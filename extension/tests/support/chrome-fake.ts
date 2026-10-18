@@ -19,8 +19,8 @@ export type FakePort = {
 export type ChromeFake = {
   uninstall(): void;
   /**
-   * Every chrome.* call and every port message in either direction, in order: "tabCapture.getMediaStreamId",
-   * "offscreen.createDocument", "runtime.onMessage.addListener", "port:recorder:offscreen offscreen.start".
+   * Every chrome.* call and every port message in either direction, in order: "offscreen.createDocument",
+   * "runtime.onMessage.addListener", "port:recorder:offscreen offscreen.start".
    */
   calls: string[];
   storage: {
@@ -65,7 +65,6 @@ export type ChromeFake = {
     >;
     onDocumentClosed: FakeHook<[]>;
   };
-  tabCapture: { calls: { targetTabId?: number }[]; answer: string | Error };
   debugger: {
     attached: chrome.debugger.Debuggee[];
     commands: {
@@ -376,7 +375,6 @@ export function installChromeFake(
       onDocumentCreated: documentCreated,
       onDocumentClosed: documentClosed,
     },
-    tabCapture: { calls: [], answer: "stream-id" },
     debugger: {
       attached: [],
       commands: [],
@@ -719,15 +717,6 @@ export function installChromeFake(
       async hasDocument() {
         calls.push("offscreen.hasDocument");
         return fake.offscreen.open;
-      },
-    },
-    tabCapture: {
-      async getMediaStreamId(options: { targetTabId?: number } = {}) {
-        calls.push("tabCapture.getMediaStreamId");
-        fake.tabCapture.calls.push(options);
-        if (fake.tabCapture.answer instanceof Error)
-          throw fake.tabCapture.answer;
-        return fake.tabCapture.answer;
       },
     },
     debugger: {

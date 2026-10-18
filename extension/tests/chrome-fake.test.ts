@@ -227,20 +227,27 @@ test("uninstall removes globalThis.chrome", () => {
   fake = installChromeFake();
 });
 
-test("calls lists tabCapture.getMediaStreamId before a later port message in the order they happened", async () => {
+test("calls lists a chrome call before a later port message in the order they happened", async () => {
   chrome.runtime.onConnect.addListener(() => undefined);
   const far = fake.connectFrom("recorder:offscreen", { id: "x" });
-  await chrome.tabCapture.getMediaStreamId({ targetTabId: 3 });
+  await chrome.offscreen.createDocument({
+    url: "offscreen.html",
+    reasons: ["LOCAL_STORAGE"] as chrome.offscreen.Reason[],
+    justification: "test",
+  });
   far.postMessage({ type: "offscreen.ready" });
-  const capture = fake.calls.indexOf("tabCapture.getMediaStreamId");
+  const created = fake.calls.indexOf("offscreen.createDocument");
   const message = fake.calls.indexOf("port:recorder:offscreen offscreen.ready");
-  expect(capture).toBeGreaterThanOrEqual(0);
-  expect(message).toBeGreaterThan(capture);
-  expect(fake.tabCapture.calls).toEqual([{ targetTabId: 3 }]);
+  expect(created).toBeGreaterThanOrEqual(0);
+  expect(message).toBeGreaterThan(created);
   chrome.runtime.getURL("a.html");
   chrome.runtime.getManifest();
   expect(fake.calls).toContain("runtime.getURL");
   expect(fake.calls).toContain("runtime.getManifest");
+});
+
+test("the fake offers no screen capture: the Recorder records no screen", () => {
+  expect("tabCapture" in chrome).toBe(false);
 });
 
 test("addListener is recorded as <namespace>.<event>.addListener", () => {
