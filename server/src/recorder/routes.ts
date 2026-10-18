@@ -230,8 +230,6 @@ export function createRecorderRoutes(deps: RecorderRouteDeps) {
     const answer: RecorderMe = {
       user,
       connectionId: context.var.recorderConnectionId ?? "",
-      // OpenBot transcribes nothing for the Recorder: its dictation route takes a signed-in session only.
-      capabilities: { transcription: false },
     };
     return context.json(answer);
   });

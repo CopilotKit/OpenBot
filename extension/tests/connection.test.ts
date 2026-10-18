@@ -46,7 +46,7 @@ async function holdIfAsked(path: string): Promise<void> {
 }
 let meAnswer: { status: number; body: object } = {
   status: 200,
-  body: { user, connectionId: "c1", capabilities: { transcription: true } },
+  body: { user, connectionId: "c1" },
 };
 
 beforeAll(() => {
@@ -125,7 +125,7 @@ beforeEach(() => {
   };
   meAnswer = {
     status: 200,
-    body: { user, connectionId: "c1", capabilities: { transcription: true } },
+    body: { user, connectionId: "c1" },
   };
   realNow = Date.now;
   clock = 1_800_000_000_000;

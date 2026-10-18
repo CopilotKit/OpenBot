@@ -70,7 +70,6 @@ function stateResponse(
     me: {
       user: { id: "u1", name: "Ada Lovelace", email: "ada@example.test" },
       connectionId: "k1",
-      capabilities: { transcription: true },
     } as PageStateResponse["me"],
     policy: { openbotUrl: null, invalid: false },
     notice: null,

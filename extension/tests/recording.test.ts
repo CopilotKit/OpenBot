@@ -91,7 +91,6 @@ const openbot = {
 const meBody = {
   user: ada,
   connectionId: "c-obr_one",
-  capabilities: { transcription: true },
 };
 const CONNECTING = new Set([
   "GET /api/recorder/me",

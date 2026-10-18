@@ -56,11 +56,7 @@ export type ExchangeResponse = {
   connection: RecorderConnection;
   user: RecorderUser;
 };
-export type RecorderMe = {
-  user: RecorderUser;
-  connectionId: string;
-  capabilities: { transcription: boolean };
-};
+export type RecorderMe = { user: RecorderUser; connectionId: string };
 /** Decision 10: assigned, unassigned (no space for the Bot), missing (Intelligence says the container does not exist),
  * learning-off (Intelligence's Learning delivery is off, unlicensed or unavailable, so existence was not checked),
  * unverified (Intelligence could not be asked), unjoined (the runtime's 5 s deadline passed and it joined no space). */

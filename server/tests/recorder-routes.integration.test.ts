@@ -289,8 +289,6 @@ describe("using the bearer", () => {
     expect(await me.json()).toEqual({
       user: { id: owner, email: `${owner}@example.test`, name: "The Owner" },
       connectionId: made.connection.id,
-      // Dictation is configured in this harness, and still OpenBot transcribes nothing for the Recorder.
-      capabilities: { transcription: false },
     });
 
     const bots = (await (
