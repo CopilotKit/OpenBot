@@ -742,6 +742,50 @@ test("a recording whose network bodies could not be sent is not forgotten on off
   await until(() => drains().length === 0, "the drain forgotten");
 });
 
+/** A network media whose lines were all acknowledged: no body line left, `progress` as the upload recorded it. */
+async function seedAcknowledgedBodies(
+  demonstrationId: string,
+  progress: { chunks: number; offset: number; completed?: boolean } | null,
+) {
+  const mediaId = bodiesMedia(demonstrationId);
+  const db = await openRecorderDatabase(dbName);
+  try {
+    await tx(db, ["meta"], "readwrite", (t) => {
+      t.objectStore("meta").put(mediaId, `media:${demonstrationId}:network`);
+      if (progress)
+        t.objectStore("meta").put(progress, `bodies-progress:${mediaId}`);
+    });
+  } finally {
+    db.close();
+  }
+}
+
+/** Stops a recording while connected, then has the document report it done. */
+async function finishWithDone(id: string) {
+  await page({ type: "page.stop" });
+  await until(() => drains().length === 1, "the drain recorded");
+  doc?.postMessage({ type: "offscreen.done", demonstrationId: id });
+  await until(() => drains().length === 0, "the drain forgotten");
+}
+
+test("offscreen.done finishes the network media when every line was acknowledged but its completion is still owed", async () => {
+  const id = await startRecording(7);
+  await seedAcknowledgedBodies(id, { chunks: 2, offset: 0 });
+  await finishWithDone(id);
+
+  expect(bodies).toEqual([
+    { demonstrationId: id, target: { openbotUrl: origin, token: "obr_one" } },
+  ]);
+});
+
+test("offscreen.done does not touch the network media when nothing is owed", async () => {
+  const id = await startRecording(7);
+  await seedAcknowledgedBodies(id, { chunks: 2, offset: 0, completed: true });
+  await finishWithDone(id);
+
+  expect(bodies).toEqual([]);
+});
+
 test("a browser start whose stop OpenBot cannot take yet still sends the network bodies, and sends them after the retried stop", async () => {
   const id = await recordThenRestartBrowser();
   openbot.stopUnavailable = true;

@@ -34,7 +34,7 @@ import type {
 import { IDLE_STATE, parseOffscreenSignedOut } from "../protocol/messages";
 import {
   deleteDemonstrationData,
-  hasNetworkBodies,
+  networkBodiesOwed,
   openRecorderDatabase,
 } from "../shared/database";
 import { hasHostPermission } from "../shared/host-access";
@@ -1064,10 +1064,10 @@ export function installRecording(
     return run;
   }
 
-  /** Whether none of a drain's network body lines are left in IndexedDB, sending what is left first when its person is
+  /** Whether none of a drain's network body lines are left in IndexedDB and no completion is owed, sending what is left first when its person is
    * connected: a drain is never forgotten while its bodies are owed (Decision 19). */
   async function bodiesSent(drain: DrainRecord): Promise<boolean> {
-    if (!(await hasNetworkBodies(await db(), drain.demonstrationId)))
+    if (!(await networkBodiesOwed(await db(), drain.demonstrationId)))
       return true;
     const connection = await currentConnection();
     if (!connection || !ownedBy(drain, connection)) return false;

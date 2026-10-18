@@ -182,19 +182,28 @@ export async function deleteDemonstrationData(
   );
 }
 
-/** Whether network body lines of one demonstration are still waiting in `bodies` (lines leave once OpenBot has them). */
-export async function hasNetworkBodies(
+/**
+ * Whether a demonstration's network bodies still owe OpenBot something: lines waiting in `bodies`, or every line
+ * acknowledged but the media's `complete` not yet taken (its "bodies-progress:<mediaId>" record has chunks and is not
+ * completed). Read-only.
+ */
+export async function networkBodiesOwed(
   db: IDBDatabase,
   demonstrationId: string,
 ): Promise<boolean> {
   return tx(db, ["bodies", "meta"], "readonly", async (t) => {
+    const meta = t.objectStore("meta");
     const mediaId = await requestToPromise(
-      t.objectStore("meta").get(`media:${demonstrationId}:network`),
+      meta.get(`media:${demonstrationId}:network`),
     );
     if (typeof mediaId !== "string") return false;
     const lines = await requestToPromise(
       t.objectStore("bodies").count(pairRange(mediaId)),
     );
-    return lines > 0;
+    if (lines > 0) return true;
+    const progress = (await requestToPromise(
+      meta.get(`bodies-progress:${mediaId}`),
+    )) as { chunks?: number; completed?: boolean } | undefined;
+    return (progress?.chunks ?? 0) > 0 && !progress?.completed;
   });
 }
