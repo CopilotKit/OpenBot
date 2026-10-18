@@ -8,11 +8,7 @@ import {
 import type { MiddlewareHandler } from "hono";
 import { DEV_ACTOR } from "../auth/dev-actor";
 import { emailDomainAllowed } from "../auth/email-domain";
-import type {
-  AppVariables,
-  AuthenticatedActor,
-  RoleRepository,
-} from "../auth/guards";
+import type { AuthenticatedActor, RoleRepository } from "../auth/guards";
 import {
   AuthorityUnavailable,
   ORGANIZATION_SESSION_COOKIE,
@@ -225,17 +221,4 @@ export function createRequireRecorder(
       401,
     );
   };
-}
-
-/** A recorder bearer is resolved ONLY as a recorder; without one, the session guard decides. Used on the dictation route only. */
-export function createRequireUserOrRecorder(
-  requireUser: MiddlewareHandler<{ Variables: AppVariables }>,
-  resolve: RecorderResolver,
-  onRefused: RecorderRefusalSink,
-): MiddlewareHandler<{ Variables: RecorderVariables }> {
-  const requireRecorder = createRequireRecorder(resolve, onRefused);
-  return (context, next) =>
-    context.req.header("authorization")?.startsWith(RECORDER_BEARER_PREFIX)
-      ? requireRecorder(context, next)
-      : requireUser(context, next);
 }

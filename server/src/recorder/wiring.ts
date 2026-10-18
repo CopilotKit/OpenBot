@@ -160,7 +160,6 @@ export function createRecorderExtension(deps: {
         ? { id: row.id, email: row.email, name: row.name?.trim() || row.email }
         : null;
     },
-    capabilities: () => ({ transcription: Boolean(config.transcription) }),
     sealOrganizationSession,
     resolve,
     onRefused: createRecorderRefusalAudit(deps.auditStore),

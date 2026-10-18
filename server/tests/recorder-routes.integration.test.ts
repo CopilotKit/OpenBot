@@ -23,10 +23,14 @@ const ORIGIN = `chrome-extension://${RECORDER_EXTENSION_ID}`;
 const INSTALL = "c".repeat(32);
 const OTHER_EXTENSION = `chrome-extension://${"a".repeat(32)}`;
 
+let transcribed = 0;
 const transcriber = Bun.serve({
   hostname: "127.0.0.1",
   port: 0,
-  fetch: () => Response.json({ text: "hello from the fake" }),
+  fetch: () => {
+    transcribed += 1;
+    return Response.json({ text: "hello from the fake" });
+  },
 });
 
 type Harness = ReturnType<typeof build>;
@@ -285,20 +289,9 @@ describe("using the bearer", () => {
     expect(await me.json()).toEqual({
       user: { id: owner, email: `${owner}@example.test`, name: "The Owner" },
       connectionId: made.connection.id,
-      capabilities: { transcription: true },
+      // Dictation is configured in this harness, and still OpenBot transcribes nothing for the Recorder.
+      capabilities: { transcription: false },
     });
-    const noTranscription = build({
-      TRANSCRIPTION_PROVIDER: undefined,
-      TRANSCRIPTION_BASE_URL: undefined,
-      TRANSCRIPTION_MODEL: undefined,
-    });
-    const other = await connect(noTranscription, "2".repeat(32));
-    const meAgain = await call(noTranscription, "/api/recorder/me", {
-      headers: bearer(other.token),
-    });
-    expect(
-      ((await meAgain.json()) as { capabilities: unknown }).capabilities,
-    ).toEqual({ transcription: false });
 
     const bots = (await (
       await call(h, "/api/recorder/bots", { headers: bearer(made.token) })
@@ -372,7 +365,7 @@ describe("using the bearer", () => {
     ).toBe(401);
   });
 
-  test("the bearer transcribes speech", async () => {
+  test("the bearer cannot transcribe speech, even with the dictation header", async () => {
     const h = build();
     const made = await connect(h, "5".repeat(32));
     const form = new FormData();
@@ -388,8 +381,9 @@ describe("using the bearer", () => {
         body: form,
       },
     );
-    expect(answer.status).toBe(200);
-    expect(await answer.json()).toEqual({ text: "hello from the fake" });
+    expect(answer.status).toBe(401);
+    expect(await answer.json()).toEqual({ error: "Authentication required." });
+    expect(transcribed).toBe(0);
   });
 
   test("OpenBot takes no recording from the Recorder, not even with its bearer", async () => {

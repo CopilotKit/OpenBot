@@ -115,10 +115,7 @@ import {
   type ModelProviderProxy,
   mountProviderOAuthProxy,
 } from "./provider-oauth";
-import {
-  createRequireRecorder,
-  createRequireUserOrRecorder,
-} from "./recorder/guard";
+import { createRequireRecorder } from "./recorder/guard";
 import { createRecorderRoutes } from "./recorder/routes";
 import type { RecorderExtensionDeps } from "./recorder/wiring";
 import type { ResponsibilityBindingStore } from "./responsibilities/bindings";
@@ -634,23 +631,10 @@ export function createApp(
       : context.json({ error: "No identity provider is configured." }, 503),
   );
 
-  const requireRecorder = coworker?.recorder
-    ? createRequireRecorder(
-        coworker.recorder.resolve,
-        coworker.recorder.onRefused,
-      )
-    : undefined;
-  const requireUserOrRecorder = coworker?.recorder
-    ? createRequireUserOrRecorder(
-        requireUser,
-        coworker.recorder.resolve,
-        coworker.recorder.onRefused,
-      )
-    : undefined;
   app.route(
     "/api/audio",
     createDictationRoutes(
-      requireUserOrRecorder ?? requireUser,
+      requireUser,
       config.transcription
         ? createTranscriptionProvider(config.transcription)
         : undefined,
@@ -1594,13 +1578,16 @@ export function createApp(
       createDeliveryRoutes({ ...coworker.delivery.authenticated, requireUser }),
     );
   }
-  if (coworker?.recorder && requireRecorder) {
+  if (coworker?.recorder) {
     app.route(
       "/api/recorder",
       createRecorderRoutes({
         ...coworker.recorder,
         requireUser,
-        requireRecorder,
+        requireRecorder: createRequireRecorder(
+          coworker.recorder.resolve,
+          coworker.recorder.onRefused,
+        ),
         auditStore,
       }),
     );

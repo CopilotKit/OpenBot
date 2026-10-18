@@ -27,7 +27,6 @@ export type RecorderRouteDeps = {
   listBots: (actor: AuthenticatedActor) => Promise<RecorderBot[]>;
   /** The name falls back to the email, never empty. */
   user: (userId: string) => Promise<RecorderUser | null>;
-  capabilities: () => RecorderMe["capabilities"];
   /** Null outside organization mode. */
   sealOrganizationSession: (
     cookieHeader: string | undefined,
@@ -231,7 +230,8 @@ export function createRecorderRoutes(deps: RecorderRouteDeps) {
     const answer: RecorderMe = {
       user,
       connectionId: context.var.recorderConnectionId ?? "",
-      capabilities: deps.capabilities(),
+      // OpenBot transcribes nothing for the Recorder: its dictation route takes a signed-in session only.
+      capabilities: { transcription: false },
     };
     return context.json(answer);
   });

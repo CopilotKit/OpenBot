@@ -1,15 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { Hono, type MiddlewareHandler } from "hono";
+import { Hono } from "hono";
 import type { AuditEventInput } from "../src/audit";
 import { DEV_ACTOR } from "../src/auth/dev-actor";
-import type { AppVariables, AuthenticatedActor } from "../src/auth/guards";
+import type { AuthenticatedActor } from "../src/auth/guards";
 import { AuthorityUnavailable } from "../src/auth/organization";
 import type { OpenBotRole } from "../src/auth/roles";
 import {
   createRecorderResolver,
   createRequireRecorder,
-  createRequireUserOrRecorder,
   RECORDER_BEARER,
   type RecorderMode,
   type RecorderRefusalSink,
@@ -324,104 +323,6 @@ describe("the recorder bearer guard", () => {
     expect(RECORDER_BEARER.exec(`Bearer ${TOKEN}`)?.[1]).toBe(TOKEN);
     expect(RECORDER_BEARER.test(`Bearer ${TOKEN}x`)).toBe(false);
     expect(RECORDER_BEARER.test("Bearer obr_short")).toBe(false);
-  });
-});
-
-describe("the dictation guard that takes a session or a recorder bearer", () => {
-  function sessionGuard(person: AuthenticatedActor) {
-    const calls: Request[] = [];
-    const requireUser: MiddlewareHandler<{ Variables: AppVariables }> = async (
-      context,
-      next,
-    ) => {
-      calls.push(context.req.raw);
-      if (!context.req.header("cookie")) {
-        return context.json({ error: "Authentication required." }, 401);
-      }
-      context.set("actor", person);
-      await next();
-    };
-    return { requireUser, calls };
-  }
-
-  function mount(requireUser: MiddlewareHandler<{ Variables: AppVariables }>) {
-    const { resolve } = fixture(betterAuth());
-    const refusals: Refusal[] = [];
-    const app = new Hono<{ Variables: RecorderVariables }>();
-    app.post(
-      "/api/audio/transcriptions",
-      createRequireUserOrRecorder(requireUser, resolve, (refusal) => {
-        refusals.push(refusal);
-      }),
-      (c) => c.json(c.var.actor),
-    );
-    const call = (headers: Record<string, string>) =>
-      app.request("http://openbot.test/api/audio/transcriptions", {
-        method: "POST",
-        headers,
-      });
-    return { call, refusals };
-  }
-
-  const somebodyElse: AuthenticatedActor = {
-    id: "somebody-else",
-    email: "else@openbot.test",
-    name: "Somebody Else",
-    role: "admin",
-  };
-
-  test("with no Authorization header the session guard decides", async () => {
-    const { requireUser, calls } = sessionGuard(somebodyElse);
-    const { call, refusals } = mount(requireUser);
-
-    const response = await call({ cookie: "test-session=else" });
-
-    expect(calls).toHaveLength(1);
-    expect(response.status).toBe(200);
-    expect((await response.json()).id).toBe(somebodyElse.id);
-    expect(refusals).toEqual([]);
-  });
-
-  test("a bearer that is not a recorder token is left to the session guard", async () => {
-    const { requireUser, calls } = sessionGuard(somebodyElse);
-    const { call } = mount(requireUser);
-
-    const response = await call({ authorization: "Bearer not-a-recorder" });
-
-    expect(calls).toHaveLength(1);
-    expect(response.status).toBe(401);
-    expect(await response.json()).toEqual({
-      error: "Authentication required.",
-    });
-  });
-
-  test("a recorder bearer with another person's session cookie resolves only the recorder's person", async () => {
-    const { requireUser, calls } = sessionGuard(somebodyElse);
-    const { call } = mount(requireUser);
-
-    const response = await call({
-      authorization: `Bearer ${TOKEN}`,
-      cookie: "test-session=else",
-    });
-
-    expect(response.status).toBe(200);
-    expect((await response.json()).id).toBe(owner.id);
-    expect(calls).toHaveLength(0);
-  });
-
-  test("a refused recorder bearer is signed out without asking the session guard", async () => {
-    const { requireUser, calls } = sessionGuard(somebodyElse);
-    const { call, refusals } = mount(requireUser);
-
-    const response = await call({
-      authorization: `Bearer ${STRANGER_TOKEN}`,
-      cookie: "test-session=else",
-    });
-
-    expect(response.status).toBe(401);
-    expect((await response.json()).code).toBe("RECORDER_SIGNED_OUT");
-    expect(calls).toHaveLength(0);
-    expect(refusals.map((refusal) => refusal.reason)).toEqual(["unknown"]);
   });
 });
 
