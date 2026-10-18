@@ -1,9 +1,12 @@
 //! OpenBot Desktop's binary run the way its callers run it: `--install-recorder-host` as the app's setup
 //! and a person would, and the native messaging host as Chrome starts it.
 use serde_json::{json, Value};
-use std::io::Read;
+use std::io::{BufRead, BufReader, ErrorKind, Read, Write};
+use std::net::TcpListener;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Output, Stdio};
+use std::process::{Child, ChildStdin, Command, ExitStatus, Output, Stdio};
+use std::sync::mpsc;
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 const BINARY: &str = env!("CARGO_BIN_EXE_openbot-desktop");
@@ -49,7 +52,7 @@ impl Drop for TempHome {
 }
 
 /// Reads the child's output on its own threads, so a full pipe never stalls it.
-fn drain(mut pipe: impl Read + Send + 'static) -> std::thread::JoinHandle<Vec<u8>> {
+fn drain(mut pipe: impl Read + Send + 'static) -> JoinHandle<Vec<u8>> {
     std::thread::spawn(move || {
         let mut bytes = Vec::new();
         let _ = pipe.read_to_end(&mut bytes);
@@ -57,27 +60,38 @@ fn drain(mut pipe: impl Read + Send + 'static) -> std::thread::JoinHandle<Vec<u8
     })
 }
 
-/// Waits for the child to exit, killing it and failing the test if it is still running at the deadline.
-fn finish(mut child: Child, patience: Duration) -> Output {
-    let stdout = drain(child.stdout.take().unwrap());
-    let stderr = drain(child.stderr.take().unwrap());
+/// Waits for the child to exit; None, with the child killed, when it is still running at the deadline.
+fn wait_for_exit(child: &mut Child, patience: Duration) -> Option<ExitStatus> {
     let deadline = Instant::now() + patience;
-    let status = loop {
+    loop {
         if let Some(status) = child.try_wait().unwrap() {
-            break status;
+            return Some(status);
         }
         if Instant::now() > deadline {
             let _ = child.kill();
             let _ = child.wait();
-            let stderr = String::from_utf8_lossy(&stderr.join().unwrap()).into_owned();
-            panic!("openbot-desktop was still running after {patience:?}: {stderr}");
+            return None;
         }
         std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// Runs the child to its exit, failing the test if it is still running after `patience`.
+fn finish(mut child: Child, patience: Duration) -> Output {
+    let stdout = drain(child.stdout.take().unwrap());
+    let stderr = drain(child.stderr.take().unwrap());
+    let status = wait_for_exit(&mut child, patience);
+    let stderr = stderr.join().unwrap();
+    let Some(status) = status else {
+        panic!(
+            "openbot-desktop was still running after {patience:?}: {}",
+            String::from_utf8_lossy(&stderr)
+        );
     };
     Output {
         status,
         stdout: stdout.join().unwrap(),
-        stderr: stderr.join().unwrap(),
+        stderr,
     }
 }
 
@@ -144,4 +158,213 @@ fn the_install_command_writes_a_manifest_for_the_only_browser_present() {
         .exists());
     assert!(!home.path().join(".config/google-chrome").exists());
     assert!(!home.path().join(".config/chromium").exists());
+}
+
+/// The host as Chrome starts it: the caller's origin first and, on Windows, the parent window after
+/// it. Replies are read on their own thread, so a host that never answers fails the test instead of
+/// hanging it.
+struct Host {
+    child: Child,
+    stdin: Option<ChildStdin>,
+    replies: mpsc::Receiver<Value>,
+    stderr: Option<JoinHandle<Vec<u8>>>,
+}
+
+/// One message as Chrome frames it: a 32-bit length in native byte order, then the UTF-8 JSON.
+fn read_framed(input: &mut impl Read) -> Option<Value> {
+    let mut prefix = [0u8; 4];
+    input.read_exact(&mut prefix).ok()?;
+    let mut body = vec![0; u32::from_ne_bytes(prefix) as usize];
+    input.read_exact(&mut body).ok()?;
+    Some(serde_json::from_slice(&body).expect("the host wrote a message that is not JSON"))
+}
+
+impl Host {
+    fn start(home: &Path, origin: &str, test_app_url: Option<&str>) -> Self {
+        let mut command = binary(home);
+        command
+            .arg(origin)
+            .env_remove("OPENBOT_RECORDER_HOST_TEST_APP_URL")
+            .stdin(Stdio::piped());
+        if cfg!(windows) {
+            command.arg("--parent-window=0");
+        }
+        if let Some(url) = test_app_url {
+            command.env("OPENBOT_RECORDER_HOST_TEST_APP_URL", url);
+        }
+        let mut child = command.spawn().unwrap();
+        let stdin = child.stdin.take();
+        let mut stdout = child.stdout.take().unwrap();
+        let stderr = Some(drain(child.stderr.take().unwrap()));
+        let (sender, replies) = mpsc::channel();
+        std::thread::spawn(move || {
+            while let Some(reply) = read_framed(&mut stdout) {
+                if sender.send(reply).is_err() {
+                    break;
+                }
+            }
+        });
+        Self {
+            child,
+            stdin,
+            replies,
+            stderr,
+        }
+    }
+
+    fn ask(&mut self, message: Value) -> Value {
+        let body = message.to_string();
+        let stdin = self.stdin.as_mut().unwrap();
+        stdin.write_all(&(body.len() as u32).to_ne_bytes()).unwrap();
+        stdin.write_all(body.as_bytes()).unwrap();
+        stdin.flush().unwrap();
+        match self.replies.recv_timeout(Duration::from_secs(30)) {
+            Ok(reply) => reply,
+            Err(error) => panic!("no reply to {message}: {error}"),
+        }
+    }
+
+    fn running(&mut self) -> bool {
+        self.child.try_wait().unwrap().is_none()
+    }
+
+    /// Closes the host's input the way Chrome does when it is done, and waits for it to exit.
+    fn close(mut self) -> ExitStatus {
+        drop(self.stdin.take());
+        let status = wait_for_exit(&mut self.child, Duration::from_secs(30));
+        let stderr = self.stderr.take().unwrap().join().unwrap();
+        let Some(status) = status else {
+            panic!(
+                "the host was still running after its input closed: {}",
+                String::from_utf8_lossy(&stderr)
+            );
+        };
+        assert!(
+            self.replies.try_recv().is_err(),
+            "the host answered a message nobody sent"
+        );
+        status
+    }
+}
+
+impl Drop for Host {
+    fn drop(&mut self) {
+        if self.child.try_wait().ok().flatten().is_none() {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
+    }
+}
+
+#[test]
+fn the_host_answers_as_chrome_asks_and_exits_when_its_input_closes() {
+    let home = TempHome::new("host");
+    let mut host = Host::start(home.path(), &extension_origin(), None);
+    assert_eq!(
+        host.ask(json!({ "type": "ping" })),
+        json!({ "available": false })
+    );
+    assert!(host.running(), "the host exited before its input closed");
+    assert_eq!(
+        host.ask(json!({ "type": "handoff" })),
+        json!({ "error": "not-installed" })
+    );
+    let status = host.close();
+    assert!(status.success(), "{status:?}");
+}
+
+#[test]
+fn another_extension_is_refused_a_handoff() {
+    let other = format!("chrome-extension://{}/", "p".repeat(32));
+    assert_ne!(other, extension_origin());
+    let home = TempHome::new("foreign");
+    let mut host = Host::start(home.path(), &other, None);
+    assert_eq!(
+        host.ask(json!({ "type": "handoff" })),
+        json!({ "error": "origin-not-allowed" })
+    );
+    assert_eq!(
+        host.ask(json!({ "type": "ping" })),
+        json!({ "available": false })
+    );
+    assert!(host.close().success());
+}
+
+/// Answers one request with a minted code and hands back the request's head and body.
+fn mint_once(listener: TcpListener) -> JoinHandle<(String, String)> {
+    std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut reader = BufReader::new(stream.try_clone().unwrap());
+        let mut head = String::new();
+        let mut length = 0;
+        loop {
+            let mut line = String::new();
+            if reader.read_line(&mut line).unwrap() == 0 || line == "\r\n" {
+                break;
+            }
+            if let Some(value) = line.to_lowercase().strip_prefix("content-length:") {
+                length = value.trim().parse().unwrap();
+            }
+            head.push_str(&line);
+        }
+        let mut body = vec![0; length];
+        reader.read_exact(&mut body).unwrap();
+        let minted = r#"{"code":"obc_fixture","expiresAt":"2026-10-18T12:00:00.000Z"}"#;
+        stream
+            .write_all(
+                format!(
+                    "HTTP/1.1 201 Created\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{minted}",
+                    minted.len()
+                )
+                .as_bytes(),
+            )
+            .unwrap();
+        (head, String::from_utf8(body).unwrap())
+    })
+}
+
+// A debug binary lets a test point the host at an OpenBot it started itself. A release binary has no
+// such seam: CI runs this file with `--release` on Windows, where the same variable changes nothing.
+#[test]
+fn the_test_app_address_reaches_only_a_debug_binary() {
+    let home = TempHome::new("seam");
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let mut host = Host::start(home.path(), &extension_origin(), Some(&url));
+    if cfg!(debug_assertions) {
+        let app = mint_once(listener);
+        assert_eq!(
+            host.ask(json!({ "type": "ping" })),
+            json!({ "available": true })
+        );
+        assert_eq!(
+            host.ask(json!({ "type": "handoff" })),
+            json!({ "openbotUrl": url, "code": "obc_fixture" })
+        );
+        let (head, body) = app.join().unwrap();
+        assert!(
+            head.starts_with("POST /api/recorder/connect-codes HTTP/1.1\r\n"),
+            "{head}"
+        );
+        assert!(!head.to_lowercase().contains("cookie:"), "{head}");
+        assert_eq!(
+            serde_json::from_str::<Value>(&body).unwrap(),
+            json!({ "via": "desktop" })
+        );
+    } else {
+        assert_eq!(
+            host.ask(json!({ "type": "ping" })),
+            json!({ "available": false })
+        );
+        assert_eq!(
+            host.ask(json!({ "type": "handoff" })),
+            json!({ "error": "not-installed" })
+        );
+        listener.set_nonblocking(true).unwrap();
+        match listener.accept() {
+            Err(error) => assert_eq!(error.kind(), ErrorKind::WouldBlock),
+            Ok((_, peer)) => panic!("a release binary dialled the test app from {peer}"),
+        }
+    }
+    assert!(host.close().success());
 }

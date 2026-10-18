@@ -13,8 +13,8 @@ mod test_support;
 
 use openbot_desktop_lib::{
     acquire, deployment, deployment_release, engine, env as openbot_env, harness, host_access,
-    install, preparation, problem::Problem, provider, pull_metrics, quiet, recorder_install, stack,
-    supervise, telemetry, tray, windows as win,
+    install, preparation, problem::Problem, provider, pull_metrics, quiet, recorder_host,
+    recorder_install, stack, supervise, telemetry, tray, windows as win,
 };
 
 const QUIT_CLEANUP_NOTICE_FILE: &str = ".openbot-quit-cleanup-notice";
@@ -2648,6 +2648,73 @@ fn owned_app_url(root: &Path, ports: &openbot_env::Ports) -> Option<String> {
     stack::app_url(ports.app)
 }
 
+/// An address the Recorder's native host answers in place of a Desktop deployment's own, so a test
+/// can drive the whole handoff against an OpenBot it started itself. Debug builds only: a release
+/// binary never reads the variable.
+#[cfg(debug_assertions)]
+fn recorder_host_test_app_url() -> Option<String> {
+    std::env::var("OPENBOT_RECORDER_HOST_TEST_APP_URL")
+        .ok()
+        .filter(|url| !url.is_empty())
+}
+
+#[cfg(not(debug_assertions))]
+fn recorder_host_test_app_url() -> Option<String> {
+    None
+}
+
+/// What the Recorder's native host knows about this computer's OpenBot.
+///
+/// The browser starts the host as a fresh process with no app around it, so it finds the deployment
+/// the way the app's setup does: the root last launched, read from Tauri's config directory.
+fn recorder_host_environment() -> recorder_host::HostEnvironment {
+    let home = recorder_home().unwrap_or_else(|| PathBuf::from("."));
+    let config = recorder_host::app_config_dir(
+        recorder_os(),
+        &home,
+        std::env::var_os("XDG_CONFIG_HOME")
+            .as_deref()
+            .map(Path::new),
+        std::env::var_os("APPDATA").as_deref().map(Path::new),
+    );
+    let root = preparation::selected_root(&config);
+    let organization_root = root.clone();
+    // In organization mode the local OpenBot admits only its organization session cookie, handed
+    // over from Desktop's saved sign-in exactly as opening the window does. Never logged.
+    let organization_cookie: recorder_host::OrganizationCookie = Box::new(move |app_url| {
+        let Some(root) = organization_root.as_deref() else {
+            return Ok(None);
+        };
+        let authority =
+            openbot_env::already_set(&root.join(".env"), &["OPENBOT_ORGANIZATION_AUTH_URL"])
+                .remove("OPENBOT_ORGANIZATION_AUTH_URL")
+                .unwrap_or_default();
+        if authority.is_empty() {
+            return Ok(None);
+        }
+        openbot_desktop_lib::organization_auth::local_session_cookie(root, &authority, app_url)
+            .map(Some)
+            .map_err(|problem| problem.said)
+    });
+    if let Some(url) = recorder_host_test_app_url() {
+        return recorder_host::HostEnvironment {
+            installed: Box::new(|| true),
+            app_url: Box::new(move || Some(url.clone())),
+            organization_cookie,
+        };
+    }
+    let installed = root.is_some();
+    recorder_host::HostEnvironment {
+        installed: Box::new(move || installed),
+        app_url: Box::new(move || {
+            let root = root.as_deref()?;
+            let ports = openbot_env::Ports::read(root).ok()?;
+            owned_app_url(root, &ports)
+        }),
+        organization_cookie,
+    }
+}
+
 /// What stopped the stack, if anything did, and forget it once it has been read.
 ///
 /// Cleared on reading so a failure from an hour ago does not greet somebody who has since fixed it.
@@ -3821,6 +3888,11 @@ fn install_recorder_host_for_this_user() -> Result<Vec<PathBuf>, Problem> {
 
 fn main() {
     let args: Vec<std::ffi::OsString> = std::env::args_os().collect();
+    // Chrome, Edge or Chromium starting the Recorder's native messaging host: answer it and exit, before
+    // anything of the app (the single-instance plugin would forward this launch to a running app).
+    if let Some(origin) = recorder_host::caller_origin(&args) {
+        std::process::exit(recorder_host::run(&origin, &recorder_host_environment()));
+    }
     // The same install the app's setup runs, as a command, so it can be tested and run by hand.
     if args.get(1).is_some_and(|a| a == "--install-recorder-host") {
         std::process::exit(match install_recorder_host_for_this_user() {
