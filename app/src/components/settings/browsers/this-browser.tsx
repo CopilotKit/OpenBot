@@ -113,7 +113,11 @@ export function ThisBrowser() {
 
   return (
     <PageSection title="This browser">
-      {detected === undefined ? null : (
+      {connections.error ? (
+        <p className="text-destructive text-sm" role="alert">
+          Could not check whether this browser is connected.
+        </p>
+      ) : detected === undefined ? null : (
         <PageRows>
           <Item size="sm">
             <ItemMedia variant="icon">

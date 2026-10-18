@@ -8,7 +8,13 @@ import {
 } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { environmentManager, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  waitFor,
+} from "@testing-library/react";
 import { ConnectedBrowsers } from "@/components/settings/browsers/connected-browsers";
 import { ThisBrowser } from "@/components/settings/browsers/this-browser";
 import { queryClient } from "@/query-client";
@@ -27,6 +33,8 @@ const EXTENSION_ID = "a".repeat(32);
 const THIS_COPY = "c".repeat(32);
 const OTHER_COPY = "d".repeat(32);
 const originalFetch = global.fetch;
+let connectionsFail = false;
+let connectionsFetches = 0;
 const sent: { path: string; method: string; body: unknown }[] = [];
 let connections: Record<string, unknown>[] = [];
 /** The Recorder's answers: what a ping and a connect message get, or undefined for no extension. */
@@ -59,6 +67,8 @@ beforeEach(() => {
   sent.length = 0;
   messages.length = 0;
   connections = [];
+  connectionsFail = false;
+  connectionsFetches = 0;
   recorder = undefined;
   hadChrome = "chrome" in globals;
   savedChrome = globals.chrome;
@@ -103,6 +113,10 @@ beforeEach(() => {
           connections = connections.filter((c) => c.id !== id);
           return new Response(null, { status: 204 });
         }
+      }
+      if (url === "/api/recorder/connections") {
+        connectionsFetches += 1;
+        if (connectionsFail) return new Response(null, { status: 500 });
       }
       if (url === "/api/recorder/connections")
         return Response.json({ connections, extensionIds: [EXTENSION_ID] });
@@ -240,3 +254,56 @@ test("Disconnect sends the DELETE and the row disappears", async () => {
   await view.findByText("No browsers are connected.");
   expect(view.queryByText("Chrome on Mac")).toBeNull();
 });
+
+test("when the connections cannot be loaded This browser says it cannot tell, and is not empty", async () => {
+  connectionsFail = true;
+  const view = draw();
+  await view.findByText(
+    "Could not check whether this browser is connected.",
+    {},
+    { timeout: 4000 },
+  );
+  expect(view.getByRole("alert")).toBeTruthy();
+  expect(view.queryByRole("button")).toBeNull();
+});
+
+test("a connect request nobody confirms expires after five minutes and stops polling", async () => {
+  recorder = {
+    ping: { ok: true },
+    connect: { ok: true, installId: THIS_COPY, awaitingConfirmation: true },
+  };
+  // Capture the five-minute timers (the expiry, and the query cache's own 5-minute gc) so the test can fire them instead of waiting.
+  const realSetTimeout = globalThis.setTimeout;
+  const expiries: (() => void)[] = [];
+  globalThis.setTimeout = ((
+    handler: () => void,
+    delay?: number,
+    ...args: unknown[]
+  ) => {
+    if (delay === 5 * 60_000) {
+      expiries.push(handler);
+      return 0;
+    }
+    return realSetTimeout(handler, delay, ...args);
+  }) as unknown as typeof setTimeout;
+  try {
+    const view = draw();
+    fireEvent.click(
+      await view.findByRole("button", { name: "Connect this browser" }),
+    );
+    await view.findByText("Confirm in the OpenBot Recorder tab that opened.");
+    expect(expiries.length).toBeGreaterThan(0);
+    const polling = connectionsFetches;
+    await new Promise((resolve) => realSetTimeout(resolve, 2500));
+    expect(connectionsFetches).toBeGreaterThan(polling);
+    act(() => {
+      for (const fire of expiries) fire();
+    });
+    await view.findByText("The request expired. Try again.");
+    const stopped = connectionsFetches;
+    await new Promise((resolve) => realSetTimeout(resolve, 2500));
+    expect(connectionsFetches).toBe(stopped);
+  } finally {
+    globalThis.setTimeout = realSetTimeout;
+  }
+}, 15_000);
