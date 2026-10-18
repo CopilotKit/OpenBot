@@ -8,6 +8,7 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- Let remote AG-UI Bots use the browser in chat: `computer_*` calls a caller offers now pass through for the caller to execute instead of being refused as "unavailable for this headless turn" ([#804](https://github.com/CopilotKit/OpenBot/issues/804)).
 **Before upgrading.** Five things change for an existing deployment:
 - A hosted computer's browser is now headed by default. It uses a little more memory than headless
   did; set `COMPUTER_BROWSER_MODE=headless` (Helm: `computers.browserMode: headless`) to keep the old
