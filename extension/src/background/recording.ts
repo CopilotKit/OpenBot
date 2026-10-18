@@ -515,9 +515,12 @@ export function installRecording(
     // started, not awaited: the uploader waits on this callback while holding its queue, and a stop drains that queue.
     onSignedOut: async (reason) => {
       if (live)
-        void handleSignedOut(reason, live.token, live.userId).catch(
-          report("signing out"),
-        );
+        void handleSignedOut(
+          reason,
+          live.token,
+          live.userId,
+          live.openbotUrl,
+        ).catch(report("signing out"));
     },
     // A refusal is about the recording its batch was for: one that is no longer live, or one Start over is leaving,
     // stops nothing.
@@ -825,6 +828,10 @@ export function installRecording(
         const signedOut = parseOffscreenSignedOut(message);
         if (signedOut)
           void documentSignedOut(signedOut).catch(report("signing out"));
+        else
+          report("signing out")(
+            new Error("offscreen.signed-out without a valid token"),
+          );
         return;
       }
     }
@@ -1401,7 +1408,12 @@ export function installRecording(
       error,
     });
     if (signedOut)
-      await markWaiting((drain) => drain.userId === current.userId, signedOut);
+      await markWaiting(
+        (drain) =>
+          drain.userId === current.userId &&
+          drain.openbotUrl === current.openbotUrl,
+        signedOut,
+      );
     if (offscreenDone.has(demonstrationId)) await documentDone(demonstrationId);
     if (error === SENTENCES.stopPending) scheduleStopRetry();
     await maybeCloseDocument();
@@ -1466,7 +1478,12 @@ export function installRecording(
       } catch (error) {
         const reason = signedOutReason(error);
         if (reason) {
-          await handleSignedOut(reason, connection.token, connection.user.id);
+          await handleSignedOut(
+            reason,
+            connection.token,
+            connection.user.id,
+            connection.openbotUrl,
+          );
           return;
         }
         failed = true;
@@ -1511,31 +1528,38 @@ export function installRecording(
   }
 
   /** OpenBot answered that the connection a request used is gone: forget it (only if it is still the stored one), stop
-   * a recording that used it, and keep everything for its person. */
+   * a recording that used it, and keep everything for its person on that OpenBot (their drains on another OpenBot are
+   * another connection's). */
   async function handleSignedOut(
     reason: SignedOutReason,
     token: string,
     userId: string,
+    openbotUrl: string,
   ): Promise<void> {
     await forgetConnection(reason, token);
     if (live && live.token === token && state.phase === "recording")
       await stopRecording({ kind: "signed-out", reason });
-    else await markWaiting((drain) => drain.userId === userId, reason);
+    else
+      await markWaiting(
+        (drain) => drain.userId === userId && drain.openbotUrl === openbotUrl,
+        reason,
+      );
   }
 
   /** The document's pass or trajectory registration was answered signed out for `token`. A pass taken with an older
-   * token, after the person connected again, changes nothing: the newer connection's recover may still be sending. */
+   * token, after the person connected again, changes nothing: the newer connection's recover may still be sending. A
+   * reconnect can land between the read here and the forget, so drains wait only when the forget really happened. */
   async function documentSignedOut({
     reason,
     token,
   }: OffscreenSignedOut): Promise<void> {
     if (live && live.token === token && state.phase === "recording") {
-      await handleSignedOut(reason, token, live.userId);
+      await handleSignedOut(reason, token, live.userId, live.openbotUrl);
       return;
     }
     const connection = await currentConnection();
     if (connection?.token !== token) return;
-    await forgetConnection(reason, token);
+    if (!(await forgetConnection(reason, token))) return;
     await markWaiting((drain) => ownedBy(drain, connection), reason);
   }
 
@@ -1557,7 +1581,12 @@ export function installRecording(
     } catch (error) {
       const reason = signedOutReason(error);
       if (reason && current !== restartingFrom)
-        await handleSignedOut(reason, current.token, current.userId);
+        await handleSignedOut(
+          reason,
+          current.token,
+          current.userId,
+          current.openbotUrl,
+        );
       // Any other failure waits for the next heartbeat.
       return;
     }
@@ -1856,7 +1885,12 @@ export function installRecording(
       } catch (error) {
         const reason = signedOutReason(error);
         if (reason) {
-          await handleSignedOut(reason, connection.token, connection.user.id);
+          await handleSignedOut(
+            reason,
+            connection.token,
+            connection.user.id,
+            connection.openbotUrl,
+          );
           return;
         }
         if (isRefusal(error)) await steps.reset(drain.demonstrationId);

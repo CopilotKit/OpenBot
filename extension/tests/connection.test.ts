@@ -383,6 +383,20 @@ test("a forget told which token asked leaves a newer connection alone, and forge
   });
 });
 
+test("a forget answers whether it forgot a connection", async () => {
+  // Nothing stored: a forget told which token asked forgets nothing, and neither does one told nothing.
+  expect(await forgetConnection("revoked", "obr_old")).toBe(false);
+  expect(await forgetConnection("revoked")).toBe(false);
+  await connected("obr_new");
+  expect(await forgetConnection("revoked", "obr_old")).toBe(false);
+  expect((await currentConnection())?.token).toBe("obr_new");
+  expect(await forgetConnection("revoked", "obr_new")).toBe(true);
+  expect(await currentConnection()).toBeNull();
+  await connected("obr_newer");
+  expect(await forgetConnection("revoked")).toBe(true);
+  expect(await currentConnection()).toBeNull();
+});
+
 test("forgetting a revoked connection leaves a signed-out notice with its reason", async () => {
   await connect("obc_abc");
   await handleConnectionMessage({

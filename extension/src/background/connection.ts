@@ -121,14 +121,23 @@ type ForgetReason = "revoked" | "removed" | "organization" | "disconnected";
  * used as `askedWith`. Reconnecting this copy revokes its old token, so a request sent with the old token can finish
  * after approve stored the new connection: with `askedWith`, only the connection that asked is forgotten, notice and
  * all. The check and the forget are one queued job, and approve stores through the queue, so no new connection lands
- * between them. Without `askedWith`, whatever connection is stored is forgotten at once. */
-export function forgetConnection(
+ * between them. Without `askedWith`, whatever connection is stored is forgotten at once.
+ *
+ * Resolves true when it forgot a connection: false when `askedWith` is no longer the stored token, or when nothing was
+ * stored, so a caller can leave alone what belongs to a connection that stays. */
+export async function forgetConnection(
   reason: ForgetReason,
   askedWith?: string,
-): Promise<void> {
-  if (askedWith === undefined) return forget(reason);
+): Promise<boolean> {
+  if (askedWith === undefined) {
+    const stored = await currentConnection();
+    await forget(reason);
+    return stored !== null;
+  }
   return serially(async () => {
-    if ((await currentConnection())?.token === askedWith) await forget(reason);
+    if ((await currentConnection())?.token !== askedWith) return false;
+    await forget(reason);
+    return true;
   });
 }
 

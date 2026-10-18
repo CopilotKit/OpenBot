@@ -4,6 +4,7 @@ import {
   beforeAll,
   beforeEach,
   expect,
+  spyOn,
   test,
 } from "bun:test";
 import { isDeepStrictEqual } from "node:util";
@@ -1850,10 +1851,121 @@ test("a sign-out the document reports for the stored connection forgets it, tell
   expect(drains().slice(1)).toEqual([beas, elsewhere]);
 });
 
-test("a sign-out the document reports without a token is refused and changes nothing", async () => {
+test("a sign-out that stops the running recording keeps waiting only the person's drains on this OpenBot", async () => {
+  fake.tabs.set(7, { id: 7, url: "chrome://newtab/" } as chrome.tabs.Tab);
   await startRecording({ botId: "bot-1", title: "T", tabId: 7 });
-  doc?.postMessage({ type: "offscreen.signed-out", reason: "revoked" });
+  expect(await page({ type: "page.stop" })).toEqual({ ok: true });
+  const own = drains()[0] as DrainRecord;
+  const elsewhere: DrainRecord = {
+    ...own,
+    demonstrationId: "demo-elsewhere",
+    openbotUrl: "https://other-openbot.example.test",
+  };
+  fake.storage.local.set("drains", [own, elsewhere]);
+  const second = await startRecording({ botId: "bot-1", title: "T", tabId: 7 });
+  doc?.postMessage({
+    type: "offscreen.signed-out",
+    reason: "revoked",
+    token: "obr_one",
+  });
+  await until(
+    async () => (await state()).phase === "idle",
+    "the recording stops",
+  );
   await settle();
+  expect(
+    drains().find((drain) => drain.demonstrationId === second)?.kept,
+  ).toMatchObject({ parked: true, waitingForReconnect: true });
+  expect(
+    drains().find((drain) => drain.demonstrationId === "demo-elsewhere"),
+  ).toEqual(elsewhere);
+});
+
+test("a sign-out answered while sending what was kept leaves the person's drains on another OpenBot alone", async () => {
+  fake.tabs.set(7, { id: 7, url: "chrome://newtab/" } as chrome.tabs.Tab);
+  const id = await startRecording({ botId: "bot-1", title: "T", tabId: 7 });
+  doc?.postMessage({
+    type: "offscreen.signed-out",
+    reason: "revoked",
+    token: "obr_one",
+  });
+  await until(
+    () => drains()[0]?.kept?.waitingForReconnect === true,
+    "kept for Ada",
+  );
+  const { kept: _kept, ...own } = drains()[0] as DrainRecord;
+  const elsewhere: DrainRecord = {
+    ...own,
+    demonstrationId: "demo-elsewhere",
+    openbotUrl: "https://other-openbot.example.test",
+  };
+  fake.storage.local.set("drains", [...drains(), elsewhere]);
+  // Ada connects again, but OpenBot answers the new connection signed out too.
+  openbot.revoked.add("obr_two");
+  connect(ada, "obr_two");
+  await handlers.connected();
+  await until(
+    () => storedConnection() === undefined,
+    "the new connection is forgotten",
+  );
+  await settle();
+  expect(
+    drains().find((drain) => drain.demonstrationId === id)?.kept,
+  ).toMatchObject({ parked: true, waitingForReconnect: true });
+  expect(
+    drains().find((drain) => drain.demonstrationId === "demo-elsewhere"),
+  ).toEqual(elsewhere);
+});
+
+test("a sign-out the document reports as a reconnect lands keeps no drain waiting and leaves the new connection", async () => {
+  fake.tabs.set(7, { id: 7, url: "chrome://newtab/" } as chrome.tabs.Tab);
+  const id = await startRecording({ botId: "bot-1", title: "T", tabId: 7 });
+  expect(await page({ type: "page.stop" })).toEqual({ ok: true });
+  expect(drains()).toMatchObject([{ demonstrationId: id }]);
+  // The handler's first read of the connection still finds the old token, and Ada connects again right after it.
+  const local = chrome.storage.local as unknown as {
+    get: (keys: unknown) => Promise<Record<string, unknown>>;
+  };
+  const original = local.get;
+  local.get = async (keys) => {
+    const items = await original.call(local, keys);
+    if (keys === "connection") {
+      local.get = original;
+      connect(ada, "obr_two");
+    }
+    return items;
+  };
+  try {
+    doc?.postMessage({
+      type: "offscreen.signed-out",
+      reason: "revoked",
+      token: "obr_one",
+    });
+    await until(() => local.get === original, "the handler reads the token");
+    await settle();
+  } finally {
+    local.get = original;
+  }
+  expect(storedConnection()?.token).toBe("obr_two");
+  expect(fake.storage.local.get("notice")).toBeUndefined();
+  expect(drains()).toMatchObject([{ demonstrationId: id }]);
+  expect(drains().filter((drain) => drain.kept !== undefined)).toEqual([]);
+});
+
+test("a sign-out the document reports without a token is refused, logged, and changes nothing", async () => {
+  await startRecording({ botId: "bot-1", title: "T", tabId: 7 });
+  const logged = spyOn(console, "error").mockImplementation(() => {});
+  try {
+    doc?.postMessage({ type: "offscreen.signed-out", reason: "revoked" });
+    await settle();
+    expect(logged).toHaveBeenCalledTimes(1);
+    expect(logged.mock.calls[0]?.[0]).toBe("Recorder: signing out failed");
+    expect(String(logged.mock.calls[0]?.[1])).toContain(
+      "offscreen.signed-out without a valid token",
+    );
+  } finally {
+    logged.mockRestore();
+  }
   expect((await state()).phase).toBe("recording");
   expect(storedConnection()?.token).toBe("obr_one");
   expect(fake.storage.local.get("notice")).toBeUndefined();
