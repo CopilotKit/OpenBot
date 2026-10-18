@@ -1690,6 +1690,7 @@ test("a signed-out pass names its reason and keeps everything for the person", a
   document?.postMessage({
     type: "offscreen.signed-out",
     reason: "organization",
+    token: "obr_one",
   });
   await until(
     async () => (await state()).phase === "idle",
@@ -1728,7 +1729,11 @@ test("connecting again as the same person sends what was kept; another person do
     [click("One"), click("Two"), click("Three")],
     3,
   );
-  doc?.postMessage({ type: "offscreen.signed-out", reason: "revoked" });
+  doc?.postMessage({
+    type: "offscreen.signed-out",
+    reason: "revoked",
+    token: "obr_one",
+  });
   await until(
     () => drains()[0]?.kept?.waitingForReconnect === true,
     "kept for Ada",
@@ -1763,10 +1768,105 @@ test("connecting again as the same person sends what was kept; another person do
   expect(drains()[0]?.kept).toBeUndefined();
 });
 
+test("a sign-out the document reports for an older token, after the person connected again, changes nothing", async () => {
+  fake.tabs.set(7, { id: 7, url: "chrome://newtab/" } as chrome.tabs.Tab);
+  const id = await startRecording({ botId: "bot-1", title: "T", tabId: 7 });
+  expect(await page({ type: "page.stop" })).toEqual({ ok: true });
+  expect(drains()).toMatchObject([{ demonstrationId: id }]);
+  // Ada connects this browser again while the stopped recording still drains: its recover goes out with the new token.
+  connect(ada, "obr_two");
+  await handlers.connected();
+  await until(
+    () => sentToDocument("offscreen.recover").length === 1,
+    "offscreen.recover",
+  );
+  // A pass the old connection's streamer took is answered signed out.
+  doc?.postMessage({
+    type: "offscreen.signed-out",
+    reason: "revoked",
+    token: "obr_one",
+  });
+  await settle();
+  expect(storedConnection()?.token).toBe("obr_two");
+  expect(fake.storage.local.get("notice")).toBeUndefined();
+  expect(drains()).toMatchObject([{ demonstrationId: id }]);
+  expect(drains()[0]?.kept).toBeUndefined();
+  expect((await state()).error).toBeUndefined();
+  expect(fake.offscreen.open).toBe(true);
+});
+
+test("a sign-out the document reports for an older token leaves the new connection's recording running", async () => {
+  connect(ada, "obr_two");
+  await startRecording({ botId: "bot-1", title: "T", tabId: 7 });
+  doc?.postMessage({
+    type: "offscreen.signed-out",
+    reason: "revoked",
+    token: "obr_one",
+  });
+  await settle();
+  expect((await state()).phase).toBe("recording");
+  expect(storedConnection()?.token).toBe("obr_two");
+  expect(fake.storage.local.get("notice")).toBeUndefined();
+  expect(sentToDocument("offscreen.stop")).toEqual([]);
+});
+
+test("a sign-out the document reports for the stored connection forgets it, tells the person, and keeps only that connection's drains waiting", async () => {
+  fake.tabs.set(7, { id: 7, url: "chrome://newtab/" } as chrome.tabs.Tab);
+  const id = await startRecording({ botId: "bot-1", title: "T", tabId: 7 });
+  expect(await page({ type: "page.stop" })).toEqual({ ok: true });
+  const own = drains()[0] as DrainRecord;
+  expect(own).toMatchObject({ demonstrationId: id, userId: "p1" });
+  // Drains no connection of Ada's here sends: Bea's, and Ada's own on another OpenBot.
+  const beas: DrainRecord = {
+    ...own,
+    demonstrationId: "demo-bea",
+    userId: bea.id,
+    userName: bea.name,
+  };
+  const elsewhere: DrainRecord = {
+    ...own,
+    demonstrationId: "demo-elsewhere",
+    openbotUrl: "https://other-openbot.example.test",
+  };
+  fake.storage.local.set("drains", [own, beas, elsewhere]);
+  doc?.postMessage({
+    type: "offscreen.signed-out",
+    reason: "revoked",
+    token: "obr_one",
+  });
+  await until(
+    () => drains()[0]?.kept?.waitingForReconnect === true,
+    "Ada's drain waits for her",
+  );
+  expect(storedConnection()).toBeUndefined();
+  expect(fake.storage.local.get("notice")).toMatchObject({
+    kind: "signed-out",
+    reason: "revoked",
+  });
+  expect(drains()[0]).toMatchObject({
+    demonstrationId: id,
+    kept: { parked: true, waitingForReconnect: true },
+  });
+  expect(drains().slice(1)).toEqual([beas, elsewhere]);
+});
+
+test("a sign-out the document reports without a token is refused and changes nothing", async () => {
+  await startRecording({ botId: "bot-1", title: "T", tabId: 7 });
+  doc?.postMessage({ type: "offscreen.signed-out", reason: "revoked" });
+  await settle();
+  expect((await state()).phase).toBe("recording");
+  expect(storedConnection()?.token).toBe("obr_one");
+  expect(fake.storage.local.get("notice")).toBeUndefined();
+});
+
 test("a recover the document could not be sent still lets it close once everything is done", async () => {
   fake.tabs.set(7, { id: 7, url: "chrome://newtab/" } as chrome.tabs.Tab);
   await startRecording({ botId: "bot-1", title: "T", tabId: 7 });
-  doc?.postMessage({ type: "offscreen.signed-out", reason: "revoked" });
+  doc?.postMessage({
+    type: "offscreen.signed-out",
+    reason: "revoked",
+    token: "obr_one",
+  });
   await until(
     () => drains()[0]?.kept?.waitingForReconnect === true,
     "kept for Ada",
@@ -1920,7 +2020,11 @@ test("a sign-out while a Stop drains tells the person, and keeps the recording f
   holdStop = true;
   const stopping = page({ type: "page.stop" });
   await until(async () => (await state()).phase === "stopping", "stopping");
-  doc?.postMessage({ type: "offscreen.signed-out", reason: "organization" });
+  doc?.postMessage({
+    type: "offscreen.signed-out",
+    reason: "organization",
+    token: "obr_one",
+  });
   await until(
     () => fake.storage.local.get("connection") === undefined,
     "the connection is forgotten",
@@ -1990,7 +2094,11 @@ test("Disconnect clears a sentence that says everything is kept until you connec
   // A sign-out.
   connect();
   await startRecording({ botId: "bot-1", title: "T", tabId: 7 });
-  doc?.postMessage({ type: "offscreen.signed-out", reason: "revoked" });
+  doc?.postMessage({
+    type: "offscreen.signed-out",
+    reason: "revoked",
+    token: "obr_one",
+  });
   await until(
     async () => (await state()).error === SIGNED_OUT,
     "the signed-out sentence",
@@ -2681,7 +2789,11 @@ test("Stop pressed while Start over waits for OpenBot ends the recording: the ne
 test("a sign-out while Start over waits for OpenBot ends the recording: the new one never starts and is deleted", async () => {
   const held = await startOverHeldAtCreate();
   const { old, create, restarted } = held;
-  doc?.postMessage({ type: "offscreen.signed-out", reason: "revoked" });
+  doc?.postMessage({
+    type: "offscreen.signed-out",
+    reason: "revoked",
+    token: "obr_one",
+  });
   await until(
     async () => (await state()).phase === "idle",
     "the recording stops",
@@ -2709,7 +2821,11 @@ test("a sign-out after Start over keeps the new recording for its person, not th
   const old = await startRecording({ botId: "bot-1", title: "T", tabId: 7 });
   await sendSteps(contentPort(7), [click()], 2);
   expect(await page({ type: "page.restart" })).toEqual({ ok: true });
-  doc?.postMessage({ type: "offscreen.signed-out", reason: "revoked" });
+  doc?.postMessage({
+    type: "offscreen.signed-out",
+    reason: "revoked",
+    token: "obr_one",
+  });
   await until(
     async () => (await state()).phase === "idle",
     "the recording stops",
@@ -3233,7 +3349,11 @@ async function signOut(via: Delivery): Promise<undefined> {
   if (!connection) return undefined;
   openbot.revoked.add(connection.token);
   if (via === "document" && doc) {
-    doc.postMessage({ type: "offscreen.signed-out", reason: "revoked" });
+    doc.postMessage({
+      type: "offscreen.signed-out",
+      reason: "revoked",
+      token: connection.token,
+    });
     return undefined;
   }
   if (network.deps?.context()) await uploader.flush().catch(() => undefined);

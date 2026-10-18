@@ -4,6 +4,7 @@ import { MAX_TIMESTAMP_MS } from "@openbot/shared/recorder-masking";
 import {
   parseContentMessage,
   parseExternalMessage,
+  parseOffscreenSignedOut,
   parsePageConnectDecide,
 } from "../src/protocol/messages";
 
@@ -144,5 +145,30 @@ describe("parsePageConnectDecide", () => {
       "not an address",
     ])
       expect(parsePageConnectDecide({ ...decide, origin })).toBeNull();
+  });
+});
+
+describe("parseOffscreenSignedOut", () => {
+  const signedOut = {
+    type: "offscreen.signed-out",
+    reason: "organization",
+    token: "obr_one",
+  };
+
+  test("returns a sign-out naming the token its pass used", () => {
+    expect(parseOffscreenSignedOut(signedOut)).toEqual(signedOut as never);
+  });
+
+  test("returns null for a sign-out without a token", () => {
+    const { token: _, ...withoutToken } = signedOut;
+    expect(parseOffscreenSignedOut(withoutToken)).toBeNull();
+  });
+
+  test("returns null for a token that is not a string, or an unknown reason", () => {
+    for (const token of [null, 7, { value: "obr_one" }])
+      expect(parseOffscreenSignedOut({ ...signedOut, token })).toBeNull();
+    expect(
+      parseOffscreenSignedOut({ ...signedOut, reason: "expired" }),
+    ).toBeNull();
   });
 });

@@ -148,6 +148,17 @@ export type BackgroundToOffscreen =
       drains: DrainRecord[];
     } // after a browser restart, and when the person who recorded kept drains connects again
   | { type: "offscreen.discard"; demonstrationIds: string[] }; // only on the person's own "Discard kept events" or Disconnect: clear their IndexedDB data
+/** The one offscreen message the service worker parses: it signs a connection out, so it names the bearer the failing
+ * pass or trajectory registration used, and only that connection is signed out (a pass taken with an older token after
+ * the person connected again signs out nothing). */
+export const offscreenSignedOutSchema = z
+  .object({
+    type: z.literal("offscreen.signed-out"),
+    reason: z.enum(["revoked", "removed", "organization"]),
+    token: z.string(),
+  })
+  .strict();
+export type OffscreenSignedOut = z.infer<typeof offscreenSignedOutSchema>;
 export type OffscreenToBackground =
   | { type: "offscreen.ready" }
   | {
@@ -175,10 +186,7 @@ export type OffscreenToBackground =
       events: number;
     } // a stopped recording's events are kept (Decision 19)
   | { type: "offscreen.heartbeat" } // every 30 s while a live session exists (Task 9 polls OpenBot on it)
-  | {
-      type: "offscreen.signed-out";
-      reason: "revoked" | "removed" | "organization";
-    }; // a pass came back RECORDER_SIGNED_OUT, with the guard's reason; its events stay kept (Decision 19)
+  | OffscreenSignedOut; // a pass came back RECORDER_SIGNED_OUT, with the guard's reason; its events stay kept (Decision 19)
 
 /** The connect page's Connect or Cancel. `origin` is the one the page showed (its page.connect.pending answer), in the
  * form a pending connect stores (normaliseOpenBotOrigin's): the service worker refuses a decide whose origin is not the
@@ -308,6 +316,14 @@ export function parseExternalMessage(
 /** The one page message the router parses, as it carries the origin the decide handler checks. */
 export function parsePageConnectDecide(raw: unknown): PageConnectDecide | null {
   const parsed = pageConnectDecideSchema.safeParse(raw);
+  return parsed.success ? parsed.data : null;
+}
+/** A sign-out without the token it is about is refused: forgetting without one would forget whichever connection is
+ * stored. */
+export function parseOffscreenSignedOut(
+  raw: unknown,
+): OffscreenSignedOut | null {
+  const parsed = offscreenSignedOutSchema.safeParse(raw);
   return parsed.success ? parsed.data : null;
 }
 export type { DemonstrationAction };

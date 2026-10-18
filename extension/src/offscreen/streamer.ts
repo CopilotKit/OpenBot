@@ -63,7 +63,8 @@ export type StreamerDeps = {
   status(update: StreamerStatus): void;
   /** Rollover registered another trajectory of `demonstrationId`: after Start over that can be the replaced recording. */
   onTrajectory(trajectoryId: string, demonstrationId: string): void;
-  /** Forwarded as offscreen.signed-out { reason }. */
+  /** Forwarded as offscreen.signed-out { reason, token }: the controller adds the session token its fetchGrant and
+   * registerTrajectory used (the streamer never holds it), so the service worker signs out only that connection. */
   onSignedOut(reason: "revoked" | "removed" | "organization"): void;
   /** A trajectory stopped streaming with its events kept (a stop (hold) or stop (park) row); called on each transition,
    * and again for every trajectory still kept when its recording stops or is replaced by Start over. */

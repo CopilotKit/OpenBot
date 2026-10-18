@@ -23,6 +23,7 @@ import type {
   ContentToBackground,
   ExternalResponse,
   ExternalToBackground,
+  OffscreenSignedOut,
   OffscreenToBackground,
   PageResponse,
   PageStateResponse,
@@ -30,7 +31,7 @@ import type {
   RecorderState,
   StreamSession,
 } from "../protocol/messages";
-import { IDLE_STATE } from "../protocol/messages";
+import { IDLE_STATE, parseOffscreenSignedOut } from "../protocol/messages";
 import {
   deleteDemonstrationData,
   openRecorderDatabase,
@@ -820,9 +821,12 @@ export function installRecording(
       case "offscreen.heartbeat":
         void heartbeat().catch(report("checking the recording in OpenBot"));
         return;
-      case "offscreen.signed-out":
-        void documentSignedOut(message.reason).catch(report("signing out"));
+      case "offscreen.signed-out": {
+        const signedOut = parseOffscreenSignedOut(message);
+        if (signedOut)
+          void documentSignedOut(signedOut).catch(report("signing out"));
         return;
+      }
     }
   }
 
@@ -1396,7 +1400,8 @@ export function installRecording(
       learning,
       error,
     });
-    if (signedOut) await markWaiting(current.userId, signedOut);
+    if (signedOut)
+      await markWaiting((drain) => drain.userId === current.userId, signedOut);
     if (offscreenDone.has(demonstrationId)) await documentDone(demonstrationId);
     if (error === SENTENCES.stopPending) scheduleStopRetry();
     await maybeCloseDocument();
@@ -1478,15 +1483,15 @@ export function installRecording(
 
   // ---- Signed out ----------------------------------------------------------------------------
 
-  /** Every drain of the person waits for them to connect this browser again; nothing is discarded (Decision 19). A
-   * recording Start over discarded is not kept for them: it only waits to be deleted in OpenBot once they connect. */
+  /** Every drain `belongs` picks waits for its person to connect this browser again; nothing is discarded (Decision 19).
+   * A recording Start over discarded is not kept for them: it only waits to be deleted in OpenBot once they connect. */
   async function markWaiting(
-    userId: string,
+    belongs: (drain: DrainRecord) => boolean,
     reason: SignedOutReason,
   ): Promise<void> {
     await updateDrains((drains) =>
       drains.map((drain) =>
-        drain.userId !== userId || drain.discard
+        !belongs(drain) || drain.discard
           ? drain
           : {
               ...drain,
@@ -1515,15 +1520,23 @@ export function installRecording(
     await forgetConnection(reason, token);
     if (live && live.token === token && state.phase === "recording")
       await stopRecording({ kind: "signed-out", reason });
-    else await markWaiting(userId, reason);
+    else await markWaiting((drain) => drain.userId === userId, reason);
   }
 
-  async function documentSignedOut(reason: SignedOutReason): Promise<void> {
+  /** The document's pass or trajectory registration was answered signed out for `token`. A pass taken with an older
+   * token, after the person connected again, changes nothing: the newer connection's recover may still be sending. */
+  async function documentSignedOut({
+    reason,
+    token,
+  }: OffscreenSignedOut): Promise<void> {
+    if (live && live.token === token && state.phase === "recording") {
+      await handleSignedOut(reason, token, live.userId);
+      return;
+    }
     const connection = await currentConnection();
-    const token = live?.token ?? connection?.token;
-    const userId = live?.userId ?? connection?.user.id;
-    if (token === undefined || userId === undefined) return;
-    await handleSignedOut(reason, token, userId);
+    if (connection?.token !== token) return;
+    await forgetConnection(reason, token);
+    await markWaiting((drain) => ownedBy(drain, connection), reason);
   }
 
   // ---- Noticing a stop made in OpenBot -------------------------------------------------------
