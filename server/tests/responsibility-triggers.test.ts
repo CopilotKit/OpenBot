@@ -696,6 +696,16 @@ describe("inbound email via SES -> SNS", () => {
   test("MIME text extraction prefers text/plain and decodes quoted-printable", () => {
     expect(extractEmailText(mime)).toBe("The disk on db-1 is at 99%.");
   });
+  test("MIME text extraction decodes character references in an HTML-only part", () => {
+    const html = [
+      "Content-Type: text/html; charset=utf-8",
+      "",
+      "<p>Q3&nbsp;numbers for AT&amp;T: margin &lt; 5%, we&#8217;re &quot;on&nbsp;track&quot; &#x2014; &amp;lt; stays</p>",
+    ].join("\r\n");
+    expect(extractEmailText(html)).toBe(
+      'Q3 numbers for AT&T: margin < 5%, we’re "on track" — &lt; stays',
+    );
+  });
   test("signing certificate URLs must be HTTPS on an sns.<region>.amazonaws.com host", () => {
     expect(isSnsUrl(CERT_URL, true)).toBe(true);
     expect(
