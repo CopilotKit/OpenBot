@@ -34,7 +34,17 @@ async function recover(recording: RecordingRecovery): Promise<void> {
   // recording's events and keeps retrying them. With no document nothing sends them, and sendDrains below finishes it
   // before anything goes out; opening one here would hide from the phase below that the document was gone, and a live
   // recording or a stop would never resume it on its session.
-  if (hadDocument) await recording.finishDiscards();
+  // A document that never comes back must not stop the rest of recovery: the live recording still has to resume, and
+  // sendDrains (no document) or the next start finishes the discard, which no path here sends.
+  if (hadDocument)
+    await recording
+      .finishDiscards()
+      .catch((error) =>
+        console.error(
+          "Recorder: finishing a discard after a restart failed",
+          error,
+        ),
+      );
   switch (phase) {
     case "idle":
       // storage.session is empty after a browser restart: a recording left in storage.local was interrupted.

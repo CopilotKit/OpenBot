@@ -4,6 +4,7 @@ import {
   beforeAll,
   beforeEach,
   expect,
+  spyOn,
   test,
 } from "bun:test";
 import type { DemonstrationAction } from "@openbot/shared/demonstration-schema";
@@ -853,6 +854,32 @@ test("a service-worker restart with no document resumes the live recording befor
   ]);
   expect((await state()).phase).toBe("recording");
   expect(drains()).toEqual([]);
+});
+
+test("a discard that cannot finish because the document never reconnects does not stop the live recording resuming", async () => {
+  startWorker();
+  await startRecording(7);
+  fake.storage.local.set("drains", [
+    { ...seededRecord(), demonstrationId: "demo-gone", discarding: true },
+  ]);
+  await restartWorker(); // the document is still open, but its port never reconnects
+  const logged = spyOn(console, "error").mockImplementation(() => {});
+  try {
+    const recovering = recoverInterruptedRecording();
+    await settle();
+    await advance(5_000);
+    await recovering;
+    expect(logged).toHaveBeenCalledTimes(1);
+  } finally {
+    logged.mockRestore();
+  }
+
+  expect(network.resumed).toEqual([[{ tabId: 7, url: DEAL }]]);
+  expect((await state()).phase).toBe("recording");
+  expect(
+    openbot.calls.filter((call) => call.path.includes("demo-gone")),
+  ).toEqual([]);
+  expect(drains().map((drain) => drain.demonstrationId)).toEqual(["demo-gone"]);
 });
 
 test("a service-worker restart with the document alive posts nothing to it", async () => {
