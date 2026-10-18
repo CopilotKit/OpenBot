@@ -1468,9 +1468,10 @@ export function installRecording(
     // resumed stop past the document's part (telling-openbot) tells it nothing again.
     if (resumed?.stage !== "telling-openbot") {
       if (since + STOP_WATCHDOG_MS <= deps.now()) {
-        // The watchdog has run out (it counts from the persisted start): a connected document is still told, nothing
-        // is waited for, and the drain holds whatever it has not sent.
-        postOffscreen(message);
+        // The watchdog has run out (it counts from the persisted start): a document is still told, waiting for one
+        // that is reconnecting after the restart, but nothing waits for it to answer, and the drain holds whatever it
+        // has not sent.
+        await sendToDocument(message);
       } else {
         // The document went away with the service worker: it is reopened on the stored session to finish the stop.
         if (resumed && !(await hasOffscreenDocument()))

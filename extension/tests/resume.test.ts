@@ -643,6 +643,22 @@ test("a stop whose persisted start is over 120 s old skips the wait", async () =
   expect(drains().map((drain) => drain.demonstrationId)).toEqual([DEMO]);
 });
 
+test("a stale resumed stop still reaches a document that reconnects after recovery starts", async () => {
+  seed({
+    phase: "stopping",
+    stopping: { since: now - 121_000, stage: "draining" },
+  });
+  holdStop = true;
+  startWorker();
+  const recovering = recoverInterruptedRecording();
+  await settle(); // recovery is under way and the document has not reconnected yet
+  const port = openDocumentPort();
+  await recovering;
+
+  expect(sentToDocument("offscreen.stop", port)).toHaveLength(1);
+  expect((await state()).phase).toBe("idle");
+});
+
 test("a resumed stop waits only for what is left of the 120 seconds", async () => {
   seed({
     phase: "stopping",
