@@ -30,6 +30,11 @@ async function recover(recording: RecordingRecovery): Promise<void> {
   const phase = await recording.loadedPhase();
   // A browser restart closes the document; a service-worker restart leaves it running, still sending what it holds.
   const hadDocument = await hasOffscreenDocument();
+  // A discard the restart interrupted is finished first: a document that outlived the service worker still holds that
+  // recording's events and keeps retrying them. With no document nothing sends them, and sendDrains below finishes it
+  // before anything goes out; opening one here would hide from the phase below that the document was gone, and a live
+  // recording or a stop would never resume it on its session.
+  if (hadDocument) await recording.finishDiscards();
   switch (phase) {
     case "idle":
       // storage.session is empty after a browser restart: a recording left in storage.local was interrupted.

@@ -659,6 +659,29 @@ test("a stale resumed stop still reaches a document that reconnects after recove
   expect((await state()).phase).toBe("idle");
 });
 
+test("a stale resumed stop with no document reopens it and tells it to stop, so the person's outcome stands", async () => {
+  seed(
+    {
+      phase: "stopping",
+      stopping: { since: now - 121_000, stage: "draining" },
+    },
+    { document: false },
+  );
+  startWorker();
+  await recoverInterruptedRecording();
+
+  expect(toDocument().map((message) => message.type)).toEqual([
+    "offscreen.resume",
+    "offscreen.stop",
+    "offscreen.recover",
+  ]);
+  expect(sentToDocument("offscreen.stop")).toEqual([
+    { type: "offscreen.stop", outcome: "succeeded" },
+  ]);
+  expect(requests()).toEqual([`POST ${demoPath(DEMO, "/stop")}`]);
+  expect((await state()).phase).toBe("idle");
+});
+
 test("a resumed stop waits only for what is left of the 120 seconds", async () => {
   seed({
     phase: "stopping",
@@ -808,6 +831,28 @@ test("a service-worker restart with no document resumes it with the stored sessi
   expect(after.capture.screen).toBe("failed");
   expect(after.capture.screenReason).toBe(SCREEN_RESTARTED);
   expect(network.resumed).toEqual([[{ tabId: 7, url: DEAL }]]);
+});
+
+test("a service-worker restart with no document resumes the live recording before it finishes a discard the restart interrupted", async () => {
+  startWorker();
+  await startRecording(7);
+  const stored = fake.storage.session.get("stream") as StreamSession;
+  await chrome.offscreen.closeDocument();
+  fake.storage.local.set("drains", [
+    { ...seededRecord(), demonstrationId: "demo-gone", discarding: true },
+  ]);
+  await restartWorker();
+  await recoverInterruptedRecording();
+
+  expect(toDocument()).toEqual([
+    {
+      type: "offscreen.resume",
+      session: { ...stored, media: { tabStreamId: null, microphone: false } },
+    },
+    { type: "offscreen.discard", demonstrationIds: ["demo-gone"] },
+  ]);
+  expect((await state()).phase).toBe("recording");
+  expect(drains()).toEqual([]);
 });
 
 test("a service-worker restart with the document alive posts nothing to it", async () => {

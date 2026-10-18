@@ -124,6 +124,10 @@ export type RecordingRecovery = {
   resumeStop(): Promise<string | null>;
   /** The live recording after a service-worker restart: network capture again and, when it is gone, the document. */
   resumeRecording(): Promise<void>;
+  /** Finishes every discard a restart interrupted, whoever is connected: the document clears what it holds of those
+   * recordings (a document that outlived the service worker would otherwise keep sending them) and nothing of them is
+   * sent to OpenBot. */
+  finishDiscards(): Promise<void>;
   /** For every drain of the connected person: its queued steps, its owed stop and its network bodies, then
    * offscreen.recover. Drains of anyone else wait for their person to connect again. */
   sendDrains(): Promise<void>;
@@ -1467,15 +1471,16 @@ export function installRecording(
     // its person, or discarded (a Disconnect is under way), waits only for a reconnecting document to hear of it. A
     // resumed stop past the document's part (telling-openbot) tells it nothing again.
     if (resumed?.stage !== "telling-openbot") {
+      // The document went away with the service worker: it is reopened on the stored session to finish the stop, with
+      // the person's outcome, however long ago the stop began.
+      if (resumed && !(await hasOffscreenDocument()))
+        await resumeDocument().catch(report("reopening the document"));
       if (since + STOP_WATCHDOG_MS <= deps.now()) {
         // The watchdog has run out (it counts from the persisted start): a document is still told, waiting for one
         // that is reconnecting after the restart, but nothing waits for it to answer, and the drain holds whatever it
         // has not sent.
         await sendToDocument(message);
       } else {
-        // The document went away with the service worker: it is reopened on the stored session to finish the stop.
-        if (resumed && !(await hasOffscreenDocument()))
-          await resumeDocument().catch(report("reopening the document"));
         if (
           (mode.kind === "person" || mode.kind === "openbot") &&
           disconnecting === 0
@@ -2260,6 +2265,7 @@ export function installRecording(
     abandonStart: afterReady(abandonStart),
     resumeStop: afterReady(resumeStop),
     resumeRecording: afterReady(resumeRecording),
+    finishDiscards: afterReady(finishDiscards),
     sendDrains: afterReady(() => sendDrains({ recovering: true })),
     recoverDrain: afterReady(recoverDrain),
   };

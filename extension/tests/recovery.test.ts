@@ -975,7 +975,10 @@ test("after a browser restart with nobody connected, the interrupted recording w
 // ---- A recording the person discarded is never sent -------------------------------------------
 
 /** A drain whose discard the person chose and a restart interrupted before it finished clearing it. */
-async function storeDiscardingDrain(id: string) {
+async function storeDiscardingDrain(
+  id: string,
+  extra: Partial<DrainRecord> = {},
+) {
   const drain: DrainRecord = {
     demonstrationId: id,
     botId: "bot-1",
@@ -988,6 +991,7 @@ async function storeDiscardingDrain(id: string) {
     stopPending: true,
     discard: false,
     discarding: true,
+    ...extra,
   };
   fake.storage.local.set("drains", [drain]);
   await queueSteps(id, [click("Approve")]);
@@ -1027,6 +1031,25 @@ test("a discard the restart interrupted is finished even when nobody is connecte
   await storeDiscardingDrain("demo-gone");
   fake.storage.local.delete("connection");
   startWorker();
+  await recoverInterruptedRecording();
+  await expectDiscardFinished("demo-gone");
+});
+
+test("a service-worker restart with the document still open finishes a discard it interrupted and sends nothing of that recording", async () => {
+  // Its stop reached OpenBot and the document holds its events, retrying them while the document lives on.
+  await storeDiscardingDrain("demo-gone", {
+    stopPending: false,
+    kept: {
+      reason: "Intelligence could not take the events yet.",
+      parked: false,
+      events: 12,
+      at: now - 1_000,
+    },
+  });
+  fake.offscreen.open = true;
+  fake.restartServiceWorker();
+  startWorker();
+  openDocument(); // the document reconnects its port
   await recoverInterruptedRecording();
   await expectDiscardFinished("demo-gone");
 });
