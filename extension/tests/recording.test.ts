@@ -3140,6 +3140,44 @@ test("a Start over whose create fails after Stop ended it leaves the recording s
   expect(openbot.calls.at(-1)?.path).toBe(demoPath(next, "/actions"));
 });
 
+test("a Start over whose new recording cannot be created stops with the failure, shows nothing as saved, and still deletes the old one after it drains", async () => {
+  await page({ type: "page.bots" });
+  const old = await startRecording({ botId: "bot-1", title: "T", tabId: 7 });
+  await sendSteps(contentPort(7), [click()], 2);
+  expect((await state()).learning).toEqual({
+    state: "assigned",
+    containerId: "space-1",
+  });
+  const failure = "OpenBot is busy. Try again.";
+  openbot.createAnswers.push({ status: 503, body: { error: failure } });
+  expect(await page({ type: "page.restart" })).toEqual({
+    ok: false,
+    error: failure,
+  });
+  // The old recording is deleted in OpenBot once it drains, so nothing says it was saved or what Learning saw of it.
+  const after = await state();
+  expect(after.phase).toBe("idle");
+  expect(after.error).toBe(failure);
+  expect(after.lastStopped).toBeUndefined();
+  expect(after.learning).toBeUndefined();
+  const answer = (await page({ type: "page.state" })) as PageStateResponse;
+  expect(answer.state.error).toBe(failure);
+  expect(answer.state.lastStopped).toBeUndefined();
+  expect(answer.state.learning).toBeUndefined();
+  expect(sentToDocument("offscreen.stop")).toEqual([
+    { type: "offscreen.stop", outcome: "failed" },
+  ]);
+  expect(drains()).toMatchObject([{ demonstrationId: old, discard: true }]);
+  expect(requests()).not.toContain(`DELETE ${demoPath(old)}`);
+  doc?.postMessage({ type: "offscreen.done", demonstrationId: old });
+  await until(
+    () => requests().includes(`DELETE ${demoPath(old)}`),
+    "the old one is deleted in OpenBot",
+  );
+  await until(() => drains().length === 0, "its drain is forgotten");
+  expect((await state()).lastStopped).toBeUndefined();
+});
+
 test("Stop pressed while Start over saves the switch stops the new recording after the document and the tabs were moved to it", async () => {
   const old = await startRecording({ botId: "bot-1", title: "T", tabId: 7 });
   const content = contentPort(7);

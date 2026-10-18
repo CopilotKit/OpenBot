@@ -220,7 +220,8 @@ export type RecorderEvent =
   | { type: "stopped" }
   | {
       type: "finished";
-      lastStopped: NonNullable<RecorderState["lastStopped"]>;
+      /** Absent for a recording OpenBot deletes once it drains (a failed Start over): nothing of it is saved. */
+      lastStopped?: NonNullable<RecorderState["lastStopped"]>;
       learning?: LearningSpaceState;
       error?: string;
     }
@@ -315,7 +316,10 @@ export function reduceRecorder(
         ...IDLE_STATE,
         ...kept,
         lastStopped: event.lastStopped,
-        learning: event.learning ?? state.learning,
+        // The Learning space belongs to the recording that was saved; with none saved, there is none to show.
+        learning: event.lastStopped
+          ? (event.learning ?? state.learning)
+          : undefined,
         error: event.error,
       });
     case "restart":
@@ -1535,11 +1539,15 @@ export function installRecording(
     await removeSession("stream");
     dispatch({
       type: "finished",
-      lastStopped: {
-        demonstrationId,
-        botId: current.botId,
-        openbotUrl: current.openbotUrl,
-      },
+      // A failed Start over's recording is deleted in OpenBot once it drains: the popup must not offer it as saved.
+      lastStopped:
+        mode.kind === "restart-failed"
+          ? undefined
+          : {
+              demonstrationId,
+              botId: current.botId,
+              openbotUrl: current.openbotUrl,
+            },
       learning,
       error,
     });

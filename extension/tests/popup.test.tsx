@@ -1093,6 +1093,19 @@ test("signed out, a Start-over drain that is not kept shows only the kept row: n
   expect(queryByText(/Sending the rest/)).toBeNull();
 });
 
+test("after a Start over that could not open the new recording, the popup shows the failure and nothing as saved", async () => {
+  // What the controller leaves (reduceRecorder's "finished" with no lastStopped): the old recording drains to be deleted.
+  const failure = "OpenBot is busy. Try again.";
+  const { findByText, getByRole, queryByRole, queryByText } = setup(
+    stateResponse({ state: { botId: "b1", error: failure, draining: 1 } }),
+  );
+  await findByText(failure);
+  expect(queryByText("Saved")).toBeNull();
+  expect(queryByText("Review it in OpenBot to draft the Skill.")).toBeNull();
+  expect(queryByRole("link")).toBeNull();
+  expect(getByRole("button", { name: "Record" })).toBeTruthy();
+});
+
 test("a pending stop shows its sentence and no Record button when its Bot is the only one", async () => {
   const { findByText, queryByRole, queryByText } = setup(
     stateResponse({ state: { ...STOPPED, botId: "b1", error: STOP_PENDING } }),
