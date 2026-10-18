@@ -560,6 +560,15 @@ export const auditEventTypes = [
    * minute per replica, because a browser retrying a dead token would otherwise flood the trail.
    */
   "recorder.bearer_refused",
+  /*
+   * A browser connected to OpenBot as the Recorder, by whom and through which extension copy. Never
+   * the token or the code; the label is the person's own name for the browser.
+   */
+  "recorder.connected",
+  /* A connection attempt from an origin that is not the Recorder's. Payload: the origin offered. */
+  "recorder.connect_refused",
+  /* A connection ended; payload `reason` is replaced (the same copy connected again), disconnected or revoked. */
+  "recorder.revoked",
 ] as const;
 
 export type AuditEventType = (typeof auditEventTypes)[number];

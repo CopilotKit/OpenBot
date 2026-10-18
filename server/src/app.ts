@@ -80,6 +80,13 @@ import type { DemonstrationStore } from "./demonstrations/store";
 import { mountDesktopConnectionFailure } from "./desktop-connection-failure";
 import { createTranscriptionProvider } from "./dictation/provider";
 import { createDictationRoutes } from "./dictation/routes";
+import { createDemonstrationMediaReadRoutes } from "./demonstrations/media-read-routes";
+import {
+  createRequireRecorder,
+  createRequireUserOrRecorder,
+} from "./recorder/guard";
+import { createRecorderRoutes } from "./recorder/routes";
+import type { RecorderExtensionDeps } from "./recorder/wiring";
 import type { HostAccessBroker } from "./host-access/broker";
 import { createHostAccessRoutes } from "./host-access/routes";
 import { identityRoutes } from "./identity/routes";
@@ -398,6 +405,8 @@ export function createApp(
       recorder: DemonstrationRecorder;
     };
     approvals?: ApprovalService;
+    /** The Recorder extension's routes and guards (recorder/wiring.ts). Absent, nothing about it is mounted. */
+    recorder?: RecorderExtensionDeps;
     /**
      * Shared apps: who may use an app's one team account, and the switch that makes an app Shared.
      *
@@ -626,10 +635,23 @@ export function createApp(
       : context.json({ error: "No identity provider is configured." }, 503),
   );
 
+  const requireRecorder = coworker?.recorder
+    ? createRequireRecorder(
+        coworker.recorder.resolve,
+        coworker.recorder.onRefused,
+      )
+    : undefined;
+  const requireUserOrRecorder = coworker?.recorder
+    ? createRequireUserOrRecorder(
+        requireUser,
+        coworker.recorder.resolve,
+        coworker.recorder.onRefused,
+      )
+    : undefined;
   app.route(
     "/api/audio",
     createDictationRoutes(
-      requireUser,
+      requireUserOrRecorder ?? requireUser,
       config.transcription
         ? createTranscriptionProvider(config.transcription)
         : undefined,
@@ -1571,6 +1593,25 @@ export function createApp(
     app.route(
       "/api/delivery",
       createDeliveryRoutes({ ...coworker.delivery.authenticated, requireUser }),
+    );
+  }
+  if (coworker?.recorder && requireRecorder) {
+    app.route(
+      "/api/recorder",
+      createRecorderRoutes({
+        ...coworker.recorder,
+        requireUser,
+        requireRecorder,
+        auditStore,
+      }),
+    );
+    app.use("/api/demonstrations/:id/media/*", requireUser);
+    app.route(
+      "/api/demonstrations/:id/media",
+      createDemonstrationMediaReadRoutes({
+        media: coworker.recorder.media,
+        demonstrationOwner: coworker.recorder.demonstrationOwner,
+      }),
     );
   }
   if (coworker?.demonstrations)
