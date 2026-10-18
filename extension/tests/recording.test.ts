@@ -124,6 +124,11 @@ const openbot = {
   stopLearning: null as LearningSpaceState | null,
   open: (_botId: string | null): object => ({ demonstration: null }),
   openSignedOut: null as null | "revoked" | "removed" | "organization",
+  /** Recordings told to stop: OpenBot refuses their steps from then on, as the real one does. */
+  stopped: new Set<string>(),
+  /** While set, the create and open-recording answers wait for it. */
+  holdCreate: null as Promise<void> | null,
+  holdOpen: null as Promise<void> | null,
   me: { status: 200, body: {} as object } as Answer,
   bots: [
     {
@@ -153,6 +158,9 @@ function resetOpenBot() {
   openbot.stopLearning = null;
   openbot.open = () => ({ demonstration: null });
   openbot.openSignedOut = null;
+  openbot.stopped = new Set();
+  openbot.holdCreate = null;
+  openbot.holdOpen = null;
   openbot.me = { status: 200, body: meBody };
 }
 
@@ -187,6 +195,7 @@ beforeAll(() => {
       if (method === "DELETE" && path === "/api/recorder/connections/current")
         return new Response(null, { status: 204 });
       if (method === "POST" && path === "/api/recorder/demonstrations") {
+        if (openbot.holdCreate) await openbot.holdCreate;
         const answer = openbot.createAnswers.shift();
         if (answer)
           return Response.json(answer.body, { status: answer.status });
@@ -196,7 +205,8 @@ beforeAll(() => {
           { status: 201 },
         );
       }
-      if (method === "GET" && path === "/api/recorder/demonstrations/open")
+      if (method === "GET" && path === "/api/recorder/demonstrations/open") {
+        if (openbot.holdOpen) await openbot.holdOpen;
         return openbot.openSignedOut
           ? Response.json(
               {
@@ -207,6 +217,7 @@ beforeAll(() => {
               { status: 401 },
             )
           : Response.json(openbot.open(url.searchParams.get("botId")));
+      }
       const match =
         /^\/api\/recorder\/demonstrations\/([^/]+)(\/[a-z]+)?$/.exec(path);
       if (!match) return new Response("nope", { status: 404 });
@@ -221,10 +232,12 @@ beforeAll(() => {
               { error: "Could not register the trajectory." },
               { status: openbot.trajectoryStatus },
             );
-      if (method === "POST" && rest === "/stop")
+      if (method === "POST" && rest === "/stop") {
+        openbot.stopped.add(id);
         return Response.json({
           demonstration: demonstration(id, openbot.stopLearning),
         });
+      }
       if (method === "POST" && rest === "/actions") {
         if (openbot.failActions > 0) {
           openbot.failActions -= 1;
@@ -239,7 +252,7 @@ beforeAll(() => {
             },
             { status: 401 },
           );
-        if (openbot.refuseActions)
+        if (openbot.refuseActions || openbot.stopped.has(id))
           return Response.json(
             { error: "This recording is not open." },
             { status: 400 },
@@ -285,6 +298,14 @@ const fakeTimers = {
 };
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+/** A promise the test opens on cue, to hold one of the fake OpenBot's answers. */
+function gate() {
+  let open = () => {};
+  const promise = new Promise<void>((resolve) => {
+    open = resolve;
+  });
+  return { promise, open: () => open() };
+}
 const settle = () => sleep(25);
 async function until(check: () => boolean | Promise<boolean>, label: string) {
   const deadline = Date.now() + 3_000;
@@ -1737,8 +1758,9 @@ test("Start over stops the old recording, records into a new one and deletes the
   const before = openbot.calls.length;
   expect(await page({ type: "page.restart" })).toEqual({ ok: true });
   const fresh = "demo-2";
-  const trajectoryId = registered(before + 2) ?? "";
+  const trajectoryId = registered(before + 3) ?? "";
   expect(requests().slice(before)).toEqual([
+    `POST ${demoPath(old, "/actions")}`, // its queued steps go before OpenBot hears of the stop
     `POST ${demoPath(old, "/stop")}`,
     "POST /api/recorder/demonstrations",
     `POST ${demoPath(fresh, "/trajectories")}`,
@@ -1749,7 +1771,7 @@ test("Start over stops the old recording, records into a new one and deletes the
   expect(await state()).toMatchObject({
     phase: "recording",
     demonstrationId: fresh,
-    steps: 0,
+    steps: 1, // the page it starts on (Decision 16)
     noticeShown: false,
   });
   expect(fake.storage.local.get("activeRecording")).toMatchObject({
@@ -1770,10 +1792,165 @@ test("Start over stops the old recording, records into a new one and deletes the
   expect(
     requests().filter((r) => r === `DELETE ${demoPath(old)}`),
   ).toHaveLength(1);
-  await sendSteps(contentPort(7), [click()], 1);
+  await sendSteps(contentPort(7), [click()], 2);
   await uploader.flush();
   expect(openbot.batches.at(-1)).toMatchObject({ fromIndex: 0 });
   expect(openbot.calls.at(-1)?.path).toBe(demoPath(fresh, "/actions"));
+});
+
+test("Start over is not stopped by a step upload OpenBot refuses for the recording it leaves", async () => {
+  const old = await startRecording({ botId: "bot-1", title: "T", tabId: 7 });
+  const content = contentPort(7);
+  await sendSteps(content, [click()], 2);
+  const create = gate();
+  openbot.holdCreate = create.promise;
+  const before = openbot.calls.length;
+  const restarted = page({ type: "page.restart" });
+  await until(
+    () =>
+      requests().slice(before).includes("POST /api/recorder/demonstrations"),
+    "the new recording is being created",
+  );
+  // A step and the uploader's 3 s flush land while OpenBot is still creating the new recording.
+  content.postMessage({ type: "content.step", action: click("Late") });
+  await settle();
+  await advance(3_000);
+  create.open();
+  expect(await restarted).toEqual({ ok: true });
+  expect(await state()).toMatchObject({
+    phase: "recording",
+    demonstrationId: "demo-2",
+  });
+  expect((await state()).error).toBeUndefined();
+  expect(sentToDocument("offscreen.stop")).toEqual([]);
+  // The old recording's queued steps went before its stop, and nothing was sent to it after.
+  expect(requests().slice(before)).toEqual([
+    `POST ${demoPath(old, "/actions")}`,
+    `POST ${demoPath(old, "/stop")}`,
+    "POST /api/recorder/demonstrations",
+    `POST ${demoPath("demo-2", "/trajectories")}`,
+  ]);
+  expect(fake.storage.local.get("activeRecording")).toMatchObject({
+    demonstrationId: "demo-2",
+  });
+  await sendSteps(content, [click()], 2);
+  await uploader.flush();
+  expect(openbot.calls.at(-1)?.path).toBe(demoPath("demo-2", "/actions"));
+  expect(openbot.batches.at(-1)).toMatchObject({ fromIndex: 0 });
+  expect(openbot.batches.at(-1)?.actions).toHaveLength(2);
+});
+
+test("a heartbeat answered with no open recording during Start over stops nothing", async () => {
+  await startRecording({ botId: "bot-1", title: "T", tabId: 7 });
+  const polls = () =>
+    requests().filter((r) =>
+      r.startsWith("GET /api/recorder/demonstrations/open"),
+    );
+  const open = gate();
+  openbot.holdOpen = open.promise;
+  doc?.postMessage({ type: "offscreen.heartbeat" });
+  await until(() => polls().length === 1, "a poll in flight");
+  const create = gate();
+  openbot.holdCreate = create.promise;
+  const before = openbot.calls.length;
+  const restarted = page({ type: "page.restart" });
+  await until(
+    () =>
+      requests().slice(before).includes("POST /api/recorder/demonstrations"),
+    "the new recording is being created",
+  );
+  // The poll sent before Start over is answered while it runs (`{ demonstration: null }`), and a heartbeat during it
+  // does not ask at all.
+  open.open();
+  now += 25_000;
+  doc?.postMessage({ type: "offscreen.heartbeat" });
+  await settle();
+  create.open();
+  expect(await restarted).toEqual({ ok: true });
+  expect(await state()).toMatchObject({
+    phase: "recording",
+    demonstrationId: "demo-2",
+  });
+  expect((await state()).error).toBeUndefined();
+  expect(sentToDocument("offscreen.stop")).toEqual([]);
+  expect(drains()).toMatchObject([
+    { demonstrationId: "demo-1", discard: true },
+  ]);
+  expect(polls()).toHaveLength(1);
+});
+
+test("after Start over, a status about the old recording's trajectory leaves the new recording's capture alone", async () => {
+  await startRecording({ botId: "bot-1", title: "T", tabId: 7 });
+  const oldTrajectory = registered(1) ?? "";
+  expect(await page({ type: "page.restart" })).toEqual({ ok: true });
+  const newTrajectory = registered(openbot.calls.length - 1) ?? "";
+  expect(newTrajectory).not.toBe(oldTrajectory);
+  doc?.postMessage({
+    type: "offscreen.status",
+    capture: {
+      intelligence: "held",
+      intelligenceReason: "Learning capture is paused",
+    },
+    trajectoryId: oldTrajectory,
+  });
+  doc?.postMessage({
+    type: "offscreen.status",
+    capture: { voice: "recording" },
+    trajectoryId: newTrajectory,
+  });
+  await until(
+    async () => (await state()).capture.voice === "recording",
+    "the new recording's status",
+  );
+  expect((await state()).capture.intelligence).toBe("connecting");
+  expect((await state()).capture.intelligenceReason).toBeUndefined();
+  // A rollover of the new recording reports for it too.
+  doc?.postMessage({
+    type: "offscreen.trajectory",
+    demonstrationId: "demo-2",
+    trajectoryId: "t-3",
+  });
+  doc?.postMessage({
+    type: "offscreen.status",
+    capture: { intelligence: "streaming" },
+    trajectoryId: "t-3",
+  });
+  await until(
+    async () => (await state()).capture.intelligence === "streaming",
+    "the rollover's status",
+  );
+});
+
+test("Start over begins the new recording at the page the person is on", async () => {
+  await startRecording({ botId: "bot-1", title: "T", tabId: 7 });
+  fake.webNavigation.commit({
+    tabId: 7,
+    frameId: 0,
+    url: "https://crm.example.test/deals/43?tab=notes",
+    transitionType: "link",
+  });
+  await until(
+    async () =>
+      (await state()).topUrls["7"] ===
+      "https://crm.example.test/deals/43?tab=notes",
+    "the tab moved",
+  );
+  expect(await page({ type: "page.restart" })).toEqual({ ok: true });
+  expect((await state()).steps).toBe(1);
+  await uploader.flush();
+  const batches = openbot.calls
+    .filter((call) => call.path === demoPath("demo-2", "/actions"))
+    .map((call) => call.body as Batch);
+  expect(batches[0]).toEqual({
+    fromIndex: 0,
+    actions: [
+      {
+        kind: "navigate",
+        url: "https://crm.example.test/deals/43",
+        transition: "other",
+      },
+    ],
+  });
 });
 
 test("a rollover registers the new trajectory on the recording", async () => {

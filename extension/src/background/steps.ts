@@ -51,8 +51,9 @@ export function createStepUploader(deps: {
   target(): StepTarget | null;
   db(): Promise<IDBDatabase>;
   onSignedOut(reason: SignedOutReason): Promise<void>;
-  /** The server refused the batch: the recording was stopped there (Task 13's Stop). */
-  onRefused(message: string): Promise<void>;
+  /** The server refused the batch: the recording was stopped there (Task 13's Stop). `demonstrationId` is the
+   * recording the refused batch was for, which need not be the live one by the time this runs. */
+  onRefused(message: string, demonstrationId: string): Promise<void>;
   timers?: {
     set(fn: () => void, ms: number): unknown;
     clear(handle: unknown): void;
@@ -230,7 +231,7 @@ export function createStepUploader(deps: {
       if (refusal) {
         if (live) {
           refused.add(target.demonstrationId);
-          await deps.onRefused(error.message);
+          await deps.onRefused(error.message, target.demonstrationId);
         }
         return;
       }

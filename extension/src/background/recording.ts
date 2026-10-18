@@ -403,7 +403,12 @@ export function installRecording(
   let bots = new Map<string, RecorderBot>();
   const frameUrls = new Map<string, string>();
   let lastPollAt: number | undefined;
+  /** Start over is switching recordings: nothing uploads, takes a step or stops the recording until it is done. */
   let restarting = false;
+  /** The recording whose capture the popup shows and the trajectories it streams to: a status about any other
+   * trajectory (a recording Start over discarded, still draining) leaves that capture alone. */
+  let shown: { demonstrationId: string; trajectoryIds: Set<string> } | null =
+    null;
 
   let database: Promise<IDBDatabase> | null = null;
   const db = () => {
@@ -462,8 +467,9 @@ export function installRecording(
   // ---- Steps ---------------------------------------------------------------------------------
 
   const steps = deps.createStepUploader({
+    // Start over drains the recording it leaves itself, before OpenBot hears of its stop.
     target: (): StepTarget | null =>
-      live
+      live && !restarting
         ? {
             openbotUrl: live.openbotUrl,
             token: live.token,
@@ -479,7 +485,10 @@ export function installRecording(
           report("signing out"),
         );
     },
-    onRefused: async () => {
+    // A refusal is about the recording its batch was for: one that is no longer live, or one Start over is leaving,
+    // stops nothing.
+    onRefused: async (_message, demonstrationId) => {
+      if (restarting || live?.demonstrationId !== demonstrationId) return;
       void stopRecording({ kind: "openbot" }).catch(
         report("stopping a recording stopped in OpenBot"),
       );
@@ -489,7 +498,7 @@ export function installRecording(
 
   /** Adds a step to the live recording; navigate and gesture steps count toward the 50-step notice, network steps do not. */
   function addStep(action: DemonstrationAction): void {
-    if (!live) return;
+    if (!live || restarting) return;
     steps.add(action);
     if (action.kind === "network") return;
     dispatch({ type: "step" });
@@ -503,13 +512,30 @@ export function installRecording(
     }
   }
 
+  /** The drafted Skill starts where the person is (Decision 16): a navigate step for the page, when it is a website. */
+  function addFirstStep(url: string | undefined): void {
+    if (!isRecordablePage(url)) return;
+    const first = validStep({
+      kind: "navigate",
+      url: safeDemonstrationUrl(url ?? ""),
+      transition: "other",
+    });
+    if (first) addStep(first);
+  }
+
   const ready = (async () => {
     const stored = await readSession("recorder");
     if (stored) state = stored;
     for (const digest of (await readSession("digests")) ?? [])
       digests.add(digest);
-    if (state.phase !== "recording") return;
+    if (state.phase === "idle") return;
     const record = await readLocal("activeRecording");
+    if (record)
+      shown = {
+        demonstrationId: record.demonstrationId,
+        trajectoryIds: new Set(record.trajectoryIds),
+      };
+    if (state.phase !== "recording") return;
     const connection = await currentConnection();
     if (!record || !connection || !ownedBy(record, connection)) return;
     live = {
@@ -687,10 +713,15 @@ export function installRecording(
         flushEvents();
         return;
       case "offscreen.status":
-        if (state.phase !== "idle")
+        if (
+          state.phase !== "idle" &&
+          shown?.trajectoryIds.has(message.trajectoryId)
+        )
           dispatch({ type: "capture", capture: message.capture });
         return;
       case "offscreen.trajectory":
+        if (shown?.demonstrationId === message.demonstrationId)
+          shown.trajectoryIds.add(message.trajectoryId);
         void addTrajectory(message.demonstrationId, message.trajectoryId).catch(
           report("registering a trajectory"),
         );
@@ -1003,6 +1034,7 @@ export function installRecording(
         if (typeof holdRetryMs === "number")
           session.e2eHoldRetryMs = holdRetryMs;
       }
+      shown = { demonstrationId, trajectoryIds: new Set([trajectoryId]) };
       const port = await openDocument();
       // THEN, with nothing awaited in between: a tab stream id works once and expires within seconds, so it is taken
       // last and the document consumes it first thing.
@@ -1046,15 +1078,7 @@ export function installRecording(
       await injectRecordingScripts(tabId, demonstrationId).catch(
         () => undefined,
       );
-      // The drafted Skill starts where the person started (Decision 16).
-      const first = recordable
-        ? validStep({
-            kind: "navigate",
-            url: safeDemonstrationUrl(url ?? ""),
-            transition: "other",
-          })
-        : null;
-      if (first) addStep(first);
+      addFirstStep(url);
       // The capture owns the fallback: it alone starts, extends, resumes and stops it.
       capture = deps.createNetworkCapture(networkDeps, {
         fallback: deps.createPageFallback(),
@@ -1359,7 +1383,8 @@ export function installRecording(
   // ---- Noticing a stop made in OpenBot -------------------------------------------------------
 
   async function heartbeat(): Promise<void> {
-    if (state.phase !== "recording" || !live) return;
+    // Start over decides what happens to the recording it leaves, before and after the poll.
+    if (state.phase !== "recording" || !live || restarting) return;
     const at = deps.now();
     if (lastPollAt !== undefined && at - lastPollAt < POLL_EVERY_MS) return;
     lastPollAt = at;
@@ -1372,11 +1397,13 @@ export function installRecording(
       );
     } catch (error) {
       const reason = signedOutReason(error);
-      if (reason) await handleSignedOut(reason, current.token, current.userId);
+      if (reason && !restarting)
+        await handleSignedOut(reason, current.token, current.userId);
       // Any other failure waits for the next heartbeat.
       return;
     }
-    if (live !== current || state.phase !== "recording") return;
+    // An answer about a recording that is no longer live (Start over replaced it) decides nothing.
+    if (restarting || live !== current || state.phase !== "recording") return;
     if (answer.demonstration?.id !== current.demonstrationId) {
       await stopRecording({ kind: "openbot" });
       return;
@@ -1391,17 +1418,31 @@ export function installRecording(
     if (state.phase !== "recording" || !live || restarting)
       return { ok: false, error: SENTENCES.notRecording };
     restarting = true;
+    let answer: PageResponse;
     try {
-      return await rotate(live);
+      answer = await rotate(live);
     } finally {
       restarting = false;
     }
+    // Taken in the same turn as the switch ends, so it is the new recording's first step.
+    if (answer.ok) {
+      const tabId = state.tabIds[0];
+      addFirstStep(tabId === undefined ? undefined : state.topUrls[tabId]);
+    }
+    return answer;
   }
 
   async function rotate(current: Live): Promise<PageResponse> {
     const old = await readLocal("activeRecording");
     if (!old) return { ok: false, error: SENTENCES.notRecording };
     const target = { openbotUrl: current.openbotUrl, token: current.token };
+    // Its queued steps go before its stop, because OpenBot refuses steps for a stopped recording. The drain waits behind
+    // an upload in flight and reports no refusal; whatever it cannot send is discarded with the recording.
+    await steps
+      .drain({ ...target, demonstrationId: old.demonstrationId })
+      .catch(() => undefined);
+    if (state.phase !== "recording" || live !== current)
+      return { ok: false, error: SENTENCES.notRecording };
     try {
       await openbotJson(target, recorderPaths.stop(old.demonstrationId), {
         method: "POST",
@@ -1449,6 +1490,7 @@ export function installRecording(
       discard: false,
     };
     live = { ...current, demonstrationId };
+    shown = { demonstrationId, trajectoryIds: new Set([trajectoryId]) };
     const drains = await serially(async () => {
       const previous = (await readLocal("activeRecording")) ?? old;
       const existing = (await readLocal("drains")) ?? [];
