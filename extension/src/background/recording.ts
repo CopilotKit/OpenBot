@@ -34,6 +34,7 @@ import type {
 import { IDLE_STATE, parseOffscreenSignedOut } from "../protocol/messages";
 import {
   deleteDemonstrationData,
+  hasNetworkBodies,
   openRecorderDatabase,
 } from "../shared/database";
 import { hasHostPermission } from "../shared/host-access";
@@ -937,10 +938,11 @@ export function installRecording(
     if (drain?.discard) await deleteOnOpenBot(drain);
   }
 
-  /** Everything of a stopped recording is sent: its drain goes, unless its stop has not reached OpenBot yet, or it is a
-   * discarded one OpenBot cannot be told to delete yet (a later recovery reports it done again). An answer for the
-   * recording a stop is still moving into the drains is remembered and applied by that move; the lookup runs in the same
-   * storage queue as the move, so the two never cross. */
+  /** Everything of a stopped recording is sent: its drain goes, unless its stop has not reached OpenBot yet, its network
+   * bodies are still in IndexedDB (sent here when its person is connected; else, or when OpenBot does not take them, the
+   * drain stays for their next reconnect or browser start), or it is a discarded one OpenBot cannot be told to delete yet
+   * (a later recovery reports it done again). An answer for the recording a stop is still moving into the drains is
+   * remembered and applied by that move; the lookup runs in the same storage queue as the move, so the two never cross. */
   async function documentDone(demonstrationId: string): Promise<void> {
     offscreenDone.add(demonstrationId);
     const drain = await serially(async () => {
@@ -954,7 +956,10 @@ export function installRecording(
       return found;
     });
     if (drain && !drain.stopPending) {
-      const removable = !drain.discard || (await deleteOnOpenBot(drain));
+      // A discarded recording's bodies are deleted with the rest of it, never sent.
+      const removable = drain.discard
+        ? await deleteOnOpenBot(drain)
+        : await bodiesSent(drain);
       if (removable) {
         if (drain.discard)
           await deleteDemonstrationData(await db(), demonstrationId);
@@ -969,6 +974,57 @@ export function installRecording(
       }
     }
     await maybeCloseDocument();
+  }
+
+  type BodiesOutcome = "sent" | "failed" | "signed-out";
+  /** One upload of a drain's network bodies per connection at a time: a done the document reports while a reconnect is
+   * sending them joins that upload instead of starting a second one. */
+  const sendingBodies = new Map<string, Promise<BodiesOutcome>>();
+
+  /** Uploads the network body lines a drain still holds in IndexedDB, and completes that media, under its person's
+   * connection. A signed-out answer forgets that connection (their drains wait for them); any other failure is reported,
+   * and the lines stay in IndexedDB for the next try. */
+  function sendBodies(
+    drain: DrainRecord,
+    connection: ConnectionRecord,
+  ): Promise<BodiesOutcome> {
+    const key = `${connection.token} ${drain.demonstrationId}`;
+    const running = sendingBodies.get(key);
+    if (running) return running;
+    const run = (async (): Promise<BodiesOutcome> => {
+      try {
+        await deps.recoverNetworkBodies(drain, {
+          openbotUrl: drain.openbotUrl,
+          token: connection.token,
+        });
+        return "sent";
+      } catch (error) {
+        const reason = signedOutReason(error);
+        if (!reason) {
+          report("sending network bodies")(error);
+          return "failed";
+        }
+        await handleSignedOut(
+          reason,
+          connection.token,
+          connection.user.id,
+          connection.openbotUrl,
+        );
+        return "signed-out";
+      }
+    })().finally(() => sendingBodies.delete(key));
+    sendingBodies.set(key, run);
+    return run;
+  }
+
+  /** Whether none of a drain's network body lines are left in IndexedDB, sending what is left first when its person is
+   * connected: a drain is never forgotten while its bodies are owed (Decision 19). */
+  async function bodiesSent(drain: DrainRecord): Promise<boolean> {
+    if (!(await hasNetworkBodies(await db(), drain.demonstrationId)))
+      return true;
+    const connection = await currentConnection();
+    if (!connection || !ownedBy(drain, connection)) return false;
+    return (await sendBodies(drain, connection)) === "sent";
   }
 
   async function keepEvents(
@@ -1548,7 +1604,8 @@ export function installRecording(
       await documentDone(drain.demonstrationId);
   }
 
-  /** Steps first, then the stop, for every drain whose stop has not reached OpenBot, with backoff 5 s doubling to 5 minutes. */
+  /** Steps first, then the stop, then the network bodies, for every drain whose stop has not reached OpenBot, with backoff
+   * 5 s doubling to 5 minutes. */
   async function retryPendingStops(): Promise<void> {
     const connection = await currentConnection();
     if (!connection) return;
@@ -1574,7 +1631,10 @@ export function installRecording(
           return;
         }
         failed = true;
+        continue;
       }
+      // Best effort: bodies OpenBot does not take stay in IndexedDB, and the drain stays for them.
+      if ((await sendBodies(drain, connection)) === "signed-out") return;
     }
     if (failed) {
       scheduleStopRetry();
@@ -1947,9 +2007,9 @@ export function installRecording(
   }
 
   /** The person who recorded kept drains is connected again (or, `recovering`, the browser started): send everything
-   * their drains still owe. Drains of another person, or of another OpenBot, keep waiting: they are never sent under
-   * someone else's connection, and recovery marks them waiting for their person. Recovery also uploads each drain's
-   * network bodies still in IndexedDB. */
+   * their drains still owe, their network bodies still in IndexedDB included. Drains of another person, or of another
+   * OpenBot, keep waiting: they are never sent under someone else's connection, and recovery marks them waiting for their
+   * person. */
   async function sendDrains(options: { recovering: boolean }): Promise<void> {
     const connection = await currentConnection();
     if (options.recovering)
@@ -1979,7 +2039,6 @@ export function installRecording(
             ...target,
             demonstrationId: drain.demonstrationId,
           });
-        if (options.recovering) await deps.recoverNetworkBodies(drain, target);
       } catch (error) {
         const reason = signedOutReason(error);
         if (reason) {
@@ -1994,6 +2053,8 @@ export function installRecording(
         if (isRefusal(error)) await steps.reset(drain.demonstrationId);
         else scheduleStopRetry();
       }
+      // Whether or not the steps and the stop went through: the bodies wait on neither.
+      if ((await sendBodies(drain, connection)) === "signed-out") return;
     }
     const port = await openDocument();
     try {

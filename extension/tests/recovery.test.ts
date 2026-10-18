@@ -4,6 +4,7 @@ import {
   beforeAll,
   beforeEach,
   expect,
+  spyOn,
   test,
 } from "bun:test";
 import type { DemonstrationAction } from "@openbot/shared/demonstration-schema";
@@ -29,6 +30,7 @@ import {
   stepsNextKey,
   tx,
 } from "../src/shared/database";
+import { OpenBotError } from "../src/shared/openbot-client";
 import type { DrainRecord } from "../src/shared/storage";
 import {
   type ChromeFake,
@@ -70,6 +72,8 @@ const openbot = {
   gone: new Set<string>(),
   /** Every request is answered with the recorder guard's signed-out 401. */
   signedOut: false,
+  /** `POST .../stop` is answered 503 (OpenBot is up but cannot take the stop for now). */
+  stopUnavailable: false,
 };
 /** OpenBot's requests, the network-body recoveries and what the document received, in order. */
 let timeline: string[] = [];
@@ -132,6 +136,11 @@ beforeAll(() => {
         return new Response(null, { status: 204 });
       if (method === "POST" && rest === "/trajectories")
         return new Response(null, { status: 204 });
+      if (method === "POST" && rest === "/stop" && openbot.stopUnavailable)
+        return Response.json(
+          { error: "OpenBot could not stop the recording yet." },
+          { status: 503 },
+        );
       if (method === "POST" && rest === "/stop")
         return Response.json({
           demonstration: {
@@ -193,6 +202,21 @@ async function until(check: () => boolean | Promise<boolean>, label: string) {
     await sleep(2);
   }
 }
+/** Moves the clock, firing every fake timer that falls due on the way, in order. */
+async function advance(ms: number) {
+  const end = now + ms;
+  for (;;) {
+    const due = timers
+      .filter((timer) => timer.at <= end)
+      .sort((a, b) => a.at - b.at)[0];
+    if (!due) break;
+    timers = timers.filter((timer) => timer !== due);
+    now = due.at;
+    due.fn();
+    await settle();
+  }
+  now = end;
+}
 
 let fake: ChromeFake;
 type Indexed = { indexedDB?: IDBFactory; IDBKeyRange?: typeof FakeIDBKeyRange };
@@ -232,10 +256,13 @@ const toDocument = (port: FakePort | null = doc) =>
 const sentToDocument = (type: string) =>
   toDocument().filter((message) => message.type === type);
 
+/** Every network-body recovery the controller asked for, sent or not. */
 let bodies: {
   demonstrationId: string;
   target: { openbotUrl: string; token: string };
 }[] = [];
+/** What the network-body recovery answers for a recording: nothing (its lines are sent) or the error it throws. */
+let bodiesAnswer: (demonstrationId: string) => Error | null = () => null;
 
 function doubles(): Partial<RecordingDeps> {
   return {
@@ -259,7 +286,14 @@ function doubles(): Partial<RecordingDeps> {
       chrome.tabCapture.getMediaStreamId({ targetTabId: tabId }),
     recoverNetworkBodies: async (drain, target) => {
       bodies.push({ demonstrationId: drain.demonstrationId, target });
+      const failure = bodiesAnswer(drain.demonstrationId);
+      if (failure) {
+        timeline.push(`bodies ${drain.demonstrationId} failed`);
+        throw failure;
+      }
       timeline.push(`bodies ${drain.demonstrationId}`);
+      // As the real recovery does: lines leave IndexedDB once OpenBot has them.
+      await clearBodies(drain.demonstrationId);
     },
     readPolicy: async () => ({
       openbotUrl: null,
@@ -365,6 +399,62 @@ async function queueSteps(
   }
 }
 
+const bodiesMedia = (demonstrationId: string) => `net-${demonstrationId}`;
+
+/** Network body lines a previous session stored and never sent (the layout database.ts documents). */
+async function queueBodies(demonstrationId: string, lines: number) {
+  const mediaId = bodiesMedia(demonstrationId);
+  const db = await openRecorderDatabase(dbName);
+  try {
+    await tx(db, ["bodies", "meta"], "readwrite", (t) => {
+      for (let line = 0; line < lines; line += 1)
+        t.objectStore("bodies").put({
+          mediaId,
+          line,
+          text: `{"line":${line}}`,
+        });
+      t.objectStore("meta").put(mediaId, `media:${demonstrationId}:network`);
+      t.objectStore("meta").put(lines, `bodies-next:${mediaId}`);
+    });
+  } finally {
+    db.close();
+  }
+}
+
+const bodiesRange = (demonstrationId: string) =>
+  IDBKeyRange.bound(
+    [bodiesMedia(demonstrationId), -Infinity],
+    [bodiesMedia(demonstrationId), Infinity],
+  );
+
+async function storedBodies(demonstrationId: string) {
+  const db = await openRecorderDatabase(dbName);
+  try {
+    return await requestToPromise(
+      db
+        .transaction("bodies", "readonly")
+        .objectStore("bodies")
+        .count(bodiesRange(demonstrationId)),
+    );
+  } finally {
+    db.close();
+  }
+}
+
+async function clearBodies(demonstrationId: string) {
+  const db = await openRecorderDatabase(dbName);
+  try {
+    await tx(db, ["bodies"], "readwrite", (t) => {
+      t.objectStore("bodies").delete(bodiesRange(demonstrationId));
+    });
+  } finally {
+    db.close();
+  }
+}
+
+const unavailable = () =>
+  new OpenBotError(503, "OpenBot could not take the bodies yet.", null);
+
 /** A recording with three queued steps (the page it started on and two clicks), then a browser restart. */
 async function recordThenRestartBrowser() {
   const id = await startRecording(7);
@@ -401,12 +491,14 @@ beforeEach(() => {
   timers = [];
   timeline = [];
   bodies = [];
+  bodiesAnswer = () => null;
   now = 1_800_000_000_000;
   openbot.calls = [];
   openbot.held = new Map();
   openbot.nextDemo = 0;
   openbot.gone = new Set();
   openbot.signedOut = false;
+  openbot.stopUnavailable = false;
   connect();
   startWorker();
 });
@@ -543,6 +635,166 @@ test("a signed-out answer while recovering keeps the queued data for the person"
   expect(sentToDocument("offscreen.recover")[0]).toEqual(
     expect.objectContaining({ token: "obr_two" }),
   );
+});
+
+// ---- Network bodies a drain still owes -------------------------------------------------------
+
+test("connecting again after a sign-out sends the kept recording's network bodies under the new connection", async () => {
+  const id = await startRecording(7);
+  openbot.signedOut = true;
+  await page({ type: "page.stop" });
+  await until(
+    () => drains()[0]?.kept?.waitingForReconnect === true,
+    "kept for Ada",
+  );
+  expect(bodies).toEqual([]);
+
+  openbot.signedOut = false;
+  timeline = [];
+  connect(ada, "obr_two");
+  await handlers.connected();
+  await until(
+    () => sentToDocument("offscreen.recover").length === 1,
+    "recover",
+  );
+  expect(timeline.filter((entry) => !entry.startsWith("document "))).toEqual([
+    `POST ${demoPath(id, "/actions")}`,
+    `POST ${demoPath(id, "/stop")}`,
+    `bodies ${id}`,
+  ]);
+  expect(bodies).toEqual([
+    { demonstrationId: id, target: { openbotUrl: origin, token: "obr_two" } },
+  ]);
+});
+
+test("a recording whose network bodies could not be sent is not forgotten on offscreen.done, and goes once they are sent", async () => {
+  const id = await startRecording(7);
+  await queueBodies(id, 2);
+  openbot.signedOut = true;
+  await page({ type: "page.stop" });
+  await until(
+    () => drains()[0]?.kept?.waitingForReconnect === true,
+    "kept for Ada",
+  );
+
+  openbot.signedOut = false;
+  bodiesAnswer = () => unavailable();
+  const logged = spyOn(console, "error").mockImplementation(() => {});
+  try {
+    connect(ada, "obr_two");
+    await handlers.connected();
+    await until(
+      () => sentToDocument("offscreen.recover").length === 1,
+      "recover",
+    );
+    // The document has sent everything it held, but the bodies are still in IndexedDB: the drain stays for them.
+    doc?.postMessage({ type: "offscreen.done", demonstrationId: id });
+    await settle();
+    await settle();
+    expect(drains().map((drain) => drain.demonstrationId)).toEqual([id]);
+    expect(await storedBodies(id)).toBe(2);
+  } finally {
+    logged.mockRestore();
+  }
+
+  // The next browser start sends them, and the document it reopens reports the drain done again: now it goes.
+  await until(() => !fake.offscreen.open, "the document closed");
+  bodiesAnswer = () => null;
+  await restartBrowser();
+  startWorker();
+  await recoverInterruptedRecording();
+  expect(timeline.filter((entry) => !entry.startsWith("document "))).toEqual([
+    `bodies ${id}`,
+  ]);
+  expect(await storedBodies(id)).toBe(0);
+  expect(drains().map((drain) => drain.demonstrationId)).toEqual([id]);
+  doc?.postMessage({ type: "offscreen.done", demonstrationId: id });
+  await until(() => drains().length === 0, "the drain forgotten");
+});
+
+test("a browser start whose stop OpenBot cannot take yet still sends the network bodies, and sends them after the retried stop", async () => {
+  const id = await recordThenRestartBrowser();
+  openbot.stopUnavailable = true;
+  bodiesAnswer = () => unavailable();
+  startWorker();
+  const logged = spyOn(console, "error").mockImplementation(() => {});
+  try {
+    await recoverInterruptedRecording();
+  } finally {
+    logged.mockRestore();
+  }
+
+  expect(timeline.filter((entry) => !entry.startsWith("document "))).toEqual([
+    `POST ${demoPath(id, "/actions")}`,
+    `POST ${demoPath(id, "/stop")}`,
+    `bodies ${id} failed`,
+  ]);
+  expect(drains().map((drain) => drain.stopPending)).toEqual([true]);
+
+  // The stop retry goes through: the bodies go after it.
+  openbot.stopUnavailable = false;
+  bodiesAnswer = () => null;
+  timeline = [];
+  await advance(5_000);
+  await until(
+    () => timeline.includes(`bodies ${id}`),
+    "the bodies sent after the retried stop",
+  );
+  expect(timeline.filter((entry) => !entry.startsWith("document "))).toEqual([
+    `POST ${demoPath(id, "/stop")}`,
+    `bodies ${id}`,
+  ]);
+  expect(bodies.at(-1)).toEqual({
+    demonstrationId: id,
+    target: { openbotUrl: origin, token: "obr_one" },
+  });
+  expect(drains().map((drain) => drain.stopPending)).toEqual([undefined]);
+});
+
+test("a network-bodies failure is reported and the next drain still gets its turn", async () => {
+  await restartBrowser();
+  const drain = (demonstrationId: string): DrainRecord => ({
+    demonstrationId,
+    botId: "bot-1",
+    title: "Ada's",
+    openbotUrl: origin,
+    userId: ada.id,
+    userName: ada.name,
+    trajectoryIds: [`t-${demonstrationId}`],
+    startedAt: now - 60_000,
+    discard: false,
+  });
+  fake.storage.local.set("drains", [drain("demo-a"), drain("demo-b")]);
+  bodiesAnswer = (demonstrationId) =>
+    demonstrationId === "demo-a" ? new Error("The body store broke.") : null;
+  startWorker();
+  const logged = spyOn(console, "error").mockImplementation(() => {});
+  try {
+    await recoverInterruptedRecording();
+    expect(logged).toHaveBeenCalledTimes(1);
+    expect(logged.mock.calls[0]?.[0]).toBe(
+      "Recorder: sending network bodies failed",
+    );
+    expect(String(logged.mock.calls[0]?.[1])).toContain(
+      "The body store broke.",
+    );
+  } finally {
+    logged.mockRestore();
+  }
+
+  expect(timeline.filter((entry) => !entry.startsWith("document "))).toEqual([
+    "bodies demo-a failed",
+    "bodies demo-b",
+  ]);
+  expect(fake.storage.local.get("connection")).toBeDefined();
+  expect(sentToDocument("offscreen.recover")).toEqual([
+    {
+      type: "offscreen.recover",
+      openbotUrl: origin,
+      token: "obr_one",
+      drains: [drain("demo-a"), drain("demo-b")],
+    },
+  ]);
 });
 
 test("recovery runs once when index.ts and runtime.onStartup both start it", async () => {

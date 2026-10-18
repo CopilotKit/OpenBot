@@ -179,3 +179,20 @@ export async function deleteDemonstrationData(
     },
   );
 }
+
+/** Whether network body lines of one demonstration are still waiting in `bodies` (lines leave once OpenBot has them). */
+export async function hasNetworkBodies(
+  db: IDBDatabase,
+  demonstrationId: string,
+): Promise<boolean> {
+  return tx(db, ["bodies", "meta"], "readonly", async (t) => {
+    const mediaId = await requestToPromise(
+      t.objectStore("meta").get(`media:${demonstrationId}:network`),
+    );
+    if (typeof mediaId !== "string") return false;
+    const lines = await requestToPromise(
+      t.objectStore("bodies").count(pairRange(mediaId)),
+    );
+    return lines > 0;
+  });
+}
