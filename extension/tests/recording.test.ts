@@ -1879,6 +1879,128 @@ test("a heartbeat answered with no open recording during Start over stops nothin
   expect(polls()).toHaveLength(1);
 });
 
+/** Starts recording on tab 7, then presses Start over and holds OpenBot's answer to the new recording's create. */
+async function startOverHeldAtCreate() {
+  const old = await startRecording({ botId: "bot-1", title: "T", tabId: 7 });
+  const content = contentPort(7);
+  await sendSteps(content, [click()], 2);
+  const injected = fake.scripting.executed.length;
+  // Held here: a sign-out closes the document, and what it was sent still counts.
+  const document = doc;
+  const create = gate();
+  openbot.holdCreate = create.promise;
+  const before = openbot.calls.length;
+  const restarted = page({ type: "page.restart" });
+  await until(
+    () =>
+      requests().slice(before).includes("POST /api/recorder/demonstrations"),
+    "the new recording is being created",
+  );
+  return { old, content, document, injected, create, restarted };
+}
+
+/** Nothing of the recording Start over created (demo-2) runs here, and it is not left open in OpenBot. */
+async function expectNewRecordingNeverStarted(held: {
+  content: FakePort;
+  document: FakePort | null;
+  injected: number;
+}) {
+  const { content, document, injected } = held;
+  const after = await state();
+  expect(after.phase).toBe("idle");
+  expect(after.demonstrationId).not.toBe("demo-2");
+  expect(sentToDocument("offscreen.rotate", document)).toEqual([]);
+  expect(sentToDocument("offscreen.start", document)).toHaveLength(1);
+  expect(fake.scripting.executed).toHaveLength(injected);
+  expect(content.messages).not.toContainEqual(
+    expect.objectContaining({
+      type: "background.capture",
+      active: true,
+      demonstrationId: "demo-2",
+    }),
+  );
+  expect(fake.storage.local.get("activeRecording")).toBeUndefined();
+  expect(fake.storage.session.get("stream")).toBeUndefined();
+  expect(drains().map((drain) => drain.demonstrationId)).not.toContain(
+    "demo-2",
+  );
+  await until(
+    () => requests().includes(`DELETE ${demoPath("demo-2")}`),
+    "the new recording is deleted in OpenBot",
+  );
+  // No step is taken for it either.
+  await uploader.flush();
+  expect(requests()).not.toContain(`POST ${demoPath("demo-2", "/actions")}`);
+}
+
+test("Stop pressed while Start over waits for OpenBot ends the recording: the new one never starts and is deleted", async () => {
+  const held = await startOverHeldAtCreate();
+  const { old, create, restarted } = held;
+  expect(await page({ type: "page.stop" })).toEqual({ ok: true });
+  create.open();
+  expect(await restarted).toEqual({
+    ok: false,
+    error: "Nothing is being recorded.",
+  });
+  await expectNewRecordingNeverStarted(held);
+  // Stop's own flow ran for the old recording: drained, told OpenBot, and kept rather than discarded.
+  const after = await state();
+  expect(after.error).toBeUndefined();
+  expect(after.lastStopped?.demonstrationId).toBe(old);
+  expect(sentToDocument("offscreen.stop", held.document)).toEqual([
+    { type: "offscreen.stop", outcome: "succeeded" },
+  ]);
+  expect(requests()).toContain(`POST ${demoPath(old, "/stop")}`);
+  expect(requests()).not.toContain(`DELETE ${demoPath(old)}`);
+  expect(drains()).toHaveLength(1);
+  expect(drains()[0]).toMatchObject({ demonstrationId: old, discard: false });
+  expect(drains()[0]?.stopPending).toBeUndefined();
+});
+
+test("a sign-out while Start over waits for OpenBot ends the recording: the new one never starts and is deleted", async () => {
+  const held = await startOverHeldAtCreate();
+  const { old, create, restarted } = held;
+  doc?.postMessage({ type: "offscreen.signed-out", reason: "revoked" });
+  await until(
+    async () => (await state()).phase === "idle",
+    "the recording stops",
+  );
+  create.open();
+  expect(await restarted).toEqual({
+    ok: false,
+    error: "Nothing is being recorded.",
+  });
+  // The fake OpenBot still takes the token, so the new recording is closed there.
+  await expectNewRecordingNeverStarted(held);
+  expect((await state()).error).toBe(SIGNED_OUT);
+  expect(fake.storage.local.get("connection")).toBeUndefined();
+  // Everything of the old recording is kept for the person.
+  expect(drains()).toHaveLength(1);
+  expect(drains()[0]).toMatchObject({
+    demonstrationId: old,
+    discard: false,
+    stopPending: true,
+    kept: { waitingForReconnect: true },
+  });
+});
+
+test("Disconnect while Start over waits for OpenBot ends the recording: the new one never starts and nothing comes back", async () => {
+  const held = await startOverHeldAtCreate();
+  const { old, create, restarted } = held;
+  expect(await page({ type: "page.disconnect" })).toEqual({ ok: true });
+  create.open();
+  expect(await restarted).toEqual({
+    ok: false,
+    error: "Nothing is being recorded.",
+  });
+  await expectNewRecordingNeverStarted(held);
+  expect(sentToDocument("offscreen.discard", held.document)).toEqual([
+    { type: "offscreen.discard", demonstrationIds: [old] },
+  ]);
+  expect(drains()).toEqual([]);
+  expect(fake.storage.local.get("connection")).toBeUndefined();
+});
+
 test("after Start over, a status about the old recording's trajectory leaves the new recording's capture alone", async () => {
   await startRecording({ botId: "bot-1", title: "T", tabId: 7 });
   const oldTrajectory = registered(1) ?? "";

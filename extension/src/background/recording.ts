@@ -1436,13 +1436,15 @@ export function installRecording(
     const old = await readLocal("activeRecording");
     if (!old) return { ok: false, error: SENTENCES.notRecording };
     const target = { openbotUrl: current.openbotUrl, token: current.token };
+    // Stop, a sign-out or Disconnect can end the recording while Start over waits on OpenBot: after every wait it checks
+    // the recording it leaves is still the live one, and once it is not, nothing switches.
+    const ended = () => state.phase !== "recording" || live !== current;
     // Its queued steps go before its stop, because OpenBot refuses steps for a stopped recording. The drain waits behind
     // an upload in flight and reports no refusal; whatever it cannot send is discarded with the recording.
     await steps
       .drain({ ...target, demonstrationId: old.demonstrationId })
       .catch(() => undefined);
-    if (state.phase !== "recording" || live !== current)
-      return { ok: false, error: SENTENCES.notRecording };
+    if (ended()) return { ok: false, error: SENTENCES.notRecording };
     try {
       await openbotJson(target, recorderPaths.stop(old.demonstrationId), {
         method: "POST",
@@ -1451,6 +1453,7 @@ export function installRecording(
       // Still recording the old one.
       return { ok: false, error: sentenceFor(error, SENTENCES.startFailed) };
     }
+    if (ended()) return { ok: false, error: SENTENCES.notRecording };
     const trajectoryId = crypto.randomUUID();
     let demonstrationId: string | undefined;
     try {
@@ -1476,6 +1479,14 @@ export function installRecording(
       const sentence = sentenceFor(error, SENTENCES.startFailed);
       await stopRecording({ kind: "restart-failed", error: sentence });
       return { ok: false, error: sentence };
+    }
+    if (ended()) {
+      // The recording ended while OpenBot created the new one, which never starts here: it is deleted as a recording that
+      // could not start is. Best effort: after a sign-out the token no longer works, and OpenBot's own rules close it.
+      await openbotJson(target, recorderPaths.demonstration(demonstrationId), {
+        method: "DELETE",
+      }).catch(() => undefined);
+      return { ok: false, error: SENTENCES.notRecording };
     }
     const startedAt = deps.now();
     const next: DrainRecord = {
