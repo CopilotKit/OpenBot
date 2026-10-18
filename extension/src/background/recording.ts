@@ -1496,6 +1496,7 @@ export function installRecording(
         tabId,
         url: state.topUrls[tabId] ?? "",
       })),
+      state.capture.network,
     );
     // A stop that came meanwhile has stopped this capture already.
     if (network !== capture) return;

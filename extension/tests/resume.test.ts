@@ -165,6 +165,7 @@ const sentToDocument = (type: string, port: FakePort | null = doc) =>
 
 let network: {
   resumed: { tabId: number; url: string }[][];
+  previous: string[];
   resumeMode: NetworkMode;
   recorded: CapturedEvent[];
 };
@@ -179,9 +180,10 @@ function doubles(): Partial<RecordingDeps> {
         isRecordablePage(url) ? "debugger" : "waiting",
       addTab: async () => {},
       onCommitted: async () => {},
-      resume: async (tabs) => {
+      resume: async (tabs, previous) => {
         network.resumed.push(tabs);
-        return network.resumeMode;
+        network.previous.push(previous);
+        return previous === "stopped" ? "stopped" : network.resumeMode;
       },
       recordPageEvent: async (event) => {
         network.recorded.push(event);
@@ -347,7 +349,12 @@ beforeEach(() => {
   timers = [];
   now = 1_800_000_000_000;
   openbot.calls = [];
-  network = { resumed: [], resumeMode: "debugger", recorded: [] };
+  network = {
+    resumed: [],
+    previous: [],
+    resumeMode: "debugger",
+    recorded: [],
+  };
   masked = [];
   pinnedIntelligenceUrls = null;
   connect();
@@ -735,6 +742,27 @@ test("a service-worker restart restores followed tabs, digests and network captu
     type: "background.capture",
     active: true,
     recordingId: id,
+  });
+});
+
+test("a service-worker restart hands the network capture the mode it had, so a capture the person stopped stays stopped", async () => {
+  const reason =
+    "You closed Chrome's debugging bar, so network calls are no longer recorded.";
+  seed({
+    phase: "recording",
+    capture: {
+      intelligence: "streaming",
+      network: "stopped",
+      networkReason: reason,
+    },
+  });
+  startWorker();
+  openDocumentPort();
+  await recoverInterruptedRecording();
+  expect(network.previous).toEqual(["stopped"]);
+  expect((await state()).capture).toMatchObject({
+    network: "stopped",
+    networkReason: reason,
   });
 });
 

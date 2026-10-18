@@ -3,7 +3,6 @@ import type {
   RecorderBot,
   RecorderMe,
 } from "@openbot/shared/recorder-api";
-import { RECORDER_PAGE_NETWORK_MESSAGE_BYTES } from "@openbot/shared/recorder-api";
 import type { CapturedEvent } from "@openbot/shared/recorder-masking";
 import { MAX_TIMESTAMP_MS } from "@openbot/shared/recorder-masking";
 import { z } from "zod";
@@ -238,7 +237,8 @@ export const externalToBackgroundSchema = z.discriminatedUnion("type", [
       code: z.string().startsWith("obc_").max(80),
     })
     .strict(),
-  // From the MAIN-world fallback (Task 18), already masked in the page; accepted only from a recorded tab.
+  // From the MAIN-world fallback (Task 18), masked and trimmed to fit one event in the page; accepted only from a
+  // recorded tab.
   z.object({ type: z.literal("recorder.page-network"), event }).strict(),
 ]);
 export type ExternalToBackground = z.infer<typeof externalToBackgroundSchema>;
@@ -279,19 +279,13 @@ export function parseContentMessage(raw: unknown): ContentToBackground | null {
   const parsed = contentToBackgroundSchema.safeParse(raw);
   return parsed.success ? parsed.data : null;
 }
-/** safeParse with a size cap per type: 64 KiB for openbot.*, RECORDER_PAGE_NETWORK_MESSAGE_BYTES for recorder.page-network
- * (it carries full masked bodies up to 2 MiB each, Task 18). */
+/** safeParse + 64 KiB JSON size cap: a recorder.page-network event arrives already trimmed to fit one Intelligence
+ * event (16 KiB), so nothing larger is ever a real one. */
 export function parseExternalMessage(
   raw: unknown,
 ): ExternalToBackground | null {
   const bytes = jsonBytes(raw);
-  if (bytes === null) return null;
-  const type = (raw as { type?: unknown } | null)?.type;
-  const cap =
-    type === "recorder.page-network"
-      ? RECORDER_PAGE_NETWORK_MESSAGE_BYTES
-      : MAX_MESSAGE_BYTES;
-  if (bytes > cap) return null;
+  if (bytes === null || bytes > MAX_MESSAGE_BYTES) return null;
   const parsed = externalToBackgroundSchema.safeParse(raw);
   return parsed.success ? parsed.data : null;
 }

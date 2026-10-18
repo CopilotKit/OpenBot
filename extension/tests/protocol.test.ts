@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { RECORDER_PAGE_NETWORK_MESSAGE_BYTES } from "@openbot/shared/recorder-api";
 import { MAX_TIMESTAMP_MS } from "@openbot/shared/recorder-masking";
 import {
   parseContentMessage,
@@ -107,17 +106,15 @@ describe("parseExternalMessage", () => {
     ).toBeNull();
   });
 
-  test("a recorder.page-network with a 1 MiB body parses, and one over its cap returns null", () => {
+  test("a recorder.page-network that fits one event parses, and one over 64 KiB returns null", () => {
     const ok = {
       type: "recorder.page-network",
-      event: event({ response: { body: "x".repeat(1024 * 1024) } }),
+      event: event({ response: { body: "x".repeat(15 * 1024) } }),
     };
     expect(parseExternalMessage(ok)).not.toBeNull();
     const tooBig = {
       type: "recorder.page-network",
-      event: event({
-        response: { body: "x".repeat(RECORDER_PAGE_NETWORK_MESSAGE_BYTES) },
-      }),
+      event: event({ response: { body: "x".repeat(64 * 1024) } }),
     };
     expect(parseExternalMessage(tooBig)).toBeNull();
   });
