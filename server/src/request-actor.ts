@@ -1,6 +1,7 @@
 import { DEV_ACTOR } from "./auth/dev-actor";
 import type { OpenBotRole } from "./auth/roles";
 import type { IdentifyActor, IdentifyUser } from "./copilot";
+import type { RecorderResolver } from "./recorder/guard";
 
 export type RequestActor = { id: string; name: string; role: OpenBotRole };
 
@@ -23,6 +24,31 @@ type SessionLike = {
  */
 const ANONYMOUS_ACTOR = { id: "", role: "user" } as const;
 
+/** The name the runtime is given: never blank, because its `resolveUser` refuses a blank name. */
+export function actorName(user: {
+  id: string;
+  name?: string | null;
+  email?: string | null;
+}): string {
+  return user.name?.trim() || user.email || user.id;
+}
+
+/**
+ * The runtime's capture-pass route, matched the way its router does: the last three path segments
+ * are `trajectory`, the id and `connect`, wherever the runtime is mounted.
+ */
+function isTrajectoryConnectPath(pathname: string): boolean {
+  const segments = pathname.split("/").filter(Boolean);
+  const length = segments.length;
+  return (
+    length >= 3 &&
+    segments[length - 3] === "trajectory" &&
+    segments[length - 1] === "connect"
+  );
+}
+
+const RECORDER_BEARER_PREFIX = "Bearer obr_";
+
 /**
  * Who is asking, for a CopilotKit request.
  *
@@ -32,6 +58,7 @@ const ANONYMOUS_ACTOR = { id: "", role: "user" } as const;
  */
 export function createRequestActor(deps: {
   singleUser: boolean;
+  resolveRecorder?: RecorderResolver;
   getSession(headers: Headers): Promise<SessionLike | null | undefined>;
   rolesForUser(userId: string): Promise<OpenBotRole[]>;
 }): {
@@ -40,6 +67,22 @@ export function createRequestActor(deps: {
   identifyActor: IdentifyActor;
 } {
   async function resolveRequestActor(request: Request): Promise<RequestActor> {
+    // A Recorder token is answered only on the capture pass, in every auth mode: it can never run a Bot.
+    if (
+      request.headers.get("authorization")?.startsWith(RECORDER_BEARER_PREFIX)
+    ) {
+      if (
+        deps.resolveRecorder &&
+        isTrajectoryConnectPath(new URL(request.url).pathname)
+      ) {
+        const resolution = await deps.resolveRecorder(request);
+        if (resolution && "actor" in resolution) {
+          const { actor } = resolution;
+          return { id: actor.id, name: actorName(actor), role: actor.role };
+        }
+      }
+      throw new Error("A CopilotKit run requires a signed-in user.");
+    }
     if (deps.singleUser) {
       return { id: DEV_ACTOR.id, name: DEV_ACTOR.email, role: DEV_ACTOR.role };
     }
@@ -54,7 +97,7 @@ export function createRequestActor(deps: {
     }
     return {
       id: user.id,
-      name: user.name ?? user.email ?? user.id,
+      name: actorName(user),
       role: roles.includes("admin") ? "admin" : "user",
     };
   }
