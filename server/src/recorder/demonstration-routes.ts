@@ -161,6 +161,13 @@ export function createRecorderDemonstrationRoutes(
       const owner = context.var.actor.id;
       const id = context.req.param("id");
       const trajectoryId = context.req.param("trajectoryId");
+      // The column is a Postgres uuid: any other value could only fail as a
+      // retryable 503, so it is a plain not-found.
+      if (
+        !registerTrajectorySchema.shape.trajectoryId.safeParse(trajectoryId)
+          .success
+      )
+        throw new DemonstrationNotFoundError();
       const found = await store.trajectoryOwner(owner, trajectoryId);
       if (found?.demonstrationId !== id) throw new DemonstrationNotFoundError();
       await store.closeTrajectory(owner, id, trajectoryId);

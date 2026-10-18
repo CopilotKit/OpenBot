@@ -211,6 +211,11 @@ describe("the extension's demonstration routes", () => {
     );
     expect(unknown.status).toBe(404);
     expect(typeof ((await unknown.json()) as Parsed).error).toBe("string");
+    const notUuid = await app.request(`/${id}/trajectories/not-a-uuid/close`, {
+      method: "POST",
+    });
+    expect(notUuid.status).toBe(404);
+    expect(typeof ((await notUuid.json()) as Parsed).error).toBe("string");
     expect(
       (
         await appFor(other).request(
