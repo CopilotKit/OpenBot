@@ -1,6 +1,6 @@
 # Company install of the OpenBot Recorder
 
-The OpenBot Recorder is a Chrome and Edge extension that records a person doing a task in their own browser and sends it to your Intelligence as a trajectory. OpenBot connects the browser and hands out each capture pass for the Bot the person picked; it keeps nothing the Recorder records. This guide is for the IT team that installs it for everyone and pins it to your OpenBot. It has no store listing, so your team hosts the package.
+The OpenBot Recorder is a Chrome and Edge extension that records a person doing a task in their own browser and sends it to your Intelligence as a trajectory. OpenBot only connects the browser and hands out each capture pass for the Bot the person picked; everything recorded goes straight from the browser to Intelligence. This guide is for the IT team that installs it for everyone and pins it to your OpenBot. It has no store listing, so your team hosts the package.
 
 ## Before you start: the Intelligence settings capture needs
 
@@ -63,7 +63,7 @@ After a change, use "Reload policies" in `chrome://policy`. A policy that names 
 - Force-installed copies do not show Chrome's "started debugging this browser" bar (Chromium `debugger_api.cc`).
 - People still click "Connect this browser" in OpenBot once to sign in.
 - The options page shows "Set by your organization".
-- What the Recorder keeps: clicks, typing, the pages people open and the network calls behind them, masked in the browser before anything leaves it. It records no screen and no sound.
+- What the Recorder records: clicks, typing, the pages people open and the network calls behind them, masked in the browser before anything leaves it and sent only to your Intelligence. The browser keeps events only until Intelligence acknowledges them, or the person discards them.
 
 ## What has been tested and what has not
 
@@ -77,8 +77,7 @@ For the Intelligence team:
 
 - No per-user erasure of trajectories.
 - No server-side redaction. The Recorder's masking in the browser is the only line of defence.
-- No general file store. A network body that does not fit in one event is cut to fit, and the rest is not kept anywhere. The Recorder records no screen or audio.
-- No transcription, so the Recorder does not capture voice.
+- No general file store. A network body that does not fit in one event is cut to fit, and the rest is not kept anywhere.
 - The ECS `CHECK_ORIGIN` gap described in the first section.
 
 ## Known issue under investigation

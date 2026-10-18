@@ -49,6 +49,16 @@ describe("the company-install guide", () => {
     expect(index).toContain("recorder-company-install.md");
   });
 
+  test("describes only what the Recorder records now: no screen, sound or transcription", () => {
+    for (const removed of [
+      /screen/i,
+      /voice|audio|sound|microphone/i,
+      /transcri/i,
+    ]) {
+      expect(guide).not.toMatch(removed);
+    }
+  });
+
   test("has no em dash", () => {
     expect(guide).not.toContain("—");
   });
