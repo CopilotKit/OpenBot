@@ -86,6 +86,7 @@ button {
 }
 button:focus-visible { border-color: var(--ring); box-shadow: 0 0 0 3px color-mix(in oklch, var(--ring) 50%, transparent); }
 button.primary { background: var(--primary); color: var(--primary-foreground); }
+button.primary:hover { background: color-mix(in oklch, var(--primary) 80%, transparent); }
 button.ghost { background: transparent; color: var(--foreground); }
 button.ghost:hover { background: var(--border); }
 `;

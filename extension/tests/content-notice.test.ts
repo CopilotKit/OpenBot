@@ -188,3 +188,13 @@ test("the focus ring follows the theme's --ring in light and dark", () => {
     /prefers-color-scheme: dark\)\s*\{\s*:host\s*\{([^}]*)\}/.exec(style)?.[1];
   expect(darkBlock).toContain(`--ring: ${dark["--ring"]};`);
 });
+
+test("the primary button dims to 80% of the primary token on hover", () => {
+  const notice = show(() => {});
+  const style =
+    notice.host.shadowRoot?.querySelector("style")?.textContent ?? "";
+  const hoverRule =
+    /button\.primary:hover\s*\{([^}]*)\}/.exec(style)?.[1] ?? "";
+  expect(hoverRule).toContain("var(--primary) 80%");
+  expect(hoverRule).not.toMatch(/oklch\(\d/);
+});
