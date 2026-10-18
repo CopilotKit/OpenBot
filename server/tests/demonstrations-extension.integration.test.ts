@@ -229,6 +229,27 @@ test("a rollover can register while the stopped recording still has an open traj
     store.registerTrajectory(owner, demo.id, randomUUID()),
   ).rejects.toThrow(DemonstrationRefusedError);
 });
+for (const status of ["drafted", "published"] as const) {
+  test(`a rollover begun before Stop still registers once the recording is ${status}, while a trajectory is open`, async () => {
+    const demo = await recorder.start(owner, bot, "Roll", "extension");
+    const first = randomUUID();
+    await store.registerTrajectory(owner, demo.id, first);
+    await recorder.stop(owner, demo.id);
+    await database
+      .update(demonstrations)
+      .set({ status })
+      .where(eq(demonstrations.id, demo.id));
+    const second = randomUUID();
+    await store.registerTrajectory(owner, demo.id, second);
+    await store.closeTrajectory(owner, demo.id, first);
+    await store.closeTrajectory(owner, demo.id, second);
+    await expect(
+      store.registerTrajectory(owner, demo.id, randomUUID()),
+    ).rejects.toThrow(
+      "This recording has finished and takes no new trajectory.",
+    );
+  });
+}
 test("presentExtension carries the newest trajectory's learning state", async () => {
   const demo = await recorder.start(owner, bot, "Learning", "extension");
   expect((await store.presentExtension(owner, demo.id)).learning).toBeNull();

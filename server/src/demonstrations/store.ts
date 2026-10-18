@@ -312,7 +312,7 @@ export function createDemonstrationStore(database: Database) {
               ),
             )
             .limit(1);
-          if (row.status !== "stopped" || !unclosed)
+          if (!unclosed)
             throw new DemonstrationRefusedError(
               "This recording has finished and takes no new trajectory.",
             );
