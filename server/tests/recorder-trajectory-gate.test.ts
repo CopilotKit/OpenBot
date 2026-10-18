@@ -13,26 +13,17 @@ import {
   createTrajectoryConnectHook,
   createTrajectoryRefusalAudit,
   isTrajectoryConnectPath,
-  type TrajectoryOwner,
+  RECORDER_BOT_HEADER,
 } from "../src/recorder/trajectory-gate";
 
 const TRAJECTORY = "0b6c1c0e-6f0a-4f6e-9a55-1d1c2f3f4a5b";
 const PERSON = "person-1";
 const OTHER = "person-2";
+const BOT = "bot-1";
 
-type Owner = Awaited<ReturnType<TrajectoryOwner>>;
 type Refusal = Parameters<
   Parameters<typeof createTrajectoryConnectHook>[0]["audit"]
 >[0];
-
-const openOwner = (overrides: Partial<NonNullable<Owner>> = {}): Owner => ({
-  demonstrationId: "demo-1",
-  botId: "bot-1",
-  status: "recording",
-  source: "extension",
-  closedAt: null,
-  ...overrides,
-});
 
 const actor: RecorderActor = {
   id: PERSON,
@@ -46,28 +37,40 @@ const actor: RecorderActor = {
 function setup(
   options: {
     bearer?: RecorderResolution;
-    session?: string | null;
-    owners?: Record<string, Owner>;
+    /** Who may record for which Bot, as `${person}:${bot}`. */
+    recordable?: string[];
+    /** Existing bindings: trajectory id to `${person}:${bot}`. */
+    bound?: Record<string, string>;
   } = {},
 ) {
-  const bearer = "bearer" in options ? options.bearer : null;
-  const owners = options.owners ?? { [`${PERSON}:${TRAJECTORY}`]: openOwner() };
-  const ownerCalls: string[] = [];
+  const bearer = "bearer" in options ? options.bearer : { actor };
+  const recordable = new Set(options.recordable ?? [`${PERSON}:${BOT}`]);
+  const bound = new Map(Object.entries(options.bound ?? {}));
+  const asked: string[] = [];
   const refusals: Refusal[] = [];
   const resolveRecorder: RecorderResolver = async () => bearer ?? null;
   const hook = createTrajectoryConnectHook({
     resolveRecorder,
-    sessionActorId: async () =>
-      "session" in options ? (options.session ?? null) : null,
-    trajectoryOwner: async (userId, trajectoryId) => {
-      ownerCalls.push(`${userId}:${trajectoryId}`);
-      return owners[`${userId}:${trajectoryId}`] ?? null;
+    canRecordForBot: async (userId, botId) => {
+      asked.push(`may ${userId}:${botId}`);
+      return recordable.has(`${userId}:${botId}`);
+    },
+    bind: async ({ trajectoryId, userId, botId }) => {
+      asked.push(`bind ${trajectoryId}:${userId}:${botId}`);
+      const pair = `${userId}:${botId}`;
+      const existing = bound.get(trajectoryId);
+      if (existing === undefined) bound.set(trajectoryId, pair);
+      return existing === undefined || existing === pair;
     },
     audit: (refusal) => refusals.push(refusal),
   });
-  const run = async (route: Parameters<typeof hook>[0]["route"]) => {
+  const run = async (
+    route: Parameters<typeof hook>[0]["route"],
+    headers: Record<string, string> = { [RECORDER_BOT_HEADER]: BOT },
+  ) => {
     const request = new Request("http://127.0.0.1/api/copilotkit/x", {
       method: "POST",
+      headers,
     });
     try {
       await hook({
@@ -82,9 +85,11 @@ function setup(
       throw thrown;
     }
   };
-  const connect = (trajectoryId = TRAJECTORY) =>
-    run({ method: "trajectory/connect", trajectoryId });
-  return { run, connect, ownerCalls, refusals };
+  const connect = (
+    trajectoryId = TRAJECTORY,
+    headers?: Record<string, string>,
+  ) => run({ method: "trajectory/connect", trajectoryId }, headers);
+  return { run, connect, asked, refusals, bound };
 }
 
 async function bodyOf(response: Response | null) {
@@ -92,17 +97,17 @@ async function bodyOf(response: Response | null) {
 }
 
 describe("createTrajectoryConnectHook", () => {
-  test("passes every other route without a query", async () => {
-    const { run, ownerCalls, refusals } = setup();
+  test("passes every other route without a question", async () => {
+    const { run, asked, refusals } = setup();
 
-    expect(await run({ method: "agent/run", agentId: "bot-1" })).toBeNull();
+    expect(await run({ method: "agent/run", agentId: BOT })).toBeNull();
     expect(await run({ method: "info" })).toBeNull();
-    expect(ownerCalls).toEqual([]);
+    expect(asked).toEqual([]);
     expect(refusals).toEqual([]);
   });
 
-  test("answers 400 for an id that is not a UUID before any query", async () => {
-    const { connect, ownerCalls, refusals } = setup({ session: PERSON });
+  test("answers 400 for an id that is not a UUID before any question", async () => {
+    const { connect, asked, refusals } = setup();
 
     const response = await connect("not-a-uuid");
 
@@ -112,7 +117,7 @@ describe("createTrajectoryConnectHook", () => {
       code: TRAJECTORY_GATE_REFUSALS.invalidId.code,
       message: TRAJECTORY_GATE_REFUSALS.invalidId.message,
     });
-    expect(ownerCalls).toEqual([]);
+    expect(asked).toEqual([]);
     expect(refusals.map((refusal) => refusal.reason)).toEqual(["invalid-id"]);
   });
 
@@ -123,7 +128,7 @@ describe("createTrajectoryConnectHook", () => {
       ["removed", "removed"],
       ["organization", "organization"],
     ] as const) {
-      const { connect, ownerCalls, refusals } = setup({
+      const { connect, asked, refusals } = setup({
         bearer: { refused, userId: PERSON },
       });
 
@@ -135,7 +140,7 @@ describe("createTrajectoryConnectHook", () => {
       expect(body.code).toBe(RECORDER_SIGNED_OUT);
       expect(body.reason).toBe(reason);
       expect(typeof body.message).toBe("string");
-      expect(ownerCalls).toEqual([]);
+      expect(asked).toEqual([]);
       expect(refusals).toEqual([
         { reason: "signed-out", trajectoryId: TRAJECTORY, userId: PERSON },
       ]);
@@ -171,84 +176,113 @@ describe("createTrajectoryConnectHook", () => {
     expect(refusals.map((refusal) => refusal.reason)).toEqual(["unavailable"]);
   });
 
-  test("answers 401 IDENTITY_REQUIRED when there is neither a bearer nor a session", async () => {
-    const { connect, ownerCalls, refusals } = setup({ session: null });
+  test("answers 401 IDENTITY_REQUIRED without a Recorder bearer, whatever else the request carries", async () => {
+    const { connect, asked, refusals } = setup({ bearer: null });
 
-    const response = await connect();
+    const response = await connect(TRAJECTORY, {
+      [RECORDER_BOT_HEADER]: BOT,
+      cookie: "better-auth.session_token=signed-in",
+    });
 
     expect(response?.status).toBe(401);
-    expect((await bodyOf(response)).code).toBe("IDENTITY_REQUIRED");
-    expect(ownerCalls).toEqual([]);
+    expect(await bodyOf(response)).toEqual({
+      code: "IDENTITY_REQUIRED",
+      message: "Connect this browser to OpenBot to record.",
+    });
+    expect(asked).toEqual([]);
     expect(refusals).toEqual([
       { reason: "signed-out", trajectoryId: TRAJECTORY, userId: null },
     ]);
   });
 
-  test("allows the owner's open extension recording by bearer and by cookie", async () => {
-    const byBearer = setup({ bearer: { actor } });
-    const byCookie = setup({ session: PERSON });
+  test("answers 403 FORBIDDEN when the request names no Bot", async () => {
+    for (const headers of [{}, { [RECORDER_BOT_HEADER]: "   " }]) {
+      const { connect, asked, refusals, bound } = setup();
 
-    expect(await byBearer.connect()).toBeNull();
-    expect(await byCookie.connect()).toBeNull();
-    expect(byBearer.refusals).toEqual([]);
-    expect(byCookie.refusals).toEqual([]);
+      const response = await connect(TRAJECTORY, headers);
+
+      expect(response?.status).toBe(403);
+      expect(response?.headers.get("cache-control")).toBe("no-store");
+      expect(await bodyOf(response)).toEqual({
+        code: "FORBIDDEN",
+        message: "Name the Bot this recording is for.",
+      });
+      expect(asked).toEqual([]);
+      expect(bound.size).toBe(0);
+      expect(refusals).toEqual([
+        { reason: "no-bot", trajectoryId: TRAJECTORY, userId: PERSON },
+      ]);
+    }
   });
 
-  test("allows a stopped recording whose trajectory is still open", async () => {
-    const { connect } = setup({
-      session: PERSON,
-      owners: { [`${PERSON}:${TRAJECTORY}`]: openOwner({ status: "stopped" }) },
+  test("answers 403 FORBIDDEN for a Bot the person may not record for, and binds nothing", async () => {
+    const { connect, asked, refusals, bound } = setup({ recordable: [] });
+
+    const response = await connect();
+
+    expect(response?.status).toBe(403);
+    expect(await bodyOf(response)).toEqual({
+      code: "FORBIDDEN",
+      message: "You cannot record for this Bot.",
+    });
+    expect(asked).toEqual([`may ${PERSON}:${BOT}`]);
+    expect(bound.size).toBe(0);
+    expect(refusals).toEqual([
+      { reason: "bot-forbidden", trajectoryId: TRAJECTORY, userId: PERSON },
+    ]);
+  });
+
+  test("binds a new trajectory to the person and the Bot they named, trimmed", async () => {
+    const { connect, asked, refusals, bound } = setup();
+
+    expect(
+      await connect(TRAJECTORY, { [RECORDER_BOT_HEADER]: ` ${BOT} ` }),
+    ).toBeNull();
+    expect(asked).toEqual([
+      `may ${PERSON}:${BOT}`,
+      `bind ${TRAJECTORY}:${PERSON}:${BOT}`,
+    ]);
+    expect(bound.get(TRAJECTORY)).toBe(`${PERSON}:${BOT}`);
+    expect(refusals).toEqual([]);
+  });
+
+  test("lets the same person and Bot through again, for a reconnect's fresh pass", async () => {
+    const { connect, refusals } = setup({
+      bound: { [TRAJECTORY]: `${PERSON}:${BOT}` },
     });
 
     expect(await connect()).toBeNull();
+    expect(await connect()).toBeNull();
+    expect(refusals).toEqual([]);
   });
 
-  test("answers 404 for a trajectory nobody registered", async () => {
-    const { connect, refusals } = setup({ session: PERSON, owners: {} });
+  test("answers 404 for a trajectory bound to another person", async () => {
+    const { connect, refusals, bound } = setup({
+      bound: { [TRAJECTORY]: `${OTHER}:${BOT}` },
+    });
 
     const response = await connect();
 
     expect(response?.status).toBe(404);
     expect(response?.headers.get("cache-control")).toBe("no-store");
     expect(await bodyOf(response)).toEqual({
-      code: TRAJECTORY_GATE_REFUSALS.notOpen.code,
-      message: TRAJECTORY_GATE_REFUSALS.notOpen.message,
+      code: "NOT_FOUND",
+      message: "This trajectory belongs to another recording.",
     });
+    expect(bound.get(TRAJECTORY)).toBe(`${OTHER}:${BOT}`);
     expect(refusals).toEqual([
-      { reason: "not-open", trajectoryId: TRAJECTORY, userId: PERSON },
+      { reason: "bound-elsewhere", trajectoryId: TRAJECTORY, userId: PERSON },
     ]);
   });
 
-  test("answers 404 for a closed trajectory", async () => {
-    const { connect } = setup({
-      session: PERSON,
-      owners: {
-        [`${PERSON}:${TRAJECTORY}`]: openOwner({ closedAt: new Date() }),
-      },
+  test("answers 404 for the person's trajectory bound to another of their Bots", async () => {
+    const { connect, bound } = setup({
+      recordable: [`${PERSON}:${BOT}`, `${PERSON}:bot-2`],
+      bound: { [TRAJECTORY]: `${PERSON}:bot-2` },
     });
 
     expect((await connect())?.status).toBe(404);
-  });
-
-  test("answers 404 for a recording that did not come from the extension", async () => {
-    const { connect } = setup({
-      session: PERSON,
-      owners: {
-        [`${PERSON}:${TRAJECTORY}`]: openOwner({ source: "computer" }),
-      },
-    });
-
-    expect((await connect())?.status).toBe(404);
-  });
-
-  test("answers 404 for another person's trajectory", async () => {
-    const { connect, ownerCalls } = setup({
-      bearer: { actor },
-      owners: { [`${OTHER}:${TRAJECTORY}`]: openOwner() },
-    });
-
-    expect((await connect())?.status).toBe(404);
-    expect(ownerCalls).toEqual([`${PERSON}:${TRAJECTORY}`]);
+    expect(bound.get(TRAJECTORY)).toBe(`${PERSON}:bot-2`);
   });
 });
 

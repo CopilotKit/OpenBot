@@ -81,6 +81,7 @@ const spies: Array<{ mockRestore(): void }> = [];
 const guard = createStallGuard({ stallMs: 0 });
 const { identifyUser, identifyActor } = createRequestActor({
   singleUser: false,
+  resolveRecorder: recorder.resolve,
   getSession: async (headers) => getSession({ headers }),
   rolesForUser: (id) => roleRepository.rolesForUser(id),
 });
@@ -102,7 +103,7 @@ const runtime = mountCopilotRuntime(
   }),
   identifyUser,
   identifyActor,
-  { learningSettings },
+  { learningSettings, trajectoryCapture: recorder.trajectoryCapture },
 );
 
 const app = createApp(

@@ -1,3 +1,4 @@
+import type { AuditInitiator } from "@openbot/toolkit/initiator";
 import {
   and,
   desc,
@@ -13,7 +14,6 @@ import type { PgColumn } from "drizzle-orm/pg-core";
 import type { Database } from "./db/client";
 import { auditEvents } from "./db/schema";
 import { parsePageLimit } from "./paging";
-import type { AuditInitiator } from "@openbot/toolkit/initiator";
 
 const sensitiveKeys = new Set([
   "access_token",
@@ -571,9 +571,9 @@ export const auditEventTypes = [
   "recorder.revoked",
   /*
    * The capture pass (the runtime's trajectory/connect) turned a caller away: an id that is not a UUID, no
-   * sign-in or a bearer that no longer resolves, no role, the organization unable to answer, or a recording
-   * that is not the person's own open one. Target the trajectory id; payload `reason`. At most one row per
-   * person, trajectory and reason a minute per replica.
+   * Recorder bearer or one that no longer resolves, no role, the organization unable to answer, no Bot named,
+   * a Bot the person may not record for, or a trajectory already bound to another person or Bot. Target the
+   * trajectory id; payload `reason`. At most one row per person, trajectory and reason a minute per replica.
    */
   "recorder.trajectory_refused",
 ] as const;

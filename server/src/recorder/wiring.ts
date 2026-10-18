@@ -1,4 +1,8 @@
-import type { CopilotKitIntelligence } from "@copilotkit/runtime/v2";
+import type {
+  CopilotKitIntelligence,
+  CopilotRuntimeHooks,
+  GetTrajectoryLearningContainerIds,
+} from "@copilotkit/runtime/v2";
 import type { LearningSettings } from "@openbot/shared/learning";
 import { eq } from "drizzle-orm";
 import type { AgentProfileStore } from "../agents/profile-store";
@@ -26,6 +30,12 @@ import {
 } from "./learning-space";
 import { createRecorderRefusalAudit } from "./refusal-audit";
 import type { RecorderRouteDeps } from "./routes";
+import { createTrajectoryBindingStore } from "./trajectory-bindings";
+import {
+  createTrajectoryConnectHook,
+  createTrajectoryLearningSelector,
+  createTrajectoryRefusalAudit,
+} from "./trajectory-gate";
 
 /** What createApp's `coworker.recorder` takes. */
 export type RecorderExtensionDeps = Omit<
@@ -74,9 +84,15 @@ export function createRecorderExtension(deps: {
   /** Also the demonstration recorder's `ownsBot`, so there is one copy. */
   canRecordForBot(ownerUserId: string, botId: string): Promise<boolean>;
   learningSpace: LearningSpaceCheck;
+  /** The capture pass, for `mountCopilotRuntime`: its gate (an onBeforeHandler hook) and its Learning space selector. */
+  trajectoryCapture: {
+    gate: NonNullable<CopilotRuntimeHooks["onBeforeHandler"]>;
+    selectLearningContainers: GetTrajectoryLearningContainerIds;
+  };
 } {
   const { config, database, organizationAuth } = deps;
   const connections = createRecorderConnectionStore(database);
+  const trajectoryBindings = createTrajectoryBindingStore(database);
 
   const canRecordForBot = async (ownerUserId: string, botId: string) =>
     (await deps.pluginStore.agentOwner(botId)) === ownerUserId ||
@@ -165,5 +181,17 @@ export function createRecorderExtension(deps: {
     onRefused: createRecorderRefusalAudit(deps.auditStore),
     canRecordForBot,
     learningSpace,
+    trajectoryCapture: {
+      gate: createTrajectoryConnectHook({
+        resolveRecorder: resolve,
+        canRecordForBot,
+        bind: trajectoryBindings.bind,
+        audit: createTrajectoryRefusalAudit(deps.auditStore),
+      }),
+      selectLearningContainers: createTrajectoryLearningSelector({
+        botFor: trajectoryBindings.botFor,
+        learningSpace,
+      }),
+    },
   };
 }

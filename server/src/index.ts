@@ -444,6 +444,8 @@ const auth: AuthService | undefined =
 const { resolveRequestActor, identifyUser, identifyActor } = createRequestActor(
   {
     singleUser: config.singleUser,
+    // Answered only on the capture pass. Called per request, after the Recorder's wiring below exists.
+    resolveRecorder: (request) => recorderExtension.resolve(request),
     getSession: async (headers) =>
       (await auth?.api.getSession({ headers })) ?? null,
     rolesForUser: (id) => roleRepository.rolesForUser(id),
@@ -1602,6 +1604,7 @@ const copilotRuntime = mountCopilotRuntime(
       void channelStore.signalBusy(input.threadId, input.busy).catch(() => {});
     },
     learningSettings,
+    trajectoryCapture: recorderExtension.trajectoryCapture,
   },
 );
 

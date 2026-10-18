@@ -1,6 +1,10 @@
 import type { Message, RunAgentInput } from "@ag-ui/client";
 import { type AbstractAgent, HttpAgent } from "@ag-ui/client";
-import type { BuiltInAgentConfiguration } from "@copilotkit/runtime/v2";
+import type {
+  BuiltInAgentConfiguration,
+  CopilotRuntimeHooks,
+  GetTrajectoryLearningContainerIds,
+} from "@copilotkit/runtime/v2";
 import {
   type CopilotKitIntelligence,
   CopilotRuntime,
@@ -1701,10 +1705,25 @@ export function mountCopilotRuntime(
     basePath?: string;
     onRunBusy?: (input: { threadId: string; busy: boolean }) => void;
     learningSettings?: LearningSettingsStore;
+    /**
+     * The Recorder's capture pass (`trajectory/connect`): the gate that lets only a connected browser through for a
+     * Bot it may record for, and the selector that assigns the trajectory to that Bot's Learning space
+     * (`recorder/wiring.ts`). Absent, the route is the runtime's own: any person identifyUser resolves gets a pass
+     * that joins no Learning space. `index.ts` always passes it.
+     */
+    trajectoryCapture?: {
+      gate: NonNullable<CopilotRuntimeHooks["onBeforeHandler"]>;
+      selectLearningContainers: GetTrajectoryLearningContainerIds;
+    };
   } = {},
 ) {
   const { intelligence } = config.runtime;
-  const { basePath = "/api/copilotkit", onRunBusy, learningSettings } = options;
+  const {
+    basePath = "/api/copilotkit",
+    onRunBusy,
+    learningSettings,
+    trajectoryCapture,
+  } = options;
 
   /**
    * The same Bot a person's run would get, built without a request.
@@ -1764,6 +1783,12 @@ export function mountCopilotRuntime(
             userId: user.id,
           });
         },
+        ...(trajectoryCapture
+          ? {
+              getTrajectoryLearningContainerIds:
+                trajectoryCapture.selectLearningContainers,
+            }
+          : {}),
       }),
     );
 
@@ -1817,7 +1842,13 @@ export function mountCopilotRuntime(
   });
 
   return {
-    handler: createCopilotHonoHandler({ runtime, basePath }),
+    handler: createCopilotHonoHandler({
+      runtime,
+      basePath,
+      ...(trajectoryCapture
+        ? { hooks: { onBeforeHandler: trajectoryCapture.gate } }
+        : {}),
+    }),
     learning,
     /**
      * How to reach the platform's runner, exactly as the runtime reaches it.
