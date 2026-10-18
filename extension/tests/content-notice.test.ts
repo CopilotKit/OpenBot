@@ -170,3 +170,21 @@ test("the notice's colours are OpenBot's", () => {
     expect(style).toContain(value);
   }
 });
+
+test("the focus ring follows the theme's --ring in light and dark", () => {
+  const css = readFileSync(
+    join(import.meta.dir, "../../app/src/theme.css"),
+    "utf8",
+  );
+  const dark = customProperties(css, /\.dark\s*\{([^}]*)\}/);
+  const notice = show(() => {});
+  const style =
+    notice.host.shadowRoot?.querySelector("style")?.textContent ?? "";
+  const focusRule = /button:focus-visible\s*\{([^}]*)\}/.exec(style)?.[1] ?? "";
+  expect(focusRule).toContain("var(--ring)");
+  expect(focusRule).not.toContain(NOTICE_TOKENS.light["--ring"]);
+  expect(focusRule).not.toMatch(/oklch\(/);
+  const darkBlock =
+    /prefers-color-scheme: dark\)\s*\{\s*:host\s*\{([^}]*)\}/.exec(style)?.[1];
+  expect(darkBlock).toContain(`--ring: ${dark["--ring"]};`);
+});
