@@ -263,6 +263,8 @@ let bodies: {
 }[] = [];
 /** What the network-body recovery answers for a recording: nothing (its lines are sent) or the error it throws. */
 let bodiesAnswer: (demonstrationId: string) => Error | null = () => null;
+/** The managed policy's pinned Intelligence addresses; null when the organization pins none. */
+let pinnedIntelligenceUrls: string[] | null = null;
 
 function doubles(): Partial<RecordingDeps> {
   return {
@@ -298,7 +300,7 @@ function doubles(): Partial<RecordingDeps> {
     readPolicy: async () => ({
       openbotUrl: null,
       openbotUrlInvalid: false,
-      allowedIntelligenceUrls: null,
+      allowedIntelligenceUrls: pinnedIntelligenceUrls,
     }),
     hasHostPermission: async () => true,
     now: () => now,
@@ -492,6 +494,7 @@ beforeEach(() => {
   timeline = [];
   bodies = [];
   bodiesAnswer = () => null;
+  pinnedIntelligenceUrls = null;
   now = 1_800_000_000_000;
   openbot.calls = [];
   openbot.held = new Map();
@@ -548,6 +551,7 @@ test("a browser restart mid-recording uploads its queued steps, stops the dangli
       type: "offscreen.recover",
       openbotUrl: origin,
       token: "obr_one",
+      allowedIntelligenceUrls: null,
       drains: drains(),
     },
   ]);
@@ -563,6 +567,32 @@ test("a browser restart mid-recording uploads its queued steps, stops the dangli
   await until(() => drains().length === 0, "the drain forgotten");
   await until(() => !fake.offscreen.open, "the document closed");
   expect((await recorderState()).draining).toBe(0);
+});
+
+test("after a browser start, offscreen.recover carries the organization's pinned Intelligence addresses", async () => {
+  pinnedIntelligenceUrls = ["wss://intelligence.example.com"];
+  await recordThenRestartBrowser();
+  startWorker();
+  await recoverInterruptedRecording();
+
+  expect(sentToDocument("offscreen.recover")).toEqual([
+    {
+      type: "offscreen.recover",
+      openbotUrl: origin,
+      token: "obr_one",
+      allowedIntelligenceUrls: ["wss://intelligence.example.com"],
+      drains: drains(),
+    },
+  ]);
+});
+
+test("after a browser start with no pinned Intelligence addresses, offscreen.recover carries null", async () => {
+  await recordThenRestartBrowser();
+  startWorker();
+  await recoverInterruptedRecording();
+
+  const [recover] = sentToDocument("offscreen.recover");
+  expect(recover).toHaveProperty("allowedIntelligenceUrls", null);
 });
 
 test("a 404 while recovering still drains and clears", async () => {
@@ -792,6 +822,7 @@ test("a network-bodies failure is reported and the next drain still gets its tur
       type: "offscreen.recover",
       openbotUrl: origin,
       token: "obr_one",
+      allowedIntelligenceUrls: null,
       drains: [drain("demo-a"), drain("demo-b")],
     },
   ]);
@@ -930,6 +961,7 @@ test("a drain of another person waits for that person and nothing of it is sent;
       type: "offscreen.recover",
       openbotUrl: origin,
       token: "obr_one",
+      allowedIntelligenceUrls: null,
       drains: [parked],
     },
   ]);

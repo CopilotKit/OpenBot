@@ -455,6 +455,43 @@ async function streaming(h: Harness, trajectoryId: string, count = 2) {
   );
 }
 
+/** Row 23: the organization pins its Intelligence addresses, and this one is not among them. */
+const NOT_ALLOWED = PASS_HINTS.GATEWAY_NOT_ALLOWED;
+/** An organization's pinned Intelligence addresses that leave the fake gateway out. */
+const ELSEWHERE = ["wss://intelligence.example.com"];
+
+/** A recording stopped with its events parked; then the next browser start opens a document and OpenBot passes again. */
+async function keptThenRestart(h: Harness): Promise<StreamSession> {
+  h.openbot.refuse = () => parkedPass();
+  await h.open(virtualClock());
+  const session = h.session();
+  h.post({ type: "offscreen.start", session });
+  h.post({ type: "offscreen.event", event: click(1) });
+  h.post({ type: "offscreen.stop", outcome: "succeeded" });
+  await until(() => h.received("offscreen.kept").length > 0, "kept");
+  h.openbot.refuse = null;
+  await h.open(virtualClock(NEXT_START));
+  return session;
+}
+
+/** Counts the WebSockets opened while it is installed; `restore()` puts the global back. */
+function countSockets() {
+  const original = globalThis.WebSocket;
+  const opened: string[] = [];
+  globalThis.WebSocket = class extends original {
+    constructor(url: string | URL, protocols?: string | string[]) {
+      super(url, protocols);
+      opened.push(String(url));
+    }
+  };
+  return {
+    opened,
+    restore() {
+      globalThis.WebSocket = original;
+    },
+  };
+}
+
 beforeEach(() => {
   saved = {
     indexedDB: globals.indexedDB,
@@ -833,6 +870,7 @@ describe("offscreen controller", () => {
       type: "offscreen.recover",
       openbotUrl: session.openbotUrl,
       token: session.token,
+      allowedIntelligenceUrls: null,
       drains: [h.drain(session)],
     });
     await until(() => h.received("offscreen.done").length === 1, "done");
@@ -896,6 +934,7 @@ describe("offscreen controller", () => {
       type: "offscreen.recover",
       openbotUrl: stopped.openbotUrl,
       token: stopped.token,
+      allowedIntelligenceUrls: null,
       drains: [h.drain(stopped), h.drain(interrupted)],
     });
     await until(() => atDone.size === 2, "done for both recordings");
@@ -927,6 +966,147 @@ describe("offscreen controller", () => {
     );
   });
 
+  test("a recover whose pinned Intelligence addresses leave the gateway out opens no socket and keeps the recording parked", async () => {
+    const h = await setup();
+    const session = await keptThenRestart(h);
+    const t = session.trajectoryId;
+    const passes = h.openbot.passes.length;
+    const kept = h.received("offscreen.kept").length;
+    const sockets = countSockets();
+    try {
+      // A fresh document after a browser start: no Record has told it any policy.
+      h.post({
+        type: "offscreen.recover",
+        openbotUrl: session.openbotUrl,
+        token: session.token,
+        allowedIntelligenceUrls: ELSEWHERE,
+        drains: [h.drain(session)],
+      });
+      await until(
+        () =>
+          h
+            .received("offscreen.kept")
+            .slice(kept)
+            .some((report) => report.reason === NOT_ALLOWED),
+        "kept as not allowed",
+      );
+      await sleep(50);
+      expect(h.received("offscreen.kept").at(-1)).toEqual({
+        type: "offscreen.kept",
+        demonstrationId: "demo-1",
+        reason: NOT_ALLOWED,
+        parked: true,
+        events: 4,
+      });
+      expect(h.openbot.passes.length).toBeGreaterThan(passes);
+      expect(sockets.opened).toEqual([]);
+      expect(h.gateway.joins).toEqual([]);
+      expect(h.names(t)).toEqual([]);
+      expect(await h.pending(t)).toHaveLength(4);
+      expect(h.received("offscreen.done")).toEqual([]);
+    } finally {
+      sockets.restore();
+    }
+  });
+
+  test("a recover whose pinned Intelligence addresses include the gateway streams, whatever the live recording's policy", async () => {
+    const h = await setup();
+    const session = await keptThenRestart(h);
+    const t = session.trajectoryId;
+    const live = h.session({
+      demonstrationId: "demo-live",
+      allowedIntelligenceUrls: ELSEWHERE,
+    });
+    h.post({ type: "offscreen.start", session: live });
+    await until(
+      () =>
+        h
+          .received("offscreen.status")
+          .some(
+            (status) =>
+              status.trajectoryId === live.trajectoryId &&
+              status.capture.intelligenceReason === NOT_ALLOWED,
+          ),
+      "the live recording parked by its own policy",
+    );
+    const sockets = countSockets();
+    try {
+      h.post({
+        type: "offscreen.recover",
+        openbotUrl: session.openbotUrl,
+        token: session.token,
+        allowedIntelligenceUrls: [h.gateway.url],
+        drains: [h.drain(session)],
+      });
+      await until(
+        () =>
+          h
+            .received("offscreen.done")
+            .some((done) => done.demonstrationId === "demo-1"),
+        "done for the recovered recording",
+      );
+      expect(sockets.opened.length).toBeGreaterThan(0);
+      expect(h.names(t)).toEqual([
+        "recording.started",
+        "outcome",
+        "click",
+        "outcome",
+      ]);
+      expect(h.names(live.trajectoryId)).toEqual([]);
+    } finally {
+      sockets.restore();
+    }
+  });
+
+  test("a recover with no pinned Intelligence addresses streams, whatever the live recording's policy", async () => {
+    const h = await setup();
+    const session = await keptThenRestart(h);
+    const t = session.trajectoryId;
+    const live = h.session({
+      demonstrationId: "demo-live",
+      allowedIntelligenceUrls: ELSEWHERE,
+    });
+    h.post({ type: "offscreen.start", session: live });
+    await until(
+      () =>
+        h
+          .received("offscreen.status")
+          .some(
+            (status) =>
+              status.trajectoryId === live.trajectoryId &&
+              status.capture.intelligenceReason === NOT_ALLOWED,
+          ),
+      "the live recording parked by its own policy",
+    );
+    const sockets = countSockets();
+    try {
+      h.post({
+        type: "offscreen.recover",
+        openbotUrl: session.openbotUrl,
+        token: session.token,
+        allowedIntelligenceUrls: null,
+        drains: [h.drain(session)],
+      });
+      await until(
+        () =>
+          h
+            .received("offscreen.done")
+            .some((done) => done.demonstrationId === "demo-1"),
+        "done for the recovered recording",
+      );
+      expect(sockets.opened.length).toBeGreaterThan(0);
+      expect(h.names(t)).toEqual([
+        "recording.started",
+        "outcome",
+        "click",
+        "outcome",
+      ]);
+      expect(h.names(live.trajectoryId)).toEqual([]);
+    } finally {
+      sockets.restore();
+    }
+  });
+
   test("recover leaves a recording this document already streams to its own streamer", async () => {
     const h = await setup();
     h.media.finish = makeGate();
@@ -944,6 +1124,7 @@ describe("offscreen controller", () => {
       type: "offscreen.recover",
       openbotUrl: session.openbotUrl,
       token: "obr_second",
+      allowedIntelligenceUrls: null,
       drains: [h.drain(session)],
     });
     await sleep(100);
@@ -1109,6 +1290,7 @@ describe("offscreen controller", () => {
       type: "offscreen.recover",
       openbotUrl: session.openbotUrl,
       token: "obr_second",
+      allowedIntelligenceUrls: null,
       drains: [h.drain(session)],
     });
     await until(() => h.received("offscreen.done").length === 1, "done");

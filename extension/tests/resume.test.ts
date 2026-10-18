@@ -255,6 +255,8 @@ let network: {
   recorded: CapturedEvent[];
 };
 let masked: string[][] = [];
+/** The managed policy's pinned Intelligence addresses; null when the organization pins none. */
+let pinnedIntelligenceUrls: string[] | null = null;
 
 function doubles(): Partial<RecordingDeps> {
   return {
@@ -295,7 +297,7 @@ function doubles(): Partial<RecordingDeps> {
     readPolicy: async () => ({
       openbotUrl: null,
       openbotUrlInvalid: false,
-      allowedIntelligenceUrls: null,
+      allowedIntelligenceUrls: pinnedIntelligenceUrls,
     }),
     hasHostPermission: async () => true,
     now: () => now,
@@ -497,6 +499,7 @@ beforeEach(() => {
   openbot.holdStop = null;
   network = { resumed: [], resumeMode: "debugger", recorded: [] };
   masked = [];
+  pinnedIntelligenceUrls = null;
   connect();
 });
 
@@ -554,6 +557,34 @@ test("a service-worker restart during Stop finishes the stop: draining with the 
       type: "offscreen.recover",
       openbotUrl: origin,
       token: "obr_one",
+      allowedIntelligenceUrls: null,
+      drains: drains(),
+    },
+  ]);
+  port.postMessage({ type: "offscreen.done", demonstrationId: id });
+  await until(() => drains().length === 0, "the drain forgotten");
+});
+
+test("the document asked to report on a resumed stop is held to the organization's pinned Intelligence addresses", async () => {
+  pinnedIntelligenceUrls = ["wss://intelligence.example.com"];
+  startWorker();
+  const id = await recordThenStop();
+  await restartWorker();
+  const port = openDocumentPort();
+  const recovering = recoverInterruptedRecording();
+  await until(() => heldStops.length === 2, "the stop told again");
+  port.postMessage({
+    type: "offscreen.stopped",
+    demonstrationId: id,
+    trajectoryIds: [],
+  });
+  await recovering;
+  expect(sentToDocument("offscreen.recover", port)).toEqual([
+    {
+      type: "offscreen.recover",
+      openbotUrl: origin,
+      token: "obr_one",
+      allowedIntelligenceUrls: ["wss://intelligence.example.com"],
       drains: drains(),
     },
   ]);
@@ -733,6 +764,7 @@ test("a service-worker restart just after Stop moved the recording into the drai
       type: "offscreen.recover",
       openbotUrl: origin,
       token: "obr_one",
+      allowedIntelligenceUrls: null,
       drains: [seededRecord()],
     },
   ]);

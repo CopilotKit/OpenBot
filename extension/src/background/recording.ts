@@ -2085,10 +2085,12 @@ export function installRecording(
       const fresh = ((await readLocal("drains")) ?? []).filter(
         (drain) => ownedBy(drain, connection) && !drain.discarding,
       );
+      const policy = await deps.readPolicy();
       port.postMessage({
         type: "offscreen.recover",
         openbotUrl: connection.openbotUrl,
         token: connection.token,
+        allowedIntelligenceUrls: policy.allowedIntelligenceUrls,
         drains: fresh,
       } satisfies BackgroundToOffscreen);
     } finally {
@@ -2245,10 +2247,12 @@ export function installRecording(
       drain.kept?.waitingForReconnect
     )
       return;
+    const policy = await deps.readPolicy();
     await sendToDocument({
       type: "offscreen.recover",
       openbotUrl: connection.openbotUrl,
       token: connection.token,
+      allowedIntelligenceUrls: policy.allowedIntelligenceUrls,
       drains: [drain],
     });
   }

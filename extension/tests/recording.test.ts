@@ -1763,6 +1763,7 @@ test("connecting again as the same person sends what was kept; another person do
     type: "offscreen.recover",
     openbotUrl: origin,
     token: "obr_two",
+    allowedIntelligenceUrls: null,
     drains: [{ demonstrationId: demoId, userId: "p1" }],
   });
   expect(drains()[0]?.stopPending).toBeUndefined();

@@ -145,6 +145,9 @@ export type BackgroundToOffscreen =
       type: "offscreen.recover";
       openbotUrl: string;
       token: string;
+      /** The managed policy's pinned Intelligence addresses when it was sent (null: none pinned); the recovered
+       * streamers are held to it, since a document opened after a browser start was never told a policy. */
+      allowedIntelligenceUrls: string[] | null;
       drains: DrainRecord[];
     } // after a browser restart, and when the person who recorded kept drains connects again
   | { type: "offscreen.discard"; demonstrationIds: string[] }; // only on the person's own "Discard kept events" or Disconnect: clear their IndexedDB data

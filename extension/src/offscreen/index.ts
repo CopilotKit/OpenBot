@@ -216,8 +216,6 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
   /** Tokens OpenBot answered "signed out" for, with the guard's reason: nothing more is sent with them. */
   const signedOutTokens = new Map<string, SignedOutReason>();
   let live: Live | null = null;
-  /** The newest recording's allowed Intelligence addresses (policy); a recovery's message carries none. */
-  let allowedGatewayUrls: string[] | null = null;
   let work: Promise<void> = Promise.resolve();
 
   /** Handles one message at a time, in the order the service worker posted them; nothing awaits a drain here. */
@@ -583,7 +581,6 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
         return null;
       });
     live = target;
-    allowedGatewayUrls = session.allowedIntelligenceUrls;
     stopBeat();
     beat();
     serially(
@@ -787,8 +784,9 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
           recover: true,
         },
         target,
-        // A recovery's message carries no policy: the newest recording's applies.
-        { live: null, allowedGatewayUrls },
+        // The policy the recover was sent with, never a live recording's: a gateway it does not allow gets no socket,
+        // and the recording stays parked with its events kept.
+        { live: null, allowedGatewayUrls: message.allowedIntelligenceUrls },
       );
       void finishRecovery(stream, drain).catch((error) => {
         console.error(
