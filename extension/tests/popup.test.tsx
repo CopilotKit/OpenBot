@@ -86,6 +86,7 @@ function setup(
       | { ok: false; reason: "permission" };
     answers?: Partial<Record<PageToBackground["type"], PageResponse>>;
     microphone?: "granted" | "prompt" | "denied";
+    lastBotId?: string;
   } = {},
 ) {
   const sent: PageToBackground[] = [];
@@ -111,6 +112,7 @@ function setup(
         },
         activeTabId: async () => 7,
         microphoneState: async () => options.microphone ?? "granted",
+        lastBotId: async () => options.lastBotId,
       }}
     />,
   );
@@ -176,6 +178,13 @@ test("Connect with OpenBot Desktop is hidden unless Desktop answers available", 
   );
 });
 
+test("Connect with OpenBot Desktop is a secondary button even when it is the only action", async () => {
+  const { findByText } = setup(stateResponse(NOT_CONNECTED), { desktop: true });
+  const button = await findByText("Connect with OpenBot Desktop");
+  expect(button.className).toContain("bg-secondary");
+  expect(button.className).not.toContain("bg-primary");
+});
+
 test("connected and idle shows the person, the host, the form copy and Record disabled", async () => {
   const { findByText, getByText, getByRole } = setup(stateResponse());
   await findByText("Ada Lovelace");
@@ -226,7 +235,6 @@ test("Record prepares, then sends page.record with the Bot, title, tab and micro
     }),
   );
   expect(prepareCalls()).toBe(1);
-  expect(localStorage.getItem("recorder.lastBotId")).toBe("b1");
 });
 
 test("a Record refused for website access does not send page.record", async () => {
@@ -249,8 +257,9 @@ test("a Record refused for website access does not send page.record", async () =
 });
 
 test("the last used Bot is preselected", async () => {
-  localStorage.setItem("recorder.lastBotId", "b2");
-  const { findByText, getByRole } = setup(stateResponse());
+  const { findByText, getByRole } = setup(stateResponse(), {
+    lastBotId: "b2",
+  });
   await findByText(
     "Learning will not see this recording: this Bot has no Learning space. It still saves to OpenBot.",
   );
@@ -401,6 +410,44 @@ test("an error shows the server's sentence, and an open recording offers Stop th
   await waitFor(() =>
     expect(sent.filter((m) => m.type === "page.record").at(-1)).toMatchObject({
       botId: "b1",
+      replaceOpen: true,
+    }),
+  );
+});
+
+const OPEN_ERROR = "You already have a recording open for this Bot.";
+
+test("an open recording offers Stop the open recording in a fresh popup that made no Record click", async () => {
+  const { findByText, findByLabelText, getByRole, sent } = setup(
+    stateResponse({
+      state: {
+        openRecording: { demonstrationId: "d1" },
+        botId: "b2",
+        error: OPEN_ERROR,
+      } as Partial<RecorderState>,
+    }),
+  );
+  await findByText(OPEN_ERROR);
+  const stop = getByRole("button", {
+    name: "Stop the open recording",
+  }) as HTMLButtonElement;
+  expect(stop.disabled).toBe(true);
+  expect(getByRole("combobox", { name: "Bot" }).textContent).toContain(
+    "Support Bot",
+  );
+  await userEvent.type(
+    await findByLabelText("What are you about to do?"),
+    "Refund an order",
+  );
+  await waitFor(() => expect(stop.disabled).toBe(false));
+  fireEvent.click(stop);
+  await waitFor(() =>
+    expect(sent.filter((m) => m.type === "page.record").at(-1)).toEqual({
+      type: "page.record",
+      botId: "b2",
+      title: "Refund an order",
+      tabId: 7,
+      microphone: true,
       replaceOpen: true,
     }),
   );

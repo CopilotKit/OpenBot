@@ -3,6 +3,7 @@ import { IconAlertTriangle } from "@tabler/icons-react";
 import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import type { PageResponse, PageStateResponse } from "../../protocol/messages";
+import { readLocal } from "../../shared/storage";
 import { Page } from "../ui/page";
 import { ask as askBackground } from "../ui/runtime";
 import { microphoneState as defaultMicrophoneState } from "./media";
@@ -15,9 +16,8 @@ export type PopupDeps = {
   ask: typeof askBackground;
   activeTabId: () => Promise<number>;
   microphoneState: typeof defaultMicrophoneState;
+  lastBotId: () => Promise<string | undefined>;
 };
-
-const LAST_BOT_KEY = "recorder.lastBotId";
 
 /** The active tab; in the e2e variant only, the tab named by RECORDER_E2E_TARGET_TAB (Playwright cannot click the toolbar). */
 async function activeTabId(): Promise<number> {
@@ -35,22 +35,6 @@ async function activeTabId(): Promise<number> {
   return tab.id;
 }
 
-function readLastBot(): string | null {
-  try {
-    return localStorage.getItem(LAST_BOT_KEY);
-  } catch {
-    return null;
-  }
-}
-
-function saveLastBot(botId: string) {
-  try {
-    localStorage.setItem(LAST_BOT_KEY, botId);
-  } catch {
-    // The preselection is a convenience only.
-  }
-}
-
 const openTab = (url: string) => chrome.tabs.create({ url });
 
 /** The toolbar popup: sign-in state, Bot choice and the Record form. */
@@ -59,16 +43,17 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
   const prepare = deps?.prepare ?? prepareRecording;
   const tabId = deps?.activeTabId ?? activeTabId;
   const microphoneState = deps?.microphoneState ?? defaultMicrophoneState;
+  // Read once when the popup opens, so the seam is fixed at mount.
+  const [readLastBotId] = useState(
+    () => deps?.lastBotId ?? (() => readLocal("lastBotId")),
+  );
   const [view, setView] = useState<PageStateResponse | null>(null);
   const [bots, setBots] = useState<RecorderBot[]>([]);
   const [desktop, setDesktop] = useState(false);
   const [microphone, setMicrophone] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [attempt, setAttempt] = useState<{
-    botId: string;
-    title: string;
-  } | null>(null);
+  const [lastBotId, setLastBotId] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     const answer = await ask<PageResponse>({ type: "page.state" });
@@ -93,6 +78,16 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    let live = true;
+    readLastBotId().then((id) => {
+      if (live && id) setLastBotId(id);
+    });
+    return () => {
+      live = false;
+    };
+  }, [readLastBotId]);
 
   useEffect(() => {
     let live = true;
@@ -148,7 +143,7 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
           {desktop ? (
             <Button
               size="lg"
-              variant={openAddress ? "outline" : "default"}
+              variant="secondary"
               onClick={async () => {
                 const answer = await ask({ type: "page.connect.desktop" });
                 if (!answer.ok) setError(answer.error);
@@ -172,7 +167,6 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
   const record = async (botId: string, title: string, replaceOpen = false) => {
     setBusy(true);
     setError(null);
-    setAttempt({ botId, title });
     try {
       const prepared = await prepare();
       if (!prepared.ok) {
@@ -190,7 +184,6 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
         ...(replaceOpen ? { replaceOpen: true } : {}),
       });
       if (!answer.ok) setError(answer.error);
-      else saveLastBot(botId);
       await refresh();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -210,27 +203,22 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
       {state.phase === "idle" ? (
         <RecordForm
           bots={bots}
-          initialBotId={readLastBot()}
+          initialBotId={
+            state.openRecording ? (state.botId ?? lastBotId) : lastBotId
+          }
+          openRecording={state.openRecording !== undefined}
           transcription={view.me?.capabilities.transcription ?? true}
           microphoneGranted={microphone}
           busy={busy}
-          onRecord={(botId, title) => record(botId, title)}
+          onRecord={(botId, title, options) =>
+            record(botId, title, options?.replaceOpen)
+          }
           onAllowMicrophone={() =>
             openTab(chrome.runtime.getURL("microphone.html"))
           }
         />
       ) : null}
       {shownError ? <ErrorLine message={shownError} /> : null}
-      {state.openRecording && attempt ? (
-        <Button
-          className="mt-2"
-          size="sm"
-          disabled={busy}
-          onClick={() => record(attempt.botId, attempt.title, true)}
-        >
-          Stop the open recording
-        </Button>
-      ) : null}
     </Page>
   );
 }
