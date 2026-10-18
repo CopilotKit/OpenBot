@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { ExchangeResponse } from "@openbot/shared/recorder-api";
 import { RECORDER_EXTENSION_ID } from "@openbot/shared/recorder-extension";
 import { eq, inArray } from "drizzle-orm";
@@ -10,6 +10,7 @@ import { loadConfig } from "../src/config";
 import { createDatabase } from "../src/db/client";
 import { users } from "../src/db/schema/core";
 import { recorderConnections } from "../src/db/schema/recorder";
+import { RECORDER_BEARER } from "../src/recorder/guard";
 import { createRecorderExtension } from "../src/recorder/wiring";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
@@ -107,19 +108,35 @@ test("in single-user mode a connect code, an exchange and the bearer all resolve
   expect((await call("/api/recorder/bots", { headers })).status).toBe(200);
 });
 
-test("a connection that belongs to another person is refused", async () => {
-  const token = `obr_${randomUUID().replaceAll("-", "")}${randomUUID().replaceAll("-", "")}`;
+/** A live connection stored the way the connection store stores one: a well-formed token and its SHA-256. */
+async function seedConnection(userId: string, installId: string) {
+  const token = `obr_${randomBytes(32).toString("base64url")}`;
+  // Well-formed, so the resolver reads the row instead of refusing the shape of the token.
+  expect(RECORDER_BEARER.test(`Bearer ${token}`)).toBe(true);
   await database.insert(recorderConnections).values({
     id: randomUUID(),
-    userId: other,
+    userId,
     tokenHash: createHash("sha256").update(token).digest("hex"),
-    label: "Someone else",
+    label: "Seeded",
     via: "web",
     extensionId: RECORDER_EXTENSION_ID,
-    installId: "9".repeat(32),
+    installId,
   });
+  return token;
+}
+
+test("a connection that belongs to another person is refused", async () => {
+  // The control: a row built the same way for the one local person is accepted, so a refusal below
+  // can only come from whose row it is.
+  const mine = await seedConnection(DEV_ACTOR.id, "8".repeat(32));
+  const accepted = await call("/api/recorder/me", {
+    headers: { authorization: `Bearer ${mine}` },
+  });
+  expect(accepted.status).toBe(200);
+
+  const theirs = await seedConnection(other, "9".repeat(32));
   const refused = await call("/api/recorder/me", {
-    headers: { authorization: `Bearer ${token}` },
+    headers: { authorization: `Bearer ${theirs}` },
   });
   expect(refused.status).toBe(401);
 });

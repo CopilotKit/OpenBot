@@ -1,5 +1,6 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { randomUUID } from "node:crypto";
+import { CopilotKitIntelligence } from "@copilotkit/runtime/v2";
 import type { ExchangeResponse } from "@openbot/shared/recorder-api";
 import { RECORDER_EXTENSION_ID } from "@openbot/shared/recorder-extension";
 import { count, eq, inArray } from "drizzle-orm";
@@ -73,8 +74,14 @@ const recorder = createRecorderExtension({
   auditStore,
 });
 
-// The agent resolver records every actor a run asks it to load Bots for.
+// The agent resolver records every actor a run asks it to load Bots for, and serves the Bot to every
+// one of them, anonymous included: the worst case, a Bot anyone can reach, so only identity refuses.
 const loadedFor: string[] = [];
+// Who Intelligence was asked to open a thread for. Reaching it is a run starting.
+const threadsFor: string[] = [];
+// Every fetch, refused: nothing in this file may dial Intelligence (or anything else).
+const dialled: string[] = [];
+const spies: Array<{ mockRestore(): void }> = [];
 const guard = createStallGuard({ stallMs: 0 });
 const { identifyUser, identifyActor } = createRequestActor({
   singleUser: false,
@@ -90,9 +97,11 @@ const runtime = mountCopilotRuntime(
     model: { provider: "openai", defaultModel: "unused" },
     loadAgents: async (actor) => {
       loadedFor.push(actor.id);
-      return [];
+      return [
+        { id: BOT, name: "Bot", type: "built_in", systemPrompt: "Work." },
+      ];
     },
-    resolveModelApiKey: async () => null,
+    resolveModelApiKey: async () => "synthetic-key",
     stallGuard: guard,
   }),
   identifyUser,
@@ -151,6 +160,28 @@ let token = "";
 let stoppedId = "";
 
 beforeAll(async () => {
+  spies.push(
+    spyOn(
+      CopilotKitIntelligence.prototype,
+      "getOrCreateThread",
+    ).mockImplementation(async (input) => {
+      threadsFor.push(input.userId);
+      throw new Error("No thread is opened in this test.");
+    }),
+    // The Learning assignment asks whether the thread exists first: it does not.
+    spyOn(CopilotKitIntelligence.prototype, "getThread").mockImplementation(
+      async () => {
+        const error = new Error("Missing synthetic Thread");
+        error.name = "PlatformRequestError";
+        Object.assign(error, { status: 404 });
+        throw error;
+      },
+    ),
+    spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      dialled.push(input instanceof Request ? input.url : String(input));
+      throw new Error("No network in this test.");
+    }),
+  );
   await database
     .insert(users)
     .values({ id: owner, email: `${owner}@example.test`, name: "The Owner" });
@@ -180,6 +211,7 @@ beforeAll(async () => {
   stoppedId = started.id;
 });
 afterAll(async () => {
+  for (const spy of spies) spy.mockRestore();
   guard.stop();
   await database
     .delete(demonstrations)
@@ -241,13 +273,17 @@ describe("a recorder bearer works only on the Recorder's own routes", () => {
           forwardedProps: {},
         },
       });
-    // The control: the person's own session does reach the agent resolver, so the recording works.
+    // The control: the person's own session reaches the Bot and starts a run as them.
     await run(COOKIE);
     expect(loadedFor).toContain(owner);
-    const before = loadedFor.length;
+    expect(threadsFor).toEqual([owner]);
+    const loaded = loadedFor.length;
     const answer = await run({ authorization: `Bearer ${token}` });
-    expect(answer.status).toBeGreaterThanOrEqual(400);
-    expect(loadedFor.slice(before)).not.toContain(owner);
+    expect(answer.ok).toBe(false);
+    expect(threadsFor).toEqual([owner]);
+    expect(loadedFor.slice(loaded)).not.toContain(owner);
+    const intelligence = config.runtime.intelligence.apiUrl;
+    expect(dialled.filter((url) => url.startsWith(intelligence))).toEqual([]);
   });
 
   test("no gate rule matches a recorder path", () => {
