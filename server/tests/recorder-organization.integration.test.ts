@@ -46,6 +46,8 @@ const signedIn: Answer = () => Response.json({ user: person });
 let answer: Answer = signedIn;
 const authorityFetch = (request: Request) => {
   expect(new URL(request.url).pathname).toBe("/api/me");
+  if (request.headers.get("cookie") !== SESSION_COOKIE)
+    return new Response(null, { status: 401 });
   return answer();
 };
 let authority = Bun.serve({
@@ -263,7 +265,7 @@ test("a person the organization removed is refused once the cached answer ages o
   // Still inside the 60 s cache: the earlier answer stands.
   expect((await me()).status).toBe(200);
   pastTheCache();
-  clearOrganizationFailure();
+  expect(await desktopFailure()).toBeNull();
   const removed = await me();
   expect(removed.status).toBe(401);
   expect(await removed.json()).toMatchObject({
