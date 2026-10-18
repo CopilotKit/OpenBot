@@ -42,7 +42,11 @@ async function activeTabId(): Promise<number> {
 
 const openTab = (url: string) => chrome.tabs.create({ url });
 
-/** The toolbar popup: sign-in state, Bot choice and the Record form. */
+/**
+ * The toolbar popup. Signed out: how to connect, plus any recordings kept in this browser (with Discard). Connected:
+ * the Record form with a Bot choice; while recording, time, steps, the capture rows, Stop and Start over; after Stop,
+ * where to review the recording and what is still sending or kept.
+ */
 export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
   const ask = deps?.ask ?? askBackground;
   const prepare = deps?.prepare ?? prepareRecording;
@@ -102,22 +106,22 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
   }, [live, ask]);
 
   useEffect(() => {
-    let live = true;
+    let mounted = true;
     readLastBotId().then((id) => {
-      if (live && id) setLastBotId(id);
+      if (mounted && id) setLastBotId(id);
     });
     return () => {
-      live = false;
+      mounted = false;
     };
   }, [readLastBotId]);
 
   useEffect(() => {
-    let live = true;
+    let mounted = true;
     microphoneState().then((state) => {
-      if (live) setMicrophone(state === "granted");
+      if (mounted) setMicrophone(state === "granted");
     });
     return () => {
-      live = false;
+      mounted = false;
     };
   }, [microphoneState]);
 
@@ -161,7 +165,12 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
       >
         <Notices notice={view.notice} kept={state.kept} onDismiss={dismiss} />
         {/* Signed out with recordings kept for the person (Decision 19): how to send them, or Discard. */}
-        <AfterStop state={state} onDiscard={discardKept} openTab={openTab} />
+        <AfterStop
+          state={state}
+          connected={false}
+          onDiscard={discardKept}
+          openTab={openTab}
+        />
         {policy.invalid ? (
           <p className="mt-4 text-muted-foreground text-sm">
             Your organization's Recorder policy names an OpenBot address the
@@ -254,6 +263,7 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
       {state.phase === "idle" ? (
         <AfterStop
           state={state}
+          connected
           openbotUrl={connection.openbotUrl}
           onDiscard={discardKept}
           openTab={openTab}

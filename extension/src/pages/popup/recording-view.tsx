@@ -140,13 +140,15 @@ export function RecordingView({
           ) : null}
         </PageRows>
       </div>
-      <div className="mt-6">
-        <CaptureRows
-          capture={state.capture}
-          learning={state.learning}
-          onRecordScreen={actions.onRecordScreen}
-        />
-      </div>
+      {state.phase === "starting" ? null : (
+        <div className="mt-6">
+          <CaptureRows
+            capture={state.capture}
+            learning={state.learning}
+            onRecordScreen={actions.onRecordScreen}
+          />
+        </div>
+      )}
       <div className="mt-6 flex flex-col gap-2">
         <Button size="lg" disabled={busy || stopping} onClick={actions.onStop}>
           Stop
@@ -182,14 +184,19 @@ function keptSentence(kept: NonNullable<RecorderState["kept"]>): string {
     : `${counts} ${verb} kept in this browser: ${stripCaptureStatus(kept.reason)}`;
 }
 
-/** After Stop: where to review the recording, what is still sending, and any events kept in the browser. */
+/**
+ * After Stop: where to review the recording, what is still sending, and any events kept in the browser. Signed out,
+ * only the kept row shows: OpenBot has not heard the stop (nothing to review) and nothing can send.
+ */
 export function AfterStop({
   state,
+  connected,
   openbotUrl,
   onDiscard,
   openTab,
 }: {
   state: RecorderState;
+  connected: boolean;
   /** The connected OpenBot, for a stopped recording that does not name its own. */
   openbotUrl?: string;
   onDiscard: () => void;
@@ -202,17 +209,18 @@ export function AfterStop({
   const keptRecordings = kept?.recordings ?? 0;
   const streaming = state.draining > keptRecordings;
   const retrying = keptRecordings > (kept?.waitingFor?.recordings ?? 0);
-  const sending = state.draining > 0 && (streaming || retrying);
+  const sending = connected && state.draining > 0 && (streaming || retrying);
   // While it is still sending, the Learning capture row below says the same thing.
   const sentence = recordingLearningSentence(
     lastStopped && !sending ? state.learning : undefined,
   );
-  if (!lastStopped && !kept && !sending) return null;
   const reviewBase = lastStopped?.openbotUrl || openbotUrl;
+  // OpenBot has the stop only when connected and it answered: a pending stop has nothing to review yet.
   const reviewUrl =
-    lastStopped && reviewBase
+    connected && !isStopPending(state.error) && lastStopped && reviewBase
       ? `${reviewBase}/bots/${lastStopped.botId}/demonstrations`
       : null;
+  if (!kept && !reviewUrl && !sending) return null;
   return (
     <div className="mb-6">
       <PageRows>
@@ -304,8 +312,8 @@ export function AfterStop({
             <DialogTitle>Discard kept events?</DialogTitle>
           </DialogHeader>
           <DialogBody className="mt-4 text-sm">
-            Discard them? Intelligence will never receive them. Your recordings
-            in OpenBot stay as they are.
+            Intelligence will never receive them. Your recordings in OpenBot
+            stay as they are.
           </DialogBody>
           <DialogFooter className="mt-4">
             <Button size="sm" variant="ghost" onClick={() => setAsking(false)}>

@@ -65,6 +65,16 @@ function describe(status: string, reason: string | undefined) {
   return reason ? `${status}. ${reason}` : status;
 }
 
+/** The Learning capture line: a reason that already says "Retrying" stands alone, never "Retrying. ... Retrying; ...". */
+function describeIntelligence(
+  intelligence: CaptureStatus["intelligence"],
+  reason: string | undefined,
+) {
+  return intelligence === "retrying" && reason && /\bRetrying\b/.test(reason)
+    ? reason
+    : describe(INTELLIGENCE_STATUS[intelligence], reason);
+}
+
 type RowText = { title: string; lines: string[] };
 
 /** A stop that keeps every event: the status as the title, then why, then when it tries again. */
@@ -100,8 +110,8 @@ function captureText(
       : {
           title: "Learning capture",
           lines: [
-            describe(
-              INTELLIGENCE_STATUS[capture.intelligence],
+            describeIntelligence(
+              capture.intelligence,
               capture.intelligenceReason &&
                 stripCaptureStatus(capture.intelligenceReason),
             ),
