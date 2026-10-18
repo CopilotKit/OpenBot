@@ -565,6 +565,8 @@ export function installRecording(
   /** The port has spoken (offscreen.ready on load, or any message from a document that reconnected). */
   let documentReady = false;
   let readyWaiters: ((port: chrome.runtime.Port) => void)[] = [];
+  /** Waiting for the document's port to connect again (`documentPort`). */
+  let connectWaiters: ((port: chrome.runtime.Port) => void)[] = [];
   /** Set while a document is opened for a start or a recovery: events wait until its session message is posted. */
   let holdEvents = false;
   const queued: { event: CapturedEvent; bytes: number }[] = [];
@@ -592,6 +594,26 @@ export function installRecording(
     } catch {
       return false;
     }
+  }
+
+  /** The document's port. While a document exists but its port is down (the service worker restarted and the document
+   * reconnects with its backoff), waits up to `ms` for the port to connect again; a connected port is enough, since the
+   * document opened it and listens on it. Null when no document exists, or its port did not come back in time. */
+  async function documentPort(ms: number): Promise<chrome.runtime.Port | null> {
+    if (offscreen) return offscreen;
+    if (!(await hasOffscreenDocument())) return null;
+    if (offscreen) return offscreen;
+    return new Promise((resolve) => {
+      const waiter = (port: chrome.runtime.Port) => {
+        deps.timers.clear(handle);
+        resolve(port);
+      };
+      const handle = deps.timers.set(() => {
+        connectWaiters = connectWaiters.filter((entry) => entry !== waiter);
+        resolve(null);
+      }, ms);
+      connectWaiters.push(waiter);
+    });
   }
 
   function waitForReady(): Promise<chrome.runtime.Port> {
@@ -699,13 +721,20 @@ export function installRecording(
       };
       stopWaiters.set(demonstrationId, finish);
       // The watchdog counts from the persisted start of the stop, so a restarted worker waits no longer in total.
-      handle = deps.timers.set(
-        finish,
-        Math.max(0, since + STOP_WATCHDOG_MS - deps.now()),
-      );
-      // No document to tell: what it holds is recovered with the drain.
-      if (!postOffscreen(message)) finish();
+      const remaining = Math.max(0, since + STOP_WATCHDOG_MS - deps.now());
+      handle = deps.timers.set(finish, remaining);
+      // A document whose port is reconnecting is waited for within the watchdog. With no document there is nothing to
+      // tell: what it holds is recovered with the drain.
+      void documentPort(remaining).then((port) => {
+        if (stopWaiters.get(demonstrationId) !== finish) return;
+        if (!port || !postOffscreen(message)) finish();
+      });
     });
+  }
+
+  /** Posts a message the document must get, waiting up to the ready timeout for its port while it reconnects. */
+  async function sendToDocument(message: BackgroundToOffscreen): Promise<void> {
+    if (await documentPort(READY_TIMEOUT_MS)) postOffscreen(message);
   }
 
   function onOffscreenMessage(
@@ -1109,6 +1138,7 @@ export function installRecording(
       live = null;
       network = null;
       networkMode = "off";
+      frameUrls.clear();
       if (capture)
         await capture.stop().catch(report("stopping network capture"));
       if (injected) await stopRecordingScripts([tabId]);
@@ -1209,6 +1239,7 @@ export function installRecording(
     await persisted;
     await stopRecordingScripts(tabIds);
     digests.clear();
+    frameUrls.clear();
     await removeSession("digests");
     const capture = network;
     network = null;
@@ -1223,10 +1254,10 @@ export function installRecording(
       stoppedFrom,
     });
     // Media and voice drain and the final outcome is queued before OpenBot hears of the stop. A recording kept for
-    // its person, or discarded, waits for nothing.
+    // its person, or discarded, waits only for a reconnecting document to hear of it.
     if (mode.kind === "person" || mode.kind === "openbot")
       await awaitStopped(demonstrationId, since, message);
-    else postOffscreen(message);
+    else await sendToDocument(message);
     dispatch({ type: "stopped" });
 
     let learning: LearningSpaceState | undefined;
@@ -1502,9 +1533,13 @@ export function installRecording(
       await stopRecording({ kind: "restart-failed", error: sentence });
       return { ok: false, error: sentence };
     }
+    // The document must hear of the switch: while its port reconnects, the wait happens here, before the switch begins,
+    // so nothing in the switch waits.
+    await documentPort(READY_TIMEOUT_MS);
     if (ended()) {
-      // The recording ended while OpenBot created the new one, which never starts here: it is deleted as a recording that
-      // could not start is. Best effort: after a sign-out the token no longer works, and OpenBot's own rules close it.
+      // The recording ended while OpenBot created the new one, or while the document reconnected, and the new one never
+      // starts here: it is deleted as a recording that could not start is. Best effort: after a sign-out the token no
+      // longer works, and OpenBot's own rules close it.
       await openbotJson(target, recorderPaths.demonstration(demonstrationId), {
         method: "DELETE",
       }).catch(() => undefined);
@@ -1570,6 +1605,7 @@ export function installRecording(
     await steps.reset(old.demonstrationId);
     live = { ...current, demonstrationId };
     shown = { demonstrationId, trajectoryIds: new Set([trajectoryId]) };
+    frameUrls.clear();
     postOffscreen({ type: "offscreen.rotate", demonstrationId, trajectoryId });
     dispatch({ type: "restart", demonstrationId, startedAt });
     publishDrains(drains);
@@ -1642,11 +1678,14 @@ export function installRecording(
   async function discardDrains(demonstrationIds: string[]): Promise<void> {
     if (demonstrationIds.length === 0) return;
     const port = await openDocument();
-    port.postMessage({
-      type: "offscreen.discard",
-      demonstrationIds,
-    } satisfies BackgroundToOffscreen);
-    releaseEvents();
+    try {
+      port.postMessage({
+        type: "offscreen.discard",
+        demonstrationIds,
+      } satisfies BackgroundToOffscreen);
+    } finally {
+      releaseEvents();
+    }
     const database = await db();
     for (const id of demonstrationIds)
       await deleteDemonstrationData(database, id);
@@ -1702,16 +1741,19 @@ export function installRecording(
       }
     }
     const port = await openDocument();
-    const fresh = ((await readLocal("drains")) ?? []).filter((drain) =>
-      ownedBy(drain, connection),
-    );
-    port.postMessage({
-      type: "offscreen.recover",
-      openbotUrl: connection.openbotUrl,
-      token: connection.token,
-      drains: fresh,
-    } satisfies BackgroundToOffscreen);
-    releaseEvents();
+    try {
+      const fresh = ((await readLocal("drains")) ?? []).filter((drain) =>
+        ownedBy(drain, connection),
+      );
+      port.postMessage({
+        type: "offscreen.recover",
+        openbotUrl: connection.openbotUrl,
+        token: connection.token,
+        drains: fresh,
+      } satisfies BackgroundToOffscreen);
+    } finally {
+      releaseEvents();
+    }
   }
 
   // ---- The popup's answers -------------------------------------------------------------------
@@ -2031,7 +2073,11 @@ export function installRecording(
         offscreen = null;
         documentReady = false;
       });
+      // The events that waited go first, then whatever waited for the port.
       flushEvents();
+      const waiters = connectWaiters;
+      connectWaiters = [];
+      for (const waiter of waiters) waiter(port);
     },
 
     async connected() {

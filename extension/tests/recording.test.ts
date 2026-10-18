@@ -368,6 +368,36 @@ const toDocument = (port: FakePort | null = doc) =>
   (port?.messages ?? []) as BackgroundToOffscreen[];
 const sentToDocument = (type: string, port: FakePort | null = doc) =>
   toDocument(port).filter((message) => message.type === type);
+/** The service worker's view of its own restart: the document's port went down while the document lives on. */
+async function dropDocumentPort() {
+  doc?.disconnect();
+  doc = null;
+  await settle();
+}
+/** The document reconnecting its port with its backoff: it connects again and says nothing first. */
+function reconnectDocument(): FakePort {
+  const port = fake.connectFrom(PORT_OFFSCREEN, OFFSCREEN_SENDER);
+  doc = port;
+  docSeen = 0;
+  return port;
+}
+/** Makes the service worker's first post of `type` on a document port that connects from now on throw, as a post on a
+ * port that just went away does. */
+function throwOnFirstPost(type: string) {
+  const failure = { thrown: false };
+  chrome.runtime.onConnect.addListener((port: chrome.runtime.Port) => {
+    if (port.name !== PORT_OFFSCREEN) return;
+    const post = port.postMessage;
+    port.postMessage = (message: unknown) => {
+      if (!failure.thrown && (message as { type?: string }).type === type) {
+        failure.thrown = true;
+        throw new Error("Attempting to use a disconnected port object");
+      }
+      post(message);
+    };
+  });
+  return failure;
+}
 
 type NetworkDouble = {
   deps?: NetworkCaptureDeps;
@@ -984,6 +1014,48 @@ test("a stop whose document never answers goes on after 120 seconds from when it
   expect(requests().at(-1)).toBe(`POST ${demoPath(demoId, "/stop")}`);
 });
 
+test("Stop while the document's port reconnects tells the document on its new port before OpenBot", async () => {
+  await startRecording({ botId: "bot-1", title: "T", tabId: 7 });
+  await dropDocumentPort();
+  holdStop = true;
+  const stopping = page({ type: "page.stop" });
+  await settle();
+  expect(requests().some((r) => r.endsWith("/stop"))).toBe(false);
+  const again = reconnectDocument();
+  await until(
+    () => sentToDocument("offscreen.stop", again).length === 1,
+    "offscreen.stop on the new port",
+  );
+  expect(sentToDocument("offscreen.stop", again)[0]).toEqual({
+    type: "offscreen.stop",
+    outcome: "succeeded",
+  });
+  await settle();
+  expect(requests().some((r) => r.endsWith("/stop"))).toBe(false); // waits for offscreen.stopped
+  again.postMessage({
+    type: "offscreen.stopped",
+    demonstrationId: demoId,
+    trajectoryIds: [],
+  });
+  expect(await stopping).toEqual({ ok: true });
+  expect(requests().at(-1)).toBe(`POST ${demoPath(demoId, "/stop")}`);
+  again.postMessage({ type: "offscreen.done", demonstrationId: demoId });
+  await until(() => !fake.offscreen.open, "the document closes");
+});
+
+test("Stop with no document finishes at once: there is nothing to wait for", async () => {
+  await startRecording({ botId: "bot-1", title: "T", tabId: 7 });
+  await chrome.offscreen.closeDocument();
+  await settle();
+  let answered = false;
+  void page({ type: "page.stop" }).then(() => {
+    answered = true;
+  });
+  await until(() => answered, "Stop finishes without a timer");
+  expect(requests().at(-1)).toBe(`POST ${demoPath(demoId, "/stop")}`);
+  expect((await state()).phase).toBe("idle");
+});
+
 test("the document closes only when every drain is done", async () => {
   const first = await startRecording({ botId: "bot-1", title: "T", tabId: 7 });
   await page({ type: "page.stop" });
@@ -1305,6 +1377,62 @@ test("connecting again as the same person sends what was kept; another person do
   });
   expect(drains()[0]?.stopPending).toBeUndefined();
   expect(drains()[0]?.kept).toBeUndefined();
+});
+
+test("a recover the document could not be sent still lets it close once everything is done", async () => {
+  fake.tabs.set(7, { id: 7, url: "chrome://newtab/" } as chrome.tabs.Tab);
+  await startRecording({ botId: "bot-1", title: "T", tabId: 7 });
+  doc?.postMessage({ type: "offscreen.signed-out", reason: "revoked" });
+  await until(
+    () => drains()[0]?.kept?.waitingForReconnect === true,
+    "kept for Ada",
+  );
+  await until(() => !fake.offscreen.open, "the document closes");
+  const failure = throwOnFirstPost("offscreen.recover");
+  connect(ada, "obr_two");
+  await handlers.connected();
+  await until(() => failure.thrown, "the recover post throws");
+  await until(
+    () => drains()[0]?.stopPending === undefined,
+    "the stop reached OpenBot",
+  );
+  doc?.postMessage({ type: "offscreen.done", demonstrationId: demoId });
+  await until(() => drains().length === 0, "the drain is forgotten");
+  await until(() => !fake.offscreen.open, "the document closes again");
+});
+
+test("a discard the document could not be sent still lets the live recording's events through", async () => {
+  const first = await startRecording({ botId: "bot-1", title: "T", tabId: 7 });
+  await page({ type: "page.stop" });
+  doc?.postMessage({
+    type: "offscreen.kept",
+    demonstrationId: first,
+    reason: "Learning capture is off for this organization.",
+    parked: true,
+    events: 3,
+  });
+  await until(() => !fake.offscreen.open, "the document closes");
+  const failure = throwOnFirstPost("offscreen.discard");
+  await startRecording({ botId: "bot-1", title: "T", tabId: 7 });
+  const content = contentPort(7);
+  expect(await page({ type: "page.kept.discard" })).toMatchObject({
+    ok: false,
+  });
+  expect(failure.thrown).toBe(true);
+  content.postMessage({
+    type: "content.event",
+    event: contentEvent({ after: true }),
+  });
+  await until(
+    () =>
+      sentToDocument("offscreen.event").some(
+        (message) =>
+          message.type === "offscreen.event" &&
+          (message.event.value as { after?: boolean } | undefined)?.after ===
+            true,
+      ),
+    "the event reaches the document",
+  );
 });
 
 test("Disconnect discards the kept recordings, and nothing else does", async () => {
@@ -1656,6 +1784,33 @@ test("navigation in every frame becomes an event, and only the top frame becomes
   ]);
   expect((await state()).topUrls["7"]).toBe(
     "https://crm.example.test/deals/44",
+  );
+});
+
+test("a frame's address from an earlier recording is never where its navigation in the next one came from", async () => {
+  const frameNavigation = async (url: string) => {
+    const before = sentToDocument("offscreen.event").length;
+    fake.webNavigation.commit({ tabId: 7, frameId: 2, parentFrameId: 0, url });
+    await until(
+      () => sentToDocument("offscreen.event").length === before + 1,
+      `the frame's navigation to ${url}`,
+    );
+    const message = sentToDocument("offscreen.event").at(-1);
+    return message?.type === "offscreen.event" ? message.event.value : null;
+  };
+  await startRecording({ botId: "bot-1", title: "T", tabId: 7 });
+  await frameNavigation("https://widgets.example.test/a");
+  expect(await frameNavigation("https://widgets.example.test/b")).toMatchObject(
+    { from: "https://widgets.example.test/a" },
+  );
+  await page({ type: "page.stop" });
+  await startRecording({ botId: "bot-1", title: "T", tabId: 7 });
+  expect(await frameNavigation("https://widgets.example.test/c")).toMatchObject(
+    { frameId: 2, from: "" },
+  );
+  expect(await page({ type: "page.restart" })).toEqual({ ok: true });
+  expect(await frameNavigation("https://widgets.example.test/d")).toMatchObject(
+    { frameId: 2, from: "" },
   );
 });
 
@@ -2199,6 +2354,44 @@ test("Stop pressed while Start over saves the switch stops the new recording aft
     { demonstrationId: old, discard: true },
     { demonstrationId: "demo-2", discard: false },
   ]);
+});
+
+test("Start over while the document's port reconnects moves the document to the new recording before the tabs capture for it", async () => {
+  const old = await startRecording({ botId: "bot-1", title: "T", tabId: 7 });
+  const content = contentPort(7);
+  await sendSteps(content, [click()], 2);
+  await dropDocumentPort();
+  const mark = fake.calls.length;
+  let answered = false;
+  const restarted = page({ type: "page.restart" }).then((answer) => {
+    answered = true;
+    return answer;
+  });
+  const trajectories = `POST ${demoPath("demo-2", "/trajectories")}`;
+  await until(
+    () => requests().includes(trajectories),
+    "the new recording exists in OpenBot",
+  );
+  await settle();
+  expect(answered).toBe(false);
+  expect((await state()).demonstrationId).toBe(old);
+  const again = reconnectDocument();
+  expect(await restarted).toEqual({ ok: true });
+  const trajectoryId = registered(requests().indexOf(trajectories)) ?? "";
+  expect(sentToDocument("offscreen.rotate", again)).toEqual([
+    { type: "offscreen.rotate", demonstrationId: "demo-2", trajectoryId },
+  ]);
+  const after = fake.calls.slice(mark);
+  const rotateAt = after.indexOf(`port:${PORT_OFFSCREEN} offscreen.rotate`);
+  expect(rotateAt).toBeGreaterThan(-1);
+  expect(
+    after.indexOf(`port:${PORT_CONTENT} background.capture`),
+  ).toBeGreaterThan(rotateAt);
+  expect(content.messages).toContainEqual({
+    type: "background.capture",
+    active: true,
+    demonstrationId: "demo-2",
+  });
 });
 
 test("after Start over, a status about the old recording's trajectory leaves the new recording's capture alone", async () => {
