@@ -2,23 +2,18 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { eq, inArray } from "drizzle-orm";
 import { createDatabase } from "../src/db/client";
-import { agents, users } from "../src/db/schema/core";
-import { agentProfiles } from "../src/db/schema/coworker";
-import { skills } from "../src/db/schema/plugins";
+import { users } from "../src/db/schema/core";
 import {
   recorderConnectCodes,
   recorderConnections,
+  recorderTrajectoryBindings,
 } from "../src/db/schema/recorder";
-import { skillShareRequests } from "../src/db/schema/skill-shares";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const prefix = `recorder-${randomUUID()}`;
 const alice = `${prefix}-alice`;
 const bob = `${prefix}-bob`;
-const bot = `${prefix}-bot`;
-const slug = `rec-${randomUUID().slice(0, 8)}`;
-const skillId = `${prefix}-skill`;
 let counter = 0;
 const next = () => `${prefix}-${counter++}`;
 
@@ -54,34 +49,10 @@ beforeAll(async () => {
     { id: alice, email: `${alice}@example.test` },
     { id: bob, email: `${bob}@example.test` },
   ]);
-  await database.insert(agents).values({
-    id: bot,
-    name: "Recorder Bot",
-    type: "built_in",
-    configuration: {},
-  });
-  await database.insert(agentProfiles).values({
-    agentId: bot,
-    ownerUserId: alice,
-    title: "Recorder Bot",
-    roleDescription: "Assist",
-    avatarSeed: bot,
-    visibility: "private",
-  });
-  await database.insert(skills).values({
-    id: skillId,
-    ownerUserId: alice,
-    slug,
-    title: "Recorded",
-    summary: "Recorded skill",
-    instructions: "Do it",
-  });
 });
 
 afterAll(async () => {
-  await database.delete(skills).where(eq(skills.slug, slug));
   await database.delete(users).where(inArray(users.id, [alice, bob]));
-  await database.delete(agents).where(eq(agents.id, bot));
   await database.$client.close();
 });
 
@@ -151,28 +122,59 @@ test("deleting a person removes their connections and connect codes", async () =
   ).toEqual([]);
 });
 
-test("skill-share requests: one pending per kind and Skill, and a make_bot row names its Bot", async () => {
-  const share = (kind: "share" | "make_bot", status = "pending") => ({
-    id: next(),
-    kind,
-    skillSlug: slug,
-    requestedBy: alice,
-    status: status as "pending",
-    ...(kind === "make_bot"
-      ? { botName: "Bot", botTitle: "Title", botRoleDescription: "Role" }
-      : {}),
-  });
-  await database.insert(skillShareRequests).values(share("share"));
-  await rejects(
-    database.insert(skillShareRequests).values(share("share")),
-    /skill_share_requests_pending_idx/,
-  );
-  await database.insert(skillShareRequests).values(share("make_bot"));
-  await database.insert(skillShareRequests).values(share("share", "declined"));
+test("a trajectory binds to one person and Bot, by its UUID", async () => {
+  const trajectoryId = randomUUID();
+  await database
+    .insert(recorderTrajectoryBindings)
+    .values({ trajectoryId, userId: alice, botId: "bot-1" });
   await rejects(
     database
-      .insert(skillShareRequests)
-      .values({ ...share("make_bot", "declined"), botName: null }),
-    /skill_share_requests_bot_check/,
+      .insert(recorderTrajectoryBindings)
+      .values({ trajectoryId, userId: bob, botId: "bot-2" }),
+    /recorder_trajectory_bindings_pkey|duplicate key/i,
   );
+  await rejects(
+    database
+      .insert(recorderTrajectoryBindings)
+      .values({ trajectoryId: "not-a-uuid", userId: alice, botId: "bot-1" }),
+    /uuid/i,
+  );
+  const [row] = await database
+    .select()
+    .from(recorderTrajectoryBindings)
+    .where(eq(recorderTrajectoryBindings.trajectoryId, trajectoryId));
+  expect(row).toMatchObject({ trajectoryId, userId: alice, botId: "bot-1" });
+  expect(row?.createdAt).toBeInstanceOf(Date);
+});
+
+test("deleting a person removes their trajectory bindings", async () => {
+  const dave = `${prefix}-dave`;
+  await database
+    .insert(users)
+    .values({ id: dave, email: `${dave}@example.test` });
+  await database
+    .insert(recorderTrajectoryBindings)
+    .values({ trajectoryId: randomUUID(), userId: dave, botId: "bot-1" });
+  await database.delete(users).where(eq(users.id, dave));
+  expect(
+    await database
+      .select()
+      .from(recorderTrajectoryBindings)
+      .where(eq(recorderTrajectoryBindings.userId, dave)),
+  ).toEqual([]);
+});
+
+test("the migration holds only the Recorder's connections and trajectory bindings", async () => {
+  const migration = await Bun.file(
+    new URL("../drizzle/0057_recorder_extension.sql", import.meta.url),
+  ).text();
+  const created = [...migration.matchAll(/CREATE TABLE "([a-z0-9_]+)"/g)].map(
+    (match) => match[1],
+  );
+  expect(created.sort()).toEqual([
+    "recorder_connect_codes",
+    "recorder_connections",
+    "recorder_trajectory_bindings",
+  ]);
+  expect(migration).not.toMatch(/ALTER TABLE "demonstrations"|DROP /);
 });

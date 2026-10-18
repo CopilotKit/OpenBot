@@ -5,6 +5,7 @@ import {
   text,
   timestamp,
   uniqueIndex,
+  uuid,
 } from "drizzle-orm/pg-core";
 import { users } from "./core";
 
@@ -55,4 +56,23 @@ export const recorderConnections = pgTable(
       .on(table.userId, table.installId)
       .where(sql`${table.revokedAt} IS NULL`),
   ],
+);
+
+/**
+ * Which person and Bot a Recorder trajectory belongs to, written by the capture pass's gate and read by its
+ * Learning space selector. Nothing recorded is kept here: the trajectory itself lives in Intelligence.
+ */
+export const recorderTrajectoryBindings = pgTable(
+  "recorder_trajectory_bindings",
+  {
+    trajectoryId: uuid("trajectory_id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    botId: text("bot_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [index("recorder_trajectory_bindings_user_idx").on(table.userId)],
 );
