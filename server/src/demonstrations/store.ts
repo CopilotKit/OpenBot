@@ -275,7 +275,10 @@ export function createDemonstrationStore(database: Database) {
         return total;
       });
     },
-    /** Binds a trajectory to this person's extension recording; one trajectory belongs to one recording. */
+    /**
+     * Binds a trajectory to this person's extension recording; one trajectory belongs to one recording.
+     * A recording that has finished (stopped, drafted or published) still accepts one while a trajectory is open.
+     */
     async registerTrajectory(
       ownerUserId: string,
       id: string,

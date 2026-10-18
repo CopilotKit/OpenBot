@@ -234,11 +234,10 @@ for (const status of ["drafted", "published"] as const) {
     const demo = await recorder.start(owner, bot, "Roll", "extension");
     const first = randomUUID();
     await store.registerTrajectory(owner, demo.id, first);
+    await store.appendBatch(owner, demo.id, 0, [click]);
     await recorder.stop(owner, demo.id);
-    await database
-      .update(demonstrations)
-      .set({ status })
-      .where(eq(demonstrations.id, demo.id));
+    if (status === "drafted") await store.draft(owner, demo.id);
+    else await store.markPublished(owner, demo.id, `roll-${demo.id}`);
     const second = randomUUID();
     await store.registerTrajectory(owner, demo.id, second);
     await store.closeTrajectory(owner, demo.id, first);
