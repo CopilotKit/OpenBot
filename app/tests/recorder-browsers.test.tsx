@@ -19,13 +19,15 @@ import { ConnectedBrowsers } from "@/components/settings/browsers/connected-brow
 import { ThisBrowser } from "@/components/settings/browsers/this-browser";
 import { queryClient } from "@/query-client";
 
+let wasServer = true;
 beforeAll(() => {
   GlobalRegistrator.register();
+  wasServer = environmentManager.isServer();
   // The query library decided "server" when it was imported, before the DOM existed, and so never polls.
   environmentManager.setIsServer(() => false);
 });
 afterAll(() => {
-  environmentManager.setIsServer(() => typeof window === "undefined");
+  environmentManager.setIsServer(() => wasServer);
   GlobalRegistrator.unregister();
 });
 
