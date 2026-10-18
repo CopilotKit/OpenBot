@@ -1,6 +1,6 @@
 import { hasHostPermission } from "../../shared/host-access";
 
-export type Prepared = { ok: true } | { ok: false; reason: "permission" };
+type Prepared = { ok: true } | { ok: false; reason: "permission" };
 
 type PrepareDeps = {
   hasHostPermission: () => Promise<boolean>;

@@ -11,7 +11,7 @@ export type BuildVariant = "release" | "e2e";
 // https://developer.chrome.com/docs/extensions/reference/manifest/externally-connectable
 // https://developer.chrome.com/docs/extensions/reference/api/alarms
 export const MINIMUM_CHROME_VERSION = "125";
-export const PERMISSIONS = [
+const PERMISSIONS = [
   "storage",
   "unlimitedStorage",
   "alarms",
