@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { createContentPort } from "../src/content/port";
 import type {
   BackgroundToContent,
   ContentToBackground,
 } from "../src/protocol/messages";
 import { parseContentMessage } from "../src/protocol/messages";
+import { installChromeFake } from "./support/chrome-fake";
 
 type TestPort = {
   port: chrome.runtime.Port;
@@ -290,5 +292,46 @@ describe("createContentPort", () => {
     const parsed = parseContentMessage(hello);
     expect(parsed).not.toBeNull();
     expect(parsed?.type === "content.hello" && parsed.url.length).toBe(4096);
+  });
+});
+
+describe("the content script entry", () => {
+  const globals = globalThis as Record<string, unknown>;
+  let uninstall: (() => void) | undefined;
+  beforeEach(() => {
+    GlobalRegistrator.register({ url: "https://app.example.test/page" });
+  });
+  afterEach(() => {
+    uninstall?.();
+    uninstall = undefined;
+    Reflect.deleteProperty(globals, "__openbotRecorderActive");
+    Reflect.deleteProperty(globals, "__openbotRecorderContent");
+    GlobalRegistrator.unregister();
+  });
+
+  test("a frame injected with the active flag captures before its port answers", async () => {
+    const fake = installChromeFake();
+    uninstall = () => fake.uninstall();
+    const received: ContentToBackground[] = [];
+    chrome.runtime.onConnect.addListener((port) => {
+      // The service worker never answers: nothing but the frame's own flag can have started the capture.
+      port.onMessage.addListener((m: ContentToBackground) => received.push(m));
+    });
+    globals.__openbotRecorderActive = "d1";
+    document.body.innerHTML = `<button id="save">Save</button>`;
+
+    await import("../src/content/index");
+    const click = new MouseEvent("click", { bubbles: true, button: 0 });
+    Object.defineProperty(click, "isTrusted", { value: true });
+    document.getElementById("save")?.dispatchEvent(click);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(received[0]).toMatchObject({ type: "content.hello", top: true });
+    const step = received.find((m) => m.type === "content.step");
+    expect(step).toMatchObject({
+      type: "content.step",
+      action: { kind: "click", target: { role: "button", name: "Save" } },
+    });
+    expect(globals.__openbotRecorderContent).toBe(true);
   });
 });
