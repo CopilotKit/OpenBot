@@ -563,7 +563,10 @@ test("a refused attach on a real site falls back to page capture", async () => {
   fake.debugger.refuseAttach = "Cannot attach to this target.";
   expect(await capture.start(7, "https://crm.example.test/")).toBe("page");
   expect(fallbackCalls).toEqual(["start 7"]);
-  expect(statuses.at(-1)?.[0]).toBe("page");
+  expect(statuses.at(-1)).toEqual([
+    "page",
+    "Chrome refused its debugger here.",
+  ]);
 });
 
 test("a refused attach with no page capture either is off, with Chrome's reason", async () => {

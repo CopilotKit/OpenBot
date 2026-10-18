@@ -43,8 +43,8 @@ export type NetworkCapture = {
 const WAITING = "Network calls are recorded once this tab opens a website.";
 const CANCELLED =
   "You closed Chrome's debugging bar, so network calls are no longer recorded.";
-const PAGE =
-  "Chrome refused its debugger here, so the Recorder records the page's own fetch and XHR calls.";
+/** The popup's Network row already says the page's own calls are captured: this says why. */
+const PAGE = "Chrome refused its debugger here.";
 const refusedSentence = (message: string) =>
   `Chrome would not let the Recorder record network calls here (${message}).`;
 
