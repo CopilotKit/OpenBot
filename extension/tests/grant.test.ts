@@ -58,8 +58,12 @@ describe("classifyGrantError, one assertion per pass row of the table", () => {
   });
 
   test("row 4: OpenBot's not found is parked, with a sentence about the recording's Bot", () => {
-    const r = TRAJECTORY_GATE_REFUSALS.notOpen;
-    const v = park(classifyGrantError(r.status, r));
+    const b = body(
+      404,
+      "NOT_FOUND",
+      "This trajectory belongs to another recording.",
+    );
+    const v = park(classifyGrantError(b.status, b.body));
     expect(v.hint).toBe(
       "Learning capture is off: OpenBot does not offer you this recording's Bot any more.",
     );
