@@ -3,7 +3,7 @@ import { bodyLimit } from "hono/body-limit";
 import type { AppVariables } from "../auth/guards";
 import type { DemonstrationRecorder } from "./recording";
 import { parseDemonstrationSchedule } from "./schedule";
-import type { DemonstrationStore } from "./store";
+import { DEMONSTRATION_PAGE_SIZE, type DemonstrationStore } from "./store";
 import { DemonstrationNotFoundError, DemonstrationRefusedError } from "./types";
 export function createDemonstrationRoutes(
   store: DemonstrationStore,
@@ -30,14 +30,26 @@ export function createDemonstrationRoutes(
       503,
     );
   });
-  routes.get("/", async (context) =>
-    context.json({
-      demonstrations: await store.list(
-        context.var.actor.id,
-        context.req.query("botId") ?? "",
-      ),
-    }),
-  );
+  routes.get("/", async (context) => {
+    const beforeText = context.req.query("before");
+    const before = beforeText === undefined ? undefined : new Date(beforeText);
+    if (before && Number.isNaN(before.getTime()))
+      throw new DemonstrationRefusedError(
+        "The time to list recordings before could not be read.",
+      );
+    const demonstrations = await store.list(
+      context.var.actor.id,
+      context.req.query("botId") ?? "",
+      { before },
+    );
+    return context.json({
+      demonstrations,
+      nextBefore:
+        demonstrations.length === DEMONSTRATION_PAGE_SIZE
+          ? (demonstrations.at(-1)?.createdAt.toISOString() ?? null)
+          : null,
+    });
+  });
   routes.post("/", async (context) => {
     const input = await body(context.req.raw);
     if (typeof input.botId !== "string" || typeof input.title !== "string")

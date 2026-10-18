@@ -4,9 +4,10 @@ import type {
   ExtensionDemonstration,
   LearningSpaceState,
 } from "@openbot/shared/recorder-api";
-import { and, desc, eq, getTableColumns, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, getTableColumns, isNull, lt, sql } from "drizzle-orm";
 import type { Database } from "../db/client";
 import {
+  demonstrationMedia,
   demonstrationSteps,
   demonstrations,
   demonstrationTrajectories,
@@ -26,6 +27,8 @@ import {
 } from "./types";
 
 type DemonstrationRow = typeof demonstrations.$inferSelect;
+/** How many recordings one page of the list holds. */
+export const DEMONSTRATION_PAGE_SIZE = 30;
 /** The ten-minute bound as a database interval, so expiry uses the database clock. */
 const limit = () =>
   sql`(${DEMONSTRATION_MAX_DURATION_MS}::integer * interval '1 millisecond')`;
@@ -101,20 +104,53 @@ export function createDemonstrationStore(database: Database) {
   return {
     get,
     expireOverdue,
-    async list(ownerUserId: string, botId: string) {
+    /**
+     * A page of this Bot's recordings as summaries, newest first: every column but the step list, with
+     * the step count, the newest trajectory's Learning state and the completed media computed in SQL, so
+     * a list never carries (or polls) a recording's whole step list. Only rows created before `before`
+     * when it is given.
+     */
+    async list(
+      ownerUserId: string,
+      botId: string,
+      { before }: { before?: Date } = {},
+    ) {
       await expireOverdue(ownerUserId);
+      const { actions: _actions, ...columns } = getTableColumns(demonstrations);
+      // Qualified by hand: drizzle prints a single-table select's columns bare, and the subqueries have their own "id".
+      const outerId = sql.raw('"demonstrations"."id"');
       const rows = await database
-        .select()
+        .select({
+          ...columns,
+          actionCount: sql<number>`(case when ${demonstrations.source} = 'extension' and ${demonstrations.status} = 'recording' then ${demonstrations.stepCount} else jsonb_array_length(${demonstrations.actions}) end)::integer`,
+          learningState: sql<
+            LearningSpaceState["state"] | null
+          >`(select ${demonstrationTrajectories.learningState} from ${demonstrationTrajectories} where ${demonstrationTrajectories.demonstrationId} = ${outerId} order by ${demonstrationTrajectories.createdAt} desc limit 1)`,
+          media: sql<
+            { id: string; kind: "screen" | "audio" | "network" }[]
+          >`coalesce((select jsonb_agg(jsonb_build_object('id', ${demonstrationMedia.id}, 'kind', ${demonstrationMedia.kind}) order by ${demonstrationMedia.createdAt}) from ${demonstrationMedia} where ${demonstrationMedia.demonstrationId} = ${outerId} and ${demonstrationMedia.completedAt} is not null), '[]'::jsonb)`,
+        })
         .from(demonstrations)
         .where(
           and(
             eq(demonstrations.ownerUserId, ownerUserId),
             eq(demonstrations.botId, botId),
+            before ? lt(demonstrations.createdAt, before) : undefined,
           ),
         )
         .orderBy(desc(demonstrations.createdAt))
-        .limit(30);
-      return rows.map(present);
+        .limit(DEMONSTRATION_PAGE_SIZE);
+      return rows.map((row) => {
+        const extension = row.source === "extension";
+        return {
+          ...row,
+          expiresAt: extension ? null : demonstrationExpiresAt(row.createdAt),
+          maxDurationMs: extension ? null : DEMONSTRATION_MAX_DURATION_MS,
+          reachedTimeLimit: extension
+            ? false
+            : reachedDemonstrationTimeLimit(row),
+        };
+      });
     },
     async active(ownerUserId: string, botId: string) {
       await expireOverdue(ownerUserId);
