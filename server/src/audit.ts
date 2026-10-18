@@ -569,6 +569,13 @@ export const auditEventTypes = [
   "recorder.connect_refused",
   /* A connection ended; payload `reason` is replaced (the same copy connected again), disconnected or revoked. */
   "recorder.revoked",
+  /*
+   * The capture pass (the runtime's trajectory/connect) turned a caller away: an id that is not a UUID, no
+   * sign-in or a bearer that no longer resolves, no role, the organization unable to answer, or a recording
+   * that is not the person's own open one. Target the trajectory id; payload `reason`. At most one row per
+   * person, trajectory and reason a minute per replica.
+   */
+  "recorder.trajectory_refused",
 ] as const;
 
 export type AuditEventType = (typeof auditEventTypes)[number];
