@@ -1,8 +1,4 @@
-import {
-  RECORDER_SIGNED_OUT,
-  recorderPaths,
-  type TrajectoryGrant,
-} from "@openbot/shared/recorder-api";
+import type { TrajectoryGrant } from "@openbot/shared/recorder-api";
 import type { CapturedEvent } from "@openbot/shared/recorder-masking";
 import {
   type BackgroundToOffscreen,
@@ -11,7 +7,6 @@ import {
   PORT_OFFSCREEN,
   type StreamSession,
 } from "../protocol/messages";
-import { OpenBotError, openbotJson } from "../shared/openbot-client";
 import type { DrainRecord } from "../shared/storage";
 import { fetchGrant, GrantError } from "./grant";
 import {
@@ -45,7 +40,6 @@ export type OffscreenControllerDeps = {
   rolloverAt?: number;
 };
 
-const HEARTBEAT_MS = 30_000;
 const RECONNECT_DELAYS_MS = [500, 1_000, 2_000, 4_000];
 /** The sequencer's last issued seq, in the outbox's meta store. */
 const SEQ_META_KEY = "seq";
@@ -53,12 +47,10 @@ const SEQ_META_KEY = "seq";
 const DELIVER_ONCE_BACK = new Set<OffscreenToBackground["type"]>([
   "offscreen.trajectory",
   "offscreen.stopped",
-  "offscreen.rotated",
   "offscreen.kept",
   "offscreen.done",
   "offscreen.signed-out",
 ]);
-const SIGNED_OUT_SENTENCE = "This browser is signed out of OpenBot.";
 
 const realTimers: Timers = {
   set: (fn, ms) => setTimeout(fn, ms),
@@ -72,9 +64,9 @@ type Stream = {
   /** The Bot its recordings are for, named on every pass (Start over keeps the Bot). */
   botId: string;
   /** Recordings it still sends; one leaves when it is done, replaced by Start over, or discarded. */
-  demonstrations: Set<string>;
+  recordings: Set<string>;
   signedOut: boolean;
-  /** The bearer the request OpenBot answered "signed out" to used. */
+  /** The bearer the pass OpenBot answered "signed out" to used. */
   failedToken?: string;
   streamer?: Streamer;
 };
@@ -82,7 +74,7 @@ type Stream = {
 /** The recording this document records now (offscreen.start or offscreen.resume). */
 type Live = {
   session: StreamSession;
-  demonstrationId: string;
+  recordingId: string;
   /** The trajectory its status is reported for: the service worker shows only statuses of the recording's trajectories. */
   trajectoryId: string;
   capture: Partial<CaptureStatus>;
@@ -201,7 +193,7 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
   }
 
   const streams: Stream[] = [];
-  /** Which recording each trajectory belongs to, for OpenBot's routes; kept in memory, since a discard clears the meta. */
+  /** Which recording each trajectory belongs to; kept in memory, since a discard clears the meta. */
   const owners = new Map<string, string>();
   /** Tokens OpenBot answered "signed out" for, with the guard's reason: nothing more is sent with them. */
   const signedOutTokens = new Map<string, SignedOutReason>();
@@ -218,49 +210,30 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
     });
   }
 
-  const streaming = (demonstrationId: string) =>
+  const streaming = (recordingId: string) =>
     streams.find(
       (stream) =>
         stream.streamer &&
         !stream.signedOut &&
-        stream.demonstrations.has(demonstrationId),
+        stream.recordings.has(recordingId),
     );
 
-  function finished(stream: Stream, demonstrationId: string): void {
-    stream.demonstrations.delete(demonstrationId);
+  function finished(stream: Stream, recordingId: string): void {
+    stream.recordings.delete(recordingId);
     const index = streams.indexOf(stream);
-    if (
-      stream.demonstrations.size === 0 &&
-      live?.stream !== stream &&
-      index >= 0
-    )
+    if (stream.recordings.size === 0 && live?.stream !== stream && index >= 0)
       streams.splice(index, 1);
-  }
-
-  async function ownerOf(
-    outbox: Outbox,
-    trajectoryId: string,
-  ): Promise<string> {
-    const known = owners.get(trajectoryId);
-    if (known) return known;
-    const meta = await outbox.getMeta<TrajectoryMeta>(
-      trajectoryMetaKey(trajectoryId),
-    );
-    if (!meta)
-      throw new Error(`No recording is known for trajectory ${trajectoryId}.`);
-    owners.set(trajectoryId, meta.demonstrationId);
-    return meta.demonstrationId;
   }
 
   /** A resumed recording's trajectories, rolled-over ones included, as its outbox links them. */
   async function rememberChain(
     outbox: Outbox,
     trajectoryId: string,
-    demonstrationId: string,
+    recordingId: string,
   ): Promise<void> {
     let id: string | undefined = trajectoryId;
     while (id !== undefined && !owners.has(id)) {
-      owners.set(id, demonstrationId);
+      owners.set(id, recordingId);
       id = (await outbox.getMeta<TrajectoryMeta>(trajectoryMetaKey(id)))?.next;
     }
   }
@@ -290,68 +263,6 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
     } catch (error) {
       if (error instanceof GrantError && error.verdict.kind === "signed-out")
         stream.failedToken = token;
-      throw error;
-    }
-  }
-
-  const signedOutError = (reason: SignedOutReason) =>
-    new OpenBotError(401, SIGNED_OUT_SENTENCE, {
-      error: SIGNED_OUT_SENTENCE,
-      code: RECORDER_SIGNED_OUT,
-      reason,
-    });
-
-  async function register(
-    stream: Stream,
-    outbox: Outbox,
-    trajectoryId: string,
-  ): Promise<void> {
-    const { openbotUrl, token } = stream.target;
-    const reason = signedOutReason(stream, token);
-    if (reason) throw signedOutError(reason);
-    const demonstrationId = await ownerOf(outbox, trajectoryId);
-    try {
-      await openbotJson(
-        { openbotUrl, token },
-        recorderPaths.trajectories(demonstrationId),
-        { body: { trajectoryId } },
-      );
-    } catch (error) {
-      if (error instanceof OpenBotError && error.signedOut)
-        stream.failedToken = token;
-      throw error;
-    }
-  }
-
-  async function closeTrajectory(
-    stream: Stream,
-    outbox: Outbox,
-    trajectoryId: string,
-  ): Promise<void> {
-    const { openbotUrl, token } = stream.target;
-    const reason = signedOutTokens.get(token);
-    if (reason) throw signedOutError(reason);
-    const demonstrationId = await ownerOf(outbox, trajectoryId);
-    try {
-      await openbotJson(
-        { openbotUrl, token },
-        recorderPaths.closeTrajectory(demonstrationId, trajectoryId),
-        { method: "POST" },
-      );
-    } catch (error) {
-      // OpenBot's own 404: it no longer knows the recording (a Record that could not start is deleted at once), so
-      // nothing is left to close and the recording can report done.
-      if (
-        error instanceof OpenBotError &&
-        error.status === 404 &&
-        error.body !== null
-      ) {
-        console.error(
-          "Recorder: OpenBot no longer knows a trajectory it was asked to close",
-          error,
-        );
-        return;
-      }
       throw error;
     }
   }
@@ -394,13 +305,13 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
     const target = live;
     const recording =
       target?.stream === stream &&
-      target.demonstrationId === report.demonstrationId &&
+      target.recordingId === report.recordingId &&
       !target.ending;
     // While it still records, its status says so.
     if (recording) return;
     post({
       type: "offscreen.kept",
-      demonstrationId: report.demonstrationId,
+      recordingId: report.recordingId,
       reason: report.reason,
       parked: report.parked,
       events: report.events,
@@ -419,16 +330,12 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
   ): Promise<Stream & { streamer: Streamer }> {
     const { outbox, sequencer } = await storage();
     if (session.resume)
-      await rememberChain(
-        outbox,
-        session.trajectoryId,
-        session.demonstrationId,
-      );
-    else owners.set(session.trajectoryId, session.demonstrationId);
+      await rememberChain(outbox, session.trajectoryId, session.recordingId);
+    else owners.set(session.trajectoryId, session.recordingId);
     const stream: Stream = {
       target: { ...target },
       botId,
-      demonstrations: new Set([session.demonstrationId]),
+      recordings: new Set([session.recordingId]),
       signedOut: false,
     };
     streams.push(stream);
@@ -437,17 +344,13 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
     try {
       const streamer = await createStreamer(session, {
         fetchGrant: (trajectoryId) => pass(stream, trajectoryId),
-        registerTrajectory: (trajectoryId) =>
-          register(stream, outbox, trajectoryId),
-        closeTrajectory: (trajectoryId) =>
-          closeTrajectory(stream, outbox, trajectoryId),
         allowedGatewayUrls: options.allowedGatewayUrls,
         outbox,
         sequencer,
         status: (update) => streamerStatus(stream, update),
-        onTrajectory: (trajectoryId, demonstrationId) => {
-          owners.set(trajectoryId, demonstrationId);
-          post({ type: "offscreen.trajectory", demonstrationId, trajectoryId });
+        onTrajectory: (trajectoryId, recordingId) => {
+          owners.set(trajectoryId, recordingId);
+          post({ type: "offscreen.trajectory", recordingId, trajectoryId });
         },
         onSignedOut: (reason) => signedOut(stream, reason),
         onKept: (report) => kept(stream, report),
@@ -466,18 +369,6 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
   }
 
   // ---- The live recording ------------------------------------------------------------------------
-
-  let heartbeat: unknown;
-  function beat(): void {
-    heartbeat = timers.set(() => {
-      post({ type: "offscreen.heartbeat" });
-      beat();
-    }, HEARTBEAT_MS);
-  }
-  function stopBeat(): void {
-    if (heartbeat !== undefined) timers.clear(heartbeat);
-    heartbeat = undefined;
-  }
 
   function deliver(target: Live, event: CapturedEvent): void {
     const streamer = target.stream?.streamer;
@@ -502,7 +393,7 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
   async function begin(target: Live, resume: boolean): Promise<void> {
     const { session } = target;
     try {
-      const existing = streaming(session.demonstrationId);
+      const existing = streaming(session.recordingId);
       if (existing) {
         existing.target.token = session.token;
         target.stream = existing;
@@ -512,7 +403,7 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
         {
           trajectoryId: session.trajectoryId,
           title: session.title,
-          demonstrationId: session.demonstrationId,
+          recordingId: session.recordingId,
           version: session.version,
           ...(resume ? { resume: true } : {}),
         },
@@ -535,7 +426,7 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
   function startLive(session: StreamSession, resume: boolean): void {
     const target: Live = {
       session,
-      demonstrationId: session.demonstrationId,
+      recordingId: session.recordingId,
       trajectoryId: session.trajectoryId,
       capture: {},
       stream: null,
@@ -545,8 +436,6 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
       stopped: null,
     };
     live = target;
-    stopBeat();
-    beat();
     serially(
       () => begin(target, resume),
       resume ? "resume a recording" : "start a recording",
@@ -555,7 +444,7 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
 
   async function rotate(
     target: Live,
-    demonstrationId: string,
+    recordingId: string,
     trajectoryId: string,
   ): Promise<void> {
     try {
@@ -567,26 +456,22 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
         );
         return;
       }
-      const previous = target.demonstrationId;
-      owners.set(trajectoryId, demonstrationId);
-      stream.demonstrations.add(demonstrationId);
+      const previous = target.recordingId;
+      owners.set(trajectoryId, recordingId);
+      stream.recordings.add(recordingId);
       // Switched before the streamer reports anything for it: the replaced recording's kept events are offscreen.kept.
-      target.demonstrationId = demonstrationId;
+      target.recordingId = recordingId;
       target.trajectoryId = trajectoryId;
       const rotated = streamer.rotate({
-        demonstrationId,
+        recordingId,
         trajectoryId,
         title: target.session.title,
       });
       void rotated.then(
         () => {
           finished(stream, previous);
-          post({
-            type: "offscreen.rotated",
-            previousDemonstrationId: previous,
-          });
-          // Its trajectories are drained and closed: nothing is left of it.
-          post({ type: "offscreen.done", demonstrationId: previous });
+          // Its trajectories are drained and finished, its failed outcome included: nothing is left of it.
+          post({ type: "offscreen.done", recordingId: previous });
         },
         (error) => {
           console.error(
@@ -604,13 +489,12 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
   async function stop(
     target: Live,
     outcome: "succeeded" | "failed",
-    stoppedFrom: "openbot" | undefined,
   ): Promise<void> {
     if (target.stopped) {
       // The service worker restarted mid-Stop and asks again.
       post({
         type: "offscreen.stopped",
-        demonstrationId: target.demonstrationId,
+        recordingId: target.recordingId,
         trajectoryIds: target.stopped.trajectoryIds,
       });
       return;
@@ -623,24 +507,21 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
         "Recorder: Stop arrived for a recording whose streamer never started",
       );
       target.ending = true;
-      const demonstrationId = target.demonstrationId;
+      const recordingId = target.recordingId;
       target.stopped = { trajectoryIds: [] };
-      post({ type: "offscreen.stopped", demonstrationId, trajectoryIds: [] });
-      post({ type: "offscreen.done", demonstrationId });
+      post({ type: "offscreen.stopped", recordingId, trajectoryIds: [] });
+      post({ type: "offscreen.done", recordingId });
       return;
     }
     target.ending = true;
-    const demonstrationId = target.demonstrationId;
-    const { trajectoryIds } = await streamer.stop(
-      outcome,
-      stoppedFrom ? { stoppedFrom } : undefined,
-    );
+    const recordingId = target.recordingId;
+    const { trajectoryIds } = await streamer.stop(outcome);
     target.stopped = { trajectoryIds };
-    post({ type: "offscreen.stopped", demonstrationId, trajectoryIds });
+    post({ type: "offscreen.stopped", recordingId, trajectoryIds });
     void streamer.drained().then(
       () => {
-        finished(stream, demonstrationId);
-        post({ type: "offscreen.done", demonstrationId });
+        finished(stream, recordingId);
+        post({ type: "offscreen.done", recordingId });
       },
       (error) => {
         console.error(
@@ -660,8 +541,8 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
     // The streamer queues the interrupted outcome only when none was queued.
     await stream.streamer.stop("failed", { reason: "interrupted" });
     await stream.streamer.drained();
-    finished(stream, drain.demonstrationId);
-    post({ type: "offscreen.done", demonstrationId: drain.demonstrationId });
+    finished(stream, drain.recordingId);
+    post({ type: "offscreen.done", recordingId: drain.recordingId });
   }
 
   async function recover(
@@ -672,7 +553,7 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
       token: message.token,
     };
     for (const drain of message.drains) {
-      const current = streaming(drain.demonstrationId);
+      const current = streaming(drain.recordingId);
       if (current) {
         // Never a second streamer for one recording: the one sending it goes on, with the new connection's token.
         if (current.target.openbotUrl === target.openbotUrl)
@@ -681,24 +562,24 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
       }
       for (const stale of streams.filter(
         (stream) =>
-          stream.signedOut && stream.demonstrations.has(drain.demonstrationId),
+          stream.signedOut && stream.recordings.has(drain.recordingId),
       ))
-        finished(stale, drain.demonstrationId);
+        finished(stale, drain.recordingId);
       const [first] = drain.trajectoryIds;
       if (first === undefined) {
         console.error(
           "Recorder: a kept recording has no trajectory to recover",
-          drain.demonstrationId,
+          drain.recordingId,
         );
         continue;
       }
       for (const trajectoryId of drain.trajectoryIds)
-        owners.set(trajectoryId, drain.demonstrationId);
+        owners.set(trajectoryId, drain.recordingId);
       const stream = await openStream(
         {
           trajectoryId: first,
           title: drain.title,
-          demonstrationId: drain.demonstrationId,
+          recordingId: drain.recordingId,
           version: chrome.runtime.getManifest().version,
           resume: true,
           recover: true,
@@ -720,46 +601,43 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
 
   async function clearOutbox(
     outbox: Outbox,
-    demonstrationId: string,
+    recordingId: string,
   ): Promise<void> {
     for (const trajectoryId of await outbox.trajectories()) {
       const meta = await outbox.getMeta<TrajectoryMeta>(
         trajectoryMetaKey(trajectoryId),
       );
-      const owner = meta?.demonstrationId ?? owners.get(trajectoryId);
-      if (owner === demonstrationId) await outbox.clear(trajectoryId);
+      const owner = meta?.recordingId ?? owners.get(trajectoryId);
+      if (owner === recordingId) await outbox.clear(trajectoryId);
     }
   }
 
-  /** Only on the person's own "Discard kept events" or Disconnect. */
-  async function discard(demonstrationIds: string[]): Promise<void> {
-    const wanted = new Set(demonstrationIds);
+  /** The person's own "Discard kept events" or Disconnect, or a Record that never went live. */
+  async function discard(recordingIds: string[]): Promise<void> {
+    const wanted = new Set(recordingIds);
     const dropped: Streamer[] = [];
     for (const stream of [...streams]) {
-      const own = [...stream.demonstrations].filter((id) => wanted.has(id));
+      const own = [...stream.recordings].filter((id) => wanted.has(id));
       if (own.length === 0) continue;
-      if (own.length === stream.demonstrations.size) {
+      if (own.length === stream.recordings.size) {
         if (stream.streamer) dropped.push(stream.streamer);
-        stream.demonstrations.clear();
+        stream.recordings.clear();
         streams.splice(streams.indexOf(stream), 1);
       } else {
         // It also sends a recording that goes on (Start over replaced the discarded one): only the discarded one's
         // events are cleared below.
-        for (const id of own) stream.demonstrations.delete(id);
+        for (const id of own) stream.recordings.delete(id);
       }
     }
-    if (live && wanted.has(live.demonstrationId)) {
-      stopBeat();
-      live = null;
-    }
+    if (live && wanted.has(live.recordingId)) live = null;
     const { outbox } = await storage();
-    // Closing the discarded trajectories in OpenBot can take a while: later messages do not wait for it.
+    // Later messages do not wait for the clearing.
     void (async () => {
       await Promise.all(dropped.map((streamer) => streamer.discard()));
-      for (const demonstrationId of demonstrationIds) {
-        await clearOutbox(outbox, demonstrationId);
+      for (const recordingId of recordingIds) {
+        await clearOutbox(outbox, recordingId);
         // The service worker closes the document once nothing it holds is still sending.
-        post({ type: "offscreen.done", demonstrationId });
+        post({ type: "offscreen.done", recordingId });
       }
     })().catch((error) => {
       console.error("Recorder: kept recordings could not be discarded", error);
@@ -792,27 +670,19 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
         }
         target.holds += 1;
         serially(
-          () => rotate(target, message.demonstrationId, message.trajectoryId),
+          () => rotate(target, message.recordingId, message.trajectoryId),
           "start over",
         );
         return;
       case "offscreen.stop":
-        // Heartbeats tell the service worker a recording is live; they end with it.
-        stopBeat();
         if (!target) return;
-        serially(
-          () => stop(target, message.outcome, message.stoppedFrom),
-          "stop the recording",
-        );
+        serially(() => stop(target, message.outcome), "stop the recording");
         return;
       case "offscreen.recover":
         serially(() => recover(message), "recover kept recordings");
         return;
       case "offscreen.discard":
-        serially(
-          () => discard(message.demonstrationIds),
-          "discard kept recordings",
-        );
+        serially(() => discard(message.recordingIds), "discard recordings");
         return;
     }
   }

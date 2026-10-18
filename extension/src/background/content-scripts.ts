@@ -4,15 +4,15 @@ import type { BackgroundToContent } from "../protocol/messages";
 
 /** Runs in the page's ISOLATED world before content.js, so the script starts capturing the moment it loads, before its
  * port says anything (the injection race, Task 9). Chrome serializes it: it must use nothing but its argument. */
-function markRecordingActive(demonstrationId: string): void {
+function markRecordingActive(recordingId: string): void {
   (globalThis as { __openbotRecorderActive?: string }).__openbotRecorderActive =
-    demonstrationId;
+    recordingId;
 }
 
 /** The active flag, then content.js, both as soon as possible; every frame of the tab when `frameIds` is absent. */
 export async function injectRecordingScripts(
   tabId: number,
-  demonstrationId: string,
+  recordingId: string,
   frameIds?: number[],
 ): Promise<void> {
   const target =
@@ -20,7 +20,7 @@ export async function injectRecordingScripts(
   await chrome.scripting.executeScript({
     target,
     func: markRecordingActive,
-    args: [demonstrationId],
+    args: [recordingId],
     injectImmediately: true,
   });
   await chrome.scripting.executeScript({

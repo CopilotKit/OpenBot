@@ -6,11 +6,11 @@ const MAX_SHOWN = 999;
 
 function badgeText(state: RecorderState): string {
   if (state.phase !== "recording") return "";
-  if (state.steps === 0) return "REC";
-  return state.steps > MAX_SHOWN ? `${MAX_SHOWN}+` : String(state.steps);
+  if (state.actions === 0) return "REC";
+  return state.actions > MAX_SHOWN ? `${MAX_SHOWN}+` : String(state.actions);
 }
 
-/** The toolbar badge: the step count while recording, empty otherwise. */
+/** The toolbar badge: the action count while recording, empty otherwise. */
 export async function showBadge(state: RecorderState): Promise<void> {
   const text = badgeText(state);
   if (text)

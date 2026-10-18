@@ -16,7 +16,6 @@ import {
   PORT_CONTENT,
   PORT_OFFSCREEN,
 } from "../src/protocol/messages";
-import { openRecorderDatabase } from "../src/shared/database";
 import { type ChromeFake, installChromeFake } from "./support/chrome-fake";
 
 let fake: ChromeFake;
@@ -438,18 +437,7 @@ test("importing the service worker's index registers each listener once and clos
 });
 
 test("a recorder.page-network event the fallback accepts reaches the network capture, not the offscreen document", async () => {
-  const globals = globalThis as unknown as {
-    indexedDB: IDBFactory;
-    IDBKeyRange: typeof FakeIDBKeyRange;
-  };
-  const saved = {
-    indexedDB: globals.indexedDB,
-    IDBKeyRange: globals.IDBKeyRange,
-  };
-  globals.indexedDB = new IDBFactory();
-  globals.IDBKeyRange = FakeIDBKeyRange;
-  const dbName = `router-test-${Math.random()}`;
-  const demonstrationId = "demo-9";
+  const recordingId = "rec-9";
   const trajectoryId = "00000000-0000-4000-8000-000000000009";
   const startedAt = 1_800_000_000_000;
   const event: CapturedEvent = {
@@ -472,7 +460,7 @@ test("a recorder.page-network event the fallback accepts reaches the network cap
       connectedAt: startedAt,
     });
     fake.storage.local.set("activeRecording", {
-      demonstrationId,
+      recordingId,
       botId: "bot-1",
       title: "Update deal",
       openbotUrl: "http://127.0.0.1:9",
@@ -480,25 +468,24 @@ test("a recorder.page-network event the fallback accepts reaches the network cap
       userName: "Ada",
       trajectoryIds: [trajectoryId],
       startedAt,
-      discard: false,
     });
     fake.storage.session.set("recorder", {
       ...IDLE_STATE,
       phase: "recording",
-      demonstrationId,
+      recordingId,
       botId: "bot-1",
       title: "Update deal",
       tabIds: [7],
       topUrls: { "7": "https://crm.example.test/" },
       startedAt,
-      steps: 1,
+      actions: 1,
       capture: {
         intelligence: "streaming",
         network: "page",
       },
     });
     fake.storage.session.set("stream", {
-      demonstrationId,
+      recordingId,
       title: "Update deal",
       botId: "bot-1",
       openbotUrl: "http://127.0.0.1:9",
@@ -532,16 +519,14 @@ test("a recorder.page-network event the fallback accepts reaches the network cap
       }),
       acceptPageNetworkEvent: (received) => {
         asked.push(received);
-        return { event: received, step: null };
+        return received;
       },
-      recoverNetworkBodies: async () => {},
       readPolicy: async () => ({
         openbotUrl: null,
         openbotUrlInvalid: false,
         allowedIntelligenceUrls: null,
       }),
       hasHostPermission: async () => true,
-      openDatabase: () => openRecorderDatabase(dbName),
     });
     installRouter(handlers);
     document = fake.connectFrom(PORT_OFFSCREEN, {
@@ -570,7 +555,5 @@ test("a recorder.page-network event the fallback accepts reaches the network cap
     ).toEqual([]);
   } finally {
     document?.disconnect();
-    globals.indexedDB = saved.indexedDB;
-    globals.IDBKeyRange = saved.IDBKeyRange;
   }
 });

@@ -1,3 +1,6 @@
+// A service-worker restart: Chrome stops the worker and starts it again while storage.session, storage.local and the
+// offscreen document (its outbox included) stay. The controller finishes what the old worker began: a Stop, a Record,
+// or the live recording.
 import {
   afterAll,
   afterEach,
@@ -7,9 +10,7 @@ import {
   spyOn,
   test,
 } from "bun:test";
-import type { DemonstrationAction } from "@openbot/shared/demonstration-schema";
 import type { CapturedEvent } from "@openbot/shared/recorder-masking";
-import { IDBKeyRange as FakeIDBKeyRange, IDBFactory } from "fake-indexeddb";
 import type { NetworkMode } from "../src/background/network";
 import {
   installRecording,
@@ -27,12 +28,6 @@ import {
   type RecorderState,
   type StreamSession,
 } from "../src/protocol/messages";
-import {
-  openRecorderDatabase,
-  requestToPromise,
-  stepsNextKey,
-  tx,
-} from "../src/shared/database";
 import { isRecordablePage } from "../src/shared/origin";
 import type { DrainRecord } from "../src/shared/storage";
 import {
@@ -49,8 +44,6 @@ const OFFSCREEN_SENDER = {
 const ada = { id: "p1", name: "Ada", email: "ada@example.test" };
 const DEAL = "https://crm.example.test/deals/42";
 const NEXT_DEAL = "https://crm.example.test/deals/43";
-const STOPPED_IN_OPENBOT =
-  "This recording was stopped in OpenBot. Everything until then was saved.";
 const SIGNED_OUT =
   "This browser was disconnected from OpenBot. Your recording stopped, and everything in it is kept in this browser until you connect again.";
 const START_FAILED = "The recording could not start. Try again.";
@@ -58,11 +51,6 @@ const START_FAILED = "The recording could not start. Try again.";
 const SECRET = "4111111111111111";
 const SECRET_DIGEST = "ab".repeat(32);
 
-const click = (name: string): DemonstrationAction => ({
-  kind: "click",
-  url: DEAL,
-  target: { role: "button", name, sensitive: false },
-});
 const capturedEvent = (name: string, value: unknown): CapturedEvent => ({
   type: "CUSTOM",
   name,
@@ -71,17 +59,10 @@ const capturedEvent = (name: string, value: unknown): CapturedEvent => ({
 });
 
 // ---- The fake OpenBot -------------------------------------------------------------------------
+//
+// Nothing a restart finishes asks OpenBot anything: every request is recorded so the tests can say so.
 
-type Call = { method: string; path: string; body: unknown };
-type Batch = { fromIndex: number; actions: DemonstrationAction[] };
-
-const openbot = {
-  calls: [] as Call[],
-  held: new Map<string, number>(),
-  nextDemo: 0,
-  /** While set, stop answers wait for it. */
-  holdStop: null as Promise<void> | null,
-};
+const openbot = { calls: [] as string[] };
 
 let server: ReturnType<typeof Bun.serve>;
 let origin = "";
@@ -90,67 +71,14 @@ beforeAll(() => {
   server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
-    async fetch(request) {
-      const url = new URL(request.url);
-      const text = await request.text();
-      openbot.calls.push({
-        method: request.method,
-        path: url.pathname,
-        body: text ? JSON.parse(text) : undefined,
-      });
-      const { method } = request;
-      const demonstration = (id: string, status: string) => ({
-        id,
-        botId: "bot-1",
-        title: "Update deal",
-        source: "extension",
-        status,
-        actionCount: openbot.held.get(id) ?? 0,
-        learning: null,
-      });
-      if (method === "POST" && url.pathname === "/api/recorder/demonstrations")
-        return Response.json(
-          {
-            demonstration: demonstration(
-              `demo-${++openbot.nextDemo}`,
-              "recording",
-            ),
-          },
-          { status: 201 },
-        );
-      const match =
-        /^\/api\/recorder\/demonstrations\/([^/]+)(\/[a-z]+)?$/.exec(
-          url.pathname,
-        );
-      if (!match) return new Response("nope", { status: 404 });
-      const id = match[1] as string;
-      const rest = match[2];
-      if (method === "DELETE" && rest === undefined)
-        return new Response(null, { status: 204 });
-      if (method === "POST" && rest === "/trajectories")
-        return new Response(null, { status: 204 });
-      if (method === "POST" && rest === "/stop") {
-        if (openbot.holdStop) await openbot.holdStop;
-        return Response.json({ demonstration: demonstration(id, "stopped") });
-      }
-      if (method === "POST" && rest === "/actions") {
-        const batch = JSON.parse(text) as Batch;
-        const held = openbot.held.get(id) ?? 0;
-        if (batch.fromIndex !== held)
-          return Response.json({ error: "Gap.", count: held }, { status: 409 });
-        openbot.held.set(id, held + batch.actions.length);
-        return Response.json({ count: held + batch.actions.length });
-      }
-      return new Response("nope", { status: 404 });
+    fetch(request) {
+      openbot.calls.push(`${request.method} ${new URL(request.url).pathname}`);
+      return Response.json({ error: "Not found." }, { status: 404 });
     },
   });
   origin = server.url.origin;
 });
 afterAll(() => server.stop(true));
-
-const requests = () => openbot.calls.map((c) => `${c.method} ${c.path}`);
-const demoPath = (id: string, rest = "") =>
-  `/api/recorder/demonstrations/${id}${rest}`;
 
 // ---- Time, the offscreen document and the doubles -------------------------------------------
 
@@ -193,25 +121,13 @@ async function advance(ms: number) {
   }
   now = end;
 }
-function gate() {
-  let open = () => {};
-  const promise = new Promise<void>((resolve) => {
-    open = resolve;
-  });
-  return { promise, open: () => open() };
-}
 
 let fake: ChromeFake;
-type Indexed = { indexedDB?: IDBFactory; IDBKeyRange?: typeof FakeIDBKeyRange };
-const indexedGlobals = globalThis as unknown as Indexed;
-let savedIndexed: Indexed = {};
-let dbCounter = 0;
-let dbName = "";
 
 /** The offscreen document: it says ready on every port it opens, and answers offscreen.stop unless `holdStop` is set. */
 let doc: FakePort | null = null;
 let docSeen = 0;
-let docDemo = "";
+let docRecording = "";
 let holdStop = false;
 let heldStops: string[] = [];
 let docPoll: ReturnType<typeof setInterval> | undefined;
@@ -230,13 +146,13 @@ function answerAsDocument() {
       message.type === "offscreen.start" ||
       message.type === "offscreen.resume"
     )
-      docDemo = message.session.demonstrationId;
+      docRecording = message.session.recordingId;
     if (message.type === "offscreen.stop") {
-      if (holdStop) heldStops.push(docDemo);
+      if (holdStop) heldStops.push(docRecording);
       else
         doc.postMessage({
           type: "offscreen.stopped",
-          demonstrationId: docDemo,
+          recordingId: docRecording,
           trajectoryIds: [],
         });
     }
@@ -287,9 +203,8 @@ function doubles(): Partial<RecordingDeps> {
             JSON.stringify(event.value).replaceAll(SECRET, "[redacted]"),
           )
         : event.value;
-      return { event: { ...event, value }, step: null };
+      return { ...event, value };
     },
-    recoverNetworkBodies: async () => {},
     readPolicy: async () => ({
       openbotUrl: null,
       openbotUrlInvalid: false,
@@ -297,7 +212,6 @@ function doubles(): Partial<RecordingDeps> {
     }),
     hasHostPermission: async () => true,
     now: () => now,
-    openDatabase: () => openRecorderDatabase(dbName),
     timers: fakeTimers,
   };
 }
@@ -309,13 +223,12 @@ function startWorker() {
 }
 
 /** Chrome stops the service worker and starts it again: its listeners, timers and ports go, while storage.session,
- * storage.local, IndexedDB and the offscreen document stay. */
+ * storage.local and the offscreen document stay. */
 async function restartWorker() {
   await settle();
   fake.restartServiceWorker();
   timers = [];
   doc = null;
-  openbot.calls = [];
   startWorker();
 }
 
@@ -343,7 +256,7 @@ const contentPort = (tabId: number, url = DEAL) =>
     url,
   });
 
-async function startRecording(tabId = 7) {
+async function startRecording(tabId = 7): Promise<string> {
   fake.tabs.set(tabId, { id: tabId, url: DEAL } as chrome.tabs.Tab);
   const answer = await page({
     type: "page.record",
@@ -352,48 +265,24 @@ async function startRecording(tabId = 7) {
     tabId,
   });
   expect(answer).toEqual({ ok: true });
-  return `demo-${openbot.nextDemo}`;
+  return (await state()).recordingId ?? "";
 }
 
-async function storedSteps(demonstrationId: string) {
-  const db = await openRecorderDatabase(dbName);
-  try {
-    return await requestToPromise<{ action: DemonstrationAction }[]>(
-      db
-        .transaction("steps", "readonly")
-        .objectStore("steps")
-        .getAll(
-          IDBKeyRange.bound(
-            [demonstrationId, -Infinity],
-            [demonstrationId, Infinity],
-          ),
-        ),
-    );
-  } finally {
-    db.close();
-  }
-}
-
-/** A recording with a queued click besides its first step, then Stop, which the document has not answered yet. */
+/** A recording, then Stop, which the document has not answered yet. */
 async function recordThenStop() {
   const id = await startRecording(7);
-  contentPort(7).postMessage({ type: "content.step", action: click("Save") });
-  await until(
-    async () => (await storedSteps(id)).length === 2,
-    "two steps queued",
-  );
   holdStop = true;
   void page({ type: "page.stop" });
   await until(() => heldStops.length === 1, "the document heard the stop");
-  expect((await state()).stopping?.stage).toBe("draining");
+  expect((await state()).stopping).toEqual({ since: now });
   return id;
 }
 
 // ---- What a previous service worker persisted -----------------------------------------------
 
-const DEMO = "demo-9";
+const RECORDING = "rec-9";
 const seededRecord = (): DrainRecord => ({
-  demonstrationId: DEMO,
+  recordingId: RECORDING,
   botId: "bot-1",
   title: "Update deal",
   openbotUrl: origin,
@@ -401,10 +290,9 @@ const seededRecord = (): DrainRecord => ({
   userName: ada.name,
   trajectoryIds: ["00000000-0000-4000-8000-000000000009"],
   startedAt: now - 60_000,
-  discard: false,
 });
 
-/** Writes what a service worker that went away persisted for `demo-9`, with the document still open unless told. */
+/** Writes what a service worker that went away persisted for `rec-9`, with the document still open unless told. */
 function seed(
   recorder: Partial<RecorderState>,
   options: { activeRecording?: boolean; document?: boolean } = {},
@@ -414,59 +302,32 @@ function seed(
     fake.storage.local.set("activeRecording", active);
   fake.storage.session.set("recorder", {
     ...IDLE_STATE,
-    demonstrationId: DEMO,
+    recordingId: RECORDING,
     botId: "bot-1",
     title: "Update deal",
     tabIds: [7],
     topUrls: { "7": DEAL },
     startedAt: active.startedAt,
-    steps: 1,
-    capture: {
-      intelligence: "streaming",
-      network: "debugger",
-    },
+    actions: 3,
+    capture: { intelligence: "streaming", network: "debugger" },
     ...recorder,
   });
   fake.storage.session.set("stream", {
-    demonstrationId: DEMO,
+    recordingId: RECORDING,
     title: "Update deal",
     botId: "bot-1",
     openbotUrl: origin,
     token: "obr_one",
-    trajectoryId: active.trajectoryIds[0],
+    trajectoryId: active.trajectoryIds[0] ?? "",
     startedAt: active.startedAt,
     allowedIntelligenceUrls: null,
     version: "0.3.0",
   } satisfies StreamSession);
   fake.offscreen.open = options.document ?? true;
-  docDemo = DEMO;
-}
-
-async function queueSteps(
-  demonstrationId: string,
-  actions: DemonstrationAction[],
-) {
-  const db = await openRecorderDatabase(dbName);
-  try {
-    await tx(db, ["steps", "meta"], "readwrite", (t) => {
-      actions.forEach((action, index) => {
-        t.objectStore("steps").put({ demonstrationId, index, action });
-      });
-      t.objectStore("meta").put(actions.length, stepsNextKey(demonstrationId));
-    });
-  } finally {
-    db.close();
-  }
+  docRecording = RECORDING;
 }
 
 beforeEach(() => {
-  savedIndexed = {
-    indexedDB: indexedGlobals.indexedDB,
-    IDBKeyRange: indexedGlobals.IDBKeyRange,
-  };
-  indexedGlobals.indexedDB = new IDBFactory();
-  indexedGlobals.IDBKeyRange = FakeIDBKeyRange;
-  dbName = `resume-test-${++dbCounter}`;
   fake = installChromeFake({
     extensionId: EXTENSION_ID,
     manifestVersion: "0.3.0",
@@ -479,16 +340,13 @@ beforeEach(() => {
     doc = null;
   });
   doc = null;
-  docDemo = "";
+  docRecording = "";
   holdStop = false;
   heldStops = [];
   docPoll = setInterval(answerAsDocument, 1);
   timers = [];
   now = 1_800_000_000_000;
   openbot.calls = [];
-  openbot.held = new Map();
-  openbot.nextDemo = 0;
-  openbot.holdStop = null;
   network = { resumed: [], resumeMode: "debugger", recorded: [] };
   masked = [];
   pinnedIntelligenceUrls = null;
@@ -499,13 +357,11 @@ afterEach(async () => {
   clearInterval(docPoll);
   await settle();
   fake.uninstall();
-  indexedGlobals.indexedDB = savedIndexed.indexedDB;
-  indexedGlobals.IDBKeyRange = savedIndexed.IDBKeyRange;
 });
 
 // ---- A restart in the middle of a Stop -------------------------------------------------------
 
-test("a service-worker restart during Stop finishes the stop: draining with the document alive", async () => {
+test("a service-worker restart during Stop finishes the stop with the document alive", async () => {
   startWorker();
   const id = await recordThenStop();
   await restartWorker();
@@ -517,32 +373,22 @@ test("a service-worker restart during Stop finishes the stop: draining with the 
     { type: "offscreen.stop", outcome: "succeeded" },
   ]);
   await settle();
-  expect(requests()).toEqual([]); // OpenBot hears of the stop only once the document stopped
+  // Still stopping until the document has queued the outcome.
+  expect((await state()).phase).toBe("stopping");
 
   port.postMessage({
     type: "offscreen.stopped",
-    demonstrationId: id,
+    recordingId: id,
     trajectoryIds: [],
   });
   await recovering;
-  expect(requests()).toEqual([
-    `POST ${demoPath(id, "/actions")}`,
-    `POST ${demoPath(id, "/stop")}`,
-  ]);
-  expect(await storedSteps(id)).toEqual([]);
   const after = await state();
   expect(after.phase).toBe("idle");
   expect(after.stopping).toBeUndefined();
-  expect(after.lastStopped).toEqual({
-    demonstrationId: id,
-    botId: "bot-1",
-    openbotUrl: origin,
-  });
+  expect(after.lastStopped).toEqual({ recordingId: id, botId: "bot-1" });
   expect(fake.storage.local.get("activeRecording")).toBeUndefined();
   expect(fake.storage.session.get("stream")).toBeUndefined();
-  expect(
-    drains().map((drain) => [drain.demonstrationId, drain.stopPending]),
-  ).toEqual([[id, undefined]]);
+  expect(drains().map((drain) => drain.recordingId)).toEqual([id]);
   // The document is asked to report on it again: an offscreen.done it sent before the restart went with the old worker.
   expect(sentToDocument("offscreen.recover", port)).toEqual([
     {
@@ -553,8 +399,9 @@ test("a service-worker restart during Stop finishes the stop: draining with the 
       drains: drains(),
     },
   ]);
-  port.postMessage({ type: "offscreen.done", demonstrationId: id });
+  port.postMessage({ type: "offscreen.done", recordingId: id });
   await until(() => drains().length === 0, "the drain forgotten");
+  expect(openbot.calls).toEqual([]);
 });
 
 test("the document asked to report on a resumed stop is held to the organization's pinned Intelligence addresses", async () => {
@@ -567,7 +414,7 @@ test("the document asked to report on a resumed stop is held to the organization
   await until(() => heldStops.length === 2, "the stop told again");
   port.postMessage({
     type: "offscreen.stopped",
-    demonstrationId: id,
+    recordingId: id,
     trajectoryIds: [],
   });
   await recovering;
@@ -580,11 +427,11 @@ test("the document asked to report on a resumed stop is held to the organization
       drains: drains(),
     },
   ]);
-  port.postMessage({ type: "offscreen.done", demonstrationId: id });
+  port.postMessage({ type: "offscreen.done", recordingId: id });
   await until(() => drains().length === 0, "the drain forgotten");
 });
 
-test("a service-worker restart during Stop finishes the stop: draining with no document", async () => {
+test("a service-worker restart during Stop with no document reopens it on the stored session and finishes the stop", async () => {
   startWorker();
   const id = await recordThenStop();
   const stored = fake.storage.session.get("stream") as StreamSession;
@@ -599,79 +446,27 @@ test("a service-worker restart during Stop finishes the stop: draining with no d
     "offscreen.recover",
   ]);
   expect(sentToDocument("offscreen.resume")).toEqual([
-    {
-      type: "offscreen.resume",
-      session: stored,
-    },
-  ]);
-  expect(requests()).toEqual([
-    `POST ${demoPath(id, "/actions")}`,
-    `POST ${demoPath(id, "/stop")}`,
+    { type: "offscreen.resume", session: stored },
   ]);
   expect((await state()).phase).toBe("idle");
-  expect(drains().map((drain) => drain.demonstrationId)).toEqual([id]);
-});
-
-test("a service-worker restart during Stop finishes the stop: telling OpenBot", async () => {
-  seed({
-    phase: "stopping",
-    stopping: { since: now - 5_000, stage: "telling-openbot" },
-  });
-  startWorker();
-  const port = openDocumentPort();
-  await recoverInterruptedRecording();
-
-  expect(requests()).toEqual([`POST ${demoPath(DEMO, "/stop")}`]);
-  expect(sentToDocument("offscreen.stop", port)).toEqual([]);
-  expect(sentToDocument("offscreen.resume", port)).toEqual([]);
-  expect((await state()).phase).toBe("idle");
-  expect(fake.storage.local.get("activeRecording")).toBeUndefined();
-  expect(drains()).toEqual([seededRecord()]);
-});
-
-test("a service-worker restart during Stop finishes the stop: stopped from OpenBot sends no stop", async () => {
-  seed({
-    phase: "stopping",
-    stopping: { since: now - 5_000, stage: "draining", stoppedFrom: "openbot" },
-  });
-  // A step recorded after the recording was stopped in OpenBot, which refuses it.
-  await queueSteps(DEMO, [click("Too late")]);
-  startWorker();
-  const port = openDocumentPort();
-  await recoverInterruptedRecording();
-
-  expect(sentToDocument("offscreen.stop", port)).toEqual([
-    { type: "offscreen.stop", outcome: "succeeded", stoppedFrom: "openbot" },
-  ]);
-  expect(requests()).toEqual([]);
-  expect(await storedSteps(DEMO)).toEqual([]);
-  const after = await state();
-  expect(after.phase).toBe("idle");
-  expect(after.error).toBe(STOPPED_IN_OPENBOT);
-  expect(drains().map((drain) => drain.demonstrationId)).toEqual([DEMO]);
+  expect(drains().map((drain) => drain.recordingId)).toEqual([id]);
+  expect(openbot.calls).toEqual([]);
 });
 
 test("a stop whose persisted start is over 120 s old skips the wait", async () => {
-  seed({
-    phase: "stopping",
-    stopping: { since: now - 121_000, stage: "draining" },
-  });
+  seed({ phase: "stopping", stopping: { since: now - 121_000 } });
   holdStop = true; // the document never answers
   startWorker();
   const port = openDocumentPort();
   await recoverInterruptedRecording(); // no clock advance needed
 
   expect(sentToDocument("offscreen.stop", port)).toHaveLength(1);
-  expect(requests()).toEqual([`POST ${demoPath(DEMO, "/stop")}`]);
   expect((await state()).phase).toBe("idle");
-  expect(drains().map((drain) => drain.demonstrationId)).toEqual([DEMO]);
+  expect(drains().map((drain) => drain.recordingId)).toEqual([RECORDING]);
 });
 
 test("a stale resumed stop still reaches a document that reconnects after recovery starts", async () => {
-  seed({
-    phase: "stopping",
-    stopping: { since: now - 121_000, stage: "draining" },
-  });
+  seed({ phase: "stopping", stopping: { since: now - 121_000 } });
   holdStop = true;
   startWorker();
   const recovering = recoverInterruptedRecording();
@@ -685,10 +480,7 @@ test("a stale resumed stop still reaches a document that reconnects after recove
 
 test("a stale resumed stop with no document reopens it and tells it to stop, so the person's outcome stands", async () => {
   seed(
-    {
-      phase: "stopping",
-      stopping: { since: now - 121_000, stage: "draining" },
-    },
+    { phase: "stopping", stopping: { since: now - 121_000 } },
     { document: false },
   );
   startWorker();
@@ -702,15 +494,11 @@ test("a stale resumed stop with no document reopens it and tells it to stop, so 
   expect(sentToDocument("offscreen.stop")).toEqual([
     { type: "offscreen.stop", outcome: "succeeded" },
   ]);
-  expect(requests()).toEqual([`POST ${demoPath(DEMO, "/stop")}`]);
   expect((await state()).phase).toBe("idle");
 });
 
 test("a resumed stop waits only for what is left of the 120 seconds", async () => {
-  seed({
-    phase: "stopping",
-    stopping: { since: now - 119_000, stage: "draining" },
-  });
+  seed({ phase: "stopping", stopping: { since: now - 119_000 } });
   holdStop = true;
   startWorker();
   openDocumentPort();
@@ -721,20 +509,16 @@ test("a resumed stop waits only for what is left of the 120 seconds", async () =
   await until(() => heldStops.length === 1, "the stop told again");
   await settle();
   expect(finished).toBe(false);
-  expect(requests()).toEqual([]);
 
   await advance(1_000);
   await recovering;
-  expect(requests()).toEqual([`POST ${demoPath(DEMO, "/stop")}`]);
   expect((await state()).phase).toBe("idle");
+  expect(drains().map((drain) => drain.recordingId)).toEqual([RECORDING]);
 });
 
 test("a service-worker restart just after Stop moved the recording into the drains only finishes", async () => {
   seed(
-    {
-      phase: "stopping",
-      stopping: { since: now - 5_000, stage: "telling-openbot" },
-    },
+    { phase: "stopping", stopping: { since: now - 5_000 } },
     { activeRecording: false },
   );
   fake.storage.local.set("drains", [seededRecord()]);
@@ -742,14 +526,9 @@ test("a service-worker restart just after Stop moved the recording into the drai
   const port = openDocumentPort();
   await recoverInterruptedRecording();
 
-  expect(requests()).toEqual([]);
   const after = await state();
   expect(after.phase).toBe("idle");
-  expect(after.lastStopped).toEqual({
-    demonstrationId: DEMO,
-    botId: "bot-1",
-    openbotUrl: origin,
-  });
+  expect(after.lastStopped).toEqual({ recordingId: RECORDING, botId: "bot-1" });
   expect(drains()).toEqual([seededRecord()]);
   expect(sentToDocument("offscreen.recover", port)).toEqual([
     {
@@ -763,33 +542,18 @@ test("a service-worker restart just after Stop moved the recording into the drai
 });
 
 test("Disconnect waits for a resumed stop and discards the recording it finished", async () => {
-  seed({
-    phase: "stopping",
-    stopping: { since: now - 5_000, stage: "telling-openbot" },
-  });
-  const stopAnswer = gate();
-  openbot.holdStop = stopAnswer.promise;
+  seed({ phase: "stopping", stopping: { since: now - 5_000 } });
+  holdStop = true;
   startWorker();
   openDocumentPort();
   const recovering = recoverInterruptedRecording();
-  await until(
-    () => requests().includes(`POST ${demoPath(DEMO, "/stop")}`),
-    "the stop sent",
-  );
+  await until(() => heldStops.length === 1, "the stop told again");
   // The person disconnects (the router calls this once the connection is gone).
   fake.storage.local.delete("connection");
-  let disconnected = false;
-  const disconnecting = handlers.disconnected().then(() => {
-    disconnected = true;
-  });
-  await settle();
-  expect(disconnected).toBe(false);
-
-  stopAnswer.open();
+  await handlers.disconnected();
   await recovering;
-  await disconnecting;
   expect(sentToDocument("offscreen.discard")).toEqual([
-    { type: "offscreen.discard", demonstrationIds: [DEMO] },
+    { type: "offscreen.discard", recordingIds: [RECORDING] },
   ]);
   expect(drains()).toEqual([]);
   expect((await state()).phase).toBe("idle");
@@ -797,16 +561,17 @@ test("Disconnect waits for a resumed stop and discards the recording it finished
 
 // ---- A restart in the middle of Record -------------------------------------------------------
 
-test("a service-worker restart in the middle of Record rolls it back, and Record works again", async () => {
-  seed({ phase: "starting", demonstrationId: undefined, tabIds: [] });
+test("a service-worker restart in the middle of Record discards what the document holds of it, and Record works again", async () => {
+  seed({ phase: "starting", recordingId: undefined, tabIds: [] });
   startWorker();
   const port = openDocumentPort();
   await recoverInterruptedRecording();
 
-  expect(sentToDocument("offscreen.stop", port)).toEqual([
-    { type: "offscreen.stop", outcome: "failed" },
+  // Nothing of it is ever sent: it never went live.
+  expect(sentToDocument("offscreen.discard", port)).toEqual([
+    { type: "offscreen.discard", recordingIds: [RECORDING] },
   ]);
-  expect(requests()).toEqual([`DELETE ${demoPath(DEMO)}`]);
+  expect(sentToDocument("offscreen.stop", port)).toEqual([]);
   expect(fake.storage.local.get("activeRecording")).toBeUndefined();
   expect(fake.storage.session.get("stream")).toBeUndefined();
   expect(drains()).toEqual([]);
@@ -815,13 +580,9 @@ test("a service-worker restart in the middle of Record rolls it back, and Record
   expect(after.error).toBe(START_FAILED);
   await until(() => !fake.offscreen.open, "the document closed");
 
-  openbot.calls = [];
-  const id = await startRecording(7);
+  await startRecording(7);
   expect((await state()).phase).toBe("recording");
-  expect(requests()).toEqual([
-    "POST /api/recorder/demonstrations",
-    `POST ${demoPath(id, "/trajectories")}`,
-  ]);
+  expect(openbot.calls).toEqual([]);
 });
 
 // ---- A restart while recording ---------------------------------------------------------------
@@ -836,14 +597,8 @@ test("a service-worker restart with no document resumes it with the stored sessi
   await recoverInterruptedRecording();
 
   expect(fake.calls.slice(mark)).toContain("offscreen.createDocument");
-  expect(toDocument()).toEqual([
-    {
-      type: "offscreen.resume",
-      session: stored,
-    },
-  ]);
-  const after = await state();
-  expect(after.phase).toBe("recording");
+  expect(toDocument()).toEqual([{ type: "offscreen.resume", session: stored }]);
+  expect((await state()).phase).toBe("recording");
   expect(network.resumed).toEqual([[{ tabId: 7, url: DEAL }]]);
 });
 
@@ -853,17 +608,14 @@ test("a service-worker restart with no document resumes the live recording befor
   const stored = fake.storage.session.get("stream") as StreamSession;
   await chrome.offscreen.closeDocument();
   fake.storage.local.set("drains", [
-    { ...seededRecord(), demonstrationId: "demo-gone", discarding: true },
+    { ...seededRecord(), recordingId: "rec-gone", discarding: true },
   ]);
   await restartWorker();
   await recoverInterruptedRecording();
 
   expect(toDocument()).toEqual([
-    {
-      type: "offscreen.resume",
-      session: stored,
-    },
-    { type: "offscreen.discard", demonstrationIds: ["demo-gone"] },
+    { type: "offscreen.resume", session: stored },
+    { type: "offscreen.discard", recordingIds: ["rec-gone"] },
   ]);
   expect((await state()).phase).toBe("recording");
   expect(drains()).toEqual([]);
@@ -873,7 +625,7 @@ test("a discard that cannot finish because the document never reconnects does no
   startWorker();
   await startRecording(7);
   fake.storage.local.set("drains", [
-    { ...seededRecord(), demonstrationId: "demo-gone", discarding: true },
+    { ...seededRecord(), recordingId: "rec-gone", discarding: true },
   ]);
   await restartWorker(); // the document is still open, but its port never reconnects
   const logged = spyOn(console, "error").mockImplementation(() => {});
@@ -889,10 +641,7 @@ test("a discard that cannot finish because the document never reconnects does no
 
   expect(network.resumed).toEqual([[{ tabId: 7, url: DEAL }]]);
   expect((await state()).phase).toBe("recording");
-  expect(
-    openbot.calls.filter((call) => call.path.includes("demo-gone")),
-  ).toEqual([]);
-  expect(drains().map((drain) => drain.demonstrationId)).toEqual(["demo-gone"]);
+  expect(drains().map((drain) => drain.recordingId)).toEqual(["rec-gone"]);
 });
 
 test("a service-worker restart with the document alive posts nothing to it", async () => {
@@ -985,19 +734,33 @@ test("a service-worker restart restores followed tabs, digests and network captu
   expect(tab8.messages).toContainEqual({
     type: "background.capture",
     active: true,
-    demonstrationId: id,
+    recordingId: id,
+  });
+});
+
+test("a service-worker restart keeps the action count, so the 50-action notice still comes at the 50th", async () => {
+  seed({ phase: "recording", actions: 49 });
+  startWorker();
+  openDocumentPort();
+  await recoverInterruptedRecording();
+  const top = contentPort(7);
+  top.postMessage({
+    type: "content.event",
+    event: capturedEvent("click", { text: "Save" }),
+  });
+  await until(async () => (await state()).noticeOpen, "the notice opens");
+  expect((await state()).actions).toBe(50);
+  expect(top.messages).toContainEqual({
+    type: "background.notice",
+    show: true,
+    actions: 50,
   });
 });
 
 test("a service-worker restart whose recording lost its connection stops it and keeps it for its person", async () => {
   startWorker();
   const id = await startRecording(7);
-  contentPort(7).postMessage({ type: "content.step", action: click("Save") });
-  await until(
-    async () => (await storedSteps(id)).length === 2,
-    "two steps queued",
-  );
-  // The popup's /me refresh found the connection revoked while the recording ran on.
+  // The keep-alive found the connection revoked while the recording ran on.
   fake.storage.local.delete("connection");
   fake.storage.local.set("notice", {
     kind: "signed-out",
@@ -1008,20 +771,19 @@ test("a service-worker restart whose recording lost its connection stops it and 
   const port = openDocumentPort();
   await recoverInterruptedRecording();
 
-  expect(requests()).toEqual([]);
   expect(sentToDocument("offscreen.stop", port)).toEqual([
     { type: "offscreen.stop", outcome: "succeeded" },
   ]);
+  expect(sentToDocument("offscreen.discard", port)).toEqual([]);
   expect(network.resumed).toEqual([]);
-  expect(await storedSteps(id)).toHaveLength(2);
   const after = await state();
   expect(after.phase).toBe("idle");
   expect(after.error).toBe(SIGNED_OUT);
   expect(drains()).toEqual([
     expect.objectContaining({
-      demonstrationId: id,
-      stopPending: true,
+      recordingId: id,
       kept: expect.objectContaining({ waitingForReconnect: true }),
     }),
   ]);
+  expect(openbot.calls).toEqual([]);
 });

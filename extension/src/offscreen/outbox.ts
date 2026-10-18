@@ -13,15 +13,14 @@ export type OutboxEvent = {
 
 /** One trajectory's own record in the meta store. */
 export type TrajectoryMeta = {
-  demonstrationId: string;
+  recordingId: string;
   title: string;
   pushed: number;
   outcomeQueued: boolean;
   droppedPending: number;
   stopped: boolean;
-  /** Rollover: the next trajectory, and whether OpenBot has registered it yet (a restarted document resumes the registration). */
+  /** Rollover: the trajectory this one continues in. */
   next?: string;
-  registered?: boolean;
 };
 
 /** The meta key prefix a trajectory's own record lives under; `trajectories()` counts these as well as stored events. */

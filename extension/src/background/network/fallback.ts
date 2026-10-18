@@ -1,9 +1,3 @@
-import { safeDemonstrationUrl } from "@openbot/shared/demonstration-rules";
-import {
-  type DemonstrationAction,
-  demonstrationActionSchema,
-  NETWORK_STEP_METHODS,
-} from "@openbot/shared/demonstration-schema";
 import {
   type CapturedEvent,
   type JsonValue,
@@ -28,9 +22,6 @@ const configureHook = (id: string): void =>
   );
 const stopHook = (): void =>
   (globalThis as unknown as Hook)[Symbol.for("openbot.recorder.stop")]?.();
-
-/** The last network step handed out, so a repeat of the same request is one step. Reset whenever a fallback starts or stops. */
-let lastStepKey: string | null = null;
 
 /**
  * Injects the page-network hook into the MAIN world of the recorded tabs only: never registerContentScripts, so an
@@ -59,7 +50,6 @@ export function createPageFallback(): PageFallback {
 
   return {
     async start(tabIds) {
-      lastStepKey = null;
       tabs.clear();
       for (const tabId of tabIds) tabs.add(tabId);
       try {
@@ -83,7 +73,6 @@ export function createPageFallback(): PageFallback {
     async stop() {
       const stopping = [...tabs];
       running = false;
-      lastStepKey = null;
       tabs.clear();
       for (const tabId of stopping)
         await chrome.scripting
@@ -102,40 +91,23 @@ export function createPageFallback(): PageFallback {
 const isObject = (value: unknown): value is { [key: string]: JsonValue } =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-/** A recorder.page-network event from a recorded tab: re-masked with the digests (full bodies kept, up to 2 MiB each), plus its step. Null drops it.
- * The router hands the event to NetworkCapture.recordPageEvent, so large bodies reach the same body store as debugger capture. */
+/** A recorder.page-network event from a recorded tab, re-masked with the digests (the page cannot know them) and marked
+ * `capturedBy: "page"`; null drops it. The router hands it to NetworkCapture.recordPageEvent, which trims it to fit. */
 export function acceptPageNetworkEvent(
   event: CapturedEvent,
   digests: ReadonlySet<string>,
-): { event: CapturedEvent; step: DemonstrationAction | null } | null {
+): CapturedEvent | null {
   if (!isObject(event) || event.name !== "network") return null;
   const value = event.value;
   if (
     !isObject(value) ||
     typeof value.url !== "string" ||
     typeof value.method !== "string" ||
-    typeof value.status !== "number"
+    (typeof value.status !== "number" && value.status !== null)
   )
     return null;
   const masked = maskNetworkEvent(event, { digests });
   if (!isObject(masked.value)) return null;
   // Page scripts can forge these messages: consumers read capturedBy to know they are lower trust.
-  const accepted: CapturedEvent = {
-    ...masked,
-    value: { ...masked.value, capturedBy: "page" },
-  };
-  const method = value.method.toUpperCase();
-  if (!(NETWORK_STEP_METHODS as readonly string[]).includes(method))
-    return { event: accepted, step: null };
-  const step = demonstrationActionSchema.safeParse({
-    kind: "network",
-    url: safeDemonstrationUrl(value.url),
-    method,
-    status: value.status,
-  });
-  if (!step.success) return { event: accepted, step: null };
-  const key = `${method} ${step.data.kind === "network" ? step.data.url : ""} ${value.status}`;
-  if (key === lastStepKey) return { event: accepted, step: null };
-  lastStepKey = key;
-  return { event: accepted, step: step.data };
+  return { ...masked, value: { ...masked.value, capturedBy: "page" } };
 }

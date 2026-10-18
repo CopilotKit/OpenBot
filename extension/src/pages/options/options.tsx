@@ -128,7 +128,7 @@ export function Options({ deps }: { deps?: Partial<OptionsDeps> }) {
               <ItemContent>
                 <ItemTitle>This browser</ItemTitle>
                 <ItemDescription>
-                  Stop recording to OpenBot from this browser.
+                  Disconnect this browser from OpenBot.
                 </ItemDescription>
               </ItemContent>
               <ItemActions>
@@ -178,7 +178,7 @@ export function Options({ deps }: { deps?: Partial<OptionsDeps> }) {
             <DialogTitle>Disconnect this browser?</DialogTitle>
           </DialogHeader>
           <DialogBody className="mt-4 text-sm">
-            <p>It stops recording to OpenBot until you connect it again.</p>
+            <p>The Recorder records nothing until you connect it again.</p>
             {kept ? (
               <p className="mt-2">
                 {plural(kept.events, "event", "events")} from{" "}

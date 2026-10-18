@@ -1,9 +1,8 @@
 import type { BackgroundToContent } from "../protocol/messages";
 import { startEventCapture } from "./collector";
 import { createSensitivityTracker } from "./masking-context";
-import { isNoticeEvent, showNotice } from "./notice";
+import { showNotice } from "./notice";
 import { contentHello, createContentPort } from "./port";
-import { startStepCapture } from "./steps";
 
 type RecorderGlobals = typeof globalThis & {
   __openbotRecorderContent?: boolean;
@@ -36,19 +35,8 @@ function startContentScript() {
       tracker,
       send: (event) => port.post({ type: "content.event", event }),
     });
-    const steps = startStepCapture({
-      send: (action) => port.post({ type: "content.step", action }),
-      isIgnored: (target, path) =>
-        isNoticeEvent(target, path) ||
-        path.some(
-          (node) =>
-            node instanceof Element &&
-            node.hasAttribute("data-copilotkit-ignore"),
-        ),
-    });
     capture = {
       stop() {
-        steps.stop();
         events.stop();
         uninstall();
       },
@@ -58,7 +46,7 @@ function startContentScript() {
   const stopCapture = () => {
     capture?.stop();
     capture = null;
-    // Capture stopping for any reason ends the 50-step notice: its buttons would otherwise act on a later recording.
+    // Capture stopping for any reason ends the 50-action notice: its buttons would otherwise act on a later recording.
     notice?.remove();
     notice = null;
   };
@@ -71,7 +59,7 @@ function startContentScript() {
     notice = null;
     if (!message.show) return;
     notice = showNotice({
-      steps: message.steps,
+      actions: message.actions,
       choose: (choice) => port.post({ type: "content.notice", choice }),
     });
   };

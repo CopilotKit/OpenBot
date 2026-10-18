@@ -15,7 +15,12 @@ import {
   type GrantVerdict,
   PASS_HINTS,
 } from "../src/offscreen/grant";
-import { type Outbox, openOutbox } from "../src/offscreen/outbox";
+import {
+  type Outbox,
+  openOutbox,
+  TRAJECTORY_META_PREFIX,
+  type TrajectoryMeta,
+} from "../src/offscreen/outbox";
 import {
   type ChannelLike,
   createPhoenixSession,
@@ -30,7 +35,6 @@ import {
   type StreamerSession,
   type StreamerStatus,
 } from "../src/offscreen/streamer";
-import { OpenBotError } from "../src/shared/openbot-client";
 import { type FakeGateway, startFakeGateway } from "./support/fake-gateway";
 
 // The table's sentences, pinned here as the person reads them.
@@ -236,19 +240,11 @@ type Harness = {
   statuses: { at: number; status: StreamerStatus }[];
   kept: KeptReport[];
   signedOut: string[];
-  registered: string[];
-  registerFailures: number;
-  /** Every registration attempt, refused or not. */
-  registerCalls: string[];
-  /** Errors the next registration attempts throw, in order. */
-  registerScript: Error[];
-  /** Holds every registration attempt until it resolves. */
-  registerGate: Promise<void> | null;
   onTrajectory: string[];
-  /** Each registered rollover with the recording it belongs to. */
-  rollovers: { trajectoryId: string; demonstrationId: string }[];
+  /** Each rollover with the recording it belongs to. */
+  rollovers: { trajectoryId: string; recordingId: string }[];
+  /** Trajectories in the order the streamer finished them (their meta saved with `closed`). */
   closed: string[];
-  closeGate: Promise<void> | null;
   last(): StreamerStatus;
   stored(trajectoryId: string): { seq: number; name: string; raw: unknown }[];
   pending(trajectoryId: string): Promise<number>;
@@ -259,6 +255,23 @@ type Harness = {
   ): Promise<Streamer>;
   trajectoryId: string;
 };
+
+/** The outbox, recording each trajectory the streamer finishes: its meta is saved with `closed` set. */
+function watchClosing(outbox: Outbox, closed: string[]): Outbox {
+  return {
+    ...outbox,
+    setMeta: async <T>(key: string, value: T) => {
+      await outbox.setMeta(key, value);
+      const id = key.slice(TRAJECTORY_META_PREFIX.length);
+      if (
+        key.startsWith(TRAJECTORY_META_PREFIX) &&
+        (value as TrajectoryMeta & { closed?: boolean }).closed &&
+        !closed.includes(id)
+      )
+        closed.push(id);
+    },
+  };
+}
 
 let harness: Harness | null = null;
 const streamers: Streamer[] = [];
@@ -296,15 +309,9 @@ async function setup(options: { eventCap?: number } = {}): Promise<Harness> {
     statuses: [],
     kept: [],
     signedOut: [],
-    registered: [],
-    registerFailures: 0,
-    registerCalls: [],
-    registerScript: [],
-    registerGate: null,
     onTrajectory: [],
     rollovers: [],
     closed: [],
-    closeGate: null,
     trajectoryId: crypto.randomUUID(),
     last: () => {
       const entry = h.statuses.at(-1);
@@ -338,29 +345,14 @@ async function setup(options: { eventCap?: number } = {}): Promise<Harness> {
             },
           };
         },
-        async registerTrajectory(trajectoryId: string) {
-          h.registerCalls.push(trajectoryId);
-          if (h.registerGate) await h.registerGate;
-          const scripted = h.registerScript.shift();
-          if (scripted) throw scripted;
-          if (h.registerFailures > 0) {
-            h.registerFailures -= 1;
-            throw new Error("OpenBot is unreachable");
-          }
-          h.registered.push(trajectoryId);
-        },
-        async closeTrajectory(trajectoryId: string) {
-          if (h.closeGate) await h.closeGate;
-          h.closed.push(trajectoryId);
-        },
         allowedGatewayUrls: null,
-        outbox: h.outbox,
+        outbox: watchClosing(h.outbox, h.closed),
         sequencer,
         status: (status: StreamerStatus) =>
           h.statuses.push({ at: clock.now(), status }),
-        onTrajectory: (trajectoryId: string, demonstrationId: string) => {
+        onTrajectory: (trajectoryId: string, recordingId: string) => {
           h.onTrajectory.push(trajectoryId);
-          h.rollovers.push({ trajectoryId, demonstrationId });
+          h.rollovers.push({ trajectoryId, recordingId });
         },
         onSignedOut: (reason: string) => h.signedOut.push(reason),
         onKept: (kept: KeptReport) => h.kept.push(kept),
@@ -382,7 +374,7 @@ async function setup(options: { eventCap?: number } = {}): Promise<Harness> {
         {
           trajectoryId: h.trajectoryId,
           title: "File the weekly report",
-          demonstrationId: "demo-1",
+          recordingId: "rec-1",
           version: "0.1.0",
           ...session,
         },
@@ -435,29 +427,6 @@ const busyPass = () =>
     code: "CONNECTION_FAILED",
     message: "Could not connect to Intelligence",
   });
-
-/** An answer to a request, as `openbotJson` throws it: OpenBot's JSON error body when given a sentence, else no body (a
- * proxy's, a load balancer's or a sign-in page's answer). */
-const openbotAnswer = (status: number, sentence?: string) =>
-  new OpenBotError(
-    status,
-    sentence ?? `OpenBot answered ${status}.`,
-    sentence === undefined ? null : { error: sentence },
-  );
-
-/** What the popup reads for a rollover OpenBot refused. */
-const rolloverRefused = (sentence?: string) =>
-  sentence === undefined
-    ? "Learning capture is off: OpenBot refused the next part of this recording."
-    : `Learning capture is off: OpenBot refused the next part of this recording (${sentence}).`;
-
-/** Connections to Intelligence that are open or opening. */
-const openSockets = (h: Harness) =>
-  h.sockets.filter(
-    (socket) =>
-      socket.readyState === WebSocket.CONNECTING ||
-      socket.readyState === WebSocket.OPEN,
-  ).length;
 
 async function streaming(h: Harness) {
   await until(() => h.last().intelligence === "streaming", "streaming");
@@ -519,7 +488,7 @@ describe("streamer", () => {
       "outcome",
     ]);
     expect(payloadOf(stored[0])).toMatchObject({
-      demonstrationId: "demo-1",
+      recordingId: "rec-1",
       source: "openbot-recorder",
       version: "0.1.0",
     });
@@ -640,7 +609,7 @@ describe("streamer", () => {
     expect(h.kept[0]).toMatchObject({
       parked: false,
       reason: PASS_HINTS.TRAJECTORIES_NOT_ENABLED,
-      demonstrationId: "demo-1",
+      recordingId: "rec-1",
       trajectoryId: h.trajectoryId,
     });
 
@@ -679,7 +648,7 @@ describe("streamer", () => {
         reason: GATEWAY_OFF,
         parked: true,
         events: expect.any(Number),
-        demonstrationId: "demo-1",
+        recordingId: "rec-1",
         trajectoryId: h.trajectoryId,
       },
     ]);
@@ -1412,8 +1381,11 @@ describe("streamer", () => {
         ]).length === 70,
       "all 70 stored",
     );
-    await until(() => h.closed.length === 2, "the first two closed");
-    expect(h.registered).toEqual([second, third]);
+    await until(() => h.closed.length === 2, "the first two finished");
+    expect(h.rollovers).toEqual([
+      { trajectoryId: second, recordingId: "rec-1" },
+      { trajectoryId: third, recordingId: "rec-1" },
+    ]);
     expect(h.closed).toEqual([h.trajectoryId, second]);
     const first = h.stored(h.trajectoryId);
     const middle = h.stored(second);
@@ -1424,7 +1396,7 @@ describe("streamer", () => {
     expect(middle[0].name).toBe("recording.continues");
     expect(payloadOf(middle[0])).toMatchObject({
       previousTrajectoryId: h.trajectoryId,
-      demonstrationId: "demo-1",
+      recordingId: "rec-1",
     });
     expect(payloadOf(middle.at(-1) ?? middle[0]).nextTrajectoryId).toBe(third);
     expect(payloadOf(last[0]).previousTrajectoryId).toBe(second);
@@ -1435,27 +1407,11 @@ describe("streamer", () => {
     expect(h.closed).toEqual([h.trajectoryId, second, third]);
   });
 
-  test("registration that keeps failing never pushes the old trajectory past its cap", async () => {
+  test("a rollover never pushes a trajectory past Intelligence's cap, and asks OpenBot for nothing but passes", async () => {
     const h = await setup({ eventCap: 40 });
-    h.registerFailures = 5;
     const s = await h.start({}, { rolloverAt: 30 });
     for (let i = 0; i < 98; i++) s.push(click(i));
-    await until(
-      () => h.stored(h.trajectoryId).length === 31,
-      "the first trajectory full",
-    );
-    await sleep(100);
-    const first = h.stored(h.trajectoryId);
-    expect(first).toHaveLength(31);
-    expect(first.at(-1)?.name).toBe("recording.continued");
-    expect(h.onTrajectory).toHaveLength(0);
-    for (let step = 0; step < 10 && h.onTrajectory.length < 3; step++) {
-      await h.clock.advance(MINUTE);
-    }
-    await until(
-      () => h.onTrajectory.length === 3,
-      "every next trajectory registered",
-    );
+    await until(() => h.onTrajectory.length === 3, "three rollovers");
     const chain = [h.trajectoryId, ...h.onTrajectory];
     await until(
       () => clicks(chain.flatMap((id) => h.stored(id))).length === 98,
@@ -1464,34 +1420,27 @@ describe("streamer", () => {
     expect(clicks(chain.flatMap((id) => h.stored(id)))).toEqual(range(98));
     for (const id of chain) expect(h.stored(id).length).toBeLessThanOrEqual(31);
     expect(h.last().events.rejected).toBe(0);
+    // Every rolled-over trajectory streams on its own pass, at once: nothing waits on OpenBot.
+    expect([...new Set(h.grants)].sort()).toEqual([...chain].sort());
   });
 
-  test("a rollover registered after Start over is reported for the recording it belongs to", async () => {
+  test("a rollover is reported for the recording it belongs to, and Start over finishes it with a failed outcome", async () => {
     const h = await setup();
-    h.registerFailures = 1;
     const second = crypto.randomUUID();
     const s = await h.start({}, { rolloverAt: 5, randomUUID: () => second });
     // started, outcome and three clicks fill the first trajectory; the fourth click rolls over.
     for (let i = 0; i < 4; i++) s.push(click(i));
-    await until(
-      () => h.registerFailures === 0,
-      "the first registration refused",
-    );
-    expect(h.rollovers).toEqual([]);
+    await until(() => h.rollovers.length === 1, "the rollover reported");
+    expect(h.rollovers).toEqual([
+      { trajectoryId: second, recordingId: "rec-1" },
+    ]);
     const next = crypto.randomUUID();
-    const rotating = s.rotate({
-      demonstrationId: "demo-2",
+    await s.rotate({
+      recordingId: "rec-2",
       trajectoryId: next,
       title: "Try again",
     });
     await until(() => h.stored(next).length === 2, "the new recording streams");
-
-    await h.clock.advance(1_000);
-    await until(() => h.rollovers.length === 1, "the rollover registered");
-    expect(h.rollovers).toEqual([
-      { trajectoryId: second, demonstrationId: "demo-1" },
-    ]);
-    await rotating;
     expect(h.closed).toEqual([h.trajectoryId, second]);
     const rolled = h.stored(second);
     expect(clicks(rolled)).toEqual([3]);
@@ -1501,308 +1450,34 @@ describe("streamer", () => {
     });
   });
 
-  test("a rollover OpenBot refuses is parked with its events kept, never registered again, and the rest of the recording streams", async () => {
-    const h = await setup();
-    const refusal = rolloverRefused(
-      "This recording has finished and takes no new trajectory",
-    );
-    const second = crypto.randomUUID();
-    const third = crypto.randomUUID();
-    const ids = [second, third];
-    h.registerScript = [
-      openbotAnswer(
-        400,
-        "This recording has finished and takes no new trajectory.",
-      ),
-    ];
-    const gate = makeGate();
-    h.registerGate = gate.promise;
-    const s = await h.start(
-      {},
-      { rolloverAt: 5, randomUUID: () => ids.shift() ?? crypto.randomUUID() },
-    );
-    // started, outcome and three clicks fill the first trajectory; the fourth click rolls over.
-    for (let i = 0; i < 4; i++) s.push(click(i));
-    await until(
-      async () => (await h.pending(second)) === 2,
-      "the rollover's events queued",
-    );
-    gate.release();
-    await until(() => h.kept.length === 1, "the refused rollover kept");
-    expect(h.kept[0]).toEqual({
-      reason: refusal,
-      parked: true,
-      events: 2,
-      demonstrationId: "demo-1",
-      trajectoryId: second,
-    });
-    await until(() => h.last().intelligence === "parked", "parked");
-    expect(h.last().reason).toBe(refusal);
-
-    for (let step = 0; step < 10; step++) await h.clock.advance(MINUTE);
-    expect(h.registerCalls).toEqual([second]);
-    expect(h.grants).not.toContain(second);
-    expect(h.kept).toHaveLength(1);
-    expect(await h.pending(second)).toBe(2);
-    // The first trajectory still sends everything it holds.
-    await until(
-      async () => (await h.pending(h.trajectoryId)) === 0,
-      "the first trajectory sent",
-    );
-    const first = h.stored(h.trajectoryId);
-    expect(clicks(first)).toEqual([0, 1, 2]);
-    expect(first.at(-1)?.name).toBe("recording.continued");
-
-    // The parked trajectory fills up and rolls over; OpenBot registers the next one, and it streams.
-    for (let i = 4; i < 8; i++) s.push(click(i));
-    await until(() => h.rollovers.length === 1, "the next rollover registered");
-    expect(h.rollovers).toEqual([
-      { trajectoryId: third, demonstrationId: "demo-1" },
-    ]);
-    await until(
-      () => clicks(h.stored(third)).length === 1,
-      "the third trajectory streams",
-    );
-    expect(clicks(h.stored(third))).toEqual([7]);
-    expect(h.registerCalls).toEqual([second, third]);
-    // The caught-up first trajectory left Intelligence: only the third holds a connection.
-    await until(() => openSockets(h) === 1, "one connection");
-    // recording.continues, clicks 3 to 6 and recording.continued stay kept.
-    expect(await h.pending(second)).toBe(6);
-
-    await s.stop("succeeded");
-    await until(() => h.closed.includes(third), "the third trajectory closed");
-    // The first trajectory stays open in OpenBot, so the parked rollover can still register at the next browser start.
-    expect(h.closed).toEqual([third]);
-    expect(h.kept).toHaveLength(2);
-    expect(h.kept[1]).toEqual({
-      reason: refusal,
-      parked: true,
-      events: 6,
-      demonstrationId: "demo-1",
-      trajectoryId: second,
-    });
-    await h.clock.advance(10 * MINUTE);
-    expect(await h.pending(second)).toBe(6);
-    expect(h.registerCalls).toEqual([second, third]);
-  });
-
-  test("a rollover OpenBot cannot find is parked with OpenBot's sentence, and registers again after a restart", async () => {
+  test("discard clears every trajectory of the recording, a rolled-over one included, and sends nothing more", async () => {
     const h = await setup();
     const second = crypto.randomUUID();
-    h.registerScript = [
-      openbotAnswer(404, "This demonstration could not be found."),
-    ];
-    const gate = makeGate();
-    h.registerGate = gate.promise;
     const s = await h.start({}, { rolloverAt: 5, randomUUID: () => second });
-    for (let i = 0; i < 4; i++) s.push(click(i));
-    await until(
-      async () => (await h.pending(second)) === 2,
-      "the rollover's events queued",
-    );
-    gate.release();
-    await until(() => h.kept.length === 1, "the refused rollover kept");
-    expect(h.kept[0]).toEqual({
-      reason: rolloverRefused("This demonstration could not be found"),
-      parked: true,
-      events: 2,
-      demonstrationId: "demo-1",
-      trajectoryId: second,
-    });
-    await s.stop("succeeded");
-    expect(await h.pending(second)).toBe(3);
-
-    // The next browser start recovers the recording: OpenBot registers the rollover now, and nothing kept was lost.
-    h.outbox = await openOutbox(h.dbName);
-    const recovered = await h.start({ resume: true, recover: true });
-    await recovered.drained();
-    expect(h.registered).toEqual([second]);
-    expect(h.registerCalls).toEqual([second, second]);
-    const rolled = h.stored(second);
-    expect(rolled.map((entry) => entry.name)).toEqual([
-      "recording.continues",
-      "click",
-      "outcome",
-    ]);
-    expect(clicks(rolled)).toEqual([3]);
-    expect(h.closed).toEqual([h.trajectoryId, second]);
-  });
-
-  test("a signed-out answer to a rollover's registration signs out instead of parking, and keeps its events", async () => {
-    const h = await setup();
-    const second = crypto.randomUUID();
-    h.registerScript = [
-      new OpenBotError(401, "Connect this browser to OpenBot again.", {
-        error: "Connect this browser to OpenBot again.",
-        code: RECORDER_SIGNED_OUT,
-        reason: "removed",
+    await started(h);
+    // The rollover's pass is refused for good (row 7): its events stay kept.
+    h.passScript = [
+      classifyGrantError(503, {
+        code: "INTELLIGENCE_RUNTIME_REQUIRED",
+        message: "Intelligence is not configured.",
       }),
     ];
-    const s = await h.start({}, { rolloverAt: 5, randomUUID: () => second });
     for (let i = 0; i < 4; i++) s.push(click(i));
-    await until(() => h.signedOut.length === 1, "signed out");
-    expect(h.signedOut).toEqual(["removed"]);
-    await until(async () => (await h.pending(second)) === 2, "kept");
-    await h.clock.advance(10 * MINUTE);
-    expect(h.registerCalls).toEqual([second]);
-    expect(h.kept).toEqual([]);
-    expect(h.last().intelligence).toBe("off");
-    expect(await h.pending(second)).toBe(2);
-    // Signed out, a discard has no token to close anything with.
-    await s.discard();
-    expect(h.closed).toEqual([]);
-  });
-
-  test("an OpenBot refusal with a blank sentence is kept with the plain one", async () => {
-    const h = await setup();
-    const second = crypto.randomUUID();
-    h.registerScript = [openbotAnswer(400, "  ")];
-    const s = await h.start({}, { rolloverAt: 5, randomUUID: () => second });
-    for (let i = 0; i < 4; i++) s.push(click(i));
-    await until(() => h.kept.length === 1, "the refused rollover kept");
-    expect(h.kept[0]).toMatchObject({
-      reason: rolloverRefused(),
-      parked: true,
-      trajectoryId: second,
-    });
-  });
-
-  test("a rollover registration answered by anything but OpenBot's own refusal keeps retrying", async () => {
-    const h = await setup();
-    const second = crypto.randomUUID();
-    h.registerScript = [
-      // A proxy's, a single sign-on page's or a load balancer's answer: no OpenBot body.
-      openbotAnswer(401),
-      openbotAnswer(403),
-      openbotAnswer(404),
-      openbotAnswer(400),
-      // OpenBot's 401 that is not its sign-out.
-      new OpenBotError(401, "Sign in again.", { error: "Sign in again." }),
-    ];
-    const s = await h.start({}, { rolloverAt: 5, randomUUID: () => second });
-    for (let i = 0; i < 4; i++) s.push(click(i));
-    await until(() => h.registerCalls.length === 1, "the first attempt");
-    for (let step = 0; step < 10 && h.rollovers.length === 0; step++) {
-      await h.clock.advance(MINUTE);
-    }
-    await until(() => h.rollovers.length === 1, "the rollover registered");
-    expect(h.registerCalls).toEqual(Array(6).fill(second));
-    expect(h.kept).toEqual([]);
-    expect(h.signedOut).toEqual([]);
-    await until(
-      () => clicks(h.stored(second)).length === 1,
-      "the rollover streams",
-    );
-  });
-
-  test("a caught-up trajectory whose rollover OpenBot refused leaves Intelligence but stays open in OpenBot", async () => {
-    const h = await setup();
-    const second = crypto.randomUUID();
-    h.registerScript = [
-      openbotAnswer(
-        400,
-        "This recording has finished and takes no new trajectory.",
-      ),
-    ];
-    const s = await h.start({}, { rolloverAt: 5, randomUUID: () => second });
-    for (let i = 0; i < 4; i++) s.push(click(i));
-    await until(() => h.kept.length === 1, "the refused rollover kept");
+    await until(() => h.kept.length === 1, "the rollover kept");
+    expect(h.kept[0]?.trajectoryId).toBe(second);
     await until(
       async () => (await h.pending(h.trajectoryId)) === 0,
       "the first trajectory sent",
     );
-    expect(h.sockets.length).toBeGreaterThan(0);
-    await until(() => openSockets(h) === 0, "no connection to Intelligence");
-    const passes = h.grants.length;
-    await h.clock.advance(10 * MINUTE);
-    expect(openSockets(h)).toBe(0);
-    expect(h.grants).toHaveLength(passes);
-    expect(h.closed).toEqual([]);
-    expect(h.last().intelligence).toBe("parked");
-    expect(await h.pending(second)).toBe(2);
-  });
-
-  test("discard closes the recording's open trajectories in OpenBot, but not a rollover OpenBot never registered", async () => {
-    const h = await setup();
-    const second = crypto.randomUUID();
-    h.registerScript = [
-      openbotAnswer(
-        400,
-        "This recording has finished and takes no new trajectory.",
-      ),
-    ];
-    const s = await h.start({}, { rolloverAt: 5, randomUUID: () => second });
-    for (let i = 0; i < 4; i++) s.push(click(i));
-    await until(() => h.kept.length === 1, "the refused rollover kept");
-    await until(
-      async () => (await h.pending(h.trajectoryId)) === 0,
-      "the first trajectory sent",
-    );
-    expect(h.closed).toEqual([]);
 
     await s.discard();
-    expect(h.closed).toEqual([h.trajectoryId]);
     expect(await h.pending(second)).toBe(0);
     expect(await h.outbox.trajectories()).toEqual([]);
-  });
-
-  test("discard closes a rollover whose registration was still on its way", async () => {
-    const h = await setup();
-    const second = crypto.randomUUID();
-    const gate = makeGate();
-    h.registerGate = gate.promise;
-    const s = await h.start({}, { rolloverAt: 5, randomUUID: () => second });
-    for (let i = 0; i < 4; i++) s.push(click(i));
-    await until(() => h.registerCalls.length === 1, "the registration sent");
-
-    await s.discard();
-    expect(h.closed).toEqual([h.trajectoryId]);
-    gate.release();
-    await until(() => h.closed.length === 2, "the late rollover closed");
-    expect(h.closed).toEqual([h.trajectoryId, second]);
-    expect(h.rollovers).toEqual([]);
-  });
-
-  test("a discard still discards when OpenBot cannot close the trajectory", async () => {
-    const h = await setup();
-    const s = await h.start(
-      {},
-      {
-        closeTrajectory: async () => {
-          throw new Error("OpenBot is unreachable");
-        },
-      },
-    );
-    await started(h);
-    s.push(click(0));
-    await expect(s.discard()).resolves.toBeUndefined();
-    expect(await h.outbox.trajectories()).toEqual([]);
-  });
-
-  test("a rollover registration answered 5xx, 408 or 429 keeps retrying with the back-off", async () => {
-    const h = await setup();
-    const second = crypto.randomUUID();
-    h.registerScript = [
-      openbotAnswer(503, "OpenBot is restarting."),
-      openbotAnswer(429),
-      openbotAnswer(408),
-      openbotAnswer(500),
-    ];
-    const s = await h.start({}, { rolloverAt: 5, randomUUID: () => second });
-    for (let i = 0; i < 4; i++) s.push(click(i));
-    await until(() => h.registerCalls.length === 1, "the first attempt");
-    expect(h.rollovers).toEqual([]);
-    for (let step = 0; step < 10 && h.rollovers.length === 0; step++) {
-      await h.clock.advance(MINUTE);
-    }
-    await until(() => h.rollovers.length === 1, "the rollover registered");
-    expect(h.registerCalls).toEqual([second, second, second, second, second]);
-    expect(h.kept).toEqual([]);
-    await until(
-      () => clicks(h.stored(second)).length === 1,
-      "the rollover streams",
-    );
+    const grants = h.grants.length;
+    s.push(click(9));
+    await h.clock.advance(10 * MINUTE);
+    expect(h.grants).toHaveLength(grants);
+    expect(h.stored(second)).toEqual([]);
   });
 
   test("stop queues the outcome last, keeps draining with no deadline and closes each trajectory when empty", async () => {
@@ -1814,7 +1489,7 @@ describe("streamer", () => {
     await until(() => h.grants.length === 2, "the gateway is paused");
     s.push(click(0));
     s.push(click(1));
-    const stopped = await s.stop("succeeded", { stoppedFrom: "openbot" });
+    const stopped = await s.stop("failed", { reason: "interrupted" });
     expect(stopped.trajectoryIds).toEqual([h.trajectoryId]);
     expect(await h.pending(h.trajectoryId)).toBe(3);
     let drained = false;
@@ -1831,44 +1506,42 @@ describe("streamer", () => {
     expect(stored.at(-1)?.name).toBe("outcome");
     expect(payloadOf(stored.at(-1) ?? stored[0])).toMatchObject({
       workflow: "File the weekly report",
-      phase: "succeeded",
-      stoppedFrom: "openbot",
+      phase: "failed",
+      reason: "interrupted",
     });
     expect(clicks(stored)).toEqual([0, 1]);
     expect(h.last().intelligence).toBe("off");
   });
 
-  test("Start over closes the old trajectory as failed, switches at once and resolves after the old one drained", async () => {
+  test("Start over finishes the old trajectory as failed, switches at once and resolves after the old one drained", async () => {
     const h = await setup();
     const s = await h.start();
     await started(h);
     s.push(click(0));
-    const gate = makeGate();
-    h.closeGate = gate.promise;
     const next = crypto.randomUUID();
-    let rotated = false;
+    let atRotated: string[] = [];
     const rotating = s
       .rotate({
-        demonstrationId: "demo-2",
+        recordingId: "rec-2",
         trajectoryId: next,
         title: "Try again",
       })
       .then(() => {
-        rotated = true;
+        atRotated = h.stored(h.trajectoryId).map((entry) => entry.name);
       });
     s.push(click(1));
     await until(
       () => h.stored(next).length === 3,
       "the new trajectory streams at once",
     );
-    await until(
-      () => h.stored(h.trajectoryId).length === 4,
-      "the old one drained",
-    );
-    await sleep(50);
-    expect(rotated).toBe(false);
-    gate.release();
     await rotating;
+    // Resolved only once Intelligence had every event of the old trajectory, its failed outcome included.
+    expect(atRotated).toEqual([
+      "recording.started",
+      "outcome",
+      "click",
+      "outcome",
+    ]);
     expect(h.closed).toEqual([h.trajectoryId]);
     const old = h.stored(h.trajectoryId);
     expect(old.at(-1)?.name).toBe("outcome");
@@ -1882,7 +1555,7 @@ describe("streamer", () => {
       "outcome",
       "click",
     ]);
-    expect(payloadOf(fresh[0]).demonstrationId).toBe("demo-2");
+    expect(payloadOf(fresh[0]).recordingId).toBe("rec-2");
     expect(payloadOf(fresh[1])).toMatchObject({
       workflow: "Try again",
       phase: "started",
@@ -1907,7 +1580,7 @@ describe("streamer", () => {
       reason: GATEWAY_OFF,
       parked: true,
       events: 4,
-      demonstrationId: "demo-1",
+      recordingId: "rec-1",
       trajectoryId: h.trajectoryId,
     });
   });
@@ -1924,7 +1597,7 @@ describe("streamer", () => {
     let rotated = false;
     void s
       .rotate({
-        demonstrationId: "demo-2",
+        recordingId: "rec-2",
         trajectoryId: next,
         title: "Try again",
       })
@@ -1937,7 +1610,7 @@ describe("streamer", () => {
       reason: GATEWAY_OFF,
       parked: true,
       events: 3,
-      demonstrationId: "demo-1",
+      recordingId: "rec-1",
       trajectoryId: h.trajectoryId,
     });
     expect(await h.pending(h.trajectoryId)).toBe(3);
@@ -1970,7 +1643,7 @@ describe("streamer", () => {
     const s = await h.start();
     await expect(
       s.rotate({
-        demonstrationId: "demo-2",
+        recordingId: "rec-2",
         trajectoryId: crypto.randomUUID(),
         title: "",
       }),

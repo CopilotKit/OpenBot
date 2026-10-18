@@ -85,11 +85,10 @@ const eventMessage = (n: number): ContentToBackground => ({
   type: "content.event",
   event: { type: "CUSTOM", name: "click", timestamp: 1000 + n, value: { n } },
 });
-const stepMessage = (n: number): ContentToBackground =>
-  ({
-    type: "content.step",
-    action: { kind: "click", url: `https://example.test/${n}`, target: {} },
-  }) as ContentToBackground;
+const noticeMessage = (n: number): ContentToBackground => ({
+  type: "content.notice",
+  choice: n % 2 === 0 ? "continue" : "stop",
+});
 const digestMessage = (n: number): ContentToBackground => ({
   type: "content.sensitive",
   digest: n.toString(16).padStart(64, "0"),
@@ -119,10 +118,10 @@ describe("createContentPort", () => {
     const received: BackgroundToContent[] = [];
     content.onMessage((m) => received.push(m));
 
-    content.post(stepMessage(1));
+    content.post(noticeMessage(1));
     ports[0].receive({ type: "background.capture", active: true });
 
-    expect(ports[0].sent).toEqual([stepMessage(1)]);
+    expect(ports[0].sent).toEqual([noticeMessage(1)]);
     expect(received).toEqual([{ type: "background.capture", active: true }]);
   });
 
@@ -157,7 +156,7 @@ describe("createContentPort", () => {
     const { content, ports, fire } = harness();
     ports[0].disconnect();
 
-    content.post(stepMessage(1));
+    content.post(noticeMessage(1));
     content.post(eventMessage(1));
     content.post(digestMessage(1));
     fire();
@@ -168,7 +167,7 @@ describe("createContentPort", () => {
       top: expect.any(Boolean),
     });
     expect(sent.slice(1)).toEqual([
-      stepMessage(1),
+      noticeMessage(1),
       eventMessage(1),
       digestMessage(1),
     ]);
@@ -195,15 +194,15 @@ describe("createContentPort", () => {
     expect(sent[201]).toEqual(eventMessage(204));
   });
 
-  test("steps and digests among the events are all kept, in order, and never dropped", () => {
+  test("notice choices and digests among the events are all kept, in order, and never dropped", () => {
     const { content, ports, fire } = harness();
     ports[0].disconnect();
 
     const expected: unknown[] = [];
     for (let n = 0; n < 30; n += 1) {
-      const step = stepMessage(n);
-      content.post(step);
-      expected.push(step);
+      const choice = noticeMessage(n);
+      content.post(choice);
+      expected.push(choice);
     }
     for (let n = 0; n < 5; n += 1) {
       const digest = digestMessage(n);
@@ -214,9 +213,9 @@ describe("createContentPort", () => {
     fire();
 
     const sent: ContentToBackground[] = ports[1].sent;
-    expect(sent.filter((m) => m.type === "content.step") as unknown[]).toEqual(
-      expected.slice(0, 30),
-    );
+    expect(
+      sent.filter((m) => m.type === "content.notice") as unknown[],
+    ).toEqual(expected.slice(0, 30));
     expect(
       sent.filter((m) => m.type === "content.sensitive") as unknown[],
     ).toEqual(expected.slice(30));
@@ -327,10 +326,12 @@ describe("the content script entry", () => {
     await new Promise((resolve) => setTimeout(resolve, 20));
 
     expect(received[0]).toMatchObject({ type: "content.hello", top: true });
-    const step = received.find((m) => m.type === "content.step");
-    expect(step).toMatchObject({
-      type: "content.step",
-      action: { kind: "click", target: { role: "button", name: "Save" } },
+    const captured = received.find(
+      (m) => m.type === "content.event" && m.event.name === "click",
+    );
+    expect(captured).toMatchObject({
+      type: "content.event",
+      event: { name: "click", value: { target: { tag: "button" } } },
     });
     expect(globals.__openbotRecorderContent).toBe(true);
   });
@@ -345,7 +346,7 @@ describe("the content script entry", () => {
     el?.dispatchEvent(click);
   }
 
-  test("capture stopping takes the 50-step notice down", async () => {
+  test("capture stopping takes the 50-action notice down", async () => {
     const fake = installChromeFake();
     uninstall = () => fake.uninstall();
     const ports: chrome.runtime.Port[] = [];
@@ -357,7 +358,7 @@ describe("the content script entry", () => {
     await import(`../src/content/index?fresh=${Date.now()}0`);
     await new Promise((resolve) => setTimeout(resolve, 20));
     const port = ports[0];
-    port.postMessage({ type: "background.notice", show: true, steps: 50 });
+    port.postMessage({ type: "background.notice", show: true, actions: 50 });
     await new Promise((resolve) => setTimeout(resolve, 20));
     const oldNotice = document.querySelector("openbot-recorder-notice");
     expect(oldNotice).not.toBeNull();
@@ -369,7 +370,7 @@ describe("the content script entry", () => {
     expect(oldNotice?.isConnected).toBe(false);
   });
 
-  test("a click inside a part of the page marked to be ignored is not a step", async () => {
+  test("a click inside a part of the page marked to be ignored is not captured", async () => {
     const fake = installChromeFake();
     uninstall = () => fake.uninstall();
     const received: ContentToBackground[] = [];
@@ -380,14 +381,18 @@ describe("the content script entry", () => {
     document.body.innerHTML = `<div data-copilotkit-ignore><button id="skip">Skip</button></div><button id="keep">Keep</button>`;
     await import(`../src/content/index?fresh=${Date.now()}1`);
 
+    const clicks = () =>
+      received.filter(
+        (m) => m.type === "content.event" && m.event.name === "click",
+      );
     trustedClick(document.getElementById("skip"));
     await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(received.filter((m) => m.type === "content.step")).toEqual([]);
+    expect(clicks()).toEqual([]);
 
     trustedClick(document.getElementById("keep"));
     await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(received.filter((m) => m.type === "content.step")).toMatchObject([
-      { action: { target: { name: "Keep" } } },
+    expect(clicks()).toMatchObject([
+      { event: { value: { target: { text: "Keep" } } } },
     ]);
   });
 });

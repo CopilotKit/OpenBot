@@ -57,11 +57,11 @@ describe("classifyGrantError, one assertion per pass row of the table", () => {
     );
   });
 
-  test("row 4: a recording that is not open is parked", () => {
+  test("row 4: OpenBot's not found is parked, with a sentence about the recording's Bot", () => {
     const r = TRAJECTORY_GATE_REFUSALS.notOpen;
     const v = park(classifyGrantError(r.status, r));
     expect(v.hint).toBe(
-      "Learning capture is off: this recording is no longer open in OpenBot.",
+      "Learning capture is off: OpenBot does not offer you this recording's Bot any more.",
     );
   });
 

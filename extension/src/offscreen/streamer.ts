@@ -13,7 +13,6 @@ import {
   trimEvent,
 } from "@openbot/shared/recorder-masking";
 import type { CaptureStatus } from "../protocol/messages";
-import { OpenBotError } from "../shared/openbot-client";
 import { isAllowedGatewayUrl } from "../shared/origin";
 import { GrantError, type GrantVerdict, PASS_HINTS } from "./grant";
 import {
@@ -41,7 +40,7 @@ export type KeptReport = {
   reason: string;
   parked: boolean;
   events: number;
-  demonstrationId: string;
+  recordingId: string;
   trajectoryId: string;
 };
 
@@ -52,19 +51,15 @@ type Timers = {
 
 export type StreamerDeps = {
   fetchGrant(trajectoryId: string): Promise<TrajectoryGrant>;
-  /** Rejects with OpenBot's answer as an `OpenBotError`: only OpenBot's own refusal (a 400 or 404 with its JSON error body)
-   * parks the rolled-over trajectory, a signed-out 401 signs out, and anything else (a network failure, a 5xx, any other
-   * 4xx, or an answer without OpenBot's body, such as a proxy's or a sign-in page's) is retried. */
-  registerTrajectory(trajectoryId: string): Promise<void>;
-  closeTrajectory(trajectoryId: string): Promise<void>;
   allowedGatewayUrls: string[] | null;
   outbox: Outbox;
   sequencer: { next(): number; flush(): Promise<void> };
   status(update: StreamerStatus): void;
-  /** Rollover registered another trajectory of `demonstrationId`: after Start over that can be the replaced recording. */
-  onTrajectory(trajectoryId: string, demonstrationId: string): void;
-  /** Forwarded as offscreen.signed-out { reason, token }: the controller adds the session token its fetchGrant and
-   * registerTrajectory used (the streamer never holds it), so the service worker signs out only that connection. */
+  /** A long recording rolled over to another trajectory of `recordingId`: after Start over that can be the replaced
+   * recording. */
+  onTrajectory(trajectoryId: string, recordingId: string): void;
+  /** Forwarded as offscreen.signed-out { reason, token }: the controller adds the session token its fetchGrant used (the
+   * streamer never holds it), so the service worker signs out only that connection. */
   onSignedOut(reason: "revoked" | "removed" | "organization"): void;
   /** A trajectory stopped streaming with its events kept (a stop (hold) or stop (park) row); called on each transition,
    * and again for every trajectory still kept when its recording stops or is replaced by Start over. */
@@ -85,9 +80,9 @@ export type StreamerDeps = {
 
 export type Streamer = {
   push(event: CapturedEvent): void;
-  /** Start over: outcome failed to the current trajectory, switch at once, resolve when the old one is drained and closed. */
+  /** Start over: outcome failed to the current trajectory, switch at once, resolve when the old one is drained and finished. */
   rotate(next: {
-    demonstrationId: string;
+    recordingId: string;
     trajectoryId: string;
     title: string;
   }): Promise<void>;
@@ -96,7 +91,7 @@ export type Streamer = {
     outcome: "succeeded" | "failed",
     extra?: Record<string, JsonValue>,
   ): Promise<{ trajectoryIds: string[] }>;
-  /** Resolves when every trajectory of this streamer has an empty outbox and is closed. A trajectory that stopped with
+  /** Resolves when every trajectory of this streamer has an empty outbox and is finished. A trajectory that stopped with
    * its events kept never resolves it; it reports `onKept` instead, and a later successful retry drains and resolves. */
   drained(): Promise<void>;
   discard(): Promise<void>;
@@ -105,11 +100,11 @@ export type Streamer = {
 export type StreamerSession = {
   trajectoryId: string;
   title: string;
-  demonstrationId: string;
+  recordingId: string;
   version: string;
   /** Reopen the outbox entries and meta of this trajectory and the ones it rolled over to, and send them first. */
   resume?: boolean;
-  /** A streamer for offscreen.recover: no new rollover starts (only buffered transcripts and the final outcome follow). */
+  /** A streamer for offscreen.recover: no new rollover starts (only the final outcome follows). */
   recover?: boolean;
 };
 
@@ -146,13 +141,6 @@ const messagesRefusedSentence = (reason: string) =>
   `Learning capture is paused: Intelligence refused the recorder's messages (${reason}).`;
 const sessionEndedSentence = (reason: string) =>
   `Learning capture is paused: Intelligence ended the capture session (${reason}).`;
-/** A rollover OpenBot refused, with OpenBot's own sentence when it gave one (parked, so "off", as the popup titles it). */
-const registrationRefusedSentence = (sentence: string) => {
-  const detail = sentence.trim().replace(/\.+$/, "");
-  return detail
-    ? `Learning capture is off: OpenBot refused the next part of this recording (${detail}).`
-    : "Learning capture is off: OpenBot refused the next part of this recording.";
-};
 const checkOriginSentence = () => {
   const id =
     typeof chrome !== "undefined" && chrome.runtime?.id
@@ -163,7 +151,8 @@ const checkOriginSentence = () => {
 
 type WireEvent = CapturedEvent & { value: Record<string, JsonValue> };
 
-/** The meta a trajectory keeps in the outbox; `closed` records that OpenBot closed it, so a resumed streamer skips it. */
+/** The meta a trajectory keeps in the outbox; `closed` records that every event of it reached Intelligence, so a resumed
+ * streamer skips it. */
 type StoredMeta = TrajectoryMeta & { closed?: boolean };
 
 type Kept = { reason: string; parked: boolean };
@@ -218,13 +207,6 @@ type Lane = {
   conn: Connection | null;
   /** The next connect attempt (a back-off or a held trajectory's retry). */
   timer: unknown;
-  /** The next attempt to close the trajectory in OpenBot. */
-  closeTimer: unknown;
-  awaitingRegistration: boolean;
-  /** OpenBot refused to register this rolled-over trajectory; a recovering streamer asks again at the next browser start. */
-  refused: boolean;
-  /** Caught up behind a refused successor: its connection is gone, but it stays open in OpenBot for that next attempt. */
-  released: boolean;
   closing: boolean;
   kept: Kept | null;
   retry: { attempts: number; since: number } | null;
@@ -377,35 +359,6 @@ function regrant(row: RegrantRow, detail = "unknown"): Failure {
   }
 }
 
-const SIGNED_OUT_REASONS = ["revoked", "removed", "organization"] as const;
-
-type RegistrationFailure =
-  | { kind: "retry" }
-  | { kind: "refused"; reason: string }
-  | { kind: "signed-out"; reason: (typeof SIGNED_OUT_REASONS)[number] };
-
-/**
- * Only the registration route's own Refused (400) and NotFound (404), carrying OpenBot's JSON error body, are answers a
- * retry cannot change. Anything that cannot be told from a transient condition (a network failure, a 5xx, any other
- * 4xx, a 401 that is not OpenBot's sign-out, a proxy's or a sign-in page's answer with no OpenBot body) is retried.
- */
-function registrationFailure(error: unknown): RegistrationFailure {
-  if (!(error instanceof OpenBotError)) return { kind: "retry" };
-  if (error.signedOut) {
-    const reason =
-      SIGNED_OUT_REASONS.find((known) => known === error.body?.reason) ??
-      "revoked";
-    return { kind: "signed-out", reason };
-  }
-  if (error.body !== null && (error.status === 400 || error.status === 404)) {
-    return {
-      kind: "refused",
-      reason: registrationRefusedSentence(error.body.error),
-    };
-  }
-  return { kind: "retry" };
-}
-
 const reasonOf = (payload: unknown): string =>
   isRecord(payload) && typeof payload.reason === "string"
     ? payload.reason
@@ -428,7 +381,8 @@ const realTimers: Timers = {
 /**
  * Streams one recording's events to Intelligence's trajectory channel from a durable outbox: every event is resent until
  * the gateway acknowledges it, every refusal gets the verdict of Task 11's table (none discards events), a long recording
- * rolls over to linked trajectories, and each trajectory is closed in OpenBot once its outbox is empty.
+ * rolls over to linked trajectories (a `recording.continued` event names the next one), and each trajectory is finished
+ * once it is stopped and its outbox is empty.
  */
 export async function createStreamer(
   session: StreamerSession,
@@ -455,31 +409,27 @@ export async function createStreamer(
     string,
     { sent: number; rejected: number; dropped: number }
   >();
-  const waiters: { demonstrationId: string; resolve: () => void }[] = [];
-  let demonstrationId = session.demonstrationId;
+  const waiters: { recordingId: string; resolve: () => void }[] = [];
+  let recordingId = session.recordingId;
   let signedOut = false;
   let discarded = false;
   let lastStatus = "";
-  const registrations: { old: Lane; next: Lane }[] = [];
-  let registering = false;
-  let registrationAttempt = 0;
-  let registrationTimer: unknown;
   let chain: Promise<void> = Promise.resolve();
 
   const halted = () => signedOut || discarded;
   const clear = (handle: unknown) => {
     if (handle !== undefined) timers.clear(handle);
   };
-  const countsOf = (demonstration: string) => {
-    let found = counters.get(demonstration);
+  const countsOf = (recording: string) => {
+    let found = counters.get(recording);
     if (!found) {
       found = { sent: 0, rejected: 0, dropped: 0 };
-      counters.set(demonstration, found);
+      counters.set(recording, found);
     }
     return found;
   };
-  const lanesOf = (demonstration: string) =>
-    lanes.filter((lane) => lane.meta.demonstrationId === demonstration);
+  const lanesOf = (recording: string) =>
+    lanes.filter((lane) => lane.meta.recordingId === recording);
 
   const makeLane = (id: string, meta: StoredMeta, pending: number): Lane => ({
     id,
@@ -487,10 +437,6 @@ export async function createStreamer(
     pending,
     conn: null,
     timer: undefined,
-    closeTimer: undefined,
-    awaitingRegistration: false,
-    refused: false,
-    released: false,
     closing: false,
     kept: null,
     retry: null,
@@ -499,8 +445,8 @@ export async function createStreamer(
     showing: undefined,
     maxEvents: MAX_BATCH_EVENTS,
   });
-  const freshMeta = (demonstration: string, title: string): StoredMeta => ({
-    demonstrationId: demonstration,
+  const freshMeta = (recording: string, title: string): StoredMeta => ({
+    recordingId: recording,
     title,
     pushed: 0,
     outcomeQueued: false,
@@ -532,7 +478,7 @@ export async function createStreamer(
     intelligence: CaptureStatus["intelligence"];
     reason?: string;
   } | null => {
-    if (lane.meta.closed || lane.released) return null;
+    if (lane.meta.closed) return null;
     if (lane.kept) {
       return {
         intelligence: lane.kept.parked ? "parked" : "held",
@@ -545,7 +491,7 @@ export async function createStreamer(
   };
 
   const emitStatus = () => {
-    const own = lanesOf(demonstrationId);
+    const own = lanesOf(recordingId);
     let pick: {
       intelligence: CaptureStatus["intelligence"];
       reason?: string;
@@ -563,7 +509,7 @@ export async function createStreamer(
         }
       }
     }
-    const counts = countsOf(demonstrationId);
+    const counts = countsOf(recordingId);
     const update: StreamerStatus = {
       intelligence: pick.intelligence,
       ...(pick.reason === undefined ? {} : { reason: pick.reason }),
@@ -583,16 +529,16 @@ export async function createStreamer(
 
   const settleWaiters = () => {
     for (const waiter of [...waiters]) {
-      const own = lanesOf(waiter.demonstrationId);
+      const own = lanesOf(waiter.recordingId);
       if (own.length > 0 && own.every((lane) => lane.meta.closed)) {
         waiters.splice(waiters.indexOf(waiter), 1);
         waiter.resolve();
       }
     }
   };
-  const closedAll = (demonstration: string) =>
+  const closedAll = (recording: string) =>
     new Promise<void>((resolve) => {
-      waiters.push({ demonstrationId: demonstration, resolve });
+      waiters.push({ recordingId: recording, resolve });
       settleWaiters();
     });
 
@@ -623,7 +569,7 @@ export async function createStreamer(
       reason: kept.reason,
       parked: kept.parked,
       events: lane.pending,
-      demonstrationId: lane.meta.demonstrationId,
+      recordingId: lane.meta.recordingId,
       trajectoryId: lane.id,
     });
   };
@@ -646,8 +592,8 @@ export async function createStreamer(
    * A recording that stops or is replaced with trajectories already held or parked reports them again: the transition
    * was reported while it still recorded, when the controller posts only a status, so this is its first offscreen.kept.
    */
-  const reportStillKept = (demonstration: string) => {
-    for (const lane of lanesOf(demonstration)) {
+  const reportStillKept = (recording: string) => {
+    for (const lane of lanesOf(recording)) {
       if (lane.kept && !lane.meta.closed) reportKept(lane, lane.kept);
     }
   };
@@ -677,15 +623,11 @@ export async function createStreamer(
   const signOut = (reason: "revoked" | "removed" | "organization") => {
     if (halted()) return;
     signedOut = true;
-    clear(registrationTimer);
-    registrationTimer = undefined;
     for (const lane of lanes) {
       if (lane.conn) teardown(lane.conn);
       lane.conn = null;
       clear(lane.timer);
-      clear(lane.closeTimer);
       lane.timer = undefined;
-      lane.closeTimer = undefined;
     }
     emitStatus();
     deps.onSignedOut(reason);
@@ -768,143 +710,21 @@ export async function createStreamer(
     if (!lane.meta.stopped || lane.pending > 0 || lane.meta.droppedPending > 0)
       return;
     if (lane.conn?.inflight) return;
-    if (lane.meta.next !== undefined && !lane.meta.registered) {
-      if (lanes.some((other) => other.id === lane.meta.next && other.refused))
-        release(lane);
-      return;
-    }
     void close(lane);
   };
 
-  /**
-   * A caught-up trajectory whose successor OpenBot refused leaves Intelligence, so no more than two connections are ever
-   * open, but it stays open in OpenBot: a stopped recording registers the successor at the next browser start only while
-   * one of its trajectories is still open.
-   */
-  const release = (lane: Lane) => {
-    if (lane.conn) teardown(lane.conn);
-    lane.conn = null;
-    clear(lane.timer);
-    lane.timer = undefined;
-    lane.released = true;
-    emitStatus();
-  };
-
-  /** Discard closes the dropped recording's trajectories in OpenBot, once and best effort; signed out, it has no token. */
-  const closeDiscarded = async (lane: Lane) => {
-    if (signedOut) return;
-    try {
-      await deps.closeTrajectory(lane.id);
-      lane.meta.closed = true;
-    } catch (error) {
-      console.error(
-        "Recorder: OpenBot did not close a discarded trajectory",
-        error,
-      );
-    }
-  };
-
+  /** A stopped trajectory whose every event Intelligence acknowledged is finished: its connection goes, and its meta
+   * says so, so a resumed streamer leaves it alone. */
   const close = async (lane: Lane) => {
     lane.closing = true;
     clear(lane.timer);
     lane.timer = undefined;
     if (lane.conn) teardown(lane.conn);
     lane.conn = null;
-    let attempt = 0;
-    const run = async (): Promise<void> => {
-      lane.closeTimer = undefined;
-      if (halted()) return;
-      try {
-        await deps.closeTrajectory(lane.id);
-      } catch (error) {
-        attempt += 1;
-        console.error(
-          "Recorder: OpenBot did not close a trajectory yet",
-          error,
-        );
-        if (!halted()) {
-          lane.closeTimer = timers.set(() => void run(), backoff(attempt));
-        }
-        return;
-      }
-      lane.meta.closed = true;
-      await persist(lane);
-      emitStatus();
-      settleWaiters();
-    };
-    await run();
-  };
-
-  /**
-   * Registers rolled-over trajectories with OpenBot one at a time, in the order they link, each retried until it succeeds
-   * or OpenBot refuses it.
-   */
-  const register = (old: Lane, next: Lane) => {
-    next.awaitingRegistration = true;
-    registrations.push({ old, next });
-    if (!registering) void runRegistrations();
-  };
-
-  const runRegistrations = async (): Promise<void> => {
-    registrationTimer = undefined;
-    registering = true;
-    while (registrations.length > 0) {
-      if (halted()) return;
-      const { old, next } = registrations[0];
-      try {
-        await deps.registerTrajectory(next.id);
-      } catch (error) {
-        const failure = registrationFailure(error);
-        if (failure.kind === "signed-out") {
-          signOut(failure.reason);
-          return;
-        }
-        if (failure.kind === "refused") {
-          // Parked: the trajectory never takes a pass, its events stay kept until the person discards them, and a
-          // recovering streamer asks again at the next browser start. The old trajectory waits open in OpenBot for that,
-          // and leaves Intelligence once it has caught up.
-          console.error(
-            "Recorder: OpenBot refused to register the next trajectory",
-            error,
-          );
-          registrationAttempt = 0;
-          registrations.shift();
-          if (halted()) return;
-          next.refused = true;
-          keep(next, { reason: failure.reason, parked: true });
-          maybeClose(old);
-          continue;
-        }
-        registrationAttempt += 1;
-        console.error(
-          "Recorder: OpenBot did not register the next trajectory yet",
-          error,
-        );
-        // `registering` stays true while the retry waits, so a later rollover only joins the queue.
-        if (!halted()) {
-          registrationTimer = timers.set(
-            () => void runRegistrations(),
-            backoff(registrationAttempt),
-          );
-        }
-        return;
-      }
-      registrationAttempt = 0;
-      registrations.shift();
-      if (discarded) {
-        // OpenBot registered it after the person discarded the recording: close it as discard closed the others.
-        await closeDiscarded(next);
-        return;
-      }
-      if (halted()) return;
-      old.meta.registered = true;
-      await persist(old);
-      next.awaitingRegistration = false;
-      deps.onTrajectory(next.id, next.meta.demonstrationId);
-      void connect(next);
-      maybeClose(old);
-    }
-    registering = false;
+    lane.meta.closed = true;
+    await persist(lane);
+    emitStatus();
+    settleWaiters();
   };
 
   const current = (lane: Lane, conn: Connection) =>
@@ -971,7 +791,7 @@ export async function createStreamer(
       return;
     }
     lane.pending -= inflight.items.length;
-    const counts = countsOf(lane.meta.demonstrationId);
+    const counts = countsOf(lane.meta.recordingId);
     counts.sent += response.accepted;
     counts.rejected += response.rejected;
     lane.retry = null;
@@ -1025,7 +845,7 @@ export async function createStreamer(
     }
     lane.pending -= 1;
     lane.meta.droppedPending += 1;
-    countsOf(lane.meta.demonstrationId).dropped += 1;
+    countsOf(lane.meta.recordingId).dropped += 1;
     await persist(lane);
     emitStatus();
     if (!current(lane, conn)) return;
@@ -1267,15 +1087,7 @@ export async function createStreamer(
 
   /** A fresh pass for every connection: a spent pass is never reused. */
   const connect = async (lane: Lane): Promise<void> => {
-    if (
-      halted() ||
-      lane.meta.closed ||
-      lane.closing ||
-      lane.released ||
-      lane.awaitingRegistration ||
-      lane.conn
-    )
-      return;
+    if (halted() || lane.meta.closed || lane.closing || lane.conn) return;
     clear(lane.timer);
     lane.timer = undefined;
     const conn: Connection = {
@@ -1322,7 +1134,7 @@ export async function createStreamer(
     const prepared = prepareEvent(event, seq, now());
     if (!prepared) {
       lane.meta.droppedPending += 1;
-      countsOf(lane.meta.demonstrationId).dropped += 1;
+      countsOf(lane.meta.recordingId).dropped += 1;
       await persist(lane);
       emitStatus();
       return;
@@ -1353,7 +1165,7 @@ export async function createStreamer(
     await queue(
       lane,
       custom("recording.started", {
-        demonstrationId: lane.meta.demonstrationId,
+        recordingId: lane.meta.recordingId,
         source: "openbot-recorder",
         version: session.version,
       }),
@@ -1373,28 +1185,29 @@ export async function createStreamer(
     );
     const next = makeLane(
       nextId,
-      freshMeta(old.meta.demonstrationId, old.meta.title),
+      freshMeta(old.meta.recordingId, old.meta.title),
       0,
     );
     lanes.push(next);
     await persist(next);
     old.meta.next = nextId;
-    old.meta.registered = false;
     old.meta.stopped = true;
     await persist(old);
     await queue(
       next,
       custom("recording.continues", {
         previousTrajectoryId: old.id,
-        demonstrationId: old.meta.demonstrationId,
+        recordingId: old.meta.recordingId,
       }),
     );
-    register(old, next);
+    deps.onTrajectory(next.id, next.meta.recordingId);
+    void connect(next);
+    maybeClose(old);
     return next;
   };
 
   const currentLane = (): Lane => {
-    const own = lanesOf(demonstrationId);
+    const own = lanesOf(recordingId);
     return own[own.length - 1];
   };
 
@@ -1432,16 +1245,10 @@ export async function createStreamer(
           ? undefined
           : await outbox.getMeta<StoredMeta>(trajectoryMetaKey(id));
     }
-    lanes.forEach((lane, index) => {
-      const next = lanes[index + 1];
-      if (lane.meta.next !== undefined && !lane.meta.registered && next) {
-        register(lane, next);
-      }
-    });
   } else {
     const lane = makeLane(
       session.trajectoryId,
-      freshMeta(session.demonstrationId, session.title),
+      freshMeta(session.recordingId, session.title),
       0,
     );
     lanes.push(lane);
@@ -1469,7 +1276,7 @@ export async function createStreamer(
           "A recording needs a title: Intelligence refuses an outcome without a workflow.",
         );
       }
-      const previous = demonstrationId;
+      const previous = recordingId;
       await enqueue(async () => {
         const old = currentLane();
         if (!old.meta.outcomeQueued && !old.meta.closed) {
@@ -1481,11 +1288,11 @@ export async function createStreamer(
         }
         old.meta.stopped = true;
         await persist(old);
-        reportStillKept(old.meta.demonstrationId);
-        demonstrationId = next.demonstrationId;
+        reportStillKept(old.meta.recordingId);
+        recordingId = next.recordingId;
         const lane = makeLane(
           next.trajectoryId,
-          freshMeta(next.demonstrationId, next.title),
+          freshMeta(next.recordingId, next.title),
           0,
         );
         lanes.push(lane);
@@ -1514,39 +1321,28 @@ export async function createStreamer(
         }
         lane.meta.stopped = true;
         await persist(lane);
-        reportStillKept(demonstrationId);
+        reportStillKept(recordingId);
         maybeClose(lane);
         return {
-          trajectoryIds: lanesOf(demonstrationId).map((own) => own.id),
+          trajectoryIds: lanesOf(recordingId).map((own) => own.id),
         };
       });
     },
 
     drained() {
-      return closedAll(demonstrationId);
+      return closedAll(recordingId);
     },
 
     async discard() {
       discarded = true;
-      clear(registrationTimer);
-      registrationTimer = undefined;
       for (const lane of lanes) {
         if (lane.conn) teardown(lane.conn);
         lane.conn = null;
         clear(lane.timer);
-        clear(lane.closeTimer);
         lane.timer = undefined;
-        lane.closeTimer = undefined;
       }
       await chain;
       for (const lane of lanes) await outbox.clear(lane.id);
-      // Left open, a trajectory would keep OpenBot serving passes and taking new trajectories for this recording. A
-      // rollover OpenBot never registered has nothing to close.
-      await Promise.all(
-        lanes
-          .filter((lane) => !lane.meta.closed && !lane.awaitingRegistration)
-          .map(closeDiscarded),
-      );
     },
   };
 }

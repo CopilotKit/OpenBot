@@ -1,23 +1,16 @@
 // Feature off until Task 17 replaces it.
-import type { DemonstrationAction } from "@openbot/shared/demonstration-schema";
 import {
   type CapturedEvent,
   EVENT_BUDGET_BYTES,
   trimEvent,
 } from "@openbot/shared/recorder-masking";
-import type { DrainRecord } from "../../shared/storage";
 import type { PageFallback } from "./fallback";
 
 export type NetworkMode = "debugger" | "page" | "waiting" | "off";
-export type RecordingContext = {
-  openbotUrl: string;
-  token: string;
-  demonstrationId: string;
-};
 export type NetworkCaptureDeps = {
-  context(): RecordingContext | null;
+  /** The OpenBot the recording's passes come from: its own calls are never captured. Null once nothing records. */
+  openbotUrl(): string | null;
   emit(event: CapturedEvent): void;
-  step(action: DemonstrationAction): void;
   status(mode: NetworkMode | "stopped", reason?: string): void;
   digests(): ReadonlySet<string>;
 };
@@ -28,7 +21,7 @@ export type NetworkCapture = {
   onCommitted(tabId: number, frameId: number, url: string): Promise<void>;
   /** After a service-worker restart: re-attach to every followed tab (detaching a stale session of ours first). */
   resume(tabs: { tabId: number; url: string }[]): Promise<NetworkMode>;
-  /** A page-level fallback event (Task 18), already re-masked: stored and emitted exactly like a debugger event, large bodies through the same body store. */
+  /** A page-level fallback event (Task 18), already re-masked: trimmed to fit one event and emitted like a debugger event. */
   recordPageEvent(event: CapturedEvent): Promise<void>;
   stop(): Promise<void>;
 };
@@ -46,14 +39,7 @@ export function createNetworkCapture(
     onCommitted: async () => {},
     resume: async () => "off",
     recordPageEvent: async (event) =>
-      deps.emit(trimEvent(event, EVENT_BUDGET_BYTES).event), // feature off: trimmed, no body store
+      deps.emit(trimEvent(event, EVENT_BUDGET_BYTES).event),
     stop: async () => {},
   };
 }
-
-/** After a browser restart (Task 9's recovery): upload a drained recording's network body lines still in IndexedDB and
- * complete its network media. Feature off: nothing is buffered, so nothing to do. */
-export async function recoverNetworkBodies(
-  _drain: DrainRecord,
-  _target: { openbotUrl: string; token: string },
-): Promise<void> {}

@@ -12,8 +12,6 @@ import { Separator } from "@/components/ui/separator";
 import type { CaptureStatus, RecorderState } from "../../protocol/messages";
 import { learningSentence } from "../popup/record-form";
 
-const UNJOINED =
-  "Learning did not see this recording: OpenBot could not choose its Learning space in time. It still saves to OpenBot.";
 const LEADING_STATUS = /^Learning capture is (?:paused|off):\s*/;
 const HELD_LINE =
   "Your events are kept in this browser and sent when Intelligence accepts them; it tries again every 5 minutes.";
@@ -27,18 +25,9 @@ export function stripCaptureStatus(reason: string): string {
   return line.charAt(0).toUpperCase() + line.slice(1);
 }
 
-/** The sentence about a recording's Learning space; `unjoined` only arises from a pass, so only a recording shows it. */
-export function recordingLearningSentence(
-  learning: LearningSpaceState | undefined,
-): string | null {
-  if (!learning) return null;
-  return learning.state === "unjoined" ? UNJOINED : learningSentence(learning);
-}
-
 const NOT_IN_A_SPACE = new Set<LearningSpaceState["state"]>([
   "unassigned",
   "missing",
-  "unjoined",
 ]);
 
 const INTELLIGENCE_STATUS: Record<CaptureStatus["intelligence"], string> = {
@@ -83,7 +72,7 @@ function keptText(parked: boolean, reason: string | undefined): RowText {
 
 /** What the row says about the recording's Learning space, after the capture status, so neither hides the other. */
 function spaceLines(learning: LearningSpaceState | undefined): string[] {
-  const sentence = recordingLearningSentence(learning);
+  const sentence = learning ? learningSentence(learning) : null;
   return [
     ...(learning && NOT_IN_A_SPACE.has(learning.state)
       ? ["Not into a Learning space"]
@@ -158,9 +147,9 @@ export function LearningCaptureRow({
 }
 
 /**
- * The Learning capture row after Stop, for what is still sending. A finished recording's capture status is back to
- * idle (the service worker ignores the document's status once nothing records), so this reads the drains instead:
- * events kept by a stop (held or parked), or else a recording that is still streaming.
+ * The Learning capture row after Stop, for events kept by a stop (held or parked). A finished recording's capture status
+ * is back to idle (the service worker ignores the document's status once nothing records), so this reads the drains
+ * instead; without kept events it says the rest is still sending.
  */
 export function SendingLearningRow({
   kept,

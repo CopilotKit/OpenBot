@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { IDBKeyRange as FakeIDBKeyRange, IDBFactory } from "fake-indexeddb";
 import {
-  deleteDemonstrationData,
   openRecorderDatabase,
   RECORDER_DATABASE,
   RECORDER_DATABASE_VERSION,
@@ -44,16 +43,12 @@ describe("recorder database", () => {
     expect(RECORDER_DATABASE_VERSION).toBe(1);
   });
 
-  test("creates exactly the six stores with the documented key paths", async () => {
+  test("creates exactly the outbox's two stores with the documented key paths", async () => {
     const db = await openRecorderDatabase(freshName());
-    expect([...db.objectStoreNames].sort()).toEqual([...STORES].sort());
-    expect(STORES.length).toBe(6);
+    expect([...db.objectStoreNames].sort()).toEqual(["events", "meta"]);
+    expect([...STORES].sort()).toEqual(["events", "meta"]);
     expect(keyPathOf(db, "events")).toEqual(["trajectoryId", "seq"]);
     expect(keyPathOf(db, "meta")).toBeNull();
-    expect(keyPathOf(db, "media")).toEqual(["mediaId", "index"]);
-    expect(keyPathOf(db, "voice")).toEqual(["demonstrationId", "index"]);
-    expect(keyPathOf(db, "steps")).toEqual(["demonstrationId", "index"]);
-    expect(keyPathOf(db, "bodies")).toEqual(["mediaId", "line"]);
     db.close();
   });
 
@@ -115,13 +110,13 @@ describe("recorder database", () => {
 
   test("tx rejects with the failing request's error when work does not await it", async () => {
     const db = await openRecorderDatabase(freshName());
-    await tx(db, ["steps"], "readwrite", (t) =>
+    await tx(db, ["events"], "readwrite", (t) =>
       requestToPromise(
-        t.objectStore("steps").add({ demonstrationId: "d", index: 0 }),
+        t.objectStore("events").add({ trajectoryId: "t", seq: 0 }),
       ),
     );
-    const error = await tx(db, ["steps"], "readwrite", (t) => {
-      t.objectStore("steps").add({ demonstrationId: "d", index: 0 });
+    const error = await tx(db, ["events"], "readwrite", (t) => {
+      t.objectStore("events").add({ trajectoryId: "t", seq: 0 });
       return "ok";
     }).then(
       () => undefined,
@@ -131,115 +126,22 @@ describe("recorder database", () => {
     db.close();
   });
 
-  test("deleteDemonstrationData removes one demonstration and leaves another", async () => {
-    const db = await openRecorderDatabase(freshName());
-    const seed = (id: string, mediaId: string, bodiesId: string) =>
-      tx(db, [...STORES], "readwrite", (t) => {
-        t.objectStore("steps").put({ demonstrationId: id, index: 0 });
-        t.objectStore("steps").put({ demonstrationId: id, index: 1 });
-        t.objectStore("voice").put({ demonstrationId: id, index: 0 });
-        t.objectStore("media").put({
-          mediaId,
-          index: 0,
-          blob: new Blob(["a"]),
-        });
-        t.objectStore("media").put({
-          mediaId,
-          index: 1,
-          blob: new Blob(["b"]),
-        });
-        t.objectStore("bodies").put({ mediaId: bodiesId, line: 0, text: "x" });
-        t.objectStore("meta").put(mediaId, `media:${id}:screen`);
-        t.objectStore("meta").put(bodiesId, `media:${id}:network`);
-        t.objectStore("meta").put(1, `bodies-next:${bodiesId}`);
-      });
-    await seed("d1", "m1", "b1");
-    await seed("d2", "m2", "b2");
-
-    await deleteDemonstrationData(db, "d1");
-
-    const count = (store: StoreNameLike) =>
-      tx(db, [store], "readonly", (t) =>
-        requestToPromise(t.objectStore(store).count()),
-      );
-    expect(await count("steps")).toBe(2);
-    expect(await count("voice")).toBe(1);
-    expect(await count("media")).toBe(2);
-    expect(await count("bodies")).toBe(1);
-    const keys = await tx(db, ["meta"], "readonly", (t) =>
-      requestToPromise(t.objectStore("meta").getAllKeys()),
-    );
-    expect(keys.sort()).toEqual([
-      "bodies-next:b2",
-      "media:d2:network",
-      "media:d2:screen",
-    ]);
-    const left = await tx(db, ["media"], "readonly", (t) =>
-      requestToPromise(t.objectStore("media").getAll()),
-    );
-    expect(left.every((r) => r.mediaId === "m2")).toBe(true);
-    db.close();
-  });
-
-  test("deleteDemonstrationData forgets the demonstration's next step index only", async () => {
-    const db = await openRecorderDatabase(freshName());
-    await tx(db, ["meta"], "readwrite", (t) => {
-      t.objectStore("meta").put(3, "steps-next:demo-1");
-      t.objectStore("meta").put(5, "steps-next:demo-2");
-    });
-
-    await deleteDemonstrationData(db, "demo-1");
-
-    const keys = await tx(db, ["meta"], "readonly", (t) =>
-      requestToPromise(t.objectStore("meta").getAllKeys()),
-    );
-    expect(keys).toEqual(["steps-next:demo-2"]);
-    db.close();
-  });
-
-  test("deleteDemonstrationData forgets the network body upload progress of that demonstration's media only", async () => {
-    const db = await openRecorderDatabase(freshName());
-    await tx(db, ["meta"], "readwrite", (t) => {
-      const meta = t.objectStore("meta");
-      meta.put("net-1", "media:demo-1:network");
-      meta.put("net-2", "media:demo-2:network");
-      meta.put({ chunks: 2, offset: 0 }, "bodies-progress:net-1");
-      meta.put(
-        { chunks: 3, offset: 4, completed: true },
-        "bodies-progress:net-2",
-      );
-    });
-
-    await deleteDemonstrationData(db, "demo-1");
-
-    const keys = await tx(db, ["meta"], "readonly", (t) =>
-      requestToPromise(t.objectStore("meta").getAllKeys()),
-    );
-    expect(keys.sort()).toEqual([
-      "bodies-progress:net-2",
-      "media:demo-2:network",
-    ]);
-    db.close();
-  });
-
   test("tx resolves when the caller handled a request error", async () => {
     const db = await openRecorderDatabase(freshName());
-    await tx(db, ["steps"], "readwrite", (t) => {
-      t.objectStore("steps").add({ demonstrationId: "d", index: 0 });
+    await tx(db, ["events"], "readwrite", (t) => {
+      t.objectStore("events").add({ trajectoryId: "t", seq: 0 });
     });
-    await tx(db, ["steps"], "readwrite", (t) => {
+    await tx(db, ["events"], "readwrite", (t) => {
       const duplicate = t
-        .objectStore("steps")
-        .add({ demonstrationId: "d", index: 0 });
+        .objectStore("events")
+        .add({ trajectoryId: "t", seq: 0 });
       duplicate.onerror = (e) => e.preventDefault();
-      t.objectStore("steps").put({ demonstrationId: "d", index: 1 });
+      t.objectStore("events").put({ trajectoryId: "t", seq: 1 });
     });
-    const count = await tx(db, ["steps"], "readonly", (t) =>
-      requestToPromise(t.objectStore("steps").count()),
+    const count = await tx(db, ["events"], "readonly", (t) =>
+      requestToPromise(t.objectStore("events").count()),
     );
     expect(count).toBe(2);
     db.close();
   });
 });
-
-type StoreNameLike = (typeof STORES)[number];

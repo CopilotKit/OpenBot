@@ -21,25 +21,20 @@ export type KeptEvents = {
   at: number;
   waitingForReconnect?: boolean;
 };
-/** A recording whose queued steps, events, voice or media may still need sending. */
+/** A recording whose events may still need sending to Intelligence. A recording exists only in this browser and in
+ * Intelligence: `recordingId` is the Recorder's own id for it, and `trajectoryIds` its trajectories in Intelligence. */
 export type DrainRecord = {
-  demonstrationId: string;
+  recordingId: string;
+  /** The Bot the person picked: every capture pass names it, so the trajectories join its Learning space. */
   botId: string;
   title: string;
+  /** The OpenBot that hands out its capture passes. */
   openbotUrl: string;
-  /** The person who recorded it: its data is sent only while that person is connected to `openbotUrl` (Decision 19). */
+  /** The person who recorded it: its events are sent only while that person is connected to `openbotUrl` (Decision 19). */
   userId: string;
   userName: string;
   trajectoryIds: string[];
   startedAt: number;
-  /** Stop has not yet reached OpenBot (its steps were still uploading, or OpenBot did not answer): recovery and the next
-   * reconnect upload the queued steps first and then send `POST .../stop` (Task 9). */
-  stopPending?: boolean;
-  /** Start over: delete this demonstration once its outbox has drained. */
-  discard: boolean;
-  /** The offscreen document reported it done (Intelligence has every event of it) while it stays for OpenBot: its stop
-   * has not reached OpenBot, or its network bodies are still owed. */
-  streamed?: boolean;
   /** The person chose to discard it (Discard kept events, Disconnect): nothing of it is ever sent, and a restart that
    * interrupted the clearing finishes it. */
   discarding?: boolean;
@@ -60,7 +55,7 @@ export type LocalState = {
   installSecret?: string;
   connection?: ConnectionRecord;
   lastBotId?: string;
-  activeRecording?: DrainRecord; // the recording in progress; moved into `drains` at Stop and on recovery
+  activeRecording?: DrainRecord; // the recording in progress; moved into `drains` at Stop, Start over and on recovery
   drains?: DrainRecord[]; // stopped recordings still sending; removed on offscreen.done
   notice?: RecorderNotice;
   /** When the organization-session keep-alive last reached OpenBot (Decision 2, Task 8). */

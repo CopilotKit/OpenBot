@@ -13,7 +13,7 @@ import { ask as askBackground } from "../ui/runtime";
 import { Notices } from "./notices";
 import { prepareRecording } from "./prepare";
 import { RecordForm } from "./record-form";
-import { AfterStop, isStopPending, RecordingView } from "./recording-view";
+import { AfterStop, RecordingView } from "./recording-view";
 
 export type PopupDeps = {
   prepare: typeof prepareRecording;
@@ -42,8 +42,8 @@ const openTab = (url: string) => chrome.tabs.create({ url });
 
 /**
  * The toolbar popup. Signed out: how to connect, plus any recordings kept in this browser (with Discard). Connected:
- * the Record form with a Bot choice; while recording, time, steps, the capture rows, Stop and Start over; after Stop,
- * where to review the recording and what is still sending or kept.
+ * the Record form with a Bot choice; while recording, time, actions, the capture rows, Stop and Start over; after Stop,
+ * that the recording went to Intelligence and into which Learning space, and what is still sending or kept.
  */
 export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
   const ask = deps?.ask ?? askBackground;
@@ -59,7 +59,6 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastBotId, setLastBotId] = useState<string | null>(null);
-  const [shownBotId, setShownBotId] = useState("");
 
   const refresh = useCallback(async () => {
     const answer = await ask<PageResponse>({ type: "page.state" });
@@ -151,12 +150,7 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
       >
         <Notices notice={view.notice} kept={state.kept} onDismiss={dismiss} />
         {/* Signed out with recordings kept for the person (Decision 19): how to send them, or Discard. */}
-        <AfterStop
-          state={state}
-          connected={false}
-          onDiscard={discardKept}
-          openTab={openTab}
-        />
+        <AfterStop state={state} connected={false} onDiscard={discardKept} />
         {policy.invalid ? (
           <p className="mt-4 text-muted-foreground text-sm">
             Your organization's Recorder policy names an OpenBot address the
@@ -194,7 +188,7 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
     );
   }
 
-  const record = async (botId: string, title: string, replaceOpen = false) => {
+  const record = async (botId: string, title: string) => {
     setBusy(true);
     setError(null);
     try {
@@ -210,7 +204,6 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
         botId,
         title,
         tabId: await tabId(),
-        ...(replaceOpen ? { replaceOpen: true } : {}),
       });
       if (!answer.ok) setError(answer.error);
       await refresh();
@@ -221,23 +214,7 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
     }
   };
 
-  // A stop OpenBot has not heard of yet holds back Record for the Bot it stopped, not for every Bot.
-  const stopPending = isStopPending(state.error);
-  const recordableBots = stopPending
-    ? bots.filter((bot) => bot.id !== state.lastStopped?.botId)
-    : bots;
-
-  const refusedBotId = state.openRecording
-    ? (state.botId ?? lastBotId ?? undefined)
-    : undefined;
-  // The open-recording refusal is about one Bot: another picked Bot neither shows it nor offers the stop.
-  const refusalIsForAnotherBot =
-    refusedBotId !== undefined &&
-    shownBotId !== "" &&
-    shownBotId !== refusedBotId;
-  const shownError = refusalIsForAnotherBot
-    ? null
-    : (error ?? state.error ?? null);
+  const shownError = error ?? state.error ?? null;
   return (
     <Page
       title={connection.user.name}
@@ -249,9 +226,8 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
         <AfterStop
           state={state}
           connected
-          openbotUrl={connection.openbotUrl}
+          bots={bots}
           onDiscard={discardKept}
-          openTab={openTab}
         />
       ) : (
         <RecordingView
@@ -264,18 +240,12 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
           }}
         />
       )}
-      {state.phase === "idle" && (!stopPending || recordableBots.length > 0) ? (
+      {state.phase === "idle" ? (
         <RecordForm
-          bots={recordableBots}
-          initialBotId={
-            state.openRecording ? (state.botId ?? lastBotId) : lastBotId
-          }
-          openRecordingBotId={refusedBotId}
-          onBotChange={setShownBotId}
+          bots={bots}
+          initialBotId={lastBotId}
           busy={busy}
-          onRecord={(botId, title, options) =>
-            record(botId, title, options?.replaceOpen)
-          }
+          onRecord={record}
         />
       ) : null}
       {shownError ? <ErrorLine message={shownError} /> : null}

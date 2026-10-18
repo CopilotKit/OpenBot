@@ -11,19 +11,19 @@ afterEach(() => {
   fake.uninstall();
 });
 
-const recording = (steps: number): RecorderState => ({
+const recording = (actions: number): RecorderState => ({
   ...IDLE_STATE,
   phase: "recording",
-  steps,
+  actions,
 });
 
 describe("showBadge", () => {
-  test("a recording shows REC in red until the first step", async () => {
+  test("a recording shows REC in red until the first action", async () => {
     await showBadge(recording(0));
     expect(fake.badge).toEqual({ text: "REC", color: "#e7000b" });
   });
 
-  test("a recording shows its step count", async () => {
+  test("a recording shows its action count", async () => {
     await showBadge(recording(7));
     expect(fake.badge).toEqual({ text: "7", color: "#e7000b" });
     await showBadge(recording(999));

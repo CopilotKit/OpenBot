@@ -96,7 +96,7 @@ test("Disconnect asks first and sends nothing on Cancel", async () => {
   fireEvent.click(await findByRole("button", { name: "Disconnect" }));
   expect(getByText("Disconnect this browser?")).toBeTruthy();
   expect(
-    getByText("It stops recording to OpenBot until you connect it again."),
+    getByText("The Recorder records nothing until you connect it again."),
   ).toBeTruthy();
   fireEvent.click(await findByRole("button", { name: "Cancel" }));
   expect(sent.some((m) => m.type === "page.disconnect")).toBe(false);

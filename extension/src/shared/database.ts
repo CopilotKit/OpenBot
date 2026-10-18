@@ -4,24 +4,10 @@ export const RECORDER_DATABASE_VERSION = 1;
 /**
  * Every object store, created together in version 1:
  *  events  keyPath ["trajectoryId", "seq"]        the streamer's outbox
- *  meta    out-of-line string keys                 trajectory meta, "seq", "media:<demonstrationId>:<kind>" -> mediaId
- *  media   keyPath ["mediaId", "index"]            buffered screen and audio chunks, value { mediaId, index, blob }
- *  voice   keyPath ["demonstrationId", "index"]    untranscribed voice slices
- *  steps   keyPath ["demonstrationId", "index"]    steps not yet acknowledged by OpenBot
- *  bodies  keyPath ["mediaId", "line"]             network body lines not yet uploaded, value { mediaId, line, text };
- *          meta "media:<demonstrationId>:network" -> mediaId, "bodies-next:<mediaId>" -> the next line number and
- *          "bodies-progress:<mediaId>" -> { chunks, offset, inflight?, completed? }, how far OpenBot has taken the media
- * The step uploader also keeps meta "steps-next:<demonstrationId>" -> the next step index for that recording
- * (see stepsNextKey); deleteDemonstrationData removes it with the rest of the demonstration.
+ *  meta    out-of-line string keys                 each trajectory's own record, and "seq", the last seq issued
+ * Nothing else is kept in this browser: a recording's events wait here until Intelligence acknowledges them.
  */
-export const STORES = [
-  "events",
-  "meta",
-  "media",
-  "voice",
-  "steps",
-  "bodies",
-] as const;
+export const STORES = ["events", "meta"] as const;
 export type StoreName = (typeof STORES)[number];
 
 /**
@@ -38,14 +24,6 @@ export function openRecorderDatabase(
       if (db.objectStoreNames.length === 0) {
         db.createObjectStore("events", { keyPath: ["trajectoryId", "seq"] });
         db.createObjectStore("meta");
-        db.createObjectStore("media", { keyPath: ["mediaId", "index"] });
-        db.createObjectStore("voice", {
-          keyPath: ["demonstrationId", "index"],
-        });
-        db.createObjectStore("steps", {
-          keyPath: ["demonstrationId", "index"],
-        });
-        db.createObjectStore("bodies", { keyPath: ["mediaId", "line"] });
       }
     };
     request.onsuccess = () => resolve(request.result);
@@ -136,74 +114,5 @@ export function tx<T>(
     } catch (error) {
       fail(error);
     }
-  });
-}
-
-const prefixRange = (prefix: string) =>
-  IDBKeyRange.bound(prefix, `${prefix}\uffff`);
-/** The meta key holding a demonstration's next step index; the step uploader and the delete share it. */
-export const stepsNextKey = (demonstrationId: string) =>
-  `steps-next:${demonstrationId}`;
-
-const pairRange = (first: string) =>
-  IDBKeyRange.bound([first, -Infinity], [first, Infinity]);
-
-/**
- * Deletes every record of one demonstration in steps, voice and (through meta) media and bodies; Start over and the
- * person's own "Discard kept events" or Disconnect use it (a sign-out keeps the data).
- */
-export async function deleteDemonstrationData(
-  db: IDBDatabase,
-  demonstrationId: string,
-): Promise<void> {
-  await tx(
-    db,
-    ["steps", "voice", "media", "bodies", "meta"],
-    "readwrite",
-    async (t) => {
-      const meta = t.objectStore("meta");
-      t.objectStore("steps").delete(pairRange(demonstrationId));
-      t.objectStore("voice").delete(pairRange(demonstrationId));
-      const linkRange = prefixRange(`media:${demonstrationId}:`);
-      const linkKeys = await requestToPromise(meta.getAllKeys(linkRange));
-      const mediaIds = await Promise.all(
-        linkKeys.map((key) => requestToPromise(meta.get(key))),
-      );
-      for (const mediaId of mediaIds) {
-        if (typeof mediaId !== "string") continue;
-        t.objectStore("media").delete(pairRange(mediaId));
-        t.objectStore("bodies").delete(pairRange(mediaId));
-        meta.delete(`bodies-next:${mediaId}`);
-        meta.delete(`bodies-progress:${mediaId}`);
-      }
-      meta.delete(linkRange);
-      meta.delete(stepsNextKey(demonstrationId));
-    },
-  );
-}
-
-/**
- * Whether a demonstration's network bodies still owe OpenBot something: lines waiting in `bodies`, or every line
- * acknowledged but the media's `complete` not yet taken (its "bodies-progress:<mediaId>" record has chunks and is not
- * completed). Read-only.
- */
-export async function networkBodiesOwed(
-  db: IDBDatabase,
-  demonstrationId: string,
-): Promise<boolean> {
-  return tx(db, ["bodies", "meta"], "readonly", async (t) => {
-    const meta = t.objectStore("meta");
-    const mediaId = await requestToPromise(
-      meta.get(`media:${demonstrationId}:network`),
-    );
-    if (typeof mediaId !== "string") return false;
-    const lines = await requestToPromise(
-      t.objectStore("bodies").count(pairRange(mediaId)),
-    );
-    if (lines > 0) return true;
-    const progress = (await requestToPromise(
-      meta.get(`bodies-progress:${mediaId}`),
-    )) as { chunks?: number; completed?: boolean } | undefined;
-    return (progress?.chunks ?? 0) > 0 && !progress?.completed;
   });
 }

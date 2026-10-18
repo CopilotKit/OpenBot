@@ -34,7 +34,7 @@ export const PASS_HINTS: Record<string, string> = {
   FORBIDDEN:
     "Learning capture is off: your OpenBot account has no role that may record.",
   NOT_FOUND:
-    "Learning capture is off: this recording is no longer open in OpenBot.",
+    "Learning capture is off: OpenBot does not offer you this recording's Bot any more.",
   IDENTITY_REQUIRED:
     "Learning capture is paused: OpenBot could not tell Intelligence who you are.",
   INTELLIGENCE_RUNTIME_REQUIRED:

@@ -1,5 +1,3 @@
-import type { DemonstrationAction } from "@openbot/shared/demonstration-schema";
-import { demonstrationActionSchema } from "@openbot/shared/demonstration-schema";
 import type {
   LearningSpaceState,
   RecorderBot,
@@ -30,31 +28,26 @@ export type CaptureStatus = {
 };
 export type RecorderState = {
   phase: "idle" | "starting" | "recording" | "stopping";
-  demonstrationId?: string;
+  recordingId?: string;
   botId?: string;
   title?: string;
   tabIds: number[];
   startedAt?: number;
-  steps: number;
+  /** What the person did so far: clicks, inputs and page loads in a followed tab's top frame. The 50-action notice and
+   * the badge count these. */
+  actions: number;
   noticeShown: boolean;
-  /** The 50-step notice is on screen: from when it shows until any choice (in a tab or the popup), Stop, Start over or
-   * the end of the recording. The popup shows its card from this. */
+  /** The 50-action notice is on screen: from when it shows until any choice (in a tab or the popup), Stop, Start over
+   * or the end of the recording. The popup shows its card from this. */
   noticeOpen: boolean;
   capture: CaptureStatus;
-  lastStopped?: { demonstrationId: string; botId: string; openbotUrl: string };
+  /** The recording Stop ended last, and the Bot it was for: the popup says it went to Intelligence. */
+  lastStopped?: { recordingId: string; botId: string };
   draining: number; // stopped recordings still sending
-  /** Of `draining`, the recordings Intelligence already has every event of, kept only for OpenBot (their stop, or their
-   * network bodies) and not kept for a retry (`kept`); absent when none. */
-  streamed?: number;
-  openRecording?: { demonstrationId: string }; // Record was refused: this person has one open for the Bot
-  learning?: LearningSpaceState; // the picked Bot's Learning space at Record, then what the passes found (Decision 10)
-  topUrls: Record<string, string>; // followed tab id -> its top frame's current URL, for sub-frame steps (Decision 17)
+  learning?: LearningSpaceState; // the picked Bot's Learning space at Record (Decision 10)
+  topUrls: Record<string, string>; // followed tab id -> its top frame's current URL
   /** While phase is "stopping": persisted so a restarted service worker finishes the stop (Task 9). */
-  stopping?: {
-    since: number;
-    stage: "draining" | "telling-openbot";
-    stoppedFrom?: "openbot";
-  };
+  stopping?: { since: number };
   /** Stopped recordings whose events are kept (summed over drains with `kept`), for the popup's Discard offer;
    * `waitingFor` names the person whose recordings wait for them to connect this browser again (Decision 19). */
   kept?: {
@@ -69,7 +62,7 @@ export type RecorderState = {
 export const IDLE_STATE: RecorderState = {
   phase: "idle",
   tabIds: [],
-  steps: 0,
+  actions: 0,
   noticeShown: false,
   noticeOpen: false,
   draining: 0,
@@ -96,12 +89,6 @@ export const contentToBackgroundSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("content.event"), event }).strict(),
   z
     .object({
-      type: z.literal("content.step"),
-      action: demonstrationActionSchema,
-    })
-    .strict(),
-  z
-    .object({
       type: z.literal("content.sensitive"),
       digest: z.string().regex(/^[0-9a-f]{64}$/),
     })
@@ -115,11 +102,11 @@ export const contentToBackgroundSchema = z.discriminatedUnion("type", [
 ]);
 export type ContentToBackground = z.infer<typeof contentToBackgroundSchema>;
 export type BackgroundToContent =
-  | { type: "background.capture"; active: boolean; demonstrationId?: string }
-  | { type: "background.notice"; show: boolean; steps: number };
+  | { type: "background.capture"; active: boolean; recordingId?: string }
+  | { type: "background.notice"; show: boolean; actions: number };
 
 export type StreamSession = {
-  demonstrationId: string;
+  recordingId: string;
   title: string;
   botId: string;
   openbotUrl: string;
@@ -136,12 +123,8 @@ export type BackgroundToOffscreen =
   | { type: "offscreen.start"; session: StreamSession }
   | { type: "offscreen.resume"; session: StreamSession } // the service worker restarted and found no document: same outbox
   | { type: "offscreen.event"; event: CapturedEvent }
-  | { type: "offscreen.rotate"; demonstrationId: string; trajectoryId: string } // "Start over"
-  | {
-      type: "offscreen.stop";
-      outcome: "succeeded" | "failed";
-      stoppedFrom?: "openbot";
-    } // idempotent per demonstration (Task 11)
+  | { type: "offscreen.rotate"; recordingId: string; trajectoryId: string } // "Start over"
+  | { type: "offscreen.stop"; outcome: "succeeded" | "failed" } // idempotent per recording (Task 11)
   | {
       type: "offscreen.recover";
       openbotUrl: string;
@@ -151,10 +134,10 @@ export type BackgroundToOffscreen =
       allowedIntelligenceUrls: string[] | null;
       drains: DrainRecord[];
     } // after a browser restart, and when the person who recorded kept drains connects again
-  | { type: "offscreen.discard"; demonstrationIds: string[] }; // only on the person's own "Discard kept events" or Disconnect: clear their IndexedDB data
+  | { type: "offscreen.discard"; recordingIds: string[] }; // the person's own "Discard kept events" or Disconnect, or a Record that never went live: clear their outbox
 /** The one offscreen message the service worker parses: it signs a connection out, so it names the bearer the failing
- * pass or trajectory registration used, and only that connection is signed out (a pass taken with an older token after
- * the person connected again signs out nothing). */
+ * pass used, and only that connection is signed out (a pass taken with an older token after the person connected again
+ * signs out nothing). */
 export const offscreenSignedOutSchema = z
   .object({
     type: z.literal("offscreen.signed-out"),
@@ -172,24 +155,22 @@ export type OffscreenToBackground =
     }
   | {
       type: "offscreen.trajectory";
-      demonstrationId: string;
+      recordingId: string;
       trajectoryId: string;
-    } // rollover registered another trajectory
+    } // a long recording rolled over to another trajectory
   | {
       type: "offscreen.stopped";
-      demonstrationId: string;
+      recordingId: string;
       trajectoryIds: string[];
     } // final outcome queued
-  | { type: "offscreen.rotated"; previousDemonstrationId: string } // the discarded recording's events are drained and its trajectory closed
-  | { type: "offscreen.done"; demonstrationId: string } // every event sent, every trajectory closed
+  | { type: "offscreen.done"; recordingId: string } // every event sent, every trajectory finished
   | {
       type: "offscreen.kept";
-      demonstrationId: string;
+      recordingId: string;
       reason: string;
       parked: boolean;
       events: number;
     } // a stopped recording's events are kept (Decision 19)
-  | { type: "offscreen.heartbeat" } // every 30 s while a live session exists (Task 9 polls OpenBot on it)
   | OffscreenSignedOut; // a pass came back RECORDER_SIGNED_OUT, with the guard's reason; its events stay kept (Decision 19)
 
 /** The connect page's Connect or Cancel. `origin` is the one the page showed (its page.connect.pending answer), in the
@@ -216,7 +197,6 @@ export type PageToBackground =
       botId: string;
       title: string;
       tabId: number;
-      replaceOpen?: boolean;
     }
   | { type: "page.stop" }
   | { type: "page.restart" }
@@ -328,4 +308,3 @@ export function parseOffscreenSignedOut(
   const parsed = offscreenSignedOutSchema.safeParse(raw);
   return parsed.success ? parsed.data : null;
 }
-export type { DemonstrationAction };

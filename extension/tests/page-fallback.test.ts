@@ -149,11 +149,11 @@ test("a page event is re-masked and marked as page captured", () => {
     new Set(),
   );
   expect(result).not.toBeNull();
-  const text = JSON.stringify(result?.event);
+  const text = JSON.stringify(result);
   expect(text).not.toContain("Bearer abc");
   expect(text).toContain("Accept");
   expect(
-    (result?.event.value as unknown as { capturedBy: string } | undefined)
+    (result?.value as unknown as { capturedBy: string } | undefined)
       ?.capturedBy,
   ).toBe("page");
 });
@@ -175,10 +175,10 @@ test("a digest match in a page body is redacted", async () => {
     }),
     new Set([digest]),
   );
-  expect(JSON.stringify(result?.event)).not.toContain("correct-horse-battery");
+  expect(JSON.stringify(result)).not.toContain("correct-horse-battery");
 });
 
-test("a 300 KB body is kept whole", () => {
+test("a 300 KB body is kept whole here: the capture trims it to fit one event", () => {
   const big = JSON.stringify({ rows: "x".repeat(300 * 1024) });
   const result = acceptPageNetworkEvent(
     event({
@@ -190,7 +190,7 @@ test("a 300 KB body is kept whole", () => {
     new Set(),
   );
   const body = (
-    result?.event.value as unknown as
+    result?.value as unknown as
       | {
           response: { body: { text: string } };
         }
@@ -199,28 +199,12 @@ test("a 300 KB body is kept whole", () => {
   expect(body?.text.length).toBe(big.length);
 });
 
-test("only a state-changing request makes a step, and a repeat of it makes none", async () => {
-  await createPageFallback().start([7]);
-  expect(
-    acceptPageNetworkEvent(event({ method: "GET" }), new Set())?.step,
-  ).toBe(null);
-  const put = event({
-    method: "PUT",
-    url: "https://crm.example.test/api/items/4?token=abc",
-    status: 204,
-  });
-  expect(acceptPageNetworkEvent(put, new Set())?.step).toEqual({
-    kind: "network",
-    url: "https://crm.example.test/api/items/4",
-    method: "PUT",
-    status: 204,
-  });
-  expect(acceptPageNetworkEvent(put, new Set())?.step).toBeNull();
-  expect(
-    acceptPageNetworkEvent(event({ method: "DELETE", status: 204 }), new Set())
-      ?.step?.kind,
-  ).toBe("network");
-  expect(acceptPageNetworkEvent(put, new Set())?.step).not.toBeNull();
+test("a failed request, whose status is null, is accepted", () => {
+  const result = acceptPageNetworkEvent(
+    event({ status: null, outcome: "error" }),
+    new Set(),
+  );
+  expect(result?.value).toMatchObject({ status: null, capturedBy: "page" });
 });
 
 test("a malformed event is dropped", () => {

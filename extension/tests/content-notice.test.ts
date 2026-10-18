@@ -2,13 +2,10 @@ import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import {
-  isNoticeEvent,
-  NOTICE_TAG,
-  NOTICE_TOKENS,
-  showNotice,
-} from "../src/content/notice";
-import { startStepCapture } from "../src/content/steps";
+import type { CapturedEvent } from "@openbot/shared/recorder-masking";
+import { startEventCapture } from "../src/content/collector";
+import { createSensitivityTracker } from "../src/content/masking-context";
+import { NOTICE_TAG, NOTICE_TOKENS, showNotice } from "../src/content/notice";
 
 beforeAll(() =>
   GlobalRegistrator.register({ url: "https://app.example.test/page" }),
@@ -23,7 +20,7 @@ afterEach(() => {
 });
 
 function show(choose: (choice: "stop" | "restart" | "continue") => void) {
-  const notice = showNotice({ steps: 50, choose, isTrusted: () => true });
+  const notice = showNotice({ actions: 50, choose, isTrusted: () => true });
   shown = notice;
   return notice;
 }
@@ -48,31 +45,44 @@ function customProperties(
   return vars;
 }
 
-test("the notice is never recorded", async () => {
-  const notice = show(() => {});
-  const sent: unknown[] = [];
-  const steps = startStepCapture({
-    send: (a) => sent.push(a),
-    isIgnored: (t, path) => isNoticeEvent(t, path),
-    isTrusted: () => true,
+/** happy-dom cannot make trusted events; the collector listens only for them, so these are marked trusted by hand. */
+const trustedClick = () => {
+  const event = new MouseEvent("click", {
+    bubbles: true,
+    composed: true,
+    button: 0,
   });
-  notice.host.dispatchEvent(
-    new MouseEvent("click", { bubbles: true, composed: true, button: 0 }),
-  );
-  button(notice.host, "Stop").dispatchEvent(
-    new MouseEvent("click", { bubbles: true, composed: true, button: 0 }),
-  );
-  expect(sent).toEqual([]);
-  steps.stop();
+  Object.defineProperty(event, "isTrusted", { value: true });
+  return event;
+};
+
+test("a click on the notice is never captured, so it never counts as an action", () => {
+  document.body.innerHTML = `<button id="b">Save</button>`;
+  const notice = show(() => {});
+  const tracker = createSensitivityTracker({ isTrusted: () => true });
+  const uninstall = tracker.install();
+  const sent: CapturedEvent[] = [];
+  const capture = startEventCapture({
+    tracker,
+    send: (event) => sent.push(event),
+  });
+  try {
+    notice.host.dispatchEvent(trustedClick());
+    button(notice.host, "Stop").dispatchEvent(trustedClick());
+    expect(sent.filter((event) => event.name === "click")).toEqual([]);
+    // The page's own button is captured as usual.
+    (document.getElementById("b") as HTMLElement).dispatchEvent(trustedClick());
+    expect(sent.filter((event) => event.name === "click")).toHaveLength(1);
+  } finally {
+    capture.stop();
+    uninstall();
+  }
 });
 
-test("the notice host is ignored by the capture and marked data-copilotkit-ignore", () => {
+test("the notice host is marked data-copilotkit-ignore", () => {
   const notice = show(() => {});
   expect(notice.host.tagName.toLowerCase()).toBe(NOTICE_TAG);
   expect(notice.host.hasAttribute("data-copilotkit-ignore")).toBe(true);
-  expect(isNoticeEvent(notice.host, [notice.host])).toBe(true);
-  expect(isNoticeEvent(document.body, [document.body])).toBe(false);
-  expect(isNoticeEvent(null, [])).toBe(false);
 });
 
 test("the notice offers Stop, Start over and Keep going", () => {
@@ -80,7 +90,7 @@ test("the notice offers Stop, Start over and Keep going", () => {
   const notice = show((c) => choices.push(c));
   const root = notice.host.shadowRoot as ShadowRoot;
   expect(root.querySelector("[role=dialog]")).not.toBeNull();
-  expect(root.textContent).toContain("You have recorded 50 steps");
+  expect(root.textContent).toContain("You have recorded 50 actions");
   expect(root.textContent).toContain(
     "Click Stop if the task is done, start over if it went wrong, or keep going if it needs more.",
   );
@@ -106,7 +116,7 @@ test("Escape means Keep going", () => {
 test("a page script clicking the notice does nothing", () => {
   const choices: string[] = [];
   const notice = showNotice({
-    steps: 50,
+    actions: 50,
     choose: (c) => choices.push(c),
   });
   shown = notice;

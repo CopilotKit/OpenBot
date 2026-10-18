@@ -105,9 +105,8 @@ type OpenBot = {
   /** Answers for the next passes, in order; then `refuse`, then a grant. */
   passScript: (() => Response)[];
   refuse: ((trajectoryId: string) => Response | null) | null;
-  registered: { demonstrationId: string; trajectoryId: string }[];
-  closed: { demonstrationId: string; trajectoryId: string }[];
-  closeAnswer: (() => Response) | null;
+  /** Every request to OpenBot's recorder routes: the document must send none (it asks only for passes). */
+  recorderRequests: string[];
 };
 
 /** Row 7: only an operator can fix it, so the events are parked. */
@@ -157,7 +156,7 @@ type Harness = {
   /** "fetch <path>", in the order they happened. */
   log: string[];
   ports: ServiceWorkerPort[];
-  demonstrations: Set<string>;
+  recordings: Set<string>;
   /** Registers the service worker's onConnect listener, as a (re)started worker does. */
   listen(): void;
   trackFetch(): void;
@@ -184,14 +183,16 @@ async function setup(): Promise<Harness> {
     passes: [],
     passScript: [],
     refuse: null,
-    registered: [],
-    closed: [],
-    closeAnswer: null,
+    recorderRequests: [],
   };
   let gateway: FakeGateway | null = null;
   const route = (request: Request): Response | Promise<Response> | null => {
-    if (!gateway || request.method !== "POST") return null;
     const path = new URL(request.url).pathname;
+    if (path.startsWith("/api/recorder/")) {
+      openbot.recorderRequests.push(`${request.method} ${path}`);
+      return Response.json({ error: "Not found." }, { status: 404 });
+    }
+    if (!gateway || request.method !== "POST") return null;
     const pass = /^\/api\/copilotkit\/trajectory\/([^/]+)\/connect$/.exec(path);
     if (pass) {
       const trajectoryId = decodeURIComponent(pass[1]);
@@ -212,29 +213,6 @@ async function setup(): Promise<Harness> {
         },
       });
     }
-    const close =
-      /^\/api\/recorder\/demonstrations\/([^/]+)\/trajectories\/([^/]+)\/close$/.exec(
-        path,
-      );
-    if (close) {
-      openbot.closed.push({
-        demonstrationId: decodeURIComponent(close[1]),
-        trajectoryId: decodeURIComponent(close[2]),
-      });
-      return openbot.closeAnswer?.() ?? new Response(null, { status: 204 });
-    }
-    const register =
-      /^\/api\/recorder\/demonstrations\/([^/]+)\/trajectories$/.exec(path);
-    if (register) {
-      const demonstrationId = decodeURIComponent(register[1]);
-      return request.json().then((body) => {
-        openbot.registered.push({
-          demonstrationId,
-          trajectoryId: (body as { trajectoryId: string }).trajectoryId,
-        });
-        return new Response(null, { status: 204 });
-      });
-    }
     return null;
   };
   gateway = await startFakeGateway({ extraRoutes: route });
@@ -247,7 +225,7 @@ async function setup(): Promise<Harness> {
     clock: virtualClock(),
     log: [],
     ports: [],
-    demonstrations: new Set(),
+    recordings: new Set(),
     listen() {
       chrome.runtime.onConnect.addListener((port) => {
         const entry: ServiceWorkerPort = { port, messages: [] };
@@ -290,9 +268,9 @@ async function setup(): Promise<Harness> {
         message.type === "offscreen.start" ||
         message.type === "offscreen.resume"
       )
-        h.demonstrations.add(message.session.demonstrationId);
+        h.recordings.add(message.session.recordingId);
       if (message.type === "offscreen.rotate")
-        h.demonstrations.add(message.demonstrationId);
+        h.recordings.add(message.recordingId);
       const newest = h.ports.at(-1);
       if (!newest) throw new Error("No document is connected");
       newest.port.postMessage(message);
@@ -305,7 +283,7 @@ async function setup(): Promise<Harness> {
     latest: () => h.ports.at(-1)?.messages ?? [],
     session(overrides = {}) {
       return {
-        demonstrationId: "demo-1",
+        recordingId: "rec-1",
         title: "File the weekly report",
         botId: "bot-1",
         openbotUrl: started.httpUrl,
@@ -319,7 +297,7 @@ async function setup(): Promise<Harness> {
     },
     drain(session, overrides = {}) {
       return {
-        demonstrationId: session.demonstrationId,
+        recordingId: session.recordingId,
         botId: session.botId,
         title: session.title,
         openbotUrl: session.openbotUrl,
@@ -327,7 +305,6 @@ async function setup(): Promise<Harness> {
         userName: "Ada",
         trajectoryIds: [session.trajectoryId],
         startedAt: session.startedAt,
-        discard: false,
         ...overrides,
       };
     },
@@ -355,6 +332,18 @@ const click = (i: number): CapturedEvent => ({
   timestamp: 1_700_000_000_000 + i,
   value: { i },
 });
+
+/** Whether the streamer finished the trajectory: every event of it reached Intelligence, and its meta says so. */
+async function finishedTrajectory(
+  h: Harness,
+  trajectoryId: string,
+): Promise<boolean> {
+  const outbox = await openOutbox(h.dbName);
+  const meta = await outbox.getMeta<{ closed?: boolean }>(
+    trajectoryMetaKey(trajectoryId),
+  );
+  return meta?.closed === true;
+}
 
 const outcomes = (h: Harness, trajectoryId: string) =>
   h.values(trajectoryId).filter((_, index) => {
@@ -435,7 +424,7 @@ afterEach(async () => {
       try {
         entry.port.postMessage({
           type: "offscreen.discard",
-          demonstrationIds: [...h.demonstrations],
+          recordingIds: [...h.recordings],
         } satisfies BackgroundToOffscreen);
       } catch {
         // That document's port is already gone.
@@ -510,15 +499,12 @@ describe("offscreen controller", () => {
     expect(h.received("offscreen.stopped")).toEqual([
       {
         type: "offscreen.stopped",
-        demonstrationId: "demo-1",
+        recordingId: "rec-1",
         trajectoryIds: [t],
       },
     ]);
 
-    await until(
-      () => h.openbot.closed.some((entry) => entry.trajectoryId === t),
-      "the trajectory closed",
-    );
+    await until(() => finishedTrajectory(h, t), "the trajectory finished");
     expect(h.names(t)).toEqual([
       "recording.started",
       "outcome",
@@ -527,9 +513,6 @@ describe("offscreen controller", () => {
       "outcome",
     ]);
     expect(outcomes(h, t).at(-1)).toMatchObject({ phase: "succeeded" });
-    expect(h.openbot.closed).toEqual([
-      { demonstrationId: "demo-1", trajectoryId: t },
-    ]);
     await until(
       () => h.received("offscreen.done").length === 1,
       "offscreen.done",
@@ -539,7 +522,7 @@ describe("offscreen controller", () => {
       types.indexOf("offscreen.done"),
     );
     expect(h.received("offscreen.done")).toEqual([
-      { type: "offscreen.done", demonstrationId: "demo-1" },
+      { type: "offscreen.done", recordingId: "rec-1" },
     ]);
   });
 
@@ -563,12 +546,12 @@ describe("offscreen controller", () => {
     expect(h.received("offscreen.stopped")).toEqual([
       {
         type: "offscreen.stopped",
-        demonstrationId: "demo-1",
+        recordingId: "rec-1",
         trajectoryIds: [],
       },
     ]);
     expect(h.received("offscreen.done")).toEqual([
-      { type: "offscreen.done", demonstrationId: "demo-1" },
+      { type: "offscreen.done", recordingId: "rec-1" },
     ]);
     const types = h.latest().map((message) => message.type);
     expect(types.indexOf("offscreen.stopped")).toBeLessThan(
@@ -632,12 +615,12 @@ describe("offscreen controller", () => {
     expect(h.received("offscreen.stopped")).toEqual([
       {
         type: "offscreen.stopped",
-        demonstrationId: "demo-1",
+        recordingId: "rec-1",
         trajectoryIds: [t],
       },
       {
         type: "offscreen.stopped",
-        demonstrationId: "demo-1",
+        recordingId: "rec-1",
         trajectoryIds: [t],
       },
     ]);
@@ -646,54 +629,6 @@ describe("offscreen controller", () => {
       "succeeded",
     ]);
     expect(h.received("offscreen.done")).toHaveLength(1);
-  });
-
-  test("stop passes stoppedFrom to the outcome", async () => {
-    const h = await setup();
-    await h.open();
-    const session = h.session();
-    const t = session.trajectoryId;
-    h.post({ type: "offscreen.start", session });
-    await streaming(h, t);
-    h.post({
-      type: "offscreen.stop",
-      outcome: "succeeded",
-      stoppedFrom: "openbot",
-    });
-    await until(() => h.received("offscreen.done").length === 1, "done");
-    expect(outcomes(h, t).at(-1)).toMatchObject({
-      workflow: "File the weekly report",
-      phase: "succeeded",
-      stoppedFrom: "openbot",
-    });
-  });
-
-  test("a heartbeat is posted every 30 s while recording and stops at stop", async () => {
-    const h = await setup();
-    await h.open();
-    const session = h.session();
-    h.post({ type: "offscreen.start", session });
-    await streaming(h, session.trajectoryId);
-    expect(h.received("offscreen.heartbeat")).toHaveLength(0);
-
-    await h.clock.advance(29_999);
-    expect(h.received("offscreen.heartbeat")).toHaveLength(0);
-    await h.clock.advance(1);
-    await until(
-      () => h.received("offscreen.heartbeat").length === 1,
-      "the first heartbeat",
-    );
-    await h.clock.advance(30_000);
-    await until(
-      () => h.received("offscreen.heartbeat").length === 2,
-      "the second heartbeat",
-    );
-
-    h.post({ type: "offscreen.stop", outcome: "succeeded" });
-    await until(() => h.received("offscreen.stopped").length === 1, "stopped");
-    await h.clock.advance(3 * MINUTE);
-    await sleep(20);
-    expect(h.received("offscreen.heartbeat")).toHaveLength(2);
   });
 
   test("a stopped recording whose events are kept posts offscreen.kept, and a later recover drains it and posts done", async () => {
@@ -729,7 +664,7 @@ describe("offscreen controller", () => {
     await until(() => h.received("offscreen.kept").length > 0, "kept");
     expect(h.received("offscreen.kept").at(-1)).toEqual({
       type: "offscreen.kept",
-      demonstrationId: "demo-1",
+      recordingId: "rec-1",
       reason: PARKED,
       parked: true,
       events: 6,
@@ -748,7 +683,7 @@ describe("offscreen controller", () => {
     });
     await until(() => h.received("offscreen.done").length === 1, "done");
     expect(h.received("offscreen.done")).toEqual([
-      { type: "offscreen.done", demonstrationId: "demo-1" },
+      { type: "offscreen.done", recordingId: "rec-1" },
     ]);
     expect(h.names(t)).toEqual([
       "recording.started",
@@ -791,7 +726,7 @@ describe("offscreen controller", () => {
     const h = await setup();
     h.openbot.refuse = () => parkedPass();
     await h.open(virtualClock());
-    const stopped = h.session({ demonstrationId: "demo-stopped" });
+    const stopped = h.session({ recordingId: "rec-stopped" });
     h.post({ type: "offscreen.start", session: stopped });
     h.post({ type: "offscreen.event", event: click(1) });
     h.post({ type: "offscreen.stop", outcome: "succeeded" });
@@ -800,7 +735,7 @@ describe("offscreen controller", () => {
       "the stopped recording kept",
     );
     // Then the browser crashed during the next recording.
-    const interrupted = h.session({ demonstrationId: "demo-interrupted" });
+    const interrupted = h.session({ recordingId: "rec-interrupted" });
     h.post({ type: "offscreen.start", session: interrupted });
     h.post({ type: "offscreen.event", event: click(2) });
     h.post({ type: "offscreen.event", event: click(3) });
@@ -817,10 +752,10 @@ describe("offscreen controller", () => {
     recovering.port.onMessage.addListener((message: OffscreenToBackground) => {
       if (message.type !== "offscreen.done") return;
       const t =
-        message.demonstrationId === "demo-stopped"
+        message.recordingId === "rec-stopped"
           ? stopped.trajectoryId
           : interrupted.trajectoryId;
-      atDone.set(message.demonstrationId, h.names(t));
+      atDone.set(message.recordingId, h.names(t));
     });
     h.post({
       type: "offscreen.recover",
@@ -840,8 +775,8 @@ describe("offscreen controller", () => {
       "outcome",
     ];
     // Everything had reached Intelligence before each done was posted.
-    expect(atDone.get("demo-stopped")).toEqual(stoppedNames);
-    expect(atDone.get("demo-interrupted")).toEqual(interruptedNames);
+    expect(atDone.get("rec-stopped")).toEqual(stoppedNames);
+    expect(atDone.get("rec-interrupted")).toEqual(interruptedNames);
     expect(
       outcomes(h, stopped.trajectoryId).map((value) => value.phase),
     ).toEqual(["started", "succeeded"]);
@@ -852,9 +787,8 @@ describe("offscreen controller", () => {
         reason: "interrupted",
       }),
     );
-    expect(h.openbot.closed.map((entry) => entry.trajectoryId).sort()).toEqual(
-      [stopped.trajectoryId, interrupted.trajectoryId].sort(),
-    );
+    expect(await finishedTrajectory(h, stopped.trajectoryId)).toBe(true);
+    expect(await finishedTrajectory(h, interrupted.trajectoryId)).toBe(true);
   });
 
   test("a recover whose pinned Intelligence addresses leave the gateway out opens no socket and keeps the recording parked", async () => {
@@ -884,7 +818,7 @@ describe("offscreen controller", () => {
       await sleep(50);
       expect(h.received("offscreen.kept").at(-1)).toEqual({
         type: "offscreen.kept",
-        demonstrationId: "demo-1",
+        recordingId: "rec-1",
         reason: NOT_ALLOWED,
         parked: true,
         events: 4,
@@ -905,7 +839,7 @@ describe("offscreen controller", () => {
     const session = await keptThenRestart(h);
     const t = session.trajectoryId;
     const live = h.session({
-      demonstrationId: "demo-live",
+      recordingId: "rec-live",
       allowedIntelligenceUrls: ELSEWHERE,
     });
     h.post({ type: "offscreen.start", session: live });
@@ -933,7 +867,7 @@ describe("offscreen controller", () => {
         () =>
           h
             .received("offscreen.done")
-            .some((done) => done.demonstrationId === "demo-1"),
+            .some((done) => done.recordingId === "rec-1"),
         "done for the recovered recording",
       );
       expect(sockets.opened.length).toBeGreaterThan(0);
@@ -954,7 +888,7 @@ describe("offscreen controller", () => {
     const session = await keptThenRestart(h);
     const t = session.trajectoryId;
     const live = h.session({
-      demonstrationId: "demo-live",
+      recordingId: "rec-live",
       allowedIntelligenceUrls: ELSEWHERE,
     });
     h.post({ type: "offscreen.start", session: live });
@@ -982,7 +916,7 @@ describe("offscreen controller", () => {
         () =>
           h
             .received("offscreen.done")
-            .some((done) => done.demonstrationId === "demo-1"),
+            .some((done) => done.recordingId === "rec-1"),
         "done for the recovered recording",
       );
       expect(sockets.opened.length).toBeGreaterThan(0);
@@ -1030,24 +964,6 @@ describe("offscreen controller", () => {
     expect(h.received("offscreen.done")).toHaveLength(1);
   });
 
-  test("a recording OpenBot no longer knows still reports done once its events are sent", async () => {
-    const h = await setup();
-    // A Record that could not start: the service worker stops it, then deletes it in OpenBot.
-    h.openbot.closeAnswer = () =>
-      Response.json({ error: "Demonstration not found." }, { status: 404 });
-    await h.open();
-    const session = h.session();
-    const t = session.trajectoryId;
-    h.post({ type: "offscreen.start", session });
-    await streaming(h, t);
-    h.post({ type: "offscreen.stop", outcome: "failed" });
-    await until(() => h.received("offscreen.done").length === 1, "done");
-    expect(h.openbot.closed).toEqual([
-      { demonstrationId: "demo-1", trajectoryId: t },
-    ]);
-    expect(outcomes(h, t).at(-1)).toMatchObject({ phase: "failed" });
-  });
-
   test("discard clears a recording's events, and is posted only for the person's own discard or disconnect", async () => {
     const h = await setup();
     h.openbot.refuse = () => parkedPass();
@@ -1062,10 +978,10 @@ describe("offscreen controller", () => {
     // Nothing was cleared on its own: the kept events wait for the person.
     expect(await h.pending(t)).toHaveLength(4);
 
-    h.post({ type: "offscreen.discard", demonstrationIds: ["demo-1"] });
+    h.post({ type: "offscreen.discard", recordingIds: ["rec-1"] });
     await until(() => h.received("offscreen.done").length === 1, "done");
     expect(h.received("offscreen.done")).toEqual([
-      { type: "offscreen.done", demonstrationId: "demo-1" },
+      { type: "offscreen.done", recordingId: "rec-1" },
     ]);
     expect(await h.pending(t)).toEqual([]);
     const outbox = await openOutbox(h.dbName);
@@ -1090,24 +1006,24 @@ describe("offscreen controller", () => {
     const second = crypto.randomUUID();
     h.post({
       type: "offscreen.rotate",
-      demonstrationId: "demo-2",
+      recordingId: "rec-2",
       trajectoryId: second,
     });
     await until(
       () =>
         h
           .received("offscreen.kept")
-          .some((kept) => kept.demonstrationId === "demo-1"),
+          .some((kept) => kept.recordingId === "rec-1"),
       "the replaced recording kept",
     );
     await streaming(h, second);
 
-    h.post({ type: "offscreen.discard", demonstrationIds: ["demo-1"] });
+    h.post({ type: "offscreen.discard", recordingIds: ["rec-1"] });
     await until(
       () =>
         h
           .received("offscreen.done")
-          .some((done) => done.demonstrationId === "demo-1"),
+          .some((done) => done.recordingId === "rec-1"),
       "done for the discarded recording",
     );
     expect(await h.pending(first.trajectoryId)).toEqual([]);
@@ -1122,7 +1038,7 @@ describe("offscreen controller", () => {
       () =>
         h
           .received("offscreen.done")
-          .some((done) => done.demonstrationId === "demo-2"),
+          .some((done) => done.recordingId === "rec-2"),
       "done for the new recording",
     );
     expect(h.names(second)).toEqual([
@@ -1196,7 +1112,7 @@ describe("offscreen controller", () => {
 
   test("a sign-out stops every recording sent with its token, and is posted once", async () => {
     const h = await setup();
-    const first = h.session({ demonstrationId: "demo-held" });
+    const first = h.session({ recordingId: "rec-held" });
     h.openbot.refuse = (trajectoryId) =>
       trajectoryId === first.trajectoryId ? heldPass() : null;
     await h.open();
@@ -1207,13 +1123,13 @@ describe("offscreen controller", () => {
       "the first recording held",
     );
     expect(h.received("offscreen.kept").at(-1)).toMatchObject({
-      demonstrationId: "demo-held",
+      recordingId: "rec-held",
       parked: false,
     });
 
     // The next recording, on the same connection, hears that the connection is gone.
     h.openbot.passScript.push(signedOutPass("revoked"));
-    const second = h.session({ demonstrationId: "demo-next" });
+    const second = h.session({ recordingId: "rec-next" });
     h.post({ type: "offscreen.start", session: second });
     await until(
       () => h.received("offscreen.signed-out").length === 1,
@@ -1287,10 +1203,7 @@ describe("offscreen controller", () => {
 
     // The service worker restarts while the last batch is answered: done cannot be delivered yet.
     fake.restartServiceWorker();
-    await until(
-      () => h.openbot.closed.some((entry) => entry.trajectoryId === t),
-      "the trajectory closed",
-    );
+    await until(() => finishedTrajectory(h, t), "the trajectory finished");
     await sleep(30);
     const connects = () =>
       fake.calls.filter((call) => call === "runtime.connect").length;
@@ -1320,7 +1233,7 @@ describe("offscreen controller", () => {
     });
     expect(resent[2]).toEqual({
       type: "offscreen.done",
-      demonstrationId: "demo-1",
+      recordingId: "rec-1",
     });
     expect(h.received("offscreen.done")).toHaveLength(1);
   });
@@ -1348,12 +1261,9 @@ describe("offscreen controller", () => {
     const [rolled] = h.received("offscreen.trajectory");
     expect(rolled).toEqual({
       type: "offscreen.trajectory",
-      demonstrationId: "demo-1",
+      recordingId: "rec-1",
       trajectoryId: expect.any(String),
     });
-    expect(h.openbot.registered).toEqual([
-      { demonstrationId: "demo-1", trajectoryId: rolled.trajectoryId },
-    ]);
     await until(
       () => h.names(rolled.trajectoryId).includes("click"),
       "the rolled-over trajectory streaming",
@@ -1363,41 +1273,34 @@ describe("offscreen controller", () => {
     const next = crypto.randomUUID();
     h.post({
       type: "offscreen.rotate",
-      demonstrationId: "demo-2",
+      recordingId: "rec-2",
       trajectoryId: next,
     });
-    await until(
-      () => h.received("offscreen.rotated").length === 1,
-      "offscreen.rotated",
-    );
-    expect(h.received("offscreen.rotated")).toEqual([
-      { type: "offscreen.rotated", previousDemonstrationId: "demo-1" },
-    ]);
     await until(
       () =>
         h
           .received("offscreen.done")
-          .some((done) => done.demonstrationId === "demo-1"),
+          .some((done) => done.recordingId === "rec-1"),
       "done for the replaced recording",
     );
     expect(outcomes(h, rolled.trajectoryId).at(-1)).toMatchObject({
       phase: "failed",
     });
     await streaming(h, next);
-    expect(h.values(next)[0]).toMatchObject({ demonstrationId: "demo-2" });
+    expect(h.values(next)[0]).toMatchObject({ recordingId: "rec-2" });
 
     h.post({ type: "offscreen.stop", outcome: "succeeded" });
     await until(
       () =>
         h
           .received("offscreen.done")
-          .some((done) => done.demonstrationId === "demo-2"),
+          .some((done) => done.recordingId === "rec-2"),
       "done for the new recording",
     );
     expect(h.received("offscreen.stopped")).toEqual([
       {
         type: "offscreen.stopped",
-        demonstrationId: "demo-2",
+        recordingId: "rec-2",
         trajectoryIds: [next],
       },
     ]);
@@ -1405,7 +1308,7 @@ describe("offscreen controller", () => {
     // A pass refused for a signed-out connection names the guard's reason and the token it used.
     h.openbot.passScript.push(signedOutPass("organization"));
     const later = h.session({
-      demonstrationId: "demo-3",
+      recordingId: "rec-3",
       token: "obr_later",
     });
     h.post({ type: "offscreen.start", session: later });
@@ -1420,5 +1323,8 @@ describe("offscreen controller", () => {
         token: "obr_later",
       },
     ]);
+    // A rollover, a Start over and a stop: OpenBot heard nothing but the capture passes.
+    expect(h.openbot.recorderRequests).toEqual([]);
+    expect(h.openbot.passes.length).toBeGreaterThan(3);
   });
 });

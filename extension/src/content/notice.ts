@@ -1,5 +1,5 @@
 /**
- * The 50-step notice, drawn in the page. A page cannot load the extension's stylesheet into its own document, so the
+ * The 50-action notice, drawn in the page. A page cannot load the extension's stylesheet into its own document, so the
  * colours are copied from app/src/theme.css (`:root` and `.dark`) and a test keeps them equal. The shadow root is open
  * so the end-to-end test can drive it, which means a page script can reach the buttons too: every handler acts only on
  * trusted events.
@@ -92,7 +92,7 @@ button.ghost:hover { background: var(--border); }
 `;
 
 export function showNotice(options: {
-  steps: number;
+  actions: number;
   choose(choice: Choice): void;
   isTrusted?: (event: Event) => boolean;
 }): { remove(): void; host: HTMLElement } {
@@ -108,10 +108,13 @@ export function showNotice(options: {
   card.className = "card";
   card.setAttribute("role", "dialog");
   card.setAttribute("aria-live", "polite");
-  card.setAttribute("aria-label", `You have recorded ${options.steps} steps`);
+  card.setAttribute(
+    "aria-label",
+    `You have recorded ${options.actions} actions`,
+  );
 
   const title = document.createElement("h2");
-  title.textContent = `You have recorded ${options.steps} steps`;
+  title.textContent = `You have recorded ${options.actions} actions`;
   const body = document.createElement("p");
   body.textContent =
     "Click Stop if the task is done, start over if it went wrong, or keep going if it needs more.";
@@ -143,14 +146,4 @@ export function showNotice(options: {
   document.documentElement.append(host);
 
   return { host, remove: () => host.remove() };
-}
-
-/** True for an event that came from the notice, so the step capture never records a click on it. */
-export function isNoticeEvent(
-  target: EventTarget | null,
-  path: EventTarget[],
-): boolean {
-  const isNotice = (node: EventTarget | null) =>
-    node instanceof Element && node.localName === NOTICE_TAG;
-  return isNotice(target) || path.some(isNotice);
 }

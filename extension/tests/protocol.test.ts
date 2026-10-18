@@ -8,11 +8,6 @@ import {
   parsePageConnectDecide,
 } from "../src/protocol/messages";
 
-const click = {
-  kind: "click" as const,
-  url: "https://shop.example.test/cart",
-  target: { role: "button", name: "Checkout", sensitive: false },
-};
 const event = (value: unknown, timestamp = 1_700_000_000_000) => ({
   type: "CUSTOM" as const,
   name: "page",
@@ -21,9 +16,21 @@ const event = (value: unknown, timestamp = 1_700_000_000_000) => ({
 });
 
 describe("parseContentMessage", () => {
-  test("returns a valid content.step", () => {
-    const message = { type: "content.step", action: click };
+  test("returns a valid content.event", () => {
+    const message = { type: "content.event", event: event({ x: 1 }) };
     expect(parseContentMessage(message)).toEqual(message as never);
+  });
+
+  test("returns null for a content.step: steps are no longer recorded", () => {
+    const message = {
+      type: "content.step",
+      action: {
+        kind: "click",
+        url: "https://shop.example.test/cart",
+        target: { role: "button", name: "Checkout", sensitive: false },
+      },
+    };
+    expect(parseContentMessage(message)).toBeNull();
   });
 
   test("returns null for an unknown type", () => {

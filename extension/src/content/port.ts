@@ -30,9 +30,9 @@ export function contentHello(): ContentToBackground {
 
 /**
  * The content script's line to the service worker. When the worker restarts the port disconnects: reconnect after
- * 0.5, 1, 2 and 4 s (then every 4 s) and keep what was posted meanwhile, in order. Steps, digests, hellos and notice
- * choices are always kept (a lost digest would let a typed secret through later network bodies, a lost step is a hole
- * in the Skill); only `content.event`s count towards `maxBuffer`, and beyond it the oldest is dropped and counted.
+ * 0.5, 1, 2 and 4 s (then every 4 s) and keep what was posted meanwhile, in order. Digests, hellos and notice choices
+ * are always kept (a lost digest would let a typed secret through later network bodies); only `content.event`s count
+ * towards `maxBuffer`, and beyond it the oldest is dropped and counted.
  */
 export function createContentPort(
   options: {

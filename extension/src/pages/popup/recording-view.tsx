@@ -1,8 +1,8 @@
+import type { RecorderBot } from "@openbot/shared/recorder-api";
 import {
   IconCircleCheck,
   IconCloudUpload,
   IconDatabaseOff,
-  IconExternalLink,
   IconListCheck,
 } from "@tabler/icons-react";
 import { useEffect, useState } from "react";
@@ -18,7 +18,6 @@ import {
 } from "@/components/ui/dialog";
 import {
   Item,
-  ItemActions,
   ItemContent,
   ItemDescription,
   ItemFooter,
@@ -29,17 +28,10 @@ import { Separator } from "@/components/ui/separator";
 import type { RecorderState } from "../../protocol/messages";
 import {
   CaptureRows,
-  recordingLearningSentence,
   SendingLearningRow,
   stripCaptureStatus,
 } from "../ui/capture-rows";
-
-/** The sentence the service worker sets while OpenBot has not yet heard of a Stop. */
-export const STOP_PENDING_PREFIX = "Stopping: OpenBot did not answer yet.";
-
-export function isStopPending(error: string | undefined): boolean {
-  return error?.startsWith(STOP_PENDING_PREFIX) ?? false;
-}
+import { learningSentence } from "./record-form";
 
 function plural(count: number, one: string, many: string) {
   return `${count} ${count === 1 ? one : many}`;
@@ -57,7 +49,7 @@ export type RecordingActions = {
   onNotice: (choice: "stop" | "restart" | "continue") => void;
 };
 
-/** What the popup shows while a recording runs: time, steps, the capture rows, and Stop or Start over. */
+/** What the popup shows while a recording runs: time, actions, the capture rows, and Stop or Start over. */
 export function RecordingView({
   state,
   busy,
@@ -88,7 +80,7 @@ export function RecordingView({
                   ? "Starting the recording"
                   : state.phase === "stopping"
                     ? "Stopping the recording"
-                    : `${elapsed(state.startedAt, now)} · ${plural(state.steps, "step", "steps")}`}
+                    : `${elapsed(state.startedAt, now)} · ${plural(state.actions, "action", "actions")}`}
               </ItemDescription>
             </ItemContent>
           </Item>
@@ -99,7 +91,7 @@ export function RecordingView({
               <Separator />
               <Item size="sm">
                 <ItemContent>
-                  <ItemTitle>{`You have recorded ${state.steps} steps`}</ItemTitle>
+                  <ItemTitle>{`You have recorded ${state.actions} actions`}</ItemTitle>
                   <ItemDescription className="line-clamp-none">
                     Click Stop if the task is done, start over if it went wrong,
                     or keep going if it needs more.
@@ -175,107 +167,85 @@ function keptSentence(kept: NonNullable<RecorderState["kept"]>): string {
     : `${counts} ${verb} kept in this browser: ${stripCaptureStatus(kept.reason)}`;
 }
 
+/** Where the stopped recording went in Intelligence: the picked Bot's Learning space, or why Learning may not see it. */
+function destinationLines(state: RecorderState, bots: RecorderBot[]): string[] {
+  const { lastStopped, learning } = state;
+  if (!lastStopped) return [];
+  const bot = bots.find((candidate) => candidate.id === lastStopped.botId);
+  const space =
+    learning?.state === "assigned"
+      ? "It goes into this Bot's Learning space."
+      : learning
+        ? learningSentence(learning)
+        : null;
+  return [
+    ...(bot ? [`Recorded for ${bot.name}.`] : []),
+    ...(space ? [space] : []),
+  ];
+}
+
 /**
- * After Stop: where to review the recording, what is still sending, and any events kept in the browser. Signed out,
- * only the kept row shows: OpenBot has not heard the stop (nothing to review) and nothing can send.
+ * After Stop: that the recording went to Intelligence (or is still on its way) and into which Learning space, and any
+ * events kept in the browser. Signed out, only the kept row shows: nothing can send until the person connects again.
  */
 export function AfterStop({
   state,
   connected,
-  openbotUrl,
+  bots = [],
   onDiscard,
-  openTab,
 }: {
   state: RecorderState;
   connected: boolean;
-  /** The connected OpenBot, for a stopped recording that does not name its own. */
-  openbotUrl?: string;
+  /** The connected person's Bots, to name the one the stopped recording was for. */
+  bots?: RecorderBot[];
   onDiscard: () => void;
-  openTab: (url: string) => void;
 }) {
   const [asking, setAsking] = useState(false);
   const { lastStopped, kept } = state;
-  // Every stopped recording is a drain until it is sent; kept ones wait for a retry, ones kept for a person who
-  // signed out send nothing until they connect again (the kept row below says so), and streamed ones only wait for
-  // OpenBot, Intelligence having all of them (a pending stop says so in its own sentence).
+  // Every stopped recording is a drain until Intelligence has all of it; kept ones wait for a retry, and ones kept for
+  // a person who signed out send nothing until they connect again (the kept row below says so).
   const keptRecordings = kept?.recordings ?? 0;
-  const streaming = state.draining - (state.streamed ?? 0) > keptRecordings;
-  const retrying = keptRecordings > (kept?.waitingFor?.recordings ?? 0);
-  const sending = connected && state.draining > 0 && (streaming || retrying);
-  // While it is still sending, the Learning capture row below says the same thing.
-  const sentence = recordingLearningSentence(
-    lastStopped && !sending ? state.learning : undefined,
-  );
-  const reviewBase = lastStopped?.openbotUrl || openbotUrl;
-  // OpenBot has the stop only when connected and it answered: a pending stop has nothing to review yet.
-  const reviewUrl =
-    connected && !isStopPending(state.error) && lastStopped && reviewBase
-      ? `${reviewBase}/bots/${lastStopped.botId}/demonstrations`
-      : null;
-  if (!kept && !reviewUrl && !sending) return null;
+  const streaming = connected && state.draining > keptRecordings;
+  const retrying =
+    connected && keptRecordings > (kept?.waitingFor?.recordings ?? 0);
+  const sent = connected && lastStopped !== undefined && state.draining === 0;
+  const lines = destinationLines(state, bots);
+  if (!kept && !sent && !streaming) return null;
   return (
     <div className="mb-6">
       <PageRows>
-        {reviewUrl ? (
-          <Item
-            size="sm"
-            render={
-              <a
-                href={reviewUrl}
-                onClick={(event) => {
-                  event.preventDefault();
-                  openTab(reviewUrl);
-                }}
-              />
-            }
-          >
+        {sent || streaming ? (
+          <Item size="sm">
             <ItemMedia variant="icon">
-              <IconCircleCheck />
+              {sent ? <IconCircleCheck /> : <IconCloudUpload />}
             </ItemMedia>
             <ItemContent>
-              <ItemTitle>Saved</ItemTitle>
-              <ItemDescription className="line-clamp-none">
-                Review it in OpenBot to draft the Skill.
-              </ItemDescription>
-              {sentence ? (
+              <ItemTitle>
+                {sent ? "Sent to Intelligence" : "Sending to Intelligence"}
+              </ItemTitle>
+              {sent ? null : (
                 <ItemDescription className="line-clamp-none">
-                  {sentence}
+                  The rest of the recording is on its way. You can keep
+                  browsing.
                 </ItemDescription>
-              ) : null}
+              )}
+              {lines.map((line) => (
+                <ItemDescription key={line} className="line-clamp-none">
+                  {line}
+                </ItemDescription>
+              ))}
             </ItemContent>
-            <ItemActions>
-              <IconExternalLink className="size-4 text-muted-foreground" />
-            </ItemActions>
           </Item>
         ) : null}
-        {sending ? (
+        {retrying ? (
           <>
-            {reviewUrl ? <Separator /> : null}
-            {streaming ? (
-              <>
-                <Item size="sm">
-                  <ItemMedia variant="icon">
-                    <IconCloudUpload />
-                  </ItemMedia>
-                  <ItemContent>
-                    <ItemDescription className="line-clamp-none">
-                      Sending the last of the recording to Intelligence and
-                      OpenBot. You can keep browsing.
-                    </ItemDescription>
-                  </ItemContent>
-                </Item>
-                <Separator />
-              </>
-            ) : null}
-            <SendingLearningRow
-              kept={retrying ? kept : undefined}
-              learning={state.learning}
-            />
+            {sent || streaming ? <Separator /> : null}
+            <SendingLearningRow kept={kept} learning={state.learning} />
           </>
         ) : null}
         {kept ? (
           <>
-            {reviewUrl || sending ? <Separator /> : null}
+            {sent || streaming || retrying ? <Separator /> : null}
             <Item size="sm">
               <ItemMedia variant="icon">
                 <IconDatabaseOff />
@@ -304,8 +274,7 @@ export function AfterStop({
             <DialogTitle>Discard kept events?</DialogTitle>
           </DialogHeader>
           <DialogBody className="mt-4 text-sm">
-            Intelligence will never receive them. Your recordings in OpenBot
-            stay as they are.
+            Intelligence will never receive them.
           </DialogBody>
           <DialogFooter className="mt-4">
             <Button size="sm" variant="ghost" onClick={() => setAsking(false)}>

@@ -125,7 +125,7 @@ test("a pass pointing at an unlisted gateway is refused by the policy's list the
       {
         trajectoryId,
         title: "File the weekly report",
-        demonstrationId: "demo-1",
+        recordingId: "rec-1",
         version: "0.1.0",
       },
       {
@@ -138,8 +138,6 @@ test("a pass pointing at an unlisted gateway is refused by the policy's list the
             },
           };
         },
-        registerTrajectory: async () => {},
-        closeTrajectory: async () => {},
         allowedGatewayUrls: (await readPolicy()).allowedIntelligenceUrls,
         outbox,
         sequencer: { next: () => seq++, flush: async () => {} },

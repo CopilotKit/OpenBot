@@ -83,8 +83,8 @@ describe("outbox", () => {
 
   test("clear forgets the trajectory's events and meta and leaves the others", async () => {
     const outbox = await openOutbox(freshName());
-    const meta = (demonstrationId: string): TrajectoryMeta => ({
-      demonstrationId,
+    const meta = (recordingId: string): TrajectoryMeta => ({
+      recordingId,
       title: "t",
       pushed: 0,
       outcomeQueued: false,

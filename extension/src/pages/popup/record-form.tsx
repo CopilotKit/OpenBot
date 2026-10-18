@@ -2,7 +2,7 @@ import type {
   LearningSpaceState,
   RecorderBot,
 } from "@openbot/shared/recorder-api";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { PageSection } from "@/components/layout/page-parts";
 import { Button } from "@/components/ui/button";
 import {
@@ -23,16 +23,16 @@ import {
 const LEARNING_SENTENCES: Partial<Record<LearningSpaceState["state"], string>> =
   {
     unassigned:
-      "Learning will not see this recording: this Bot has no Learning space. It still saves to OpenBot.",
+      "Learning will not see this recording: this Bot has no Learning space. It still goes to Intelligence.",
     missing:
-      "Learning will not see this recording: this Bot's Learning space does not exist in Intelligence. Ask an administrator to fix it in Admin, Automatic Learning. It still saves to OpenBot.",
+      "Learning will not see this recording: this Bot's Learning space does not exist in Intelligence. Ask an administrator to fix it in Admin, Automatic Learning. It still goes to Intelligence.",
     "learning-off":
-      "Learning may not see this recording: Intelligence's Learning delivery is off or unavailable, so OpenBot could not check this Bot's Learning space. It still saves to OpenBot.",
+      "Learning may not see this recording: Intelligence's Learning delivery is off or unavailable, so OpenBot could not check this Bot's Learning space. It still goes to Intelligence.",
     unverified:
-      "Learning may not see this recording: OpenBot could not check this Bot's Learning space with Intelligence just now. It still saves to OpenBot.",
+      "Learning may not see this recording: OpenBot could not check this Bot's Learning space with Intelligence just now. It still goes to Intelligence.",
   };
 
-/** What the person is told under the Bot picker; assigned (and the pass-only unjoined) say nothing. */
+/** What the person is told under the Bot picker; assigned says nothing there. */
 export function learningSentence(learning: LearningSpaceState): string | null {
   return LEARNING_SENTENCES[learning.state] ?? null;
 }
@@ -48,23 +48,13 @@ export const TITLE_MAX = 120;
 export function RecordForm({
   bots,
   initialBotId,
-  openRecordingBotId,
-  onBotChange,
   busy,
   onRecord,
 }: {
   bots: RecorderBot[];
   initialBotId: string | null;
-  /** The Bot whose Record was refused because this person has one open for it. */
-  openRecordingBotId: string | undefined;
-  /** Told the Bot the form is showing, so the popup can tell whose refusal it is displaying. */
-  onBotChange: (botId: string) => void;
   busy: boolean;
-  onRecord: (
-    botId: string,
-    title: string,
-    options?: { replaceOpen: true },
-  ) => void;
+  onRecord: (botId: string, title: string) => void;
 }) {
   const [picked, setPicked] = useState<string | null>(null);
   // Bots arrive after the form mounts: the pick wins, then the last used, then the first.
@@ -74,7 +64,6 @@ export function RecordForm({
     ) ??
     bots[0]?.id ??
     "";
-  useEffect(() => onBotChange(botId), [botId, onBotChange]);
   const [title, setTitle] = useState("");
   const bot = bots.find((candidate) => candidate.id === botId);
   const sentence = bot ? learningSentence(bot.learning) : null;
@@ -132,19 +121,6 @@ export function RecordForm({
           <Button size="lg" type="submit" disabled={!ready}>
             Record
           </Button>
-          {openRecordingBotId !== undefined && openRecordingBotId === botId ? (
-            <Button
-              size="sm"
-              type="button"
-              variant="outline"
-              disabled={!ready}
-              onClick={() =>
-                onRecord(botId, title.trim(), { replaceOpen: true })
-              }
-            >
-              Stop the open recording
-            </Button>
-          ) : null}
         </FieldGroup>
       </form>
     </PageSection>
