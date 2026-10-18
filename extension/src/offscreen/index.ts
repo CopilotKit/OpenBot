@@ -79,6 +79,8 @@ const realTimers: Timers = {
 type Stream = {
   /** The token is replaced when the person connects this browser again while it still streams (offscreen.recover). */
   target: Target;
+  /** The Bot its recordings are for, named on every pass (Start over keeps the Bot). */
+  botId: string;
   /** Recordings it still sends; one leaves when it is done, replaced by Start over, or discarded. */
   demonstrations: Set<string>;
   signedOut: boolean;
@@ -293,7 +295,10 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
     const reason = signedOutReason(stream, token);
     if (reason) throw new GrantError({ kind: "signed-out", reason });
     try {
-      return await fetchGrant({ openbotUrl, token }, trajectoryId);
+      return await fetchGrant(
+        { openbotUrl, token, botId: stream.botId },
+        trajectoryId,
+      );
     } catch (error) {
       if (error instanceof GrantError && error.verdict.kind === "signed-out")
         stream.failedToken = token;
@@ -417,6 +422,7 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
   async function openStream(
     session: StreamerSession,
     target: Target,
+    botId: string,
     options: {
       live: Live | null;
       allowedGatewayUrls: string[] | null;
@@ -433,6 +439,7 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
     else owners.set(session.trajectoryId, session.demonstrationId);
     const stream: Stream = {
       target: { ...target },
+      botId,
       demonstrations: new Set([session.demonstrationId]),
       signedOut: false,
     };
@@ -538,6 +545,7 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
           ...(resume ? { resume: true } : {}),
         },
         { openbotUrl: session.openbotUrl, token: session.token },
+        session.botId,
         {
           live: target,
           allowedGatewayUrls: session.allowedIntelligenceUrls,
@@ -784,6 +792,7 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
           recover: true,
         },
         target,
+        drain.botId,
         // The policy the recover was sent with, never a live recording's: a gateway it does not allow gets no socket,
         // and the recording stays parked with its events kept.
         { live: null, allowedGatewayUrls: message.allowedIntelligenceUrls },

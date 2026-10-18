@@ -312,7 +312,12 @@ describe("classifyGrantError, one assertion per pass row of the table", () => {
 describe("fetchGrant", () => {
   let server: ReturnType<typeof Bun.serve>;
   let openbotUrl = "";
-  let seen: { auth: string | null; body: string; path: string } | null = null;
+  let seen: {
+    auth: string | null;
+    bot: string | null;
+    body: string;
+    path: string;
+  } | null = null;
   let respond: () => Response = () => new Response(null, { status: 500 });
 
   beforeAll(() => {
@@ -322,6 +327,7 @@ describe("fetchGrant", () => {
       async fetch(request) {
         seen = {
           auth: request.headers.get("authorization"),
+          bot: request.headers.get("x-openbot-recorder-bot"),
           body: await request.text(),
           path: new URL(request.url).pathname,
         };
@@ -332,7 +338,7 @@ describe("fetchGrant", () => {
   });
   afterAll(() => server.stop(true));
 
-  const target = () => ({ openbotUrl, token: "tok" });
+  const target = () => ({ openbotUrl, token: "tok", botId: "bot-7" });
   const id = "0b8b3c34-7c0e-4f7b-8f0a-9d7e4a2f1c11";
 
   async function failure(): Promise<GrantVerdict> {
@@ -345,7 +351,7 @@ describe("fetchGrant", () => {
     throw new Error("fetchGrant did not fail");
   }
 
-  test("posts {} with the bearer and returns the grant", async () => {
+  test("posts {} with the bearer and the picked Bot, and returns the grant", async () => {
     const grant = {
       joinToken: "j",
       realtime: { clientUrl: "wss://i.example/client", topic: "trajectory:1" },
@@ -354,6 +360,7 @@ describe("fetchGrant", () => {
     expect(await fetchGrant(target(), id)).toEqual(grant);
     expect(seen).toEqual({
       auth: "Bearer tok",
+      bot: "bot-7",
       body: "{}",
       path: `/api/copilotkit/trajectory/${id}/connect`,
     });
@@ -407,7 +414,7 @@ describe("fetchGrant", () => {
     const url = `http://127.0.0.1:${dead.port}`;
     dead.stop(true);
     try {
-      await fetchGrant({ openbotUrl: url, token: "t" }, id);
+      await fetchGrant({ openbotUrl: url, token: "t", botId: "bot-7" }, id);
       throw new Error("did not fail");
     } catch (error) {
       expect(error).toBeInstanceOf(GrantError);

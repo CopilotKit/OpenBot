@@ -107,7 +107,11 @@ function makeGate(): Gate {
 
 /** OpenBot's routes the offscreen document calls, served on the fake gateway's own origin. */
 type OpenBot = {
-  passes: { trajectoryId: string; authorization: string | null }[];
+  passes: {
+    trajectoryId: string;
+    authorization: string | null;
+    bot: string | null;
+  }[];
   /** Answers for the next passes, in order; then `refuse`, then a grant. */
   passScript: (() => Response)[];
   refuse: ((trajectoryId: string) => Response | null) | null;
@@ -224,6 +228,7 @@ async function setup(): Promise<Harness> {
       openbot.passes.push({
         trajectoryId,
         authorization: request.headers.get("authorization"),
+        bot: request.headers.get("x-openbot-recorder-bot"),
       });
       const scripted = openbot.passScript.shift();
       if (scripted) return scripted();
@@ -889,6 +894,32 @@ describe("offscreen controller", () => {
     expect(
       h.media.recovered.map((entry) => entry.drain.demonstrationId),
     ).toEqual(["demo-1"]);
+  });
+
+  test("every pass names the recording's Bot, for the live recording and for a recovered one", async () => {
+    const h = await setup();
+    h.openbot.refuse = () => parkedPass();
+    await h.open(virtualClock());
+    const session = h.session({ botId: "bot-live" });
+    h.post({ type: "offscreen.start", session });
+    h.post({ type: "offscreen.stop", outcome: "succeeded" });
+    await until(() => h.received("offscreen.kept").length > 0, "kept");
+    expect(h.openbot.passes.map((pass) => pass.bot)).toEqual(["bot-live"]);
+
+    h.openbot.refuse = null;
+    await h.open(virtualClock(NEXT_START));
+    h.post({
+      type: "offscreen.recover",
+      openbotUrl: session.openbotUrl,
+      token: session.token,
+      allowedIntelligenceUrls: null,
+      drains: [{ ...h.drain(session), botId: "bot-kept" }],
+    });
+    await until(() => h.received("offscreen.done").length === 1, "done");
+    expect(h.openbot.passes.slice(1).map((pass) => pass.bot)).toEqual(
+      h.openbot.passes.slice(1).map(() => "bot-kept"),
+    );
+    expect(h.openbot.passes.length).toBeGreaterThan(1);
   });
 
   test("recover drains a stopped recording's outbox before reporting done, and adds an interrupted outcome only when none was queued", async () => {

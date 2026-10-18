@@ -189,9 +189,17 @@ function isGrant(value: unknown): value is TrajectoryGrant {
   );
 }
 
-/** Asks the runtime's `trajectory/connect` for a one-time capture pass; throws a GrantError carrying the row's verdict. */
+/** The header that names the Bot the person picked in the popup on every capture pass request: OpenBot puts the
+ * trajectory into that Bot's Learning space. */
+export const RECORDER_BOT_HEADER = "x-openbot-recorder-bot";
+
+/** Where a pass is asked for: the connected OpenBot, the recorder bearer, and the recording's Bot. */
+export type GrantTarget = { openbotUrl: string; token: string; botId: string };
+
+/** Asks the runtime's `trajectory/connect` for a one-time capture pass for the recording's Bot; throws a GrantError
+ * carrying the row's verdict. */
 export async function fetchGrant(
-  target: { openbotUrl: string; token: string },
+  target: GrantTarget,
   trajectoryId: string,
 ): Promise<TrajectoryGrant> {
   let response: Response;
@@ -204,6 +212,7 @@ export async function fetchGrant(
         headers: {
           Accept: "application/json",
           "Content-Type": "application/json",
+          [RECORDER_BOT_HEADER]: target.botId,
         },
         body: "{}",
       },
