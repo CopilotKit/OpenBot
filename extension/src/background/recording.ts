@@ -458,7 +458,13 @@ export function installRecording(
   let networkMode: NetworkMode | "stopped" = "off";
   const digests = new Set<string>();
   let bots = new Map<string, RecorderBot>();
-  const frameUrls = new Map<string, string>();
+  /** Each followed tab's last recorded top-frame address and page: the same one again is not recorded twice. */
+  const recordedNavigations = new Map<number, string>();
+  const recordedPages = new Map<number, string>();
+  const forgetAddresses = () => {
+    recordedNavigations.clear();
+    recordedPages.clear();
+  };
   /** The recording a Start over is leaving, while it waits for the document's port: a second Start over is refused. */
   let restartingFrom: Live | null = null;
   /** Set while Start over saves and makes the switch to the new recording: a stop waits for it, so the document and the
@@ -1073,6 +1079,7 @@ export function installRecording(
       };
       watchConnection();
       // Recording from here on, before the script is injected: a content script that says hello is told to capture.
+      recordedNavigations.set(tabId, url ?? "");
       dispatch({
         type: "started",
         recordingId,
@@ -1107,7 +1114,7 @@ export function installRecording(
       unwatchConnection();
       network = null;
       networkMode = "off";
-      frameUrls.clear();
+      forgetAddresses();
       if (capture)
         await capture.stop().catch(report("stopping network capture"));
       if (injected) await stopRecordingScripts([tabId]);
@@ -1195,7 +1202,7 @@ export function installRecording(
     }
     await stopRecordingScripts(tabIds);
     digests.clear();
-    frameUrls.clear();
+    forgetAddresses();
     await removeSession("digests");
     const capture = network;
     network = null;
@@ -1550,7 +1557,7 @@ export function installRecording(
       });
     live = { ...current, recordingId };
     shown = { recordingId, trajectoryIds: new Set([trajectoryId]) };
-    frameUrls.clear();
+    forgetAddresses();
     postOffscreen({ type: "offscreen.rotate", recordingId, trajectoryId });
     dispatch({ type: "restart", recordingId, startedAt });
     publishDrains(drains);
@@ -1984,6 +1991,7 @@ export function installRecording(
     switch (message.type) {
       case "content.event": {
         const event = message.event as CapturedEvent;
+        if (event.name === "page" && !isTopPage(port, tabId, event)) return;
         forwardEvent(event);
         if (ACTION_EVENTS.has(event.name)) countAction();
         return;
@@ -2007,6 +2015,48 @@ export function installRecording(
     }
   }
 
+  /** A `page` event comes from the collector each time it starts in a document: only a followed tab's top frame counts
+   * (never an iframe, nor a page Chrome prerenders out of sight), and only once per address until the tab moves on. */
+  function isTopPage(
+    port: chrome.runtime.Port,
+    tabId: number,
+    event: CapturedEvent,
+  ): boolean {
+    const sender = port.sender as
+      | (chrome.runtime.MessageSender & { documentLifecycle?: string })
+      | undefined;
+    if (sender?.frameId !== 0 || sender.documentLifecycle === "prerender")
+      return false;
+    const url = (event.value as { url?: unknown } | null)?.url;
+    if (typeof url !== "string") return true;
+    if (recordedPages.get(tabId) === url) return false;
+    recordedPages.set(tabId, url);
+    return true;
+  }
+
+  /** A followed tab's top frame reached a page: recorded once per address (a reload again), never an iframe's. */
+  function recordTopNavigation(
+    details: NavigationDetails,
+    kind: "commit" | "history",
+  ): void {
+    const { tabId, url } = details;
+    const event = navigationEvent(
+      details,
+      kind,
+      state.topUrls[tabId] || undefined,
+    );
+    dispatch({ type: "page", tabId, url });
+    if (!/^https?:/i.test(url)) return;
+    const reload =
+      (event.value as { navigationType?: string }).navigationType === "reload";
+    if (!reload && recordedNavigations.get(tabId) === url) return;
+    recordedNavigations.set(tabId, url);
+    // The reloaded document's page event is recorded again.
+    if (reload) recordedPages.delete(tabId);
+    forwardEvent(event);
+    countAction();
+  }
+
   function onNavigation(
     details: NavigationDetails,
     kind: "commit" | "history",
@@ -2014,14 +2064,7 @@ export function installRecording(
     if (state.phase !== "recording" || !live) return;
     const { tabId, frameId, url } = details;
     if (!state.tabIds.includes(tabId)) return;
-    const frame = `${tabId}:${frameId}`;
-    const from = frameId === 0 ? state.topUrls[tabId] : frameUrls.get(frame);
-    forwardEvent(navigationEvent(details, kind, from || undefined));
-    frameUrls.set(frame, url);
-    if (frameId === 0) {
-      dispatch({ type: "page", tabId, url });
-      countAction();
-    }
+    if (frameId === 0) recordTopNavigation(details, kind);
     if (kind !== "commit") return;
     // The script's own guard makes a repeat harmless; a frame Chrome refuses (an opaque sandboxed one) is skipped.
     void injectRecordingScripts(tabId, live.recordingId, [frameId]).catch(

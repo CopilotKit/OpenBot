@@ -47,7 +47,8 @@ export function collectorBeforeSend(
   return (event) => {
     const captured = event as CapturedEvent;
     if (captured?.name === "page") {
-      // The collector emits one `page` event whenever it starts; the service worker records navigation for every frame.
+      // The collector emits one `page` event whenever it starts; only the top frame's counts (the service worker records
+      // the top frame's navigation, and keeps a page event only from a followed tab's top frame).
       if (window !== window.top) return null;
       if (document.readyState === "loading") {
         // Injected as soon as the frame commits, so the title can still be empty.

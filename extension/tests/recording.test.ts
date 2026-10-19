@@ -1284,11 +1284,12 @@ test("clicks, inputs and page loads in a followed tab's top frame count as actio
     url: "https://widgets.example.test/a",
   });
   await until(
-    () => sentToDocument("offscreen.event").length === 7,
+    () => sentToDocument("offscreen.event").length === 6,
     "every event forwarded",
   );
   await settle();
-  // A click, an input (from any frame), a page load and a history change: the frame load and the rest do not count.
+  // A click, an input (from any frame), a page load and a history change: the frame load is not even recorded, and the
+  // rest do not count.
   expect((await state()).actions).toBe(4);
   expect(fake.badge.text).toBe("4");
   network.deps?.emit(event("network", { url: "https://crm.example.test/x" }));
@@ -2662,14 +2663,21 @@ test("a tab the recorded tab opened is followed", async () => {
   expect((await state()).tabIds).toEqual([7, 8]);
 });
 
-test("navigation in every frame becomes a navigation event for Intelligence, with masked addresses", async () => {
+test("only a followed tab's top frame becomes a navigation event for Intelligence, once per address, with masked addresses", async () => {
   await record();
+  const navigations = () =>
+    sentToDocument("offscreen.event")
+      .map((m) => (m.type === "offscreen.event" ? m.event : null))
+      .filter((recorded) => recorded?.name === "navigation");
+  // The page the recording started on, again: already where the tab is.
+  fake.webNavigation.historyUpdate({ tabId: 7, frameId: 0, url: DEAL });
   fake.webNavigation.commit({
     tabId: 7,
     frameId: 0,
-    url: "https://crm.example.test/deals/43?tab=notes",
+    url: "https://crm.example.test/deals/43?tab=notes&token=abc",
     transitionType: "link",
   });
+  // An iframe loading, and an iframe's own history: the page's doing, never recorded.
   fake.webNavigation.commit({
     tabId: 7,
     frameId: 2,
@@ -2678,66 +2686,130 @@ test("navigation in every frame becomes a navigation event for Intelligence, wit
   });
   fake.webNavigation.historyUpdate({
     tabId: 7,
+    frameId: 2,
+    url: "https://widgets.example.test/b",
+  });
+  // The page rewriting its own address to the same one, as a single-page app does again and again.
+  for (let i = 0; i < 3; i++)
+    fake.webNavigation.historyUpdate({
+      tabId: 7,
+      frameId: 0,
+      url: "https://crm.example.test/deals/43?tab=notes&token=abc",
+    });
+  fake.webNavigation.historyUpdate({
+    tabId: 7,
     frameId: 0,
     url: "https://crm.example.test/deals/44",
   });
-  await until(
-    () => sentToDocument("offscreen.event").length === 3,
-    "three navigation events",
-  );
-  const events = sentToDocument("offscreen.event").map((m) =>
-    m.type === "offscreen.event" ? m.event : null,
-  );
+  // A reload of the same address is the person's, and recorded; a blank document is no page they reached.
+  fake.webNavigation.commit({
+    tabId: 7,
+    frameId: 0,
+    url: "https://crm.example.test/deals/44",
+    transitionType: "reload",
+  });
+  fake.webNavigation.commit({ tabId: 7, frameId: 0, url: "about:blank" });
+  await until(() => navigations().length === 3, "three navigation events");
+  await settle();
+  const events = navigations();
+  expect(events).toHaveLength(3);
   expect(events[0]).toMatchObject({
     name: "navigation",
-    value: { from: DEAL, navigationType: "push", frameId: 0 },
-  });
-  expect(events[1]).toMatchObject({
-    name: "navigation",
     value: {
-      frameId: 2,
-      from: "",
-      to: "https://widgets.example.test/a?token=[redacted]",
+      from: DEAL,
+      to: "https://crm.example.test/deals/43?tab=notes&token=[redacted]",
+      navigationType: "push",
+      frameId: 0,
     },
   });
-  expect(events[2]).toMatchObject({
-    name: "navigation",
+  expect(events[1]).toMatchObject({
     value: {
-      from: "https://crm.example.test/deals/43?tab=notes",
+      from: "https://crm.example.test/deals/43?tab=notes&token=[redacted]",
       to: "https://crm.example.test/deals/44",
     },
   });
-  expect((await state()).topUrls["7"]).toBe(
-    "https://crm.example.test/deals/44",
-  );
+  expect(events[2]).toMatchObject({
+    value: {
+      from: "https://crm.example.test/deals/44",
+      to: "https://crm.example.test/deals/44",
+      navigationType: "reload",
+    },
+  });
+  expect(JSON.stringify(events)).not.toContain("widgets.example.test");
+  expect((await state()).topUrls["7"]).toBe("about:blank");
   expect(openbot.calls).toEqual([]);
 });
 
-test("a frame's address from an earlier recording is never where its navigation in the next one came from", async () => {
-  const frameNavigation = async (url: string) => {
+test("an address recorded before is recorded again in the next recording and after Start over", async () => {
+  const navigateTo = async (url: string) => {
     const before = sentToDocument("offscreen.event").length;
-    fake.webNavigation.commit({ tabId: 7, frameId: 2, parentFrameId: 0, url });
+    fake.webNavigation.commit({ tabId: 7, frameId: 0, url });
     await until(
       () => sentToDocument("offscreen.event").length === before + 1,
-      `the frame's navigation to ${url}`,
+      `the navigation to ${url}`,
     );
     const message = sentToDocument("offscreen.event").at(-1);
     return message?.type === "offscreen.event" ? message.event.value : null;
   };
   await record();
-  await frameNavigation("https://widgets.example.test/a");
-  expect(await frameNavigation("https://widgets.example.test/b")).toMatchObject(
-    { from: "https://widgets.example.test/a" },
-  );
+  await navigateTo("https://crm.example.test/deals/43");
   await page({ type: "page.stop" });
   await record();
-  expect(await frameNavigation("https://widgets.example.test/c")).toMatchObject(
-    { frameId: 2, from: "" },
-  );
+  expect(await navigateTo("https://crm.example.test/deals/43")).toMatchObject({
+    to: "https://crm.example.test/deals/43",
+  });
   expect(await page({ type: "page.restart" })).toEqual({ ok: true });
-  expect(await frameNavigation("https://widgets.example.test/d")).toMatchObject(
-    { frameId: 2, from: "" },
+  expect(await navigateTo("https://crm.example.test/deals/43")).toMatchObject({
+    to: "https://crm.example.test/deals/43",
+  });
+});
+
+test("a page event counts only from a followed tab's top frame, once per address until a reload", async () => {
+  await record();
+  const pages = () =>
+    sentToDocument("offscreen.event")
+      .map((m) => (m.type === "offscreen.event" ? m.event : null))
+      .filter((recorded) => recorded?.name === "page");
+  const top = contentPort(7, 0);
+  const frame = contentPort(7, 4);
+  // A page Chrome prerenders out of sight (its search warm-up page) is a top-level document with a frame id of its own.
+  const prerendered = fake.connectFrom(PORT_CONTENT, {
+    id: EXTENSION_ID,
+    tab: { id: 7 } as chrome.tabs.Tab,
+    frameId: 9,
+    documentLifecycle: "prerender",
+    url: "https://www.google.com/search/warmup.html",
+  } as chrome.runtime.MessageSender);
+  const pageAt = (url: string) => ({
+    type: "content.event",
+    event: event("page", { url, route: new URL(url).pathname, title: "t" }),
+  });
+  frame.postMessage(pageAt("https://widgets.example.test/embed"));
+  prerendered.postMessage(pageAt("https://www.google.com/search/warmup.html"));
+  top.postMessage(pageAt(DEAL));
+  top.postMessage(pageAt(DEAL));
+  await until(() => pages().length === 1, "the top frame's page");
+  fake.webNavigation.commit({
+    tabId: 7,
+    frameId: 0,
+    url: DEAL,
+    transitionType: "reload",
+  });
+  await until(
+    () =>
+      sentToDocument("offscreen.event").some(
+        (m) => m.type === "offscreen.event" && m.event.name === "navigation",
+      ),
+    "the reload",
   );
+  top.postMessage(pageAt(DEAL));
+  await until(() => pages().length === 2, "the reloaded page");
+  await settle();
+  expect(
+    pages().map(
+      (recorded) => (recorded?.value as { url?: string } | undefined)?.url,
+    ),
+  ).toEqual([DEAL, DEAL]);
 });
 
 test("an action's time from a followed tab reaches the network capture, never one from another tab", async () => {
