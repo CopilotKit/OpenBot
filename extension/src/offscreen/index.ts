@@ -510,7 +510,7 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
           if (live === target && !target.ending) deliver(target, event);
         },
         status: (update) => postStatus(target, { voice: update }),
-        mask: (text) => scrubTranscript(text, { digests }),
+        mask: (text, before) => scrubTranscript(text, { digests, before }),
       },
       { ...(deps.voice ?? browserVoice()), now, timers },
     );

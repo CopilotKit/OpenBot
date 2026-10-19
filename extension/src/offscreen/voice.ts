@@ -5,7 +5,8 @@
 // cannot show a prompt. The microphone is opened with getUserMedia and its track handed to the recognizer, so a missing
 // grant or a missing device is told apart from a speech-service failure. It is the browser's own speech recognition with
 // its defaults: no model is downloaded, bundled or forced on the device. Only the words leave: each final phrase becomes one
-// masked `transcript` event in the recording, and no audio is kept. Interim words only update the popup.
+// masked `transcript` event in the recording, and no audio is kept. Interim words only update the popup, masked the same
+// way.
 //
 // Nothing here may use a chrome.* API: an offscreen document has only runtime messaging.
 import type { CapturedEvent } from "@openbot/shared/recorder-masking";
@@ -62,8 +63,10 @@ export type VoiceOptions = {
   /** One `transcript` event per final phrase, already masked. */
   emit(event: CapturedEvent): void;
   status(voice: VoiceCapture): void;
-  /** The Recorder's text masking for a transcript, with the recording's sensitive-value digests. */
-  mask(text: string): string;
+  /** The Recorder's text masking for a transcript, with the recording's sensitive-value digests. `before` is the phrase
+   * said just before (empty for the first): Chrome ends a phrase at a pause, so a number read out after "my card number
+   * is" can come as a phrase of its own. */
+  mask(text: string, before: string): string;
 };
 
 export type Voice = {
@@ -166,6 +169,8 @@ export function startVoice(options: VoiceOptions, deps: VoiceDeps): Voice {
   let pendingHeard: string | null = null;
   let heard: string | undefined;
   let lastStatus: VoiceCapture | null = null;
+  /** The last final phrase, unmasked, so the next one is masked knowing what came before it. */
+  let lastPhrase = "";
 
   const status = (voice: VoiceCapture) => {
     if (closed) return;
@@ -244,8 +249,10 @@ export function startVoice(options: VoiceOptions, deps: VoiceDeps): Voice {
       }
       if (listening.emitted.has(index)) continue;
       listening.emitted.add(index);
-      const masked = mask(text.trim());
-      if (!masked) continue;
+      const phrase = text.trim();
+      if (!phrase) continue;
+      const masked = mask(phrase, lastPhrase);
+      lastPhrase = phrase;
       const startedAt = Math.max(
         listening.firstHeard.get(index) ?? at,
         listening.lastFinalAt,
@@ -268,8 +275,8 @@ export function startVoice(options: VoiceOptions, deps: VoiceDeps): Voice {
     }
     // While a mute or Stop waits for the last phrase, its words are still sent but the popup already says muted.
     if (muted) return;
-    const words = mask(interim.trim());
-    if (words) showInterim(tail(words));
+    const said = interim.trim();
+    if (said) showInterim(tail(mask(said, lastPhrase)));
     else if (listening.recognition !== null) {
       pendingHeard = null;
       listeningStatus();
@@ -399,6 +406,7 @@ export function startVoice(options: VoiceOptions, deps: VoiceDeps): Voice {
     const opening = ++generation;
     failed = false;
     clearTimers();
+    lastPhrase = "";
     if (current) drop(current);
     status({ state: "starting" });
     if (!deps.Recognition) {

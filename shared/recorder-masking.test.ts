@@ -752,7 +752,91 @@ test("a spoken card number is scrubbed however the speech service wrote its digi
   );
   expect(
     scrubTranscript("card 4,242-42424,2424,242 expires 12 28, code 123"),
-  ).toBe(`card ${REDACTED} expires 12 28, code 123`);
+  ).toBe(`card ${REDACTED} expires ${REDACTED}, code ${REDACTED}`);
+});
+
+test("a spoken number the speech service cut short or ran together is scrubbed too, whatever its checksum", () => {
+  // What Chrome wrote for "4 0 1 2, 8 8 8 8, 8 8 8 8, 1 8 8 1" read aloud in a real run: digits dropped or merged, so no
+  // longer a valid card number, or cut off at Stop.
+  const said: Array<[string, string]> = [
+    ["my card number is 4012-888888-1881", `my card number is ${REDACTED}`],
+    ["my card number is 4012-8888", `my card number is ${REDACTED}`],
+    ["my card number is 4012 8888 8888 1881", `my card number is ${REDACTED}`],
+    ["my card number is 4012-8888-8888-1881", `my card number is ${REDACTED}`],
+    [
+      "my card number is $4,012,888,888,881,881",
+      `my card number is $${REDACTED}`,
+    ],
+    // Six digits or more go with no word before them, however they are split.
+    ["it is 4012-888888-1881 thanks", `it is ${REDACTED} thanks`],
+    ["then 4012 88 and done", `then ${REDACTED} and done`],
+    ["type 4 0 1 2, 8 8 then", `type ${REDACTED} then`],
+    ["type 4 0 1 2 - 8 8 then", `type ${REDACTED} then`],
+    ["that is $4,2424,2424 there", `that is $${REDACTED} there`],
+    ["40128888 is the one", `${REDACTED} is the one`],
+    ["try 4012.8888.", `try ${REDACTED}.`],
+    ["call 555 123 4567", `call ${REDACTED}`],
+    ["ref ab4012888 now", `ref ab${REDACTED} now`],
+  ];
+  for (const [text, masked] of said) expect(scrubTranscript(text)).toBe(masked);
+});
+
+test("after a word that names a secret, every number that follows in the phrase goes, however short", () => {
+  const said: Array<[string, string]> = [
+    ["my PIN is 1234", `my PIN is ${REDACTED}`],
+    ["the CVV is 123", `the CVV is ${REDACTED}`],
+    ["CVC 4 2 1 please", `CVC ${REDACTED} please`],
+    ["the security code is 421", `the security code is ${REDACTED}`],
+    ["my card number is 4012", `my card number is ${REDACTED}`],
+    ["debit card ending 1881", `debit card ending ${REDACTED}`],
+    ["credit limit 500", `credit limit ${REDACTED}`],
+    ["account 77 please", `account ${REDACTED} please`],
+    ["routing number 12", `routing number ${REDACTED}`],
+    ["IBAN GB 82 WEST", `IBAN GB ${REDACTED} WEST`],
+    ["SSN is 123", `SSN is ${REDACTED}`],
+    [
+      "my social security number is 123 45",
+      `my social security number is ${REDACTED}`,
+    ],
+    ["the passcode is 0000", `the passcode is ${REDACTED}`],
+    ["my pass code is 12", `my pass code is ${REDACTED}`],
+    ["my password is hunter2", `my password is ${REDACTED}`],
+    ["the OTP is 48", `the OTP is ${REDACTED}`],
+    ["verification code 4821", `verification code ${REDACTED}`],
+    [
+      "my card number is 4012 and then order 1043",
+      `my card number is ${REDACTED} and then order ${REDACTED}`,
+    ],
+    // A number said before the word is not after it.
+    ["order 1043 on my card", "order 1043 on my card"],
+  ];
+  for (const [text, masked] of said) expect(scrubTranscript(text)).toBe(masked);
+});
+
+test("a number said in the phrase after one that names a secret goes too, as Chrome splits a phrase at a pause", () => {
+  expect(scrubTranscript("4012", { before: "my card number is" })).toBe(
+    REDACTED,
+  );
+  expect(scrubTranscript("it is 12 34", { before: "and my PIN" })).toBe(
+    `it is ${REDACTED}`,
+  );
+  expect(
+    scrubTranscript("order 1043", { before: "I opened the order page" }),
+  ).toBe("order 1043");
+});
+
+test("ordinary numbers in speech are kept", () => {
+  for (const text of [
+    "order 1043, 2 items for $12.50 in 3 minutes",
+    "step 3 then step 4",
+    "open order 1043 and refund 2 items",
+    "12345 is five digits",
+    "on October 18, 2026 the parcel came",
+    "it shipped December 3 2026",
+    "discard 3 drafts and add 2 to the cart",
+    "I pinned 2 tabs",
+  ])
+    expect(scrubTranscript(text)).toBe(text);
 });
 
 test("a spoken transcript keeps ordinary numbers and loses what the text masking always takes", () => {

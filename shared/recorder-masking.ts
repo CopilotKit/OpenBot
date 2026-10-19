@@ -379,16 +379,42 @@ export function scrubText(text: string, options?: MaskOptions): string {
   return out;
 }
 
-/** Digits read aloud, as a speech service writes them: groups of numerals joined by a comma, a full stop, a dash or a space,
- * or by a comma or full stop and a space ("$4,2424,2424,2424,242" for a card number read in fours). */
-const SPOKEN_NUMBER = /(?<![\w.,])\d+(?:(?:[,.]? |[,.-])\d+)+(?![\w])/g;
+/** What joins the numerals of a number read aloud, as a speech service writes it: a comma, a full stop or a dash, alone or
+ * with spaces around it, or spaces alone ("4012-888888-1881", "4 0 1 2, 8 8 8 8", "$4,2424,2424,2424,242"). */
+const SPOKEN_GAP = String.raw`(?:\s*[,.\-\u2013]\s*|\s+)`;
+/** A number read aloud: numerals, in any script, joined by `SPOKEN_GAP`, and the name of a month said just before it. */
+const SPOKEN_NUMBER = new RegExp(
+  String.raw`(\b(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+)?(?<!\p{Nd})(\p{Nd}+(?:${SPOKEN_GAP}\p{Nd}+)*)`,
+  "giu",
+);
+/** A speech service drops digits of a number read aloud and runs others together, so a card, account or phone number
+ * comes back neither whole nor valid: any spoken number of this many digits goes, whatever its checksum. */
+const SPOKEN_DIGITS_REDACTED = 6;
+/** Words that say a secret number follows: every number after one, to the end of the phrase, goes however short. */
+const SPOKEN_SECRET =
+  /\b(?:cards?|credit|debit|accounts?|routing|iban|ssn|social\s+security|pin|cvv\d?|cvc|security\s+codes?|pass[\s-]?codes?|pass[\s-]?words?|otp|verification\s+codes?)\b/i;
+/** One word; after a `SPOKEN_SECRET` word, one with a numeral in it goes whole ("hunter2"). */
+const SPOKEN_WORD = /[\p{L}\p{N}]+/gu;
+const HAS_NUMERAL = /\p{Nd}/u;
+/** Markers `SPOKEN_WORD` left one gap apart ("[redacted] [redacted] [redacted]" for "4 0 1"), folded into one. */
+const REDACTED_RUN = new RegExp(
+  `${REDACTED.replace(/[[\]]/g, "\\$&")}(?:${SPOKEN_GAP}${REDACTED.replace(/[[\]]/g, "\\$&")})+`,
+  "g",
+);
+/** A date said in full ("October 18, 2026") keeps its day and year, the one ordinary run of six digits in speech. */
+const DAY_AND_YEAR = /^\d{1,2},?\s+(?:1[89]|20)\d\d$/;
 
-/** A spoken run of numerals loses every stretch of its groups that is a card number (13 to 19 digits that pass the Luhn
- * check) or a value typed into a sensitive field, whatever the separators between the groups. */
+/** A spoken number before any `SPOKEN_SECRET` word: one of `SPOKEN_DIGITS_REDACTED` digits or more goes whole, a date said
+ * in full excepted; a shorter one loses each stretch of its groups that is a value typed into a sensitive field. */
 const scrubSpokenRun = (
   run: string,
+  afterMonth: boolean,
   matches: ((value: string) => boolean) | null,
 ): string => {
+  const digits = run.replace(/\P{Nd}/gu, "");
+  if (digits.length >= SPOKEN_DIGITS_REDACTED)
+    return afterMonth && DAY_AND_YEAR.test(run) ? run : REDACTED;
+  if (matches === null || digits.length < MIN_DIGEST_LENGTH) return run;
   const groups = [...run.matchAll(/\d+/g)].map((match) => ({
     digits: match[0],
     start: match.index,
@@ -398,35 +424,49 @@ const scrubSpokenRun = (
   for (let first = 0; first < groups.length; first++) {
     const head = groups[first];
     if (!head) continue;
-    let digits = "";
+    let typed = "";
     for (let last = first; last < groups.length; last++) {
       const group = groups[last];
       if (!group) break;
-      digits += group.digits;
-      const card = digits.length <= CARD_MAX_DIGITS && isCardNumber(digits);
-      const typed =
-        matches !== null &&
-        last - first < MAX_DIGEST_GROUPS &&
-        digits.length >= MIN_DIGEST_LENGTH &&
-        matches(digits);
-      if (card || typed) spans.push([head.start, group.end]);
-      if (digits.length > CARD_MAX_DIGITS && last - first >= MAX_DIGEST_GROUPS)
-        break;
+      typed += group.digits;
+      if (typed.length >= MIN_DIGEST_LENGTH && matches(typed))
+        spans.push([head.start, group.end]);
     }
   }
   return redactSpans(run, spans);
 };
 
-/** `scrubText` for what a person said while recording, as the browser's speech recognition wrote it: numbers read aloud
- * come back with thousands separators and stray signs, so a spoken card number or typed secret is found in those runs
- * first, then the text masking runs as it does on everything else. */
-export function scrubTranscript(text: string, options?: MaskOptions): string {
+/** `scrubText` for what a person said while recording, as the browser's speech recognition wrote it. A speech service
+ * writes a number read aloud with thousands separators, stray signs and dashes, and drops or runs together its digits, so
+ * a spoken number of six digits or more goes whatever it adds up to, every number after a word that names a secret (in
+ * this phrase, or in `before`, the phrase said just before it) goes however short, and a shorter one loses a value typed
+ * into a sensitive field. Then the text masking runs as it does on everything else. */
+export function scrubTranscript(
+  text: string,
+  options?: MaskOptions & { before?: string },
+): string {
   const matches =
     options?.digests && options.digests.size > 0
       ? digestMatcher(options)
       : null;
+  const secret = SPOKEN_SECRET.exec(text);
+  const from =
+    options?.before && SPOKEN_SECRET.test(options.before)
+      ? 0
+      : secret
+        ? secret.index + secret[0].length
+        : text.length;
+  const head = text.slice(0, from);
+  const tail = text
+    .slice(from)
+    .replace(SPOKEN_WORD, (word) => (HAS_NUMERAL.test(word) ? REDACTED : word))
+    .replace(REDACTED_RUN, REDACTED);
   return scrubText(
-    text.replace(SPOKEN_NUMBER, (run) => scrubSpokenRun(run, matches)),
+    head.replace(
+      SPOKEN_NUMBER,
+      (_, month: string | undefined, run: string) =>
+        (month ?? "") + scrubSpokenRun(run, month !== undefined, matches),
+    ) + tail,
     options,
   );
 }

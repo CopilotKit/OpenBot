@@ -111,7 +111,8 @@ function setup(
       muted: options.muted ?? false,
       emit: (event) => s.events.push(event),
       status: (voice) => s.statuses.push(voice),
-      mask: (text) => scrubTranscript(text, { digests: options.digests }),
+      mask: (text, before) =>
+        scrubTranscript(text, { digests: options.digests, before }),
     },
     deps,
   );
@@ -248,6 +249,46 @@ describe("voice", () => {
     ]);
     expect(JSON.stringify(s.statuses)).not.toContain("4242");
     expect(JSON.stringify(s.statuses)).not.toContain("hunter2");
+  });
+
+  test("a card number cut short is masked in the words the popup shows while it is still being said", async () => {
+    const s = setup();
+    await s.clock.advance(0);
+    const recognition = s.recognition();
+    recognition.begin();
+    // What Chrome showed in a real run while the number was being read out.
+    recognition.say([["my card number is 4012-8", false]]);
+    await s.clock.advance(500);
+    expect(s.last()?.heard).toBe(`my card number is ${REDACTED}`);
+    expect(JSON.stringify(s.statuses)).not.toContain("4012");
+  });
+
+  test("a number read out after a pause is masked as following the phrase that named the card", async () => {
+    const s = setup();
+    await s.clock.advance(0);
+    const recognition = s.recognition();
+    recognition.begin();
+    recognition.say([["my card number is", true]]);
+    recognition.say(
+      [
+        ["my card number is", true],
+        ["4012", false],
+      ],
+      1,
+    );
+    await s.clock.advance(500);
+    expect(s.last()?.heard).toBe(REDACTED);
+    recognition.say(
+      [
+        ["my card number is", true],
+        ["4012 8", true],
+      ],
+      1,
+    );
+    expect(
+      s.events.map((event) => (event.value as { text: string }).text),
+    ).toEqual(["my card number is", REDACTED]);
+    expect(JSON.stringify([s.events, s.statuses])).not.toContain("4012");
   });
 
   test("a recognition Chrome ends is restarted on the same microphone, with a growing delay when it keeps ending at once", async () => {
