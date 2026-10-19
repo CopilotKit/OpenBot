@@ -933,3 +933,18 @@ test("a Composio key is read when set and absent when not", () => {
       .composioApiKey,
   ).toBe("ak_example");
 });
+
+test("Linear chat integration turns on when LINEAR_API_KEY is set", () => {
+  expect(loadConfig(baseEnvironment).linear).toBeUndefined();
+  expect(
+    loadConfig({ ...baseEnvironment, LINEAR_API_KEY: "  lin_secret  " }).linear
+      ?.apiKey,
+  ).toBe("lin_secret");
+  expect(
+    loadConfig({
+      ...baseEnvironment,
+      LINEAR_API_KEY: "lin_secret",
+      LINEAR_TEAM_ID: " team-uuid ",
+    }).linear?.defaultTeamId,
+  ).toBe("team-uuid");
+});

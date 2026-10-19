@@ -74,6 +74,7 @@ import {
 import { createProductEngineerRoutes } from "./product-engineer/routes";
 import { createProductEngineerRunner } from "./product-engineer/runner";
 import type { ProductEngineerStore } from "./product-engineer/store";
+import { useLinearTools } from "./plugins/builtin-linear";
 import { useProductEngineerTools } from "./plugins/builtin-product-engineer";
 import { createDocumentRoutes } from "./documents/routes";
 import type { KnowledgeDocumentStore } from "./documents/store";
@@ -1465,6 +1466,12 @@ export function createApp(
     );
   } else {
     useProductEngineerTools(null);
+  }
+
+  if (config.linear) {
+    useLinearTools(config.linear);
+  } else {
+    useLinearTools(null);
   }
 
   if (knowledgeDocumentStore) {

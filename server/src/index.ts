@@ -433,6 +433,24 @@ if (tenantPackage.tenantId === "plugiq-agentforce") {
       }
     }
   }
+  if (config.linear) {
+    await pluginStore.addServer({
+      key: "agentforce-linear",
+      by: seededBy,
+    });
+    const linearRefs = [
+      "agentforce-linear/get_linear_viewer",
+      "agentforce-linear/get_linear_issue",
+      "agentforce-linear/list_linear_issues",
+      "agentforce-linear/create_linear_issue",
+      "agentforce-linear/assign_linear_issue_to_me",
+    ];
+    for (const agentId of packageAgentIds) {
+      for (const ref of linearRefs) {
+        await pluginStore.grant("mcp", ref, agentId, seededBy);
+      }
+    }
+  }
 }
 
 /**

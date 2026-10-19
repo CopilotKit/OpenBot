@@ -91,6 +91,17 @@ We are currently running **without OAuth**: `OPENBOT_SINGLE_USER=true`. Put TLS 
 
 Leave `MANAGED_AGENT_AG_UI_URL` unset in the container unless a Bot is actually reachable from it. The laptop default `http://localhost:4201/ag-ui` will break a deploy.
 
+### Linear (chat + Product Engineer)
+
+| Variable         | Purpose                                                                                                                                                                                                                                                                                             |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `LINEAR_API_KEY` | Workspace API key from [Linear settings](https://linear.app/settings/api). Enables **chat** tools (`list_linear_issues`, `create_linear_issue`, etc.) on bots when the fintech package is loaded. Same key is also required for **Product Engineer** together with `CURSOR_API_KEY` and `PE_REPOS`. |
+| `LINEAR_TEAM_ID` | Optional default team UUID for `create_linear_issue` when the model does not pass `teamId`.                                                                                                                                                                                                         |
+
+**Assign to me** in chat assigns to the **Linear user that owns the API key**, not necessarily the person typing in AgentForce. Per-user Linear OAuth remains available via Composio if you need that model.
+
+On first boot with tenant `plugiq-agentforce`, the server seeds `agentforce-linear` grants for all package bots when `LINEAR_API_KEY` is set.
+
 ---
 
 ## What is not in the image

@@ -1,4 +1,5 @@
 import * as builtinDemoKnowledge from "./builtin-demo-knowledge";
+import * as builtinLinear from "./builtin-linear";
 import * as builtinProductEngineer from "./builtin-product-engineer";
 import * as builtinRoutines from "./builtin-routines";
 import * as composio from "./composio";
@@ -123,6 +124,7 @@ export type TransportKind =
   | "builtin-demo-knowledge"
   | "builtin-routines"
   | "builtin-product-engineer"
+  | "builtin-linear"
   | "composio";
 
 /**
@@ -150,6 +152,7 @@ const TRANSPORTS: Record<TransportKind, VendorTransport> = {
   "builtin-demo-knowledge": builtinDemoKnowledge,
   "builtin-routines": builtinRoutines,
   "builtin-product-engineer": builtinProductEngineer,
+  "builtin-linear": builtinLinear,
   composio,
 };
 

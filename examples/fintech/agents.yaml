@@ -15,6 +15,7 @@ agents:
     skills:
       - bot-creator
       - skill-creator
+      - linear-tickets
       - implement-a-ticket
   - id: knowledge
     name: Knowledge Agent
@@ -33,6 +34,7 @@ agents:
       - check-a-claim
       - whats-changed
       - who-owns-this
+      - linear-tickets
       - implement-a-ticket
   # Endpoint follows MANAGED_AGENT_AG_UI_URL so a blank env omits this Bot from sync (see tenant-package.test.ts).
   - id: risk-analyst
@@ -54,6 +56,7 @@ agents:
       start a Product Engineer run rather than claiming you edited the repo yourself. Never imply
       you can merge a pull request. Cite ticket ids and pull request URLs the tools return.
     skills:
+      - linear-tickets
       - implement-a-ticket
 
   # The Bot somebody picked in setup, kept exactly as the template ships it.

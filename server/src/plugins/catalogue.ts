@@ -312,6 +312,23 @@ export const CATALOGUE: readonly CatalogueEntry[] = Object.freeze([
     docsUrl: "https://github.com/CopilotKit/OpenBot/blob/main/docs/routines.md",
   },
   {
+    key: "agentforce-linear",
+    title: "Linear",
+    vendor: "Descasio",
+    summary:
+      "List, read, create, and assign Linear issues using the workspace API key.",
+    host: "builtin://agentforce-linear",
+    path: "/",
+    transport: "builtin-linear",
+    auth: Object.freeze({ kind: "builtin" }),
+    writeTools: Object.freeze([
+      "create_linear_issue",
+      "assign_linear_issue_to_me",
+    ]),
+    docsUrl:
+      "https://developers.linear.app/docs/graphql/working-with-the-graphql-api",
+  },
+  {
     key: "product-engineer",
     title: "Product Engineer",
     vendor: "Descasio",

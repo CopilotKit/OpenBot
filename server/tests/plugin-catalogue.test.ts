@@ -317,6 +317,23 @@ describe("Product Engineer", () => {
   });
 });
 
+describe("AgentForce Linear", () => {
+  const entry = catalogueEntry("agentforce-linear");
+
+  test("is a builtin for workspace Linear API key chat tools", () => {
+    expect(entry?.transport).toBe("builtin-linear");
+    expect(resolveServerUrl("agentforce-linear")?.url).toBe(
+      "builtin://agentforce-linear",
+    );
+    expect(entry?.writeTools).toEqual([
+      "create_linear_issue",
+      "assign_linear_issue_to_me",
+    ]);
+    expect(classifyTool(entry, "list_linear_issues", true)).toBe("read");
+    expect(classifyTool(entry, "create_linear_issue", true)).toBe("write");
+  });
+});
+
 describe("what a tool does", () => {
   const drive = catalogueEntry("google-drive")!;
 

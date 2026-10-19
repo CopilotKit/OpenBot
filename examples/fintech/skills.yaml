@@ -81,6 +81,23 @@ skills:
       - google-drive/search_files
       - google-drive/read_file_content
 
+  - slug: linear-tickets
+    title: Linear tickets
+    summary: List, read, create, and assign Linear issues in the workspace.
+    instructions: >-
+      Use Linear tools for ticket questions before guessing. To see what is assigned to someone,
+      call list_linear_issues with assigneeNameContains or assigneeEmail. To read one ticket, call
+      get_linear_issue with its identifier (for example ORC-424). To create a ticket, call
+      create_linear_issue with a clear title; set assignToMe when they want it on themselves. To
+      assign an existing ticket to the workspace API user, call assign_linear_issue_to_me. Cite
+      identifier, status, assignee, and URL in answers. If Linear is not configured, say so plainly.
+    tools:
+      - agentforce-linear/get_linear_viewer
+      - agentforce-linear/get_linear_issue
+      - agentforce-linear/list_linear_issues
+      - agentforce-linear/create_linear_issue
+      - agentforce-linear/assign_linear_issue_to_me
+
   - slug: implement-a-ticket
     title: Implement a Linear ticket
     summary: Start or check a Product Engineer coding run for a Linear ticket.

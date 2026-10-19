@@ -157,6 +157,12 @@ export type ProductEngineerConfig = {
   model: string;
 };
 
+/** Linear workspace API access for chat tools (list/create/assign issues). */
+export type LinearIntegrationConfig = {
+  apiKey: string;
+  defaultTeamId?: string;
+};
+
 export type DeploymentConfig = {
   /** The port the API listens on. Named `PORT` or `SERVER_PORT`; see `serverPort`. */
   port: number;
@@ -167,6 +173,10 @@ export type DeploymentConfig = {
    * Unset leaves `/api/product-engineer` unmounted.
    */
   productEngineer?: ProductEngineerConfig;
+  /**
+   * Linear issue tools for chat agents. Set when LINEAR_API_KEY is present.
+   */
+  linear?: LinearIntegrationConfig;
   /**
    * Authentication for the bundled Bot and/or the installed picked harness.
    *
@@ -1026,6 +1036,18 @@ function serverPort(environment: Environment): number {
  * Product Engineer cloud dispatch. All three of CURSOR_API_KEY, LINEAR_API_KEY, and PE_REPOS
  * must be set; otherwise the feature stays off and routes are not mounted.
  */
+function linearIntegrationConfig(
+  environment: Environment,
+): LinearIntegrationConfig | undefined {
+  const apiKey = optional(environment, "LINEAR_API_KEY");
+  if (!apiKey) return undefined;
+  const teamId = optional(environment, "LINEAR_TEAM_ID");
+  return {
+    apiKey,
+    ...(teamId ? { defaultTeamId: teamId } : {}),
+  };
+}
+
 function productEngineerConfig(
   environment: Environment,
 ): ProductEngineerConfig | undefined {
@@ -1058,6 +1080,7 @@ export function loadConfig(
   const managedAgent = managedAgentConfig(environment);
   const workerSharedSecret = optional(environment, "WORKER_SHARED_SECRET");
   const productEngineer = productEngineerConfig(environment);
+  const linear = linearIntegrationConfig(environment);
 
   return {
     port: serverPort(environment),
@@ -1065,6 +1088,7 @@ export function loadConfig(
     keyEncryptionKey: keyEncryptionKey(environment),
     ...(managedAgent ? { managedAgent } : {}),
     ...(productEngineer ? { productEngineer } : {}),
+    ...(linear ? { linear } : {}),
     agentEndpointAllowedHosts: agentEndpointAllowedHosts(environment),
     deploymentId: optional(environment, "DEPLOYMENT_ID"),
     composioApiKey: optional(environment, "COMPOSIO_API_KEY"),
