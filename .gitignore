@@ -41,10 +41,13 @@ charts/*/charts/
 # The environments are here for the same reason and are the more expensive mistake: `.venv` is
 # hundreds of megabytes of platform-specific binaries that would be useless to anybody who cloned
 # them. `uv` makes `.venv` and the older tooling makes `venv`, and both spellings are in use across
-# these packages.
+# these packages. CI gives each Python Bot an environment named after it — `.venv-adk`,
+# `.venv-antigravity` — and running those same commands locally leaves them in the tree, so the
+# suffixed spelling is ignored too.
 __pycache__/
 *.py[cod]
 .venv/
+.venv-*/
 venv/
 *.egg-info/
 .pytest_cache/

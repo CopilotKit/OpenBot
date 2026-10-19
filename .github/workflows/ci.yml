@@ -443,6 +443,13 @@ jobs:
           . .venv-adk/bin/activate
           python -m pip install --requirement agent-adk/requirements.txt --requirement agent-adk/requirements-test.txt
           python -m pytest agent-adk/tests -q
+      - name: Antigravity provider pin and token gate
+        run: |
+          set -euo pipefail
+          python -m venv .venv-antigravity
+          . .venv-antigravity/bin/activate
+          python -m pip install --requirement agent-antigravity/requirements.txt --requirement agent-antigravity/requirements-test.txt
+          python -m pytest agent-antigravity/tests -q
       - name: Langroid model-choice and tool-call regressions
         run: |
           set -euo pipefail

@@ -12,6 +12,7 @@ import {
   channels,
 } from "../db/schema";
 import { agentAuthHeaders, authFromConfiguration } from "./auth-header";
+import { isManagedEndpoint } from "./managed-endpoint";
 import type { AgentActor } from "./profile-types";
 
 /**
@@ -63,12 +64,10 @@ export function createRuntimeAgentLoader(
       if (isRemoteAgent && managedAgent) {
         // Config parses URLs, while package rows retain their original spelling. Compare both
         // in canonical form so scheme/host case cannot silently drop the deployment token.
-        const endpoint = managedEndpointIdentity(agent.endpoint);
-        const ours =
-          endpoint !== undefined &&
-          [managedAgent.endpoint, managedAgent.alsoRun]
-            .filter((url): url is URL => url !== undefined)
-            .some((url) => endpoint === managedEndpointIdentity(url));
+        const ours = isManagedEndpoint(agent.endpoint, [
+          managedAgent.endpoint,
+          managedAgent.alsoRun,
+        ]);
         if (ours) {
           agent.headers = {
             ...agent.headers,
@@ -90,18 +89,6 @@ export function createRuntimeAgentLoader(
 
     return [...registered.values()];
   };
-}
-
-/** Keep the existing pathname slash tolerance without erasing query or fragment differences. */
-function managedEndpointIdentity(value: string | URL): string | undefined {
-  try {
-    const endpoint = new URL(value);
-    endpoint.pathname = endpoint.pathname.replace(/\/+$/, "");
-    return endpoint.toString();
-  } catch {
-    // An invalid stored URL is not a managed endpoint; it must not abort another agent's load.
-    return undefined;
-  }
 }
 
 function selectActiveAgents(database: Database, actor: AgentActor) {
