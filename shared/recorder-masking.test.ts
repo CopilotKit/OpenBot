@@ -11,6 +11,7 @@ import {
   REDACTED,
   sanitiseForIntelligence,
   scrubText,
+  scrubTranscript,
   scrubUrl,
   sha256HexSync,
   trimEvent,
@@ -732,4 +733,49 @@ test("JSON of 2 MiB cut inside a string is masked in linear time", () => {
     elapsedMs(() => (out = maskBody(cut, "application/json"))),
   ).toBeLessThan(5000);
   expect(leaks(out)).toEqual([]);
+});
+
+test("a spoken card number is scrubbed however the speech service wrote its digits", () => {
+  // As Chrome's speech services wrote "4242 4242 4242 4242" read aloud: thousands separators, a stray currency sign or
+  // dash, commas with spaces, and the plain groups an on-device model writes.
+  expect(scrubTranscript("my card number is $4,2424,2424,2424,242")).toBe(
+    `my card number is $${REDACTED}`,
+  );
+  expect(scrubTranscript("my card number is 4,242-42424,2424,242")).toBe(
+    `my card number is ${REDACTED}`,
+  );
+  expect(scrubTranscript("My card number is 4242 4242 4242 4242.")).toBe(
+    `My card number is ${REDACTED}.`,
+  );
+  expect(scrubTranscript("it is 4242, 4242, 4242, 4242 thanks")).toBe(
+    `it is ${REDACTED} thanks`,
+  );
+  expect(
+    scrubTranscript("card 4,242-42424,2424,242 expires 12 28, code 123"),
+  ).toBe(`card ${REDACTED} expires 12 28, code 123`);
+});
+
+test("a spoken transcript keeps ordinary numbers and loses what the text masking always takes", () => {
+  expect(scrubTranscript("order 1043, 2 items for $12.50 in 3 minutes")).toBe(
+    "order 1043, 2 items for $12.50 in 3 minutes",
+  );
+  expect(scrubTranscript("write to ana@example.test now")).toBe(
+    `write to ${REDACTED} now`,
+  );
+});
+
+test("a value typed into a sensitive field is scrubbed when it is spoken, whatever the separators", () => {
+  const digests = new Set([sha256HexSync("737"), sha256HexSync("hunter2")]);
+  expect(scrubTranscript("the code is 7,3,7 ok", { digests })).toBe(
+    `the code is ${REDACTED} ok`,
+  );
+  expect(scrubTranscript("the code is 7 3 7", { digests })).toBe(
+    `the code is ${REDACTED}`,
+  );
+  expect(scrubTranscript("my password is hunter2", { digests })).toBe(
+    `my password is ${REDACTED}`,
+  );
+  expect(scrubTranscript("I need 7,38 of them", { digests })).toBe(
+    "I need 7,38 of them",
+  );
 });

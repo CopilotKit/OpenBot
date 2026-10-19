@@ -379,6 +379,58 @@ export function scrubText(text: string, options?: MaskOptions): string {
   return out;
 }
 
+/** Digits read aloud, as a speech service writes them: groups of numerals joined by a comma, a full stop, a dash or a space,
+ * or by a comma or full stop and a space ("$4,2424,2424,2424,242" for a card number read in fours). */
+const SPOKEN_NUMBER = /(?<![\w.,])\d+(?:(?:[,.]? |[,.-])\d+)+(?![\w])/g;
+
+/** A spoken run of numerals loses every stretch of its groups that is a card number (13 to 19 digits that pass the Luhn
+ * check) or a value typed into a sensitive field, whatever the separators between the groups. */
+const scrubSpokenRun = (
+  run: string,
+  matches: ((value: string) => boolean) | null,
+): string => {
+  const groups = [...run.matchAll(/\d+/g)].map((match) => ({
+    digits: match[0],
+    start: match.index,
+    end: match.index + match[0].length,
+  }));
+  const spans: Array<[number, number]> = [];
+  for (let first = 0; first < groups.length; first++) {
+    const head = groups[first];
+    if (!head) continue;
+    let digits = "";
+    for (let last = first; last < groups.length; last++) {
+      const group = groups[last];
+      if (!group) break;
+      digits += group.digits;
+      const card = digits.length <= CARD_MAX_DIGITS && isCardNumber(digits);
+      const typed =
+        matches !== null &&
+        last - first < MAX_DIGEST_GROUPS &&
+        digits.length >= MIN_DIGEST_LENGTH &&
+        matches(digits);
+      if (card || typed) spans.push([head.start, group.end]);
+      if (digits.length > CARD_MAX_DIGITS && last - first >= MAX_DIGEST_GROUPS)
+        break;
+    }
+  }
+  return redactSpans(run, spans);
+};
+
+/** `scrubText` for what a person said while recording, as the browser's speech recognition wrote it: numbers read aloud
+ * come back with thousands separators and stray signs, so a spoken card number or typed secret is found in those runs
+ * first, then the text masking runs as it does on everything else. */
+export function scrubTranscript(text: string, options?: MaskOptions): string {
+  const matches =
+    options?.digests && options.digests.size > 0
+      ? digestMatcher(options)
+      : null;
+  return scrubText(
+    text.replace(SPOKEN_NUMBER, (run) => scrubSpokenRun(run, matches)),
+    options,
+  );
+}
+
 export function maskHeaders(
   headers: Record<string, string>,
   options?: MaskOptions,
