@@ -92,6 +92,10 @@ export function Options({ deps }: { deps?: Partial<OptionsDeps> }) {
 
   const { connection, policy } = state;
   const kept = state.state.kept;
+  // A Disconnect discards everything this browser still holds: the recording in progress, the stopped recordings
+  // still sending to Intelligence, and the kept ones.
+  const recording = state.state.phase !== "idle";
+  const sending = Math.max(0, state.state.draining - (kept?.recordings ?? 0));
   return (
     <Page title="OpenBot Recorder" width="prose">
       <PageSection title="Connection">
@@ -179,6 +183,20 @@ export function Options({ deps }: { deps?: Partial<OptionsDeps> }) {
           </DialogHeader>
           <DialogBody className="mt-4 text-sm">
             <p>The Recorder records nothing until you connect it again.</p>
+            {recording ? (
+              <p className="mt-2">
+                The recording in progress stops, and what it has not sent to
+                Intelligence yet is discarded.
+              </p>
+            ) : null}
+            {sending > 0 ? (
+              <p className="mt-2">
+                {plural(sending, "recording", "recordings")} still sending to
+                Intelligence {sending === 1 ? "stops" : "stop"}, and what{" "}
+                {sending === 1 ? "it has" : "they have"} not sent yet is
+                discarded.
+              </p>
+            ) : null}
             {kept ? (
               <p className="mt-2">
                 {plural(kept.events, "event", "events")} from{" "}

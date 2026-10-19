@@ -118,6 +118,53 @@ test("the dialog names the kept events when some are waiting", async () => {
   ).toBeTruthy();
 });
 
+test("the dialog says a recording in progress stops and what it has not sent is discarded", async () => {
+  const { findByRole, getByText } = setup(
+    stateResponse({ state: { phase: "recording", recordingId: "r1" } }),
+  );
+  fireEvent.click(await findByRole("button", { name: "Disconnect" }));
+  expect(
+    getByText(
+      "The recording in progress stops, and what it has not sent to Intelligence yet is discarded.",
+    ),
+  ).toBeTruthy();
+});
+
+test("the dialog names the stopped recordings still sending apart from the kept ones", async () => {
+  const { findByRole, getByText, queryByText } = setup(
+    stateResponse({
+      state: {
+        draining: 3,
+        kept: { recordings: 1, events: 4, reason: "r", parked: false },
+      },
+    }),
+  );
+  fireEvent.click(await findByRole("button", { name: "Disconnect" }));
+  expect(
+    getByText(
+      "2 recordings still sending to Intelligence stop, and what they have not sent yet is discarded.",
+    ),
+  ).toBeTruthy();
+  expect(
+    getByText(
+      "4 events from 1 recording still waiting in this browser are discarded.",
+    ),
+  ).toBeTruthy();
+  expect(queryByText(/recording in progress/)).toBeNull();
+});
+
+test("the dialog says one recording still sending stops", async () => {
+  const { findByRole, getByText } = setup(
+    stateResponse({ state: { draining: 1 } }),
+  );
+  fireEvent.click(await findByRole("button", { name: "Disconnect" }));
+  expect(
+    getByText(
+      "1 recording still sending to Intelligence stops, and what it has not sent yet is discarded.",
+    ),
+  ).toBeTruthy();
+});
+
 test("the dialog says is discarded when a single event is kept", async () => {
   const { findByRole, getByText } = setup(
     stateResponse({
