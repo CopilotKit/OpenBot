@@ -70,6 +70,19 @@ test("shows the origin and the default name", async () => {
   expect(getByText("Google Chrome on macOS")).toBeTruthy();
 });
 
+test("the page says OpenBot signs the browser in and hands out passes, and recordings go to Intelligence", async () => {
+  const { findByText, container } = render(<ConnectPage />);
+  await findByText(ORIGIN);
+  expect(
+    await findByText(
+      "Confirm this is your OpenBot. It signs this browser in and hands out each capture pass. What you record goes to Intelligence, not to OpenBot.",
+    ),
+  ).toBeTruthy();
+  expect(container.ownerDocument.body.textContent).not.toMatch(
+    /save (your )?recordings/i,
+  );
+});
+
 test("the Name row opens a dialog whose Save changes the name and the label later sent", async () => {
   const { findByText, findByLabelText, getByText, getByRole } = render(
     <ConnectPage />,
@@ -104,7 +117,7 @@ test("denied access shows the access sentence and sends no decide message", asyn
   const { findByRole, findByText } = render(<ConnectPage />);
   fireEvent.click(await findByRole("button", { name: "Connect" }));
   await findByText(
-    `OpenBot Recorder needs access to ${ORIGIN} to save your recordings there.`,
+    `OpenBot Recorder needs access to ${ORIGIN} to sign this browser in and get capture passes. What you record goes to Intelligence, not to OpenBot.`,
   );
   expect(received.map((m) => m.type)).toEqual(["page.connect.pending"]);
 });

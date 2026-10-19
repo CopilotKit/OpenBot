@@ -97,7 +97,7 @@ export function ConnectPage() {
     }
     if (!granted) {
       setMessage(
-        `OpenBot Recorder needs access to ${pending.origin} to save your recordings there.`,
+        `OpenBot Recorder needs access to ${pending.origin} to sign this browser in and get capture passes. What you record goes to Intelligence, not to OpenBot.`,
       );
       setBusy(false);
       return;
@@ -128,7 +128,7 @@ export function ConnectPage() {
   return (
     <Page
       title="Connect this browser to OpenBot"
-      description="Confirm this is the OpenBot you want this browser to save recordings to."
+      description="Confirm this is your OpenBot. It signs this browser in and hands out each capture pass. What you record goes to Intelligence, not to OpenBot."
       width="prose"
     >
       {phase.kind === "ready" ? (
