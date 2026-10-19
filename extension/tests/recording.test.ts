@@ -65,7 +65,8 @@ const event = (name: string, value: unknown): CapturedEvent => ({
   timestamp: 1_700_000_000_000,
   value: value as CapturedEvent["value"],
 });
-const contentEvent = (value: unknown) => event("page", value);
+/** A step the person took in the page, as a content script sends it. */
+const contentEvent = (value: unknown) => event("click", value);
 
 // ---- The fake OpenBot -------------------------------------------------------------------------
 //
@@ -279,8 +280,7 @@ type NetworkDouble = {
   recorded: CapturedEvent[];
   /** The tab each page-level event came from, in order. */
   pageTabs: number[];
-  /** The action times handed to the capture, by tab. */
-  actions: [number, number][];
+
   failStart: boolean;
   /** How many captures were created, and the ones started and not stopped since. */
   created: number;
@@ -377,9 +377,6 @@ function doubles(): Partial<RecordingDeps> {
           network.calls.push(`onCommitted ${tabId} ${frameId} ${url}`);
         },
         resume: async () => "off" as NetworkMode,
-        action: (tabId, at) => {
-          network.actions.push([tabId, at]);
-        },
         recordPageEvent: async (tabId, recorded) => {
           network.pageTabs.push(tabId);
           network.recorded.push(recorded);
@@ -512,7 +509,6 @@ beforeEach(() => {
     calls: [],
     recorded: [],
     pageTabs: [],
-    actions: [],
     failStart: false,
     created: 0,
     running: new Set(),
@@ -1271,11 +1267,17 @@ test("clicks, inputs and page loads in a followed tab's top frame count as actio
     "every event forwarded",
   );
   await settle();
-  // A click, an input (from any frame), a page load and a history change: the frame load is not even recorded, and the
-  // rest do not count.
+  // The page the recording started on, a click, an input (from any frame), a page load and a history change: the
+  // collector's page event and the frame load are not even recorded. The start and the rest do not count.
   expect((await state()).actions).toBe(4);
   expect(fake.badge.text).toBe("4");
-  network.deps?.emit(event("network", { url: "https://crm.example.test/x" }));
+  network.deps?.call({
+    tabId: 7,
+    startedAt: now,
+    endedAt: now + 50,
+    method: "GET",
+    url: "https://crm.example.test/x",
+  });
   await settle();
   expect((await state()).actions).toBe(4);
 });
@@ -1298,7 +1300,13 @@ test("the 50-action notice goes once to every followed tab's top frame", async (
   for (let i = 0; i < 49; i++)
     top7.postMessage({ type: "content.event", event: event("click", { i }) });
   for (let i = 0; i < 10; i++)
-    network.deps?.emit(event("network", { i, url: DEAL }));
+    network.deps?.call({
+      tabId: 7,
+      startedAt: now + i,
+      endedAt: now + i + 50,
+      method: "GET",
+      url: DEAL,
+    });
   await until(async () => (await state()).actions === 49, "49 actions");
   await settle();
   expect([...notices(top7), ...notices(top8), ...notices(sub7)]).toEqual([]);
@@ -2428,17 +2436,65 @@ test("the network capture is handed the fallback and the controller never calls 
   expect(network.deps?.openbotUrl()).toBeNull();
 });
 
-test("a network event the capture emits goes to the document while the recording runs, and not after", async () => {
+test("a step goes out once its save is known, carrying it; a call after the recording stopped changes nothing", async () => {
   await record();
-  network.deps?.emit(event("network", { url: "https://crm.example.test/a" }));
-  await until(
-    () => sentToDocument("offscreen.event").length === 1,
-    "the event is forwarded",
-  );
+  const clicks = () =>
+    sentToDocument("offscreen.event")
+      .map((m) => (m.type === "offscreen.event" ? m.event : null))
+      .filter((recorded) => recorded?.name === "click");
+  // Ten seconds ago on the service worker's clock: the step's window has closed.
+  const at = now - 10_000;
+  contentPort(7).postMessage({
+    type: "content.event",
+    event: {
+      ...event("click", {
+        step: "click",
+        target: { tag: "button", role: "button", name: "Mark as read" },
+      }),
+      timestamp: at,
+    },
+  });
+  network.deps?.call({
+    tabId: 7,
+    startedAt: at + 20,
+    endedAt: at + 90,
+    method: "PUT",
+    url: "https://crm.example.test/api/notifications/9/read",
+    exchange: {
+      url: "https://crm.example.test/api/notifications/9/read",
+      status: 200,
+      body: { status: "empty" },
+      response: { status: "complete", text: '{"ok":true}', encoding: "utf-8" },
+    },
+  });
+  await until(() => clicks().length === 1, "the click");
+  expect(clicks()[0]?.value).toMatchObject({
+    step: "click",
+    request: {
+      method: "PUT",
+      url: "https://crm.example.test/api/notifications/9/read",
+      status: 200,
+      body: { status: "empty" },
+      response: { status: "complete", text: '{"ok":true}' },
+    },
+  });
+  const sent = sentToDocument("offscreen.event").length;
   await page({ type: "page.stop" });
-  network.deps?.emit(event("network", { url: "https://crm.example.test/b" }));
+  network.deps?.call({
+    tabId: 7,
+    startedAt: at + 30,
+    endedAt: at + 90,
+    method: "GET",
+    url: "https://crm.example.test/b",
+  });
   await settle();
-  expect(sentToDocument("offscreen.event")).toHaveLength(1);
+  expect(sentToDocument("offscreen.event")).toHaveLength(sent);
+  // No network call is ever recorded on its own.
+  expect(
+    sentToDocument("offscreen.event").filter(
+      (m) => m.type === "offscreen.event" && m.event.name === "network",
+    ),
+  ).toEqual([]);
 });
 
 test("in the e2e build the hold interval travels in the session", async () => {
@@ -2631,8 +2687,13 @@ test("a tab the recorded tab opened is followed", async () => {
     event: contentEvent({ from: 8 }),
   });
   await until(
-    () => sentToDocument("offscreen.event").length === 1,
-    "the event is forwarded",
+    () =>
+      sentToDocument("offscreen.event").some(
+        (m) =>
+          m.type === "offscreen.event" &&
+          (m.event.value as { from?: number }).from === 8,
+      ),
+    "tab 8's step is forwarded",
   );
   fake.webNavigation.createdTarget({
     sourceTabId: 99,
@@ -2643,7 +2704,7 @@ test("a tab the recorded tab opened is followed", async () => {
   expect((await state()).tabIds).toEqual([7, 8]);
 });
 
-test("only a followed tab's top frame becomes a navigation event for Intelligence, once per address, with masked addresses", async () => {
+test("only a followed tab's top frame becomes a page-change step, once per address, with masked addresses", async () => {
   await record();
   const navigations = () =>
     sentToDocument("offscreen.event")
@@ -2689,26 +2750,32 @@ test("only a followed tab's top frame becomes a navigation event for Intelligenc
     transitionType: "reload",
   });
   fake.webNavigation.commit({ tabId: 7, frameId: 0, url: "about:blank" });
-  await until(() => navigations().length === 3, "three navigation events");
+  await until(() => navigations().length === 4, "four page changes");
   await settle();
   const events = navigations();
-  expect(events).toHaveLength(3);
+  expect(events).toHaveLength(4);
+  // The page the recording started on is its first step.
   expect(events[0]).toMatchObject({
     name: "navigation",
+    value: { step: "navigate", from: "", to: DEAL, navigationType: "start" },
+  });
+  expect(events[1]).toMatchObject({
+    name: "navigation",
     value: {
+      step: "navigate",
       from: DEAL,
       to: "https://crm.example.test/deals/43?tab=notes&token=[redacted]",
       navigationType: "push",
       frameId: 0,
     },
   });
-  expect(events[1]).toMatchObject({
+  expect(events[2]).toMatchObject({
     value: {
       from: "https://crm.example.test/deals/43?tab=notes&token=[redacted]",
       to: "https://crm.example.test/deals/44",
     },
   });
-  expect(events[2]).toMatchObject({
+  expect(events[3]).toMatchObject({
     value: {
       from: "https://crm.example.test/deals/44",
       to: "https://crm.example.test/deals/44",
@@ -2721,96 +2788,85 @@ test("only a followed tab's top frame becomes a navigation event for Intelligenc
 });
 
 test("an address recorded before is recorded again in the next recording and after Start over", async () => {
+  const visits = (url: string) =>
+    sentToDocument("offscreen.event").filter(
+      (m) =>
+        m.type === "offscreen.event" &&
+        m.event.name === "navigation" &&
+        (m.event.value as { to?: string }).to === url,
+    ).length;
   const navigateTo = async (url: string) => {
-    const before = sentToDocument("offscreen.event").length;
+    const before = visits(url);
     fake.webNavigation.commit({ tabId: 7, frameId: 0, url });
-    await until(
-      () => sentToDocument("offscreen.event").length === before + 1,
-      `the navigation to ${url}`,
-    );
-    const message = sentToDocument("offscreen.event").at(-1);
-    return message?.type === "offscreen.event" ? message.event.value : null;
+    await until(() => visits(url) === before + 1, `the navigation to ${url}`);
   };
   await record();
   await navigateTo("https://crm.example.test/deals/43");
   await page({ type: "page.stop" });
   await record();
-  expect(await navigateTo("https://crm.example.test/deals/43")).toMatchObject({
-    to: "https://crm.example.test/deals/43",
-  });
+  await navigateTo("https://crm.example.test/deals/43");
   expect(await page({ type: "page.restart" })).toEqual({ ok: true });
-  expect(await navigateTo("https://crm.example.test/deals/43")).toMatchObject({
-    to: "https://crm.example.test/deals/43",
-  });
+  await navigateTo("https://crm.example.test/deals/43");
+  expect(visits("https://crm.example.test/deals/43")).toBe(3);
 });
 
-test("a page event counts only from a followed tab's top frame, once per address until a reload", async () => {
+test("the collector's page event is never recorded: the tab's start and its page changes are the steps, with the tab's page", async () => {
+  fake.tabs.set(7, { id: 7, url: DEAL, title: "Deal 42" } as chrome.tabs.Tab);
   await record();
-  const pages = () =>
-    sentToDocument("offscreen.event")
-      .map((m) => (m.type === "offscreen.event" ? m.event : null))
-      .filter((recorded) => recorded?.name === "page");
-  const top = contentPort(7, 0);
-  const frame = contentPort(7, 4);
-  // A page Chrome prerenders out of sight (its search warm-up page) is a top-level document with a frame id of its own.
-  const prerendered = fake.connectFrom(PORT_CONTENT, {
-    id: EXTENSION_ID,
-    tab: { id: 7 } as chrome.tabs.Tab,
-    frameId: 9,
-    documentLifecycle: "prerender",
-    url: "https://www.google.com/search/warmup.html",
-  } as chrome.runtime.MessageSender);
-  const pageAt = (url: string) => ({
+  contentPort(7, 0).postMessage({
     type: "content.event",
-    event: event("page", { url, route: new URL(url).pathname, title: "t" }),
+    event: event("page", { url: DEAL, route: "/deals/42", title: "Deal 42" }),
   });
-  frame.postMessage(pageAt("https://widgets.example.test/embed"));
-  prerendered.postMessage(pageAt("https://www.google.com/search/warmup.html"));
-  top.postMessage(pageAt(DEAL));
-  top.postMessage(pageAt(DEAL));
-  await until(() => pages().length === 1, "the top frame's page");
-  fake.webNavigation.commit({
-    tabId: 7,
-    frameId: 0,
-    url: DEAL,
-    transitionType: "reload",
-  });
-  await until(
-    () =>
-      sentToDocument("offscreen.event").some(
-        (m) => m.type === "offscreen.event" && m.event.name === "navigation",
-      ),
-    "the reload",
-  );
-  top.postMessage(pageAt(DEAL));
-  await until(() => pages().length === 2, "the reloaded page");
+  const forwarded = () =>
+    sentToDocument("offscreen.event").map((m) =>
+      m.type === "offscreen.event" ? m.event : null,
+    );
+  await until(() => forwarded().length === 1, "the start step");
   await settle();
-  expect(
-    pages().map(
-      (recorded) => (recorded?.value as { url?: string } | undefined)?.url,
-    ),
-  ).toEqual([DEAL, DEAL]);
+  expect(forwarded().map((recorded) => recorded?.name)).toEqual(["navigation"]);
+  expect(forwarded()[0]?.value).toMatchObject({
+    step: "navigate",
+    to: DEAL,
+    navigationType: "start",
+    page: { url: DEAL, title: "Deal 42" },
+  });
 });
 
-test("an action's time from a followed tab reaches the network capture, never one from another tab", async () => {
+test("steps leave in the order they came, from every frame and followed tab", async () => {
   await record();
+  const at = 1_700_000_000_000;
+  const step = (port: FakePort, name: string, offset: number) =>
+    port.postMessage({
+      type: "content.event",
+      event: {
+        type: "CUSTOM",
+        name,
+        timestamp: at + offset,
+        value: {
+          step: name,
+          target: { tag: "button", name: `${name} ${offset}` },
+        },
+      },
+    });
   const top = contentPort(7, 0);
   const frame = contentPort(7, 3);
-  const other = contentPort(9, 0);
-  top.postMessage({ type: "content.action", at: now - 20 });
-  frame.postMessage({ type: "content.action", at: now - 10 });
-  other.postMessage({ type: "content.action", at: now - 5 });
-  // A time ahead of the service worker's clock is taken as now.
-  top.postMessage({ type: "content.action", at: now + 60_000 });
-  await until(() => network.actions.length === 3, "three actions");
-  await settle();
-  expect(network.actions).toEqual([
-    [7, now - 20],
-    [7, now - 10],
-    [7, now],
-  ]);
-  // Only times: nothing an action carries is forwarded to Intelligence.
-  expect(sentToDocument("offscreen.event")).toEqual([]);
+  step(top, "click", 0);
+  step(frame, "input", 100);
+  step(top, "submit", 200);
+  step(top, "key", 300);
+  const steps = () =>
+    sentToDocument("offscreen.event")
+      .map((m) => (m.type === "offscreen.event" ? m.event : null))
+      .filter((recorded) => recorded?.name !== "navigation");
+  await until(() => steps().length === 4, "four steps");
+  expect(
+    steps().map(
+      (recorded) =>
+        (recorded?.value as { target?: { name?: string } } | undefined)?.target
+          ?.name,
+    ),
+  ).toEqual(["click 0", "input 100", "submit 200", "key 300"]);
+  expect((await state()).actions).toBe(4);
 });
 
 test("a whole recording, Start over included, asks OpenBot for nothing", async () => {

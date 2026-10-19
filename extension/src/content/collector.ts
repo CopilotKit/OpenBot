@@ -9,6 +9,7 @@ import {
 } from "@openbot/shared/recorder-masking";
 import { installActionCapture } from "./actions";
 import type { SensitivityTracker } from "./masking-context";
+import { createElementTracker, enrichStep } from "./targeting";
 
 const COALESCE_MS = 750;
 const DROP_REPORT_MS = 5_000;
@@ -24,16 +25,19 @@ const realTimers: Timers = {
 
 /** Mask, trim to EVENT_BUDGET_BYTES, then sanitise (NUL and lone surrogates), so the collector's own checks after beforeSend
  * (it refuses NUL with INVALID_EVENT and anything over 16 KiB with EVENT_TOO_LARGE) never drop an event; null only for an event
- * maskCollectorEvent cannot read, which is counted. */
+ * maskCollectorEvent cannot read, which is counted. `enrich` adds a click's or an edit's targeting (targeting.ts) first, so
+ * the masking covers it too. The collector's `page` event is not a step: the service worker records each page change. */
 export function collectorBeforeSend(
   tracker: SensitivityTracker,
-  emitLater: (event: CapturedEvent) => void,
   onDropped?: (reason: string) => void,
+  enrich: (event: CapturedEvent) => CapturedEvent = (event) => event,
 ): (event: TrajectoryEvent) => TrajectoryEvent | null {
-  const prepare = (event: CapturedEvent): CapturedEvent | null => {
+  return (event) => {
+    const captured = event as CapturedEvent;
+    if (captured?.name === "page") return null;
     const masked = maskCollectorEvent(
-      event,
-      { sensitive: tracker.sensitiveForEvent(event?.name ?? "") },
+      enrich(captured),
+      { sensitive: tracker.sensitiveForEvent(captured?.name ?? "") },
       { digests: tracker.digests() },
     );
     if (masked === null) {
@@ -41,39 +45,10 @@ export function collectorBeforeSend(
       return null;
     }
     const trimmed = trimEvent(masked, EVENT_BUDGET_BYTES).event;
-    return { ...trimmed, value: sanitiseForIntelligence(trimmed.value) };
-  };
-
-  return (event) => {
-    const captured = event as CapturedEvent;
-    if (captured?.name === "page") {
-      // The collector emits one `page` event whenever it starts; only the top frame's counts (the service worker records
-      // the top frame's navigation, and keeps a page event only from a followed tab's top frame).
-      if (window !== window.top) return null;
-      if (document.readyState === "loading") {
-        // Injected as soon as the frame commits, so the title can still be empty.
-        document.addEventListener(
-          "DOMContentLoaded",
-          () => {
-            const value = captured.value;
-            const withTitle: CapturedEvent = {
-              ...captured,
-              value:
-                typeof value === "object" &&
-                value !== null &&
-                !Array.isArray(value)
-                  ? { ...value, title: document.title }
-                  : value,
-            };
-            const ready = prepare(withTitle);
-            if (ready) emitLater(ready);
-          },
-          { once: true },
-        );
-        return null;
-      }
-    }
-    return prepare(captured) as TrajectoryEvent | null;
+    return {
+      ...trimmed,
+      value: sanitiseForIntelligence(trimmed.value),
+    } as TrajectoryEvent;
   };
 }
 
@@ -90,16 +65,14 @@ const inputKey = (event: CapturedEvent): string => {
   ]);
 };
 
-/** Captures clicks and inputs, plus form submits and Enter in a field (actions.ts), and reports when each real action
- * happened to `onAction`. `send` also receives one `recorder.dropped { count, reason }` event per 5 s while the collector
+/** Captures the person's steps: clicks and edits through the collector, each with its targeting, plus form submits and
+ * Enter in a field (actions.ts). `send` also receives one `recorder.dropped { count, reason }` event per 5 s while the collector
  * reported errors (INVALID_EVENT, EVENT_TOO_LARGE, PERSISTENCE_UNKNOWN, CAPTURE_FAILED) or beforeSend dropped one, so no event
  * vanishes uncounted. Network is off (the collector's patch of `fetch` sees nothing in this isolated world; the debugger or
  * the MAIN-world bundle capture it) and navigation is off (the service worker records it from `webNavigation`). */
 export function startEventCapture(options: {
   tracker: SensitivityTracker;
   send(event: CapturedEvent): void;
-  /** When the person acted (epoch ms), at most once per ACTION_PING_MS: never what they did. */
-  onAction?(at: number): void;
   coalesceMs?: number;
   timers?: Timers;
 }): { stop(): void } {
@@ -174,9 +147,31 @@ export function startEventCapture(options: {
     });
   };
 
+  // Installed before the collector's own listeners, so for every click and edit it knows the element first.
+  const elements = createElementTracker();
+  let uninstallElements: () => void = () => {};
+  try {
+    uninstallElements = elements.install();
+  } catch {
+    // The collector's own start fails on the same page and counts it as CAPTURE_FAILED.
+  }
   const collector = createTrajectoryCollector({
     capture: { clicks: true, inputs: true, navigation: false, network: false },
-    beforeSend: collectorBeforeSend(tracker, deliver, countDrop),
+    beforeSend: collectorBeforeSend(tracker, countDrop, (event) =>
+      event.name === "click" || event.name === "input"
+        ? enrichStep(
+            event,
+            elements.elementFor(
+              event.name === "click"
+                ? "click"
+                : String(
+                    (event.value as { eventType?: unknown } | null)
+                      ?.eventType ?? "",
+                  ),
+            ),
+          )
+        : event,
+    ),
     send: coalescing,
     onError: (error) => countDrop(error.code),
   });
@@ -188,7 +183,6 @@ export function startEventCapture(options: {
     ? null
     : installActionCapture({
         emit: (name, value) => collector.emit(name, value as JsonValue),
-        action: (at) => options.onAction?.(at),
       });
   if (!failed && !installed) countDrop("CAPTURE_FAILED");
   const uninstallActions = installed ?? (() => {});
@@ -197,6 +191,7 @@ export function startEventCapture(options: {
     stop() {
       uninstallActions();
       collector.stop();
+      uninstallElements();
       flushInputs();
       if (dropTimer !== undefined) {
         timers.clear(dropTimer);

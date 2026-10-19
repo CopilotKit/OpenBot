@@ -1,33 +1,34 @@
 // Network capture for the tabs a recording follows: Chrome's debugger (CDP's Network domain) on each followed tab and
 // its frames, or, where Chrome refuses the debugger on a real site, the page-level fetch and XHR hook (fallback.ts),
-// which this capture owns. Only the calls the person's own actions cause are kept (causality.ts, one gate for both
-// paths); each is masked with the shared rules, trimmed to fit one Intelligence event, and emitted; nothing is stored or
-// sent anywhere else.
+// which this capture owns. No call is recorded on its own: each one that passes the screens (screen.ts) goes to the
+// steps (steps.ts) with when it ran, and a write with its exchange masked with the shared rules, so it can be the save
+// of the step that sent it. Nothing is stored or sent anywhere else.
 import {
   type CapturedEvent,
-  EVENT_BUDGET_BYTES,
+  type JsonValue,
   maskNetworkEvent,
-  trimEvent,
+  scrubUrl,
 } from "@openbot/shared/recorder-masking";
 import { isRecordablePage } from "../../shared/origin";
-import {
-  type CausalityGate,
-  callSignature,
-  createCausalityGate,
-  screenCall,
-} from "./causality";
+import type { StepCall } from "../steps";
 import {
   createRequestTracker,
   type Debuggee,
   MAX_POST_DATA_SIZE,
+  type TrackedCall,
 } from "./debugger";
 import type { PageFallback } from "./fallback";
+import { callSignature, createRepeatMemory, screenCall } from "./screen";
 
 export type NetworkMode = "debugger" | "page" | "waiting" | "off";
 export type NetworkCaptureDeps = {
   /** The OpenBot the recording's passes come from: its own calls are never captured. Null once nothing records. */
   openbotUrl(): string | null;
-  emit(event: CapturedEvent): void;
+  /** A call that passed the screens, masked: for the steps to tell which they caused and which saved something. */
+  call(call: StepCall): void;
+  /** A write in flight (debugger only), from its start until `call` had it or it was screened out. */
+  writeStarted(id: string, tabId: number, startedAt: number): void;
+  writeEnded(id: string): void;
   status(mode: NetworkMode | "stopped", reason?: string): void;
   digests(): ReadonlySet<string>;
 };
@@ -42,22 +43,20 @@ export type NetworkCapture = {
     tabs: { tabId: number; url: string }[],
     previous: NetworkMode | "stopped",
   ): Promise<NetworkMode | "stopped">;
-  /** The person did something in a followed tab at `at` (epoch ms): the calls starting just after it are its own. */
-  action(tabId: number, at: number): void;
   /** A page-level fallback event (Task 18) from a followed tab, already re-masked: dropped when it is a call to OpenBot
-   * itself (the debugger never records those either) or one the person's actions did not cause, else trimmed to fit one
-   * event and emitted like a debugger event. */
+   * itself (the debugger never sees those either) or fails the screens, else handed to the steps like a debugger call. */
   recordPageEvent(tabId: number, event: CapturedEvent): Promise<void>;
   stop(): Promise<void>;
 };
 
-const WAITING = "Network calls are recorded once this tab opens a website.";
+const WAITING =
+  "What each step saves is recorded once this tab opens a website.";
 const CANCELLED =
-  "You closed Chrome's debugging bar, so network calls are no longer recorded.";
-/** The popup's Network row already says the calls are captured from inside the page: this says why. */
+  "You closed Chrome's debugging bar, so what each step saves is no longer recorded.";
+/** The popup's Network row already says what each step saves is captured from inside the page: this says why. */
 const PAGE = "Chrome refused its debugger here.";
 const refusedSentence = (message: string) =>
-  `Chrome would not let the Recorder record network calls here (${message}).`;
+  `Chrome would not let the Recorder see what each step saves here (${message}).`;
 
 const AUTO_ATTACH = {
   autoAttach: true,
@@ -69,19 +68,32 @@ const FRAME_TARGETS = new Set(["iframe", "page"]);
 
 type TabState = "attached" | "waiting" | "refused" | "page";
 
-/** The parts of a page-hook network event the gate reads. */
-type PageCall = {
+/** The parts of a network event the steps read. */
+type NetworkValue = {
   url?: unknown;
   method?: unknown;
+  status?: unknown;
   outcome?: unknown;
   completedAt?: unknown;
   durationMs?: unknown;
   request?: {
     headers?: Record<string, string>;
-    body?: { text?: unknown };
+    body?: JsonValue;
   } | null;
-  response?: { url?: unknown } | null;
+  response?: { url?: unknown; body?: JsonValue } | null;
 };
+
+const WRITE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
+/** A masked network event's exchange, as a step carries its save. */
+function exchangeOf(value: NetworkValue): StepCall["exchange"] {
+  return {
+    url: typeof value.url === "string" ? value.url : "",
+    status: typeof value.status === "number" ? value.status : null,
+    body: value.request?.body ?? null,
+    response: value.response?.body ?? null,
+  };
+}
 
 const number = (value: unknown): number | undefined =>
   typeof value === "number" && Number.isFinite(value) ? value : undefined;
@@ -103,10 +115,10 @@ async function forcedRefusal(): Promise<boolean> {
  * creates the fallback with createPageFallback() and hands it over here; it never calls the fallback itself. */
 export function createNetworkCapture(
   deps: NetworkCaptureDeps,
-  options: { fallback?: PageFallback; gate?: CausalityGate } = {},
+  options: { fallback?: PageFallback } = {},
 ): NetworkCapture {
   const { fallback } = options;
-  const gate = options.gate ?? createCausalityGate();
+  const repeats = createRepeatMemory();
   const tabs = new Map<number, TabState>();
   /** Each followed tab's main frame id (its page target's id), read once from Chrome when a document request needs it. */
   const topFrames = new Map<number, string>();
@@ -145,13 +157,24 @@ export function createNetworkCapture(
   const tracker = createRequestTracker({
     ignore,
     send,
-    gate,
+    repeats,
     topFrame,
-    emit: (event) => {
+    call: (call: TrackedCall) => {
       if (ended || mode === "stopped") return;
+      const { event, ...timing } = call;
+      if (!event) {
+        deps.call({ ...timing, url: scrubUrl(timing.url) });
+        return;
+      }
       const masked = maskNetworkEvent(event, { digests: deps.digests() });
-      deps.emit(trimEvent(masked, EVENT_BUDGET_BYTES).event);
+      const value = (masked.value ?? {}) as NetworkValue;
+      const exchange = exchangeOf(value);
+      deps.call({ ...timing, url: exchange?.url ?? "", exchange });
     },
+    writeStarted: (id, tabId, startedAt) => {
+      if (!ended && mode !== "stopped") deps.writeStarted(id, tabId, startedAt);
+    },
+    writeEnded: (id) => deps.writeEnded(id),
   });
 
   function setMode(next: NetworkMode | "stopped", reason?: string): void {
@@ -213,7 +236,7 @@ export function createNetworkCapture(
       const others = attachedTabs().filter((other) => other !== tabId);
       tabs.clear();
       tracker.clear();
-      gate.clear();
+      repeats.clear();
       unlisten();
       setMode("stopped", CANCELLED);
       for (const other of others)
@@ -224,7 +247,7 @@ export function createNetworkCapture(
     tabs.delete(tabId);
     topFrames.delete(tabId);
     tracker.forgetTab(tabId);
-    gate.forgetTab(tabId);
+    repeats.forgetTab(tabId);
   }
 
   function listen(): void {
@@ -378,29 +401,30 @@ export function createNetworkCapture(
       return follow(list);
     },
 
-    action(tabId, at) {
-      if (ended || mode === "stopped") return;
-      gate.action(tabId, at);
-    },
-
     async recordPageEvent(tabId, event) {
       if (ended) return;
       // The URLs are already masked, which keeps their origin. A call a redirect landed on OpenBot is OpenBot's too.
-      const value = event.value as PageCall | null;
+      const value = event.value as NetworkValue | null;
       const urls = [value?.url, value?.response?.url];
       if (urls.some((url) => typeof url === "string" && ignore(url))) return;
       if (!value || typeof value.url !== "string") return;
-      const method = typeof value.method === "string" ? value.method : "GET";
-      const body =
-        typeof value.request?.body?.text === "string"
-          ? value.request.body.text
+      const method = (
+        typeof value.method === "string" ? value.method : "GET"
+      ).toUpperCase();
+      const body = value.request?.body;
+      const text =
+        typeof body === "object" &&
+        body !== null &&
+        !Array.isArray(body) &&
+        typeof body.text === "string"
+          ? body.text
           : undefined;
       // The hook reports a call once it is answered: it started its duration before that.
       const endedAt = number(value.completedAt) ?? event.timestamp;
       const startedAt = endedAt - Math.max(0, number(value.durationMs) ?? 0);
-      const repeat = gate.seen(
+      const repeat = repeats.seen(
         tabId,
-        callSignature(method, value.url, body),
+        callSignature(method, value.url, text),
         startedAt,
       );
       const outcome =
@@ -415,13 +439,18 @@ export function createNetworkCapture(
           outcome,
           headers:
             typeof headers === "object" && headers !== null ? headers : {},
-          body,
+          body: text,
           repeat,
         })
       )
         return;
-      gate.admit({ tabId, startedAt, endedAt }, () => {
-        if (!ended) deps.emit(trimEvent(event, EVENT_BUDGET_BYTES).event);
+      deps.call({
+        tabId,
+        startedAt,
+        endedAt,
+        method,
+        url: value.url,
+        ...(WRITE_METHODS.has(method) ? { exchange: exchangeOf(value) } : {}),
       });
     },
 
@@ -433,7 +462,7 @@ export function createNetworkCapture(
       tabs.clear();
       topFrames.clear();
       tracker.clear();
-      gate.clear();
+      repeats.clear();
       unlisten();
       for (const tabId of attached)
         await chrome.debugger.detach({ tabId }).catch(() => undefined);

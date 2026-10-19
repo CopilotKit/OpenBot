@@ -1,7 +1,7 @@
-// What Chrome's debugger (CDP's Network domain) reports about the calls a followed tab and its frames make, turned into
-// the collector's `network` event: one per finished fetch, XHR or top-frame document request that the person's own action
-// caused (causality.ts decides), with its bodies read through the debugger. The event leaves here unmasked; the capture
-// masks and trims it before anything else sees it.
+// What Chrome's debugger (CDP's Network domain) reports about the calls a followed tab and its frames make: when each
+// finished fetch, XHR or top-frame document request ran, so a step can tell which calls it caused, and for a write its
+// bodies read through the debugger as the collector's `network` event, so it can be that step's save. Nothing here is
+// recorded on its own: the event leaves unmasked, and the capture masks it before the steps (steps.ts) see it.
 import type {
   CapturedEvent,
   JsonValue,
@@ -12,7 +12,7 @@ import {
   textBody,
   unavailableBody,
 } from "../../shared/network-body";
-import { type CausalityGate, callSignature, screenCall } from "./causality";
+import { callSignature, type RepeatMemory, screenCall } from "./screen";
 
 /** A tab, or a frame's own session inside it (flattened auto-attach: cross-site iframes run in their own process). */
 export type Debuggee = { tabId: number; sessionId?: string };
@@ -38,7 +38,7 @@ type Pending = {
   wallStart: number;
   /** Monotonic seconds when the response headers arrived. */
   respondedAt?: number;
-  /** The tab already made this exact call before (polling, a refetch): see CausalityGate.seen. */
+  /** The tab already made this exact call before (polling, a refetch): see screen.ts createRepeatMemory. */
   repeat: boolean;
   response?: {
     url: string;
@@ -48,12 +48,24 @@ type Pending = {
   };
 };
 
-/** The calls a Bot repeats are the page's API calls and the top frame's own document requests (a link followed, a form
- * posted): images, fonts, stylesheets, scripts, media, beacons (Ping), CSP reports, preflights, prefetches, event streams
- * and websockets are never recorded. */
+/** The calls a step can cause or save through are the page's API calls and the top frame's own document requests (a
+ * link followed, a form posted): images, fonts, stylesheets, scripts, media, beacons (Ping), CSP reports, preflights,
+ * prefetches, event streams and websockets never are. */
 const RECORDED_TYPES = new Set(["XHR", "Fetch", "Document"]);
 /** CDP's own cap on post data it sends inline; anything longer is asked for with Network.getRequestPostData. */
 export const MAX_POST_DATA_SIZE = 65_536;
+const WRITE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
+/** A finished call that passed the screens: when it ran, and for a write its unmasked exchange as a network event. */
+export type TrackedCall = {
+  tabId: number;
+  startedAt: number;
+  respondedAt?: number;
+  endedAt: number;
+  method: string;
+  url: string;
+  event?: CapturedEvent;
+};
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -90,17 +102,26 @@ function decodeBase64(data: string): string {
 
 /**
  * Follows requests per debuggee from `Network.requestWillBeSent` to `Network.loadingFinished` or `loadingFailed`, and
- * hands every finished fetch, XHR or top-frame document request that `gate` ties to the person's action to `emit` as a
- * network event. `ignore` names URLs never recorded (OpenBot's own); `topFrame` answers a tab's main frame id.
+ * hands every finished fetch, XHR or top-frame document request that passed the screens to `call`; a write comes with
+ * its bodies, read only then. `writeStarted` and `writeEnded` bracket each write from its start until `call` had it (or
+ * it was screened out), so a step waits for a save still in flight. `ignore` names URLs never recorded (OpenBot's own);
+ * `topFrame` answers a tab's main frame id.
  */
 export function createRequestTracker(options: {
   ignore(url: string): boolean;
   send: Send;
-  emit(event: CapturedEvent): void;
-  gate: CausalityGate;
+  call(call: TrackedCall): void;
+  writeStarted(id: string, tabId: number, startedAt: number): void;
+  writeEnded(id: string): void;
+  repeats: RepeatMemory;
   topFrame(tabId: number): Promise<string | undefined>;
 }) {
   const pending = new Map<string, Pending>();
+  /** The writes in flight, by key, until `call` had them. */
+  const writes = new Set<string>();
+  const endWrite = (key: string) => {
+    if (writes.delete(key)) options.writeEnded(key);
+  };
   const keyOf = (target: Debuggee, requestId: string) =>
     `${target.tabId}/${target.sessionId ?? ""}/${requestId}`;
 
@@ -160,6 +181,7 @@ export function createRequestTracker(options: {
 
   async function finish(
     request: Pending,
+    key: string,
     outcome: "ok" | "error" | "aborted",
     finishedAt: number,
   ): Promise<void> {
@@ -179,34 +201,35 @@ export function createRequestTracker(options: {
     });
     if (verdict) return;
     const endedAt = wall(request, finishedAt);
-    // Bodies are read only for a call the person's action caused: the page's own calls cost nothing more.
-    options.gate.admit(
-      {
-        tabId: request.target.tabId,
-        startedAt: request.wallStart,
-        respondedAt:
-          request.respondedAt === undefined
-            ? undefined
-            : Math.min(endedAt, wall(request, request.respondedAt)),
-        endedAt,
-      },
-      () => {
-        void record(request, outcome, finishedAt).catch((error) =>
-          console.error(
-            "Recorder: a network call could not be recorded",
-            error,
-          ),
-        );
-      },
-    );
+    const timing = {
+      tabId: request.target.tabId,
+      startedAt: request.wallStart,
+      respondedAt:
+        request.respondedAt === undefined
+          ? undefined
+          : Math.min(endedAt, wall(request, request.respondedAt)),
+      endedAt,
+      method: request.method,
+      url: request.url,
+    };
+    // A read can only lead to a save: when it ran is all a step needs, and its bodies are never read.
+    if (!WRITE_METHODS.has(request.method)) {
+      options.call(timing);
+      return;
+    }
+    options.call({
+      ...timing,
+      event: await networkEvent(request, outcome, finishedAt),
+    });
+    endWrite(key);
   }
 
-  /** Reads the call's bodies and emits it as the collector's network event. */
-  async function record(
+  /** Reads the call's bodies into the collector's network event. */
+  async function networkEvent(
     request: Pending,
     outcome: "ok" | "error" | "aborted",
     finishedAt: number,
-  ): Promise<void> {
+  ): Promise<CapturedEvent> {
     const [sent, received] = await Promise.all([
       requestBody(request),
       outcome === "ok"
@@ -216,7 +239,7 @@ export function createRequestTracker(options: {
     const url = new URL(request.url);
     const completedAt = Date.now();
     const response = request.response;
-    options.emit({
+    return {
       type: "CUSTOM",
       name: "network",
       timestamp: completedAt,
@@ -249,7 +272,7 @@ export function createRequestTracker(options: {
         },
         capturedBy: "debugger",
       },
-    });
+    };
   }
 
   function settle(
@@ -262,17 +285,26 @@ export function createRequestTracker(options: {
     const key = keyOf(target, requestId);
     const request = pending.get(key);
     pending.delete(key);
-    if (!request) return;
+    if (!request) {
+      endWrite(key);
+      return;
+    }
     const type = text(params.type) ?? request.type;
-    if (!type || !RECORDED_TYPES.has(type)) return;
+    if (!type || !RECORDED_TYPES.has(type)) {
+      endWrite(key);
+      return;
+    }
     request.type = type;
     void finish(
       request,
+      key,
       outcome,
       number(params.timestamp) ?? request.startedAt,
-    ).catch((error) =>
-      console.error("Recorder: a network call could not be recorded", error),
-    );
+    )
+      .catch((error) =>
+        console.error("Recorder: a network call could not be read", error),
+      )
+      .finally(() => endWrite(key));
   }
 
   return {
@@ -296,6 +328,7 @@ export function createRequestTracker(options: {
           // A redirect reuses the request id: the call that matters is the one it lands on.
           if (options.ignore(url)) {
             pending.delete(key);
+            endWrite(key);
             return;
           }
           const method = (text(request.method) ?? "GET").toUpperCase();
@@ -316,16 +349,25 @@ export function createRequestTracker(options: {
             frameId: text(raw.frameId),
             startedAt: number(raw.timestamp) ?? 0,
             wallStart,
-            // Only the kinds a recording can keep are remembered: a script or an image is never a repeat that matters.
+            // Only the kinds a step can cause are remembered: a script or an image is never a repeat that matters.
             repeat:
               type !== undefined && RECORDED_TYPES.has(type)
-                ? options.gate.seen(
+                ? options.repeats.seen(
                     target.tabId,
                     callSignature(method, url, postData),
                     wallStart,
                   )
                 : false,
           });
+          if (
+            type !== undefined &&
+            RECORDED_TYPES.has(type) &&
+            WRITE_METHODS.has(method) &&
+            !writes.has(key)
+          ) {
+            writes.add(key);
+            options.writeStarted(key, target.tabId, wallStart);
+          }
           return;
         }
         case "Network.responseReceived": {
@@ -355,10 +397,14 @@ export function createRequestTracker(options: {
     /** A tab that closed: its calls still in flight never finish. */
     forgetTab(tabId: number): void {
       for (const [key, request] of pending)
-        if (request.target.tabId === tabId) pending.delete(key);
+        if (request.target.tabId === tabId) {
+          pending.delete(key);
+          endWrite(key);
+        }
     },
     clear(): void {
       pending.clear();
+      for (const key of [...writes]) endWrite(key);
     },
   };
 }

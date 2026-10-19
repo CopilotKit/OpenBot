@@ -1,9 +1,18 @@
-import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  expect,
+  spyOn,
+  test,
+} from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import type { CapturedEvent } from "@openbot/shared/recorder-masking";
-import { ACTION_PING_MS, installActionCapture } from "../src/content/actions";
+import { installActionCapture } from "../src/content/actions";
 import { startEventCapture } from "../src/content/collector";
 import { createSensitivityTracker } from "../src/content/masking-context";
+import { CODE_CLOCK, leakedSecrets } from "./support/recorded-text";
 
 beforeAll(() =>
   GlobalRegistrator.register({ url: "https://crm.example.test/deals/42" }),
@@ -11,6 +20,11 @@ beforeAll(() =>
 afterAll(() => GlobalRegistrator.unregister());
 
 const cleanups: (() => void)[] = [];
+// The leak checks search what a step records, never its clock: pinned so a check that read the clock would fail every run.
+beforeEach(() => {
+  const clock = spyOn(Date, "now").mockReturnValue(CODE_CLOCK);
+  cleanups.push(() => clock.mockRestore());
+});
 afterEach(() => {
   for (const cleanup of cleanups.splice(0)) cleanup();
   document.body.innerHTML = "";
@@ -24,70 +38,23 @@ const byPerson = <E extends Event>(event: E): E => {
 };
 
 function install() {
-  let clock = 1_800_000_000_000;
-  const actions: number[] = [];
   const emitted: [string, Record<string, unknown>][] = [];
   const uninstall = installActionCapture({
     emit: (name, value) => emitted.push([name, value]),
-    action: (at) => actions.push(at),
-    now: () => clock,
     isTrusted: (event) => PERSON.has(event),
   });
   if (!uninstall) throw new Error("not installed");
   cleanups.push(uninstall);
-  return {
-    actions,
-    emitted,
-    advance(ms: number) {
-      clock += ms;
-    },
-    get now() {
-      return clock;
-    },
-  };
+  return emitted;
 }
 
-test("every real action reports its time, at most once per 100 ms; a page's own dispatched event never does", () => {
-  const h = install();
-  const button = document.createElement("button");
-  document.body.append(button);
-  button.dispatchEvent(
-    byPerson(new PointerEvent("pointerdown", { bubbles: true })),
-  );
-  button.dispatchEvent(byPerson(new MouseEvent("click", { bubbles: true })));
-  expect(h.actions).toEqual([h.now]);
-  h.advance(ACTION_PING_MS);
-  const field = document.createElement("input");
-  document.body.append(field);
-  field.dispatchEvent(byPerson(new Event("input", { bubbles: true })));
-  h.advance(ACTION_PING_MS);
-  field.dispatchEvent(
-    byPerson(new KeyboardEvent("keydown", { key: "e", bubbles: true })),
-  );
-  h.advance(ACTION_PING_MS);
-  // A modifier on its own is no action, and a script's click is the page's.
-  field.dispatchEvent(
-    byPerson(new KeyboardEvent("keydown", { key: "Shift", bubbles: true })),
-  );
-  button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-  field.dispatchEvent(byPerson(new Event("change", { bubbles: true })));
-  const first = h.actions[0] ?? 0;
-  expect(h.actions).toEqual([
-    first,
-    first + ACTION_PING_MS,
-    first + 2 * ACTION_PING_MS,
-    first + 3 * ACTION_PING_MS,
-  ]);
-  expect(h.emitted).toEqual([]);
-});
-
-test("a form submitted is a submit event naming the form and its button, never what was typed", () => {
-  const h = install();
+test("a form submitted is a submit step naming the form and its button, with their targeting, never what was typed", () => {
+  const emitted = install();
   document.body.innerHTML = `
-    <form id="login" name="login" method="post" action="/session?token=abc">
+    <form id="login" name="login" method="post" action="/session?token=abc" aria-label="Sign in">
       <input name="user" value="ada">
       <input name="password" type="password" value="hunter2">
-      <button id="go" type="submit">Sign in</button>
+      <button id="go" type="submit" data-testid="sign-in">Sign in</button>
     </form>`;
   const form = document.querySelector("form") as HTMLFormElement;
   const submit = byPerson(new Event("submit", { bubbles: true }));
@@ -96,35 +63,43 @@ test("a form submitted is a submit event naming the form and its button, never w
   });
   form.dispatchEvent(submit);
   form.dispatchEvent(new Event("submit", { bubbles: true }));
-  expect(h.emitted).toEqual([
-    [
-      "submit",
-      {
-        url: location.href,
-        route: location.pathname,
-        target: {
-          tag: "form",
-          role: null,
-          attributes: { id: "login", name: "login", method: "post" },
-        },
-        submitter: {
-          tag: "button",
-          role: null,
-          attributes: { id: "go", type: "submit" },
-        },
-      },
+  expect(emitted).toHaveLength(1);
+  const [name, value] = emitted[0] ?? [];
+  expect(name).toBe("submit");
+  expect(value).toMatchObject({
+    step: "submit",
+    url: location.href,
+    route: location.pathname,
+    target: {
+      tag: "form",
+      role: "form",
+      name: "Sign in",
+      attributes: { id: "login", name: "login", method: "post" },
+    },
+    selectors: [
+      { by: "id", selector: "#login" },
+      { by: "name", selector: 'form[name="login"]' },
+      { by: "role", selector: 'role=form[name="Sign in"]' },
+      { by: "css", selector: "html > body > form" },
     ],
-  ]);
-  expect(JSON.stringify(h.emitted)).not.toContain("hunter2");
-  expect(JSON.stringify(h.emitted)).not.toContain("ada");
-  expect(h.actions).toHaveLength(1);
+    submitter: {
+      tag: "button",
+      role: "button",
+      name: "Sign in",
+      attributes: { id: "go", type: "submit", "data-testid": "sign-in" },
+    },
+    page: { url: location.href, title: "" },
+    viewport: { width: window.innerWidth, height: window.innerHeight },
+  });
+  expect(leakedSecrets(emitted, ["hunter2", "ada"])).toEqual([]);
 });
 
-test("Enter in a field is a key event; Shift+Enter, a composition, or Enter outside a field is not", () => {
-  const h = install();
+test("Enter in a field is an Enter step with the field's targeting; Shift+Enter, a composition, or Enter outside a field is not", () => {
+  const emitted = install();
   document.body.innerHTML = `
+    <label for="message">Ask about this deal</label>
     <textarea id="message" placeholder="Ask anything">What should I do?</textarea>
-    <div id="editor" contenteditable="true">Hello</div>
+    <div id="editor" contenteditable="true" aria-label="Notes">Hello</div>
     <input id="agree" type="checkbox">
     <button id="send">Send</button>`;
   const press = (selector: string, init: KeyboardEventInit) =>
@@ -139,40 +114,37 @@ test("Enter in a field is a key event; Shift+Enter, a composition, or Enter outs
   press("#editor", {});
   press("#agree", {});
   press("#send", {});
-  expect(h.emitted).toEqual([
+  expect(emitted.map(([name, value]) => [name, value.key, value.step])).toEqual(
     [
-      "key",
-      {
-        key: "Enter",
-        url: location.href,
-        route: location.pathname,
-        target: {
-          tag: "textarea",
-          role: null,
-          attributes: { id: "message", placeholder: "Ask anything" },
-        },
-      },
+      ["key", "Enter", "enter"],
+      ["key", "Enter", "enter"],
     ],
-    [
-      "key",
-      {
-        key: "Enter",
-        url: location.href,
-        route: location.pathname,
-        target: { tag: "div", role: null, attributes: { id: "editor" } },
-      },
-    ],
-  ]);
-  expect(JSON.stringify(h.emitted)).not.toContain("What should I do");
+  );
+  expect(emitted[0]?.[1]).toMatchObject({
+    target: {
+      tag: "textarea",
+      role: "textbox",
+      name: "Ask about this deal",
+      inputType: "textarea",
+      attributes: { id: "message", placeholder: "Ask anything" },
+    },
+  });
+  expect(emitted[1]?.[1]).toMatchObject({
+    target: {
+      tag: "div",
+      role: "textbox",
+      name: "Notes",
+      inputType: "contenteditable",
+    },
+  });
+  expect(leakedSecrets(emitted, ["What should I do", "Hello"])).toEqual([]);
 });
 
-test("submit and Enter reach the recording through the collector, masked like any event, and actions are reported", () => {
+test("submit and Enter reach the recording through the collector, masked like any step", () => {
   const sent: CapturedEvent[] = [];
-  const actions: number[] = [];
   const capture = startEventCapture({
     tracker: createSensitivityTracker(),
     send: (event) => sent.push(event),
-    onAction: (at) => actions.push(at),
   });
   cleanups.push(capture.stop);
   (
@@ -190,12 +162,10 @@ test("submit and Enter reach the recording through the collector, masked like an
   (document.querySelector("form") as HTMLFormElement).dispatchEvent(
     trusted(new Event("submit", { bubbles: true })),
   );
-  const names = sent.map((event) => event.name);
-  expect(names).toContain("key");
-  expect(names).toContain("submit");
-  const key = sent.find((event) => event.name === "key");
-  expect((key?.value as { url?: string } | undefined)?.url).toContain(
-    "token=[redacted]",
-  );
-  expect(actions.length).toBeGreaterThan(0);
+  expect(sent.map((event) => event.name)).toEqual(["key", "submit"]);
+  for (const event of sent) {
+    const value = event.value as { url: string; page: { url: string } };
+    expect(value.url).toContain("token=[redacted]");
+    expect(value.page.url).toContain("token=[redacted]");
+  }
 });

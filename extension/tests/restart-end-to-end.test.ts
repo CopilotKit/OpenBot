@@ -260,8 +260,8 @@ test("a browser restart mid-recording: a new document sends what the old one kep
   const trajectoryId = await recordTwoClicks();
   await until(
     async () =>
-      (await (await openOutbox(databaseName)).count(trajectoryId)) === 4,
-    "the outbox holds the recording's four events",
+      (await (await openOutbox(databaseName)).count(trajectoryId)) === 5,
+    "the outbox holds the recording's five events: its start, its first page and two clicks",
   );
   expect(names(trajectoryId)).toEqual([]);
 
@@ -283,6 +283,7 @@ test("a browser restart mid-recording: a new document sends what the old one kep
   expect(names(trajectoryId)).toEqual([
     "recording.started",
     "outcome",
+    "navigation",
     "click",
     "click",
     "outcome",
@@ -304,7 +305,7 @@ test("a browser restart mid-recording: a new document sends what the old one kep
 
 test("a recording kept when its connection was revoked is sent once the person connects again", async () => {
   const trajectoryId = await recordTwoClicks();
-  await until(() => names(trajectoryId).length === 4, "the clicks streamed");
+  await until(() => names(trajectoryId).length === 5, "the clicks streamed");
 
   // OpenBot answers that the connection was revoked (as the connection check sees it): the recording stops, and what
   // the document had not sent yet, its failed outcome included, is kept for the person.
@@ -319,7 +320,7 @@ test("a recording kept when its connection was revoked is sent once the person c
     "the recording kept for its person",
   );
   expect(fake.storage.local.get("connection")).toBeUndefined();
-  expect(names(trajectoryId)).toHaveLength(4);
+  expect(names(trajectoryId)).toHaveLength(5);
 
   connect("obr_two");
   await handlers.connected();
@@ -330,6 +331,7 @@ test("a recording kept when its connection was revoked is sent once the person c
   expect(names(trajectoryId)).toEqual([
     "recording.started",
     "outcome",
+    "navigation",
     "click",
     "click",
     "outcome",

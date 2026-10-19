@@ -92,7 +92,8 @@ const isObject = (value: unknown): value is { [key: string]: JsonValue } =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
 /** A recorder.page-network event from a recorded tab, re-masked with the digests (the page cannot know them) and marked
- * `capturedBy: "page"`; null drops it. The router hands it to NetworkCapture.recordPageEvent, which trims it to fit. */
+ * `capturedBy: "page"`; null drops it. The router hands it to NetworkCapture.recordPageEvent, which screens it and hands
+ * it to the steps, where a write can be a step's save. */
 export function acceptPageNetworkEvent(
   event: CapturedEvent,
   digests: ReadonlySet<string>,

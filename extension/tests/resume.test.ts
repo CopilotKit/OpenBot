@@ -764,7 +764,7 @@ test("a service-worker restart restores followed tabs, digests and network captu
 
 test("a service-worker restart hands the network capture the mode it had, so a capture the person stopped stays stopped", async () => {
   const reason =
-    "You closed Chrome's debugging bar, so network calls are no longer recorded.";
+    "You closed Chrome's debugging bar, so what each step saves is no longer recorded.";
   seed({
     phase: "recording",
     capture: {

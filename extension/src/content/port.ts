@@ -30,8 +30,8 @@ export function contentHello(): ContentToBackground {
 
 /**
  * The content script's line to the service worker. When the worker restarts the port disconnects: reconnect after
- * 0.5, 1, 2 and 4 s (then every 4 s) and keep what was posted meanwhile, in order, except action times. Digests, hellos
- * and notice choices are always kept (a lost digest would let a typed secret through later network bodies); only `content.event`s count
+ * 0.5, 1, 2 and 4 s (then every 4 s) and keep what was posted meanwhile, in order. Digests, hellos and notice choices
+ * are always kept (a lost digest would let a typed secret through later network bodies); only `content.event`s count
  * towards `maxBuffer`, and beyond it the oldest is dropped and counted. A port can die before Chrome reports it: a post
  * or a flush that throws keeps what it could not send and reconnects. Once the extension is updated or removed the
  * script is orphaned (`chrome.runtime.id` is gone): the line closes for good and tells `onOrphaned` listeners, instead
@@ -194,9 +194,6 @@ export function createContentPort(
         if (deliver(port, message)) return;
         lose(port);
       }
-      // An action's time only matters while the calls it caused are in flight: one that waited for a restarted worker
-      // would tie nothing, so it is not kept.
-      if (message.type === "content.action") return;
       enqueue(message);
     },
     onMessage(listener) {

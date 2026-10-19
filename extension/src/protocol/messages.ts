@@ -107,14 +107,6 @@ const contentToBackgroundSchema = z.discriminatedUnion("type", [
     })
     .strict(),
   z.object({ type: z.literal("content.event"), event }).strict(),
-  // When the person clicked, typed, submitted or pressed a key in the frame (epoch ms): no detail of what, only when, so
-  // the service worker can tell the calls it caused from the page's own.
-  z
-    .object({
-      type: z.literal("content.action"),
-      at: z.number().positive().max(MAX_TIMESTAMP_MS),
-    })
-    .strict(),
   z
     .object({
       type: z.literal("content.sensitive"),

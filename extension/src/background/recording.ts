@@ -12,7 +12,11 @@ import {
   type RecorderMe,
   recorderPaths,
 } from "@openbot/shared/recorder-api";
-import type { CapturedEvent } from "@openbot/shared/recorder-masking";
+import {
+  type CapturedEvent,
+  scrubText,
+  scrubUrl,
+} from "@openbot/shared/recorder-masking";
 import type {
   BackgroundToOffscreen,
   CaptureStatus,
@@ -76,6 +80,7 @@ import {
   hasOffscreenDocument,
 } from "./offscreen-document";
 import type { RouterHandlers } from "./router";
+import { createStepAssembler, type StepAssembler } from "./steps";
 
 type Timers = {
   set(fn: () => void, ms: number): unknown;
@@ -144,6 +149,8 @@ const QUEUE_EVENTS = 2_000;
 const QUEUE_BYTES = 8 * 1024 * 1024;
 /** The collector events that are something the person did; page loads in a followed tab's top frame count too. */
 const ACTION_EVENTS = new Set(["click", "input", "submit", "key"]);
+/** The content events that are the person's steps: held until each one's save is known (steps.ts). */
+const STEP_EVENTS = ACTION_EVENTS;
 
 const SENTENCES = {
   noConnection: "Connect this browser to OpenBot first.",
@@ -455,13 +462,13 @@ export function installRecording(
   const digests = new Set<string>();
   /** The person's own Learning space as OpenBot last described it: a recording starts with it, for its popup line. */
   let learningSpace: LearningSpaceState | undefined;
-  /** Each followed tab's last recorded top-frame address and page: the same one again is not recorded twice. */
+  /** Each followed tab's last recorded top-frame address: the same one again is not recorded twice. */
   const recordedNavigations = new Map<number, string>();
-  const recordedPages = new Map<number, string>();
   const forgetAddresses = () => {
     recordedNavigations.clear();
-    recordedPages.clear();
   };
+  /** The live recording's steps, held until each one's save (if any) is known (steps.ts). */
+  let steps: StepAssembler | null = null;
   /** The recording a Start over is leaving, while it waits for the document's port: a second Start over is refused. */
   let restartingFrom: Live | null = null;
   /** Set while Start over saves and makes the switch to the new recording: a stop waits for it, so the document and the
@@ -935,11 +942,70 @@ export function installRecording(
     return { ok: false, error };
   }
 
+  /** A tab's top page as a step carries it: masked as every step is. */
+  async function pageOf(
+    tabId: number,
+  ): Promise<{ url: string; title?: string } | null> {
+    const tab = await chrome.tabs.get(tabId).catch(() => null);
+    if (!tab?.url) return null;
+    const options = { digests };
+    return {
+      url: scrubUrl(tab.url, options),
+      ...(tab.title ? { title: scrubText(tab.title, options) } : {}),
+    };
+  }
+
+  /** A new set of held steps for the live recording; the previous one's are sent first. */
+  function openSteps(): StepAssembler {
+    steps?.flush();
+    steps?.clear();
+    const assembler = createStepAssembler({
+      emit: (event) => {
+        if (steps === assembler) forwardEvent(event);
+      },
+      pageOf,
+      now: deps.now,
+    });
+    steps = assembler;
+    return assembler;
+  }
+
+  /** Sends every step held and holds no more (the recording stops). */
+  function closeSteps(): void {
+    const held = steps;
+    if (!held) return;
+    held.flush();
+    held.clear();
+    if (steps === held) steps = null;
+  }
+
+  /** The page a tab is on when a recording starts in it: its first step. */
+  function startStep(tabId: number, url: string): void {
+    if (!/^https?:/i.test(url)) return;
+    const to = scrubUrl(url, { digests });
+    steps?.navigation(tabId, {
+      type: "CUSTOM",
+      name: "navigation",
+      timestamp: deps.now(),
+      value: {
+        step: "navigate",
+        from: "",
+        to,
+        navigationType: "start",
+        frameId: 0,
+        parentFrameId: -1,
+      },
+    });
+  }
+
   const networkDeps: NetworkCaptureDeps = {
     openbotUrl: () => live?.openbotUrl ?? null,
-    emit: (event) => {
-      if (live) forwardEvent(event);
+    call: (call) => {
+      if (live) steps?.call(call);
     },
+    writeStarted: (id, tabId, startedAt) =>
+      steps?.writeStarted(id, tabId, startedAt),
+    writeEnded: (id) => steps?.writeEnded(id),
     status: (mode, reason) => {
       networkMode = mode;
       if (state.phase === "starting" || state.phase === "recording")
@@ -1085,6 +1151,8 @@ export function installRecording(
         },
       });
       injected = true;
+      openSteps();
+      startStep(tabId, url ?? "");
       // A page the Recorder may not read refuses the script; its first commit to a website injects it.
       await injectRecordingScripts(tabId, recordingId).catch(() => undefined);
       // The capture owns the fallback: it alone starts, extends, resumes and stops it.
@@ -1106,6 +1174,8 @@ export function installRecording(
       unwatchConnection();
       network = null;
       networkMode = "off";
+      steps?.clear();
+      steps = null;
       forgetAddresses();
       if (capture)
         await capture.stop().catch(report("stopping network capture"));
@@ -1200,6 +1270,8 @@ export function installRecording(
     network = null;
     networkMode = "off";
     if (capture) await capture.stop().catch(report("stopping network capture"));
+    // The steps still held go before the outcome, with the saves they have.
+    closeSteps();
     // Only the person's Stop succeeds. A Disconnect or a sign-out ends the recording midway: what it streamed live is in
     // Intelligence already, and its outcome says why it ended.
     const message: BackgroundToOffscreen =
@@ -1547,10 +1619,18 @@ export function installRecording(
         trajectoryId,
         startedAt,
       });
+    // The recording it leaves gets its held steps first; the new one starts on the pages the tabs are on.
+    steps?.flush();
     live = { ...current, recordingId };
     shown = { recordingId, trajectoryIds: new Set([trajectoryId]) };
     forgetAddresses();
     postOffscreen({ type: "offscreen.rotate", recordingId, trajectoryId });
+    openSteps();
+    for (const tabId of state.tabIds) {
+      const top = state.topUrls[tabId] ?? "";
+      recordedNavigations.set(tabId, top);
+      startStep(tabId, top);
+    }
     dispatch({ type: "restart", recordingId, startedAt });
     publishDrains(drains);
     postToContentPorts(
@@ -1763,6 +1843,7 @@ export function installRecording(
       fallback: deps.createPageFallback(),
     });
     network = capture;
+    openSteps();
     const mode = await capture.resume(
       state.tabIds.map((tabId) => ({
         tabId,
@@ -1984,15 +2065,16 @@ export function installRecording(
     switch (message.type) {
       case "content.event": {
         const event = message.event as CapturedEvent;
-        if (event.name === "page" && !isTopPage(port, tabId, event)) return;
-        forwardEvent(event);
+        // A page load is recorded as the tab's page change, from the service worker.
+        if (event.name === "page") return;
+        if (!STEP_EVENTS.has(event.name)) {
+          forwardEvent(event);
+          return;
+        }
+        steps?.step(tabId, event, port.sender?.frameId !== 0);
         if (ACTION_EVENTS.has(event.name)) countAction();
         return;
       }
-      case "content.action":
-        // A click, edit, submit or key press: the network calls starting right after it are the person's own.
-        network?.action(tabId, Math.min(message.at, deps.now()));
-        return;
       case "content.sensitive":
         // Memory only: it survives a service-worker restart, vanishes with the browser, and goes at Stop.
         digests.add(message.digest);
@@ -2006,25 +2088,6 @@ export function installRecording(
         void noticeChoice(message.choice).catch(report("the notice choice"));
         return;
     }
-  }
-
-  /** A `page` event comes from the collector each time it starts in a document: only a followed tab's top frame counts
-   * (never an iframe, nor a page Chrome prerenders out of sight), and only once per address until the tab moves on. */
-  function isTopPage(
-    port: chrome.runtime.Port,
-    tabId: number,
-    event: CapturedEvent,
-  ): boolean {
-    const sender = port.sender as
-      | (chrome.runtime.MessageSender & { documentLifecycle?: string })
-      | undefined;
-    if (sender?.frameId !== 0 || sender.documentLifecycle === "prerender")
-      return false;
-    const url = (event.value as { url?: unknown } | null)?.url;
-    if (typeof url !== "string") return true;
-    if (recordedPages.get(tabId) === url) return false;
-    recordedPages.set(tabId, url);
-    return true;
   }
 
   /** A followed tab's top frame reached a page: recorded once per address (a reload again), never an iframe's. */
@@ -2044,9 +2107,10 @@ export function installRecording(
       (event.value as { navigationType?: string }).navigationType === "reload";
     if (!reload && recordedNavigations.get(tabId) === url) return;
     recordedNavigations.set(tabId, url);
-    // The reloaded document's page event is recorded again.
-    if (reload) recordedPages.delete(tabId);
-    forwardEvent(event);
+    steps?.navigation(tabId, {
+      ...event,
+      value: { ...(event.value as Record<string, unknown>), step: "navigate" },
+    });
     countAction();
   }
 

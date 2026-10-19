@@ -74,10 +74,7 @@ function trustedEvent<T extends Event>(event: T): T {
 
 describe("collectorBeforeSend", () => {
   test("an oversized event is trimmed inside beforeSend, before the collector's 16 KiB check", () => {
-    const beforeSend = collectorBeforeSend(
-      createSensitivityTracker(),
-      () => {},
-    );
+    const beforeSend = collectorBeforeSend(createSensitivityTracker());
     const out = beforeSend({
       type: "CUSTOM",
       name: "input",
@@ -90,10 +87,7 @@ describe("collectorBeforeSend", () => {
   });
 
   test("a value with a NUL character reaches send with U+FFFD, so the collector never refuses it", () => {
-    const beforeSend = collectorBeforeSend(
-      createSensitivityTracker(),
-      () => {},
-    );
+    const beforeSend = collectorBeforeSend(createSensitivityTracker());
     const out = beforeSend({
       type: "CUSTOM",
       name: "input",
@@ -108,82 +102,45 @@ describe("collectorBeforeSend", () => {
     const dropped: string[] = [];
     const beforeSend = collectorBeforeSend(
       createSensitivityTracker(),
-      () => {},
       (reason) => dropped.push(reason),
     );
     expect(beforeSend(null as never)).toBeNull();
     expect(dropped).toEqual(["unreadable"]);
   });
 
-  test("a page event from a sub-frame is dropped", () => {
-    const top = Object.getOwnPropertyDescriptor(window, "top");
-    Object.defineProperty(window, "top", { value: {}, configurable: true });
-    try {
-      const emitted: CapturedEvent[] = [];
-      const beforeSend = collectorBeforeSend(createSensitivityTracker(), (e) =>
-        emitted.push(e),
-      );
-      const page = {
-        type: "CUSTOM",
-        name: "page",
-        timestamp: 1,
-        value: { url: "https://ad.test/", title: "" },
-      };
-      expect(beforeSend(page as never)).toBeNull();
-      expect(emitted).toEqual([]);
-    } finally {
-      if (top) Object.defineProperty(window, "top", top);
-      else delete (window as unknown as { top?: unknown }).top;
-    }
-  });
-
-  test("a title-less top-frame page event waits for the title", () => {
-    let state: DocumentReadyState = "loading";
-    Object.defineProperty(document, "readyState", {
-      get: () => state,
-      configurable: true,
-    });
-    try {
-      const emitted: CapturedEvent[] = [];
-      const beforeSend = collectorBeforeSend(createSensitivityTracker(), (e) =>
-        emitted.push(e),
-      );
-      const page = {
-        type: "CUSTOM",
-        name: "page",
-        timestamp: 1,
-        value: { url: "https://example.test/", title: "" },
-      };
-      expect(beforeSend(page as never)).toBeNull();
-      document.title = "Orders";
-      state = "interactive";
-      document.dispatchEvent(new Event("DOMContentLoaded"));
-      expect(emitted).toHaveLength(1);
-      expect(emitted[0]?.value).toMatchObject({
-        url: "https://example.test/",
-        title: "Orders",
-      });
-    } finally {
-      delete (document as unknown as { readyState?: unknown }).readyState;
-      document.title = "";
-    }
-  });
-
-  test("a page event once the document has loaded passes through", () => {
-    const beforeSend = collectorBeforeSend(
-      createSensitivityTracker(),
-      () => {},
-    );
+  test("a page event is never a step: the service worker records each page change itself", () => {
+    const beforeSend = collectorBeforeSend(createSensitivityTracker());
     const page = {
       type: "CUSTOM",
       name: "page",
       timestamp: 1,
       value: { url: "https://example.test/", title: "Home" },
     };
-    expect(beforeSend(page as never)).toMatchObject({
-      name: "page",
-      value: { title: "Home" },
-    });
+    expect(beforeSend(page as never)).toBeNull();
+  });
+
+  test("enrich adds what it finds before masking, so the masking covers it too", () => {
+    const digests = new Set([sha256HexSync("hunter-two")]);
+    const tracker = {
+      ...createSensitivityTracker(),
+      digests: () => digests,
+    };
+    const beforeSend = collectorBeforeSend(tracker, undefined, (event) => ({
+      ...event,
+      value: {
+        ...(event.value as Record<string, unknown>),
+        selectors: [{ by: "text", selector: 'text="hunter-two"' }],
+        page: { url: "https://example.test/?token=abc", title: "Home" },
+      },
+    }));
+    const out = beforeSend({
+      type: "CUSTOM",
+      name: "click",
+      timestamp: 1,
+      value: { target: { tag: "button", text: "Go" } },
+    } as never);
+    expect(JSON.stringify(out)).not.toContain("hunter-two");
+    expect(JSON.stringify(out)).not.toContain("token=abc");
   });
 });
 
@@ -295,10 +252,10 @@ describe("startEventCapture coalescing", () => {
     expect(sent.filter((e) => e.name === "recorder.dropped")).toEqual([]);
   });
 
-  test("capture is clicks and inputs only", () => {
+  test("capture is the person's steps only: starting sends nothing, not even the collector's page event", () => {
     document.body.innerHTML = `<button id="b">Save</button>`;
     const { sent } = drive();
-    expect(sent.map((event) => event.name)).toEqual(["page"]);
+    expect(sent).toEqual([]);
   });
 
   test("a 2FA code typed into a real sign-in's code field, with no autocomplete=one-time-code, never leaves in any copy", () => {
@@ -395,7 +352,7 @@ describe("startEventCapture drop reports", () => {
       timers,
     });
     stops.push(capture.stop);
-    // The page event at start failed already; two clicks fail too.
+    // Two clicks fail to reach the port.
     const button = document.getElementById("b") as HTMLElement;
     for (let i = 0; i < 2; i++)
       button.dispatchEvent(
@@ -410,7 +367,7 @@ describe("startEventCapture drop reports", () => {
     expect(sent).toHaveLength(1);
     expect(sent[0]).toMatchObject({
       name: "recorder.dropped",
-      value: { count: 3, reason: "PERSISTENCE_UNKNOWN" },
+      value: { count: 2, reason: "PERSISTENCE_UNKNOWN" },
     });
     timers.advance(60_000);
     expect(sent).toHaveLength(1);
@@ -421,10 +378,13 @@ describe("startEventCapture drop reports", () => {
     const timers = fakeTimers();
     const sent: CapturedEvent[] = [];
     const real = newTracker();
+    let clicks = 0;
     const tracker = {
       ...real,
+      // The first two clicks cannot be read; the third is, and its delivery fails.
       sensitiveForEvent: (name: string) => {
-        if (name === "click") throw new Error("tracker failed");
+        if (name === "click" && ++clicks <= 2)
+          throw new Error("tracker failed");
         return real.sensitiveForEvent(name);
       },
     };
@@ -440,7 +400,7 @@ describe("startEventCapture drop reports", () => {
     });
     stops.push(capture.stop);
     const button = document.getElementById("b") as HTMLElement;
-    for (let i = 0; i < 2; i++)
+    for (let i = 0; i < 3; i++)
       button.dispatchEvent(
         trustedEvent(
           new MouseEvent("click", { bubbles: true, composed: true, button: 0 }),
