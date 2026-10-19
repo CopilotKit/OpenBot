@@ -32,11 +32,11 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `code_required` (below). A server and a computer must be upgraded together: an older computer has
   no `/sign-in/code`.
 
-### A repeated minute in a routine's schedule is described once
+### An HTML-only email reaches its trigger as the sender wrote it
 
-A schedule like `0,30,0 9 * * *` fires at 09:00 and 09:30, but the routines page and the model were
-told "Every day at 09:00, 09:00 and 09:30". Repeated minutes are now said once, as repeated weekdays
-already were.
+An email trigger reads an HTML-only mail by stripping its tags, and the character references stayed:
+the Bot read `AT&amp;T`, `we&#8217;re` and `Q3&nbsp;numbers`. Numeric references, `&amp;`, `&lt;`,
+`&gt;`, `&quot;`, `&apos;` and `&nbsp;` are now decoded, once, so `&amp;lt;` reads as `&lt;`.
 
 ### The Bot's screen opens only when there is something to watch
 
@@ -56,6 +56,12 @@ on a still screen, for an action that never happened.
   (`Cloud computer use`) and the network (`Cloud network access`), and the boundary enforced all
   three — but the Bot was still offered the tools, so it reached for one, was refused, and spent the
   turn saying so. The tools a switch turns off are now withheld from the Bot in the first place.
+
+### A repeated minute in a routine's schedule is described once
+
+A schedule like `0,30,0 9 * * *` fires at 09:00 and 09:30, but the routines page and the model were
+told "Every day at 09:00, 09:00 and 09:30". Repeated minutes are now said once, as repeated weekdays
+already were.
 
 ### An app you have not connected is offered where you are reading
 
@@ -305,6 +311,20 @@ in a channel is cancelled. GitHub links through a GitHub App's user sign-in, set
 `GITHUB_APP_CLIENT_ID` and `GITHUB_APP_CLIENT_SECRET` (both or neither); the server refuses to start
 with them and no public URL. Nothing reads the links yet: they are what GitHub alerts and reviews will
 build on. Migration `0053_identity_links` only adds tables.
+
+### A credential written as the word after a flag is redacted
+
+`docker login -p secret`, `sshpass -p secret` and `redis-cli -a secret` were recorded with the
+password in clear: the rules recognised a flag whose name says what it carries, and mysql's attached
+`-psecret`, but not a credential passed as the word after the flag. `redis-cli -ahunter2` was worse —
+the attached form reads as a flag called `-asecret`, so the rule for a flag named after a secret
+redacted the word *after* it and left the password. A URL with no user, `redis://:secret@host`, was
+missed the same way, and so were curl's proxy credentials in `--proxy-user` where `-u` and `--user`
+were covered. All of them are now redacted, in the command kept for Action Recording and in the copy
+exported to a telemetry collector. A password separated from `-p` by a space is left alone: mysql
+asks for it at the prompt and the word after the flag is the database name. Each of these rules ends where its
+command does, so the port in `sshpass -p secret ssh -p 2222`, or in a `docker run -p 8080:80` on the
+line after a `docker login`, is left alone.
 
 ### An app's account can belong to the team
 
