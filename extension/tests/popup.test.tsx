@@ -359,6 +359,26 @@ for (const [kind, sentence] of SENTENCES) {
   });
 }
 
+test("after Stop the Learning sentence shows once, in the sent row, not again under the picker", async () => {
+  const sentence = SENTENCES.find(([kind]) => kind === "learning-off")?.[1];
+  const off = learning("learning-off");
+  const { findByText, container } = setup(
+    stateResponse({
+      state: {
+        lastStopped: { recordingId: "r1", botId: "b1" },
+        learning: off,
+      },
+    }),
+    {
+      bots: [{ id: "b1", name: "Refund Clerk", learning: off }],
+      lastBotId: "b1",
+    },
+  );
+  await findByText("Sent to Intelligence");
+  await findByText("Recorded for Refund Clerk.");
+  expect(container.textContent?.split(sentence ?? "").length).toBe(2);
+});
+
 test("the popup asks for nothing about the screen or the microphone", async () => {
   const { findByText, container, queryByRole } = setup(stateResponse());
   await findByText("Ada Lovelace");
@@ -475,16 +495,26 @@ const closesNotice =
 
 test("the 50-action card shows only while the controller says the notice is open", async () => {
   const closed = setup(
-    recording({ actions: 50, noticeShown: true, noticeOpen: false }),
+    recording({
+      actions: 50,
+      noticeShown: true,
+      noticeOpen: false,
+      noticeAt: 50,
+    }),
   );
   await closed.findByText("1:05 · 50 actions");
-  expect(closed.queryByText("You have recorded 50 actions")).toBeNull();
+  expect(closed.queryByText("You have recorded 50 or more actions")).toBeNull();
   expect(closed.queryByRole("button", { name: "Keep going" })).toBeNull();
   closed.unmount();
   const open = setup(
-    recording({ actions: 50, noticeShown: true, noticeOpen: true }),
+    recording({
+      actions: 50,
+      noticeShown: true,
+      noticeOpen: true,
+      noticeAt: 50,
+    }),
   );
-  await open.findByText("You have recorded 50 actions");
+  await open.findByText("You have recorded 50 or more actions");
   expect(open.getByRole("button", { name: "Keep going" })).toBeTruthy();
 });
 
@@ -493,13 +523,15 @@ test("Keep going on the page takes the card out of the popup at the next page.st
     actions: 50,
     noticeShown: true,
     noticeOpen: true,
+    noticeAt: 50,
   });
   const { findByText, getByRole, queryByText, sent } = setup(response);
-  await findByText("You have recorded 50 actions");
+  await findByText("You have recorded 50 or more actions");
   // The person answers the overlay in the tab: the controller closes the notice, and the popup's poll sees it.
   response.state.noticeOpen = false;
   await waitFor(
-    () => expect(queryByText("You have recorded 50 actions")).toBeNull(),
+    () =>
+      expect(queryByText("You have recorded 50 or more actions")).toBeNull(),
     { timeout: 3000 },
   );
   expect(sent.some((m) => m.type === "page.notice")).toBe(false);
@@ -511,11 +543,12 @@ test("at 50 actions with the notice open the popup repeats its three choices, an
     actions: 50,
     noticeShown: true,
     noticeOpen: true,
+    noticeAt: 50,
   });
   const { findByText, getByRole, queryByText, sent } = setup(response, {
     onAsk: closesNotice(response),
   });
-  await findByText("You have recorded 50 actions");
+  await findByText("You have recorded 50 or more actions");
   fireEvent.click(getByRole("button", { name: "Keep going" }));
   await waitFor(() =>
     expect(sent.filter((m) => m.type === "page.notice").at(-1)).toMatchObject({
@@ -523,7 +556,7 @@ test("at 50 actions with the notice open the popup repeats its three choices, an
     }),
   );
   await waitFor(() =>
-    expect(queryByText("You have recorded 50 actions")).toBeNull(),
+    expect(queryByText("You have recorded 50 or more actions")).toBeNull(),
   );
   expect(getByRole("button", { name: "Stop" })).toBeTruthy();
 });
@@ -537,14 +570,15 @@ test("the 50-action card's Stop and Start over hide it too", async () => {
       actions: 52,
       noticeShown: true,
       noticeOpen: true,
+      noticeAt: 50,
     });
     const { findByText, getAllByRole, queryByText, sent, unmount } = setup(
       response,
       { onAsk: closesNotice(response) },
     );
-    const card = (await findByText("You have recorded 52 actions")).closest(
-      "[data-slot=item]",
-    ) as HTMLElement;
+    const card = (
+      await findByText("You have recorded 50 or more actions")
+    ).closest("[data-slot=item]") as HTMLElement;
     const button = getAllByRole("button", { name }).find((candidate) =>
       card.contains(candidate),
     ) as HTMLElement;
@@ -555,7 +589,7 @@ test("the 50-action card's Stop and Start over hide it too", async () => {
       ),
     );
     await waitFor(() =>
-      expect(queryByText("You have recorded 52 actions")).toBeNull(),
+      expect(queryByText("You have recorded 50 or more actions")).toBeNull(),
     );
     unmount();
   }
@@ -566,22 +600,60 @@ test("Keep going hides the card for that recording only: the next one to reach 5
     actions: 50,
     noticeShown: true,
     noticeOpen: true,
+    noticeAt: 50,
   });
   const { findByText, getByRole, queryByText } = setup(response, {
     onAsk: closesNotice(response),
   });
-  await findByText("You have recorded 50 actions");
+  await findByText("You have recorded 50 or more actions");
   fireEvent.click(getByRole("button", { name: "Keep going" }));
   await waitFor(() =>
-    expect(queryByText("You have recorded 50 actions")).toBeNull(),
+    expect(queryByText("You have recorded 50 or more actions")).toBeNull(),
   );
   // The popup polls page.state while a recording runs: the next answer is another recording whose notice opened.
   Object.assign(response.state, {
     recordingId: "r8",
-    actions: 51,
+    actions: 50,
     noticeOpen: true,
   });
-  await findByText("You have recorded 51 actions", {}, { timeout: 3000 });
+  await findByText(
+    "You have recorded 50 or more actions",
+    {},
+    {
+      timeout: 3000,
+    },
+  );
+});
+
+test("Stop and Start over are pinned to the bottom of the popup, so a tall notice never pushes them past Chrome's 600px", async () => {
+  const { findByText, getAllByRole } = setup(
+    recording({
+      actions: 50,
+      noticeShown: true,
+      noticeOpen: true,
+      noticeAt: 50,
+    }),
+  );
+  await findByText("You have recorded 50 or more actions");
+  const stop = getAllByRole("button", { name: "Stop" }).at(-1) as HTMLElement;
+  const bar = stop.parentElement as HTMLElement;
+  expect(bar.className).toContain("sticky");
+  expect(bar.className).toContain("bottom-0");
+  expect(bar.className).toContain("bg-background");
+  expect(bar.textContent).toBe("StopStart over");
+});
+
+test("the card says the count the notice opened at, in the page notice's words, while the count goes on", async () => {
+  const { findByText, getByText } = setup(
+    recording({
+      actions: 147,
+      noticeShown: true,
+      noticeOpen: true,
+      noticeAt: 50,
+    }),
+  );
+  await findByText("You have recorded 50 or more actions");
+  expect(getByText("1:05 · 147 actions")).toBeTruthy();
 });
 
 test("held and parked capture say so, with the reason and the kept-events line", async () => {

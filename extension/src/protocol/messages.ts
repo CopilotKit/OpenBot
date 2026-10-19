@@ -36,6 +36,9 @@ export type RecorderState = {
    * the badge count these. */
   actions: number;
   noticeShown: boolean;
+  /** How many actions there were when the 50-action notice showed: the popup and the page both say that number "or
+   * more", while the count goes on. */
+  noticeAt?: number;
   /** The 50-action notice is on screen: from when it shows until any choice (in a tab or the popup), Stop, Start over
    * or the end of the recording. The popup shows its card from this. */
   noticeOpen: boolean;

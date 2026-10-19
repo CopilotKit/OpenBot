@@ -90,7 +90,7 @@ test("the notice offers Stop, Start over and Keep going", () => {
   const notice = show((c) => choices.push(c));
   const root = notice.host.shadowRoot as ShadowRoot;
   expect(root.querySelector("[role=dialog]")).not.toBeNull();
-  expect(root.textContent).toContain("You have recorded 50 actions");
+  expect(root.textContent).toContain("You have recorded 50 or more actions");
   expect(root.textContent).toContain(
     "Click Stop if the task is done, start over if it went wrong, or keep going if it needs more.",
   );

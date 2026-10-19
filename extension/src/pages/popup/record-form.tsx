@@ -50,11 +50,14 @@ export function RecordForm({
   initialBotId,
   busy,
   onRecord,
+  learningShown = null,
 }: {
   bots: RecorderBot[];
   initialBotId: string | null;
   busy: boolean;
   onRecord: (botId: string, title: string) => void;
+  /** A Learning sentence the popup already shows above the form (about the recording just stopped): not repeated. */
+  learningShown?: string | null;
 }) {
   const [picked, setPicked] = useState<string | null>(null);
   // Bots arrive after the form mounts: the pick wins, then the last used, then the first.
@@ -66,7 +69,8 @@ export function RecordForm({
     "";
   const [title, setTitle] = useState("");
   const bot = bots.find((candidate) => candidate.id === botId);
-  const sentence = bot ? learningSentence(bot.learning) : null;
+  const learning = bot ? learningSentence(bot.learning) : null;
+  const sentence = learning === learningShown ? null : learning;
   const ready = bot !== undefined && title.trim() !== "" && !busy;
   return (
     <PageSection>

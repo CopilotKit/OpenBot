@@ -110,11 +110,12 @@ export function showNotice(options: {
   card.setAttribute("aria-live", "polite");
   card.setAttribute(
     "aria-label",
-    `You have recorded ${options.actions} actions`,
+    `You have recorded ${options.actions} or more actions`,
   );
 
   const title = document.createElement("h2");
-  title.textContent = `You have recorded ${options.actions} actions`;
+  // It shows once, at the threshold, while the count goes on: "or more" keeps it true, in the same words as the popup.
+  title.textContent = `You have recorded ${options.actions} or more actions`;
   const body = document.createElement("p");
   body.textContent =
     "Click Stop if the task is done, start over if it went wrong, or keep going if it needs more.";

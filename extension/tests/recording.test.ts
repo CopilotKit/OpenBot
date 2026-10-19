@@ -1360,6 +1360,8 @@ test("the 50-action notice is open in the state the popup reads, and Keep going 
   top.postMessage({ type: "content.event", event: event("click", { i: 50 }) });
   await until(async () => (await state()).actions === 51, "51 actions");
   expect((await state()).noticeOpen).toBe(false);
+  // The popup and the page both say the count it opened at, while the count goes on.
+  expect((await state()).noticeAt).toBe(50);
 });
 
 test("Keep going in the popup closes the 50-action notice", async () => {
@@ -1396,6 +1398,7 @@ test("Start over on the notice records a new recording whose count starts again"
     noticeShown: false,
     noticeOpen: false,
   });
+  expect((await state()).noticeAt).toBeUndefined();
 });
 
 // ---- Start over ------------------------------------------------------------------------------

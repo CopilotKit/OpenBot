@@ -273,7 +273,12 @@ export function reduceRecorder(
     case "action":
       return { ...state, actions: state.actions + 1 };
     case "notice":
-      return { ...state, noticeShown: true, noticeOpen: true };
+      return {
+        ...state,
+        noticeShown: true,
+        noticeOpen: true,
+        noticeAt: state.actions,
+      };
     case "notice-answered":
       return { ...state, noticeOpen: false };
     case "follow":
@@ -309,15 +314,17 @@ export function reduceRecorder(
         learning: event.lastStopped ? state.learning : undefined,
         error: event.error,
       });
-    case "restart":
+    case "restart": {
+      const { noticeAt: _previous, ...rest } = state;
       return {
-        ...state,
+        ...rest,
         recordingId: event.recordingId,
         startedAt: event.startedAt,
         actions: 0,
         noticeShown: false,
         noticeOpen: false,
       };
+    }
     case "drains":
       return defined({ ...state, draining: event.draining, kept: event.kept });
     case "send-failed":

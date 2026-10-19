@@ -14,7 +14,11 @@ import { desktopSentence } from "./desktop-sentence";
 import { Notices } from "./notices";
 import { prepareRecording } from "./prepare";
 import { RecordForm } from "./record-form";
-import { AfterStop, RecordingView } from "./recording-view";
+import {
+  AfterStop,
+  afterStopLearningSentence,
+  RecordingView,
+} from "./recording-view";
 
 type PopupDeps = {
   prepare: typeof prepareRecording;
@@ -253,6 +257,7 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
           initialBotId={lastBotId}
           busy={busy}
           onRecord={record}
+          learningShown={afterStopLearningSentence(state, true)}
         />
       ) : null}
       {shownError ? <ErrorLine message={shownError} /> : null}

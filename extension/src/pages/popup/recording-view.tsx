@@ -91,7 +91,8 @@ export function RecordingView({
               <Separator />
               <Item size="sm">
                 <ItemContent>
-                  <ItemTitle>{`You have recorded ${state.actions} actions`}</ItemTitle>
+                  {/* The same words as the notice on the page, which shows once at the threshold. */}
+                  <ItemTitle>{`You have recorded ${state.noticeAt ?? state.actions} or more actions`}</ItemTitle>
                   <ItemDescription className="line-clamp-none">
                     Click Stop if the task is done, start over if it went wrong,
                     or keep going if it needs more.
@@ -132,7 +133,9 @@ export function RecordingView({
           <CaptureRows capture={state.capture} learning={state.learning} />
         </div>
       )}
-      <div className="mt-6 flex flex-col gap-2">
+      {/* Kept in view at the bottom of the popup: Chrome caps a popup at 600px, and with the 50-action notice open the
+          rows above can run past it. */}
+      <div className="sticky bottom-0 -mx-4 -mb-4 mt-6 flex flex-col gap-2 bg-background px-4 pt-3 pb-4">
         <Button size="lg" disabled={busy || stopping} onClick={actions.onStop}>
           Stop
         </Button>
@@ -184,6 +187,28 @@ function destinationLines(state: RecorderState, bots: RecorderBot[]): string[] {
   ];
 }
 
+/** Which of the after-Stop rows show: sent (Intelligence has all of the last stopped recording) or still sending. */
+function afterStopRows(state: RecorderState, connected: boolean) {
+  const keptRecordings = state.kept?.recordings ?? 0;
+  return {
+    keptRecordings,
+    streaming: connected && state.draining > keptRecordings,
+    sent: connected && state.lastStopped !== undefined && state.draining === 0,
+  };
+}
+
+/** The Learning sentence the after-Stop row shows about the stopped recording, if any. The Record form under it leaves
+ * out the same sentence, so the popup says it once. */
+export function afterStopLearningSentence(
+  state: RecorderState,
+  connected: boolean,
+): string | null {
+  const { sent, streaming } = afterStopRows(state, connected);
+  if (!(sent || streaming) || !state.lastStopped || !state.learning)
+    return null;
+  return learningSentence(state.learning);
+}
+
 /**
  * After Stop: that the recording went to Intelligence (or is still on its way) and into which Learning space, and any
  * events kept in the browser. Signed out, only the kept row shows: nothing can send until the person connects again.
@@ -201,14 +226,12 @@ export function AfterStop({
   onDiscard: () => void;
 }) {
   const [asking, setAsking] = useState(false);
-  const { lastStopped, kept } = state;
+  const { kept } = state;
   // Every stopped recording is a drain until Intelligence has all of it; kept ones wait for a retry, and ones kept for
   // a person who signed out send nothing until they connect again (the kept row below says so).
-  const keptRecordings = kept?.recordings ?? 0;
-  const streaming = connected && state.draining > keptRecordings;
+  const { keptRecordings, streaming, sent } = afterStopRows(state, connected);
   const retrying =
     connected && keptRecordings > (kept?.waitingFor?.recordings ?? 0);
-  const sent = connected && lastStopped !== undefined && state.draining === 0;
   const lines = destinationLines(state, bots);
   if (!kept && !sent && !streaming) return null;
   return (
