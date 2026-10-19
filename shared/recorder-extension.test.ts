@@ -2,10 +2,23 @@ import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import {
   extensionIdFromOrigin,
-  extensionIdFromPublicKey,
   RECORDER_EXTENSION_ID,
   recorderExtensionIds,
 } from "./recorder-extension";
+
+/** Chrome's extension id: SHA-256 of the DER public key, first 32 hex digits mapped 0-f -> a-p. */
+async function extensionIdFromPublicKey(base64Der: string): Promise<string> {
+  const der = Uint8Array.from(atob(base64Der.trim()), (character) =>
+    character.charCodeAt(0),
+  );
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", der));
+  const hex = Array.from(digest, (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("");
+  return Array.from(hex.slice(0, 32), (digit) =>
+    String.fromCharCode(97 + Number.parseInt(digit, 16)),
+  ).join("");
+}
 
 const publicKey = readFileSync(
   new URL("../extension/keys/public-key.txt", import.meta.url),

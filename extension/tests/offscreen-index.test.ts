@@ -595,7 +595,7 @@ describe("offscreen controller", () => {
     ]);
   });
 
-  test("a second stop for an already stopped demonstration only re-posts stopped", async () => {
+  test("a second stop for an already stopped recording only re-posts stopped", async () => {
     const h = await setup();
     await h.open();
     const session = h.session();

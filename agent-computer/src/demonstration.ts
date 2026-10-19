@@ -5,8 +5,6 @@ import {
   safeDemonstrationUrl,
 } from "../../shared/demonstration-rules";
 import type { InputMessage } from "./screencast";
-export { gestureForRecording, safeDemonstrationUrl };
-export type { RecordedGesture } from "../../shared/demonstration-rules";
 
 /** Never reads a field's value, page body, clipboard or image. All text entry is parameterized. */
 export async function describeHumanGesture(page: Page, input: InputMessage) {

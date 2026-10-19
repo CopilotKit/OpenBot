@@ -65,4 +65,16 @@ describe("color scheme", () => {
     expect(styles).toMatch(/:root\s*\{[\s\S]*?color-scheme:\s*light/);
     expect(styles).toMatch(/\.dark\s*\{[\s\S]*?color-scheme:\s*dark/);
   });
+
+  // The Recorder's pages import theme.css too, so the chat's own rules live in styles.css.
+  test("the shared theme carries no chat-only rule", () => {
+    expect(styles).not.toContain("tool-line");
+    expect(styles).not.toContain("websandbox");
+    const app = readFileSync(
+      new URL("../src/styles.css", import.meta.url),
+      "utf8",
+    );
+    expect(app).toContain(".tool-line-running");
+    expect(app).toContain("iframe.websandbox__frame");
+  });
 });
