@@ -80,11 +80,62 @@ type SessionState = {
   /** openbot.connect requests per origin in the last 10 minutes (timestamps), for Decision 22's limit (Task 8). */
   connectRequests?: Record<string, number[]>;
 };
+const isString = (value: unknown): value is string => typeof value === "string";
+
+function isKeptEvents(value: unknown): value is KeptEvents {
+  if (typeof value !== "object" || value === null) return false;
+  const kept = value as Record<string, unknown>;
+  return (
+    isString(kept.reason) &&
+    typeof kept.parked === "boolean" &&
+    typeof kept.events === "number" &&
+    typeof kept.at === "number" &&
+    (kept.waitingForReconnect === undefined ||
+      typeof kept.waitingForReconnect === "boolean")
+  );
+}
+
+/** A recording record in this build's shape. A build from before the Recorder sent to Intelligence only stored its
+ * recordings by demonstration, which nothing can send any more. */
+export function isDrainRecord(value: unknown): value is DrainRecord {
+  if (typeof value !== "object" || value === null) return false;
+  const drain = value as Record<string, unknown>;
+  return (
+    isString(drain.recordingId) &&
+    isString(drain.botId) &&
+    isString(drain.title) &&
+    isString(drain.openbotUrl) &&
+    isString(drain.userId) &&
+    isString(drain.userName) &&
+    Array.isArray(drain.trajectoryIds) &&
+    drain.trajectoryIds.every(isString) &&
+    typeof drain.startedAt === "number" &&
+    (drain.discarding === undefined || typeof drain.discarding === "boolean") &&
+    (drain.kept === undefined || isKeptEvents(drain.kept))
+  );
+}
+
+/** The recordings in storage.local are read through a shape check: one of another shape is left out (and goes with
+ * the next write of the list), never handed to the code that sends recordings. */
+function checked<K extends keyof LocalState>(
+  key: K,
+  value: unknown,
+): LocalState[K] {
+  if (value === undefined) return undefined as LocalState[K];
+  if (key === "drains")
+    return (
+      Array.isArray(value) ? value.filter(isDrainRecord) : []
+    ) as LocalState[K];
+  if (key === "activeRecording")
+    return (isDrainRecord(value) ? value : undefined) as LocalState[K];
+  return value as LocalState[K];
+}
+
 export async function readLocal<K extends keyof LocalState>(
   key: K,
 ): Promise<LocalState[K]> {
   const items = await chrome.storage.local.get(key);
-  return items[key] as LocalState[K];
+  return checked(key, items[key]);
 }
 export async function writeLocal<K extends keyof LocalState>(
   key: K,

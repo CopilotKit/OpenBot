@@ -1,14 +1,49 @@
 export const RECORDER_DATABASE = "openbot-recorder";
-export const RECORDER_DATABASE_VERSION = 1;
+export const RECORDER_DATABASE_VERSION = 2;
 
 /**
- * Every object store, created together in version 1:
+ * Every object store:
  *  events  keyPath ["trajectoryId", "seq"]        the streamer's outbox
- *  meta    out-of-line string keys                 each trajectory's own record, and "seq", the last seq issued
+ *  meta    out-of-line string keys                 "trajectory:<id>", each trajectory's own record, and "seq", the last
+ *                                                  seq issued
  * Nothing else is kept in this browser: a recording's events wait here until Intelligence acknowledges them.
+ *
+ * Version 2 drops what a build from before the Recorder sent to Intelligence only left behind: every other store (its
+ * screen, voice, step and network-body stores), every other meta key, and each trajectory record without a recording
+ * id (a demonstration's) with its events. Nothing can send those any more.
  */
 export const STORES = ["events", "meta"] as const;
 type StoreName = (typeof STORES)[number];
+
+const SEQ_KEY = "seq";
+const TRAJECTORY_PREFIX = "trajectory:";
+
+/** Removes, inside the upgrade's transaction, every meta key the outbox does not use and every trajectory record with
+ * no recording id, with that trajectory's events. */
+function dropLeftovers(upgrade: IDBTransaction): void {
+  const meta = upgrade.objectStore("meta");
+  const events = upgrade.objectStore("events");
+  const cursor = meta.openCursor();
+  cursor.onsuccess = () => {
+    const at = cursor.result;
+    if (!at) return;
+    const key = String(at.key);
+    if (key.startsWith(TRAJECTORY_PREFIX)) {
+      const record = at.value as { recordingId?: unknown } | null;
+      if (typeof record?.recordingId !== "string") {
+        const trajectoryId = key.slice(TRAJECTORY_PREFIX.length);
+        events.delete(
+          IDBKeyRange.bound(
+            [trajectoryId, -Infinity],
+            [trajectoryId, Infinity],
+          ),
+        );
+        at.delete();
+      }
+    } else if (key !== SEQ_KEY) at.delete();
+    at.continue();
+  };
+}
 
 /**
  * Opens (and on first use creates) the database; `name` lets tests use a fresh one per case. A later schema change
@@ -19,14 +54,23 @@ export function openRecorderDatabase(
 ): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(name, RECORDER_DATABASE_VERSION);
-    request.onupgradeneeded = () => {
+    request.onupgradeneeded = (event) => {
       const db = request.result;
-      if (db.objectStoreNames.length === 0) {
+      for (const store of [...db.objectStoreNames])
+        if (!(STORES as readonly string[]).includes(store))
+          db.deleteObjectStore(store);
+      if (!db.objectStoreNames.contains("events"))
         db.createObjectStore("events", { keyPath: ["trajectoryId", "seq"] });
-        db.createObjectStore("meta");
-      }
+      if (!db.objectStoreNames.contains("meta")) db.createObjectStore("meta");
+      if (event.oldVersion > 0 && request.transaction)
+        dropLeftovers(request.transaction);
     };
-    request.onsuccess = () => resolve(request.result);
+    request.onsuccess = () => {
+      const db = request.result;
+      // A newer copy of the extension upgrading the database is never blocked by this one.
+      db.onversionchange = () => db.close();
+      resolve(db);
+    };
     request.onerror = () =>
       reject(
         request.error ??

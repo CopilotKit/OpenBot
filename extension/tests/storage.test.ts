@@ -21,6 +21,40 @@ afterEach(() => {
 });
 
 describe("storage helpers", () => {
+  test("a recording record of another shape (an old build's demonstration) is never handed out", async () => {
+    const current = {
+      recordingId: "rec-1",
+      botId: "bot-1",
+      title: "T",
+      openbotUrl: "https://openbot.example.test",
+      userId: "u1",
+      userName: "Ada",
+      trajectoryIds: ["t-1"],
+      startedAt: 1,
+      kept: { reason: "Paused.", parked: true, events: 2, at: 3 },
+    };
+    const old = {
+      demonstrationId: "demo-1",
+      botId: "bot-1",
+      title: "T",
+      openbotUrl: "https://openbot.example.test",
+      userId: "u1",
+      userName: "Ada",
+      trajectoryIds: ["t-0"],
+      startedAt: 1,
+      discard: false,
+      stopPending: true,
+    };
+    fake.storage.local.set("drains", [old, current, null, { recordingId: 5 }]);
+    expect(await readLocal("drains")).toEqual([current]);
+    fake.storage.local.set("drains", "not a list");
+    expect(await readLocal("drains")).toEqual([]);
+    fake.storage.local.set("activeRecording", old);
+    expect(await readLocal("activeRecording")).toBeUndefined();
+    fake.storage.local.set("activeRecording", current);
+    expect(await readLocal("activeRecording")).toEqual(current);
+  });
+
   test("local and session values round-trip and remove", async () => {
     expect(await readLocal("lastBotId")).toBeUndefined();
     await writeLocal("lastBotId", "bot_1");

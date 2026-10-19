@@ -38,9 +38,57 @@ const keyPathOf = (db: IDBDatabase, store: string) =>
   db.transaction(store, "readonly").objectStore(store).keyPath;
 
 describe("recorder database", () => {
-  test("declares the default name and version 1", () => {
+  test("declares the default name and version 2", () => {
     expect(RECORDER_DATABASE).toBe("openbot-recorder");
-    expect(RECORDER_DATABASE_VERSION).toBe(1);
+    expect(RECORDER_DATABASE_VERSION).toBe(2);
+  });
+
+  test("a version 1 database an old build left drops its other stores, meta keys and demonstration trajectories, and keeps the outbox", async () => {
+    const name = freshName();
+    await new Promise<void>((resolve, reject) => {
+      const request = indexedDB.open(name, 1);
+      request.onupgradeneeded = () => {
+        const db = request.result;
+        db.createObjectStore("events", { keyPath: ["trajectoryId", "seq"] });
+        const meta = db.createObjectStore("meta");
+        db.createObjectStore("media", { keyPath: ["mediaId", "index"] });
+        db.createObjectStore("voice", {
+          keyPath: ["demonstrationId", "index"],
+        });
+        db.createObjectStore("steps", {
+          keyPath: ["demonstrationId", "index"],
+        });
+        db.createObjectStore("bodies", { keyPath: ["mediaId", "line"] });
+        meta.put(7, "seq");
+        meta.put({ recordingId: "rec-1", title: "T" }, "trajectory:t-new");
+        meta.put({ demonstrationId: "demo-1", title: "T" }, "trajectory:t-old");
+        meta.put("media-1", "media:demo-1:screen");
+        meta.put(3, "bodies-next:media-1");
+        meta.put({ chunks: 1, offset: 0 }, "bodies-progress:media-1");
+        meta.put(2, "steps-next:demo-1");
+        const events = request.transaction?.objectStore("events");
+        events?.put({ trajectoryId: "t-new", seq: 1 });
+        events?.put({ trajectoryId: "t-old", seq: 2 });
+        events?.put({ trajectoryId: "t-old", seq: 3 });
+      };
+      request.onsuccess = () => {
+        request.result.close();
+        resolve();
+      };
+      request.onerror = () => reject(request.error);
+    });
+    const db = await openRecorderDatabase(name);
+    expect(db.version).toBe(2);
+    expect([...db.objectStoreNames].sort()).toEqual(["events", "meta"]);
+    const metaKeys = await tx(db, ["meta"], "readonly", (t) =>
+      requestToPromise(t.objectStore("meta").getAllKeys()),
+    );
+    expect(metaKeys.map(String).sort()).toEqual(["seq", "trajectory:t-new"]);
+    const eventKeys = await tx(db, ["events"], "readonly", (t) =>
+      requestToPromise(t.objectStore("events").getAllKeys()),
+    );
+    expect(eventKeys).toEqual([["t-new", 1]]);
+    db.close();
   });
 
   test("creates exactly the outbox's two stores with the documented key paths", async () => {
@@ -59,7 +107,7 @@ describe("recorder database", () => {
       requestToPromise(t.objectStore("meta").put("kept", "marker")),
     );
     const second = await openRecorderDatabase(name);
-    expect(second.version).toBe(1);
+    expect(second.version).toBe(2);
     const value = await tx(second, ["meta"], "readonly", (t) =>
       requestToPromise(t.objectStore("meta").get("marker")),
     );
