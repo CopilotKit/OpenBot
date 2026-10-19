@@ -58,8 +58,7 @@ recorded.
   bearer cannot run a Bot or read a conversation.
 - **Intelligence must allow trajectories:** the `trajectories` licence feature,
   `FF_LEARNING_TRAJECTORIES=true`, and an `INTELLIGENCE_GATEWAY_WS_URL` that people's browsers can
-  reach. A company that installs the extension for everyone pins it to its OpenBot by browser
-  policy; see [docs/recorder-company-install.md](docs/recorder-company-install.md).
+  reach.
 - **`OPENBOT_RECORDER_EXTRA_EXTENSION_IDS`** lists other extension ids to trust besides the
   Recorder's own, for a fork or a build signed with another key. Each must be 32 letters from a to
   p, comma separated; **a value that is not stops the server at boot.**
