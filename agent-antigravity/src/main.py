@@ -10,6 +10,17 @@ instead of offering this row to a deployment that holds only an OpenAI one.
 
 The model is still the deployment's to choose. `BOT_MODEL` names which Gemini; the pin only stops
 the *provider* drifting to one the harness cannot use.
+
+WHERE the Gemini lives is the deployment's too. The `google` row in `shared/model-providers.json`
+names both variables this Bot reads — the key and the base url — and they are read from that row
+rather than spelled out here, so renaming either is one edit to the file every language reads. A
+base url set there sends the harness at a Gemini-compatible endpoint instead of Google's: a
+gateway, a proxy that holds the real key, or a mock while someone tries the Bot out without one.
+That url is the API ROOT, with no version path on it — `http://host:4141`, not
+`http://host:4141/v1beta`. The harness appends `/v1beta/models/<model>:streamGenerateContent`
+itself, and a url carrying the version already gets it twice and 404s, which the harness reports
+as the unplaceable `agent executor error: Error 0, Message: Not found`. Measured against a logging
+proxy, because that message names neither the url nor the status.
 """
 
 import hmac
@@ -20,13 +31,17 @@ from pathlib import Path
 # The spec file every language in the box reads: one level above this Bot in the repository, and
 # one level above /app/src in the image the Dockerfile builds.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
-from model_providers import bot_settings
+from model_providers import SPEC, bot_settings
 
 from ag_ui_antigravity import AntigravityAgent, create_antigravity_app
 from fastapi import Request
 from fastapi.responses import JSONResponse
+from google.antigravity.models import GeminiAPIEndpoint
 
 TOKEN_HEADER = "x-openbot-agent-token"
+
+#: The Gemini row this Bot is pinned to. Both variable names come from it.
+_GOOGLE = SPEC["providers"]["google"]
 
 
 def _model() -> str:
@@ -39,15 +54,41 @@ def _model() -> str:
     return bot_settings("agent-antigravity", pinned_provider="google").model
 
 
-app = create_antigravity_app(
-    AntigravityAgent(
-        model=_model(),
-        # Read from the environment by the SDK itself when absent. Named here so the failure when
-        # it is missing is this Bot's, at start-up, rather than a stream that opens and dies.
-        api_key=os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY"),
-    ),
-    path="/",
-)
+def _api_key() -> str | None:
+    """The key, under the name the provider row gives it.
+
+    `GEMINI_API_KEY` is the SDK's own spelling and is taken as a second name for the same thing,
+    because a deployment that already set it for another Google tool should not have to set it
+    twice. Blank is not a choice: compose hands an unset variable through as an empty string.
+    """
+    for variable in (_GOOGLE["key_variable"], "GEMINI_API_KEY"):
+        value = (os.environ.get(variable) or "").strip()
+        if value:
+            return value
+    return None
+
+
+def _agent() -> AntigravityAgent:
+    """The harness, pointed at whatever Gemini this deployment runs.
+
+    With a base url the endpoint is spelled out: `AntigravityAgent(base_url=...)` is a DIFFERENT
+    and mutually exclusive path, meant for unauthenticated local servers, and it drops the key.
+    `endpoint=GeminiAPIEndpoint(...)` is the one that carries both — which is what a gateway, or a
+    mock in front of the Gemini API, needs.
+    """
+    model, api_key = _model(), _api_key()
+    base_url = (os.environ.get(_GOOGLE["base_url_variable"]) or "").strip()
+    if base_url:
+        return AntigravityAgent(
+            model=model,
+            endpoint=GeminiAPIEndpoint(base_url=base_url, api_key=api_key),
+        )
+    # Named rather than left to the SDK's own environment read, so a missing key is this Bot's
+    # failure at start-up rather than a stream that opens and dies.
+    return AntigravityAgent(model=model, api_key=api_key)
+
+
+app = create_antigravity_app(_agent(), path="/")
 
 
 @app.middleware("http")
