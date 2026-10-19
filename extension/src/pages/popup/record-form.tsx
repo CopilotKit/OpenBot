@@ -61,7 +61,8 @@ export function RecordForm({
   onRecord: (botId: string, title: string) => void;
   /** A Learning sentence the popup already shows above the form (about the recording just stopped): not repeated. */
   learningShown?: string | null;
-  /** Chrome has refused the Recorder the microphone: the form offers the microphone page. */
+  /** The browser has not given the Recorder a lasting microphone grant (refused, or never answered): the form offers
+   * the setup page, since a recording would go on without narration. */
   microphoneBlocked?: boolean;
   onAllowMicrophone?: () => void;
 }) {

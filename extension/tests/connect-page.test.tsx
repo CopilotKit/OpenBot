@@ -96,7 +96,6 @@ test("the Name row opens a dialog whose Save changes the name and the label late
   await user.type(input, "Work laptop");
   await user.click(getByText("Save"));
   await waitFor(() => expect(getByText("Work laptop")).toBeTruthy());
-  fake.permissions.answer = true;
   fireEvent.click(getByRole("button", { name: "Connect" }));
   await waitFor(() =>
     expect(
@@ -109,21 +108,24 @@ test("the Name row opens a dialog whose Save changes the name and the label late
     label: "Work laptop",
     origin: ORIGIN,
   });
-  expect(fake.permissions.requests).toEqual([{ origins: [`${ORIGIN}/*`] }]);
 });
 
-test("denied access shows the access sentence and sends no decide message", async () => {
+test("Connect asks for no permission: website access came with the install", async () => {
+  // Chrome would refuse anything else here: the person's answer to a prompt is the only way to a grant.
   fake.permissions.answer = false;
   const { findByRole, findByText } = render(<ConnectPage />);
   fireEvent.click(await findByRole("button", { name: "Connect" }));
   await findByText(
-    `OpenBot Recorder needs access to ${ORIGIN} to sign this browser in and get capture passes. What you record goes to Intelligence, not to OpenBot.`,
+    "Connected as Google Chrome on macOS. You can close this tab.",
   );
-  expect(received.map((m) => m.type)).toEqual(["page.connect.pending"]);
+  expect(fake.permissions.requests).toEqual([]);
+  expect(received.map((m) => m.type)).toEqual([
+    "page.connect.pending",
+    "page.connect.decide",
+  ]);
 });
 
 test("a refusal from OpenBot shows its sentence", async () => {
-  fake.permissions.answer = true;
   decideAnswer = { ok: false, error: "That code has expired." };
   const { findByRole, findByText } = render(<ConnectPage />);
   fireEvent.click(await findByRole("button", { name: "Connect" }));
@@ -150,7 +152,6 @@ test("Cancel sends approve false with the origin the page shows", async () => {
 test("Connect sends the origin the page shows", async () => {
   const shown = "http://[::1]:7470";
   pendingAnswer = { ok: true, pending: { origin: shown, via: "desktop" } };
-  fake.permissions.answer = true;
   const { findByRole, findByText } = render(<ConnectPage />);
   await findByText(shown);
   fireEvent.click(await findByRole("button", { name: "Connect" }));

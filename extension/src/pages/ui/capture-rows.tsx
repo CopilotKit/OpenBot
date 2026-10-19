@@ -195,7 +195,7 @@ const NETWORK_STATUS: Record<CaptureStatus["network"], string> = {
 export type VoiceActions = {
   /** The switch: true mutes the narration, false turns it on again (also the way to try again after a failure). */
   onMute: (muted: boolean) => void;
-  /** Opens the microphone page, offered when Chrome has not let the Recorder use the microphone. */
+  /** Opens the setup page, offered when the browser has not let the Recorder use the microphone. */
   onAllowMicrophone: () => void;
 };
 

@@ -1,7 +1,7 @@
 // The person's narration, transcribed in this browser with the Web Speech API while they record. It runs in the offscreen
 // document, which lasts the whole recording (the popup closes when it loses focus). Chrome lets an offscreen document use
 // speech recognition and the microphone once the extension's own origin holds a lasting microphone grant, which the
-// microphone page asks for on a visible tab; without one, both fail at once as not allowed, since an offscreen document
+// setup page asks for on a visible tab when the Recorder is installed; without one, both fail at once as not allowed, since an offscreen document
 // cannot show a prompt. The microphone is opened with getUserMedia and its track handed to the recognizer, so a missing
 // grant or a missing device is told apart from a speech-service failure. It is the browser's own speech recognition with
 // its defaults: no model is downloaded, bundled or forced on the device. Only the words leave: each final phrase becomes one
@@ -115,7 +115,7 @@ function languageName(language: string): string {
 export function voiceSentence(problem: VoiceProblem, language: string): string {
   switch (problem) {
     case "microphone":
-      return `Chrome has not let the Recorder use the microphone. ${GOES_ON}`;
+      return `The Recorder is not allowed to use the microphone. ${GOES_ON}`;
     case "no-microphone":
       return `No microphone was found, or another app is using it. ${GOES_ON}`;
     case "no-recognition":

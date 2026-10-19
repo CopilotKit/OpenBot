@@ -705,16 +705,22 @@ test("a refused frame is skipped and the recording carries on", async () => {
   expect((await state()).phase).toBe("recording");
 });
 
-test("Record without website access is refused with the access sentence", async () => {
+test("Record after the person took website access away in the browser's settings says how to give it back", async () => {
+  // The install grants it; only the person's own Site access setting can withhold it afterwards.
   hostAccess = false;
   fake.tabs.set(7, { id: 7, url: DEAL } as chrome.tabs.Tab);
   expect(
     await page({ type: "page.record", botId: "bot-1", title: "T", tabId: 7 }),
-  ).toEqual({ ok: false, error: "Allow the Recorder to read websites first." });
+  ).toEqual({
+    ok: false,
+    error:
+      "Site access is off for OpenBot Recorder. Open your browser's Extensions page, choose Details on OpenBot Recorder and set Site access to On all sites.",
+  });
   expect(fake.offscreen.created).toEqual([]);
   expect(await state()).toMatchObject({
     phase: "idle",
-    error: "Allow the Recorder to read websites first.",
+    error:
+      "Site access is off for OpenBot Recorder. Open your browser's Extensions page, choose Details on OpenBot Recorder and set Site access to On all sites.",
   });
 });
 

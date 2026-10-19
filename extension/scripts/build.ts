@@ -12,7 +12,7 @@ import { build, type InlineConfig } from "vite";
 import { type BuildVariant, buildManifest } from "../src/manifest";
 import { verifyDist } from "./verify-dist";
 
-const PAGES = ["popup", "connect", "access", "microphone", "options"] as const;
+const PAGES = ["popup", "connect", "setup", "options"] as const;
 
 export function parseBuildVariant(
   value: string | undefined,
@@ -142,7 +142,7 @@ async function main() {
   ).trim();
   writeFileSync(
     path.join(dist, "manifest.json"),
-    `${JSON.stringify(buildManifest({ variant, version: rootVersion, publicKey }), null, 2)}\n`,
+    `${JSON.stringify(buildManifest({ version: rootVersion, publicKey }), null, 2)}\n`,
   );
 
   const problems = verifyDist(dist, { variant, rootVersion });

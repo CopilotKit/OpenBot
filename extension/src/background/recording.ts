@@ -146,7 +146,9 @@ const ACTION_EVENTS = new Set(["click", "input"]);
 
 const SENTENCES = {
   noConnection: "Connect this browser to OpenBot first.",
-  noAccess: "Allow the Recorder to read websites first.",
+  // The install grants website access; only the person's own Site access setting can withhold it afterwards.
+  noAccess:
+    "Site access is off for OpenBot Recorder. Open your browser's Extensions page, choose Details on OpenBot Recorder and set Site access to On all sites.",
   busy: "A recording is already running.",
   notRecording: "Nothing is being recorded.",
   noVoice: "This recording has no voice.",

@@ -22,8 +22,8 @@ const PERMISSIONS = [
   "nativeMessaging",
 ] as const; // alarms: the organization sign-in keep-alive (Decision 2); unlimitedStorage: Decision 7
 
+/** The same for every build variant: the e2e build differs only in the test hooks its code keeps (see verify-dist). */
 export function buildManifest(input: {
-  variant: BuildVariant;
   version: string;
   publicKey: string;
 }): chrome.runtime.ManifestV3 {
@@ -50,9 +50,12 @@ export function buildManifest(input: {
     background: { service_worker: "service-worker.js", type: "module" },
     options_page: "options.html",
     permissions: [...PERMISSIONS],
-    ...(input.variant === "e2e"
-      ? { host_permissions: ["<all_urls>"] }
-      : { optional_host_permissions: ["<all_urls>"] }),
+    // Granted at install, so neither Connect nor the first Record has to ask. The debugger permission already implies
+    // access to every site, so Chrome and Edge show the same install warnings with or without it ("Read and change all
+    // your data on all websites", "Access the page debugger backend", "Communicate with cooperating native
+    // applications"), and an update that adds it is no privilege increase that disables the extension.
+    // https://developer.chrome.com/docs/extensions/reference/permissions-list
+    host_permissions: ["<all_urls>"],
     externally_connectable: { matches: ["<all_urls>"] },
     storage: { managed_schema: "managed_schema.json" },
     content_security_policy: {

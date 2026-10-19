@@ -11,6 +11,7 @@ import type { RecorderBot } from "@openbot/shared/recorder-api";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { PASS_HINTS } from "../src/offscreen/grant";
+import { voiceSentence } from "../src/offscreen/voice";
 import { desktopSentence } from "../src/pages/popup/desktop-sentence";
 import { Popup } from "../src/pages/popup/popup";
 import { stripCaptureStatus } from "../src/pages/ui/capture-rows";
@@ -83,10 +84,6 @@ function setup(
   options: {
     bots?: RecorderBot[];
     desktop?: boolean;
-    prepared?:
-      | { ok: true }
-      | { ok: false; reason: "permission" }
-      | { ok: false; reason: "microphone" };
     answers?: Partial<Record<PageToBackground["type"], PageResponse>>;
     lastBotId?: string;
     pageLanguage?: string | null;
@@ -97,7 +94,6 @@ function setup(
   } = {},
 ) {
   const sent: PageToBackground[] = [];
-  let prepareCalls = 0;
   const ask = async (message: PageToBackground): Promise<PageResponse> => {
     sent.push(message);
     options.onAsk?.(message);
@@ -115,10 +111,6 @@ function setup(
     <Popup
       deps={{
         ask: ask as never,
-        prepare: async () => {
-          prepareCalls += 1;
-          return options.prepared ?? { ok: true };
-        },
         activeTabId: async () => 7,
         lastBotId: async () => options.lastBotId,
         pageLanguage: async (tabId) =>
@@ -128,7 +120,7 @@ function setup(
       }}
     />,
   );
-  return { sent, prepareCalls: () => prepareCalls, ...view };
+  return { sent, ...view };
 }
 
 const NOT_CONNECTED = { connection: null, me: null } as const;
@@ -279,11 +271,10 @@ test("Record is disabled without a Bot even with a title", async () => {
   ).toBe(true);
 });
 
-test("Record prepares, then sends page.record with the Bot, title, tab and the page's language", async () => {
-  const { findByLabelText, getByRole, sent, prepareCalls } = setup(
-    stateResponse(),
-    { pageLanguage: "de-DE" },
-  );
+test("Record sends page.record with the Bot, title, tab and the page's language", async () => {
+  const { findByLabelText, getByRole, sent } = setup(stateResponse(), {
+    pageLanguage: "de-DE",
+  });
   await userEvent.type(
     await findByLabelText("What are you about to do?"),
     "Refund an order",
@@ -303,7 +294,6 @@ test("Record prepares, then sends page.record with the Bot, title, tab and the p
       language: "de-DE",
     }),
   );
-  expect(prepareCalls()).toBe(1);
 });
 
 test("a page that declares no usable language narrates in the browser's", async () => {
@@ -331,44 +321,93 @@ test("a page that declares no usable language narrates in the browser's", async 
   }
 });
 
-test("the first Record that opens the microphone page says to allow it there and records nothing yet", async () => {
-  const { findByLabelText, getByRole, findByText, sent } = setup(
-    stateResponse(),
-    { prepared: { ok: false, reason: "microphone" } },
-  );
+/** Chrome's answer for the microphone as the page itself would read it, for the test's length. */
+function microphonePermission(state: PermissionState) {
+  const own = Object.getOwnPropertyDescriptor(navigator, "permissions");
+  Object.defineProperty(navigator, "permissions", {
+    configurable: true,
+    value: { query: async () => ({ state }) },
+  });
+  return () => {
+    if (own) Object.defineProperty(navigator, "permissions", own);
+    else delete (navigator as { permissions?: unknown }).permissions;
+  };
+}
+
+async function pressRecord(view: ReturnType<typeof setup>) {
   await userEvent.type(
-    await findByLabelText("What are you about to do?"),
+    await view.findByLabelText("What are you about to do?"),
     "Refund an order",
   );
   await waitFor(() =>
     expect(
-      (getByRole("button", { name: "Record" }) as HTMLButtonElement).disabled,
+      (view.getByRole("button", { name: "Record" }) as HTMLButtonElement)
+        .disabled,
     ).toBe(false),
   );
-  fireEvent.click(getByRole("button", { name: "Record" }));
-  await findByText(
-    "Allow the microphone in the tab that opened, then press Record again.",
-  );
-  expect(sent.some((m) => m.type === "page.record")).toBe(false);
+  fireEvent.click(view.getByRole("button", { name: "Record" }));
+}
+
+test("the first Record records: no permission prompt, no tab, page.record goes at once", async () => {
+  // A fresh install: website access came with it, and the microphone may not be answered yet.
+  fake.permissions.granted.add("<all_urls>");
+  const restore = microphonePermission("prompt");
+  try {
+    const view = setup(stateResponse(), { microphone: "prompt" });
+    await pressRecord(view);
+    await waitFor(() =>
+      expect(view.sent.find((m) => m.type === "page.record")).toMatchObject({
+        botId: "b1",
+        title: "Refund an order",
+      }),
+    );
+    expect(fake.opened).toEqual([]);
+    expect(fake.permissions.requests).toEqual([]);
+    expect(view.queryByRole("alert")).toBeNull();
+  } finally {
+    restore();
+  }
 });
 
-test("a Record refused for website access does not send page.record", async () => {
-  const { findByLabelText, getByRole, findByText, sent } = setup(
-    stateResponse(),
-    { prepared: { ok: false, reason: "permission" } },
-  );
-  await userEvent.type(
-    await findByLabelText("What are you about to do?"),
-    "Refund an order",
-  );
-  await waitFor(() =>
-    expect(
-      (getByRole("button", { name: "Record" }) as HTMLButtonElement).disabled,
-    ).toBe(false),
-  );
-  fireEvent.click(getByRole("button", { name: "Record" }));
-  await findByText(/Allow website access/);
-  expect(sent.some((m) => m.type === "page.record")).toBe(false);
+test("Record without the microphone records, and the Voice row says it is not allowed with a button that opens the setup page only when pressed", async () => {
+  fake.permissions.granted.add("<all_urls>");
+  const restore = microphonePermission("denied");
+  try {
+    const response = stateResponse();
+    const view = setup(response, {
+      microphone: "denied",
+      // What the service worker reports once the document found the microphone refused.
+      onAsk: (message) => {
+        if (message.type !== "page.record") return;
+        Object.assign(response.state, {
+          phase: "recording",
+          recordingId: "r9",
+          botId: "b1",
+          title: "Refund an order",
+          startedAt: Date.now(),
+          capture: {
+            intelligence: "streaming",
+            network: "debugger",
+            voice: {
+              state: "failed",
+              problem: "microphone",
+              reason: voiceSentence("microphone", "en-GB"),
+            },
+          },
+        });
+      },
+    });
+    await pressRecord(view);
+    await view.findByText(
+      "The Recorder is not allowed to use the microphone. Recording goes on without your voice.",
+    );
+    expect(view.sent.filter((m) => m.type === "page.record")).toHaveLength(1);
+    expect(fake.opened).toEqual([]);
+    fireEvent.click(view.getByRole("button", { name: "Allow microphone" }));
+    expect(fake.opened).toEqual([chrome.runtime.getURL("setup.html")]);
+  } finally {
+    restore();
+  }
 });
 
 test("the last used Bot is preselected", async () => {
@@ -437,8 +476,8 @@ test("after Stop the Learning sentence shows once, in the sent row, not again un
   expect(container.textContent?.split(sentence ?? "").length).toBe(2);
 });
 
-test("the popup asks for nothing about the screen, and offers the microphone page only when Chrome refused it", async () => {
-  for (const microphone of [null, "granted", "prompt"] as const) {
+test("the popup asks for nothing about the screen, and offers the setup page when the microphone is not allowed", async () => {
+  for (const microphone of [null, "granted"] as const) {
     const { findByText, container, queryByRole, unmount } = setup(
       stateResponse(),
       { microphone },
@@ -448,11 +487,15 @@ test("the popup asks for nothing about the screen, and offers the microphone pag
     expect(queryByRole("button", { name: "Allow microphone" })).toBeNull();
     unmount();
   }
-  const { findByRole } = setup(stateResponse(), {
-    microphone: "denied",
-  });
-  fireEvent.click(await findByRole("button", { name: "Allow microphone" }));
-  expect(fake.opened).toEqual([chrome.runtime.getURL("microphone.html")]);
+  // Refused, or never answered (the setup page closed without a choice): either way the document cannot listen.
+  for (const microphone of ["denied", "prompt"] as const) {
+    const { findByRole, unmount } = setup(stateResponse(), { microphone });
+    expect(fake.opened).toEqual([]);
+    fireEvent.click(await findByRole("button", { name: "Allow microphone" }));
+    expect(fake.opened).toEqual([chrome.runtime.getURL("setup.html")]);
+    fake.opened.length = 0;
+    unmount();
+  }
 });
 
 test("each notice renders its sentence and dismisses", async () => {
@@ -604,25 +647,26 @@ test("muted, the switch is off and turning it on unmutes; starting shows it on",
   ).toBe("true");
 });
 
-test("a microphone Chrome refused says so in a plain sentence and offers the microphone page; other failures say theirs", async () => {
+test("a microphone the browser refused says so in a plain sentence and offers the setup page; other failures say theirs", async () => {
   const refused = setup(
     voiceRecording({
       state: "failed",
       problem: "microphone",
       reason:
-        "Chrome has not let the Recorder use the microphone. Recording goes on without your voice.",
+        "The Recorder is not allowed to use the microphone. Recording goes on without your voice.",
       heard: "stale words",
     }),
   );
   await refused.findByText(
-    "Chrome has not let the Recorder use the microphone. Recording goes on without your voice.",
+    "The Recorder is not allowed to use the microphone. Recording goes on without your voice.",
   );
   expect(refused.queryByText(/stale words/)).toBeNull();
   expect(
     refused.getByRole("switch", { name: "Voice" }).getAttribute("aria-checked"),
   ).toBe("false");
+  expect(fake.opened).toEqual([]);
   fireEvent.click(refused.getByRole("button", { name: "Allow microphone" }));
-  expect(fake.opened).toEqual([chrome.runtime.getURL("microphone.html")]);
+  expect(fake.opened).toEqual([chrome.runtime.getURL("setup.html")]);
   refused.unmount();
 
   const network = setup(

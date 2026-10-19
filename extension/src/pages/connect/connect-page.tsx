@@ -22,7 +22,6 @@ import {
 } from "@/components/ui/item";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import { hostPermissionPattern } from "../../shared/origin";
 import { Page } from "../ui/page";
 import { ask } from "../ui/runtime";
 
@@ -86,22 +85,7 @@ export function ConnectPage() {
   const connect = async (pending: Pending) => {
     setBusy(true);
     setMessage(null);
-    // Requested here, inside the click, so Chrome counts it as the person's own gesture.
-    let granted = false;
-    try {
-      granted = await chrome.permissions.request({
-        origins: [hostPermissionPattern(pending.origin)],
-      });
-    } catch {
-      granted = false;
-    }
-    if (!granted) {
-      setMessage(
-        `OpenBot Recorder needs access to ${pending.origin} to sign this browser in and get capture passes. What you record goes to Intelligence, not to OpenBot.`,
-      );
-      setBusy(false);
-      return;
-    }
+    // No permission to ask for: the install granted access to every site, this OpenBot's included.
     const answer = await ask({
       type: "page.connect.decide",
       approve: true,

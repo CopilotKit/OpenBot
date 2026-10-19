@@ -53,10 +53,6 @@ export function isAllowedGatewayUrl(
   return allowed.some((entry) => parse(entry)?.origin === url.origin);
 }
 
-export function hostPermissionPattern(origin: string): string {
-  return `${origin}/*`;
-}
-
 const NON_RECORDABLE_HOSTS = new Set([
   "chromewebstore.google.com",
   "microsoftedge.microsoft.com",

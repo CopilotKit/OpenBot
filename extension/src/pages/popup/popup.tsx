@@ -13,7 +13,6 @@ import { Page } from "../ui/page";
 import { ask as askBackground } from "../ui/runtime";
 import { desktopSentence } from "./desktop-sentence";
 import { Notices } from "./notices";
-import { prepareRecording } from "./prepare";
 import { RecordForm } from "./record-form";
 import {
   AfterStop,
@@ -26,7 +25,6 @@ import {
 } from "./voice";
 
 type PopupDeps = {
-  prepare: typeof prepareRecording;
   ask: typeof askBackground;
   activeTabId: () => Promise<number>;
   lastBotId: () => Promise<string | undefined>;
@@ -62,7 +60,6 @@ const openTab = (url: string) => {
  */
 export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
   const ask = deps?.ask ?? askBackground;
-  const prepare = deps?.prepare ?? prepareRecording;
   const tabId = deps?.activeTabId ?? activeTabId;
   const readPageLanguage = deps?.pageLanguage ?? defaultPageLanguage;
   const browserLanguage = deps?.browserLanguage ?? (() => navigator.language);
@@ -131,7 +128,7 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
     };
   }, [readLastBotId]);
 
-  // Read when the popup opens: the Record form offers the microphone page when Chrome has not allowed it.
+  // Read when the popup opens: the Record form offers the setup page when the microphone is not allowed.
   useEffect(() => {
     let mounted = true;
     readMicrophone().then((state) => {
@@ -226,19 +223,12 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
     );
   }
 
+  // Records at once: website access came with the install, and a recording without the microphone goes on (its Voice
+  // row says so and offers the setup page). The popup never opens a tab or asks for a permission here.
   const record = async (botId: string, title: string) => {
     setBusy(true);
     setError(null);
     try {
-      const prepared = await prepare();
-      if (!prepared.ok) {
-        setError(
-          prepared.reason === "microphone"
-            ? "Allow the microphone in the tab that opened, then press Record again."
-            : "Allow website access in the tab that opened, then press Record again.",
-        );
-        return;
-      }
       const tab = await tabId();
       const language = narrationLanguage(
         await readPageLanguage(tab),
@@ -260,8 +250,8 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
     }
   };
 
-  const allowMicrophone = () =>
-    openTab(chrome.runtime.getURL("microphone.html"));
+  // Only ever on the person's click: the setup page asks for the microphone on a tab they can see.
+  const allowMicrophone = () => openTab(chrome.runtime.getURL("setup.html"));
 
   const shownError = error ?? state.error ?? null;
   return (
@@ -300,7 +290,7 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
           busy={busy}
           onRecord={record}
           learningShown={afterStopLearningSentence(state, true)}
-          microphoneBlocked={microphone === "denied"}
+          microphoneBlocked={microphone === "denied" || microphone === "prompt"}
           onAllowMicrophone={allowMicrophone}
         />
       ) : null}

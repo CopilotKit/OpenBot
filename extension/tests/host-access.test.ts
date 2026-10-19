@@ -11,7 +11,7 @@ afterEach(() => {
 });
 
 describe("hasHostPermission", () => {
-  test("is false until website access is granted", async () => {
+  test("is false while website access is withheld", async () => {
     expect(await hasHostPermission()).toBe(false);
   });
 

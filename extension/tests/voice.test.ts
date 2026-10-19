@@ -387,7 +387,7 @@ describe("voice", () => {
     expect(s.speech.instances).toHaveLength(4);
   });
 
-  test("a microphone Chrome has not allowed says so in a plain sentence, and nothing listens", async () => {
+  test("a microphone the browser has not allowed says so in a plain sentence, and nothing listens", async () => {
     const s = setup({
       microphone: async () => {
         throw domError("NotAllowedError");
@@ -398,7 +398,7 @@ describe("voice", () => {
       state: "failed",
       problem: "microphone",
       reason:
-        "Chrome has not let the Recorder use the microphone. Recording goes on without your voice.",
+        "The Recorder is not allowed to use the microphone. Recording goes on without your voice.",
     });
     expect(s.speech.instances).toHaveLength(0);
   });

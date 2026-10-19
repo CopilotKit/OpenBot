@@ -1,4 +1,4 @@
-// What the popup and the microphone page need to know about the person's narration before a recording: whether Chrome
+// What the popup and the setup page need to know about the person's narration before a recording: whether Chrome
 // lets the Recorder's own origin use the microphone, and the page's language.
 
 /** Chrome's microphone permission for the Recorder's own origin, which the offscreen document records with. Null when

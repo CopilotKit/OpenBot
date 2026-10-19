@@ -1,6 +1,5 @@
 import { expect, test } from "bun:test";
 import {
-  hostPermissionPattern,
   isAllowedGatewayUrl,
   isRecordablePage,
   normaliseOpenBotOrigin,
@@ -62,12 +61,6 @@ test("an allow list pins the gateway's origin", () => {
     true,
   );
   expect(isAllowedGatewayUrl("wss://gw.example.test/client", [])).toBe(false);
-});
-
-test("the host permission pattern covers the whole origin", () => {
-  expect(hostPermissionPattern("https://openbot.example.test")).toBe(
-    "https://openbot.example.test/*",
-  );
 });
 
 test("only http and https pages are recordable", () => {
