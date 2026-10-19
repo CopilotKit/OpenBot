@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { pluginsPageQueryOptions } from "@/lib/plugins/queries";
+import { RESEARCH_ROLES } from "@openbot/shared/research";
 import { undeclaredElsewhere } from "@/lib/skills/form";
 
 /**
@@ -132,6 +133,26 @@ export function SkillTools({
           ))}
         </div>
       )}
+
+      {plugins.data ? (
+        <div className="flex flex-col gap-1.5">
+          <p className="text-muted-foreground text-xs">Public-web research</p>
+          <div className="flex flex-wrap gap-2">
+            {RESEARCH_ROLES.map((role) => (
+              <Button
+                key={role.ref}
+                onClick={() => toggle(role.ref)}
+                size="sm"
+                title={`${role.ref} — on whichever research connector the Bot holds`}
+                type="button"
+                variant={held.has(role.ref) ? "default" : "outline"}
+              >
+                {role.label}
+              </Button>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       {elsewhere.length > 0 ? (
         <div className="flex flex-col gap-1.5">

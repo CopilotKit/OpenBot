@@ -16,6 +16,7 @@ const state: ComputerControlState = {
   requested: true,
   transitioning: false,
   resumeSnapshotRequired: false,
+  recoveryRequired: false,
   request: {
     id: "request-1",
     toolCallId: "call-1",

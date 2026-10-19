@@ -26,6 +26,7 @@ import {
   customUrlRefusal,
   resolveServerUrl,
   serverCredentialKind,
+  tokenHeaderFor,
 } from "../catalogue";
 import { toolkitOf } from "../composio";
 import type { ListedTool } from "../mcp";
@@ -1290,6 +1291,7 @@ export function serverMethods(context: StoreContext) {
         listed = await transport.listTools({
           url: effectiveUrl(row, entry),
           token,
+          tokenHeader: tokenHeaderFor(entry),
         });
       } catch (error) {
         /*

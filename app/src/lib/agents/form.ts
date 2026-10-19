@@ -19,8 +19,8 @@ export const agentFormSchema = z.object({
   roleDescription: z
     .string()
     .trim()
-    .min(1, "Role description is required.")
-    .max(1000, "Role description must be 1000 characters or fewer."),
+    .min(1, "A description of what it does is required.")
+    .max(1000, "What it does must be 1000 characters or fewer."),
   visibility: z.enum(["public", "private"]),
   /**
    * The AG-UI endpoint this coworker runs on. Empty means the Bot in the box.

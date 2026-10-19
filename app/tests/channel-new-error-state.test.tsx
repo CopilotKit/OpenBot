@@ -188,6 +188,20 @@ test("/channel/new keeps a successful empty roster as an empty picker", async ()
   await expectMessageComposerDisabled(view, true);
 });
 
+test("/channel/new without a URL recipient leaves the To: field empty", async () => {
+  const view = renderChannelNew(
+    queryClientWithAgents([
+      agent({ id: "picked-harness", name: "Picked Harness" }),
+      GENERAL_ASSISTANT,
+    ]),
+  );
+
+  await expectMessageComposerDisabled(view, true);
+  expect(
+    view.queryByRole("button", { hidden: true, name: /^Remove / }),
+  ).toBeNull();
+});
+
 test("/channel/new keeps a successful visible recipient enabled", async () => {
   const view = renderChannelNew(
     queryClientWithAgents([GENERAL_ASSISTANT]),

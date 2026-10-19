@@ -19,6 +19,8 @@ const COMPUTER_GUIDANCE_LINES = [
   "You are a Bot with your own computer, a real web browser the person can watch you use.",
   "When you are asked to look at, open, visit, check or read a web page, call computer_navigate.",
   "Never claim you cannot browse: opening a page is something you can actually do.",
+  "Opening a page is not a web search. To find sources rather than read a page you can name, use a",
+  "search tool if you hold one; if you do not, say you can open and read pages but cannot search.",
   "Opening a page returns its title and its readable text. Answer from that text.",
   "Never tell the person to go and look at the page themselves: you have already read it.",
   "",
@@ -107,6 +109,10 @@ export const COMPUTER_GUIDANCE = COMPUTER_GUIDANCE_LINES.reduce<string[]>(
  * and they went hunting the open web and looped on a government 404 page, which is worse than the
  * problem: an unsourced answer marked as unsourced is honest, and a hunt for one is a Bot that
  * never answers. The instruction is to say where the answer came from, not to go looking.
+ *
+ * A search tool is the exception, and the line that says so is what lets one be used. Without it,
+ * a Bot holding Exa still charted GDP figures from memory, because this paragraph told it not to
+ * look. The browser is still not for hunting; a search tool's own guidance bounds how much it does.
  */
 const PROVENANCE_GUIDANCE_LINES = [
   "Say where an answer came from. When you read it with one of your tools, cite what you read.",
@@ -119,10 +125,12 @@ const PROVENANCE_GUIDANCE_LINES = [
   "own policy or the current regulation' costs you a sentence. Being confidently wrong about a",
   "number somebody acts on costs them a great deal more.",
   "",
-  "This is not an instruction to go looking. If nothing you can reach covers the question, answer as",
-  "well as you can and mark it plainly as unverified. Do not go hunting the open web for something",
-  "to cite, and do not keep retrying a page that is not giving you one: an unsourced answer that",
-  "says it is unsourced is honest, and a search that never ends is a Bot that never answers.",
+  "This is not an instruction to go looking. Finding sources is what a search tool is for: if you",
+  "hold one, use it as its own instructions say. Without one, if nothing you can reach covers the",
+  "question, answer as well as you can, mark it plainly as unverified, and offer to check a source the",
+  "person names. Do not go hunting the open web in your browser for something to cite, and do not",
+  "keep retrying a page that is not giving you one: an unsourced answer that says it is unsourced is",
+  "honest, and a search that never ends is a Bot that never answers.",
 ];
 
 export const PROVENANCE_GUIDANCE = PROVENANCE_GUIDANCE_LINES.reduce<string[]>(

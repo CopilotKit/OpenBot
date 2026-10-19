@@ -127,10 +127,16 @@ const TABLE = {
   /** `connectionFields`: a box whose answer could not be sent back, because it has no name. */
   fieldNameMissing: () =>
     /under the name nothing, which cannot be filled in here/,
-  /** Personal-mode guard: the person asking has not connected their own account for this app. */
+  /**
+   * Personal-mode guard: the person asking has not connected their own account for this app.
+   *
+   * No longer "in Settings": this refusal carries a connect prompt (see
+   * `@openbot/shared/connect-prompt`), so the transcript draws the button rather than naming a
+   * screen somewhere else. The sentence is still the whole of what the model is told.
+   */
   personalNotConnected: (app: string = "[^.]+") =>
     new RegExp(
-      `You have not connected your ${app} account\\. Connect it in Settings and ask again\\.`,
+      `You have not connected your ${app} account\\. Connect it and ask again\\.`,
     ),
   /** Shared-mode guard: this deployment's shared account for the app has not been connected yet. */
   sharedNotConnected: (app: string = "[^.]+") =>

@@ -8,6 +8,27 @@ import { readToolName } from "../src/lib/plugins/tool-name";
  * that exists to keep two vendors' `search` apart. A reader should never see either.
  */
 describe("naming a tool call", () => {
+  test("a research call says what it did and not which provider did it", () => {
+    for (const name of [
+      "mcp__exa__web_search_exa",
+      "mcp__exa-authenticated__web_search_exa",
+      "mcp__parallel__web_search",
+      "mcp__firecrawl__firecrawl_search",
+    ]) {
+      expect(readToolName(name)).toEqual({ label: "Search the web" });
+    }
+    expect(readToolName("mcp__exa__web_fetch_exa")).toEqual({
+      label: "Read web pages",
+    });
+    expect(readToolName("mcp__firecrawl__firecrawl_scrape")).toEqual({
+      label: "Read web pages",
+    });
+    // Only the research pair is relabelled; a provider's other tools keep their own names.
+    expect(readToolName("mcp__firecrawl__firecrawl_map").label).toBe(
+      "Firecrawl map",
+    );
+  });
+
   test("an MCP tool reads as an action against a named server", () => {
     expect(readToolName("mcp__slack__post_message")).toEqual({
       label: "Post message",
@@ -45,6 +66,36 @@ describe("naming a tool call", () => {
       label: "List files",
       detail: "box",
     });
+  });
+
+  test("a brokered app never puts the broker on screen", () => {
+    // Composio is how this deployment reaches Gmail, which is plumbing: the reader asked their Bot
+    // about their email, not about which broker holds the grant. The app also names itself in every
+    // tool it publishes, so "Gmail fetch emails" already says which mailbox was read.
+    expect(readToolName("mcp__composio-gmail__GMAIL_FETCH_EMAILS")).toEqual({
+      label: "Gmail fetch emails",
+    });
+    expect(readToolName("mcp__composio-slack__SLACK_SEND_EMAIL")).toEqual({
+      label: "Slack send email",
+    });
+  });
+
+  test("a brokered app the label does not name is kept, without its broker", () => {
+    // The app still belongs on screen when the action does not say it — but as the app, never as
+    // `composio-gmail`. This is what proves the prefix is stripped rather than the detail deleted.
+    expect(readToolName("mcp__composio-gmail__FETCH_EMAILS")).toEqual({
+      label: "Fetch emails",
+      detail: "gmail",
+    });
+  });
+
+  test("a brokered app named by the label's first word is still dropped", () => {
+    // Composio writes `<APP>_<VERB>_<NOUN>`, so the app leads and is never the verb. The rule that
+    // protects `posts`/`post_message` excludes the first word from the search, and applying it here
+    // would put "googlecalendar" beside a label that opens with it.
+    expect(
+      readToolName("mcp__composio-googlecalendar__GOOGLECALENDAR_CREATE_EVENT"),
+    ).toEqual({ label: "Googlecalendar create event" });
   });
 
   test("a component the app registered is left alone", () => {

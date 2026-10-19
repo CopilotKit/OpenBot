@@ -2,7 +2,6 @@ import { IconSettings } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Navigate } from "@tanstack/react-router";
 import { motion, useReducedMotion } from "motion/react";
-import { useEffect, useRef } from "react";
 import { z } from "zod";
 import { AgentProfile } from "@/components/agents/agent-profile";
 import { BotPausedBanner } from "@/components/bot-profile/pause-banner";
@@ -10,12 +9,12 @@ import { ChannelAvatar } from "@/components/channels/avatar";
 import { ChannelChat } from "@/components/channels/channel-chat";
 import { ComputerChatControls } from "@/components/computer/computer-controls";
 import { ComputerViewPanel } from "@/components/computer/computer-panel";
+import { useAutoWatchScreen } from "@/components/computer/use-auto-watch-screen";
 import { DetailPanel } from "@/components/layout/detail-panel";
 import { SidebarToggle } from "@/components/layout/sidebar-toggle";
 import { Button } from "@/components/ui/button";
 import { useMarkOpenChannelRead } from "@/lib/channels/mark-read";
 import { type AgentChannel, channelQueryOptions } from "@/lib/channels/queries";
-import { onComputerActivity } from "@/lib/copilot/computer-activity";
 
 const chatSearchSchema = z.object({
   settings: z.boolean().optional(),
@@ -50,28 +49,26 @@ function RouteComponent() {
   useMarkOpenChannelRead(channelId);
 
   // Browser activity may auto-open the screen once per run unless this run was dismissed.
-  const dismissedEpoch = useRef<number | null>(null);
-  const runEpoch = useRef<number | null>(null);
-  useEffect(() => {
-    if (!agentId) return;
-    return onComputerActivity((activity) => {
-      if (activity.botId !== agentId) return;
-      runEpoch.current = activity.epoch;
-      if (dismissedEpoch.current === activity.epoch) return;
+  const autoWatch = useAutoWatchScreen({
+    botId: agentId,
+    watching: isWatching,
+    busy: isSettingsOpen,
+    open: () =>
       navigate({
-        search: (previous) =>
-          previous.watch === true || previous.settings === true
-            ? previous
-            : { ...previous, settings: undefined, watch: true },
-      });
-    });
-  }, [agentId, navigate]);
+        search: (previous) => ({
+          ...previous,
+          settings: undefined,
+          watch: true,
+        }),
+      }),
+    close: () =>
+      navigate({ search: (previous) => ({ ...previous, watch: undefined }) }),
+  });
 
   // Settings and watch share one pane; opening either clears the other URL flag.
   const show = (next: "settings" | "watch" | null) => {
     // Dismissal applies only to the current browser-activity run.
-    if (next !== "watch" && isWatching)
-      dismissedEpoch.current = runEpoch.current;
+    if (next !== "watch" && isWatching) autoWatch.dismiss();
     return navigate({
       search: (previous) => ({
         ...previous,

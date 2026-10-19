@@ -38,6 +38,75 @@ A base64 or quoted-printable email part was always read as UTF-8, whatever chars
 named, so an `iso-8859-1` mail reached the Bot with every accented letter turned into `�`. Each part
 is now decoded in the charset it names, and a charset the runtime does not know still reads as UTF-8.
 
+### The Bot's screen opens only when there is something to watch
+
+Asking a Bot a question it answered in words could still open its computer beside the conversation,
+on a still screen, for an action that never happened.
+
+- **A call that never reaches the screen no longer opens it.** Reading, writing or listing a file,
+  and running a command, happen on the computer rather than on its display. Only work that happens
+  on the screen opens it.
+- **A refused action takes its screen back.** The screen is announced before the action so a page
+  can be watched while it loads; an action a policy, a capability switch or a network rule refuses
+  never touches the browser, so the screen it opened closes again. A refusal does not close a screen
+  some earlier action in the same run legitimately opened, and an action that was permitted and
+  failed keeps its screen, because the page may have moved.
+- **A Bot is no longer given computer tools this deployment would refuse.** Admin → Controls already
+  decided whether anybody may use a Bot's browser (`Cloud browser use`), its files and shell
+  (`Cloud computer use`) and the network (`Cloud network access`), and the boundary enforced all
+  three — but the Bot was still offered the tools, so it reached for one, was refused, and spent the
+  turn saying so. The tools a switch turns off are now withheld from the Bot in the first place.
+
+### An app you have not connected is offered where you are reading
+
+A Bot asked to use an app whose account the person had not connected answered with the name of a
+screen somewhere else: "Connect it in Settings and ask again." The conversation now carries the
+thing itself — a card naming the app, with a Connect button.
+
+- Pressing Connect opens the vendor's consent in a **new tab**, so the conversation is not replaced
+  by a page load and the question is still there afterwards. The card watches for the account to
+  appear and says so only once the server lists it, never merely because somebody came back.
+- It covers an account that was never connected, one disconnected while a call was in flight, and
+  access that was withdrawn. An app shared across the deployment still says to ask an administrator,
+  since the person reading cannot connect it.
+
+### A reply's tool calls fold into one line
+
+A Bot that searched, read two pages and checked Drive before answering drew four lines above its
+answer. Adjacent connector calls and browser steps now fold into one line that says what was done,
+such as "Searched the web and read 2 pages", with an icon for each kind of step. It names the step in
+progress while the Bot works, and counts issues when a step was blocked or failed. Opened, it lists
+each step with its query, page or connector, and each step opens to what it was given and what came
+back. A single connector call keeps its own line, and approvals, connection requests and anything the
+app draws itself stay outside the fold.
+
+### Public-web research works with Exa and Firecrawl, not only Parallel
+
+Four new catalogue entries give a Bot public-web search and page reading without its browser:
+**Exa Search** (free, rate-limited), **Exa Search (API key)**, **Firecrawl** (free) and **Firecrawl
+(API key)**. They sit beside the two Parallel entries, and nothing is granted to any Bot until an administrator does it.
+See [docs/web-research.md](docs/web-research.md).
+
+- **The research guidance follows whichever provider a Bot holds.** It used to switch on only for
+  Parallel's two tools. Now a Bot holding any provider's search and fetch tools is told how to use
+  them, and a Bot holding more than one uses the one the person asks for.
+- **A Bot holding a research provider searches without being asked** when an answer depends on facts
+  that change, such as current figures, rankings or recent events, and stops after a search or two.
+  Before, every Bot was told not to go looking, so one holding a search tool still answered from
+  memory. A Bot with only its browser now says it can open pages but cannot search.
+- **A conversation doesn't say which provider searched.** Research calls show as "Search the web"
+  and "Read web pages" rather than "Web search exa", and the Bot doesn't name the provider unless
+  asked. The Bot's access page still shows which provider it holds.
+- **The shipped `research-public-web` skill declares roles, not Parallel.** Its tools are now
+  `@research/search` and `@research/fetch`, which match the search and fetch tools of every research
+  provider the Bot was granted. A skill written by a person can declare the same roles, and the
+  Skills page offers them under "Public-web research". A role grants nothing.
+- **Exa and Firecrawl list their reads.** Every other tool they advertise counts as a write, so a
+  Firecrawl monitor deletion or an Exa agent run goes through the same policy as any write.
+- **An API key can go in the vendor's own header.** Exa reads `x-api-key`; the deployment key for
+  that entry is sent there. The admin page now says the key is "Sent with every call to this vendor"
+  rather than calling it a bearer token.
+
 ### Bot turns hold their conversation more carefully
 
 Routines, responsibilities, background research, wake-ups, group turns and Bot-to-Bot handoffs keep a

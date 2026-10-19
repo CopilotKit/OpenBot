@@ -11,6 +11,7 @@ import type { ReactNode } from "react";
  * something with nothing to show yet.
  */
 export function ToolLine({
+  icon,
   label,
   detail,
   running,
@@ -18,6 +19,8 @@ export function ToolLine({
   failed,
   children,
 }: {
+  /** Drawn before the label, small and muted. A group of steps puts its kinds here. */
+  icon?: ReactNode;
   /** What was done, in a couple of words: "Searched Slack", "Filled in", "Read the page". */
   label: string;
   /** What it was done to. Muted, and truncated rather than wrapped. */
@@ -42,6 +45,7 @@ export function ToolLine({
         running ? "tool-line-running" : ""
       }`}
     >
+      {icon ? <span className="shrink-0 self-center">{icon}</span> : null}
       <span className="shrink-0">
         {refused
           ? `Blocked: ${label}`

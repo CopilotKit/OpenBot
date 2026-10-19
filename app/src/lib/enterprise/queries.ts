@@ -141,3 +141,29 @@ export function actionRecordsQueryOptions() {
       }),
   });
 }
+
+/** The capability switches as they apply to the person asking. */
+export type MyCapabilities = {
+  capabilities: Partial<Record<CapabilityKey, boolean>>;
+  /** False on a deployment running without enterprise controls, where the defaults stand. */
+  enforced: boolean;
+};
+
+/**
+ * What this person may use, which is not an administrator's read.
+ *
+ * `/me` sits under the enterprise ADMIN prefix and is deliberately the one route there that any
+ * signed-in person may call: the switches decide what the app offers them, so the app has to be
+ * able to ask. Everything else behind that prefix requires an administrator.
+ */
+export function myCapabilitiesQueryOptions() {
+  return queryOptions({
+    queryKey: ["enterprise", "me"] as const,
+    queryFn: async (): Promise<MyCapabilities> =>
+      (
+        await client("/api/admin/enterprise/me", {
+          fallback: "Could not load what this deployment allows",
+        })
+      ).json(),
+  });
+}
