@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import { loadConfig } from "../src/config";
 
 const environment = {
@@ -43,4 +44,29 @@ test("ids with spaces after the comma are each trimmed", () => {
 
 test("unset gives no extra ids", () => {
   expect(loadConfig(environment).recorder).toEqual({ extraExtensionIds: [] });
+});
+
+test("the example environment and the changelog name the variable and that a bad value stops boot", () => {
+  const example = readFileSync(
+    new URL("../../.env.example", import.meta.url),
+    "utf8",
+  );
+  expect(example).toContain("# OPENBOT_RECORDER_EXTRA_EXTENSION_IDS=");
+  expect(example).toMatch(/Any\s+other value stops the server at boot/);
+  const [unreleased = ""] = readFileSync(
+    new URL("../../CHANGELOG.md", import.meta.url),
+    "utf8",
+  )
+    .split("## Unreleased")[1]
+    ?.split(/^## /m) ?? [""];
+  for (const term of [
+    "0057_recorder_extension",
+    "OPENBOT_RECORDER_EXTRA_EXTENSION_IDS",
+    "stops the server at boot",
+    "Settings → Browsers",
+    "1.79.1",
+    "COPILOTKIT_OPENAI_API=responses",
+  ]) {
+    expect(unreleased).toContain(term);
+  }
 });

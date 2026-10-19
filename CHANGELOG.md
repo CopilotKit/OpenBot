@@ -8,7 +8,7 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-**Before upgrading.** Five things change for an existing deployment:
+**Before upgrading.** Seven things change for an existing deployment:
 - A hosted computer's browser is now headed by default. It uses a little more memory than headless
   did; set `COMPUTER_BROWSER_MODE=headless` (Helm: `computers.browserMode: headless`) to keep the old
   behaviour.
@@ -31,6 +31,40 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - Migration `0056_sign_in_code_step` widens the check on `sign_in_requests.status` to allow
   `code_required` (below). A server and a computer must be upgraded together: an older computer has
   no `/sign-in/code`.
+- Migration `0057_recorder_extension` adds three tables for the OpenBot Recorder (below):
+  `recorder_connect_codes`, `recorder_connections` and `recorder_trajectory_bindings`. Nothing
+  existing changes, and the tables stay empty until somebody connects a browser.
+- The CopilotKit runtime moves to 1.79.1. A built-in Bot whose `openai/...` model is reached
+  through an `OPENAI_BASE_URL` that is not OpenAI or Azure now calls that endpoint's Chat
+  Completions API (`/chat/completions`) instead of the Responses API. That is what most
+  OpenAI-compatible endpoints serve, so Bots behind one of them now work; a gateway that also serves
+  the Responses API loses Responses-only features, such as reasoning summaries, without an error.
+  `COPILOTKIT_OPENAI_API=responses` keeps the Responses API (`chat` forces Chat Completions); any
+  other value is an error when a built-in Bot runs. Deployments on OpenAI or Azure are unchanged.
+
+### Teach a Bot by doing the task in your own browser: the OpenBot Recorder
+
+The OpenBot Recorder is a Chrome and Edge extension. A person picks a Bot, does the task in their own
+browser, and the Recorder sends what they did (clicks, typing, pages and the network calls behind
+them, masked in the browser first) straight to Intelligence as a trajectory in that Bot's Learning
+space. OpenBot connects the browser and hands out each capture pass; it receives nothing that is
+recorded.
+
+- **Settings → Browsers** connects the Recorder in this browser and lists every browser connected
+  as you, each with a Disconnect. OpenBot Desktop can connect the Recorder on its own computer too.
+- **Only a connected browser gets a capture pass.** The runtime's `trajectory/<id>/connect` route
+  answers only the Recorder's own bearer, for a Bot the person may record for, and binds the
+  trajectory to that person and Bot. A signed-in session alone gets no pass, and the Recorder's
+  bearer cannot run a Bot or read a conversation.
+- **Intelligence must allow trajectories:** the `trajectories` licence feature,
+  `FF_LEARNING_TRAJECTORIES=true`, and an `INTELLIGENCE_GATEWAY_WS_URL` that people's browsers can
+  reach. A company that installs the extension for everyone pins it to its OpenBot by browser
+  policy; see [docs/recorder-company-install.md](docs/recorder-company-install.md).
+- **`OPENBOT_RECORDER_EXTRA_EXTENSION_IDS`** lists other extension ids to trust besides the
+  Recorder's own, for a fork or a build signed with another key. Each must be 32 letters from a to
+  p, comma separated; **a value that is not stops the server at boot.**
+- Connecting, disconnecting and refusals are audited as `recorder.connected`, `recorder.revoked`,
+  `recorder.connect_refused`, `recorder.bearer_refused` and `recorder.trajectory_refused`.
 
 ### The Bot's screen opens only when there is something to watch
 
