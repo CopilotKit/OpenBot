@@ -23,6 +23,7 @@ import { skills } from "../src/db/schema/plugins";
 import { createDemonstrationRecorder } from "../src/demonstrations/recording";
 import { createDemonstrationStore } from "../src/demonstrations/store";
 import { createLearningSettingsStore } from "../src/learning/settings";
+import { createLearningSharingStore } from "../src/learning/sharing";
 import { createRecorderExtension } from "../src/recorder/wiring";
 import { createRequestActor } from "../src/request-actor";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
@@ -126,6 +127,11 @@ const app = createApp(
   ...(Array.from({ length: 21 }) as never[]),
   {
     recorder,
+    personalLearning: {
+      store: createLearningSharingStore(database),
+      skillsOf: async () => ({ skills: [] }),
+      invalidate: () => {},
+    },
     approvals: {} as never,
     demonstrations: {
       store: demonstrationStore,
@@ -244,6 +250,10 @@ describe("a recorder bearer works only on the Recorder's own routes", () => {
       ["GET", "/api/agents"],
       ["POST", "/api/agents", { name: "Sneaky" }],
       ["GET", "/api/approvals"],
+      // Who else's Bots use the person's Skills is theirs to change in Settings, never the Recorder's.
+      ["GET", "/api/settings/learning"],
+      ["PUT", "/api/settings/learning/mode", { mode: "open" }],
+      ["PUT", "/api/settings/learning/skills/refund", { open: true }],
     ];
     for (const [method, path, json] of routes) {
       const answer = await call(path, {

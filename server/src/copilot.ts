@@ -57,6 +57,7 @@ import {
   LEARNED_SKILL_TOOL_NAMES,
   type LearnedSkillInvocation,
   type LearningRuntime,
+  type PersonalSkillSources,
 } from "./learning/runtime";
 import type { LearningSettingsStore } from "./learning/settings";
 import {
@@ -1706,10 +1707,15 @@ export function mountCopilotRuntime(
     onRunBusy?: (input: { threadId: string; busy: boolean }) => void;
     learningSettings?: LearningSettingsStore;
     /**
-     * The Recorder's capture pass (`trajectory/connect`): the gate that lets only a connected browser through for a
-     * Bot it may record for, and the selector that assigns the trajectory to that Bot's Learning space
-     * (`recorder/wiring.ts`). Absent, the route is the runtime's own: any person identifyUser resolves gets a pass
-     * that joins no Learning space. `index.ts` always passes it.
+     * Each person's own Learning space and everyone's opened Skills, which join the Bot's own in every run
+     * (learning/runtime.ts). Absent, a run gets only the Bot's own learned Skills.
+     */
+    personalSkills?: PersonalSkillSources;
+    /**
+     * The Recorder's capture pass (`trajectory/connect`): the gate that lets only a connected browser through, and
+     * the selector that assigns the trajectory to its person's own Learning space (`recorder/wiring.ts`). Absent, the
+     * route is the runtime's own: any person identifyUser resolves gets a pass that joins no Learning space.
+     * `index.ts` always passes it.
      */
     trajectoryCapture?: {
       gate: NonNullable<CopilotRuntimeHooks["onBeforeHandler"]>;
@@ -1722,6 +1728,7 @@ export function mountCopilotRuntime(
     basePath = "/api/copilotkit",
     onRunBusy,
     learningSettings,
+    personalSkills,
     trajectoryCapture,
   } = options;
 
@@ -1796,6 +1803,7 @@ export function mountCopilotRuntime(
     ? createLearningRuntime({
         store: learningSettings,
         client: intelligenceClient,
+        ...(personalSkills ? { people: personalSkills } : {}),
       })
     : undefined;
 

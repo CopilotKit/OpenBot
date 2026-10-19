@@ -571,11 +571,19 @@ export const auditEventTypes = [
   "recorder.revoked",
   /*
    * The capture pass (the runtime's trajectory/connect) turned a caller away: an id that is not a UUID, no
-   * Recorder bearer or one that no longer resolves, no role, the organization unable to answer, no Bot named,
-   * a Bot the person may not record for, or a trajectory already bound to another person or Bot. Target the
-   * trajectory id; payload `reason`. At most one row per person, trajectory and reason a minute per replica.
+   * Recorder bearer or one that no longer resolves, no role, the organization unable to answer, or a trajectory
+   * already bound to another person. Target the trajectory id; payload `reason`. At most one row per person,
+   * trajectory and reason a minute per replica.
    */
   "recorder.trajectory_refused",
+  /*
+   * A person changed who else's Bots use the Skills learned in their own Learning space (Settings, Learning). Target
+   * the person; payload `from` and `to`, each `closed`, `open` or `choose`.
+   */
+  "learning.sharing_changed",
+  /* A person opened one of their own learned Skills to every Bot, or closed it again. Target and payload `skill`. */
+  "learning.skill_opened",
+  "learning.skill_closed",
 ] as const;
 
 export type AuditEventType = (typeof auditEventTypes)[number];

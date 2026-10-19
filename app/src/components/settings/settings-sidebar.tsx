@@ -7,6 +7,7 @@ import {
   IconKey,
   IconLayoutGrid,
   IconPlug,
+  IconSchool,
   IconSettings,
 } from "@tabler/icons-react";
 import { Link, type LinkOptions } from "@tanstack/react-router";
@@ -75,6 +76,12 @@ export const SETTINGS_SIDEBAR_ITEMS: {
     title: "Browsers",
     icon: IconBrowser,
     linkOptions: { to: "/settings/browsers" },
+  },
+  {
+    /* Who else's Bots use the Skills learned from your recordings: none, all, or the ones you open. */
+    title: "Learning",
+    icon: IconSchool,
+    linkOptions: { to: "/settings/learning" },
   },
   {
     /* Logins saved from a Bot's private sign-in form. */

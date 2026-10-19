@@ -11,4 +11,12 @@ describe("settings sidebar", () => {
       titles.indexOf("Connected accounts") + 1,
     );
   });
+
+  test("Learning links to /settings/learning, right after Browsers", () => {
+    const titles = SETTINGS_SIDEBAR_ITEMS.map((item) => item.title);
+    const learning = SETTINGS_SIDEBAR_ITEMS[titles.indexOf("Learning")];
+
+    expect(learning?.linkOptions).toEqual({ to: "/settings/learning" });
+    expect(titles.indexOf("Learning")).toBe(titles.indexOf("Browsers") + 1);
+  });
 });

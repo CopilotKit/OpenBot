@@ -35,7 +35,7 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   Learning space (below): `recorder_connect_codes`, `recorder_connections`,
   `recorder_trajectory_bindings`, `learning_person_spaces`, `learning_skill_sharing` and
   `learning_open_skills`. Nothing existing changes, and the tables stay empty until somebody
-  connects a browser.
+  connects a browser or changes Settings → Learning.
 - The CopilotKit runtime moves to 1.79.1. A built-in Bot whose `openai/...` model is reached
   through an `OPENAI_BASE_URL` that is not OpenAI or Azure now calls that endpoint's Chat
   Completions API (`/chat/completions`) instead of the Responses API. That is what most
@@ -49,8 +49,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 The OpenBot Recorder is a Chrome and Edge extension. A person names the task, does it in their own
 browser, and the Recorder sends what they did (clicks, typing, pages and the network calls behind
 them, masked in the browser first) straight to Intelligence as a trajectory in that person's own
-Learning space. OpenBot connects the browser and hands out each capture pass; it receives nothing
-that is recorded.
+Learning space. Every Bot they use then gets the Skills learned there, beside the Bot's own. OpenBot
+connects the browser and hands out each capture pass; it receives nothing that is recorded.
 
 - **Settings → Browsers** connects the Recorder in this browser and lists every browser connected
   as you, each with a Disconnect. OpenBot Desktop can connect the Recorder on its own computer too.
@@ -65,6 +65,16 @@ that is recorded.
   install, or a CopilotKit CLI login against managed Intelligence. Intelligence's runtime key
   cannot make one. With neither, a missing space cannot be made, and the Recorder's popup says
   Learning will not see the recording; the recording still goes to Intelligence.
+- **Every Bot a person uses draws on their space.** A run gets the Bot's own learned Skills, then
+  the person's own, then any another person opened (below). On a name clash the Bot's own wins,
+  then the person's own; two people's opened Skills with one name are both kept, each named
+  `<their space>/<name>`. A person's space that is missing or unreachable never fails a run: it
+  goes on with the Skills it has. Admin → Automatic Learning off, or a Bot excluded there, still
+  means no learned Skills at all.
+- **Settings → Learning** chooses who else's Bots use a person's Skills: only their own (the
+  default), every Bot in the deployment, or the Skills they open one by one. Runs read what is
+  open from memory, refreshed at once on the replica that saved a change and within 30 seconds on
+  the others.
 - **Intelligence must allow trajectories:** the `trajectories` licence feature,
   `FF_LEARNING_TRAJECTORIES=true`, and an `INTELLIGENCE_GATEWAY_WS_URL` that people's browsers can
   reach.
@@ -72,7 +82,9 @@ that is recorded.
   Recorder's own, for a fork or a build signed with another key. Each must be 32 letters from a to
   p, comma separated; **a value that is not stops the server at boot.**
 - Connecting, disconnecting and refusals are audited as `recorder.connected`, `recorder.revoked`,
-  `recorder.connect_refused`, `recorder.bearer_refused` and `recorder.trajectory_refused`.
+  `recorder.connect_refused`, `recorder.bearer_refused` and `recorder.trajectory_refused`; changing
+  Settings → Learning as `learning.sharing_changed`, `learning.skill_opened` and
+  `learning.skill_closed`.
 
 ### The Bot's screen opens only when there is something to watch
 

@@ -178,6 +178,10 @@ import {
 } from "./learning/personal-space";
 import { clearLearningRevisionFallback } from "./learning/runtime";
 import { createLearningSettingsStore } from "./learning/settings";
+import {
+  createLearningSharingStore,
+  createOpenSkillIndex,
+} from "./learning/sharing";
 import { createMemoryDefaults } from "./memory/defaults";
 import { createMemoryIngestion } from "./memory/ingestion";
 import { createIntelligenceMemory } from "./memory/intelligence";
@@ -329,7 +333,7 @@ const learningAutoAssign = createLearningAutoAssign({
   audit: createAuditStore(database),
 });
 /*
- * Each person's own Learning space: every recording they make joins it. Made
+ * Each person's own Learning space: every recording they make joins it, and every Bot they run uses its Skills. Made
  * with the same credential as the default container, on first need: when their browser connects, and again on a
  * capture pass if it is still missing. With no such credential a missing space cannot be made, and the Recorder says so.
  */
@@ -354,6 +358,11 @@ const personalLearningSpaces = createPersonalLearningSpaces({
         .where(eq(users.id, userId))
         .limit(1)
     ).map((row) => row.name?.trim() || null)[0] ?? null,
+});
+const learningSharingStore = createLearningSharingStore(database);
+/** What everyone opened to every Bot, in memory: runs read this, never each person's space or the table. */
+const openSkillIndex = createOpenSkillIndex({
+  read: () => learningSharingStore.openSources(),
 });
 const learningSettings = withLearningAutoAssign(
   learningSettingsStore,
@@ -1637,6 +1646,10 @@ const copilotRuntime = mountCopilotRuntime(
       void channelStore.signalBusy(input.threadId, input.busy).catch(() => {});
     },
     learningSettings,
+    personalSkills: {
+      containerFor: personalLearningSpaces.containerFor,
+      openSkills: () => openSkillIndex.sources(),
+    },
     trajectoryCapture: recorderExtension.trajectoryCapture,
   },
 );
@@ -2424,6 +2437,13 @@ const app = createApp(
       recorder: demonstrationRecorder,
     },
     recorder: recorderExtension,
+    personalLearning: {
+      store: learningSharingStore,
+      skillsOf: (userId) =>
+        copilotRuntime.learning?.personalSkills(userId) ??
+        Promise.resolve({ unavailable: "unavailable" as const }),
+      invalidate: () => openSkillIndex.invalidate(),
+    },
     delivery: {
       authenticated: {
         store: deliveryStore,

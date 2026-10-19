@@ -1,8 +1,8 @@
+import { MAX_IMAGE_BYTES } from "@openbot/shared/attachments";
 import type { Hono as HonoApp, MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { serveStatic } from "hono/bun";
-import { MAX_IMAGE_BYTES } from "@openbot/shared/attachments";
 import { enterpriseControls } from "./admin/controls";
 import { createEnterpriseGate } from "./admin/gate";
 import { createEnterpriseAdminRoutes } from "./admin/routes";
@@ -25,10 +25,10 @@ import type { ApprovalService } from "./approvals/service";
 import {
   type AuditEventType,
   type AuditInitiator,
-  auditEventsToCsv,
   AuditQueryError,
   type AuditReader,
   type AuditStore,
+  auditEventsToCsv,
   auditQueryFromUrl,
   DEPLOYMENT_INITIATOR,
   readAuditExportRows,
@@ -89,6 +89,10 @@ import {
   createLearningRoutes,
   type LearningAdminDependencies,
 } from "./learning/routes";
+import {
+  createPersonalLearningRoutes,
+  type PersonalLearningRouteDeps,
+} from "./learning/sharing-routes";
 import type { MemoryIngestion } from "./memory/ingestion";
 import { createMemoryRoutes } from "./memory/routes";
 import type { MemoryStore } from "./memory/store";
@@ -403,6 +407,8 @@ export function createApp(
     approvals?: ApprovalService;
     /** The Recorder extension's routes and guards (recorder/wiring.ts). Absent, nothing about it is mounted. */
     recorder?: RecorderExtensionDeps;
+    /** Settings, Learning: who else's Bots use a person's own learned Skills. Absent, the screen has nothing to read. */
+    personalLearning?: PersonalLearningRouteDeps;
     /**
      * Shared apps: who may use an app's one team account, and the switch that makes an app Shared.
      *
@@ -1603,6 +1609,14 @@ export function createApp(
       }),
     );
   }
+  if (coworker?.personalLearning)
+    app.route(
+      "/api/settings/learning",
+      createPersonalLearningRoutes(
+        { ...coworker.personalLearning, auditStore },
+        requireUser,
+      ),
+    );
   if (coworker?.demonstrations)
     app.route(
       "/api/demonstrations",

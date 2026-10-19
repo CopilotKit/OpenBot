@@ -1,0 +1,198 @@
+import type {
+  LearningSharingMode,
+  PersonalLearningSharing,
+} from "@openbot/shared/learning";
+import {
+  IconCheck,
+  IconListCheck,
+  IconLock,
+  IconSparkles,
+  IconUsersGroup,
+} from "@tabler/icons-react";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import React from "react";
+import {
+  PageEmpty,
+  PageRows,
+  PageSection,
+} from "@/components/layout/page-shell";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemMedia,
+  ItemTitle,
+} from "@/components/ui/item";
+import { Separator } from "@/components/ui/separator";
+import { Switch } from "@/components/ui/switch";
+import {
+  setLearnedSkillOpenMutationOptions,
+  setLearningSharingModeMutationOptions,
+} from "@/lib/learning/mutations";
+import { personalLearningQueryOptions } from "@/lib/learning/queries";
+import { queryClient } from "@/query-client";
+
+/** The three choices, each with the one plain line that says who sees what. */
+export const SHARING_CHOICES: {
+  mode: LearningSharingMode;
+  icon: React.ComponentType<{ className?: string }>;
+  title: string;
+  description: string;
+}[] = [
+  {
+    mode: "closed",
+    icon: IconLock,
+    title: "Only my Bots",
+    description: "Only the Bots you use draw on your Skills.",
+  },
+  {
+    mode: "open",
+    icon: IconUsersGroup,
+    title: "Everyone's Bots",
+    description: "Every Bot in this OpenBot draws on all of your Skills.",
+  },
+  {
+    mode: "choose",
+    icon: IconListCheck,
+    title: "The Skills I choose",
+    description:
+      "Every Bot draws on the Skills you open below; your own Bots use all of them.",
+  },
+];
+
+/** What the Skills list says when it has none to show. */
+function emptySentence(data: PersonalLearningSharing): string {
+  if (data.unavailable === "off")
+    return "Automatic Learning is off in this OpenBot, so no Skills are learned from your recordings.";
+  if (data.skills === null)
+    return "Your Skills could not be read from Intelligence just now. Your choice above still applies to them.";
+  return "No Skills have been learned from your recordings yet. Each one you open here reaches every Bot once it is.";
+}
+
+/**
+ * Settings, Learning: every recording a person makes goes into their own Learning space, and the Skills learned there
+ * reach every Bot they use. Here they choose who else's Bots may draw on them: none (the default), all, or the Skills
+ * they open one by one. Each change takes effect when it is made; there is no save.
+ */
+export function LearningSharing() {
+  const sharing = useQuery(personalLearningQueryOptions());
+  const setMode = useMutation(
+    setLearningSharingModeMutationOptions(queryClient),
+  );
+  const setOpen = useMutation(setLearnedSkillOpenMutationOptions(queryClient));
+  if (sharing.isPending) return null;
+  if (sharing.error) {
+    return (
+      <p className="mt-6 text-destructive text-sm" role="alert">
+        {sharing.error.message}
+      </p>
+    );
+  }
+  const data = sharing.data;
+  // Shown at once while the save is on its way, as a switch is.
+  const mode = (setMode.isPending ? setMode.variables : undefined) ?? data.mode;
+  const failure = setMode.error ?? setOpen.error;
+
+  return (
+    <>
+      <PageSection
+        title="Who else's Bots use your Skills"
+        description="Your own Bots always use every Skill learned from your recordings."
+      >
+        <PageRows>
+          {/* One pressed button of three, as Admin, Boundaries draws its enforcement choice. */}
+          {SHARING_CHOICES.map((choice, index) => (
+            <React.Fragment key={choice.mode}>
+              {index > 0 ? <Separator /> : null}
+              <Item
+                size="sm"
+                render={
+                  <button
+                    aria-pressed={mode === choice.mode}
+                    disabled={setMode.isPending}
+                    onClick={() => {
+                      if (mode !== choice.mode) setMode.mutate(choice.mode);
+                    }}
+                    type="button"
+                  />
+                }
+              >
+                <ItemMedia variant="icon">
+                  <choice.icon />
+                </ItemMedia>
+                <ItemContent>
+                  <ItemTitle>{choice.title}</ItemTitle>
+                  <ItemDescription className="line-clamp-none">
+                    {choice.description}
+                  </ItemDescription>
+                </ItemContent>
+                <ItemActions>
+                  {mode === choice.mode ? (
+                    <IconCheck
+                      aria-hidden="true"
+                      className="size-4 text-foreground"
+                    />
+                  ) : null}
+                </ItemActions>
+              </Item>
+            </React.Fragment>
+          ))}
+        </PageRows>
+      </PageSection>
+      {mode === "choose" ? (
+        <PageSection
+          title="Your Skills"
+          description="Open a Skill to let every Bot in this OpenBot use it."
+        >
+          {data.skills === null || data.skills.length === 0 ? (
+            <PageEmpty>{emptySentence(data)}</PageEmpty>
+          ) : (
+            <PageRows>
+              {data.skills.map((skill, index) => {
+                const open =
+                  (setOpen.isPending && setOpen.variables?.name === skill.name
+                    ? setOpen.variables.open
+                    : undefined) ?? skill.open;
+                return (
+                  <React.Fragment key={skill.name}>
+                    {index > 0 ? <Separator /> : null}
+                    <Item size="sm">
+                      <ItemMedia variant="icon">
+                        <IconSparkles />
+                      </ItemMedia>
+                      <ItemContent>
+                        <ItemTitle>{skill.name}</ItemTitle>
+                        <ItemDescription>
+                          {open
+                            ? "Every Bot may use it."
+                            : "Only your Bots use it."}
+                          {skill.description ? ` ${skill.description}` : ""}
+                        </ItemDescription>
+                      </ItemContent>
+                      <ItemActions>
+                        <Switch
+                          aria-label={`Open ${skill.name} to everyone`}
+                          checked={open}
+                          disabled={setOpen.isPending}
+                          onCheckedChange={(checked) =>
+                            setOpen.mutate({ name: skill.name, open: checked })
+                          }
+                        />
+                      </ItemActions>
+                    </Item>
+                  </React.Fragment>
+                );
+              })}
+            </PageRows>
+          )}
+        </PageSection>
+      ) : null}
+      {failure ? (
+        <p className="mt-4 text-destructive text-sm" role="alert">
+          {failure.message}
+        </p>
+      ) : null}
+    </>
+  );
+}
