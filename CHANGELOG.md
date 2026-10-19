@@ -165,7 +165,9 @@ redacted the word *after* it and left the password. A URL with no user, `redis:/
 missed the same way, and so were curl's proxy credentials in `--proxy-user` where `-u` and `--user`
 were covered. All of them are now redacted, in the command kept for Action Recording and in the copy
 exported to a telemetry collector. A password separated from `-p` by a space is left alone: mysql
-asks for it at the prompt and the word after the flag is the database name.
+asks for it at the prompt and the word after the flag is the database name. Each of these rules ends where its
+command does, so the port in `sshpass -p secret ssh -p 2222`, or in a `docker run -p 8080:80` on the
+line after a `docker login`, is left alone.
 
 ### An app's account can belong to the team
 

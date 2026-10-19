@@ -50,27 +50,31 @@ const RULES: [RegExp, (match: string, ...groups: string[]) => string][] = [
    * word after it instead of the password.
    *
    * Each of these refuses a value that begins with `-`, so a flag left bare, which asks for the
-   * password interactively, does not swallow the flag that follows it.
+   * password interactively, does not swallow the flag that follows it. And each ends where its
+   * command does: at a line break, which starts another command whose `-p` is a port again, though
+   * not at a line continued with a backslash, which is the same command.
    */
   // `-psecret` for mysql and friends. Nothing separates them: a space means the password is asked for
   // at the prompt and the word after `-p` is the database, so only the attached form is redacted.
   [
-    /(\bmysql(?:dump)?\b[^|;&]*?\s-p)("[^"]*"|'[^']*'|[^\s'"-]\S*)/gi,
+    /(\bmysql(?:dump)?\b(?:[^|;&\\\r\n]|\\[\s\S])*?(?:[ \t]|\\\r?\n)-p)("[^"]*"|'[^']*'|[^\s'"-]\S*)/gi,
     (_m, lead) => `${lead}${REDACTED}`,
   ],
   // `docker login -p secret`, where `-p` is the password rather than a port.
   [
-    /(\bdocker\s+login\b[^|;&]*?\s-p[ \t]*)("[^"]*"|'[^']*'|[^\s'"-]\S*)/gi,
+    /(\bdocker(?:[ \t]|\\\r?\n)+login\b(?:[^|;&\\\r\n]|\\[\s\S])*?(?:[ \t]|\\\r?\n)-p[ \t]*)("[^"]*"|'[^']*'|[^\s'"-]\S*)/gi,
     (_m, lead) => `${lead}${REDACTED}`,
   ],
-  // `sshpass -p secret ssh user@host`, where `-p` is the password handed to ssh.
+  // `sshpass -p secret ssh user@host`, where `-p` is the password handed to ssh. Only sshpass's own
+  // options are read, `-f file`, `-d fd` and `-P prompt` with the word after them, so the command it
+  // wraps keeps its `-p` and `-P`, which are ports. Case matters here: `-P` is sshpass's prompt.
   [
-    /(\bsshpass\b[^|;&]*?\s-p[ \t]*)("[^"]*"|'[^']*'|[^\s'"-]\S*)/gi,
+    /(\bsshpass(?:(?:[ \t]|\\\r?\n)+(?:-[fdP][ \t]*(?:"[^"]*"|'[^']*'|[^\s'"-]\S*)|-[^\sp]\S*))*?(?:[ \t]|\\\r?\n)+-p[ \t]*)("[^"]*"|'[^']*'|[^\s'"-]\S*)/g,
     (_m, lead) => `${lead}${REDACTED}`,
   ],
   // `redis-cli -a secret`, `-asecret` and `--pass secret`, the same shape under redis-cli's names.
   [
-    /(\bredis-cli\b[^|;&]*?\s(?:-a[ \t]*|--pass(?:=|[ \t]+)))("[^"]*"|'[^']*'|[^\s'"-]\S*)/gi,
+    /(\bredis-cli\b(?:[^|;&\\\r\n]|\\[\s\S])*?(?:[ \t]|\\\r?\n)(?:-a[ \t]*|--pass(?:=|[ \t]+)))("[^"]*"|'[^']*'|[^\s'"-]\S*)/gi,
     (_m, lead) => `${lead}${REDACTED}`,
   ],
   // A quoted key in a JSON body: `-d '{"password":"x"}'`, or `-d "{\\"password\\":\\"x\\"}"` once the

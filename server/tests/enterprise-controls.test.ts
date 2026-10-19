@@ -410,6 +410,27 @@ describe("scrubbing commands", () => {
     ["redis-cli -ahunter2 SET k v", "redis-cli -a[REDACTED] SET k v"],
     ["redis-cli --pass hunter2 SET k v", "redis-cli --pass [REDACTED] SET k v"],
     ["redis://:hunter2@cache:6379", "redis://:[REDACTED]@cache:6379"],
+    // Each of those rules ends where its command does. A line break starts another command, whose
+    // `-p` is a port again; a line continued with a backslash does not. sshpass's options end at
+    // the command it wraps, and that command's own `-p` and `-P` are ports too.
+    [
+      "sshpass -p hunter2 ssh -p 2222 user@host",
+      "sshpass -p [REDACTED] ssh -p 2222 user@host",
+    ],
+    [
+      "sshpass -f pw.txt ssh -p 2222 user@host",
+      "sshpass -f pw.txt ssh -p 2222 user@host",
+    ],
+    ["sshpass -e scp -P 2222 f host:", "sshpass -e scp -P 2222 f host:"],
+    [
+      "docker login -u bob r.test\ndocker run -p 8080:80 nginx",
+      "docker login -u bob r.test\ndocker run -p 8080:80 nginx",
+    ],
+    [
+      "docker login -u bob \\\n  -p hunter2 r.test",
+      "docker login -u bob \\\n  -p [REDACTED] r.test",
+    ],
+    ["redis-cli PING\nls -a /tmp", "redis-cli PING\nls -a /tmp"],
   ];
   for (const [input, output] of cases) {
     test(input, () => expect(scrubCommand(input)).toBe(output));
