@@ -488,7 +488,7 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
 
   async function stop(
     target: Live,
-    outcome: "succeeded" | "failed",
+    message: Extract<BackgroundToOffscreen, { type: "offscreen.stop" }>,
   ): Promise<void> {
     if (target.stopped) {
       // The service worker restarted mid-Stop and asks again.
@@ -515,7 +515,10 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
     }
     target.ending = true;
     const recordingId = target.recordingId;
-    const { trajectoryIds } = await streamer.stop(outcome);
+    const { trajectoryIds } =
+      message.outcome === "failed"
+        ? await streamer.stop("failed", { reason: message.reason })
+        : await streamer.stop("succeeded");
     target.stopped = { trajectoryIds };
     post({ type: "offscreen.stopped", recordingId, trajectoryIds });
     void streamer.drained().then(
@@ -676,7 +679,7 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
         return;
       case "offscreen.stop":
         if (!target) return;
-        serially(() => stop(target, message.outcome), "stop the recording");
+        serially(() => stop(target, message), "stop the recording");
         return;
       case "offscreen.recover":
         serially(() => recover(message), "recover kept recordings");

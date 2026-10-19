@@ -118,12 +118,17 @@ export type StreamSession = {
    * no extension API but runtime, so it cannot read storage itself); the offscreen document reads it only inside its e2e branch. */
   e2eHoldRetryMs?: number;
 };
+/** Why a recording ended without the person's Stop, sent to Intelligence with its failed outcome: `disconnected` for a
+ * Disconnect (the person's own, or the organization's policy moving the Recorder), `signed-out` for a connection OpenBot
+ * signed out. Events streamed live before it ended are already in Intelligence. */
+export type StopFailure = "disconnected" | "signed-out";
 export type BackgroundToOffscreen =
   | { type: "offscreen.start"; session: StreamSession }
   | { type: "offscreen.resume"; session: StreamSession } // the service worker restarted and found no document: same outbox
   | { type: "offscreen.event"; event: CapturedEvent }
   | { type: "offscreen.rotate"; recordingId: string; trajectoryId: string } // "Start over"
-  | { type: "offscreen.stop"; outcome: "succeeded" | "failed" } // idempotent per recording (Task 11)
+  | { type: "offscreen.stop"; outcome: "succeeded" } // the person's Stop; idempotent per recording (Task 11)
+  | { type: "offscreen.stop"; outcome: "failed"; reason: StopFailure } // the browser was disconnected or signed out mid-recording
   | {
       type: "offscreen.recover";
       openbotUrl: string;

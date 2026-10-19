@@ -800,7 +800,7 @@ test("a service-worker restart whose recording lost its connection stops it and 
   await recoverInterruptedRecording();
 
   expect(sentToDocument("offscreen.stop", port)).toEqual([
-    { type: "offscreen.stop", outcome: "succeeded" },
+    { type: "offscreen.stop", outcome: "failed", reason: "signed-out" },
   ]);
   expect(sentToDocument("offscreen.discard", port)).toEqual([]);
   expect(network.resumed).toEqual([]);

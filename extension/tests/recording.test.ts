@@ -1481,6 +1481,10 @@ test("a signed-out pass names its reason and keeps everything for the person", a
     parked: true,
     waitingFor: { name: "Ada", recordings: 1 },
   });
+  // The person did not stop it: its outcome says the browser was signed out.
+  expect(sentToDocument("offscreen.stop", document)).toEqual([
+    { type: "offscreen.stop", outcome: "failed", reason: "signed-out" },
+  ]);
   expect(sentToDocument("offscreen.discard", document)).toEqual([]);
   expect(drains()).toMatchObject([
     {
@@ -1802,9 +1806,11 @@ test("Disconnect discards the kept recordings and the one recording, and nothing
     () => sentToDocument("offscreen.discard").length === 1,
     "offscreen.discard",
   );
+  // What the recording streamed live is in Intelligence already: its outcome says it ended with a Disconnect.
   expect(sentToDocument("offscreen.stop").at(-1)).toEqual({
     type: "offscreen.stop",
-    outcome: "succeeded",
+    outcome: "failed",
+    reason: "disconnected",
   });
   expect(sentToDocument("offscreen.discard")[0]).toEqual({
     type: "offscreen.discard",

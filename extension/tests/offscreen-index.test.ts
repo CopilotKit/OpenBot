@@ -526,6 +526,22 @@ describe("offscreen controller", () => {
     ]);
   });
 
+  test("a stop that is not the person's sends a failed outcome naming why the recording ended", async () => {
+    const h = await setup();
+    await h.open();
+    const session = h.session();
+    const t = session.trajectoryId;
+    h.post({ type: "offscreen.start", session });
+    await streaming(h, t);
+    h.post({ type: "offscreen.event", event: click(1) });
+    h.post({ type: "offscreen.stop", outcome: "failed", reason: "signed-out" });
+    await until(() => finishedTrajectory(h, t), "the trajectory finished");
+    expect(outcomes(h, t).at(-1)).toMatchObject({
+      phase: "failed",
+      reason: "signed-out",
+    });
+  });
+
   test("stop reports stopped and done when the streamer never started", async () => {
     const h = await setup();
     await h.open(h.clock, {

@@ -1086,10 +1086,16 @@ export function installRecording(
     network = null;
     networkMode = "off";
     if (capture) await capture.stop().catch(report("stopping network capture"));
-    const message: BackgroundToOffscreen = {
-      type: "offscreen.stop",
-      outcome: "succeeded",
-    };
+    // Only the person's Stop succeeds. A Disconnect or a sign-out ends the recording midway: what it streamed live is in
+    // Intelligence already, and its outcome says why it ended.
+    const message: BackgroundToOffscreen =
+      mode.kind === "person"
+        ? { type: "offscreen.stop", outcome: "succeeded" }
+        : {
+            type: "offscreen.stop",
+            outcome: "failed",
+            reason: mode.kind === "disconnect" ? "disconnected" : "signed-out",
+          };
     // The document went away with the service worker: it is reopened on the stored session to finish the stop, however
     // long ago the stop began.
     if (resumed && !(await hasOffscreenDocument()))
@@ -1123,7 +1129,8 @@ export function installRecording(
     await removeSession("stream");
     dispatch({
       type: "finished",
-      // A recording a Disconnect stops is discarded right after: nothing of it goes to Intelligence.
+      // A recording a Disconnect stops is discarded right after: what it had not sent yet never goes to Intelligence, so
+      // the popup does not say it was sent (what it streamed live is there, ended with a failed outcome).
       lastStopped:
         mode.kind === "disconnect"
           ? undefined
