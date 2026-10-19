@@ -2,6 +2,7 @@ import { readFile, rename, rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { parseEnv } from "node:util";
+import { intelligenceApiKey } from "../shared/intelligence-key";
 import {
   cliLoginPresent,
   containerMissing,
@@ -136,7 +137,10 @@ export async function setupLearning(
   const effective = (name: string) =>
     (environment[name] || values[name] || "").trim();
   if (effective(CONTAINER)) return "preserved";
-  const existingKey = effective("INTELLIGENCE_API_KEY");
+  const existingKey = intelligenceApiKey({
+    CPK_INTELLIGENCE_API_KEY: effective("CPK_INTELLIGENCE_API_KEY"),
+    INTELLIGENCE_API_KEY: effective("INTELLIGENCE_API_KEY"),
+  });
   if (existingKey) {
     /*
      * The key cannot create containers, and it is never replaced here. Creation goes through a
