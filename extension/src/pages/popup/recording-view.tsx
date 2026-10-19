@@ -1,4 +1,7 @@
-import type { RecorderBot } from "@openbot/shared/recorder-api";
+import {
+  joinedLearningContainer,
+  type RecorderBot,
+} from "@openbot/shared/recorder-api";
 import {
   IconCircleCheck,
   IconCloudUpload,
@@ -184,17 +187,17 @@ function keptSentence(kept: NonNullable<RecorderState["kept"]>): string {
     : `${counts} ${verb} kept in this browser: ${stripCaptureStatus(kept.reason)}`;
 }
 
-/** Where the stopped recording went in Intelligence: the picked Bot's Learning space, or why Learning may not see it. */
+/** Where the stopped recording went in Intelligence: the picked Bot's Learning space, or why Learning will not see it. */
 function destinationLines(state: RecorderState, bots: RecorderBot[]): string[] {
   const { lastStopped, learning } = state;
   if (!lastStopped) return [];
   const bot = bots.find((candidate) => candidate.id === lastStopped.botId);
-  const space =
-    learning?.state === "assigned"
+  // Into the Bot's space whenever the capture pass joined it, checked or not.
+  const space = !learning
+    ? null
+    : joinedLearningContainer(learning) !== null
       ? "It goes into this Bot's Learning space."
-      : learning
-        ? learningSentence(learning)
-        : null;
+      : learningSentence(learning);
   return [
     ...(bot ? [`Recorded for ${bot.name}.`] : []),
     ...(space ? [space] : []),

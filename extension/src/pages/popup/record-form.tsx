@@ -1,6 +1,7 @@
-import type {
-  LearningSpaceState,
-  RecorderBot,
+import {
+  joinedLearningContainer,
+  type LearningSpaceState,
+  type RecorderBot,
 } from "@openbot/shared/recorder-api";
 import { IconMicrophone } from "@tabler/icons-react";
 import { useState } from "react";
@@ -27,14 +28,18 @@ const LEARNING_SENTENCES: Partial<Record<LearningSpaceState["state"], string>> =
       "Learning will not see this recording: this Bot has no Learning space. It still goes to Intelligence.",
     missing:
       "Learning will not see this recording: this Bot's Learning space does not exist in Intelligence. Ask an administrator to fix it in Admin, Automatic Learning. It still goes to Intelligence.",
-    "learning-off":
-      "Learning may not see this recording: Intelligence's Learning delivery is off or unavailable, so OpenBot could not check this Bot's Learning space. It still goes to Intelligence.",
+    // OpenBot could not read the Bot's Learning settings, so it named no container.
     unverified:
-      "Learning may not see this recording: OpenBot could not check this Bot's Learning space with Intelligence just now. It still goes to Intelligence.",
+      "Learning may not see this recording: OpenBot could not read this Bot's Learning space just now. It still goes to Intelligence.",
   };
 
-/** What the person is told under the Bot picker; assigned says nothing there. */
+/**
+ * What the person is told under the Bot picker: a warning only when the capture pass joins no Learning space (the Bot has
+ * none, Intelligence says it does not exist, or OpenBot named none). A space OpenBot could not check with Intelligence
+ * (its Learning delivery off, or Intelligence not answering) says nothing, because the pass still joins it.
+ */
 export function learningSentence(learning: LearningSpaceState): string | null {
+  if (joinedLearningContainer(learning) !== null) return null;
   return LEARNING_SENTENCES[learning.state] ?? null;
 }
 

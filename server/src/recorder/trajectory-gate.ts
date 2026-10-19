@@ -3,6 +3,7 @@ import type {
   GetTrajectoryLearningContainerIds,
 } from "@copilotkit/runtime/v2";
 import {
+  joinedLearningContainer,
   type LearningSpaceState,
   RECORDER_BOT_HEADER,
   RECORDER_SIGNED_OUT,
@@ -180,13 +181,8 @@ const CHECK_STOP_EARLY_MS = 100;
  * reject whole and join with no container.
  */
 function containerIdsFor(learning: LearningSpaceState): string[] | null {
-  const joins =
-    learning.state === "assigned" ||
-    learning.state === "unverified" ||
-    learning.state === "learning-off";
-  return joins && typeof learning.containerId === "string"
-    ? [learning.containerId]
-    : null;
+  const containerId = joinedLearningContainer(learning);
+  return containerId === null ? null : [containerId];
 }
 
 /**

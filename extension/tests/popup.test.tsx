@@ -46,9 +46,10 @@ afterEach(() => {
   fake.uninstall();
 });
 
+/** As /api/recorder/bots answers: every state names the Bot's container except unassigned (no space set). */
 const learning = (state: RecorderBot["learning"]["state"]) => ({
   state,
-  containerId: state === "assigned" ? "c1" : null,
+  containerId: state === "unassigned" ? null : "c1",
 });
 const BOTS: RecorderBot[] = [
   { id: "b1", name: "Billing Bot", learning: learning("assigned") },
@@ -432,14 +433,10 @@ const SENTENCES: [RecorderBot["learning"]["state"], string | null][] = [
     "missing",
     "Learning will not see this recording: this Bot's Learning space does not exist in Intelligence. Ask an administrator to fix it in Admin, Automatic Learning. It still goes to Intelligence.",
   ],
-  [
-    "learning-off",
-    "Learning may not see this recording: Intelligence's Learning delivery is off or unavailable, so OpenBot could not check this Bot's Learning space. It still goes to Intelligence.",
-  ],
-  [
-    "unverified",
-    "Learning may not see this recording: OpenBot could not check this Bot's Learning space with Intelligence just now. It still goes to Intelligence.",
-  ],
+  // OpenBot could not check the space (Learning delivery off, or Intelligence not answering), but the capture pass still
+  // joins the Bot's container, so the recording lands in it: no warning.
+  ["learning-off", null],
+  ["unverified", null],
 ];
 for (const [kind, sentence] of SENTENCES) {
   test(`a Bot whose Learning space is ${kind} ${sentence ? "says so" : "says nothing"} under the picker`, async () => {
@@ -456,9 +453,49 @@ for (const [kind, sentence] of SENTENCES) {
   });
 }
 
-test("after Stop the Learning sentence shows once, in the sent row, not again under the picker", async () => {
-  const sentence = SENTENCES.find(([kind]) => kind === "learning-off")?.[1];
+test("a Bot whose settings OpenBot could not read says Learning may not see the recording", async () => {
+  const { findByRole, container } = setup(stateResponse(), {
+    bots: [
+      {
+        id: "b1",
+        name: "Only Bot",
+        learning: { state: "unverified", containerId: null },
+      },
+    ],
+  });
+  await findByRole("combobox", { name: "Bot" });
+  await waitFor(() =>
+    expect(container.textContent).toContain(
+      "Learning may not see this recording: OpenBot could not read this Bot's Learning space just now. It still goes to Intelligence.",
+    ),
+  );
+});
+
+test("after Stop with Intelligence's Learning delivery off, the popup says the recording goes into the Bot's Learning space and warns nothing", async () => {
+  // The check of the space failed (its skills endpoint answers 404), but the capture pass joined the Bot's container.
   const off = learning("learning-off");
+  const { findByText, container } = setup(
+    stateResponse({
+      state: {
+        lastStopped: { recordingId: "r1", botId: "b1" },
+        learning: off,
+      },
+    }),
+    {
+      bots: [{ id: "b1", name: "Refund Clerk", learning: off }],
+      lastBotId: "b1",
+    },
+  );
+  await findByText("Sent to Intelligence");
+  await findByText("Recorded for Refund Clerk.");
+  await findByText("It goes into this Bot's Learning space.");
+  expect(container.textContent).not.toContain("Learning may not");
+  expect(container.textContent).not.toContain("Learning will not");
+});
+
+test("after Stop the Learning sentence shows once, in the sent row, not again under the picker", async () => {
+  const sentence = SENTENCES.find(([kind]) => kind === "missing")?.[1];
+  const off = learning("missing");
   const { findByText, container } = setup(
     stateResponse({
       state: {
@@ -1028,21 +1065,18 @@ test("every pass sentence loses its status phrase and starts with a capital", ()
   ).toBe("This browser was disconnected from OpenBot.");
 });
 
-test("learning-off and unverified each show their sentence while streaming", async () => {
-  const off = setup(
-    recording({ learning: { state: "learning-off", containerId: null } }),
-  );
-  await off.findByText(
-    /Intelligence's Learning delivery is off or unavailable/,
-  );
-  expect(off.getByText("Streaming to Intelligence")).toBeTruthy();
-  cleanup();
-  const unverified = setup(
+test("while streaming, a space OpenBot could not check warns nothing, since the pass joined the Bot's container", async () => {
+  for (const state of ["learning-off", "unverified"] as const) {
+    const view = setup(recording({ learning: { state, containerId: "c1" } }));
+    await view.findByText("Streaming to Intelligence");
+    expect(view.container.textContent).not.toContain("Learning may not");
+    expect(view.queryByText("Not into a Learning space")).toBeNull();
+    view.unmount();
+  }
+  const unread = setup(
     recording({ learning: { state: "unverified", containerId: null } }),
   );
-  await unverified.findByText(
-    /could not check this Bot's Learning space with Intelligence just now/,
-  );
+  await unread.findByText(/could not read this Bot's Learning space just now/);
 });
 
 test("refused and dropped events are counted in the Learning capture row", async () => {

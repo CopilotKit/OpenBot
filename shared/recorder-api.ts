@@ -70,6 +70,23 @@ export type LearningSpaceState = {
   state: (typeof LEARNING_SPACE_STATES)[number];
   containerId: string | null;
 };
+/**
+ * The Learning container a capture pass joins for this answer, or null when it joins none. Only a Bot with no space, or
+ * a container Intelligence says does not exist, joins none: an answer Intelligence could not give (unverified, or
+ * Learning delivery off) still names the Bot's container, so one failed check does not change where a trajectory
+ * lands. The server's selector joins by this, and the Recorder warns that Learning will not see a recording by it.
+ */
+export function joinedLearningContainer(
+  learning: LearningSpaceState,
+): string | null {
+  const joins =
+    learning.state === "assigned" ||
+    learning.state === "unverified" ||
+    learning.state === "learning-off";
+  return joins && typeof learning.containerId === "string"
+    ? learning.containerId
+    : null;
+}
 export type RecorderBot = {
   id: string;
   name: string;

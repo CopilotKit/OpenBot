@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   connectCodeRequestSchema,
   exchangeRequestSchema,
+  joinedLearningContainer,
   RECORDER_BOT_HEADER,
   recorderPaths,
   TRAJECTORY_GATE_REFUSALS,
@@ -80,5 +81,25 @@ describe("recorder constants and paths", () => {
     expect(
       Object.values(TRAJECTORY_GATE_REFUSALS).map((r) => r.status),
     ).toEqual([400, 403, 503]);
+  });
+});
+
+describe("joinedLearningContainer", () => {
+  test("a pass joins the Bot's container unless there is none or Intelligence says it does not exist", () => {
+    const cases: [
+      Parameters<typeof joinedLearningContainer>[0],
+      string | null,
+    ][] = [
+      [{ state: "assigned", containerId: "c1" }, "c1"],
+      // OpenBot could not check (Learning delivery off, or Intelligence not answering): the pass still names it.
+      [{ state: "learning-off", containerId: "c1" }, "c1"],
+      [{ state: "unverified", containerId: "c1" }, "c1"],
+      [{ state: "unverified", containerId: null }, null],
+      [{ state: "unassigned", containerId: null }, null],
+      [{ state: "missing", containerId: "c1" }, null],
+      [{ state: "unjoined", containerId: "c1" }, null],
+    ];
+    for (const [learning, joined] of cases)
+      expect(joinedLearningContainer(learning)).toBe(joined);
   });
 });
