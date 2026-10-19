@@ -228,6 +228,7 @@ type RecorderEvent =
     }
   | { type: "restart"; recordingId: string; startedAt: number }
   | { type: "drains"; draining: number; kept?: RecorderState["kept"] }
+  | { type: "send-failed"; error: string }
   | { type: "error"; error: string }
   | { type: "cancelled" }
   | { type: "clear-error" };
@@ -319,6 +320,14 @@ export function reduceRecorder(
       };
     case "drains":
       return defined({ ...state, draining: event.draining, kept: event.kept });
+    case "send-failed":
+      // The recording Stop ended last never reached Intelligence: the popup says so instead of where it went.
+      return defined({
+        ...state,
+        lastStopped: undefined,
+        learning: undefined,
+        error: event.error,
+      });
     case "error":
       return defined({
         ...IDLE_STATE,
@@ -561,6 +570,8 @@ export function installRecording(
   const stopWaiters = new Map<string, () => void>();
   /** Offscreen answers that arrived before their recording reached `drains`, applied when it does. */
   const offscreenDone = new Set<string>();
+  /** Recordings the document could not send at all, with the sentence that says so. */
+  const failedSends = new Map<string, string>();
   const earlyKept = new Map<string, KeptEvents>();
 
   /** Opening and closing the document never cross. */
@@ -796,6 +807,8 @@ export function installRecording(
         stopWaiters.get(message.recordingId)?.();
         return;
       case "offscreen.done":
+        if (message.failed !== undefined)
+          sendFailed(message.recordingId, message.failed);
         void documentDone(message.recordingId).catch(
           report("finishing a drain"),
         );
@@ -842,6 +855,14 @@ export function installRecording(
         ),
       );
     });
+  }
+
+  /** None of a recording could be sent (its streamer never started): the popup must never say it went to Intelligence.
+   * The answer can come before Stop finishes (`endRecording` reads it then) or after. */
+  function sendFailed(recordingId: string, sentence: string): void {
+    failedSends.set(recordingId, sentence);
+    if (state.lastStopped?.recordingId === recordingId)
+      dispatch({ type: "send-failed", error: sentence });
   }
 
   /** Intelligence has every event of a stopped recording: its drain goes. An answer for the recording a stop is still
@@ -1208,15 +1229,16 @@ export function installRecording(
 
     await moveIntoDrains(recordingId);
     await removeSession("stream");
+    const failed = failedSends.get(recordingId);
     dispatch({
       type: "finished",
       // A recording a Disconnect stops is discarded right after: what it had not sent yet never goes to Intelligence, so
       // the popup does not say it was sent (what it streamed live is there, ended with a failed outcome).
       lastStopped:
-        mode.kind === "disconnect"
+        mode.kind === "disconnect" || failed !== undefined
           ? undefined
           : { recordingId, botId: current.botId },
-      error: signedOut ? stoppedSentence(signedOut) : undefined,
+      error: signedOut ? stoppedSentence(signedOut) : failed,
     });
     if (signedOut)
       // A sign-out that forgot nothing (the person connected again) leaves their other drains to the new connection.

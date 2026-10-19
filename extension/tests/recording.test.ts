@@ -841,6 +841,62 @@ test("Stop queues the outcome in the document, and the recording waits as a drai
   expect(openbot.calls).toEqual([]);
 });
 
+test("a recording the document could not send at all never reads as sent: Stop says nothing reached Intelligence", async () => {
+  const id = await record();
+  const NOT_SENT =
+    "Nothing of this recording reached Intelligence: the Recorder could not start sending it. Try recording again.";
+  holdStop = true;
+  const stopping = page({ type: "page.stop" });
+  await until(
+    () => sentToDocument("offscreen.stop").length === 1,
+    "offscreen.stop",
+  );
+  doc?.postMessage({
+    type: "offscreen.stopped",
+    recordingId: id,
+    trajectoryIds: [],
+  });
+  doc?.postMessage({
+    type: "offscreen.done",
+    recordingId: id,
+    failed: NOT_SENT,
+  });
+  expect(await stopping).toEqual({ ok: true });
+  await until(() => drains().length === 0, "the drain goes");
+  const after = await state();
+  expect(after.lastStopped).toBeUndefined();
+  expect(after.error).toBe(NOT_SENT);
+});
+
+test("a could-not-send answer that comes after Stop finished takes back the sent line", async () => {
+  const id = await record();
+  holdStop = true;
+  const stopping = page({ type: "page.stop" });
+  await until(
+    () => sentToDocument("offscreen.stop").length === 1,
+    "offscreen.stop",
+  );
+  doc?.postMessage({
+    type: "offscreen.stopped",
+    recordingId: id,
+    trajectoryIds: [],
+  });
+  await stopping;
+  expect((await state()).lastStopped?.recordingId).toBe(id);
+  doc?.postMessage({
+    type: "offscreen.done",
+    recordingId: id,
+    failed: "Nothing of this recording reached Intelligence.",
+  });
+  await until(
+    async () => (await state()).lastStopped === undefined,
+    "the sent line goes",
+  );
+  expect((await state()).error).toBe(
+    "Nothing of this recording reached Intelligence.",
+  );
+});
+
 test("the popup keeps the picked Bot's Learning space after Stop", async () => {
   await page({ type: "page.bots" });
   await record();

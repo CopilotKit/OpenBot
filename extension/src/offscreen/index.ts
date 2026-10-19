@@ -41,6 +41,12 @@ export type OffscreenControllerDeps = {
 };
 
 const RECONNECT_DELAYS_MS = [500, 1_000, 2_000, 4_000];
+/** The live status of a recording whose streamer could not be created (its storage did not open, say). */
+const NOT_STARTED =
+  "The Recorder could not start sending this recording to Intelligence.";
+/** What the service worker shows after Stop for such a recording: none of it was stored, so none of it can be sent. */
+const NOT_SENT =
+  "Nothing of this recording reached Intelligence: the Recorder could not start sending it. Try recording again.";
 /** The sequencer's last issued seq, in the outbox's meta store. */
 const SEQ_META_KEY = "seq";
 /** Answers the service worker must not miss: one that could not be delivered is posted again once the port is back. */
@@ -86,6 +92,10 @@ type Live = {
   waiting: CapturedEvent[];
   /** From the moment Stop queues its outcome: kept events are reported with offscreen.kept from then on. */
   ending: boolean;
+  /** Its streamer could not be created: every event it is handed is dropped, counted. A resumed recording still has what
+   * it stored before in the outbox. */
+  notStarted: { resumed: boolean } | null;
+  dropped: number;
   stopped: { trajectoryIds: string[] } | null;
 };
 
@@ -372,15 +382,28 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
 
   // ---- The live recording ------------------------------------------------------------------------
 
+  /** A recording with no streamer says so, and how many of its events were dropped. */
+  function postNotStarted(target: Live): void {
+    postStatus(target, {
+      intelligence: "off",
+      intelligenceReason: NOT_STARTED,
+      events: { sent: 0, pending: 0, rejected: 0, dropped: target.dropped },
+    });
+  }
+
   function deliver(target: Live, event: CapturedEvent): void {
     const streamer = target.stream?.streamer;
     if (target.holds > 0 || !streamer) {
-      if (target.holds > 0) target.waiting.push(event);
-      else
-        console.error(
-          "Recorder: an event was dropped: its recording has no streamer",
-          event.name,
-        );
+      if (target.holds > 0) {
+        target.waiting.push(event);
+        return;
+      }
+      console.error(
+        "Recorder: an event was dropped: its recording has no streamer",
+        event.name,
+      );
+      target.dropped += 1;
+      if (target.notStarted) postNotStarted(target);
       return;
     }
     streamer.push(event);
@@ -420,6 +443,14 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
               : undefined,
         },
       );
+    } catch (error) {
+      // Nothing can send this recording: the popup says so while it records, and Stop reports it (never as sent).
+      console.error(
+        "Recorder: the offscreen document could not start a recording's streamer",
+        error,
+      );
+      target.notStarted = { resumed: resume };
+      postNotStarted(target);
     } finally {
       release(target);
     }
@@ -433,6 +464,8 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
       first: session.trajectoryId,
       capture: {},
       stream: null,
+      notStarted: null,
+      dropped: 0,
       holds: 1,
       waiting: [],
       ending: false,
@@ -506,7 +539,9 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
     const stream = target.stream;
     const streamer = stream?.streamer;
     if (!stream || !streamer) {
-      // The streamer never started (its storage failed to open): nothing was sent, but the recording still ends.
+      // The streamer never started (its storage failed to open): the recording still ends. A new one stored nothing and
+      // can never be sent, so it is done with that said; a resumed one keeps what it stored before, parked for a later
+      // recover.
       console.error(
         "Recorder: Stop arrived for a recording whose streamer never started",
       );
@@ -514,7 +549,15 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
       const recordingId = target.recordingId;
       target.stopped = { trajectoryIds: [] };
       post({ type: "offscreen.stopped", recordingId, trajectoryIds: [] });
-      post({ type: "offscreen.done", recordingId });
+      if (target.notStarted?.resumed)
+        post({
+          type: "offscreen.kept",
+          recordingId,
+          reason: NOT_STARTED,
+          parked: true,
+          events: 0,
+        });
+      else post({ type: "offscreen.done", recordingId, failed: NOT_SENT });
       return;
     }
     target.ending = true;

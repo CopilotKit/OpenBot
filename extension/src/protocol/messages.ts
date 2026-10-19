@@ -170,7 +170,7 @@ export type OffscreenToBackground =
       recordingId: string;
       trajectoryIds: string[];
     } // final outcome queued
-  | { type: "offscreen.done"; recordingId: string } // every event sent, every trajectory finished
+  | { type: "offscreen.done"; recordingId: string; failed?: string } // every event sent, every trajectory finished; `failed`: none of it could be sent, and why
   | {
       type: "offscreen.kept";
       recordingId: string;

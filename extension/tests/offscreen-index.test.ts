@@ -542,7 +542,7 @@ describe("offscreen controller", () => {
     });
   });
 
-  test("stop reports stopped and done when the streamer never started", async () => {
+  test("a streamer that never starts says so while it records, counts what it drops, and Stop reports nothing sent", async () => {
     const h = await setup();
     await h.open(h.clock, {
       openOutbox: async () => {
@@ -551,8 +551,27 @@ describe("offscreen controller", () => {
     });
     const session = h.session();
     h.post({ type: "offscreen.start", session });
-    // Let the failed streamer start settle before Stop arrives.
+    h.post({ type: "offscreen.event", event: click(1) });
+    // Let the failed streamer start settle before more events and Stop arrive.
     await sleep(100);
+    h.post({ type: "offscreen.event", event: click(2) });
+    await until(
+      () =>
+        h
+          .received("offscreen.status")
+          .some((status) => status.capture.events?.dropped === 2),
+      "both events counted as dropped",
+    );
+    expect(h.received("offscreen.status").at(-1)).toEqual({
+      type: "offscreen.status",
+      trajectoryId: session.trajectoryId,
+      capture: {
+        intelligence: "off",
+        intelligenceReason:
+          "The Recorder could not start sending this recording to Intelligence.",
+        events: { sent: 0, pending: 0, rejected: 0, dropped: 2 },
+      },
+    });
 
     h.post({ type: "offscreen.stop", outcome: "succeeded" });
     await until(
@@ -567,12 +586,41 @@ describe("offscreen controller", () => {
       },
     ]);
     expect(h.received("offscreen.done")).toEqual([
-      { type: "offscreen.done", recordingId: "rec-1" },
+      {
+        type: "offscreen.done",
+        recordingId: "rec-1",
+        failed:
+          "Nothing of this recording reached Intelligence: the Recorder could not start sending it. Try recording again.",
+      },
     ]);
     const types = h.latest().map((message) => message.type);
     expect(types.indexOf("offscreen.stopped")).toBeLessThan(
       types.indexOf("offscreen.done"),
     );
+  });
+
+  test("a resumed recording whose streamer never starts keeps what it stored, parked, instead of reporting done", async () => {
+    const h = await setup();
+    await h.open(h.clock, {
+      openOutbox: async () => {
+        throw new Error("IndexedDB could not be opened");
+      },
+    });
+    h.post({ type: "offscreen.resume", session: h.session() });
+    await sleep(100);
+    h.post({ type: "offscreen.stop", outcome: "succeeded" });
+    await until(() => h.received("offscreen.kept").length === 1, "kept");
+    expect(h.received("offscreen.kept")).toEqual([
+      {
+        type: "offscreen.kept",
+        recordingId: "rec-1",
+        reason:
+          "The Recorder could not start sending this recording to Intelligence.",
+        parked: true,
+        events: 0,
+      },
+    ]);
+    expect(h.received("offscreen.done")).toEqual([]);
   });
 
   test("resume restarts the streamer over the existing outbox", async () => {
