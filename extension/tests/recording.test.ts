@@ -899,6 +899,7 @@ test("Stop while the document's port reconnects tells the document on its new po
 test("Stop after the document went away reopens it on the stored session, so the outcome is queued now", async () => {
   const id = await record();
   const session = sentToDocument("offscreen.start")[0];
+  if (session?.type !== "offscreen.start") throw new Error("No start");
   await chrome.offscreen.closeDocument();
   await settle();
   let answered = false;
@@ -909,7 +910,7 @@ test("Stop after the document went away reopens it on the stored session, so the
   expect(sentToDocument("offscreen.resume")).toEqual([
     {
       type: "offscreen.resume",
-      session: session?.type === "offscreen.start" ? session.session : null,
+      session: session.session,
     },
   ]);
   expect(sentToDocument("offscreen.stop")).toEqual([
@@ -924,6 +925,7 @@ test("a document that goes away mid-recording is reopened on the stored session 
   const id = await record();
   const content = contentPort(7);
   const session = sentToDocument("offscreen.start")[0];
+  if (session?.type !== "offscreen.start") throw new Error("No start");
   // The document crashes: Chrome no longer lists it, and its port is gone.
   await chrome.offscreen.closeDocument();
   await settle();
@@ -942,7 +944,7 @@ test("a document that goes away mid-recording is reopened on the stored session 
   ]);
   expect(sentToDocument("offscreen.resume")[0]).toEqual({
     type: "offscreen.resume",
-    session: session?.type === "offscreen.start" ? session.session : null,
+    session: session.session,
   });
   expect(await state()).toMatchObject({ phase: "recording", recordingId: id });
 });
