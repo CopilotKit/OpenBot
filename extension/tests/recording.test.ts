@@ -2161,6 +2161,93 @@ test("Disconnect clears a sentence that says everything is kept until you connec
 
 // ---- A connection lost without a Disconnect ---------------------------------------------------
 
+const meChecks = () =>
+  openbot.calls.filter((call) => call.path === "/api/recorder/me");
+
+test("while a recording runs OpenBot is asked every 30 s whether its connection stands, and a browser revoked in OpenBot ends the recording as signed out", async () => {
+  const id = await record();
+  const document = doc;
+  await advance(29_999);
+  expect(meChecks()).toEqual([]);
+  await advance(1);
+  await until(() => meChecks().length === 1, "the first check");
+  expect(meChecks()[0]?.auth).toBe("Bearer obr_one");
+  await advance(30_000);
+  await until(() => meChecks().length === 2, "the second check");
+  expect((await state()).phase).toBe("recording");
+
+  // The person revokes this browser in OpenBot's Settings: the next check ends the recording through the sign-out path.
+  openbot.revoked.add("obr_one");
+  await advance(30_000);
+  await until(async () => (await state()).phase === "idle", "the stop");
+  expect(storedConnection()).toBeUndefined();
+  expect(fake.storage.local.get("notice")).toMatchObject({
+    kind: "signed-out",
+    reason: "revoked",
+  });
+  expect(sentToDocument("offscreen.halt", document)).toEqual([
+    { type: "offscreen.halt", token: "obr_one" },
+  ]);
+  expect(sentToDocument("offscreen.stop", document)).toEqual([
+    { type: "offscreen.stop", outcome: "failed", reason: "signed-out" },
+  ]);
+  expect(await state()).toMatchObject({ phase: "idle", error: SIGNED_OUT });
+  expect(network.running.size).toBe(0);
+  expect(drains()).toMatchObject([
+    { recordingId: id, kept: { waitingForReconnect: true } },
+  ]);
+
+  // Nothing records any more, so nothing is checked.
+  const checks = meChecks().length;
+  await advance(90_000);
+  expect(meChecks()).toHaveLength(checks);
+});
+
+test("a connection check that cannot reach OpenBot, or gets an error page, is no sign-out: the recording goes on and the next check asks again", async () => {
+  await record();
+  const realFetch = globalThis.fetch;
+  const refused: string[] = [];
+  globalThis.fetch = Object.assign(
+    async (input: string | URL | Request) => {
+      refused.push(String(input));
+      throw new TypeError("Failed to fetch");
+    },
+    { preconnect: realFetch.preconnect },
+  );
+  try {
+    await advance(30_000);
+    await until(() => refused.length === 1, "the check that fails");
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  expect(refused[0]).toBe(`${origin}/api/recorder/me`);
+  expect((await state()).phase).toBe("recording");
+  expect(storedConnection()?.token).toBe("obr_one");
+
+  openbot.me = { status: 503, body: { error: "OpenBot is restarting." } };
+  await advance(30_000);
+  await until(() => meChecks().length === 1, "the check OpenBot answers 503");
+  await settle();
+  expect((await state()).phase).toBe("recording");
+  expect(storedConnection()?.token).toBe("obr_one");
+  expect(sentToDocument("offscreen.stop")).toEqual([]);
+  expect(sentToDocument("offscreen.halt")).toEqual([]);
+
+  await advance(30_000);
+  await until(() => meChecks().length === 2, "the next check");
+  expect((await state()).phase).toBe("recording");
+});
+
+test("the connection check follows the recording through Start over, and stops with Stop", async () => {
+  await record();
+  expect(await page({ type: "page.restart" })).toEqual({ ok: true });
+  await advance(30_000);
+  await until(() => meChecks().length === 1, "the check after Start over");
+  await page({ type: "page.stop" });
+  await advance(60_000);
+  expect(meChecks()).toHaveLength(1);
+});
+
 test("a keep-alive that finds the connection signed out stops the recording at once and halts the document's streams for its token", async () => {
   const id = await record();
   const document = doc;

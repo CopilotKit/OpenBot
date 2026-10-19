@@ -135,6 +135,8 @@ export function recordingRecovery(): RecordingRecovery | null {
 const READY_TIMEOUT_MS = 5_000;
 const STOP_WATCHDOG_MS = 120_000;
 const ME_FRESH_MS = 60_000;
+/** How often a running recording asks OpenBot whether its connection still stands. */
+const CONNECTION_CHECK_MS = 30_000;
 /** While the offscreen port is down, content events wait here; beyond either cap the oldest go, counted (Decision 19). */
 const QUEUE_EVENTS = 2_000;
 const QUEUE_BYTES = 8 * 1024 * 1024;
@@ -1058,6 +1060,7 @@ export function installRecording(
         token: connection.token,
         userId: connection.user.id,
       };
+      watchConnection();
       // Recording from here on, before the script is injected: a content script that says hello is told to capture.
       dispatch({
         type: "started",
@@ -1086,6 +1089,7 @@ export function installRecording(
     } catch (error) {
       // Roll back in reverse.
       live = null;
+      unwatchConnection();
       network = null;
       networkMode = "off";
       frameUrls.clear();
@@ -1145,6 +1149,7 @@ export function installRecording(
     if (state.phase !== "recording" || !live) return;
     const current = live;
     live = null;
+    unwatchConnection();
     await trackStop(endRecording(current, mode));
   }
 
@@ -1279,6 +1284,51 @@ export function installRecording(
     return notice?.kind === "signed-out"
       ? (notice.reason ?? "revoked")
       : "revoked";
+  }
+
+  // ---- The connection check while recording -------------------------------------------------
+
+  /** While a recording runs, OpenBot is asked every 30 s whether the connection it records under still stands: a
+   * browser revoked in OpenBot's Settings, or a connection OpenBot signed out, would otherwise go on streaming until the
+   * popup or the 12-hour keep-alive asked. A signed-out answer ends the recording through the sign-out path (a failed
+   * outcome, reason signed-out, its streams halted, everything kept for its person). OpenBot not answering, or
+   * answering anything else, says nothing about the connection: the recording goes on through an outage, and the next
+   * check asks again. */
+  let connectionCheck: unknown = null;
+  function watchConnection(): void {
+    unwatchConnection();
+    connectionCheck = deps.timers.set(() => {
+      connectionCheck = null;
+      void ready.then(checkConnection).catch(report("checking the connection"));
+    }, CONNECTION_CHECK_MS);
+  }
+
+  function unwatchConnection(): void {
+    if (connectionCheck !== null) deps.timers.clear(connectionCheck);
+    connectionCheck = null;
+  }
+
+  async function checkConnection(): Promise<void> {
+    const current = live;
+    if (!current || state.phase !== "recording") return;
+    try {
+      await openbotJson<RecorderMe>(
+        { openbotUrl: current.openbotUrl, token: current.token },
+        recorderPaths.me,
+      );
+    } catch (error) {
+      const reason = signedOutReason(error);
+      if (reason)
+        await handleSignedOut(
+          reason,
+          current.token,
+          current.userId,
+          current.openbotUrl,
+        );
+    }
+    // Still recording (OpenBot answered, could not answer, or the person connected again first): asked again later.
+    if (live && state.phase === "recording" && connectionCheck === null)
+      watchConnection();
   }
 
   // ---- Signed out ----------------------------------------------------------------------------
@@ -1672,6 +1722,8 @@ export function installRecording(
       await stopWithoutConnection();
       return;
     }
+    // The checks the previous service worker ran went with it.
+    watchConnection();
     const capture = deps.createNetworkCapture(networkDeps, {
       fallback: deps.createPageFallback(),
     });

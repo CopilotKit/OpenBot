@@ -654,6 +654,23 @@ test("a discard that cannot finish because the document never reconnects does no
   expect(drains().map((drain) => drain.recordingId)).toEqual(["rec-gone"]);
 });
 
+test("a service-worker restart mid-recording goes on checking the connection with OpenBot every 30 s", async () => {
+  startWorker();
+  await startRecording(7);
+  await restartWorker();
+  openDocumentPort();
+  await recoverInterruptedRecording();
+  expect((await state()).phase).toBe("recording");
+  expect(openbot.calls).toEqual([]);
+  await advance(30_000);
+  await until(
+    () => openbot.calls.includes("GET /api/recorder/me"),
+    "the check after the restart",
+  );
+  // OpenBot's answer here says nothing about the connection: the recording goes on.
+  expect((await state()).phase).toBe("recording");
+});
+
 test("a service-worker restart with the document alive posts nothing to it", async () => {
   startWorker();
   await startRecording(7);
