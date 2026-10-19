@@ -5,9 +5,9 @@ import { join } from "node:path";
 
 const repositoryRoot = join(import.meta.dir, "..");
 
-// Desktop installs a release from GitHub's tag tarball, keeping only the top-level entries that
-// deployment.rs names, then runs `bun install --frozen-lockfile --ignore-scripts`.
-function copiedEntries(): string[] {
+// Desktop installs a release from GitHub's tag tarball, keeping only the top-level entries and the
+// single files that deployment.rs names, then runs `bun install --frozen-lockfile --ignore-scripts`.
+function copiedLists(): { entries: string[]; files: string[] } {
   const source = readFileSync(
     join(repositoryRoot, "desktop", "src-tauri", "src", "deployment.rs"),
     "utf8",
@@ -24,7 +24,19 @@ function copiedEntries(): string[] {
       (match) => match[1] ?? "",
     );
   };
-  return [...literals("REQUIRED"), ...literals("ALSO_COPIED")];
+  return {
+    entries: [...literals("REQUIRED"), ...literals("ALSO_COPIED")],
+    files: literals("ALSO_COPIED_FILES"),
+  };
+}
+
+// A workspace reaches a deployment whole, or as its manifest alone, which is all the install needs.
+function copiedWorkspace(workspace: string): boolean {
+  const { entries, files } = copiedLists();
+  return (
+    entries.includes(workspace.split("/")[0] ?? "") ||
+    files.includes(`${workspace}/package.json`)
+  );
 }
 
 function lockfileWorkspaceKeys(): string[] {
@@ -51,20 +63,23 @@ describe("OpenBot Desktop's copied tree", () => {
     const manifest = JSON.parse(
       readFileSync(join(repositoryRoot, "package.json"), "utf8"),
     ) as { workspaces: string[] };
-    const copied = copiedEntries();
-
     for (const workspace of manifest.workspaces) {
-      expect(copied).toContain(workspace);
+      expect({ workspace, copied: copiedWorkspace(workspace) }).toEqual({
+        workspace,
+        copied: true,
+      });
     }
   });
 
   test("every workspace the lockfile names is in Desktop's copied tree", () => {
-    const copied = copiedEntries();
     const keys = lockfileWorkspaceKeys().filter((key) => key !== "");
     expect(keys.length).toBeGreaterThan(0);
 
     for (const key of keys) {
-      expect(copied).toContain(key.split("/")[0] ?? "");
+      expect({ key, copied: copiedWorkspace(key) }).toEqual({
+        key,
+        copied: true,
+      });
       expect(tracked(join(key, "package.json"))).toBe(true);
     }
   });
