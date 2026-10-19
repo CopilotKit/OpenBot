@@ -199,6 +199,36 @@ function decodeBody(
     );
   return body;
 }
+/**
+ * An HTML-only mail writes `AT&amp;T` and `we&#8217;re`, and the Bot should read what the sender
+ * wrote. Numeric references, the five XML names and `&nbsp;` are decoded in one pass after the tags
+ * are stripped, so `&amp;lt;` reads as `&lt;` rather than as a tag, and any other name is left as
+ * written.
+ */
+const CHARACTER_REFERENCE =
+  /&(?:#(\d{1,7})|#x([0-9a-f]{1,6})|(amp|lt|gt|quot|apos|nbsp));/gi;
+const NAMED_CHARACTERS: Record<string, string> = {
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  apos: "'",
+  nbsp: " ",
+};
+function decodeCharacterReference(
+  reference: string,
+  decimal: string | undefined,
+  hex: string | undefined,
+  name: string | undefined,
+) {
+  if (name) return NAMED_CHARACTERS[name.toLowerCase()] ?? reference;
+  const code = decimal
+    ? Number.parseInt(decimal, 10)
+    : Number.parseInt(hex ?? "", 16);
+  return code > 0 && code <= 0x10ffff && (code < 0xd800 || code > 0xdfff)
+    ? String.fromCodePoint(code)
+    : reference;
+}
 /** Minimal MIME walk: the first text/plain part, else text/html with tags stripped. */
 export function extractEmailText(raw: string, depth = 0): string {
   const split = /\r?\n\r?\n/.exec(raw);
@@ -235,6 +265,7 @@ export function extractEmailText(raw: string, depth = 0): string {
     ? decoded
         .replace(/<style[\s\S]*?<\/style>|<script[\s\S]*?<\/script>/gi, "")
         .replace(/<[^>]+>/g, " ")
+        .replace(CHARACTER_REFERENCE, decodeCharacterReference)
         .replace(/\s+/g, " ")
         .trim()
     : decoded.trim();
