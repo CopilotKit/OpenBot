@@ -25,14 +25,16 @@ export function readToolName(name: string): ToolName {
   const parts = name.split("__");
   if (parts.length < 3 || parts[0] !== "mcp") return { label: name };
 
-  const [, server, ...rest] = parts;
+  const [, rawServer, ...rest] = parts;
+  const server = rawServer ?? "";
   const tool = rest.join("__");
+  const broker = brokeredApp(server);
   /*
    * Research is named for what it did, not for who did it. `web_search_exa` would read "Web search
    * exa", which tells the person which vendor this deployment buys search from and nothing about
    * their answer. Which provider is granted is an administrator's fact, on the Bot's access page.
    */
-  const role = researchRoleOfTool(server ?? "", tool);
+  const role = researchRoleOfTool(server, tool);
   if (role) return { label: RESEARCH_ROLE_LABELS[role] };
   const label = humanise(tool);
 
@@ -59,10 +61,35 @@ export function readToolName(name: string): ToolName {
    * a known limit of this rule, not a bug to chase with a word list.
    */
   const labelWords = label.toLowerCase().split(" ").map(singular);
-  const wordsActedOn = labelWords.slice(1);
-  const serverWords = wordsOf(server ?? "").map(singular);
+  /*
+   * A BROKERED APP IS SEARCHED FOR IN THE WHOLE LABEL, VERB INCLUDED. The verb exclusion above
+   * exists for a server whose name collides with a verb by accident, and a broker's apps cannot
+   * produce that collision: Composio publishes `<APP>_<VERB>_<NOUN>`, so the app always leads and
+   * is never the verb. Excluding the first word here would put "googlecalendar" beside a label
+   * that opens with the word.
+   */
+  const wordsActedOn = broker ? labelWords : labelWords.slice(1);
+  const serverWords = wordsOf(broker ?? server).map(singular);
   const named = containsPhrase(wordsActedOn, serverWords);
-  return named ? { label } : { label, detail: server };
+  return named ? { label } : { label, detail: broker ?? server };
+}
+
+/**
+ * The app behind a brokered server key, or null for a server this deployment dials itself.
+ *
+ * A brokered server is keyed `<broker>-<app>` — `composio-gmail` — because the broker is how the
+ * credential is held and two brokers could both offer Gmail. Neither of those is the reader's
+ * business: they asked their Bot about their email, not about which company holds the grant. This
+ * is the same argument the research relabelling above makes, and the answer is the same — which
+ * broker a deployment buys through is an administrator's fact, on the Bot's access page.
+ *
+ * Only the prefix is removed, never the app. "Gmail" is what was acted upon and stays legible.
+ */
+function brokeredApp(server: string): string | null {
+  const prefix = "composio-";
+  if (!server.startsWith(prefix)) return null;
+  const app = server.slice(prefix.length);
+  return app.length > 0 ? app : null;
 }
 
 /**
