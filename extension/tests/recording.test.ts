@@ -1263,12 +1263,13 @@ test("clicks, inputs and page loads in a followed tab's top frame count as actio
     url: "https://widgets.example.test/a",
   });
   await until(
-    () => sentToDocument("offscreen.event").length === 6,
+    () => sentToDocument("offscreen.event").length === 5,
     "every event forwarded",
   );
   await settle();
-  // The page the recording started on, a click, an input (from any frame), a page load and a history change: the
-  // collector's page event and the frame load are not even recorded. The start and the rest do not count.
+  // The page the recording started on, a click, an input (from any frame), and a page load with the history change the
+  // page made right after it, one page change: the collector's page event and the frame load are not even recorded.
+  // The start does not count; each top-frame page change does.
   expect((await state()).actions).toBe(4);
   expect(fake.badge.text).toBe("4");
   network.deps?.call({
@@ -2750,32 +2751,27 @@ test("only a followed tab's top frame becomes a page-change step, once per addre
     transitionType: "reload",
   });
   fake.webNavigation.commit({ tabId: 7, frameId: 0, url: "about:blank" });
-  await until(() => navigations().length === 4, "four page changes");
+  await until(() => navigations().length === 3, "three page changes");
   await settle();
   const events = navigations();
-  expect(events).toHaveLength(4);
+  expect(events).toHaveLength(3);
   // The page the recording started on is its first step.
   expect(events[0]).toMatchObject({
     name: "navigation",
     value: { step: "navigate", from: "", to: DEAL, navigationType: "start" },
   });
+  // The page's own change of address right after the link is one step with it: from where it began to where it ended.
   expect(events[1]).toMatchObject({
     name: "navigation",
     value: {
       step: "navigate",
       from: DEAL,
-      to: "https://crm.example.test/deals/43?tab=notes&token=[redacted]",
+      to: "https://crm.example.test/deals/44",
       navigationType: "push",
       frameId: 0,
     },
   });
   expect(events[2]).toMatchObject({
-    value: {
-      from: "https://crm.example.test/deals/43?tab=notes&token=[redacted]",
-      to: "https://crm.example.test/deals/44",
-    },
-  });
-  expect(events[3]).toMatchObject({
     value: {
       from: "https://crm.example.test/deals/44",
       to: "https://crm.example.test/deals/44",
@@ -2808,7 +2804,8 @@ test("an address recorded before is recorded again in the next recording and aft
   expect(await page({ type: "page.restart" })).toEqual({ ok: true });
   await navigateTo("https://crm.example.test/deals/43");
   expect(visits("https://crm.example.test/deals/43")).toBe(3);
-});
+  // Each page change waits STEP_TIMING.redirectMs for a redirect before it is sent.
+}, 15_000);
 
 test("the collector's page event is never recorded: the tab's start and its page changes are the steps, with the tab's page", async () => {
   fake.tabs.set(7, { id: 7, url: DEAL, title: "Deal 42" } as chrome.tabs.Tab);

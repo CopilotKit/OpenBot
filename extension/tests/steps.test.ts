@@ -6,6 +6,7 @@ import {
 import {
   carriesValues,
   createStepAssembler,
+  isChatter,
   STEP_TIMING,
   type StepCall,
   saveQuality,
@@ -557,7 +558,7 @@ test("a page change waits for its page's title; a step from an iframe gets its t
     },
   });
   h.steps.step(1, click(START + 500, "Chat"), true);
-  h.advance(STEP_TIMING.navigationMs);
+  h.advance(STEP_TIMING.redirectMs);
   await flushPromises();
   h.advance(10_000);
   await flushPromises();
@@ -624,7 +625,7 @@ test("a page change queued behind a step that leaves just as its title is due st
   // The click's window runs its full length, so it leaves exactly when the page change looks up its title.
   const clickAt =
     START +
-    STEP_TIMING.navigationMs -
+    STEP_TIMING.redirectMs -
     STEP_TIMING.horizonMs -
     STEP_TIMING.settleMs;
   h.steps.step(1, click(clickAt, "Contacts"));
@@ -638,7 +639,7 @@ test("a page change queued behind a step that leaves just as its title is due st
       from: "",
     },
   });
-  h.advance(STEP_TIMING.navigationMs);
+  h.advance(STEP_TIMING.redirectMs);
   await flushPromises();
   expect(lookups).toBe(1);
   expect(h.sent.map((event) => event.name)).toEqual(["click", "navigation"]);
@@ -687,4 +688,227 @@ test("an edit that echoes the Enter or click just before it (the field's change)
     ["key", "https://crm.example.test/api/chat"],
     ["input", null],
   ]);
+});
+
+test("a write that keeps the page alive or reports on it is never a save: presence, heartbeats, pings, typing, session refreshes, telemetry, tracking and logs", () => {
+  for (const path of [
+    "/api/chirp/v1/gateway/com.example.assistant.experience.rpc.PresenceRpc/updateBreezePresence",
+    "/api/presence/v1/update",
+    "/api/heartbeat",
+    "/ws/ping",
+    "/api/keep-alive",
+    "/rpc/ChatService/sendTypingIndicator",
+    "/auth/session/refresh",
+    "/api/refreshSession",
+    "/api/telemetry/save",
+    "/api/trackEvent",
+    "/api/logs/batch",
+    "/api/developer/platform/logging/public/publish/v1/action-logs/create",
+  ])
+    expect([path, isChatter(path)]).toEqual([path, true]);
+  for (const path of [
+    "/rpc/com.example.EngineService/sendMessage",
+    "/api/login-api/v1/login/verification-code",
+    "/api/shipping/labels/create",
+    "/api/catalog/items/save",
+    "/api/sessions/42/notes",
+  ])
+    expect([path, isChatter(path)]).toEqual([path, false]);
+  // A read receipt the page posts when it shows a conversation is its own; marking a notification read with a PUT is
+  // the person dismissing it.
+  expect(
+    isChatter(
+      "/rpc/com.example.engine.rpc.ConversationsService/markConversationRead",
+    ),
+  ).toBe(true);
+  expect(
+    isChatter(
+      "/api/persistent-notifications/v1/notifications/notification/9/deliveryMethod/BANNER/action/MARKED_AS_READ",
+      undefined,
+      "PUT",
+    ),
+  ).toBe(false);
+  // A GraphQL mutation is known by its operation, named or not.
+  expect(isChatter("/graphql", "UpdatePresence")).toBe(true);
+  expect(
+    saveQuality(
+      call(
+        0,
+        "POST",
+        "https://crm.example.test/graphql",
+        '{"query":"mutation { updatePresence(online: true) { ok } }"}',
+      ),
+      [],
+    ).save,
+  ).toBe(false);
+  expect(
+    saveQuality(call(0, "PUT", "https://crm.example.test/api/presence/me"), [])
+      .save,
+  ).toBe(false);
+});
+
+test("opening a chat that only announces presence carries nothing; the message sent after it carries its save", () => {
+  const h = harness();
+  h.steps.step(1, click(START, "Ask a question"));
+  h.steps.call(
+    call(
+      START + 370,
+      "POST",
+      "https://crm.example.test/rpc/com.example.PresenceRpc/updateBreezePresence",
+      '{"panelOpen":true}',
+    ),
+  );
+  h.steps.call(
+    call(
+      START + 440,
+      "POST",
+      "https://crm.example.test/rpc/com.example.ConversationsService/listConversations",
+      "{}",
+    ),
+  );
+  h.steps.call(
+    call(
+      START + 445,
+      "POST",
+      "https://crm.example.test/rpc/com.example.ConversationsService/markConversationRead",
+      '{"conversationId":7}',
+    ),
+  );
+  h.steps.step(1, click(START + 5_000, "Send"));
+  h.steps.call(
+    call(
+      START + 5_060,
+      "POST",
+      "https://crm.example.test/rpc/com.example.PresenceRpc/updateBreezePresence",
+      "{}",
+    ),
+  );
+  h.steps.call(
+    call(
+      START + 5_090,
+      "POST",
+      "https://crm.example.test/rpc/com.example.EngineService/sendMessage",
+      '{"message":"hi"}',
+    ),
+  );
+  h.advance(20_000);
+  expect(h.sent.map((event) => request(event)?.url ?? null)).toEqual([
+    null,
+    "https://crm.example.test/rpc/com.example.EngineService/sendMessage",
+  ]);
+});
+
+const change = (at: number, to: string, from = "", navigationType = "push") =>
+  ({
+    type: "CUSTOM",
+    name: "navigation",
+    timestamp: at,
+    value: { step: "navigate", from, to, navigationType, frameId: 0 },
+  }) as CapturedEvent;
+
+test("page changes the page makes one after another, with no step between them, are one step to the final page", async () => {
+  const lookups: string[] = [];
+  const h = harness({
+    pageOf: async () => {
+      lookups.push("looked up");
+      return {
+        url: "https://crm.example.test/reports/view/7",
+        title: "Reports",
+      };
+    },
+  });
+  h.steps.step(1, click(START, "Continue"));
+  h.steps.navigation(
+    1,
+    change(
+      START + 400,
+      "https://crm.example.test/home-beta",
+      "https://crm.example.test/login/confirm",
+    ),
+  );
+  h.steps.navigation(
+    1,
+    change(START + 900, "https://crm.example.test/reports"),
+  );
+  h.steps.navigation(
+    1,
+    change(START + 1_200, "https://crm.example.test/reports/view"),
+  );
+  h.steps.navigation(
+    1,
+    change(
+      START + 1_300,
+      "https://crm.example.test/reports/view/7",
+      "",
+      "replace",
+    ),
+  );
+  h.advance(
+    STEP_TIMING.horizonMs + STEP_TIMING.settleMs + STEP_TIMING.redirectMs,
+  );
+  await flushPromises();
+  h.advance(1);
+  await flushPromises();
+  expect(h.sent.map((event) => event.name)).toEqual(["click", "navigation"]);
+  expect(h.sent[1]?.value).toMatchObject({
+    step: "navigate",
+    from: "https://crm.example.test/login/confirm",
+    to: "https://crm.example.test/reports/view/7",
+    navigationType: "push",
+    page: { url: "https://crm.example.test/reports/view/7", title: "Reports" },
+  });
+  // Looked up once, for the final page.
+  expect(lookups).toHaveLength(1);
+});
+
+test("a step of the person's between two page changes, or a gap longer than the redirect wait, keeps them apart", async () => {
+  const h = harness();
+  h.steps.navigation(1, change(START, "https://crm.example.test/contacts"));
+  h.steps.step(1, click(START + 300, "Ada Lovelace"));
+  h.steps.navigation(
+    1,
+    change(START + 320, "https://crm.example.test/contacts/9001"),
+  );
+  h.steps.navigation(
+    1,
+    change(
+      START + 320 + STEP_TIMING.redirectMs + 1,
+      "https://crm.example.test/contacts/9001/notes",
+    ),
+  );
+  h.advance(30_000);
+  await flushPromises();
+  h.advance(1);
+  expect(
+    h.sent.map((event) => {
+      const value = event.value as { to?: string; target?: { name?: string } };
+      return value.to ?? value.target?.name;
+    }),
+  ).toEqual([
+    "https://crm.example.test/contacts",
+    "Ada Lovelace",
+    "https://crm.example.test/contacts/9001",
+    "https://crm.example.test/contacts/9001/notes",
+  ]);
+});
+
+test("a reload or a step back is the person's own page change, never folded into the one before", async () => {
+  const h = harness();
+  h.steps.navigation(1, change(START, "https://crm.example.test/deals/44"));
+  h.steps.navigation(
+    1,
+    change(START + 300, "https://crm.example.test/deals/44", "", "reload"),
+  );
+  h.steps.navigation(
+    1,
+    change(START + 600, "https://crm.example.test/deals/43", "", "traverse"),
+  );
+  h.advance(30_000);
+  await flushPromises();
+  h.advance(1);
+  expect(
+    h.sent.map(
+      (event) => (event.value as { navigationType: string }).navigationType,
+    ),
+  ).toEqual(["push", "reload", "traverse"]);
 });

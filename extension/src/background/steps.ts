@@ -16,7 +16,13 @@
 // - a POST whose masked body carries what the person just typed or chose, or whose path or operation is a write
 //   (create, update, save, delete, send, submit, mark, archive, assign). Apps read their configuration through POSTs
 //   too, and those stay out.
-// When several qualify, the one carrying the person's values wins, else the first.
+// When several qualify, the one carrying the person's values wins, else the first. A write the page sends to keep itself
+// alive or to report on itself (presence, heartbeats, pings, typing, session refreshes, telemetry, tracking, logs) is
+// never a save.
+//
+// Page changes the page makes one after another, with no step of the person's between them and none more than
+// `redirectMs` after the last (a sign-in's redirects, an app settling on its default view), are one step to the final
+// page, `from` the address the chain began at.
 import {
   type CapturedEvent,
   EVENT_BUDGET_BYTES,
@@ -38,8 +44,9 @@ export const STEP_TIMING = {
   leadMs: 250,
   /** How long a closed step waits for its calls (and a coalesced edit before it) to arrive. */
   settleMs: 1_000,
-  /** How long a page change waits before it is sent, so its page has a title. */
-  navigationMs: 1_000,
+  /** How long a page change waits for the next one the page makes on its own (a redirect) before it is sent, so a
+   * chain of them is one step to the final page, with that page's title. */
+  redirectMs: 2_000,
   /** The longest a step waits for a save still in flight. */
   inflightCapMs: 10_000,
 } as const;
@@ -114,6 +121,54 @@ function firstWord(name: string): string | undefined {
     ?.toLowerCase();
 }
 
+/** Words that mark a write as the page keeping itself alive or reporting on itself, never a save: presence,
+ * heartbeats, pings, typing indicators, session refreshes, telemetry, tracking and logs. */
+const CHATTER_WORDS = new Set([
+  "presence",
+  "heartbeat",
+  "heartbeats",
+  "ping",
+  "pings",
+  "keepalive",
+  "typing",
+  "telemetry",
+  "track",
+  "tracking",
+  "log",
+  "logs",
+  "logging",
+]);
+
+/** Every word of a name, lower case: `updateBreezePresence` -> update, breeze, presence; `keep-alive` -> keepalive. */
+function words(name: string): string[] {
+  return name
+    .replace(/([a-z\d])([A-Z])/g, "$1 $2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+    .toLowerCase()
+    .replace(/keep[\s_-]*alive/g, "keepalive")
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+}
+
+/** Whether a write's path or operation says it is the page's own chatter (updateBreezePresence, /heartbeat,
+ * /session/refresh, trackEvent, /logs/batch) rather than something the person saved. A read receipt sent as a POST
+ * call (markConversationRead, markAsSeen) is the page noting what it showed; one sent as a PUT or PATCH on the thing
+ * itself (`/notifications/9/action/MARKED_AS_READ`) is the person's own choice, as dismissing a banner is. */
+export function isChatter(
+  path: string,
+  operation?: string,
+  method = "POST",
+): boolean {
+  const all = [...words(path), ...(operation ? words(operation) : [])];
+  if (all.some((word) => CHATTER_WORDS.has(word))) return true;
+  if (all.includes("session") && all.includes("refresh")) return true;
+  return (
+    method.toUpperCase() === "POST" &&
+    all.includes("mark") &&
+    all.some((word) => word === "read" || word === "seen" || word === "viewed")
+  );
+}
+
 const ID_SEGMENT = /^(?:\d+|[0-9a-f]{8,}(?:-[0-9a-f]{4,})*)$/i;
 
 /** Whether an operation name, or the last two segments of a path that are not ids, say they save something:
@@ -173,7 +228,12 @@ function graphql(
   const mutation = queries.some((query) =>
     /(?:^|\})\s*mutation\b/.test(query.replace(/#[^\n]*/g, "").trimStart()),
   );
-  return { kind: mutation ? "mutation" : "query", operation: names[0] };
+  // An unnamed operation is known by its first field: `mutation { updatePresence(...) }`.
+  const field = queries[0]?.match(/^[^{]*\{\s*(\w+)/)?.[1];
+  return {
+    kind: mutation ? "mutation" : "query",
+    operation: [names[0], field].filter(Boolean).join(" ") || undefined,
+  };
 }
 
 const bodyText = (body: JsonValue | undefined): string | undefined =>
@@ -207,15 +267,16 @@ export function saveQuality(
   const text = bodyText(call.exchange.body);
   const carries = carriesValues(text, values);
   const gql = graphql(call.url, text);
-  if (gql.kind === "query") return { save: false, carries };
-  if (gql.kind === "mutation") return { save: true, carries };
-  if (method !== "POST") return { save: true, carries };
   let path = call.url;
   try {
     path = new URL(call.url).pathname;
   } catch {
     // Not a URL: its text is its path.
   }
+  if (isChatter(path, gql.operation, method)) return { save: false, carries };
+  if (gql.kind === "query") return { save: false, carries };
+  if (gql.kind === "mutation") return { save: true, carries };
+  if (method !== "POST") return { save: true, carries };
   return { save: carries || soundsLikeWrite(path, true), carries };
 }
 
@@ -236,6 +297,9 @@ type Pending = {
   timer?: unknown;
   /** A page change: when its page's title is looked up. */
   pageTimer?: unknown;
+  /** A page change: when its chain's last page change came, and which lookup of its page counts. */
+  lastHop?: number;
+  lookup?: number;
 };
 
 const stepValue = (event: CapturedEvent): Record<string, unknown> =>
@@ -285,6 +349,8 @@ export function createStepAssembler(options: {
   const calls = new Map<number, StepCall[]>();
   const typed = new Map<number, string[]>();
   const inflight = new Map<string, { tabId: number; startedAt: number }>();
+  /** Each tab's page change still held with no step of the person's after it: a redirect joins it. */
+  const openChange = new Map<number, Pending>();
   let ended = false;
 
   const lastOwner = (tabId: number): Pending | undefined => {
@@ -300,7 +366,7 @@ export function createStepAssembler(options: {
   }
 
   function isReady(step: Pending, at: number): boolean {
-    // A page change is ready once its page was looked up, `navigationMs` after it.
+    // A page change is ready once its page was looked up, `redirectMs` after its chain's last page change.
     if (!step.owner) return !step.waitingForPage;
     if (step.waitingForPage) return false;
     if (at < readyAt(step)) return false;
@@ -411,6 +477,7 @@ export function createStepAssembler(options: {
       }
       queue.shift();
       if (head.timer !== undefined) timers.clear(head.timer);
+      if (openChange.get(head.tabId) === head) openChange.delete(head.tabId);
       options.emit(finish(head));
     }
     prune(at);
@@ -428,7 +495,8 @@ export function createStepAssembler(options: {
     }
   }
 
-  /** Looks up the tab's page for the step; it waits for the answer, or for `inflightCapMs` at most. */
+  /** Looks up the tab's page for the step; it waits for the answer, or for `inflightCapMs` at most. A page change
+   * that a later redirect joined meanwhile looks again, and the earlier answer does not count. */
   function fetchPage(step: Pending): void {
     if (!options.pageOf) {
       step.waitingForPage = false;
@@ -436,9 +504,11 @@ export function createStepAssembler(options: {
       return;
     }
     step.waitingForPage = true;
+    const lookup = (step.lookup ?? 0) + 1;
+    step.lookup = lookup;
     let done = false;
     const finish = () => {
-      if (done) return;
+      if (done || step.lookup !== lookup) return;
       done = true;
       timers.clear(cap);
       step.waitingForPage = false;
@@ -446,7 +516,7 @@ export function createStepAssembler(options: {
     };
     const cap = timers.set(finish, tune.inflightCapMs);
     options.pageOf(step.tabId).then((page) => {
-      if (page && !done) step.page = page;
+      if (page && !done && step.lookup === lookup) step.page = page;
       finish();
     }, finish);
   }
@@ -456,6 +526,8 @@ export function createStepAssembler(options: {
      * iframe, whose page is the tab's. */
     step(tabId: number, event: CapturedEvent, fromFrame = false): void {
       if (ended) return;
+      // A page change after this one is the person's doing, never a redirect of the one before.
+      openChange.delete(tabId);
       const at = event.timestamp;
       const previous = lastOwner(tabId);
       const echo =
@@ -493,6 +565,36 @@ export function createStepAssembler(options: {
     /** A page change in the tab's top frame: sent in its place among the steps, once its page has a title. */
     navigation(tabId: number, event: CapturedEvent): void {
       if (ended) return;
+      const open = openChange.get(tabId);
+      const since = open ? event.timestamp - (open.lastHop ?? open.at) : -1;
+      // A reload or a step back or forward is the person's; a push or a replace this soon after the last is the page's.
+      const kind = stepValue(event).navigationType;
+      if (
+        open &&
+        queue.includes(open) &&
+        kind !== "reload" &&
+        kind !== "traverse" &&
+        since >= 0 &&
+        since <= tune.redirectMs
+      ) {
+        // A redirect: the held page change now ends where this one does, and still begins where it began.
+        const first = stepValue(open.event);
+        open.event = {
+          ...open.event,
+          value: {
+            ...stepValue(event),
+            from: first.from ?? "",
+            navigationType: first.navigationType ?? "push",
+          } as unknown as JsonValue,
+        };
+        open.lastHop = event.timestamp;
+        open.page = undefined;
+        open.waitingForPage = true;
+        open.lookup = (open.lookup ?? 0) + 1;
+        if (open.pageTimer !== undefined) timers.clear(open.pageTimer);
+        open.pageTimer = timers.set(() => fetchPage(open), tune.redirectMs);
+        return;
+      }
       const step: Pending = {
         tabId,
         at: event.timestamp,
@@ -501,9 +603,11 @@ export function createStepAssembler(options: {
         closeAt: event.timestamp,
         values: [],
         waitingForPage: true,
+        lastHop: event.timestamp,
       };
       queue.push(step);
-      step.pageTimer = timers.set(() => fetchPage(step), tune.navigationMs);
+      openChange.set(tabId, step);
+      step.pageTimer = timers.set(() => fetchPage(step), tune.redirectMs);
     },
 
     /** A finished call that passed the screens. */
@@ -539,9 +643,11 @@ export function createStepAssembler(options: {
       calls.clear();
       typed.clear();
       inflight.clear();
+      openChange.clear();
     },
 
     forgetTab(tabId: number): void {
+      openChange.delete(tabId);
       calls.delete(tabId);
       typed.delete(tabId);
       for (const [id, flight] of inflight)

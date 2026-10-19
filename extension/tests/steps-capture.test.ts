@@ -25,7 +25,7 @@ const TIMING = {
   horizonMs: 600,
   leadMs: 100,
   settleMs: 150,
-  navigationMs: 50,
+  redirectMs: 50,
   inflightCapMs: 3_000,
 };
 
