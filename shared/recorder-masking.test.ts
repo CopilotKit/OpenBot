@@ -975,6 +975,21 @@ test("a short numeric input is a one-time code field by its shape alone", () => 
   expect(sensitive({ inputmode: "decimal", maxlength: "6" })).toBe(false);
 });
 
+test("one numeric box of a code typed a digit per box is sensitive on its own, and a one-letter box is not", () => {
+  const sensitive = (attributes: Record<string, string>) =>
+    isSensitiveTarget({ tag: "input", attributes });
+  expect(sensitive({ maxlength: "1", inputmode: "numeric" })).toBe(true);
+  expect(sensitive({ maxlength: "1", type: "tel" })).toBe(true);
+  expect(sensitive({ maxlength: "1", pattern: "[0-9]*" })).toBe(true);
+  // A middle initial, and a one-digit count, keep their values.
+  expect(
+    sensitive({ maxlength: "1", type: "text", name: "middleInitial" }),
+  ).toBe(false);
+  expect(sensitive({ maxlength: "1", inputmode: "numeric", name: "qty" })).toBe(
+    false,
+  );
+});
+
 test("ordinary codes and short numbers are not one-time codes: zip, postal, promo, coupon and country codes are kept", () => {
   const cases: Array<[Record<string, string>, string?]> = [
     [{ name: "zipCode", inputmode: "numeric", maxlength: "5" }],

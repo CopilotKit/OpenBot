@@ -7,7 +7,10 @@ import {
   test,
 } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import type { CapturedEvent } from "@openbot/shared/recorder-masking";
+import {
+  type CapturedEvent,
+  sha256HexSync,
+} from "@openbot/shared/recorder-masking";
 import {
   collectorBeforeSend,
   startEventCapture,
@@ -324,6 +327,51 @@ describe("startEventCapture coalescing", () => {
     expect(target.value).toBe("[redacted]");
     expect(target.attributes.value).toBe("[redacted]");
     expect(target.attributes["data-test-id"]).toBe("two-factor-code-input");
+  });
+});
+
+describe("startEventCapture with a code typed a digit per box", () => {
+  test("a code typed into six unlabelled one-character boxes never leaves in any box's input event", () => {
+    // Six text boxes, one character each, each in its own wrapper, no label: the page moves focus along as each is filled
+    // and mirrors the value into the attribute.
+    document.body.innerHTML = `<form>${[1, 2, 3, 4, 5, 6]
+      .map(
+        (n) =>
+          `<div class="cell"><input id="otp-${n}" type="text" maxlength="1" autocomplete="off"></div>`,
+      )
+      .join("")}<button id="b" type="button">Verify</button></form>`;
+    const timers = fakeTimers();
+    const sent: CapturedEvent[] = [];
+    const tracker = newTracker();
+    const capture = startEventCapture({
+      tracker,
+      send: (event) => sent.push(event),
+      timers,
+    });
+    stops.push(capture.stop);
+    const reported: string[] = [];
+    tracker.onSensitiveValue((digest) => reported.push(digest));
+    [..."731946"].forEach((digit, index) => {
+      const box = document.getElementById(
+        `otp-${index + 1}`,
+      ) as HTMLInputElement;
+      box.focus();
+      box.value = digit;
+      box.setAttribute("value", digit);
+      box.dispatchEvent(
+        trustedEvent(new Event("input", { bubbles: true, composed: true })),
+      );
+    });
+    timers.advance(750);
+    const typed = sent.filter((event) => event.name === "input");
+    expect(typed).toHaveLength(6);
+    for (const event of typed) {
+      const target = (event.value as { target: Record<string, unknown> })
+        .target as { value?: string; attributes: Record<string, string> };
+      expect(target.value).toBe("[redacted]");
+      expect(target.attributes.value).toBe("[redacted]");
+    }
+    expect(reported).toContain(sha256HexSync("731946"));
   });
 });
 

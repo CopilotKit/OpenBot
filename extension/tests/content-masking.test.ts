@@ -443,6 +443,104 @@ describe("sensitivity tracker", () => {
     },
   );
 
+  /** Six boxes, one character each, each in its own wrapper inside a form, with no label. */
+  const sixBoxes = (attributes = 'type="text" maxlength="1"') =>
+    `<form>${[1, 2, 3, 4, 5, 6]
+      .map((n) => `<div><input id="b${n}" ${attributes}></div>`)
+      .join("")}<button type="button">Verify</button></form>`;
+  const box = (n: number) =>
+    document.getElementById(`b${n}`) as HTMLInputElement;
+  const typeAcross = (code: string) =>
+    [...code].forEach((digit, index) => {
+      focus(box(index + 1));
+      type(box(index + 1), digit);
+    });
+
+  test("every box of a code typed a digit per box is sensitive, though no box has a label", () => {
+    document.body.innerHTML = sixBoxes();
+    const tracker = track();
+    for (const n of [1, 2, 3, 4, 5, 6]) {
+      focus(box(n));
+      expect([n, tracker.sensitiveForEvent("input")]).toEqual([n, true]);
+    }
+  });
+
+  test("the code the boxes make together is hashed in order, so it is masked in any body", () => {
+    document.body.innerHTML = sixBoxes();
+    const tracker = track();
+    typeAcross("731946");
+    expect([...tracker.digests()]).toContain(sha256HexSync("731946"));
+    const masked = maskNetworkEvent(
+      {
+        type: "CUSTOM",
+        name: "network",
+        timestamp: 1,
+        value: {
+          url: "https://crm.example.test/api/devices/approve",
+          request: {
+            headers: { "content-type": "application/json" },
+            body: {
+              text: '{"challengeResponse":"731946"}',
+              status: "captured",
+            },
+          },
+        },
+      },
+      { digests: tracker.digests() },
+    );
+    expect(JSON.stringify(masked)).not.toContain("731946");
+  });
+
+  test("numeric boxes side by side in one parent, without maxlength, are a row too", () => {
+    document.body.innerHTML = `<div>${[1, 2, 3, 4]
+      .map((n) => `<input id="b${n}" type="tel">`)
+      .join("")}</div>`;
+    const tracker = track();
+    focus(box(2));
+    expect(tracker.sensitiveForEvent("input")).toBe(true);
+    typeAcross("4821");
+    expect([...tracker.digests()]).toContain(sha256HexSync("4821"));
+  });
+
+  test("a code the page spreads across the boxes on paste, with no input event per box, is hashed once it has", async () => {
+    document.body.innerHTML = sixBoxes('inputmode="numeric" maxlength="1"');
+    // What a code widget does with a paste: take it over and fill every box itself.
+    document.addEventListener("paste", (event) => {
+      event.preventDefault();
+      [..."580317"].forEach((digit, index) => {
+        box(index + 1).value = digit;
+      });
+    });
+    const tracker = track();
+    focus(box(1));
+    box(1).dispatchEvent(
+      new Event("paste", { bubbles: true, composed: true, cancelable: true }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect([...tracker.digests()]).toContain(sha256HexSync("580317"));
+  });
+
+  test.each([
+    ["a lone middle-initial box", `<input id="b1" type="text" maxlength="1">`],
+    [
+      "three one-character boxes",
+      `<div>${[1, 2, 3].map((n) => `<input id="b${n}" maxlength="1">`).join("")}</div>`,
+    ],
+    [
+      "nine one-character boxes",
+      `<div>${[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => `<input id="b${n}" maxlength="1">`).join("")}</div>`,
+    ],
+    [
+      "four checkboxes",
+      `<div>${[1, 2, 3, 4].map((n) => `<input id="b${n}" type="checkbox" maxlength="1">`).join("")}</div>`,
+    ],
+  ])("%s is not a row of code boxes", (_, markup) => {
+    document.body.innerHTML = markup;
+    const tracker = track();
+    focus(box(1));
+    expect(tracker.sensitiveForEvent("input")).toBe(false);
+  });
+
   test("install's cleanup removes the listeners", () => {
     document.body.innerHTML = `<label for="a">Security code</label><input id="a">`;
     const tracker = createSensitivityTracker(trusted);

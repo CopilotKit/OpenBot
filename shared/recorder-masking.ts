@@ -871,24 +871,31 @@ const TEXT_INPUT_TYPES: ReadonlySet<string> = new Set([
 const FIELD_HINT_ATTRIBUTE =
   /^(?:class|data-(?:test-?id|test|testing-?id|qa|cy|e2e|automation-?id|tid|hook))$/i;
 
-/** Inputmode numeric, type tel or a digits-only pattern, 4 to 8 long by its maxlength or its pattern. */
-const hasCodeShape = (attributes: Record<string, string>): boolean => {
+/** How many characters a numeric field (inputmode numeric, type tel or a digits-only pattern) takes, by its maxlength or its
+ * pattern; NaN for a field that is not numeric or says no length. */
+const numericFieldLength = (attributes: Record<string, string>): number => {
   const pattern = DIGITS_PATTERN.exec((attributes.pattern ?? "").trim());
   const numeric =
     attributes.inputmode?.toLowerCase() === "numeric" ||
     attributes.type?.toLowerCase() === "tel" ||
     pattern !== null;
-  if (!numeric) return false;
+  if (!numeric) return Number.NaN;
   const declared = Number.parseInt(attributes.maxlength ?? "", 10);
-  const length = Number.isFinite(declared)
+  return Number.isFinite(declared)
     ? declared
     : Number.parseInt(pattern?.[2] || pattern?.[1] || "", 10);
+};
+
+/** A short numeric input, 4 to 8 long: a one-time code field by its shape. */
+const hasCodeShape = (attributes: Record<string, string>): boolean => {
+  const length = numericFieldLength(attributes);
   return length >= CODE_FIELD_MIN_LENGTH && length <= CODE_FIELD_MAX_LENGTH;
 };
 
 /** A field that takes a one-time code, though it lacks autocomplete=one-time-code: its words name one; or it says "code"
  * (no zip, promo or country code) and asks for a number of digits, has a code's shape or sits on a sign-in page; or it has
- * a code's shape (a short numeric input) and names no ordinary number. Text inputs, text areas and editable regions only. */
+ * a code's shape (a short numeric input) or is one numeric box of a code typed a digit per box, and names no ordinary
+ * number. Text inputs, text areas and editable regions only. */
 const isOneTimeCodeField = (
   target: { attributes?: Record<string, string>; label?: string; tag?: string },
   url: string | undefined,
@@ -928,7 +935,12 @@ const isOneTimeCodeField = (
     (DIGIT_COUNT.test(words) || shape || authFlowUrl(url))
   )
     return true;
-  return shape && !ORDINARY_NUMBER.test(words);
+  // One box of a code typed a digit per box: a numeric input one character long. The content script knows its row of
+  // boxes; this holds for a box judged on its own.
+  return (
+    (shape || numericFieldLength(attributes) === 1) &&
+    !ORDINARY_NUMBER.test(words)
+  );
 };
 
 /** A field whose value is a secret: a password, a card, a security or one-time code. `context.url` is the page it is on. */
