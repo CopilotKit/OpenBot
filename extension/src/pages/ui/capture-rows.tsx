@@ -246,6 +246,12 @@ export function VoiceRow({
             voiceLine(voice)
           )}
         </ItemDescription>
+        {/* Still listening, but the browser hands back no words for what it hears. */}
+        {listening && voice.reason ? (
+          <ItemDescription className="line-clamp-none">
+            {voice.reason}
+          </ItemDescription>
+        ) : null}
         {listening && voice.heard ? (
           <ItemDescription className="text-foreground" aria-live="polite">
             {`“${voice.heard}”`}

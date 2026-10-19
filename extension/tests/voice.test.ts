@@ -6,6 +6,8 @@ import {
 } from "@openbot/shared/recorder-masking";
 import {
   FLUSH_MS,
+  NO_WORDS_MS,
+  NO_WORDS_SENTENCE,
   startVoice,
   type VoiceDeps,
   voiceSentence,
@@ -289,6 +291,77 @@ describe("voice", () => {
       s.events.map((event) => (event.value as { text: string }).text),
     ).toEqual(["my card number is", REDACTED]);
     expect(JSON.stringify([s.events, s.statuses])).not.toContain("4012");
+  });
+
+  test("speech that never comes back as words says so after a while, keeps listening, and clears once words arrive", async () => {
+    const s = setup();
+    await s.clock.advance(0);
+    const recognition = s.recognition();
+    recognition.begin();
+    // As Edge did in a real run: it hears speech and raises no error, but every final phrase is empty.
+    recognition.hearSpeech();
+    const empties: [string, boolean][] = [];
+    for (let phrase = 0; phrase < 6; phrase++) {
+      await s.clock.advance(3_000);
+      empties.push(["", true]);
+      recognition.say(empties);
+    }
+    expect(s.last()?.reason).toBeUndefined();
+    await s.clock.advance(NO_WORDS_MS - 18_000);
+    expect(s.last()).toEqual({ state: "listening", reason: NO_WORDS_SENTENCE });
+    expect(NO_WORDS_SENTENCE).toBe(
+      "This browser is not turning your speech into words. Recording carries on without narration.",
+    );
+    expect(s.events).toHaveLength(0);
+    expect(recognition.aborts).toBe(0);
+    expect(recognition.stops).toBe(0);
+    expect(s.tracks[0]?.readyState).toBe("live");
+    // Chrome ends the recognition and another listens: the sentence stays.
+    recognition.end();
+    await s.clock.advance(0);
+    const next = s.recognition();
+    expect(next).not.toBe(recognition);
+    next.begin();
+    expect(s.last()).toEqual({ state: "listening", reason: NO_WORDS_SENTENCE });
+    next.say([["", true]]);
+    expect(s.last()?.reason).toBe(NO_WORDS_SENTENCE);
+    // A real phrase: it is sent and the sentence goes.
+    next.say(
+      [
+        ["", true],
+        ["I am opening the order page", true],
+      ],
+      1,
+    );
+    expect(s.events).toHaveLength(1);
+    expect(s.last()).toEqual({
+      state: "listening",
+      heard: "I am opening the order page",
+    });
+  });
+
+  test("silence never says the browser is not turning speech into words, and a mute forgets that it did", async () => {
+    const quiet = setup();
+    await quiet.clock.advance(0);
+    quiet.recognition().begin();
+    await quiet.clock.advance(5 * NO_WORDS_MS);
+    expect(quiet.statuses.some((status) => status.reason)).toBe(false);
+
+    const s = setup();
+    await s.clock.advance(0);
+    s.recognition().begin();
+    s.recognition().hearSpeech();
+    await s.clock.advance(NO_WORDS_MS);
+    expect(s.last()?.reason).toBe(NO_WORDS_SENTENCE);
+    s.voice.mute(true);
+    s.recognition().end();
+    expect(s.last()).toEqual({ state: "muted" });
+    s.voice.mute(false);
+    await s.clock.advance(0);
+    s.recognition().begin();
+    expect(s.last()).toEqual({ state: "listening" });
+    await s.clock.advance(NO_WORDS_MS);
+    expect(s.last()).toEqual({ state: "listening" });
   });
 
   test("a recognition Chrome ends is restarted on the same microphone, with a growing delay when it keeps ending at once", async () => {

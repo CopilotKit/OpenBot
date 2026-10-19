@@ -19,6 +19,8 @@ export function fakeSpeech() {
     onresult: RecognitionLike["onresult"] = null;
     onerror: RecognitionLike["onerror"] = null;
     onend: (() => void) | null = null;
+    onspeechstart: (() => void) | null = null;
+    onsoundstart: (() => void) | null = null;
     track: MediaStreamTrack | undefined;
     started = false;
     stops = 0;
@@ -39,6 +41,10 @@ export function fakeSpeech() {
     // What Chrome does:
     begin() {
       this.onstart?.();
+    }
+    hearSpeech() {
+      this.onsoundstart?.();
+      this.onspeechstart?.();
     }
     say(results: [string, boolean][], resultIndex = 0) {
       this.onresult?.({

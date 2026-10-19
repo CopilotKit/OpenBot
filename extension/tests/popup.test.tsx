@@ -569,6 +569,19 @@ test("while listening the Voice row says so, shows the last words heard, and its
   );
 });
 
+test("listening to speech that never comes back as words, the Voice row says so and stays on", async () => {
+  const sentence =
+    "This browser is not turning your speech into words. Recording carries on without narration.";
+  const { findByText, getByText, getByRole } = setup(
+    voiceRecording({ state: "listening", reason: sentence }),
+  );
+  await findByText(sentence);
+  expect(getByText("Listening")).toBeTruthy();
+  expect(
+    getByRole("switch", { name: "Voice" }).getAttribute("aria-checked"),
+  ).toBe("true");
+});
+
 test("muted, the switch is off and turning it on unmutes; starting shows it on", async () => {
   const muted = setup(voiceRecording({ state: "muted" }));
   await muted.findByText("Muted. Turn it on to narrate what you do.");

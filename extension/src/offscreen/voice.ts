@@ -6,7 +6,7 @@
 // grant or a missing device is told apart from a speech-service failure. It is the browser's own speech recognition with
 // its defaults: no model is downloaded, bundled or forced on the device. Only the words leave: each final phrase becomes one
 // masked `transcript` event in the recording, and no audio is kept. Interim words only update the popup, masked the same
-// way.
+// way. A browser that hears speech but hands back no words (every phrase empty) says so in the popup after a while.
 //
 // Nothing here may use a chrome.* API: an offscreen document has only runtime messaging.
 import type { CapturedEvent } from "@openbot/shared/recorder-masking";
@@ -40,6 +40,9 @@ export type RecognitionLike = {
   onresult: ((event: RecognitionResultEvent) => void) | null;
   onerror: ((event: { error: string; message?: string }) => void) | null;
   onend: (() => void) | null;
+  /** Sound, then speech, was heard: the browser is listening to someone. */
+  onsoundstart?: (() => void) | null;
+  onspeechstart?: (() => void) | null;
   /** Chrome takes the microphone track to listen to; a browser without that form ignores it and opens the default
    * microphone itself. */
   start(track?: MediaStreamTrack): void;
@@ -90,6 +93,10 @@ const NETWORK_FIRST_MS = 2_000;
 const NETWORK_MAX_MS = 60_000;
 /** The popup shows the end of what was heard, not all of it. */
 const HEARD_MAX = 160;
+/** Speech heard for this long without a phrase coming back in words means the browser is not transcribing it. */
+export const NO_WORDS_MS = 20_000;
+export const NO_WORDS_SENTENCE =
+  "This browser is not turning your speech into words. Recording carries on without narration.";
 
 const GOES_ON = "Recording goes on without your voice.";
 
@@ -171,6 +178,9 @@ export function startVoice(options: VoiceOptions, deps: VoiceDeps): Voice {
   let lastStatus: VoiceCapture | null = null;
   /** The last final phrase, unmasked, so the next one is masked knowing what came before it. */
   let lastPhrase = "";
+  /** Runs from the first speech heard until a phrase comes back in words; when it fires, the popup says none do. */
+  let noWordsTimer: unknown = null;
+  let noWords = false;
 
   const status = (voice: VoiceCapture) => {
     if (closed) return;
@@ -178,14 +188,40 @@ export function startVoice(options: VoiceOptions, deps: VoiceDeps): Voice {
     options.status(voice);
   };
   const listeningStatus = () =>
-    status({ state: "listening", ...(heard ? { heard } : {}) });
+    status({
+      state: "listening",
+      ...(heard ? { heard } : {}),
+      ...(noWords ? { reason: NO_WORDS_SENTENCE } : {}),
+    });
 
   function clearTimers(): void {
     if (restartTimer !== null) deps.timers.clear(restartTimer);
     if (interimTimer !== null) deps.timers.clear(interimTimer);
+    if (noWordsTimer !== null) deps.timers.clear(noWordsTimer);
     restartTimer = null;
     interimTimer = null;
+    noWordsTimer = null;
     pendingHeard = null;
+    noWords = false;
+  }
+
+  /** Speech was heard (a sound or speech began, or results came): unless a phrase comes back in words within
+   * NO_WORDS_MS, the browser is not turning it into words, as Edge does when every final phrase it returns is empty. The
+   * microphone stays open and recognition goes on, so the sentence goes as soon as words come. */
+  function speechHeard(): void {
+    if (noWords || noWordsTimer !== null || muted || failed || closed) return;
+    noWordsTimer = deps.timers.set(() => {
+      noWordsTimer = null;
+      if (muted || failed || closed || !current) return;
+      noWords = true;
+      if (lastStatus?.state === "listening") listeningStatus();
+    }, NO_WORDS_MS);
+  }
+
+  function wordsCame(): void {
+    if (noWordsTimer !== null) deps.timers.clear(noWordsTimer);
+    noWordsTimer = null;
+    noWords = false;
   }
 
   function release(listening: Listening): void {
@@ -237,6 +273,7 @@ export function startVoice(options: VoiceOptions, deps: VoiceDeps): Voice {
 
   function results(listening: Listening, event: RecognitionResultEvent): void {
     const at = deps.now();
+    speechHeard();
     let interim = "";
     for (let index = event.resultIndex; index < event.results.length; index++) {
       const result = event.results[index];
@@ -253,6 +290,7 @@ export function startVoice(options: VoiceOptions, deps: VoiceDeps): Voice {
       if (!phrase) continue;
       const masked = mask(phrase, lastPhrase);
       lastPhrase = phrase;
+      wordsCame();
       const startedAt = Math.max(
         listening.firstHeard.get(index) ?? at,
         listening.lastFinalAt,
@@ -350,6 +388,11 @@ export function startVoice(options: VoiceOptions, deps: VoiceDeps): Voice {
       if (listening.recognition !== recognition) return;
       listeningStatus();
     };
+    const heardSound = () => {
+      if (listening.recognition === recognition) speechHeard();
+    };
+    recognition.onsoundstart = heardSound;
+    recognition.onspeechstart = heardSound;
     recognition.onresult = (event) => {
       if (listening.recognition !== recognition && !listening.ended) return;
       results(listening, event);

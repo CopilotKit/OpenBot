@@ -30,7 +30,8 @@ export type CaptureStatus = {
 };
 /** What the Voice row shows. `heard` is the last words recognised (interim words too), masked as the transcript events
  * are; it lives in the popup's state only. `problem` says what went wrong when `state` is failed, so the row can offer
- * the fix (the microphone page for `microphone`). */
+ * the fix (the microphone page for `microphone`). `reason` is the sentence the row shows: why voice stopped when failed,
+ * or, while listening, that the browser hears speech but hands back no words for it. */
 export type VoiceCapture = {
   state: "starting" | "listening" | "muted" | "failed";
   reason?: string;
