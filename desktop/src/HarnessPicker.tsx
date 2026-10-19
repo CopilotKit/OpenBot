@@ -9,7 +9,10 @@ export type Harness = {
   summary: string;
   image: string | null;
   health_path: string | null;
-  credential: "any-provider" | "anthropic" | "their-endpoint";
+  // Mirrors `Credential` in shared/harnesses.ts, which this cannot import: the desktop app is
+  // outside the workspace and reads the catalogue over the Tauri boundary as JSON. Adding a
+  // variant there means adding it here, and the tile below is what reads it.
+  credential: "any-provider" | "anthropic" | "google" | "their-endpoint";
   maintainer: "first-party" | "partnership" | "community";
   mark: string | null;
   port: number | null;
@@ -136,6 +139,9 @@ export function HarnessPicker({
               <span className="tile-summary">{row.summary}</span>
               {row.credential === "anthropic" && (
                 <span className="tile-note">No API key needed</span>
+              )}
+              {row.credential === "google" && (
+                <span className="tile-note">Needs a Gemini key</span>
               )}
               {row.credential === "their-endpoint" && (
                 <span className="tile-note">Uses your running agent</span>
