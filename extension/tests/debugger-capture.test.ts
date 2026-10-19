@@ -715,6 +715,37 @@ test("a page-level event is trimmed to fit one event and emitted", async () => {
   expect(value(emitted[0]).capturedBy).toBe("page");
 });
 
+test("a page-level event for a call to OpenBot itself is dropped, like the debugger drops it", async () => {
+  await capture.start(7, "https://crm.example.test/");
+  const pageEvent = (url: string, responseUrl = url): CapturedEvent => ({
+    type: "CUSTOM",
+    name: "network",
+    timestamp: 1,
+    value: {
+      method: "POST",
+      url,
+      status: 200,
+      capturedBy: "page",
+      response: {
+        url: responseUrl,
+        headers: { "content-type": "application/json" },
+        body: { status: "complete", text: '{"code":"obc_live_connect_code"}' },
+      },
+    },
+  });
+  await capture.recordPageEvent(
+    pageEvent(`${OPENBOT}/api/recorder/connect-codes`),
+  );
+  // A call that a redirect landed on OpenBot.
+  await capture.recordPageEvent(
+    pageEvent("https://crm.example.test/go", `${OPENBOT}/api/recorder/me`),
+  );
+  await capture.recordPageEvent(pageEvent("https://crm.example.test/api"));
+  expect(emitted.map((event) => value(event).url)).toEqual([
+    "https://crm.example.test/api",
+  ]);
+});
+
 test("in the e2e build a forced refusal makes start fall back as a refused attach would", async () => {
   const previous = process.env.RECORDER_VARIANT;
   process.env.RECORDER_VARIANT = "e2e";

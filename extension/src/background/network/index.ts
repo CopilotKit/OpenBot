@@ -35,7 +35,8 @@ export type NetworkCapture = {
     tabs: { tabId: number; url: string }[],
     previous: NetworkMode | "stopped",
   ): Promise<NetworkMode | "stopped">;
-  /** A page-level fallback event (Task 18), already re-masked: trimmed to fit one event and emitted like a debugger event. */
+  /** A page-level fallback event (Task 18), already re-masked: dropped when it is a call to OpenBot itself (the debugger
+   * never records those either), else trimmed to fit one event and emitted like a debugger event. */
   recordPageEvent(event: CapturedEvent): Promise<void>;
   stop(): Promise<void>;
 };
@@ -333,6 +334,13 @@ export function createNetworkCapture(
 
     async recordPageEvent(event) {
       if (ended) return;
+      // The URLs are already masked, which keeps their origin. A call a redirect landed on OpenBot is OpenBot's too.
+      const value = event.value as {
+        url?: unknown;
+        response?: { url?: unknown } | null;
+      } | null;
+      const urls = [value?.url, value?.response?.url];
+      if (urls.some((url) => typeof url === "string" && ignore(url))) return;
       deps.emit(trimEvent(event, EVENT_BUDGET_BYTES).event);
     },
 
