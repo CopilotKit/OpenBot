@@ -774,22 +774,49 @@ const cut = (text: string, length: number): string => {
   return text.slice(0, end);
 };
 
-const truncateBody = (
-  event: CapturedEvent,
-  side: "request" | "response",
-  maxBytes: number,
-): void => {
+/**
+ * Cuts the request and response bodies to one length, the longest that fits the event in `maxBytes`. A body shorter
+ * than that length stays whole, so the larger body is always cut first: a small response survives a large upload,
+ * and two large bodies end the same length. Called only on an event already over its budget.
+ */
+const truncateBodies = (event: CapturedEvent, maxBytes: number): void => {
   const value = event.value;
-  if (!isObject(value) || !isObject(value[side])) return;
-  const body = (value[side] as Obj).body;
-  if (!isObject(body) || typeof body.text !== "string") return;
-  let length = body.text.length;
-  while (length > 0 && byteLength(event) > maxBytes) {
-    length = Math.floor(length / 2);
-    body.text = cut(body.text, length);
-    body.status = "truncated";
-    body.truncated = true;
+  if (!isObject(value)) return;
+  const bodies: { exchange: Obj; body: Obj; text: string }[] = [];
+  for (const side of ["request", "response"] as const) {
+    const exchange = value[side];
+    if (!isObject(exchange)) continue;
+    const body = exchange.body;
+    if (isObject(body) && typeof body.text === "string")
+      bodies.push({ exchange, body, text: body.text });
   }
+  if (bodies.length === 0) return;
+  const capAt = (length: number) => {
+    for (const { exchange, body, text } of bodies)
+      exchange.body =
+        text.length > length
+          ? {
+              ...body,
+              text: cut(text, length),
+              status: "truncated",
+              truncated: true,
+            }
+          : body;
+  };
+  // The event with every body whole is over budget: the answer is below the longest body's length.
+  let fits = -1;
+  let low = 0;
+  let high = Math.max(...bodies.map(({ text }) => text.length)) - 1;
+  while (low <= high) {
+    const length = Math.floor((low + high) / 2);
+    capAt(length);
+    if (byteLength(event) <= maxBytes) {
+      fits = length;
+      low = length + 1;
+    } else high = length - 1;
+  }
+  // Nothing fits even with the bodies emptied: they stay empty, and the caller cuts further.
+  capAt(Math.max(fits, 0));
 };
 
 export function trimEvent(
@@ -800,8 +827,7 @@ export function trimEvent(
     event as unknown as JsonValue,
   ) as unknown as CapturedEvent;
   if (byteLength(work) <= maxBytes) return { event: work, trimmed: false };
-  truncateBody(work, "response", maxBytes);
-  if (byteLength(work) > maxBytes) truncateBody(work, "request", maxBytes);
+  truncateBodies(work, maxBytes);
   if (
     byteLength(work) > maxBytes &&
     isObject(work.value) &&

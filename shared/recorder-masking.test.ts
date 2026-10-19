@@ -303,6 +303,57 @@ test("an event over budget is trimmed body-first and says so", () => {
   expect(at(event, "response", "body", "status")).toBe("truncated");
 });
 
+const eventBytes = (event: unknown) =>
+  new TextEncoder().encode(JSON.stringify(event)).byteLength;
+
+test("a large request is cut first and its small response survives whole, with the event filling its budget", () => {
+  const response = '{"ok":true,"id":"a1b2c3d4"}';
+  expect(response).toHaveLength(27);
+  const upload = {
+    type: "CUSTOM" as const,
+    name: "network",
+    timestamp: 1,
+    value: {
+      url: "https://api.x.test/upload",
+      request: {
+        method: "POST",
+        body: { status: "complete", text: "a".repeat(2_600_000) },
+      },
+      response: { status: 200, body: { status: "complete", text: response } },
+    },
+  };
+  const { event, trimmed } = trimEvent(upload, 15 * 1024);
+  expect(trimmed).toBe(true);
+  expect(at(event, "response", "body")).toEqual({
+    status: "complete",
+    text: response,
+  });
+  expect(at(event, "request", "body", "status")).toBe("truncated");
+  expect(at(event, "request", "body", "truncated")).toBe(true);
+  // The cut leaves the event as close to the budget as one more character would overshoot.
+  expect(eventBytes(event)).toBeLessThanOrEqual(15 * 1024);
+  expect(eventBytes(event)).toBeGreaterThan(15 * 1024 - 2);
+});
+
+test("two large bodies are cut to the same length, and neither is emptied", () => {
+  const both = {
+    type: "CUSTOM" as const,
+    name: "network",
+    timestamp: 1,
+    value: {
+      request: { body: { status: "complete", text: "q".repeat(60_000) } },
+      response: { body: { status: "complete", text: "r".repeat(40_000) } },
+    },
+  };
+  const { event } = trimEvent(both, 15 * 1024);
+  const request: string = at(event, "request", "body", "text");
+  const responseText: string = at(event, "response", "body", "text");
+  expect(request.length).toBe(responseText.length);
+  expect(request.length).toBeGreaterThan(7_000);
+  expect(at(event, "response", "body", "status")).toBe("truncated");
+  expect(eventBytes(event)).toBeLessThanOrEqual(15 * 1024);
+});
+
 test("an input event with a huge value is trimmed by shortening the value and text", () => {
   const big = {
     type: "CUSTOM" as const,
