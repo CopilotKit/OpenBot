@@ -302,3 +302,92 @@ test("the collector's click and edits become steps with their targeting, masked:
   });
   expect(leakedSecrets(sent, ["Hunter-Two-99"])).toEqual([]);
 });
+
+/** Starts the collector's step capture and clicks `element` as a person would; the step it records. */
+function clickStep(element: HTMLElement): Record<string, unknown> {
+  const sent: CapturedEvent[] = [];
+  const tracker = createSensitivityTracker({ isTrusted: () => true });
+  cleanups.push(tracker.install());
+  const capture = startEventCapture({
+    tracker,
+    send: (event) => sent.push(event),
+  });
+  cleanups.push(capture.stop);
+  element.dispatchEvent(
+    trusted(new MouseEvent("pointerdown", { bubbles: true, composed: true })),
+  );
+  element.dispatchEvent(
+    trusted(new MouseEvent("click", { bubbles: true, composed: true })),
+  );
+  const step = sent.find((event) => event.name === "click");
+  if (!step) throw new Error("no click step");
+  return step.value as Record<string, unknown>;
+}
+
+const boxed = (element: HTMLElement, box: Record<string, number>) =>
+  Object.defineProperty(element, "getBoundingClientRect", {
+    value: () => box,
+  });
+
+test("a click on the text inside a button names and selects the button, through any wrapper, and keeps the box of what was clicked", () => {
+  document.body.innerHTML = `
+    <button id="ask" data-testid="ask-ai"><div role="presentation"><span id="label">Ask a <b>question</b></span></div></button>
+    <div role="menuitem" tabindex="0" id="crm"><svg></svg><span id="crm-text">CRM</span></div>`;
+  const label = $("#label");
+  boxed(label, { x: 12, y: 40, width: 80, height: 16 });
+  boxed($("#ask"), { x: 0, y: 30, width: 200, height: 36 });
+  const step = clickStep(label);
+  expect(step.target).toMatchObject({ role: "button", name: "Ask a question" });
+  expect(step.selectors).toEqual([
+    { by: "testid", selector: '[data-testid="ask-ai"]' },
+    { by: "id", selector: "#ask" },
+    { by: "role", selector: 'role=button[name="Ask a question"]' },
+    { by: "text", selector: 'text="Ask a question"' },
+    { by: "css", selector: "html > body > button" },
+  ]);
+  expect(step.box).toEqual({ x: 12, y: 40, width: 80, height: 16 });
+  cleanups.splice(0).forEach((cleanup) => {
+    cleanup();
+  });
+  const crm = clickStep($("#crm-text"));
+  expect(crm.target).toMatchObject({ role: "menuitem", name: "CRM" });
+  expect((crm.selectors as { by: string; selector: string }[])[0]).toEqual({
+    by: "id",
+    selector: "#crm",
+  });
+});
+
+test("a click that meets nothing a person acts on names the clicked element by its own first 60 characters, its pieces of text kept apart", () => {
+  document.body.innerHTML = `
+    <div id="panel" class="TFlex__StyledFlex-inKyeJ edqmbC">
+      <h1>Sign in</h1><p>or create an account</p><a href="/google">Sign in with Google</a><p>See how we can help you grow.</p>
+    </div>
+    <ul id="nav" role="menu"><li>Bookmarks</li><li>CRM</li><li>Marketing</li><li>Content</li><li>Sales</li><li>Revenue</li><li>Service</li></ul>`;
+  const panel = clickStep($("#panel"));
+  // Cut at 60 characters, at most.
+  expect((panel.target as { name: string }).name).toBe(
+    "Sign in or create an account Sign in with Google See how we",
+  );
+  expect((panel.selectors as { by: string }[]).map((s) => s.by)).toEqual([
+    "id",
+    "css",
+  ]);
+  cleanups.splice(0).forEach((cleanup) => {
+    cleanup();
+  });
+  const menu = clickStep($("#nav"));
+  expect(menu.target).toMatchObject({
+    role: "menu",
+    name: "Bookmarks CRM Marketing Content Sales Revenue Service",
+  });
+});
+
+test("text split across elements is never glued into one word in a name", () => {
+  document.body.innerHTML = `
+    <a id="a" href="/x"><span>Sign</span><span>in</span></a>
+    <button id="b"><b>Save</b>changes</button>
+    <button id="c">Close <span hidden>dialog 4921</span><span aria-hidden="true">x</span></button>`;
+  expect(nameOf($("#a"))).toBe("Sign in");
+  expect(nameOf($("#b"))).toBe("Save changes");
+  expect(nameOf($("#c"))).toBe("Close");
+});

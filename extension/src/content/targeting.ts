@@ -1,12 +1,8 @@
 // What a step carries so an agent can find and use the same element again: its accessible role and name, its input type,
 // a ranked list of stable selectors, the frame it sits in, the page, and where it was on screen. Built in the page, before
 // the step is masked, so the shared masking rules apply to all of it as they do to the rest of the step. Nothing here
-// ever reads a field's value into a name or a selector.
-
-/** The collector's own choice of the element a click or an edit is about (`@copilotkit/learning` 0.0.1 `clicks.ts`
- * INTERACTIVE), so the targeting describes the element the step names. */
-export const INTERACTIVE =
-  'button, a[href], input, select, textarea, label, summary, [role], [data-copilotkit-action], [contenteditable]:not([contenteditable="false"])';
+// ever reads a field's value into a name or a selector. A click names the element the person meant (meantElement): the
+// collector's own description of what was clicked (its tag, text and attributes) stays beside it as the collector wrote it.
 
 /** Attributes a team puts on an element for tests and automation: the steadiest handle there is. */
 const TEST_ATTRIBUTES = [
@@ -21,6 +17,8 @@ const TEST_ATTRIBUTES = [
 ] as const;
 
 const MAX_NAME = 200;
+/** A name read from what an element says is its first 60 characters: enough to tell it apart, never a whole panel. */
+const MAX_TEXT_NAME = 60;
 /** The roles ARIA names from their content (a form, a list or a region is named only by its own label). */
 const NAMED_BY_CONTENT = new Set([
   "button",
@@ -78,7 +76,7 @@ export type StepTargeting = {
 };
 
 const squash = (text: string | null | undefined, max = MAX_NAME): string =>
-  (text ?? "").replace(/\s+/g, " ").trim().slice(0, max);
+  (text ?? "").replace(/\s+/g, " ").trim().slice(0, max).trimEnd();
 
 /** An id a framework made up (React's `:r1:`, `ember123`, a uuid, a long hex or number run) changes from one load to the
  * next, so it is never a selector. */
@@ -156,11 +154,37 @@ const isField = (element: Element) =>
   element instanceof HTMLSelectElement ||
   element.matches('[contenteditable]:not([contenteditable="false"])');
 
-/** What is written on the element, as a person sees it: never a field's own value. */
-function visibleText(element: Element): string {
+const SILENT = new Set(["script", "style", "noscript", "template"]);
+
+/** What is written on the element, as a person reads it: each piece of text with a space between it and the next, so
+ * "Sign in" and "or create an account" never run together as "Sign inor create"; never a field's own value, nor text a
+ * page hides from everyone. Cut at `max` characters. */
+function visibleText(element: Element, max = MAX_NAME): string {
   if (isField(element)) return "";
-  const text = (element as HTMLElement).innerText ?? element.textContent;
-  return squash(typeof text === "string" ? text : element.textContent);
+  const parts: string[] = [];
+  let length = 0;
+  const walker = element.ownerDocument.createTreeWalker(
+    element,
+    NodeFilter.SHOW_TEXT,
+  );
+  for (
+    let node = walker.nextNode();
+    node && length <= max;
+    node = walker.nextNode()
+  ) {
+    const parent = node.parentElement;
+    if (
+      parent &&
+      (SILENT.has(parent.localName) ||
+        parent.closest('[hidden], [aria-hidden="true"]'))
+    )
+      continue;
+    const text = node.nodeValue?.trim();
+    if (!text) continue;
+    parts.push(text);
+    length += text.length + 1;
+  }
+  return squash(parts.join(" "), max);
 }
 
 function labelText(element: Element): string {
@@ -169,6 +193,34 @@ function labelText(element: Element): string {
     return squash([...labels].map((label) => label.textContent).join(" "));
   const wrapping = element.closest("label");
   return wrapping ? squash(wrapping.textContent) : "";
+}
+
+/** An element a person acts on: a field, a button, a link, a summary, or anything whose role is one clicked (a menu
+ * item, a tab, an option, a checkbox). A panel, a menu or a presentation wrapper is not. */
+export function isActionable(element: Element): boolean {
+  if (isField(element))
+    return !(element instanceof HTMLInputElement && element.type === "hidden");
+  if (element.localName === "button" || element.localName === "summary")
+    return true;
+  if (element.localName === "a" && element.hasAttribute("href")) return true;
+  const role = roleOf(element);
+  return role !== null && CLICKED_BY_TEXT.has(role);
+}
+
+/** The element a click was meant for: the clicked element or the nearest one around it a person acts on (through
+ * shadow roots), or null when there is none, as when a page's empty space or a panel's text was clicked. */
+export function meantElement(clicked: Element): Element | null {
+  let current: Element | null = clicked;
+  for (let depth = 0; current && depth < 40; depth++) {
+    if (isActionable(current)) return current;
+    const root = current.getRootNode();
+    current =
+      current.parentElement ??
+      (typeof ShadowRoot !== "undefined" && root instanceof ShadowRoot
+        ? root.host
+        : null);
+  }
+  return null;
 }
 
 /** The accessible name, as a screen reader would find it: aria-labelledby, aria-label, the field's label, the text on a
@@ -195,7 +247,9 @@ export function nameOf(element: Element): string {
     const role = roleOf(element);
     // A button, a link or an element with no role of its own is named by what it says; a form or a region never is.
     const text =
-      role === null || NAMED_BY_CONTENT.has(role) ? visibleText(element) : "";
+      role === null || NAMED_BY_CONTENT.has(role)
+        ? visibleText(element, MAX_TEXT_NAME)
+        : "";
     if (text) return text;
   }
   for (const attribute of ["placeholder", "title", "alt"]) {
@@ -283,7 +337,10 @@ export function selectorsOf(
     out.push({ by: "name", selector: `${tag}[name=${quote(nameAttribute)}]` });
   if (role && name && !echoes(name))
     out.push({ by: "role", selector: `role=${role}[name=${quote(name)}]` });
-  const text = role && CLICKED_BY_TEXT.has(role) ? visibleText(element) : "";
+  const text =
+    role && CLICKED_BY_TEXT.has(role)
+      ? visibleText(element, MAX_TEXT_SELECTOR + 1)
+      : "";
   if (text && text.length <= MAX_TEXT_SELECTOR && !echoes(text))
     out.push({ by: "text", selector: `text=${quote(text)}` });
   out.push({ by: "css", selector: cssPath(element) });
@@ -314,13 +371,24 @@ function framePath(): { url: string; path: string[] } | undefined {
 
 /** Everything an agent needs to find `element` again. `value` is the field's current value, so nothing derived here
  * repeats it. */
-export function targetingOf(element: Element, value?: string): StepTargeting {
+export function targetingOf(
+  element: Element,
+  value?: string,
+  options: {
+    /** The element the box is read from: the one actually clicked, when the step names the one around it. */
+    boxOf?: Element;
+    /** Name the element by its own short text whatever its role (a click that met nothing a person acts on). */
+    ownText?: boolean;
+  } = {},
+): StepTargeting {
   const live = value?.trim() ?? "";
   const echoes = (text: string) => live.length >= 3 && text.includes(live);
   const role = roleOf(element);
-  const named = nameOf(element);
+  const named =
+    nameOf(element) ||
+    (options.ownText ? visibleText(element, MAX_TEXT_NAME) : "");
   const name = echoes(named) ? "" : named;
-  const rect = element.getBoundingClientRect();
+  const rect = (options.boxOf ?? element).getBoundingClientRect();
   const frame = framePath();
   return {
     role,
@@ -373,8 +441,7 @@ export function createElementTracker() {
   let pressed: Element | null = null;
   let current: { type: string; element: Element } | null = null;
   const onPointerDown = (event: Event) => {
-    const element = eventElement(event);
-    pressed = element ? (element.closest(INTERACTIVE) ?? element) : null;
+    pressed = eventElement(event);
   };
   const onClick = (event: Event) => {
     const element = eventElement(event);
@@ -382,13 +449,11 @@ export function createElementTracker() {
       current = null;
       return;
     }
-    // The collector describes a click a re-render moved to <body> or off a detached node by its pointerdown target.
-    const chosen =
-      isRootOrDetached(element) && pressed
-        ? pressed
-        : (element.closest(INTERACTIVE) ?? element);
+    // A click a re-render moved to <body> or off a detached node was meant for what the pointer went down on, as the
+    // collector reads it too.
+    const clicked = isRootOrDetached(element) && pressed ? pressed : element;
     pressed = null;
-    current = { type: "click", element: chosen };
+    current = { type: "click", element: clicked };
   };
   const onEdit = (event: Event) => {
     const element = eventElement(event);
@@ -433,7 +498,14 @@ export function enrichStep<E extends { name: string; value: unknown }>(
       ? (record.target as Record<string, unknown>)
       : {};
   const live = typeof target.value === "string" ? target.value : undefined;
-  const { role, name, inputType, ...rest } = targetingOf(element, live);
+  // A click names and selects the element it was meant for (the button around the clicked text), and keeps the box of
+  // what was clicked; one that met nothing a person acts on names the clicked element by its own short text.
+  const meant = event.name === "click" ? meantElement(element) : element;
+  const { role, name, inputType, ...rest } = targetingOf(
+    meant ?? element,
+    live,
+    { boxOf: element, ownText: meant === null },
+  );
   return {
     ...event,
     value: {
