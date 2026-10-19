@@ -100,6 +100,9 @@ export type Streamer = {
   /** The organization's policy now allows these gateways (null: any). A trajectory streaming to a gateway it no longer
    * allows is parked with its events kept, and every later pass is checked against the new list. */
   allow(urls: string[] | null): void;
+  /** Once the service worker has heard a recording is done: the records of its trajectories go from the outbox (each
+   * one finished, so nothing is left of them to send or resume). Does nothing while any of them is still open. */
+  forget(recordingId: string): Promise<void>;
 };
 
 export type StreamerSession = {
@@ -222,6 +225,8 @@ type Lane = {
   /** The retrying sentence, once the person should see it (from the second consecutive failure). */
   showing: string | undefined;
   maxEvents: number;
+  /** Its record is gone from the outbox (`forget`): nothing writes it again. */
+  forgotten: boolean;
 };
 
 const isRecord = (value: unknown): value is Record<string, JsonValue> =>
@@ -452,6 +457,7 @@ export async function createStreamer(
     failures: 0,
     showing: undefined,
     maxEvents: MAX_BATCH_EVENTS,
+    forgotten: false,
   });
   const freshMeta = (recording: string, title: string): StoredMeta => ({
     recordingId: recording,
@@ -464,9 +470,14 @@ export async function createStreamer(
 
   /** Writes the lane's meta as it is now; a failed write is reported and the in-memory meta stays authoritative. */
   const persist = (lane: Lane): Promise<void> =>
-    outbox.setMeta(trajectoryMetaKey(lane.id), lane.meta).catch((error) => {
-      console.error("Recorder: a trajectory's meta could not be saved", error);
-    });
+    lane.forgotten
+      ? Promise.resolve()
+      : outbox.setMeta(trajectoryMetaKey(lane.id), lane.meta).catch((error) => {
+          console.error(
+            "Recorder: a trajectory's meta could not be saved",
+            error,
+          );
+        });
 
   /** Runs outbox writes one at a time, in push order; a failure is reported and later work still runs. */
   const enqueue = <T>(work: () => Promise<T>): Promise<T> => {
@@ -1257,6 +1268,24 @@ export async function createStreamer(
           ? undefined
           : await outbox.getMeta<StoredMeta>(trajectoryMetaKey(id));
     }
+  } else if (
+    session.recover &&
+    (await outbox.count(session.trajectoryId)) === 0
+  ) {
+    // A recording with neither a record nor an event left finished: its records go once it is done (`forget`). Nothing
+    // is sent for it again, and no record is written back.
+    const done = makeLane(
+      session.trajectoryId,
+      {
+        ...freshMeta(session.recordingId, session.title),
+        stopped: true,
+        outcomeQueued: true,
+        closed: true,
+      },
+      0,
+    );
+    done.forgotten = true;
+    lanes.push(done);
   } else {
     const lane = makeLane(
       session.trajectoryId,
@@ -1360,6 +1389,16 @@ export async function createStreamer(
     async halt() {
       if (!halted()) stopSending();
       await chain;
+    },
+
+    async forget(recording) {
+      const own = lanesOf(recording);
+      if (own.length === 0 || !own.every((lane) => lane.meta.closed)) return;
+      for (const lane of own) lane.forgotten = true;
+      // Newest first: a step cut short leaves the start of the chain, never a record that no chain reaches.
+      await enqueue(async () => {
+        for (const lane of [...own].reverse()) await outbox.clear(lane.id);
+      });
     },
 
     allow(urls) {

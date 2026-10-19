@@ -333,7 +333,8 @@ const click = (i: number): CapturedEvent => ({
   value: { i },
 });
 
-/** Whether the streamer finished the trajectory: every event of it reached Intelligence, and its meta says so. */
+/** Whether the streamer finished the trajectory: every event of it reached Intelligence, and its meta says so, or its
+ * record is already gone (a done recording's records leave the outbox). */
 async function finishedTrajectory(
   h: Harness,
   trajectoryId: string,
@@ -342,7 +343,10 @@ async function finishedTrajectory(
   const meta = await outbox.getMeta<{ closed?: boolean }>(
     trajectoryMetaKey(trajectoryId),
   );
-  return meta?.closed === true;
+  if (meta) return meta.closed === true;
+  return (
+    h.names(trajectoryId).length > 0 && (await outbox.count(trajectoryId)) === 0
+  );
 }
 
 const outcomes = (h: Harness, trajectoryId: string) =>
@@ -621,6 +625,50 @@ describe("offscreen controller", () => {
       },
     ]);
     expect(h.received("offscreen.done")).toEqual([]);
+  });
+
+  test("a done recording's trajectory records leave the outbox, Start over's replaced one included", async () => {
+    const h = await setup();
+    await h.open();
+    const session = h.session();
+    const t = session.trajectoryId;
+    h.post({ type: "offscreen.start", session });
+    await streaming(h, t);
+    const next = crypto.randomUUID();
+    h.post({
+      type: "offscreen.rotate",
+      recordingId: "rec-2",
+      trajectoryId: next,
+    });
+    await until(() => h.received("offscreen.done").length === 1, "rec-1 done");
+    h.post({ type: "offscreen.stop", outcome: "succeeded" });
+    await until(() => h.received("offscreen.done").length === 2, "rec-2 done");
+    const outbox = await openOutbox(h.dbName);
+    await until(
+      async () => (await outbox.trajectories()).length === 0,
+      "no trajectory record left",
+    );
+    expect(await outbox.getMeta(trajectoryMetaKey(t))).toBeUndefined();
+    expect(await outbox.getMeta(trajectoryMetaKey(next))).toBeUndefined();
+  });
+
+  test("a recover for a recording whose records are gone sends nothing again and reports it done", async () => {
+    const h = await setup();
+    await h.open();
+    const session = h.session();
+    h.post({
+      type: "offscreen.recover",
+      openbotUrl: session.openbotUrl,
+      token: "obr_first",
+      allowedIntelligenceUrls: null,
+      drains: [h.drain(session)],
+    });
+    await until(() => h.received("offscreen.done").length === 1, "done");
+    await sleep(30);
+    expect(h.names(session.trajectoryId)).toEqual([]);
+    expect(h.openbot.passes).toEqual([]);
+    const outbox = await openOutbox(h.dbName);
+    expect(await outbox.trajectories()).toEqual([]);
   });
 
   test("resume restarts the streamer over the existing outbox", async () => {

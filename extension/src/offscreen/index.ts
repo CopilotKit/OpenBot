@@ -230,6 +230,17 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
         stream.recordings.has(recordingId),
     );
 
+  /** A recording is done and the service worker told: its finished trajectories' records leave the outbox, so a
+   * discard's walk of every trajectory stays short. */
+  function forget(streamer: Streamer, recordingId: string): void {
+    void streamer.forget(recordingId).catch((error) => {
+      console.error(
+        "Recorder: a finished recording's records could not be removed",
+        error,
+      );
+    });
+  }
+
   function finished(stream: Stream, recordingId: string): void {
     stream.recordings.delete(recordingId);
     const index = streams.indexOf(stream);
@@ -509,6 +520,7 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
           finished(stream, previous);
           // Its trajectories are drained and finished, its failed outcome included: nothing is left of it.
           post({ type: "offscreen.done", recordingId: previous });
+          forget(streamer, previous);
         },
         (error) => {
           console.error(
@@ -572,6 +584,7 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
       () => {
         finished(stream, recordingId);
         post({ type: "offscreen.done", recordingId });
+        forget(streamer, recordingId);
       },
       (error) => {
         console.error(
@@ -593,6 +606,7 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
     await stream.streamer.drained();
     finished(stream, drain.recordingId);
     post({ type: "offscreen.done", recordingId: drain.recordingId });
+    forget(stream.streamer, drain.recordingId);
   }
 
   async function recover(
