@@ -175,14 +175,11 @@ pub fn needs_fetch(root: &Path, wanted: &str) -> bool {
 pub const REQUIRED: [&str; 4] = ["docker-compose.yml", "server", "app", "worker"];
 
 /// The rest of what a deployment needs, which is not what it is checked for.
-pub const ALSO_COPIED: [&str; 9] = [
+pub const ALSO_COPIED: [&str; 8] = [
     "shared",
     // A root workspace the server imports as `@openbot/toolkit`. Without it, `bun install
     // --frozen-lockfile` stops with `Workspace not found "toolkit"`.
     "toolkit",
-    // The Recorder extension's root workspace. Desktop does not build or run it, but `bun install
-    // --frozen-lockfile` stops with `Workspace not found "extension"` without its manifest.
-    "extension",
     "examples",
     "package.json",
     "bun.lock",
@@ -191,6 +188,14 @@ pub const ALSO_COPIED: [&str; 9] = [
     // stack trace that names the parser and not the missing file.
     "tsconfig.base.json",
     "bunfig.toml",
+];
+
+/// Single files copied from a directory that is otherwise left behind.
+pub const ALSO_COPIED_FILES: [&str; 1] = [
+    // The Recorder extension's workspace manifest, and nothing else of it. Desktop does not build
+    // or run the extension, but `bun install --frozen-lockfile` stops with `Workspace not found
+    // "extension"` without its manifest. Its source, tests and assets stay out of a deployment.
+    "extension/package.json",
 ];
 
 /// Fetch the tagged tarball and lay the deployment out under `root`.
@@ -244,14 +249,13 @@ fn destination_in(root: &Path, path: &Path) -> Result<Option<PathBuf>, String> {
     }
 
     // Only what a deployment needs. The rest of the tree is a place to develop, not to run.
-    let wanted = relative
+    let names: Vec<String> = relative
         .components()
-        .next()
-        .map(|first| {
-            let name = first.as_os_str().to_string_lossy().into_owned();
-            REQUIRED.contains(&name.as_str()) || ALSO_COPIED.contains(&name.as_str())
-        })
-        .unwrap_or(false);
+        .map(|part| part.as_os_str().to_string_lossy().into_owned())
+        .collect();
+    let wanted = names.first().is_some_and(|first| {
+        REQUIRED.contains(&first.as_str()) || ALSO_COPIED.contains(&first.as_str())
+    }) || ALSO_COPIED_FILES.contains(&names.join("/").as_str());
     if !wanted {
         return Ok(None);
     }
@@ -535,6 +539,43 @@ mod tests {
     }
 
     #[test]
+    fn only_the_recorder_extensions_manifest_is_copied() {
+        let dir = scratch("extension");
+
+        let archive = tarball(&[
+            ("OpenBot-0.0.8/extension/package.json", b"{}"),
+            (
+                "OpenBot-0.0.8/extension/src/background/index.ts",
+                b"export {}",
+            ),
+            (
+                "OpenBot-0.0.8/extension/tests/recording.test.ts",
+                b"export {}",
+            ),
+            ("OpenBot-0.0.8/extension/public/manifest.json", b"{}"),
+            ("OpenBot-0.0.8/extension/package.json.bak", b"{}"),
+        ]);
+        unpack(&dir, &archive).expect("the download is laid out");
+
+        let manifest = std::fs::read_to_string(dir.join("extension/package.json")).ok();
+        let mut copied: Vec<String> = Vec::new();
+        let mut pending = vec![dir.join("extension")];
+        while let Some(next) = pending.pop() {
+            for entry in std::fs::read_dir(&next).into_iter().flatten().flatten() {
+                if entry.path().is_dir() {
+                    pending.push(entry.path());
+                } else {
+                    copied.push(entry.file_name().to_string_lossy().into_owned());
+                }
+            }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert_eq!(manifest.as_deref(), Some("{}"));
+        assert_eq!(copied, ["package.json"]);
+    }
+
+    #[test]
     fn a_recorded_version_is_not_fetched_again() {
         let dir = std::env::temp_dir().join(format!("openbot-dep-same-{}", std::process::id()));
         record(&dir, "v0.0.7").unwrap();
@@ -602,7 +643,9 @@ mod tests {
         for workspace in manifest["workspaces"].as_array().unwrap() {
             let workspace = workspace.as_str().unwrap();
             assert!(
-                REQUIRED.contains(&workspace) || ALSO_COPIED.contains(&workspace),
+                REQUIRED.contains(&workspace)
+                    || ALSO_COPIED.contains(&workspace)
+                    || ALSO_COPIED_FILES.contains(&format!("{workspace}/package.json").as_str()),
                 "{workspace} is a root workspace that a frozen install needs, but is not copied"
             );
         }
