@@ -1,8 +1,6 @@
 import { expect, test } from "bun:test";
-import {
-  browserStepDetails,
-  groupBrowserSteps,
-} from "../src/components/channels/browser-activity";
+import { browserStepDetails } from "../src/components/channels/browser-activity";
+import { groupToolSteps } from "../src/components/channels/tool-activity";
 import type { VisibleChatItem } from "../src/components/channels/chat-messages";
 
 function step(
@@ -25,13 +23,11 @@ function step(
 test("navigation and intervening browser actions become one stable row as results stream", () => {
   const first = step("one");
   const items = [first, step("read", "computer_read"), step("two")];
-  const grouped = groupBrowserSteps(items);
-  expect(grouped).toEqual([{ kind: "browser", id: "one", steps: items }]);
+  const grouped = groupToolSteps(items);
+  expect(grouped).toEqual([{ kind: "tools", id: "one", steps: items }]);
   expect(
-    groupBrowserSteps([
-      { ...first, result: '{"ok":true}' },
-      ...items.slice(1),
-    ])[0]?.id,
+    groupToolSteps([{ ...first, result: '{"ok":true}' }, ...items.slice(1)])[0]
+      ?.id,
   ).toBe("one");
   expect(items).toHaveLength(3);
 });
@@ -50,7 +46,7 @@ test("grouping keeps messages, other tools, and human assistance requests in the
     step("shell", "computer_run_command"),
   ];
   for (const boundary of boundaries) {
-    const grouped = groupBrowserSteps([step("one"), boundary, step("two")]);
+    const grouped = groupToolSteps([step("one"), boundary, step("two")]);
     expect(grouped.map((item) => item.id)).toEqual(["one", boundary.id, "two"]);
     expect(grouped[1]).toBe(boundary);
   }

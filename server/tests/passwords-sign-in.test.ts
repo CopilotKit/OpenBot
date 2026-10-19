@@ -12,11 +12,13 @@ import { parseApprovalContinuation } from "../src/approvals/types";
 import type { AuditEventInput, AuditStore } from "../src/audit";
 import type { AppVariables } from "../src/auth/guards";
 import type { ComputerGateway } from "../src/computer/gateway";
-import {
-  createHeadlessComputerTools,
-  HeadlessToolSuspension,
-} from "../src/computer/headless-tools";
-import type { SignInFillInput, SignInFillResult } from "../src/computer/schema";
+import { createHeadlessComputerTools } from "../src/computer/headless-tools";
+import type {
+  SignInCodeInput,
+  SignInCodeResult,
+  SignInFillInput,
+  SignInFillResult,
+} from "../src/computer/schema";
 import {
   createPasswordRoutes,
   createSignInRoutes,
@@ -27,7 +29,9 @@ import {
 } from "../src/passwords/service";
 import { createMemoryPasswordStore } from "../src/passwords/store";
 import { originOf, type SignInRequestRecord } from "../src/passwords/types";
-import { createTurnRunner, type RunnerLike } from "../src/routines/run-turn";
+import { createTurnRunner, type RunnerLike } from "@openbot/toolkit/run-turn";
+import { HeadlessToolSuspension } from "@openbot/toolkit/headless-tools";
+import { serverTurnAdmission } from "../src/agents/turn-admission";
 
 /**
  * The private sign-in request and the Passwords vault, as properties:
@@ -43,17 +47,36 @@ const USERNAME = "alice.private@example.test";
 const CODE = "918273";
 const KEY = Buffer.alloc(32, 7).toString("base64");
 
-function fakeGateway(result: Partial<SignInFillResult> = {}) {
+function fakeGateway(
+  result: Partial<SignInFillResult> = {},
+  /** What each code typed in answers, in order; the last one repeats. */
+  codeResults: Partial<SignInCodeResult>[] = [{}],
+) {
   const fills: SignInFillInput[] = [];
+  const codes: SignInCodeInput[] = [];
   const helps: string[] = [];
-  const gateway: Pick<ComputerGateway, "signIn" | "requestHelp"> = {
+  const gateway: Pick<
+    ComputerGateway,
+    "signIn" | "signInCode" | "requestHelp"
+  > = {
     async signIn(_botId, input) {
       fills.push(input);
       return {
         submitted: true,
         passwordFieldVisible: false,
+        codeRequested: false,
         url: "https://example.com/home",
         ...result,
+      };
+    },
+    async signInCode(_botId, input) {
+      codes.push(input);
+      return {
+        submitted: true,
+        codeFieldVisible: false,
+        passwordFieldVisible: false,
+        url: "https://example.com/home",
+        ...(codeResults[codes.length - 1] ?? codeResults.at(-1)),
       };
     },
     async requestHelp(_botId, _actor, reason) {
@@ -64,7 +87,7 @@ function fakeGateway(result: Partial<SignInFillResult> = {}) {
       } as unknown as Awaited<ReturnType<ComputerGateway["requestHelp"]>>;
     },
   };
-  return { gateway, fills, helps };
+  return { gateway, fills, codes, helps };
 }
 
 function audit() {
@@ -74,10 +97,14 @@ function audit() {
 }
 
 function setup(
-  options: { manager?: boolean; fill?: Partial<SignInFillResult> } = {},
+  options: {
+    manager?: boolean;
+    fill?: Partial<SignInFillResult>;
+    code?: Partial<SignInCodeResult>[];
+  } = {},
 ) {
   const store = createMemoryPasswordStore();
-  const computer = fakeGateway(options.fill);
+  const computer = fakeGateway(options.fill, options.code);
   const trail = audit();
   const resolved: SignInRequestRecord[] = [];
   const service = createSignInService({
@@ -128,7 +155,6 @@ describe("a sign-in request answered with a typed login", () => {
     const view = await service.submit("owner", request.id, actor, {
       username: USERNAME,
       password: PASSWORD,
-      code: CODE,
       save: true,
     });
     expect(view.status).toBe("signed_in");
@@ -137,9 +163,10 @@ describe("a sign-in request answered with a typed login", () => {
         origin: "https://example.com",
         username: USERNAME,
         password: PASSWORD,
-        code: CODE,
       },
     ]);
+    // A site that never asked for a code is never sent one.
+    expect(computer.codes).toEqual([]);
     const done = resolved[0];
     if (!done) throw new Error("not resolved");
     const toolResult = signInToolResult(done);
@@ -410,7 +437,6 @@ describe("the routes", () => {
       post(`/api/sign-in-requests/${id}/submit`, {
         username: USERNAME,
         password: PASSWORD,
-        code: CODE,
         save: true,
       }),
     );
@@ -440,6 +466,263 @@ describe("the routes", () => {
     );
     expect(response.status).toBe(500);
     expectNoCredential(await response.text());
+  });
+});
+
+/**
+ * "All MFA codes are after the fact, none are during or before." The form asks for a username and
+ * password only. A site that then shows a one-time-code field moves the request to `code_required`,
+ * the person is asked for the code the site just sent, and only that is typed in.
+ */
+describe("a site that asks for a verification code after the password", () => {
+  async function asked(options: Parameters<typeof setup>[0] = {}) {
+    const context = setup({
+      ...options,
+      fill: {
+        codeRequested: true,
+        url: "https://example.com/mfa",
+        ...options.fill,
+      },
+    });
+    const request = await context.service.request({
+      ownerUserId: "owner",
+      botId: "bot",
+      site: "example.com",
+      actor,
+    });
+    return { ...context, request };
+  }
+
+  test("submit the login, then the code: code_required, then signed in, and the Bot told once", async () => {
+    const { service, computer, trail, store, resolved, request } =
+      await asked();
+    const waiting = await service.submit("owner", request.id, actor, {
+      username: USERNAME,
+      password: PASSWORD,
+      save: true,
+    });
+    expect(waiting.status).toBe("code_required");
+    expect(waiting.outcome).toBeNull();
+    // Nothing final yet: the Bot is still waiting, and has been told nothing.
+    expect(resolved).toEqual([]);
+    expect(computer.codes).toEqual([]);
+    // The site accepted the password, so it is saved now, and never with a code.
+    const [saved] = await store.logins("owner");
+    expect(saved?.username).toBe(USERNAME);
+
+    const done = await service.submitCode("owner", request.id, actor, {
+      code: CODE,
+    });
+    expect(done.status).toBe("signed_in");
+    expect(done.method).toBe("typed");
+    expect(computer.codes).toEqual([
+      { origin: "https://example.com", code: CODE },
+    ]);
+    expect(resolved.map((row) => row.status)).toEqual(["signed_in"]);
+    const toolResult = signInToolResult(resolved[0] as SignInRequestRecord);
+    expect(toolResult).toMatchObject({ ok: true, signedIn: true });
+    expect(trail.rows.map((row) => row.eventType)).toEqual([
+      "computer.sign_in_requested",
+      "computer.sign_in_code_requested",
+      "password.saved",
+      "computer.sign_in_completed",
+    ]);
+    expectNoCredential(
+      everything(
+        waiting,
+        done,
+        toolResult,
+        trail.rows,
+        [...store.requests.values()],
+        [...store.saved.values()],
+      ),
+    );
+    expect(everything(trail.rows, toolResult)).not.toContain(USERNAME);
+  });
+
+  test("a wrong code keeps asking for the code, and the right one then finishes", async () => {
+    const { service, trail, resolved, request } = await asked({
+      code: [{ codeFieldVisible: true, url: "https://example.com/mfa" }, {}],
+    });
+    await service.submit("owner", request.id, actor, {
+      username: USERNAME,
+      password: PASSWORD,
+    });
+    const wrong = await service
+      .submitCode("owner", request.id, actor, { code: CODE })
+      .catch((error: Error) => error);
+    expect(wrong).toBeInstanceOf(Error);
+    expect((wrong as Error).message).toMatch(/did not accept that code/);
+    const after = await service.get("owner", request.id);
+    expect(after.status).toBe("code_required");
+    expect(after.outcome).toMatch(/did not accept that code/);
+    expect(resolved).toEqual([]);
+    const failed = trail.rows.find(
+      (row) => row.eventType === "computer.sign_in_failed",
+    );
+    expect(failed?.payload).toMatchObject({ step: "code" });
+    expect(
+      (await service.submitCode("owner", request.id, actor, { code: CODE }))
+        .status,
+    ).toBe("signed_in");
+    expect(resolved).toHaveLength(1);
+    expectNoCredential(everything(trail.rows, wrong));
+  });
+
+  test("a request waiting on its code expires, and the Bot is told why, never the code", async () => {
+    const { service, store, resolved, request } = await asked();
+    await service.submit("owner", request.id, actor, {
+      username: USERNAME,
+      password: PASSWORD,
+    });
+    const row = store.requests.get(request.id);
+    if (!row) throw new Error("missing");
+    row.expiresAt = new Date(Date.now() - 1_000);
+    const view = await service.get("owner", request.id);
+    expect(view.status).toBe("expired");
+    expect(view.outcome).toMatch(/verification code/);
+    await expect(
+      service.submitCode("owner", request.id, actor, { code: CODE }),
+    ).rejects.toThrow(/no longer open/);
+    expect(resolved.map((done) => done.status)).toEqual(["expired"]);
+    expect(signInToolResult(resolved[0] as SignInRequestRecord).ok).toBe(false);
+  });
+
+  test("a code is refused until the site has asked for one", async () => {
+    const { service, computer } = setup();
+    const request = await service.request({
+      ownerUserId: "owner",
+      botId: "bot",
+      site: "example.com",
+      actor,
+    });
+    await expect(
+      service.submitCode("owner", request.id, actor, { code: CODE }),
+    ).rejects.toThrow(/not asking for a verification code/);
+    expect(computer.codes).toEqual([]);
+  });
+
+  test("a site that falls back to its login page reopens the login form", async () => {
+    const { service, request } = await asked({
+      code: [{ passwordFieldVisible: true, url: "https://example.com/login" }],
+    });
+    await service.submit("owner", request.id, actor, {
+      username: USERNAME,
+      password: PASSWORD,
+    });
+    await expect(
+      service.submitCode("owner", request.id, actor, { code: CODE }),
+    ).rejects.toThrow(/sign-in page/);
+    expect((await service.get("owner", request.id)).status).toBe("pending");
+  });
+
+  test("a saved login stops for the code the same way, and the code is never stored", async () => {
+    const context = await asked();
+    await context.service.submit("owner", context.request.id, actor, {
+      username: USERNAME,
+      password: PASSWORD,
+      save: true,
+    });
+    await context.service.submitCode("owner", context.request.id, actor, {
+      code: CODE,
+    });
+    const [login] = await context.store.logins("owner");
+    if (!login) throw new Error("not saved");
+    const next = await context.service.request({
+      ownerUserId: "owner",
+      botId: "bot",
+      site: "example.com",
+      actor,
+    });
+    const waiting = await context.service.useSaved("owner", next.id, actor, {
+      loginId: login.id,
+    });
+    expect(waiting.status).toBe("code_required");
+    expect(waiting.method).toBe("saved");
+    const done = await context.service.submitCode("owner", next.id, actor, {
+      code: CODE,
+    });
+    expect(done).toMatchObject({ status: "signed_in", method: "saved" });
+    expectNoCredential(everything([...context.store.saved.values()]));
+  });
+
+  test("taking over or cancelling still works while the code is awaited", async () => {
+    const first = await asked();
+    await first.service.submit("owner", first.request.id, actor, {
+      password: PASSWORD,
+    });
+    expect(
+      (await first.service.takeOver("owner", first.request.id, actor)).status,
+    ).toBe("taken_over");
+    const second = await asked();
+    await second.service.submit("owner", second.request.id, actor, {
+      password: PASSWORD,
+    });
+    expect(
+      (await second.service.cancel("owner", second.request.id, actor)).status,
+    ).toBe("cancelled");
+  });
+
+  test("an abandoned code attempt reopens to the code step, not the login", async () => {
+    const { service, store, request } = await asked();
+    await service.submit("owner", request.id, actor, {
+      username: USERNAME,
+      password: PASSWORD,
+    });
+    await store.transition("owner", request.id, ["code_required"], {
+      status: "filling",
+      fillingUntil: new Date(Date.now() - 1_000),
+    });
+    expect((await service.get("owner", request.id)).status).toBe(
+      "code_required",
+    );
+  });
+
+  test("the routes take the login and then the code, and answer with neither", async () => {
+    const context = await asked();
+    const requireUser = async (
+      c: { set: (key: "actor", value: AppVariables["actor"]) => void },
+      next: () => Promise<void>,
+    ) => {
+      c.set("actor", {
+        id: "owner",
+        email: "owner@example.test",
+      } as AppVariables["actor"]);
+      await next();
+    };
+    const server = new Hono<{ Variables: AppVariables }>().route(
+      "/api/sign-in-requests",
+      createSignInRoutes(
+        context.service,
+        requireUser as never,
+        async () => true,
+      ),
+    );
+    const post = (path: string, body: unknown) =>
+      server.fetch(
+        new Request(`http://127.0.0.1/api/sign-in-requests${path}`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        }),
+      );
+    const id = context.request.id;
+    // A code sent with the login, by an older form, is not read: it would be typed before the site asked.
+    const login = await post(`/${id}/submit`, {
+      username: USERNAME,
+      password: PASSWORD,
+      code: CODE,
+    });
+    expect(login.status).toBe(200);
+    const loginBody = await login.text();
+    expect(JSON.parse(loginBody).status).toBe("code_required");
+    expect(context.computer.fills[0]).not.toHaveProperty("code");
+    expect((await post(`/${id}/code`, {})).status).toBe(400);
+    const code = await post(`/${id}/code`, { code: CODE });
+    expect(code.status).toBe(200);
+    const codeBody = await code.text();
+    expect(JSON.parse(codeBody).status).toBe("signed_in");
+    expectNoCredential(loginBody + codeBody);
   });
 });
 
@@ -505,6 +788,7 @@ describe("an unattended turn that needs a sign-in", () => {
       stop: async () => true,
     };
     const run = createTurnRunner({
+      admission: serverTurnAdmission,
       intelligence: {
         getOrCreateThread: async () => undefined,
         getThreadMessages: async () => ({ messages: [] }),

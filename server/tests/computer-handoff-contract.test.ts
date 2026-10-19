@@ -3,7 +3,7 @@ import type { MiddlewareHandler } from "hono";
 import type {
   BrowserChallenge,
   ComputerControlState,
-} from "../../shared/computer-control";
+} from "@openbot/shared/computer-control";
 import type { AppVariables } from "../src/auth/guards";
 import { createComputerGateway } from "../src/computer/gateway";
 import type { PolicyStore } from "../src/computer/policy-store";
@@ -16,6 +16,7 @@ const state: ComputerControlState = {
   requested: true,
   transitioning: false,
   resumeSnapshotRequired: false,
+  recoveryRequired: false,
   request: {
     id: "request-1",
     toolCallId: "call-1",

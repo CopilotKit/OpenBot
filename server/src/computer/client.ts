@@ -1,4 +1,4 @@
-import type { HandoffRequest } from "../../../shared/computer-control";
+import type { HandoffRequest } from "@openbot/shared/computer-control";
 import type { NavigateResult } from "./schema";
 import { checkNavigationTarget } from "./target";
 

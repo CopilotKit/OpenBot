@@ -221,6 +221,20 @@ export const pluginKeys = {
  */
 export type PluginConnection = {
   serverId: string;
+  /**
+   * Whether the credential behind this row has been withdrawn or deleted, present only on a HELD
+   * row — a brokered one keeps no secret here, so it has no equivalent question.
+   *
+   * A ROW IS NOT ACCESS. Revoking a credential leaves this row pointing at it, and reconnecting
+   * moves `credential_id` and `updated_at` without touching `connected_at`, so the presence of a
+   * row says nothing about whether the app can be used and nothing visible changes when it can be
+   * again. Anything drawing the word "connected" has to read this; anything listing the apps
+   * somebody has ever connected does not.
+   *
+   * Undefined on a brokered row and on any shape written before this existed, and the absence
+   * reads as not revoked.
+   */
+  revoked?: boolean;
   /** What the vendor actually granted, which is not always what was asked for. Empty for brokered. */
   scope: string;
   connectedAt: string;

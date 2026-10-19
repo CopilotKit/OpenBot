@@ -100,6 +100,9 @@ wants the `build` sections overridden away rather than this variable alone.
 A tag can be moved to point at a different image; a digest cannot. The same digest that CI smoke
 tested is the one that runs, and rolling back is the same command with an earlier version.
 
+On Kubernetes the chart takes the same digest as `image.digest`; see
+[charts/openbot/README.md](../charts/openbot/README.md#pin-the-image-by-digest).
+
 Before deploying, you can check an image is the one this repository built. Every published image
 carries its own attestation:
 

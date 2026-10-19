@@ -4,7 +4,7 @@ import type {
   VoiceSessionPage,
   VoiceSessionRecord,
   VoiceTranscriptEntry,
-} from "../../../shared/voice-session";
+} from "@openbot/shared/voice-session";
 import type { AgentActor } from "../agents/profile-types";
 import type { ChannelStore } from "../channels/routes";
 import type { Database } from "../db/client";

@@ -4,4 +4,4 @@
  * See `routine-firing.ts` beside this file: the server builds the message from `shared/`, and the
  * browser keeps importing through `@/`.
  */
-export { readResponsibilityTurn } from "../../../../shared/responsibility-turn";
+export { readResponsibilityTurn } from "@openbot/shared/responsibility-turn";

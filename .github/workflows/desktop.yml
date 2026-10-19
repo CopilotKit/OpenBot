@@ -3,12 +3,16 @@ name: Desktop
 # The shell is the one thing here that cannot be proved by running it on Linux: it is a macOS app, a
 # Windows app and a Linux app built from one tree, and the ways they differ are exactly the ways
 # this fails. So it tests and builds on all three, on every change to it.
+# `shared/harnesses.json` and `shared/marks/**` are watched here even though they are not under
+# desktop/: the catalogue the setup window draws moved there so the web app could read one copy, and
+# these jobs are the only ones that prove it still deserializes into `Harness` — `catalogue()` parses
+# it at runtime with an `expect`, so a bad row panics the window rather than failing a type check.
 on:
   pull_request:
-    paths: ["desktop/**", "package.json", ".github/workflows/desktop.yml"]
+    paths: ["desktop/**", "shared/harnesses.json", "shared/marks/**", "package.json", ".github/workflows/desktop.yml"]
   push:
     branches: [main]
-    paths: ["desktop/**", "package.json", ".github/workflows/desktop.yml"]
+    paths: ["desktop/**", "shared/harnesses.json", "shared/marks/**", "package.json", ".github/workflows/desktop.yml"]
   workflow_call:
     secrets:
       OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET:
@@ -31,7 +35,7 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
           toolchain: stable
           components: rustfmt, clippy
@@ -71,7 +75,7 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.4.3
-      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
           toolchain: stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2

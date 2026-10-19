@@ -211,6 +211,8 @@ type Connection = {
   url: string;
   /** The bearer token for this server, already decrypted. Absent for a server that needs none. */
   token?: string;
+  /** The header the token goes in, sent as stored, when the vendor does not read `Authorization`. */
+  tokenHeader?: string;
 };
 
 /**
@@ -342,7 +344,11 @@ async function withClient<T>(
 ): Promise<T> {
   const transport = new StreamableHTTPClientTransport(new URL(connection.url), {
     requestInit: connection.token
-      ? { headers: { Authorization: authorizationHeader(connection.token) } }
+      ? {
+          headers: connection.tokenHeader
+            ? { [connection.tokenHeader]: connection.token.trim() }
+            : { Authorization: authorizationHeader(connection.token) },
+        }
       : undefined,
   });
   const client = new Client({ name: "openbot", version: "1.0.0" });

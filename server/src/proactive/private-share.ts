@@ -25,7 +25,7 @@ import {
   approvalPreview,
   currentApprovalContext,
 } from "../approvals/types";
-import { HeadlessToolSuspension } from "../computer/headless-tools";
+import { HeadlessToolSuspension } from "@openbot/toolkit/headless-tools";
 
 export const PRIVATE_SHARE_TOOL_REF = "openbot/share_private_information";
 export const PRIVATE_SHARE_EFFECT = "share_private";

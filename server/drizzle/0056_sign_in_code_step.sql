@@ -1,0 +1,2 @@
+ALTER TABLE "sign_in_requests" DROP CONSTRAINT "sign_in_requests_status_check";--> statement-breakpoint
+ALTER TABLE "sign_in_requests" ADD CONSTRAINT "sign_in_requests_status_check" CHECK ("sign_in_requests"."status" IN ('pending', 'filling', 'code_required', 'taken_over', 'signed_in', 'failed', 'cancelled', 'expired'));

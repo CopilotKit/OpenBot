@@ -10,10 +10,10 @@
  */
 import { z } from "zod";
 import type { AuditInitiator } from "../audit";
-import type { HeadlessTool } from "../computer/headless-tools";
 import type { MemoryStore } from "../memory/store";
 import { REFUSAL_MARKER } from "../plugins/tools";
-import type { TurnRunner } from "../routines/runner";
+import type { TurnRunner } from "@openbot/toolkit/run-turn";
+import type { HeadlessTool } from "@openbot/toolkit/headless-tools";
 import type { WorkQueue } from "../work/queue";
 import {
   proactiveInitiator,

@@ -87,7 +87,7 @@ export const signInRequests = pgTable(
     index("sign_in_requests_owner_idx").on(t.ownerUserId, t.status),
     check(
       "sign_in_requests_status_check",
-      sql`${t.status} IN ('pending', 'filling', 'taken_over', 'signed_in', 'failed', 'cancelled', 'expired')`,
+      sql`${t.status} IN ('pending', 'filling', 'code_required', 'taken_over', 'signed_in', 'failed', 'cancelled', 'expired')`,
     ),
     check(
       "sign_in_requests_method_check",

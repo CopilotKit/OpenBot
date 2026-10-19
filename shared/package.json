@@ -1,0 +1,17 @@
+{
+  "name": "@openbot/shared",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./harnesses.json": "./harnesses.json",
+    "./model-providers.json": "./model-providers.json",
+    "./*": "./*.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}

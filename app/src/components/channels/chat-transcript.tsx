@@ -59,19 +59,21 @@ import {
   toolResultFailed,
 } from "@/lib/plugins/tool-result";
 import { readTeamBotConsent } from "@/lib/team-bots";
+import { readConnectPrompt } from "@openbot/shared/connect-prompt";
 import { cn } from "@/lib/utils";
 import { VOICE_CHAT_ACTIVITY, type VoiceChatEntry } from "@/lib/voice/archive";
 import {
-  BrowserActivity,
-  groupBrowserSteps,
+  groupToolSteps,
+  ToolActivity,
   type TranscriptItem,
-} from "./browser-activity";
+} from "./tool-activity";
 import {
   attachmentModality,
   type SentAttachment,
   toVisibleChatItems,
 } from "./chat-messages";
 import type { QueuedMessage } from "./composer";
+import { ConnectAppCard } from "./connect-app-card";
 import { TeamBotConsentCard } from "./team-bot-consent";
 import { ToolRenderBoundary } from "./tool-boundary";
 import { ToolLine } from "./tool-line";
@@ -1371,6 +1373,9 @@ function ServerToolLine({ name, result }: { name: string; result?: string }) {
   // A Team Bot asking to use this person's own account draws its consent card, not the sentence.
   const consent = refused ? readTeamBotConsent(body) : null;
   if (consent) return <TeamBotConsentCard {...consent} />;
+  // An app this person has not connected draws the connect button, not the name of a screen.
+  const connect = refused ? readConnectPrompt(body) : null;
+  if (connect) return <ConnectAppCard {...connect} />;
   return (
     <ToolLine
       {...(detail ? { detail } : {})}
@@ -1525,7 +1530,7 @@ export function ChatTranscript({
    * cost was markdown parsing and chart SVGs, and those are skipped by the memoised children below,
    * which is where the 25x came from. This runs per render and is not worth guarding.
    */
-  const items = groupBrowserSteps(toVisibleChatItems(messages));
+  const items = groupToolSteps(toVisibleChatItems(messages));
 
   /*
    * ONLY WHILE THERE IS NOTHING ELSE TO LOOK AT. Once a reply starts streaming, or a tool line
@@ -1668,12 +1673,12 @@ export function ChatTranscript({
             </div>
             {items.length === 0 && restoring ? <RestoringTranscript /> : null}
             {items.map((item, index) =>
-              item.kind === "browser" ? (
+              item.kind === "tools" ? (
                 <MessageScrollerItem key={item.id} messageId={item.id}>
                   <Arriving
                     delay={delays.delayFor(item.id, index, items.length)}
                   >
-                    <BrowserActivity
+                    <ToolActivity
                       group={item}
                       active={busy && index === items.length - 1}
                     />

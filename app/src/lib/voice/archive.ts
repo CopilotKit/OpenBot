@@ -7,7 +7,7 @@ import type {
   SaveVoiceSessionInput,
   VoiceSessionPage,
   VoiceSessionRecord,
-} from "../../../../shared/voice-session";
+} from "@openbot/shared/voice-session";
 import { closingOf } from "./cut";
 import {
   forgetVoiceCall,

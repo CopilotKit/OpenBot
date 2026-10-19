@@ -6,10 +6,10 @@ import {
 } from "@tanstack/react-query";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { client } from "@/lib/client";
-import type { UserPreferences } from "../../../../shared/user-preferences";
+import type { UserPreferences } from "@openbot/shared/user-preferences";
 import { settingsKeys } from "./queries";
 
-export type { MessageListEmphasis } from "../../../../shared/user-preferences";
+export type { MessageListEmphasis } from "@openbot/shared/user-preferences";
 
 export function userPreferencesQueryOptions(userId: string | undefined) {
   return queryOptions({

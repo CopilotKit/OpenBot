@@ -1,7 +1,10 @@
+import { summaryFor, WEB_HARNESSES } from "@openbot/shared/harnesses";
+import { IconSparkles } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { AnimatePresence, MotionConfig, motion } from "motion/react";
 import { useState } from "react";
 import useMeasure from "react-use-measure";
+import { HarnessMark } from "@/components/agents/harness-mark";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -61,7 +64,13 @@ export function CreateAgentDialog({
 }) {
   return (
     <Dialog onOpenChange={(next) => !next && onClose()} open={open}>
-      <DialogContent>
+      {/* A floor of 70% of the viewport, against the popup's usual grow-to-fit. The three steps are
+          very different heights — two choices on one, three fields on another, four plus an
+          endpoint test on the last — and a dialog that resized itself between each made the
+          wizard feel like three unrelated popups. The floor sits under the 85svh ceiling the popup
+          already carries, so the two never fight: every step lands in that 70–85% band, and the
+          shortest one pays for it with empty room below the question. */}
+      <DialogContent className="min-h-[70svh]">
         {/* All wizard state lives below DialogContent, whose portal unmounts on close: dismissing
             the dialog mid-way discards the half-answered steps rather than pickling them. */}
         <CreateAgentWizard onClose={onClose} onCreated={onCreated} />
@@ -70,8 +79,14 @@ export function CreateAgentDialog({
   );
 }
 
-/** The steps, in the order they are asked. The name is the questionnaire item's name. */
-const STEPS = ["identity", "visibility", "kind"] as const;
+/**
+ * The steps, in the order they are asked. The name is the questionnaire item's name.
+ *
+ * Visibility is last because it is the only question whose answer does not change what the person
+ * is making. Asked second, it arrived before they had decided anything that makes private or public
+ * mean something, and it was the step people had the least to go on.
+ */
+const STEPS = ["identity", "kind", "endpoint", "visibility"] as const;
 type StepName = (typeof STEPS)[number];
 
 /** The two ways a coworker can be seen. */
@@ -95,27 +110,12 @@ const VISIBILITY_OPTIONS: Array<{
 /**
  * Where the coworker runs. Not a stored field: the server knows only whether an endpoint was
  * given, so "built-in" is the empty endpoint and this choice exists to make that fork explicit.
+ *
+ * Which framework was picked is not stored either. Every one of them is reached the same way and
+ * written the same way, so after this dialog closes there is no record of the button that was
+ * pressed.
  */
 type AgentKind = "builtin" | "managed";
-
-const KIND_OPTIONS: Array<{
-  value: AgentKind;
-  title: string;
-  description: string;
-}> = [
-  {
-    value: "builtin",
-    title: "Built-in",
-    description:
-      "Runs on this deployment's own Bot. Nothing to host or connect — it is ready the moment it is created.",
-  },
-  {
-    value: "managed",
-    title: "Managed",
-    description:
-      "Runs on an agent you host, spoken to over AG-UI. This server dials your endpoint on every run.",
-  },
-];
 
 /** The first step's slice of the form contract, so its errors match the server's limits. */
 const identitySchema = agentFormSchema.pick({
@@ -170,12 +170,30 @@ function CreateAgentWizard({
   const [values, setValues] = useState<AgentFormValues>(emptyAgentForm);
   /** Deliberately unanswered to start with: revealing endpoint fields is the point of asking. */
   const [kind, setKind] = useState<AgentKind | null>(null);
+  /**
+   * Which framework's button was pressed, so Back returns to it still chosen.
+   *
+   * Nothing else reads it. Every framework leads to the same endpoint step and is stored the same
+   * way, so after this dialog closes there is no answer to "which did I pick" — by design.
+   */
+  const [harness, setHarness] = useState<string | null>(null);
 
   const [connection, setConnection] = useState<ConnectionVerdict | null>(null);
   const [testing, setTesting] = useState(false);
   const [ref, bounds] = useMeasure();
 
-  const last = step === STEPS.length - 1;
+  /**
+   * The steps this answer actually asks, which is why there is no counter.
+   *
+   * A Bot that runs on this deployment is never asked for an address, so the sequence is three
+   * questions for it and four for one somebody hosts. `step` indexes this rather than `STEPS`, so
+   * the same index means the same question whichever way the person went.
+   */
+  const sequence = STEPS.filter(
+    (name) => name !== "endpoint" || kind === "managed",
+  );
+  const current = sequence[step];
+  const last = step === sequence.length - 1;
   const set = <K extends keyof AgentFormValues>(
     key: K,
     value: AgentFormValues[K],
@@ -197,18 +215,39 @@ function CreateAgentWizard({
   const identityErrors = tried ? identityIssues(values) : {};
   const endpointError = !tried
     ? undefined
-    : kind === "managed" && values.endpoint.trim() === ""
-      ? "An endpoint is required for a managed coworker."
+    : values.endpoint.trim() === ""
+      ? "An address is required for an agent you host."
       : agentFormSchema.shape.endpoint.safeParse(values.endpoint).error
           ?.issues[0]?.message;
 
+  /**
+   * A framework button, or the Bot that runs here, answered and moved on in one press.
+   *
+   * The press is the answer, so there is nothing left for a Continue to confirm — and the step
+   * this replaced cost the hosted path two presses for one decision. `go` is called with the next
+   * index directly rather than through `advance`, because `advance` would read `kind` from a
+   * closure this setState has not updated yet.
+   */
+  const choose = (next: AgentKind, harnessId: string | null) => {
+    setKind(next);
+    setHarness(harnessId);
+    if (next === "builtin") {
+      // A built-in coworker has no endpoint; whatever was typed on the way past must not ride
+      // along into the create.
+      set("endpoint", "");
+      set("authValue", "");
+      setConnection(null);
+    }
+    go(step + 1);
+  };
+
   const stepValid = (): boolean => {
-    if (STEPS[step] === "identity") {
+    if (current === "identity") {
       return identitySchema.safeParse(values).success;
     }
-    if (STEPS[step] === "kind") {
-      if (kind === null) return false;
-      if (kind === "builtin") return true;
+    // Reachable only by pressing one of its buttons, which is the answer; guarded anyway for Enter.
+    if (current === "kind") return kind !== null;
+    if (current === "endpoint") {
       return (
         values.endpoint.trim() !== "" &&
         agentFormSchema.shape.endpoint.safeParse(values.endpoint).success
@@ -248,7 +287,10 @@ function CreateAgentWizard({
       <DialogTitle className="sr-only">New coworker</DialogTitle>
       <DialogBody className="overflow-y-auto">
         <Questionnaire
-          item={STEPS[step]}
+          /* Fills the body so the empty room the min-height buys falls between the step and the
+             buttons, rather than below buttons floating in the middle of the popup. */
+          className="flex-1"
+          item={current}
           noValidate
           /*
            * Enter means Continue, handled here rather than through the form's submit. The
@@ -272,11 +314,11 @@ function CreateAgentWizard({
           }}
           onSubmit={(event) => event.preventDefault()}
         >
-          {/* A plain element rather than QuestionnaireProgress: only the active step is mounted,
-              so the primitive would count one question and announce the wrong total. */}
-          <p className="text-xs font-medium text-muted-foreground tabular-nums">
-            Step {step + 1} of {STEPS.length}
-          </p>
+          {/* No step counter. The wizard is three questions for a Bot that runs here and four for
+              one at an address somebody hosts, and a counter whose total changes under the reader
+              mid-way is worse than none: it reads as the thing having got longer. Each step says
+              what it is asking in its own heading, which is the part that was carrying the reader
+              anyway. */}
           <MotionConfig
             transition={{ duration: 0.5, type: "spring", bounce: 0 }}
           >
@@ -297,42 +339,44 @@ function CreateAgentWizard({
                 >
                   <motion.div
                     animate="active"
-                    className="pt-4"
+                    /*
+                     * `pb-2` is slack under the pane, not spacing: the frame above animates its
+                     * height to whatever this measures, and clips at that edge. Without it the
+                     * last line of a step sits exactly on the clip, so the spring's tail — still
+                     * 4px short at 320ms, 1px at 400ms — shaves the bottom off that line for a
+                     * visible moment on the way back to a taller step, and any rounding against
+                     * it clips the line outright at rest.
+                     */
+                    className="pt-4 pb-2"
                     custom={direction}
                     exit="exit"
                     initial="initial"
-                    key={STEPS[step]}
+                    key={current}
                     variants={variants}
                   >
-                    {STEPS[step] === "identity" ? (
+                    {current === "identity" ? (
                       <IdentityStep
                         errors={identityErrors}
                         set={set}
                         values={values}
                       />
-                    ) : STEPS[step] === "visibility" ? (
+                    ) : current === "visibility" ? (
                       <VisibilityStep set={set} values={values} />
+                    ) : current === "endpoint" ? (
+                      <EndpointStep
+                        connection={connection}
+                        endpointError={endpointError}
+                        onTest={() => void testConnection()}
+                        set={set}
+                        testing={testing}
+                        values={values}
+                      />
                     ) : (
                       <KindStep
                         builtInAvailable={builtInAvailable}
-                        endpointError={endpointError}
+                        chosen={harness}
                         kind={kind}
-                        onKind={(next) => {
-                          setKind(next);
-                          if (next === "builtin") {
-                            // A built-in coworker has no endpoint; whatever was typed on the way
-                            // past must not ride along into the create.
-                            set("endpoint", "");
-                            set("authValue", "");
-                            setConnection(null);
-                          }
-                        }}
-                        onTest={() => void testConnection()}
-                        connection={connection}
-                        set={set}
-                        showKindError={tried && kind === null}
-                        testing={testing}
-                        values={values}
+                        onChoose={choose}
                       />
                     )}
                   </motion.div>
@@ -347,7 +391,9 @@ function CreateAgentWizard({
             </p>
           ) : null}
 
-          <div className="mt-6 flex justify-between gap-2">
+          {/* `mt-auto` pins the row to the bottom when the step is short; `pt-6` is the gap it
+              keeps once the step is tall enough to have pushed it there itself. */}
+          <div className="mt-auto flex justify-between gap-2 pt-6">
             <Button
               onClick={step === 0 ? onClose : () => go(step - 1)}
               type="button"
@@ -355,17 +401,22 @@ function CreateAgentWizard({
             >
               {step === 0 ? "Cancel" : "Back"}
             </Button>
-            <Button
-              disabled={createAgent.isPending}
-              onClick={() => void advance()}
-              type="button"
-            >
-              {last
-                ? createAgent.isPending
-                  ? "Creating…"
-                  : "Create coworker"
-                : "Continue"}
-            </Button>
+            {/* No forward button where the choice is the answer: on "where does it run" every
+                button both answers and moves on, so a Continue beside them would be a
+                control that confirms a decision already taken. */}
+            {current === "kind" ? null : (
+              <Button
+                disabled={createAgent.isPending}
+                onClick={() => void advance()}
+                type="button"
+              >
+                {last
+                  ? createAgent.isPending
+                    ? "Creating…"
+                    : "Create coworker"
+                  : "Continue"}
+              </Button>
+            )}
           </div>
         </Questionnaire>
       </DialogBody>
@@ -411,13 +462,14 @@ function IdentityStep({
     <StepItem name="identity">
       <QuestionnaireTitle>Who is this coworker?</QuestionnaireTitle>
       <QuestionnaireDescription>
-        The role you write here applies in every channel this coworker works in.
+        A name to call it by, a line describing it, and the job it does.
       </QuestionnaireDescription>
       <FieldGroup>
         <Field data-invalid={errors.name ? true : undefined}>
           <FieldLabel htmlFor="create-agent-name">Name</FieldLabel>
           <Input
             aria-invalid={errors.name ? true : undefined}
+            autoComplete="off"
             id="create-agent-name"
             onChange={(event) => set("name", event.target.value)}
             placeholder="Expense Manager"
@@ -431,6 +483,7 @@ function IdentityStep({
           <FieldLabel htmlFor="create-agent-title">Title</FieldLabel>
           <Input
             aria-invalid={errors.title ? true : undefined}
+            autoComplete="off"
             id="create-agent-title"
             onChange={(event) => set("title", event.target.value)}
             placeholder="Finance Operations"
@@ -438,12 +491,17 @@ function IdentityStep({
           />
           {errors.title ? (
             <FieldError errors={[{ message: errors.title }]} />
-          ) : null}
+          ) : (
+            <p className="text-muted-foreground text-sm">
+              A few words, shown beneath its name in lists.
+            </p>
+          )}
         </Field>
         <Field data-invalid={errors.roleDescription ? true : undefined}>
-          <FieldLabel htmlFor="create-agent-role">Role</FieldLabel>
+          <FieldLabel htmlFor="create-agent-role">What it does</FieldLabel>
           <Textarea
             aria-invalid={errors.roleDescription ? true : undefined}
+            autoComplete="off"
             id="create-agent-role"
             onChange={(event) => set("roleDescription", event.target.value)}
             placeholder="Review receipts, categorize expenses, and prepare reimbursement reports."
@@ -452,7 +510,15 @@ function IdentityStep({
           />
           {errors.roleDescription ? (
             <FieldError errors={[{ message: errors.roleDescription }]} />
-          ) : null}
+          ) : (
+            /* Said here rather than above the three fields, where it used to sit: it is true of
+               this field alone, and "Role" next to "Title" read as a second job title rather than
+               as the standing instruction it becomes. */
+            <p className="text-muted-foreground text-sm">
+              Its standing instruction in every channel. Messages in a channel
+              are tasks within it.
+            </p>
+          )}
         </Field>
       </FieldGroup>
     </StepItem>
@@ -491,11 +557,117 @@ function VisibilityStep({
   );
 }
 
+/**
+ * Where the coworker runs, as buttons.
+ *
+ * TWO RADIOS BECAME A LIST OF NAMES, because the person this step is for arrives knowing the role
+ * they want and could not tell "Built-in" from "Managed" — both are a kind of Bot, and neither
+ * word says which one is theirs. A list led by the Bot this deployment runs itself, followed by the
+ * frameworks somebody might already have running, is answered by recognition instead.
+ *
+ * EVERY FRAMEWORK LEADS TO THE SAME PLACE. Picking Google ADK rather than CrewAI changes nothing:
+ * both ask for an AG-UI address on the next step and are stored identically. The names are here so
+ * somebody finds their own and knows this will work, not because the choice branches. The risk that
+ * carries — that twelve buttons read as a promise OpenBot will go and run CrewAI for you, which is
+ * what the desktop setup window really does — was raised and accepted deliberately.
+ *
+ * The press is the answer, so there is no Continue: `onChoose` both records and advances.
+ */
 function KindStep({
   builtInAvailable,
+  chosen,
   kind,
-  onKind,
-  showKindError,
+  onChoose,
+}: {
+  /** Whether this deployment has been pointed at a Bot of its own. */
+  builtInAvailable: boolean;
+  /** The framework whose button was pressed, so coming back shows it still chosen. */
+  chosen: string | null;
+  kind: AgentKind | null;
+  onChoose: (kind: AgentKind, harness: string | null) => void;
+}) {
+  return (
+    <StepItem name="kind">
+      <QuestionnaireTitle>Where does it run?</QuestionnaireTitle>
+      <div className="flex flex-col gap-2">
+        <button
+          aria-pressed={kind === "builtin"}
+          className="flex w-full items-center gap-3 rounded-lg border border-border p-3 text-left transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-50 aria-pressed:border-primary/40 aria-pressed:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+          disabled={!builtInAvailable}
+          onClick={() => onChoose("builtin", null)}
+          type="button"
+        >
+          <IconSparkles className="size-5 shrink-0 text-muted-foreground" />
+          <span className="min-w-0">
+            <span className="block font-medium text-sm">Run it here</span>
+            <span className="block text-muted-foreground text-xs">
+              {builtInAvailable
+                ? "OpenBot runs it for you. Nothing to set up — it can start work as soon as it is made."
+                : "Not available yet. Whoever set OpenBot up has to switch this on first."}
+            </span>
+          </span>
+        </button>
+
+        <div className="flex items-center gap-2 py-1 text-muted-foreground text-xs">
+          <span className="h-px flex-1 bg-border" />
+          or connect one you run
+          <span className="h-px flex-1 bg-border" />
+        </div>
+
+        {/*
+         * Every framework, always, behind a scroller rather than a disclosure. A "show more" made
+         * somebody who did not find their own on the first three press a control before they could
+         * even look; scrolling is the gesture people already try on a list. The scroller is bounded
+         * so it is the list that moves and not the step: the question above it and the Back button
+         * below stay exactly where they were.
+         *
+         * FLUSH, WITH NOTHING WIDER THAN THE FRAME ABOVE IT. The frame that animates each step's
+         * height hides its overflow, and it hides it on both axes. A negative margin here — put in
+         * to stop a row's border meeting the clip edge — made this box three pixels wider than that
+         * frame, and focusing the step scrolled the frame four pixels sideways to reveal them.
+         * Every child then drew four pixels to the left of where it belonged, so the step's own
+         * heading lost the left of its first letter and each row lost its left border. Horizontal
+         * room is bought with an inset focus ring on the rows instead, which cannot overflow.
+         *
+         * Bounded in `svh` rather than at a fixed height, because the popup it sits in is already
+         * sized that way: at `max-h-64` the list stopped short and left a third of the step empty.
+         */}
+        <div className="max-h-[42svh] overflow-y-auto">
+          <div className="flex flex-col gap-2">
+            {WEB_HARNESSES.map((harness) => (
+              <button
+                aria-pressed={kind === "managed" && chosen === harness.id}
+                className="flex w-full items-center gap-3 rounded-lg border border-border p-3 text-left transition-colors hover:bg-muted aria-pressed:border-primary/40 aria-pressed:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+                data-testid="harness-option"
+                key={harness.id}
+                onClick={() => onChoose("managed", harness.id)}
+                type="button"
+              >
+                <HarnessMark id={harness.mark} name={harness.name} />
+                <span className="min-w-0">
+                  <span className="block font-medium text-sm">
+                    {harness.name}
+                  </span>
+                  <span className="block text-muted-foreground text-xs">
+                    {summaryFor(harness)}
+                  </span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    </StepItem>
+  );
+}
+
+/**
+ * The address of an agent somebody else hosts.
+ *
+ * Generic on purpose: it does not name the framework that led here, because nothing about it
+ * differs per framework and a heading that said "your CrewAI agent" would imply otherwise.
+ */
+function EndpointStep({
   values,
   set,
   endpointError,
@@ -503,11 +675,6 @@ function KindStep({
   testing,
   onTest,
 }: {
-  /** Whether this deployment has a Bot of its own for a coworker to run on. */
-  builtInAvailable: boolean;
-  kind: AgentKind | null;
-  onKind: (kind: AgentKind) => void;
-  showKindError: boolean;
   values: AgentFormValues;
   set: <K extends keyof AgentFormValues>(
     key: K,
@@ -519,100 +686,67 @@ function KindStep({
   onTest: () => void;
 }) {
   return (
-    <StepItem name="kind">
-      <QuestionnaireTitle>Where does it run?</QuestionnaireTitle>
-      <QuestionnaireChoices>
-        {KIND_OPTIONS.map((option) => {
-          /*
-           * Shown but not offerable, rather than hidden: a deployment with no managed Bot cannot
-           * back a built-in coworker, and the create would be refused. The card staying visible is
-           * what tells the person the kind exists and why it is not theirs to pick.
-           */
-          const unavailable = option.value === "builtin" && !builtInAvailable;
-          return (
-            <QuestionnaireChoice
-              checked={kind === option.value}
-              disabled={unavailable}
-              key={option.value}
-              onChange={() => onKind(option.value)}
-              value={option.value}
-            >
-              <span className="font-medium">{option.title}</span>
-              <QuestionnaireChoiceDescription>
-                {unavailable
-                  ? "Not available here: this deployment has no Bot of its own for a coworker to run on."
-                  : option.description}
-              </QuestionnaireChoiceDescription>
-            </QuestionnaireChoice>
-          );
-        })}
-      </QuestionnaireChoices>
-      {showKindError ? (
-        <p className="text-sm text-destructive" role="alert">
-          Choose where this coworker runs.
-        </p>
-      ) : null}
-      {kind === "managed" ? (
-        <FieldGroup>
-          <Field data-invalid={endpointError ? true : undefined}>
-            <FieldLabel htmlFor="create-agent-endpoint">
-              Agent endpoint
-            </FieldLabel>
-            <div className="flex gap-2">
-              <Input
-                aria-invalid={endpointError ? true : undefined}
-                id="create-agent-endpoint"
-                onChange={(event) => set("endpoint", event.target.value)}
-                placeholder="https://your-agent.example.com/ag-ui"
-                value={values.endpoint}
-              />
-              <Button
-                disabled={!values.endpoint || testing}
-                onClick={onTest}
-                type="button"
-                variant="outline"
-              >
-                {testing ? "Testing…" : "Test"}
-              </Button>
-            </div>
-            {endpointError ? (
-              <FieldError errors={[{ message: endpointError }]} />
-            ) : null}
-            {connection ? (
-              <p
-                className={`text-sm ${connection.ok ? "text-muted-foreground" : "text-destructive"}`}
-                role="status"
-              >
-                {connection.ok
-                  ? `It answered: ${connection.events.join(", ")}`
-                  : connection.reason}
-              </p>
-            ) : (
-              <p className="text-muted-foreground text-sm">
-                Anything that speaks AG-UI works. This server dials your agent,
-                so an agent on your own machine has to be reachable from here.
-              </p>
-            )}
-          </Field>
-          <Field>
-            <FieldLabel htmlFor="create-agent-key">
-              Key for that agent (optional)
-            </FieldLabel>
+    <StepItem name="endpoint">
+      <QuestionnaireTitle>Where can it be reached?</QuestionnaireTitle>
+      <FieldGroup>
+        <Field data-invalid={endpointError ? true : undefined}>
+          <FieldLabel htmlFor="create-agent-endpoint">
+            Agent endpoint
+          </FieldLabel>
+          <div className="flex gap-2">
             <Input
+              aria-invalid={endpointError ? true : undefined}
               autoComplete="off"
-              id="create-agent-key"
-              onChange={(event) => set("authValue", event.target.value)}
-              placeholder="Bearer …"
-              type="password"
-              value={values.authValue}
+              id="create-agent-endpoint"
+              onChange={(event) => set("endpoint", event.target.value)}
+              placeholder="https://your-agent.example.com/ag-ui"
+              value={values.endpoint}
             />
-            <p className="text-muted-foreground text-sm">
-              Sent as an <code>Authorization</code> header on every run, and
-              kept in the credential vault.
+            <Button
+              disabled={!values.endpoint || testing}
+              onClick={onTest}
+              type="button"
+              variant="outline"
+            >
+              {testing ? "Testing…" : "Test"}
+            </Button>
+          </div>
+          {endpointError ? (
+            <FieldError errors={[{ message: endpointError }]} />
+          ) : connection ? (
+            <p
+              className={`text-sm ${connection.ok ? "text-muted-foreground" : "text-destructive"}`}
+              role="status"
+            >
+              {connection.ok
+                ? `It answered: ${connection.events.join(", ")}`
+                : connection.reason}
             </p>
-          </Field>
-        </FieldGroup>
-      ) : null}
+          ) : (
+            <p className="text-muted-foreground text-sm">
+              Anything that speaks AG-UI works. This server dials your agent, so
+              an agent on your own machine has to be reachable from here.
+            </p>
+          )}
+        </Field>
+        <Field>
+          <FieldLabel htmlFor="create-agent-key">
+            Key for that agent (optional)
+          </FieldLabel>
+          <Input
+            autoComplete="off"
+            id="create-agent-key"
+            onChange={(event) => set("authValue", event.target.value)}
+            placeholder="Bearer …"
+            type="password"
+            value={values.authValue}
+          />
+          <p className="text-muted-foreground text-sm">
+            Sent as an <code>Authorization</code> header on every run, and kept
+            in the credential vault.
+          </p>
+        </Field>
+      </FieldGroup>
     </StepItem>
   );
 }

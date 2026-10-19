@@ -8181,6 +8181,8 @@ fn main() {
         std::fs::create_dir_all(root.join("server")).unwrap();
         std::fs::create_dir_all(root.join("app")).unwrap();
         std::fs::create_dir_all(root.join("worker")).unwrap();
+        std::fs::create_dir_all(root.join("shared")).unwrap();
+        std::fs::create_dir_all(root.join("toolkit")).unwrap();
         std::fs::write(root.join("docker-compose.yml"), "services: {}\n").unwrap();
         std::fs::write(
             root.join("app/package.json"),
@@ -8228,7 +8230,7 @@ fn main() {
         )
         .unwrap();
         deployment::record(root, DEPLOYMENT_VERSION).unwrap();
-        for package in ["", "server", "worker"] {
+        for package in ["", "server", "worker", "shared", "toolkit"] {
             std::fs::write(root.join(package).join("package.json"), "{}").unwrap();
         }
         std::fs::write(root.join("bun.lock"), "synthetic-lock").unwrap();

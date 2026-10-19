@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { RESEARCH_ROLES } from "@openbot/shared/research";
 
 /**
  * The four things a person decides about a skill.
@@ -75,6 +76,9 @@ export function undeclaredElsewhere(
   selected: readonly string[],
   offered: readonly string[],
 ): string[] {
-  const known = new Set(offered);
+  const known = new Set([
+    ...offered,
+    ...RESEARCH_ROLES.map((role) => role.ref),
+  ]);
   return selected.filter((ref) => !known.has(ref));
 }

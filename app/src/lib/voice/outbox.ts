@@ -1,4 +1,4 @@
-import type { SaveVoiceSessionInput } from "../../../../shared/voice-session";
+import type { SaveVoiceSessionInput } from "@openbot/shared/voice-session";
 import { authKeys, type AuthenticatedUser } from "@/lib/auth/queries";
 import { queryClient } from "@/query-client";
 

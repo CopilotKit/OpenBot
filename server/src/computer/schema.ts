@@ -1,7 +1,7 @@
 import type {
   BrowserChallenge,
   ComputerControlState,
-} from "../../../shared/computer-control";
+} from "@openbot/shared/computer-control";
 /**
  * The computer-use contract.
  *
@@ -327,14 +327,29 @@ export type SignInFillInput = {
   origin: string;
   username?: string;
   password: string;
-  /** A one-time code the person entered alongside, typed if the site asks for one. */
-  code?: string;
 };
 
 /** What the computer reports. No field here ever carries a credential. */
 export type SignInFillResult = {
   submitted: boolean;
   /** Whether the page still shows a password field after submitting: the plainest sign of a failure. */
+  passwordFieldVisible: boolean;
+  /**
+   * The site accepted the password and now shows a one-time-code field. Never known before the
+   * password is in: a code is only ever asked for after the fact, and then sent with `SignInCodeInput`.
+   */
+  codeRequested: boolean;
+  url: string;
+  error?: string;
+};
+
+/** The verification code a site asked for, typed into the page that is waiting for it. */
+export type SignInCodeInput = { origin: string; code: string };
+
+export type SignInCodeResult = {
+  submitted: boolean;
+  /** Whether a code field still shows after submitting: the plainest sign the code was refused. */
+  codeFieldVisible: boolean;
   passwordFieldVisible: boolean;
   url: string;
   error?: string;

@@ -8,7 +8,7 @@
  * event, so a missed sweep costs two seconds where a missed event would cost the name entirely.
  */
 import { and, asc, eq, isNull, notExists, sql } from "drizzle-orm";
-import { readFiring } from "../../../shared/routine-firing";
+import { readFiring } from "@openbot/shared/routine-firing";
 import type { Database } from "../db/client";
 import {
   channelMemberships,

@@ -3,8 +3,8 @@ import { HttpAgent, type RunAgentInput } from "@ag-ui/client";
 import { of } from "rxjs";
 import { z } from "zod";
 import { currentApprovalContext } from "../src/approvals/types";
-import { HeadlessToolSuspension } from "../src/computer/headless-tools";
 import { buildAgents } from "../src/copilot";
+import { HeadlessToolSuspension } from "@openbot/toolkit/headless-tools";
 
 async function fixture(answered = false) {
   const requests: RunAgentInput[] = [];

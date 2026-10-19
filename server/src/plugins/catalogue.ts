@@ -31,12 +31,24 @@
 import { isNeverAllowedHostname } from "../computer/target";
 // Type-only, so naming the transport here creates no import cycle with the registry that resolves it.
 import type { CuratedTransportKind } from "./transport";
+import {
+  type ResearchRole,
+  researchRoleOfTool,
+} from "@openbot/shared/research";
 
 export type CatalogueAuth =
   /** Answers without any credential at all. */
   | { kind: "none" }
   /** One token, held by the deployment, used for everybody. */
-  | { kind: "deployment-bearer" }
+  | {
+      kind: "deployment-bearer";
+      /**
+       * The header the token travels in. Absent means `Authorization`, as a Bearer token unless the
+       * token names its own scheme. A vendor that reads its key from a header of its own, as Exa
+       * reads `x-api-key`, names it here, and the token is sent in it exactly as stored.
+       */
+      header?: string;
+    }
   /**
    * First-party and in-process. There is no credential, because there is nothing to authenticate
    * to: the call runs against this deployment's own tables, as the person whose turn it is.
@@ -138,8 +150,50 @@ export type CatalogueEntry = {
    * naming it resolves to a Composio dial with no app and no brokered gate.
    */
   transport?: CuratedTransportKind;
+  /**
+   * The only tools on this server that read, when the vendor's list is too long or moves too fast
+   * for {@link CatalogueEntry.writeTools} to be trusted complete.
+   *
+   * With it, every advertised tool NOT named here is a write. Firecrawl is why: it publishes tool
+   * families (`firecrawl_monitor_*`) rather than names, a write list can only hold names, and a
+   * monitor deletion nobody listed would otherwise classify as a read.
+   */
+  readTools?: readonly string[];
   docsUrl: string;
 };
+
+/** The research role a granted `serverId/toolName` ref plays, or null when it plays none. */
+export function researchRoleFor(ref: string): ResearchRole | null {
+  // A tool without a ref plays no role. Bot instructions are built from this, so it never throws.
+  if (typeof ref !== "string") return null;
+  const slash = ref.indexOf("/");
+  if (slash <= 0) return null;
+  return researchRoleOfTool(ref.slice(0, slash), ref.slice(slash + 1));
+}
+
+/** Exa's research and multi-step agent tools spend credits, so only the three that read are reads. */
+const EXA_READ_TOOLS = Object.freeze([
+  "web_search_exa",
+  "web_fetch_exa",
+  "web_search_advanced_exa",
+]);
+
+/** Crawls, agents, browser sessions and feedback start work or change state at Firecrawl. */
+const FIRECRAWL_WRITE_TOOLS = Object.freeze([
+  "firecrawl_crawl",
+  "firecrawl_agent",
+  "firecrawl_interact",
+  "firecrawl_interact_stop",
+  "firecrawl_feedback",
+  "firecrawl_search_feedback",
+]);
+
+const FIRECRAWL_READ_TOOLS = Object.freeze([
+  "firecrawl_search",
+  "firecrawl_scrape",
+  "firecrawl_map",
+  "firecrawl_parse",
+]);
 
 /**
  * A short list, deliberately.
@@ -183,6 +237,59 @@ export const CATALOGUE: readonly CatalogueEntry[] = Object.freeze([
     auth: { kind: "deployment-bearer" },
     writeTools: Object.freeze([]),
     docsUrl: "https://docs.parallel.ai/integrations/mcp/search-mcp",
+  },
+  {
+    key: "exa",
+    title: "Exa Search",
+    vendor: "Exa",
+    summary:
+      "Public-web search and page reading. Free rate-limited access without a key.",
+    host: "https://mcp.exa.ai",
+    path: "/mcp",
+    auth: { kind: "none" },
+    writeTools: Object.freeze([]),
+    readTools: EXA_READ_TOOLS,
+    docsUrl: "https://exa.ai/docs/reference/exa-mcp",
+  },
+  {
+    key: "exa-authenticated",
+    title: "Exa Search (API key)",
+    vendor: "Exa",
+    summary:
+      "Public-web search and page reading using this deployment's Exa API key.",
+    host: "https://mcp.exa.ai",
+    path: "/mcp",
+    // Exa reads its key from `x-api-key`, not from `Authorization`.
+    auth: { kind: "deployment-bearer", header: "x-api-key" },
+    writeTools: Object.freeze([]),
+    readTools: EXA_READ_TOOLS,
+    docsUrl: "https://exa.ai/docs/reference/exa-mcp",
+  },
+  {
+    key: "firecrawl",
+    title: "Firecrawl",
+    vendor: "Firecrawl",
+    summary:
+      "Public-web search and page scraping. Free access without a key offers search, scrape and parse.",
+    host: "https://mcp.firecrawl.dev",
+    path: "/v2/mcp",
+    auth: { kind: "none" },
+    writeTools: FIRECRAWL_WRITE_TOOLS,
+    readTools: FIRECRAWL_READ_TOOLS,
+    docsUrl: "https://docs.firecrawl.dev/mcp-server",
+  },
+  {
+    key: "firecrawl-authenticated",
+    title: "Firecrawl (API key)",
+    vendor: "Firecrawl",
+    summary:
+      "Public-web search and page scraping using this deployment's Firecrawl API key.",
+    host: "https://mcp.firecrawl.dev",
+    path: "/v2/mcp",
+    auth: { kind: "deployment-bearer" },
+    writeTools: FIRECRAWL_WRITE_TOOLS,
+    readTools: FIRECRAWL_READ_TOOLS,
+    docsUrl: "https://docs.firecrawl.dev/mcp-server",
   },
 
   {
@@ -355,6 +462,15 @@ export function serverCredentialKind(entry: CatalogueEntry): "mcp" | null {
   return entry.auth.kind === "deployment-bearer" ? "mcp" : null;
 }
 
+/** The header this entry's deployment token is sent in, when it is not `Authorization`. */
+export function tokenHeaderFor(
+  entry: CatalogueEntry | null,
+): string | undefined {
+  return entry?.auth.kind === "deployment-bearer"
+    ? entry.auth.header
+    : undefined;
+}
+
 export function catalogueEntry(key: string): CatalogueEntry | null {
   return BY_KEY.get(key) ?? null;
 }
@@ -453,6 +569,8 @@ export function classifyTool(
   // The reviewed list outranks the column, and only in this direction: a name a person reviewed as a
   // write stays a write whatever the listing recorded about it.
   if (entry?.writeTools.includes(toolName)) return "write";
+  // An entry that names its reads names all of them, so anything else it advertises is a write.
+  if (entry?.readTools && !entry.readTools.includes(toolName)) return "write";
   // Anything the column holds settles the rest. `typeof` rather than truthiness so the empty string
   // is treated as the value it is instead of as an absence of one.
   if (typeof recorded === "string")

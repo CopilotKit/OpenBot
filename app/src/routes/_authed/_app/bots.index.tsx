@@ -22,7 +22,8 @@ function BotsPage() {
           render={(props) => (
             <Link {...props} search={{ new: true }} to="/bots" />
           )}
-          size="lg"
+          size="sm"
+          variant="ghost"
         >
           <IconPlus />
           New Bot

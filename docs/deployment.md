@@ -120,7 +120,7 @@ and the fix would not be available.
 | `EMBEDDED_POSTGRES` | `on` to run the database inside the container. Off by default |
 | `KEY_ENCRYPTION_KEY` | base64 32 bytes. `openssl rand -base64 32`. The example key is refused in production |
 | `INTELLIGENCE_API_URL`, `INTELLIGENCE_GATEWAY_WS_URL`, `INTELLIGENCE_API_KEY` | CopilotKit Intelligence. A free plan is available and it can be self-hosted |
-| `COPILOTKIT_LICENSE_TOKEN` | optional. Managed Intelligence issues none; set it only for a self-hosted Intelligence that has one |
+| `COPILOTKIT_LICENSE_TOKEN` | optional. Managed Intelligence issues none; set it for a self-hosted Intelligence, which needs the same licence on its own deployment too |
 | a model key | `OPENAI_API_KEY`, or the provider you configured |
 
 `COMPUTER_TOKEN` is generated at start if you do not set one. Both processes that need it are inside

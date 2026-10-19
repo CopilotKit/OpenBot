@@ -19,7 +19,7 @@ import {
   suspendClaimedComputers,
 } from "../src/work/culler";
 import { createWorkQueue } from "../src/work/queue";
-import { workOwner } from "../../shared/work-owner";
+import { workOwner } from "@openbot/shared/work-owner";
 
 const config = loadConfig(process.env);
 if (!config.computer) {

@@ -510,10 +510,20 @@ export function ComputerView({
             Finishing the assistant's current action before giving you control…
           </p>
         ) : null}
-        {!settled && control?.request?.status === "interrupted" ? (
+        {/*
+          The request's own interruption reason is written for the assistant, so the person gets
+          their own sentence, and is only asked to act when the assistant is actually waiting on them.
+        */}
+        {!settled && control?.recoveryRequired ? (
           <p className="px-3 py-2 text-sm">
-            The browser was interrupted. {control.request.interruption} Open the
-            screen and take control again to check it.
+            The Computer stopped while you had control, so the assistant can't
+            use the browser yet. Take control to check the page, then hand it
+            back.
+          </p>
+        ) : !settled && control?.request?.status === "interrupted" ? (
+          <p className="px-3 py-2 text-sm text-muted-foreground">
+            The Computer stopped before anyone took control. The assistant will
+            ask again if it still needs you.
           </p>
         ) : null}
         {/*

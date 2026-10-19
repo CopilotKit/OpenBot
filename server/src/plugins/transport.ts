@@ -63,6 +63,8 @@ export type VendorTransport = {
   listTools(connection: {
     url: string;
     token?: string;
+    /** Where `token` goes when the vendor does not read `Authorization`; only MCP reads it. */
+    tokenHeader?: string;
     /**
      * Declared by the shared connection shape, and never supplied on THIS path.
      *
@@ -85,6 +87,7 @@ export type VendorTransport = {
     connection: {
       url: string;
       token?: string;
+      tokenHeader?: string;
       /**
        * Who this call is for, and which Bot is making it.
        *

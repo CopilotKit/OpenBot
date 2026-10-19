@@ -2,7 +2,7 @@ import {
   attachmentUrl,
   classifyAttachment,
   MAX_EXTRACTED_CHARACTERS,
-} from "../../../shared/attachments";
+} from "@openbot/shared/attachments";
 
 /**
  * What `load` hands back for an attachment id: the bytes and the metadata
@@ -520,7 +520,7 @@ async function resolvePart(
  * For an older message it must not. History is replayed in full on every
  * turn, so a row that vanished once would fail this channel's every future
  * turn, for ever, with no recovery but starting another channel — the same
- * shape as the dangling tool call in `agents/history-sanitize.ts`, found in
+ * shape as the dangling tool call in `toolkit/history-sanitize.ts`, found in
  * production twice: a permanent failure grown out of transient damage, and
  * nothing the person did wrong. That file's answer is this one's. History is
  * CONTEXT for a turn, not a transaction to resume; the attachment is already

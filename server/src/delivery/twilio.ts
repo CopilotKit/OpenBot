@@ -1,4 +1,5 @@
 import { validateRequest } from "twilio";
+import { DELIVERY_REQUEST_TIMEOUT_MS } from "../timeouts";
 import {
   DeliveryProviderError,
   type ProviderFetch,
@@ -67,7 +68,7 @@ export function createTwilioTransport(config: TwilioConfig) {
     try {
       response = await wire(url, {
         method: "POST",
-        signal: AbortSignal.timeout(30_000),
+        signal: AbortSignal.timeout(DELIVERY_REQUEST_TIMEOUT_MS),
         headers: {
           authorization: `Basic ${Buffer.from(`${config.accountSid}:${config.authToken}`).toString("base64")}`,
           "content-type": "application/x-www-form-urlencoded",

@@ -9,7 +9,7 @@ import {
   selectLearningTarget,
 } from "../src/learning/runtime";
 import type { LearningSettingsStore } from "../src/learning/settings";
-import type { LearningSettings } from "../../shared/learning";
+import type { LearningSettings } from "@openbot/shared/learning";
 import { skillSnapshot } from "./fixtures/learned-skills";
 
 function fixture() {

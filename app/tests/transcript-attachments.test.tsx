@@ -17,7 +17,7 @@ import {
 } from "@/components/channels/chat-transcript";
 import type { QueuedMessage } from "@/components/channels/composer";
 import { attachmentUrl } from "@/lib/channels/attachments";
-import { frameFiring } from "../../shared/routine-firing";
+import { frameFiring } from "@openbot/shared/routine-firing";
 import { settleReactWork } from "./settle-react-work";
 
 /**

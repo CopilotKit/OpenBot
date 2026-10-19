@@ -6,7 +6,7 @@
 import {
   isLearningContainerId,
   type LearningTarget,
-} from "../../shared/learning";
+} from "@openbot/shared/learning";
 import { singleUserEnabled } from "./auth/dev-actor";
 import { normalizeDomain } from "./auth/email-domain";
 import { organizationAuthority } from "./auth/organization";

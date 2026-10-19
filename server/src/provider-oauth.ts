@@ -14,6 +14,7 @@ import {
   CredentialLockUnavailable,
   lockProviderCredentials,
 } from "./provider-oauth-lock";
+import { OAUTH_REQUEST_TIMEOUT_MS } from "./timeouts";
 
 export type ModelOAuthRecord = {
   version: 1;
@@ -167,7 +168,7 @@ export function createProviderOAuthProxy(
           {
             method: "POST",
             redirect: "error",
-            signal: AbortSignal.timeout(15_000),
+            signal: AbortSignal.timeout(OAUTH_REQUEST_TIMEOUT_MS),
             headers: {
               "content-type": "application/x-www-form-urlencoded",
               accept: "application/json",

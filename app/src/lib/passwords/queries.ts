@@ -10,6 +10,8 @@ import { client } from "@/lib/client";
 export type SignInStatus =
   | "pending"
   | "filling"
+  /** The site took the password and sent a verification code; the form asks for only that now. */
+  | "code_required"
   | "taken_over"
   | "signed_in"
   | "failed"

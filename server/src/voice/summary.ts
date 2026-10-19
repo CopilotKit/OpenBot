@@ -1,4 +1,4 @@
-import type { VoiceTranscriptEntry } from "../../../shared/voice-session";
+import type { VoiceTranscriptEntry } from "@openbot/shared/voice-session";
 import { PlanModel } from "../agents/plan-model";
 import type { TitlerOptions } from "../channels/titler";
 import type { RuntimeModel } from "../copilot";

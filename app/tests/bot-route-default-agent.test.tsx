@@ -311,6 +311,7 @@ test("/bot opens a live Computer sidebar with ownership controls and preserves t
           requested: false,
           transitioning: false,
           resumeSnapshotRequired: false,
+          recoveryRequired: false,
         });
       return Response.json({ error: "No frame yet" }, { status: 404 });
     },
@@ -374,6 +375,7 @@ test("/bot?watch=true restores the live Computer panel on reload", async () => {
         requested: false,
         transitioning: false,
         resumeSnapshotRequired: false,
+        recoveryRequired: false,
       }),
     { preconnect: originalFetch.preconnect },
   );

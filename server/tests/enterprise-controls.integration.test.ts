@@ -34,9 +34,10 @@ import {
   teamBotPublications,
   users,
 } from "../src/db/schema";
-import { createTurnRunner } from "../src/routines/run-turn";
+import { createTurnRunner } from "@openbot/toolkit/run-turn";
 import { createTeamBots } from "../src/team-bots/team-bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { serverTurnAdmission } from "../src/agents/turn-admission";
 
 /**
  * The enterprise controls against a real PostgreSQL, through the same seams production uses: the
@@ -442,6 +443,7 @@ function headlessTurn(agentId: string) {
     stop: async () => true,
   };
   const runTurn = createTurnRunner({
+    admission: serverTurnAdmission,
     // biome-ignore lint/suspicious/noExplicitAny: narrow structural fakes, on purpose.
     intelligence: intelligence as any,
     // biome-ignore lint/suspicious/noExplicitAny: narrow structural fakes, on purpose.
@@ -501,6 +503,7 @@ describe("headless turns obey the same switches", () => {
   test("a Bot-to-Bot hand-off meets the same switches", async () => {
     let ran = 0;
     const hop = createHandoffDelivery({
+      admission: serverTurnAdmission,
       deadlineMs: 5_000,
       agentFor: async () =>
         ({

@@ -22,8 +22,7 @@
   // `lib.dom.d.ts` declares as a `string` and which is in scope because nothing here narrows `lib`:
   // TS2451 for the redeclaration, and then TS2367 on the line below it, because comparing the lib's
   // `string` with `0` is two types that do not overlap. A global shared with the standard library,
-  // not with a sibling. Named individually the way `app/tsconfig.json` names the two `shared` files
-  // it reaches for.
+  // not with a sibling. Named individually for that reason.
   //
   // `tests` is NOT here yet, and that is a known gap rather than a decision: the suite has never been
   // type-checked and turning it on surfaces a few hundred years of accumulated `any`. It is what let

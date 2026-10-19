@@ -52,7 +52,11 @@ export function createPasswordStore(database: Database): PasswordStore {
         .where(
           and(
             eq(signInRequests.ownerUserId, ownerUserId),
-            inArray(signInRequests.status, ["pending", "taken_over"]),
+            inArray(signInRequests.status, [
+              "pending",
+              "code_required",
+              "taken_over",
+            ]),
             sql`${signInRequests.expiresAt} > now()`,
           ),
         )
@@ -165,7 +169,7 @@ export function createMemoryPasswordStore(): PasswordStore & {
       return [...requests.values()].filter(
         (row) =>
           row.ownerUserId === ownerUserId &&
-          (row.status === "pending" || row.status === "taken_over") &&
+          ["pending", "code_required", "taken_over"].includes(row.status) &&
           row.expiresAt > new Date(),
       );
     },
