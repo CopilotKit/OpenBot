@@ -1,10 +1,9 @@
 /**
  * A fake Intelligence for the Recorder's tests: the realtime gateway's trajectory channel
- * (Phoenix serializer V2 at /client/websocket) and the app-api's POST /api/trajectories/join.
+ * (Phoenix serializer V2 at /client/websocket) and POST /api/trajectories/join.
  *
- * It mirrors Intelligence v0.13.14 (identical to main 48b9528da for trajectories):
- * `realtime-gateway/lib/realtime_gateway/{trajectories/batch.ex, trajectories/event_store.ex,
- * client/trajectory_channel.ex, client/socket.ex}` and `app-api/src/routes/trajectories-routes.ts`.
+ * It mirrors what Intelligence v0.13.14 answers a trajectory client: the same limits, refusals,
+ * acknowledgements and join errors, as a client sees them on the wire.
  */
 import type { ServerWebSocket } from "bun";
 
@@ -130,7 +129,7 @@ function containsNul(value: unknown): boolean {
   return false;
 }
 
-/** `Batch.prepare_event/1`: true when the event is storable. */
+/** True when Intelligence would store the event. */
 function validEvent(
   event: unknown,
 ): event is { name: string; value: { seq: number }; timestamp: number } {
@@ -309,7 +308,7 @@ export async function startFakeGateway(
       : { reason };
   }
 
-  /** `Batch.prepare` then `EventStore.accept`: a reply plus whether the channel stops. */
+  /** Checks a batch as Intelligence does, then stores it: a reply plus whether the channel stops. */
   function acceptBatch(
     trajectoryId: string,
     payload: unknown,

@@ -22,9 +22,9 @@ type Obj = { [key: string]: JsonValue };
 
 /** A 3-digit security code is a secret too, so digests of values this short still match. */
 export const MIN_DIGEST_LENGTH = 3;
-/** Intelligence's per-event limit (batch.ex `@max_event_bytes`). */
+/** Intelligence's per-event limit. */
 export const MAX_EVENT_BYTES = 16 * 1024;
-/** Intelligence refuses timestamps at or above 253,402,300,800,000 (batch.ex `@max_timestamp_ms` and `prepare_event/1`). */
+/** Intelligence refuses timestamps at or above 253,402,300,800,000. */
 export const MAX_TIMESTAMP_MS = 253_402_300_800_000 - 1;
 /** Leaves room for the seq and envelope the streamer adds to each event. */
 export const EVENT_BUDGET_BYTES = 15 * 1024;
@@ -116,7 +116,7 @@ const TARGET_ATTRIBUTE_VALUES = [
   "aria-valuetext",
   "data-value",
 ] as const;
-/** Intelligence rejects a NUL at any depth (batch.ex `prepare_event/1` with `contains_nul?/1`). */
+/** Intelligence rejects a NUL at any depth. */
 const NUL = "\u0000";
 /** Longest `target.value` and `target.text` kept when trimming (plan Task 3 `trimEvent`). */
 const TRIMMED_TARGET_TEXT = 200;

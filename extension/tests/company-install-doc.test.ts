@@ -22,11 +22,11 @@ describe("the company-install guide", () => {
     const heading = section.split("\n")[0];
     expect(heading).toContain("Intelligence");
     for (const term of [
+      "trajectories",
+      "FF_LEARNING_TRAJECTORIES",
+      "INTELLIGENCE_GATEWAY_WS_URL",
       "CHECK_ORIGIN",
-      "PublicAppOrigin",
-      "REALTIME_CHECK_ORIGIN",
       "LEARNING_RUNTIME_ENABLED",
-      "Intelligence gap",
       `chrome-extension://${RECORDER_EXTENSION_ID}`,
     ]) {
       expect(section).toContain(term);
@@ -41,8 +41,42 @@ describe("the company-install guide", () => {
 
   test("states what has been tested and what has not", () => {
     expect(guide).toContain("What has been tested and what has not");
-    expect(guide).toContain("Intelligence gaps");
-    expect(guide).toContain("Known issue under investigation");
+  });
+
+  // A public guide for IT teams: Intelligence's own source files, commits, gaps lists and open bugs are not theirs.
+  test("names no Intelligence internals", () => {
+    for (const internal of [
+      /\b(?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}\b/, // a commit
+      /\.exs?\b/,
+      /cloudformation|release\.yaml|values[-.][a-z-]*\.yaml|install\.sh/i,
+      /\b(?:apps|charts|deploy)\//,
+      /Intelligence gaps?/i,
+      /Known issue/i,
+      /Intelligence team/i,
+    ]) {
+      expect(guide).not.toMatch(internal);
+    }
+  });
+
+  test("tells IT to confirm the policy reached the browser, and that a value of the wrong type is refused", () => {
+    expect(guide).toContain("chrome://policy");
+    expect(guide).toMatch(/status OK/);
+    expect(guide).toMatch(/refused, never ignored/);
+    expect(guide).toMatch(/one address on its own/);
+  });
+
+  test("covers the native messaging host OpenBot Desktop registers per person", () => {
+    for (const term of [
+      "ai.copilotkit.openbot.recorder",
+      "NativeMessagingAllowlist",
+      "NativeMessagingBlocklist",
+      "NativeMessagingUserLevelHosts",
+      "/etc/opt/chrome/native-messaging-hosts/",
+      "HKLM\\SOFTWARE\\Google\\Chrome\\NativeMessagingHosts",
+      `"allowed_origins": ["chrome-extension://${RECORDER_EXTENSION_ID}/"]`,
+    ]) {
+      expect(guide).toContain(term);
+    }
   });
 
   test("is linked from the docs index", () => {
