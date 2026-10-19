@@ -131,6 +131,21 @@ fn saved(root: &Path, expected: &str) -> Result<Option<SavedSession>, Problem> {
     Ok(Some(session))
 }
 
+/// Whether Desktop holds a sign-in for this organization, read from this computer alone. The Recorder's native host
+/// asks on every ping, which must stay cheap and never reach the network; whether the organization still accepts the
+/// sign-in is the handoff's question. On Windows the saved sign-in is sealed with DPAPI and opening it starts
+/// PowerShell, so there only its presence is read.
+pub fn signed_in_locally(root: &Path, authority_url: &str) -> Result<bool, Problem> {
+    let expected = authority(authority_url)?;
+    if !crate::vault::stored(root, SAVED_COOKIE) {
+        return Ok(false);
+    }
+    if cfg!(target_os = "windows") {
+        return Ok(true);
+    }
+    Ok(saved(root, &expected)?.is_some())
+}
+
 pub fn status(root: &Path, authority_url: &str) -> Result<Option<OrganizationUser>, Problem> {
     let expected = authority(authority_url)?;
     saved(root, &expected)?
@@ -678,6 +693,37 @@ mod tests {
         )
         .unwrap();
         (root, authority, worker)
+    }
+
+    #[test]
+    fn signed_in_locally_reads_the_saved_sign_in_and_creates_nothing() {
+        // Nothing listens at either authority: the check never dials one.
+        let authority = "http://127.0.0.1:9";
+        let root = std::env::temp_dir().join(format!(
+            "openbot-signed-in-locally-{}-{}",
+            std::process::id(),
+            random()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        assert!(!signed_in_locally(&root, authority).unwrap());
+        assert!(!root.join(".secrets").exists());
+        crate::vault::remember(
+            &root,
+            SAVED_COOKIE,
+            &serde_json::to_string(&SavedSession {
+                authority: authority.into(),
+                cookie: "better-auth.session_token=saved".into(),
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(signed_in_locally(&root, authority).unwrap());
+        // Where the saved sign-in can be read cheaply, one for another organization is not this one's.
+        if !cfg!(target_os = "windows") {
+            assert!(!signed_in_locally(&root, "http://127.0.0.1:8").unwrap());
+        }
+        assert!(signed_in_locally(&root, "not a url").is_err());
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

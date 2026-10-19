@@ -2663,6 +2663,32 @@ fn recorder_host_test_app_url() -> Option<String> {
     None
 }
 
+/// The organization's sign-in address when this deployment runs in organization mode.
+fn organization_authority(root: &Path) -> Option<String> {
+    openbot_env::already_set(&root.join(".env"), &["OPENBOT_ORGANIZATION_AUTH_URL"])
+        .remove("OPENBOT_ORGANIZATION_AUTH_URL")
+        .filter(|authority| !authority.is_empty())
+}
+
+/// A sign-in the organization or the local OpenBot refused is one to make again; anything else may pass.
+fn organization_refusal(problem: &Problem) -> recorder_host::Refusal {
+    if problem.connection == Some(openbot_desktop_lib::problem::Connection::Organization) {
+        recorder_host::Refusal::NotSignedIn
+    } else {
+        recorder_host::Refusal::OrganizationUnavailable
+    }
+}
+
+/// The ping's one question to the app: does `/api/capabilities` answer through the app's port, on either loopback.
+fn recorder_ping_app_answers(port: u16) -> bool {
+    stack::answering_within(
+        port,
+        "/api/capabilities",
+        recorder_host::PING_PROBE_PATIENCE,
+    )
+    .is_some()
+}
+
 /// What the Recorder's native host knows about this computer's OpenBot.
 ///
 /// The browser starts the host as a fresh process with no app around it, so it finds the deployment
@@ -2678,34 +2704,59 @@ fn recorder_host_environment() -> recorder_host::HostEnvironment {
         std::env::var_os("APPDATA").as_deref().map(Path::new),
     );
     let root = preparation::selected_root(&config);
-    let organization_root = root.clone();
-    // In organization mode the local OpenBot admits only its organization session cookie, handed
+    // For a ping: whether Desktop holds the organization sign-in at all, read from this computer alone.
+    let signed_in_root = root.clone();
+    let signed_in: recorder_host::Check<Result<(), recorder_host::Refusal>> = Box::new(move || {
+        let Some(root) = signed_in_root.as_deref() else {
+            return Ok(());
+        };
+        let Some(authority) = organization_authority(root) else {
+            return Ok(());
+        };
+        match openbot_desktop_lib::organization_auth::signed_in_locally(root, &authority) {
+            Ok(true) => Ok(()),
+            Ok(false) => Err(recorder_host::Refusal::NotSignedIn),
+            Err(problem) => Err(organization_refusal(&problem)),
+        }
+    });
+    // For a handoff: in organization mode the local OpenBot admits only its organization session cookie, handed
     // over from Desktop's saved sign-in exactly as opening the window does. Never logged.
+    let organization_root = root.clone();
     let organization_cookie: recorder_host::OrganizationCookie = Box::new(move |app_url| {
         let Some(root) = organization_root.as_deref() else {
             return Ok(None);
         };
-        let authority =
-            openbot_env::already_set(&root.join(".env"), &["OPENBOT_ORGANIZATION_AUTH_URL"])
-                .remove("OPENBOT_ORGANIZATION_AUTH_URL")
-                .unwrap_or_default();
-        if authority.is_empty() {
+        let Some(authority) = organization_authority(root) else {
             return Ok(None);
-        }
+        };
         openbot_desktop_lib::organization_auth::local_session_cookie(root, &authority, app_url)
             .map(Some)
-            .map_err(|problem| problem.said)
+            .map_err(|problem| organization_refusal(&problem))
     });
     if let Some(url) = recorder_host_test_app_url() {
+        let port = reqwest::Url::parse(&url)
+            .ok()
+            .and_then(|url| url.port_or_known_default());
         return recorder_host::HostEnvironment {
             installed: Box::new(|| true),
+            app_answers: Box::new(move || port.is_some_and(recorder_ping_app_answers)),
+            signed_in,
             app_url: Box::new(move || Some(url.clone())),
             organization_cookie,
         };
     }
     let installed = root.is_some();
+    let ping_root = root.clone();
     recorder_host::HostEnvironment {
         installed: Box::new(move || installed),
+        // No ownership check: a ping proves nothing and sends nothing secret, and the handoff checks before it does.
+        app_answers: Box::new(move || {
+            ping_root
+                .as_deref()
+                .and_then(|root| openbot_env::Ports::read(root).ok())
+                .is_some_and(|ports| recorder_ping_app_answers(ports.app))
+        }),
+        signed_in,
         app_url: Box::new(move || {
             let root = root.as_deref()?;
             let ports = openbot_env::Ports::read(root).ok()?;
@@ -3950,7 +4001,7 @@ fn main() {
     // Chrome, Edge or Chromium starting the Recorder's native messaging host: answer it and exit, before
     // anything of the app (the single-instance plugin would forward this launch to a running app).
     if let Some(origin) = recorder_host::caller_origin(&args) {
-        std::process::exit(recorder_host::run(&origin, &recorder_host_environment()));
+        std::process::exit(recorder_host::run(&origin, recorder_host_environment()));
     }
     // The same install the app's setup runs, as a command, so it can be tested and run by hand.
     if args.get(1).is_some_and(|a| a == "--install-recorder-host") {

@@ -2766,8 +2766,13 @@ const LOOPBACKS: [&str; 2] = ["127.0.0.1", "[::1]"];
 /// Returns the address that worked rather than a boolean, so a caller that has to send somebody
 /// there can use the one that answered instead of guessing again.
 pub fn answering_at(port: u16, path: &str) -> Option<String> {
+    answering_within(port, path, std::time::Duration::from_secs(3))
+}
+
+/// [`answering_at`], giving each loopback at most `patience`.
+pub fn answering_within(port: u16, path: &str, patience: std::time::Duration) -> Option<String> {
     let client = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(3))
+        .timeout(patience)
         .build()
         .ok()?;
     LOOPBACKS.iter().find_map(|host| {
