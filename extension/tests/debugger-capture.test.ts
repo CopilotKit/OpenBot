@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { RECORDER_NETWORK_BODY_MAX_BYTES } from "@openbot/shared/recorder-api";
 import {
   type CapturedEvent,
   EVENT_BUDGET_BYTES,
@@ -421,7 +420,7 @@ test("a large body is trimmed to fit one event and is never sent or stored anywh
 });
 
 test("a body over 2 MiB is read to its first 2 MiB only, and the event says how large it was", async () => {
-  expect(NETWORK_BODY_READ_MAX_BYTES).toBe(RECORDER_NETWORK_BODY_MAX_BYTES);
+  expect(NETWORK_BODY_READ_MAX_BYTES).toBe(2 * MiB);
   await capture.start(7, "https://crm.example.test/");
   request(7, {
     id: "1",

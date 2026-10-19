@@ -12,10 +12,10 @@ export type NetworkBody = {
   reason?: string;
 };
 
-/** How much of a body is read (Decision 5's 2 MiB; `shared/recorder-api.ts` RECORDER_NETWORK_BODY_MAX_BYTES, which a
- * test keeps equal). What is read is masked as one piece before the event is cut to Intelligence's 16 KiB, so a
- * credential-named key is redacted wherever it sits in it. A body this cut short is no longer valid JSON: `maskBody`
- * then reads it key by key from its start, and a form body pair by pair, so no credential in the part kept survives. */
+/** How much of a body is read (Decision 5's 2 MiB). What is read is masked as one piece before the event is cut to
+ * Intelligence's 16 KiB, so a credential-named key is redacted wherever it sits in it. A body this cut short is no
+ * longer valid JSON: `maskBody` then reads it key by key from its start, and a form body pair by pair, so no
+ * credential in the part kept survives. */
 export const NETWORK_BODY_READ_MAX_BYTES = 2 * 1024 * 1024;
 
 const encoder = new TextEncoder();

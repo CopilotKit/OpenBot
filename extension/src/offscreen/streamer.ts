@@ -1,7 +1,4 @@
-import {
-  TRAJECTORY_ROLLOVER_AT,
-  type TrajectoryGrant,
-} from "@openbot/shared/recorder-api";
+import type { TrajectoryGrant } from "@openbot/shared/recorder-api";
 import { RECORDER_EXTENSION_ID } from "@openbot/shared/recorder-extension";
 import {
   type CapturedEvent,
@@ -13,6 +10,7 @@ import {
   trimEvent,
 } from "@openbot/shared/recorder-masking";
 import type { CaptureStatus } from "../protocol/messages";
+import { TRAJECTORY_ROLLOVER_AT } from "../shared/limits";
 import { isAllowedGatewayUrl } from "../shared/origin";
 import { GrantError, type GrantVerdict, PASS_HINTS } from "./grant";
 import {

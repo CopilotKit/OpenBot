@@ -7,7 +7,6 @@
 // IndexedDB outbox.
 import {
   type LearningSpaceState,
-  RECORDER_STEP_NOTICE_AT,
   type RecorderBot,
   type RecorderMe,
   recorderPaths,
@@ -29,6 +28,7 @@ import type {
 } from "../protocol/messages";
 import { IDLE_STATE, parseOffscreenSignedOut } from "../protocol/messages";
 import { hasHostPermission } from "../shared/host-access";
+import { RECORDER_ACTION_NOTICE_AT } from "../shared/limits";
 import { OpenBotError, openbotJson } from "../shared/openbot-client";
 import { readPolicy } from "../shared/policy";
 import {
@@ -473,7 +473,7 @@ export function installRecording(
   function countAction(): void {
     if (!live || state.phase !== "recording") return;
     dispatch({ type: "action" });
-    if (state.actions >= RECORDER_STEP_NOTICE_AT && !state.noticeShown) {
+    if (state.actions >= RECORDER_ACTION_NOTICE_AT && !state.noticeShown) {
       dispatch({ type: "notice" });
       postToContentPorts(
         state.tabIds,

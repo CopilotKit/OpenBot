@@ -3,9 +3,6 @@ import { z } from "zod";
 export const RECORDER_TOKEN_PREFIX = "obr_";
 export const RECORDER_CODE_PREFIX = "obc_";
 export const RECORDER_CONNECT_CODE_TTL_MS = 5 * 60_000;
-export const RECORDER_NETWORK_BODY_MAX_BYTES = 2 * 1024 * 1024;
-export const RECORDER_STEP_NOTICE_AT = 50;
-export const TRAJECTORY_ROLLOVER_AT = 19_000; // Intelligence caps a trajectory at 20,000 events (trajectories/store.ex @default_event_cap)
 /** The `code` on every 401 the recorder bearer gets. Only this code means "signed out". */
 export const RECORDER_SIGNED_OUT = "RECORDER_SIGNED_OUT";
 /** The `code` on the 503 the recorder guard and the trajectory gate answer when the organization's sign-in server could not
