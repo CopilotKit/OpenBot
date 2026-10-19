@@ -188,8 +188,8 @@ export function SendingLearningRow({
 const NETWORK_STATUS: Record<CaptureStatus["network"], string> = {
   off: "Off",
   waiting: "Waiting for the page",
-  debugger: "Capturing the network calls behind what you do",
-  page: "Capturing the network calls behind what you do, from inside the page",
+  debugger: "Capturing what each step saves",
+  page: "Capturing what each step saves, from inside the page",
   stopped: "Stopped",
 };
 export type VoiceActions = {

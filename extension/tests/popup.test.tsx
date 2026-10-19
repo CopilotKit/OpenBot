@@ -256,7 +256,7 @@ test("connected and idle shows the person, the host, the form copy and Record di
   expect(getByText("openbot.example.test")).toBeTruthy();
   expect(
     getByText(
-      "Records your clicks, typing, the pages you open, the network calls behind them and what you say as you go. Passwords and secrets stay in your browser.",
+      "Records each step you take (your clicks, typing and the pages you open) with what it saves, and what you say as you go. Passwords and secrets stay in your browser.",
     ),
   ).toBeTruthy();
   expect(

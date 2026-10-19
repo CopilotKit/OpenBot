@@ -47,10 +47,12 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 ### Teach a Bot by doing the task in your own browser: the OpenBot Recorder
 
 The OpenBot Recorder is a Chrome and Edge extension. A person names the task, does it in their own
-browser, and the Recorder sends what they did (clicks, typing, pages and the network calls behind
-them, masked in the browser first) straight to Intelligence as a trajectory in that person's own
-Learning space. Every Bot they use then gets the Skills learned there, beside the Bot's own. OpenBot
-connects the browser and hands out each capture pass; it receives nothing that is recorded.
+browser, and the Recorder sends what they did, step by step (each click, entry, choice, submit,
+Enter and page change, with what an agent needs to find that element again, and the one request a
+step sent when it saved something), masked in the browser first, straight to Intelligence as a
+trajectory in that person's own Learning space; the page's own traffic is never recorded. Every Bot
+they use then gets the Skills learned there, beside the Bot's own. OpenBot connects the browser and
+hands out each capture pass; it receives nothing that is recorded.
 
 - **Settings → Browsers** connects the Recorder in this browser and lists every browser connected
   as you, each with a Disconnect. OpenBot Desktop can connect the Recorder on its own computer too.
