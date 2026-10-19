@@ -47,6 +47,7 @@ const RECORDING_TYPES = new Set<string>([
   "page.notice",
   "page.notice.dismiss",
   "page.kept.discard",
+  "page.voice",
 ]);
 
 const UNKNOWN: PageResponse = { ok: false, error: "Unknown request." };

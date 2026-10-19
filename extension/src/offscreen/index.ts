@@ -1,5 +1,8 @@
 import type { TrajectoryGrant } from "@openbot/shared/recorder-api";
-import type { CapturedEvent } from "@openbot/shared/recorder-masking";
+import {
+  type CapturedEvent,
+  scrubTranscript,
+} from "@openbot/shared/recorder-masking";
 import {
   type BackgroundToOffscreen,
   type CaptureStatus,
@@ -23,6 +26,12 @@ import {
   type StreamerSession,
   type StreamerStatus,
 } from "./streamer";
+import {
+  type RecognitionConstructor,
+  startVoice,
+  type Voice,
+  type VoiceDeps,
+} from "./voice";
 
 type Timers = {
   set(fn: () => void, ms: number): unknown;
@@ -38,7 +47,24 @@ export type OffscreenControllerDeps = {
   now?: () => number;
   timers?: Timers;
   rolloverAt?: number;
+  /** Test seam: the speech recognition and the microphone the live recording's voice uses. */
+  voice?: Pick<VoiceDeps, "Recognition" | "getUserMedia">;
 };
+
+/** The browser's own speech recognition and microphone: web APIs only, as an offscreen document has no other chrome.*
+ * API than runtime messaging. */
+function browserVoice(): Pick<VoiceDeps, "Recognition" | "getUserMedia"> {
+  const scope = globalThis as unknown as {
+    SpeechRecognition?: RecognitionConstructor;
+    webkitSpeechRecognition?: RecognitionConstructor;
+  };
+  return {
+    Recognition:
+      scope.SpeechRecognition ?? scope.webkitSpeechRecognition ?? null,
+    getUserMedia: (constraints) =>
+      navigator.mediaDevices.getUserMedia(constraints),
+  };
+}
 
 const RECONNECT_DELAYS_MS = [500, 1_000, 2_000, 4_000];
 /** The live status of a recording whose streamer could not be created (its storage did not open, say). */
@@ -97,6 +123,8 @@ type Live = {
   notStarted: { resumed: boolean } | null;
   dropped: number;
   stopped: { trajectoryIds: string[] } | null;
+  /** The person's narration, transcribed here; null when the session has none, and once Stop has ended it. */
+  voice: Voice | null;
 };
 
 /**
@@ -211,6 +239,8 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
   const signedOutTokens = new Map<string, SignedOutReason>();
   let live: Live | null = null;
   let work: Promise<void> = Promise.resolve();
+  /** The live recording's sensitive-value digests, from the service worker: a spoken secret is masked like a typed one. */
+  let digests = new Set<string>();
 
   /** Handles one message at a time, in the order the service worker posted them; nothing awaits a drain here. */
   function serially(task: () => Promise<void>, what: string): void {
@@ -467,7 +497,35 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
     }
   }
 
+  /** The live recording's voice: each final phrase is a masked `transcript` event in its stream, in order with the rest,
+   * and its status goes to the popup with the recording's other capture statuses. */
+  function startVoiceFor(target: Live): void {
+    const voice = target.session.voice;
+    if (!voice) return;
+    target.voice = startVoice(
+      {
+        language: voice.language,
+        muted: voice.muted,
+        emit: (event) => {
+          if (live === target && !target.ending) deliver(target, event);
+        },
+        status: (update) => postStatus(target, { voice: update }),
+        mask: (text) => scrubTranscript(text, { digests }),
+      },
+      { ...(deps.voice ?? browserVoice()), now, timers },
+    );
+  }
+
+  /** Ends the voice of a recording that ends: the phrase in progress goes into its stream first. */
+  async function endVoice(target: Live): Promise<void> {
+    const voice = target.voice;
+    target.voice = null;
+    await voice?.stop();
+  }
+
   function startLive(session: StreamSession, resume: boolean): void {
+    // A recording that was never told to stop (its document was replaced) lets go of the microphone.
+    if (live) void endVoice(live);
     const target: Live = {
       session,
       recordingId: session.recordingId,
@@ -481,8 +539,10 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
       waiting: [],
       ending: false,
       stopped: null,
+      voice: null,
     };
     live = target;
+    startVoiceFor(target);
     serially(
       () => begin(target, resume),
       resume ? "resume a recording" : "start a recording",
@@ -539,6 +599,8 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
     target: Live,
     message: Extract<BackgroundToOffscreen, { type: "offscreen.stop" }>,
   ): Promise<void> {
+    // The phrase being spoken goes in before the outcome; the microphone is let go whatever happens next.
+    await endVoice(target);
     if (target.stopped) {
       // The service worker restarted mid-Stop and asks again.
       post({
@@ -693,7 +755,10 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
         for (const id of own) stream.recordings.delete(id);
       }
     }
-    if (live && wanted.has(live.recordingId)) live = null;
+    if (live && wanted.has(live.recordingId)) {
+      void endVoice(live);
+      live = null;
+    }
     const { outbox } = await storage();
     // Later messages do not wait for the clearing.
     void (async () => {
@@ -827,6 +892,18 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
         return;
       case "offscreen.policy":
         allow(message.allowedIntelligenceUrls);
+        return;
+      case "offscreen.voice":
+        if (!target?.session.voice) return;
+        // Kept in the session too, so a document reopened on it would start the same way.
+        target.session = {
+          ...target.session,
+          voice: { ...target.session.voice, muted: message.muted },
+        };
+        target.voice?.mute(message.muted);
+        return;
+      case "offscreen.digests":
+        digests = new Set(message.digests);
         return;
     }
   }

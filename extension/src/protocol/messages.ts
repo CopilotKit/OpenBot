@@ -24,7 +24,26 @@ export type CaptureStatus = {
   events?: { sent: number; pending: number; rejected: number; dropped: number };
   network: "off" | "waiting" | "debugger" | "page" | "stopped";
   networkReason?: string;
+  /** The person's narration, transcribed in this browser; absent when the recording has no voice. Replaced whole on
+   * every update, so a reason or the words heard never outlive the state they belong to. */
+  voice?: VoiceCapture;
 };
+/** What the Voice row shows. `heard` is the last words recognised (interim words too), masked as the transcript events
+ * are; it lives in the popup's state only. `problem` says what went wrong when `state` is failed, so the row can offer
+ * the fix (the microphone page for `microphone`). */
+export type VoiceCapture = {
+  state: "starting" | "listening" | "muted" | "failed";
+  reason?: string;
+  heard?: string;
+  problem?: VoiceProblem;
+};
+export type VoiceProblem =
+  | "microphone"
+  | "no-microphone"
+  | "no-recognition"
+  | "service"
+  | "network"
+  | "language";
 export type RecorderState = {
   phase: "idle" | "starting" | "recording" | "stopping";
   recordingId?: string;
@@ -117,6 +136,8 @@ export type StreamSession = {
   startedAt: number;
   allowedIntelligenceUrls: string[] | null;
   version: string;
+  /** The narration's language (BCP 47) and whether the person muted it. Absent: this recording has no voice. */
+  voice?: { language: string; muted: boolean };
   /** e2e variant only: the service worker copies storage.local.RECORDER_E2E_HOLD_RETRY_MS here (an offscreen document can use
    * no extension API but runtime, so it cannot read storage itself); the offscreen document reads it only inside its e2e branch. */
   e2eHoldRetryMs?: number;
@@ -147,7 +168,9 @@ export type BackgroundToOffscreen =
   | { type: "offscreen.discard"; recordingIds: string[] } // the person's own "Discard kept events" or Disconnect, or a Record that never went live: clear their outbox
   | { type: "offscreen.token"; recordingId: string; token: string } // the live recording's person connected this browser again: its passes use the new token
   | { type: "offscreen.halt"; token: string } // that connection is gone (signed out, or moved away by policy): every stream sending with its token stops at once, its events kept
-  | { type: "offscreen.policy"; allowedIntelligenceUrls: string[] | null }; // the managed policy changed: streams to a gateway it no longer allows are parked
+  | { type: "offscreen.policy"; allowedIntelligenceUrls: string[] | null } // the managed policy changed: streams to a gateway it no longer allows are parked
+  | { type: "offscreen.voice"; muted: boolean } // the person muted or unmuted the live recording's voice
+  | { type: "offscreen.digests"; digests: string[] }; // every sensitive-value digest of the live recording, so a spoken secret is masked too
 /** The one offscreen message the service worker parses: it signs a connection out, so it names the bearer the failing
  * pass used, and only that connection is signed out (a pass taken with an older token after the person connected again
  * signs out nothing). */
@@ -210,8 +233,12 @@ export type PageToBackground =
       botId: string;
       title: string;
       tabId: number;
+      /** The narration's language: the page's own, else the browser's (the service worker's browser language when
+       * absent or unusable). */
+      language?: string;
     }
   | { type: "page.stop" }
+  | { type: "page.voice"; muted: boolean }
   | { type: "page.restart" }
   | { type: "page.notice"; choice: "stop" | "restart" | "continue" }
   | { type: "page.notice.dismiss" }

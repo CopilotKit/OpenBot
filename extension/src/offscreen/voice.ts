@@ -1,0 +1,512 @@
+// The person's narration, transcribed in this browser with the Web Speech API while they record. It runs in the offscreen
+// document, which lasts the whole recording (the popup closes when it loses focus). Chrome lets an offscreen document use
+// speech recognition and the microphone once the extension's own origin holds a lasting microphone grant, which the
+// microphone page asks for on a visible tab; without one, both fail at once as not allowed, since an offscreen document
+// cannot show a prompt. The microphone is opened with getUserMedia and its track handed to the recognizer, so a missing
+// grant or a missing device is told apart from a speech-service failure. It is the browser's own speech recognition with
+// its defaults: no model is downloaded, bundled or forced on the device. Only the words leave: each final phrase becomes one
+// masked `transcript` event in the recording, and no audio is kept. Interim words only update the popup.
+//
+// Nothing here may use a chrome.* API: an offscreen document has only runtime messaging.
+import type { CapturedEvent } from "@openbot/shared/recorder-masking";
+import type { VoiceCapture, VoiceProblem } from "../protocol/messages";
+
+type Timers = {
+  set(fn: () => void, ms: number): unknown;
+  clear(handle: unknown): void;
+};
+
+type RecognitionResult = {
+  readonly isFinal: boolean;
+  readonly length: number;
+  readonly [index: number]: { readonly transcript: string } | undefined;
+};
+type RecognitionResultEvent = {
+  readonly resultIndex: number;
+  readonly results: {
+    readonly length: number;
+    readonly [index: number]: RecognitionResult | undefined;
+  };
+};
+
+/** The parts of the Web Speech API's SpeechRecognition the Recorder uses. */
+export type RecognitionLike = {
+  lang: string;
+  continuous: boolean;
+  interimResults: boolean;
+  maxAlternatives: number;
+  onstart: (() => void) | null;
+  onresult: ((event: RecognitionResultEvent) => void) | null;
+  onerror: ((event: { error: string; message?: string }) => void) | null;
+  onend: (() => void) | null;
+  /** Chrome takes the microphone track to listen to; a browser without that form ignores it and opens the default
+   * microphone itself. */
+  start(track?: MediaStreamTrack): void;
+  stop(): void;
+  abort(): void;
+};
+export type RecognitionConstructor = new () => RecognitionLike;
+
+export type VoiceDeps = {
+  /** SpeechRecognition (or webkitSpeechRecognition); null when the browser has none. */
+  Recognition: RecognitionConstructor | null;
+  getUserMedia(constraints: MediaStreamConstraints): Promise<MediaStream>;
+  now(): number;
+  timers: Timers;
+};
+
+export type VoiceOptions = {
+  /** BCP 47, the page's language or the browser's. */
+  language: string;
+  muted: boolean;
+  /** One `transcript` event per final phrase, already masked. */
+  emit(event: CapturedEvent): void;
+  status(voice: VoiceCapture): void;
+  /** The Recorder's text masking for a transcript, with the recording's sensitive-value digests. */
+  mask(text: string): string;
+};
+
+export type Voice = {
+  /** Muting ends the recognition after the phrase in progress and lets go of the microphone; unmuting (also the way to
+   * try again after a failure) opens it again. */
+  mute(muted: boolean): void;
+  /** The recording ends: the phrase in progress is emitted, then the microphone is let go. Nothing is emitted after
+   * it resolves. */
+  stop(): Promise<void>;
+};
+
+/** How long Stop waits for the speech service to hand over the phrase in progress. */
+export const FLUSH_MS = 1_500;
+/** Interim words reach the popup at most this often. */
+const INTERIM_MS = 400;
+/** A recognition that ends sooner than this after it started is restarted with a growing delay, never in a tight loop. */
+const QUICK_END_MS = 2_000;
+const RESTART_FIRST_MS = 500;
+const RESTART_MAX_MS = 30_000;
+const NETWORK_FIRST_MS = 2_000;
+const NETWORK_MAX_MS = 60_000;
+/** The popup shows the end of what was heard, not all of it. */
+const HEARD_MAX = 160;
+
+const GOES_ON = "Recording goes on without your voice.";
+
+function languageName(language: string): string {
+  try {
+    return (
+      new Intl.DisplayNames(["en"], { type: "language" }).of(language) ??
+      language
+    );
+  } catch {
+    return language;
+  }
+}
+
+/** The plain sentence the popup shows for each failure. */
+export function voiceSentence(problem: VoiceProblem, language: string): string {
+  switch (problem) {
+    case "microphone":
+      return `Chrome has not let the Recorder use the microphone. ${GOES_ON}`;
+    case "no-microphone":
+      return `No microphone was found, or another app is using it. ${GOES_ON}`;
+    case "no-recognition":
+      return `This browser cannot turn speech into text. ${GOES_ON}`;
+    case "service":
+      return `Chrome's speech recognition is turned off or not available here. ${GOES_ON}`;
+    case "network":
+      return "Chrome's speech service cannot be reached. Recording goes on, and voice tries again in a moment.";
+    case "language":
+      return `Chrome cannot turn ${languageName(language)} speech into text. ${GOES_ON}`;
+  }
+}
+
+/** Why getUserMedia refused, as the Voice row says it. */
+function microphoneProblem(error: unknown): VoiceProblem {
+  const name = error instanceof Error ? error.name : "";
+  return name === "NotAllowedError" || name === "SecurityError"
+    ? "microphone"
+    : "no-microphone";
+}
+
+/** The last words heard, shortened from the front at a word boundary. */
+function tail(text: string): string {
+  if (text.length <= HEARD_MAX) return text;
+  const cut = text.slice(-HEARD_MAX);
+  const space = cut.indexOf(" ");
+  return `…${space > 0 ? cut.slice(space + 1) : cut}`;
+}
+
+/** One microphone opening: its stream and the recognitions that listen to it, restarted as Chrome ends them. */
+type Listening = {
+  stream: MediaStream;
+  track: MediaStreamTrack;
+  recognition: RecognitionLike | null;
+  startedAt: number;
+  /** Result indexes of the current recognition already emitted, when each was first heard, and when the last one
+   * ended: Chrome can show a phrase's index while the one before is still being spoken, so a phrase starts no earlier
+   * than the end of the one before it. */
+  emitted: Set<number>;
+  firstHeard: Map<number, number>;
+  lastFinalAt: number;
+  ended: (() => void) | null;
+};
+
+export function startVoice(options: VoiceOptions, deps: VoiceDeps): Voice {
+  const { language, emit, mask } = options;
+  let muted = options.muted;
+  let closed = false;
+  /** The current opening of the microphone; replaced or cleared when it ends, so a late callback of an old one is ignored. */
+  let current: Listening | null = null;
+  /** Bumped by every begin, mute and stop: an opening still under way checks it is still wanted. */
+  let generation = 0;
+  let failed = false;
+  let quickEnds = 0;
+  let networkFailures = 0;
+  let restartTimer: unknown = null;
+  let interimTimer: unknown = null;
+  let pendingHeard: string | null = null;
+  let heard: string | undefined;
+  let lastStatus: VoiceCapture | null = null;
+
+  const status = (voice: VoiceCapture) => {
+    if (closed) return;
+    lastStatus = voice;
+    options.status(voice);
+  };
+  const listeningStatus = () =>
+    status({ state: "listening", ...(heard ? { heard } : {}) });
+
+  function clearTimers(): void {
+    if (restartTimer !== null) deps.timers.clear(restartTimer);
+    if (interimTimer !== null) deps.timers.clear(interimTimer);
+    restartTimer = null;
+    interimTimer = null;
+    pendingHeard = null;
+  }
+
+  function release(listening: Listening): void {
+    listening.track.onended = null;
+    for (const track of listening.stream.getTracks()) track.stop();
+    if (current === listening) current = null;
+  }
+
+  /** Lets go of an opening at once: a Stop or mute waiting on its last phrase stops waiting. */
+  function drop(listening: Listening): void {
+    if (listening.ended) {
+      listening.ended();
+      return;
+    }
+    const recognition = listening.recognition;
+    listening.recognition = null;
+    recognition?.abort();
+    release(listening);
+  }
+
+  function fail(problem: VoiceProblem, detail?: unknown): void {
+    if (detail !== undefined)
+      console.error(`Recorder: voice stopped (${problem})`, detail);
+    failed = true;
+    generation += 1;
+    clearTimers();
+    if (current) drop(current);
+    heard = undefined;
+    status({
+      state: "failed",
+      problem,
+      reason: voiceSentence(problem, language),
+    });
+  }
+
+  function showInterim(text: string): void {
+    pendingHeard = text;
+    if (interimTimer !== null) return;
+    interimTimer = deps.timers.set(() => {
+      interimTimer = null;
+      const next = pendingHeard;
+      pendingHeard = null;
+      if (next === null || muted || !current || current.recognition === null)
+        return;
+      heard = next;
+      listeningStatus();
+    }, INTERIM_MS);
+  }
+
+  function results(listening: Listening, event: RecognitionResultEvent): void {
+    const at = deps.now();
+    let interim = "";
+    for (let index = event.resultIndex; index < event.results.length; index++) {
+      const result = event.results[index];
+      if (!result) continue;
+      const text = result[0]?.transcript ?? "";
+      if (!listening.firstHeard.has(index)) listening.firstHeard.set(index, at);
+      if (!result.isFinal) {
+        interim += text;
+        continue;
+      }
+      if (listening.emitted.has(index)) continue;
+      listening.emitted.add(index);
+      const masked = mask(text.trim());
+      if (!masked) continue;
+      const startedAt = Math.max(
+        listening.firstHeard.get(index) ?? at,
+        listening.lastFinalAt,
+      );
+      listening.lastFinalAt = at;
+      emit({
+        type: "CUSTOM",
+        name: "transcript",
+        timestamp: startedAt,
+        value: {
+          text: masked,
+          startedAt: new Date(startedAt).toISOString(),
+          endedAt: new Date(at).toISOString(),
+          language,
+        },
+      });
+      heard = tail(masked);
+      networkFailures = 0;
+      quickEnds = 0;
+    }
+    // While a mute or Stop waits for the last phrase, its words are still sent but the popup already says muted.
+    if (muted) return;
+    const words = mask(interim.trim());
+    if (words) showInterim(tail(words));
+    else if (listening.recognition !== null) {
+      pendingHeard = null;
+      listeningStatus();
+    }
+  }
+
+  function schedule(ms: number, work: () => void): void {
+    if (restartTimer !== null) deps.timers.clear(restartTimer);
+    restartTimer = deps.timers.set(() => {
+      restartTimer = null;
+      work();
+    }, ms);
+  }
+
+  /** Chrome ended a recognition (a long silence, its own time limit, a network error): another listens to the same
+   * microphone while voice is wanted. */
+  function ended(listening: Listening, networkError: boolean): void {
+    const recognition = listening.recognition;
+    listening.recognition = null;
+    const waiter = listening.ended;
+    listening.ended = null;
+    if (waiter) {
+      waiter();
+      return;
+    }
+    if (recognition === null || current !== listening || closed) return;
+    if (muted || failed) {
+      release(listening);
+      return;
+    }
+    if (listening.track.readyState !== "live") {
+      fail("no-microphone");
+      return;
+    }
+    let delay = 0;
+    if (networkError) {
+      networkFailures += 1;
+      delay = Math.min(
+        NETWORK_MAX_MS,
+        NETWORK_FIRST_MS * 2 ** (networkFailures - 1),
+      );
+    } else if (deps.now() - listening.startedAt < QUICK_END_MS) {
+      quickEnds += 1;
+      delay = Math.min(RESTART_MAX_MS, RESTART_FIRST_MS * 2 ** (quickEnds - 1));
+    } else quickEnds = 0;
+    schedule(delay, () => {
+      if (current === listening && !muted && !failed && !closed)
+        listen(listening);
+    });
+  }
+
+  function listen(listening: Listening): void {
+    const Recognition = deps.Recognition;
+    if (!Recognition) {
+      fail("no-recognition");
+      return;
+    }
+    let recognition: RecognitionLike;
+    try {
+      recognition = new Recognition();
+    } catch (error) {
+      fail("no-recognition", error);
+      return;
+    }
+    recognition.lang = language;
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.maxAlternatives = 1;
+    let networkError = false;
+    recognition.onstart = () => {
+      if (listening.recognition !== recognition) return;
+      listeningStatus();
+    };
+    recognition.onresult = (event) => {
+      if (listening.recognition !== recognition && !listening.ended) return;
+      results(listening, event);
+    };
+    recognition.onerror = (event) => {
+      if (listening.recognition !== recognition || listening.ended) return;
+      switch (event.error) {
+        case "no-speech":
+        case "aborted":
+          return; // the end that follows restarts it
+        case "network":
+          networkError = true;
+          status({
+            state: "failed",
+            problem: "network",
+            reason: voiceSentence("network", language),
+          });
+          return;
+        case "language-not-supported":
+        case "service-not-allowed":
+          fail(
+            event.error === "language-not-supported" ? "language" : "service",
+            event.error,
+          );
+          return;
+        case "not-allowed":
+          fail("microphone", event.error);
+          return;
+        case "audio-capture":
+          fail("no-microphone", event.error);
+          return;
+        default:
+          fail("service", `${event.error} ${event.message ?? ""}`.trim());
+      }
+    };
+    recognition.onend = () => {
+      if (listening.recognition !== recognition) return;
+      ended(listening, networkError);
+    };
+    listening.recognition = recognition;
+    listening.startedAt = deps.now();
+    listening.emitted = new Set();
+    listening.firstHeard = new Map();
+    listening.lastFinalAt = 0;
+    try {
+      recognition.start(listening.track);
+    } catch (error) {
+      listening.recognition = null;
+      fail("service", error);
+    }
+  }
+
+  async function begin(): Promise<void> {
+    const opening = ++generation;
+    failed = false;
+    clearTimers();
+    if (current) drop(current);
+    status({ state: "starting" });
+    if (!deps.Recognition) {
+      fail("no-recognition");
+      return;
+    }
+    let stream: MediaStream;
+    try {
+      stream = await deps.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
+    } catch (error) {
+      if (opening === generation && !closed)
+        fail(microphoneProblem(error), error);
+      return;
+    }
+    const stillWanted = () => opening === generation && !closed && !muted;
+    if (!stillWanted()) {
+      for (const track of stream.getTracks()) track.stop();
+      return;
+    }
+    const [track] = stream.getAudioTracks();
+    if (!track) {
+      for (const each of stream.getTracks()) each.stop();
+      fail("no-microphone");
+      return;
+    }
+    const listening: Listening = {
+      stream,
+      track,
+      recognition: null,
+      startedAt: deps.now(),
+      emitted: new Set(),
+      firstHeard: new Map(),
+      lastFinalAt: 0,
+      ended: null,
+    };
+    current = listening;
+    // The microphone went away (unplugged, or taken by the system): voice cannot go on until the person tries again.
+    track.onended = () => {
+      if (current === listening) fail("no-microphone");
+    };
+    listen(listening);
+  }
+
+  /** Ends the current opening after the phrase in progress, waiting at most FLUSH_MS for it. */
+  function finish(): Promise<void> {
+    generation += 1;
+    clearTimers();
+    const listening = current;
+    if (!listening) return Promise.resolve();
+    const recognition = listening.recognition;
+    if (!recognition) {
+      release(listening);
+      return Promise.resolve();
+    }
+    return new Promise<void>((resolve) => {
+      let timer: unknown = null;
+      const done = () => {
+        if (timer !== null) deps.timers.clear(timer);
+        if (listening.ended === done) listening.ended = null;
+        if (listening.recognition === recognition) {
+          listening.recognition = null;
+          recognition.abort();
+        }
+        release(listening);
+        resolve();
+      };
+      timer = deps.timers.set(done, FLUSH_MS);
+      listening.ended = done;
+      try {
+        recognition.stop();
+      } catch {
+        done();
+      }
+    });
+  }
+
+  if (muted) status({ state: "muted" });
+  else void begin().catch((error) => fail("service", error));
+
+  return {
+    mute(next) {
+      if (closed) return;
+      if (next) {
+        muted = true;
+        failed = false;
+        heard = undefined;
+        void finish();
+        status({ state: "muted" });
+        return;
+      }
+      const wasMuted = muted;
+      muted = false;
+      // Already listening (or opening): unmuting changes nothing. After a mute or a failure (a speech service out of
+      // reach included, which would otherwise wait for its own retry) it opens the microphone again now.
+      if (!wasMuted && lastStatus?.state !== "failed") return;
+      void begin().catch((error) => fail("service", error));
+    },
+    async stop() {
+      if (closed) return;
+      muted = true;
+      await finish();
+      closed = true;
+    },
+  };
+}

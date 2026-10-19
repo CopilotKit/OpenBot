@@ -450,6 +450,7 @@ async function startRecording(input: {
   botId: string;
   title: string;
   tabId: number;
+  language?: string;
 }): Promise<string> {
   if (!fake.tabs.has(input.tabId))
     fake.tabs.set(input.tabId, {
@@ -571,6 +572,7 @@ test("Record opens the document and starts a new trajectory for the picked Bot, 
     botId: "bot-1",
     title: "Update deal",
     tabId: 7,
+    language: "de-DE",
   });
   expect(id).toMatch(UUID);
   expect(openbot.calls).toEqual([]);
@@ -592,12 +594,15 @@ test("Record opens the document and starts a new trajectory for the picked Bot, 
     startedAt: now,
     allowedIntelligenceUrls: null,
     version: "0.3.0",
+    // Every recording narrates, in the page's language.
+    voice: { language: "de-DE", muted: false },
   });
   expect(start.session.trajectoryId).not.toBe(id);
   expect(fake.offscreen.created[0]).toMatchObject({
     url: "offscreen.html",
-    reasons: ["LOCAL_STORAGE"],
+    reasons: ["LOCAL_STORAGE", "USER_MEDIA"],
   });
+  expect((await state()).capture.voice).toEqual({ state: "starting" });
   expect(fake.scripting.registered).toEqual([]); // nothing registered for every site (Decision 4)
   const injected = fake.scripting.executed.filter(
     (i) => (i.target as { tabId: number }).tabId === 7,
@@ -2501,6 +2506,77 @@ test("sensitive digests live in storage.session only, reach the page masking, an
   expect([...(network.deps?.digests() ?? [])]).toEqual([digest]);
   await page({ type: "page.stop" });
   expect(fake.storage.session.get("digests")).toBeUndefined();
+});
+
+test("a Record without a usable language narrates in the browser's, else English", async () => {
+  await startRecording({
+    botId: "bot-1",
+    title: "T",
+    tabId: 7,
+    language: "x-klingon",
+  });
+  const start = sentToDocument("offscreen.start")[0];
+  if (start?.type !== "offscreen.start") throw new Error("No start");
+  expect(start.session.voice).toEqual({
+    language:
+      typeof navigator !== "undefined" && navigator.language
+        ? Intl.getCanonicalLocales(navigator.language)[0]
+        : "en-US",
+    muted: false,
+  });
+});
+
+test("muting the voice tells the document, keeps the mute in the stored session, and says so in the popup at once", async () => {
+  await record();
+  expect(await page({ type: "page.voice", muted: true })).toEqual({ ok: true });
+  expect(sentToDocument("offscreen.voice")).toEqual([
+    { type: "offscreen.voice", muted: true },
+  ]);
+  expect(
+    (fake.storage.session.get("stream") as StreamSession | undefined)?.voice,
+  ).toMatchObject({ muted: true });
+  expect((await state()).capture.voice).toEqual({ state: "muted" });
+  expect(await page({ type: "page.voice", muted: false })).toEqual({
+    ok: true,
+  });
+  expect(sentToDocument("offscreen.voice").at(-1)).toEqual({
+    type: "offscreen.voice",
+    muted: false,
+  });
+  expect((await state()).capture.voice).toEqual({ state: "starting" });
+  await page({ type: "page.stop" });
+  expect(await page({ type: "page.voice", muted: true })).toEqual({
+    ok: false,
+    error: "Nothing is being recorded.",
+  });
+  expect((await state()).capture.voice).toBeUndefined();
+});
+
+test("the document gets every sensitive-value digest, again when its port comes back, so spoken secrets are masked", async () => {
+  const first = "a".repeat(64);
+  const second = "b".repeat(64);
+  await record();
+  const port = contentPort(7);
+  port.postMessage({ type: "content.sensitive", digest: first });
+  port.postMessage({ type: "content.sensitive", digest: second });
+  await until(
+    () => sentToDocument("offscreen.digests").length === 2,
+    "the digests reach the document",
+  );
+  expect(sentToDocument("offscreen.digests").at(-1)).toEqual({
+    type: "offscreen.digests",
+    digests: [first, second],
+  });
+  const back = reconnectDocument();
+  back.postMessage({ type: "offscreen.ready" });
+  await until(
+    () => sentToDocument("offscreen.digests", back).length === 1,
+    "the digests again on the new port",
+  );
+  expect(sentToDocument("offscreen.digests", back)[0]).toEqual({
+    type: "offscreen.digests",
+    digests: [first, second],
+  });
 });
 
 test("events from a tab that is not being recorded are ignored", async () => {

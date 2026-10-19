@@ -36,6 +36,7 @@ import {
   type RecorderPolicy,
   readPolicy,
 } from "../shared/policy";
+import { narrationLanguage } from "../shared/speech-language";
 import {
   type ConnectionRecord,
   type DrainRecord,
@@ -148,6 +149,7 @@ const SENTENCES = {
   noAccess: "Allow the Recorder to read websites first.",
   busy: "A recording is already running.",
   notRecording: "Nothing is being recorded.",
+  noVoice: "This recording has no voice.",
   tabClosed:
     "That tab is closed. Open the Recorder on the tab you want to record.",
   startFailed: "The recording could not start. Try again.",
@@ -797,6 +799,8 @@ export function installRecording(
     switch (message.type) {
       case "offscreen.ready":
         flushEvents();
+        if (state.phase === "recording" && digests.size > 0)
+          postOffscreen({ type: "offscreen.digests", digests: [...digests] });
         return;
       case "offscreen.status":
         if (
@@ -1028,6 +1032,11 @@ export function installRecording(
         startedAt,
         allowedIntelligenceUrls: policy.allowedIntelligenceUrls,
         version: chrome.runtime.getManifest().version,
+        // Every recording narrates: the person mutes it in the popup if they want to.
+        voice: {
+          language: narrationLanguage(message.language, navigator.language),
+          muted: false,
+        },
       };
       if (import.meta.env.RECORDER_VARIANT === "e2e") {
         const items = await chrome.storage.local.get(
@@ -1068,7 +1077,11 @@ export function installRecording(
         tabId,
         topUrl: url ?? "",
         startedAt,
-        capture: { intelligence: "connecting", network: "off" },
+        capture: {
+          intelligence: "connecting",
+          network: "off",
+          voice: { state: "starting" },
+        },
       });
       injected = true;
       // A page the Recorder may not read refuses the script; its first commit to a website injects it.
@@ -1551,6 +1564,27 @@ export function installRecording(
     });
   }
 
+  // ---- Voice ---------------------------------------------------------------------------------
+
+  /** The person mutes or unmutes the live recording's narration: the document stops or starts listening, and the stored
+   * session says so, so a document reopened on it starts the same way. */
+  async function setVoice(muted: boolean): Promise<PageResponse> {
+    if (state.phase !== "recording" || !live)
+      return { ok: false, error: SENTENCES.notRecording };
+    const stream = await readSession("stream");
+    if (!stream?.voice) return { ok: false, error: SENTENCES.noVoice };
+    await writeSession("stream", {
+      ...stream,
+      voice: { ...stream.voice, muted },
+    });
+    dispatch({
+      type: "capture",
+      capture: { voice: { state: muted ? "muted" : "starting" } },
+    });
+    await sendToDocument({ type: "offscreen.voice", muted });
+    return { ok: true };
+  }
+
   // ---- The 50-action notice ------------------------------------------------------------------
 
   async function noticeChoice(
@@ -1958,6 +1992,8 @@ export function installRecording(
         void writeSession("digests", [...digests]).catch(
           report("keeping a sensitive-value digest"),
         );
+        // The document masks the person's narration with them too; a document whose port is down gets them on ready.
+        postOffscreen({ type: "offscreen.digests", digests: [...digests] });
         return;
       case "content.notice":
         void noticeChoice(message.choice).catch(report("the notice choice"));
@@ -2055,6 +2091,8 @@ export function installRecording(
           return { ok: true };
         case "page.kept.discard":
           return discardKept();
+        case "page.voice":
+          return setVoice(message.muted);
         default:
           return { ok: false, error: "Unknown request." };
       }

@@ -20,10 +20,11 @@ export function ensureOffscreenDocument(): Promise<void> {
       url: OFFSCREEN_PATH,
       // Chrome names no offscreen reason for a socket or an IndexedDB outbox, and only AUDIO_PLAYBACK limits a document's
       // lifetime (https://developer.chrome.com/docs/extensions/reference/api/offscreen#type-Reason). LOCAL_STORAGE,
-      // durable storage in the document, is the nearest reason to what it does.
-      reasons: ["LOCAL_STORAGE"],
+      // durable storage in the document, is the nearest reason to what it does; USER_MEDIA is the microphone it
+      // transcribes the person's narration from.
+      reasons: ["LOCAL_STORAGE", "USER_MEDIA"],
       justification:
-        "Keeps the recording in this browser and sends it to Intelligence.",
+        "Keeps the recording in this browser, turns the person's narration into text, and sends it to Intelligence.",
     });
   })().finally(() => {
     creating = null;

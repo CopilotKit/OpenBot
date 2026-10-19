@@ -24,6 +24,7 @@ import {
 import type { DrainRecord } from "../src/shared/storage";
 import { type ChromeFake, installChromeFake } from "./support/chrome-fake";
 import { type FakeGateway, startFakeGateway } from "./support/fake-gateway";
+import { fakeMicrophone, fakeSpeech } from "./support/fake-speech";
 
 const MINUTE = 60_000;
 const PARKED = PASS_HINTS.INTELLIGENCE_RUNTIME_REQUIRED;
@@ -1551,5 +1552,220 @@ describe("offscreen controller", () => {
     // A rollover, a Start over and a stop: OpenBot heard nothing but the capture passes.
     expect(h.openbot.recorderRequests).toEqual([]);
     expect(h.openbot.passes.length).toBeGreaterThan(3);
+  });
+});
+
+describe("voice", () => {
+  /** A document whose voice listens through a fake speech recognition and microphone. */
+  async function withVoice() {
+    const h = await setup();
+    const speech = fakeSpeech();
+    const microphone = fakeMicrophone();
+    await h.open(h.clock, {
+      voice: {
+        Recognition: speech.Recognition,
+        getUserMedia: microphone.getUserMedia,
+      },
+    });
+    const recognition = async (count = 1) => {
+      await until(
+        () => speech.instances.length >= count,
+        "the speech recognition",
+      );
+      const found = speech.instances[count - 1];
+      if (!found) throw new Error("no recognition");
+      return found;
+    };
+    return { h, speech, microphone, recognition };
+  }
+  /** The voice states the service worker was told, each change once (the words heard update a state in place). */
+  const voiceStates = (h: Harness) =>
+    h
+      .received("offscreen.status")
+      .flatMap((status) =>
+        status.capture.voice ? [status.capture.voice.state] : [],
+      )
+      .filter((state, index, all) => state !== all[index - 1]);
+  const heardWords = (h: Harness) =>
+    h
+      .received("offscreen.status")
+      .flatMap((status) => status.capture.voice?.heard ?? []);
+  const spoken = (h: Harness, trajectoryId: string) =>
+    h
+      .values(trajectoryId)
+      .filter((_, index) => h.names(trajectoryId)[index] === "transcript");
+
+  test("each final phrase is a masked transcript event in the recording's stream, in order with its other events, and Stop sends the phrase in progress before the outcome", async () => {
+    const { h, microphone, recognition } = await withVoice();
+    const session = h.session({ voice: { language: "en-GB", muted: false } });
+    const t = session.trajectoryId;
+    h.post({ type: "offscreen.start", session });
+    const listening = await recognition();
+    expect(listening.lang).toBe("en-GB");
+    expect(listening.track as unknown).toBe(microphone.tracks[0]);
+    listening.begin();
+    await streaming(h, t);
+    h.post({ type: "offscreen.event", event: click(1) });
+    await until(() => h.names(t).includes("click"), "the first click");
+    listening.say([["my card number is 4242 4242 4242 4242", true]]);
+    h.post({ type: "offscreen.event", event: click(2) });
+    await until(
+      () => h.names(t).filter((name) => name === "click").length === 2,
+      "the second click",
+    );
+    listening.say(
+      [
+        ["my card number is 4242 4242 4242 4242", true],
+        [" now I press send", false],
+      ],
+      1,
+    );
+    h.post({ type: "offscreen.stop", outcome: "succeeded" });
+    await until(() => listening.stops === 1, "the recognition asked to stop");
+    listening.say(
+      [
+        ["my card number is 4242 4242 4242 4242", true],
+        [" now I press send", true],
+      ],
+      1,
+    );
+    listening.end();
+    await until(() => finishedTrajectory(h, t), "the trajectory finished");
+    expect(
+      h
+        .names(t)
+        .filter((name) => ["click", "transcript", "outcome"].includes(name))
+        .slice(1),
+    ).toEqual(["click", "transcript", "click", "transcript", "outcome"]);
+    expect(spoken(h, t)).toEqual([
+      expect.objectContaining({
+        text: "my card number is [redacted]",
+        language: "en-GB",
+      }),
+      expect.objectContaining({ text: "now I press send" }),
+    ]);
+    expect(JSON.stringify(h.gateway.events(t))).not.toContain("4242");
+    expect(microphone.tracks[0]?.readyState).toBe("ended");
+    expect(voiceStates(h)).toEqual(["starting", "listening"]);
+    expect(heardWords(h)).toEqual(["my card number is [redacted]"]);
+  });
+
+  test("a stop that is not the person's (Disconnect, a sign-out, the policy) ends the voice too and lets go of the microphone", async () => {
+    for (const reason of ["disconnected", "signed-out"] as const) {
+      const { h, microphone, recognition } = await withVoice();
+      const session = h.session({
+        recordingId: `rec-${reason}`,
+        voice: { language: "en-US", muted: false },
+      });
+      h.post({ type: "offscreen.start", session });
+      const listening = await recognition();
+      listening.begin();
+      h.post({ type: "offscreen.stop", outcome: "failed", reason });
+      await until(() => listening.stops === 1, "the recognition asked to stop");
+      listening.end();
+      await until(
+        () => microphone.tracks[0]?.readyState === "ended",
+        "the microphone let go",
+      );
+      await until(
+        () => h.received("offscreen.stopped").length === 1,
+        "offscreen.stopped",
+      );
+    }
+  });
+
+  test("a stop the speech service never answers still ends the recording after the flush wait", async () => {
+    const { h, microphone, recognition } = await withVoice();
+    const session = h.session({ voice: { language: "en-US", muted: false } });
+    h.post({ type: "offscreen.start", session });
+    const listening = await recognition();
+    listening.begin();
+    h.post({ type: "offscreen.stop", outcome: "succeeded" });
+    await until(() => listening.stops === 1, "the recognition asked to stop");
+    expect(h.received("offscreen.stopped")).toHaveLength(0);
+    await h.clock.advance(1_500);
+    await until(
+      () => h.received("offscreen.stopped").length === 1,
+      "offscreen.stopped",
+    );
+    expect(listening.aborts).toBe(1);
+    expect(microphone.tracks[0]?.readyState).toBe("ended");
+  });
+
+  test("offscreen.voice mutes and unmutes the live recording's voice, and its states reach the service worker", async () => {
+    const { h, microphone, recognition } = await withVoice();
+    const session = h.session({ voice: { language: "en-US", muted: false } });
+    h.post({ type: "offscreen.start", session });
+    const first = await recognition();
+    first.begin();
+    h.post({ type: "offscreen.voice", muted: true });
+    await until(() => first.stops === 1, "the recognition asked to stop");
+    first.end();
+    await until(
+      () => microphone.tracks[0]?.readyState === "ended",
+      "the microphone let go",
+    );
+    h.post({ type: "offscreen.voice", muted: false });
+    const second = await recognition(2);
+    second.begin();
+    await until(() => voiceStates(h).at(-1) === "listening", "listening again");
+    expect(voiceStates(h)).toEqual([
+      "starting",
+      "listening",
+      "muted",
+      "starting",
+      "listening",
+    ]);
+    expect(microphone.constraints).toHaveLength(2);
+  });
+
+  test("a recording that starts muted opens no microphone, and a session without voice has none", async () => {
+    const { h, microphone, speech } = await withVoice();
+    h.post({
+      type: "offscreen.start",
+      session: h.session({ voice: { language: "en-US", muted: true } }),
+    });
+    await until(() => voiceStates(h).includes("muted"), "muted");
+    h.post({
+      type: "offscreen.start",
+      session: h.session({ recordingId: "rec-2" }),
+    });
+    await sleep(30);
+    expect(microphone.constraints).toHaveLength(0);
+    expect(speech.instances).toHaveLength(0);
+  });
+
+  test("a value typed into a sensitive field is masked when it is spoken", async () => {
+    const { h, recognition } = await withVoice();
+    const session = h.session({ voice: { language: "en-US", muted: false } });
+    const t = session.trajectoryId;
+    h.post({ type: "offscreen.start", session });
+    h.post({
+      type: "offscreen.digests",
+      digests: [new Bun.CryptoHasher("sha256").update("hunter2").digest("hex")],
+    });
+    const listening = await recognition();
+    listening.begin();
+    await streaming(h, t);
+    listening.say([["my password is hunter2", true]]);
+    await until(() => spoken(h, t).length === 1, "the transcript");
+    expect(spoken(h, t)[0]).toMatchObject({
+      text: "my password is [redacted]",
+    });
+  });
+
+  test("a Record that never went live and is discarded lets go of the microphone", async () => {
+    const { h, microphone, recognition } = await withVoice();
+    const session = h.session({ voice: { language: "en-US", muted: false } });
+    h.post({ type: "offscreen.start", session });
+    const listening = await recognition();
+    listening.begin();
+    h.post({ type: "offscreen.discard", recordingIds: [session.recordingId] });
+    await until(() => listening.stops === 1, "the recognition asked to stop");
+    listening.end();
+    await until(
+      () => microphone.tracks[0]?.readyState === "ended",
+      "the microphone let go",
+    );
   });
 });
