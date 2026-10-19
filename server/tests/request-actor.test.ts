@@ -180,6 +180,8 @@ describe("createRequestActor", () => {
           "/api/copilotkit/agent/bot/run",
           "/api/copilotkit/trajectory/t-1/connect/extra",
           "/api/copilotkit/trajectory/connect",
+          // The id the runtime would decode: one that does not decode is no trajectory.
+          "/api/copilotkit/trajectory/%E0%A4%A/connect",
         ]) {
           await expect(resolveRequestActor(passRequest(path))).rejects.toThrow(
             "A CopilotKit run requires a signed-in user.",

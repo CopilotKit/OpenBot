@@ -58,7 +58,7 @@ export type RecorderRefusalSink = (refusal: {
 export const RECORDER_BEARER = /^Bearer (obr_[A-Za-z0-9_-]{43})$/;
 
 /** Anything that starts like a recorder token is taken as one, and only as one; anything else is not this guard's. */
-const RECORDER_BEARER_PREFIX = `Bearer ${RECORDER_TOKEN_PREFIX}`;
+export const RECORDER_BEARER_PREFIX = `Bearer ${RECORDER_TOKEN_PREFIX}`;
 /** How long the organization's verdict on one connection is trusted on this replica. */
 const ORGANIZATION_VERDICT_TTL_MS = 60_000;
 

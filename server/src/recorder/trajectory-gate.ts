@@ -275,8 +275,9 @@ export function createTrajectoryLearningSelector(deps: {
 }
 
 /**
- * Defense in depth for identifyUser: the same unanchored shape the runtime's router matches
- * (`core/fetch-router.ts` `matchRoute`): the last three non-empty segments are `trajectory/<id>/connect`.
+ * Defense in depth for identifyUser (`request-actor.ts` answers a Recorder bearer only where this is true): the same
+ * unanchored shape the runtime's router matches (`core/fetch-router.ts` `matchRoute`): the last three non-empty
+ * segments are `trajectory/<id>/connect`, and the id decodes to something.
  */
 export function isTrajectoryConnectPath(
   pathname: string,

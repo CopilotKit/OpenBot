@@ -1,7 +1,11 @@
 import { DEV_ACTOR } from "./auth/dev-actor";
 import type { OpenBotRole } from "./auth/roles";
 import type { IdentifyActor, IdentifyUser } from "./copilot";
-import type { RecorderResolver } from "./recorder/guard";
+import {
+  RECORDER_BEARER_PREFIX,
+  type RecorderResolver,
+} from "./recorder/guard";
+import { isTrajectoryConnectPath } from "./recorder/trajectory-gate";
 
 type RequestActor = { id: string; name: string; role: OpenBotRole };
 
@@ -32,22 +36,6 @@ export function actorName(user: {
 }): string {
   return user.name?.trim() || user.email || user.id;
 }
-
-/**
- * The runtime's capture-pass route, matched the way its router does: the last three path segments
- * are `trajectory`, the id and `connect`, wherever the runtime is mounted.
- */
-function isTrajectoryConnectPath(pathname: string): boolean {
-  const segments = pathname.split("/").filter(Boolean);
-  const length = segments.length;
-  return (
-    length >= 3 &&
-    segments[length - 3] === "trajectory" &&
-    segments[length - 1] === "connect"
-  );
-}
-
-const RECORDER_BEARER_PREFIX = "Bearer obr_";
 
 /**
  * Who is asking, for a CopilotKit request.
