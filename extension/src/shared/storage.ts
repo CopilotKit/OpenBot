@@ -22,11 +22,10 @@ export type KeptEvents = {
   waitingForReconnect?: boolean;
 };
 /** A recording whose events may still need sending to Intelligence. A recording exists only in this browser and in
- * Intelligence: `recordingId` is the Recorder's own id for it, and `trajectoryIds` its trajectories in Intelligence. */
+ * Intelligence: `recordingId` is the Recorder's own id for it, and `trajectoryIds` its trajectories in Intelligence,
+ * each in its person's own Learning space. */
 export type DrainRecord = {
   recordingId: string;
-  /** The Bot the person picked: every capture pass names it, so the trajectories join its Learning space. */
-  botId: string;
   title: string;
   /** The OpenBot that hands out its capture passes. */
   openbotUrl: string;
@@ -54,7 +53,6 @@ type LocalState = {
   /** Random per installed copy (each browser and profile has its own), written on install or first use (Decision 18). */
   installSecret?: string;
   connection?: ConnectionRecord;
-  lastBotId?: string;
   activeRecording?: DrainRecord; // the recording in progress; moved into `drains` at Stop, Start over and on recovery
   drains?: DrainRecord[]; // stopped recordings still sending; removed on offscreen.done
   notice?: RecorderNotice;
@@ -102,7 +100,6 @@ export function isDrainRecord(value: unknown): value is DrainRecord {
   const drain = value as Record<string, unknown>;
   return (
     isString(drain.recordingId) &&
-    isString(drain.botId) &&
     isString(drain.title) &&
     isString(drain.openbotUrl) &&
     isString(drain.userId) &&

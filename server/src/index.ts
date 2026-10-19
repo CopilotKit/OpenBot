@@ -131,6 +131,7 @@ import {
   channelMemberships,
   channels,
   intelligenceChannelMappings,
+  users,
 } from "./db/schema";
 import { createDeliveryRouter, DELIVERY_WORK_KINDS } from "./delivery/router";
 import {
@@ -164,11 +165,17 @@ import {
 } from "./learning/auto-assign";
 import {
   cliLoginPresent,
+  createLearningContainer,
   ensureLearningContainer,
   intelligenceApiOrigin,
   keyIntelligence,
+  type LearningContainerCredentials,
   learningSetupInstructions,
 } from "./learning/ensure-container";
+import {
+  createPersonalLearningSpaces,
+  createPersonSpaceStore,
+} from "./learning/personal-space";
 import { clearLearningRevisionFallback } from "./learning/runtime";
 import { createLearningSettingsStore } from "./learning/settings";
 import { createMemoryDefaults } from "./memory/defaults";
@@ -285,6 +292,26 @@ const learningApiOrigin = (() => {
 const learningCanCreate =
   learningApiOrigin !== undefined &&
   (config.learningSetup !== undefined || cliLoginPresent());
+/** The credential that can create a Learning container, for the `openbot` default and for each person's own space. */
+const learningCredentials = (apiUrl: string): LearningContainerCredentials => ({
+  directory: process.cwd(),
+  apiUrl,
+  nonInteractive: true,
+  key: keyIntelligence(
+    apiUrl,
+    config.runtime.intelligence.apiKey,
+    config.runtime.intelligence.gatewayWsUrl,
+  ),
+  cliLogin: cliLoginPresent(),
+  ...(config.learningSetup
+    ? {
+        serviceToken: {
+          token: config.learningSetup.serviceToken,
+          projectId: config.learningSetup.projectId,
+        },
+      }
+    : {}),
+});
 const learningAutoAssign = createLearningAutoAssign({
   enabled: config.learningAutoAssign,
   store: learningSettingsStore,
@@ -296,28 +323,37 @@ const learningAutoAssign = createLearningAutoAssign({
   ...(learningCanCreate && learningApiOrigin
     ? {
         create: () =>
-          ensureLearningContainer({
-            directory: process.cwd(),
-            apiUrl: learningApiOrigin,
-            nonInteractive: true,
-            key: keyIntelligence(
-              learningApiOrigin,
-              config.runtime.intelligence.apiKey,
-              config.runtime.intelligence.gatewayWsUrl,
-            ),
-            cliLogin: cliLoginPresent(),
-            ...(config.learningSetup
-              ? {
-                  serviceToken: {
-                    token: config.learningSetup.serviceToken,
-                    projectId: config.learningSetup.projectId,
-                  },
-                }
-              : {}),
-          }),
+          ensureLearningContainer(learningCredentials(learningApiOrigin)),
       }
     : {}),
   audit: createAuditStore(database),
+});
+/*
+ * Each person's own Learning space: every recording they make joins it. Made
+ * with the same credential as the default container, on first need: when their browser connects, and again on a
+ * capture pass if it is still missing. With no such credential a missing space cannot be made, and the Recorder says so.
+ */
+const personalLearningSpaces = createPersonalLearningSpaces({
+  readSettings: () => learningSettingsStore.read(),
+  snapshots: learningProbeIntelligence,
+  store: createPersonSpaceStore(database),
+  ...(learningCanCreate && learningApiOrigin
+    ? {
+        create: (container) =>
+          createLearningContainer({
+            ...learningCredentials(learningApiOrigin),
+            container,
+          }),
+      }
+    : {}),
+  nameFor: async (userId) =>
+    (
+      await database
+        .select({ name: users.name })
+        .from(users)
+        .where(eq(users.id, userId))
+        .limit(1)
+    ).map((row) => row.name?.trim() || null)[0] ?? null,
 });
 const learningSettings = withLearningAutoAssign(
   learningSettingsStore,
@@ -1122,19 +1158,16 @@ const recorderExtension = createRecorderExtension({
   organizationAuth,
   roleRepository,
   peopleStore,
-  agentProfileStore,
-  pluginStore,
-  actorFor,
-  learningSettingsStore,
-  snapshots: learningProbeIntelligence,
+  personalSpaces: personalLearningSpaces,
   auditStore: bootAuditStore,
 });
 const demonstrationStore = createDemonstrationStore(database);
 const demonstrationRecorder = createDemonstrationRecorder({
   store: demonstrationStore,
   // Teaching a shared deployment Bot is allowed as well as an owned one; the skill is the owner's.
-  // The Recorder extension holds the one copy of the rule, so a Bot one can teach is a Bot one can record for.
-  ownsBot: recorderExtension.canRecordForBot,
+  ownsBot: async (ownerUserId, botId) =>
+    (await pluginStore.agentOwner(botId)) === ownerUserId ||
+    (await agentProfileStore.get(await actorFor(ownerUserId), botId)) !== null,
   ownsSkill: async (owner, slug) =>
     (await pluginStore.skillOwner(slug)) === owner,
   routines: routineStore,

@@ -1,4 +1,4 @@
-import type { RecorderBot } from "@openbot/shared/recorder-api";
+import type { LearningSpaceState } from "@openbot/shared/recorder-api";
 import { IconAlertTriangle } from "@tabler/icons-react";
 import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -8,7 +8,6 @@ import type {
   PageToBackground,
 } from "../../protocol/messages";
 import { narrationLanguage } from "../../shared/speech-language";
-import { readLocal } from "../../shared/storage";
 import { Page } from "../ui/page";
 import { ask as askBackground } from "../ui/runtime";
 import { desktopSentence } from "./desktop-sentence";
@@ -27,7 +26,6 @@ import {
 type PopupDeps = {
   ask: typeof askBackground;
   activeTabId: () => Promise<number>;
-  lastBotId: () => Promise<string | undefined>;
   pageLanguage: (tabId: number) => Promise<string | null>;
   browserLanguage: () => string;
   microphoneState: () => Promise<PermissionState | null>;
@@ -55,8 +53,9 @@ const openTab = (url: string) => {
 
 /**
  * The toolbar popup. Signed out: how to connect, plus any recordings kept in this browser (with Discard). Connected:
- * the Record form with a Bot choice; while recording, time, actions, the capture rows, Stop and Start over; after Stop,
- * that the recording went to Intelligence and into which Learning space, and what is still sending or kept.
+ * the title and Record (every recording goes into the person's own Learning space); while recording, time, actions,
+ * the capture rows, Stop and Start over; after Stop, that the recording went to Intelligence and into their Learning
+ * space, and what is still sending or kept.
  */
 export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
   const ask = deps?.ask ?? askBackground;
@@ -66,16 +65,11 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
   const [readMicrophone] = useState(
     () => deps?.microphoneState ?? defaultMicrophoneState,
   );
-  // Read once when the popup opens, so the seam is fixed at mount.
-  const [readLastBotId] = useState(
-    () => deps?.lastBotId ?? (() => readLocal("lastBotId")),
-  );
   const [view, setView] = useState<PageStateResponse | null>(null);
-  const [bots, setBots] = useState<RecorderBot[]>([]);
+  const [learning, setLearning] = useState<LearningSpaceState | null>(null);
   const [desktop, setDesktop] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [lastBotId, setLastBotId] = useState<string | null>(null);
   const [microphone, setMicrophone] = useState<PermissionState | null>(null);
 
   const refresh = useCallback(async () => {
@@ -87,9 +81,9 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
     if (!("state" in answer)) return;
     setView(answer);
     if (answer.connection) {
-      const list = await ask<PageResponse>({ type: "page.bots" });
-      if (list.ok && "bots" in list) setBots(list.bots);
-      else if (!list.ok) setError(list.error);
+      const space = await ask<PageResponse>({ type: "page.learning" });
+      if (space.ok && "learning" in space) setLearning(space.learning);
+      else if (!space.ok) setError(space.error);
     } else {
       const probe = await ask<PageResponse>({
         type: "page.desktop.available",
@@ -117,16 +111,6 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
       clearInterval(timer);
     };
   }, [live, ask]);
-
-  useEffect(() => {
-    let mounted = true;
-    readLastBotId().then((id) => {
-      if (mounted && id) setLastBotId(id);
-    });
-    return () => {
-      mounted = false;
-    };
-  }, [readLastBotId]);
 
   // Read when the popup opens: the Record form offers the setup page when the microphone is not allowed.
   useEffect(() => {
@@ -225,7 +209,7 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
 
   // Records at once: website access came with the install, and a recording without the microphone goes on (its Voice
   // row says so and offers the setup page). The popup never opens a tab or asks for a permission here.
-  const record = async (botId: string, title: string) => {
+  const record = async (title: string) => {
     setBusy(true);
     setError(null);
     try {
@@ -236,7 +220,6 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
       );
       const answer = await ask({
         type: "page.record",
-        botId,
         title,
         tabId: tab,
         language,
@@ -262,12 +245,7 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
     >
       <Notices notice={view.notice} kept={state.kept} onDismiss={dismiss} />
       {state.phase === "idle" ? (
-        <AfterStop
-          state={state}
-          connected
-          bots={bots}
-          onDiscard={discardKept}
-        />
+        <AfterStop state={state} connected onDiscard={discardKept} />
       ) : (
         <RecordingView
           state={state}
@@ -285,8 +263,7 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
       )}
       {state.phase === "idle" ? (
         <RecordForm
-          bots={bots}
-          initialBotId={lastBotId}
+          learning={learning}
           busy={busy}
           onRecord={record}
           learningShown={afterStopLearningSentence(state, true)}

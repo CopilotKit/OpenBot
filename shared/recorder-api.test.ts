@@ -3,7 +3,6 @@ import {
   connectCodeRequestSchema,
   exchangeRequestSchema,
   joinedLearningContainer,
-  RECORDER_BOT_HEADER,
   recorderPaths,
   TRAJECTORY_GATE_REFUSALS,
 } from "./recorder-api";
@@ -57,7 +56,7 @@ describe("recorder constants and paths", () => {
       connection: recorderPaths.connection("c"),
       currentConnection: recorderPaths.currentConnection,
       me: recorderPaths.me,
-      bots: recorderPaths.bots,
+      learning: recorderPaths.learning,
       trajectoryConnect: recorderPaths.trajectoryConnect("t"),
     };
     expect(Object.keys(samples).sort()).toEqual(
@@ -70,13 +69,6 @@ describe("recorder constants and paths", () => {
     }
   });
 
-  test("the extension and the gate name the Bot in one lowercase header", () => {
-    expect(RECORDER_BOT_HEADER).toBe("x-openbot-recorder-bot");
-    expect(
-      new Headers({ [RECORDER_BOT_HEADER]: "b" }).get("X-OpenBot-Recorder-Bot"),
-    ).toBe("b");
-  });
-
   test("the gate refusals carry the documented statuses", () => {
     expect(
       Object.values(TRAJECTORY_GATE_REFUSALS).map((r) => r.status),
@@ -85,7 +77,7 @@ describe("recorder constants and paths", () => {
 });
 
 describe("joinedLearningContainer", () => {
-  test("a pass joins the Bot's container unless there is none or Intelligence says it does not exist", () => {
+  test("a pass joins the person's container unless there is none or it does not exist and could not be made", () => {
     const cases: [
       Parameters<typeof joinedLearningContainer>[0],
       string | null,

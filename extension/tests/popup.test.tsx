@@ -7,7 +7,7 @@ import {
   test,
 } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import type { RecorderBot } from "@openbot/shared/recorder-api";
+import type { LearningSpaceState } from "@openbot/shared/recorder-api";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { PASS_HINTS } from "../src/offscreen/grant";
@@ -46,15 +46,19 @@ afterEach(() => {
   fake.uninstall();
 });
 
-/** As /api/recorder/bots answers: every state names the Bot's container except unassigned (no space set). */
-const learning = (state: RecorderBot["learning"]["state"]) => ({
+/** As /api/recorder/learning answers: the person's own space, named except when there is none (unassigned, missing). */
+const learning = (state: LearningSpaceState["state"]): LearningSpaceState => ({
   state,
-  containerId: state === "unassigned" ? null : "c1",
+  containerId: state === "unassigned" || state === "missing" ? null : "c1",
 });
-const BOTS: RecorderBot[] = [
-  { id: "b1", name: "Billing Bot", learning: learning("assigned") },
-  { id: "b2", name: "Support Bot", learning: learning("unassigned") },
-];
+const UNASSIGNED_SENTENCE =
+  "Learning will not see this recording: Automatic Learning is off in this OpenBot. It still goes to Intelligence.";
+const MISSING_SENTENCE =
+  "Learning will not see this recording: your Learning space could not be made in Intelligence. Ask an administrator to check Admin, Automatic Learning. It still goes to Intelligence.";
+const UNREACHED_SENTENCE =
+  "Learning may not see this recording: OpenBot could not reach your Learning space just now. It still goes to Intelligence.";
+const INTO_YOUR_SPACE =
+  "It goes into your Learning space, and every Bot you use learns from it.";
 
 function stateResponse(
   over: Omit<Partial<PageStateResponse>, "state"> & {
@@ -83,10 +87,10 @@ function stateResponse(
 function setup(
   response: PageStateResponse,
   options: {
-    bots?: RecorderBot[];
+    /** The person's own Learning space as OpenBot answers it. */
+    learning?: LearningSpaceState;
     desktop?: boolean;
     answers?: Partial<Record<PageToBackground["type"], PageResponse>>;
-    lastBotId?: string;
     pageLanguage?: string | null;
     browserLanguage?: string;
     microphone?: PermissionState | null;
@@ -102,8 +106,8 @@ function setup(
     if (fixed) return fixed;
     // Chrome copies every message as JSON, so each answer is a new object, as the polling popup sees it.
     if (message.type === "page.state") return structuredClone(response);
-    if (message.type === "page.bots")
-      return { ok: true, bots: options.bots ?? BOTS };
+    if (message.type === "page.learning")
+      return { ok: true, learning: options.learning ?? learning("assigned") };
     if (message.type === "page.desktop.available")
       return { ok: true, available: options.desktop ?? false };
     return { ok: true };
@@ -113,7 +117,6 @@ function setup(
       deps={{
         ask: ask as never,
         activeTabId: async () => 7,
-        lastBotId: async () => options.lastBotId,
         pageLanguage: async (tabId) =>
           tabId === 7 ? (options.pageLanguage ?? null) : null,
         browserLanguage: () => options.browserLanguage ?? "en-GB",
@@ -261,18 +264,28 @@ test("connected and idle shows the person, the host, the form copy and Record di
   ).toBe(true);
 });
 
-test("Record is disabled without a Bot even with a title", async () => {
-  const { findByLabelText, getByRole } = setup(stateResponse(), { bots: [] });
-  await userEvent.type(
-    await findByLabelText("What are you about to do?"),
-    "Refund an order",
-  );
+test("the popup has no Bot picker: only the title and Record, and Record needs just a title", async () => {
+  const { findByLabelText, getByRole, queryByRole, queryByLabelText, sent } =
+    setup(stateResponse());
+  const title = await findByLabelText("What are you about to do?");
+  expect(queryByRole("combobox")).toBeNull();
+  expect(queryByLabelText("Bot")).toBeNull();
   expect(
     (getByRole("button", { name: "Record" }) as HTMLButtonElement).disabled,
   ).toBe(true);
+  await userEvent.type(title, "Refund an order");
+  await waitFor(() =>
+    expect(
+      (getByRole("button", { name: "Record" }) as HTMLButtonElement).disabled,
+    ).toBe(false),
+  );
+  // It asks for the person's Learning space, never for a list of Bots.
+  const asked = sent.map((message) => message.type as string);
+  expect(asked).toContain("page.learning");
+  expect(asked).not.toContain("page.bots");
 });
 
-test("Record sends page.record with the Bot, title, tab and the page's language", async () => {
+test("Record sends page.record with the title, tab and the page's language, and no Bot", async () => {
   const { findByLabelText, getByRole, sent } = setup(stateResponse(), {
     pageLanguage: "de-DE",
   });
@@ -289,7 +302,6 @@ test("Record sends page.record with the Bot, title, tab and the page's language"
   await waitFor(() =>
     expect(sent.find((m) => m.type === "page.record")).toEqual({
       type: "page.record",
-      botId: "b1",
       title: "Refund an order",
       tabId: 7,
       language: "de-DE",
@@ -358,7 +370,6 @@ test("the first Record records: no permission prompt, no tab, page.record goes a
     await pressRecord(view);
     await waitFor(() =>
       expect(view.sent.find((m) => m.type === "page.record")).toMatchObject({
-        botId: "b1",
         title: "Refund an order",
       }),
     );
@@ -383,7 +394,6 @@ test("Record without the microphone records, and the Voice row says it is not al
         Object.assign(response.state, {
           phase: "recording",
           recordingId: "r9",
-          botId: "b1",
           title: "Refund an order",
           startedAt: Date.now(),
           capture: {
@@ -411,39 +421,23 @@ test("Record without the microphone records, and the Voice row says it is not al
   }
 });
 
-test("the last used Bot is preselected", async () => {
-  const { findByText, getByRole } = setup(stateResponse(), {
-    lastBotId: "b2",
-  });
-  await findByText(
-    "Learning will not see this recording: this Bot has no Learning space. It still goes to Intelligence.",
-  );
-  expect(getByRole("combobox", { name: "Bot" }).textContent).toContain(
-    "Support Bot",
-  );
-});
-
-const SENTENCES: [RecorderBot["learning"]["state"], string | null][] = [
-  ["assigned", null],
-  [
-    "unassigned",
-    "Learning will not see this recording: this Bot has no Learning space. It still goes to Intelligence.",
-  ],
-  [
-    "missing",
-    "Learning will not see this recording: this Bot's Learning space does not exist in Intelligence. Ask an administrator to fix it in Admin, Automatic Learning. It still goes to Intelligence.",
-  ],
+const SENTENCES: [LearningSpaceState, string | null][] = [
+  [learning("assigned"), null],
+  [learning("unassigned"), UNASSIGNED_SENTENCE],
+  [learning("missing"), MISSING_SENTENCE],
   // OpenBot could not check the space (Learning delivery off, or Intelligence not answering), but the capture pass still
-  // joins the Bot's container, so the recording lands in it: no warning.
-  ["learning-off", null],
-  ["unverified", null],
+  // joins the person's container, so the recording lands in it: no warning.
+  [learning("learning-off"), null],
+  [learning("unverified"), null],
+  // OpenBot could not reach the space at all (or was still making it), so the pass names none.
+  [{ state: "unverified", containerId: null }, UNREACHED_SENTENCE],
 ];
-for (const [kind, sentence] of SENTENCES) {
-  test(`a Bot whose Learning space is ${kind} ${sentence ? "says so" : "says nothing"} under the picker`, async () => {
-    const { findByRole, container } = setup(stateResponse(), {
-      bots: [{ id: "b1", name: "Only Bot", learning: learning(kind) }],
+for (const [space, sentence] of SENTENCES) {
+  test(`a Learning space ${space.state}${space.containerId ? "" : " with no container"} ${sentence ? "says so" : "says nothing"} under the title`, async () => {
+    const { findByLabelText, container } = setup(stateResponse(), {
+      learning: space,
     });
-    await findByRole("combobox", { name: "Bot" });
+    await findByLabelText("What are you about to do?");
     if (sentence) {
       await waitFor(() => expect(container.textContent).toContain(sentence));
     } else {
@@ -453,64 +447,33 @@ for (const [kind, sentence] of SENTENCES) {
   });
 }
 
-test("a Bot whose settings OpenBot could not read says Learning may not see the recording", async () => {
-  const { findByRole, container } = setup(stateResponse(), {
-    bots: [
-      {
-        id: "b1",
-        name: "Only Bot",
-        learning: { state: "unverified", containerId: null },
-      },
-    ],
-  });
-  await findByRole("combobox", { name: "Bot" });
-  await waitFor(() =>
-    expect(container.textContent).toContain(
-      "Learning may not see this recording: OpenBot could not read this Bot's Learning space just now. It still goes to Intelligence.",
-    ),
-  );
-});
-
-test("after Stop with Intelligence's Learning delivery off, the popup says the recording goes into the Bot's Learning space and warns nothing", async () => {
-  // The check of the space failed (its skills endpoint answers 404), but the capture pass joined the Bot's container.
+test("after Stop with Intelligence's Learning delivery off, the popup says the recording goes into your Learning space and warns nothing", async () => {
+  // The check of the space failed (its skills endpoint answers 404), but the capture pass joined the person's container.
   const off = learning("learning-off");
   const { findByText, container } = setup(
     stateResponse({
-      state: {
-        lastStopped: { recordingId: "r1", botId: "b1" },
-        learning: off,
-      },
+      state: { lastStopped: { recordingId: "r1" }, learning: off },
     }),
-    {
-      bots: [{ id: "b1", name: "Refund Clerk", learning: off }],
-      lastBotId: "b1",
-    },
+    { learning: off },
   );
   await findByText("Sent to Intelligence");
-  await findByText("Recorded for Refund Clerk.");
-  await findByText("It goes into this Bot's Learning space.");
+  await findByText(INTO_YOUR_SPACE);
+  expect(container.textContent).not.toContain("Recorded for");
   expect(container.textContent).not.toContain("Learning may not");
   expect(container.textContent).not.toContain("Learning will not");
 });
 
-test("after Stop the Learning sentence shows once, in the sent row, not again under the picker", async () => {
-  const sentence = SENTENCES.find(([kind]) => kind === "missing")?.[1];
+test("after Stop the Learning sentence shows once, in the sent row, not again under the title", async () => {
   const off = learning("missing");
   const { findByText, container } = setup(
     stateResponse({
-      state: {
-        lastStopped: { recordingId: "r1", botId: "b1" },
-        learning: off,
-      },
+      state: { lastStopped: { recordingId: "r1" }, learning: off },
     }),
-    {
-      bots: [{ id: "b1", name: "Refund Clerk", learning: off }],
-      lastBotId: "b1",
-    },
+    { learning: off },
   );
   await findByText("Sent to Intelligence");
-  await findByText("Recorded for Refund Clerk.");
-  expect(container.textContent?.split(sentence ?? "").length).toBe(2);
+  await findByText(MISSING_SENTENCE);
+  expect(container.textContent?.split(MISSING_SENTENCE).length).toBe(2);
 });
 
 test("the popup asks for nothing about the screen, and offers the setup page when the microphone is not allowed", async () => {
@@ -600,7 +563,6 @@ const recording = (
     state: {
       phase: "recording",
       recordingId: "r7",
-      botId: "b1",
       title: "Refund an order",
       startedAt: Date.now() - 65_000,
       actions: 12,
@@ -948,7 +910,7 @@ test("a recording outside a Learning space says Not into a Learning space with t
   );
   await findByText("Not into a Learning space");
   expect(
-    getByText(/this Bot's Learning space does not exist in Intelligence/),
+    getByText(/your Learning space could not be made in Intelligence/),
   ).toBeTruthy();
 });
 
@@ -975,7 +937,7 @@ test("outside a Learning space the Learning capture row still says its status an
   expect(queryByText(/^Retrying\./)).toBeNull();
   expect(getByText("Learning capture")).toBeTruthy();
   expect(getByText("Not into a Learning space")).toBeTruthy();
-  expect(getByText(/this Bot has no Learning space/)).toBeTruthy();
+  expect(getByText(/Automatic Learning is off in this OpenBot/)).toBeTruthy();
 });
 
 test("a retrying status whose reason does not say so keeps the status word", async () => {
@@ -1018,7 +980,7 @@ test("a held recording outside a Learning space keeps the pause, its reason and 
   ).toBeTruthy();
   expect(getByText(HELD_LINE)).toBeTruthy();
   expect(getByText("Not into a Learning space")).toBeTruthy();
-  expect(getByText(/this Bot has no Learning space/)).toBeTruthy();
+  expect(getByText(/Automatic Learning is off in this OpenBot/)).toBeTruthy();
 });
 
 test("a parked recording outside a Learning space says Not into a Learning space too", async () => {
@@ -1034,7 +996,7 @@ test("a parked recording outside a Learning space says Not into a Learning space
   );
   await findByText("Learning capture is off");
   expect(
-    getByText("OpenBot does not offer you this recording's Bot any more."),
+    getByText("OpenBot says this recording belongs to another person."),
   ).toBeTruthy();
   expect(getByText(PARKED_LINE)).toBeTruthy();
   expect(getByText("Not into a Learning space")).toBeTruthy();
@@ -1065,7 +1027,7 @@ test("every pass sentence loses its status phrase and starts with a capital", ()
   ).toBe("This browser was disconnected from OpenBot.");
 });
 
-test("while streaming, a space OpenBot could not check warns nothing, since the pass joined the Bot's container", async () => {
+test("while streaming, a space OpenBot could not check warns nothing, since the pass joined the person's container", async () => {
   for (const state of ["learning-off", "unverified"] as const) {
     const view = setup(recording({ learning: { state, containerId: "c1" } }));
     await view.findByText("Streaming to Intelligence");
@@ -1076,7 +1038,7 @@ test("while streaming, a space OpenBot could not check warns nothing, since the 
   const unread = setup(
     recording({ learning: { state: "unverified", containerId: null } }),
   );
-  await unread.findByText(/could not read this Bot's Learning space just now/);
+  await unread.findByText(/could not reach your Learning space just now/);
 });
 
 test("refused and dropped events are counted in the Learning capture row", async () => {
@@ -1092,42 +1054,37 @@ test("refused and dropped events are counted in the Learning capture row", async
   expect(getByText("1 event could not be sent")).toBeTruthy();
 });
 
-const STOPPED = { lastStopped: { recordingId: "r1", botId: "b1" } };
+const STOPPED = { lastStopped: { recordingId: "r1" } };
 const SENDING =
   "The rest of the recording is on its way. You can keep browsing.";
 
-test("after stop with nothing still sending, the popup says the recording went to Intelligence and into the Bot's Learning space", async () => {
+test("after stop with nothing still sending, the popup says the recording went to Intelligence and into your Learning space", async () => {
   const { findByText, getByText, queryByText, queryByRole } = setup(
     stateResponse({
       state: { ...STOPPED, learning: learning("assigned"), draining: 0 },
     }),
   );
   await findByText("Sent to Intelligence");
-  await findByText("Recorded for Billing Bot.");
-  expect(getByText("It goes into this Bot's Learning space.")).toBeTruthy();
+  expect(getByText(INTO_YOUR_SPACE)).toBeTruthy();
+  expect(queryByText(/Recorded for/)).toBeNull();
   expect(queryByText(SENDING)).toBeNull();
   // Nothing about OpenBot keeping it or drafting from it, and nothing to open there.
   expect(queryByText(/Review it in OpenBot|Saved|draft/)).toBeNull();
   expect(queryByRole("link")).toBeNull();
 });
 
-test("after stop, a Bot outside a Learning space says Learning will not see the recording, and that it still went to Intelligence", async () => {
+test("after stop with Automatic Learning off, the popup says Learning will not see the recording, and that it still went to Intelligence", async () => {
   const { findByText, getByText } = setup(
     stateResponse({
       state: {
-        lastStopped: { recordingId: "r1", botId: "b2" },
+        lastStopped: { recordingId: "r1" },
         learning: learning("unassigned"),
         draining: 0,
       },
     }),
   );
   await findByText("Sent to Intelligence");
-  await findByText("Recorded for Support Bot.");
-  expect(
-    getByText(
-      "Learning will not see this recording: this Bot has no Learning space. It still goes to Intelligence.",
-    ),
-  ).toBeTruthy();
+  expect(getByText(UNASSIGNED_SENTENCE)).toBeTruthy();
 });
 
 // What the controller sends after Stop: "finished" puts capture back to IDLE_STATE's, and offscreen.status is ignored
@@ -1147,7 +1104,7 @@ test("after stop with nothing kept, what is still sending says it is sending to 
   );
   await findByText("Sending to Intelligence");
   expect(getByText(SENDING)).toBeTruthy();
-  expect(getByText(/this Bot has no Learning space/)).toBeTruthy();
+  expect(getByText(/Automatic Learning is off in this OpenBot/)).toBeTruthy();
   expect(queryByText("Sent to Intelligence")).toBeNull();
   expect(queryByText("Off")).toBeNull();
   expect(queryByText(/Learning capture is (off|paused)/)).toBeNull();
@@ -1175,7 +1132,7 @@ test("after stop, a parked recording still to send says Learning capture is off,
     getByText("This OpenBot is not connected to Intelligence."),
   ).toBeTruthy();
   expect(getByText(PARKED_LINE)).toBeTruthy();
-  expect(getByText(/this Bot has no Learning space/)).toBeTruthy();
+  expect(getByText(/Automatic Learning is off in this OpenBot/)).toBeTruthy();
   expect(queryByText("Off")).toBeNull();
   // Every drain is kept: nothing is streaming right now.
   expect(queryByText(SENDING)).toBeNull();

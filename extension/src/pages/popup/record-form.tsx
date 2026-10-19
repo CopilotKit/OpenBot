@@ -1,7 +1,6 @@
 import {
   joinedLearningContainer,
   type LearningSpaceState,
-  type RecorderBot,
 } from "@openbot/shared/recorder-api";
 import { IconMicrophone } from "@tabler/icons-react";
 import { useState } from "react";
@@ -14,29 +13,23 @@ import {
   FieldLabel,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 
 const LEARNING_SENTENCES: Partial<Record<LearningSpaceState["state"], string>> =
   {
     unassigned:
-      "Learning will not see this recording: this Bot has no Learning space. It still goes to Intelligence.",
+      "Learning will not see this recording: Automatic Learning is off in this OpenBot. It still goes to Intelligence.",
     missing:
-      "Learning will not see this recording: this Bot's Learning space does not exist in Intelligence. Ask an administrator to fix it in Admin, Automatic Learning. It still goes to Intelligence.",
-    // OpenBot could not read the Bot's Learning settings, so it named no container.
+      "Learning will not see this recording: your Learning space could not be made in Intelligence. Ask an administrator to check Admin, Automatic Learning. It still goes to Intelligence.",
+    // OpenBot could not read its Learning settings, or your space was still being made, so it named none.
     unverified:
-      "Learning may not see this recording: OpenBot could not read this Bot's Learning space just now. It still goes to Intelligence.",
+      "Learning may not see this recording: OpenBot could not reach your Learning space just now. It still goes to Intelligence.",
   };
 
 /**
- * What the person is told under the Bot picker: a warning only when the capture pass joins no Learning space (the Bot has
- * none, Intelligence says it does not exist, or OpenBot named none). A space OpenBot could not check with Intelligence
- * (its Learning delivery off, or Intelligence not answering) says nothing, because the pass still joins it.
+ * What the person is told under the title: a warning only when the capture pass joins none of their own Learning space
+ * (Automatic Learning is off, the space could not be made, or OpenBot could not reach it). A space OpenBot could not
+ * check with Intelligence (its Learning delivery off, or Intelligence not answering) says nothing, because the pass
+ * still joins it.
  */
 export function learningSentence(learning: LearningSpaceState): string | null {
   if (joinedLearningContainer(learning) !== null) return null;
@@ -46,24 +39,23 @@ export function learningSentence(learning: LearningSpaceState): string | null {
 const TITLE_MAX = 120;
 
 /**
- * The Bot, the title and Record. Deviation from openbot-screen-layout: the Bot `Select` and the title `Input` sit
- * in a `Field` stack inside the section rather than as summary rows that open dialogs, because a toolbar popup is
- * one short form whose only job is to pick, name and press Record, and a dialog over a 384px popup would hide the
- * very button it serves.
+ * The title and Record. Every recording goes into the person's own Learning space, so there is nothing to pick.
+ * Deviation from openbot-screen-layout: the title `Input` sits in a `Field` inside the section rather than as a summary
+ * row that opens a dialog, because a toolbar popup is one short form whose only job is to name and press Record, and a
+ * dialog over a 384px popup would hide the very button it serves.
  */
 export function RecordForm({
-  bots,
-  initialBotId,
+  learning = null,
   busy,
   onRecord,
   learningShown = null,
   microphoneBlocked = false,
   onAllowMicrophone,
 }: {
-  bots: RecorderBot[];
-  initialBotId: string | null;
+  /** The person's own Learning space, once OpenBot said; null until then, and nothing is warned about. */
+  learning?: LearningSpaceState | null;
   busy: boolean;
-  onRecord: (botId: string, title: string) => void;
+  onRecord: (title: string) => void;
   /** A Learning sentence the popup already shows above the form (about the recording just stopped): not repeated. */
   learningShown?: string | null;
   /** The browser has not given the Recorder a lasting microphone grant (refused, or never answered): the form offers
@@ -71,53 +63,19 @@ export function RecordForm({
   microphoneBlocked?: boolean;
   onAllowMicrophone?: () => void;
 }) {
-  const [picked, setPicked] = useState<string | null>(null);
-  // Bots arrive after the form mounts: the pick wins, then the last used, then the first.
-  const botId =
-    [picked, initialBotId].find((id) =>
-      bots.some((candidate) => candidate.id === id),
-    ) ??
-    bots[0]?.id ??
-    "";
   const [title, setTitle] = useState("");
-  const bot = bots.find((candidate) => candidate.id === botId);
-  const learning = bot ? learningSentence(bot.learning) : null;
-  const sentence = learning === learningShown ? null : learning;
-  const ready = bot !== undefined && title.trim() !== "" && !busy;
+  const warning = learning ? learningSentence(learning) : null;
+  const sentence = warning === learningShown ? null : warning;
+  const ready = title.trim() !== "" && !busy;
   return (
     <PageSection>
       <form
         onSubmit={(event) => {
           event.preventDefault();
-          if (ready) onRecord(botId, title.trim());
+          if (ready) onRecord(title.trim());
         }}
       >
         <FieldGroup>
-          <Field>
-            <FieldLabel htmlFor="recorder-bot">Bot</FieldLabel>
-            <Select
-              value={botId}
-              onValueChange={(value) => {
-                if (typeof value === "string") setPicked(value);
-              }}
-            >
-              <SelectTrigger
-                id="recorder-bot"
-                aria-label="Bot"
-                className="w-full"
-              >
-                <SelectValue>{bot?.name ?? "Choose a Bot"}</SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                {bots.map((candidate) => (
-                  <SelectItem key={candidate.id} value={candidate.id}>
-                    {candidate.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {sentence ? <FieldDescription>{sentence}</FieldDescription> : null}
-          </Field>
           <Field>
             <FieldLabel htmlFor="recorder-title">
               What are you about to do?
@@ -134,6 +92,9 @@ export function RecordForm({
               behind them and what you say as you go. Passwords and secrets stay
               in your browser.
             </FieldDescription>
+            {sentence ? (
+              <FieldDescription role="status">{sentence}</FieldDescription>
+            ) : null}
           </Field>
           {microphoneBlocked && onAllowMicrophone ? (
             <Button

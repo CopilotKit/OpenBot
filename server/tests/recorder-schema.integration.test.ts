@@ -1,8 +1,13 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { createDatabase } from "../src/db/client";
-import { agents, users } from "../src/db/schema/core";
+import { users } from "../src/db/schema/core";
+import {
+  learningOpenSkills,
+  learningPersonSpaces,
+  learningSkillSharing,
+} from "../src/db/schema/learning";
 import {
   recorderConnectCodes,
   recorderConnections,
@@ -14,8 +19,6 @@ const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const prefix = `recorder-${randomUUID()}`;
 const alice = `${prefix}-alice`;
 const bob = `${prefix}-bob`;
-const botOne = `${prefix}-bot-1`;
-const botTwo = `${prefix}-bot-2`;
 let counter = 0;
 const next = () => `${prefix}-${counter++}`;
 
@@ -51,18 +54,9 @@ beforeAll(async () => {
     { id: alice, email: `${alice}@example.test` },
     { id: bob, email: `${bob}@example.test` },
   ]);
-  await database.insert(agents).values(
-    [botOne, botTwo].map((id) => ({
-      id,
-      name: id,
-      type: "built_in" as const,
-      configuration: {},
-    })),
-  );
 });
 
 afterAll(async () => {
-  await database.delete(agents).where(inArray(agents.id, [botOne, botTwo]));
   await database.delete(users).where(inArray(users.id, [alice, bob]));
   await database.$client.close();
 });
@@ -133,74 +127,116 @@ test("deleting a person removes their connections and connect codes", async () =
   ).toEqual([]);
 });
 
-test("a trajectory binds to one person and Bot, by its UUID", async () => {
+test("a trajectory binds to one person, by its UUID, and names no Bot", async () => {
   const trajectoryId = randomUUID();
   await database
     .insert(recorderTrajectoryBindings)
-    .values({ trajectoryId, userId: alice, botId: botOne });
+    .values({ trajectoryId, userId: alice });
   await rejects(
     database
       .insert(recorderTrajectoryBindings)
-      .values({ trajectoryId, userId: bob, botId: botTwo }),
+      .values({ trajectoryId, userId: bob }),
     /recorder_trajectory_bindings_pkey|duplicate key/i,
   );
   await rejects(
     database
       .insert(recorderTrajectoryBindings)
-      .values({ trajectoryId: "not-a-uuid", userId: alice, botId: botOne }),
+      .values({ trajectoryId: "not-a-uuid", userId: alice }),
     /uuid/i,
   );
   const [row] = await database
     .select()
     .from(recorderTrajectoryBindings)
     .where(eq(recorderTrajectoryBindings.trajectoryId, trajectoryId));
-  expect(row).toMatchObject({ trajectoryId, userId: alice, botId: botOne });
+  expect(row).toMatchObject({ trajectoryId, userId: alice });
+  expect(Object.keys(row ?? {}).sort()).toEqual([
+    "createdAt",
+    "trajectoryId",
+    "userId",
+  ]);
   expect(row?.createdAt).toBeInstanceOf(Date);
+  const columns = (await database.execute(
+    sql`select column_name from information_schema.columns where table_name = 'recorder_trajectory_bindings' order by column_name`,
+  )) as unknown as { column_name: string }[];
+  expect(columns.map((column) => column.column_name)).toEqual([
+    "created_at",
+    "trajectory_id",
+    "user_id",
+  ]);
 });
 
-test("deleting a person removes their trajectory bindings", async () => {
+test("deleting a person removes their trajectory bindings, Learning space row and sharing choice", async () => {
   const dave = `${prefix}-dave`;
   await database
     .insert(users)
     .values({ id: dave, email: `${dave}@example.test` });
   await database
     .insert(recorderTrajectoryBindings)
-    .values({ trajectoryId: randomUUID(), userId: dave, botId: botOne });
+    .values({ trajectoryId: randomUUID(), userId: dave });
+  await database
+    .insert(learningPersonSpaces)
+    .values({ userId: dave, containerId: `${prefix}-space-dave` });
+  await database
+    .insert(learningSkillSharing)
+    .values({ userId: dave, mode: "choose" });
+  await database
+    .insert(learningOpenSkills)
+    .values({ userId: dave, skillName: "refund-order" });
   await database.delete(users).where(eq(users.id, dave));
-  expect(
-    await database
-      .select()
-      .from(recorderTrajectoryBindings)
-      .where(eq(recorderTrajectoryBindings.userId, dave)),
-  ).toEqual([]);
+  for (const table of [
+    recorderTrajectoryBindings,
+    learningPersonSpaces,
+    learningSkillSharing,
+    learningOpenSkills,
+  ]) {
+    expect(
+      await database.select().from(table).where(eq(table.userId, dave)),
+    ).toEqual([]);
+  }
 });
 
-test("a binding names a Bot that exists, and deleting the Bot removes its bindings", async () => {
+test("a sharing choice is closed, open or choose, and closed by default", async () => {
+  await database.insert(learningSkillSharing).values({ userId: alice });
+  const [row] = await database
+    .select()
+    .from(learningSkillSharing)
+    .where(eq(learningSkillSharing.userId, alice));
+  expect(row?.mode).toBe("closed");
   await rejects(
-    database.insert(recorderTrajectoryBindings).values({
-      trajectoryId: randomUUID(),
-      userId: alice,
-      botId: `${prefix}-no-such-bot`,
-    }),
-    /bot_id|foreign key/i,
+    database
+      .update(learningSkillSharing)
+      .set({ mode: "everyone" as never })
+      .where(eq(learningSkillSharing.userId, alice)),
+    /learning_skill_sharing_mode_check|check constraint/i,
   );
-  const gone = `${prefix}-bot-gone`;
   await database
-    .insert(agents)
-    .values({ id: gone, name: gone, type: "built_in", configuration: {} });
-  await database
-    .insert(recorderTrajectoryBindings)
-    .values({ trajectoryId: randomUUID(), userId: alice, botId: gone });
-  await database.delete(agents).where(eq(agents.id, gone));
-  expect(
-    await database
-      .select()
-      .from(recorderTrajectoryBindings)
-      .where(eq(recorderTrajectoryBindings.botId, gone)),
-  ).toEqual([]);
+    .delete(learningSkillSharing)
+    .where(eq(learningSkillSharing.userId, alice));
 });
 
-test("the migration holds only the Recorder's connections and trajectory bindings", async () => {
+test("one Learning space per person, and no two people share one", async () => {
+  const space = `${prefix}-space`;
+  await database
+    .insert(learningPersonSpaces)
+    .values({ userId: alice, containerId: space });
+  await rejects(
+    database
+      .insert(learningPersonSpaces)
+      .values({ userId: alice, containerId: `${space}-2` }),
+    /learning_person_spaces_pkey|duplicate key/i,
+  );
+  await rejects(
+    database
+      .insert(learningPersonSpaces)
+      .values({ userId: bob, containerId: space }),
+    /learning_person_spaces_container_id_unique|duplicate key/i,
+  );
+  await database
+    .delete(learningPersonSpaces)
+    .where(eq(learningPersonSpaces.userId, alice));
+});
+
+test("the migration holds only the Recorder's connections and trajectory bindings, and each person's Learning space and sharing", async () => {
   const migration = await Bun.file(
     new URL("../drizzle/0057_recorder_extension.sql", import.meta.url),
   ).text();
@@ -208,9 +244,14 @@ test("the migration holds only the Recorder's connections and trajectory binding
     (match) => match[1],
   );
   expect(created.sort()).toEqual([
+    "learning_open_skills",
+    "learning_person_spaces",
+    "learning_skill_sharing",
     "recorder_connect_codes",
     "recorder_connections",
     "recorder_trajectory_bindings",
   ]);
   expect(migration).not.toMatch(/ALTER TABLE "demonstrations"|DROP /);
+  // A recording is the person's: no Bot column, and no reference to the agents table.
+  expect(migration).not.toMatch(/bot_id|"agents"/);
 });

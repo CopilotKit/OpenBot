@@ -1,10 +1,12 @@
 import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { CopilotKitIntelligence } from "@copilotkit/runtime/v2";
+import {
+  CopilotKitIntelligence,
+  LearnedSkillsError,
+} from "@copilotkit/runtime/v2";
 import type { LearningSettings } from "@openbot/shared/learning";
 import {
   type ExchangeResponse,
-  RECORDER_BOT_HEADER,
   RECORDER_SIGNED_OUT,
   recorderPaths,
 } from "@openbot/shared/recorder-api";
@@ -17,8 +19,15 @@ import { createStallGuard } from "../src/channels/stall-guard";
 import { loadConfig } from "../src/config";
 import { mountCopilotRuntime } from "../src/copilot";
 import { createDatabase } from "../src/db/client";
-import { agents, users } from "../src/db/schema/core";
+import { users } from "../src/db/schema/core";
+import { learningPersonSpaces } from "../src/db/schema/learning";
 import { recorderTrajectoryBindings } from "../src/db/schema/recorder";
+import type { LearningContainerSpec } from "../src/learning/ensure-container";
+import {
+  createPersonalLearningSpaces,
+  createPersonSpaceStore,
+  personalLearningContainerId,
+} from "../src/learning/personal-space";
 import { createLearningSettingsStore } from "../src/learning/settings";
 import { createRecorderExtension } from "../src/recorder/wiring";
 import { createRequestActor } from "../src/request-actor";
@@ -29,15 +38,14 @@ import { testEnvironment } from "./support/environment";
 /*
  * The capture pass end to end, through the app index.ts builds: the Recorder's routes, the runtime mounted with the
  * Recorder's gate and Learning space selector, and the request identity that answers the Recorder's bearer only here.
- * Intelligence is the one thing faked: its trajectory join answers a grant and records what it was asked.
+ * Intelligence is the one thing faked: its trajectory join answers a grant and records what it was asked, its skills
+ * read says which Learning containers exist, and a service token's create makes one.
  */
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const prefix = `recorder-pass-${randomUUID()}`;
 const owner = `${prefix}-owner`;
 const stranger = `${prefix}-stranger`;
-const BOT = `${prefix}-bot`;
-const STRANGERS_BOT = `${prefix}-strangers-bot`;
 const ORIGIN = `chrome-extension://${RECORDER_EXTENSION_ID}`;
 const OWNER_COOKIE = { cookie: "test-session=owner" };
 
@@ -60,15 +68,10 @@ const getSession = async ({ headers }: { headers: Headers }) => {
     ? { user: { id, email: `${id}@example.test`, name: `Person ${id}` } }
     : null;
 };
-// Each person may record only for their own Bot.
-const botOwners: Record<string, string> = {
-  [BOT]: owner,
-  [STRANGERS_BOT]: stranger,
-};
 const learning: LearningSettings = {
   enabled: true,
   defaultTarget: { containerId: "openbot" },
-  agents: { [BOT]: { containerId: "bot-space" } },
+  agents: {},
 };
 const audits: AuditEventInput[] = [];
 const auditStore = {
@@ -76,31 +79,39 @@ const auditStore = {
     audits.push(event);
   },
 };
-const probed: string[] = [];
-
+const OWNER_SPACE = personalLearningContainerId(owner);
+const STRANGER_SPACE = personalLearningContainerId(stranger);
+/** The Learning containers Intelligence holds: the stranger's space exists, the owner's is made on first need. */
+const containers = new Set([STRANGER_SPACE]);
+const created: LearningContainerSpec[] = [];
 const recorder = createRecorderExtension({
   config,
   database,
   organizationAuth: undefined,
   roleRepository,
   peopleStore: { isRevoked: async () => false },
-  agentProfileStore: {
-    list: async () => [],
-    get: async () => null,
-  } as never,
-  pluginStore: { agentOwner: async (botId) => botOwners[botId] ?? null },
-  actorFor: async (id) => ({ id, role: "user" }),
-  learningSettingsStore: { read: async () => learning },
-  snapshots: {
-    getLearnedSkillsSnapshot: async ({
-      containerId,
-    }: {
-      containerId: string;
-    }) => {
-      probed.push(containerId);
-      return skillSnapshot();
+  personalSpaces: createPersonalLearningSpaces({
+    readSettings: async () => learning,
+    snapshots: {
+      getLearnedSkillsSnapshot: async ({
+        containerId,
+      }: {
+        containerId: string;
+      }) => {
+        if (!containers.has(containerId))
+          throw new LearnedSkillsError("CONTAINER_NOT_FOUND", false);
+        return skillSnapshot();
+      },
+    } as never,
+    store: createPersonSpaceStore(database),
+    create: async (container) => {
+      created.push(container);
+      if (containers.has(container.id)) return "present";
+      containers.add(container.id);
+      return "created";
     },
-  } as never,
+    log: () => {},
+  }),
   auditStore,
 });
 
@@ -182,7 +193,7 @@ async function connectBrowser(person: string, installId: string) {
   return ((await exchanged.json()) as ExchangeResponse).token;
 }
 
-/** The capture pass exactly as the Recorder asks for it: its bearer, the picked Bot, and `{}`. */
+/** The capture pass exactly as the Recorder asks for it: its bearer and `{}`. No Bot is named. */
 function pass(trajectoryId: string, headers: Record<string, string>) {
   return call(recorderPaths.trajectoryConnect(trajectoryId), {
     method: "POST",
@@ -191,19 +202,16 @@ function pass(trajectoryId: string, headers: Record<string, string>) {
   });
 }
 
-const as = (person: string, botId?: string) => ({
+const as = (person: string) => ({
   authorization: `Bearer ${tokens[person]}`,
-  ...(botId === undefined ? {} : { [RECORDER_BOT_HEADER]: botId }),
 });
 
 async function bindingOf(trajectoryId: string) {
   return database
-    .select({
-      userId: recorderTrajectoryBindings.userId,
-      botId: recorderTrajectoryBindings.botId,
-    })
+    .select()
     .from(recorderTrajectoryBindings)
-    .where(eq(recorderTrajectoryBindings.trajectoryId, trajectoryId));
+    .where(eq(recorderTrajectoryBindings.trajectoryId, trajectoryId))
+    .then((rows) => rows.map(({ userId }) => ({ userId })));
 }
 
 beforeAll(async () => {
@@ -232,15 +240,6 @@ beforeAll(async () => {
     { id: owner, email: `${owner}@example.test`, name: "The Owner" },
     { id: stranger, email: `${stranger}@example.test`, name: "A Stranger" },
   ]);
-  // A binding names a Bot that exists.
-  await database.insert(agents).values(
-    [BOT, STRANGERS_BOT].map((id) => ({
-      id,
-      name: id,
-      type: "built_in" as const,
-      configuration: {},
-    })),
-  );
   tokens[owner] = await connectBrowser(owner, "1".repeat(32));
   tokens[stranger] = await connectBrowser(stranger, "2".repeat(32));
 });
@@ -248,7 +247,6 @@ beforeAll(async () => {
 afterAll(async () => {
   for (const spy of spies) spy.mockRestore();
   guard.stop();
-  await database.delete(agents).where(inArray(agents.id, [BOT, STRANGERS_BOT]));
   await database.delete(users).where(inArray(users.id, [owner, stranger]));
   await database.$client.close();
 });
@@ -256,8 +254,8 @@ afterAll(async () => {
 describe("the capture pass", () => {
   const mine = randomUUID();
 
-  test("a connected browser gets a pass for its own Bot, joined to that Bot's Learning space", async () => {
-    const answer = await pass(mine, as(owner, BOT));
+  test("a connected browser gets a pass with no Bot named, joined to the person's own Learning space", async () => {
+    const answer = await pass(mine, as(owner));
 
     expect(answer.status).toBe(200);
     expect(await answer.json()).toEqual({
@@ -271,31 +269,40 @@ describe("the capture pass", () => {
       {
         trajectoryId: mine,
         appUserId: owner,
-        learningContainerIds: ["bot-space"],
+        learningContainerIds: [OWNER_SPACE],
       },
     ]);
-    expect(probed).toContain("bot-space");
-    expect(await bindingOf(mine)).toEqual([{ userId: owner, botId: BOT }]);
+    expect(await bindingOf(mine)).toEqual([{ userId: owner }]);
+  });
+
+  test("the person's space was made once, on first need, and OpenBot remembers it", async () => {
+    expect(created.filter((spec) => spec.id === OWNER_SPACE)).toHaveLength(1);
+    expect(
+      await database
+        .select({ containerId: learningPersonSpaces.containerId })
+        .from(learningPersonSpaces)
+        .where(eq(learningPersonSpaces.userId, owner)),
+    ).toEqual([{ containerId: OWNER_SPACE }]);
   });
 
   test("a reconnect asks for a fresh pass and gets one, joined to the same space", async () => {
-    const answer = await pass(mine, as(owner, BOT));
+    const answer = await pass(mine, as(owner));
 
     expect(answer.status).toBe(200);
     expect(joins.at(-1)).toEqual({
       trajectoryId: mine,
       appUserId: owner,
-      learningContainerIds: ["bot-space"],
+      learningContainerIds: [OWNER_SPACE],
     });
-    expect(await bindingOf(mine)).toEqual([{ userId: owner, botId: BOT }]);
+    expect(await bindingOf(mine)).toEqual([{ userId: owner }]);
   });
 
-  test("the selector reads the binding: the Bot's container for its person, nothing for anyone else", async () => {
+  test("the selector reads the binding: the person's own container for them, nothing for anyone else", async () => {
     const select = recorder.trajectoryCapture.selectLearningContainers;
 
     expect(
       await select({ trajectoryId: mine, user: { id: owner, name: "Owner" } }),
-    ).toEqual(["bot-space"]);
+    ).toEqual([OWNER_SPACE]);
     expect(
       await select({
         trajectoryId: mine,
@@ -308,6 +315,14 @@ describe("the capture pass", () => {
         user: { id: owner, name: "Owner" },
       }),
     ).toBeNull();
+  });
+
+  test("the Recorder reads the person's own space, which its popup warns about", async () => {
+    const answer = await call(recorderPaths.learning, { headers: as(owner) });
+    expect(answer.status).toBe(200);
+    expect(await answer.json()).toEqual({
+      learning: { state: "assigned", containerId: OWNER_SPACE },
+    });
   });
 
   describe("is refused, and never reaches Intelligence,", () => {
@@ -325,53 +340,26 @@ describe("the capture pass", () => {
       joined = joins.length;
     });
 
-    test("without the Bot header", async () => {
-      const trajectoryId = randomUUID();
-      await refusedWith(await pass(trajectoryId, as(owner)), 403, "FORBIDDEN");
-      expect(await bindingOf(trajectoryId)).toEqual([]);
-    });
-
-    test("for a Bot the person cannot record for", async () => {
-      const trajectoryId = randomUUID();
-      await refusedWith(
-        await pass(trajectoryId, as(owner, STRANGERS_BOT)),
-        403,
-        "FORBIDDEN",
-      );
-      expect(await bindingOf(trajectoryId)).toEqual([]);
-    });
-
     test("for a trajectory id that is not a UUID", async () => {
       await refusedWith(
-        await pass("not-a-uuid", as(owner, BOT)),
+        await pass("not-a-uuid", as(owner)),
         400,
         "INVALID_REQUEST",
       );
     });
 
     test("for a trajectory bound to someone else", async () => {
-      await refusedWith(
-        await pass(mine, as(stranger, STRANGERS_BOT)),
-        404,
-        "NOT_FOUND",
-      );
-      expect(await bindingOf(mine)).toEqual([{ userId: owner, botId: BOT }]);
+      await refusedWith(await pass(mine, as(stranger)), 404, "NOT_FOUND");
+      expect(await bindingOf(mine)).toEqual([{ userId: owner }]);
     });
 
     test("with neither a bearer nor a cookie", async () => {
-      await refusedWith(
-        await pass(randomUUID(), { [RECORDER_BOT_HEADER]: BOT }),
-        401,
-        "IDENTITY_REQUIRED",
-      );
+      await refusedWith(await pass(randomUUID(), {}), 401, "IDENTITY_REQUIRED");
     });
 
     test("with only the person's signed-in session, because only a connected browser records", async () => {
       await refusedWith(
-        await pass(randomUUID(), {
-          ...OWNER_COOKIE,
-          [RECORDER_BOT_HEADER]: BOT,
-        }),
+        await pass(randomUUID(), OWNER_COOKIE),
         401,
         "IDENTITY_REQUIRED",
       );
@@ -381,7 +369,6 @@ describe("the capture pass", () => {
       await refusedWith(
         await pass(randomUUID(), {
           authorization: `Bearer obr_${"z".repeat(43)}`,
-          [RECORDER_BOT_HEADER]: BOT,
         }),
         401,
         RECORDER_SIGNED_OUT,
@@ -393,30 +380,23 @@ describe("the capture pass", () => {
         .filter((event) => event.eventType === "recorder.trajectory_refused")
         .map((event) => (event.payload as { reason: string }).reason);
       expect(reasons).toEqual(
-        expect.arrayContaining([
-          "no-bot",
-          "bot-forbidden",
-          "invalid-id",
-          "bound-elsewhere",
-          "signed-out",
-        ]),
+        expect.arrayContaining(["invalid-id", "bound-elsewhere", "signed-out"]),
       );
+      expect(reasons).not.toContain("no-bot");
+      expect(reasons).not.toContain("bot-forbidden");
     });
   });
 
-  test("the other person's own trajectory, for their own Bot, still gets its pass", async () => {
+  test("the other person's own trajectory still gets its pass, into their own space", async () => {
     const theirs = randomUUID();
-    const answer = await pass(theirs, as(stranger, STRANGERS_BOT));
+    const answer = await pass(theirs, as(stranger));
 
     expect(answer.status).toBe(200);
-    // Their Bot has no space of its own, so it joins the deployment's default.
     expect(joins.at(-1)).toEqual({
       trajectoryId: theirs,
       appUserId: stranger,
-      learningContainerIds: ["openbot"],
+      learningContainerIds: [STRANGER_SPACE],
     });
-    expect(await bindingOf(theirs)).toEqual([
-      { userId: stranger, botId: STRANGERS_BOT },
-    ]);
+    expect(await bindingOf(theirs)).toEqual([{ userId: stranger }]);
   });
 });

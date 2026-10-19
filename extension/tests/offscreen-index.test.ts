@@ -286,7 +286,6 @@ async function setup(): Promise<Harness> {
       return {
         recordingId: "rec-1",
         title: "File the weekly report",
-        botId: "bot-1",
         openbotUrl: started.httpUrl,
         token: "obr_first",
         trajectoryId: crypto.randomUUID(),
@@ -299,7 +298,6 @@ async function setup(): Promise<Harness> {
     drain(session, overrides = {}) {
       return {
         recordingId: session.recordingId,
-        botId: session.botId,
         title: session.title,
         openbotUrl: session.openbotUrl,
         userId: "user-1",
@@ -812,15 +810,15 @@ describe("offscreen controller", () => {
     expect(outcomes(h, t).at(-1)).toMatchObject({ phase: "succeeded" });
   });
 
-  test("every pass names the recording's Bot, for the live recording and for a recovered one", async () => {
+  test("no pass names a Bot, for the live recording or a recovered one: the recording is the person's", async () => {
     const h = await setup();
     h.openbot.refuse = () => parkedPass();
     await h.open(virtualClock());
-    const session = h.session({ botId: "bot-live" });
+    const session = h.session();
     h.post({ type: "offscreen.start", session });
     h.post({ type: "offscreen.stop", outcome: "succeeded" });
     await until(() => h.received("offscreen.kept").length > 0, "kept");
-    expect(h.openbot.passes.map((pass) => pass.bot)).toEqual(["bot-live"]);
+    expect(h.openbot.passes.map((pass) => pass.bot)).toEqual([null]);
 
     h.openbot.refuse = null;
     await h.open(virtualClock(NEXT_START));
@@ -830,11 +828,12 @@ describe("offscreen controller", () => {
       token: session.token,
       allowedIntelligenceUrls: null,
       version: "0.1.0",
-      drains: [{ ...h.drain(session), botId: "bot-kept" }],
+      // A drain an earlier build kept still carries the Bot it named; it sends, and names none.
+      drains: [{ ...h.drain(session), botId: "bot-kept" } as never],
     });
     await until(() => h.received("offscreen.done").length === 1, "done");
     expect(h.openbot.passes.slice(1).map((pass) => pass.bot)).toEqual(
-      h.openbot.passes.slice(1).map(() => "bot-kept"),
+      h.openbot.passes.slice(1).map(() => null),
     );
     expect(h.openbot.passes.length).toBeGreaterThan(1);
   });

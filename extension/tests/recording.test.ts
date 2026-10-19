@@ -8,8 +8,8 @@ import {
   test,
 } from "bun:test";
 import {
+  type LearningSpaceState,
   RECORDER_SIGNED_OUT,
-  type RecorderBot,
 } from "@openbot/shared/recorder-api";
 import type { CapturedEvent } from "@openbot/shared/recorder-masking";
 import type {
@@ -69,7 +69,8 @@ const contentEvent = (value: unknown) => event("page", value);
 
 // ---- The fake OpenBot -------------------------------------------------------------------------
 //
-// The extension asks OpenBot only to connect: who is connected (`me`), the Bots, and Disconnect. Every other request
+// The extension asks OpenBot only to connect: who is connected (`me`), the person's Learning space, and Disconnect. Every
+// other request
 // is recorded, so a test can say OpenBot heard nothing of a recording.
 
 type Call = { method: string; path: string; auth: string | null };
@@ -77,18 +78,12 @@ type HeldRoute = "me" | "disconnect";
 
 const openbot = {
   calls: [] as Call[],
-  /** Tokens OpenBot no longer takes: `me` and the Bots answer signed out for them. */
+  /** Tokens OpenBot no longer takes: `me` and the Learning space answer signed out for them. */
   revoked: new Set<string>(),
   /** While set, that route's answers wait for it. */
   holds: {} as Partial<Record<HeldRoute, Promise<void>>>,
   me: { status: 200, body: {} as object },
-  bots: [
-    {
-      id: "bot-1",
-      name: "Deals",
-      learning: { state: "assigned", containerId: "space-1" },
-    },
-  ] as RecorderBot[],
+  learning: { state: "assigned", containerId: "space-1" } as LearningSpaceState,
 };
 const meBody = {
   user: ada,
@@ -96,7 +91,7 @@ const meBody = {
 };
 const CONNECTING = new Set([
   "GET /api/recorder/me",
-  "GET /api/recorder/bots",
+  "GET /api/recorder/learning",
   "DELETE /api/recorder/connections/current",
 ]);
 
@@ -137,8 +132,8 @@ beforeAll(() => {
           Response.json(openbot.me.body, { status: openbot.me.status })
         );
       }
-      if (route === "GET /api/recorder/bots")
-        return signedOut() ?? Response.json({ bots: openbot.bots });
+      if (route === "GET /api/recorder/learning")
+        return signedOut() ?? Response.json({ learning: openbot.learning });
       if (route === "DELETE /api/recorder/connections/current") {
         if (openbot.holds.disconnect) await openbot.holds.disconnect;
         return new Response(null, { status: 204 });
@@ -455,7 +450,6 @@ const notices = (port: FakePort) =>
 
 /** Records on `tabId` and resolves with the new recording's id. */
 async function startRecording(input: {
-  botId: string;
   title: string;
   tabId: number;
   language?: string;
@@ -471,7 +465,7 @@ async function startRecording(input: {
   if (!id) throw new Error("No recording id");
   return id;
 }
-const record = () => startRecording({ botId: "bot-1", title: "T", tabId: 7 });
+const record = () => startRecording({ title: "T", tabId: 7 });
 /** The trajectory the document was told to stream a recording into. */
 function trajectoryOf(recordingId: string): string {
   for (const message of everyDocumentMessage()) {
@@ -579,7 +573,6 @@ function useVariant(value: string) {
 
 test("Record opens the document and starts a new trajectory for the picked Bot, telling OpenBot nothing", async () => {
   const id = await startRecording({
-    botId: "bot-1",
     title: "Update deal",
     tabId: 7,
     language: "de-DE",
@@ -597,7 +590,6 @@ test("Record opens the document and starts a new trajectory for the picked Bot, 
   expect(start.session).toEqual({
     recordingId: id,
     title: "Update deal",
-    botId: "bot-1",
     openbotUrl: origin,
     token: "obr_one",
     trajectoryId: expect.stringMatching(UUID),
@@ -629,7 +621,6 @@ test("Record opens the document and starts a new trajectory for the picked Bot, 
   });
   expect(active()).toEqual({
     recordingId: id,
-    botId: "bot-1",
     title: "Update deal",
     openbotUrl: origin,
     userId: "p1",
@@ -637,12 +628,12 @@ test("Record opens the document and starts a new trajectory for the picked Bot, 
     trajectoryIds: [start.session.trajectoryId],
     startedAt: now,
   });
-  expect(fake.storage.local.get("lastBotId")).toBe("bot-1");
+  // No Bot is remembered: there is none to pick.
+  expect(fake.storage.local.get("lastBotId")).toBeUndefined();
   expect(fake.storage.session.get("stream")).toEqual(start.session);
   expect(await state()).toMatchObject({
     phase: "recording",
     recordingId: id,
-    botId: "bot-1",
     tabIds: [7],
     topUrls: { "7": DEAL },
     actions: 0,
@@ -651,8 +642,8 @@ test("Record opens the document and starts a new trajectory for the picked Bot, 
   expect(fake.badge).toEqual({ text: "REC", color: "#e7000b" });
 });
 
-test("Record copies the picked Bot's Learning space from the last Bot list", async () => {
-  await page({ type: "page.bots" });
+test("Record copies the person's own Learning space, as OpenBot last described it", async () => {
+  await page({ type: "page.learning" });
   await record();
   expect((await state()).learning).toEqual({
     state: "assigned",
@@ -719,9 +710,7 @@ test("Record after the person took website access away in the browser's settings
   // The install grants it; only the person's own Site access setting can withhold it afterwards.
   hostAccess = false;
   fake.tabs.set(7, { id: 7, url: DEAL } as chrome.tabs.Tab);
-  expect(
-    await page({ type: "page.record", botId: "bot-1", title: "T", tabId: 7 }),
-  ).toEqual({
+  expect(await page({ type: "page.record", title: "T", tabId: 7 })).toEqual({
     ok: false,
     error:
       "Site access is off for OpenBot Recorder. Open your browser's Extensions page, choose Details on OpenBot Recorder and set Site access to On all sites.",
@@ -739,7 +728,6 @@ test("Record without a connection is refused", async () => {
   fake.tabs.set(7, { id: 7, url: DEAL } as chrome.tabs.Tab);
   const answer = await page({
     type: "page.record",
-    botId: "bot-1",
     title: "T",
     tabId: 7,
   });
@@ -755,7 +743,6 @@ test("Record while a recording runs is refused and changes nothing", async () =>
   const id = await record();
   const answer = await page({
     type: "page.record",
-    botId: "bot-1",
     title: "T",
     tabId: 7,
   });
@@ -785,7 +772,6 @@ test("a failure once the document started rolls everything back, and the documen
   const content = contentPort(7);
   const answer = await page({
     type: "page.record",
-    botId: "bot-1",
     title: "T",
     tabId: 7,
   });
@@ -847,10 +833,10 @@ test("Stop queues the outcome in the document, and the recording waits as a drai
   expect(await stopping).toEqual({ ok: true });
   expect(await state()).toMatchObject({
     phase: "idle",
-    lastStopped: { recordingId: id, botId: "bot-1" },
+    lastStopped: { recordingId: id },
     draining: 1,
   });
-  expect(drains()).toMatchObject([{ recordingId: id, botId: "bot-1" }]);
+  expect(drains()).toMatchObject([{ recordingId: id }]);
   expect(active()).toBeUndefined();
   expect(fake.storage.session.get("stream")).toBeUndefined();
   expect(fake.badge.text).toBe("");
@@ -918,8 +904,8 @@ test("a could-not-send answer that comes after Stop finished takes back the sent
   );
 });
 
-test("the popup keeps the picked Bot's Learning space after Stop", async () => {
-  await page({ type: "page.bots" });
+test("the popup keeps the person's Learning space after Stop", async () => {
+  await page({ type: "page.learning" });
   await record();
   expect(await page({ type: "page.stop" })).toEqual({ ok: true });
   expect((await state()).learning).toEqual({
@@ -1118,7 +1104,6 @@ test("Stop while Record still injects the content script waits for Record to fin
   const injection = holdFirstInjection();
   const recording = page({
     type: "page.record",
-    botId: "bot-1",
     title: "T",
     tabId: 7,
   });
@@ -1142,7 +1127,6 @@ test("Start over while Record still injects the content script waits for Record,
   const injection = holdFirstInjection();
   const recording = page({
     type: "page.record",
-    botId: "bot-1",
     title: "T",
     tabId: 7,
   });
@@ -1215,7 +1199,6 @@ for (const action of ["Stop", "Disconnect"] as const)
       const held = wait.hold();
       const recording = page({
         type: "page.record",
-        botId: "bot-1",
         title: "T",
         tabId: 7,
       });
@@ -1447,7 +1430,6 @@ test("Start over sends the recording it leaves to Intelligence with a failed out
   });
   expect(active()).toMatchObject({
     recordingId: fresh,
-    botId: "bot-1",
     trajectoryIds: [rotate.trajectoryId],
   });
   expect(
@@ -1692,10 +1674,10 @@ test("a signed-out answer the popup gets from OpenBot forgets the connection and
   expect(sentToDocument("offscreen.discard")).toEqual([]);
 });
 
-test("a signed-out answer to the Bot list does the same", async () => {
+test("a signed-out answer to the Learning space does the same", async () => {
   await record();
   openbot.revoked.add("obr_one");
-  const answer = await page({ type: "page.bots" });
+  const answer = await page({ type: "page.learning" });
   expect(answer.ok).toBe(false);
   expect(storedConnection()).toBeUndefined();
   expect((await state()).phase).toBe("idle");
@@ -2338,7 +2320,6 @@ test("Record refuses a connection whose OpenBot the policy no longer allows, and
   fake.tabs.set(7, { id: 7, url: DEAL } as chrome.tabs.Tab);
   const answer = await page({
     type: "page.record",
-    botId: "bot-1",
     title: "T",
     tabId: 7,
   });
@@ -2527,7 +2508,6 @@ test("sensitive digests live in storage.session only, reach the page masking, an
 
 test("a Record without a usable language narrates in the browser's, else English", async () => {
   await startRecording({
-    botId: "bot-1",
     title: "T",
     tabId: 7,
     language: "x-klingon",
@@ -2834,7 +2814,7 @@ test("an action's time from a followed tab reaches the network capture, never on
 });
 
 test("a whole recording, Start over included, asks OpenBot for nothing", async () => {
-  await page({ type: "page.bots" });
+  await page({ type: "page.learning" });
   const content = contentPort(7);
   await record();
   content.postMessage({ type: "content.event", event: event("click", {}) });
@@ -2846,10 +2826,10 @@ test("a whole recording, Start over included, asks OpenBot for nothing", async (
   expect(await page({ type: "page.restart" })).toEqual({ ok: true });
   expect(await page({ type: "page.stop" })).toEqual({ ok: true });
   await settle();
-  expect(requests()).toEqual(["GET /api/recorder/bots"]);
+  expect(requests()).toEqual(["GET /api/recorder/learning"]);
 });
 
-// ---- The popup's state, Bots and sign-out ------------------------------------------------------
+// ---- The popup's state, Learning space and sign-out --------------------------------------------
 
 test("page.state answers with the connection, me and the policy address, fetching me at most once a minute", async () => {
   policy = {
@@ -2884,16 +2864,27 @@ test("page.state answers with the connection, me and the policy address, fetchin
   expect(fake.storage.local.get("notice")).toBeUndefined();
 });
 
-test("page.bots lists the Bots", async () => {
-  expect(await page({ type: "page.bots" })).toEqual({
+test("page.learning reads the person's own Learning space", async () => {
+  expect(await page({ type: "page.learning" })).toEqual({
     ok: true,
-    bots: openbot.bots,
+    learning: openbot.learning,
   });
   expect(openbot.calls[0]).toMatchObject({
     method: "GET",
-    path: "/api/recorder/bots",
+    path: "/api/recorder/learning",
     auth: "Bearer obr_one",
   });
+});
+
+test("Record names no Bot anywhere: not in the message, the drain, the session or the state", async () => {
+  const id = await record();
+  const start = sentToDocument("offscreen.start")[0] as unknown as {
+    session: Record<string, unknown>;
+  };
+  expect(Object.keys(start.session)).not.toContain("botId");
+  expect(Object.keys(active() ?? {})).not.toContain("botId");
+  expect(Object.keys(await state())).not.toContain("botId");
+  expect(id).toBeTruthy();
 });
 
 test("a signed-out answer from me forgets the connection with its reason", async () => {
@@ -2948,13 +2939,11 @@ test("the state machine's transitions need no timers", () => {
   };
   let current = reduceRecorder(IDLE_STATE, {
     type: "record",
-    botId: "bot-1",
     title: "T",
     learning: { state: "assigned", containerId: "space-1" },
   });
   expect(current).toMatchObject({
     phase: "starting",
-    botId: "bot-1",
     title: "T",
   });
   current = reduceRecorder(current, {
@@ -2981,13 +2970,13 @@ test("the state machine's transitions need no timers", () => {
   });
   current = reduceRecorder(current, {
     type: "finished",
-    lastStopped: { recordingId: "r1", botId: "bot-1" },
+    lastStopped: { recordingId: "r1" },
   });
   expect(current).toMatchObject({
     phase: "idle",
     actions: 0,
     tabIds: [],
-    lastStopped: { recordingId: "r1", botId: "bot-1" },
+    lastStopped: { recordingId: "r1" },
     learning: { state: "assigned", containerId: "space-1" },
   });
   expect(current.stopping).toBeUndefined();
@@ -3045,7 +3034,6 @@ function fire(
     case "Record":
       return page({
         type: "page.record",
-        botId: "bot-1",
         title: "T",
         tabId: 7,
       });

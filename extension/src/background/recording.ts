@@ -1,13 +1,14 @@
 // The recording controller: Record, the tabs a recording follows, the 50-action notice, Stop, Start over and the
 // drains that keep sending after it. A recording goes to Intelligence only: Record takes a new trajectory id, the
-// offscreen document asks OpenBot for a capture pass naming the picked Bot and streams every event to Intelligence, and
+// offscreen document asks OpenBot for a capture pass (the trajectory joins the person's own Learning space) and streams
+// every event to Intelligence, and
 // Stop queues the outcome and lets the outbox drain. OpenBot hears nothing of the recording itself. The phase lives in a
 // reducer (`reduceRecorder`), persisted to storage.session after every transition so a restarted service worker finds
 // it; what must survive a browser restart lives in storage.local (`activeRecording`, `drains`) and in the document's
 // IndexedDB outbox.
 import {
   type LearningSpaceState,
-  type RecorderBot,
+  type RecorderLearningResponse,
   type RecorderMe,
   recorderPaths,
 } from "@openbot/shared/recorder-api";
@@ -207,7 +208,6 @@ const CANCELLED = new Error("Record was cancelled before it started.");
 type RecorderEvent =
   | {
       type: "record";
-      botId: string;
       title: string;
       learning?: LearningSpaceState;
     }
@@ -259,7 +259,6 @@ export function reduceRecorder(
         ...kept,
         lastStopped: state.lastStopped,
         phase: "starting",
-        botId: event.botId,
         title: event.title,
         learning: event.learning,
       });
@@ -346,7 +345,6 @@ export function reduceRecorder(
         ...IDLE_STATE,
         ...kept,
         lastStopped: state.lastStopped,
-        botId: state.botId,
         error: event.error,
       });
     case "cancelled":
@@ -408,7 +406,6 @@ const defaultDeps: RecordingDeps = {
 /** The live recording: whom it belongs to and the token its passes are asked for with. */
 type Live = {
   recordingId: string;
-  botId: string;
   openbotUrl: string;
   token: string;
   userId: string;
@@ -438,7 +435,6 @@ function report(what: string): (error: unknown) => void {
 function liveFrom(record: DrainRecord, token: string): Live {
   return {
     recordingId: record.recordingId,
-    botId: record.botId,
     openbotUrl: record.openbotUrl,
     token,
     userId: record.userId,
@@ -457,7 +453,8 @@ export function installRecording(
   let network: NetworkCapture | null = null;
   let networkMode: NetworkMode | "stopped" = "off";
   const digests = new Set<string>();
-  let bots = new Map<string, RecorderBot>();
+  /** The person's own Learning space as OpenBot last described it: a recording starts with it, for its popup line. */
+  let learningSpace: LearningSpaceState | undefined;
   /** Each followed tab's last recorded top-frame address and page: the same one again is not recorded twice. */
   const recordedNavigations = new Map<number, string>();
   const recordedPages = new Map<number, string>();
@@ -960,9 +957,8 @@ export function installRecording(
     if (state.phase !== "idle") return { ok: false, error: SENTENCES.busy };
     dispatch({
       type: "record",
-      botId: message.botId,
       title: message.title,
-      learning: bots.get(message.botId)?.learning,
+      learning: learningSpace,
     });
     let finish = () => {};
     const attempt = {
@@ -996,7 +992,7 @@ export function installRecording(
     connection: ConnectionRecord,
     attempt: { cancelled: boolean },
   ): Promise<PageResponse> {
-    const { botId, title, tabId } = message;
+    const { title, tabId } = message;
     let tab: chrome.tabs.Tab;
     try {
       tab = await chrome.tabs.get(tabId);
@@ -1016,7 +1012,6 @@ export function installRecording(
       const startedAt = deps.now();
       const active: DrainRecord = {
         recordingId,
-        botId,
         title,
         openbotUrl: connection.openbotUrl,
         userId: connection.user.id,
@@ -1026,14 +1021,12 @@ export function installRecording(
       };
       await serially(() => writeLocal("activeRecording", active));
       saved = true;
-      await writeLocal("lastBotId", botId);
       const policy = await deps.readPolicy();
       if (attempt.cancelled) throw CANCELLED;
       if (!allowsOpenBot(policy, connection.openbotUrl)) throw POLICY_REFUSED;
       const session: StreamSession = {
         recordingId,
         title,
-        botId,
         openbotUrl: connection.openbotUrl,
         token: connection.token,
         trajectoryId,
@@ -1072,7 +1065,6 @@ export function installRecording(
         throw CANCELLED;
       live = {
         recordingId,
-        botId,
         openbotUrl: connection.openbotUrl,
         token: connection.token,
         userId: connection.user.id,
@@ -1271,7 +1263,7 @@ export function installRecording(
       lastStopped:
         mode.kind === "disconnect" || failed !== undefined
           ? undefined
-          : { recordingId, botId: current.botId },
+          : { recordingId },
       error: signedOut ? stoppedSentence(signedOut) : failed,
     });
     if (signedOut)
@@ -1911,16 +1903,17 @@ export function installRecording(
     };
   }
 
-  async function listBots(): Promise<PageResponse> {
+  /** The person's own Learning space, which every recording they make joins: whether Learning will see it. */
+  async function readLearningSpace(): Promise<PageResponse> {
     const connection = await currentConnection();
     if (!connection) return { ok: false, error: SENTENCES.noConnection };
     try {
-      const answer = await openbotJson<{ bots: RecorderBot[] }>(
+      const answer = await openbotJson<RecorderLearningResponse>(
         connection,
-        recorderPaths.bots,
+        recorderPaths.learning,
       );
-      bots = new Map(answer.bots.map((bot) => [bot.id, bot]));
-      return { ok: true, bots: answer.bots };
+      learningSpace = answer.learning;
+      return { ok: true, learning: answer.learning };
     } catch (error) {
       const reason = signedOutReason(error);
       if (reason)
@@ -2124,8 +2117,8 @@ export function installRecording(
       switch (message.type) {
         case "page.state":
           return pageState();
-        case "page.bots":
-          return listBots();
+        case "page.learning":
+          return readLearningSpace();
         case "page.record":
           return record(message);
         case "page.stop":

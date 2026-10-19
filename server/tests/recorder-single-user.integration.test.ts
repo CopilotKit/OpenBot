@@ -10,6 +10,7 @@ import { loadConfig } from "../src/config";
 import { createDatabase } from "../src/db/client";
 import { users } from "../src/db/schema/core";
 import { recorderConnections } from "../src/db/schema/recorder";
+import { personalLearningContainerId } from "../src/learning/personal-space";
 import { RECORDER_BEARER } from "../src/recorder/guard";
 import { createRecorderExtension } from "../src/recorder/wiring";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
@@ -17,7 +18,6 @@ import { TEST_POOL, testDatabaseUrl } from "./support/database";
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const other = `recorder-single-${randomUUID()}-other`;
 const ORIGIN = `chrome-extension://${RECORDER_EXTENSION_ID}`;
-const BOT = "mine";
 
 const config = loadConfig({
   DATABASE_URL: "postgres://openbot:openbot@127.0.0.1:5432/openbot",
@@ -29,7 +29,6 @@ const config = loadConfig({
   OPENBOT_SINGLE_USER: "true",
 });
 const auditStore = { insert: async (_event: AuditEventInput) => {} };
-const bot = { id: BOT, name: "Bot", hidden: false, deletedAt: null };
 const roleRepository = { rolesForUser: async () => ["admin" as const] };
 const recorder = createRecorderExtension({
   config,
@@ -37,14 +36,14 @@ const recorder = createRecorderExtension({
   organizationAuth: undefined,
   roleRepository,
   peopleStore: { isRevoked: async () => false },
-  agentProfileStore: {
-    list: async () => [bot],
-    get: async (_actor: unknown, id: string) => (id === BOT ? bot : null),
-  } as never,
-  pluginStore: { agentOwner: async () => null },
-  actorFor: async (id) => ({ id, role: "admin" }),
-  learningSettingsStore: { read: async () => ({}) as never },
-  snapshots: { getLearnedSkillsSnapshot: async () => ({}) as never },
+  personalSpaces: {
+    containerFor: personalLearningContainerId,
+    state: async (userId) => ({
+      state: "assigned",
+      containerId: personalLearningContainerId(userId),
+    }),
+    kick: () => {},
+  },
   auditStore,
 });
 const app = createApp(
@@ -104,7 +103,15 @@ test("in single-user mode a connect code, an exchange and the bearer all resolve
   expect(((await me.json()) as { user: { id: string } }).user.id).toBe(
     "dev-local-user",
   );
-  expect((await call("/api/recorder/bots", { headers })).status).toBe(200);
+  // The one local person's recordings go into their own Learning space.
+  const learning = await call("/api/recorder/learning", { headers });
+  expect(learning.status).toBe(200);
+  expect(await learning.json()).toEqual({
+    learning: {
+      state: "assigned",
+      containerId: personalLearningContainerId("dev-local-user"),
+    },
+  });
 });
 
 /** A live connection stored the way the connection store stores one: a well-formed token and its SHA-256. */

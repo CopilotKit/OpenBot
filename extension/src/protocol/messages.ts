@@ -1,6 +1,5 @@
 import type {
   LearningSpaceState,
-  RecorderBot,
   RecorderMe,
 } from "@openbot/shared/recorder-api";
 import type { CapturedEvent } from "@openbot/shared/recorder-masking";
@@ -48,7 +47,6 @@ export type VoiceProblem =
 export type RecorderState = {
   phase: "idle" | "starting" | "recording" | "stopping";
   recordingId?: string;
-  botId?: string;
   title?: string;
   tabIds: number[];
   startedAt?: number;
@@ -63,10 +61,10 @@ export type RecorderState = {
    * or the end of the recording. The popup shows its card from this. */
   noticeOpen: boolean;
   capture: CaptureStatus;
-  /** The recording Stop ended last, and the Bot it was for: the popup says it went to Intelligence. */
-  lastStopped?: { recordingId: string; botId: string };
+  /** The recording Stop ended last: the popup says it went to Intelligence. */
+  lastStopped?: { recordingId: string };
   draining: number; // stopped recordings still sending
-  learning?: LearningSpaceState; // the picked Bot's Learning space at Record (Decision 10)
+  learning?: LearningSpaceState; // the person's own Learning space at Record (Decision 10)
   topUrls: Record<string, string>; // followed tab id -> its top frame's current URL
   /** While phase is "stopping": persisted so a restarted service worker finishes the stop (Task 9). */
   stopping?: { since: number };
@@ -138,7 +136,6 @@ export type BackgroundToContent =
 export type StreamSession = {
   recordingId: string;
   title: string;
-  botId: string;
   openbotUrl: string;
   token: string;
   trajectoryId: string;
@@ -236,10 +233,9 @@ type PageConnectDecide = z.infer<typeof pageConnectDecideSchema>;
 
 export type PageToBackground =
   | { type: "page.state" }
-  | { type: "page.bots" }
+  | { type: "page.learning" }
   | {
       type: "page.record";
-      botId: string;
       title: string;
       tabId: number;
       /** The narration's language: the page's own, else the browser's (the service worker's browser language when
@@ -273,7 +269,7 @@ export type PageStateResponse = {
 export type PageResponse =
   | PageStateResponse
   | { ok: true; pending: { origin: string; via: "web" | "desktop" } | null }
-  | { ok: true; bots: RecorderBot[] }
+  | { ok: true; learning: LearningSpaceState }
   | { ok: true; available: boolean }
   | { ok: true; offered: true }
   | { ok: true; offered: false; reason: string } // why OpenBot Desktop did not connect this browser, as a code (DesktopOffer)

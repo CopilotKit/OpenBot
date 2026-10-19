@@ -12,7 +12,7 @@ function BrowsersPage() {
   return (
     <PageShell
       title="Browsers"
-      description="Connect the OpenBot Recorder in this browser to teach a Bot by doing a task yourself."
+      description="Connect the OpenBot Recorder in this browser to teach your Bots by doing a task yourself. What you record goes into your own Learning space."
     >
       <ThisBrowser />
       <ConnectedBrowsers />

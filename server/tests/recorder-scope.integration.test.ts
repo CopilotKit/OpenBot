@@ -15,6 +15,10 @@ import { createDatabase } from "../src/db/client";
 import { agents, users } from "../src/db/schema/core";
 import { routines } from "../src/db/schema/coworker";
 import { demonstrations } from "../src/db/schema/demonstrations";
+import {
+  learningOpenSkills,
+  learningSkillSharing,
+} from "../src/db/schema/learning";
 import { skills } from "../src/db/schema/plugins";
 import { createDemonstrationRecorder } from "../src/demonstrations/recording";
 import { createDemonstrationStore } from "../src/demonstrations/store";
@@ -62,11 +66,11 @@ const recorder = createRecorderExtension({
   organizationAuth: undefined,
   roleRepository,
   peopleStore: { isRevoked: async () => false },
-  agentProfileStore,
-  pluginStore: { agentOwner: async () => owner },
-  actorFor: async (id) => ({ id, role: "user" }),
-  learningSettingsStore: { read: async () => ({}) as never },
-  snapshots: { getLearnedSkillsSnapshot: async () => ({}) as never },
+  personalSpaces: {
+    containerFor: (userId) => `space-of-${userId}`,
+    state: async () => ({ state: "unassigned", containerId: null }),
+    kick: () => {},
+  },
   auditStore,
 });
 
@@ -144,12 +148,19 @@ const call = (path: string, init: RequestInit & { json?: unknown } = {}) => {
 
 async function counts() {
   const of = async (
-    table: typeof demonstrations | typeof routines | typeof skills,
+    table:
+      | typeof demonstrations
+      | typeof routines
+      | typeof skills
+      | typeof learningSkillSharing
+      | typeof learningOpenSkills,
   ) => (await database.select({ n: count() }).from(table))[0]?.n ?? 0;
   return {
     demonstrations: await of(demonstrations),
     routines: await of(routines),
     skills: await of(skills),
+    sharing: await of(learningSkillSharing),
+    openSkills: await of(learningOpenSkills),
   };
 }
 
@@ -277,7 +288,7 @@ describe("a recorder bearer works only on the Recorder's own routes", () => {
   });
 
   test("no gate rule matches a recorder path", () => {
-    for (const path of ["/api/recorder/me", "/api/recorder/bots"]) {
+    for (const path of ["/api/recorder/me", "/api/recorder/learning"]) {
       expect(runtimeRun(path)).toBeNull();
       const matched = GATED_ROUTES.filter((rule) => rule.path.test(path));
       expect([path, matched.length]).toEqual([path, 0]);

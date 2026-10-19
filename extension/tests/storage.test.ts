@@ -24,7 +24,6 @@ describe("storage helpers", () => {
   test("a recording record of another shape (an old build's demonstration) is never handed out", async () => {
     const current = {
       recordingId: "rec-1",
-      botId: "bot-1",
       title: "T",
       openbotUrl: "https://openbot.example.test",
       userId: "u1",
@@ -35,7 +34,6 @@ describe("storage helpers", () => {
     };
     const old = {
       demonstrationId: "demo-1",
-      botId: "bot-1",
       title: "T",
       openbotUrl: "https://openbot.example.test",
       userId: "u1",
@@ -56,11 +54,11 @@ describe("storage helpers", () => {
   });
 
   test("local and session values round-trip and remove", async () => {
-    expect(await readLocal("lastBotId")).toBeUndefined();
-    await writeLocal("lastBotId", "bot_1");
-    expect(await readLocal("lastBotId")).toBe("bot_1");
-    await removeLocal("lastBotId");
-    expect(await readLocal("lastBotId")).toBeUndefined();
+    expect(await readLocal("installSecret")).toBeUndefined();
+    await writeLocal("installSecret", "s".repeat(64));
+    expect(await readLocal("installSecret")).toBe("s".repeat(64));
+    await removeLocal("installSecret");
+    expect(await readLocal("installSecret")).toBeUndefined();
 
     await writeSession("digests", ["a".repeat(64)]);
     expect(await readSession("digests")).toEqual(["a".repeat(64)]);

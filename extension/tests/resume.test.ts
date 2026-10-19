@@ -263,7 +263,6 @@ async function startRecording(tabId = 7): Promise<string> {
   fake.tabs.set(tabId, { id: tabId, url: DEAL } as chrome.tabs.Tab);
   const answer = await page({
     type: "page.record",
-    botId: "bot-1",
     title: "Update deal",
     tabId,
   });
@@ -286,7 +285,6 @@ async function recordThenStop() {
 const RECORDING = "rec-9";
 const seededRecord = (): DrainRecord => ({
   recordingId: RECORDING,
-  botId: "bot-1",
   title: "Update deal",
   openbotUrl: origin,
   userId: ada.id,
@@ -306,7 +304,6 @@ function seed(
   fake.storage.session.set("recorder", {
     ...IDLE_STATE,
     recordingId: RECORDING,
-    botId: "bot-1",
     title: "Update deal",
     tabIds: [7],
     topUrls: { "7": DEAL },
@@ -318,7 +315,6 @@ function seed(
   fake.storage.session.set("stream", {
     recordingId: RECORDING,
     title: "Update deal",
-    botId: "bot-1",
     openbotUrl: origin,
     token: "obr_one",
     trajectoryId: active.trajectoryIds[0] ?? "",
@@ -393,7 +389,7 @@ test("a service-worker restart during Stop finishes the stop with the document a
   const after = await state();
   expect(after.phase).toBe("idle");
   expect(after.stopping).toBeUndefined();
-  expect(after.lastStopped).toEqual({ recordingId: id, botId: "bot-1" });
+  expect(after.lastStopped).toEqual({ recordingId: id });
   expect(fake.storage.local.get("activeRecording")).toBeUndefined();
   expect(fake.storage.session.get("stream")).toBeUndefined();
   expect(drains().map((drain) => drain.recordingId)).toEqual([id]);
@@ -538,7 +534,7 @@ test("a service-worker restart just after Stop moved the recording into the drai
 
   const after = await state();
   expect(after.phase).toBe("idle");
-  expect(after.lastStopped).toEqual({ recordingId: RECORDING, botId: "bot-1" });
+  expect(after.lastStopped).toEqual({ recordingId: RECORDING });
   expect(drains()).toEqual([seededRecord()]);
   expect(sentToDocument("offscreen.recover", port)).toEqual([
     {

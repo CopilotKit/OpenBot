@@ -5,7 +5,6 @@ import type {
 import {
   joinedLearningContainer,
   type LearningSpaceState,
-  RECORDER_BOT_HEADER,
   RECORDER_SIGNED_OUT,
   TRAJECTORY_GATE_REFUSALS,
 } from "@openbot/shared/recorder-api";
@@ -14,8 +13,8 @@ import {
   DEPLOYMENT_INITIATOR,
   recordAuditEvent,
 } from "../audit";
+import type { PersonalLearningSpaces } from "../learning/personal-space";
 import type { RecorderRefusal, RecorderResolver } from "./guard";
-import type { LearningSpaceCheck } from "./learning-space";
 
 type TrajectoryRefusal = {
   reason:
@@ -23,8 +22,6 @@ type TrajectoryRefusal = {
     | "signed-out"
     | "forbidden"
     | "unavailable"
-    | "no-bot"
-    | "bot-forbidden"
     | "bound-elsewhere";
   trajectoryId: string;
   userId: string | null;
@@ -48,18 +45,8 @@ const SIGNED_OUT_MESSAGES: Record<
     "Your organization sign-in ended. Connect this browser to OpenBot again.",
 };
 
-/** The pass's refusals about the picked Bot and the trajectory's binding; the codes are the ones the Recorder already reads. */
+/** The pass's refusal about the trajectory's binding; the code is the one the Recorder already reads. */
 const BINDING_REFUSALS = {
-  noBot: {
-    status: 403,
-    code: "FORBIDDEN",
-    message: "Name the Bot this recording is for.",
-  },
-  botForbidden: {
-    status: 403,
-    code: "FORBIDDEN",
-    message: "You cannot record for this Bot.",
-  },
   boundElsewhere: {
     status: 404,
     code: "NOT_FOUND",
@@ -83,19 +70,14 @@ function refuse(status: number, body: Record<string, unknown>): Response {
 
 /**
  * The capture pass's gate, on the runtime's own resolved route (onBeforeHandler runs before handleTrajectoryConnect's
- * isValidTrajectoryId). Only a connected browser gets a pass: a valid Recorder bearer, a UUID trajectory id, and the
- * Bot it names in {@link RECORDER_BOT_HEADER} one the person may record for. The first pass binds the trajectory to
- * that person and Bot; a later pass for it must name the same pair, or it is not found.
+ * isValidTrajectoryId). Only a connected browser gets a pass: a valid Recorder bearer and a UUID trajectory id. No Bot
+ * is named: a recording belongs to the person, and goes into their own Learning space. The first pass binds the
+ * trajectory to that person; a later pass for it from anyone else is not found.
  */
 export function createTrajectoryConnectHook(deps: {
   resolveRecorder: RecorderResolver;
-  canRecordForBot(userId: string, botId: string): Promise<boolean>;
-  /** False when the trajectory is already bound to another person or Bot. */
-  bind(input: {
-    trajectoryId: string;
-    userId: string;
-    botId: string;
-  }): Promise<boolean>;
+  /** False when the trajectory is already bound to another person. */
+  bind(input: { trajectoryId: string; userId: string }): Promise<boolean>;
   /** Writes recorder.trajectory_refused, at most once per (person, trajectory, reason) a minute on this replica, and once per reason a minute for callers with no person. */
   audit: (refusal: TrajectoryRefusal) => void;
 }): NonNullable<CopilotRuntimeHooks["onBeforeHandler"]> {
@@ -156,14 +138,7 @@ export function createTrajectoryConnectHook(deps: {
     }
     const personId = resolution.actor.id;
 
-    const botId = request.headers.get(RECORDER_BOT_HEADER)?.trim();
-    if (!botId) {
-      return known("no-bot", personId, BINDING_REFUSALS.noBot);
-    }
-    if (!(await deps.canRecordForBot(personId, botId))) {
-      return known("bot-forbidden", personId, BINDING_REFUSALS.botForbidden);
-    }
-    if (!(await deps.bind({ trajectoryId, userId: personId, botId }))) {
+    if (!(await deps.bind({ trajectoryId, userId: personId }))) {
       known("bound-elsewhere", personId, BINDING_REFUSALS.boundElsewhere);
     }
   };
@@ -175,10 +150,10 @@ const SELECTOR_BUDGET_MS = 4_000;
 const CHECK_STOP_EARLY_MS = 100;
 
 /**
- * The ids a pass joins. Only a container Intelligence says is missing, or no container at all, joins none: an answer
- * Intelligence could not give (unverified, or Learning delivery off) still names the Bot's container, so one slow probe
- * does not change which space a trajectory joins from one pass to the next. Never `[null]`, which the runtime would
- * reject whole and join with no container.
+ * The ids a pass joins. Only a space that does not exist and could not be made, or no space at all, joins none: an
+ * answer Intelligence could not give (unverified, or Learning delivery off) still names the person's container, so one
+ * slow probe does not change which space a trajectory joins from one pass to the next. Never `[null]`, which the runtime
+ * would reject whole and join with no container.
  */
 function containerIdsFor(learning: LearningSpaceState): string[] | null {
   const containerId = joinedLearningContainer(learning);
@@ -186,16 +161,16 @@ function containerIdsFor(learning: LearningSpaceState): string[] | null {
 }
 
 /**
- * Chooses a trajectory's Learning space for the runtime: the space of the Bot its first pass bound it to, through the
- * same target and container check the Recorder's Bot list uses. Stable for a trajectory, because the binding never
- * changes its Bot. It answers inside `budgetMs` and as soon as `signal` aborts, and never throws, because the runtime
- * joins without any container when the selector throws or misses its deadline (`intelligence-platform/client.ts`
- * `ɵconnectTrajectory`).
+ * Chooses a trajectory's Learning space for the runtime: the own Learning space of the person its first pass bound it
+ * to, made on the spot when it does not exist yet and a credential here can make it (learning/personal-space.ts).
+ * Stable for a trajectory, because a person's space id never changes. It answers inside `budgetMs` and as soon as
+ * `signal` aborts, and never throws, because the runtime joins without any container when the selector throws or misses
+ * its deadline (`intelligence-platform/client.ts` `ɵconnectTrajectory`).
  */
 export function createTrajectoryLearningSelector(deps: {
-  /** The Bot this person's trajectory is bound to, or null. */
-  botFor(trajectoryId: string, userId: string): Promise<string | null>;
-  learningSpace: LearningSpaceCheck;
+  /** Whether this person's capture pass bound this trajectory. */
+  isBoundTo(trajectoryId: string, userId: string): Promise<boolean>;
+  personalSpace: Pick<PersonalLearningSpaces, "state">;
   /** Default 4_000: answer inside the runtime's 5 s deadline. */
   budgetMs?: number;
 }): GetTrajectoryLearningContainerIds {
@@ -238,9 +213,9 @@ export function createTrajectoryLearningSelector(deps: {
       else signal?.addEventListener("abort", onAbort, { once: true });
 
       void (async () => {
-        let botId: string | null;
+        let bound: boolean;
         try {
-          botId = await deps.botFor(trajectoryId, user.id);
+          bound = await deps.isBoundTo(trajectoryId, user.id);
         } catch (error) {
           failed(
             "recorder-trajectory-learning-binding-failed",
@@ -250,13 +225,15 @@ export function createTrajectoryLearningSelector(deps: {
           answer(null);
           return;
         }
-        if (!botId || answered) {
+        if (!bound || answered) {
           answer(null);
           return;
         }
         try {
           answer(
-            containerIdsFor(await deps.learningSpace(botId, stopCheck.signal)),
+            containerIdsFor(
+              await deps.personalSpace.state(user.id, stopCheck.signal),
+            ),
           );
         } catch (error) {
           failed(

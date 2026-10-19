@@ -1,12 +1,8 @@
 import type {
-  CopilotKitIntelligence,
   CopilotRuntimeHooks,
   GetTrajectoryLearningContainerIds,
 } from "@copilotkit/runtime/v2";
-import type { LearningSettings } from "@openbot/shared/learning";
 import { eq } from "drizzle-orm";
-import type { AgentProfileStore } from "../agents/profile-store";
-import type { AgentActor } from "../agents/profile-types";
 import type { AuditStore } from "../audit";
 import type { AuthenticatedActor, RoleRepository } from "../auth/guards";
 import { ORGANIZATION_SESSION_COOKIE } from "../auth/organization";
@@ -14,8 +10,8 @@ import type { DeploymentConfig } from "../config";
 import { decryptSecret, encryptSecret } from "../credentials";
 import type { Database } from "../db/client";
 import { users } from "../db/schema";
+import type { PersonalLearningSpaces } from "../learning/personal-space";
 import type { PeopleStore } from "../people/store";
-import type { PluginStore } from "../plugins/store";
 import { createRecorderConnectionStore } from "./connections";
 import { allowedExtensionIds } from "./extension-origins";
 import {
@@ -24,7 +20,6 @@ import {
   type RecorderRefusalSink,
   type RecorderResolver,
 } from "./guard";
-import { createLearningSpaceCheck } from "./learning-space";
 import { createRecorderRefusalAudit } from "./refusal-audit";
 import type { RecorderRouteDeps } from "./routes";
 import { createTrajectoryBindingStore } from "./trajectory-bindings";
@@ -42,6 +37,9 @@ export type RecorderExtensionDeps = Omit<
   resolve: RecorderResolver;
   onRefused: RecorderRefusalSink;
 };
+
+/** How long the Recorder's popup waits for the person's Learning space: the capture pass's own budget. */
+const LEARNING_SPACE_WAIT_MS = 4_000;
 
 /** The value of one cookie in a Cookie header, or undefined. */
 function cookieValue(header: string, name: string): string | undefined {
@@ -70,16 +68,10 @@ export function createRecorderExtension(deps: {
     | undefined;
   roleRepository: RoleRepository;
   peopleStore: Pick<PeopleStore, "isRevoked">;
-  agentProfileStore: AgentProfileStore;
-  pluginStore: Pick<PluginStore, "agentOwner">;
-  actorFor(userId: string): Promise<AgentActor>;
-  learningSettingsStore: { read(): Promise<LearningSettings> };
-  /** The client the existing Learning container probe uses. */
-  snapshots: Pick<CopilotKitIntelligence, "getLearnedSkillsSnapshot">;
+  /** Each person's own Learning space, which every recording they make joins. */
+  personalSpaces: PersonalLearningSpaces;
   auditStore: AuditStore;
 }): RecorderExtensionDeps & {
-  /** Also the demonstration recorder's `ownsBot`, so there is one copy. */
-  canRecordForBot(ownerUserId: string, botId: string): Promise<boolean>;
   /** The capture pass, for `mountCopilotRuntime`: its gate (an onBeforeHandler hook) and its Learning space selector. */
   trajectoryCapture: {
     gate: NonNullable<CopilotRuntimeHooks["onBeforeHandler"]>;
@@ -89,13 +81,7 @@ export function createRecorderExtension(deps: {
   const { config, database, organizationAuth } = deps;
   const connections = createRecorderConnectionStore(database);
   const trajectoryBindings = createTrajectoryBindingStore(database);
-
-  const canRecordForBot = async (ownerUserId: string, botId: string) =>
-    (await deps.pluginStore.agentOwner(botId)) === ownerUserId ||
-    (await deps.agentProfileStore.get(
-      await deps.actorFor(ownerUserId),
-      botId,
-    )) !== null;
+  const { personalSpaces } = deps;
 
   const mode: RecorderMode = config.singleUser
     ? { kind: "single-user" }
@@ -137,35 +123,17 @@ export function createRecorderExtension(deps: {
         }
       : async () => null;
 
-  const learningSpace = createLearningSpaceCheck({
-    readSettings: () => deps.learningSettingsStore.read(),
-    snapshots: deps.snapshots,
-    probeTimeoutMs: 3_000,
-  });
-
-  // The Learning checks run at once, not one after another: each is bounded by its 3 s probe and cached per container for 60 s.
-  const listBots: RecorderExtensionDeps["listBots"] = async (actor) => {
-    const profiles = (
-      await deps.agentProfileStore.list(await deps.actorFor(actor.id))
-    ).filter((bot) => !bot.hidden && bot.deletedAt === null);
-    const recordable = await Promise.all(
-      profiles.map(async (bot) =>
-        (await canRecordForBot(actor.id, bot.id))
-          ? {
-              id: bot.id,
-              name: bot.name,
-              learning: await learningSpace(bot.id),
-            }
-          : null,
-      ),
-    );
-    return recordable.filter((bot) => bot !== null);
-  };
-
   return {
     connections,
     allowedExtensionIds: () => allowedExtensionIds(config),
-    listBots,
+    // Bounded like a capture pass, so the popup is not held by a slow Intelligence; a creation it started goes on.
+    learningSpace: (actor) =>
+      personalSpaces.state(
+        actor.id,
+        AbortSignal.timeout(LEARNING_SPACE_WAIT_MS),
+      ),
+    // Made when the browser connects, so a space only a slow credential can make is there before the first recording.
+    onConnected: (userId) => personalSpaces.kick(userId),
     user: async (userId) => {
       const row = await userRow(userId);
       return row
@@ -175,17 +143,15 @@ export function createRecorderExtension(deps: {
     sealOrganizationSession,
     resolve,
     onRefused: createRecorderRefusalAudit(deps.auditStore),
-    canRecordForBot,
     trajectoryCapture: {
       gate: createTrajectoryConnectHook({
         resolveRecorder: resolve,
-        canRecordForBot,
         bind: trajectoryBindings.bind,
         audit: createTrajectoryRefusalAudit(deps.auditStore),
       }),
       selectLearningContainers: createTrajectoryLearningSelector({
-        botFor: trajectoryBindings.botFor,
-        learningSpace,
+        isBoundTo: trajectoryBindings.isBoundTo,
+        personalSpace: personalSpaces,
       }),
     },
   };

@@ -2,7 +2,7 @@ import {
   connectCodeRequestSchema,
   type ExchangeResponse,
   exchangeRequestSchema,
-  type RecorderBot,
+  type LearningSpaceState,
   type RecorderConnectionsResponse,
   type RecorderMe,
   type RecorderUser,
@@ -24,7 +24,10 @@ export type RecorderRouteDeps = {
   requireUser: MiddlewareHandler<{ Variables: AppVariables }>;
   requireRecorder: MiddlewareHandler<{ Variables: RecorderVariables }>;
   allowedExtensionIds: () => string[];
-  listBots: (actor: AuthenticatedActor) => Promise<RecorderBot[]>;
+  /** Whether this person's recordings land in their own Learning space (made on first need). Never throws. */
+  learningSpace: (actor: AuthenticatedActor) => Promise<LearningSpaceState>;
+  /** A browser connected as this person: make their Learning space in the background. Never throws or waits. */
+  onConnected?: (userId: string) => void;
   /** The name falls back to the email, never empty. */
   user: (userId: string) => Promise<RecorderUser | null>;
   /** Null outside organization mode. */
@@ -157,6 +160,17 @@ export function createRecorderRoutes(deps: RecorderRouteDeps) {
         label: made.connection.label,
       },
     });
+    try {
+      deps.onConnected?.(made.userId);
+    } catch (error) {
+      // Making the person's Learning space is a nicety here: the capture pass makes it too. Never fatal to connecting.
+      console.error(
+        JSON.stringify({
+          type: "recorder-learning-space-kick-failed",
+          error: String(error),
+        }),
+      );
+    }
     if (made.replaced) {
       await audit({
         eventType: "recorder.revoked",
@@ -241,8 +255,8 @@ export function createRecorderRoutes(deps: RecorderRouteDeps) {
     return context.json(answer);
   });
 
-  routes.get("/bots", deps.requireRecorder, async (context) =>
-    context.json({ bots: await deps.listBots(context.var.actor) }),
+  routes.get("/learning", deps.requireRecorder, async (context) =>
+    context.json({ learning: await deps.learningSpace(context.var.actor) }),
   );
 
   return routes;

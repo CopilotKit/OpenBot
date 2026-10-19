@@ -1,6 +1,5 @@
 import {
   RECORDER_AUTHORITY_UNAVAILABLE,
-  RECORDER_BOT_HEADER,
   RECORDER_SIGNED_OUT,
   recorderPaths,
   type TrajectoryGrant,
@@ -35,7 +34,7 @@ export const PASS_HINTS: Record<string, string> = {
   FORBIDDEN:
     "Learning capture is off: your OpenBot account has no role that may record.",
   NOT_FOUND:
-    "Learning capture is off: OpenBot does not offer you this recording's Bot any more.",
+    "Learning capture is off: OpenBot says this recording belongs to another person.",
   IDENTITY_REQUIRED:
     "Learning capture is paused: OpenBot could not tell Intelligence who you are.",
   INTELLIGENCE_RUNTIME_REQUIRED:
@@ -53,7 +52,7 @@ export const PASS_HINTS: Record<string, string> = {
   TRAJECTORY_APP_USER_CONFLICT:
     "Learning capture is off: Intelligence already holds this recording for someone else.",
   LEARNING_CONTAINER_NOT_FOUND:
-    "Learning capture is paused: Intelligence could not find this Bot's Learning space.",
+    "Learning capture is paused: Intelligence could not find your Learning space.",
   UNAUTHORIZED: "Learning capture is paused: OpenBot refused the capture pass.",
   GATEWAY_NOT_ALLOWED:
     "Learning capture is off: the capture pass pointed at an Intelligence address your organization does not allow.",
@@ -190,11 +189,11 @@ function isGrant(value: unknown): value is TrajectoryGrant {
   );
 }
 
-/** Where a pass is asked for: the connected OpenBot, the recorder bearer, and the recording's Bot. */
-type GrantTarget = { openbotUrl: string; token: string; botId: string };
+/** Where a pass is asked for: the connected OpenBot and the recorder bearer. No Bot: the recording is the person's. */
+type GrantTarget = { openbotUrl: string; token: string };
 
-/** Asks the runtime's `trajectory/connect` for a one-time capture pass for the recording's Bot; throws a GrantError
- * carrying the row's verdict. */
+/** Asks the runtime's `trajectory/connect` for a one-time capture pass, which joins the trajectory to the person's own
+ * Learning space; throws a GrantError carrying the row's verdict. */
 export async function fetchGrant(
   target: GrantTarget,
   trajectoryId: string,
@@ -209,7 +208,6 @@ export async function fetchGrant(
         headers: {
           Accept: "application/json",
           "Content-Type": "application/json",
-          [RECORDER_BOT_HEADER]: target.botId,
         },
         body: "{}",
       },

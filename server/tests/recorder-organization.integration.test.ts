@@ -39,7 +39,6 @@ const ORIGIN = `chrome-extension://${RECORDER_EXTENSION_ID}`;
 const APP = "http://127.0.0.1:3010";
 const HOST_TOKEN = "recorder-organization-host-token";
 const SESSION_COOKIE = "better-auth.session_token=fixture-session";
-const BOT = "mine";
 
 type Answer = () => Response | Promise<Response>;
 const signedIn: Answer = () => Response.json({ user: person });
@@ -80,7 +79,6 @@ const auditStore = {
     audits.push(event);
   },
 };
-const bot = { id: BOT, name: "Bot", hidden: false, deletedAt: null };
 const roleRepository = { rolesForUser: async () => ["user" as const] };
 
 let app: ReturnType<typeof createApp>;
@@ -159,14 +157,11 @@ beforeAll(() => {
     organizationAuth,
     roleRepository,
     peopleStore: { isRevoked: async () => false },
-    agentProfileStore: {
-      list: async () => [bot],
-      get: async (_actor: unknown, id: string) => (id === BOT ? bot : null),
-    } as never,
-    pluginStore: { agentOwner: async () => null },
-    actorFor: async (id) => ({ id, role: "user" }),
-    learningSettingsStore: { read: async () => ({}) as never },
-    snapshots: { getLearnedSkillsSnapshot: async () => ({}) as never },
+    personalSpaces: {
+      containerFor: (userId) => `space-of-${userId}`,
+      state: async () => ({ state: "unassigned", containerId: null }),
+      kick: () => {},
+    },
     auditStore,
   });
   app = createApp(

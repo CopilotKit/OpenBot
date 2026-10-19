@@ -57,7 +57,7 @@ describe("classifyGrantError, one assertion per pass row of the table", () => {
     );
   });
 
-  test("row 4: OpenBot's not found is parked, with a sentence about the recording's Bot", () => {
+  test("row 4: OpenBot's not found is parked: the recording belongs to another person", () => {
     const b = body(
       404,
       "NOT_FOUND",
@@ -65,7 +65,7 @@ describe("classifyGrantError, one assertion per pass row of the table", () => {
     );
     const v = park(classifyGrantError(b.status, b.body));
     expect(v.hint).toBe(
-      "Learning capture is off: OpenBot does not offer you this recording's Bot any more.",
+      "Learning capture is off: OpenBot says this recording belongs to another person.",
     );
   });
 
@@ -202,7 +202,7 @@ describe("classifyGrantError, one assertion per pass row of the table", () => {
       classifyGrantError(404, { code: "LEARNING_CONTAINER_NOT_FOUND" }),
     );
     expect(v.hint).toBe(
-      "Learning capture is paused: Intelligence could not find this Bot's Learning space.",
+      "Learning capture is paused: Intelligence could not find your Learning space.",
     );
   });
 
@@ -342,7 +342,7 @@ describe("fetchGrant", () => {
   });
   afterAll(() => server.stop(true));
 
-  const target = () => ({ openbotUrl, token: "tok", botId: "bot-7" });
+  const target = () => ({ openbotUrl, token: "tok" });
   const id = "0b8b3c34-7c0e-4f7b-8f0a-9d7e4a2f1c11";
 
   async function failure(): Promise<GrantVerdict> {
@@ -355,7 +355,7 @@ describe("fetchGrant", () => {
     throw new Error("fetchGrant did not fail");
   }
 
-  test("posts {} with the bearer and the picked Bot, and returns the grant", async () => {
+  test("posts {} with the bearer and no Bot, and returns the grant", async () => {
     const grant = {
       joinToken: "j",
       realtime: { clientUrl: "wss://i.example/client", topic: "trajectory:1" },
@@ -364,7 +364,7 @@ describe("fetchGrant", () => {
     expect(await fetchGrant(target(), id)).toEqual(grant);
     expect(seen).toEqual({
       auth: "Bearer tok",
-      bot: "bot-7",
+      bot: null,
       body: "{}",
       path: `/api/copilotkit/trajectory/${id}/connect`,
     });
@@ -418,7 +418,7 @@ describe("fetchGrant", () => {
     const url = `http://127.0.0.1:${dead.port}`;
     dead.stop(true);
     try {
-      await fetchGrant({ openbotUrl: url, token: "t", botId: "bot-7" }, id);
+      await fetchGrant({ openbotUrl: url, token: "t" }, id);
       throw new Error("did not fail");
     } catch (error) {
       expect(error).toBeInstanceOf(GrantError);

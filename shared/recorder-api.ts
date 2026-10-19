@@ -8,9 +8,6 @@ export const RECORDER_SIGNED_OUT = "RECORDER_SIGNED_OUT";
 /** The `code` on the 503 the recorder guard and the trajectory gate answer when the organization's sign-in server could not
  * answer for now (Decision 19): transient, never a sign-out; the caller retries. */
 export const RECORDER_AUTHORITY_UNAVAILABLE = "RECORDER_AUTHORITY_UNAVAILABLE";
-/** The header the Recorder names the Bot the person picked in on every capture pass request, beside its bearer: OpenBot
- * binds the trajectory to that Bot and puts it into that Bot's Learning space. */
-export const RECORDER_BOT_HEADER = "x-openbot-recorder-bot";
 /** The refusals OpenBot's trajectory gate shares with the Recorder's pass table (rows 1, 3 and 4a). */
 export const TRAJECTORY_GATE_REFUSALS = {
   invalidId: {
@@ -54,9 +51,10 @@ export type ExchangeResponse = {
   user: RecorderUser;
 };
 export type RecorderMe = { user: RecorderUser; connectionId: string };
-/** Decision 10: assigned, unassigned (no space for the Bot), missing (Intelligence says the container does not exist),
- * learning-off (Intelligence's Learning delivery is off, unlicensed or unavailable, so existence was not checked),
- * unverified (Intelligence could not be asked), unjoined (the runtime's 5 s deadline passed and it joined no space). */
+/** Decision 10, for the person's own Learning space: assigned (it exists), unassigned (Automatic Learning is off, so
+ * there is no space), missing (it does not exist and could not be made), learning-off (Intelligence's Learning delivery
+ * is off, unlicensed or unavailable, so existence was not checked), unverified (Intelligence could not be asked, or the
+ * space was still being made), unjoined (the runtime's 5 s deadline passed and it joined no space). */
 export const LEARNING_SPACE_STATES = [
   "assigned",
   "unassigned",
@@ -65,16 +63,16 @@ export const LEARNING_SPACE_STATES = [
   "unverified",
   "unjoined",
 ] as const;
-/** Whether a Bot's recordings land in a Learning space (Decision 10, Task 15). */
+/** Whether the person's recordings land in their own Learning space (Decision 10, Task 15). */
 export type LearningSpaceState = {
   state: (typeof LEARNING_SPACE_STATES)[number];
   containerId: string | null;
 };
 /**
- * The Learning container a capture pass joins for this answer, or null when it joins none. Only a Bot with no space, or
- * a container Intelligence says does not exist, joins none: an answer Intelligence could not give (unverified, or
- * Learning delivery off) still names the Bot's container, so one failed check does not change where a trajectory
- * lands. The server's selector joins by this, and the Recorder warns that Learning will not see a recording by it.
+ * The Learning container a capture pass joins for this answer, or null when it joins none. Only no space at all, or one
+ * that does not exist and could not be made, joins none: an answer Intelligence could not give (unverified, or Learning
+ * delivery off) still names the person's container, so one failed check does not change where a trajectory lands. The
+ * server's selector joins by this, and the Recorder warns that Learning will not see a recording by it.
  */
 export function joinedLearningContainer(
   learning: LearningSpaceState,
@@ -87,11 +85,8 @@ export function joinedLearningContainer(
     ? learning.containerId
     : null;
 }
-export type RecorderBot = {
-  id: string;
-  name: string;
-  learning: LearningSpaceState;
-};
+/** `GET /api/recorder/learning`: the person's own Learning space, which every recording they make joins. */
+export type RecorderLearningResponse = { learning: LearningSpaceState };
 export type TrajectoryGrant = {
   joinToken: string;
   realtime: { clientUrl: string; topic: string };
@@ -121,7 +116,7 @@ export const recorderPaths = {
     `/api/recorder/connections/${id(connectionId)}`,
   currentConnection: "/api/recorder/connections/current",
   me: "/api/recorder/me",
-  bots: "/api/recorder/bots",
+  learning: "/api/recorder/learning",
   trajectoryConnect: (t: string) =>
     `/api/copilotkit/trajectory/${id(t)}/connect`,
 } as const;

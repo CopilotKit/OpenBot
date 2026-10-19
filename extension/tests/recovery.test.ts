@@ -193,7 +193,6 @@ async function startRecording(tabId = 7): Promise<string> {
   fake.tabs.set(tabId, { id: tabId, url: DEAL } as chrome.tabs.Tab);
   const answer = await page({
     type: "page.record",
-    botId: "bot-1",
     title: "Update deal",
     tabId,
   });
@@ -215,7 +214,6 @@ const storedDrain = (
   extra: Partial<DrainRecord> = {},
 ): DrainRecord => ({
   recordingId: id,
-  botId: "bot-1",
   title: `${person.name}'s`,
   openbotUrl: origin,
   userId: person.id,
@@ -265,7 +263,7 @@ test("a browser restart mid-recording hands the recording to a new document, whi
     at: now,
   });
   expect(drains()).toEqual([
-    expect.objectContaining({ recordingId: id, botId: "bot-1", userId: "p1" }),
+    expect.objectContaining({ recordingId: id, userId: "p1" }),
   ]);
   expect(drains()[0]?.kept).toBeUndefined();
   // The document recovers it: the streamer reads its outbox and queues the interrupted outcome itself.

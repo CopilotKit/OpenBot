@@ -89,10 +89,9 @@ test("recording messages from the extension's own pages go to the recording hand
   installRouter(handlers);
   const messages: PageToBackground[] = [
     { type: "page.state" },
-    { type: "page.bots" },
+    { type: "page.learning" },
     {
       type: "page.record",
-      botId: "b",
       title: "t",
       tabId: 1,
     },
@@ -461,7 +460,6 @@ test("a recorder.page-network event the fallback accepts reaches the network cap
     });
     fake.storage.local.set("activeRecording", {
       recordingId,
-      botId: "bot-1",
       title: "Update deal",
       openbotUrl: "http://127.0.0.1:9",
       userId: "p1",
@@ -473,7 +471,6 @@ test("a recorder.page-network event the fallback accepts reaches the network cap
       ...IDLE_STATE,
       phase: "recording",
       recordingId,
-      botId: "bot-1",
       title: "Update deal",
       tabIds: [7],
       topUrls: { "7": "https://crm.example.test/" },
@@ -487,7 +484,6 @@ test("a recorder.page-network event the fallback accepts reaches the network cap
     fake.storage.session.set("stream", {
       recordingId,
       title: "Update deal",
-      botId: "bot-1",
       openbotUrl: "http://127.0.0.1:9",
       token: "obr_one",
       trajectoryId,

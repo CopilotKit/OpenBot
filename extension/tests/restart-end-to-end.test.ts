@@ -48,7 +48,11 @@ async function until(check: () => boolean | Promise<boolean>, label: string) {
 //
 // One server: OpenBot's capture pass route beside the gateway it hands out.
 
-type Pass = { trajectoryId: string; authorization: string | null; bot: string };
+type Pass = {
+  trajectoryId: string;
+  authorization: string | null;
+  bot: string | null;
+};
 let gateway: FakeGateway;
 let passes: Pass[] = [];
 /** The answer OpenBot gives a pass while set; a grant when null. */
@@ -78,7 +82,7 @@ function route(request: Request): Response | null {
   passes.push({
     trajectoryId,
     authorization: request.headers.get("authorization"),
-    bot: request.headers.get("x-openbot-recorder-bot") ?? "",
+    bot: request.headers.get("x-openbot-recorder-bot"),
   });
   if (passAnswer) return passAnswer();
   return Response.json({
@@ -202,7 +206,6 @@ async function recordTwoClicks(): Promise<string> {
   expect(
     await page({
       type: "page.record",
-      botId: "bot-1",
       title: "Update deal",
       tabId: 7,
     }),
@@ -291,7 +294,8 @@ test("a browser restart mid-recording: a new document sends what the old one kep
   expect(passes.at(-1)).toEqual({
     trajectoryId,
     authorization: "Bearer obr_one",
-    bot: "bot-1",
+    // No Bot is named: the recording is the person's, and joins their own Learning space.
+    bot: null,
   });
   expect(await (await openOutbox(databaseName)).count(trajectoryId)).toBe(0);
   await until(() => !fake.offscreen.open, "the document closed");

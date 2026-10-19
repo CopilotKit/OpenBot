@@ -1,7 +1,4 @@
-import {
-  joinedLearningContainer,
-  type RecorderBot,
-} from "@openbot/shared/recorder-api";
+import { joinedLearningContainer } from "@openbot/shared/recorder-api";
 import {
   IconCircleCheck,
   IconCloudUpload,
@@ -187,21 +184,17 @@ function keptSentence(kept: NonNullable<RecorderState["kept"]>): string {
     : `${counts} ${verb} kept in this browser: ${stripCaptureStatus(kept.reason)}`;
 }
 
-/** Where the stopped recording went in Intelligence: the picked Bot's Learning space, or why Learning will not see it. */
-function destinationLines(state: RecorderState, bots: RecorderBot[]): string[] {
+/** Where the stopped recording went in Intelligence: the person's own Learning space, or why Learning will not see it. */
+function destinationLines(state: RecorderState): string[] {
   const { lastStopped, learning } = state;
   if (!lastStopped) return [];
-  const bot = bots.find((candidate) => candidate.id === lastStopped.botId);
-  // Into the Bot's space whenever the capture pass joined it, checked or not.
+  // Into the person's space whenever the capture pass joined it, checked or not.
   const space = !learning
     ? null
     : joinedLearningContainer(learning) !== null
-      ? "It goes into this Bot's Learning space."
+      ? "It goes into your Learning space, and every Bot you use learns from it."
       : learningSentence(learning);
-  return [
-    ...(bot ? [`Recorded for ${bot.name}.`] : []),
-    ...(space ? [space] : []),
-  ];
+  return space ? [space] : [];
 }
 
 /** Which of the after-Stop rows show: sent (Intelligence has all of the last stopped recording) or still sending. */
@@ -233,13 +226,10 @@ export function afterStopLearningSentence(
 export function AfterStop({
   state,
   connected,
-  bots = [],
   onDiscard,
 }: {
   state: RecorderState;
   connected: boolean;
-  /** The connected person's Bots, to name the one the stopped recording was for. */
-  bots?: RecorderBot[];
   onDiscard: () => void;
 }) {
   const [asking, setAsking] = useState(false);
@@ -249,7 +239,7 @@ export function AfterStop({
   const { keptRecordings, streaming, sent } = afterStopRows(state, connected);
   const retrying =
     connected && keptRecordings > (kept?.waitingFor?.recordings ?? 0);
-  const lines = destinationLines(state, bots);
+  const lines = destinationLines(state);
   if (!kept && !sent && !streaming) return null;
   return (
     <div className="mb-6">

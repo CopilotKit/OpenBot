@@ -36,7 +36,10 @@ const transcriber = Bun.serve({
 
 type Harness = ReturnType<typeof build>;
 
-function build(extra: Record<string, string | undefined> = {}) {
+function build(
+  extra: Record<string, string | undefined> = {},
+  options: { kickThrows?: boolean } = {},
+) {
   const config = loadConfig(
     testEnvironment({
       TRANSCRIPTION_PROVIDER: "openai-compatible",
@@ -52,27 +55,25 @@ function build(extra: Record<string, string | undefined> = {}) {
     },
   };
   const roleRepository = { rolesForUser: async () => ["user" as const] };
-  const bot = (id: string, hidden = false) => ({
-    id,
-    name: `Bot ${id}`,
-    hidden,
-    deletedAt: null,
-  });
+  /** The person's own Learning space, faked: what the Recorder is told, and whose browsers connected. */
+  const kicked: string[] = [];
   const recorder = createRecorderExtension({
     config,
     database,
     organizationAuth: undefined,
     roleRepository,
     peopleStore: { isRevoked: async () => false },
-    agentProfileStore: {
-      list: async () => [bot("mine"), bot("hidden", true), bot("foreign")],
-      get: async (_actor: unknown, id: string) =>
-        id === "mine" ? bot("mine") : null,
-    } as never,
-    pluginStore: { agentOwner: async () => null },
-    actorFor: async (id) => ({ id, role: "user" }),
-    learningSettingsStore: { read: async () => ({}) as never },
-    snapshots: { getLearnedSkillsSnapshot: async () => ({}) as never },
+    personalSpaces: {
+      containerFor: (userId) => `space-of-${userId}`,
+      state: async (userId) => ({
+        state: "assigned",
+        containerId: `space-of-${userId}`,
+      }),
+      kick: (userId) => {
+        kicked.push(userId);
+        if (options.kickThrows) throw new Error("credential store down");
+      },
+    },
     auditStore,
   });
   const app = createApp(
@@ -99,7 +100,7 @@ function build(extra: Record<string, string | undefined> = {}) {
     ...(Array.from({ length: 21 }) as never[]),
     { recorder },
   );
-  return { app, audits, config };
+  return { app, audits, config, kicked };
 }
 
 const call = (
@@ -249,6 +250,13 @@ describe("connecting", () => {
     expect(again.status).toBe(400);
   });
 
+  test("connecting still succeeds when starting the person's Learning space fails", async () => {
+    const h = build({}, { kickThrows: true });
+    const made = await connect(h, "7".repeat(32));
+    expect(made.token).toMatch(/^obr_/);
+    expect(h.kicked).toEqual([owner]);
+  });
+
   test("the same copy connecting again replaces its older connection", async () => {
     const h = build();
     const first = await connect(h, "d".repeat(32));
@@ -301,9 +309,11 @@ describe("connecting", () => {
 });
 
 describe("using the bearer", () => {
-  test("me, bots and the connections list", async () => {
+  test("me, the person's own Learning space and the connections list", async () => {
     const h = build();
     const made = await connect(h, "1".repeat(32));
+    // Connecting the browser starts making the person's space, so it is there before the first recording.
+    expect(h.kicked).toEqual([owner]);
     const me = await call(h, "/api/recorder/me", {
       headers: bearer(made.token),
     });
@@ -313,24 +323,25 @@ describe("using the bearer", () => {
       connectionId: made.connection.id,
     });
 
-    const bots = (await (
-      await call(h, "/api/recorder/bots", { headers: bearer(made.token) })
-    ).json()) as {
-      bots: {
-        id: string;
-        learning: { state: string; containerId: string | null };
-      }[];
+    const learning = await call(h, "/api/recorder/learning", {
+      headers: bearer(made.token),
+    });
+    expect(learning.status).toBe(200);
+    const answer = (await learning.json()) as {
+      learning: { state: string; containerId: string | null };
     };
-    expect(bots.bots.map((b) => b.id)).toEqual(["mine"]);
-    for (const bot of bots.bots) {
-      expect(LEARNING_SPACE_STATES as readonly string[]).toContain(
-        bot.learning.state,
-      );
-      expect(
-        bot.learning.containerId === null ||
-          typeof bot.learning.containerId === "string",
-      ).toBe(true);
-    }
+    expect(LEARNING_SPACE_STATES as readonly string[]).toContain(
+      answer.learning.state,
+    );
+    expect(answer.learning).toEqual({
+      state: "assigned",
+      containerId: `space-of-${owner}`,
+    });
+    // There is no Bot list any more: a recording is the person's, not a Bot's.
+    expect(
+      (await call(h, "/api/recorder/bots", { headers: bearer(made.token) }))
+        .status,
+    ).toBe(404);
 
     const listed = (await (
       await call(h, "/api/recorder/connections", { headers: COOKIE })

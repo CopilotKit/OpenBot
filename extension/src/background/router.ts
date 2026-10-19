@@ -40,7 +40,7 @@ const CONNECTION_TYPES = new Set<string>([
 ]);
 const RECORDING_TYPES = new Set<string>([
   "page.state",
-  "page.bots",
+  "page.learning",
   "page.record",
   "page.stop",
   "page.restart",

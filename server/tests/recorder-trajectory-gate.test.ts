@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
 import {
-  RECORDER_BOT_HEADER,
   RECORDER_SIGNED_OUT,
   TRAJECTORY_GATE_REFUSALS,
 } from "@openbot/shared/recorder-api";
@@ -37,36 +36,28 @@ const actor: RecorderActor = {
 function setup(
   options: {
     bearer?: RecorderResolution;
-    /** Who may record for which Bot, as `${person}:${bot}`. */
-    recordable?: string[];
-    /** Existing bindings: trajectory id to `${person}:${bot}`. */
+    /** Existing bindings: trajectory id to person. */
     bound?: Record<string, string>;
   } = {},
 ) {
   const bearer = "bearer" in options ? options.bearer : { actor };
-  const recordable = new Set(options.recordable ?? [`${PERSON}:${BOT}`]);
   const bound = new Map(Object.entries(options.bound ?? {}));
   const asked: string[] = [];
   const refusals: Refusal[] = [];
   const resolveRecorder: RecorderResolver = async () => bearer ?? null;
   const hook = createTrajectoryConnectHook({
     resolveRecorder,
-    canRecordForBot: async (userId, botId) => {
-      asked.push(`may ${userId}:${botId}`);
-      return recordable.has(`${userId}:${botId}`);
-    },
-    bind: async ({ trajectoryId, userId, botId }) => {
-      asked.push(`bind ${trajectoryId}:${userId}:${botId}`);
-      const pair = `${userId}:${botId}`;
+    bind: async ({ trajectoryId, userId }) => {
+      asked.push(`bind ${trajectoryId}:${userId}`);
       const existing = bound.get(trajectoryId);
-      if (existing === undefined) bound.set(trajectoryId, pair);
-      return existing === undefined || existing === pair;
+      if (existing === undefined) bound.set(trajectoryId, userId);
+      return existing === undefined || existing === userId;
     },
     audit: (refusal) => refusals.push(refusal),
   });
   const run = async (
     route: Parameters<typeof hook>[0]["route"],
-    headers: Record<string, string> = { [RECORDER_BOT_HEADER]: BOT },
+    headers: Record<string, string> = {},
   ) => {
     const request = new Request("http://127.0.0.1/api/copilotkit/x", {
       method: "POST",
@@ -180,7 +171,6 @@ describe("createTrajectoryConnectHook", () => {
     const { connect, asked, refusals } = setup({ bearer: null });
 
     const response = await connect(TRAJECTORY, {
-      [RECORDER_BOT_HEADER]: BOT,
       cookie: "better-auth.session_token=signed-in",
     });
 
@@ -195,60 +185,30 @@ describe("createTrajectoryConnectHook", () => {
     ]);
   });
 
-  test("answers 403 FORBIDDEN when the request names no Bot", async () => {
-    for (const headers of [{}, { [RECORDER_BOT_HEADER]: "   " }]) {
-      const { connect, asked, refusals, bound } = setup();
-
-      const response = await connect(TRAJECTORY, headers);
-
-      expect(response?.status).toBe(403);
-      expect(response?.headers.get("cache-control")).toBe("no-store");
-      expect(await bodyOf(response)).toEqual({
-        code: "FORBIDDEN",
-        message: "Name the Bot this recording is for.",
-      });
-      expect(asked).toEqual([]);
-      expect(bound.size).toBe(0);
-      expect(refusals).toEqual([
-        { reason: "no-bot", trajectoryId: TRAJECTORY, userId: PERSON },
-      ]);
-    }
-  });
-
-  test("answers 403 FORBIDDEN for a Bot the person may not record for, and binds nothing", async () => {
-    const { connect, asked, refusals, bound } = setup({ recordable: [] });
-
-    const response = await connect();
-
-    expect(response?.status).toBe(403);
-    expect(await bodyOf(response)).toEqual({
-      code: "FORBIDDEN",
-      message: "You cannot record for this Bot.",
-    });
-    expect(asked).toEqual([`may ${PERSON}:${BOT}`]);
-    expect(bound.size).toBe(0);
-    expect(refusals).toEqual([
-      { reason: "bot-forbidden", trajectoryId: TRAJECTORY, userId: PERSON },
-    ]);
-  });
-
-  test("binds a new trajectory to the person and the Bot they named, trimmed", async () => {
+  test("needs no Bot: a pass with no Bot named binds the trajectory to the person", async () => {
     const { connect, asked, refusals, bound } = setup();
 
-    expect(
-      await connect(TRAJECTORY, { [RECORDER_BOT_HEADER]: ` ${BOT} ` }),
-    ).toBeNull();
-    expect(asked).toEqual([
-      `may ${PERSON}:${BOT}`,
-      `bind ${TRAJECTORY}:${PERSON}:${BOT}`,
-    ]);
-    expect(bound.get(TRAJECTORY)).toBe(`${PERSON}:${BOT}`);
+    expect(await connect()).toBeNull();
+    expect(asked).toEqual([`bind ${TRAJECTORY}:${PERSON}`]);
+    expect(bound.get(TRAJECTORY)).toBe(PERSON);
     expect(refusals).toEqual([]);
   });
 
-  test("lets the same person and Bot through again, for a reconnect's fresh pass", async () => {
+  test("ignores a Bot header an older Recorder still sends: the trajectory is the person's", async () => {
+    const { connect, bound, refusals } = setup();
+
+    expect(
+      await connect(TRAJECTORY, {
+        "x-openbot-recorder-bot": "someone-elses-bot",
+      }),
+    ).toBeNull();
+    expect(bound.get(TRAJECTORY)).toBe(PERSON);
+    expect(refusals).toEqual([]);
+  });
+
+  test("lets the same person through again, for a reconnect's fresh pass", async () => {
     const { connect, refusals } = setup({
-      bound: { [TRAJECTORY]: `${PERSON}:${BOT}` },
+      bound: { [TRAJECTORY]: PERSON },
     });
 
     expect(await connect()).toBeNull();
@@ -258,7 +218,7 @@ describe("createTrajectoryConnectHook", () => {
 
   test("answers 404 for a trajectory bound to another person", async () => {
     const { connect, refusals, bound } = setup({
-      bound: { [TRAJECTORY]: `${OTHER}:${BOT}` },
+      bound: { [TRAJECTORY]: OTHER },
     });
 
     const response = await connect();
@@ -269,20 +229,10 @@ describe("createTrajectoryConnectHook", () => {
       code: "NOT_FOUND",
       message: "This trajectory belongs to another recording.",
     });
-    expect(bound.get(TRAJECTORY)).toBe(`${OTHER}:${BOT}`);
+    expect(bound.get(TRAJECTORY)).toBe(OTHER);
     expect(refusals).toEqual([
       { reason: "bound-elsewhere", trajectoryId: TRAJECTORY, userId: PERSON },
     ]);
-  });
-
-  test("answers 404 for the person's trajectory bound to another of their Bots", async () => {
-    const { connect, bound } = setup({
-      recordable: [`${PERSON}:${BOT}`, `${PERSON}:bot-2`],
-      bound: { [TRAJECTORY]: `${PERSON}:bot-2` },
-    });
-
-    expect((await connect())?.status).toBe(404);
-    expect(bound.get(TRAJECTORY)).toBe(`${PERSON}:bot-2`);
   });
 });
 

@@ -7,7 +7,7 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
-import { agents, users } from "./core";
+import { users } from "./core";
 
 export const recorderConnectCodes = pgTable(
   "recorder_connect_codes",
@@ -59,9 +59,9 @@ export const recorderConnections = pgTable(
 );
 
 /**
- * Which person and Bot a Recorder trajectory belongs to, written by the capture pass's gate and read by its
- * Learning space selector. Nothing recorded is kept here: the trajectory itself lives in Intelligence. A binding goes
- * with its person or its Bot.
+ * Which person a Recorder trajectory belongs to, written by the capture pass's gate and read by its Learning space
+ * selector, which joins it to that person's own Learning space. Nothing recorded is kept here: the trajectory itself
+ * lives in Intelligence. A binding goes with its person.
  */
 export const recorderTrajectoryBindings = pgTable(
   "recorder_trajectory_bindings",
@@ -70,9 +70,6 @@ export const recorderTrajectoryBindings = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    botId: text("bot_id")
-      .notNull()
-      .references(() => agents.id, { onDelete: "cascade" }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
