@@ -62,7 +62,7 @@ def test_the_agent_is_built_on_the_pinned_provider(monkeypatch):
     import src.main
 
     importlib.reload(src.main)
-    assert src.main._model() == "gemini-2.5-flash"
+    assert src.main._model() == "gemini-3.6-flash"
 
 
 def _rebuilt():

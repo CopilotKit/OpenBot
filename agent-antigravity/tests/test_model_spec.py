@@ -20,7 +20,7 @@ def test_the_row_this_bot_runs(monkeypatch):
     monkeypatch.delenv("BOT_PROVIDER", raising=False)
     monkeypatch.delenv("BOT_MODEL", raising=False)
     assert bot_settings(BOT_ID, pinned_provider=PINNED) == BotSettings(
-        provider="google", model="gemini-2.5-flash"
+        provider="google", model="gemini-3.6-flash"
     )
 
 
@@ -34,9 +34,11 @@ def test_the_provider_is_pinned_against_a_deployment_that_moved_everything_else(
 def test_the_model_is_still_the_deployments_to_choose(monkeypatch):
     """Pinning the provider is not pinning the model: any Gemini the deployment names is fine."""
     monkeypatch.delenv("BOT_PROVIDER", raising=False)
-    monkeypatch.setenv("BOT_MODEL", "gemini-3.6-flash")
+    # Deliberately NOT the file's own model: an override that names what the row already says
+    # would pass whether or not the environment was read at all.
+    monkeypatch.setenv("BOT_MODEL", "gemini-3.8-flash")
     assert bot_settings(BOT_ID, pinned_provider=PINNED) == BotSettings(
-        provider="google", model="gemini-3.6-flash"
+        provider="google", model="gemini-3.8-flash"
     )
 
 
