@@ -7,6 +7,7 @@ import { afterExposureChange } from "../plugins/exposure-change";
 import type { SharedUseStore } from "../plugins/shared-use-store";
 import { testAgentConnection } from "./connection-test";
 import { checkAgentEndpoint } from "./endpoint";
+import { isManagedEndpoint } from "./managed-endpoint";
 import { canManageAgent } from "./profile-policy";
 import {
   AgentAssignedError,
@@ -296,6 +297,18 @@ export function createAgentRoutes(
    * already reports nothing rather than reach for a store that is not there.
    */
   sharedUse?: SharedUseStore,
+  /**
+   * The deployment's own token and the addresses it belongs to, so a connection test against one of
+   * them knocks the way a real run will.
+   *
+   * A named object rather than two more positional strings, for the reason the handoff parameter
+   * gives: everything above it is optional, and a misplaced string typechecks.
+   *
+   * `endpoints` is every address this deployment runs — the Bot in the box and any harness picked
+   * during setup — because the run path had to learn that same lesson: matching only the first left
+   * the picked harness answering 401 to everything.
+   */
+  managedRun?: { token: string; endpoints: readonly (string | URL)[] },
 ) {
   /** The dto with the one fact only this closure knows: whether the coworker runs on our own Bot. */
   const dto = (actor: AgentActor, agent: AgentProfile) => ({
@@ -428,9 +441,29 @@ export function createAgentRoutes(
     if (!parsed.ok) {
       return context.json({ error: parsed.error }, 400);
     }
-    const headers = parsed.value;
+    /*
+     * An address this deployment runs is knocked on with this deployment's token.
+     *
+     * Nobody types that token — the run path attaches it by recognising the address — so a test
+     * that left it off reported "The agent refused this request. If it needs a key, add it as a
+     * header." for the Bot in the box and for the harness picked during setup. Both work; the
+     * advice was to break them.
+     *
+     * The person's own headers are applied over these rather than under, because a header they
+     * typed is a thing they can see and change, and this one is not.
+     */
+    const ours =
+      managedRun &&
+      typeof body?.endpoint === "string" &&
+      isManagedEndpoint(body.endpoint, managedRun.endpoints);
+    const headers = {
+      ...(ours ? { "x-openbot-agent-token": managedRun.token } : {}),
+      ...parsed.value,
+    };
     const result = await testAgentConnection(body?.endpoint, {
-      headers,
+      // Absent rather than empty when there is nothing to send, so a deployment with no managed Bot
+      // probes exactly as it did before this.
+      ...(Object.keys(headers).length > 0 ? { headers } : {}),
       allowPrivateHosts,
       allowedHosts,
     });
