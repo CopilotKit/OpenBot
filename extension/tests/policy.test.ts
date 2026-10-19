@@ -55,6 +55,29 @@ test("an http address that is not loopback is invalid and the bad string is neve
   expect(JSON.stringify(policy)).not.toContain("openbot.example.test");
 });
 
+test("the managed schema keeps to what Chrome loads: an object root, and exactly one type for each policy", async () => {
+  // https://developer.chrome.com/docs/extensions/reference/manifest/storage: the root is an object without
+  // additionalProperties, and every schema has a $ref or exactly one type (Chrome refuses to load the extension
+  // otherwise, and publishes only values of that type).
+  const schema = (await Bun.file(
+    new URL("../public/managed_schema.json", import.meta.url),
+  ).json()) as {
+    type: string;
+    additionalProperties?: unknown;
+    properties: Record<string, { type: unknown; description: string }>;
+  };
+  expect(schema.type).toBe("object");
+  expect(schema.additionalProperties).toBeUndefined();
+  expect(Object.keys(schema.properties).sort()).toEqual([
+    "AllowedIntelligenceUrls",
+    "OpenBotUrl",
+  ]);
+  expect(schema.properties.OpenBotUrl?.type).toBe("string");
+  expect(schema.properties.AllowedIntelligenceUrls?.type).toBe("array");
+  for (const property of Object.values(schema.properties))
+    expect(property.description).toContain("chrome://policy");
+});
+
 test("an empty or non-string OpenBot address is invalid", async () => {
   for (const value of ["", "   ", 7, "https://x.test/path"]) {
     fake.storage.setManaged({ OpenBotUrl: value });

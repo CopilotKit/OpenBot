@@ -20,7 +20,12 @@ function openbotUrlFrom(
     : { openbotUrl: null, openbotUrlInvalid: true };
 }
 
-/** Absent: no restriction. Present: only the valid wss:// entries (ws:// for a loopback IP); none left refuses every pass. */
+/** Absent: no restriction. Present: only the valid wss:// entries (ws:// for a loopback IP); none left refuses every pass.
+ *
+ * Chrome publishes a managed value only when it matches managed_schema.json, and a schema names exactly one type, so a
+ * value IT wrote with the wrong type (a single string, a Windows REG_MULTI_SZ) never reaches this function: it reads as
+ * absent, no restriction. No schema can widen that, so the schema's description and the company install guide tell IT
+ * to check chrome://policy. The non-list branch below is a guard for a Chrome that published one anyway. */
 function allowedUrlsFrom(value: unknown): string[] | null {
   if (value === undefined) return null;
   if (!Array.isArray(value)) return [];
