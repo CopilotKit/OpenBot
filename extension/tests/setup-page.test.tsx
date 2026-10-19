@@ -128,7 +128,7 @@ test("blocked: names the browser's own settings page, Chrome's or Edge's", async
     [false, "chrome"],
     [true, "edge"],
   ] as const) {
-    const { findByText, getByRole, calls, unmount } = setup({
+    const { findByText, getByRole, queryByText, calls, unmount } = setup({
       states: ["denied"],
       refusals: ["NotAllowedError"],
       edge,
@@ -136,8 +136,9 @@ test("blocked: names the browser's own settings page, Chrome's or Edge's", async
     await findByText(
       `Blocked. Open ${scheme}://settings/content/microphone, allow OpenBot Recorder, then choose Allow microphone.`,
     );
-    // A blocked microphone shows no prompt, so the page does not ask on its own.
+    // A blocked microphone shows no prompt, so the page does not ask on its own, nor says how to answer one.
     expect(calls).toEqual([]);
+    expect(queryByText(/asks, choose Allow/)).toBeNull();
     await waitFor(() =>
       expect(
         (

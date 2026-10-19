@@ -4,9 +4,9 @@ import { PageRows, PageSection } from "@/components/layout/page-parts";
 import { Button } from "@/components/ui/button";
 import {
   Item,
-  ItemActions,
   ItemContent,
   ItemDescription,
+  ItemFooter,
   ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
@@ -132,7 +132,8 @@ export function SetupPage({ deps }: { deps?: Partial<SetupPageDeps> }) {
   }, []);
 
   const browser = d.isEdge() ? EDGE : CHROME;
-  // Every answer short of a lasting grant: the row says why in red and offers to ask again.
+  // Every answer short of a lasting grant: the row says why and offers to ask again, under the sentence (as the popup's
+  // Voice row does) so a narrow window never squeezes the words beside the button.
   const problem =
     status === "visit-only" ||
     status === "dismissed" ||
@@ -158,27 +159,26 @@ export function SetupPage({ deps }: { deps?: Partial<SetupPageDeps> }) {
             <ItemContent>
               <ItemTitle>Microphone</ItemTitle>
               <ItemDescription
-                className={
-                  problem
-                    ? "line-clamp-none text-destructive"
-                    : "line-clamp-none"
-                }
+                className="line-clamp-none"
                 role={problem ? "alert" : "status"}
               >
                 {sentence(status, browser)}
               </ItemDescription>
             </ItemContent>
             {problem ? (
-              <ItemActions>
+              <ItemFooter className="justify-end">
                 <Button size="sm" onClick={ask}>
                   Allow microphone
                 </Button>
-              </ItemActions>
+              </ItemFooter>
             ) : null}
           </Item>
         </PageRows>
       </PageSection>
-      {status === "granted" ? null : (
+      {/* How to answer the prompt, while there is one to answer: not once allowed, blocked or without a microphone. */}
+      {status === "granted" ||
+      status === "denied" ||
+      status === "no-microphone" ? null : (
         <p className="mt-4 text-muted-foreground text-sm">{browser.hint}</p>
       )}
     </Page>
