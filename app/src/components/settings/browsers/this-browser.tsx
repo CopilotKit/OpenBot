@@ -32,6 +32,19 @@ const REFUSALS: Record<string, string> = {
 /** The Recorder can also answer `unreachable` or `invalid`, which have no sentence of their own. */
 const REFUSAL_FALLBACK = "The Recorder did not accept the request. Try again.";
 
+/** The Recorder takes only so many connects from one OpenBot in ten minutes; its refusal says how long is left. */
+function throttledSentence(retryAfterMs: number | undefined): string {
+  const lead = "Too many connect requests in a short time.";
+  if (retryAfterMs === undefined) return `${lead} Try again in a few minutes.`;
+  const minutes = Math.max(1, Math.ceil(retryAfterMs / 60_000));
+  return `${lead} Try again in ${minutes} ${minutes === 1 ? "minute" : "minutes"}.`;
+}
+
+function refusalSentence(error: string, retryAfterMs?: number): string {
+  if (error === "throttled") return throttledSentence(retryAfterMs);
+  return REFUSALS[error] ?? REFUSAL_FALLBACK;
+}
+
 type Attempt =
   | { state: "idle" }
   | { state: "sending" }
@@ -94,7 +107,7 @@ export function ThisBrowser() {
       if (!answer.ok) {
         setAttempt({
           state: "failed",
-          message: REFUSALS[answer.error] ?? REFUSAL_FALLBACK,
+          message: refusalSentence(answer.error, answer.retryAfterMs),
         });
         return;
       }

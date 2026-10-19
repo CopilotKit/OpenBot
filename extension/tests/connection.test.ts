@@ -235,9 +235,8 @@ test("a second origin while one is pending is busy, until the person closes the 
 
 test("the same origin asking again reuses the open connect tab instead of opening another", async () => {
   await connect("obc_1");
-  // Four asks fit Decision 22's limit of three per ten minutes only when spaced out.
   for (const code of ["obc_2", "obc_3", "obc_4"]) {
-    clock += 4 * 60 * 1000;
+    clock += 60 * 1000;
     await connect(code);
   }
   expect(opened).toHaveLength(1);
@@ -715,32 +714,56 @@ test("a website that is not this copy's OpenBot learns nothing from a ping", asy
   ).toEqual({ ok: true });
 });
 
-test("an origin that asks to connect over and over is told busy and opens nothing", async () => {
-  await connect("obc_1");
-  await connect("obc_2");
-  await connect("obc_3");
-  expect(await connect("obc_4")).toEqual({ ok: false, error: "busy" });
+test("an ordinary run of connects (connect, connect again, again after Disconnect, again after a revoke, and a couple of retries) is never refused", async () => {
+  for (let i = 1; i <= 6; i++) {
+    clock += 30 * 1000;
+    expect((await connect(`obc_${i}`)).ok).toBe(true);
+  }
   expect(opened).toHaveLength(1);
-  expect((await readSession("pendingConnect"))?.code).toBe("obc_3");
-  clock += 10 * 60 * 1000 + 1;
-  expect((await connect("obc_5")).ok).toBe(true);
 });
 
-test("ten connects in one tick from one origin open one tab, and the limit answers the other seven busy", async () => {
+test("an origin that asks to connect over and over is throttled with the time left, opens nothing more, and may ask again once that time is up", async () => {
+  for (let i = 1; i <= 10; i++) {
+    expect((await connect(`obc_${i}`)).ok).toBe(true);
+    clock += 30 * 1000;
+  }
+  // The first of the ten leaves the ten-minute window five minutes from now.
+  expect(await connect("obc_11")).toEqual({
+    ok: false,
+    error: "throttled",
+    retryAfterMs: 5 * 60 * 1000,
+  });
+  expect(opened).toHaveLength(1);
+  expect((await readSession("pendingConnect"))?.code).toBe("obc_10");
+  clock += 5 * 60 * 1000 - 1;
+  expect(await connect("obc_12")).toEqual({
+    ok: false,
+    error: "throttled",
+    retryAfterMs: 1,
+  });
+  clock += 1;
+  expect((await connect("obc_13")).ok).toBe(true);
+});
+
+test("twelve connects in one tick from one origin open one tab, and the limit throttles the other two", async () => {
   const site = "https://a.example.test";
   const answers = await Promise.all(
-    Array.from({ length: 10 }, (_, i) => connect(`obc_${i}`, site)),
+    Array.from({ length: 12 }, (_, i) => connect(`obc_${i}`, site)),
   );
   const accepted = answers.flatMap((answer, i) =>
     answer.ok ? [`obc_${i}`] : [],
   );
-  expect(accepted).toHaveLength(3);
+  expect(accepted).toHaveLength(10);
   expect(answers.filter((answer) => !answer.ok)).toEqual(
-    Array(7).fill({ ok: false, error: "busy" }),
+    Array(2).fill({
+      ok: false,
+      error: "throttled",
+      retryAfterMs: 10 * 60 * 1000,
+    }),
   );
   expect(opened).toHaveLength(1);
-  expect((await readSession("pendingConnect"))?.code).toBe(accepted[2]);
-  expect((await readSession("connectRequests"))?.[site]).toHaveLength(3);
+  expect((await readSession("pendingConnect"))?.code).toBe(accepted[9]);
+  expect((await readSession("connectRequests"))?.[site]).toHaveLength(10);
 });
 
 test("connects from two origins in one tick open one tab and answer the second busy", async () => {

@@ -274,7 +274,8 @@ export type ExternalResponse =
         | "busy"
         | "invalid"
         | "not-recording";
-    };
+    }
+  | { ok: false; error: "throttled"; retryAfterMs: number }; // too many connects from this origin lately, and how long until it may ask again
 
 const MAX_MESSAGE_BYTES = 64 * 1024;
 

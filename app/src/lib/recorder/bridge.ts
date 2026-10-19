@@ -18,9 +18,10 @@ export type DetectedRecorder = {
   installId?: string;
 };
 
+/** A `throttled` refusal carries `retryAfterMs`: how long until the Recorder takes a connect from this OpenBot again. */
 type ConnectCodeAnswer =
   | { ok: true; installId?: string; awaitingConfirmation?: boolean }
-  | { ok: false; error: string };
+  | { ok: false; error: string; retryAfterMs?: number };
 
 const DEFAULT_DETECT_TIMEOUT_MS = 1500;
 
@@ -86,10 +87,17 @@ export async function sendConnectCode(
   const answer = await ask(id, { type: "openbot.connect", code });
   if (!isRecord(answer)) return { ok: false, error: "unreachable" };
   if (answer.ok !== true) {
-    return {
+    const refusal: ConnectCodeAnswer = {
       ok: false,
       error: typeof answer.error === "string" ? answer.error : "invalid",
     };
+    if (
+      typeof answer.retryAfterMs === "number" &&
+      Number.isFinite(answer.retryAfterMs) &&
+      answer.retryAfterMs >= 0
+    )
+      refusal.retryAfterMs = answer.retryAfterMs;
+    return refusal;
   }
   const result: ConnectCodeAnswer = { ok: true };
   if (typeof answer.installId === "string") result.installId = answer.installId;

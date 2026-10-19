@@ -137,6 +137,17 @@ describe("sendConnectCode", () => {
     });
   });
 
+  test("a throttled refusal carries how long until the Recorder takes a connect again", async () => {
+    installChrome((_id, _message, reply) =>
+      reply({ ok: false, error: "throttled", retryAfterMs: 420_000 }),
+    );
+    expect(await sendConnectCode("aaa", "obc_x")).toEqual({
+      ok: false,
+      error: "throttled",
+      retryAfterMs: 420_000,
+    });
+  });
+
   test("lastError, no answer or no chrome is a refusal, not a throw", async () => {
     const runtime = installChrome((_id, _message, reply) => {
       runtime.lastError = { message: "gone" };

@@ -58,8 +58,10 @@ const OUT_OF_DATE =
   "This page is out of date. Close it and choose Connect this browser in OpenBot again.";
 const POLICY_REFUSED =
   "Your organization's Recorder policy does not allow this OpenBot. Ask your IT team.";
+/** Web connects one OpenBot origin may ask for in any ten minutes: enough that an ordinary run (connect, connect again,
+ * again after a Disconnect or a revoke, a retry or two) never meets it, while a page asking over and over is held off. */
 const CONNECT_WINDOW_MS = 10 * 60 * 1000;
-const CONNECT_LIMIT = 3;
+const CONNECT_LIMIT = 10;
 const KEEP_ALIVE_ALARM = "recorder-session-keepalive";
 const KEEP_ALIVE_PERIOD_MINUTES = 720;
 const KEEP_ALIVE_PERIOD_MS = KEEP_ALIVE_PERIOD_MINUTES * 60 * 1000;
@@ -350,7 +352,13 @@ async function webConnect(
   const recent = (requests?.[origin] ?? []).filter(
     (at) => now - at < CONNECT_WINDOW_MS,
   );
-  if (recent.length >= CONNECT_LIMIT) return { ok: false, error: "busy" };
+  // Not "busy": nothing is pending, and the wait is until the oldest of these leaves the window, which the page says.
+  if (recent.length >= CONNECT_LIMIT)
+    return {
+      ok: false,
+      error: "throttled",
+      retryAfterMs: Math.min(...recent) + CONNECT_WINDOW_MS - now,
+    };
   await writeSession("connectRequests", {
     ...requests,
     [origin]: [...recent, now],

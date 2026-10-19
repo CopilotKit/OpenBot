@@ -227,6 +227,40 @@ test("a pinned-elsewhere refusal shows its sentence", async () => {
   );
 });
 
+test("a throttled connect says plainly when to try again, not that another request is under way", async () => {
+  recorder = {
+    ping: { ok: true },
+    connect: { ok: false, error: "throttled", retryAfterMs: 6.5 * 60_000 },
+  };
+  const view = draw();
+  const button = await view.findByRole("button", {
+    name: "Connect this browser",
+  });
+  fireEvent.click(button);
+  await view.findByText(
+    "Too many connect requests in a short time. Try again in 7 minutes.",
+  );
+  expect(view.queryByText(/finishing another connect request/)).toBeNull();
+
+  // Under a minute left reads as one minute, never zero.
+  recorder.connect = { ok: false, error: "throttled", retryAfterMs: 20_000 };
+  fireEvent.click(button);
+  await view.findByText(
+    "Too many connect requests in a short time. Try again in 1 minute.",
+  );
+});
+
+test("a connect the Recorder is still finishing keeps its own sentence", async () => {
+  recorder = { ping: { ok: true }, connect: { ok: false, error: "busy" } };
+  const view = draw();
+  fireEvent.click(
+    await view.findByRole("button", { name: "Connect this browser" }),
+  );
+  await view.findByText(
+    "The Recorder is finishing another connect request. Try again in a moment.",
+  );
+});
+
 test("an answer with no sentence of its own still gets one", async () => {
   recorder = { ping: { ok: true }, connect: { ok: false, error: "invalid" } };
   const view = draw();
