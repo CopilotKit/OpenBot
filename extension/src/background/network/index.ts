@@ -1,7 +1,8 @@
 // Network capture for the tabs a recording follows: Chrome's debugger (CDP's Network domain) on each followed tab and
 // its frames, or, where Chrome refuses the debugger on a real site, the page-level fetch and XHR hook (fallback.ts),
-// which this capture owns. Every call is masked with the shared rules, trimmed to fit one Intelligence event, and
-// emitted; nothing is stored or sent anywhere else.
+// which this capture owns. Only the calls the person's own actions cause are kept (causality.ts, one gate for both
+// paths); each is masked with the shared rules, trimmed to fit one Intelligence event, and emitted; nothing is stored or
+// sent anywhere else.
 import {
   type CapturedEvent,
   EVENT_BUDGET_BYTES,
@@ -9,6 +10,12 @@ import {
   trimEvent,
 } from "@openbot/shared/recorder-masking";
 import { isRecordablePage } from "../../shared/origin";
+import {
+  type CausalityGate,
+  callSignature,
+  createCausalityGate,
+  screenCall,
+} from "./causality";
 import {
   createRequestTracker,
   type Debuggee,
@@ -35,16 +42,19 @@ export type NetworkCapture = {
     tabs: { tabId: number; url: string }[],
     previous: NetworkMode | "stopped",
   ): Promise<NetworkMode | "stopped">;
-  /** A page-level fallback event (Task 18), already re-masked: dropped when it is a call to OpenBot itself (the debugger
-   * never records those either), else trimmed to fit one event and emitted like a debugger event. */
-  recordPageEvent(event: CapturedEvent): Promise<void>;
+  /** The person did something in a followed tab at `at` (epoch ms): the calls starting just after it are its own. */
+  action(tabId: number, at: number): void;
+  /** A page-level fallback event (Task 18) from a followed tab, already re-masked: dropped when it is a call to OpenBot
+   * itself (the debugger never records those either) or one the person's actions did not cause, else trimmed to fit one
+   * event and emitted like a debugger event. */
+  recordPageEvent(tabId: number, event: CapturedEvent): Promise<void>;
   stop(): Promise<void>;
 };
 
 const WAITING = "Network calls are recorded once this tab opens a website.";
 const CANCELLED =
   "You closed Chrome's debugging bar, so network calls are no longer recorded.";
-/** The popup's Network row already says the page's own calls are captured: this says why. */
+/** The popup's Network row already says the calls are captured from inside the page: this says why. */
 const PAGE = "Chrome refused its debugger here.";
 const refusedSentence = (message: string) =>
   `Chrome would not let the Recorder record network calls here (${message}).`;
@@ -54,10 +64,27 @@ const AUTO_ATTACH = {
   waitForDebuggerOnStart: false,
   flatten: true,
 };
-/** The frames whose calls are the page's own: cross-site iframes run in their own session. */
+/** The frames followed too (a cross-site iframe runs in its own session): an action there causes calls there. */
 const FRAME_TARGETS = new Set(["iframe", "page"]);
 
 type TabState = "attached" | "waiting" | "refused" | "page";
+
+/** The parts of a page-hook network event the gate reads. */
+type PageCall = {
+  url?: unknown;
+  method?: unknown;
+  outcome?: unknown;
+  completedAt?: unknown;
+  durationMs?: unknown;
+  request?: {
+    headers?: Record<string, string>;
+    body?: { text?: unknown };
+  } | null;
+  response?: { url?: unknown } | null;
+};
+
+const number = (value: unknown): number | undefined =>
+  typeof value === "number" && Number.isFinite(value) ? value : undefined;
 
 const errorMessage = (error: unknown) =>
   error instanceof Error ? error.message : String(error);
@@ -76,10 +103,13 @@ async function forcedRefusal(): Promise<boolean> {
  * creates the fallback with createPageFallback() and hands it over here; it never calls the fallback itself. */
 export function createNetworkCapture(
   deps: NetworkCaptureDeps,
-  options: { fallback?: PageFallback } = {},
+  options: { fallback?: PageFallback; gate?: CausalityGate } = {},
 ): NetworkCapture {
   const { fallback } = options;
+  const gate = options.gate ?? createCausalityGate();
   const tabs = new Map<number, TabState>();
+  /** Each followed tab's main frame id (its page target's id), read once from Chrome when a document request needs it. */
+  const topFrames = new Map<number, string>();
   let mode: NetworkMode | "stopped" = "off";
   /** stop() was called: nothing attaches, starts or emits from here on. */
   let ended = false;
@@ -101,9 +131,22 @@ export function createNetworkCapture(
     }
   };
 
+  async function topFrame(tabId: number): Promise<string | undefined> {
+    const known = topFrames.get(tabId);
+    if (known !== undefined) return known;
+    const targets = await chrome.debugger.getTargets().catch(() => []);
+    const page = targets.find(
+      (target) => target.tabId === tabId && target.type === "page",
+    );
+    if (page) topFrames.set(tabId, page.id);
+    return page?.id;
+  }
+
   const tracker = createRequestTracker({
     ignore,
     send,
+    gate,
+    topFrame,
     emit: (event) => {
       if (ended || mode === "stopped") return;
       const masked = maskNetworkEvent(event, { digests: deps.digests() });
@@ -170,6 +213,7 @@ export function createNetworkCapture(
       const others = attachedTabs().filter((other) => other !== tabId);
       tabs.clear();
       tracker.clear();
+      gate.clear();
       unlisten();
       setMode("stopped", CANCELLED);
       for (const other of others)
@@ -178,7 +222,9 @@ export function createNetworkCapture(
     }
     // target_closed: that tab is gone; the others keep capturing.
     tabs.delete(tabId);
+    topFrames.delete(tabId);
     tracker.forgetTab(tabId);
+    gate.forgetTab(tabId);
   }
 
   function listen(): void {
@@ -332,16 +378,51 @@ export function createNetworkCapture(
       return follow(list);
     },
 
-    async recordPageEvent(event) {
+    action(tabId, at) {
+      if (ended || mode === "stopped") return;
+      gate.action(tabId, at);
+    },
+
+    async recordPageEvent(tabId, event) {
       if (ended) return;
       // The URLs are already masked, which keeps their origin. A call a redirect landed on OpenBot is OpenBot's too.
-      const value = event.value as {
-        url?: unknown;
-        response?: { url?: unknown } | null;
-      } | null;
+      const value = event.value as PageCall | null;
       const urls = [value?.url, value?.response?.url];
       if (urls.some((url) => typeof url === "string" && ignore(url))) return;
-      deps.emit(trimEvent(event, EVENT_BUDGET_BYTES).event);
+      if (!value || typeof value.url !== "string") return;
+      const method = typeof value.method === "string" ? value.method : "GET";
+      const body =
+        typeof value.request?.body?.text === "string"
+          ? value.request.body.text
+          : undefined;
+      // The hook reports a call once it is answered: it started its duration before that.
+      const endedAt = number(value.completedAt) ?? event.timestamp;
+      const startedAt = endedAt - Math.max(0, number(value.durationMs) ?? 0);
+      const repeat = gate.seen(
+        tabId,
+        callSignature(method, value.url, body),
+        startedAt,
+      );
+      const outcome =
+        value.outcome === "aborted" || value.outcome === "error"
+          ? value.outcome
+          : "ok";
+      const headers = value.request?.headers;
+      if (
+        screenCall({
+          url: value.url,
+          method,
+          outcome,
+          headers:
+            typeof headers === "object" && headers !== null ? headers : {},
+          body,
+          repeat,
+        })
+      )
+        return;
+      gate.admit({ tabId, startedAt, endedAt }, () => {
+        if (!ended) deps.emit(trimEvent(event, EVENT_BUDGET_BYTES).event);
+      });
     },
 
     async stop() {
@@ -350,7 +431,9 @@ export function createNetworkCapture(
       const attached = attachedTabs();
       const wasPage = mode === "page";
       tabs.clear();
+      topFrames.clear();
       tracker.clear();
+      gate.clear();
       unlisten();
       for (const tabId of attached)
         await chrome.debugger.detach({ tabId }).catch(() => undefined);

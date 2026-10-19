@@ -185,7 +185,8 @@ function doubles(): Partial<RecordingDeps> {
         network.previous.push(previous);
         return previous === "stopped" ? "stopped" : network.resumeMode;
       },
-      recordPageEvent: async (event) => {
+      action: () => {},
+      recordPageEvent: async (_tabId, event) => {
         network.recorded.push(event);
       },
       stop: async () => {},

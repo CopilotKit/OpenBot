@@ -1,6 +1,7 @@
 // What Chrome's debugger (CDP's Network domain) reports about the calls a followed tab and its frames make, turned into
-// the collector's `network` event: one per finished fetch or XHR, with its bodies read through the debugger. The event
-// leaves here unmasked; the capture masks and trims it before anything else sees it.
+// the collector's `network` event: one per finished fetch, XHR or top-frame document request that the person's own action
+// caused (causality.ts decides), with its bodies read through the debugger. The event leaves here unmasked; the capture
+// masks and trims it before anything else sees it.
 import type {
   CapturedEvent,
   JsonValue,
@@ -11,6 +12,7 @@ import {
   textBody,
   unavailableBody,
 } from "../../shared/network-body";
+import { type CausalityGate, callSignature, screenCall } from "./causality";
 
 /** A tab, or a frame's own session inside it (flattened auto-attach: cross-site iframes run in their own process). */
 export type Debuggee = { tabId: number; sessionId?: string };
@@ -30,7 +32,14 @@ type Pending = {
   postData?: string;
   hasPostData: boolean;
   type?: string;
+  frameId?: string;
+  /** CDP's monotonic seconds when the request was sent, and the wall clock (epoch ms) at that moment. */
   startedAt: number;
+  wallStart: number;
+  /** Monotonic seconds when the response headers arrived. */
+  respondedAt?: number;
+  /** The tab already made this exact call before (polling, a refetch): see CausalityGate.seen. */
+  repeat: boolean;
   response?: {
     url: string;
     status: number;
@@ -39,8 +48,10 @@ type Pending = {
   };
 };
 
-/** The calls a Skill repeats are the page's own API calls: images, scripts, stylesheets and documents are dropped. */
-const RECORDED_TYPES = new Set(["XHR", "Fetch"]);
+/** The calls a Bot repeats are the page's API calls and the top frame's own document requests (a link followed, a form
+ * posted): images, fonts, stylesheets, scripts, media, beacons (Ping), CSP reports, preflights, prefetches, event streams
+ * and websockets are never recorded. */
+const RECORDED_TYPES = new Set(["XHR", "Fetch", "Document"]);
 /** CDP's own cap on post data it sends inline; anything longer is asked for with Network.getRequestPostData. */
 export const MAX_POST_DATA_SIZE = 65_536;
 
@@ -79,12 +90,15 @@ function decodeBase64(data: string): string {
 
 /**
  * Follows requests per debuggee from `Network.requestWillBeSent` to `Network.loadingFinished` or `loadingFailed`, and
- * hands every finished fetch or XHR to `emit` as a network event. `ignore` names URLs never recorded (OpenBot's own).
+ * hands every finished fetch, XHR or top-frame document request that `gate` ties to the person's action to `emit` as a
+ * network event. `ignore` names URLs never recorded (OpenBot's own); `topFrame` answers a tab's main frame id.
  */
 export function createRequestTracker(options: {
   ignore(url: string): boolean;
   send: Send;
   emit(event: CapturedEvent): void;
+  gate: CausalityGate;
+  topFrame(tabId: number): Promise<string | undefined>;
 }) {
   const pending = new Map<string, Pending>();
   const keyOf = (target: Debuggee, requestId: string) =>
@@ -140,7 +154,55 @@ export function createRequestTracker(options: {
     }
   }
 
+  /** Wall-clock milliseconds for one of the request's monotonic timestamps. */
+  const wall = (request: Pending, monotonic: number) =>
+    request.wallStart + Math.max(0, (monotonic - request.startedAt) * 1000);
+
   async function finish(
+    request: Pending,
+    outcome: "ok" | "error" | "aborted",
+    finishedAt: number,
+  ): Promise<void> {
+    if (request.type === "Document") {
+      // A document request counts only in the top frame: an iframe loading is the page's own doing.
+      if (request.target.sessionId !== undefined) return;
+      const top = await options.topFrame(request.target.tabId);
+      if (top === undefined || request.frameId !== top) return;
+    }
+    const verdict = screenCall({
+      url: request.url,
+      method: request.method,
+      outcome,
+      headers: request.headers,
+      body: request.postData,
+      repeat: request.repeat,
+    });
+    if (verdict) return;
+    const endedAt = wall(request, finishedAt);
+    // Bodies are read only for a call the person's action caused: the page's own calls cost nothing more.
+    options.gate.admit(
+      {
+        tabId: request.target.tabId,
+        startedAt: request.wallStart,
+        respondedAt:
+          request.respondedAt === undefined
+            ? undefined
+            : Math.min(endedAt, wall(request, request.respondedAt)),
+        endedAt,
+      },
+      () => {
+        void record(request, outcome, finishedAt).catch((error) =>
+          console.error(
+            "Recorder: a network call could not be recorded",
+            error,
+          ),
+        );
+      },
+    );
+  }
+
+  /** Reads the call's bodies and emits it as the collector's network event. */
+  async function record(
     request: Pending,
     outcome: "ok" | "error" | "aborted",
     finishedAt: number,
@@ -159,7 +221,12 @@ export function createRequestTracker(options: {
       name: "network",
       timestamp: completedAt,
       value: {
-        transport: request.type === "XHR" ? "xhr" : "fetch",
+        transport:
+          request.type === "XHR"
+            ? "xhr"
+            : request.type === "Document"
+              ? "document"
+              : "fetch",
         method: request.method,
         url: request.url,
         origin: url.origin,
@@ -231,16 +298,33 @@ export function createRequestTracker(options: {
             pending.delete(key);
             return;
           }
+          const method = (text(request.method) ?? "GET").toUpperCase();
+          const postData = text(request.postData);
+          const type = text(raw.type);
+          const wallTime = number(raw.wallTime);
+          const wallStart =
+            wallTime === undefined ? Date.now() : Math.round(wallTime * 1000);
           pending.set(key, {
             target,
             requestId,
             url,
-            method: (text(request.method) ?? "GET").toUpperCase(),
+            method,
             headers: headers(request.headers),
-            postData: text(request.postData),
+            postData,
             hasPostData: request.hasPostData === true,
-            type: text(raw.type),
+            type,
+            frameId: text(raw.frameId),
             startedAt: number(raw.timestamp) ?? 0,
+            wallStart,
+            // Only the kinds a recording can keep are remembered: a script or an image is never a repeat that matters.
+            repeat:
+              type !== undefined && RECORDED_TYPES.has(type)
+                ? options.gate.seen(
+                    target.tabId,
+                    callSignature(method, url, postData),
+                    wallStart,
+                  )
+                : false,
           });
           return;
         }
@@ -251,6 +335,7 @@ export function createRequestTracker(options: {
           const response = isRecord(raw.response) ? raw.response : null;
           if (!request || !response) return;
           request.type = text(raw.type) ?? request.type;
+          request.respondedAt = number(raw.timestamp) ?? request.respondedAt;
           request.response = {
             url: text(response.url) ?? request.url,
             status: number(response.status) ?? 0,

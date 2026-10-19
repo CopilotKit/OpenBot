@@ -504,7 +504,8 @@ test("a recorder.page-network event the fallback accepts reaches the network cap
           addTab: async () => {},
           onCommitted: async () => {},
           resume: async () => "page",
-          recordPageEvent: async (accepted) => {
+          action: () => {},
+          recordPageEvent: async (_tabId, accepted) => {
             recorded.push(accepted);
           },
           stop: async () => {},

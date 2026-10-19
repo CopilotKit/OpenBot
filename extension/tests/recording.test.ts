@@ -282,6 +282,10 @@ type NetworkDouble = {
   options?: { fallback?: PageFallback };
   calls: string[];
   recorded: CapturedEvent[];
+  /** The tab each page-level event came from, in order. */
+  pageTabs: number[];
+  /** The action times handed to the capture, by tab. */
+  actions: [number, number][];
   failStart: boolean;
   /** How many captures were created, and the ones started and not stopped since. */
   created: number;
@@ -378,7 +382,11 @@ function doubles(): Partial<RecordingDeps> {
           network.calls.push(`onCommitted ${tabId} ${frameId} ${url}`);
         },
         resume: async () => "off" as NetworkMode,
-        recordPageEvent: async (recorded) => {
+        action: (tabId, at) => {
+          network.actions.push([tabId, at]);
+        },
+        recordPageEvent: async (tabId, recorded) => {
+          network.pageTabs.push(tabId);
           network.recorded.push(recorded);
         },
         stop: async () => {
@@ -509,6 +517,8 @@ beforeEach(() => {
   network = {
     calls: [],
     recorded: [],
+    pageTabs: [],
+    actions: [],
     failStart: false,
     created: 0,
     running: new Set(),
@@ -2728,6 +2738,27 @@ test("a frame's address from an earlier recording is never where its navigation 
   expect(await frameNavigation("https://widgets.example.test/d")).toMatchObject(
     { frameId: 2, from: "" },
   );
+});
+
+test("an action's time from a followed tab reaches the network capture, never one from another tab", async () => {
+  await record();
+  const top = contentPort(7, 0);
+  const frame = contentPort(7, 3);
+  const other = contentPort(9, 0);
+  top.postMessage({ type: "content.action", at: now - 20 });
+  frame.postMessage({ type: "content.action", at: now - 10 });
+  other.postMessage({ type: "content.action", at: now - 5 });
+  // A time ahead of the service worker's clock is taken as now.
+  top.postMessage({ type: "content.action", at: now + 60_000 });
+  await until(() => network.actions.length === 3, "three actions");
+  await settle();
+  expect(network.actions).toEqual([
+    [7, now - 20],
+    [7, now - 10],
+    [7, now],
+  ]);
+  // Only times: nothing an action carries is forwarded to Intelligence.
+  expect(sentToDocument("offscreen.event")).toEqual([]);
 });
 
 test("a whole recording, Start over included, asks OpenBot for nothing", async () => {

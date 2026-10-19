@@ -132,6 +132,7 @@ function doubles(): Partial<RecordingDeps> {
       addTab: async () => {},
       onCommitted: async () => {},
       resume: async () => "debugger",
+      action: () => {},
       recordPageEvent: async () => {},
       stop: async () => {},
     }),

@@ -185,6 +185,21 @@ describe("createContentPort", () => {
     ]);
   });
 
+  test("an action's time goes straight through while connected, and is not kept while disconnected", () => {
+    const { content, ports, fire } = harness();
+    content.post({ type: "content.action", at: 1_000 });
+    expect(ports[0].sent).toEqual([{ type: "content.action", at: 1_000 }]);
+    expect(parseContentMessage(ports[0].sent[0])).toEqual({
+      type: "content.action",
+      at: 1_000,
+    });
+    ports[0].disconnect();
+    content.post({ type: "content.action", at: 2_000 });
+    content.post(eventMessage(1));
+    fire();
+    expect(ports[1].sent.slice(1)).toEqual([eventMessage(1)]);
+  });
+
   test("with 205 events buffered the 5 oldest are dropped and counted before the 200 that remain", () => {
     const { content, ports, fire } = harness();
     ports[0].disconnect();

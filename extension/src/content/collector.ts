@@ -1,4 +1,4 @@
-import type { TrajectoryEvent } from "@copilotkit/learning";
+import type { JsonValue, TrajectoryEvent } from "@copilotkit/learning";
 import { createTrajectoryCollector } from "@copilotkit/learning";
 import {
   type CapturedEvent,
@@ -7,6 +7,7 @@ import {
   sanitiseForIntelligence,
   trimEvent,
 } from "@openbot/shared/recorder-masking";
+import { installActionCapture } from "./actions";
 import type { SensitivityTracker } from "./masking-context";
 
 const COALESCE_MS = 750;
@@ -88,13 +89,16 @@ const inputKey = (event: CapturedEvent): string => {
   ]);
 };
 
-/** Captures clicks and inputs. `send` also receives one `recorder.dropped { count, reason }` event per 5 s while the collector
+/** Captures clicks and inputs, plus form submits and Enter in a field (actions.ts), and reports when each real action
+ * happened to `onAction`. `send` also receives one `recorder.dropped { count, reason }` event per 5 s while the collector
  * reported errors (INVALID_EVENT, EVENT_TOO_LARGE, PERSISTENCE_UNKNOWN, CAPTURE_FAILED) or beforeSend dropped one, so no event
  * vanishes uncounted. Network is off (the collector's patch of `fetch` sees nothing in this isolated world; the debugger or
  * the MAIN-world bundle capture it) and navigation is off (the service worker records it from `webNavigation`). */
 export function startEventCapture(options: {
   tracker: SensitivityTracker;
   send(event: CapturedEvent): void;
+  /** When the person acted (epoch ms), at most once per ACTION_PING_MS: never what they did. */
+  onAction?(at: number): void;
   coalesceMs?: number;
   timers?: Timers;
 }): { stop(): void } {
@@ -176,9 +180,21 @@ export function startEventCapture(options: {
     onError: (error) => countDrop(error.code),
   });
   collector.start();
+  // Submit and Enter go through the collector too, so they are masked and trimmed like a click. A page that refused the
+  // collector's own listeners has already been counted as CAPTURE_FAILED.
+  const failed = drops.has("CAPTURE_FAILED");
+  const installed = failed
+    ? null
+    : installActionCapture({
+        emit: (name, value) => collector.emit(name, value as JsonValue),
+        action: (at) => options.onAction?.(at),
+      });
+  if (!failed && !installed) countDrop("CAPTURE_FAILED");
+  const uninstallActions = installed ?? (() => {});
 
   return {
     stop() {
+      uninstallActions();
       collector.stop();
       flushInputs();
       if (dropTimer !== undefined) {

@@ -142,7 +142,7 @@ const CONNECTION_CHECK_MS = 30_000;
 const QUEUE_EVENTS = 2_000;
 const QUEUE_BYTES = 8 * 1024 * 1024;
 /** The collector events that are something the person did; page loads in a followed tab's top frame count too. */
-const ACTION_EVENTS = new Set(["click", "input"]);
+const ACTION_EVENTS = new Set(["click", "input", "submit", "key"]);
 
 const SENTENCES = {
   noConnection: "Connect this browser to OpenBot first.",
@@ -1988,6 +1988,10 @@ export function installRecording(
         if (ACTION_EVENTS.has(event.name)) countAction();
         return;
       }
+      case "content.action":
+        // A click, edit, submit or key press: the network calls starting right after it are the person's own.
+        network?.action(tabId, Math.min(message.at, deps.now()));
+        return;
       case "content.sensitive":
         // Memory only: it survives a service-worker restart, vanishes with the browser, and goes at Stop.
         digests.add(message.digest);
@@ -2122,7 +2126,7 @@ export function installRecording(
         digests,
       );
       if (!event) return { ok: false, error: "invalid" };
-      await network.recordPageEvent(event);
+      await network.recordPageEvent(tabId, event);
       return { ok: true };
     },
 

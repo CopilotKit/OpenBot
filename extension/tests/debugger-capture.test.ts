@@ -138,7 +138,17 @@ type RequestSpec = {
   base64Encoded?: boolean;
   failed?: { canceled: boolean };
   sessionId?: string;
+  frameId?: string;
+  /** No action of the person's came before it: the page made it on its own. */
+  unprompted?: boolean;
+  /** Seconds since the epoch the request was sent (CDP's wallTime); SENT unless a test says otherwise. */
+  wallTime?: number;
+  /** How long it ran, in seconds (0.25 unless a test says otherwise). */
+  duration?: number;
 };
+
+/** When the requests below are sent, unless a test says otherwise (CDP's wallTime, in seconds). */
+const SENT = Math.floor(Date.now() / 1000);
 
 /** A request as Chrome reports it: sent, answered, then finished (or failed). */
 function request(tabId: number, spec: RequestSpec) {
@@ -146,6 +156,12 @@ function request(tabId: number, spec: RequestSpec) {
     ? { tabId, sessionId: spec.sessionId }
     : { tabId };
   const type = spec.type ?? "Fetch";
+  const wallTime = spec.wallTime ?? SENT;
+  // CDP's monotonic clock, in step with the wall clock.
+  const sentAt = 100 + (wallTime - SENT);
+  const endAt = sentAt + (spec.duration ?? 0.25);
+  // The person's click just before: the call is theirs (causality.ts).
+  if (!spec.unprompted) capture.action(tabId, wallTime * 1000 - 100);
   if (spec.body !== undefined)
     bodies[spec.id] = {
       body: spec.body,
@@ -154,8 +170,9 @@ function request(tabId: number, spec: RequestSpec) {
   fake.debugger.emit(target, "Network.requestWillBeSent", {
     requestId: spec.id,
     type,
-    timestamp: 100,
-    wallTime: 1_700_000_000,
+    timestamp: sentAt,
+    wallTime,
+    ...(spec.frameId !== undefined ? { frameId: spec.frameId } : {}),
     request: {
       url: spec.url,
       method: spec.method ?? "GET",
@@ -167,7 +184,7 @@ function request(tabId: number, spec: RequestSpec) {
   if (spec.failed) {
     fake.debugger.emit(target, "Network.loadingFailed", {
       requestId: spec.id,
-      timestamp: 100.5,
+      timestamp: endAt,
       type,
       errorText: "net::ERR_FAILED",
       canceled: spec.failed.canceled,
@@ -177,6 +194,7 @@ function request(tabId: number, spec: RequestSpec) {
   fake.debugger.emit(target, "Network.responseReceived", {
     requestId: spec.id,
     type,
+    timestamp: endAt,
     response: {
       url: spec.url,
       status: spec.status ?? 200,
@@ -188,7 +206,7 @@ function request(tabId: number, spec: RequestSpec) {
   });
   fake.debugger.emit(target, "Network.loadingFinished", {
     requestId: spec.id,
-    timestamp: 100.25,
+    timestamp: endAt,
   });
 }
 
@@ -262,7 +280,7 @@ test("every read is recorded too, an XHR included", async () => {
   ]);
 });
 
-test("images, scripts, stylesheets and documents are not recorded", async () => {
+test("images, scripts, stylesheets, fonts and a document request outside the top frame are not recorded", async () => {
   await capture.start(7, "https://crm.example.test/");
   for (const [id, type] of [
     ["1", "Image"],
@@ -376,7 +394,7 @@ test("a text response Chrome hands over as base64 is decoded", async () => {
   expect(value(emitted[0]).response.body.text).toBe("hello");
 });
 
-test("a failed request is an error, a cancelled one is aborted, and neither has a status", async () => {
+test("a failed request is an error with no status; a cancelled one is not recorded at all", async () => {
   await capture.start(7, "https://crm.example.test/");
   request(7, {
     id: "1",
@@ -388,13 +406,15 @@ test("a failed request is an error, a cancelled one is aborted, and neither has 
     url: "https://crm.example.test/api/b",
     failed: { canceled: true },
   });
-  await until(() => emitted.length === 2, "two events");
+  await until(() => emitted.length === 1, "the failed call");
+  await settle();
   expect(
-    emitted.map((event) => [value(event).outcome, value(event).status]),
-  ).toEqual([
-    ["error", null],
-    ["aborted", null],
-  ]);
+    emitted.map((event) => [
+      value(event).url,
+      value(event).outcome,
+      value(event).status,
+    ]),
+  ).toEqual([["https://crm.example.test/api/a", "error", null]]);
   expect(value(emitted[0]).response.body).toEqual({
     status: "unavailable",
     reason: "no-response",
@@ -691,14 +711,18 @@ test("stop detaches every tab, and nothing in flight is emitted after it", async
 
 test("a page-level event is trimmed to fit one event and emitted", async () => {
   await capture.start(7, "https://crm.example.test/");
+  const now = Date.now();
+  capture.action(7, now - 50);
   const big: CapturedEvent = {
     type: "CUSTOM",
     name: "network",
-    timestamp: 1,
+    timestamp: now,
     value: {
       method: "GET",
       url: "https://crm.example.test/api",
       status: 200,
+      completedAt: now,
+      durationMs: 20,
       capturedBy: "page",
       response: {
         headers: { "content-type": "text/plain" },
@@ -706,7 +730,7 @@ test("a page-level event is trimmed to fit one event and emitted", async () => {
       },
     },
   };
-  await capture.recordPageEvent(big);
+  await capture.recordPageEvent(7, big);
   expect(emitted).toHaveLength(1);
   expect(
     new TextEncoder().encode(JSON.stringify(emitted[0])).length,
@@ -716,14 +740,18 @@ test("a page-level event is trimmed to fit one event and emitted", async () => {
 
 test("a page-level event for a call to OpenBot itself is dropped, like the debugger drops it", async () => {
   await capture.start(7, "https://crm.example.test/");
+  const now = Date.now();
+  capture.action(7, now - 50);
   const pageEvent = (url: string, responseUrl = url): CapturedEvent => ({
     type: "CUSTOM",
     name: "network",
-    timestamp: 1,
+    timestamp: now,
     value: {
       method: "POST",
       url,
       status: 200,
+      completedAt: now,
+      durationMs: 20,
       capturedBy: "page",
       response: {
         url: responseUrl,
@@ -733,15 +761,268 @@ test("a page-level event for a call to OpenBot itself is dropped, like the debug
     },
   });
   await capture.recordPageEvent(
+    7,
     pageEvent(`${OPENBOT}/api/recorder/connect-codes`),
   );
   // A call that a redirect landed on OpenBot.
   await capture.recordPageEvent(
+    7,
     pageEvent("https://crm.example.test/go", `${OPENBOT}/api/recorder/me`),
   );
-  await capture.recordPageEvent(pageEvent("https://crm.example.test/api"));
+  await capture.recordPageEvent(7, pageEvent("https://crm.example.test/api"));
   expect(emitted.map((event) => value(event).url)).toEqual([
     "https://crm.example.test/api",
+  ]);
+});
+
+// ---- Only what the person's actions cause -----------------------------------------------------
+
+test("a click's API call is recorded; the beacons, polling, prefetch, iframe and aborted calls around it are not", async () => {
+  fake.tabs.set(7, {
+    id: 7,
+    url: "https://crm.example.test/deals/42",
+  } as chrome.tabs.Tab);
+  await capture.start(7, "https://crm.example.test/deals/42");
+  // Everything happened half a minute ago, so nothing below waits for an action still on its way.
+  const click = SENT - 30;
+  const at = (seconds: number) => ({
+    wallTime: click + seconds,
+    unprompted: true,
+  });
+  // The page polls on its own before the person does anything.
+  request(7, {
+    id: "poll-1",
+    url: "https://crm.example.test/api/unread",
+    body: "{}",
+    ...at(-10),
+  });
+  capture.action(7, click * 1000);
+  // The person's click: the note they add, and the deal the response handler reloads 1.2 s in, past the window.
+  request(7, {
+    id: "note",
+    url: "https://crm.example.test/api/deals/42/notes",
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    postData: '{"text":"Call back Tuesday"}',
+    body: '{"id":7}',
+    duration: 1.1,
+    ...at(0.08),
+  });
+  request(7, {
+    id: "deal",
+    url: "https://crm.example.test/api/deals/42",
+    body: "{}",
+    ...at(1.25),
+  });
+  // Around it, all the page's own: the same poll again, analytics, a beacon, a prefetch, a cancelled call, images and
+  // scripts, and an iframe loading with its own ad call.
+  request(7, {
+    id: "poll-2",
+    url: "https://crm.example.test/api/unread",
+    body: "{}",
+    ...at(0.1),
+  });
+  request(7, {
+    id: "ga",
+    url: "https://www.google-analytics.com/g/collect?v=2&en=click",
+    method: "POST",
+    ...at(0.12),
+  });
+  request(7, {
+    id: "beacon",
+    url: "https://crm.example.test/api/events",
+    method: "POST",
+    type: "Ping",
+    ...at(0.13),
+  });
+  request(7, {
+    id: "prefetch",
+    url: "https://crm.example.test/deals/43",
+    headers: { "next-router-prefetch": "1", rsc: "1" },
+    body: "{}",
+    ...at(0.14),
+  });
+  request(7, {
+    id: "cancelled",
+    url: "https://crm.example.test/api/search?q=a",
+    failed: { canceled: true },
+    ...at(0.15),
+  });
+  request(7, {
+    id: "img",
+    url: "https://crm.example.test/logo.png",
+    type: "Image",
+    mimeType: "image/png",
+    ...at(0.16),
+  });
+  request(7, {
+    id: "js",
+    url: "https://crm.example.test/chunk.js",
+    type: "Script",
+    mimeType: "text/javascript",
+    ...at(0.17),
+  });
+  request(7, {
+    id: "frame-doc",
+    url: "https://widgets.example.test/embed",
+    type: "Document",
+    frameId: "frame-1",
+    sessionId: "frame-session",
+    mimeType: "text/html",
+    body: "<html></html>",
+    ...at(0.18),
+  });
+  request(7, {
+    id: "frame-ad",
+    url: "https://securepubads.g.doubleclick.net/gampad/ads?iu=x",
+    sessionId: "frame-session",
+    ...at(0.2),
+  });
+  // Ten seconds on, with nothing done since: the page refreshing on its own.
+  request(7, {
+    id: "idle",
+    url: "https://crm.example.test/api/activity",
+    body: "[]",
+    ...at(10),
+  });
+  await until(() => emitted.length === 2, "the click's two calls");
+  await settle();
+  expect(
+    emitted.map((event) => [value(event).method, value(event).url]),
+  ).toEqual([
+    ["POST", "https://crm.example.test/api/deals/42/notes"],
+    ["GET", "https://crm.example.test/api/deals/42"],
+  ]);
+  expect(JSON.parse(value(emitted[0]).request.body.text as string)).toEqual({
+    text: "Call back Tuesday",
+  });
+  // Nothing dropped had its body asked for.
+  expect(
+    commandsTo("Network.getResponseBody").map(
+      (command) => (command.params as { requestId: string }).requestId,
+    ),
+  ).toEqual(["note", "deal"]);
+});
+
+test("a form the person posts in the top frame is recorded as a document request; an iframe's document never is", async () => {
+  fake.tabs.set(7, {
+    id: 7,
+    url: "https://crm.example.test/login",
+  } as chrome.tabs.Tab);
+  await capture.start(7, "https://crm.example.test/login");
+  request(7, {
+    id: "post",
+    url: "https://crm.example.test/session",
+    method: "POST",
+    type: "Document",
+    frameId: "target-7",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    postData: "user=ada&password=hunter2",
+    mimeType: "text/html",
+    body: "<html>Welcome</html>",
+  });
+  request(7, {
+    id: "frame",
+    url: "https://crm.example.test/embed",
+    type: "Document",
+    frameId: "child-frame",
+    mimeType: "text/html",
+    body: "<html></html>",
+  });
+  await until(() => emitted.length === 1, "the form post");
+  await settle();
+  expect(value(emitted[0])).toMatchObject({
+    transport: "document",
+    method: "POST",
+    url: "https://crm.example.test/session",
+  });
+  expect(value(emitted[0]).request.body.text).toBe(
+    "user=ada&password=[redacted]",
+  );
+});
+
+test("a call that is answered before word of the click arrives waits for it, then is recorded", async () => {
+  await capture.start(7, "https://crm.example.test/");
+  const sent = Date.now() / 1000;
+  request(7, {
+    id: "cached",
+    url: "https://crm.example.test/api/deals/42",
+    body: "{}",
+    wallTime: sent,
+    duration: 0.002,
+    unprompted: true,
+  });
+  await settle();
+  expect(emitted).toEqual([]);
+  capture.action(7, sent * 1000 - 30);
+  await until(() => emitted.length === 1, "the held call");
+  expect(value(emitted[0]).url).toBe("https://crm.example.test/api/deals/42");
+});
+
+test("through the page-level hook, only the click's call is kept as well", async () => {
+  await capture.start(7, "https://crm.example.test/");
+  const click = Date.now() - 30_000;
+  const pageCall = (
+    url: string,
+    startedAt: number,
+    extra: {
+      method?: string;
+      outcome?: string;
+      headers?: Record<string, string>;
+      body?: string;
+    } = {},
+  ): CapturedEvent => ({
+    type: "CUSTOM",
+    name: "network",
+    timestamp: startedAt + 120,
+    value: {
+      transport: "fetch",
+      method: extra.method ?? "GET",
+      url,
+      status: extra.outcome === "aborted" ? null : 200,
+      outcome: extra.outcome ?? "ok",
+      completedAt: startedAt + 120,
+      durationMs: 120,
+      capturedBy: "page",
+      request: {
+        headers: extra.headers ?? {},
+        body:
+          extra.body === undefined
+            ? { status: "empty" }
+            : { status: "complete", text: extra.body },
+      },
+      response: { headers: {}, body: { status: "empty" } },
+    },
+  });
+  await capture.recordPageEvent(
+    7,
+    pageCall("https://crm.example.test/api/unread", click - 5_000),
+  );
+  capture.action(7, click);
+  for (const event of [
+    pageCall("https://crm.example.test/api/deals/42/notes", click + 60, {
+      method: "POST",
+      body: '{"text":"Call back"}',
+    }),
+    pageCall("https://crm.example.test/api/unread", click + 70),
+    pageCall("https://eu.i.posthog.com/e/", click + 80, { method: "POST" }),
+    pageCall("https://crm.example.test/deals/43", click + 90, {
+      headers: { "next-router-prefetch": "1" },
+    }),
+    pageCall("https://crm.example.test/api/search?q=a", click + 95, {
+      outcome: "aborted",
+    }),
+    pageCall("https://crm.example.test/api/activity", click + 8_000),
+  ])
+    await capture.recordPageEvent(7, event);
+  // The same click seen from another tab explains nothing there.
+  await capture.recordPageEvent(
+    8,
+    pageCall("https://crm.example.test/api/deals/9", click + 60),
+  );
+  await settle();
+  expect(emitted.map((event) => value(event).url)).toEqual([
+    "https://crm.example.test/api/deals/42/notes",
   ]);
 });
 
