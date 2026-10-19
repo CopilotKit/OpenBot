@@ -58,11 +58,13 @@ describe("the company-install guide", () => {
     }
   });
 
-  test("tells IT to confirm the policy reached the browser, and that a value of the wrong type is refused", () => {
+  test("tells IT to confirm the policy reached the browser, since Chrome withholds a value of the wrong type", () => {
     expect(guide).toContain("chrome://policy");
     expect(guide).toMatch(/status OK/);
-    expect(guide).toMatch(/refused, never ignored/);
+    expect(guide).toMatch(/wrong type never reaches the Recorder/);
+    expect(guide).toMatch(/which means no restriction/);
     expect(guide).toMatch(/one address on its own/);
+    expect(guide).not.toMatch(/refused, never ignored/);
   });
 
   test("covers the native messaging host OpenBot Desktop registers per person", () => {

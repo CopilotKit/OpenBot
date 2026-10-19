@@ -54,10 +54,12 @@ Set `OpenBotUrl` (the HTTPS address of your OpenBot) and `AllowedIntelligenceUrl
 
 After a change, use "Reload policies" in `chrome://policy` (or `edge://policy`), then confirm both policies are listed under the Recorder's id with the status OK. A policy that is missing there has not reached the browser, and the Recorder behaves as if it were not set.
 
-A value the Recorder cannot use is refused, never ignored:
+Check the status every time, because a value of the wrong type never reaches the Recorder. Chrome withholds it and shows an error in `chrome://policy`, and the Recorder then behaves as if the policy were not set, which means no restriction. Two common causes: `AllowedIntelligenceUrls` given as one address on its own instead of a list, and on Windows a list not written as numbered values under its subkey.
 
-- An `OpenBotUrl` that is not a plain HTTPS address such as `https://openbot.example.com`, or is not text at all, refuses every connect, and the popup tells the person to ask their IT team.
-- An `AllowedIntelligenceUrls` that is not a list of WSS addresses, for example one address on its own, or on Windows a list not written as numbered subkeys, refuses every capture pass, so nothing can be recorded until it is fixed.
+A value of the right type that the Recorder cannot use is refused:
+
+- An `OpenBotUrl` that is not a plain HTTPS address such as `https://openbot.example.com` refuses every connect, and the popup tells the person to ask their IT team.
+- In `AllowedIntelligenceUrls`, an entry that is not a WSS address is skipped. A list with no WSS address left refuses every capture pass, so nothing can be recorded until it is fixed.
 
 ## Connecting through OpenBot Desktop
 
