@@ -3819,9 +3819,19 @@ impl recorder_install::InstallWriter for RecorderInstallWriter {
         std::fs::write(path, contents)
     }
 
+    fn read_file(&self, path: &Path) -> Option<String> {
+        std::fs::read_to_string(path).ok()
+    }
+
     // Output is captured, never inherited: `reg.exe` prints a success line, and the install command's
     // own output is only the manifest paths.
     fn run(&mut self, argv: &[String]) -> std::io::Result<()> {
+        // The registry is the developer's own, whatever folder a test points the install at.
+        if cfg!(debug_assertions) {
+            return Err(std::io::Error::other(
+                "a debug build never writes the Windows registry",
+            ));
+        }
         let (program, arguments) = argv
             .split_first()
             .ok_or_else(|| std::io::Error::other("an empty command"))?;
@@ -3862,7 +3872,19 @@ fn recorder_home() -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
+/// The variable a debug build's Recorder host install reads its home folder from.
+const RECORDER_HOST_TEST_HOME: &str = "OPENBOT_RECORDER_HOST_TEST_HOME";
+
+fn non_empty_var(name: &str) -> Option<std::ffi::OsString> {
+    std::env::var_os(name).filter(|value| !value.is_empty())
+}
+
 /// Lets each browser's Recorder find this app: one host manifest per browser present for this user.
+///
+/// A release build writes into this person's own browser folders. A debug build is a developer's binary, rebuilt on
+/// every change, and must never be registered as the host in the developer's own browsers, so it writes only under
+/// the folder `OPENBOT_RECORDER_HOST_TEST_HOME` names (a test's), takes every other folder from there too, never
+/// writes the Windows registry, and without the variable writes nothing.
 fn install_recorder_host_for_this_user() -> Result<Vec<PathBuf>, Problem> {
     let current_exe = std::env::current_exe().map_err(|error| {
         Problem::with(
@@ -3875,15 +3897,52 @@ fn install_recorder_host_for_this_user() -> Result<Vec<PathBuf>, Problem> {
         &current_exe,
         std::env::var_os("APPIMAGE").as_deref().map(Path::new),
     )?;
+    if cfg!(debug_assertions) {
+        let home = non_empty_var(RECORDER_HOST_TEST_HOME)
+            .map(PathBuf::from)
+            .ok_or_else(|| {
+                Problem::plain(format!(
+                    "A debug build sets up the Recorder only under {RECORDER_HOST_TEST_HOME}, never in your own browsers."
+                ))
+            })?;
+        return recorder_install::install(
+            &stable,
+            recorder_install::UserDirs::at(&home),
+            recorder_os(),
+            &mut RecorderInstallWriter,
+        );
+    }
     let home = recorder_home()
         .ok_or_else(|| Problem::plain("OpenBot Desktop could not find your home folder."))?;
+    let xdg_config_home = non_empty_var("XDG_CONFIG_HOME").map(PathBuf::from);
+    let chrome_config_home = non_empty_var("CHROME_CONFIG_HOME").map(PathBuf::from);
+    let local_app_data = non_empty_var("LOCALAPPDATA").map(PathBuf::from);
     recorder_install::install(
         &stable,
-        &home,
-        std::env::var_os("LOCALAPPDATA").as_deref().map(Path::new),
+        recorder_install::UserDirs {
+            home: &home,
+            xdg_config_home: xdg_config_home.as_deref(),
+            chrome_config_home: chrome_config_home.as_deref(),
+            local_app_data: local_app_data.as_deref(),
+        },
         recorder_os(),
         &mut RecorderInstallWriter,
     )
+}
+
+/// The install at launch, on its own thread so setup never waits on it, and again every minute where a browser
+/// installed since needs its own manifest. Never in a debug build (see `install_recorder_host_for_this_user`).
+#[cfg(not(debug_assertions))]
+fn keep_recorder_host_installed() -> Option<std::thread::JoinHandle<()>> {
+    Some(recorder_install::keep_recorder_host_installed(
+        install_recorder_host_for_this_user,
+        recorder_install::recheck_interval(recorder_os()),
+    ))
+}
+
+#[cfg(debug_assertions)]
+fn keep_recorder_host_installed() -> Option<std::thread::JoinHandle<()>> {
+    None
 }
 
 fn main() {
@@ -3998,8 +4057,8 @@ fn main() {
 
             remember_setup_url(app.handle())?;
 
-            // Once per launch, on its own thread: setup never waits on it, and a failure is logged.
-            recorder_install::spawn_recorder_host_install(install_recorder_host_for_this_user);
+            // On its own thread: setup never waits on it, and a failure is logged.
+            keep_recorder_host_installed();
 
             // The status menu lets somebody open the window, stop the stack, or quit the app.
             use tauri::menu::{Menu, MenuItem};
@@ -4140,6 +4199,13 @@ mod tests {
     use std::io::{Read, Write};
 
     include!("stop_ipc_tests.rs");
+
+    // The release half (it starts the install thread) is the app's own launch; a test runs a debug build.
+    #[cfg(debug_assertions)]
+    #[test]
+    fn a_debug_build_never_starts_the_recorder_host_install_at_launch() {
+        assert!(keep_recorder_host_installed().is_none());
+    }
 
     #[test]
     fn learning_default_is_written_only_for_the_provisioned_connection() {

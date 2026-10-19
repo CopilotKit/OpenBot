@@ -95,6 +95,9 @@ fn finish(mut child: Child, patience: Duration) -> Output {
     }
 }
 
+/// Where a debug binary's `--install-recorder-host` writes; it writes nowhere without it.
+const TEST_HOME: &str = "OPENBOT_RECORDER_HOST_TEST_HOME";
+
 /// The binary with nothing of the developer's own environment that would change its answer.
 fn binary(home: &Path) -> Command {
     let mut command = Command::new(BINARY);
@@ -104,6 +107,8 @@ fn binary(home: &Path) -> Command {
         .env("XDG_CONFIG_HOME", home.join(".config"))
         .env("APPDATA", home.join("AppData").join("Roaming"))
         .env("LOCALAPPDATA", home.join("AppData").join("Local"))
+        .env_remove("CHROME_CONFIG_HOME")
+        .env_remove(TEST_HOME)
         .env_remove("APPIMAGE")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -129,6 +134,7 @@ fn the_install_command_writes_a_manifest_for_the_only_browser_present() {
 
     let output = finish(
         binary(home.path())
+            .env(TEST_HOME, home.path())
             .arg("--install-recorder-host")
             .spawn()
             .unwrap(),
@@ -158,6 +164,73 @@ fn the_install_command_writes_a_manifest_for_the_only_browser_present() {
         .exists());
     assert!(!home.path().join(".config/google-chrome").exists());
     assert!(!home.path().join(".config/chromium").exists());
+}
+
+// A debug build is a developer's binary: run without the test folder, it must not register itself in the browsers of
+// the home it runs in, which outside a test is the developer's own.
+#[cfg(unix)]
+#[test]
+fn a_debug_binary_installs_only_under_the_test_home() {
+    let home = TempHome::new("debug-install");
+    let elsewhere = TempHome::new("debug-install-test-home");
+    let browser = |root: &Path| {
+        if cfg!(target_os = "macos") {
+            root.join("Library")
+                .join("Application Support")
+                .join("Google")
+                .join("Chrome")
+        } else {
+            root.join(".config").join("google-chrome")
+        }
+    };
+    for root in [home.path(), elsewhere.path()] {
+        std::fs::create_dir_all(browser(root)).unwrap();
+    }
+    let manifests = |root: &Path| browser(root).join("NativeMessagingHosts");
+
+    let refused = finish(
+        binary(home.path())
+            .arg("--install-recorder-host")
+            .spawn()
+            .unwrap(),
+        Duration::from_secs(60),
+    );
+    if cfg!(debug_assertions) {
+        assert_eq!(refused.status.code(), Some(1));
+        assert!(
+            String::from_utf8_lossy(&refused.stderr).contains(TEST_HOME),
+            "{}",
+            String::from_utf8_lossy(&refused.stderr)
+        );
+        assert!(refused.stdout.is_empty());
+        assert!(!manifests(home.path()).exists());
+
+        let output = finish(
+            binary(home.path())
+                .env(TEST_HOME, elsewhere.path())
+                .arg("--install-recorder-host")
+                .spawn()
+                .unwrap(),
+            Duration::from_secs(60),
+        );
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(manifests(elsewhere.path())
+            .join(format!("{}.json", shared("nativeHost")))
+            .is_file());
+        assert!(!manifests(home.path()).exists());
+    } else {
+        // A release build is the one people install, and writes into the home it runs in.
+        assert!(
+            refused.status.success(),
+            "{}",
+            String::from_utf8_lossy(&refused.stderr)
+        );
+        assert!(manifests(home.path()).is_dir());
+    }
 }
 
 /// The host as Chrome starts it: the caller's origin first and, on Windows, the parent window after

@@ -27,6 +27,11 @@
     "macOS": {
       "entitlements": "./Entitlements.plist"
     },
+    "windows": {
+      "nsis": {
+        "installerHooks": "./windows/hooks.nsh"
+      }
+    },
     "linux": {
       "deb": { "depends": ["pkexec", "procps", "lsof", "ca-certificates"] },
       "rpm": {
