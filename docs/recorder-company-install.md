@@ -86,6 +86,8 @@ OpenBot Desktop writes the same file for each person when it starts (on Windows 
 - macOS: `/Library/Google/Chrome/NativeMessagingHosts/ai.copilotkit.openbot.recorder.json` and `/Library/Microsoft/Edge/NativeMessagingHosts/ai.copilotkit.openbot.recorder.json`.
 - Linux: `/etc/opt/chrome/native-messaging-hosts/ai.copilotkit.openbot.recorder.json` and `/etc/opt/edge/native-messaging-hosts/ai.copilotkit.openbot.recorder.json`.
 
+When OpenBot Desktop is removed, the Windows uninstaller deletes the registrations it made for that person. On macOS and Linux nothing does: delete `ai.copilotkit.openbot.recorder.json` from each browser's `NativeMessagingHosts` folder in the person's profile. A file left behind does no harm; the Recorder just stops offering the Desktop route. Files you placed for the whole computer are yours to remove.
+
 ## What people see
 
 - Force-installed copies do not show Chrome's "started debugging this browser" bar (Chromium `debugger_api.cc`).
