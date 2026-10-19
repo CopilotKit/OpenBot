@@ -32,6 +32,12 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `code_required` (below). A server and a computer must be upgraded together: an older computer has
   no `/sign-in/code`.
 
+### An email in another charset reaches its trigger as the sender wrote it
+
+A base64 or quoted-printable email part was always read as UTF-8, whatever charset its Content-Type
+named, so an `iso-8859-1` mail reached the Bot with every accented letter turned into `�`. Each part
+is now decoded in the charset it names, and a charset the runtime does not know still reads as UTF-8.
+
 ### Bot turns hold their conversation more carefully
 
 Routines, responsibilities, background research, wake-ups, group turns and Bot-to-Bot handoffs keep a
