@@ -21,18 +21,61 @@
     }
   },
   "bots": {
-    "agent-bot": { "provider": "openai", "model": "gpt-5.5" },
-    "agent-langgraph": { "provider": "openai", "model": "gpt-5.5" },
-    "agent-mastra": { "provider": "openai", "model": "gpt-4o-mini" },
-    "agent-adk": { "provider": "openai", "model": "gpt-4o-mini" },
-    "agent-ag2": { "provider": "openai", "model": "gpt-4o-mini" },
-    "agent-agno": { "provider": "openai", "model": "gpt-5.5" },
-    "agent-crewai": { "provider": "openai", "model": "gpt-5.5" },
-    "agent-langgraph-agui": { "provider": "openai", "model": "gpt-4o-mini" },
-    "agent-langroid": { "provider": "openai", "model": "gpt-4o-mini" },
-    "agent-llamaindex": { "provider": "openai", "model": "gpt-5.5" },
-    "agent-microsoft": { "provider": "openai", "model": "gpt-4o-mini" },
-    "agent-pydantic-ai": { "provider": "openai", "model": "gpt-4o-mini" },
-    "agent-strands": { "provider": "openai", "model": "gpt-4o-mini" }
+    "agent-bot": {
+      "provider": "openai",
+      "model": "gpt-5.5"
+    },
+    "agent-langgraph": {
+      "provider": "openai",
+      "model": "gpt-5.5"
+    },
+    "agent-mastra": {
+      "provider": "openai",
+      "model": "gpt-4o-mini"
+    },
+    "agent-adk": {
+      "provider": "openai",
+      "model": "gpt-4o-mini"
+    },
+    "agent-antigravity": {
+      "provider": "google",
+      "model": "gemini-2.5-flash"
+    },
+    "agent-ag2": {
+      "provider": "openai",
+      "model": "gpt-4o-mini"
+    },
+    "agent-agno": {
+      "provider": "openai",
+      "model": "gpt-5.5"
+    },
+    "agent-crewai": {
+      "provider": "openai",
+      "model": "gpt-5.5"
+    },
+    "agent-langgraph-agui": {
+      "provider": "openai",
+      "model": "gpt-4o-mini"
+    },
+    "agent-langroid": {
+      "provider": "openai",
+      "model": "gpt-4o-mini"
+    },
+    "agent-llamaindex": {
+      "provider": "openai",
+      "model": "gpt-5.5"
+    },
+    "agent-microsoft": {
+      "provider": "openai",
+      "model": "gpt-4o-mini"
+    },
+    "agent-pydantic-ai": {
+      "provider": "openai",
+      "model": "gpt-4o-mini"
+    },
+    "agent-strands": {
+      "provider": "openai",
+      "model": "gpt-4o-mini"
+    }
   }
 }
