@@ -556,7 +556,7 @@ test("a cancel that arrives while Desktop's handoff is being asked never clears 
   });
   await settle();
   handoff.resolve({ openbotUrl: "http://127.0.0.1:7470", code: "obc_d" });
-  expect(await offering).toBe(true);
+  expect(await offering).toEqual({ offered: true });
   expect(await cancelling).toEqual({ ok: true });
   // The cancel was for the web connect: Desktop's handoff replaced it (closing its tab), and the cancel leaves
   // Desktop's own pending connect and tab alone.
@@ -824,13 +824,13 @@ test("the Desktop handoff respects a policy pinned elsewhere", async () => {
         openbotUrl: "https://openbot.example.test",
       }),
     }),
-  ).toBe(false);
+  ).toEqual({ offered: false, reason: "pinned-elsewhere" });
   expect(
     await offerDesktopConnection({
       ...asking,
       readPolicy: async () => ({ ...policy, openbotUrlInvalid: true }),
     }),
-  ).toBe(false);
+  ).toEqual({ offered: false, reason: "policy-invalid" });
   expect(
     await offerDesktopConnection({
       ...asking,
@@ -839,8 +839,37 @@ test("the Desktop handoff respects a policy pinned elsewhere", async () => {
         openbotUrl: "http://127.0.0.1:7999",
       }),
     }),
-  ).toBe(false);
+  ).toEqual({ offered: false, reason: "pinned-elsewhere" });
   expect(askDesktopCalls).toBe(1);
+  expect(opened).toEqual([]);
+  expect(await readSession("pendingConnect")).toBeUndefined();
+});
+
+test("Desktop's refusal reaches the popup as its code, after a good ping too, and opens nothing", async () => {
+  for (const [reply, reason] of [
+    [{ error: "not-signed-in" }, "not-signed-in"],
+    [{ error: "not-running" }, "not-running"],
+    [null, "no-answer"],
+  ] as const) {
+    expect(
+      await handleConnectionMessage(
+        { type: "page.connect.desktop" },
+        {
+          askDesktop: async () => reply,
+          desktopAvailable: async () => true,
+          openTab,
+          readPolicy: async () => policy,
+        },
+      ),
+    ).toEqual({ ok: true, offered: false, reason });
+  }
+  expect(
+    await offerDesktopConnection({
+      askDesktop: async () => ({ openbotUrl: "not a url", code: "obc_d" }),
+      openTab,
+      readPolicy: async () => policy,
+    }),
+  ).toEqual({ offered: false, reason: "invalid-address" });
   expect(opened).toEqual([]);
   expect(await readSession("pendingConnect")).toBeUndefined();
 });

@@ -26,27 +26,45 @@ test("a good handoff reply becomes the address and code", async () => {
   expect(fake.native.sent).toEqual([{ type: "handoff" }]);
 });
 
-test("a malformed handoff reply is null", async () => {
-  for (const reply of [
-    { openbotUrl: "http://127.0.0.1:7478" },
-    { openbotUrl: "http://127.0.0.1:7478", code: "abc" },
-    { openbotUrl: 5, code: "obc_abc" },
-    { error: "not-installed" },
-  ]) {
+test("the host's own error code comes through, a reply of another shape is handoff-failed, and no host is no-answer", async () => {
+  for (const [reply, answer] of [
+    [{ ok: false, error: "not-signed-in" }, { error: "not-signed-in" }],
+    [
+      { ok: false, error: "organization-unavailable" },
+      { error: "organization-unavailable" },
+    ],
+    [{ error: "not-installed" }, { error: "not-installed" }],
+    [{ openbotUrl: "http://127.0.0.1:7478" }, { error: "handoff-failed" }],
+    [
+      { openbotUrl: "http://127.0.0.1:7478", code: "abc" },
+      { error: "handoff-failed" },
+    ],
+    [{ openbotUrl: 5, code: "obc_abc" }, { error: "handoff-failed" }],
+    [{ ok: false }, { error: "handoff-failed" }],
+  ] as const) {
     fake.native.reply = () => reply;
-    expect(await askDesktopForHandoff()).toBeNull();
+    expect(await askDesktopForHandoff()).toEqual(answer);
   }
+  fake.native.reply = () => ({
+    ok: true,
+    openbotUrl: "http://127.0.0.1:7478",
+    code: "obc_abc",
+  });
+  expect(await askDesktopForHandoff()).toEqual({
+    openbotUrl: "http://127.0.0.1:7478",
+    code: "obc_abc",
+  });
 });
 
-test("a host that is not installed answers null", async () => {
+test("a host that is not installed answers no-answer and unavailable", async () => {
   fake.native.reply = null;
-  expect(await askDesktopForHandoff()).toBeNull();
+  expect(await askDesktopForHandoff()).toEqual({ error: "no-answer" });
   expect(await desktopAvailable()).toBe(false);
 });
 
-test("a host that never answers times out to null", async () => {
+test("a host that never answers times out to no-answer and unavailable", async () => {
   fake.native.reply = () => new Promise(() => {});
-  expect(await askDesktopForHandoff(20)).toBeNull();
+  expect(await askDesktopForHandoff(20)).toEqual({ error: "no-answer" });
   expect(await desktopAvailable(20)).toBe(false);
 });
 
@@ -56,6 +74,7 @@ test("desktopAvailable is true only for available: true", async () => {
   expect(fake.native.sent).toEqual([{ type: "ping" }]);
   for (const reply of [
     { available: false },
+    { ok: false, available: false, error: "not-signed-in" },
     { available: "true" },
     {},
     { error: "x" },
@@ -71,7 +90,7 @@ function answerAfter(ms: number, reply: object) {
     new Promise<object>((resolve) => setTimeout(() => resolve(reply), ms));
 }
 
-test("the ping waits out the Desktop host's 2 s running-app check, and gives up at 3 s", async () => {
+test("the ping waits out the Desktop host's 2 s deadline, and gives up at 3 s", async () => {
   jest.useFakeTimers();
   try {
     fake.native.reply = answerAfter(2_000, { available: true });
@@ -88,7 +107,7 @@ test("the ping waits out the Desktop host's 2 s running-app check, and gives up 
   }
 });
 
-test("a handoff waits out the host's running-app check and its own 5 s request to OpenBot, and gives up at 8 s", async () => {
+test("a handoff waits out the host's 7 s deadline, and gives up at 8 s", async () => {
   jest.useFakeTimers();
   try {
     const handoff = { openbotUrl: "http://127.0.0.1:7478", code: "obc_abc" };
@@ -100,7 +119,7 @@ test("a handoff waits out the host's running-app check and its own 5 s request t
     fake.native.reply = answerAfter(8_001, handoff);
     const tooSlow = askDesktopForHandoff();
     jest.advanceTimersByTime(8_000);
-    expect(await tooSlow).toBeNull();
+    expect(await tooSlow).toEqual({ error: "no-answer" });
   } finally {
     jest.useRealTimers();
   }

@@ -10,6 +10,7 @@ import type {
 import { readLocal } from "../../shared/storage";
 import { Page } from "../ui/page";
 import { ask as askBackground } from "../ui/runtime";
+import { desktopSentence } from "./desktop-sentence";
 import { Notices } from "./notices";
 import { prepareRecording } from "./prepare";
 import { RecordForm } from "./record-form";
@@ -174,8 +175,14 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
               size="lg"
               variant="secondary"
               onClick={async () => {
-                const answer = await ask({ type: "page.connect.desktop" });
+                setError(null);
+                const answer = await ask<PageResponse>({
+                  type: "page.connect.desktop",
+                });
+                // A good ping does not promise a good handoff: OpenBot Desktop says why it could not connect.
                 if (!answer.ok) setError(answer.error);
+                else if ("offered" in answer && !answer.offered)
+                  setError(desktopSentence(answer.reason));
                 await refresh();
               }}
             >

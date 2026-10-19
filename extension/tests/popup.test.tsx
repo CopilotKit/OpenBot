@@ -11,6 +11,7 @@ import type { RecorderBot } from "@openbot/shared/recorder-api";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { PASS_HINTS } from "../src/offscreen/grant";
+import { desktopSentence } from "../src/pages/popup/desktop-sentence";
 import { Popup } from "../src/pages/popup/popup";
 import { stripCaptureStatus } from "../src/pages/ui/capture-rows";
 import {
@@ -176,6 +177,63 @@ test("Connect with OpenBot Desktop is hidden unless Desktop answers available", 
     expect(shown.sent.some((m) => m.type === "page.connect.desktop")).toBe(
       true,
     ),
+  );
+});
+
+test("a Desktop connect that fails after a good ping shows a plain sentence for the host's code", async () => {
+  const { findByText, findByRole } = setup(stateResponse(NOT_CONNECTED), {
+    desktop: true,
+    answers: {
+      "page.connect.desktop": {
+        ok: true,
+        offered: false,
+        reason: "not-signed-in",
+      },
+    },
+  });
+  fireEvent.click(await findByText("Connect with OpenBot Desktop"));
+  expect((await findByRole("alert")).textContent).toBe(
+    "OpenBot Desktop is not signed in to your organization. Sign in again in OpenBot Desktop, then try again.",
+  );
+});
+
+test("every code OpenBot Desktop or the Recorder can give has a sentence of its own", () => {
+  const general = desktopSentence("something-new");
+  const codes = [
+    "origin-not-allowed",
+    "not-installed",
+    "not-running",
+    "not-signed-in",
+    "organization-unavailable",
+    "handoff-failed",
+    "timed-out",
+    "host-failed",
+    "unknown-message",
+    "no-answer",
+    "policy-invalid",
+    "pinned-elsewhere",
+    "invalid-address",
+  ];
+  const sentences = codes.map(desktopSentence);
+  for (const sentence of sentences) expect(sentence).not.toBe(general);
+  expect(new Set(sentences).size).toBe(codes.length);
+  expect(desktopSentence("toString")).toBe(general);
+});
+
+test("a Desktop code the Recorder does not know gets the general sentence", async () => {
+  const { findByText, findByRole } = setup(stateResponse(NOT_CONNECTED), {
+    desktop: true,
+    answers: {
+      "page.connect.desktop": {
+        ok: true,
+        offered: false,
+        reason: "something-new",
+      },
+    },
+  });
+  fireEvent.click(await findByText("Connect with OpenBot Desktop"));
+  expect((await findByRole("alert")).textContent).toBe(
+    "OpenBot Desktop could not connect this browser. Try again, or connect from OpenBot in your browser.",
   );
 });
 

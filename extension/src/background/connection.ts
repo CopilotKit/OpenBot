@@ -29,7 +29,7 @@ import {
   writeLocal,
   writeSession,
 } from "../shared/storage";
-import type { DesktopHandoff } from "./native-host";
+import type { DesktopHandoff, DesktopRefusal } from "./native-host";
 import { askDesktopForHandoff, desktopAvailable } from "./native-host";
 
 /** A connection that ended without the person's Disconnect, for the recording controller (index.ts wires it in): OpenBot
@@ -44,7 +44,7 @@ export type ConnectionLoss =
   | { kind: "policy"; connection: ConnectionRecord };
 
 type ConnectionDeps = {
-  askDesktop: () => Promise<DesktopHandoff | null>;
+  askDesktop: () => Promise<DesktopHandoff | DesktopRefusal | null>;
   desktopAvailable: () => Promise<boolean>;
   readPolicy: () => Promise<RecorderPolicy>;
   openTab: (url: string) => Promise<number | undefined>; // the new tab's id, kept in pendingConnect.tabId
@@ -216,7 +216,7 @@ export async function handleConnectionMessage(
     case "page.desktop.available":
       return { ok: true, available: await resolved.desktopAvailable() };
     case "page.connect.desktop":
-      return { ok: true, offered: await offerDesktopConnection(resolved) };
+      return { ok: true, ...(await offerDesktopConnection(resolved)) };
     default:
       return undefined;
   }
@@ -449,24 +449,37 @@ async function reconcilePolicy(deps: ConnectionDeps): Promise<void> {
   await revoke(connection);
 }
 
+/** Whether Desktop's connect page opened, or why not, as a code the popup turns into a sentence: OpenBot Desktop's own
+ * error code (see DesktopRefusal), or `policy-invalid`, `pinned-elsewhere` or `invalid-address` from the checks here. */
+export type DesktopOffer =
+  | { offered: true }
+  | { offered: false; reason: string };
+
 /** A managed browser connects only where its policy points, on the Desktop path too. Desktop's local stack is always
  * a loopback http address, so a policy naming any other kind of address can never match and Desktop is not asked. */
 export function offerDesktopConnection(
   deps?: Partial<ConnectionDeps>,
-): Promise<boolean> {
+): Promise<DesktopOffer> {
   const resolved = withDefaults(deps);
   return serially(() => desktopConnect(resolved));
 }
 
-async function desktopConnect(deps: ConnectionDeps): Promise<boolean> {
+async function desktopConnect(deps: ConnectionDeps): Promise<DesktopOffer> {
+  const refused = (reason: string): DesktopOffer => ({
+    offered: false,
+    reason,
+  });
   const policy = await deps.readPolicy();
-  if (policy.openbotUrlInvalid) return false;
-  if (policy.openbotUrl && !policy.openbotUrl.startsWith("http:")) return false;
+  if (policy.openbotUrlInvalid) return refused("policy-invalid");
+  if (policy.openbotUrl && !policy.openbotUrl.startsWith("http:"))
+    return refused("pinned-elsewhere");
   const handoff = await deps.askDesktop();
-  if (!handoff) return false;
+  if (!handoff) return refused("no-answer");
+  if ("error" in handoff) return refused(handoff.error);
   const checked = normaliseOpenBotOrigin(handoff.openbotUrl);
-  if (!checked.ok) return false;
-  if (!allowsOpenBot(policy, checked.origin)) return false;
+  if (!checked.ok) return refused("invalid-address");
+  if (!allowsOpenBot(policy, checked.origin))
+    return refused("pinned-elsewhere");
   await closeConnectTab((await readSession("pendingConnect"))?.tabId);
   const pending: PendingConnect = {
     origin: checked.origin,
@@ -478,5 +491,5 @@ async function desktopConnect(deps: ConnectionDeps): Promise<boolean> {
   const tabId = await deps.openTab(connectUrl());
   if (tabId !== undefined)
     await writeSession("pendingConnect", { ...pending, tabId });
-  return true;
+  return { offered: true };
 }

@@ -233,7 +233,8 @@ export type PageResponse =
   | { ok: true; pending: { origin: string; via: "web" | "desktop" } | null }
   | { ok: true; bots: RecorderBot[] }
   | { ok: true; available: boolean }
-  | { ok: true; offered: boolean }
+  | { ok: true; offered: true }
+  | { ok: true; offered: false; reason: string } // why OpenBot Desktop did not connect this browser, as a code (DesktopOffer)
   | { ok: true }
   | { ok: false; error: string };
 

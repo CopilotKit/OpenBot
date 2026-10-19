@@ -1,6 +1,10 @@
 import { RECORDER_NATIVE_HOST } from "@openbot/shared/recorder-extension";
 
 export type DesktopHandoff = { openbotUrl: string; code: string };
+/** Why OpenBot Desktop did not hand over a connect code: the host's own error code (`not-running`, `not-signed-in` and
+ * the rest), `no-answer` when the host is missing or did not answer in time, or `handoff-failed` for a reply of
+ * another shape. */
+export type DesktopRefusal = { error: string };
 
 async function ask(
   message: object,
@@ -24,12 +28,12 @@ async function ask(
   }
 }
 
-/** OpenBot Desktop's host answers a ping only after its running-app check, which waits up to 2 s on the local
- * OpenBot's /api/capabilities (`server_capabilities_answer` in desktop/src-tauri/src/main.rs) on a slow machine. */
+/** The host answers a ping within its own 2 s deadline (DEADLINES in desktop/src-tauri/src/recorder_host.rs); the
+ * extension waits a little longer. */
 const PING_TIMEOUT_MS = 3_000;
-/** A handoff runs the same running-app check, then the host's own request for a connect code, which it gives up on
- * after 5 s (`client` in desktop/src-tauri/src/recorder_host.rs). */
-const HANDOFF_TIMEOUT_MS = PING_TIMEOUT_MS + 5_000;
+/** The host answers a handoff, its request to the local OpenBot for a connect code included, within its own 7 s
+ * deadline (DEADLINES in recorder_host.rs); the extension waits a little longer. */
+const HANDOFF_TIMEOUT_MS = 8_000;
 
 /** A ping that mints nothing. */
 export async function desktopAvailable(
@@ -38,16 +42,21 @@ export async function desktopAvailable(
   return (await ask({ type: "ping" }, timeoutMs))?.available === true;
 }
 
+/** The host's handoff, or why there is none. A good ping does not promise a good handoff: the ping is cheap, and only
+ * the handoff checks that OpenBot answers and that the organization sign-in can be handed over. */
 export async function askDesktopForHandoff(
   timeoutMs = HANDOFF_TIMEOUT_MS,
-): Promise<DesktopHandoff | null> {
+): Promise<DesktopHandoff | DesktopRefusal> {
   const reply = await ask({ type: "handoff" }, timeoutMs);
+  if (!reply) return { error: "no-answer" };
   if (
-    reply &&
+    reply.ok !== false &&
     typeof reply.openbotUrl === "string" &&
     typeof reply.code === "string" &&
     reply.code.startsWith("obc_")
   )
     return { openbotUrl: reply.openbotUrl, code: reply.code };
-  return null;
+  if (typeof reply.error === "string" && reply.error.length > 0)
+    return { error: reply.error };
+  return { error: "handoff-failed" };
 }
