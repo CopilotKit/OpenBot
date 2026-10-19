@@ -150,6 +150,8 @@ const SENTENCES = {
     "That tab is closed. Open the Recorder on the tab you want to record.",
   startFailed: "The recording could not start. Try again.",
   documentFailed: "The Recorder could not start recording. Try again.",
+  restartUnreachable:
+    "The Recorder could not start over just now. Your recording goes on; try again in a moment.",
   signedOut:
     "This browser was disconnected from OpenBot. Your recording stopped, and everything in it is kept in this browser until you connect again.",
   organizationSignedOut:
@@ -451,6 +453,8 @@ export function installRecording(
   /** How many Disconnects are under way: a stop that finds the connection gone meanwhile is being discarded, not kept
    * for a person who was signed out. */
   let disconnecting = 0;
+  /** The stop message a Stop waits on the document to answer: a document reopened meanwhile is told it again. */
+  let pendingStop: BackgroundToOffscreen | null = null;
   /** The recording whose capture the popup shows and the trajectories it streams to: a status about any other
    * trajectory (a recording Start over replaced, still draining) leaves that capture alone. */
   let shown: { recordingId: string; trajectoryIds: Set<string> } | null = null;
@@ -716,6 +720,31 @@ export function installRecording(
   /** Posts a message the document must get, waiting up to the ready timeout for its port while it reconnects. */
   async function sendToDocument(message: BackgroundToOffscreen): Promise<void> {
     if (await documentPort(READY_TIMEOUT_MS)) postOffscreen(message);
+  }
+
+  /** How long the document's port may stay down before the document counts as gone: longer than its own reconnect
+   * backoff's first tries. */
+  const DOCUMENT_GONE_MS = READY_TIMEOUT_MS;
+
+  /** The document's port went down while a recording runs or a Stop waits on it. A document that comes back reconnects
+   * its port within the window; one that crashed never does, and nothing else would reopen it while the service worker
+   * stays awake (recovery runs only when the service worker starts), so the queue would fill and drop events. */
+  function watchForLostDocument(): void {
+    if (state.phase !== "recording" && state.phase !== "stopping") return;
+    deps.timers.set(() => {
+      void reopenLostDocument().catch(report("reopening the document"));
+    }, DOCUMENT_GONE_MS);
+  }
+
+  /** Reopens a document that is gone on the stored session, the same outbox: a live recording goes on, and a Stop that
+   * was waiting tells the new document again. A document that still exists reconnects its port itself. */
+  async function reopenLostDocument(): Promise<void> {
+    if (offscreen) return;
+    const stopping = state.phase === "stopping" ? pendingStop : null;
+    if (state.phase !== "recording" && !stopping) return;
+    if (await hasOffscreenDocument()) return;
+    if (offscreen || !(await resumeDocument())) return;
+    if (stopping && pendingStop === stopping) postOffscreen(stopping);
   }
 
   /** Opens a document that went away with a previous service worker on the stored session: the same outbox. False when
@@ -1137,9 +1166,14 @@ export function installRecording(
                 ? "disconnected"
                 : "signed-out",
           };
-    // The document went away with the service worker: it is reopened on the stored session to finish the stop, however
-    // long ago the stop began.
-    if (resumed && !(await hasOffscreenDocument()))
+    // The document went away (with the service worker, or on its own): the person's Stop reopens it on the stored
+    // session, however long ago the stop began, so the outcome is queued and the rest is sent now rather than at the
+    // next browser start. A recording kept for its person or discarded needs no document to be told.
+    if (
+      mode.kind === "person" &&
+      disconnecting === 0 &&
+      !(await hasOffscreenDocument())
+    )
       await resumeDocument().catch(report("reopening the document"));
     if (since + STOP_WATCHDOG_MS <= deps.now()) {
       // The watchdog has run out (it counts from the persisted start): a document is still told, waiting for one that
@@ -1147,8 +1181,14 @@ export function installRecording(
       // sent.
       await sendToDocument(message);
     } else if (mode.kind === "person" && disconnecting === 0) {
-      // The outcome is queued after every event before the recording counts as stopped.
-      await awaitStopped(recordingId, since, message);
+      // The outcome is queued after every event before the recording counts as stopped. A document that goes away
+      // meanwhile is reopened and told again (`reopenLostDocument`).
+      pendingStop = message;
+      try {
+        await awaitStopped(recordingId, since, message);
+      } finally {
+        pendingStop = null;
+      }
     } else {
       // A recording kept for its person, or discarded (a Disconnect is under way), waits only for a reconnecting
       // document to hear of it.
@@ -1355,10 +1395,13 @@ export function installRecording(
     restartingFrom = current;
     try {
       // The document must hear of the switch: while its port reconnects, the wait happens here, before the switch
-      // begins, so nothing in the switch waits. Stop, a sign-out or Disconnect can end the recording meanwhile.
-      await documentPort(READY_TIMEOUT_MS);
+      // begins, so nothing in the switch waits. Stop, a sign-out or Disconnect can end the recording meanwhile. A
+      // document that cannot be reached would never hear of it, so Start over is refused (the recording goes on, and
+      // a lost document is reopened).
+      const port = await documentPort(READY_TIMEOUT_MS);
       if (state.phase !== "recording" || live !== current)
         return { ok: false, error: SENTENCES.notRecording };
+      if (!port) return { ok: false, error: SENTENCES.restartUnreachable };
       let switched = () => {};
       switching = new Promise<void>((resolve) => {
         switched = resolve;
@@ -1982,6 +2025,7 @@ export function installRecording(
         if (offscreen !== port) return;
         offscreen = null;
         documentReady = false;
+        watchForLostDocument();
       });
       // The events that waited go first, then whatever waited for the port.
       flushEvents();

@@ -228,7 +228,10 @@ function answerAsDocument() {
   if (!doc) return;
   while (docSeen < doc.messages.length) {
     const message = doc.messages[docSeen++] as BackgroundToOffscreen;
-    if (message.type === "offscreen.start")
+    if (
+      message.type === "offscreen.start" ||
+      message.type === "offscreen.resume"
+    )
       docRecording = message.session.recordingId;
     if (message.type === "offscreen.rotate") docRecording = message.recordingId;
     if (message.type === "offscreen.stop") {
@@ -893,8 +896,9 @@ test("Stop while the document's port reconnects tells the document on its new po
   await until(() => !fake.offscreen.open, "the document closes");
 });
 
-test("Stop with no document finishes at once: there is nothing to wait for", async () => {
-  await record();
+test("Stop after the document went away reopens it on the stored session, so the outcome is queued now", async () => {
+  const id = await record();
+  const session = sentToDocument("offscreen.start")[0];
   await chrome.offscreen.closeDocument();
   await settle();
   let answered = false;
@@ -902,8 +906,98 @@ test("Stop with no document finishes at once: there is nothing to wait for", asy
     answered = true;
   });
   await until(() => answered, "Stop finishes without a timer");
+  expect(sentToDocument("offscreen.resume")).toEqual([
+    {
+      type: "offscreen.resume",
+      session: session?.type === "offscreen.start" ? session.session : null,
+    },
+  ]);
+  expect(sentToDocument("offscreen.stop")).toEqual([
+    { type: "offscreen.stop", outcome: "succeeded" },
+  ]);
   expect((await state()).phase).toBe("idle");
-  expect(drains()).toHaveLength(1);
+  expect(drains()).toMatchObject([{ recordingId: id }]);
+});
+
+test("a document that goes away mid-recording is reopened on the stored session once its port stays down, and the waiting events follow", async () => {
+  fake.tabs.set(7, { id: 7, url: "chrome://newtab/" } as chrome.tabs.Tab);
+  const id = await record();
+  const content = contentPort(7);
+  const session = sentToDocument("offscreen.start")[0];
+  // The document crashes: Chrome no longer lists it, and its port is gone.
+  await chrome.offscreen.closeDocument();
+  await settle();
+  content.postMessage({ type: "content.event", event: contentEvent({ i: 1 }) });
+  await settle();
+  expect(fake.offscreen.created).toHaveLength(1);
+  await advance(5_000);
+  await until(
+    () => sentToDocument("offscreen.event").length === 1,
+    "the waiting event reaches the reopened document",
+  );
+  expect(fake.offscreen.created).toHaveLength(2);
+  expect(toDocument().map((message) => message.type)).toEqual([
+    "offscreen.resume",
+    "offscreen.event",
+  ]);
+  expect(sentToDocument("offscreen.resume")[0]).toEqual({
+    type: "offscreen.resume",
+    session: session?.type === "offscreen.start" ? session.session : null,
+  });
+  expect(await state()).toMatchObject({ phase: "recording", recordingId: id });
+});
+
+test("a document whose port comes back within the window is left alone", async () => {
+  await record();
+  doc?.disconnect();
+  doc = null;
+  await settle();
+  const again = reconnectDocument();
+  await advance(5_000);
+  expect(fake.offscreen.created).toHaveLength(1);
+  expect(sentToDocument("offscreen.resume", again)).toEqual([]);
+});
+
+test("a Stop waiting on a document that goes away tells the reopened document again", async () => {
+  const id = await record();
+  holdStop = true;
+  let answered = false;
+  void page({ type: "page.stop" }).then(() => {
+    answered = true;
+  });
+  await until(
+    () => sentToDocument("offscreen.stop").length === 1,
+    "offscreen.stop",
+  );
+  holdStop = false;
+  await chrome.offscreen.closeDocument();
+  await settle();
+  await advance(5_000);
+  await until(() => answered, "Stop finishes on the reopened document");
+  expect(toDocument().map((message) => message.type)).toEqual([
+    "offscreen.resume",
+    "offscreen.stop",
+  ]);
+  expect(drains()).toMatchObject([{ recordingId: id }]);
+});
+
+test("Start over is refused while the document cannot be reached, and the recording goes on", async () => {
+  const id = await record();
+  doc?.disconnect();
+  doc = null;
+  await settle();
+  const restarting = page({ type: "page.restart" });
+  await settle();
+  await advance(5_000);
+  expect(await restarting).toEqual({
+    ok: false,
+    error:
+      "The Recorder could not start over just now. Your recording goes on; try again in a moment.",
+  });
+  expect(await state()).toMatchObject({ phase: "recording", recordingId: id });
+  expect(everyDocumentMessage().map((message) => message.type)).not.toContain(
+    "offscreen.rotate",
+  );
 });
 
 test("the document closes only when every drain is done", async () => {
