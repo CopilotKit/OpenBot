@@ -64,6 +64,8 @@ function startContentScript() {
     });
   };
 
+  // The extension was updated or removed under this page: nothing captured here can reach it any more.
+  port.onOrphaned(stopCapture);
   if (flags.__openbotRecorderActive) startCapture();
   port.onMessage((message) => {
     if (message.type === "background.capture") {

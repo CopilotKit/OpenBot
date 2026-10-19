@@ -16,13 +16,17 @@ type TestPort = {
   disconnected: boolean;
 };
 
-function makePort(): TestPort {
+/** `failAfter`: the port dies after that many messages, before Chrome tells the script, so the next post throws as
+ * Chrome's own does ("Attempting to use a disconnected port object"). */
+function makePort(failAfter = Number.POSITIVE_INFINITY): TestPort {
   const sent: ContentToBackground[] = [];
   const messageListeners: ((m: BackgroundToContent) => void)[] = [];
   const disconnectListeners: (() => void)[] = [];
   const state = { disconnected: false };
   const port = {
     postMessage: (m: ContentToBackground) => {
+      if (sent.length >= failAfter)
+        throw new Error("Attempting to use a disconnected port object");
       sent.push(m);
     },
     disconnect: () => {
@@ -51,15 +55,22 @@ function makePort(): TestPort {
   };
 }
 
-function harness(maxBuffer?: number) {
+function harness(
+  maxBuffer?: number,
+  options: { orphaned?: () => boolean } = {},
+) {
   const ports: TestPort[] = [];
   const timeouts: { fn: () => void; ms: number; cleared: boolean }[] = [];
+  /** How many messages the next port takes before it dies; undefined for a port that stays up. */
+  const control: { failAfter?: number } = {};
   const content = createContentPort({
     connect: () => {
-      const next = makePort();
+      const next = makePort(control.failAfter);
+      control.failAfter = undefined;
       ports.push(next);
       return next.port;
     },
+    orphaned: options.orphaned ?? (() => false),
     timers: {
       set: (fn, ms) => {
         const entry = { fn, ms, cleared: false };
@@ -78,7 +89,8 @@ function harness(maxBuffer?: number) {
     entry.cleared = true;
     entry.fn();
   };
-  return { content, ports, timeouts, fire };
+  const pending = () => timeouts.filter((t) => !t.cleared);
+  return { content, ports, timeouts, fire, pending, control };
 }
 
 const eventMessage = (n: number): ContentToBackground => ({
@@ -254,9 +266,10 @@ describe("createContentPort", () => {
     createContentPort({
       connect: () => {
         calls += 1;
-        throw new Error("Extension context invalidated.");
+        throw new Error("Could not establish connection.");
       },
       timers: { set: (fn, ms) => timeouts.push({ fn, ms }), clear: () => {} },
+      orphaned: () => false,
     });
 
     timeouts[0].fn();
@@ -275,6 +288,112 @@ describe("createContentPort", () => {
     second.content.dispose();
     expect(second.timeouts.every((t) => t.cleared)).toBe(true);
     expect(timeouts).toHaveLength(0);
+  });
+
+  test("a digest posted to a port that died before Chrome said so is kept, and sent after the one reconnect", () => {
+    const { content, ports, fire } = harness();
+    ports[0].port.postMessage = () => {
+      throw new Error("Attempting to use a disconnected port object");
+    };
+
+    expect(() => content.post(digestMessage(1))).not.toThrow();
+    content.post(eventMessage(1));
+    ports[0].disconnect();
+    fire();
+
+    expect(ports).toHaveLength(2);
+    expect(ports[1].sent.slice(1)).toEqual([digestMessage(1), eventMessage(1)]);
+  });
+
+  test("a port that dies during the flush keeps what it had not sent, in order, for the next one", () => {
+    const { content, ports, fire, control } = harness();
+    ports[0].disconnect();
+    content.post(digestMessage(1));
+    content.post(eventMessage(1));
+    content.post(digestMessage(2));
+    control.failAfter = 2;
+    fire();
+    fire();
+
+    expect(ports[1].sent).toEqual([
+      expect.objectContaining({ type: "content.hello" }),
+      digestMessage(1),
+    ]);
+    expect(ports[2].sent.slice(1)).toEqual([eventMessage(1), digestMessage(2)]);
+  });
+
+  test("an orphaned script, its extension updated or removed, stops reconnecting and says so", () => {
+    let orphaned = false;
+    const { content, ports, pending } = harness(undefined, {
+      orphaned: () => orphaned,
+    });
+    let told = 0;
+    content.onOrphaned(() => {
+      told += 1;
+    });
+
+    orphaned = true;
+    ports[0].disconnect();
+    content.post(digestMessage(1));
+
+    expect(pending()).toEqual([]);
+    expect(told).toBe(1);
+    expect(ports).toHaveLength(1);
+    // A listener added afterwards hears it at once.
+    content.onOrphaned(() => {
+      told += 1;
+    });
+    expect(told).toBe(2);
+  });
+
+  test("a connect refused because the extension context is gone is not retried", () => {
+    const timeouts: unknown[] = [];
+    let calls = 0;
+    const content = createContentPort({
+      connect: () => {
+        calls += 1;
+        throw new Error("Extension context invalidated.");
+      },
+      timers: { set: (fn, ms) => timeouts.push({ fn, ms }), clear: () => {} },
+      orphaned: () => true,
+    });
+    let told = false;
+    content.onOrphaned(() => {
+      told = true;
+    });
+
+    expect(calls).toBe(1);
+    expect(timeouts).toEqual([]);
+    expect(told).toBe(true);
+  });
+
+  test("by default a script is orphaned once chrome.runtime.id is gone", () => {
+    const fake = installChromeFake();
+    try {
+      const ports: TestPort[] = [];
+      const timeouts: { fn: () => void }[] = [];
+      createContentPort({
+        connect: () => {
+          const next = makePort();
+          ports.push(next);
+          return next.port;
+        },
+        timers: { set: (fn) => timeouts.push({ fn }), clear: () => {} },
+      });
+      ports[0]?.disconnect();
+      expect(timeouts).toHaveLength(1);
+      timeouts[0]?.fn();
+
+      Object.defineProperty(chrome.runtime, "id", {
+        value: undefined,
+        configurable: true,
+      });
+      ports[1]?.disconnect();
+
+      expect(timeouts).toHaveLength(1);
+    } finally {
+      fake.uninstall();
+    }
   });
 
   test("clips a very long page address so the hello sent after a reconnect still parses", () => {
@@ -394,5 +513,44 @@ describe("the content script entry", () => {
     expect(clicks()).toMatchObject([
       { event: { value: { target: { text: "Keep" } } } },
     ]);
+  });
+  test("a script orphaned by an extension update stops capturing", async () => {
+    const fake = installChromeFake();
+    uninstall = () => fake.uninstall();
+    const ports: chrome.runtime.Port[] = [];
+    chrome.runtime.onConnect.addListener((port) => {
+      ports.push(port);
+    });
+    globals.__openbotRecorderActive = "d1";
+    document.body.innerHTML = `<button id="save">Save</button>`;
+    let listening = 0;
+    const add = window.addEventListener.bind(window);
+    const remove = window.removeEventListener.bind(window);
+    window.addEventListener = ((...args: Parameters<typeof add>) => {
+      if (args[0] === "click") listening += 1;
+      add(...args);
+    }) as typeof window.addEventListener;
+    window.removeEventListener = ((...args: Parameters<typeof remove>) => {
+      if (args[0] === "click") listening -= 1;
+      remove(...args);
+    }) as typeof window.removeEventListener;
+    try {
+      await import(`../src/content/index?fresh=${Date.now()}2`);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(ports).toHaveLength(1);
+      expect(listening).toBeGreaterThan(0);
+
+      Object.defineProperty(chrome.runtime, "id", {
+        value: undefined,
+        configurable: true,
+      });
+      ports[0]?.disconnect();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+
+      expect(listening).toBe(0);
+    } finally {
+      window.addEventListener = add;
+      window.removeEventListener = remove;
+    }
   });
 });

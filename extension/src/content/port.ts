@@ -32,25 +32,36 @@ export function contentHello(): ContentToBackground {
  * The content script's line to the service worker. When the worker restarts the port disconnects: reconnect after
  * 0.5, 1, 2 and 4 s (then every 4 s) and keep what was posted meanwhile, in order. Digests, hellos and notice choices
  * are always kept (a lost digest would let a typed secret through later network bodies); only `content.event`s count
- * towards `maxBuffer`, and beyond it the oldest is dropped and counted.
+ * towards `maxBuffer`, and beyond it the oldest is dropped and counted. A port can die before Chrome reports it: a post
+ * or a flush that throws keeps what it could not send and reconnects. Once the extension is updated or removed the
+ * script is orphaned (`chrome.runtime.id` is gone): the line closes for good and tells `onOrphaned` listeners, instead
+ * of retrying every 4 s for as long as the page stays open.
  */
 export function createContentPort(
   options: {
     connect?: () => chrome.runtime.Port;
     timers?: Timers;
     maxBuffer?: number;
+    /** True once this script's extension has gone away. */
+    orphaned?: () => boolean;
   } = {},
 ): {
   post(message: ContentToBackground): void;
   onMessage(listener: (message: BackgroundToContent) => void): void;
+  /** Called once the line has closed for good because the extension went away; at once when it already has. */
+  onOrphaned(listener: () => void): void;
   dispose(): void;
 } {
   const connect =
     options.connect ?? (() => chrome.runtime.connect({ name: PORT_CONTENT }));
   const timers = options.timers ?? defaultTimers;
   const maxBuffer = options.maxBuffer ?? MAX_EVENT_BUFFER;
+  const orphaned =
+    options.orphaned ??
+    (() => !(globalThis as { chrome?: typeof chrome }).chrome?.runtime?.id);
 
   const listeners: ((message: BackgroundToContent) => void)[] = [];
+  const orphanListeners: (() => void)[] = [];
   let port: chrome.runtime.Port | null = null;
   let queue: ContentToBackground[] = [];
   let queuedEvents = 0;
@@ -58,9 +69,49 @@ export function createContentPort(
   let attempt = 0;
   let timer: unknown = null;
   let disposed = false;
+  let isOrphaned = false;
+
+  /** False when the port died before Chrome said so: postMessage throws on a disconnected port. */
+  const deliver = (
+    target: chrome.runtime.Port,
+    message: ContentToBackground,
+  ): boolean => {
+    try {
+      target.postMessage(message);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const dispose = () => {
+    disposed = true;
+    if (timer !== null) timers.clear(timer);
+    timer = null;
+    const current = port;
+    port = null;
+    try {
+      current?.disconnect();
+    } catch {
+      /* Already gone with the extension context. */
+    }
+  };
+
+  const orphan = () => {
+    if (isOrphaned) return;
+    isOrphaned = true;
+    dispose();
+    queue = [];
+    queuedEvents = 0;
+    for (const listener of orphanListeners) listener();
+  };
 
   const scheduleReconnect = () => {
     if (disposed || timer !== null) return;
+    if (orphaned()) {
+      orphan();
+      return;
+    }
     const delay =
       RECONNECT_DELAYS_MS[Math.min(attempt, RECONNECT_DELAYS_MS.length - 1)];
     attempt += 1;
@@ -70,10 +121,32 @@ export function createContentPort(
     }, delay);
   };
 
-  const flush = (target: chrome.runtime.Port) => {
-    target.postMessage(contentHello());
+  /** The live port is gone (a disconnect, or a post that threw): reconnect. A second report about the same port, or one
+   * about a port already replaced, changes nothing. */
+  const lose = (target: chrome.runtime.Port) => {
+    if (port !== target) return;
+    port = null;
+    scheduleReconnect();
+  };
+
+  const enqueue = (message: ContentToBackground) => {
+    queue.push(message);
+    if (message.type !== "content.event") return;
+    queuedEvents += 1;
+    if (queuedEvents > maxBuffer) {
+      const oldest = queue.findIndex((m) => m.type === "content.event");
+      queue.splice(oldest, 1);
+      queuedEvents -= 1;
+      dropped += 1;
+    }
+  };
+
+  /** Sends the hello, any drop count and the queue, in order; false when the port died part way, with what it did not
+   * send still queued. */
+  const flush = (target: chrome.runtime.Port): boolean => {
+    if (!deliver(target, contentHello())) return false;
     if (dropped > 0) {
-      target.postMessage({
+      const report: ContentToBackground = {
         type: "content.event",
         event: {
           type: "CUSTOM",
@@ -81,13 +154,18 @@ export function createContentPort(
           timestamp: Date.now(),
           value: { count: dropped, reason: "content-port" },
         },
-      } satisfies ContentToBackground);
+      };
+      if (!deliver(target, report)) return false;
       dropped = 0;
     }
-    const pending = queue;
-    queue = [];
-    queuedEvents = 0;
-    for (const message of pending) target.postMessage(message);
+    let sent = 0;
+    for (const message of queue) {
+      if (!deliver(target, message)) break;
+      sent += 1;
+    }
+    for (const message of queue.splice(0, sent))
+      if (message.type === "content.event") queuedEvents -= 1;
+    return queue.length === 0;
   };
 
   const open = (reconnecting: boolean) => {
@@ -103,41 +181,28 @@ export function createContentPort(
       attempt = 0;
       for (const listener of listeners) listener(message);
     });
-    next.onDisconnect.addListener(() => {
-      if (port === next) port = null;
-      scheduleReconnect();
-    });
-    if (reconnecting) flush(next);
+    next.onDisconnect.addListener(() => lose(next));
+    if (reconnecting && !flush(next)) lose(next);
   };
 
   open(false);
 
   return {
     post(message) {
+      if (disposed) return;
       if (port) {
-        port.postMessage(message);
-        return;
+        if (deliver(port, message)) return;
+        lose(port);
       }
-      queue.push(message);
-      if (message.type !== "content.event") return;
-      queuedEvents += 1;
-      if (queuedEvents > maxBuffer) {
-        const oldest = queue.findIndex((m) => m.type === "content.event");
-        queue.splice(oldest, 1);
-        queuedEvents -= 1;
-        dropped += 1;
-      }
+      enqueue(message);
     },
     onMessage(listener) {
       listeners.push(listener);
     },
-    dispose() {
-      disposed = true;
-      if (timer !== null) timers.clear(timer);
-      timer = null;
-      const current = port;
-      port = null;
-      current?.disconnect();
+    onOrphaned(listener) {
+      if (isOrphaned) listener();
+      else orphanListeners.push(listener);
     },
+    dispose,
   };
 }
