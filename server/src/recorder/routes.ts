@@ -83,14 +83,21 @@ export function createRecorderRoutes(deps: RecorderRouteDeps) {
       const sealed = await deps.sealOrganizationSession(
         context.req.header("cookie"),
       );
-      return context.json(
-        await deps.connections.mintCode(
-          context.var.actor.id,
-          body.data.via,
-          sealed,
-        ),
-        201,
+      const minted = await deps.connections.mintCode(
+        context.var.actor.id,
+        body.data.via,
+        sealed,
       );
+      if (!minted) {
+        return context.json(
+          {
+            error:
+              "Too many connection codes were asked for at once. Wait a few minutes and try again.",
+          },
+          429,
+        );
+      }
+      return context.json(minted, 201);
     },
   );
 

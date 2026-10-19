@@ -4,8 +4,7 @@ CREATE TABLE "recorder_connect_codes" (
 	"via" text NOT NULL,
 	"organization_session" text,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"expires_at" timestamp with time zone NOT NULL,
-	"consumed_at" timestamp with time zone
+	"expires_at" timestamp with time zone NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "recorder_connections" (

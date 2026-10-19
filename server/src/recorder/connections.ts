@@ -7,7 +7,7 @@ import {
   type RecorderConnection,
   type RecorderConnectVia,
 } from "@openbot/shared/recorder-api";
-import { and, asc, eq, gt, isNull, lte, or } from "drizzle-orm";
+import { and, asc, count, eq, gt, isNull, lte, or } from "drizzle-orm";
 import type { Database } from "../db/client";
 import {
   recorderConnectCodes,
@@ -16,6 +16,8 @@ import {
 
 /** A live connection's last use is written at most this often. */
 const LAST_USED_INTERVAL_MS = 60_000;
+/** Unexpired connect codes one person may hold at once. A person mints one per click, so more than this is a script. */
+const LIVE_CODES_PER_PERSON = 10;
 
 export type RecorderConnectionStore = ReturnType<
   typeof createRecorderConnectionStore
@@ -45,13 +47,23 @@ export function createRecorderConnectionStore(
 ) {
   const now = options.now ?? (() => new Date());
   return {
+    /** Null when this person already holds {@link LIVE_CODES_PER_PERSON} unexpired codes. Every expired code, and the
+     * sealed organization session it held, is deleted first. */
     async mintCode(
       userId: string,
       via: RecorderConnectVia,
       organizationSession: string | null = null,
-    ): Promise<ConnectCodeResponse> {
-      const code = secretWithPrefix(RECORDER_CODE_PREFIX);
+    ): Promise<ConnectCodeResponse | null> {
       const created = now();
+      await database
+        .delete(recorderConnectCodes)
+        .where(lte(recorderConnectCodes.expiresAt, created));
+      const [live] = await database
+        .select({ codes: count() })
+        .from(recorderConnectCodes)
+        .where(eq(recorderConnectCodes.userId, userId));
+      if ((live?.codes ?? 0) >= LIVE_CODES_PER_PERSON) return null;
+      const code = secretWithPrefix(RECORDER_CODE_PREFIX);
       const expiresAt = new Date(
         created.getTime() + RECORDER_CONNECT_CODE_TTL_MS,
       );
@@ -66,8 +78,9 @@ export function createRecorderConnectionStore(
       return { code, expiresAt: expiresAt.toISOString() };
     },
 
-    /** Consumes the code atomically and, in the same transaction, revokes this person's older live connection with the same
-     * `installId` (the same copy connecting again, Decision 18). Null when the code is unknown, expired or already used. */
+    /** Consumes the code atomically (it is deleted, with the sealed organization session it held) and, in the same
+     * transaction, revokes this person's older live connection with the same `installId` (the same copy connecting again,
+     * Decision 18). Null when the code is unknown, expired or already used. */
     async exchange(input: {
       code: string;
       label: string;
@@ -77,12 +90,10 @@ export function createRecorderConnectionStore(
       const at = now();
       return database.transaction(async (transaction) => {
         const [consumed] = await transaction
-          .update(recorderConnectCodes)
-          .set({ consumedAt: at })
+          .delete(recorderConnectCodes)
           .where(
             and(
               eq(recorderConnectCodes.codeHash, digest(input.code)),
-              isNull(recorderConnectCodes.consumedAt),
               gt(recorderConnectCodes.expiresAt, at),
             ),
           )
@@ -90,7 +101,7 @@ export function createRecorderConnectionStore(
         if (!consumed) return null;
         const [replaced] = await transaction
           .update(recorderConnections)
-          .set({ revokedAt: at })
+          .set({ revokedAt: at, organizationSession: null })
           .where(
             and(
               eq(recorderConnections.userId, consumed.userId),
@@ -139,10 +150,11 @@ export function createRecorderConnectionStore(
       return rows.map(connectionView);
     },
 
+    /** A revoked connection keeps no organization session: nothing may ask the organization for it again. */
     async revoke(userId: string, connectionId: string): Promise<boolean> {
       const revoked = await database
         .update(recorderConnections)
-        .set({ revokedAt: now() })
+        .set({ revokedAt: now(), organizationSession: null })
         .where(
           and(
             eq(recorderConnections.id, connectionId),

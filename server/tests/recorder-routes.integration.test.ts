@@ -19,6 +19,7 @@ import { testEnvironment } from "./support/environment";
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const prefix = `recorder-routes-${randomUUID()}`;
 const owner = `${prefix}-owner`;
+const busy = `${prefix}-busy`;
 const ORIGIN = `chrome-extension://${RECORDER_EXTENSION_ID}`;
 const INSTALL = "c".repeat(32);
 const OTHER_EXTENSION = `chrome-extension://${"a".repeat(32)}`;
@@ -79,16 +80,17 @@ function build(extra: Record<string, string | undefined> = {}) {
     {
       handler: () => new Response(null, { status: 204 }),
       api: {
-        getSession: async ({ headers }: { headers: Headers }) =>
-          headers.get("cookie")?.includes("test-session=owner")
-            ? {
-                user: {
-                  id: owner,
-                  email: `${owner}@example.test`,
-                  name: "The Owner",
-                },
-              }
-            : null,
+        getSession: async ({ headers }: { headers: Headers }) => {
+          const cookie = headers.get("cookie") ?? "";
+          const id = cookie.includes("test-session=owner")
+            ? owner
+            : cookie.includes("test-session=busy")
+              ? busy
+              : null;
+          return id
+            ? { user: { id, email: `${id}@example.test`, name: "The Owner" } }
+            : null;
+        },
       },
     } as never,
     roleRepository,
@@ -138,12 +140,13 @@ async function connect(
 const bearer = (token: string) => ({ authorization: `Bearer ${token}` });
 
 beforeAll(async () => {
-  await database
-    .insert(users)
-    .values({ id: owner, email: `${owner}@example.test`, name: "The Owner" });
+  await database.insert(users).values([
+    { id: owner, email: `${owner}@example.test`, name: "The Owner" },
+    { id: busy, email: `${busy}@example.test`, name: "The Owner" },
+  ]);
 });
 afterAll(async () => {
-  await database.delete(users).where(inArray(users.id, [owner]));
+  await database.delete(users).where(inArray(users.id, [owner, busy]));
   await database.$client.close();
   await transcriber.stop(true);
 });
@@ -169,6 +172,25 @@ describe("connecting", () => {
     });
     expect(minted.status).toBe(201);
     expect(((await minted.json()) as { code: string }).code).toMatch(/^obc_/);
+  });
+
+  test("a person who already holds ten unused codes is told to wait", async () => {
+    const h = build();
+    const mint = () =>
+      call(h, "/api/recorder/connect-codes", {
+        method: "POST",
+        headers: { cookie: "test-session=busy" },
+        json: { via: "web" },
+      });
+    for (let index = 0; index < 10; index += 1) {
+      expect((await mint()).status).toBe(201);
+    }
+    const refused = await mint();
+    expect(refused.status).toBe(429);
+    expect(await refused.json()).toEqual({
+      error:
+        "Too many connection codes were asked for at once. Wait a few minutes and try again.",
+    });
   });
 
   test("a body over 2 KiB is refused", async () => {

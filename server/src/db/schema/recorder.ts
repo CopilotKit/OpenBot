@@ -17,13 +17,13 @@ export const recorderConnectCodes = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     via: text("via").$type<"web" | "desktop">().notNull(),
-    /** Organization mode only: the minting request's organization session cookie, sealed with KEY_ENCRYPTION_KEY. */
+    /** Organization mode only: the minting request's organization session cookie, sealed with KEY_ENCRYPTION_KEY. The
+     * code is deleted when it is used and once it has expired, and this copy with it. */
     organizationSession: text("organization_session"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
-    consumedAt: timestamp("consumed_at", { withTimezone: true }),
   },
   (table) => [index("recorder_connect_codes_user_idx").on(table.userId)],
 );
@@ -41,7 +41,7 @@ export const recorderConnections = pgTable(
     extensionId: text("extension_id").notNull(),
     /** The connecting copy's install id for this OpenBot. */
     installId: text("install_id").notNull(),
-    /** Organization mode only, copied from the connect code: re-verified against the authority. */
+    /** Organization mode only, copied from the connect code: re-verified against the authority. Cleared on revoke. */
     organizationSession: text("organization_session"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
