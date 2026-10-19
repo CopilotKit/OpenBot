@@ -194,9 +194,8 @@ pub fn catalogue() -> Vec<Harness> {
         mark: Option<String>,
     }
 
-    let file: CatalogFile =
-        serde_json::from_str(include_str!("../../../shared/harnesses.json"))
-            .expect("shared/harnesses.json is baked in at build time and must parse");
+    let file: CatalogFile = serde_json::from_str(include_str!("../../../shared/harnesses.json"))
+        .expect("shared/harnesses.json is baked in at build time and must parse");
 
     file.harnesses
         .into_iter()
