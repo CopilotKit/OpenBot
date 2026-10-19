@@ -227,7 +227,7 @@ async function setup(): Promise<Harness> {
     ports: [],
     recordings: new Set(),
     listen() {
-      chrome.runtime.onConnect.addListener((port) => {
+      fake.apis["service-worker"].runtime.onConnect.addListener((port) => {
         const entry: ServiceWorkerPort = { port, messages: [] };
         port.onMessage.addListener((message: OffscreenToBackground) => {
           entry.messages.push(message);
@@ -418,7 +418,8 @@ beforeEach(() => {
   savedVariant = process.env.RECORDER_VARIANT;
   globals.indexedDB = new IDBFactory();
   globals.IDBKeyRange = FakeIDBKeyRange;
-  fake = installChromeFake();
+  // Every test here runs the document's own code, so `chrome` is what Chrome gives an offscreen document.
+  fake = installChromeFake({ context: "offscreen-document" });
 });
 
 afterEach(async () => {
@@ -661,6 +662,7 @@ describe("offscreen controller", () => {
       openbotUrl: session.openbotUrl,
       token: "obr_first",
       allowedIntelligenceUrls: null,
+      version: "0.1.0",
       drains: [h.drain(session)],
     });
     await until(() => h.received("offscreen.done").length === 1, "done");
@@ -791,6 +793,7 @@ describe("offscreen controller", () => {
       openbotUrl: session.openbotUrl,
       token: session.token,
       allowedIntelligenceUrls: null,
+      version: "0.1.0",
       drains: [h.drain(session)],
     });
     await until(() => h.received("offscreen.done").length === 1, "done");
@@ -825,6 +828,7 @@ describe("offscreen controller", () => {
       openbotUrl: session.openbotUrl,
       token: session.token,
       allowedIntelligenceUrls: null,
+      version: "0.1.0",
       drains: [{ ...h.drain(session), botId: "bot-kept" }],
     });
     await until(() => h.received("offscreen.done").length === 1, "done");
@@ -874,6 +878,7 @@ describe("offscreen controller", () => {
       openbotUrl: stopped.openbotUrl,
       token: stopped.token,
       allowedIntelligenceUrls: null,
+      version: "0.1.0",
       drains: [h.drain(stopped), h.drain(interrupted)],
     });
     await until(() => atDone.size === 2, "done for both recordings");
@@ -917,6 +922,7 @@ describe("offscreen controller", () => {
         openbotUrl: session.openbotUrl,
         token: session.token,
         allowedIntelligenceUrls: ELSEWHERE,
+        version: "0.1.0",
         drains: [h.drain(session)],
       });
       await until(
@@ -973,6 +979,7 @@ describe("offscreen controller", () => {
         openbotUrl: session.openbotUrl,
         token: session.token,
         allowedIntelligenceUrls: [h.gateway.url],
+        version: "0.1.0",
         drains: [h.drain(session)],
       });
       await until(
@@ -1022,6 +1029,7 @@ describe("offscreen controller", () => {
         openbotUrl: session.openbotUrl,
         token: session.token,
         allowedIntelligenceUrls: null,
+        version: "0.1.0",
         drains: [h.drain(session)],
       });
       await until(
@@ -1063,6 +1071,7 @@ describe("offscreen controller", () => {
       openbotUrl: session.openbotUrl,
       token: "obr_second",
       allowedIntelligenceUrls: null,
+      version: "0.1.0",
       drains: [h.drain(session)],
     });
     await until(() => h.received("offscreen.done").length === 1, "done");
@@ -1203,6 +1212,7 @@ describe("offscreen controller", () => {
       openbotUrl: session.openbotUrl,
       token: "obr_second",
       allowedIntelligenceUrls: null,
+      version: "0.1.0",
       drains: [h.drain(session)],
     });
     await until(() => h.received("offscreen.done").length === 1, "done");

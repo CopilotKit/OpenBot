@@ -2,12 +2,21 @@
  * An in-memory `chrome` for the Recorder's tests. It implements exactly the APIs the extension calls and
  * exposes drivers and recorders on the returned `ChromeFake`. Install it per test and uninstall it after.
  * IndexedDB is not part of it: tests import `fake-indexeddb/auto`.
+ *
+ * Each extension context sees its own `chrome`, as in Chrome. The service worker (and the extension's pages) see every
+ * API below; an offscreen document sees only what Chrome gives one: chrome.runtime with messaging, getURL and id.
+ * `globalThis.chrome` is the surface of the context the running code belongs to: code started inside `runAs` keeps
+ * that context through everything it awaits or schedules, and a listener runs in the context it was added in.
  */
 
+import { AsyncLocalStorage, AsyncResource } from "node:async_hooks";
 import { isDeepStrictEqual } from "node:util";
 
 type Listener = (...args: unknown[]) => unknown;
 type Json = Record<string, unknown>;
+
+/** The extension contexts whose `chrome` differs. */
+export type ChromeContext = "service-worker" | "offscreen-document";
 
 export type FakePort = {
   postMessage(message: unknown): void;
@@ -18,6 +27,12 @@ export type FakePort = {
 
 export type ChromeFake = {
   uninstall(): void;
+  /** Each context's `chrome`, whatever context the caller runs in: a test playing the service worker in a file whose
+   * default is the offscreen document reaches the worker's events here. */
+  apis: Record<ChromeContext, typeof chrome>;
+  /** Runs `work` as code of `context`: `globalThis.chrome` is that context's surface in it, in everything it awaits or
+   * schedules, and in every listener it adds. */
+  runAs<T>(context: ChromeContext, work: () => T): T;
   /**
    * Every chrome.* call and every port message in either direction, in order: "offscreen.createDocument",
    * "runtime.onMessage.addListener", "port:recorder:offscreen offscreen.start".
@@ -156,12 +171,15 @@ type FakeEvent = {
   clear(): void;
 };
 
+/** A listener runs in the context it was added in, whoever dispatches: the service worker posting on a port does not
+ * make the document's listener service-worker code. */
 function createEvent(name: string | null, calls: string[]): FakeEvent {
-  const listeners = new Set<Listener>();
+  const listeners = new Map<Listener, Listener>();
   return {
     addListener(listener) {
       if (name) calls.push(`${name}.addListener`);
-      listeners.add(listener);
+      if (!listeners.has(listener))
+        listeners.set(listener, AsyncResource.bind(listener));
     },
     removeListener(listener) {
       if (name) calls.push(`${name}.removeListener`);
@@ -169,7 +187,8 @@ function createEvent(name: string | null, calls: string[]): FakeEvent {
     },
     hasListener: (listener) => listeners.has(listener),
     hasListeners: () => listeners.size > 0,
-    dispatch: (...args) => [...listeners].map((listener) => listener(...args)),
+    dispatch: (...args) =>
+      [...listeners.values()].map((listener) => listener(...args)),
     clear: () => listeners.clear(),
   };
 }
@@ -271,10 +290,17 @@ function matches(value: unknown, wanted: unknown): boolean {
 }
 
 export function installChromeFake(
-  options: { extensionId?: string; manifestVersion?: string } = {},
+  options: {
+    extensionId?: string;
+    manifestVersion?: string;
+    /** The context of code that runs outside `runAs`: a test file of one context's code names it here. */
+    context?: ChromeContext;
+  } = {},
 ): ChromeFake {
   const extensionId = options.extensionId ?? DEFAULT_EXTENSION_ID;
   const manifestVersion = options.manifestVersion ?? "0.0.0";
+  const defaultContext = options.context ?? "service-worker";
+  const contextOf = new AsyncLocalStorage<ChromeContext>();
   const calls: string[] = [];
   const events: FakeEvent[] = [];
   const event = (name: string): FakeEvent => {
@@ -329,6 +355,9 @@ export function installChromeFake(
     uninstall() {
       Reflect.deleteProperty(globalThis, "chrome");
     },
+    // Filled in below, once both surfaces exist.
+    apis: {} as Record<ChromeContext, typeof chrome>,
+    runAs: (context, work) => contextOf.run(context, work),
     calls,
     storage: {
       local: new Map(),
@@ -865,6 +894,47 @@ export function installChromeFake(
     },
   };
 
-  (globalThis as unknown as { chrome: unknown }).chrome = chromeApi;
+  // What Chrome gives an offscreen document: "The runtime API is the only extensions API supported by offscreen
+  // documents", and of it only messaging, getURL and id (the rest of the keys a real document lists are enums). Its own
+  // onMessage and onConnect hear nothing in this fake: the Recorder's document only talks over the port it opens.
+  const documentSender = (): chrome.runtime.MessageSender => ({
+    id: extensionId,
+    url: `chrome-extension://${extensionId}/offscreen.html`,
+    origin: `chrome-extension://${extensionId}`,
+  });
+  const offscreenApi = {
+    runtime: {
+      id: extensionId,
+      getURL: chromeApi.runtime.getURL,
+      connect(info: { name?: string } = {}) {
+        calls.push("runtime.connect");
+        return openPort(info.name ?? "", documentSender()).far;
+      },
+      sendMessage: (message: unknown) =>
+        sendMessageFrom(message, documentSender()),
+      onMessage: createEvent("offscreen.runtime.onMessage", calls),
+      onConnect: createEvent("offscreen.runtime.onConnect", calls),
+    },
+  };
+  const surfaces: Record<ChromeContext, typeof chrome> = {
+    "service-worker": chromeApi as unknown as typeof chrome,
+    "offscreen-document": offscreenApi as unknown as typeof chrome,
+  };
+  fake.apis = surfaces;
+
+  Object.defineProperty(globalThis, "chrome", {
+    configurable: true,
+    enumerable: true,
+    get: () => surfaces[contextOf.getStore() ?? defaultContext],
+    // A test that sets its own `chrome` replaces the fake.
+    set(value: unknown) {
+      Object.defineProperty(globalThis, "chrome", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value,
+      });
+    },
+  });
   return fake;
 }

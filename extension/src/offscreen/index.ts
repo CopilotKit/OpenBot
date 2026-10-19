@@ -644,7 +644,7 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
           trajectoryId: first,
           title: drain.title,
           recordingId: drain.recordingId,
-          version: chrome.runtime.getManifest().version,
+          version: message.version,
           resume: true,
           recover: true,
         },

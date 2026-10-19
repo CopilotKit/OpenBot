@@ -403,6 +403,7 @@ test("a service-worker restart during Stop finishes the stop with the document a
       openbotUrl: origin,
       token: "obr_one",
       allowedIntelligenceUrls: null,
+      version: "0.3.0",
       drains: drains(),
     },
   ]);
@@ -431,6 +432,7 @@ test("the document asked to report on a resumed stop is held to the organization
       openbotUrl: origin,
       token: "obr_one",
       allowedIntelligenceUrls: ["wss://intelligence.example.com"],
+      version: "0.3.0",
       drains: drains(),
     },
   ]);
@@ -543,6 +545,7 @@ test("a service-worker restart just after Stop moved the recording into the drai
       openbotUrl: origin,
       token: "obr_one",
       allowedIntelligenceUrls: null,
+      version: "0.3.0",
       drains: [seededRecord()],
     },
   ]);

@@ -1599,6 +1599,7 @@ export function installRecording(
         openbotUrl: connection.openbotUrl,
         token: connection.token,
         allowedIntelligenceUrls: policy.allowedIntelligenceUrls,
+        version: chrome.runtime.getManifest().version,
         drains: own,
       } satisfies BackgroundToOffscreen);
     } finally {
@@ -1727,6 +1728,7 @@ export function installRecording(
       openbotUrl: connection.openbotUrl,
       token: connection.token,
       allowedIntelligenceUrls: policy.allowedIntelligenceUrls,
+      version: chrome.runtime.getManifest().version,
       drains: [drain],
     });
   }

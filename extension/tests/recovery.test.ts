@@ -275,6 +275,7 @@ test("a browser restart mid-recording hands the recording to a new document, whi
       openbotUrl: origin,
       token: "obr_one",
       allowedIntelligenceUrls: null,
+      version: "0.0.0",
       drains: drains(),
     },
   ]);
@@ -304,6 +305,7 @@ test("after a browser start, offscreen.recover carries the organization's pinned
       openbotUrl: origin,
       token: "obr_one",
       allowedIntelligenceUrls: ["wss://intelligence.example.com"],
+      version: "0.0.0",
       drains: drains(),
     },
   ]);
@@ -449,6 +451,7 @@ test("a drain of another person waits for that person and nothing of it is sent;
       openbotUrl: origin,
       token: "obr_one",
       allowedIntelligenceUrls: null,
+      version: "0.0.0",
       drains: [parked],
     },
   ]);

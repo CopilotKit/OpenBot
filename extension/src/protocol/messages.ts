@@ -139,6 +139,9 @@ export type BackgroundToOffscreen =
       /** The managed policy's pinned Intelligence addresses when it was sent (null: none pinned); the recovered
        * streamers are held to it, since a document opened after a browser start was never told a policy. */
       allowedIntelligenceUrls: string[] | null;
+      /** The extension's version for the recovered trajectories' metadata: an offscreen document has no
+       * chrome.runtime.getManifest (Chrome gives it only runtime messaging, getURL and id), so the service worker names it. */
+      version: string;
       drains: DrainRecord[];
     } // after a browser restart, and when the person who recorded kept drains connects again
   | { type: "offscreen.discard"; recordingIds: string[] } // the person's own "Discard kept events" or Disconnect, or a Record that never went live: clear their outbox

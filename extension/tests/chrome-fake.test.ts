@@ -689,3 +689,84 @@ test("the document hooks survive restartServiceWorker, as the document does, and
   expect(created).toEqual(["offscreen.html"]);
   expect(fake.offscreen.created).toHaveLength(2);
 });
+
+// ---- Each context's chrome ---------------------------------------------------------------------
+
+test("an offscreen document's chrome is what Chrome gives one: chrome.runtime with messaging, getURL and id, and nothing else", () => {
+  const document = fake.apis["offscreen-document"];
+  expect(Object.keys(document)).toEqual(["runtime"]);
+  expect(Object.keys(document.runtime).sort()).toEqual([
+    "connect",
+    "getURL",
+    "id",
+    "onConnect",
+    "onMessage",
+    "sendMessage",
+  ]);
+  expect(
+    fake.runAs("offscreen-document", () => "getManifest" in chrome.runtime),
+  ).toBe(false);
+  expect(fake.runAs("offscreen-document", () => "storage" in chrome)).toBe(
+    false,
+  );
+  expect("getManifest" in chrome.runtime).toBe(true);
+});
+
+test("a port the document opens reaches the service worker as the offscreen document's", async () => {
+  let sender: chrome.runtime.MessageSender | undefined;
+  chrome.runtime.onConnect.addListener((port) => {
+    sender = port.sender;
+  });
+  fake.runAs("offscreen-document", () =>
+    chrome.runtime.connect({ name: "recorder:offscreen" }),
+  );
+  expect(sender?.url).toBe(
+    `chrome-extension://${chrome.runtime.id}/offscreen.html`,
+  );
+});
+
+test("code run as the document keeps its chrome through what it awaits and schedules, and each listener runs in the context it was added in", async () => {
+  const seen: string[] = [];
+  const has = () => ("getManifest" in chrome.runtime ? "worker" : "document");
+  let workerPort: chrome.runtime.Port | undefined;
+  chrome.runtime.onConnect.addListener((port) => {
+    workerPort = port;
+    port.onMessage.addListener(() => seen.push(`worker heard: ${has()}`));
+  });
+  await fake.runAs("offscreen-document", async () => {
+    const port = chrome.runtime.connect({ name: "recorder:offscreen" });
+    port.onMessage.addListener(() => seen.push(`document heard: ${has()}`));
+    await Promise.resolve();
+    seen.push(`after an await: ${has()}`);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    seen.push(`after a timer: ${has()}`);
+    port.postMessage({ type: "offscreen.ready" });
+  });
+  workerPort?.postMessage({ type: "offscreen.start" });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(seen).toEqual([
+    "after an await: document",
+    "after a timer: document",
+    "worker heard: worker",
+    "document heard: document",
+  ]);
+});
+
+test("a file of the document's code names it as the default context; the worker's chrome stays in reach", () => {
+  fake.uninstall();
+  fake = installChromeFake({ context: "offscreen-document" });
+  expect("getManifest" in chrome.runtime).toBe(false);
+  expect(fake.apis["service-worker"].runtime.getManifest().version).toBe(
+    "0.0.0",
+  );
+  expect(fake.runAs("service-worker", () => "storage" in chrome)).toBe(true);
+});
+
+test("a test that sets its own chrome replaces the fake, and uninstall leaves none", () => {
+  const own = { runtime: { id: "own" } };
+  (globalThis as unknown as { chrome: unknown }).chrome = own;
+  expect(globalThis.chrome as unknown).toBe(own);
+  fake.uninstall();
+  expect("chrome" in globalThis).toBe(false);
+  fake = installChromeFake();
+});
