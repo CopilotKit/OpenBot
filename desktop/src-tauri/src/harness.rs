@@ -44,6 +44,13 @@ pub enum Credential {
     /// *subscription* only ever buys its own vendor's models, and this is the row where the
     /// subscription path exists.
     Anthropic,
+    /// Google, and only Google.
+    ///
+    /// Separate from `AnyProvider` because Antigravity's bundled harness requires a Gemini key
+    /// wherever its base url points — the SDK's own README is explicit about it. Offered as
+    /// "any provider you already have", it would install against an OpenAI-only deployment and
+    /// answer nothing, which is the failure `webCreate` exists to prevent on the web side.
+    Google,
     /// The person's own endpoint. Nothing is installed and no key is ours to ask for.
     TheirEndpoint,
 }

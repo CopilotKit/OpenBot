@@ -13,7 +13,19 @@ import catalogue from "./harnesses.json";
  * bun workspace, so `include_str!` takes the JSON directly. That is why the data lives in `.json`
  * and only the typing lives here.
  */
-export type Credential = "any-provider" | "anthropic" | "their-endpoint";
+/**
+ * What a harness needs before it can answer.
+ *
+ * `google` is its own variant rather than `any-provider` because Antigravity's harness requires a
+ * Gemini key wherever its base url points — "any provider the person already has" is exactly the
+ * promise it cannot keep, and a deployment holding only an OpenAI key would install a Bot that
+ * never answers.
+ */
+export type Credential =
+  | "any-provider"
+  | "anthropic"
+  | "google"
+  | "their-endpoint";
 export type Maintainer = "first-party" | "partnership" | "community";
 
 export type Harness = {

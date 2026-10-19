@@ -137,6 +137,9 @@ export function HarnessPicker({
               {row.credential === "anthropic" && (
                 <span className="tile-note">No API key needed</span>
               )}
+              {row.credential === "google" && (
+                <span className="tile-note">Needs a Gemini key</span>
+              )}
               {row.credential === "their-endpoint" && (
                 <span className="tile-note">Uses your running agent</span>
               )}
