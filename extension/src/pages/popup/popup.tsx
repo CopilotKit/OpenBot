@@ -7,6 +7,7 @@ import type {
   PageStateResponse,
   PageToBackground,
 } from "../../protocol/messages";
+import { narrationLanguage } from "../../shared/speech-language";
 import { readLocal } from "../../shared/storage";
 import { Page } from "../ui/page";
 import { ask as askBackground } from "../ui/runtime";
@@ -19,12 +20,19 @@ import {
   afterStopLearningSentence,
   RecordingView,
 } from "./recording-view";
+import {
+  microphoneState as defaultMicrophoneState,
+  pageLanguage as defaultPageLanguage,
+} from "./voice";
 
 type PopupDeps = {
   prepare: typeof prepareRecording;
   ask: typeof askBackground;
   activeTabId: () => Promise<number>;
   lastBotId: () => Promise<string | undefined>;
+  pageLanguage: (tabId: number) => Promise<string | null>;
+  browserLanguage: () => string;
+  microphoneState: () => Promise<PermissionState | null>;
 };
 
 /** The active tab; in the e2e variant only, the tab named by RECORDER_E2E_TARGET_TAB (Playwright cannot click the toolbar). */
@@ -43,7 +51,9 @@ async function activeTabId(): Promise<number> {
   return tab.id;
 }
 
-const openTab = (url: string) => chrome.tabs.create({ url });
+const openTab = (url: string) => {
+  void chrome.tabs.create({ url });
+};
 
 /**
  * The toolbar popup. Signed out: how to connect, plus any recordings kept in this browser (with Discard). Connected:
@@ -54,6 +64,11 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
   const ask = deps?.ask ?? askBackground;
   const prepare = deps?.prepare ?? prepareRecording;
   const tabId = deps?.activeTabId ?? activeTabId;
+  const readPageLanguage = deps?.pageLanguage ?? defaultPageLanguage;
+  const browserLanguage = deps?.browserLanguage ?? (() => navigator.language);
+  const [readMicrophone] = useState(
+    () => deps?.microphoneState ?? defaultMicrophoneState,
+  );
   // Read once when the popup opens, so the seam is fixed at mount.
   const [readLastBotId] = useState(
     () => deps?.lastBotId ?? (() => readLocal("lastBotId")),
@@ -64,6 +79,7 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastBotId, setLastBotId] = useState<string | null>(null);
+  const [microphone, setMicrophone] = useState<PermissionState | null>(null);
 
   const refresh = useCallback(async () => {
     const answer = await ask<PageResponse>({ type: "page.state" });
@@ -114,6 +130,17 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
       mounted = false;
     };
   }, [readLastBotId]);
+
+  // Read when the popup opens: the Record form offers the microphone page when Chrome has not allowed it.
+  useEffect(() => {
+    let mounted = true;
+    readMicrophone().then((state) => {
+      if (mounted) setMicrophone(state);
+    });
+    return () => {
+      mounted = false;
+    };
+  }, [readMicrophone]);
 
   const dismiss = async () => {
     await ask({ type: "page.notice.dismiss" });
@@ -206,15 +233,23 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
       const prepared = await prepare();
       if (!prepared.ok) {
         setError(
-          "Allow website access in the tab that opened, then press Record again.",
+          prepared.reason === "microphone"
+            ? "Allow the microphone in the tab that opened, then press Record again."
+            : "Allow website access in the tab that opened, then press Record again.",
         );
         return;
       }
+      const tab = await tabId();
+      const language = narrationLanguage(
+        await readPageLanguage(tab),
+        browserLanguage(),
+      );
       const answer = await ask({
         type: "page.record",
         botId,
         title,
-        tabId: await tabId(),
+        tabId: tab,
+        language,
       });
       if (!answer.ok) setError(answer.error);
       await refresh();
@@ -224,6 +259,9 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
       setBusy(false);
     }
   };
+
+  const allowMicrophone = () =>
+    openTab(chrome.runtime.getURL("microphone.html"));
 
   const shownError = error ?? state.error ?? null;
   return (
@@ -248,6 +286,10 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
             onStop: () => act({ type: "page.stop" }),
             onRestart: () => act({ type: "page.restart" }),
             onNotice: (choice) => act({ type: "page.notice", choice }),
+            voice: {
+              onMute: (muted) => act({ type: "page.voice", muted }),
+              onAllowMicrophone: allowMicrophone,
+            },
           }}
         />
       )}
@@ -258,6 +300,8 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
           busy={busy}
           onRecord={record}
           learningShown={afterStopLearningSentence(state, true)}
+          microphoneBlocked={microphone === "denied"}
+          onAllowMicrophone={allowMicrophone}
         />
       ) : null}
       {shownError ? <ErrorLine message={shownError} /> : null}

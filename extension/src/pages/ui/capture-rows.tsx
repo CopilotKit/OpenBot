@@ -1,15 +1,28 @@
 import type { LearningSpaceState } from "@openbot/shared/recorder-api";
-import { IconNetwork, IconSchool } from "@tabler/icons-react";
+import {
+  IconMicrophone,
+  IconMicrophoneOff,
+  IconNetwork,
+  IconSchool,
+} from "@tabler/icons-react";
 import { PageRows } from "@/components/layout/page-parts";
+import { Button } from "@/components/ui/button";
 import {
   Item,
+  ItemActions,
   ItemContent,
   ItemDescription,
+  ItemFooter,
   ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
-import type { CaptureStatus, RecorderState } from "../../protocol/messages";
+import { Switch } from "@/components/ui/switch";
+import type {
+  CaptureStatus,
+  RecorderState,
+  VoiceCapture,
+} from "../../protocol/messages";
 import { learningSentence } from "../popup/record-form";
 
 const LEADING_STATUS = /^Learning capture is (?:paused|off):\s*/;
@@ -179,6 +192,87 @@ const NETWORK_STATUS: Record<CaptureStatus["network"], string> = {
   page: "Capturing the page's own network calls",
   stopped: "Stopped",
 };
+export type VoiceActions = {
+  /** The switch: true mutes the narration, false turns it on again (also the way to try again after a failure). */
+  onMute: (muted: boolean) => void;
+  /** Opens the microphone page, offered when Chrome has not let the Recorder use the microphone. */
+  onAllowMicrophone: () => void;
+};
+
+/** What the Voice row says under its title: that it listens, or why it does not. */
+function voiceLine(voice: VoiceCapture): string {
+  switch (voice.state) {
+    case "starting":
+      return "Starting the microphone";
+    case "listening":
+      return "Listening";
+    case "muted":
+      return "Muted. Turn it on to narrate what you do.";
+    case "failed":
+      return voice.reason ?? "Voice stopped. Recording goes on without it.";
+  }
+}
+
+/** The person's narration: listening (with the last words heard), muted, or why it stopped, and the switch that mutes
+ * it. It sits with the recording's title, above the capture rows, so the live state and the words stay in view in
+ * Chrome's 600px popup. */
+export function VoiceRow({
+  voice,
+  actions,
+}: {
+  voice: VoiceCapture;
+  actions?: VoiceActions;
+}) {
+  const on = voice.state === "starting" || voice.state === "listening";
+  const listening = voice.state === "listening";
+  return (
+    <Item size="sm">
+      <ItemMedia variant="icon">
+        {on ? <IconMicrophone /> : <IconMicrophoneOff />}
+      </ItemMedia>
+      <ItemContent>
+        <ItemTitle>Voice</ItemTitle>
+        <ItemDescription className="line-clamp-none">
+          {listening ? (
+            <span className="inline-flex items-center gap-1.5">
+              {/* Decorative: the word beside it says it is live. */}
+              <span
+                aria-hidden="true"
+                className="size-1.5 shrink-0 animate-pulse rounded-full bg-emerald-500"
+              />
+              {voiceLine(voice)}
+            </span>
+          ) : (
+            voiceLine(voice)
+          )}
+        </ItemDescription>
+        {listening && voice.heard ? (
+          <ItemDescription className="text-foreground" aria-live="polite">
+            {`“${voice.heard}”`}
+          </ItemDescription>
+        ) : null}
+      </ItemContent>
+      {actions ? (
+        <ItemActions>
+          {/* Binary and immediate: the microphone opens or closes when switched. */}
+          <Switch
+            aria-label="Voice"
+            checked={on}
+            onCheckedChange={(checked) => actions.onMute(!checked)}
+          />
+        </ItemActions>
+      ) : null}
+      {actions && voice.problem === "microphone" ? (
+        <ItemFooter className="justify-end">
+          <Button size="sm" variant="ghost" onClick={actions.onAllowMicrophone}>
+            Allow microphone
+          </Button>
+        </ItemFooter>
+      ) : null}
+    </Item>
+  );
+}
+
 /** Learning capture and Network: what the Recorder is keeping, and why anything is off. */
 export function CaptureRows({
   capture,

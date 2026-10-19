@@ -2,6 +2,7 @@ import type {
   LearningSpaceState,
   RecorderBot,
 } from "@openbot/shared/recorder-api";
+import { IconMicrophone } from "@tabler/icons-react";
 import { useState } from "react";
 import { PageSection } from "@/components/layout/page-parts";
 import { Button } from "@/components/ui/button";
@@ -51,6 +52,8 @@ export function RecordForm({
   busy,
   onRecord,
   learningShown = null,
+  microphoneBlocked = false,
+  onAllowMicrophone,
 }: {
   bots: RecorderBot[];
   initialBotId: string | null;
@@ -58,6 +61,9 @@ export function RecordForm({
   onRecord: (botId: string, title: string) => void;
   /** A Learning sentence the popup already shows above the form (about the recording just stopped): not repeated. */
   learningShown?: string | null;
+  /** Chrome has refused the Recorder the microphone: the form offers the microphone page. */
+  microphoneBlocked?: boolean;
+  onAllowMicrophone?: () => void;
 }) {
   const [picked, setPicked] = useState<string | null>(null);
   // Bots arrive after the form mounts: the pick wins, then the last used, then the first.
@@ -118,10 +124,23 @@ export function RecordForm({
               onChange={(event) => setTitle(event.target.value)}
             />
             <FieldDescription>
-              Records your clicks, typing, the pages you open and the network
-              calls behind them. Passwords and secrets stay in your browser.
+              Records your clicks, typing, the pages you open, the network calls
+              behind them and what you say as you go. Passwords and secrets stay
+              in your browser.
             </FieldDescription>
           </Field>
+          {microphoneBlocked && onAllowMicrophone ? (
+            <Button
+              type="button"
+              variant="link"
+              size="sm"
+              className="-ml-px self-start px-0 has-data-[icon=inline-start]:pl-0"
+              onClick={onAllowMicrophone}
+            >
+              <IconMicrophone data-icon="inline-start" />
+              Allow microphone
+            </Button>
+          ) : null}
           <Button size="lg" type="submit" disabled={!ready}>
             Record
           </Button>

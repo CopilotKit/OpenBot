@@ -30,6 +30,8 @@ import {
   CaptureRows,
   SendingLearningRow,
   stripCaptureStatus,
+  type VoiceActions,
+  VoiceRow,
 } from "../ui/capture-rows";
 import { learningSentence } from "./record-form";
 
@@ -47,9 +49,10 @@ type RecordingActions = {
   onStop: () => void;
   onRestart: () => void;
   onNotice: (choice: "stop" | "restart" | "continue") => void;
+  voice?: VoiceActions;
 };
 
-/** What the popup shows while a recording runs: time, actions, the capture rows, and Stop or Start over. */
+/** What the popup shows while a recording runs: time, actions, the voice, the capture rows, and Stop or Start over. */
 export function RecordingView({
   state,
   busy,
@@ -84,6 +87,17 @@ export function RecordingView({
               </ItemDescription>
             </ItemContent>
           </Item>
+          {state.capture.voice ? (
+            <>
+              <Separator />
+              <VoiceRow
+                voice={state.capture.voice}
+                actions={
+                  state.phase === "recording" ? actions.voice : undefined
+                }
+              />
+            </>
+          ) : null}
           {/* The service worker says while it is open: any choice, in a tab or here, Stop and Start over close it, and
               its buttons wait while a choice is being sent, as the card stays until the next state says so. */}
           {state.noticeOpen ? (

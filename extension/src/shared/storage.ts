@@ -55,6 +55,9 @@ type LocalState = {
   installSecret?: string;
   connection?: ConnectionRecord;
   lastBotId?: string;
+  /** The first Record opened the microphone page once; later ones record whatever Chrome answered (the Voice row then
+   * says what is wrong and offers the page again). */
+  microphoneAsked?: boolean;
   activeRecording?: DrainRecord; // the recording in progress; moved into `drains` at Stop, Start over and on recovery
   drains?: DrainRecord[]; // stopped recordings still sending; removed on offscreen.done
   notice?: RecorderNotice;

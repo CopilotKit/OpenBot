@@ -83,9 +83,15 @@ function setup(
   options: {
     bots?: RecorderBot[];
     desktop?: boolean;
-    prepared?: { ok: true } | { ok: false; reason: "permission" };
+    prepared?:
+      | { ok: true }
+      | { ok: false; reason: "permission" }
+      | { ok: false; reason: "microphone" };
     answers?: Partial<Record<PageToBackground["type"], PageResponse>>;
     lastBotId?: string;
+    pageLanguage?: string | null;
+    browserLanguage?: string;
+    microphone?: PermissionState | null;
     /** What the service worker does with a message before it answers, for the next page.state to show. */
     onAsk?: (message: PageToBackground) => void;
   } = {},
@@ -115,6 +121,10 @@ function setup(
         },
         activeTabId: async () => 7,
         lastBotId: async () => options.lastBotId,
+        pageLanguage: async (tabId) =>
+          tabId === 7 ? (options.pageLanguage ?? null) : null,
+        browserLanguage: () => options.browserLanguage ?? "en-GB",
+        microphoneState: async () => options.microphone ?? null,
       }}
     />,
   );
@@ -250,7 +260,7 @@ test("connected and idle shows the person, the host, the form copy and Record di
   expect(getByText("openbot.example.test")).toBeTruthy();
   expect(
     getByText(
-      "Records your clicks, typing, the pages you open and the network calls behind them. Passwords and secrets stay in your browser.",
+      "Records your clicks, typing, the pages you open, the network calls behind them and what you say as you go. Passwords and secrets stay in your browser.",
     ),
   ).toBeTruthy();
   expect(
@@ -269,9 +279,10 @@ test("Record is disabled without a Bot even with a title", async () => {
   ).toBe(true);
 });
 
-test("Record prepares, then sends page.record with the Bot, title and tab", async () => {
+test("Record prepares, then sends page.record with the Bot, title, tab and the page's language", async () => {
   const { findByLabelText, getByRole, sent, prepareCalls } = setup(
     stateResponse(),
+    { pageLanguage: "de-DE" },
   );
   await userEvent.type(
     await findByLabelText("What are you about to do?"),
@@ -289,9 +300,56 @@ test("Record prepares, then sends page.record with the Bot, title and tab", asyn
       botId: "b1",
       title: "Refund an order",
       tabId: 7,
+      language: "de-DE",
     }),
   );
   expect(prepareCalls()).toBe(1);
+});
+
+test("a page that declares no usable language narrates in the browser's", async () => {
+  for (const pageLanguage of [null, "", "x-klingon"]) {
+    const { findByLabelText, getByRole, sent, unmount } = setup(
+      stateResponse(),
+      { pageLanguage, browserLanguage: "fr-CA" },
+    );
+    await userEvent.type(
+      await findByLabelText("What are you about to do?"),
+      "Refund an order",
+    );
+    await waitFor(() =>
+      expect(
+        (getByRole("button", { name: "Record" }) as HTMLButtonElement).disabled,
+      ).toBe(false),
+    );
+    fireEvent.click(getByRole("button", { name: "Record" }));
+    await waitFor(() =>
+      expect(sent.find((m) => m.type === "page.record")).toMatchObject({
+        language: "fr-CA",
+      }),
+    );
+    unmount();
+  }
+});
+
+test("the first Record that opens the microphone page says to allow it there and records nothing yet", async () => {
+  const { findByLabelText, getByRole, findByText, sent } = setup(
+    stateResponse(),
+    { prepared: { ok: false, reason: "microphone" } },
+  );
+  await userEvent.type(
+    await findByLabelText("What are you about to do?"),
+    "Refund an order",
+  );
+  await waitFor(() =>
+    expect(
+      (getByRole("button", { name: "Record" }) as HTMLButtonElement).disabled,
+    ).toBe(false),
+  );
+  fireEvent.click(getByRole("button", { name: "Record" }));
+  await findByText(
+    "Allow the microphone in the tab that opened, then press Record again.",
+  );
+  expect(sent.some((m) => m.type === "page.record")).toBe(false);
 });
 
 test("a Record refused for website access does not send page.record", async () => {
@@ -379,11 +437,22 @@ test("after Stop the Learning sentence shows once, in the sent row, not again un
   expect(container.textContent?.split(sentence ?? "").length).toBe(2);
 });
 
-test("the popup asks for nothing about the screen or the microphone", async () => {
-  const { findByText, container, queryByRole } = setup(stateResponse());
-  await findByText("Ada Lovelace");
-  expect(container.textContent).not.toMatch(/microphone|screen|voice/i);
-  expect(queryByRole("button", { name: "Allow microphone" })).toBeNull();
+test("the popup asks for nothing about the screen, and offers the microphone page only when Chrome refused it", async () => {
+  for (const microphone of [null, "granted", "prompt"] as const) {
+    const { findByText, container, queryByRole, unmount } = setup(
+      stateResponse(),
+      { microphone },
+    );
+    await findByText("Ada Lovelace");
+    expect(container.textContent).not.toMatch(/microphone|screen/i);
+    expect(queryByRole("button", { name: "Allow microphone" })).toBeNull();
+    unmount();
+  }
+  const { findByRole } = setup(stateResponse(), {
+    microphone: "denied",
+  });
+  fireEvent.click(await findByRole("button", { name: "Allow microphone" }));
+  expect(fake.opened).toEqual([chrome.runtime.getURL("microphone.html")]);
 });
 
 test("each notice renders its sentence and dismisses", async () => {
@@ -460,7 +529,7 @@ const recording = (
     },
   });
 
-test("the recording view shows the time, the action count and the Learning capture and Network rows only", async () => {
+test("the recording view shows the time, the action count and the Learning capture and Network rows, and Voice only for a recording with voice", async () => {
   const { findByText, getByText, queryByText, queryByRole } = setup(
     recording(),
   );
@@ -473,6 +542,90 @@ test("the recording view shows the time, the action count and the Learning captu
   expect(getByText("Streaming to Intelligence")).toBeTruthy();
   expect(queryByRole("button", { name: "Record" })).toBeNull();
   expect(queryByRole("button", { name: "Record screen" })).toBeNull();
+});
+
+const voiceRecording = (
+  voice: NonNullable<RecorderState["capture"]["voice"]>,
+) => recording({ capture: { ...CAPTURE, voice } });
+
+test("while listening the Voice row says so, shows the last words heard, and its switch mutes the narration", async () => {
+  const { findByText, getByText, getByRole, sent } = setup(
+    voiceRecording({
+      state: "listening",
+      heard: "I am opening the order page",
+    }),
+  );
+  await findByText("Voice");
+  expect(getByText("Listening")).toBeTruthy();
+  expect(getByText("“I am opening the order page”")).toBeTruthy();
+  const toggle = getByRole("switch", { name: "Voice" });
+  expect(toggle.getAttribute("aria-checked")).toBe("true");
+  fireEvent.click(toggle);
+  await waitFor(() =>
+    expect(sent.find((m) => m.type === "page.voice")).toEqual({
+      type: "page.voice",
+      muted: true,
+    }),
+  );
+});
+
+test("muted, the switch is off and turning it on unmutes; starting shows it on", async () => {
+  const muted = setup(voiceRecording({ state: "muted" }));
+  await muted.findByText("Muted. Turn it on to narrate what you do.");
+  const toggle = muted.getByRole("switch", { name: "Voice" });
+  expect(toggle.getAttribute("aria-checked")).toBe("false");
+  fireEvent.click(toggle);
+  await waitFor(() =>
+    expect(muted.sent.find((m) => m.type === "page.voice")).toEqual({
+      type: "page.voice",
+      muted: false,
+    }),
+  );
+  muted.unmount();
+  const starting = setup(voiceRecording({ state: "starting" }));
+  await starting.findByText("Starting the microphone");
+  expect(
+    starting
+      .getByRole("switch", { name: "Voice" })
+      .getAttribute("aria-checked"),
+  ).toBe("true");
+});
+
+test("a microphone Chrome refused says so in a plain sentence and offers the microphone page; other failures say theirs", async () => {
+  const refused = setup(
+    voiceRecording({
+      state: "failed",
+      problem: "microphone",
+      reason:
+        "Chrome has not let the Recorder use the microphone. Recording goes on without your voice.",
+      heard: "stale words",
+    }),
+  );
+  await refused.findByText(
+    "Chrome has not let the Recorder use the microphone. Recording goes on without your voice.",
+  );
+  expect(refused.queryByText(/stale words/)).toBeNull();
+  expect(
+    refused.getByRole("switch", { name: "Voice" }).getAttribute("aria-checked"),
+  ).toBe("false");
+  fireEvent.click(refused.getByRole("button", { name: "Allow microphone" }));
+  expect(fake.opened).toEqual([chrome.runtime.getURL("microphone.html")]);
+  refused.unmount();
+
+  const network = setup(
+    voiceRecording({
+      state: "failed",
+      problem: "network",
+      reason:
+        "Chrome's speech service cannot be reached. Recording goes on, and voice tries again in a moment.",
+    }),
+  );
+  await network.findByText(
+    "Chrome's speech service cannot be reached. Recording goes on, and voice tries again in a moment.",
+  );
+  expect(
+    network.queryByRole("button", { name: "Allow microphone" }),
+  ).toBeNull();
 });
 
 test("Stop and Start over send page.stop and page.restart", async () => {
