@@ -728,3 +728,100 @@ test("in the e2e build a forced refusal makes start fall back as a refused attac
     else process.env.RECORDER_VARIANT = previous;
   }
 });
+
+// ---- Credentials in form and oversized bodies --------------------------------------------------
+
+// A realistic sign-in and payment. None of these may reach Intelligence.
+const PASSWORD = "hunter2";
+const PIN = "4921";
+const CARD = "4111 1111 1111 1111";
+const SESSION_TOKEN = "sess_9f8e7d6c";
+const signInForm = new URLSearchParams({
+  username: "alice",
+  password: PASSWORD,
+  pin: PIN,
+  card_number: CARD,
+  session_token: SESSION_TOKEN,
+}).toString();
+const leaked = (events: CapturedEvent[]) => {
+  const text = JSON.stringify(events);
+  return [PASSWORD, PIN, "4111", SESSION_TOKEN].filter((secret) =>
+    text.includes(secret),
+  );
+};
+
+test("a form post keeps none of its credentials, whether Chrome reports it as a form or as plain text", async () => {
+  await capture.start(7, "https://bank.example.test/");
+  request(7, {
+    id: "1",
+    url: "https://bank.example.test/session",
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+    },
+    postData: signInForm,
+    body: "{}",
+  });
+  request(7, {
+    id: "2",
+    url: "https://bank.example.test/session",
+    method: "POST",
+    headers: { "Content-Type": "text/plain;charset=UTF-8" },
+    postData: signInForm,
+    body: "{}",
+  });
+  await until(() => emitted.length === 2, "two events");
+  for (const event of emitted)
+    expect(value(event).request.body.text).toBe(
+      "username=alice&password=[redacted]&pin=[redacted]&card_number=[redacted]&session_token=[redacted]",
+    );
+  expect(leaked(emitted)).toEqual([]);
+});
+
+test("a JSON body over 2 MiB, sent or received, keeps none of the credentials in the part that is read", async () => {
+  const big = JSON.stringify({
+    user: { name: "alice", password: PASSWORD },
+    session_token: SESSION_TOKEN,
+    payment: { pin: PIN, card_number: CARD },
+    rows: "x".repeat(3 * MiB),
+  });
+  await capture.start(7, "https://bank.example.test/");
+  postData["1"] = big;
+  request(7, {
+    id: "1",
+    url: "https://bank.example.test/api/sync",
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    hasPostData: true,
+    body: big,
+  });
+  request(7, { id: "2", url: "https://bank.example.test/api/me", body: big });
+  await until(() => emitted.length === 2, "two events");
+  const [sent, received] = emitted;
+  expect(value(sent).request.body.status).toBe("truncated");
+  expect(value(sent).response.body.status).toBe("truncated");
+  // Trimming empties the response first, so the request's opening is what is left to read.
+  expect(value(sent).request.body.text as string).toContain(
+    '"password":"[redacted]"',
+  );
+  expect(value(received).response.body.text as string).toContain(
+    '"password":"[redacted]"',
+  );
+  expect(leaked(emitted)).toEqual([]);
+});
+
+test("a form body over 2 MiB sent as plain text keeps none of its credentials", async () => {
+  await capture.start(7, "https://bank.example.test/");
+  postData["1"] = `${signInForm}&notes=${"n".repeat(3 * MiB)}`;
+  request(7, {
+    id: "1",
+    url: "https://bank.example.test/session",
+    method: "POST",
+    headers: { "Content-Type": "text/plain;charset=UTF-8" },
+    hasPostData: true,
+    body: "{}",
+  });
+  await until(() => emitted.length === 1, "the event");
+  expect(value(emitted[0]).request.body.status).toBe("truncated");
+  expect(leaked(emitted)).toEqual([]);
+});

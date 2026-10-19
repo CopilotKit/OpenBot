@@ -7,7 +7,12 @@ import {
   test,
 } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { EVENT_BUDGET_BYTES } from "@openbot/shared/recorder-masking";
+import {
+  type CapturedEvent,
+  EVENT_BUDGET_BYTES,
+  trimEvent,
+} from "@openbot/shared/recorder-masking";
+import { acceptPageNetworkEvent } from "../src/background/network/fallback";
 
 type Sent = { id: string; message: { type: string; event: Event } };
 type Event = {
@@ -39,6 +44,34 @@ const NativeResponse = Response;
 const nativeFetch = fetch;
 const MiB = 1024 * 1024;
 const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0, 1, 2, 3]);
+// A realistic sign-in and payment. None of these may reach Intelligence.
+const PASSWORD = "hunter2";
+const PIN = "4921";
+const CARD = "4111 1111 1111 1111";
+const SESSION_TOKEN = "sess_9f8e7d6c";
+const signIn = () =>
+  new URLSearchParams({
+    username: "alice",
+    password: PASSWORD,
+    pin: PIN,
+    card_number: CARD,
+    session_token: SESSION_TOKEN,
+  });
+const MASKED_SIGN_IN =
+  "username=alice&password=[redacted]&pin=[redacted]&card_number=[redacted]&session_token=[redacted]";
+/** A JSON sign-in over 2 MiB: its credentials sit in the part that is read, before the cut. */
+const bigSignIn = JSON.stringify({
+  user: { name: "alice", password: PASSWORD },
+  session_token: SESSION_TOKEN,
+  payment: { pin: PIN, card_number: CARD },
+  rows: "x".repeat(3 * 1024 * 1024),
+});
+const leaked = (value: unknown) => {
+  const text = JSON.stringify(value);
+  return [PASSWORD, PIN, "4111", SESSION_TOKEN].filter((secret) =>
+    text.includes(secret),
+  );
+};
 let server: ReturnType<typeof Bun.serve>;
 let sent: Sent[] = [];
 let postMessageCalls = 0;
@@ -67,6 +100,8 @@ beforeAll(() => {
         return new NativeResponse("a".repeat(3 * MiB), {
           headers: { "content-type": "text/plain" },
         });
+      if (url.pathname === "/echo") return json('{"ok":true}');
+      if (url.pathname === "/big-sign-in") return json(bigSignIn);
       if (url.pathname === "/png")
         return new NativeResponse(png, {
           headers: { "content-type": "image/png" },
@@ -290,4 +325,97 @@ test("a page without chrome.runtime.sendMessage is left alone", async () => {
   const before = globalThis.fetch;
   configure("extension-id");
   expect(globalThis.fetch).toBe(before);
+});
+
+/** What the service worker makes of the hook's message before it streams it: re-masked, then trimmed (fallback.ts, then
+ * NetworkCapture.recordPageEvent). */
+const forIntelligence = (event: Event) => {
+  const accepted = acceptPageNetworkEvent(
+    event as unknown as CapturedEvent,
+    new Set(),
+  );
+  return accepted && trimEvent(accepted, EVENT_BUDGET_BYTES).event;
+};
+
+test("a URLSearchParams body is masked pair by pair in the page, under the form type the browser adds", async () => {
+  configure("extension-id");
+  await (await fetch(url("/echo"), { method: "POST", body: signIn() })).text();
+  const event = await nextEvent();
+  expect(event.value.request.headers["content-type"]).toBe(
+    "application/x-www-form-urlencoded;charset=UTF-8",
+  );
+  expect(event.value.request.body.text).toBe(MASKED_SIGN_IN);
+  expect(leaked(sent)).toEqual([]);
+  expect(leaked(forIntelligence(event))).toEqual([]);
+});
+
+test("an XHR sending URLSearchParams is masked the same way", async () => {
+  configure("extension-id");
+  await new Promise<void>((resolve, reject) => {
+    const request = new XMLHttpRequest();
+    request.open("POST", url("/echo"));
+    request.onload = () => resolve();
+    request.onerror = () => reject(new Error("xhr failed"));
+    request.send(signIn());
+  });
+  const event = await nextEvent();
+  expect(event.value.transport).toBe("xhr");
+  expect(event.value.request.headers["content-type"]).toBe(
+    "application/x-www-form-urlencoded;charset=UTF-8",
+  );
+  expect(event.value.request.body.text).toBe(MASKED_SIGN_IN);
+  expect(leaked(sent)).toEqual([]);
+  expect(leaked(forIntelligence(event))).toEqual([]);
+});
+
+test("a form written as a plain string, sent without a type, is masked pair by pair", async () => {
+  configure("extension-id");
+  await (
+    await fetch(url("/echo"), { method: "POST", body: signIn().toString() })
+  ).text();
+  const event = await nextEvent();
+  expect(event.value.request.headers["content-type"]).toBe(
+    "text/plain;charset=UTF-8",
+  );
+  expect(event.value.request.body.text).toBe(MASKED_SIGN_IN);
+  expect(leaked(forIntelligence(event))).toEqual([]);
+});
+
+test("a FormData body is never read", async () => {
+  configure("extension-id");
+  const form = new FormData();
+  for (const [key, value] of signIn()) form.set(key, value);
+  await fetch(url("/echo"), { method: "POST", body: form }).then(
+    (response) => response.text(),
+    () => "",
+  );
+  const event = await nextEvent();
+  expect(event.value.request.headers["content-type"]).toBe(
+    "multipart/form-data",
+  );
+  expect(event.value.request.body).toEqual({
+    status: "unavailable",
+    reason: "binary",
+  });
+  expect(leaked(sent)).toEqual([]);
+  expect(leaked(forIntelligence(event))).toEqual([]);
+});
+
+test("a JSON body over 2 MiB, sent or received, keeps none of the credentials in the part that is read", async () => {
+  configure("extension-id");
+  await (
+    await fetch(url("/big-sign-in"), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: bigSignIn,
+    })
+  ).text();
+  const event = await nextEvent();
+  expect(event.value.request.body.status).toBe("truncated");
+  expect(event.value.response.body.status).toBe("truncated");
+  expect(event.value.request.body.text as string).toContain(
+    '"password":"[redacted]"',
+  );
+  expect(leaked(sent)).toEqual([]);
+  expect(leaked(forIntelligence(event))).toEqual([]);
 });

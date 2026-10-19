@@ -14,7 +14,8 @@ export type SensitivityTracker = {
   /** input and change are judged by the field the event came from (else the focused field), a click by the field it
    * landed on: the field a label forwards its click to, never an earlier pointer target. */
   sensitiveForEvent(name: string): boolean;
-  /** Values of at least MIN_DIGEST_LENGTH characters typed into sensitive fields, normalised then hashed, once per value. */
+  /** Values of at least MIN_DIGEST_LENGTH characters typed or filled into sensitive fields (a password manager's untrusted
+   * input events count too), normalised then hashed, once per value. */
   onSensitiveValue(listener: (digest: string) => void): void;
   /** This frame's own digests, for masking this frame's events. */
   digests(): ReadonlySet<string>;
@@ -79,10 +80,12 @@ export function createSensitivityTracker(options?: {
     if (field) classify(field);
   };
   const onValue = (event: Event) => {
-    if (!isTrusted(event)) return;
     // A field inside a shadow root: document.activeElement is its host, composedPath()[0] the field itself.
-    valueField = fieldOf(event.composedPath()[0] ?? null);
-    const field = valueField ?? fieldOf(document.activeElement);
+    const own = fieldOf(event.composedPath()[0] ?? null);
+    // A password manager fills a field with untrusted events: what it put there is hashed too, but the field the collector
+    // judges its next event by moves only on a trusted one, the only kind the collector records.
+    if (isTrusted(event)) valueField = own;
+    const field = own ?? fieldOf(document.activeElement);
     if (!field || !classify(field)) return;
     const normalised = normaliseSecret(fieldValue(field));
     if (normalised.length < MIN_DIGEST_LENGTH) return;

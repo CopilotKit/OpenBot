@@ -1,8 +1,9 @@
 // The page-level network hook: a classic script the service worker injects into the MAIN world of recorded tabs only,
 // when policy refuses the debugger. It wraps fetch and XMLHttpRequest, masks each finished request IN THE PAGE (each
-// body whole, so a credential-named key is redacted wherever it sits), trims the event to fit one Intelligence event,
-// and hands it to the service worker through chrome.runtime.sendMessage. It never uses window.postMessage: anything
-// posted to the window is readable by every script on the page.
+// body read up to NETWORK_BODY_READ_MAX_BYTES and masked as one piece, so a credential-named key is redacted wherever it
+// sits), trims the event to fit one Intelligence event, and hands it to the service worker through
+// chrome.runtime.sendMessage. It never uses window.postMessage: anything posted to the window is readable by every script
+// on the page.
 
 import {
   type CapturedEvent,
@@ -40,6 +41,35 @@ const isAbort = (error: unknown) =>
   typeof error === "object" &&
   error !== null &&
   (error as { name?: unknown }).name === "AbortError";
+
+/** The Content-Type the browser adds when a page sends a body without one (the Fetch standard's "extract a body", which
+ * XHR send() follows, and send()'s own rule for a Document). The page never sees it, but the body must be masked as what
+ * it is: a URLSearchParams body is a form, so its credential pairs are redacted by key. */
+function impliedContentType(body: unknown): string | undefined {
+  if (typeof body === "string") return "text/plain;charset=UTF-8";
+  if (typeof URLSearchParams !== "undefined" && body instanceof URLSearchParams)
+    return "application/x-www-form-urlencoded;charset=UTF-8";
+  // The browser adds a boundary of its own choosing, which the page cannot see.
+  if (typeof FormData !== "undefined" && body instanceof FormData)
+    return "multipart/form-data";
+  if (typeof Blob !== "undefined" && body instanceof Blob)
+    return body.type || undefined;
+  if (typeof Document !== "undefined" && body instanceof Document)
+    return body.contentType === "text/html"
+      ? "text/html;charset=UTF-8"
+      : "application/xml;charset=UTF-8";
+  return undefined;
+}
+
+/** Records the implied Content-Type in the request's own headers when the page set none, as the debugger would see it. */
+function withImpliedContentType(
+  headers: Record<string, string>,
+  body: unknown,
+): void {
+  if (body === undefined || body === null || "content-type" in headers) return;
+  const implied = impliedContentType(body);
+  if (implied) headers["content-type"] = implied;
+}
 
 function sentBody(
   body: unknown,
@@ -159,6 +189,7 @@ function wrapFetch(extensionId: string, active: () => boolean): () => void {
       const headers = headerRecord(
         new Headers(init?.headers ?? source?.headers),
       );
+      withImpliedContentType(headers, init?.body);
       request = {
         url: absolute(source ? source.url : String(input)),
         method: (init?.method ?? source?.method ?? "GET").toUpperCase(),
@@ -280,6 +311,7 @@ function wrapXhr(extensionId: string, active: () => boolean): () => void {
     const startedAt = performance.now();
     let requestBody: Body | Promise<Body>;
     try {
+      withImpliedContentType(request.headers, body);
       requestBody = sentBody(body, request.headers["content-type"]);
     } catch {
       requestBody = unavailable("request-body-unavailable");

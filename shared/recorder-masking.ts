@@ -99,6 +99,16 @@ const TOKEN_CHARS_FINE = /[^\s,;&=:"'{}[\]().<>/\\?!|*`]+/g;
 const DIGITS_AND_SEPARATORS = /^[\d\s-]+$/;
 /** Form bodies are masked pair by pair (plan Task 3 maskBody). */
 const FORM_CONTENT_TYPE = /application\/x-www-form-urlencoded/i;
+/** A first `key=` with no whitespace in the key: a form body, whatever type it was declared with (a string a page posts
+ * as text/plain, or a URLSearchParams body whose type the page-level hook could not see). */
+const FORM_START = /^[^\s=&]+=/;
+const LINE_BREAK = /[\r\n]/;
+/** application/json and every +json type. */
+const JSON_CONTENT_TYPE = /[/+]json\s*(?:;|$)/i;
+/** Text that opens like a JSON object or array: once cut short it no longer parses, whatever type it was declared with. */
+const JSON_START = /^\s*[[{]/;
+/** What a redacted JSON value becomes in JSON text. */
+const REDACTED_JSON = JSON.stringify(REDACTED);
 /** Input event target fields that hold what the person typed or chose (plan Task 3 `maskCollectorEvent`). */
 const TARGET_VALUE_FIELDS = ["value", "text"] as const;
 const TARGET_ATTRIBUTE_VALUES = [
@@ -455,12 +465,127 @@ const maskJson = (value: JsonValue, options?: MaskOptions): JsonValue => {
   return value;
 };
 
+/** One pair of a form body, as a query pair is masked; a key that is itself a secret (a long token posted bare, base64
+ * padding and all) takes the whole pair. */
+const maskFormPair = (pair: string, options?: MaskOptions): string => {
+  const at = pair.indexOf("=");
+  if (at > 0) {
+    const key = decodeQuietly(pair.slice(0, at).replace(/\+/g, " "));
+    if (scrubText(key, options) !== key || matchesDigest(key, options))
+      return REDACTED;
+  }
+  return scrubQueryPair(pair, options);
+};
+
 const maskForm = (text: string, options?: MaskOptions): string =>
   text
     .split("&")
-    .map((pair) => scrubQueryPair(pair, options))
+    .map((pair) => maskFormPair(pair, options))
     .join("&");
 
+const looksLikeForm = (text: string): boolean =>
+  FORM_START.test(text) && !LINE_BREAK.test(text.trimEnd());
+
+const isJsonSpace = (code: number): boolean =>
+  code === 0x20 || code === 0x09 || code === 0x0a || code === 0x0d;
+
+/** The index of the quote that closes the string opening at `start`, or -1 when the text ends first. */
+const closingQuote = (text: string, start: number): number => {
+  for (let i = start + 1; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    if (code === 0x5c) i++;
+    else if (code === 0x22) return i;
+  }
+  return -1;
+};
+
+/** Where the JSON value starting at `start` ends: past a string's closing quote, past the bracket that closes an object or
+ * array, or after a number's or literal's last character; the end of the text when the text ends first. */
+const valueEnd = (text: string, start: number): number => {
+  const first = text.charCodeAt(start);
+  if (first === 0x22) {
+    const close = closingQuote(text, start);
+    return close === -1 ? text.length : close + 1;
+  }
+  if (first === 0x7b || first === 0x5b) {
+    let depth = 0;
+    for (let i = start; i < text.length; i++) {
+      const code = text.charCodeAt(i);
+      if (code === 0x22) {
+        const close = closingQuote(text, i);
+        if (close === -1) return text.length;
+        i = close;
+      } else if (code === 0x7b || code === 0x5b) depth++;
+      else if ((code === 0x7d || code === 0x5d) && --depth === 0) return i + 1;
+    }
+    return text.length;
+  }
+  let i = start;
+  for (; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    if (isJsonSpace(code) || code === 0x2c || code === 0x7d || code === 0x5d)
+      break;
+  }
+  return i;
+};
+
+/** A JSON string token's text with its escapes decoded; a token the text ends inside is read as if it closed there. */
+const jsonStringValue = (token: string, closed: boolean): string => {
+  try {
+    return JSON.parse(closed ? token : `${token}"`) as string;
+  } catch {
+    return token.slice(1, closed ? -1 : undefined);
+  }
+};
+
+/** JSON that does not parse, above all a body cut at NETWORK_BODY_READ_MAX_BYTES before it was masked. It is read token by
+ * token from its start: the value of every credential-named key is redacted (a whole object or array too, up to its end or
+ * the end of the text), a string that matches a digest is redacted whole, and the result is scrubbed as text. Linear. */
+const maskJsonText = (text: string, options?: MaskOptions): string => {
+  const hasDigests = (options?.digests?.size ?? 0) > 0;
+  const out: string[] = [];
+  let copied = 0;
+  const redact = (start: number, end: number) => {
+    out.push(text.slice(copied, start), REDACTED_JSON);
+    copied = end;
+  };
+  let i = 0;
+  while (i < text.length) {
+    if (text.charCodeAt(i) !== 0x22) {
+      i++;
+      continue;
+    }
+    const close = closingQuote(text, i);
+    const end = close === -1 ? text.length : close + 1;
+    let next = end;
+    while (next < text.length && isJsonSpace(text.charCodeAt(next))) next++;
+    if (close !== -1 && text.charCodeAt(next) === 0x3a) {
+      let value = next + 1;
+      while (value < text.length && isJsonSpace(text.charCodeAt(value)))
+        value++;
+      if (
+        value < text.length &&
+        isCredentialKey(jsonStringValue(text.slice(i, end), true))
+      ) {
+        const after = valueEnd(text, value);
+        redact(value, after);
+        i = after;
+      } else i = value;
+      continue;
+    }
+    if (
+      hasDigests &&
+      matchesDigest(jsonStringValue(text.slice(i, end), close !== -1), options)
+    )
+      redact(i, end);
+    i = end;
+  }
+  out.push(text.slice(copied));
+  return scrubText(out.join(""), options);
+};
+
+/** A body is masked by its shape first and its declared type second: JSON whole; JSON that no longer parses (a body cut
+ * short) key by key; a form body pair by pair, declared or not; anything else as text. */
 export function maskBody(
   text: string,
   contentType: string | undefined,
@@ -475,8 +600,14 @@ export function maskBody(
     }
     if (parsed !== undefined && typeof parsed === "object")
       return JSON.stringify(maskJson(parsed, options));
-    if (contentType && FORM_CONTENT_TYPE.test(contentType))
+    if (JSON_START.test(text)) return maskJsonText(text, options);
+    if (
+      (contentType && FORM_CONTENT_TYPE.test(contentType)) ||
+      looksLikeForm(text)
+    )
       return maskForm(text, options);
+    if (contentType && JSON_CONTENT_TYPE.test(contentType))
+      return maskJsonText(text, options);
     return scrubText(text, options);
   } catch {
     return REDACTED;

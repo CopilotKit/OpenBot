@@ -274,14 +274,36 @@ describe("sensitivity tracker", () => {
     expect([...tracker.digests()]).toEqual([sha256HexSync("9876")]);
   });
 
-  test("an untrusted event reports nothing", () => {
-    document.body.innerHTML = `<label for="a">Security code</label><input id="a">`;
+  test("a value a password manager fills in, with untrusted events, is hashed too", () => {
+    document.body.innerHTML = `<label for="a">Security code</label><input id="a"><input id="p" type="password"><label for="n">Nickname</label><input id="n">`;
+    // The real check: every event dispatched here is untrusted, as a password manager's fill is.
     const tracker = createSensitivityTracker();
     cleanups.push(tracker.install());
-    const code = document.getElementById("a") as HTMLInputElement;
-    focus(code);
-    type(code, "737");
-    expect(tracker.digests().size).toBe(0);
+    const reported: string[] = [];
+    tracker.onSensitiveValue((digest) => reported.push(digest));
+    type(document.getElementById("a") as HTMLInputElement, "737");
+    const password = document.getElementById("p") as HTMLInputElement;
+    password.value = "hunter2";
+    password.dispatchEvent(new Event("change", { bubbles: true }));
+    type(document.getElementById("n") as HTMLInputElement, "plain value");
+    expect(reported).toEqual([sha256HexSync("737"), sha256HexSync("hunter2")]);
+  });
+
+  test("an untrusted fill never moves the field the next input event is judged by", () => {
+    document.body.innerHTML = `<label for="n">Nickname</label><input id="n"><input id="p" type="password">`;
+    const trustedEvents = new WeakSet<Event>();
+    const tracker = createSensitivityTracker({
+      isTrusted: (event) => trustedEvents.has(event),
+    });
+    cleanups.push(tracker.install());
+    const nick = document.getElementById("n") as HTMLInputElement;
+    const typed = new Event("input", { bubbles: true, composed: true });
+    trustedEvents.add(typed);
+    nick.value = "Al";
+    nick.dispatchEvent(typed);
+    type(document.getElementById("p") as HTMLInputElement, "hunter2");
+    expect(tracker.sensitiveForEvent("input")).toBe(false);
+    expect([...tracker.digests()]).toEqual([sha256HexSync("hunter2")]);
   });
 
   test("a digest is reported on a plain-http page, where crypto.subtle does not exist", () => {

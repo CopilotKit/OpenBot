@@ -578,3 +578,107 @@ test("a header value that is not a string is scrubbed as its string form", () =>
   expect(at(masked, "request", "headers", "content-length")).toBe("12");
   expect(at(masked, "response", "headers", "content-length")).toBe("2");
 });
+
+// A realistic sign-in and payment: what a form post or a JSON body carries. None of these may reach Intelligence.
+const PASSWORD = "hunter2";
+const PIN = "4921";
+const CARD = "4111 1111 1111 1111";
+const SESSION_TOKEN = "sess_9f8e7d6c";
+const leaks = (text: string) =>
+  [PASSWORD, PIN, "4111", SESSION_TOKEN].filter((secret) =>
+    text.includes(secret),
+  );
+
+test("a form body is masked pair by pair whatever type it was declared with, or none", () => {
+  const body = new URLSearchParams({
+    username: "alice",
+    password: PASSWORD,
+    pin: PIN,
+    card_number: CARD,
+    session_token: SESSION_TOKEN,
+    remember: "1",
+  }).toString();
+  for (const type of [
+    undefined,
+    "text/plain;charset=UTF-8",
+    "application/x-www-form-urlencoded;charset=UTF-8",
+  ]) {
+    const masked = maskBody(body, type);
+    expect(leaks(masked)).toEqual([]);
+    expect(masked).toBe(
+      "username=alice&password=[redacted]&pin=[redacted]&card_number=[redacted]&session_token=[redacted]&remember=1",
+    );
+  }
+});
+
+test("a form body cut short keeps none of its credentials", () => {
+  const body = `username=alice&password=${PASSWORD}&pin=${PIN}&session_token=${SESSION_TOKEN}&notes=${"a".repeat(64)}`;
+  const masked = maskBody(body.slice(0, body.length - 20), undefined);
+  expect(leaks(masked)).toEqual([]);
+  expect(masked.startsWith("username=alice&password=[redacted]")).toBe(true);
+});
+
+test("a long token posted as plain text is still redacted, though it looks like one form pair", () => {
+  expect(
+    maskBody("c2VjcmV0LXRva2VuLWZvci10aGUtYXBpLTEyMzQ1Njc4OTA=", "text/plain"),
+  ).toBe(REDACTED);
+  expect(maskBody("total = 3 apples", "text/plain")).toBe("total = 3 apples");
+});
+
+test("JSON cut short keeps none of its credentials: each credential-named key loses its value, to the end of the text", () => {
+  const whole = JSON.stringify({
+    user: { name: "alice", password: PASSWORD },
+    session_token: SESSION_TOKEN,
+    payment: { pin: PIN, card_number: CARD, cvv: 737 },
+    note: "kept",
+    rows: "x".repeat(1000),
+  });
+  const cut = whole.slice(0, whole.indexOf("xxxxx") + 5);
+  for (const type of ["application/json; charset=utf-8", undefined]) {
+    const masked = maskBody(cut, type);
+    expect(leaks(masked)).toEqual([]);
+    expect(masked).not.toContain("737");
+    expect(masked).toContain('"name":"alice"');
+    expect(masked).toContain('"password":"[redacted]"');
+    expect(masked).toContain('"note":"kept"');
+  }
+});
+
+test("JSON cut inside a credential's value, or inside a credential-named object, keeps none of it", () => {
+  expect(
+    leaks(maskBody(`{"user":"alice","password":"${PASSWORD}`, undefined)),
+  ).toEqual([]);
+  const nested = maskBody(
+    `{"user":"alice","credentials":{"username":"alice","answer":"blue-sky","pin":"${PIN}"`,
+    "application/json",
+  );
+  expect(nested).toBe('{"user":"alice","credentials":"[redacted]"');
+  // An escaped quote inside a value never ends the string early, so a key-shaped run inside it stays text.
+  const escaped = maskBody(
+    `[{"pass\\u0077ord":"${PASSWORD}","memo":"say \\"pin\\": open"},{"session_token": "${SESSION_TOKEN}`,
+    "application/json",
+  );
+  expect(escaped).toBe(
+    '[{"pass\\u0077ord":"[redacted]","memo":"say \\"pin\\": open"},{"session_token": "[redacted]"',
+  );
+});
+
+test("JSON cut short is matched against digests and card numbers too", () => {
+  const masked = maskBody(
+    `{"memo":"my code is 737","echo":"hunter 22","total":4111111111111111,"rows":["a`,
+    "application/json",
+    { digests: digestsOf("737", "hunter 22") },
+  );
+  expect(masked).toBe(
+    '{"memo":"my code is [redacted]","echo":"[redacted]","total":[redacted],"rows":["a',
+  );
+});
+
+test("JSON of 2 MiB cut inside a string is masked in linear time", () => {
+  const cut = `{"password":"${PASSWORD}","rows":[${'"row", '.repeat(300_000)}"${"x".repeat(100_000)}`;
+  let out = "";
+  expect(
+    elapsedMs(() => (out = maskBody(cut, "application/json"))),
+  ).toBeLessThan(5000);
+  expect(leaks(out)).toEqual([]);
+});

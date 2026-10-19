@@ -228,3 +228,45 @@ test("a malformed event is dropped", () => {
     acceptPageNetworkEvent(null as unknown as CapturedEvent, new Set()),
   ).toBeNull();
 });
+
+// A realistic sign-in and payment. None of these may reach Intelligence.
+const SECRETS = ["hunter2", "4921", "4111", "sess_9f8e7d6c"];
+const leaked = (value: unknown) => {
+  const text = JSON.stringify(value);
+  return SECRETS.filter((secret) => text.includes(secret));
+};
+
+test("a page event whose form body came without a type is re-masked pair by pair", () => {
+  const result = acceptPageNetworkEvent(
+    event({
+      method: "POST",
+      request: {
+        headers: {},
+        body: {
+          status: "complete",
+          text: "username=alice&password=hunter2&pin=4921&card_number=4111+1111+1111+1111&session_token=sess_9f8e7d6c",
+        },
+      },
+    }),
+    new Set(),
+  );
+  expect(leaked(result)).toEqual([]);
+});
+
+test("a page event whose JSON body was cut short is re-masked key by key", () => {
+  const result = acceptPageNetworkEvent(
+    event({
+      response: {
+        headers: { "content-type": "application/json" },
+        body: {
+          status: "truncated",
+          truncated: true,
+          text: '{"user":{"name":"alice","password":"hunter2"},"session_token":"sess_9f8e7d6c","payment":{"pin":"4921","card_number":"4111 1111 1111 1111"},"rows":"xxxx',
+        },
+      },
+    }),
+    new Set(),
+  );
+  expect(leaked(result)).toEqual([]);
+  expect(JSON.stringify(result)).toContain("alice");
+});
