@@ -30,7 +30,12 @@ import { IDLE_STATE, parseOffscreenSignedOut } from "../protocol/messages";
 import { hasHostPermission } from "../shared/host-access";
 import { RECORDER_ACTION_NOTICE_AT } from "../shared/limits";
 import { OpenBotError, openbotJson } from "../shared/openbot-client";
-import { readPolicy } from "../shared/policy";
+import {
+  allowsOpenBot,
+  onPolicyChanged,
+  type RecorderPolicy,
+  readPolicy,
+} from "../shared/policy";
 import {
   type ConnectionRecord,
   type DrainRecord,
@@ -43,7 +48,11 @@ import {
   writeSession,
 } from "../shared/storage";
 import { showBadge } from "./badge";
-import { currentConnection, forgetConnection } from "./connection";
+import {
+  type ConnectionLoss,
+  currentConnection,
+  forgetConnection,
+} from "./connection";
 import {
   forgetContentPorts,
   injectRecordingScripts,
@@ -83,10 +92,12 @@ export type RecordingDeps = {
 };
 
 /** Called by the router after Task 8's handler answered: `connected` after a successful `page.connect.decide` (web or Desktop),
- * `disconnected` after `page.disconnect` (the person's own Disconnect). */
+ * `disconnected` after `page.disconnect` (the person's own Disconnect). `connectionLost` is connection.ts's: the
+ * keep-alive's signed-out answer, or the organization's policy moving the Recorder away from the connection's OpenBot. */
 type ConnectionEvents = {
   connected(): Promise<void>;
   disconnected(): Promise<void>;
+  connectionLost(loss: ConnectionLoss): Promise<void>;
 };
 
 /** What recovery.ts drives after a browser or service-worker restart (Task 9's Recovery), on the controller installed last. */
@@ -143,17 +154,42 @@ const SENTENCES = {
     "This browser was disconnected from OpenBot. Your recording stopped, and everything in it is kept in this browser until you connect again.",
   organizationSignedOut:
     "Your organization sign-in ended. Your recording stopped, and everything in it is kept in this browser until you connect again.",
+  policyMoved:
+    "Your organization moved the Recorder to another OpenBot. Your recording stopped, and everything in it is kept in this browser.",
+  policyRefused:
+    "Your organization's Recorder policy does not allow this OpenBot. Ask your IT team.",
   keptSignedOut: "This browser was disconnected from OpenBot.",
   keptOrganization: "Your organization sign-in ended.",
+  keptPolicy: "Your organization moved the Recorder to another OpenBot.",
 } as const;
 
 type SignedOutReason = "revoked" | "removed" | "organization";
+/** Why a connection went without the person's Disconnect: OpenBot signed it out, or the policy moved the Recorder. */
+type LostReason = SignedOutReason | "policy";
 
 /** The sentences that say a stopped recording is kept until something happens: a Disconnect discards it, so they go. */
 const KEPT_SENTENCES: readonly string[] = [
   SENTENCES.signedOut,
   SENTENCES.organizationSignedOut,
+  SENTENCES.policyMoved,
 ];
+
+const stoppedSentence = (reason: LostReason): string =>
+  reason === "organization"
+    ? SENTENCES.organizationSignedOut
+    : reason === "policy"
+      ? SENTENCES.policyMoved
+      : SENTENCES.signedOut;
+
+const keptSentence = (reason: LostReason): string =>
+  reason === "organization"
+    ? SENTENCES.keptOrganization
+    : reason === "policy"
+      ? SENTENCES.keptPolicy
+      : SENTENCES.keptSignedOut;
+
+/** Record found the policy no longer allows the connection's OpenBot (connection.ts forgets it in a moment). */
+const POLICY_REFUSED = new Error("The policy does not allow this OpenBot.");
 
 /** Record ended by a stop (Stop, Disconnect, a sign-out) before its recording was live: it rolls back. */
 const CANCELLED = new Error("Record was cancelled before it started.");
@@ -356,7 +392,7 @@ type Live = {
 
 type StopMode =
   | { kind: "person" } // Stop: the outcome is queued, then the outbox drains
-  | { kind: "signed-out"; reason: SignedOutReason; forgot: boolean } // kept for the person (only this recording when the connection was not forgotten)
+  | { kind: "signed-out"; reason: LostReason; forgot: boolean } // kept for the person (only this recording when the connection was not forgotten)
   | { kind: "disconnect" }; // the person's Disconnect: discarded right after
 
 const signedOutReason = (error: unknown): SignedOutReason | null =>
@@ -922,6 +958,7 @@ export function installRecording(
       await writeLocal("lastBotId", botId);
       const policy = await deps.readPolicy();
       if (attempt.cancelled) throw CANCELLED;
+      if (!allowsOpenBot(policy, connection.openbotUrl)) throw POLICY_REFUSED;
       const session: StreamSession = {
         recordingId,
         title,
@@ -1006,6 +1043,7 @@ export function installRecording(
         await finishDiscards().catch(report("discarding a Record"));
       } else if (saved) await serially(() => removeLocal("activeRecording"));
       if (error === CANCELLED) return cancelled();
+      if (error === POLICY_REFUSED) return refuse(SENTENCES.policyRefused);
       return refuse(sentenceFor(error, SENTENCES.startFailed));
     }
   }
@@ -1094,7 +1132,10 @@ export function installRecording(
         : {
             type: "offscreen.stop",
             outcome: "failed",
-            reason: mode.kind === "disconnect" ? "disconnected" : "signed-out",
+            reason:
+              mode.kind === "disconnect" || mode.reason === "policy"
+                ? "disconnected"
+                : "signed-out",
           };
     // The document went away with the service worker: it is reopened on the stored session to finish the stop, however
     // long ago the stop began.
@@ -1114,7 +1155,7 @@ export function installRecording(
       await sendToDocument(message);
     }
 
-    let signedOut: SignedOutReason | null = null;
+    let signedOut: LostReason | null = null;
     if (mode.kind === "signed-out") signedOut = mode.reason;
     else if (mode.kind === "person") {
       // Its person's connection went while it stopped: its events are kept for them, never sent under another
@@ -1135,11 +1176,7 @@ export function installRecording(
         mode.kind === "disconnect"
           ? undefined
           : { recordingId, botId: current.botId },
-      error: signedOut
-        ? signedOut === "organization"
-          ? SENTENCES.organizationSignedOut
-          : SENTENCES.signedOut
-        : undefined,
+      error: signedOut ? stoppedSentence(signedOut) : undefined,
     });
     if (signedOut)
       // A sign-out that forgot nothing (the person connected again) leaves their other drains to the new connection.
@@ -1156,18 +1193,20 @@ export function installRecording(
     await maybeCloseDocument();
   }
 
-  /** Why the connection a stop drained under went away: a sign-out leaves its notice, the person's own Disconnect
-   * leaves none (and is under way while the stop finishes, since Disconnect waits for it). */
-  async function signedOutMeanwhile(): Promise<SignedOutReason | null> {
+  /** Why the connection a stop drained under went away: a sign-out or a policy move leaves its notice, the person's own
+   * Disconnect leaves none (and is under way while the stop finishes, since Disconnect waits for it). */
+  async function signedOutMeanwhile(): Promise<LostReason | null> {
     if (disconnecting > 0) return null;
     const notice = await readLocal("notice");
+    if (notice?.kind === "policy-moved") return "policy";
     return notice?.kind === "signed-out" ? (notice.reason ?? "revoked") : null;
   }
 
-  /** Why a recording waits for its person when no answer said so (found after a restart): the sign-out notice's reason,
-   * else a plain disconnect. */
-  async function waitingReason(): Promise<SignedOutReason> {
+  /** Why a recording waits for its person when no answer said so (found after a restart): the notice's reason, else a
+   * plain disconnect. */
+  async function waitingReason(): Promise<LostReason> {
     const notice = await readLocal("notice");
+    if (notice?.kind === "policy-moved") return "policy";
     return notice?.kind === "signed-out"
       ? (notice.reason ?? "revoked")
       : "revoked";
@@ -1178,7 +1217,7 @@ export function installRecording(
   /** Every drain `belongs` picks waits for its person to connect this browser again; nothing is discarded (Decision 19). */
   async function markWaiting(
     belongs: (drain: DrainRecord) => boolean,
-    reason: SignedOutReason,
+    reason: LostReason,
   ): Promise<void> {
     await updateDrains((drains) =>
       drains.map((drain) =>
@@ -1187,10 +1226,7 @@ export function installRecording(
           : {
               ...drain,
               kept: {
-                reason:
-                  reason === "organization"
-                    ? SENTENCES.keptOrganization
-                    : SENTENCES.keptSignedOut,
+                reason: keptSentence(reason),
                 parked: true,
                 events: drain.kept?.events ?? 0,
                 at: deps.now(),
@@ -1198,6 +1234,14 @@ export function installRecording(
               },
             },
       ),
+    );
+  }
+
+  /** No stream in the document sends with a lost connection's token any more: a socket still streaming stops now,
+   * not at its next pass, and keeps its events for the person. */
+  function haltStreams(token: string): void {
+    void sendToDocument({ type: "offscreen.halt", token }).catch(
+      report("stopping a lost connection's streams"),
     );
   }
 
@@ -1211,6 +1255,7 @@ export function installRecording(
     openbotUrl: string,
   ): Promise<void> {
     const forgot = await forgetConnection(reason, token);
+    haltStreams(token);
     if (live && live.token === token && state.phase === "recording")
       // The live recording used this token, which is dead: it stops (and marks the person's other drains waiting).
       await stopRecording({ kind: "signed-out", reason, forgot });
@@ -1235,7 +1280,37 @@ export function installRecording(
     const connection = await currentConnection();
     if (connection?.token !== token) return;
     if (!(await forgetConnection(reason, token))) return;
+    haltStreams(token);
     await markWaiting((drain) => ownedBy(drain, connection), reason);
+  }
+
+  /** The organization's policy moved the Recorder away from this connection's OpenBot (connection.ts forgot it): the
+   * live recording that used it stops, the document stops sending with its token, and everything is kept for its person
+   * on that OpenBot, as a sign-out keeps it. */
+  async function policyMoved(connection: ConnectionRecord): Promise<void> {
+    haltStreams(connection.token);
+    if (live && live.token === connection.token && state.phase === "recording")
+      await stopRecording({
+        kind: "signed-out",
+        reason: "policy",
+        forgot: true,
+      });
+    else await markWaiting((drain) => ownedBy(drain, connection), "policy");
+  }
+
+  /** A new policy goes to the document at once, and into the stored session a reopened document starts from. */
+  async function pushPolicy(policy: RecorderPolicy): Promise<void> {
+    const allowedIntelligenceUrls = policy.allowedIntelligenceUrls;
+    const stream = await readSession("stream");
+    if (stream)
+      await writeSession("stream", { ...stream, allowedIntelligenceUrls });
+    if (offscreen)
+      postOffscreen({ type: "offscreen.policy", allowedIntelligenceUrls });
+    else if (await hasOffscreenDocument())
+      await sendToDocument({
+        type: "offscreen.policy",
+        allowedIntelligenceUrls,
+      });
   }
 
   // ---- Start over ----------------------------------------------------------------------------
@@ -1789,6 +1864,11 @@ export function installRecording(
       .then(() => onCreatedTarget(details))
       .catch(report("following a new tab"));
   });
+  onPolicyChanged((policy) => {
+    void ready
+      .then(() => pushPolicy(policy))
+      .catch(report("passing on a new policy"));
+  }, deps.readPolicy);
 
   // ---- The router's handlers -----------------------------------------------------------------
 
@@ -1886,6 +1966,19 @@ export function installRecording(
       void sendDrains({ recovering: false }).catch(
         report("sending kept recordings"),
       );
+    },
+
+    async connectionLost(loss) {
+      await ready;
+      const { connection } = loss;
+      if (loss.kind === "policy") await policyMoved(connection);
+      else
+        await handleSignedOut(
+          loss.reason,
+          connection.token,
+          connection.user.id,
+          connection.openbotUrl,
+        );
     },
 
     async disconnected() {

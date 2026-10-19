@@ -1165,6 +1165,56 @@ describe("offscreen controller", () => {
     ]);
   });
 
+  test("a halt for a lost connection stops its stream at once: later events stay kept, and nothing more asks with its token", async () => {
+    const h = await setup();
+    await h.open();
+    const session = h.session();
+    const t = session.trajectoryId;
+    h.post({ type: "offscreen.start", session });
+    await streaming(h, t);
+    const passes = h.openbot.passes.length;
+    h.post({ type: "offscreen.halt", token: "obr_first" });
+    await sleep(20);
+    h.post({ type: "offscreen.event", event: click(1) });
+    await until(
+      async () => (await h.pending(t)).length === 1,
+      "the click kept in the outbox",
+    );
+    await h.clock.advance(10 * MINUTE);
+    expect(h.names(t)).toEqual(["recording.started", "outcome"]);
+    expect(h.openbot.passes).toHaveLength(passes);
+    // The service worker sent the halt: nothing is posted back about it.
+    expect(h.received("offscreen.signed-out")).toEqual([]);
+  });
+
+  test("a new policy that leaves out the gateway a recording streams to parks it there, with its events kept", async () => {
+    const h = await setup();
+    await h.open();
+    const session = h.session();
+    const t = session.trajectoryId;
+    h.post({ type: "offscreen.start", session });
+    await streaming(h, t);
+    h.post({ type: "offscreen.policy", allowedIntelligenceUrls: ELSEWHERE });
+    await until(
+      () =>
+        h
+          .received("offscreen.status")
+          .some(
+            (status) =>
+              status.capture.intelligence === "parked" &&
+              status.capture.intelligenceReason === NOT_ALLOWED,
+          ),
+      "the recording parked by the new policy",
+    );
+    h.post({ type: "offscreen.event", event: click(1) });
+    await until(
+      async () => (await h.pending(t)).length === 1,
+      "the click kept in the outbox",
+    );
+    await h.clock.advance(10 * MINUTE);
+    expect(h.names(t)).toEqual(["recording.started", "outcome"]);
+  });
+
   test("in the e2e build, session.e2eHoldRetryMs becomes the hold interval; in a release build it is ignored", async () => {
     process.env.RECORDER_VARIANT = "e2e";
     const e2e = await setup();

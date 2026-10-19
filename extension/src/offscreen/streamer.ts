@@ -93,6 +93,13 @@ export type Streamer = {
    * its events kept never resolves it; it reports `onKept` instead, and a later successful retry drains and resolves. */
   drained(): Promise<void>;
   discard(): Promise<void>;
+  /** The connection it sends for is gone (signed out, revoked, or moved away by the organization's policy): every socket
+   * closes at once and nothing more is sent; every event stays in the outbox. Resolves once the events already pushed
+   * are in it. */
+  halt(): Promise<void>;
+  /** The organization's policy now allows these gateways (null: any). A trajectory streaming to a gateway it no longer
+   * allows is parked with its events kept, and every later pass is checked against the new list. */
+  allow(urls: string[] | null): void;
 };
 
 export type StreamerSession = {
@@ -196,6 +203,8 @@ type Connection = {
   /** One push in flight per connection; "busy" while the outbox is read or written for it. */
   inflight: InFlight | "busy" | null;
   pushRetry: unknown;
+  /** The gateway its pass pointed at, once the pass came. */
+  gatewayUrl?: string;
 };
 
 type Lane = {
@@ -401,6 +410,7 @@ export async function createStreamer(
     ((url: string, params: Record<string, string>) =>
       createPhoenixSession(url, params));
   const { outbox } = deps;
+  let allowedGatewayUrls = deps.allowedGatewayUrls;
 
   const lanes: Lane[] = [];
   const counters = new Map<
@@ -618,8 +628,8 @@ export async function createStreamer(
     }, delayMs);
   };
 
-  const signOut = (reason: "revoked" | "removed" | "organization") => {
-    if (halted()) return;
+  /** Nothing more goes out: every connection and retry ends, and the events stay in the outbox. */
+  const stopSending = () => {
     signedOut = true;
     for (const lane of lanes) {
       if (lane.conn) teardown(lane.conn);
@@ -628,6 +638,11 @@ export async function createStreamer(
       lane.timer = undefined;
     }
     emitStatus();
+  };
+
+  const signOut = (reason: "revoked" | "removed" | "organization") => {
+    if (halted()) return;
+    stopSending();
     deps.onSignedOut(reason);
   };
 
@@ -1110,9 +1125,8 @@ export async function createStreamer(
       return;
     }
     if (!current(lane, conn)) return;
-    if (
-      !isAllowedGatewayUrl(grant.realtime.clientUrl, deps.allowedGatewayUrls)
-    ) {
+    conn.gatewayUrl = grant.realtime.clientUrl;
+    if (!isAllowedGatewayUrl(grant.realtime.clientUrl, allowedGatewayUrls)) {
       fail(lane, conn, {
         kind: "park",
         reason: PASS_HINTS.GATEWAY_NOT_ALLOWED,
@@ -1341,6 +1355,26 @@ export async function createStreamer(
       }
       await chain;
       for (const lane of lanes) await outbox.clear(lane.id);
+    },
+
+    async halt() {
+      if (!halted()) stopSending();
+      await chain;
+    },
+
+    allow(urls) {
+      allowedGatewayUrls = urls;
+      for (const lane of lanes) {
+        const conn = lane.conn;
+        if (
+          conn?.gatewayUrl !== undefined &&
+          !isAllowedGatewayUrl(conn.gatewayUrl, urls)
+        )
+          fail(lane, conn, {
+            kind: "park",
+            reason: PASS_HINTS.GATEWAY_NOT_ALLOWED,
+          });
+      }
     },
   };
 }

@@ -647,6 +647,26 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
     });
   }
 
+  /** The service worker says this token's connection is gone: no stream sends with it any more, and a pass asked
+   * with it is refused here, so nothing reaches OpenBot or Intelligence for it. The events stay in the outbox. */
+  async function halt(token: string): Promise<void> {
+    if (!signedOutTokens.has(token)) signedOutTokens.set(token, "revoked");
+    const halting: Promise<void>[] = [];
+    for (const stream of streams) {
+      if (stream.signedOut || stream.target.token !== token) continue;
+      stream.signedOut = true;
+      stream.failedToken = token;
+      if (stream.streamer) halting.push(stream.streamer.halt());
+    }
+    await Promise.all(halting);
+  }
+
+  /** The managed policy changed: every streamer is held to its new gateway list from now on. */
+  function allow(urls: string[] | null): void {
+    if (live) live.session = { ...live.session, allowedIntelligenceUrls: urls };
+    for (const stream of streams) stream.streamer?.allow(urls);
+  }
+
   // ---- Messages in -------------------------------------------------------------------------------
 
   function receive(message: BackgroundToOffscreen): void {
@@ -686,6 +706,18 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
         return;
       case "offscreen.discard":
         serially(() => discard(message.recordingIds), "discard recordings");
+        return;
+      case "offscreen.halt":
+        // At once, not behind the queue: a socket still streaming for a lost connection stops now.
+        void halt(message.token).catch((error) => {
+          console.error(
+            "Recorder: a lost connection's streams could not stop",
+            error,
+          );
+        });
+        return;
+      case "offscreen.policy":
+        allow(message.allowedIntelligenceUrls);
         return;
     }
   }

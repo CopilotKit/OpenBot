@@ -8,6 +8,7 @@ import {
   test,
 } from "bun:test";
 import {
+  type ConnectionLoss,
   currentConnection,
   forgetConnection,
   handleConnectionMessage,
@@ -1048,4 +1049,99 @@ test("a stale signed-out keep-alive answer after a deliberate Disconnect leaves 
   await settle();
   expect(await currentConnection()).toBeNull();
   expect(await readLocal("notice")).toBeUndefined();
+});
+
+test("a keep-alive's signed-out answer goes to the recording controller with the connection that asked", async () => {
+  await connected();
+  await writeLocal("lastKeepAliveAt", clock);
+  const lost: ConnectionLoss[] = [];
+  installConnection({
+    connectionLost: async (loss) => {
+      lost.push(loss);
+    },
+  });
+  await settle();
+  meAnswer = signedOut("organization");
+  fake.alarms.fire("recorder-session-keepalive");
+  await settle();
+  expect(lost).toEqual([
+    {
+      kind: "signed-out",
+      reason: "organization",
+      connection: expect.objectContaining({ token: "obr_fixture" }),
+    },
+  ]);
+});
+
+test("a policy that moves the Recorder away tells the recording controller, then revokes the old token", async () => {
+  await connected();
+  await writeLocal("lastKeepAliveAt", clock);
+  const lost: ConnectionLoss[] = [];
+  installConnection({
+    readPolicy: async () => policy,
+    connectionLost: async (loss) => {
+      lost.push(loss);
+      // The token is still live at OpenBot while the controller stops what used it.
+      expect(hits.some((hit) => hit.startsWith("DELETE"))).toBe(false);
+    },
+  });
+  await settle();
+  policy = { ...policy, openbotUrl: "https://moved.example.test" };
+  fake.storage.setManaged({ OpenBotUrl: "https://moved.example.test" });
+  await settle();
+  expect(await currentConnection()).toBeNull();
+  expect(lost).toEqual([
+    {
+      kind: "policy",
+      connection: expect.objectContaining({ token: "obr_fixture" }),
+    },
+  ]);
+  expect(hits).toContain(
+    "DELETE /api/recorder/connections/current Bearer obr_fixture",
+  );
+});
+
+test("a connect page opened before a pin elsewhere cannot connect once the policy moved", async () => {
+  await connect("obc_abc");
+  policy = { ...policy, openbotUrl: "https://moved.example.test" };
+  expect(
+    await handleConnectionMessage(
+      {
+        type: "page.connect.decide",
+        approve: true,
+        label: "Chrome on macOS",
+        origin,
+      },
+      deps(),
+    ),
+  ).toEqual({
+    ok: false,
+    error:
+      "Your organization's Recorder policy does not allow this OpenBot. Ask your IT team.",
+  });
+  expect(exchanges).toEqual([]);
+  expect(await currentConnection()).toBeNull();
+  expect(await readSession("pendingConnect")).toBeUndefined();
+});
+
+test("a pin elsewhere that lands while the code is exchanged keeps the connection out and revokes its new token", async () => {
+  await connect("obc_abc");
+  const exchange = holdAnswer("/api/recorder/connections");
+  const approving = handleConnectionMessage(
+    {
+      type: "page.connect.decide",
+      approve: true,
+      label: "Chrome on macOS",
+      origin,
+    },
+    deps(),
+  );
+  await exchange.arrived;
+  policy = { ...policy, openbotUrlInvalid: true };
+  exchange.release();
+  expect(await approving).toMatchObject({ ok: false });
+  expect(await currentConnection()).toBeNull();
+  expect(hits).toContain(
+    "DELETE /api/recorder/connections/current Bearer obr_fixture",
+  );
 });

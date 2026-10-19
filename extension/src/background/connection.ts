@@ -12,6 +12,7 @@ import type {
 import { OpenBotError, openbotJson } from "../shared/openbot-client";
 import { normaliseOpenBotOrigin } from "../shared/origin";
 import {
+  allowsOpenBot,
   onPolicyChanged,
   type RecorderPolicy,
   readPolicy,
@@ -31,16 +32,32 @@ import {
 import type { DesktopHandoff } from "./native-host";
 import { askDesktopForHandoff, desktopAvailable } from "./native-host";
 
+/** A connection that ended without the person's Disconnect, for the recording controller (index.ts wires it in): OpenBot
+ * answered the keep-alive signed out (nothing is forgotten yet), or the organization's policy moved the Recorder away
+ * from the connection's OpenBot (it is forgotten already). */
+export type ConnectionLoss =
+  | {
+      kind: "signed-out";
+      reason: "revoked" | "removed" | "organization";
+      connection: ConnectionRecord;
+    }
+  | { kind: "policy"; connection: ConnectionRecord };
+
 type ConnectionDeps = {
   askDesktop: () => Promise<DesktopHandoff | null>;
   desktopAvailable: () => Promise<boolean>;
   readPolicy: () => Promise<RecorderPolicy>;
   openTab: (url: string) => Promise<number | undefined>; // the new tab's id, kept in pendingConnect.tabId
+  /** Stops what the lost connection still has running: the live recording and whatever the document sends with its
+   * token. Without the recording controller (a test of this module alone), a sign-out only forgets the connection. */
+  connectionLost: (loss: ConnectionLoss) => Promise<void>;
 };
 
 const PENDING_MAX_AGE_MS = 5 * 60 * 1000;
 const OUT_OF_DATE =
   "This page is out of date. Close it and choose Connect this browser in OpenBot again.";
+const POLICY_REFUSED =
+  "Your organization's Recorder policy does not allow this OpenBot. Ask your IT team.";
 const CONNECT_WINDOW_MS = 10 * 60 * 1000;
 const CONNECT_LIMIT = 3;
 const KEEP_ALIVE_ALARM = "recorder-session-keepalive";
@@ -52,6 +69,10 @@ const defaultDeps: ConnectionDeps = {
   desktopAvailable,
   readPolicy,
   openTab: async (url) => (await chrome.tabs.create({ url })).id,
+  connectionLost: async (loss) => {
+    if (loss.kind === "signed-out")
+      await forgetConnection(loss.reason, loss.connection.token);
+  },
 };
 
 const withDefaults = (deps?: Partial<ConnectionDeps>): ConnectionDeps => ({
@@ -81,34 +102,39 @@ export function installConnection(deps?: Partial<ConnectionDeps>): void {
     await offerDesktopConnection(resolved);
   });
   chrome.alarms.onAlarm.addListener((alarm) => {
-    if (alarm.name === KEEP_ALIVE_ALARM) void keepAlive();
+    if (alarm.name === KEEP_ALIVE_ALARM) void keepAlive(resolved);
   });
-  void reconcilePolicy(resolved.readPolicy);
-  onPolicyChanged(() => void reconcilePolicy(resolved.readPolicy));
-  void scheduleKeepAlive();
+  void reconcilePolicy(resolved);
+  onPolicyChanged(() => void reconcilePolicy(resolved), resolved.readPolicy);
+  void scheduleKeepAlive(resolved);
 }
 
 /** Alarms can be cleared by a browser restart or an update, so every start makes sure it exists. */
-async function scheduleKeepAlive(): Promise<void> {
+async function scheduleKeepAlive(deps: ConnectionDeps): Promise<void> {
   if (!(await chrome.alarms.get(KEEP_ALIVE_ALARM)))
     await chrome.alarms.create(KEEP_ALIVE_ALARM, {
       periodInMinutes: KEEP_ALIVE_PERIOD_MINUTES,
     });
   const last = await readLocal("lastKeepAliveAt");
   if (last === undefined || Date.now() - last > KEEP_ALIVE_PERIOD_MS)
-    await keepAlive();
+    await keepAlive(deps);
 }
 
 /** Keeps the organization session in use (Decision 2). Only a signed-out answer changes anything: OpenBot being
- * unreachable, or an organization's sign-in server that cannot answer, waits for the next alarm. */
-async function keepAlive(): Promise<void> {
+ * unreachable, or an organization's sign-in server that cannot answer, waits for the next alarm. A signed-out answer
+ * goes to the recording controller, which forgets the connection and stops what it still has running. */
+async function keepAlive(deps: ConnectionDeps): Promise<void> {
   const connection = await currentConnection();
   if (!connection) return;
   try {
     await openbotJson<RecorderMe>(connection, recorderPaths.me);
   } catch (error) {
     if (error instanceof OpenBotError && error.signedOut)
-      await forgetConnection(error.body?.reason ?? "revoked", connection.token);
+      await deps.connectionLost({
+        kind: "signed-out",
+        reason: error.body?.reason ?? "revoked",
+        connection,
+      });
     return;
   }
   await writeLocal("lastKeepAliveAt", Date.now());
@@ -173,20 +199,15 @@ export async function handleConnectionMessage(
       // site it does not show.
       if (pending && message.origin !== pending.origin)
         return { ok: false, error: OUT_OF_DATE };
-      if (message.approve) return approve(pending, message.label);
+      if (message.approve) return approve(pending, message.label, resolved);
       if (pending) await clearPendingConnect(pending);
       return { ok: true };
     }
     case "page.disconnect": {
       const connection = await currentConnection();
       if (connection) {
-        try {
-          await openbotJson(connection, recorderPaths.currentConnection, {
-            method: "DELETE",
-          });
-        } catch {
-          // Best effort: the token is forgotten here either way, and the person can revoke it in OpenBot.
-        }
+        // Best effort: the token is forgotten here either way, and the person can revoke it in OpenBot.
+        await revoke(connection);
         // A reconnect approved while OpenBot was being told is a newer connection, and stays.
         await forgetConnection("disconnected", connection.token);
       }
@@ -204,8 +225,14 @@ export async function handleConnectionMessage(
 async function approve(
   pending: PendingConnect | undefined,
   label: string,
+  deps: ConnectionDeps,
 ): Promise<PageResponse> {
   if (!pending) return { ok: false, error: "There is nothing to connect." };
+  // The policy may have changed since this connect page opened: a pin elsewhere, or a policy gone invalid, refuses it.
+  if (!allowsOpenBot(await deps.readPolicy(), pending.origin)) {
+    await clearPendingConnect(pending);
+    return { ok: false, error: POLICY_REFUSED };
+  }
   let exchanged: ExchangeResponse;
   try {
     exchanged = await openbotJson<ExchangeResponse>(
@@ -229,16 +256,26 @@ async function approve(
           : "OpenBot did not answer. Try again.",
     };
   }
-  await serially(() =>
-    writeLocal("connection", {
-      openbotUrl: pending.origin,
-      token: exchanged.token,
-      connectionId: exchanged.connection.id,
-      user: exchanged.user,
-      via: pending.via,
-      connectedAt: Date.now(),
-    }),
-  );
+  const connection: ConnectionRecord = {
+    openbotUrl: pending.origin,
+    token: exchanged.token,
+    connectionId: exchanged.connection.id,
+    user: exchanged.user,
+    via: pending.via,
+    connectedAt: Date.now(),
+  };
+  // Checked again in the job that stores it: a pin that landed during the exchange keeps it out, and the token OpenBot
+  // just made is revoked there.
+  const stored = await serially(async () => {
+    if (!allowsOpenBot(await deps.readPolicy(), pending.origin)) return false;
+    await writeLocal("connection", connection);
+    return true;
+  });
+  if (!stored) {
+    await clearPendingConnect(pending);
+    await revoke(connection);
+    return { ok: false, error: POLICY_REFUSED };
+  }
   await clearPendingConnect(pending);
   if ((await readLocal("notice"))?.kind === "signed-out")
     await removeLocal("notice");
@@ -381,28 +418,35 @@ function sameOrigin(raw: string, origin: string): boolean {
   return checked.ok && checked.origin === origin;
 }
 
-/** Compares the stored connection with the policy: a policy that pins another origin, or is invalid, forgets the
- * connection and leaves a `policy-moved` notice (its origin empty for an invalid policy). Called at every start and
- * on every managed-storage change. The token check keeps a reconnect that lands meanwhile. */
-async function reconcilePolicy(
-  read: () => Promise<RecorderPolicy> = readPolicy,
-): Promise<void> {
-  const policy = await read();
-  const connection = await currentConnection();
-  if (!connection) return;
-  const moved = policy.openbotUrlInvalid
-    ? ""
-    : policy.openbotUrl !== null &&
-        !sameOrigin(policy.openbotUrl, connection.openbotUrl)
-      ? policy.openbotUrl
-      : null;
-  if (moved === null) return;
-  if (await forgetConnection("disconnected", connection.token))
-    await writeLocal("notice", {
-      kind: "policy-moved",
-      at: Date.now(),
-      origin: moved,
+/** Best effort: OpenBot revokes the token (the person can also revoke it in OpenBot). */
+async function revoke(connection: ConnectionRecord): Promise<void> {
+  try {
+    await openbotJson(connection, recorderPaths.currentConnection, {
+      method: "DELETE",
     });
+  } catch {
+    // Unreachable, or already revoked.
+  }
+}
+
+/** Compares the stored connection with the policy: a policy that pins another origin, or is invalid, forgets the
+ * connection and leaves a `policy-moved` notice (its origin empty for an invalid policy), then stops what the connection
+ * still has running (the live recording, and whatever the document sends with its token; everything recorded is kept
+ * for its person) and revokes the token. Called at every start and on every managed-storage change. The token check
+ * keeps a reconnect that lands meanwhile. */
+async function reconcilePolicy(deps: ConnectionDeps): Promise<void> {
+  const policy = await deps.readPolicy();
+  const connection = await currentConnection();
+  if (!connection || allowsOpenBot(policy, connection.openbotUrl)) return;
+  const moved = policy.openbotUrlInvalid ? "" : (policy.openbotUrl ?? "");
+  if (!(await forgetConnection("disconnected", connection.token))) return;
+  await writeLocal("notice", {
+    kind: "policy-moved",
+    at: Date.now(),
+    origin: moved,
+  });
+  await deps.connectionLost({ kind: "policy", connection });
+  await revoke(connection);
 }
 
 /** A managed browser connects only where its policy points, on the Desktop path too. Desktop's local stack is always
@@ -422,8 +466,7 @@ async function desktopConnect(deps: ConnectionDeps): Promise<boolean> {
   if (!handoff) return false;
   const checked = normaliseOpenBotOrigin(handoff.openbotUrl);
   if (!checked.ok) return false;
-  if (policy.openbotUrl && !sameOrigin(policy.openbotUrl, checked.origin))
-    return false;
+  if (!allowsOpenBot(policy, checked.origin)) return false;
   await closeConnectTab((await readSession("pendingConnect"))?.tabId);
   const pending: PendingConnect = {
     origin: checked.origin,

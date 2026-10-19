@@ -56,6 +56,8 @@ const SIGNED_OUT =
   "This browser was disconnected from OpenBot. Your recording stopped, and everything in it is kept in this browser until you connect again.";
 const ORGANIZATION_SIGNED_OUT =
   "Your organization sign-in ended. Your recording stopped, and everything in it is kept in this browser until you connect again.";
+const POLICY_MOVED =
+  "Your organization moved the Recorder to another OpenBot. Your recording stopped, and everything in it is kept in this browser.";
 
 const event = (name: string, value: unknown): CapturedEvent => ({
   type: "CUSTOM",
@@ -1947,6 +1949,110 @@ test("Disconnect clears a sentence that says everything is kept until you connec
   expect(await page({ type: "page.disconnect" })).toEqual({ ok: true });
   expect(drains()).toEqual([]);
   expect((await state()).error).toBeUndefined();
+});
+
+// ---- A connection lost without a Disconnect ---------------------------------------------------
+
+test("a keep-alive that finds the connection signed out stops the recording at once and halts the document's streams for its token", async () => {
+  const id = await record();
+  const document = doc;
+  const connection = storedConnection();
+  if (!connection) throw new Error("No connection");
+  await handlers.connectionLost({
+    kind: "signed-out",
+    reason: "revoked",
+    connection,
+  });
+  expect(storedConnection()).toBeUndefined();
+  expect(sentToDocument("offscreen.halt", document)).toEqual([
+    { type: "offscreen.halt", token: "obr_one" },
+  ]);
+  expect(sentToDocument("offscreen.stop", document)).toEqual([
+    { type: "offscreen.stop", outcome: "failed", reason: "signed-out" },
+  ]);
+  expect(await state()).toMatchObject({ phase: "idle", error: SIGNED_OUT });
+  expect(network.running.size).toBe(0);
+  expect(drains()).toMatchObject([
+    { recordingId: id, kept: { waitingForReconnect: true } },
+  ]);
+});
+
+test("a policy that moves the Recorder away stops the recording, halts the document's streams and keeps everything for its person", async () => {
+  fake.tabs.set(7, { id: 7, url: "chrome://newtab/" } as chrome.tabs.Tab);
+  const first = await record();
+  await page({ type: "page.stop" });
+  const second = await record();
+  const document = doc;
+  const connection = storedConnection();
+  if (!connection) throw new Error("No connection");
+  // connection.ts has forgotten the connection and left its notice.
+  fake.storage.local.delete("connection");
+  fake.storage.local.set("notice", {
+    kind: "policy-moved",
+    at: now,
+    origin: "https://moved.example.test",
+  });
+  await handlers.connectionLost({ kind: "policy", connection });
+  expect(sentToDocument("offscreen.halt", document)).toEqual([
+    { type: "offscreen.halt", token: "obr_one" },
+  ]);
+  expect(sentToDocument("offscreen.stop", document).at(-1)).toEqual({
+    type: "offscreen.stop",
+    outcome: "failed",
+    reason: "disconnected",
+  });
+  expect(await state()).toMatchObject({ phase: "idle", error: POLICY_MOVED });
+  expect(network.running.size).toBe(0);
+  expect(sentToDocument("offscreen.discard", document)).toEqual([]);
+  expect(drains()).toMatchObject([
+    {
+      recordingId: first,
+      kept: {
+        waitingForReconnect: true,
+        reason: "Your organization moved the Recorder to another OpenBot.",
+      },
+    },
+    { recordingId: second, kept: { waitingForReconnect: true } },
+  ]);
+});
+
+test("Record refuses a connection whose OpenBot the policy no longer allows, and starts nothing", async () => {
+  policy = { ...policy, openbotUrl: "https://moved.example.test" };
+  fake.tabs.set(7, { id: 7, url: DEAL } as chrome.tabs.Tab);
+  const answer = await page({
+    type: "page.record",
+    botId: "bot-1",
+    title: "T",
+    tabId: 7,
+  });
+  expect(answer).toEqual({
+    ok: false,
+    error:
+      "Your organization's Recorder policy does not allow this OpenBot. Ask your IT team.",
+  });
+  expect(sentToDocument("offscreen.start")).toEqual([]);
+  expect(active()).toBeUndefined();
+  expect((await state()).phase).toBe("idle");
+});
+
+test("a policy change hands the running document its new Intelligence addresses, and the stored session too", async () => {
+  await record();
+  policy = { ...policy, allowedIntelligenceUrls: ["wss://gw.example.test"] };
+  fake.storage.setManaged({
+    AllowedIntelligenceUrls: ["wss://gw.example.test"],
+  });
+  await until(
+    () => sentToDocument("offscreen.policy").length === 1,
+    "offscreen.policy",
+  );
+  expect(sentToDocument("offscreen.policy")[0]).toEqual({
+    type: "offscreen.policy",
+    allowedIntelligenceUrls: ["wss://gw.example.test"],
+  });
+  expect(
+    (fake.storage.session.get("stream") as StreamSession)
+      .allowedIntelligenceUrls,
+  ).toEqual(["wss://gw.example.test"]);
 });
 
 // ---- Events, tabs and navigation -------------------------------------------------------------

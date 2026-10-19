@@ -41,12 +41,22 @@ export async function readPolicy(): Promise<RecorderPolicy> {
   return policyFrom(await chrome.storage.managed.get(null));
 }
 
+/** Whether the policy lets this browser connect to (and stay connected to) `origin`: never under an invalid policy,
+ * and only to the pinned OpenBot when one is pinned. */
+export function allowsOpenBot(policy: RecorderPolicy, origin: string): boolean {
+  if (policy.openbotUrlInvalid) return false;
+  if (policy.openbotUrl === null) return true;
+  const checked = normaliseOpenBotOrigin(origin);
+  return checked.ok && checked.origin === policy.openbotUrl;
+}
+
 export function onPolicyChanged(
   listener: (policy: RecorderPolicy) => void,
+  read: () => Promise<RecorderPolicy> = readPolicy,
 ): () => void {
   const onChanged = (_changes: unknown, area: string) => {
     if (area !== "managed") return;
-    void readPolicy().then(listener);
+    void read().then(listener);
   };
   chrome.storage.onChanged.addListener(onChanged);
   return () => chrome.storage.onChanged.removeListener(onChanged);
