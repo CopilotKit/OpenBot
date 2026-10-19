@@ -4,6 +4,8 @@ import {
   beforeAll,
   beforeEach,
   expect,
+  type Mock,
+  spyOn,
   test,
 } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
@@ -13,6 +15,12 @@ import {
   trimEvent,
 } from "@openbot/shared/recorder-masking";
 import { acceptPageNetworkEvent } from "../src/background/network/fallback";
+import {
+  CARD_AND_PIN_CLOCK,
+  CODE_CLOCK,
+  leakedSecrets,
+  recordedText,
+} from "./support/recorded-text";
 
 type Sent = { id: string; message: { type: string; event: Event } };
 type Event = {
@@ -66,12 +74,11 @@ const bigSignIn = JSON.stringify({
   payment: { pin: PIN, card_number: CARD },
   rows: "x".repeat(3 * 1024 * 1024),
 });
-const leaked = (value: unknown) => {
-  const text = JSON.stringify(value);
-  return [PASSWORD, PIN, "4111", SESSION_TOKEN].filter((secret) =>
-    text.includes(secret),
-  );
-};
+/** The test server's address is left out of every leak check: a port such as 54111 is not a leaked card. */
+const serverAddress = () => ({ blank: [`127.0.0.1:${server.port}`] });
+const recorded = (value: unknown) => recordedText(value, serverAddress());
+const leaked = (value: unknown) =>
+  leakedSecrets(value, [PASSWORD, PIN, "4111", SESSION_TOKEN], serverAddress());
 let server: ReturnType<typeof Bun.serve>;
 let sent: Sent[] = [];
 let postMessageCalls = 0;
@@ -79,6 +86,8 @@ let originalPostMessage: typeof window.postMessage;
 let originalFetch: typeof fetch;
 let originalSend: XMLHttpRequest["send"];
 let originalOpen: XMLHttpRequest["open"];
+/** Date.now(), held at a reading that holds the tests' secrets' digits (support/recorded-text.ts says why). */
+let clock: Mock<typeof Date.now>;
 
 beforeAll(() => {
   server = Bun.serve({
@@ -129,6 +138,7 @@ async function loadHook() {
 }
 
 beforeEach(async () => {
+  clock = spyOn(Date, "now").mockReturnValue(CARD_AND_PIN_CLOCK);
   sent = [];
   postMessageCalls = 0;
   originalPostMessage = window.postMessage;
@@ -156,6 +166,7 @@ afterEach(() => {
   delete (globalThis as { chrome?: unknown }).chrome;
   delete globals[hookKey("configure")];
   delete globals[hookKey("stop")];
+  clock.mockRestore();
 });
 
 const url = (path: string) => `http://127.0.0.1:${server.port}${path}`;
@@ -213,6 +224,7 @@ test("a fetch's JSON request body is masked in the page before it is sent anywhe
 });
 
 test("the verification code a sign-in posts is masked in the page, and again by the service worker", async () => {
+  clock.mockReturnValue(CODE_CLOCK);
   configure("extension-id");
   await (
     await fetch(url("/echo"), {
@@ -229,12 +241,12 @@ test("the verification code a sign-in posts is masked in the page, and again by 
     verificationCode: "[redacted]",
     rememberDevice: true,
   });
-  expect(JSON.stringify(sent)).not.toContain("880261");
+  expect(recorded(sent)).not.toContain("880261");
   const accepted = acceptPageNetworkEvent(
     event as unknown as CapturedEvent,
     new Set(),
   );
-  expect(JSON.stringify(accepted)).not.toContain("880261");
+  expect(recorded(accepted)).not.toContain("880261");
 });
 
 const bytesOf = (value: unknown) =>

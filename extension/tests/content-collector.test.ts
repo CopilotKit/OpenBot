@@ -4,6 +4,7 @@ import {
   beforeAll,
   describe,
   expect,
+  spyOn,
   test,
 } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
@@ -16,6 +17,7 @@ import {
   startEventCapture,
 } from "../src/content/collector";
 import { createSensitivityTracker } from "../src/content/masking-context";
+import { CODE_CLOCK, recordedText } from "./support/recorded-text";
 
 beforeAll(() => GlobalRegistrator.register());
 afterAll(() => GlobalRegistrator.unregister());
@@ -300,6 +302,9 @@ describe("startEventCapture coalescing", () => {
   });
 
   test("a 2FA code typed into a real sign-in's code field, with no autocomplete=one-time-code, never leaves in any copy", () => {
+    // The events' timestamps hold the code's digits, which the leak check below must not read as the code.
+    const clock = spyOn(Date, "now").mockReturnValue(CODE_CLOCK);
+    tracked.push(() => clock.mockRestore());
     // The field exactly as the sign-in served it; its framework mirrors what is typed into the value attribute.
     document.body.innerHTML = `<label id="FormControl-label2">Code</label><input id="codeEntry" type="text" placeholder="Enter 6-digit code" data-test-id="two-factor-code-input" aria-labelledby="FormControl-label2"><button id="b">Log in</button>`;
     const { timers, sent } = drive();
@@ -320,7 +325,7 @@ describe("startEventCapture coalescing", () => {
     );
     const typed = sent.filter((event) => event.name === "input");
     expect(typed).toHaveLength(1);
-    expect(JSON.stringify(sent)).not.toContain("880");
+    expect(recordedText(sent)).not.toContain("880");
     const target = (
       typed[0]?.value as { target: Record<string, unknown> } | undefined
     )?.target as { value?: string; attributes: Record<string, string> };

@@ -1,4 +1,11 @@
-import { afterEach, beforeEach, expect, test } from "bun:test";
+import {
+  afterEach,
+  beforeEach,
+  expect,
+  type Mock,
+  spyOn,
+  test,
+} from "bun:test";
 import {
   type CapturedEvent,
   EVENT_BUDGET_BYTES,
@@ -13,6 +20,12 @@ import {
 import type { PageFallback } from "../src/background/network/fallback";
 import { NETWORK_BODY_READ_MAX_BYTES } from "../src/shared/network-body";
 import { type ChromeFake, installChromeFake } from "./support/chrome-fake";
+import {
+  CARD_AND_PIN_CLOCK,
+  CODE_CLOCK,
+  leakedSecrets,
+  recordedText,
+} from "./support/recorded-text";
 
 const EXTENSION_ID = "test";
 const OPENBOT = "https://openbot.example.test";
@@ -49,6 +62,8 @@ let bodies: Record<string, { body: string; base64Encoded: boolean }> = {};
 let postData: Record<string, string> = {};
 let fetches = 0;
 const realFetch = globalThis.fetch;
+/** Date.now(), held at a reading that holds the tests' secrets' digits (support/recorded-text.ts says why). */
+let clock: Mock<typeof Date.now>;
 
 const fallback: PageFallback = {
   start: async (tabIds) => {
@@ -69,10 +84,12 @@ const fallback: PageFallback = {
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const settle = () => sleep(20);
+// performance.now(), not Date.now(): the wall clock is pinned in these tests.
 async function until(check: () => boolean, label: string) {
-  const deadline = Date.now() + 3_000;
+  const deadline = performance.now() + 3_000;
   while (!check()) {
-    if (Date.now() > deadline) throw new Error(`Timed out waiting: ${label}`);
+    if (performance.now() > deadline)
+      throw new Error(`Timed out waiting: ${label}`);
     await sleep(2);
   }
 }
@@ -82,6 +99,7 @@ const commandsTo = (method: string) =>
   fake.debugger.commands.filter((command) => command.method === method);
 
 beforeEach(() => {
+  clock = spyOn(Date, "now").mockReturnValue(CARD_AND_PIN_CLOCK);
   fake = installChromeFake({ extensionId: EXTENSION_ID });
   emitted = [];
   statuses = [];
@@ -121,6 +139,7 @@ afterEach(async () => {
   await capture.stop();
   globalThis.fetch = realFetch;
   fake.uninstall();
+  clock.mockRestore();
 });
 
 type RequestSpec = {
@@ -332,7 +351,7 @@ test("a value typed into a sensitive field is scrubbed from a request body, a UR
     body: '{"echo":"hunter-two"}',
   });
   await until(() => emitted.length === 1, "the event");
-  const text = JSON.stringify(emitted[0]);
+  const text = recordedText(emitted[0]);
   expect(text).not.toContain("4111");
   expect(text).not.toContain("hunter-two");
   expect(text).toContain("[redacted]");
@@ -1054,12 +1073,8 @@ const signInForm = new URLSearchParams({
   card_number: CARD,
   session_token: SESSION_TOKEN,
 }).toString();
-const leaked = (events: CapturedEvent[]) => {
-  const text = JSON.stringify(events);
-  return [PASSWORD, PIN, "4111", SESSION_TOKEN].filter((secret) =>
-    text.includes(secret),
-  );
-};
+const leaked = (events: CapturedEvent[]) =>
+  leakedSecrets(events, [PASSWORD, PIN, "4111", SESSION_TOKEN]);
 
 test("a form post keeps none of its credentials, whether Chrome reports it as a form or as plain text", async () => {
   await capture.start(7, "https://bank.example.test/");
@@ -1138,6 +1153,7 @@ test("a form body over 2 MiB sent as plain text keeps none of its credentials", 
 });
 
 test("the verification code a sign-in posts, and the code an OAuth callback carries, never leave through the debugger", async () => {
+  clock.mockReturnValue(CODE_CLOCK);
   await capture.start(7, "https://app.example.test/login");
   request(7, {
     id: "1",
@@ -1162,7 +1178,7 @@ test("the verification code a sign-in posts, and the code an OAuth callback carr
     body: '{"token_type":"Bearer","expires_in":3600}',
   });
   await until(() => emitted.length === 3, "the events");
-  const text = JSON.stringify(emitted);
+  const text = recordedText(emitted);
   for (const secret of [
     "880261",
     "SplxlOBeZQQYbYS6WxSbIA",
