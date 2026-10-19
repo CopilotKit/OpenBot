@@ -17,7 +17,7 @@ import { createStallGuard } from "../src/channels/stall-guard";
 import { loadConfig } from "../src/config";
 import { mountCopilotRuntime } from "../src/copilot";
 import { createDatabase } from "../src/db/client";
-import { users } from "../src/db/schema/core";
+import { agents, users } from "../src/db/schema/core";
 import { recorderTrajectoryBindings } from "../src/db/schema/recorder";
 import { createLearningSettingsStore } from "../src/learning/settings";
 import { createRecorderExtension } from "../src/recorder/wiring";
@@ -232,6 +232,15 @@ beforeAll(async () => {
     { id: owner, email: `${owner}@example.test`, name: "The Owner" },
     { id: stranger, email: `${stranger}@example.test`, name: "A Stranger" },
   ]);
+  // A binding names a Bot that exists.
+  await database.insert(agents).values(
+    [BOT, STRANGERS_BOT].map((id) => ({
+      id,
+      name: id,
+      type: "built_in" as const,
+      configuration: {},
+    })),
+  );
   tokens[owner] = await connectBrowser(owner, "1".repeat(32));
   tokens[stranger] = await connectBrowser(stranger, "2".repeat(32));
 });
@@ -239,6 +248,7 @@ beforeAll(async () => {
 afterAll(async () => {
   for (const spy of spies) spy.mockRestore();
   guard.stop();
+  await database.delete(agents).where(inArray(agents.id, [BOT, STRANGERS_BOT]));
   await database.delete(users).where(inArray(users.id, [owner, stranger]));
   await database.$client.close();
 });

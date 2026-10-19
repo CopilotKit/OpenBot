@@ -10053,6 +10053,19 @@
         }
       },
       "foreignKeys": {
+        "recorder_trajectory_bindings_bot_id_agents_id_fk": {
+          "name": "recorder_trajectory_bindings_bot_id_agents_id_fk",
+          "tableFrom": "recorder_trajectory_bindings",
+          "tableTo": "agents",
+          "columnsFrom": [
+            "bot_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
         "recorder_trajectory_bindings_user_id_users_id_fk": {
           "name": "recorder_trajectory_bindings_user_id_users_id_fk",
           "tableFrom": "recorder_trajectory_bindings",

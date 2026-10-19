@@ -9,6 +9,7 @@ import type { OpenBotRole } from "../src/auth/roles";
 import {
   createRecorderResolver,
   createRequireRecorder,
+  type OrganizationVerdictCache,
   RECORDER_BEARER,
   type RecorderMode,
   type RecorderRefusalSink,
@@ -61,6 +62,7 @@ function fixture(
   options: {
     connections?: Record<string, Connection>;
     users?: UserRow[];
+    verdicts?: OrganizationVerdictCache;
   } = {},
 ) {
   const connections = new Map(
@@ -84,6 +86,7 @@ function fixture(
     mode,
     user: async (userId) => users.get(userId) ?? null,
     now: () => clock.now,
+    ...(options.verdicts ? { verdicts: options.verdicts } : {}),
   });
   const onRefused: RecorderRefusalSink = (refusal) => {
     refusals.push(refusal);
@@ -379,6 +382,7 @@ describe("single-user mode", () => {
 describe("organization mode", () => {
   function organization(
     answer: (cookie: string) => Promise<AuthenticatedActor | null>,
+    verdicts?: OrganizationVerdictCache,
   ) {
     const asked: string[] = [];
     const unsealed: string[] = [];
@@ -406,6 +410,7 @@ describe("organization mode", () => {
           organizationSession: "sealed-session-two",
         },
       },
+      ...(verdicts ? { verdicts } : {}),
     });
     return { ...built, asked, unsealed };
   }
@@ -558,6 +563,28 @@ describe("organization mode", () => {
     clock.now += 31_000;
     expect((await call(bearer())).status).toBe(200);
     expect(asked).toHaveLength(2);
+  });
+
+  test("a verdict past its 60 s is dropped when the next one is kept, so the cache does not grow", async () => {
+    const verdicts: OrganizationVerdictCache = new Map();
+    const { call, bearer, clock } = organization(signedIn(), verdicts);
+
+    await call(bearer());
+    expect([...verdicts.keys()]).toEqual(["connection-1"]);
+    clock.now += 61_000;
+    await call(bearer(SECOND_TOKEN));
+    expect([...verdicts.keys()]).toEqual(["connection-2"]);
+
+    // A verdict asked for again moves to the end, so the oldest stays first and the expired ones are a prefix.
+    clock.now += 30_000;
+    await call(bearer());
+    expect([...verdicts.keys()]).toEqual(["connection-2", "connection-1"]);
+    clock.now += 31_000;
+    await call(bearer(SECOND_TOKEN));
+    expect([...verdicts.keys()]).toEqual(["connection-1", "connection-2"]);
+    clock.now += 61_000;
+    await call(bearer());
+    expect([...verdicts.keys()]).toEqual(["connection-1"]);
   });
 
   test("a revoked connection is refused at once, whatever the cache holds", async () => {

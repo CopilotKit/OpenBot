@@ -2,7 +2,7 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { eq, inArray } from "drizzle-orm";
 import { createDatabase } from "../src/db/client";
-import { users } from "../src/db/schema/core";
+import { agents, users } from "../src/db/schema/core";
 import {
   recorderConnectCodes,
   recorderConnections,
@@ -14,6 +14,8 @@ const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const prefix = `recorder-${randomUUID()}`;
 const alice = `${prefix}-alice`;
 const bob = `${prefix}-bob`;
+const botOne = `${prefix}-bot-1`;
+const botTwo = `${prefix}-bot-2`;
 let counter = 0;
 const next = () => `${prefix}-${counter++}`;
 
@@ -49,9 +51,18 @@ beforeAll(async () => {
     { id: alice, email: `${alice}@example.test` },
     { id: bob, email: `${bob}@example.test` },
   ]);
+  await database.insert(agents).values(
+    [botOne, botTwo].map((id) => ({
+      id,
+      name: id,
+      type: "built_in" as const,
+      configuration: {},
+    })),
+  );
 });
 
 afterAll(async () => {
+  await database.delete(agents).where(inArray(agents.id, [botOne, botTwo]));
   await database.delete(users).where(inArray(users.id, [alice, bob]));
   await database.$client.close();
 });
@@ -126,24 +137,24 @@ test("a trajectory binds to one person and Bot, by its UUID", async () => {
   const trajectoryId = randomUUID();
   await database
     .insert(recorderTrajectoryBindings)
-    .values({ trajectoryId, userId: alice, botId: "bot-1" });
+    .values({ trajectoryId, userId: alice, botId: botOne });
   await rejects(
     database
       .insert(recorderTrajectoryBindings)
-      .values({ trajectoryId, userId: bob, botId: "bot-2" }),
+      .values({ trajectoryId, userId: bob, botId: botTwo }),
     /recorder_trajectory_bindings_pkey|duplicate key/i,
   );
   await rejects(
     database
       .insert(recorderTrajectoryBindings)
-      .values({ trajectoryId: "not-a-uuid", userId: alice, botId: "bot-1" }),
+      .values({ trajectoryId: "not-a-uuid", userId: alice, botId: botOne }),
     /uuid/i,
   );
   const [row] = await database
     .select()
     .from(recorderTrajectoryBindings)
     .where(eq(recorderTrajectoryBindings.trajectoryId, trajectoryId));
-  expect(row).toMatchObject({ trajectoryId, userId: alice, botId: "bot-1" });
+  expect(row).toMatchObject({ trajectoryId, userId: alice, botId: botOne });
   expect(row?.createdAt).toBeInstanceOf(Date);
 });
 
@@ -154,13 +165,38 @@ test("deleting a person removes their trajectory bindings", async () => {
     .values({ id: dave, email: `${dave}@example.test` });
   await database
     .insert(recorderTrajectoryBindings)
-    .values({ trajectoryId: randomUUID(), userId: dave, botId: "bot-1" });
+    .values({ trajectoryId: randomUUID(), userId: dave, botId: botOne });
   await database.delete(users).where(eq(users.id, dave));
   expect(
     await database
       .select()
       .from(recorderTrajectoryBindings)
       .where(eq(recorderTrajectoryBindings.userId, dave)),
+  ).toEqual([]);
+});
+
+test("a binding names a Bot that exists, and deleting the Bot removes its bindings", async () => {
+  await rejects(
+    database.insert(recorderTrajectoryBindings).values({
+      trajectoryId: randomUUID(),
+      userId: alice,
+      botId: `${prefix}-no-such-bot`,
+    }),
+    /bot_id|foreign key/i,
+  );
+  const gone = `${prefix}-bot-gone`;
+  await database
+    .insert(agents)
+    .values({ id: gone, name: gone, type: "built_in", configuration: {} });
+  await database
+    .insert(recorderTrajectoryBindings)
+    .values({ trajectoryId: randomUUID(), userId: alice, botId: gone });
+  await database.delete(agents).where(eq(agents.id, gone));
+  expect(
+    await database
+      .select()
+      .from(recorderTrajectoryBindings)
+      .where(eq(recorderTrajectoryBindings.botId, gone)),
   ).toEqual([]);
 });
 

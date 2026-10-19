@@ -63,6 +63,11 @@ const RECORDER_BEARER_PREFIX = `Bearer ${RECORDER_TOKEN_PREFIX}`;
 const ORGANIZATION_VERDICT_TTL_MS = 60_000;
 
 type OrganizationVerdict = { role: OpenBotRole } | { refused: "organization" };
+/** The organization's verdicts on this replica, by connection id, oldest first. */
+export type OrganizationVerdictCache = Map<
+  string,
+  { at: number; verdict: OrganizationVerdict }
+>;
 
 /** The first 16 hex digits of the offered recorder token's SHA-256, so a refusal can be correlated without keeping the token. */
 function digestOf(header: string | undefined): string | null {
@@ -90,12 +95,24 @@ export function createRecorderResolver(deps: {
     image: string | null;
   } | null>;
   now?: () => number;
+  /** Test seam: the cache the organization's verdicts are kept in. */
+  verdicts?: OrganizationVerdictCache;
 }): RecorderResolver {
   const now = deps.now ?? Date.now;
-  const organizationVerdicts = new Map<
-    string,
-    { at: number; verdict: OrganizationVerdict }
-  >();
+  const organizationVerdicts: OrganizationVerdictCache =
+    deps.verdicts ?? new Map();
+
+  /** Keeps a fresh verdict and drops the expired ones. A key is deleted before it is set again, so insertion order is
+   * time order and the expired entries are a prefix. */
+  function remember(connectionId: string, verdict: OrganizationVerdict) {
+    const at = now();
+    for (const [key, entry] of organizationVerdicts) {
+      if (at - entry.at < ORGANIZATION_VERDICT_TTL_MS) break;
+      organizationVerdicts.delete(key);
+    }
+    organizationVerdicts.delete(connectionId);
+    organizationVerdicts.set(connectionId, { at, verdict });
+  }
 
   /** Asks the organization whether the connection's sealed session is still signed in, and as whom. */
   async function askOrganization(
@@ -164,7 +181,7 @@ export function createRecorderResolver(deps: {
         if (error instanceof AuthorityUnavailable) return { unavailable: true };
         throw error;
       }
-      organizationVerdicts.set(connectionId, { at: now(), verdict });
+      remember(connectionId, verdict);
     }
     if ("refused" in verdict) return { refused: "organization", userId };
     return { actor: { ...person, role: verdict.role, connectionId } };

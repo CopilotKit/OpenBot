@@ -32,6 +32,7 @@ CREATE TABLE "recorder_trajectory_bindings" (
 ALTER TABLE "recorder_connect_codes" ADD CONSTRAINT "recorder_connect_codes_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "recorder_connections" ADD CONSTRAINT "recorder_connections_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "recorder_trajectory_bindings" ADD CONSTRAINT "recorder_trajectory_bindings_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "recorder_trajectory_bindings" ADD CONSTRAINT "recorder_trajectory_bindings_bot_id_agents_id_fk" FOREIGN KEY ("bot_id") REFERENCES "public"."agents"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "recorder_connect_codes_user_idx" ON "recorder_connect_codes" USING btree ("user_id");--> statement-breakpoint
 CREATE INDEX "recorder_connections_user_idx" ON "recorder_connections" USING btree ("user_id","created_at");--> statement-breakpoint
 CREATE UNIQUE INDEX "recorder_connections_live_install_idx" ON "recorder_connections" USING btree ("user_id","install_id") WHERE "recorder_connections"."revoked_at" IS NULL;--> statement-breakpoint
