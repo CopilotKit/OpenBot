@@ -855,3 +855,49 @@ test("a form body over 2 MiB sent as plain text keeps none of its credentials", 
   expect(value(emitted[0]).request.body.status).toBe("truncated");
   expect(leaked(emitted)).toEqual([]);
 });
+
+test("the verification code a sign-in posts, and the code an OAuth callback carries, never leave through the debugger", async () => {
+  await capture.start(7, "https://app.example.test/login");
+  request(7, {
+    id: "1",
+    url: "https://app.example.test/api/devices/confirm",
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    postData: '{"verificationCode":"880261","rememberDevice":true}',
+    body: '{"code":"NOT_FOUND","message":"No pending sign-in"}',
+  });
+  request(7, {
+    id: "2",
+    url: "https://app.example.test/integrations/slack?code=SplxlOBeZQQYbYS6WxSbIA&state=af0ifjsldkj",
+    body: '{"ok":true}',
+  });
+  request(7, {
+    id: "3",
+    url: "https://id.example.test/oauth/token",
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    postData:
+      "grant_type=authorization_code&code=Q7XK2MPLOK&code_verifier=dBjftJeZ4CVPmB92K27uhbUJU1p1r",
+    body: '{"token_type":"Bearer","expires_in":3600}',
+  });
+  await until(() => emitted.length === 3, "the events");
+  const text = JSON.stringify(emitted);
+  for (const secret of [
+    "880261",
+    "SplxlOBeZQQYbYS6WxSbIA",
+    "af0ifjsldkj",
+    "Q7XK2MPLOK",
+    "dBjftJeZ4CVPmB92K27uhbUJU1p1r",
+  ])
+    expect([secret, text.includes(secret)]).toEqual([secret, false]);
+  const [confirm] = emitted;
+  expect(JSON.parse(value(confirm).request.body.text as string)).toEqual({
+    verificationCode: "[redacted]",
+    rememberDevice: true,
+  });
+  // An ordinary response code on an address that is no sign-in endpoint survives.
+  expect(JSON.parse(value(confirm).response.body.text as string)).toEqual({
+    code: "NOT_FOUND",
+    message: "No pending sign-in",
+  });
+});

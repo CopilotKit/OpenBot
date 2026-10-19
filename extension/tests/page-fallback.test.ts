@@ -270,3 +270,29 @@ test("a page event whose JSON body was cut short is re-masked key by key", () =>
   expect(leaked(result)).toEqual([]);
   expect(JSON.stringify(result)).toContain("alice");
 });
+
+test("a page event is re-masked for one-time codes: a verification code key, a bare code of digits, and a typed code anywhere", async () => {
+  const { sha256HexSync } = await import("@openbot/shared/recorder-masking");
+  const result = acceptPageNetworkEvent(
+    event({
+      method: "POST",
+      url: "https://app.example.test/api/devices/confirm",
+      request: {
+        headers: { "content-type": "application/json" },
+        body: {
+          status: "complete",
+          text: '{"verificationCode":"880261","code":"551023","step":{"answer":"774410"}}',
+        },
+      },
+      response: {
+        headers: { "content-type": "application/json" },
+        body: { status: "complete", text: '{"code":"NOT_FOUND"}' },
+      },
+    }),
+    new Set([sha256HexSync("774410")]),
+  );
+  const text = JSON.stringify(result);
+  for (const code of ["880261", "551023", "774410"])
+    expect([code, text.includes(code)]).toEqual([code, false]);
+  expect(text).toContain("NOT_FOUND");
+});

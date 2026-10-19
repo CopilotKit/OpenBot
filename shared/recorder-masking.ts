@@ -17,7 +17,11 @@ export type CapturedEvent = {
   timestamp: number;
   value: JsonValue;
 };
-type MaskOptions = { digests?: ReadonlySet<string> };
+/** `url` is the address a body was sent to: on a sign-in, verification or token request a bare `code` key is a secret
+ * whatever it holds. */
+type MaskOptions = { digests?: ReadonlySet<string>; url?: string };
+/** MaskOptions as the body maskers read them, with the request's address already judged. */
+type BodyOptions = MaskOptions & { authFlow?: boolean };
 type Obj = { [key: string]: JsonValue };
 
 /** A 3-digit security code is a secret too, so digests of values this short still match. */
@@ -47,6 +51,20 @@ const METADATA =
 const CARD_KEY = /^ (pin|cvv|cvc|csc) $/;
 /** OpenBot's addition: payment-card keys matched on the joined words (plan Task 3, Decision 15). */
 const CARD_WORDS = /cardnumber|ccnumber|cardverification/;
+/** OpenBot's addition: one-time and verification code keys, matched on the joined words (`verificationCode`, `mfa_code`,
+ * `two_factor_code`, `smsCode`, `authCode`, `code_verifier`), never an ordinary code (`zipCode`, `promoCode`, `errorCode`). */
+const ONE_TIME_CODE_WORDS =
+  /(?:verification|verify|verif|otp|totp|hotp|mfa|2fa|twofactor|2factor|twostep|2step|multifactor|sms|auth|authentication|authenticator|authorization|login|signin|logon|security|access|confirmation|onetime|recovery|backup)(?:code|pin|otp)|onetimepass|codeverifier|(?:mfa|2fa|twofactor|otp|totp)token/;
+/** OpenBot's addition: one-time code keys that are the last word or the entire key (`otp`, `totp`, `x-otp`). */
+const ONE_TIME_CODE_LAST = / (?:otp|totp|hotp|otc)s? $/;
+/** A bare `code` key: a one-time code when it holds 4 to 10 digits, or on a sign-in request (`codeHoldsSecret`). */
+const BARE_CODE = /^ codes? $/;
+/** 4 to 10 digits: what a one-time code sent by text, email or an authenticator app holds. */
+const CODE_DIGITS = /^\d{4,10}$/;
+/** A sign-in, verification, token or OAuth address, read from its host and path split into words (`authFlowUrl`); never
+ * "author". */
+const AUTH_URL_WORDS =
+  / (?:auth(?!or)[a-z\d]*|oauth[a-z\d]*|login|logon|log in|signin|sign in|sso|saml|oidc|openid|mfa|2 ?fa|two ?factor|2 ?step|two ?step|otp|totp|verif[a-z]*|tokens?|callback|challenge) /;
 /** Headers whose values are credentials whatever their name looks like (plan Task 3 `CREDENTIAL_HEADERS`). */
 const CREDENTIAL_HEADERS: ReadonlySet<string> = new Set([
   "authorization",
@@ -111,11 +129,9 @@ const JSON_START = /^\s*[[{]/;
 const REDACTED_JSON = JSON.stringify(REDACTED);
 /** Input event target fields that hold what the person typed or chose (plan Task 3 `maskCollectorEvent`). */
 const TARGET_VALUE_FIELDS = ["value", "text"] as const;
-const TARGET_ATTRIBUTE_VALUES = [
-  "value",
-  "aria-valuetext",
-  "data-value",
-] as const;
+/** Attributes that hold a field's value by name (`value`, `aria-valuetext`, `aria-valuenow`, `data-value`,
+ * `data-initial-value`, `ng-reflect-value`); a sensitive field loses each, and any other attribute that echoes the value. */
+const VALUE_ATTRIBUTE = /value/i;
 /** Intelligence rejects a NUL at any depth. */
 const NUL = "\u0000";
 /** Longest `target.value` and `target.text` kept when trimming (plan Task 3 `trimEvent`). */
@@ -123,6 +139,20 @@ const TRIMMED_TARGET_TEXT = 200;
 
 const isObject = (value: unknown): value is Obj =>
   typeof value === "object" && value !== null && !Array.isArray(value);
+
+/** An attribute that repeats one of `typed` (a sensitive field's value): contains it, spaced or not, or for a value shorter
+ * than MIN_DIGEST_LENGTH is it. */
+const echoes = (attribute: unknown, typed: readonly string[]): boolean => {
+  if (typeof attribute !== "string" || attribute === REDACTED) return false;
+  return typed.some((value) => {
+    const trimmed = value.trim();
+    const normalised = normaliseSecret(trimmed);
+    return normalised.length >= MIN_DIGEST_LENGTH
+      ? attribute.includes(trimmed) ||
+          normaliseSecret(attribute).includes(normalised)
+      : attribute.trim() === trimmed;
+  });
+};
 
 const decodeQuietly = (text: string): string => {
   try {
@@ -139,8 +169,9 @@ export function normaliseSecret(value: string): string {
     : trimmed;
 }
 
-export function isCredentialKey(key: string): boolean {
-  const words = ` ${key
+/** A key's lowercase words, one space apart and one space at each end, each escape decoded on its own (collector rule). */
+const keyWords = (key: string): string =>
+  ` ${key
     .replace(/%([\da-f]{2})/gi, (_, hex: string) =>
       String.fromCharCode(parseInt(hex, 16)),
     )
@@ -149,13 +180,64 @@ export function isCredentialKey(key: string): boolean {
     .split(/[^a-z\d]+/)
     .filter(Boolean)
     .join(" ")} `;
+
+export function isCredentialKey(key: string): boolean {
+  const words = keyWords(key);
   if (METADATA.test(words)) return false;
+  const joined = words.replace(/ /g, "");
   return (
-    CREDENTIAL.test(words.replace(/ /g, "")) ||
+    CREDENTIAL.test(joined) ||
     CREDENTIAL_WORD.test(words) ||
     CARD_KEY.test(words) ||
-    CARD_WORDS.test(words.replace(/ /g, ""))
+    CARD_WORDS.test(joined) ||
+    ONE_TIME_CODE_WORDS.test(joined) ||
+    ONE_TIME_CODE_LAST.test(words)
   );
+}
+
+const isBareCodeKey = (key: string): boolean => BARE_CODE.test(keyWords(key));
+const isStateKey = (key: string): boolean => keyWords(key) === " state ";
+
+/** What a bare `code` key holds is a one-time code: 4 to 10 digits (spaces and dashes aside, or a list of them), or anything
+ * at all on a sign-in, verification or token request, so an ordinary `"code":"NOT_FOUND"` survives elsewhere. */
+const codeHoldsSecret = (
+  value: JsonValue | undefined,
+  authFlow: boolean | undefined,
+): boolean => {
+  if (authFlow) return true;
+  if (typeof value === "string")
+    return CODE_DIGITS.test(normaliseSecret(value));
+  if (typeof value === "number") return CODE_DIGITS.test(String(value));
+  return (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.every((item) => codeHoldsSecret(item, false))
+  );
+};
+
+/** Text split into lowercase words, one space apart and one space at each end (`codeEntry` and `code-entry` are both
+ * " code entry ", `6DigitCode` is " 6 digit code ", `2FACode` is " 2fa code "). */
+const fieldWords = (text: string): string =>
+  ` ${text
+    .replace(/([a-z])(?=[A-Z])/g, "$1 ")
+    .replace(/(\d)(?=[A-Z][a-z])/g, "$1 ")
+    .replace(/([A-Z]+)(?=[A-Z][a-z])/g, "$1 ")
+    .toLowerCase()
+    .split(/[^a-z\d]+/)
+    .filter(Boolean)
+    .join(" ")} `;
+
+/** True for a sign-in, verification, token or OAuth address, read from its host and path. */
+export function authFlowUrl(url: string | undefined): boolean {
+  if (!url) return false;
+  let where: string;
+  try {
+    const parsed = new URL(url);
+    where = `${parsed.hostname} ${parsed.pathname}`;
+  } catch {
+    where = url.replace(/[?#].*$/, "");
+  }
+  return AUTH_URL_WORDS.test(fieldWords(decodeQuietly(where)));
 }
 
 function isCredentialHeader(name: string): boolean {
@@ -491,7 +573,13 @@ const scrubSegment = (segment: string, options?: MaskOptions): string => {
   return scrubbed.split(REDACTED).map(encodeURIComponent).join(REDACTED);
 };
 
-const scrubQueryPair = (pair: string, options?: MaskOptions): string => {
+/** One `key=value` pair of a query or form body. `oauth` is set for the query of an OAuth callback or sign-in address, whose
+ * `state` is a secret too. */
+const scrubQueryPair = (
+  pair: string,
+  options?: BodyOptions,
+  oauth = false,
+): string => {
   const at = pair.indexOf("=");
   if (at === -1) {
     const decoded = decodeQuietly(pair);
@@ -501,14 +589,25 @@ const scrubQueryPair = (pair: string, options?: MaskOptions): string => {
       : REDACTED;
   }
   const key = pair.slice(0, at);
+  const name = decodeQuietly(key);
   const value = decodeQuietly(pair.slice(at + 1).replace(/\+/g, " "));
   const redact =
-    isCredentialKey(decodeQuietly(key)) ||
+    isCredentialKey(name) ||
+    (isBareCodeKey(name) &&
+      codeHoldsSecret(value, options?.authFlow || oauth)) ||
+    (oauth && isStateKey(name)) ||
     scrubText(value, options) !== value ||
     matchesDigest(value, options);
   return redact ? `${key}=${REDACTED}` : pair;
 };
 
+const pairKey = (pair: string): string => {
+  const at = pair.indexOf("=");
+  return decodeQuietly(at === -1 ? pair : pair.slice(0, at));
+};
+
+/** A URL's path segments and query pairs are masked one by one. On a sign-in, verification, token or OAuth address, or in a
+ * query shaped like an OAuth redirect (a `code` beside a `state`), `code` and `state` are secrets whatever they hold. */
 export function scrubUrl(url: string, options?: MaskOptions): string {
   let parsed: URL;
   try {
@@ -522,16 +621,18 @@ export function scrubUrl(url: string, options?: MaskOptions): string {
     .map((segment) => scrubSegment(segment, options))
     .join("/");
   const query = parsed.search.slice(1);
+  const pairs = query ? query.split("&") : [];
+  const oauth =
+    authFlowUrl(url) ||
+    (pairs.some((pair) => isBareCodeKey(pairKey(pair))) &&
+      pairs.some((pair) => isStateKey(pairKey(pair))));
   const scrubbedQuery = query
-    ? `?${query
-        .split("&")
-        .map((pair) => scrubQueryPair(pair, options))
-        .join("&")}`
+    ? `?${pairs.map((pair) => scrubQueryPair(pair, options, oauth)).join("&")}`
     : "";
   return `${parsed.protocol}//${parsed.host}${path}${scrubbedQuery}`;
 }
 
-const maskJson = (value: JsonValue, options?: MaskOptions): JsonValue => {
+const maskJson = (value: JsonValue, options?: BodyOptions): JsonValue => {
   if (typeof value === "string")
     return matchesDigest(value, options) ? REDACTED : scrubText(value, options);
   if (typeof value === "number") {
@@ -551,7 +652,11 @@ const maskJson = (value: JsonValue, options?: MaskOptions): JsonValue => {
   if (isObject(value)) {
     const out: Obj = {};
     for (const [key, item] of Object.entries(value))
-      out[key] = isCredentialKey(key) ? REDACTED : maskJson(item, options);
+      out[key] =
+        isCredentialKey(key) ||
+        (isBareCodeKey(key) && codeHoldsSecret(item, options?.authFlow))
+          ? REDACTED
+          : maskJson(item, options);
     return out;
   }
   return value;
@@ -559,7 +664,7 @@ const maskJson = (value: JsonValue, options?: MaskOptions): JsonValue => {
 
 /** One pair of a form body, as a query pair is masked; a key that is itself a secret (a long token posted bare, base64
  * padding and all) takes the whole pair. */
-const maskFormPair = (pair: string, options?: MaskOptions): string => {
+const maskFormPair = (pair: string, options?: BodyOptions): string => {
   const at = pair.indexOf("=");
   if (at > 0) {
     const key = decodeQuietly(pair.slice(0, at).replace(/\+/g, " "));
@@ -569,7 +674,7 @@ const maskFormPair = (pair: string, options?: MaskOptions): string => {
   return scrubQueryPair(pair, options);
 };
 
-const maskForm = (text: string, options?: MaskOptions): string =>
+const maskForm = (text: string, options?: BodyOptions): string =>
   text
     .split("&")
     .map((pair) => maskFormPair(pair, options))
@@ -630,10 +735,20 @@ const jsonStringValue = (token: string, closed: boolean): string => {
   }
 };
 
+/** The string or number a JSON value starting at `start` holds, read as far as the text goes; undefined for anything else. */
+const jsonLiteralAt = (text: string, start: number): JsonValue | undefined => {
+  const token = text.slice(start, valueEnd(text, start));
+  if (token.charCodeAt(0) === 0x22)
+    return jsonStringValue(token, closingQuote(text, start) !== -1);
+  const number = Number(token);
+  return /^-?\d/.test(token) && Number.isFinite(number) ? number : undefined;
+};
+
 /** JSON that does not parse, above all a body cut at NETWORK_BODY_READ_MAX_BYTES before it was masked. It is read token by
- * token from its start: the value of every credential-named key is redacted (a whole object or array too, up to its end or
- * the end of the text), a string that matches a digest is redacted whole, and the result is scrubbed as text. Linear. */
-const maskJsonText = (text: string, options?: MaskOptions): string => {
+ * token from its start: the value of every credential-named key, and of a bare `code` key that holds a one-time code, is
+ * redacted (a whole object or array too, up to its end or the end of the text), a string that matches a digest is redacted
+ * whole, and the result is scrubbed as text. Linear. */
+const maskJsonText = (text: string, options?: BodyOptions): string => {
   const hasDigests = (options?.digests?.size ?? 0) > 0;
   const out: string[] = [];
   let copied = 0;
@@ -655,9 +770,12 @@ const maskJsonText = (text: string, options?: MaskOptions): string => {
       let value = next + 1;
       while (value < text.length && isJsonSpace(text.charCodeAt(value)))
         value++;
+      const key = jsonStringValue(text.slice(i, end), true);
       if (
         value < text.length &&
-        isCredentialKey(jsonStringValue(text.slice(i, end), true))
+        (isCredentialKey(key) ||
+          (isBareCodeKey(key) &&
+            codeHoldsSecret(jsonLiteralAt(text, value), options?.authFlow)))
       ) {
         const after = valueEnd(text, value);
         redact(value, after);
@@ -677,11 +795,22 @@ const maskJsonText = (text: string, options?: MaskOptions): string => {
 };
 
 /** A body is masked by its shape first and its declared type second: JSON whole; JSON that no longer parses (a body cut
- * short) key by key; a form body pair by pair, declared or not; anything else as text. */
+ * short) key by key; a form body pair by pair, declared or not; anything else as text. `options.url` is where it was sent. */
 export function maskBody(
   text: string,
   contentType: string | undefined,
   options?: MaskOptions,
+): string {
+  return maskBodyText(text, contentType, {
+    ...options,
+    authFlow: authFlowUrl(options?.url),
+  });
+}
+
+function maskBodyText(
+  text: string,
+  contentType: string | undefined,
+  options: BodyOptions,
 ): string {
   try {
     let parsed: JsonValue | undefined;
@@ -706,11 +835,112 @@ export function maskBody(
   }
 }
 
-export function isSensitiveTarget(target: {
-  attributes?: Record<string, string>;
-  label?: string;
-  text?: string;
-}): boolean {
+/** A field whose name, label, placeholder, test id or class says it takes a one-time code: OTP, 2FA, two-factor, MFA,
+ * verification, passcode, security, auth, SMS, login or confirmation code, a code from an authenticator. */
+const ONE_TIME_CODE_FIELD =
+  / (?:otp|otc|totp|hotp|one ?time|2 ?fa|2 ?step|two ?step|2 ?factor|two ?factor|multi ?factor|mfa|2sv|pass ?codes?|verif[a-z]*|security ?codes?|auth ?codes?|authentication ?codes?|authenticator|authorization ?codes?|access ?codes?|sms ?codes?|log ?in ?codes?|sign ?in ?codes?|confirmation ?codes?|recovery ?codes?|backup ?codes?) /;
+/** Codes that are not secrets: a "zip code", "promo code" or "country code" is no one-time code, whatever else it says. */
+const ORDINARY_CODE =
+  / (?:zip|postal|post|promo|promotion|promotional|coupon|discount|voucher|gift|referral|invite|invitation|country|area|dial|dialing|dialling|calling|region|language|lang|locale|currency|product|item|sku|article|order|tracking|reference|source|embed|html|qr|bar|error|status|response|reason|tax|vat|tariff|hs|sic|naics|icd|cpt|cost|gl|project|course|class|department|dept|store|branch|airport|iata|station|color|colour|hex|swift|bic|sort|bank) codes?(?= )/g;
+/** "code" as a word, once the ordinary codes are taken out. */
+const CODE_WORD = / codes? /;
+/** "6-digit", "six digit", "8 characters": the length a one-time code field asks for. */
+const DIGIT_COUNT =
+  / (?:\d+|four|five|six|seven|eight) ?(?:digit|character|char)s? /;
+/** Short numbers that are not secrets, which veto a field's numeric shape: a postcode, a year, a quantity, a phone extension.
+ * A phone number is not among them: "the code we texted to your phone" names a one-time code. */
+const ORDINARY_NUMBER =
+  / (?:zip|zipcode|postal|postcode|post code|year|years|yyyy|yy|month|mm|day|dd|date|dob|birth[a-z]*|bday[a-z]*|age|qty|quantity|amount|price|cost|total|count|tip|percent[a-z]*|weight|height|width|length|size|page|sku|product|item|order|tracking|house|street|address[a-z]*|apt|suite|building|floor|unit|extension|ext|country|area|dial[a-z]*|promo[a-z]*|coupon|discount|voucher|gift|referral|invite|currency|number of) /;
+/** A `pattern` that admits digits only (`[0-9]*`, `\d{6}`, `[0-9 ]*`, `^[0-9]{4,8}$`); group 1 and 2 are its length bounds. */
+const DIGITS_PATTERN =
+  /^\^?(?:\\d|\[(?:0-9|\\d) ?\])(?:[*+]|\{(\d+)(?:,(\d*))?\})\$?$/;
+/** The shortest and longest one-time code a numeric field's length says it takes. */
+const CODE_FIELD_MIN_LENGTH = 4;
+const CODE_FIELD_MAX_LENGTH = 8;
+/** Inputs a person types a code into; a button's `value` is its label, never a secret. */
+const TEXT_INPUT_TYPES: ReadonlySet<string> = new Set([
+  "",
+  "text",
+  "tel",
+  "number",
+  "password",
+  "search",
+]);
+/** Attributes that name a field without being read by SENSITIVE_FIELD: test ids and the class name, read for one-time codes
+ * only (a "token" class names a tag picker as often as a secret). */
+const FIELD_HINT_ATTRIBUTE =
+  /^(?:class|data-(?:test-?id|test|testing-?id|qa|cy|e2e|automation-?id|tid|hook))$/i;
+
+/** Inputmode numeric, type tel or a digits-only pattern, 4 to 8 long by its maxlength or its pattern. */
+const hasCodeShape = (attributes: Record<string, string>): boolean => {
+  const pattern = DIGITS_PATTERN.exec((attributes.pattern ?? "").trim());
+  const numeric =
+    attributes.inputmode?.toLowerCase() === "numeric" ||
+    attributes.type?.toLowerCase() === "tel" ||
+    pattern !== null;
+  if (!numeric) return false;
+  const declared = Number.parseInt(attributes.maxlength ?? "", 10);
+  const length = Number.isFinite(declared)
+    ? declared
+    : Number.parseInt(pattern?.[2] || pattern?.[1] || "", 10);
+  return length >= CODE_FIELD_MIN_LENGTH && length <= CODE_FIELD_MAX_LENGTH;
+};
+
+/** A field that takes a one-time code, though it lacks autocomplete=one-time-code: its words name one; or it says "code"
+ * (no zip, promo or country code) and asks for a number of digits, has a code's shape or sits on a sign-in page; or it has
+ * a code's shape (a short numeric input) and names no ordinary number. Text inputs, text areas and editable regions only. */
+const isOneTimeCodeField = (
+  target: { attributes?: Record<string, string>; label?: string; tag?: string },
+  url: string | undefined,
+): boolean => {
+  const attributes = target.attributes ?? {};
+  const tag = target.tag?.toLowerCase();
+  const editable =
+    tag === "textarea" ||
+    (attributes.contenteditable !== undefined &&
+      attributes.contenteditable !== "false");
+  const input =
+    (tag === undefined || tag === "input") &&
+    TEXT_INPUT_TYPES.has((attributes.type ?? "").toLowerCase());
+  if (!input && !editable) return false;
+  const words = fieldWords(
+    [
+      target.label,
+      attributes["aria-label"],
+      attributes.placeholder,
+      attributes.title,
+      attributes.name,
+      attributes.id,
+      attributes.autocomplete,
+      ...Object.entries(attributes)
+        .filter(([name]) => FIELD_HINT_ATTRIBUTE.test(name))
+        .map(([, value]) => value),
+    ]
+      .filter((part): part is string => typeof part === "string")
+      .join(" ")
+      .slice(0, 2000),
+  );
+  if (ONE_TIME_CODE_FIELD.test(words)) return true;
+  if (!input) return false;
+  const shape = hasCodeShape(attributes);
+  if (
+    CODE_WORD.test(words.replace(ORDINARY_CODE, "")) &&
+    (DIGIT_COUNT.test(words) || shape || authFlowUrl(url))
+  )
+    return true;
+  return shape && !ORDINARY_NUMBER.test(words);
+};
+
+/** A field whose value is a secret: a password, a card, a security or one-time code. `context.url` is the page it is on. */
+export function isSensitiveTarget(
+  target: {
+    attributes?: Record<string, string>;
+    label?: string;
+    text?: string;
+    tag?: string;
+  },
+  context?: { url?: string },
+): boolean {
   const attributes = target.attributes ?? {};
   if (attributes.type === "password") return true;
   const words = [
@@ -724,7 +954,9 @@ export function isSensitiveTarget(target: {
   ]
     .filter((part): part is string => typeof part === "string")
     .join(" ");
-  return SENSITIVE_FIELD.test(words);
+  return (
+    SENSITIVE_FIELD.test(words) || isOneTimeCodeField(target, context?.url)
+  );
 }
 
 export function sanitiseForIntelligence(value: JsonValue): JsonValue {
@@ -782,12 +1014,23 @@ export function maskCollectorEvent(
       ? (target.attributes as Record<string, string>)
       : undefined;
     const label = typeof target.label === "string" ? target.label : undefined;
-    if (context.sensitive || isSensitiveTarget({ attributes, label })) {
+    const tag = typeof target.tag === "string" ? target.tag : undefined;
+    const url = typeof value.url === "string" ? value.url : undefined;
+    if (
+      context.sensitive ||
+      isSensitiveTarget({ attributes, label, tag }, { url })
+    ) {
+      // Every copy of the value goes: the live value and text, the value attributes, and any attribute that echoes it.
+      const typed = TARGET_VALUE_FIELDS.map((field) => target[field]).filter(
+        (item): item is string =>
+          typeof item === "string" && item.trim() !== "" && item !== REDACTED,
+      );
       for (const field of TARGET_VALUE_FIELDS)
         if (field in target) target[field] = REDACTED;
       if (attributes)
-        for (const field of TARGET_ATTRIBUTE_VALUES)
-          if (field in attributes) attributes[field] = REDACTED;
+        for (const [name, item] of Object.entries(attributes))
+          if (VALUE_ATTRIBUTE.test(name) || echoes(item, typed))
+            attributes[name] = REDACTED;
       delete target.selectedValues;
     }
     if (Array.isArray(target.files)) {
@@ -813,7 +1056,7 @@ const headerValue = (
 
 const maskExchange = (
   part: JsonValue | undefined,
-  options?: MaskOptions,
+  options: BodyOptions,
 ): JsonValue | undefined => {
   if (!isObject(part)) return part;
   const out: Obj = { ...part };
@@ -823,7 +1066,7 @@ const maskExchange = (
   if (isObject(out.body) && typeof out.body.text === "string") {
     out.body = {
       ...out.body,
-      text: maskBody(
+      text: maskBodyText(
         out.body.text,
         headerValue(part.headers, "content-type"),
         options,
@@ -842,13 +1085,22 @@ export function maskNetworkEvent(
   ) as unknown as CapturedEvent;
   if (!isObject(clone.value)) return clone;
   const value: Obj = { ...clone.value };
+  // Both bodies of a sign-in, verification or token call are read as such, by the address asked or the one answering.
+  const exchange: BodyOptions = {
+    ...options,
+    authFlow:
+      (typeof value.url === "string" && authFlowUrl(value.url)) ||
+      (isObject(value.response) &&
+        typeof value.response.url === "string" &&
+        authFlowUrl(value.response.url)),
+  };
   if (typeof value.url === "string") value.url = scrubUrl(value.url, options);
   if (typeof value.route === "string")
     value.route = scrubText(value.route, options);
   if (value.request !== undefined)
-    value.request = maskExchange(value.request, options) ?? null;
+    value.request = maskExchange(value.request, exchange) ?? null;
   if (value.response !== undefined)
-    value.response = maskExchange(value.response, options) ?? null;
+    value.response = maskExchange(value.response, exchange) ?? null;
   return { ...clone, value };
 }
 

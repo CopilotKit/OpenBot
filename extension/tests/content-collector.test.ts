@@ -295,6 +295,36 @@ describe("startEventCapture coalescing", () => {
     const { sent } = drive();
     expect(sent.map((event) => event.name)).toEqual(["page"]);
   });
+
+  test("a 2FA code typed into a real sign-in's code field, with no autocomplete=one-time-code, never leaves in any copy", () => {
+    // The field exactly as the sign-in served it; its framework mirrors what is typed into the value attribute.
+    document.body.innerHTML = `<label id="FormControl-label2">Code</label><input id="codeEntry" type="text" placeholder="Enter 6-digit code" data-test-id="two-factor-code-input" aria-labelledby="FormControl-label2"><button id="b">Log in</button>`;
+    const { timers, sent } = drive();
+    const field = document.getElementById("codeEntry") as HTMLInputElement;
+    field.dispatchEvent(
+      trustedEvent(new MouseEvent("click", { bubbles: true, composed: true })),
+    );
+    for (const typed of ["8", "88", "880", "8802", "88026", "880261"]) {
+      field.value = typed;
+      field.setAttribute("value", typed);
+      field.dispatchEvent(
+        trustedEvent(new Event("input", { bubbles: true, composed: true })),
+      );
+    }
+    timers.advance(750);
+    field.dispatchEvent(
+      trustedEvent(new MouseEvent("click", { bubbles: true, composed: true })),
+    );
+    const typed = sent.filter((event) => event.name === "input");
+    expect(typed).toHaveLength(1);
+    expect(JSON.stringify(sent)).not.toContain("880");
+    const target = (
+      typed[0]?.value as { target: Record<string, unknown> } | undefined
+    )?.target as { value?: string; attributes: Record<string, string> };
+    expect(target.value).toBe("[redacted]");
+    expect(target.attributes.value).toBe("[redacted]");
+    expect(target.attributes["data-test-id"]).toBe("two-factor-code-input");
+  });
 });
 
 describe("startEventCapture drop reports", () => {

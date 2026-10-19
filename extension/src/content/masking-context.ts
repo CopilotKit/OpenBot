@@ -1,5 +1,6 @@
 import { describeDemonstrationTarget } from "@openbot/shared/demonstration-rules";
 import {
+  isSensitiveTarget,
   MIN_DIGEST_LENGTH,
   normaliseSecret,
   sha256HexSync,
@@ -32,6 +33,39 @@ const describedByPointerdown = (target: EventTarget | null): boolean =>
   target.localName === "html" ||
   !target.isConnected;
 
+/** The longest label text read for a field: an aria-labelledby can point at a whole region. */
+const LABEL_TEXT_LIMIT = 1000;
+
+/** The text of the field's own labels and of what its aria-labelledby names: a label that is not a <label for> (a span
+ * named by aria-labelledby) still names the field. */
+const labelText = (field: Element): string => {
+  const parts: string[] = [];
+  if (
+    field instanceof HTMLInputElement ||
+    field instanceof HTMLTextAreaElement ||
+    field instanceof HTMLSelectElement
+  )
+    for (const label of Array.from(field.labels ?? []))
+      parts.push(label.textContent ?? "");
+  const root = field.getRootNode() as Partial<NonElementParentNode>;
+  for (const id of (field.getAttribute("aria-labelledby") ?? "")
+    .split(/\s+/)
+    .filter(Boolean)) {
+    const named = root.getElementById?.(id) ?? document.getElementById(id);
+    if (named) parts.push(named.textContent ?? "");
+  }
+  return parts.join(" ").slice(0, LABEL_TEXT_LIMIT);
+};
+
+/** The field as the collector describes it (its tag and every attribute), with its label text: what isSensitiveTarget reads. */
+const describeField = (field: Element) => ({
+  tag: field.localName,
+  attributes: Object.fromEntries(
+    Array.from(field.attributes, ({ name, value }) => [name, value]),
+  ),
+  label: labelText(field),
+});
+
 const fieldValue = (field: Element): string =>
   field instanceof HTMLInputElement ||
   field instanceof HTMLTextAreaElement ||
@@ -52,7 +86,10 @@ export function createSensitivityTracker(options?: {
   const classify = (field: Element): boolean => {
     const sensitive =
       (field instanceof HTMLInputElement && field.type === "password") ||
-      describeDemonstrationTarget({ point: null, element: field }).sensitive;
+      describeDemonstrationTarget({ point: null, element: field }).sensitive ||
+      // The masking's own rule, with the label text: a one-time code field without autocomplete=one-time-code, by its id,
+      // placeholder, aria-labelledby text, test id or shape, so its value is hashed and masked wherever it reappears.
+      isSensitiveTarget(describeField(field), { url: location.href });
     // A field that was ever sensitive (a show-password toggle flips its type) stays sensitive.
     const known = cache.get(field) === true || sensitive;
     cache.set(field, known);

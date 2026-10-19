@@ -212,6 +212,31 @@ test("a fetch's JSON request body is masked in the page before it is sent anywhe
   expect(JSON.stringify(sent)).not.toContain("secretpw1");
 });
 
+test("the verification code a sign-in posts is masked in the page, and again by the service worker", async () => {
+  configure("extension-id");
+  await (
+    await fetch(url("/echo"), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        verificationCode: "880261",
+        rememberDevice: true,
+      }),
+    })
+  ).text();
+  const event = await nextEvent();
+  expect(JSON.parse(event.value.request.body.text as string)).toEqual({
+    verificationCode: "[redacted]",
+    rememberDevice: true,
+  });
+  expect(JSON.stringify(sent)).not.toContain("880261");
+  const accepted = acceptPageNetworkEvent(
+    event as unknown as CapturedEvent,
+    new Set(),
+  );
+  expect(JSON.stringify(accepted)).not.toContain("880261");
+});
+
 const bytesOf = (value: unknown) =>
   new TextEncoder().encode(JSON.stringify(value)).length;
 

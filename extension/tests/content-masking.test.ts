@@ -7,7 +7,10 @@ import {
   test,
 } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { sha256HexSync } from "@openbot/shared/recorder-masking";
+import {
+  maskNetworkEvent,
+  sha256HexSync,
+} from "@openbot/shared/recorder-masking";
 import { collectorBeforeSend } from "../src/content/collector";
 import { createSensitivityTracker } from "../src/content/masking-context";
 
@@ -21,6 +24,12 @@ afterEach(() => {
   cleanups = [];
   document.body.innerHTML = "";
 });
+
+/** happy-dom's own way to move the page to another address, as a navigation would. */
+const setUrl = (url: string) =>
+  (
+    window as unknown as { happyDOM: { setURL(url: string): void } }
+  ).happyDOM.setURL(url);
 
 function track() {
   const tracker = createSensitivityTracker(trusted);
@@ -324,6 +333,115 @@ describe("sensitivity tracker", () => {
       if (original) Object.defineProperty(globalThis, "crypto", original);
     }
   });
+
+  test("a real sign-in's 2FA code field, without autocomplete=one-time-code, is sensitive and its code hashed", () => {
+    document.body.innerHTML = `<label id="FormControl-label2">Code</label><input id="codeEntry" type="text" placeholder="Enter 6-digit code" data-test-id="two-factor-code-input" aria-labelledby="FormControl-label2">`;
+    const tracker = track();
+    const field = document.getElementById("codeEntry") as HTMLInputElement;
+    focus(field);
+    expect(tracker.sensitiveForEvent("input")).toBe(true);
+    type(field, "880261");
+    expect([...tracker.digests()]).toContain(sha256HexSync("880261"));
+  });
+
+  test("the code typed there is masked from any body afterwards, whatever key holds it", () => {
+    document.body.innerHTML = `<input id="codeEntry" placeholder="Enter 6-digit code" data-test-id="two-factor-code-input">`;
+    const tracker = track();
+    const field = document.getElementById("codeEntry") as HTMLInputElement;
+    focus(field);
+    type(field, "880261");
+    const masked = maskNetworkEvent(
+      {
+        type: "CUSTOM",
+        name: "network",
+        timestamp: 1,
+        value: {
+          url: "https://crm.example.test/api/session",
+          request: {
+            headers: { "content-type": "application/json" },
+            body: {
+              text: '{"challenge":{"answer":"880261"},"n":880261}',
+              status: "captured",
+            },
+          },
+          response: {
+            headers: { "content-type": "text/plain" },
+            body: { text: "accepted 880261 for ana", status: "captured" },
+          },
+        },
+      },
+      { digests: tracker.digests() },
+    );
+    expect(JSON.stringify(masked)).not.toContain("880261");
+  });
+
+  test.each([
+    [
+      "an aria-labelledby label",
+      `<span id="l">Verification code</span><input id="f" aria-labelledby="l">`,
+    ],
+    [
+      "a short numeric input",
+      `<label for="f">Enter it here</label><input id="f" inputmode="numeric" maxlength="6">`,
+    ],
+    ["a two-factor test id", `<input id="f" data-testid="2fa-input">`],
+    ["an OTP class", `<input id="f" class="form-control otp-input">`],
+  ])("a one-time code field known by %s is sensitive", (_, markup) => {
+    document.body.innerHTML = markup;
+    const tracker = track();
+    const field = document.getElementById("f") as HTMLInputElement;
+    focus(field);
+    expect(tracker.sensitiveForEvent("input")).toBe(true);
+  });
+
+  test("a bare code field is sensitive on a sign-in page and kept elsewhere", () => {
+    const original = window.location.href;
+    try {
+      document.body.innerHTML = `<input id="f" name="code">`;
+      const tracker = track();
+      const field = document.getElementById("f") as HTMLInputElement;
+      setUrl("https://shop.example.test/cart");
+      focus(field);
+      expect(tracker.sensitiveForEvent("input")).toBe(false);
+      document.body.innerHTML = `<input id="g" name="code">`;
+      setUrl("https://app.example.test/login/confirm-to-login");
+      focus(document.getElementById("g") as HTMLInputElement);
+      expect(tracker.sensitiveForEvent("input")).toBe(true);
+    } finally {
+      setUrl(original);
+    }
+  });
+
+  test.each([
+    [
+      "zip code",
+      `<label for="f">ZIP code</label><input id="f" name="zip" inputmode="numeric" maxlength="5">`,
+    ],
+    [
+      "postal code",
+      `<label for="f">Postal code</label><input id="f" autocomplete="postal-code" maxlength="8">`,
+    ],
+    [
+      "promo code",
+      `<label for="f">Promo code</label><input id="f" name="promoCode">`,
+    ],
+    ["coupon code", `<input id="f" placeholder="Coupon code" maxlength="8">`],
+    [
+      "country code",
+      `<label for="f">Country code</label><input id="f" type="tel" maxlength="4">`,
+    ],
+  ])(
+    "a %s field is not sensitive and nothing typed into it is hashed",
+    (_, markup) => {
+      document.body.innerHTML = markup;
+      const tracker = track();
+      const field = document.getElementById("f") as HTMLInputElement;
+      focus(field);
+      expect(tracker.sensitiveForEvent("input")).toBe(false);
+      type(field, "90210");
+      expect(tracker.digests().size).toBe(0);
+    },
+  );
 
   test("install's cleanup removes the listeners", () => {
     document.body.innerHTML = `<label for="a">Security code</label><input id="a">`;

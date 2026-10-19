@@ -863,3 +863,377 @@ test("a value typed into a sensitive field is scrubbed when it is spoken, whatev
     "I need 7,38 of them",
   );
 });
+
+// ---- One-time codes --------------------------------------------------------------------------
+
+/** The 2FA field of a real sign-in, as the collector described it: no autocomplete=one-time-code, and the code mirrored into
+ * the value attribute. */
+const SIGN_IN_CODE_FIELD = {
+  id: "codeEntry",
+  type: "text",
+  placeholder: "Enter 6-digit code",
+  "data-test-id": "two-factor-code-input",
+  "aria-labelledby": "FormControl-label2",
+  value: "880261",
+};
+const SIGN_IN_PAGE = "https://app.example.test/login/confirm-to-login";
+
+test("the 2FA code field of a real sign-in loses the code in its value and its value attribute", () => {
+  const event = {
+    type: "CUSTOM" as const,
+    name: "input",
+    timestamp: 1,
+    value: {
+      eventType: "input",
+      target: {
+        tag: "input",
+        role: null,
+        action: null,
+        text: "",
+        attributes: { ...SIGN_IN_CODE_FIELD },
+        value: "880261",
+      },
+      url: SIGN_IN_PAGE,
+      route: "/login/confirm-to-login",
+    },
+  };
+  const masked = maskCollectorEvent(event, { sensitive: false });
+  expect(JSON.stringify(masked)).not.toContain("880261");
+  expect(at(masked, "target", "value")).toBe(REDACTED);
+  expect(at(masked, "target", "attributes", "value")).toBe(REDACTED);
+  expect(at(masked, "target", "attributes", "placeholder")).toBe(
+    "Enter 6-digit code",
+  );
+});
+
+test("a one-time code field is known by its id, name, placeholder, label, test id or class, without autocomplete", () => {
+  const sensitive = (attributes: Record<string, string>, label?: string) =>
+    isSensitiveTarget({ tag: "input", attributes, label });
+  expect(sensitive({ "data-test-id": "two-factor-code-input" })).toBe(true);
+  expect(sensitive({ placeholder: "Enter 6-digit code" })).toBe(true);
+  expect(sensitive({ id: "otpCode" })).toBe(true);
+  expect(sensitive({ name: "mfa_code" })).toBe(true);
+  expect(sensitive({ name: "totpPin" })).toBe(true);
+  expect(sensitive({ name: "otc" })).toBe(true);
+  expect(sensitive({ "data-testid": "2fa-input" })).toBe(true);
+  expect(sensitive({ "data-testid": "2FA-input" })).toBe(true);
+  expect(sensitive({ id: "2FACode" })).toBe(true);
+  expect(sensitive({ id: "sixDigitCode" })).toBe(true);
+  expect(sensitive({ "data-qa": "sms-code" })).toBe(true);
+  expect(sensitive({ class: "form-control otp-input" })).toBe(true);
+  expect(sensitive({ "aria-label": "Authentication code" })).toBe(true);
+  expect(sensitive({ title: "Two-step verification" })).toBe(true);
+  expect(sensitive({ name: "auth_code" })).toBe(true);
+  expect(sensitive({ name: "loginCode" })).toBe(true);
+  expect(sensitive({ name: "confirmationCode" })).toBe(true);
+  expect(sensitive({ id: "recovery-code" })).toBe(true);
+  expect(sensitive({}, "Code from your authenticator app")).toBe(true);
+  expect(sensitive({}, "Multi-factor code")).toBe(true);
+  expect(sensitive({}, "Enter the 6-digit code we sent to your phone")).toBe(
+    true,
+  );
+  expect(
+    isSensitiveTarget({
+      tag: "input",
+      attributes: { inputmode: "numeric", maxlength: "6" },
+      label: "Type what we texted to your phone",
+    }),
+  ).toBe(true);
+  // A bare "code" is a one-time code on a sign-in page, and not elsewhere.
+  expect(sensitive({ id: "codeEntry" })).toBe(false);
+  expect(
+    isSensitiveTarget(
+      { tag: "input", attributes: { id: "codeEntry" } },
+      { url: SIGN_IN_PAGE },
+    ),
+  ).toBe(true);
+  expect(
+    isSensitiveTarget(
+      { tag: "input", attributes: { name: "code" } },
+      { url: "https://shop.example.test/cart" },
+    ),
+  ).toBe(false);
+});
+
+test("a short numeric input is a one-time code field by its shape alone", () => {
+  const sensitive = (attributes: Record<string, string>) =>
+    isSensitiveTarget({ tag: "input", attributes });
+  expect(sensitive({ inputmode: "numeric", maxlength: "6" })).toBe(true);
+  expect(sensitive({ inputmode: "numeric", maxlength: "4" })).toBe(true);
+  expect(sensitive({ inputmode: "numeric", maxlength: "8" })).toBe(true);
+  expect(sensitive({ pattern: "[0-9]*", maxlength: "6" })).toBe(true);
+  expect(sensitive({ pattern: "\\d{6}" })).toBe(true);
+  expect(sensitive({ pattern: "[0-9]{4,8}" })).toBe(true);
+  expect(sensitive({ type: "tel", pattern: "[0-9 ]*", maxlength: "7" })).toBe(
+    true,
+  );
+  // Outside 4 to 8 digits, or not numeric, the shape says nothing.
+  expect(sensitive({ inputmode: "numeric", maxlength: "3" })).toBe(false);
+  expect(sensitive({ inputmode: "numeric", maxlength: "9" })).toBe(false);
+  expect(sensitive({ inputmode: "numeric" })).toBe(false);
+  expect(sensitive({ maxlength: "6" })).toBe(false);
+  expect(sensitive({ inputmode: "decimal", maxlength: "6" })).toBe(false);
+});
+
+test("ordinary codes and short numbers are not one-time codes: zip, postal, promo, coupon and country codes are kept", () => {
+  const cases: Array<[Record<string, string>, string?]> = [
+    [{ name: "zipCode", inputmode: "numeric", maxlength: "5" }],
+    [{ placeholder: "ZIP code", pattern: "[0-9]{5}" }],
+    [{ inputmode: "numeric", maxlength: "5" }, "5-digit ZIP code"],
+    [{ name: "postal_code", maxlength: "8" }, "Postal code"],
+    [{ autocomplete: "postal-code", inputmode: "numeric", maxlength: "6" }],
+    [{ name: "promoCode" }, "Promo code"],
+    [{ id: "coupon-code" }, "Coupon code"],
+    [{ name: "countryCode", type: "tel", maxlength: "4" }, "Country code"],
+    [{ "aria-label": "Discount code" }],
+    [{ name: "qty", inputmode: "numeric", maxlength: "4" }, "Quantity"],
+    [{ inputmode: "numeric", maxlength: "4", placeholder: "YYYY" }],
+    [{ name: "phone_ext", type: "tel", maxlength: "5" }, "Extension"],
+  ];
+  for (const [attributes, label] of cases)
+    expect([
+      attributes,
+      label,
+      isSensitiveTarget({ tag: "input", attributes, label }),
+    ]).toEqual([attributes, label, false]);
+  // Not on a sign-in page either, where a bare "code" counts.
+  expect(
+    isSensitiveTarget(
+      { tag: "input", attributes: { name: "promoCode" } },
+      { url: "https://shop.example.test/login" },
+    ),
+  ).toBe(false);
+});
+
+test("a button that names a one-time code keeps its label", () => {
+  const event = {
+    type: "CUSTOM" as const,
+    name: "click",
+    timestamp: 1,
+    value: {
+      target: {
+        tag: "button",
+        text: "Verify code",
+        attributes: { "data-test-id": "two-factor-submit" },
+      },
+      url: SIGN_IN_PAGE,
+    },
+  };
+  expect(
+    at(maskCollectorEvent(event, { sensitive: false }), "target", "text"),
+  ).toBe("Verify code");
+  const submit = {
+    ...event,
+    value: {
+      target: {
+        tag: "input",
+        value: "Verify",
+        attributes: { type: "submit", value: "Verify", name: "verify" },
+      },
+    },
+  };
+  expect(
+    at(maskCollectorEvent(submit, { sensitive: false }), "target", "value"),
+  ).toBe("Verify");
+});
+
+test("every attribute that echoes a sensitive field's value is redacted, for one-time code, password and card fields alike", () => {
+  const echoes = (attributes: Record<string, string>, value: string) => {
+    const event = {
+      type: "CUSTOM" as const,
+      name: "input",
+      timestamp: 1,
+      value: {
+        target: {
+          tag: "input",
+          value,
+          attributes: {
+            ...attributes,
+            value,
+            "data-initial-value": value,
+            "ng-reflect-model": value,
+            title: `Current: ${value}`,
+            dir: "ltr",
+          },
+        },
+      },
+    };
+    return maskCollectorEvent(event, { sensitive: false });
+  };
+  for (const [attributes, value] of [
+    [{ "data-test-id": "two-factor-code-input" }, "880261"],
+    [{ type: "password" }, "Hunter-22"],
+    [{ autocomplete: "cc-number" }, "4000 0566 5566 5556"],
+    [{ name: "cardnumber" }, "4000056655665556"],
+  ] as const) {
+    const masked = echoes(attributes, value);
+    expect([value, JSON.stringify(masked).includes(value)]).toEqual([
+      value,
+      false,
+    ]);
+    expect(at(masked, "target", "attributes", "dir")).toBe("ltr");
+  }
+});
+
+test("one-time code keys lose their value in JSON, form and cut-short bodies, in any case or style", () => {
+  const keys = [
+    "verificationCode",
+    "verification_code",
+    "VerificationCode",
+    "VERIFICATION_CODE",
+    "verification-code",
+    "otp",
+    "otpCode",
+    "OTPCode",
+    "otp_code",
+    "mfaCode",
+    "mfa_code",
+    "totp",
+    "totpCode",
+    "twoFactorCode",
+    "two_factor_code",
+    "2faCode",
+    "smsCode",
+    "sms_code",
+    "authCode",
+    "auth_code",
+    "authenticationCode",
+    "authorization_code",
+    "passcode",
+    "securityCode",
+    "loginCode",
+    "accessCode",
+    "confirmationCode",
+    "oneTimeCode",
+    "one_time_password",
+    "verifyCode",
+    "recoveryCode",
+    "backup_codes",
+    "code_verifier",
+    "mfaToken",
+    "x-otp",
+  ];
+  for (const key of keys)
+    expect([key, isCredentialKey(key)]).toEqual([key, true]);
+  for (const key of [
+    "zipCode",
+    "postal_code",
+    "promoCode",
+    "couponCode",
+    "countryCode",
+    "errorCode",
+    "statusCode",
+    "otpLength",
+    "mfaEnabled",
+    "verificationCodeExpiresAt",
+    "twoFactorMethod",
+    "verificationStatus",
+    "code",
+  ])
+    expect([key, isCredentialKey(key)]).toEqual([key, false]);
+});
+
+test("the verification code a real sign-in posted is redacted from its body", () => {
+  expect(maskBody('{"verificationCode":"880261"}', "application/json")).toBe(
+    `{"verificationCode":"${REDACTED}"}`,
+  );
+  expect(maskBody("verificationCode=880261", undefined)).toBe(
+    `verificationCode=${REDACTED}`,
+  );
+  expect(maskBody('{"verificationCode":"880261","rememb', undefined)).toBe(
+    `{"verificationCode":"${REDACTED}","rememb`,
+  );
+});
+
+test("a bare code key goes when it holds 4 to 10 digits, or on a sign-in request, and an ordinary response code stays", () => {
+  const json = (body: object, url?: string) =>
+    JSON.parse(maskBody(JSON.stringify(body), "application/json", { url }));
+  expect(json({ code: "880261" })).toEqual({ code: REDACTED });
+  expect(json({ code: 880261 })).toEqual({ code: REDACTED });
+  expect(json({ code: "8802" })).toEqual({ code: REDACTED });
+  expect(json({ code: "8802610000" })).toEqual({ code: REDACTED });
+  expect(json({ Code: "880 261" })).toEqual({ Code: REDACTED });
+  expect(json({ data: { code: "880261" } })).toEqual({
+    data: { code: REDACTED },
+  });
+  expect(json({ code: "NOT_FOUND", message: "No such deal" })).toEqual({
+    code: "NOT_FOUND",
+    message: "No such deal",
+  });
+  expect(json({ code: 404 })).toEqual({ code: 404 });
+  expect(json({ code: "ABC123" })).toEqual({ code: "ABC123" });
+  expect(json({ code: "88026100001" })).toEqual({ code: "88026100001" });
+  for (const url of [
+    "https://app.example.test/api/login/verify",
+    "https://id.example.test/oauth/token",
+    "https://app.example.test/api/v1/mfa/challenge",
+    "https://app.example.test/auth/callback",
+    "https://app.example.test/api/two-factor",
+  ])
+    expect([url, json({ code: "ABC123" }, url)]).toEqual([
+      url,
+      { code: REDACTED },
+    ]);
+  expect(maskBody("code=880261&remember=1", undefined)).toBe(
+    `code=${REDACTED}&remember=1`,
+  );
+  expect(maskBody("code=NOT_FOUND", undefined)).toBe("code=NOT_FOUND");
+  expect(
+    maskBody(
+      "grant_type=authorization_code&code=SplxlOBeZQQYbYS6WxSbIA",
+      undefined,
+      {
+        url: "https://id.example.test/oauth/token",
+      },
+    ),
+  ).toBe(`grant_type=authorization_code&code=${REDACTED}`);
+  expect(maskBody('{"code":"880261","note":"x', undefined)).toBe(
+    `{"code":${JSON.stringify(REDACTED)},"note":"x`,
+  );
+  expect(maskBody('{"code":"NOT_FOUND","note":"x', undefined)).toBe(
+    '{"code":"NOT_FOUND","note":"x',
+  );
+});
+
+test("a network event to a sign-in endpoint loses a bare code in its request and its response, whatever it holds", () => {
+  const masked = maskNetworkEvent({
+    type: "CUSTOM",
+    name: "network",
+    timestamp: 1,
+    value: {
+      url: "https://app.example.test/api/login/verify",
+      request: {
+        headers: { "content-type": "application/json" },
+        body: { text: '{"code":"Q7XK2M"}', status: "captured" },
+      },
+      response: {
+        headers: { "content-type": "application/json" },
+        body: { text: '{"code":"INVALID"}', status: "captured" },
+      },
+    },
+  });
+  expect(JSON.stringify(masked)).not.toContain("Q7XK2M");
+  expect(JSON.stringify(masked)).not.toContain("INVALID");
+});
+
+test("an OAuth callback's code and state are redacted from its URL, and an ordinary code query is kept", () => {
+  expect(
+    scrubUrl(
+      "https://app.example.test/oauth/callback?code=SplxlOBeZQQYbYS6WxSbIA&state=xyzABC&next=/home",
+    ),
+  ).toBe(
+    `https://app.example.test/oauth/callback?code=${REDACTED}&state=${REDACTED}&next=/home`,
+  );
+  // An OAuth redirect by its shape, wherever it lands.
+  expect(scrubUrl("https://app.example.test/?code=ab12&state=s9")).toBe(
+    `https://app.example.test/?code=${REDACTED}&state=${REDACTED}`,
+  );
+  expect(scrubUrl("https://app.example.test/verify?code=880261")).toBe(
+    `https://app.example.test/verify?code=${REDACTED}`,
+  );
+  expect(scrubUrl("https://app.example.test/deals?code=880261")).toBe(
+    `https://app.example.test/deals?code=${REDACTED}`,
+  );
+  const ordinary = "https://shop.example.test/search?code=summer&page=2";
+  expect(scrubUrl(ordinary)).toBe(ordinary);
+});
