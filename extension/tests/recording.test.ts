@@ -1559,6 +1559,59 @@ test("connecting again as the same person sends what was kept; another person do
   expect(recordingRequests()).toEqual([]);
 });
 
+test("the same person connecting again while recording moves the recording to the new token, and the old token's sign-out stops nothing", async () => {
+  const id = await record();
+  connect(ada, "obr_two");
+  await handlers.connected();
+  expect(sentToDocument("offscreen.token")).toEqual([
+    { type: "offscreen.token", recordingId: id, token: "obr_two" },
+  ]);
+  expect((fake.storage.session.get("stream") as StreamSession).token).toBe(
+    "obr_two",
+  );
+  // Connecting revoked the old token: the document's next pass with it comes back signed out.
+  doc?.postMessage({
+    type: "offscreen.signed-out",
+    reason: "revoked",
+    token: "obr_one",
+  });
+  await settle();
+  expect(await state()).toMatchObject({ phase: "recording", recordingId: id });
+  expect(storedConnection()?.token).toBe("obr_two");
+  expect(fake.storage.local.get("notice")).toBeUndefined();
+});
+
+test("an old token's sign-out that comes back before the reconnect is announced keeps the recording under the new connection", async () => {
+  const id = await record();
+  connect(ada, "obr_two");
+  doc?.postMessage({
+    type: "offscreen.signed-out",
+    reason: "revoked",
+    token: "obr_one",
+  });
+  await until(
+    () => sentToDocument("offscreen.token").length === 1,
+    "offscreen.token",
+  );
+  expect(sentToDocument("offscreen.token")[0]).toEqual({
+    type: "offscreen.token",
+    recordingId: id,
+    token: "obr_two",
+  });
+  expect(await state()).toMatchObject({ phase: "recording", recordingId: id });
+});
+
+test("another person connecting while a recording runs leaves the recording its own token", async () => {
+  await record();
+  connect(bea, "obr_bea");
+  await handlers.connected();
+  await settle();
+  expect(sentToDocument("offscreen.token")).toEqual([]);
+  expect((fake.storage.session.get("stream") as StreamSession).token).toBe(
+    "obr_one",
+  );
+});
+
 test("a sign-out the document reports for an older token, after the person connected again, changes nothing", async () => {
   fake.tabs.set(7, { id: 7, url: "chrome://newtab/" } as chrome.tabs.Tab);
   const id = await record();

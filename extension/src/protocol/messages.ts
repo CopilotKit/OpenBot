@@ -139,6 +139,7 @@ export type BackgroundToOffscreen =
       drains: DrainRecord[];
     } // after a browser restart, and when the person who recorded kept drains connects again
   | { type: "offscreen.discard"; recordingIds: string[] } // the person's own "Discard kept events" or Disconnect, or a Record that never went live: clear their outbox
+  | { type: "offscreen.token"; recordingId: string; token: string } // the live recording's person connected this browser again: its passes use the new token
   | { type: "offscreen.halt"; token: string } // that connection is gone (signed out, or moved away by policy): every stream sending with its token stops at once, its events kept
   | { type: "offscreen.policy"; allowedIntelligenceUrls: string[] | null }; // the managed policy changed: streams to a gateway it no longer allows are parked
 /** The one offscreen message the service worker parses: it signs a connection out, so it names the bearer the failing

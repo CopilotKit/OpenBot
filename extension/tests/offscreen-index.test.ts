@@ -1126,6 +1126,59 @@ describe("offscreen controller", () => {
     expect(h.openbot.passes.length).toBeGreaterThan(1);
   });
 
+  test("a new token for the live recording: its next pass asks with it", async () => {
+    const h = await setup();
+    await h.open();
+    const session = h.session();
+    const t = session.trajectoryId;
+    h.post({ type: "offscreen.start", session });
+    await streaming(h, t);
+    h.post({
+      type: "offscreen.token",
+      recordingId: "rec-1",
+      token: "obr_second",
+    });
+    await sleep(20);
+    h.gateway.dropConnections();
+    h.post({ type: "offscreen.event", event: click(1) });
+    await until(
+      () => h.names(t).includes("click"),
+      "the click after the switch",
+    );
+    expect(h.openbot.passes.at(-1)?.authorization).toBe("Bearer obr_second");
+    expect(h.received("offscreen.signed-out")).toEqual([]);
+  });
+
+  test("a live recording a pass with the old token signed out goes on streaming once the new token comes", async () => {
+    const h = await setup();
+    h.openbot.passScript.push(signedOutPass("revoked"));
+    await h.open();
+    const session = h.session();
+    const t = session.trajectoryId;
+    h.post({ type: "offscreen.start", session });
+    await until(
+      () => h.received("offscreen.signed-out").length === 1,
+      "signed out",
+    );
+    h.post({ type: "offscreen.event", event: click(1) });
+    h.post({
+      type: "offscreen.token",
+      recordingId: "rec-1",
+      token: "obr_second",
+    });
+    h.post({ type: "offscreen.event", event: click(2) });
+    await until(() => h.names(t).length === 4, "every event at Intelligence");
+    expect(h.names(t)).toEqual([
+      "recording.started",
+      "outcome",
+      "click",
+      "click",
+    ]);
+    expect(h.openbot.passes.at(-1)?.authorization).toBe("Bearer obr_second");
+    h.post({ type: "offscreen.stop", outcome: "succeeded" });
+    await until(() => h.received("offscreen.done").length === 1, "done");
+  });
+
   test("a sign-out stops every recording sent with its token, and is posted once", async () => {
     const h = await setup();
     const first = h.session({ recordingId: "rec-held" });

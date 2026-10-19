@@ -77,6 +77,8 @@ type Live = {
   recordingId: string;
   /** The trajectory its status is reported for: the service worker shows only statuses of the recording's trajectories. */
   trajectoryId: string;
+  /** The recording's first trajectory (Start over's new one after a switch): a resumed streamer follows its rollovers. */
+  first: string;
   capture: Partial<CaptureStatus>;
   stream: Stream | null;
   /** While above 0 (its streamer is being created, or Start over is switching it), events wait in `waiting`. */
@@ -428,6 +430,7 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
       session,
       recordingId: session.recordingId,
       trajectoryId: session.trajectoryId,
+      first: session.trajectoryId,
       capture: {},
       stream: null,
       holds: 1,
@@ -462,6 +465,7 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
       // Switched before the streamer reports anything for it: the replaced recording's kept events are offscreen.kept.
       target.recordingId = recordingId;
       target.trajectoryId = trajectoryId;
+      target.first = trajectoryId;
       const rotated = streamer.rotate({
         recordingId,
         trajectoryId,
@@ -647,6 +651,43 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
     });
   }
 
+  /** The live recording's person connected this browser again, which revoked the token its passes used: its stream
+   * asks with the new one. A stream that a pass with the old token already signed out is replaced by one that resumes
+   * the recording's trajectories from the outbox, once the old one has stored every event it was handed. */
+  async function retoken(target: Live, token: string): Promise<void> {
+    try {
+      target.session = { ...target.session, token };
+      const stream = target.stream;
+      if (stream && !stream.signedOut) {
+        stream.target.token = token;
+        return;
+      }
+      if (target.ending) return;
+      if (stream) {
+        await stream.streamer?.halt();
+        target.stream = null;
+        finished(stream, target.recordingId);
+      }
+      await openStream(
+        {
+          trajectoryId: target.first,
+          title: target.session.title,
+          recordingId: target.recordingId,
+          version: target.session.version,
+          resume: true,
+        },
+        { openbotUrl: target.session.openbotUrl, token },
+        target.session.botId,
+        {
+          live: target,
+          allowedGatewayUrls: target.session.allowedIntelligenceUrls,
+        },
+      );
+    } finally {
+      release(target);
+    }
+  }
+
   /** The service worker says this token's connection is gone: no stream sends with it any more, and a pass asked
    * with it is refused here, so nothing reaches OpenBot or Intelligence for it. The events stay in the outbox. */
   async function halt(token: string): Promise<void> {
@@ -706,6 +747,17 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
         return;
       case "offscreen.discard":
         serially(() => discard(message.recordingIds), "discard recordings");
+        return;
+      case "offscreen.token":
+        if (target?.recordingId !== message.recordingId) {
+          console.error(
+            "Recorder: a new token arrived for a recording this document does not record",
+          );
+          return;
+        }
+        // Events wait while a signed-out stream is replaced.
+        target.holds += 1;
+        serially(() => retoken(target, message.token), "take the new token");
         return;
       case "offscreen.halt":
         // At once, not behind the queue: a socket still streaming for a lost connection stops now.

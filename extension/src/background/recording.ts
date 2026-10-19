@@ -1256,14 +1256,44 @@ export function installRecording(
   ): Promise<void> {
     const forgot = await forgetConnection(reason, token);
     haltStreams(token);
-    if (live && live.token === token && state.phase === "recording")
+    if (live && live.token === token && state.phase === "recording") {
+      // Its person connected this browser again (which revoked this token) before the sign-out came back: the
+      // recording goes on under the new connection.
+      if (!forgot && (await adoptConnection())) return;
       // The live recording used this token, which is dead: it stops (and marks the person's other drains waiting).
       await stopRecording({ kind: "signed-out", reason, forgot });
-    else if (forgot)
+    } else if (forgot)
       await markWaiting(
         (drain) => drain.userId === userId && drain.openbotUrl === openbotUrl,
         reason,
       );
+  }
+
+  /** The live recording's person connected this browser again: connecting revoked the token its passes were asked
+   * with, so it takes the new one, as do the stored session (for a reopened document) and the document's stream.
+   * Resolves true when it switched; a recording of another person, or on another OpenBot, keeps its own token. */
+  async function adoptConnection(): Promise<boolean> {
+    const connection = await currentConnection();
+    const current = live;
+    if (
+      !connection ||
+      !current ||
+      state.phase !== "recording" ||
+      current.userId !== connection.user.id ||
+      current.openbotUrl !== connection.openbotUrl ||
+      current.token === connection.token
+    )
+      return false;
+    current.token = connection.token;
+    const stream = await readSession("stream");
+    if (stream)
+      await writeSession("stream", { ...stream, token: connection.token });
+    await sendToDocument({
+      type: "offscreen.token",
+      recordingId: current.recordingId,
+      token: connection.token,
+    });
+    return true;
   }
 
   /** The document's pass was answered signed out for `token`. A pass taken with an older token, after the person
@@ -1962,6 +1992,7 @@ export function installRecording(
 
     async connected() {
       await ready;
+      await adoptConnection();
       // The connect page waits on this answer: the sending runs on its own.
       void sendDrains({ recovering: false }).catch(
         report("sending kept recordings"),
