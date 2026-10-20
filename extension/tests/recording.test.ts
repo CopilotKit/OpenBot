@@ -16,6 +16,7 @@ import type {
   NetworkCaptureDeps,
   NetworkMode,
 } from "../src/background/network";
+import type { AgentObservation } from "../src/background/agent/observation";
 import type { PageFallback } from "../src/background/network/fallback";
 import {
   installRecording,
@@ -285,7 +286,21 @@ type NetworkDouble = {
   /** How many captures were created, and the ones started and not stopped since. */
   created: number;
   running: Set<number>;
+  /** The AG-UI observations the page hook's messages reached the capture with. */
+  pageAgent: AgentObservation[];
 };
+
+/** Each recording's agent events (agent/events.ts), as a double that says what it was handed. */
+type AgentDouble = {
+  observed: AgentObservation[];
+  clicks: { tabId: number; click: CapturedEvent }[];
+  navigated: number[];
+  stopped: boolean;
+  /** Whether a click comes back with agent context, as the real agent events add it when a Thread is open. */
+  enrich: boolean;
+  emit(tabId: number, event: CapturedEvent): void;
+};
+let agents: AgentDouble[] = [];
 let network: NetworkDouble;
 let fallback: { value: PageFallback; calls: string[]; created: number };
 let acceptAnswer: CapturedEvent | null = null;
@@ -381,11 +396,39 @@ function doubles(): Partial<RecordingDeps> {
           network.pageTabs.push(tabId);
           network.recorded.push(recorded);
         },
-        recordPageAgent: () => {},
+        recordPageAgent: (_tabId, observation) => {
+          network.pageAgent.push(observation);
+        },
         stop: async () => {
           network.calls.push("stop");
           await pass("networkStop");
           network.running.delete(capture);
+        },
+      };
+    },
+    createAgentEvents: (options) => {
+      const agent: AgentDouble = {
+        observed: [],
+        clicks: [],
+        navigated: [],
+        stopped: false,
+        enrich: false,
+        emit: options.emit,
+      };
+      agents.push(agent);
+      return {
+        observe: (observation) => agent.observed.push(observation),
+        enrichClick: (tabId, click) => {
+          agent.clicks.push({ tabId, click });
+          if (!agent.enrich) return click;
+          return {
+            ...click,
+            value: { ...(click.value as object), agent: { threadId: "t-1" } },
+          };
+        },
+        tabNavigated: (tabId) => agent.navigated.push(tabId),
+        stop: () => {
+          agent.stopped = true;
         },
       };
     },
@@ -513,7 +556,9 @@ beforeEach(() => {
     failStart: false,
     created: 0,
     running: new Set(),
+    pageAgent: [],
   };
+  agents = [];
   const fallbackCalls: string[] = [];
   fallback = {
     calls: fallbackCalls,
@@ -3497,3 +3542,141 @@ for (const first of firstActions)
         });
         expect([...hung, ...problems]).toEqual([]);
       });
+
+test("each recording has its own agent events: every AG-UI observation, every click before the steps hold it, each top-frame document, and its end; what they emit goes out among the steps by its time", async () => {
+  await record();
+  expect(agents).toHaveLength(1);
+  const [agent] = agents;
+  if (!agent) throw new Error("no agent events");
+  const observation: AgentObservation = {
+    kind: "event",
+    tabId: 7,
+    streamId: "7//1",
+    at: now,
+    agentId: "default",
+    threadId: "t-1",
+    event: { type: "RUN_STARTED", threadId: "t-1", runId: "r-1" },
+  };
+  network.deps?.agent(observation);
+  expect(agent.observed).toEqual([observation]);
+
+  const clicked = now - 10_000;
+  agent.enrich = true;
+  contentPort(7).postMessage({
+    type: "content.event",
+    event: {
+      ...event("click", {
+        step: "click",
+        target: { tag: "button", role: "button", name: "Send" },
+      }),
+      timestamp: clicked,
+    },
+  });
+  await until(() => agent.clicks.length === 1, "the click");
+  expect(agent.clicks[0]?.tabId).toBe(7);
+  // An agent event from just after the click, emitted while the click is still held: it goes out after it.
+  agent.emit(7, event("agent.message", { text: "Looking it up" }));
+  agent.emit(7, {
+    ...event("agent.run", { phase: "started" }),
+    timestamp: clicked + 5,
+  });
+  const out = () =>
+    sentToDocument("offscreen.event").flatMap((m) =>
+      m.type === "offscreen.event" ? [m.event] : [],
+    );
+  // The tab's first page change waits for its title (the steps' own timer), then everything held goes out in order.
+  await until(
+    () => out().some(({ name }) => name === "agent.run"),
+    "the held events",
+  );
+  const names = out().map(({ name }) => name);
+  // The click went out as the agent events enriched it.
+  expect(out()[names.indexOf("click")]?.value).toMatchObject({
+    step: "click",
+    agent: { threadId: "t-1" },
+  });
+  expect(names.indexOf("agent.run")).toBeGreaterThan(names.indexOf("click"));
+  // One stamped long before the click (1_700_000_000_000) left before it.
+  expect(names.indexOf("agent.message")).toBeLessThan(names.indexOf("click"));
+
+  fake.webNavigation.commit({
+    tabId: 7,
+    frameId: 3,
+    parentFrameId: 0,
+    url: "https://widgets.example.test/",
+  });
+  fake.webNavigation.historyUpdate({
+    tabId: 7,
+    frameId: 0,
+    url: "https://crm.example.test/deals/43",
+  });
+  fake.webNavigation.commit({
+    tabId: 7,
+    frameId: 0,
+    url: "https://crm.example.test/next",
+    transitionType: "link",
+  });
+  await until(() => agent.navigated.length === 1, "the new document");
+  await settle();
+  expect(agent.navigated).toEqual([7]);
+
+  await page({ type: "page.stop" });
+  expect(agent.stopped).toBe(true);
+  network.deps?.agent(observation);
+  expect(agent.observed).toHaveLength(1);
+  await record();
+  expect(agents).toHaveLength(2);
+  expect(agents[1]?.stopped).toBe(false);
+});
+
+test("an AG-UI observation from the page hook is accepted only from a recorded tab while page capture is on, whole however large, with its tab and a stream id of that tab and frame", async () => {
+  await record();
+  const observation = {
+    kind: "request",
+    streamId: "k3x9/0",
+    at: now,
+    url: "https://crm.example.test/api/copilotkit",
+    agentId: "default",
+    method: "agent/run",
+    // A long Thread: far past the 64 KiB a page-network event may be.
+    input: {
+      threadId: "t-1",
+      messages: [{ id: "m", role: "user", content: "x".repeat(200_000) }],
+    },
+  };
+  const fromTab = (
+    tabId: number,
+    message: object = { type: "recorder.page-agent", observation },
+  ) =>
+    fake.sendExternal(message, {
+      tab: { id: tabId } as chrome.tabs.Tab,
+      frameId: 4,
+      url: DEAL,
+      origin: "https://crm.example.test",
+    });
+  expect(await fromTab(7)).toEqual({ ok: false, error: "not-recording" }); // the debugger is capturing
+  network.deps?.status("page");
+  expect(await fromTab(7)).toEqual({ ok: true });
+  expect(network.pageAgent).toEqual([
+    {
+      ...observation,
+      tabId: 7,
+      streamId: "7/page/4/k3x9/0",
+    } as AgentObservation,
+  ]);
+  expect(await fromTab(99)).toEqual({ ok: false, error: "not-recording" });
+  expect(
+    await fromTab(7, {
+      type: "recorder.page-agent",
+      observation: {
+        kind: "event",
+        streamId: "k3x9/0",
+        at: now,
+        agentId: null,
+        threadId: null,
+        event: { delta: "no type" },
+      },
+    }),
+  ).toEqual({ ok: false, error: "invalid" });
+  expect(network.pageAgent).toHaveLength(1);
+});
