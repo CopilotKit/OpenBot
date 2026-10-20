@@ -134,8 +134,9 @@ for (const transport of ["sse", "intelligence"] as const)
               event.name === "agent.message" &&
               (event.value as { messageId: string }).messageId === messageId,
           );
-          expect(messages).toHaveLength(1);
-          expect((messages[0]?.value as { text: string }).text).toBe(text);
+          expect(
+            messages.map((event) => (event.value as { text: string }).text),
+          ).toEqual([text]);
           expect(count(text)).toBe(1);
         }
 
