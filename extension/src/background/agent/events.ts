@@ -199,6 +199,9 @@ export function createAgentEvents(options: {
   const recordedEvents = new Set<string>();
   /** Threads already linked to the Trajectory (TrajectoryConnection sends one `thread.linked` per Thread). */
   const linked = new Set<string>();
+  /** Bumped when the recording stops: what the library still applies afterwards belongs to no recording and is not
+   * emitted. */
+  let recording = 0;
 
   const tabOf = (tabId: number): Tab => {
     let tab = tabs.get(tabId);
@@ -267,6 +270,7 @@ export function createAgentEvents(options: {
           )
         : undefined);
     if (existing) return existing;
+    const born = recording;
     const thread: Thread = {
       agentId,
       threadId,
@@ -274,13 +278,15 @@ export function createAgentEvents(options: {
         agentId,
         threadId,
         {
-          emit: (name, value, at) =>
+          emit: (name, value, at) => {
+            if (born !== recording) return;
             options.emit(
               tabId,
               finishAgentEvent(name, value, at, options.digests()),
-            ),
+            );
+          },
           linkThread: (id, at) => {
-            if (linked.has(id)) return;
+            if (born !== recording || linked.has(id)) return;
             linked.add(id);
             options.emit(
               tabId,
@@ -668,6 +674,7 @@ export function createAgentEvents(options: {
         }
         reportDrops(tabId, tab);
       }
+      recording++;
       tabs.clear();
       recordedRuns.clear();
       expressedByThread.clear();
