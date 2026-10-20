@@ -12,6 +12,7 @@ import { IllustrationFrame } from "@/components/onboarding/illustration-frame";
 import { Button } from "@/components/ui/button";
 import { type AgentProfile, agentListQueryOptions } from "@/lib/agents/queries";
 import { currentUserQueryOptions, needsOnboarding } from "@/lib/auth/queries";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { appConfig } from "@/lib/generated/application-config";
 import { completeOnboardingMutationOptions } from "@/lib/onboarding/mutations";
 import { queryClient } from "@/query-client";
@@ -160,6 +161,16 @@ function RosterStep() {
   );
 }
 
+/**
+ * Where OpenBot can run and what can be made its own, for somebody trying it on their own machine.
+ *
+ * Empty while its content is being written (OB-02 in the product backlog). The slot and the rule for
+ * when it appears are what exist so far.
+ */
+function LocalPathsStep() {
+  return <div className="w-full min-h-64" />;
+}
+
 const STEPS: Array<() => React.ReactNode> = [
   () => <WelcomeStep />,
   () => <ComputerUseStep />,
@@ -184,7 +195,21 @@ function RouteComponent() {
   const [leaving, setLeaving] = React.useState(false);
   const [ref, bounds] = useMeasure();
 
-  const last = step === STEPS.length - 1;
+  /*
+   * The last slide is for somebody evaluating OpenBot locally, never for an organization's people:
+   * the server says single-user mode, which an organization's deployment, always behind sign-in,
+   * cannot be in. Until the answer arrives the slide is left out, so a slow or failed request never
+   * shows an organization's employees a page about deploying OpenBot themselves.
+   *
+   * NOT GATED ON `selfHostBanner` AS WELL. That flag is off for any deployment with a paid
+   * Intelligence entitlement, and the stack `copilotkit local` installs runs on an enterprise
+   * evaluation licence, so every CLI evaluator, the person this slide is for, would never see it.
+   */
+  const { data: capabilities } = useQuery(deploymentCapabilitiesQueryOptions());
+  const steps = capabilities?.localEvaluation
+    ? [...STEPS, () => <LocalPathsStep />]
+    : STEPS;
+  const last = step === steps.length - 1;
 
   const go = (to: number) => {
     setDirection(to > step ? 1 : -1);
@@ -228,7 +253,7 @@ function RouteComponent() {
                   key={step}
                   variants={variants}
                 >
-                  {STEPS[step]()}
+                  {steps[step]?.()}
                 </motion.div>
               </AnimatePresence>
 

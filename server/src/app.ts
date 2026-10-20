@@ -483,6 +483,16 @@ export function createApp(
       selfHostBanner: selfHostBanner
         ? await selfHostBanner.shown()
         : config.selfHostBanner,
+      /*
+       * Whether this is somebody trying OpenBot on their own machine, not an organization's
+       * deployment. Onboarding reads it to explain where OpenBot can run, which only the person
+       * evaluating it needs and an organization's employees should never be pitched.
+       *
+       * Single-user mode, not a new switch: it is already true only with no identity provider and
+       * no address anybody else can reach (see `singleUserAllowed` in config.ts), which is exactly
+       * a local trial, and an operator cannot forget to set it.
+       */
+      localEvaluation: config.singleUser,
       transcription: Boolean(config.transcription),
       voice: Boolean(config.voice),
       /*
