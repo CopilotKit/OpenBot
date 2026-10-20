@@ -1,20 +1,26 @@
+import { WEB_HARNESSES } from "@openbot/shared/harnesses";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import Avatar from "boring-avatars";
 import { AnimatePresence, MotionConfig, motion } from "motion/react";
 import * as React from "react";
 import useMeasure from "react-use-measure";
+import { HarnessMark } from "@/components/agents/harness-mark";
 import AgentOrb from "@/components/agents/orb/agent-orb";
 import { Composer } from "@/components/channels/composer";
 import { DesktopIllustration } from "@/components/computer/desktop-illustration";
 import { ComputerPlaceholder } from "@/components/computer/placeholder";
+import { SELF_HOST_URL } from "@/components/layout/self-host-banner";
 import { IllustrationFrame } from "@/components/onboarding/illustration-frame";
-import { Button } from "@/components/ui/button";
+import { LaptopIllustration } from "@/components/onboarding/laptop-illustration";
+import { OrganizationFlow } from "@/components/onboarding/organization-flow";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { type AgentProfile, agentListQueryOptions } from "@/lib/agents/queries";
 import { currentUserQueryOptions, needsOnboarding } from "@/lib/auth/queries";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { appConfig } from "@/lib/generated/application-config";
 import { completeOnboardingMutationOptions } from "@/lib/onboarding/mutations";
+import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
 
 export const Route = createFileRoute("/_authed/onboarding")({
@@ -161,14 +167,102 @@ function RosterStep() {
   );
 }
 
-/**
- * Where OpenBot can run and what can be made its own, for somebody trying it on their own machine.
- *
- * Empty while its content is being written (OB-02 in the product backlog). The slot and the rule for
- * when it appears are what exist so far.
+/*
+ * THE THREE SLIDES BELOW ARE FOR SOMEBODY TRYING OPENBOT ON THEIR OWN MACHINE, and only they see them
+ * (see `localEvaluation` in RouteComponent). They answer what that person is deciding: where their
+ * data is, whether their own agents fit, and what taking it to their organization involves (OB-02 in
+ * the product backlog). None of it is said to an organization's own people, who are past all three.
  */
-function LocalPathsStep() {
-  return <div className="w-full min-h-64" />;
+
+function LocalStep() {
+  return (
+    <div className="w-full flex flex-col items-center justify-center">
+      <h1 className="text-3xl font-semibold tracking-tight max-w-md text-center">
+        It runs on your machine
+      </h1>
+      {/*
+       * "Stored", and the model named, because "your data never leaves" would be untrue: every turn
+       * goes to the model provider this install was set up with. What stays is everything kept. No
+       * word about sign-in either: activating a local install signs you in to CopilotKit.
+       */}
+      <p className="mt-3 max-w-md text-center text-muted-foreground">
+        Your conversations, files and Bots are stored on this computer. Only
+        what you send to your model leaves it.
+      </p>
+      <div className="h-8" />
+      <IllustrationFrame
+        className="flex items-center justify-center px-8 py-12"
+        label={`A laptop running ${appConfig.brand.productName}`}
+      >
+        <LaptopIllustration />
+      </IllustrationFrame>
+    </div>
+  );
+}
+
+/** Every framework the New Bot wizard offers by name; "an agent you already run" is the sentence. */
+const FRAMEWORKS = WEB_HARNESSES.filter((harness) => harness.id !== "byo-url");
+
+function AgentsStep() {
+  return (
+    <div className="w-full flex flex-col items-center justify-center">
+      <h1 className="text-3xl font-semibold tracking-tight max-w-md text-center">
+        Bring the agents you already have
+      </h1>
+      <p className="mt-3 max-w-md text-center text-muted-foreground">
+        Any agent that speaks AG-UI joins as a Bot. Add one any time from Bots,
+        then New Bot.
+      </p>
+      <div className="h-8" />
+      <IllustrationFrame
+        className="flex flex-wrap justify-center gap-2 p-6"
+        label={`Frameworks that work as Bots: ${FRAMEWORKS.map((harness) => harness.name).join(", ")}`}
+      >
+        {FRAMEWORKS.map((harness) => (
+          <span
+            className="flex items-center gap-2 rounded-full bg-card px-3 py-1.5 text-sm"
+            key={harness.id}
+          >
+            <HarnessMark id={harness.mark} name={harness.name} />
+            {harness.name}
+          </span>
+        ))}
+      </IllustrationFrame>
+    </div>
+  );
+}
+
+function OrganizationStep() {
+  return (
+    <div className="w-full flex flex-col items-center justify-center">
+      <h1 className="text-3xl font-semibold tracking-tight max-w-md text-center">
+        Deploy it for your organization
+      </h1>
+      <p className="mt-3 max-w-md text-center text-muted-foreground">
+        One container image, or a Helm chart for EKS, GKE and AKS, with sign-in
+        through Google, Microsoft or Okta.
+      </p>
+      <div className="h-8" />
+      <IllustrationFrame
+        className="flex justify-center px-6 py-8"
+        label="Your people sign in with Google, Microsoft or Okta, and your organization gets its own rules, its own Bots and an audit trail"
+      >
+        <OrganizationFlow />
+      </IllustrationFrame>
+      {/*
+       * The one real control on these slides, so it sits outside the frame: a frame means picture.
+       * A new tab, because following it must not cost this person their place in onboarding.
+       */}
+      <a
+        className={cn(buttonVariants({ variant: "outline" }), "mt-6")}
+        href={SELF_HOST_URL}
+        rel="noopener noreferrer"
+        target="_blank"
+      >
+        Talk to an engineer
+      </a>
+    </div>
+  );
 }
 
 const STEPS: Array<() => React.ReactNode> = [
@@ -196,18 +290,23 @@ function RouteComponent() {
   const [ref, bounds] = useMeasure();
 
   /*
-   * The last slide is for somebody evaluating OpenBot locally, never for an organization's people:
+   * The last three slides are for somebody evaluating OpenBot locally, never for an organization's people:
    * the server says single-user mode, which an organization's deployment, always behind sign-in,
-   * cannot be in. Until the answer arrives the slide is left out, so a slow or failed request never
+   * cannot be in. Until the answer arrives they are left out, so a slow or failed request never
    * shows an organization's employees a page about deploying OpenBot themselves.
    *
    * NOT GATED ON `selfHostBanner` AS WELL. That flag is off for any deployment with a paid
    * Intelligence entitlement, and the stack `copilotkit local` installs runs on an enterprise
-   * evaluation licence, so every CLI evaluator, the person this slide is for, would never see it.
+   * evaluation licence, so every CLI evaluator, the person these slides are for, would never see them.
    */
   const { data: capabilities } = useQuery(deploymentCapabilitiesQueryOptions());
   const steps = capabilities?.localEvaluation
-    ? [...STEPS, () => <LocalPathsStep />]
+    ? [
+        ...STEPS,
+        () => <LocalStep />,
+        () => <AgentsStep />,
+        () => <OrganizationStep />,
+      ]
     : STEPS;
   const last = step === steps.length - 1;
 
