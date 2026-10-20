@@ -7,9 +7,10 @@ import {
   sanitiseForIntelligence,
   trimEvent,
 } from "@openbot/shared/recorder-masking";
+import { AGENT_TARGET_FIELD, type AgentTarget } from "../shared/agent-target";
 import { installActionCapture } from "./actions";
 import type { SensitivityTracker } from "./masking-context";
-import { createElementTracker, enrichStep } from "./targeting";
+import { agentTargetOf, createElementTracker, enrichStep } from "./targeting";
 
 const COALESCE_MS = 750;
 const DROP_REPORT_MS = 5_000;
@@ -26,11 +27,15 @@ const realTimers: Timers = {
 /** Mask, trim to EVENT_BUDGET_BYTES, then sanitise (NUL and lone surrogates), so the collector's own checks after beforeSend
  * (it refuses NUL with INVALID_EVENT and anything over 16 KiB with EVENT_TOO_LARGE) never drop an event; null only for an event
  * maskCollectorEvent cannot read, which is counted. `enrich` adds a click's or an edit's targeting (targeting.ts) first, so
- * the masking covers it too. The collector's `page` event is not a step: the service worker records each page change. */
+ * the masking covers it too. The collector's `page` event is not a step: the service worker records each page change. A
+ * click inside a chat message or tool call carries `agentTarget` (the ids CopilotKit's enricher reads) in a private field
+ * added after the masking, so the ids stay as the page wrote them for the service worker to match against the agent's
+ * messages; the service worker removes it. */
 export function collectorBeforeSend(
   tracker: SensitivityTracker,
   onDropped?: (reason: string) => void,
   enrich: (event: CapturedEvent) => CapturedEvent = (event) => event,
+  agentTarget: () => AgentTarget | null = () => null,
 ): (event: TrajectoryEvent) => TrajectoryEvent | null {
   return (event) => {
     const captured = event as CapturedEvent;
@@ -45,9 +50,17 @@ export function collectorBeforeSend(
       return null;
     }
     const trimmed = trimEvent(masked, EVENT_BUDGET_BYTES).event;
+    const value = sanitiseForIntelligence(trimmed.value);
+    const target = captured.name === "click" ? agentTarget() : null;
     return {
       ...trimmed,
-      value: sanitiseForIntelligence(trimmed.value),
+      value:
+        target &&
+        typeof value === "object" &&
+        value !== null &&
+        !Array.isArray(value)
+          ? { ...value, [AGENT_TARGET_FIELD]: target }
+          : value,
     } as TrajectoryEvent;
   };
 }
@@ -157,20 +170,24 @@ export function startEventCapture(options: {
   }
   const collector = createTrajectoryCollector({
     capture: { clicks: true, inputs: true, navigation: false, network: false },
-    beforeSend: collectorBeforeSend(tracker, countDrop, (event) =>
-      event.name === "click" || event.name === "input"
-        ? enrichStep(
-            event,
-            elements.elementFor(
-              event.name === "click"
-                ? "click"
-                : String(
-                    (event.value as { eventType?: unknown } | null)
-                      ?.eventType ?? "",
-                  ),
-            ),
-          )
-        : event,
+    beforeSend: collectorBeforeSend(
+      tracker,
+      countDrop,
+      (event) =>
+        event.name === "click" || event.name === "input"
+          ? enrichStep(
+              event,
+              elements.elementFor(
+                event.name === "click"
+                  ? "click"
+                  : String(
+                      (event.value as { eventType?: unknown } | null)
+                        ?.eventType ?? "",
+                    ),
+              ),
+            )
+          : event,
+      () => agentTargetOf(elements.elementFor("click")),
     ),
     send: coalescing,
     onError: (error) => countDrop(error.code),

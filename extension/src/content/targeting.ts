@@ -3,6 +3,7 @@
 // the step is masked, so the shared masking rules apply to all of it as they do to the rest of the step. Nothing here
 // ever reads a field's value into a name or a selector. A click names the element the person meant (meantElement): the
 // collector's own description of what was clicked (its tag, text and attributes) stays beside it as the collector wrote it.
+import type { AgentTarget } from "../shared/agent-target";
 
 /** Attributes a team puts on an element for tests and automation: the steadiest handle there is. */
 const TEST_ATTRIBUTES = [
@@ -515,4 +516,26 @@ export function enrichStep<E extends { name: string; value: unknown }>(
       ...rest,
     },
   };
+}
+
+/** The elements CopilotKit's click capture describes a click by (`@copilotkit/learning` clicks.ts `INTERACTIVE`): its
+ * enricher reads the chat message and tool call around that element, not around the node the pointer hit. */
+const COPILOTKIT_INTERACTIVE =
+  'button, a[href], input, select, textarea, label, summary, [role], [data-copilotkit-action], [contenteditable]:not([contenteditable="false"])';
+
+/** The chat message and tool call a click landed in, read exactly as CopilotKit reads them (`LearningBridge.enrich` on the
+ * element its click capture describes); null when the click is in neither. */
+export function agentTargetOf(clicked: Element | null): AgentTarget | null {
+  if (!clicked) return null;
+  const described = clicked.closest(COPILOTKIT_INTERACTIVE) ?? clicked;
+  const messageId =
+    described.closest("[data-message-id]")?.getAttribute("data-message-id") ??
+    null;
+  const toolCallId =
+    described
+      .closest("[data-tool-call-id]")
+      ?.getAttribute("data-tool-call-id") ?? null;
+  return messageId === null && toolCallId === null
+    ? null
+    : { messageId, toolCallId };
 }
