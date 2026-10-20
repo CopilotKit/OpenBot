@@ -8,7 +8,7 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-**Before upgrading.** Five things change for an existing deployment:
+**Before upgrading.** Six things change for an existing deployment:
 - A hosted computer's browser is now headed by default. It uses a little more memory than headless
   did; set `COMPUTER_BROWSER_MODE=headless` (Helm: `computers.browserMode: headless`) to keep the old
   behaviour.
@@ -31,6 +31,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - Migration `0056_sign_in_code_step` widens the check on `sign_in_requests.status` to allow
   `code_required` (below). A server and a computer must be upgraded together: an older computer has
   no `/sign-in/code`.
+- Migration `0057_app_access_requests` adds one table, `app_access_requests`, where a person's
+  request for an administrator to switch on a work app, grant it to a Bot, or connect a Shared app's
+  team account is kept, with who answered it and when. It starts empty and nothing is backfilled.
 
 ### A new Bot is made from a sheet that asks where it runs first
 
