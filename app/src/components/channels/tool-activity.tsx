@@ -1,13 +1,16 @@
+import { CopilotKitContext } from "@copilotkit/react-core/v2/context";
 import {
   IconFileText,
   IconPlug,
   IconSearch,
+  IconTool,
   IconWorld,
 } from "@tabler/icons-react";
+import { useCallback, useContext, useMemo, useSyncExternalStore } from "react";
 import { Streamdown } from "streamdown";
 import { PendingApprovals } from "@/components/approvals/inline-approval";
 import { markdownComponents } from "@/lib/markdown";
-import { readToolName } from "@/lib/plugins/tool-name";
+import { humanise, readToolName } from "@/lib/plugins/tool-name";
 import {
   asText,
   forDisplay,
@@ -35,16 +38,20 @@ export type TranscriptItem = VisibleChatItem | ToolGroup;
  * Fold adjacent tool calls into one row, so a reply that searched, read two pages and checked Drive
  * reads as one thing the Bot did rather than four lines before the answer.
  *
- * Only calls drawn as a plain line are folded: browser steps and connector (MCP) tools. A tool the
- * app draws itself, a chart or a request for help, stays where it is, and so does a refusal that
- * asks the person to connect their own account, because a question for the person must never sit
- * behind a disclosure. A connector call on its own keeps its own line; one browser step is still a
- * group, as it always was, so the row does not change shape when the second step arrives.
+ * Only calls drawn as a plain line are folded: browser steps, connector (MCP) tools, and any other
+ * tool the app has no component for, such as an external agent's `run_command`. A tool the app draws
+ * itself, a chart or a request for help, stays where it is, and so does a refusal that asks the
+ * person to connect their own account, because a question for the person must never sit behind a
+ * disclosure. A single call on its own keeps its own line; one browser step is still a group, as it
+ * always was, so the row does not change shape when the second step arrives.
+ *
+ * `isDrawn` says which tools the app draws itself; the transcript reads it from `useDrawnTool`.
  *
  * The group takes its first step's id, so the row keeps its identity while later steps stream in.
  */
 export function groupToolSteps(
   items: readonly VisibleChatItem[],
+  isDrawn: (name: string) => boolean,
 ): TranscriptItem[] {
   const grouped: TranscriptItem[] = [];
   let run: ToolItem[] = [];
@@ -56,7 +63,7 @@ export function groupToolSteps(
     run = [];
   };
   for (const item of items) {
-    if (item.kind === "tool" && foldable(item)) {
+    if (item.kind === "tool" && foldable(item, isDrawn)) {
       run.push(item);
       continue;
     }
@@ -67,10 +74,42 @@ export function groupToolSteps(
   return grouped;
 }
 
-function foldable(item: ToolItem): boolean {
+function foldable(item: ToolItem, isDrawn: (name: string) => boolean): boolean {
   if (isBrowserStep(item)) return true;
-  if (!item.toolCall.function.name.startsWith("mcp__")) return false;
+  const name = item.toolCall.function.name;
+  if (!name.startsWith("mcp__") && isDrawn(name)) return false;
   return !asksThePerson(item.result);
+}
+
+const NOTHING_DRAWN: readonly { name: string }[] = [];
+
+/**
+ * Whether the app draws a tool itself, read from CopilotKit's own renderer registry.
+ *
+ * Read from the registry rather than kept as a list here, because every `useRenderTool` and
+ * `useFrontendTool` already registers its name there, and a list would fall behind the first tool
+ * added without it. Taken from the context directly, not through `useCopilotKit`, because that
+ * throws outside a provider and the transcript is drawn without one in places. With no provider
+ * nothing is drawn. A `*` renderer draws every tool it is asked about, so nothing outside MCP folds.
+ */
+export function useDrawnTool(): (name: string) => boolean {
+  const copilotkit = useContext(CopilotKitContext)?.copilotkit;
+  const subscribe = useCallback(
+    (onChange: () => void) =>
+      copilotkit
+        ? copilotkit.subscribe({ onRenderToolCallsChanged: onChange })
+            .unsubscribe
+        : () => {},
+    [copilotkit],
+  );
+  const renderers = useSyncExternalStore(
+    subscribe,
+    () => copilotkit?.renderToolCalls ?? NOTHING_DRAWN,
+  );
+  return useMemo(() => {
+    const names = new Set(renderers.map((renderer) => renderer.name));
+    return names.has("*") ? () => true : (name) => names.has(name);
+  }, [renderers]);
 }
 
 /**
@@ -88,7 +127,7 @@ function asksThePerson(result: string | undefined): boolean {
   return readTeamBotConsent(body) !== null || readConnectPrompt(body) !== null;
 }
 
-type StepKind = "search" | "fetch" | "browser" | "connector";
+type StepKind = "search" | "fetch" | "browser" | "connector" | "tool";
 
 export type StepDetails = {
   id: string;
@@ -186,22 +225,26 @@ export function stepDetails(step: ToolItem): StepDetails {
   }
 
   const name = step.toolCall.function.name;
-  const [, server = "", ...rest] = name.split("__");
-  const role = researchRoleOfTool(server, rest.join("__"));
-  const { label, detail } = readToolName(name);
   const answer = step.result === undefined ? undefined : asText(step.result);
   const refused = answer?.startsWith(REFUSAL_MARKER) ?? false;
   const body = refused ? answer?.slice(REFUSAL_MARKER.length).trim() : answer;
-  const urls = role === "fetch" ? urlsOf(args) : [];
-  const base = {
+  const outcome = {
     id: step.id,
-    label,
     pending: step.result === undefined,
     failed: !refused && toolResultFailed(step.result),
     refused,
     inputs,
     ...(body ? { output: body } : {}),
   };
+  // Not a connector: a tool an external agent runs itself. Named in words, never as an identifier.
+  if (!name.startsWith("mcp__"))
+    return { ...outcome, kind: "tool", label: humanise(name), pages: 0 };
+
+  const [, server = "", ...rest] = name.split("__");
+  const role = researchRoleOfTool(server, rest.join("__"));
+  const { label, detail } = readToolName(name);
+  const urls = role === "fetch" ? urlsOf(args) : [];
+  const base = { ...outcome, label };
   if (role === "search") {
     const query = firstString(
       args.query,
@@ -276,6 +319,8 @@ export function summarise(steps: readonly StepDetails[]): string {
     phrases.push(
       `used ${plural(connectors.length, "connector", "connectors")}`,
     );
+  const tools = of("tool").length;
+  if (tools) phrases.push(`used ${plural(tools, "tool", "tools")}`);
   const sentence = joinPhrases(phrases);
   return sentence.charAt(0).toUpperCase() + sentence.slice(1);
 }
@@ -285,6 +330,7 @@ const KIND_ICONS = {
   fetch: IconFileText,
   browser: IconWorld,
   connector: IconPlug,
+  tool: IconTool,
 } as const;
 
 function StepIcon({
