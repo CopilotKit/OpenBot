@@ -15,6 +15,10 @@ import {
 } from "@/components/layout/page-shell";
 import { RowMark } from "@/components/layout/row-mark";
 import {
+  AccessRequestsSection,
+  usePendingRequestCounts,
+} from "@/components/plugins/access-requests";
+import {
   Item,
   ItemActions,
   ItemContent,
@@ -96,6 +100,11 @@ function summaryFor(
 function RouteComponent() {
   const plugins = useQuery(pluginsPageQueryOptions());
   const connections = useQuery(connectionsQueryOptions());
+  /*
+   * Requests waiting per app, so an administrator sees which app somebody is asking about from the
+   * list, without opening each one. Every request is also listed in full above the lists.
+   */
+  const requestCounts = usePendingRequestCounts();
 
   /*
    * PERSONAL ONLY: a Shared app's connection is the deployment's standing account, not something
@@ -128,6 +137,12 @@ function RouteComponent() {
         </p>
       ) : (
         <>
+          {/*
+           * First, because each one is somebody waiting. All of them, not only those about an app
+           * that is connected: an app nobody has switched on has no page of its own to list them on.
+           */}
+          <AccessRequestsSection />
+
           <PageSection
             description="Added for the whole deployment. Open one to set what it needs and which Bots hold its tools."
             title="Connected"
@@ -176,6 +191,9 @@ function RouteComponent() {
                           </ItemDescription>
                         </ItemContent>
                         <ItemActions>
+                          <PendingRequests
+                            count={requestCounts?.byApp[server.id] ?? 0}
+                          />
                           <span className="text-muted-foreground text-xs">
                             {summaryFor(
                               server,
@@ -226,6 +244,9 @@ function RouteComponent() {
                           <ItemDescription>{entry.summary}</ItemDescription>
                         </ItemContent>
                         <ItemActions>
+                          <PendingRequests
+                            count={requestCounts?.byApp[entry.key] ?? 0}
+                          />
                           <span className="text-muted-foreground text-xs">
                             Not added
                           </span>
@@ -293,5 +314,18 @@ function RouteComponent() {
         </>
       )}
     </PageShell>
+  );
+}
+
+/**
+ * "2 requests", beside a row's summary, in the foreground colour so it is the first thing on the
+ * row that reads as something to do. Nothing at zero: a count of nothing on every row is noise.
+ */
+function PendingRequests({ count }: { count: number }) {
+  if (count === 0) return null;
+  return (
+    <span className="font-medium text-foreground text-xs tabular-nums">
+      {count} {count === 1 ? "request" : "requests"}
+    </span>
   );
 }

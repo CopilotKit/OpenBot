@@ -13,6 +13,7 @@ import {
   PageSection,
   PageShell,
 } from "@/components/layout/page-shell";
+import { AccessRequestsSection } from "@/components/plugins/access-requests";
 import { AccountModeDialog } from "@/components/plugins/account-mode-dialog";
 import {
   BrokeredAccountRow,
@@ -611,6 +612,13 @@ function RouteComponent() {
           ) : null}
         </PageRows>
       </PageSection>
+
+      {/*
+       * People asking for this app: to switch it on, give it to a Bot, or connect its shared
+       * account. Only when somebody is; the section draws nothing otherwise. Requests name who
+       * asked — connections still name nobody.
+       */}
+      <AccessRequestsSection app={key} />
 
       <AccountModeDialog
         names={botNames}
