@@ -46,6 +46,11 @@ export type AppAccess = {
   state: AppAccessState;
   /** Whether this Bot holds any of the app's tools. */
   granted: boolean;
+  /**
+   * When the account this app runs in for this person was connected, or null. Read by the chat card
+   * to tell an account lost at the vendor from one connected again since. See `AppAccessCard`.
+   */
+  connectedAt: string | null;
   /** The request Request access files for this state; null where the next step is the person's. */
   requestKind: AppAccessRequestKind | null;
   /** This person's pending request of exactly that kind — drawn as "Requested". */

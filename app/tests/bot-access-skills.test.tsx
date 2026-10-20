@@ -73,6 +73,9 @@ function serving() {
       grants.push(`${init?.method ?? "GET"} ${url} ${init?.body ?? ""}`);
       return Response.json({ ok: true });
     }
+    if (url.includes("/api/plugins/for/") && url.endsWith("/apps")) {
+      return Response.json({ apps: [] });
+    }
     if (url.includes("/api/plugins/for/")) {
       return Response.json({ tools: [], skills: [] });
     }

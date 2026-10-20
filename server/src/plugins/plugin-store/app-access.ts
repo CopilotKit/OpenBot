@@ -348,6 +348,11 @@ export function appAccessMethods(context: StoreContext) {
       .flatMap((app) => app.rowIds);
     const usable = (row: { verified: boolean; probeAction: string | null }) =>
       !(row.probeAction !== null && !row.verified);
+    const fact = (row: {
+      verified: boolean;
+      probeAction: string | null;
+      connectedAt: Date | null;
+    }) => ({ usable: usable(row), connectedAt: iso(row.connectedAt) });
 
     const [personal, deployment, held] = await Promise.all([
       userId && toolkits.length > 0
@@ -356,6 +361,7 @@ export function appAccessMethods(context: StoreContext) {
               app: brokeredConnections.app,
               verified: brokeredConnections.verified,
               probeAction: brokeredConnections.probeAction,
+              connectedAt: brokeredConnections.connectedAt,
             })
             .from(brokeredConnections)
             .where(
@@ -373,6 +379,7 @@ export function appAccessMethods(context: StoreContext) {
               app: brokeredConnections.app,
               verified: brokeredConnections.verified,
               probeAction: brokeredConnections.probeAction,
+              connectedAt: brokeredConnections.connectedAt,
             })
             .from(brokeredConnections)
             .where(
@@ -388,6 +395,7 @@ export function appAccessMethods(context: StoreContext) {
             .select({
               serverId: mcpUserCredentials.serverId,
               revokedAt: credentialRows.revokedAt,
+              connectedAt: mcpUserCredentials.connectedAt,
             })
             .from(mcpUserCredentials)
             .innerJoin(
@@ -403,12 +411,18 @@ export function appAccessMethods(context: StoreContext) {
         : [],
     ]);
     return {
-      personalBrokered: new Map(personal.map((row) => [row.app, usable(row)])),
+      personalBrokered: new Map(personal.map((row) => [row.app, fact(row)])),
       deploymentBrokered: new Map(
-        deployment.map((row) => [row.app, usable(row)]),
+        deployment.map((row) => [row.app, fact(row)]),
       ),
       personalHeld: new Map(
-        held.map((row) => [row.serverId, row.revokedAt === null]),
+        held.map((row) => [
+          row.serverId,
+          {
+            usable: row.revokedAt === null,
+            connectedAt: iso(row.connectedAt),
+          },
+        ]),
       ),
     };
   }
@@ -463,9 +477,10 @@ export function appAccessMethods(context: StoreContext) {
         : [],
     ]);
     return apps.map((app) => {
-      const sharedUsable = app.toolkit
-        ? connections.deploymentBrokered.get(app.toolkit) === true
-        : false;
+      const teamAccount = app.toolkit
+        ? connections.deploymentBrokered.get(app.toolkit)
+        : undefined;
+      const sharedUsable = teamAccount?.usable === true;
       const personal =
         app.provider === "composio" && app.toolkit
           ? connections.personalBrokered.get(app.toolkit)
@@ -483,13 +498,10 @@ export function appAccessMethods(context: StoreContext) {
         catalogueAuth: app.entry?.auth ?? null,
         hasCredential: app.hasCredential,
         granted: [app.key, ...app.rowIds].some((id) => granted.has(id)),
-        personal: personal === undefined ? null : { usable: personal },
-        shared: app.toolkit
-          ? connections.deploymentBrokered.has(app.toolkit)
-            ? { usable: sharedUsable }
-            : null
-          : null,
+        personal: personal === undefined ? null : { usable: personal.usable },
+        shared: teamAccount ? { usable: sharedUsable } : null,
       };
+      const account = accountOf(facts);
       const state = appAccessState(facts);
       const requestKind = REQUEST_KIND_FOR[state];
       const request =
@@ -504,12 +516,18 @@ export function appAccessMethods(context: StoreContext) {
           displayName: app.title,
           logo: app.logo,
           provider: app.provider,
-          account: accountOf(facts),
+          account,
           connect: connectOf(facts),
           authScheme: app.provider === "composio" ? app.authScheme : null,
           accountMode: app.accountMode,
           state,
           granted: facts.granted,
+          connectedAt:
+            account === "shared"
+              ? (teamAccount?.connectedAt ?? null)
+              : account === "personal"
+                ? (personal?.connectedAt ?? null)
+                : null,
           requestKind,
           request: request
             ? {

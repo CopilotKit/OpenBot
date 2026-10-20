@@ -369,15 +369,20 @@ describe("what each app a Bot holds is, for the person asking", () => {
       userId: other,
       vendorUserId: other,
       verified: true,
+      connectedAt: new Date("2026-10-20T12:00:00.000Z"),
     });
     const mine = await json<{ apps: AppAccess[] }>(
       await appAs(person).request(`/api/plugins/for/${bot}/apps`),
     );
     expect(mine.apps[0]?.state).toBe("not_connected");
+    // Nothing of theirs leaks into mine, not even when they connected.
+    expect(mine.apps[0]?.connectedAt).toBeNull();
     const theirs = await json<{ apps: AppAccess[] }>(
       await appAs(other).request(`/api/plugins/for/${bot}/apps`),
     );
     expect(theirs.apps[0]?.state).toBe("ready");
+    // When, so a chat card over a lost account can tell a reconnection from the loss.
+    expect(theirs.apps[0]?.connectedAt).toBe("2026-10-20T12:00:00.000Z");
   });
 
   test("a Shared app with its team account connected is ready for everybody", async () => {
@@ -388,11 +393,14 @@ describe("what each app a Bot holds is, for the person asking", () => {
       holder: "deployment",
       vendorUserId: `openbot-deployment:${suite}`,
       verified: true,
+      connectedAt: new Date("2026-10-20T09:30:00.000Z"),
     });
     const { apps } = await json<{ apps: AppAccess[] }>(
       await appAs(person).request(`/api/plugins/for/${bot}/apps`),
     );
     expect(apps[0]?.state).toBe("ready");
+    // The team account's, since that is the account the app runs in for everybody.
+    expect(apps[0]?.connectedAt).toBe("2026-10-20T09:30:00.000Z");
   });
 
   test("with no Composio key every Composio app is switched off", async () => {

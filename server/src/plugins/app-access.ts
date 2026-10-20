@@ -108,6 +108,16 @@ export type AppAccess = {
   state: AppAccessState;
   /** Whether this Bot holds any of the app's tools. */
   granted: boolean;
+  /**
+   * When the account this app runs in for this person was connected — their own, or the team's for
+   * a Shared app — and null where none is, or where no account is involved.
+   *
+   * FOR THE ONE FACT THE STATE CANNOT CARRY. An account the vendor has lost still has its row here,
+   * so the state reads `ready`; a card drawn over the refusal that found out says Reconnect anyway.
+   * This is how that card tells "lost since the refusal" from "connected again since the refusal":
+   * a connection newer than the refusal is the reconnection, and the live state wins.
+   */
+  connectedAt: string | null;
   /** The request a press of Request access files for this state, and null where there is none. */
   requestKind: AppAccessRequestKind | null;
   /**
