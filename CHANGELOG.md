@@ -32,6 +32,15 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `code_required` (below). A server and a computer must be upgraded together: an older computer has
   no `/sign-in/code`.
 
+### A new desktop install starts its server again
+
+A desktop install of v0.2.0 stopped at start with `server stopped straight away (exit status: 1)` and
+`Cannot find module '../../../agent-computer/src/egress'`. The server imports its egress rules from
+`agent-computer`, and the desktop app did not copy that folder when it laid out the deployment. It
+does now, and a test fails if the deployment's code imports anything the desktop app does not copy.
+An install laid out by an earlier app is asked to finish installing when it starts; installing
+downloads the same release again with the missing folder. Settings and data are kept.
+
 ### A new Bot is made from a sheet that asks where it runs first
 
 New Bot opens a sheet instead of the four-screen wizard. It asks where the Bot will run, with Run it
