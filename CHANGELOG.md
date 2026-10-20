@@ -32,6 +32,29 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `code_required` (below). A server and a computer must be upgraded together: an older computer has
   no `/sign-in/code`.
 
+### A new Bot is made from a sheet that asks where it runs first
+
+New Bot opens a sheet instead of the four-screen wizard. It asks where the Bot will run, with Run it
+here chosen; a framework you run asks for its address next, and Continue checks from the server that
+something answers there before going on. The name, title, instructions and who can see it come
+last. A Bot given only a name gets a title and instructions the server accepts: for one that runs
+here, the instructions are a short prompt naming it. The frameworks list Claude Agent SDK, Google
+ADK, Google Antigravity and LangGraph first; AG2, Agno and Langroid now show their marks, and every
+mark sits on a light tile in dark mode.
+
+### A run of tool calls folds into one line
+
+Consecutive tool calls a Bot makes without drawing anything now collapse into one line ("Used 5
+tools") that opens to show each, as connector calls already did. Calls that draw an interface, and
+calls waiting on the person, still stand on their own.
+
+### Onboarding says which pictures are pictures, and tells a local install more
+
+The illustrations in onboarding sit in a muted frame and can no longer be clicked, tabbed into or
+read out as controls. On a single-user install, three more slides follow: that its data stays on
+the machine, which agents it can bring, and how to deploy it for an organization.
+`/api/capabilities` gains `localEvaluation`, true in single-user mode.
+
 ### An HTML-only email reaches its trigger as the sender wrote it
 
 An email trigger reads an HTML-only mail by stripping its tags, and the character references stayed:
