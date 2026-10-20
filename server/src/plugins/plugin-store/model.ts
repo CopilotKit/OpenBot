@@ -1104,7 +1104,8 @@ export type PluginStoreOptions = {
     },
     toolName: string,
     args: Record<string, unknown>,
-  ) => Promise<{ text: string; isError: boolean }>;
+    /** `accountGone` as `McpCallResult` carries it: the vendor lost the account this call ran in. */
+  ) => Promise<{ text: string; isError: boolean; accountGone?: true }>;
   /** Trading a refresh token for a short-lived access token. Defaults to a real HTTP exchange. */
   exchangeRefreshToken?: (input: {
     tokenUrl: string;

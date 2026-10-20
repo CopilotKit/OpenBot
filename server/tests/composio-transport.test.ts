@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { BrokerRefusalError } from "../src/plugins/broker";
+import {
+  BrokerAccountGoneError,
+  BrokerRefusalError,
+} from "../src/plugins/broker";
 import {
   askAction,
   type ComposioAction,
@@ -3221,6 +3224,50 @@ describe("calling one action", () => {
     // been joined to the vendor's or cut short of the remedy.
     expect(result.text).toBe(authored);
     expect(result.text).not.toContain("Invalid request");
+  });
+
+  test("an account the vendor lost travels as a fact on the result, beside its sentence", async () => {
+    /*
+     * The one authored condition the store acts on: it turns this result into a refusal that
+     * offers Reconnect. Read off a field rather than off the wording, so rephrasing the sentence
+     * cannot quietly stop the card being drawn — and set on nothing else.
+     */
+    const authored =
+      "Composio holds no connected account for this person and gmail, so GMAIL_FETCH_EMAILS was not run.";
+    useComposioClient(
+      recording({
+        execute: async () => {
+          throw new BrokerAccountGoneError(authored);
+        },
+      }).client,
+    );
+
+    const gone = await askAction(
+      { url: "composio://gmail", actorId: "user_asker" },
+      "GMAIL_FETCH_EMAILS",
+      { __version: "20260903_00" },
+    );
+    expect(gone.result).toMatchObject({
+      isError: true,
+      text: authored,
+      accountGone: true,
+    });
+    // Not a verdict on the key: a probe meeting this keeps its "could not find out".
+    expect(gone.answered).toBe(false);
+
+    useComposioClient(
+      recording({
+        execute: async () => {
+          throw new BrokerRefusalError("Some other authored refusal.");
+        },
+      }).client,
+    );
+    const other = await callTool(
+      { url: "composio://gmail", actorId: "user_asker" },
+      "GMAIL_FETCH_EMAILS",
+      { __version: "20260903_00" },
+    );
+    expect(other.accountGone).toBeUndefined();
   });
 
   test("a failure this deployment cannot explain still reaches for the vendor's words", async () => {

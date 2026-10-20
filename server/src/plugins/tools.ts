@@ -8,6 +8,10 @@ import {
   catalogueEntry,
   researchRoleFor,
 } from "./catalogue";
+import {
+  addressedTo,
+  SHOW_APP_ACCESS_TOOL,
+} from "@openbot/shared/connect-prompt";
 import { type ResearchRole, RESEARCH_TOOLS } from "@openbot/shared/research";
 import type { SelectableSkill } from "./selection";
 import {
@@ -100,10 +104,19 @@ export function grantedToolGuidance(
    */
   connectedButNotHeld: readonly string[] = [],
 ): string {
-  if (tools.length === 0 && connectedButNotHeld.length === 0) return "";
+  /*
+   * THE CARD TOOL IS NOT A SYSTEM. It is offered to every Bot so a missing app can be put in front of
+   * the person with the step that fixes it, and it reaches nothing — listed beside the vendors it
+   * would read as one more system this Bot "can reach directly, as the person asking". It is named
+   * below instead, at exactly the sentences that used to end on "an administrator can grant it".
+   */
+  const showsCards = tools.some((tool) => tool.name === SHOW_APP_ACCESS_TOOL);
+  const reaching = tools.filter((tool) => tool.name !== SHOW_APP_ACCESS_TOOL);
+  if (reaching.length === 0 && connectedButNotHeld.length === 0 && !showsCards)
+    return "";
 
   const bySystem = new Map<string, string[]>();
-  for (const tool of tools) {
+  for (const tool of reaching) {
     // `mcp__server__tool`, which is the shape the model is offered.
     const parts = tool.name.replace(/^mcp__/, "").split("__");
     const system = parts.length > 1 ? (parts[0] as string) : "this deployment";
@@ -116,10 +129,10 @@ export function grantedToolGuidance(
     (system) => !held.includes(system),
   );
 
-  const research = researchProviders(tools);
+  const research = researchProviders(reaching);
 
   return [
-    ...(tools.length > 0
+    ...(reaching.length > 0
       ? [
           "You can reach these systems directly, as the person asking, with their own access:",
         ]
@@ -127,7 +140,7 @@ export function grantedToolGuidance(
     ...[...bySystem.entries()].map(
       ([system, names]) => `- ${system}: ${names.join(", ")}`,
     ),
-    ...(tools.length > 0
+    ...(reaching.length > 0
       ? [
           "Use them for anything about those systems. Do NOT browse to one of their websites instead: your",
           "browser is signed in as nobody, so it sees less than these tools do and will meet a sign-in wall",
@@ -151,12 +164,35 @@ export function grantedToolGuidance(
      */
     ...(missing.length > 0
       ? [
-          ...(tools.length > 0 ? [""] : []),
+          ...(reaching.length > 0 ? [""] : []),
           `This deployment also connects to: ${missing.join(", ")}. You hold none of their tools.`,
-          "If a question needs one of them, say plainly that you have not been granted it and that an",
-          "administrator can grant it on that connector. Do NOT browse to its website: that is not the",
-          "same thing, your browser is signed in as nobody, and it will meet a sign-in wall that the",
-          "connector exists to avoid. Do not ask the person to sign in there either.",
+          ...(showsCards
+            ? [
+                `If a question needs one of them, call ${SHOW_APP_ACCESS_TOOL} with its name: that puts a card in`,
+                "front of the person saying you have not been granted it, with a button to ask an administrator",
+                "for it. Then say so in a sentence; the card already carries the rest.",
+              ]
+            : [
+                "If a question needs one of them, say plainly that you have not been granted it and that an",
+                "administrator can grant it on that connector.",
+              ]),
+          "Do NOT browse to its website: that is not the same thing, your browser is signed in as nobody,",
+          "and it will meet a sign-in wall that the connector exists to avoid. Do not ask the person to",
+          "sign in there either.",
+        ]
+      : []),
+    /*
+     * AN APP THIS DEPLOYMENT DOES NOT CONNECT AT ALL is the one case nothing above names, and the
+     * one a Bot met most bluntly: asked about Gmail on a deployment that has not switched it on, it
+     * had no word for Gmail anywhere in its instructions and either browsed or said it could not.
+     * The card says whether it can be switched on and lets the person ask for it.
+     */
+    ...(showsCards
+      ? [
+          ...(reaching.length > 0 || missing.length > 0 ? [""] : []),
+          `If the person needs a work app that is not named here at all (Gmail, Slack, Salesforce), call`,
+          `${SHOW_APP_ACCESS_TOOL} with its name before saying you cannot reach it: the card tells them whether it`,
+          "can be switched on and lets them ask an administrator. Do not browse to its website instead.",
         ]
       : []),
   ].join("\n");
@@ -281,7 +317,12 @@ export async function grantedTools(options: {
           error instanceof PluginRefusedError ||
           error instanceof ApprovalRefusedError
         ) {
-          return `${REFUSAL_MARKER} ${error.message}`;
+          /*
+           * A refusal that carries an app card names the Bot here, the one place both are known:
+           * in a channel several Bots answer in, the card has to ask what the app is for this
+           * person on THIS Bot, not on whichever one the surface happens to have declared.
+           */
+          return `${REFUSAL_MARKER} ${addressedTo(error.message, botId)}`;
         }
         /*
          * A contradiction in this deployment's own tables says nothing to a model.

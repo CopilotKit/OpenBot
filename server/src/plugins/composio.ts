@@ -1,5 +1,5 @@
 import { cutAtCodeUnits } from "../channels/text";
-import { brokerSentence, flagOf } from "./broker";
+import { BrokerAccountGoneError, brokerSentence, flagOf } from "./broker";
 import { type ListedTool, MAX_RESULT_CHARS, type McpCallResult } from "./mcp";
 
 /**
@@ -1767,6 +1767,18 @@ export async function askAction(
      * vendor's own words below, exactly as before.
      */
     const authored = brokerSentence(error);
+    /*
+     * THE ONE AUTHORED CONDITION THAT TRAVELS AS A FACT AS WELL AS A SENTENCE. An account the
+     * vendor no longer holds is something the person can fix themselves, from the conversation,
+     * and nothing on this deployment's rows knows it happened — so the result says so in a field
+     * the store reads, rather than leaving it to be recognised from the wording. See
+     * {@link BrokerAccountGoneError} and `McpCallResult.accountGone`.
+     */
+    if (authored !== null && error instanceof BrokerAccountGoneError)
+      return {
+        result: { ...failure(authored), accountGone: true },
+        answered: false,
+      };
     if (authored !== null) return unreached(authored);
 
     /*

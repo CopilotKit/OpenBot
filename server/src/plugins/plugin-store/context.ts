@@ -528,13 +528,22 @@ export function createStoreContext(options: PluginStoreOptions) {
         .limit(1);
       if (!connected) {
         /*
-         * Only the personal half carries a connect prompt. A Shared app's account belongs to the
-         * deployment, so the person reading this cannot connect it however clearly they are asked —
-         * a card offering them the button would be an invitation to a refusal.
+         * BOTH HALVES CARRY A PROMPT, AND ONLY ONE OF THEM OFFERS A CONNECT BUTTON. A Shared app's
+         * account belongs to the deployment, so the person reading this cannot connect it however
+         * clearly they are asked — a card offering them that button would be an invitation to a
+         * refusal. What the card draws is decided by the app's state for this person, read when it
+         * is drawn: for a missing team account that is Request access, which files the request an
+         * administrator answers by connecting it. The sentence stays for the model and for a reader
+         * with no card. `reason: "shared"` is only a hint; see `ConnectReason`.
          */
         throw new PluginRefusedError(
           resolved.ref.holder === "deployment"
-            ? `${row.title} is shared across this deployment and no account is connected to it yet. Ask an administrator to connect it.`
+            ? connectAppRefusal({
+                serverId: row.id,
+                title: row.title,
+                message: `${row.title} is shared across this deployment and no account is connected to it yet. Ask an administrator to connect it.`,
+                reason: "shared",
+              })
             : connectAppRefusal({
                 serverId: row.id,
                 title: row.title,

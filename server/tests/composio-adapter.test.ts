@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Composio, telemetry } from "@composio/core";
 import {
+  BrokerAccountGoneError,
   type BrokerConnection,
   BrokerRefusalError,
   BrokerUnconfiguredError,
@@ -3501,6 +3502,20 @@ describe("each vendor condition reaches the reader as its own remedy", () => {
       }
     });
   }
+
+  test("an account Composio no longer holds is raised as its own class, so a call can offer Reconnect", async () => {
+    const failure = await failureOf(
+      whileRunning(raising("ComposioConnectedAccountNotFoundError")),
+    );
+    expect(failure).toBeInstanceOf(BrokerAccountGoneError);
+    // Still an authored refusal, so every reader that prefers this deployment's sentence still does.
+    expect(failure).toBeInstanceOf(BrokerRefusalError);
+    // And nothing else is: the class is what the store acts on.
+    const other = await failureOf(
+      whileRunning(raising("ComposioRequestCancelledError")),
+    );
+    expect(other).not.toBeInstanceOf(BrokerAccountGoneError);
+  });
 
   /**
    * ONE VENDOR CLASS OVER EVERY WAY A FETCH CAN FAIL, which is a fact about the SDK rather than a

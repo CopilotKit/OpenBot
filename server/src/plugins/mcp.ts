@@ -432,6 +432,12 @@ export type McpCallResult = {
   /** True when the server itself reported the call as an error rather than failing to answer. */
   isError: boolean;
   truncated: boolean;
+  /**
+   * The vendor no longer holds the account this call was made in, though this deployment still has
+   * a row for it. Only the Composio transport sets it, and only on an `isError` result; the store
+   * turns it into a refusal that offers Reconnect. Absent everywhere else.
+   */
+  accountGone?: true;
 };
 
 /**

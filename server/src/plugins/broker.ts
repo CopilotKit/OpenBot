@@ -626,6 +626,26 @@ export class BrokerUnconfiguredError extends BrokerRefusalError {
 }
 
 /**
+ * An account this deployment still has a row for and the vendor no longer holds.
+ *
+ * ITS OWN CLASS BECAUSE IT IS THE ONE VENDOR CONDITION A PERSON CAN FIX FROM THE CONVERSATION. A
+ * grant withdrawn at the provider and an account removed in Composio's dashboard both arrive like
+ * this, nothing on this deployment records either — the `brokered_connections` row still stands and
+ * the app still reads as ready — and connecting again is the whole remedy. Telling it apart by type
+ * is what lets the tool call that met it hand the transcript a card with Reconnect on it instead of
+ * a sentence naming a settings page, without anything matching on the sentence.
+ *
+ * A {@link BrokerRefusalError} because it keeps that class's promise about the message, and because
+ * every reader that already prefers an authored sentence goes on preferring this one.
+ */
+export class BrokerAccountGoneError extends BrokerRefusalError {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = "BrokerAccountGoneError";
+  }
+}
+
+/**
  * A return address that could not bring anybody back, refused before a consent is spent on it.
  *
  * ITS OWN CLASS BECAUSE ITS REMEDY IS ITS OWN. Every other refusal in this file is about Composio —

@@ -1,3 +1,4 @@
+import { connectAppRefusal } from "@openbot/shared/connect-prompt";
 import { and, eq } from "drizzle-orm";
 import { currentApprovalContext } from "../../approvals/types";
 import { type AuditInitiator, recordAuditEvent } from "../../audit";
@@ -510,7 +511,11 @@ export function callMethods(context: StoreContext) {
         });
         const answer = { text: result.text, isError: result.isError };
         await approval?.complete(answer);
-        return answer;
+        /*
+         * The one answer that leaves this block without returning: see below the catch. Thrown
+         * from in here, the catch would write a second `mcp.call_failed` row about the same call.
+         */
+        if (!result.accountGone) return answer;
       } catch (error) {
         /*
          * Recorded, then rethrown unchanged. The caller's behaviour is unaffected — what changes is
@@ -546,6 +551,29 @@ export function callMethods(context: StoreContext) {
         });
         throw error;
       }
+      /*
+       * THE ACCOUNT IS GONE AT THE VENDOR, AND THE PERSON CAN PUT IT BACK FROM WHERE THEY ARE. The
+       * only way here: every other answer returned inside the block and every throw left the catch.
+       *
+       * Recorded above as the failure it is, with the vendor's condition in the trail. Handed on as
+       * a refusal carrying an app card rather than as the vendor's error, because nothing on this
+       * deployment's rows knows the account is gone — the app reads as ready on every screen — and
+       * the card is the one place the person is told, with Reconnect beside it. A Shared app's
+       * account is the deployment's, so there the card says an administrator has to reconnect it.
+       */
+      throw new PluginRefusedError(
+        connectAppRefusal({
+          serverId: row.id,
+          title: row.title,
+          message:
+            gatedMode === "shared"
+              ? `The shared ${row.title} account is no longer connected at the vendor, so this was not done. An administrator has to connect it again.`
+              : `Your ${row.title} account is no longer connected at the vendor, so this was not done. Reconnect it and ask again.`,
+          reason: gatedMode === "shared" ? "shared" : "reconnect",
+          at: new Date().toISOString(),
+        }),
+        null,
+      );
     },
   };
 }

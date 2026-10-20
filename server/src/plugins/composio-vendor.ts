@@ -1,4 +1,5 @@
 import {
+  BrokerAccountGoneError,
   type BrokerApp,
   type BrokerConnection,
   BrokerRefusalError,
@@ -1676,8 +1677,13 @@ function vendorRefusal(
      * neither; connecting again is what puts an account back under the row.
      */
     case "ComposioConnectedAccountNotFoundError":
-      return refusal(
+      /*
+       * Raised as its own class so the tool call that met it can put Reconnect in front of the
+       * person rather than this sentence alone. See {@link BrokerAccountGoneError}.
+       */
+      return new BrokerAccountGoneError(
         `Composio holds no connected account for this person and ${app}, so ${outcome}. A grant withdrawn at the provider and an account removed in Composio's own dashboard both read exactly like this, and a retry reaches neither: connecting ${app} again on this deployment's Connected accounts page is what restores it.`,
+        { cause: error },
       );
 
     /*

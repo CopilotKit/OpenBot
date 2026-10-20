@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  addressedTo,
   CONNECT_APP_MARKER,
   connectAppRefusal,
   readConnectPrompt,
@@ -56,5 +57,67 @@ describe("text that is not one", () => {
 
   test("undefined reads as no prompt", () => {
     expect(readConnectPrompt(undefined)).toBeNull();
+  });
+});
+
+describe("the Bot, the reason and the moment it carries", () => {
+  test("survive the round trip, and are left out when absent", () => {
+    const text = connectAppRefusal({
+      serverId: "composio-gmail",
+      title: "Gmail",
+      message: "Your Gmail account is no longer connected at the vendor.",
+      agentId: "expenses",
+      reason: "reconnect",
+      at: "2026-10-20T12:00:00.000Z",
+    });
+    expect(readConnectPrompt(text)).toEqual({
+      serverId: "composio-gmail",
+      title: "Gmail",
+      message: "Your Gmail account is no longer connected at the vendor.",
+      agentId: "expenses",
+      reason: "reconnect",
+      at: "2026-10-20T12:00:00.000Z",
+    });
+    expect(connectAppRefusal({ serverId: "s", title: "T", message: "m" })).toBe(
+      `${CONNECT_APP_MARKER}{"serverId":"s","title":"T"} m`,
+    );
+  });
+
+  test("a field of the wrong shape is dropped, and the prompt still names its app", () => {
+    const prompt = readConnectPrompt(
+      `${CONNECT_APP_MARKER}{"serverId":"composio-gmail","title":"Gmail","agentId":7,"reason":"grant me","at":"yesterday"} hello`,
+    );
+    expect(prompt).toEqual({
+      serverId: "composio-gmail",
+      title: "Gmail",
+      message: "hello",
+    });
+  });
+
+  test("addressedTo names the Bot on a prompt that names none, and leaves everything else alone", () => {
+    const bare = connectAppRefusal({
+      serverId: "notion",
+      title: "Notion",
+      message: "You have not connected your Notion account.",
+      reason: "shared",
+    });
+    expect(readConnectPrompt(addressedTo(bare, "expenses"))).toEqual({
+      serverId: "notion",
+      title: "Notion",
+      message: "You have not connected your Notion account.",
+      reason: "shared",
+      agentId: "expenses",
+    });
+
+    const named = connectAppRefusal({
+      serverId: "notion",
+      title: "Notion",
+      message: "m",
+      agentId: "travel",
+    });
+    expect(addressedTo(named, "expenses")).toBe(named);
+    expect(addressedTo("That tool is not granted.", "expenses")).toBe(
+      "That tool is not granted.",
+    );
   });
 });

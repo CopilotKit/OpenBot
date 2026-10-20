@@ -10,7 +10,12 @@ import {
   mcpServers,
   mcpTools,
 } from "../src/db/schema";
-import type { ConnectedAppBroker } from "../src/plugins/broker";
+import { readConnectPrompt } from "@openbot/shared/connect-prompt";
+import { auditEvents } from "../src/db/schema";
+import {
+  BrokerAccountGoneError,
+  type ConnectedAppBroker,
+} from "../src/plugins/broker";
 import { useComposioClient } from "../src/plugins/composio";
 import { createPluginStore } from "../src/plugins/store";
 import { expectOnlyRefusal } from "./helpers/refusals";
@@ -181,6 +186,12 @@ describe("a shared app", () => {
         (error: Error) => error.message,
       );
     expectOnlyRefusal(said, "sharedNotConnected", "Team GitHub");
+    // And it carries the card, which asks an administrator rather than offering Connect.
+    expect(readConnectPrompt(said)).toMatchObject({
+      serverId: app,
+      title: "Team GitHub",
+      reason: "shared",
+    });
   });
 
   test("offboarding the admin who connected it leaves it in place", async () => {
@@ -537,5 +548,95 @@ describe("a duplicate row at an app's url", () => {
       { id: app, accountMode: "personal" },
       { id: duplicate, accountMode: "shared" },
     ]);
+  });
+});
+
+/*
+ * THE ACCOUNT GONE AT THE VENDOR. Nothing on this deployment's rows knows it happened, so the call
+ * that meets it is the only place the person can be told: refused with the app card, `reconnect`
+ * for their own account and `shared` for the team's, stamped with when — and audited once, as the
+ * failure it is.
+ */
+describe("an account the vendor no longer holds", () => {
+  const gone = () =>
+    useComposioClient({
+      listActions: async () => [],
+      execute: async () => {
+        throw new BrokerAccountGoneError(
+          "Composio holds no connected account for this person and team-gh, so GITHUB_LIST_ISSUES was not run.",
+        );
+      },
+    });
+
+  /* Counted before and after: the trail is not cleaned between tests, which share the app id. */
+  const failures = async () =>
+    (
+      await database
+        .select({ eventType: auditEvents.eventType })
+        .from(auditEvents)
+        .where(eq(auditEvents.targetId, `${app}/GITHUB_LIST_ISSUES`))
+    ).filter((row) => row.eventType === "mcp.call_failed").length;
+
+  test("on a Shared app: refused with a card saying an administrator has to connect it again", async () => {
+    const store = freshStore();
+    await seedShared(store, true);
+    gone();
+    const already = await failures();
+    const before = Date.now();
+    const said = await store
+      .callTool({
+        ref: `${app}/GITHUB_LIST_ISSUES`,
+        args: {},
+        botId: bot,
+        actorId: asker,
+      })
+      .then(
+        () => "called",
+        (error: Error) => error.message,
+      );
+    const prompt = readConnectPrompt(said);
+    expect(prompt).toMatchObject({
+      serverId: app,
+      title: "Team GitHub",
+      reason: "shared",
+    });
+    expect(prompt?.message).toContain(
+      "An administrator has to connect it again",
+    );
+    expect(Date.parse(prompt?.at ?? "")).toBeGreaterThanOrEqual(before - 1000);
+    expect(await failures()).toBe(already + 1);
+  });
+
+  test("on a personal app: refused with a card offering Reconnect", async () => {
+    const store = freshStore();
+    await seedShared(store, false);
+    await database
+      .update(mcpServers)
+      .set({ accountMode: "personal", sharedVendorUserId: null })
+      .where(eq(mcpServers.id, app));
+    await database.insert(brokeredConnections).values({
+      provider: "composio",
+      app,
+      holder: "person",
+      userId: asker,
+      vendorUserId: asker,
+    });
+    gone();
+    const said = await store
+      .callTool({
+        ref: `${app}/GITHUB_LIST_ISSUES`,
+        args: {},
+        botId: bot,
+        actorId: asker,
+      })
+      .then(
+        () => "called",
+        (error: Error) => error.message,
+      );
+    expect(readConnectPrompt(said)).toMatchObject({
+      serverId: app,
+      reason: "reconnect",
+    });
+    expect(said).toContain("Reconnect it and ask again");
   });
 });

@@ -179,6 +179,7 @@ import { createIntelligenceMemory } from "./memory/intelligence";
 import { createMemoryStore } from "./memory/store";
 import { reportModelAvailability } from "./model-availability-check";
 import { memoryTools } from "./memory/tools";
+import { appAccessTools } from "./plugins/app-access-tool";
 import { createSignInNotifier, createSignInResumer } from "./passwords/resume";
 import { createSignInService } from "./passwords/service";
 import { createPasswordStore } from "./passwords/store";
@@ -1282,6 +1283,17 @@ const loadToolsForActor =
       ingestion: memoryIngestion,
       ownerUserId: actorId,
       agentId: botId,
+    }),
+    /*
+     * Held by every Bot, granted or not: how a Bot puts an app it cannot reach in front of the
+     * person with the step that fixes it, instead of naming an administrator. A read; see the file.
+     */
+    ...appAccessTools({
+      store: pluginStore,
+      botId,
+      actorId,
+      composioConfigured: Boolean(composio),
+      ...(composio ? { directory: () => composio.broker.listApps() } : {}),
     }),
     ...(await grantedTools({
       store: pluginStore,
