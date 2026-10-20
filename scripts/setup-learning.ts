@@ -228,8 +228,7 @@ export async function setupLearning(
       "The selected project is invalid. Run npx --yes copilotkit@latest project select again.",
     );
   }
-  // A saved record alone does not prove a stale CPK key belongs to it. Re-provision here.
-  // CLI project select removes INTELLIGENCE_API_KEY, hence the precondition above.
+  // No runtime key is available. Provision one for the saved project before assigning Learning.
   const provision = await run(
     ["project", "select", "--project", projectId, "--json"],
     directory,
@@ -286,11 +285,7 @@ export async function setupLearning(
       "The CLI did not write a runtime key. Run project select and this helper again.",
     );
   }
-  const content = upsert(
-    upsert(current, "INTELLIGENCE_API_KEY", key),
-    CONTAINER,
-    "openbot",
-  );
+  const content = upsert(current, CONTAINER, "openbot");
   await saveEnvironment(envPath, content);
   return "configured";
 }

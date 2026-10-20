@@ -980,7 +980,7 @@ function runtimeCapabilities(environment: Environment): RuntimeCapabilities {
   const missing = Object.entries({
     INTELLIGENCE_API_URL: settings.apiUrl,
     INTELLIGENCE_GATEWAY_WS_URL: settings.gatewayWsUrl,
-    INTELLIGENCE_API_KEY: settings.apiKey,
+    "CPK_INTELLIGENCE_API_KEY (or INTELLIGENCE_API_KEY)": settings.apiKey,
   })
     .filter(([, value]) => !value)
     .map(([name]) => name);

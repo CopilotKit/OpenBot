@@ -132,7 +132,7 @@ describe("deployment configuration", () => {
     delete environment[name];
 
     expect(() => loadConfig(environment)).toThrow(
-      `CopilotKit Intelligence is required and is not configured. Missing: ${name}`,
+      `CopilotKit Intelligence is required and is not configured. Missing: ${name === "INTELLIGENCE_API_KEY" ? "CPK_INTELLIGENCE_API_KEY (or INTELLIGENCE_API_KEY)" : name}`,
     );
   });
 

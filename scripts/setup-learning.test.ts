@@ -132,7 +132,8 @@ test("fresh managed setup creates and verifies the selected project's container 
   const content = await readFile(f.envPath, "utf8");
   expect(content).toContain("# Keep my other configuration");
   expect(parseEnv(content)).toMatchObject({
-    INTELLIGENCE_API_KEY: key,
+    CPK_INTELLIGENCE_API_KEY: key,
+    INTELLIGENCE_API_KEY: "",
     CPK_INTELLIGENCE_LEARNING_CONTAINER_ID: "openbot",
     OPENAI_API_KEY: "synthetic-model",
   });
