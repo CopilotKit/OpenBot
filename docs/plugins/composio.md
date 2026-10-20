@@ -514,7 +514,31 @@ page and a card in a conversation say the same thing a call would find:
 
 "Connected" is what this deployment last recorded — the same `verified` and probe columns the
 Connected accounts page reads. Nothing asks the vendor per page load, so an account ended in
-Composio's dashboard reads as `ready` until the next call or re-check finds out.
+Composio's dashboard reads as `ready` until the next call or re-check finds out — and the call that
+finds out is refused with a card offering **Reconnect** (below).
+
+On the Bot's page, Connect opens the app's consent screen in a new tab through the same connect route
+Settings uses, and the row turns ready once the connection is recorded. An app connected with a typed
+key, and Reconnect on a Composio app (whose row has to be disconnected before a new account can be
+attached), go to the app's own page under `/settings/connected-accounts` instead.
+
+### In a conversation
+
+A Bot that needs an app it cannot use puts a card in the transcript naming the app, its state and the
+next step, drawn from the same state as the Bot's page:
+
+- a call refused because the person has not connected the app;
+- a call refused because a Shared app's team account is not connected — **Request access** rather
+  than the sentence "Ask an administrator to connect it.";
+- a call Composio answered with "no connected account" — **Reconnect**, or for a Shared app a line
+  saying an administrator has to connect it again;
+- the `show_app_access` tool, which every Bot holds and is told to call for an app it holds nothing
+  for, switched off or not granted — **Request access**.
+
+The card asks `GET /api/plugins/for/:agentId/apps/:app` for the Bot that made the call when it is
+drawn, so a card scrolled back to later shows what is true now. The one case it takes the refusal's
+word over the live state is the lost account, which the server cannot see; a connection made after
+the refusal ends that. The card is drawn in the transcript, never folded into the "Used N tools" line.
 
 `GET /api/plugins/for/:agentId/apps` lists every app the Bot holds, including a grant whose app is
 gone; `GET /api/plugins/for/:agentId/apps/:app` answers for one app by key or by name, held or not.
@@ -531,7 +555,8 @@ the app does not need. Asking twice answers with the request already waiting: on
 per person, app, Bot and kind, held by a unique index rather than a check, so two replicas cannot
 both file one. A person can withdraw their own.
 
-Requests wait on the app's own page under `/admin/plugins`, with a count on the Plugins list. They
+Requests wait on the app's own page under `/admin/plugins`, and all of them at the top of the
+Plugins list, with a count on each app's row — an app nobody has switched on has no page of its own. They
 show who asked and for which Bot — they asked — and nothing about anybody's connections.
 **Approve** does what was asked in the same press:
 

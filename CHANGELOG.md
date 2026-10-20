@@ -35,6 +35,22 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   request for an administrator to switch on a work app, grant it to a Bot, or connect a Shared app's
   team account is kept, with who answered it and when. It starts empty and nothing is backfilled.
 
+### Each app on a Bot says whether you can use it, and you can ask an administrator for the rest
+
+A Bot's page now says, for every work app the Bot holds, what that app is for the person looking:
+ready, not connected yet, needing reconnecting, waiting on your organisation's shared account, turned
+off by an administrator, or not given to this Bot. Each comes with the one thing you can do about it —
+Connect or Reconnect your own account, or Request access where only an administrator can help — and
+apps are named by their own name ("Gmail", not "Composio Gmail"). In a conversation, a Bot that needs
+an app it cannot use now puts the same card in front of you instead of a sentence: an account you have
+not connected, a Shared app with no team account, an account the vendor no longer holds, and — through
+a new `show_app_access` tool every Bot holds — an app that is switched off or not granted to it. The
+card reads the app's current state when it is drawn, so it never offers a step already taken.
+Administrators see waiting requests at the top of Plugins, a count on each app's row, and a Requests
+section on the app's own page, where Approve switches the app on and grants it to the Bot in one press
+(or says what has to be done first) and Dismiss closes the request. Requests name who asked; nobody's
+connection status is shown to administrators.
+
 ### A new Bot is made from a sheet that asks where it runs first
 
 New Bot opens a sheet instead of the four-screen wizard. It asks where the Bot will run, with Run it
