@@ -150,9 +150,11 @@ function isSuggestion(input: unknown): boolean {
   );
 }
 
+/** The event the library applies: a copy, since applying a state patch can change the values it inserts, and the
+ * capture's own observation is never changed. */
 function normalise(raw: unknown): BaseEvent | null {
   if (!isRecord(raw) || typeof raw.type !== "string") return null;
-  const event: Record<string, unknown> = { ...raw };
+  const event: Record<string, unknown> = structuredClone(raw);
   for (const field of ROUTING_FIELDS) delete event[field];
   if (!RUN_IDENTITY_EVENTS.has(event.type as string)) {
     delete event.threadId;
