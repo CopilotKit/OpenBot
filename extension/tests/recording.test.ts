@@ -381,6 +381,7 @@ function doubles(): Partial<RecordingDeps> {
           network.pageTabs.push(tabId);
           network.recorded.push(recorded);
         },
+        recordPageAgent: () => {},
         stop: async () => {
           network.calls.push("stop");
           await pass("networkStop");

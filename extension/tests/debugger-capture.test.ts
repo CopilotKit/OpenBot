@@ -147,6 +147,7 @@ function captureDeps() {
     },
     writeStarted: (id: string) => started.push(id),
     writeEnded: (id: string) => ended.push(id),
+    agent: () => {},
     status: (mode: NetworkMode | "stopped", reason?: string) =>
       statuses.push([mode, reason]),
     digests: () => digests,

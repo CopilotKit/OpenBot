@@ -81,6 +81,7 @@ beforeEach(() => {
       writeEnded: (id) => steps.writeEnded(id),
       status: () => {},
       digests: () => new Set(),
+      agent: () => {},
     },
     { fallback: pageFallback },
   );

@@ -12,6 +12,7 @@ import {
   textBody,
   unavailableBody,
 } from "../../shared/network-body";
+import { requestKey, type RunVerdict } from "./agent";
 import { callSignature, type RepeatMemory, screenCall } from "./screen";
 
 /** A tab, or a frame's own session inside it (flattened auto-attach: cross-site iframes run in their own process). */
@@ -100,12 +101,21 @@ function decodeBase64(data: string): string {
   return new TextDecoder().decode(bytes);
 }
 
+/** What the AG-UI capture (agent.ts) knows of a request: an agent run is never a step's call, nor a write in flight. */
+export type AgentRuns = {
+  /** At requestWillBeSent: a run or a likely one (a candidate) is no write in flight; a body still being read is. */
+  kind(key: string): "run" | "candidate" | "pending" | null;
+  /** Whether the request is an agent run, once its answer decided, and its body when that capture read it. */
+  inspect(key: string): RunVerdict | undefined;
+  release(key: string): void;
+};
+
 /**
  * Follows requests per debuggee from `Network.requestWillBeSent` to `Network.loadingFinished` or `loadingFailed`, and
  * hands every finished fetch, XHR or top-frame document request that passed the screens to `call`; a write comes with
  * its bodies, read only then. `writeStarted` and `writeEnded` bracket each write from its start until `call` had it (or
  * it was screened out), so a step waits for a save still in flight. `ignore` names URLs never recorded (OpenBot's own);
- * `topFrame` answers a tab's main frame id.
+ * `topFrame` answers a tab's main frame id. An AG-UI run (`agent`) is none of these: the agent events have it.
  */
 export function createRequestTracker(options: {
   ignore(url: string): boolean;
@@ -115,6 +125,7 @@ export function createRequestTracker(options: {
   writeEnded(id: string): void;
   repeats: RepeatMemory;
   topFrame(tabId: number): Promise<string | undefined>;
+  agent?: AgentRuns;
 }) {
   const pending = new Map<string, Pending>();
   /** The writes in flight, by key, until `call` had them. */
@@ -122,10 +133,14 @@ export function createRequestTracker(options: {
   const endWrite = (key: string) => {
     if (writes.delete(key)) options.writeEnded(key);
   };
-  const keyOf = (target: Debuggee, requestId: string) =>
-    `${target.tabId}/${target.sessionId ?? ""}/${requestId}`;
+  const keyOf = requestKey;
 
-  async function requestBody(request: Pending): Promise<NetworkBody> {
+  /** The request's body; `asked` is Chrome's answer to the AG-UI capture's Network.getRequestPostData, when it
+   * already asked for this one. */
+  async function requestBody(
+    request: Pending,
+    asked?: Promise<unknown>,
+  ): Promise<NetworkBody> {
     const type = headerValue(request.headers, "content-type");
     // A body sent without a content type is the page's own text (fetch labels a string body text/plain).
     if (type !== undefined && !isReadableBody(type))
@@ -133,13 +148,10 @@ export function createRequestTracker(options: {
     if (request.postData !== undefined) return textBody(request.postData);
     if (!request.hasPostData) return { status: "empty" };
     try {
-      const answer = await options.send(
-        request.target,
-        "Network.getRequestPostData",
-        {
+      const answer = await (asked ??
+        options.send(request.target, "Network.getRequestPostData", {
           requestId: request.requestId,
-        },
-      );
+        }));
       return textBody(
         text(isRecord(answer) ? answer.postData : undefined) ?? "",
       );
@@ -191,6 +203,11 @@ export function createRequestTracker(options: {
       const top = await options.topFrame(request.target.tabId);
       if (top === undefined || request.frameId !== top) return;
     }
+    // An agent run is the agent events' (agent.ts): never a step's call.
+    const agent =
+      request.method === "POST" ? options.agent?.inspect(key) : undefined;
+    options.agent?.release(key);
+    if (agent?.value === true) return;
     const verdict = screenCall({
       url: request.url,
       method: request.method,
@@ -217,10 +234,15 @@ export function createRequestTracker(options: {
       options.call(timing);
       return;
     }
-    options.call({
-      ...timing,
-      event: await networkEvent(request, outcome, finishedAt),
-    });
+    const event = await networkEvent(
+      request,
+      outcome,
+      finishedAt,
+      agent?.postData,
+    );
+    // A candidate is a run once its answer's first event was AG-UI: decided by now, unless its answer is still open.
+    if (agent && (agent.value ?? (await agent.promise))) return;
+    options.call({ ...timing, event });
     endWrite(key);
   }
 
@@ -229,9 +251,10 @@ export function createRequestTracker(options: {
     request: Pending,
     outcome: "ok" | "error" | "aborted",
     finishedAt: number,
+    asked?: Promise<unknown>,
   ): Promise<CapturedEvent> {
     const [sent, received] = await Promise.all([
-      requestBody(request),
+      requestBody(request, asked),
       outcome === "ok"
         ? responseBody(request)
         : Promise.resolve(unavailableBody("no-response")),
@@ -359,10 +382,13 @@ export function createRequestTracker(options: {
                   )
                 : false,
           });
+          const agent = options.agent?.kind(key);
           if (
             type !== undefined &&
             RECORDED_TYPES.has(type) &&
             WRITE_METHODS.has(method) &&
+            agent !== "run" &&
+            agent !== "candidate" &&
             !writes.has(key)
           ) {
             writes.add(key);
@@ -393,6 +419,10 @@ export function createRequestTracker(options: {
           settle(target, raw, raw.canceled === true ? "aborted" : "error");
           return;
       }
+    },
+    /** The AG-UI capture read a body late and found an agent run: no step waits for it any longer. */
+    agentRun(key: string): void {
+      endWrite(key);
     },
     /** A tab that closed: its calls still in flight never finish. */
     forgetTab(tabId: number): void {

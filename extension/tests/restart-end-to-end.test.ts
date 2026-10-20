@@ -151,6 +151,7 @@ function doubles(): Partial<RecordingDeps> {
       resume: async () => "debugger",
       action: () => {},
       recordPageEvent: async () => {},
+      recordPageAgent: () => {},
       stop: async () => {},
     }),
     createPageFallback: () => ({

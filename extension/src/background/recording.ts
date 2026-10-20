@@ -53,6 +53,8 @@ import {
   writeLocal,
   writeSession,
 } from "../shared/storage";
+import { type AgentEvents, createAgentEvents } from "./agent/events";
+import type { AgentObservation } from "./agent/observation";
 import { showBadge } from "./badge";
 import {
   type ConnectionLoss,
@@ -89,6 +91,7 @@ type Timers = {
 
 export type RecordingDeps = {
   createNetworkCapture: typeof createNetworkCapture;
+  createAgentEvents: typeof createAgentEvents;
   createPageFallback: typeof createPageFallback;
   acceptPageNetworkEvent: typeof acceptPageNetworkEvent;
   readPolicy: typeof readPolicy;
@@ -399,6 +402,7 @@ export async function recorderState(): Promise<RecorderState> {
 
 const defaultDeps: RecordingDeps = {
   createNetworkCapture,
+  createAgentEvents,
   createPageFallback,
   acceptPageNetworkEvent,
   readPolicy,
@@ -469,6 +473,9 @@ export function installRecording(
   };
   /** The live recording's steps, held until each one's save (if any) is known (steps.ts). */
   let steps: StepAssembler | null = null;
+  /** The live recording's agent side: the AG-UI the network capture observes, as CopilotKit's own events, placed among
+   * the steps by time. A fresh one with each set of steps. */
+  let agentEvents: AgentEvents | null = null;
   /** The recording a Start over is leaving, while it waits for the document's port: a second Start over is refused. */
   let restartingFrom: Live | null = null;
   /** Set while Start over saves and makes the switch to the new recording: a stop waits for it, so the document and the
@@ -955,10 +962,11 @@ export function installRecording(
     };
   }
 
-  /** A new set of held steps for the live recording; the previous one's are sent first. */
+  /** A new set of held steps for the live recording, with its own agent events; the previous one's are sent first. */
   function openSteps(): StepAssembler {
     steps?.flush();
     steps?.clear();
+    agentEvents?.stop();
     const assembler = createStepAssembler({
       emit: (event) => {
         if (steps === assembler) forwardEvent(event);
@@ -967,6 +975,13 @@ export function installRecording(
       now: deps.now,
     });
     steps = assembler;
+    agentEvents = deps.createAgentEvents({
+      emit: (tabId, event) => {
+        if (steps === assembler) assembler.place(tabId, event);
+      },
+      digests: () => digests,
+      now: deps.now,
+    });
     return assembler;
   }
 
@@ -977,6 +992,8 @@ export function installRecording(
     held.flush();
     held.clear();
     if (steps === held) steps = null;
+    agentEvents?.stop();
+    agentEvents = null;
   }
 
   /** The page a tab is on when a recording starts in it: its first step. */
@@ -1006,6 +1023,9 @@ export function installRecording(
     writeStarted: (id, tabId, startedAt) =>
       steps?.writeStarted(id, tabId, startedAt),
     writeEnded: (id) => steps?.writeEnded(id),
+    agent: (observation) => {
+      if (live) agentEvents?.observe(observation);
+    },
     status: (mode, reason) => {
       networkMode = mode;
       if (state.phase === "starting" || state.phase === "recording")
@@ -1176,6 +1196,8 @@ export function installRecording(
       networkMode = "off";
       steps?.clear();
       steps = null;
+      agentEvents?.stop();
+      agentEvents = null;
       forgetAddresses();
       if (capture)
         await capture.stop().catch(report("stopping network capture"));
@@ -2071,7 +2093,12 @@ export function installRecording(
           forwardEvent(event);
           return;
         }
-        steps?.step(tabId, event, port.sender?.frameId !== 0);
+        // A click takes the agent context CopilotKit adds to one before the steps hold it.
+        const step =
+          event.name === "click" && agentEvents
+            ? agentEvents.enrichClick(tabId, event)
+            : event;
+        steps?.step(tabId, step, port.sender?.frameId !== 0);
         if (ACTION_EVENTS.has(event.name)) countAction();
         return;
       }
@@ -2123,6 +2150,8 @@ export function installRecording(
     if (!state.tabIds.includes(tabId)) return;
     if (frameId === 0) recordTopNavigation(details, kind);
     if (kind !== "commit") return;
+    // A new document in the top frame: the page's Threads went with the old one.
+    if (frameId === 0) agentEvents?.tabNavigated(tabId);
     // The script's own guard makes a repeat harmless; a frame Chrome refuses (an opaque sandboxed one) is skipped.
     void injectRecordingScripts(tabId, live.recordingId, [frameId]).catch(
       () => undefined,
@@ -2209,7 +2238,10 @@ export function installRecording(
       sender: chrome.runtime.MessageSender,
     ): Promise<ExternalResponse> {
       await ready;
-      if (message.type !== "recorder.page-network")
+      if (
+        message.type !== "recorder.page-network" &&
+        message.type !== "recorder.page-agent"
+      )
         return { ok: false, error: "invalid" };
       const tabId = sender.tab?.id;
       if (
@@ -2221,6 +2253,16 @@ export function installRecording(
         networkMode !== "page"
       )
         return { ok: false, error: "not-recording" };
+      if (message.type === "recorder.page-agent") {
+        // Stream ids are the page's own: the tab and frame keep two documents' apart.
+        const observation = {
+          ...message.observation,
+          tabId,
+          streamId: `${tabId}/page/${sender.frameId ?? 0}/${message.observation.streamId}`,
+        } as AgentObservation;
+        network.recordPageAgent(tabId, observation);
+        return { ok: true };
+      }
       const event = deps.acceptPageNetworkEvent(
         message.event as CapturedEvent,
         digests,
