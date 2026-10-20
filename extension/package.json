@@ -9,6 +9,8 @@
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
+    "@ag-ui/client": "1.0.2",
+    "@ag-ui/core": "1.0.2",
     "@base-ui/react": "^1.6.0",
     "@copilotkit/learning": "0.0.1",
     "@fontsource-variable/inter": "^5.3.0",
@@ -31,6 +33,7 @@
     "prompt-area": "^0.6.3",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
+    "rxjs": "7.8.1",
     "shadcn": "^4.17.0",
     "tailwind-merge": "^3.6.0",
     "tailwindcss": "^4.3.3",
