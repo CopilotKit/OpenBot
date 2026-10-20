@@ -2,6 +2,7 @@ import { Hono, type MiddlewareHandler } from "hono";
 import type { BotAccessCheck } from "../agents/profile-policy";
 import type { AppVariables } from "../auth/guards";
 import type { AccountModeSwitch } from "./account-mode";
+import { mountAppAccessRoutes } from "./route-groups/app-access";
 import type { ComposioBroker } from "./broker";
 import { mountComposioAppRoutes } from "./route-groups/composio-apps";
 import { mountConnectionRoutes } from "./route-groups/connections";
@@ -131,6 +132,7 @@ export function createPluginRoutes(
   mountOAuthCallbackRoute(context);
   mountSkillRoutes(context);
   mountGrantRoutes(context);
+  mountAppAccessRoutes(context);
 
   return routes;
 }

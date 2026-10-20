@@ -1,3 +1,4 @@
+import { appAccessMethods } from "./plugin-store/app-access";
 import { callMethods } from "./plugin-store/calls";
 import { connectionMethods } from "./plugin-store/connections";
 import { createStoreContext } from "./plugin-store/context";
@@ -48,6 +49,7 @@ export function createPluginStore(options: PluginStoreOptions) {
     ...grantMethods(context),
     ...connectionMethods(context),
     ...callMethods(context),
+    ...appAccessMethods(context),
   };
 }
 

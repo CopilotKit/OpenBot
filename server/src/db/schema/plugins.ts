@@ -688,3 +688,73 @@ export const sandboxedComponents = pgTable("sandboxed_components", {
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
+
+/**
+ * A person asking an administrator to make one work app usable through one Bot.
+ *
+ * WHAT IS ASKED FOR IS THE SERVER'S, NEVER THE BROWSER'S. `kind` is derived from the app's state for
+ * the person and the Bot at the moment of asking — switched off is `enable`, held by no grant is
+ * `grant`, a Shared app with no team account is `connect_shared` — so a request cannot be worded as
+ * something the deployment does not actually need, and approving it does exactly the one thing
+ * that state was missing.
+ *
+ * `app_key` IS THE SERVER ID THE APP HAS OR WOULD HAVE, and is not a foreign key. A request to
+ * switch an app on names an app with no `mcp_servers` row yet — `composio-<slug>` for a Composio app,
+ * the catalogue key for one this deployment ships — and is the row's id the moment it is enabled,
+ * so one key follows the app across the change being asked for. `app_title` is the app's name as
+ * the server resolved it when the request was filed, so an administrator's list can name an app
+ * that has no row to read the name from.
+ *
+ * `agent_id` IS NULLABLE FOR A REQUEST ABOUT THE APP ALONE. Every path that files one today names
+ * the Bot, so approving a request to switch an app on can grant it to that Bot in the same step;
+ * the column admits none because "switch this on" is a complete question without one.
+ *
+ * ONE PENDING REQUEST PER (PERSON, APP, BOT, KIND), held by the partial unique index rather than by
+ * a read-then-write, so two replicas filing the same request at once cannot both insert. The Bot is
+ * read through `coalesce` because Postgres treats two NULLs as distinct, and an index on the bare
+ * column would let the same app-only request pile up.
+ *
+ * NO ROW IS DELETED WHEN IT IS ANSWERED. Approved, dismissed and cancelled requests stay, with who
+ * resolved them and when; the trail says the same thing in its own rows.
+ */
+export const appAccessRequests = pgTable(
+  "app_access_requests",
+  {
+    id: text("id").primaryKey(),
+    requestedBy: text("requested_by")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    agentId: text("agent_id").references(() => agents.id, {
+      onDelete: "cascade",
+    }),
+    appKey: text("app_key").notNull(),
+    appTitle: text("app_title").notNull(),
+    kind: text("kind").$type<"enable" | "grant" | "connect_shared">().notNull(),
+    status: text("status")
+      .$type<"pending" | "approved" | "dismissed" | "cancelled">()
+      .notNull()
+      .default("pending"),
+    createdAt: createdAt(),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    resolvedBy: text("resolved_by"),
+  },
+  (table) => [
+    uniqueIndex("app_access_requests_pending_idx")
+      .on(
+        table.requestedBy,
+        table.appKey,
+        sql`coalesce(${table.agentId}, '')`,
+        table.kind,
+      )
+      .where(sql`${table.status} = 'pending'`),
+    index("app_access_requests_status_idx").on(table.status, table.appKey),
+    check(
+      "app_access_requests_kind_check",
+      sql`${table.kind} IN ('enable', 'grant', 'connect_shared')`,
+    ),
+    check(
+      "app_access_requests_status_check",
+      sql`${table.status} IN ('pending', 'approved', 'dismissed', 'cancelled')`,
+    ),
+  ],
+);

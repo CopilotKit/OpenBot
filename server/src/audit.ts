@@ -244,6 +244,18 @@ export const auditEventTypes = [
   "shared_use.approved",
   // An administrator answered a request to use a Shared app through a Bot.
   "shared_use.declined",
+  /*
+   * A person asking an administrator to switch a work app on, grant it to a Bot, or connect a
+   * Shared app's team account (`app_access_requests`), and what became of it: cancelled by the
+   * person, approved or dismissed by an administrator, or refused — a request that could not be
+   * filed, or an approval that could not be carried out. Target the app key; payload `request`,
+   * `app`, `bot`, `kind`, and for a refusal `reason`.
+   */
+  "app_access.requested",
+  "app_access.cancelled",
+  "app_access.approved",
+  "app_access.dismissed",
+  "app_access.refused",
   // Every action a Bot takes on its computer, allowed or refused. Both, always: a trail that records
   // only what was permitted cannot answer whether the Bot tried.
   "computer.action_allowed",
