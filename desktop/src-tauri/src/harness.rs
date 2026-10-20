@@ -791,17 +791,18 @@ mod tests {
         }
     }
 
-    /// The unmarked rows are the three brands with no mark in any maintained set. If a fourth
-    /// appears, somebody dropped a mark rather than a brand losing one, and that is worth stopping
-    /// for.
+    /// Every harness the picker runs an image for carries a mark. AG2, Agno and Langroid were the
+    /// last three without one, until their own repositories supplied them (see shared/marks). An
+    /// unmarked row appearing now means somebody dropped a mark rather than a brand lacking one, and
+    /// that is worth stopping for.
     #[test]
-    fn only_the_three_brands_without_a_mark_are_unmarked() {
+    fn every_harness_with_an_image_carries_a_mark() {
         let unmarked: Vec<String> = catalogue()
             .into_iter()
             .filter(|h| h.mark.is_none() && h.image.is_some())
             .map(|h| h.id)
             .collect();
-        assert_eq!(unmarked, vec!["agno", "ag2", "langroid"]);
+        assert!(unmarked.is_empty(), "unmarked harnesses: {unmarked:?}");
     }
 
     /// Mastra is offered, and the row is the assertion that the bridge on OpenBot's side works.
