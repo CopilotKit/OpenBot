@@ -463,6 +463,10 @@ export function createHttpStream(options: {
           outcome: ok && status > 0 && status < 400 ? "complete" : "failed",
         });
     },
+    /** The answer showed it is no AG-UI stream: nothing more of it is read. */
+    ignored(): boolean {
+      return reader?.verdict === "other";
+    },
     /** Whether this request is an agent run: a run is from the start, a candidate once its first event was AG-UI.
      * Null while a candidate's answer has not decided. */
     isRun(): boolean | null {

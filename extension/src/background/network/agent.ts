@@ -314,7 +314,9 @@ export function createAgentCapture(options: {
     const data = string(raw.data);
     if (requestId === undefined || data === undefined) return;
     const request = requests.get(requestKey(target, requestId));
-    if (!request || request.reading === "off") return;
+    // A stream that showed it is not AG-UI (another app's event stream) keeps coming: its bytes are not even decoded.
+    if (!request || request.reading === "off" || request.stream?.ignored())
+      return;
     const chunk = {
       bytes: bytesOf(data),
       at: wallAt(request.clock, number(raw.timestamp)),

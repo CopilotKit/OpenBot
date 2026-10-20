@@ -470,3 +470,52 @@ test("the page's WebSocket stays the browser's own: instanceof, prototype, const
   stop();
   expect(globalThis.WebSocket).toBe(NativeWebSocket);
 });
+
+test("an event stream that is not AG-UI gives the agent events nothing, even answering a run-shaped POST, which stays a network event; the page reads it whole", async () => {
+  const fixture = loadFixture("generic-proto-ws-ticker");
+  const ticker = fixture.entries.find(
+    (entry) =>
+      entry.kind === "event" &&
+      entry.method === "Network.requestWillBeSent" &&
+      entry.params.type === "EventSource",
+  );
+  const chunks = responseChunks(
+    fixture,
+    String(ticker?.kind === "event" ? ticker.params.requestId : ""),
+  ).map(({ bytes }) => bytes);
+  const length = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+  expect(chunks.length).toBeGreaterThan(1);
+  const body = JSON.stringify({
+    threadId: "t-1",
+    runId: "r-1",
+    messages: [{ id: "m-1", role: "user", content: "prices?" }],
+  });
+  const answer = (): HttpAnswer => ({
+    status: 200,
+    contentType: "text/event-stream",
+    chunks,
+    aborted: false,
+  });
+  answers.set(requestKey("GET", "/prices", ""), [answer()]);
+  answers.set(requestKey("POST", "/prices", body), [answer()]);
+  configure("extension-id");
+  const read = async (response: Response) =>
+    new Uint8Array(await response.arrayBuffer()).length;
+  expect(
+    await read(await fetch(`http://127.0.0.1:${server.port}/prices`)),
+  ).toBe(length);
+  expect(
+    await read(
+      await fetch(`http://127.0.0.1:${server.port}/prices`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body,
+      }),
+    ),
+  ).toBe(length);
+  await Bun.sleep(100);
+  expect(pageObservations()).toEqual([]);
+  expect(
+    sent.filter(({ message }) => message.type === "recorder.page-network"),
+  ).toHaveLength(2);
+});

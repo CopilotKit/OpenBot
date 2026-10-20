@@ -275,6 +275,11 @@ function followAgent(
             if (done) break;
             stream.data(value, Date.now());
             settle();
+            // Another app's event stream: the copy is let go, and the page reads on alone.
+            if (stream.ignored()) {
+              await reader.cancel().catch(() => {});
+              break;
+            }
           }
         })().then(
           () => finish(true),
