@@ -1,5 +1,5 @@
 {
-  "_readme": "One file every language reads: the agent harnesses OpenBot knows by name. The desktop setup window reads it through Rust (desktop/src-tauri/src/harness.rs, include_str!) to decide which image to run; the web app's New Bot dialog reads it through shared/harnesses.ts to name the frameworks a person might already be running. Ranked stars-first, with downloads as the sanity check, because each misleads alone. Anything the AG-UI table marks In Progress is left out \u2014 OpenAI's Agents SDK, AWS Bedrock Agents and Cloudflare Agents are all In Progress, and offering a harness that cannot answer is worse than a shorter list. 'image' is the DIRECTORY the image is built from, not the id: a release publishes openbot-<directory> from the Dockerfile paths in the tree, and four rows have an id that differs from their folder. 'mark' is the file stem under shared/marks/, or null where no maintained set has one \u2014 nothing is ever invented to fill the gap, see shared/marks/README.md. 'webCreate' is false for a row the web create API cannot actually make work. 'webSummary' overrides 'summary' in the web dialog, and exists only where the installer's sentence is false on a surface that installs nothing.",
+  "_readme": "One file every language reads: the agent harnesses OpenBot knows by name. The desktop setup window reads it through Rust (desktop/src-tauri/src/harness.rs, include_str!) to decide which image to run; the web app's New Bot dialog reads it through shared/harnesses.ts to name the frameworks a person might already be running. Ranked stars-first, with downloads as the sanity check, because each misleads alone. Anything the AG-UI table marks In Progress is left out \u2014 OpenAI's Agents SDK, AWS Bedrock Agents and Cloudflare Agents are all In Progress, and offering a harness that cannot answer is worse than a shorter list. 'image' is the DIRECTORY the image is built from, not the id: a release publishes openbot-<directory> from the Dockerfile paths in the tree, and four rows have an id that differs from their folder. 'mark' is the file stem under shared/marks/, or null where the brand publishes none \u2014 nothing is ever invented to fill the gap, see shared/marks/README.md. 'webCreate' is false for a row the web create API cannot actually make work. 'webSummary' overrides 'summary' in the web dialog, and exists only where the installer's sentence is false on a surface that installs nothing.",
   "harnesses": [
     {
       "id": "crewai",
@@ -40,7 +40,7 @@
       "runPath": "/agui",
       "credential": "any-provider",
       "maintainer": "first-party",
-      "mark": null,
+      "mark": "agno",
       "webCreate": true
     },
     {
@@ -152,7 +152,7 @@
       "runPath": "",
       "credential": "any-provider",
       "maintainer": "first-party",
-      "mark": null,
+      "mark": "ag2",
       "webCreate": true
     },
     {
@@ -166,7 +166,7 @@
       "runPath": "",
       "credential": "any-provider",
       "maintainer": "community",
-      "mark": null,
+      "mark": "langroid",
       "webCreate": true
     },
     {

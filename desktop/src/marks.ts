@@ -8,8 +8,8 @@
  * needs no `dangerouslySetInnerHTML` and the question of what is in the file never becomes a
  * security question at all.
  *
- * A row without an entry here is not an error: three of the twelve brands have no mark in any
- * maintained set, and their rows show the name alone. See `shared/marks/README.md`.
+ * A row without an entry here is not an error: "an agent you already run" has no mark, nor would a
+ * brand that publishes none, and such a row shows the name alone. See `shared/marks/README.md`.
  */
 const files = import.meta.glob("../../shared/marks/*.svg", {
   eager: true,

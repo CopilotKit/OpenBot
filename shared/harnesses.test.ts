@@ -24,7 +24,7 @@ test("the brands with no usable mark carry none", () => {
   const unmarked = HARNESSES.filter((h) => h.mark === null)
     .map((h) => h.id)
     .sort();
-  expect(unmarked).toEqual(["ag2", "agno", "byo-url", "langroid"]);
+  expect(unmarked).toEqual(["byo-url"]);
 });
 
 /*
