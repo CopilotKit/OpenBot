@@ -4,6 +4,7 @@ import type {
   RecorderUser,
 } from "@openbot/shared/recorder-api";
 import type { CapturedEvent } from "@openbot/shared/recorder-masking";
+import type { AgentSnapshot } from "../background/agent/events";
 import type { StepSnapshot } from "../background/steps";
 import type { RecorderState, StreamSession } from "../protocol/messages";
 export type ConnectionRecord = {
@@ -52,7 +53,13 @@ export type HeldEvent = { event: CapturedEvent; key?: string };
 /** The steps the live recording's service worker holds (steps.ts), written as they change: a service worker that
  * restarts takes them up again, and after a browser quit they go with the recording's drain. The events are masked
  * already, as the outbox stores them. */
-export type HeldSteps = { recordingId: string; steps: StepSnapshot };
+export type HeldSteps = {
+  recordingId: string;
+  steps: StepSnapshot;
+  /** What the recording's agent events know that a click's Thread context and the links depend on (agent/events.ts),
+   * in the same write as the steps, so the two never disagree on what has left: ids and times only. */
+  agent?: AgentSnapshot;
+};
 export type RecorderNotice =
   | { kind: "interrupted"; at: number }
   | {
@@ -67,7 +74,7 @@ type LocalState = {
   connection?: ConnectionRecord;
   activeRecording?: DrainRecord; // the recording in progress; moved into `drains` at Stop, Start over and on recovery
   drains?: DrainRecord[]; // stopped recordings still sending; removed on offscreen.done
-  heldSteps?: HeldSteps; // the live recording's held steps; absent while it holds nothing
+  heldSteps?: HeldSteps; // the live recording's held steps and agent context; absent while it holds neither
   notice?: RecorderNotice;
   /** When the organization-session keep-alive last reached OpenBot (Decision 2, Task 8). */
   lastKeepAliveAt?: number;
@@ -143,6 +150,12 @@ function isHeldEvent(value: unknown): value is HeldEvent {
   return isEvent(held.event) && (held.key === undefined || isString(held.key));
 }
 
+function isAgentSnapshot(value: unknown): value is AgentSnapshot {
+  if (typeof value !== "object" || value === null) return false;
+  const snapshot = value as Record<string, unknown>;
+  return Array.isArray(snapshot.tabs) && Array.isArray(snapshot.recordedRuns);
+}
+
 function isHeldSteps(value: unknown): value is HeldSteps {
   if (typeof value !== "object" || value === null) return false;
   const held = value as Record<string, unknown>;
@@ -159,7 +172,8 @@ function isHeldSteps(value: unknown): value is HeldSteps {
         isEvent((step as Record<string, unknown>).event),
     ) &&
     Array.isArray(steps.calls) &&
-    Array.isArray(steps.typed)
+    Array.isArray(steps.typed) &&
+    (held.agent === undefined || isAgentSnapshot(held.agent))
   );
 }
 

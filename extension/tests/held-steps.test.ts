@@ -10,6 +10,7 @@ import type {
   JsonValue,
 } from "@openbot/shared/recorder-masking";
 import { IDBKeyRange as FakeIDBKeyRange, IDBFactory } from "fake-indexeddb";
+import type { CaptureObservation } from "../src/background/agent/observation";
 import type { NetworkCaptureDeps } from "../src/background/network";
 import {
   installRecording,
@@ -30,6 +31,13 @@ import {
   type FakePort,
   installChromeFake,
 } from "./support/chrome-fake";
+import {
+  type Fixture as TrafficFixture,
+  firstThreadOf,
+  later,
+  loadFixture as loadTraffic,
+  observationsOf,
+} from "./agent-traffic";
 import { type FakeGateway, startFakeGateway } from "./support/fake-gateway";
 import { fakeMicrophone, fakeSpeech } from "./support/fake-speech";
 
@@ -278,13 +286,14 @@ function contentPort(): FakePort {
   });
 }
 
-/** Records on tab 7 from `at`, and resolves with the recording's trajectory once its start reached Intelligence. */
-async function record(at: number, title: string): Promise<string> {
+/** Records on tab 7 (on `url`) from `at`, and resolves with the recording's trajectory once its start reached
+ * Intelligence. */
+async function record(at: number, title: string, url = ORDER): Promise<string> {
   clock = at;
   fake.tabs.set(7, {
     id: 7,
-    url: ORDER,
-    title: "Order 1043 - Corner Shop admin",
+    url,
+    title: url === ORDER ? "Order 1043 - Corner Shop admin" : "Create Next App",
   } as chrome.tabs.Tab);
   expect(await page({ type: "page.record", title, tabId: 7 })).toEqual({
     ok: true,
@@ -715,3 +724,248 @@ test("Chrome stops the service worker 2 ms after the typed name left: the restar
   ]);
   expect(typedName()).toHaveLength(1);
 }, 15_000);
+
+// ---- The agent's side across a service-worker restart ---------------------------------------------------------------
+
+const runFour = fixture<{
+  pageUrl: string;
+  pageAt: number;
+  stoppedAt: number;
+  runRequestAt: number;
+  steps: CapturedEvent[];
+}>("e2e-restart-thread.json");
+/** When the page asks for its first conversation's run, in the runs that have one before the clicks. */
+const firstRequestAt = runFour.pageAt + 200;
+
+/** The fields CopilotKit's enricher adds to a click. */
+const CLICK_CONTEXT = [
+  "threadId",
+  "agentId",
+  "messageId",
+  "runId",
+  "toolCallId",
+  "toolName",
+  "toolStatus",
+  "threadAmbiguity",
+];
+const clickContext = (event: CapturedEvent) =>
+  Object.fromEntries(
+    Object.entries(event.value as Record<string, unknown>).filter(([key]) =>
+      CLICK_CONTEXT.includes(key),
+    ),
+  );
+
+/** A recorded conversation's observations in tab 7, moved so its first request comes at `at`. */
+function trafficAt(
+  traffic: TrafficFixture,
+  at: number,
+  streams: string,
+): CaptureObservation[] {
+  const observations = observationsOf(traffic, {}, 7);
+  const asked = observations.find(({ kind }) => kind === "request")?.at ?? at;
+  return later(observations, at - asked, streams);
+}
+
+/**
+ * Run 4 on its real moments: the page runs CopilotKit from the moment it loads; with `conversation`, its chat first has
+ * a conversation of its own (real recorded traffic) on a Thread, as in runs 1 and 2; the person clicks Approve without
+ * the agent, New thread, the chat box, types and sends, and the page runs its agent on the new Thread (real recorded
+ * traffic with a backend tool, as run 4's answer used one). At `stopAt`, Chrome stops the service worker, and the next
+ * content event or page traffic starts it again. Resolves with what reached Intelligence.
+ */
+async function recordRunFour(options: {
+  conversation: boolean;
+  stopAt?: number;
+  /** When Record was clicked: a second before the page loaded, unless said. */
+  recordAt?: number;
+  /** When the page asks for its first conversation's run: `firstRequestAt` unless said. */
+  conversationAt?: number;
+}): Promise<CapturedEvent[]> {
+  const trajectoryId = await record(
+    options.recordAt ?? runFour.pageAt - 1_000,
+    "Approve deal-1 by hand, then ask in a new thread (run4, worker restart)",
+    runFour.pageUrl,
+  );
+  let port = contentPort();
+  type Due =
+    | { at: number; observation: CaptureObservation }
+    | { at: number; step: CapturedEvent }
+    | { at: number; stop: true };
+  const loaded: CaptureObservation = {
+    kind: "runtime",
+    tabId: 7,
+    at: runFour.pageAt,
+    url: "http://127.0.0.1:7620/api/copilotkit",
+  };
+  const timeline: Due[] = [
+    { at: runFour.pageAt, observation: loaded },
+    ...(options.conversation
+      ? trafficAt(
+          loadTraffic("sse", "text-answer"),
+          options.conversationAt ?? firstRequestAt,
+          "first",
+        )
+      : []
+    ).map((observation) => ({ at: observation.at, observation })),
+    ...runFour.steps.map((step) => ({ at: step.timestamp, step })),
+    ...(options.stopAt === undefined
+      ? []
+      : [{ at: options.stopAt, stop: true as const }]),
+    ...trafficAt(
+      loadTraffic("sse", "backend-tool"),
+      runFour.runRequestAt,
+      "second",
+    ).map((observation) => ({ at: observation.at, observation })),
+  ].sort((a, b) => a.at - b.at);
+  for (const due of timeline) {
+    await advanceTo(due.at);
+    if ("observation" in due) network?.agent(due.observation);
+    else if ("step" in due)
+      port.postMessage({ type: "content.event", event: due.step });
+    else {
+      await restartWorker();
+      port = contentPort();
+    }
+    await settle();
+  }
+  await advanceTo((timeline.at(-1)?.at ?? clock) + 10_000);
+  expect(await page({ type: "page.stop" })).toEqual({ ok: true });
+  await until(
+    () => names(trajectoryId).filter((name) => name === "outcome").length === 2,
+    "the recording stopped",
+  );
+  return sent(trajectoryId);
+}
+
+/** The same steps and traffic recorded again, without the stop, in a browser of its own. */
+async function recordRunFourWithoutStop(conversation: boolean) {
+  await gateway.stop();
+  for (const timers of documents) timers.quit();
+  fake.uninstall();
+  gateway = await startFakeGateway({ extraRoutes: route });
+  globals.indexedDB = new IDBFactory();
+  databaseName = `held-steps-${Date.now()}-${databaseCounter++}`;
+  documents = [];
+  network = null;
+  fake = installChromeFake({
+    extensionId: EXTENSION_ID,
+    manifestVersion: "0.3.0",
+  });
+  fake.offscreen.onDocumentCreated.addListener(() => {
+    setTimeout(runDocument, 0);
+  });
+  fake.storage.local.set("connection", {
+    openbotUrl: gateway.httpUrl,
+    token: "obr_one",
+    connectionId: "c-obr_one",
+    user: ada,
+    via: "web",
+    connectedAt: 0,
+  });
+  startWorker();
+  return recordRunFour({ conversation });
+}
+
+/** The rows as two recordings of the same steps and traffic share them: without the seq Intelligence's batches number,
+ * and without the recording's own random id. */
+const withoutSeq = (events: CapturedEvent[]) =>
+  events.map(({ name, timestamp, value }) => {
+    const {
+      seq: _seq,
+      recordingId: _recording,
+      ...rest
+    } = value as Record<string, unknown>;
+    return { name, timestamp, value: rest };
+  });
+
+const linksOf = (events: CapturedEvent[]) =>
+  events
+    .filter((event) => event.name === "thread.linked")
+    .map((event) => {
+      const { threadId, reason } = event.value as Record<string, unknown>;
+      return { threadId, reason };
+    });
+
+for (const conversation of [false, true])
+  test(`Chrome stops the service worker 300 ms after a click: the clicks after it carry the Thread context they carry without the stop${conversation ? ", with a conversation before it" : ", as in run 4"}`, async () => {
+    // Run 4 (trajectory d28423b2): New thread, the chat box and Send after the restart carried no threadId at all, and
+    // the Send not the Thread its run started.
+    const restarted = await recordRunFour({
+      conversation,
+      stopAt: runFour.stoppedAt,
+    });
+    const clicks = restarted.filter((event) => event.name === "click");
+    expect(clicks).toHaveLength(4);
+    const moved = firstThreadOf(loadTraffic("sse", "backend-tool"));
+    const left = conversation
+      ? firstThreadOf(loadTraffic("sse", "text-answer"))
+      : null;
+    // Approve without the agent and New thread on the Thread open before, the chat box on none (no traffic tells which
+    // Thread it was in), Send on the Thread its run started.
+    expect(clicks.map((click) => clickContext(click))).toEqual([
+      { threadId: left },
+      { threadId: left },
+      { threadId: null },
+      { threadId: moved },
+    ]);
+    expect(linksOf(restarted)).toEqual(
+      conversation
+        ? [
+            { threadId: left, reason: "open" },
+            { threadId: moved, reason: "switch" },
+          ]
+        : [{ threadId: moved, reason: "open" }],
+    );
+    // Everything is as it would have been without the stop: no row lost, added or changed.
+    const straight = await recordRunFourWithoutStop(conversation);
+    expect(withoutSeq(restarted)).toEqual(withoutSeq(straight));
+  }, 30_000);
+
+for (const { moment, stopAt, linked, ...when } of [
+  {
+    // A link kept in the context before it went to the steps would be lost.
+    moment: "as the page asks for the run on the new Thread",
+    stopAt: runFour.runRequestAt + 1,
+    linked: "moved",
+  },
+  {
+    // With nothing held, the first conversation's link leaves as it is made, 50 ms after the page loaded, while the
+    // writes wait out HELD_WRITE_MS: a context written after it would make it again from the rest of the run's traffic.
+    moment: "as a link leaves with nothing held before it",
+    stopAt: runFour.pageAt + 51,
+    recordAt: runFour.pageAt - 5_000,
+    conversationAt: runFour.pageAt + 50,
+    linked: "left",
+  },
+  {
+    // The Send leaves 1 s after its window closes, 3 s after it (nothing follows it in its tab), with the run after it.
+    moment: "as the Send and the run's first events leave",
+    stopAt: (runFour.steps.at(-1)?.timestamp ?? 0) + 3_000 + 1_000 + 1,
+    linked: "moved",
+  },
+] as const)
+  test(`Chrome stops the service worker ${moment}: no row reaches Intelligence twice, and each Thread is linked once`, async () => {
+    const restarted = await recordRunFour({
+      conversation: true,
+      stopAt,
+      ...when,
+    });
+    const left = firstThreadOf(loadTraffic("sse", "text-answer"));
+    const moved = firstThreadOf(loadTraffic("sse", "backend-tool"));
+    const threadId = linked === "left" ? left : moved;
+    expect(
+      linksOf(restarted).filter((link) => link.threadId === threadId),
+    ).toEqual([{ threadId, reason: linked === "left" ? "open" : "switch" }]);
+    const rows = withoutSeq(restarted).map((row) => JSON.stringify(row));
+    expect(rows.filter((row, index) => rows.indexOf(row) !== index)).toEqual(
+      [],
+    );
+    // The person's question on the new Thread goes once at most, whichever side of the stop it left on.
+    const asked = restarted.filter(
+      (event) =>
+        event.name === "agent.message" &&
+        (event.value as { role?: string }).role === "user" &&
+        (event.value as { threadId?: string }).threadId === moved,
+    );
+    expect(asked.length).toBeLessThanOrEqual(1);
+  }, 30_000);

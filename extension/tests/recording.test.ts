@@ -459,6 +459,8 @@ function doubles(): Partial<RecordingDeps> {
         },
         awaitsRun: () => false,
         tabNavigated: (tabId) => agent.navigated.push(tabId),
+        snapshot: () => ({ tabs: [], recordedRuns: [] }),
+        restore: () => {},
         stop: () => {
           agent.stopped = true;
         },

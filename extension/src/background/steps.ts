@@ -436,6 +436,8 @@ export function createStepAssembler(options: {
   /** Something it holds changed (a step came or left, a call arrived, the phrase being spoken changed): `snapshot`
    * would now read differently. */
   onChange?(): void;
+  /** Items are about to leave, and `snapshot` still holds them: what is kept beside the steps can be written first. */
+  leaving?(): void;
   now?: () => number;
   timers?: Timers;
   tuning?: Partial<StepTiming>;
@@ -624,6 +626,7 @@ export function createStepAssembler(options: {
   function pump(): void {
     if (ended) return;
     const at = now();
+    let announced = false;
     while (queue.length > 0) {
       const head = queue[0];
       if (!head) break;
@@ -644,6 +647,10 @@ export function createStepAssembler(options: {
           );
         }
         break;
+      }
+      if (!announced) {
+        announced = true;
+        options.leaving?.();
       }
       queue.shift();
       if (head.timer !== undefined) timers.clear(head.timer);
@@ -926,6 +933,7 @@ export function createStepAssembler(options: {
     /** Sends every step held, with what it owns so far (the recording stops or starts over). */
     flush(): void {
       if (ended) return;
+      if (queue.length > 0) options.leaving?.();
       while (queue.length > 0) {
         const step = queue.shift();
         if (!step) break;

@@ -56,7 +56,11 @@ import {
   writeLocal,
   writeSession,
 } from "../shared/storage";
-import { type AgentEvents, createAgentEvents } from "./agent/events";
+import {
+  type AgentEvents,
+  type AgentSnapshot,
+  createAgentEvents,
+} from "./agent/events";
 import type { CaptureObservation } from "./agent/observation";
 import { showBadge } from "./badge";
 import {
@@ -176,6 +180,13 @@ const browserTimers: Timers = {
 };
 /** Timers for an assembler that only takes up held steps to send them at once (a browser restart): none ever fires. */
 const NO_TIMERS: Timers = { set: () => null, clear: () => {} };
+/** Held steps that hold nothing, written beside an agent context. */
+const NOTHING_HELD: StepSnapshot = {
+  queue: [],
+  calls: [],
+  typed: [],
+  speech: null,
+};
 
 /** The events a snapshot of held steps sends, in order, with what each owns and its key: after a browser quit nothing
  * more can arrive for them. */
@@ -1070,10 +1081,19 @@ export function installRecording(
   // restarted service worker takes them up again, and after a browser quit they go with the recording's drain, as the
   // rest of the recording is kept (storage.session would not outlive the quit). The first change is written at once,
   // later ones at most every HELD_WRITE_MS.
+  //
+  // The agent events' context (the Threads open in each tab, the runs the page asked for, the Thread linked last) goes
+  // in the same write, so a restarted service worker's clicks carry the Thread they would have. A link takes its place
+  // in that context only as it goes to the steps, and when the context changed, the write comes before anything leaves:
+  // a restarted service worker never makes a link again that left, nor takes up one that went nowhere.
 
   const stepTimers = deps.stepTimers ?? browserTimers;
   let heldSource: { recordingId: string; assembler: StepAssembler } | null =
     null;
+  /** The live recording's agent events, whose context is written with its held steps. */
+  let heldAgent: AgentEvents | null = null;
+  /** The agent context in storage, as JSON (null: none). */
+  let agentWritten: string | null = null;
   let heldTimer: unknown = null;
   let heldWrittenAt = Number.NEGATIVE_INFINITY;
   /** What storage holds, as JSON (null: nothing); undefined until this service worker wrote it. */
@@ -1089,34 +1109,53 @@ export function installRecording(
     );
   }
 
-  /** Writes what the steps hold now (or removes it when they hold nothing); resolves once it is in storage. */
+  /** The agent events' context as it is written, or null when it holds nothing a restart needs. */
+  function agentContext(): AgentSnapshot | null {
+    const agent = heldAgent?.snapshot();
+    return agent && (agent.tabs.length > 0 || agent.recordedRuns.length > 0)
+      ? agent
+      : null;
+  }
+
+  /** Writes what the steps hold now and the agent context (or removes them when they hold nothing). The write is issued
+   * at once, in order with the ones before it; resolves once it is in storage. */
   function writeHeld(): Promise<void> {
     if (heldTimer !== null) stepTimers.clear(heldTimer);
     heldTimer = null;
     heldWrittenAt = deps.now();
     const source = heldSource;
     const snapshot = source?.assembler.snapshot() ?? null;
+    const agent = source ? agentContext() : null;
     const value: HeldSteps | null =
-      source && snapshot
-        ? { recordingId: source.recordingId, steps: snapshot }
+      source && (snapshot || agent)
+        ? {
+            recordingId: source.recordingId,
+            steps: snapshot ?? NOTHING_HELD,
+            ...(agent ? { agent } : {}),
+          }
         : null;
     const text = value ? JSON.stringify(value) : null;
     if (text === heldWritten) return heldWrites;
     heldWritten = text;
-    heldWrites = heldWrites
-      .then(() =>
-        value ? writeLocal("heldSteps", value) : removeLocal("heldSteps"),
-      )
-      .catch(report("keeping the held steps"));
+    agentWritten = agent ? JSON.stringify(agent) : null;
+    const write = (
+      value ? writeLocal("heldSteps", value) : removeLocal("heldSteps")
+    ).catch(report("keeping the held steps"));
+    heldWrites = Promise.all([heldWrites, write]).then(() => undefined);
     return heldWrites;
   }
 
+  /** Held items are about to leave: when the agent context changed since it was written, it is written first, with
+   * the items still in it, so nothing leaves ahead of the context it came from. */
+  function beforeLeaving(): void {
+    const agent = agentContext();
+    if ((agent ? JSON.stringify(agent) : null) !== agentWritten)
+      void writeHeld();
+  }
+
   /** A new set of held steps for the live recording, with its own agent events; the previous one's are sent first.
-   * `restore` takes up what a previous service worker held for it. */
-  function openSteps(
-    recordingId: string,
-    restore?: StepSnapshot,
-  ): StepAssembler {
+   * `restore` takes up what a previous service worker held for it, and its agent context. */
+  function openSteps(recordingId: string, restore?: HeldSteps): StepAssembler {
     steps?.flush();
     steps?.clear();
     agentEvents?.stop();
@@ -1137,18 +1176,29 @@ export function installRecording(
         paired.awaitsRun(tabId, event, joins),
       pageOf,
       onChange: () => heldChanged(recordingId, assembler),
+      leaving: () => {
+        if (steps === assembler) beforeLeaving();
+      },
       now: deps.now,
       timers: stepTimers,
     });
     steps = assembler;
-    agentEvents = paired = deps.createAgentEvents({
+    const events = deps.createAgentEvents({
       emit: (tabId, event) => {
         if (steps === assembler) assembler.place(tabId, event);
       },
       digests: () => digests,
       now: deps.now,
+      onChange: () => {
+        if (agentEvents === events) heldChanged(recordingId, assembler);
+      },
     });
-    if (restore) assembler.restore(restore);
+    agentEvents = paired = events;
+    heldAgent = events;
+    // What the agent events of a previous service worker knew of this recording (the Threads open in each tab, the runs
+    // the page asked for, the Thread linked last) is taken up before anything reaches them, and its steps after.
+    if (restore?.agent) events.restore(restore.agent);
+    if (restore) assembler.restore(restore.steps);
     // A phrase still being spoken holds the new steps too (Start over); a restored one keeps its own hold until the
     // document says again.
     if (speechHold !== null) assembler.hold(speechHold);
@@ -1167,11 +1217,11 @@ export function installRecording(
   }
 
   /** The steps a previous service worker held for this recording, taken up by this one (once). */
-  function takeRestored(recordingId: string): StepSnapshot | undefined {
+  function takeRestored(recordingId: string): HeldSteps | undefined {
     const restored = restoredSteps;
     if (restored?.recordingId !== recordingId) return undefined;
     restoredSteps = null;
-    return restored.steps;
+    return restored;
   }
 
   // ---- The narration among the steps --------------------------------------------------------
