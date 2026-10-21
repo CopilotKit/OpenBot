@@ -52,8 +52,14 @@ type Attempt =
   | { state: "expired" }
   | { state: "failed"; message: string };
 
-/** Whether the Recorder in this browser is installed, and connected to this OpenBot as you. */
-export function ThisBrowser() {
+/** Whether the Recorder in this browser is installed, and connected to this OpenBot as you. `onInstallId` hears this
+ * browser's own copy once it is known (it answers with it only once connected), so the list of connected browsers can
+ * say which row is this one. */
+export function ThisBrowser({
+  onInstallId,
+}: {
+  onInstallId?: (installId: string | undefined) => void;
+} = {}) {
   const [attempt, setAttempt] = useState<Attempt>({ state: "idle" });
   // The install id the connect answer carried: a copy only reports its own once connected.
   const [connectedAs, setConnectedAs] = useState<string | undefined>();
@@ -83,6 +89,10 @@ export function ThisBrowser() {
     installId !== undefined &&
     (connections.data?.connections.some((c) => c.installId === installId) ??
       false);
+
+  useEffect(() => {
+    onInstallId?.(installId);
+  }, [installId, onInstallId]);
 
   // Once the connection appears the wait is over, so polling stops.
   useEffect(() => {
