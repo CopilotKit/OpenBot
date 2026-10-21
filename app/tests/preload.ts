@@ -35,7 +35,7 @@ GlobalRegistrator.unregister();
  * only because a stub in a *different* file leaked process-wide: exactly the walk-order dependency
  * the note above exists to stop.
  *
- * Null for every brand, which is a real state — four rows have no mark. A file that needs a mark
+ * Null for every brand, which is a real state — a row can have no mark. A file that needs a mark
  * drawn calls `mock.module` itself and wins, because a later registration replaces this one.
  */
 mock.module("../src/lib/marks", () => ({ markFor: () => null }));

@@ -298,7 +298,9 @@ export function describeCron(cron: string): string {
         .split(",")
         .map((part) => parsePlainInt(part, 0, 59));
       if (minutes.every((value): value is number => value !== null)) {
-        const times = [...minutes]
+        // De-duplicated like `weekdays`: cron fires once for `0,0`, so it must not read as
+        // "09:00 and 09:00".
+        const times = [...new Set(minutes)]
           .sort((a, b) => a - b)
           .map((value) => `${pad2(hour)}:${pad2(value)}`);
         return `Every day at ${joinWords(times)}`;

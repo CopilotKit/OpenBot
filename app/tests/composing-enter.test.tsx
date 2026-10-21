@@ -17,8 +17,8 @@ import {
 import { act, cleanup, fireEvent, render } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ComponentType, ReactNode } from "react";
+import { NewBotSheet } from "@/components/agents/new-bot-sheet";
 import { SetupSections } from "@/components/bot-profile/setup";
-import { CreateAgentDialog } from "@/components/agents/create-agent-dialog";
 import { type AgentProfile, agentKeys } from "@/lib/agents/queries";
 import { computerKeys } from "@/lib/computers/queries";
 import { Route as BoundariesRoute } from "@/routes/_authed/admin/boundaries";
@@ -31,7 +31,7 @@ import { Route as BoundariesRoute } from "@/routes/_authed/admin/boundaries";
  * Chromium marks it `isComposing`, and WebKit sends it after `compositionend` with the key code 229.
  * The chat composer already skips it: `prompt-area` checks `isComposing` on every Enter it handles.
  * Three text fields in the app acted on it instead, each with a text field's text still unconfirmed:
- * a coworker's name saved in place, the new-coworker wizard moving on to its next step, and a
+ * a coworker's name saved in place, the New Bot sheet moving on to its next step, and a
  * boundary rule saved into the policy in force.
  *
  * THE HARNESS IS THIS REPOSITORY'S: `GlobalRegistrator` in `beforeAll`/`afterAll`, `cleanup` in
@@ -164,26 +164,28 @@ test("a coworker's name is not saved by the Enter that confirms a composed chara
   expect(writes[0]?.body).toMatchObject({ name: "経費" });
 });
 
-test("the new-coworker wizard does not move on from the Enter that confirms a composed character", async () => {
+test("the New Bot sheet does not create from the Enter that confirms a composed character", async () => {
   const view = draw(
-    <CreateAgentDialog onClose={() => {}} onCreated={() => {}} open />,
+    <NewBotSheet onClose={() => {}} onCreated={() => {}} open />,
   );
 
+  // Run it here is chosen when the sheet opens, so Continue goes straight to the name.
+  await act(async () => {
+    fireEvent.click(await view.findByRole("button", { name: "Continue" }));
+  });
   const name = await view.findByLabelText("Name");
   await type(name, "経費");
-  await type(view.getByLabelText("Title"), "Finance Operations");
-  await type(view.getByLabelText("What it does"), "Review receipts.");
 
   await confirmComposedCharacter(name);
   await settle();
-  // The wizard draws no counter, so the step's own heading is what says where we are.
-  expect(view.getByText("Who is this coworker?")).toBeTruthy();
+  expect(writes.map((write) => write.request)).toEqual([]);
 
-  // An ordinary Enter still means Continue.
+  // An ordinary Enter still means Create.
   await act(async () => {
     fireEvent.keyDown(name, { key: "Enter", keyCode: 13 });
   });
-  expect(await view.findByText("Where does it run?")).toBeTruthy();
+  await settle();
+  expect(writes.map((write) => write.request)).toEqual(["POST /api/agents"]);
 });
 
 test("a boundary rule is not saved by the Enter that confirms a composed character", async () => {

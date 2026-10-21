@@ -182,6 +182,12 @@ describe("describeCron", () => {
     expect(describeCron("0,30 9 * * *")).toBe("Every day at 09:00 and 09:30");
   });
 
+  // cron fires once per distinct minute, so a repeated minute must not be described twice.
+  test("a repeated minute in the list is described once", () => {
+    expect(describeCron("0,30,0 9 * * *")).toBe("Every day at 09:00 and 09:30");
+    expect(describeCron("15,15 9 * * *")).toBe("Every day at 09:15");
+  });
+
   test("falls through to the raw expression when it is stranger than words", () => {
     expect(describeCron("*/7 3,4 * * *")).toBe("*/7 3,4 * * *");
   });

@@ -12,7 +12,9 @@ mock.module("@/lib/marks", () => ({
     id === "langgraph" ? "data:image/svg+xml,<svg/>" : null,
 }));
 
-const { HarnessMark } = await import("@/components/agents/harness-mark");
+const { HarnessMark, MARK_TILE } = await import(
+  "@/components/agents/harness-mark"
+);
 
 beforeAll(() => GlobalRegistrator.register());
 afterEach(() => cleanup());
@@ -25,27 +27,28 @@ test("draws the vendored mark for a brand that has one", () => {
 });
 
 /*
- * The rule from shared/marks/README.md: three brands have no mark in any maintained set, and
- * nothing is drawn to fill the gap. A monogram we drew would read as the vendor's own, which is the
+ * The rule from shared/marks/README.md: a brand that publishes no mark gets none, and nothing is
+ * drawn to fill the gap. A monogram we drew would read as the vendor's own, which is the
  * thing a trade mark holder actually objects to.
  */
 test("draws no image at all for a brand with no usable mark", () => {
-  const { container } = render(<HarnessMark id={null} name="Agno" />);
+  const { container } = render(<HarnessMark id={null} name="Unmarked" />);
   expect(container.querySelector("img")).toBeNull();
   expect(container.textContent).toBe("");
 });
 
 /*
- * Empty space is not an invented mark. Four of the twelve rows have no mark, and with the box
- * collapsed their names began a tile's width to the left of the others, which read as a ragged
- * list rather than as four brands without artwork.
+ * Empty space is not an invented mark. With the box collapsed, a row with no mark began its name a
+ * tile's width to the left of the others, which read as a ragged list rather than as a row without
+ * artwork.
  */
 test("still holds the tile's width, so unmarked rows line up with marked ones", () => {
+  // The same reserved column on both; only a drawn mark gets the white tile dark mode puts behind it.
   const marked = render(<HarnessMark id="langgraph" name="LangGraph" />);
-  const tile = marked.container.firstElementChild?.className;
+  expect(marked.container.firstElementChild?.className).toStartWith(MARK_TILE);
   cleanup();
-  const bare = render(<HarnessMark id={null} name="Agno" />);
-  expect(bare.container.firstElementChild?.className).toBe(tile);
+  const bare = render(<HarnessMark id={null} name="Unmarked" />);
+  expect(bare.container.firstElementChild?.className).toBe(MARK_TILE);
 });
 
 test("never announces the brand twice, because the name is drawn beside it", () => {

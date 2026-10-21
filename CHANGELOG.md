@@ -88,6 +88,50 @@ hands out each capture pass; it receives nothing that is recorded.
   Settings → Learning as `learning.sharing_changed`, `learning.skill_opened` and
   `learning.skill_closed`.
 
+### A new desktop install starts its server again
+
+A desktop install of v0.2.0 stopped at start with `server stopped straight away (exit status: 1)` and
+`Cannot find module '../../../agent-computer/src/egress'`. The server imports its egress rules from
+`agent-computer`, and the desktop app did not copy that folder when it laid out the deployment. It
+does now, and a test fails if the deployment's code imports anything the desktop app does not copy.
+An install laid out by an earlier app is asked to finish installing when it starts; installing
+downloads the same release again with the missing folder. Settings and data are kept.
+
+### A new Bot is made from a sheet that asks where it runs first
+
+New Bot opens a sheet instead of the four-screen wizard. It asks where the Bot will run, with Run it
+here chosen; a framework you run asks for its address next, and Continue checks from the server that
+something answers there before going on. The name, title, instructions and who can see it come
+last. A Bot given only a name gets a title and instructions the server accepts: for one that runs
+here, the instructions are a short prompt naming it. The frameworks list Claude Agent SDK, Google
+ADK, Google Antigravity and LangGraph first; AG2, Agno and Langroid now show their marks, and every
+mark sits on a light tile in dark mode.
+
+### A run of tool calls folds into one line
+
+Consecutive tool calls a Bot makes without drawing anything now collapse into one line ("Used 5
+tools") that opens to show each, as connector calls already did. Calls that draw an interface, and
+calls waiting on the person, still stand on their own.
+
+### Onboarding says which pictures are pictures, and tells a local install more
+
+The illustrations in onboarding sit in a muted frame and can no longer be clicked, tabbed into or
+read out as controls. On a single-user install, three more slides follow: that its data stays on
+the machine, which agents it can bring, and how to deploy it for an organization.
+`/api/capabilities` gains `localEvaluation`, true in single-user mode.
+
+### An HTML-only email reaches its trigger as the sender wrote it
+
+An email trigger reads an HTML-only mail by stripping its tags, and the character references stayed:
+the Bot read `AT&amp;T`, `we&#8217;re` and `Q3&nbsp;numbers`. Numeric references, `&amp;`, `&lt;`,
+`&gt;`, `&quot;`, `&apos;` and `&nbsp;` are now decoded, once, so `&amp;lt;` reads as `&lt;`.
+
+### An email in another charset reaches its trigger as the sender wrote it
+
+A base64 or quoted-printable email part was always read as UTF-8, whatever charset its Content-Type
+named, so an `iso-8859-1` mail reached the Bot with every accented letter turned into `�`. Each part
+is now decoded in the charset it names, and a charset the runtime does not know still reads as UTF-8.
+
 ### The Bot's screen opens only when there is something to watch
 
 Asking a Bot a question it answered in words could still open its computer beside the conversation,
@@ -107,6 +151,12 @@ on a still screen, for an action that never happened.
   three — but the Bot was still offered the tools, so it reached for one, was refused, and spent the
   turn saying so. The tools a switch turns off are now withheld from the Bot in the first place.
 
+### A repeated minute in a routine's schedule is described once
+
+A schedule like `0,30,0 9 * * *` fires at 09:00 and 09:30, but the routines page and the model were
+told "Every day at 09:00, 09:00 and 09:30". Repeated minutes are now said once, as repeated weekdays
+already were.
+
 ### An app you have not connected is offered where you are reading
 
 A Bot asked to use an app whose account the person had not connected answered with the name of a
@@ -119,6 +169,12 @@ thing itself — a card naming the app, with a Connect button.
 - It covers an account that was never connected, one disconnected while a call was in flight, and
   access that was withdrawn. An app shared across the deployment still says to ask an administrator,
   since the person reading cannot connect it.
+
+### No-sign-in startup rejects addresses without a host
+
+With `OPENBOT_SINGLE_USER=true`, an address such as `example.com:3010` in `OPENBOT_PUBLIC_URL`,
+`OPENBOT_APP_URL` or `TRUSTED_ORIGINS` now refuses startup. It previously counted as a private
+network address and only warned, even though the missing URL scheme left its host unidentified.
 
 ### A reply's tool calls fold into one line
 
@@ -355,6 +411,20 @@ in a channel is cancelled. GitHub links through a GitHub App's user sign-in, set
 `GITHUB_APP_CLIENT_ID` and `GITHUB_APP_CLIENT_SECRET` (both or neither); the server refuses to start
 with them and no public URL. Nothing reads the links yet: they are what GitHub alerts and reviews will
 build on. Migration `0053_identity_links` only adds tables.
+
+### A credential written as the word after a flag is redacted
+
+`docker login -p secret`, `sshpass -p secret` and `redis-cli -a secret` were recorded with the
+password in clear: the rules recognised a flag whose name says what it carries, and mysql's attached
+`-psecret`, but not a credential passed as the word after the flag. `redis-cli -ahunter2` was worse —
+the attached form reads as a flag called `-asecret`, so the rule for a flag named after a secret
+redacted the word *after* it and left the password. A URL with no user, `redis://:secret@host`, was
+missed the same way, and so were curl's proxy credentials in `--proxy-user` where `-u` and `--user`
+were covered. All of them are now redacted, in the command kept for Action Recording and in the copy
+exported to a telemetry collector. A password separated from `-p` by a space is left alone: mysql
+asks for it at the prompt and the word after the flag is the database name. Each of these rules ends where its
+command does, so the port in `sshpass -p secret ssh -p 2222`, or in a `docker run -p 8080:80` on the
+line after a `docker login`, is left alone.
 
 ### An app's account can belong to the team
 

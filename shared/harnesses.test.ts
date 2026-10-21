@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { HARNESSES } from "./harnesses";
+import { HARNESSES, WEB_HARNESSES } from "./harnesses";
 
 test("carries every row the desktop picker offers, in its order", () => {
   expect(HARNESSES.map((h) => h.id)).toEqual([
@@ -20,11 +20,29 @@ test("carries every row the desktop picker offers, in its order", () => {
   ]);
 });
 
+test("leads the web list with the partners people look for, keeping the rest in order", () => {
+  expect(WEB_HARNESSES.map((h) => h.id)).toEqual([
+    "claude-agent-sdk",
+    "google-adk",
+    "antigravity",
+    "langgraph",
+    "crewai",
+    "llamaindex",
+    "agno",
+    "pydantic-ai",
+    "microsoft-agent-framework",
+    "strands",
+    "ag2",
+    "langroid",
+    "byo-url",
+  ]);
+});
+
 test("the brands with no usable mark carry none", () => {
   const unmarked = HARNESSES.filter((h) => h.mark === null)
     .map((h) => h.id)
     .sort();
-  expect(unmarked).toEqual(["ag2", "agno", "byo-url", "langroid"]);
+  expect(unmarked).toEqual(["byo-url"]);
 });
 
 /*

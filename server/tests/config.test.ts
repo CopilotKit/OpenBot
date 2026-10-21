@@ -530,6 +530,15 @@ describe("deployment configuration", () => {
       { TRUSTED_ORIGINS: "http://localhost:3010,https://openbot.example.com" },
     ],
     ["an address that is not a URL at all", { OPENBOT_PUBLIC_URL: "openbot" }],
+    [
+      "a public URL missing its scheme",
+      { OPENBOT_PUBLIC_URL: "example.com:3010" },
+    ],
+    ["an app URL missing its scheme", { OPENBOT_APP_URL: "example.com:3010" }],
+    [
+      "a trusted origin missing its scheme",
+      { TRUSTED_ORIGINS: "http://localhost:3010,example.com:3010" },
+    ],
   ])("refuses no sign-in combined with %s", (_label, published) => {
     expect(() =>
       loadConfig({ ...withoutSignIn, ...OPEN, ...published }),
