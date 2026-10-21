@@ -109,6 +109,9 @@ const ACTION_STEPS = new Set(["click", "submit", "key"]);
 /** An edit this soon after such a step is its echo (the field's change as Enter or a click on Send blurs it): the save
  * stays the action's. */
 const ECHO_MS = 50;
+/** A form's submit this soon after a click is the click's own doing: a submit button submits its form as the click's
+ * default action, in the same task. */
+const SUBMITTED_MS = ECHO_MS;
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -439,16 +442,35 @@ export function createStepAssembler(options: {
     return carrying ?? first;
   }
 
+  /** The submit a click (already off the queue) made of its form, which follows it at once and so closes its span. */
+  function submitOf(step: Pending): Pending | undefined {
+    if (step.event.name !== "click") return undefined;
+    const next = queue.find(
+      (other) => other.owner && other.tabId === step.tabId,
+    );
+    return next?.event.name === "submit" &&
+      next.at >= step.at &&
+      next.at - step.at <= SUBMITTED_MS
+      ? next
+      : undefined;
+  }
+
   /** The step's event as it is sent: its page filled in, its save attached, cut to fit one Intelligence event. */
   function finish(step: Pending): CapturedEvent {
     if (step.placed) return step.event;
+    // A click's form submit is the click's doing: what the submit started, the click started (for `settle` only; a save
+    // in the submit's span stays the submit's).
+    const submit = submitOf(step);
     const event =
       step.owner && options.settle
         ? options.settle(
             step.tabId,
             step.event,
             // What the step started itself, as its own calls (depth 0): in its span and within `windowMs` of it.
-            (at) => inSpan(step, at) && at - step.at <= tune.windowMs,
+            (at) =>
+              (inSpan(step, at) ||
+                (submit !== undefined && inSpan(submit, at))) &&
+              at - step.at <= tune.windowMs,
           )
         : step.event;
     const value: Record<string, unknown> = { ...stepValue(event) };
