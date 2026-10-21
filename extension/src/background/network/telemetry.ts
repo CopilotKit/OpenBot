@@ -1,6 +1,7 @@
 // The calls a page makes about itself rather than for the person: analytics, telemetry, ads, error reports and real-user
-// monitoring. A recording never keeps one, even when it starts right after a click, because a Bot doing the task through
-// the site's API never needs it. Matched by host, then by path; each list stays narrow so a real API call is never caught.
+// monitoring, and CopilotKit's own capture of the page. A recording never keeps one, even when it starts right after a click,
+// because a Bot doing the task through the site's API never needs it. Matched by host, then by path, then by a body only
+// such a call sends; each list stays narrow so a real API call is never caught.
 
 /** Hosts (and their subdomains) that only ever receive analytics, ads, error reports or monitoring. */
 const TELEMETRY_HOSTS = [
@@ -131,10 +132,59 @@ const TELEMETRY_PATHS = [
 /** A body that is an error report: Sentry's envelope, sent to a tunnel route on the page's own host. */
 const ERROR_ENVELOPE = /^\{[^\n]*"(?:dsn|sent_at)"\s*:/;
 
+/** The keys of CopilotKit's capture batch (`@copilotkit/learning` LearningBatch): `{ trajectoryId, learningContainerIds?,
+ * events, dropped }`, and nothing else. */
+const BATCH_KEYS: ReadonlySet<string> = new Set([
+  "trajectoryId",
+  "learningContainerIds",
+  "events",
+  "dropped",
+]);
+/** The start of a capture batch as `httpSink` writes it (`JSON.stringify` of the batch the collector builds, in that key
+ * order), for a body cut short: its trajectory, its containers when it has any, then its first event or none. */
+const BATCH_START =
+  /^\s*\{"trajectoryId":"(?:[^"\\]|\\.)*"(?:,"learningContainerIds":\[[^\]]*\])?,"events":\[(?:\]|\{"type":"CUSTOM",)/;
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+/** One captured event of a batch (`LearningEvent`): an AG-UI CUSTOM event with its name, value and time. */
+const isLearningEvent = (value: unknown): boolean =>
+  isRecord(value) &&
+  value.type === "CUSTOM" &&
+  typeof value.name === "string" &&
+  typeof value.timestamp === "number";
+
+/** CopilotKit's own capture of the page (`@copilotkit/learning`'s collector, sent by its `httpSink` to whatever route the
+ * app chose): the page reporting on itself, and another copy of what the recording captures, never a person's save. Known
+ * by its shape, since the route is the app's. */
+export function isLearningBatch(body: string): boolean {
+  if (!body.includes('"trajectoryId"')) return false;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return BATCH_START.test(body);
+  }
+  if (!isRecord(parsed)) return false;
+  const { trajectoryId, learningContainerIds, events, dropped } = parsed;
+  return (
+    Object.keys(parsed).every((key) => BATCH_KEYS.has(key)) &&
+    typeof trajectoryId === "string" &&
+    typeof dropped === "number" &&
+    Array.isArray(events) &&
+    events.every(isLearningEvent) &&
+    (learningContainerIds === undefined ||
+      (Array.isArray(learningContainerIds) &&
+        learningContainerIds.every((id) => typeof id === "string")))
+  );
+}
+
 const onHost = (host: string, suffix: string) =>
   host === suffix || host.endsWith(`.${suffix}`);
 
-/** True for a call that only reports on the page (analytics, ads, errors, monitoring), never one doing the task. */
+/** True for a call that only reports on the page (analytics, ads, errors, monitoring, CopilotKit's own capture), never one
+ * doing the task. */
 export function isTelemetry(url: string, body?: string): boolean {
   let parsed: URL;
   try {
@@ -147,7 +197,10 @@ export function isTelemetry(url: string, body?: string): boolean {
   if (TELEMETRY_LABEL.test(host.split(".")[0] ?? "")) return true;
   const path = parsed.pathname.toLowerCase();
   if (TELEMETRY_PATHS.some((pattern) => pattern.test(path))) return true;
-  return body !== undefined && ERROR_ENVELOPE.test(body.slice(0, 2_048));
+  return (
+    body !== undefined &&
+    (ERROR_ENVELOPE.test(body.slice(0, 2_048)) || isLearningBatch(body))
+  );
 }
 
 /** The request headers a page or the browser sets on a speculative fetch: a prefetch is the page's guess, not the person's. */

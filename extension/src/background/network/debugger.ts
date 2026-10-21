@@ -14,6 +14,7 @@ import {
 } from "../../shared/network-body";
 import { requestKey, type RunVerdict } from "./agent";
 import { callSignature, type RepeatMemory, screenCall } from "./screen";
+import { isTelemetry } from "./telemetry";
 
 /** A tab, or a frame's own session inside it (flattened auto-attach: cross-site iframes run in their own process). */
 export type Debuggee = { tabId: number; sessionId?: string };
@@ -242,6 +243,16 @@ export function createRequestTracker(options: {
     );
     // A candidate is a run once its answer's first event was AG-UI: decided by now, unless its answer is still open.
     if (agent && (agent.value ?? (await agent.promise))) return;
+    // A body Chrome left out of requestWillBeSent is screened once read: one only the page's reporting on itself sends
+    // (CopilotKit's own capture batch, past 64 KiB) is never a save either.
+    const sentText = (event.value as { request: { body: NetworkBody } }).request
+      .body.text;
+    if (
+      request.postData === undefined &&
+      sentText !== undefined &&
+      isTelemetry(request.url, sentText)
+    )
+      return;
     options.call({ ...timing, event });
     endWrite(key);
   }
