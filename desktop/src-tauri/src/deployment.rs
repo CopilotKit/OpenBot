@@ -175,8 +175,11 @@ pub fn needs_fetch(root: &Path, wanted: &str) -> bool {
 pub const REQUIRED: [&str; 4] = ["docker-compose.yml", "server", "app", "worker"];
 
 /// The rest of what a deployment needs, which is not what it is checked for.
-pub const ALSO_COPIED: [&str; 8] = [
+pub const ALSO_COPIED: [&str; 9] = [
     "shared",
+    // The dependency patches `package.json` names in `patchedDependencies`. Without them `bun install
+    // --frozen-lockfile` stops with `Couldn't find patch file`.
+    "patches",
     // A root workspace the server imports as `@openbot/toolkit`. Without it, `bun install
     // --frozen-lockfile` stops with `Workspace not found "toolkit"`.
     "toolkit",

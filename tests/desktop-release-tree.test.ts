@@ -83,4 +83,20 @@ describe("OpenBot Desktop's copied tree", () => {
       expect(tracked(join(key, "package.json"))).toBe(true);
     }
   });
+
+  test("every dependency patch package.json names is in Desktop's copied tree", () => {
+    const manifest = JSON.parse(
+      readFileSync(join(repositoryRoot, "package.json"), "utf8"),
+    ) as { patchedDependencies?: Record<string, string> };
+    const { entries, files } = copiedLists();
+    for (const patch of Object.values(manifest.patchedDependencies ?? {})) {
+      const copied =
+        entries.includes(patch.split("/")[0] ?? "") || files.includes(patch);
+      expect({ patch, copied, tracked: tracked(patch) }).toEqual({
+        patch,
+        copied: true,
+        tracked: true,
+      });
+    }
+  });
 });

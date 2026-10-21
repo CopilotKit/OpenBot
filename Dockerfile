@@ -51,6 +51,8 @@ WORKDIR /src
 
 # Manifests first, so editing a source file does not reinstall the world.
 COPY package.json bun.lock ./
+# The dependency patches package.json names in patchedDependencies: the install stops without them.
+COPY patches patches
 COPY tsconfig.base.json bunfig.toml ./
 COPY app/package.json app/package.json
 COPY server/package.json server/package.json
@@ -70,7 +72,7 @@ RUN cd agent-computer && bun install --frozen-lockfile
 
 # A second tree with the build-time dependencies left out, for the runtime stage to take. Vite,
 # biome and the test tooling are a gigabyte that nothing in a running container imports.
-RUN mkdir -p /prod && cp package.json bun.lock /prod/ \
+RUN mkdir -p /prod && cp package.json bun.lock /prod/ && cp -R patches /prod/patches \
   && cd /prod && mkdir -p app server worker shared toolkit extension \
   && cp /src/app/package.json app/package.json \
   && cp /src/server/package.json server/package.json \

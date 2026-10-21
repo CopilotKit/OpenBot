@@ -12,6 +12,8 @@ WORKDIR /app
 
 # Manifests before sources, so a source change does not reinstall the world.
 COPY package.json bun.lock ./
+# The dependency patches package.json names in patchedDependencies: the install stops without them.
+COPY patches patches
 # The shared tsconfig, which every package extends. Vite reads it while transforming and fails
 # without it, in a stack trace that names esbuild rather than a missing file.
 COPY tsconfig.base.json tsconfig.base.json
