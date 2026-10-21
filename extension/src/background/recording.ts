@@ -61,6 +61,7 @@ import {
   currentConnection,
   forgetConnection,
 } from "./connection";
+import { maskContentEvent } from "./content-masking";
 import {
   forgetContentPorts,
   injectRecordingScripts,
@@ -2070,6 +2071,18 @@ export function installRecording(
     }
   }
 
+  /** A sensitive value's digest, from a content script or from the masking here: every later step, save, agent event and
+   * narration of the recording is masked with it. */
+  function keepDigest(digest: string): void {
+    // Memory only: it survives a service-worker restart, vanishes with the browser, and goes at Stop.
+    digests.add(digest);
+    void writeSession("digests", [...digests]).catch(
+      report("keeping a sensitive-value digest"),
+    );
+    // The document masks the person's narration with them too; a document whose port is down gets them on ready.
+    postOffscreen({ type: "offscreen.digests", digests: [...digests] });
+  }
+
   function onContentMessage(
     port: chrome.runtime.Port,
     message: ContentToBackground,
@@ -2092,9 +2105,16 @@ export function installRecording(
     }
     switch (message.type) {
       case "content.event": {
-        const event = message.event as CapturedEvent;
         // A page load is recorded as the tab's page change, from the service worker.
-        if (event.name === "page") return;
+        if ((message.event as CapturedEvent)?.name === "page") return;
+        // Masked again with every digest of the recording: what was typed into a sensitive field on another page, in
+        // another tab or frame, goes here too (content-masking.ts).
+        const event = maskContentEvent(
+          message.event as CapturedEvent,
+          digests,
+          keepDigest,
+        );
+        if (!event) return;
         if (!STEP_EVENTS.has(event.name)) {
           forwardEvent(event);
           return;
@@ -2109,13 +2129,7 @@ export function installRecording(
         return;
       }
       case "content.sensitive":
-        // Memory only: it survives a service-worker restart, vanishes with the browser, and goes at Stop.
-        digests.add(message.digest);
-        void writeSession("digests", [...digests]).catch(
-          report("keeping a sensitive-value digest"),
-        );
-        // The document masks the person's narration with them too; a document whose port is down gets them on ready.
-        postOffscreen({ type: "offscreen.digests", digests: [...digests] });
+        keepDigest(message.digest);
         return;
       case "content.notice":
         void noticeChoice(message.choice).catch(report("the notice choice"));
@@ -2133,6 +2147,7 @@ export function installRecording(
       details,
       kind,
       state.topUrls[tabId] || undefined,
+      { digests },
     );
     dispatch({ type: "page", tabId, url });
     if (!/^https?:/i.test(url)) return;
