@@ -4,6 +4,11 @@
 // sits), trims the event to fit one Intelligence event, and hands it to the service worker through
 // chrome.runtime.sendMessage. It never uses window.postMessage: anything posted to the window is readable by every script
 // on the page.
+//
+// It also sees the page's AG-UI traffic as the debugger does (shared/agui.ts): an agent run's request, the events of an
+// SSE or protobuf answer read through response.clone() as they arrive, and the AG-UI events each WebSocket receives,
+// sent raw as `recorder.page-agent` observations for the agent events to mask. An agent run is never a network event.
+// The page gets its own response and socket untouched, and nothing on its path waits for any of this.
 
 import {
   type CapturedEvent,
@@ -13,6 +18,16 @@ import {
   sanitiseForIntelligence,
   trimEvent,
 } from "@openbot/shared/recorder-masking";
+import {
+  type Channels,
+  createChannels,
+  createHttpStream,
+  createSocketReader,
+  matchRun,
+  runChannel,
+  type StreamObservation,
+  streamFormat,
+} from "../shared/agui";
 import {
   type NetworkBody as Body,
   isReadableBody as isReadable,
@@ -173,13 +188,142 @@ function report(
     .catch(() => {});
 }
 
-function wrapFetch(extensionId: string, active: () => boolean): () => void {
+/** This document's AG-UI streams: ids unique to this copy of the hook, the Intelligence channels its run answers
+ * named, and the run answers still being read (a socket's frames wait for them, so a channel is known first). */
+type AgentContext = {
+  extensionId: string;
+  nextId(): string;
+  channels: Channels;
+  reading: Promise<unknown>;
+};
+
+function createAgentContext(extensionId: string): AgentContext {
+  const prefix = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+  let count = 0;
+  return {
+    extensionId,
+    nextId: () => `${prefix}/${count++}`,
+    channels: createChannels(),
+    reading: Promise.resolve(),
+  };
+}
+
+function sendObservation(
+  context: AgentContext,
+  observation: StreamObservation,
+): void {
+  try {
+    const answer = send?.(context.extensionId, {
+      type: "recorder.page-agent",
+      observation,
+    });
+    if (answer instanceof Promise) answer.catch(() => {});
+  } catch {
+    /* Capture must never affect the page. */
+  }
+}
+
+/** A fetch's AG-UI side: created at the call, it reads the answer's clone when it is an event stream (or a run's
+ * JSON answer, which may name an Intelligence channel). `run` is whether the call is an agent run: true or false at
+ * once, a promise for a candidate whose answer decides. */
+function followAgent(
+  context: AgentContext,
+  url: string,
+  method: string,
+  body: string | undefined,
+) {
+  const match = matchRun(url, method, body);
+  const stream = createHttpStream({
+    streamId: context.nextId(),
+    url,
+    match,
+    at: Date.now(),
+    emit: (observation) => sendObservation(context, observation),
+  });
+  let decide: (run: boolean) => void = () => {};
+  const decided = new Promise<boolean>((resolve) => {
+    decide = resolve;
+  });
+  const settle = () => {
+    const run = stream.isRun();
+    if (run !== null) decide(run);
+  };
+  const finish = (ok: boolean) => {
+    stream.finish(ok, Date.now());
+    decide(stream.isRun() === true);
+  };
+  settle();
+  return {
+    run: match?.kind === "candidate" ? decided : match?.kind === "run",
+    /** The answer arrived: read synchronously from here, before the page can read its own copy. */
+    response(response: Response): void {
+      const type = response.headers.get("content-type");
+      stream.response(type, response.status);
+      settle();
+      const format = streamFormat(type);
+      const readable =
+        response.type !== "opaque" && response.type !== "opaqueredirect";
+      if (format && readable && response.body) {
+        const reader = response.clone().body?.getReader();
+        if (!reader) {
+          finish(false);
+          return;
+        }
+        void (async () => {
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            stream.data(value, Date.now());
+            settle();
+            // Another app's event stream: the copy is let go, and the page reads on alone.
+            if (stream.ignored()) {
+              await reader.cancel().catch(() => {});
+              break;
+            }
+          }
+        })().then(
+          () => finish(true),
+          () => finish(false),
+        );
+        return;
+      }
+      if (match?.kind === "run" && readable) {
+        const read = response
+          .clone()
+          .text()
+          .then((text) => {
+            const channel = runChannel(text);
+            if (channel)
+              context.channels.set(channel.topic, {
+                agentId: match.agentId,
+                threadId: channel.threadId ?? match.threadId,
+              });
+            finish(true);
+          })
+          .catch(() => finish(false));
+        context.reading = Promise.all([context.reading, read]);
+        return;
+      }
+      finish(true);
+    },
+    failed(): void {
+      finish(false);
+    },
+  };
+}
+
+function wrapFetch(
+  extensionId: string,
+  active: () => boolean,
+  agents: AgentContext,
+): () => void {
   const original = globalThis.fetch;
   if (typeof original !== "function") return () => {};
   const wrapped = ((input: RequestInfo | URL, init?: RequestInit) => {
     if (!active()) return original.call(globalThis, input, init);
     let request: Request;
     let requestBody: Body | Promise<Body>;
+    let agent: ReturnType<typeof followAgent> | null = null;
     try {
       const source =
         typeof globalThis.Request !== "undefined" &&
@@ -209,8 +353,26 @@ function wrapFetch(extensionId: string, active: () => boolean): () => void {
     } catch {
       return original.call(globalThis, input, init);
     }
+    try {
+      // A Request object's own body is not read for this: CopilotKit and AG-UI's clients post a string.
+      agent = followAgent(
+        agents,
+        request.url,
+        request.method,
+        typeof init?.body === "string" ? init.body : undefined,
+      );
+    } catch {
+      agent = null;
+    }
     const startedAt = performance.now();
-    const failed = (error: unknown) =>
+    const failed = (error: unknown) => {
+      try {
+        agent?.failed();
+      } catch {
+        /* Capture must never affect the page. */
+      }
+      // An agent run is never a network event; a candidate that failed before answering is not one.
+      if (agent?.run === true) return;
       report(
         "fetch",
         extensionId,
@@ -221,6 +383,7 @@ function wrapFetch(extensionId: string, active: () => boolean): () => void {
         requestBody,
         { headers: {}, body: Promise.resolve(unavailable("no-response")) },
       );
+    };
     let promise: Promise<Response>;
     try {
       promise = original.call(globalThis, input, init);
@@ -231,6 +394,13 @@ function wrapFetch(extensionId: string, active: () => boolean): () => void {
     promise
       .then((response) => {
         if (!active()) return;
+        try {
+          agent?.response(response);
+        } catch {
+          agent = null;
+        }
+        const run = agent?.run ?? false;
+        if (run === true) return;
         let body: Promise<Body>;
         try {
           body = receivedBody(response).catch(() =>
@@ -239,20 +409,27 @@ function wrapFetch(extensionId: string, active: () => boolean): () => void {
         } catch {
           body = Promise.resolve(unavailable("response-clone-failed"));
         }
-        report(
-          "fetch",
-          extensionId,
-          request,
-          startedAt,
-          response.status,
-          "ok",
-          requestBody,
-          {
-            url: response.url,
-            headers: headerRecord(response.headers),
-            body,
-          },
-        );
+        const network = () =>
+          report(
+            "fetch",
+            extensionId,
+            request,
+            startedAt,
+            response.status,
+            "ok",
+            requestBody,
+            {
+              url: response.url,
+              headers: headerRecord(response.headers),
+              body,
+            },
+          );
+        // A candidate is a network event only once its answer showed it is no agent run.
+        if (run === false) network();
+        else
+          run.then((isRun) => {
+            if (!isRun) network();
+          });
       }, failed)
       .catch(() => {});
     // The page gets the identical native promise, response and rejection.
@@ -400,6 +577,95 @@ function wrapXhr(extensionId: string, active: () => boolean): () => void {
   };
 }
 
+/** Wraps the WebSocket constructor (a Proxy: the prototype, instanceof, the static constants and subclassing stay the
+ * browser's own) to read the AG-UI events each new socket receives, and `send` for the Phoenix joins and leaves the
+ * page sends. Listening adds nothing the page can see. */
+function wrapWebSocket(
+  active: () => boolean,
+  agents: AgentContext,
+): () => void {
+  const Native = globalThis.WebSocket;
+  if (typeof Native !== "function") return () => {};
+  const readers = new WeakMap<
+    WebSocket,
+    { reader: ReturnType<typeof createSocketReader>; work: Promise<void> }
+  >();
+  let sockets = 0;
+  /** A frame waits for the run answers still being read when it came. */
+  const queue = (
+    socket: WebSocket,
+    step: (reader: ReturnType<typeof createSocketReader>) => void,
+  ) => {
+    const entry = readers.get(socket);
+    if (!entry) return;
+    const pending = agents.reading;
+    entry.work = entry.work
+      .then(() => pending)
+      .then(() => step(entry.reader))
+      .catch(() => {});
+  };
+  const observe = (socket: WebSocket) => {
+    const n = sockets++;
+    const id = agents.nextId();
+    readers.set(socket, {
+      work: Promise.resolve(),
+      reader: createSocketReader({
+        streamId: (topic, count) =>
+          topic === null
+            ? `${id}/ws/${n}/${count}`
+            : `${id}/ws/${n}/${count}/${topic}`,
+        emit: (observation) => sendObservation(agents, observation),
+        channels: agents.channels,
+      }),
+    });
+    socket.addEventListener("message", (event: MessageEvent) => {
+      if (!active() || typeof event.data !== "string") return;
+      const data = event.data;
+      const at = Date.now();
+      queue(socket, (reader) => reader.received(data, at));
+    });
+    socket.addEventListener("close", () => {
+      if (!active()) return;
+      const at = Date.now();
+      queue(socket, (reader) => reader.closed(at));
+    });
+  };
+  const Wrapped = new Proxy(Native, {
+    construct(target, args, newTarget) {
+      const socket = Reflect.construct(target, args, newTarget) as WebSocket;
+      if (active())
+        try {
+          observe(socket);
+        } catch {
+          /* Capture must never affect the page. */
+        }
+      return socket;
+    },
+  });
+  const proto = Native.prototype;
+  const nativeSend = proto.send;
+  const wrappedSend = function (
+    this: WebSocket,
+    data: string | ArrayBufferLike | Blob | ArrayBufferView,
+  ) {
+    try {
+      if (active() && typeof data === "string" && readers.has(this)) {
+        const at = Date.now();
+        queue(this, (reader) => reader.sent(data, at));
+      }
+    } catch {
+      /* Capture must never affect the page. */
+    }
+    return nativeSend.call(this, data);
+  };
+  globalThis.WebSocket = Wrapped;
+  proto.send = wrappedSend;
+  return () => {
+    if (globalThis.WebSocket === Wrapped) globalThis.WebSocket = Native;
+    if (proto.send === wrappedSend) proto.send = nativeSend;
+  };
+}
+
 (() => {
   // Injected again into a document that already has the hook (a second start, a followed tab added later): the older
   // copy restores the originals first, so the wrappers never stack.
@@ -418,11 +684,14 @@ function wrapXhr(extensionId: string, active: () => boolean): () => void {
     stop();
     running = true;
     const active = () => running;
-    const restoreFetch = wrapFetch(extensionId, active);
+    const agents = createAgentContext(extensionId);
+    const restoreFetch = wrapFetch(extensionId, active, agents);
     const restoreXhr = wrapXhr(extensionId, active);
+    const restoreSocket = wrapWebSocket(active, agents);
     restore = () => {
       restoreFetch();
       restoreXhr();
+      restoreSocket();
     };
   };
 })();

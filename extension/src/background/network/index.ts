@@ -1,8 +1,9 @@
 // Network capture for the tabs a recording follows: Chrome's debugger (CDP's Network domain) on each followed tab and
-// its frames, or, where Chrome refuses the debugger on a real site, the page-level fetch and XHR hook (fallback.ts),
-// which this capture owns. No call is recorded on its own: each one that passes the screens (screen.ts) goes to the
-// steps (steps.ts) with when it ran, and a write with its exchange masked with the shared rules, so it can be the save
-// of the step that sent it. Nothing is stored or sent anywhere else.
+// its frames, or, where Chrome refuses the debugger on a real site, the page-level fetch, XHR and WebSocket hook
+// (fallback.ts), which this capture owns. No call is recorded on its own: each one that passes the screens (screen.ts)
+// goes to the steps (steps.ts) with when it ran, and a write with its exchange masked with the shared rules, so it can
+// be the save of the step that sent it. The AG-UI traffic (agent.ts) goes to the agent events as observations; an
+// agent run is never a step's save. Nothing is stored or sent anywhere else.
 import {
   type CapturedEvent,
   type JsonValue,
@@ -10,7 +11,9 @@ import {
   scrubUrl,
 } from "@openbot/shared/recorder-masking";
 import { isRecordablePage } from "../../shared/origin";
+import type { AgentObservation } from "../agent/observation";
 import type { StepCall } from "../steps";
+import { createAgentCapture } from "./agent";
 import {
   createRequestTracker,
   type Debuggee,
@@ -31,6 +34,8 @@ export type NetworkCaptureDeps = {
   writeEnded(id: string): void;
   status(mode: NetworkMode | "stopped", reason?: string): void;
   digests(): ReadonlySet<string>;
+  /** What the capture saw of AG-UI in a followed tab, raw, in the order it saw it (agent/observation.ts). */
+  agent(observation: AgentObservation): void;
 };
 export type NetworkCapture = {
   start(tabId: number, url: string): Promise<NetworkMode>;
@@ -46,6 +51,8 @@ export type NetworkCapture = {
   /** A page-level fallback event (Task 18) from a followed tab, already re-masked: dropped when it is a call to OpenBot
    * itself (the debugger never sees those either) or fails the screens, else handed to the steps like a debugger call. */
   recordPageEvent(tabId: number, event: CapturedEvent): Promise<void>;
+  /** An AG-UI observation the page hook made in a followed tab: handed to the agent events like a debugger one. */
+  recordPageAgent(tabId: number, observation: AgentObservation): void;
   stop(): Promise<void>;
 };
 
@@ -154,11 +161,21 @@ export function createNetworkCapture(
     return page?.id;
   }
 
+  const agent = createAgentCapture({
+    send,
+    ignore,
+    observe: (observation) => {
+      if (!ended && mode !== "stopped") deps.agent(observation);
+    },
+    onRun: (key) => tracker.agentRun(key),
+  });
+
   const tracker = createRequestTracker({
     ignore,
     send,
     repeats,
     topFrame,
+    agent,
     call: (call: TrackedCall) => {
       if (ended || mode === "stopped") return;
       const { event, ...timing } = call;
@@ -224,6 +241,8 @@ export function createNetworkCapture(
         void enable({ tabId, sessionId: child });
       return;
     }
+    // The AG-UI capture first: the tracker asks it whether a request is an agent run.
+    agent.onEvent(target, method, params);
     tracker.onEvent(target, method, params);
   }
 
@@ -236,6 +255,7 @@ export function createNetworkCapture(
       const others = attachedTabs().filter((other) => other !== tabId);
       tabs.clear();
       tracker.clear();
+      agent.clear();
       repeats.clear();
       unlisten();
       setMode("stopped", CANCELLED);
@@ -247,6 +267,7 @@ export function createNetworkCapture(
     tabs.delete(tabId);
     topFrames.delete(tabId);
     tracker.forgetTab(tabId);
+    agent.forgetTab(tabId);
     repeats.forgetTab(tabId);
   }
 
@@ -454,6 +475,11 @@ export function createNetworkCapture(
       });
     },
 
+    recordPageAgent(tabId, observation) {
+      if (ended || mode !== "page" || tabs.get(tabId) !== "page") return;
+      deps.agent(observation);
+    },
+
     async stop() {
       if (ended) return;
       ended = true;
@@ -462,6 +488,7 @@ export function createNetworkCapture(
       tabs.clear();
       topFrames.clear();
       tracker.clear();
+      agent.clear();
       repeats.clear();
       unlisten();
       for (const tabId of attached)

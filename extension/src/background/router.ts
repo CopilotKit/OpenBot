@@ -174,7 +174,8 @@ export function installRouter(deps: RouterDeps): void {
       return false;
     }
     const answer =
-      message.type === "recorder.page-network"
+      message.type === "recorder.page-network" ||
+      message.type === "recorder.page-agent"
         ? deps.external(message, sender)
         : handleExternalConnect(message, sender);
     answer.then(

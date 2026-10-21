@@ -268,6 +268,42 @@ export type PageResponse =
   | { ok: true }
   | { ok: false; error: string };
 
+/** An AG-UI observation from the MAIN-world hook (shared/agui.ts StreamObservation): raw, as the debugger's are; the
+ * service worker adds the tab and prefixes the stream id with it. */
+const streamId = z.string().min(1).max(512);
+const at = z.number().positive().max(MAX_TIMESTAMP_MS);
+const pageAgentObservation = z.discriminatedUnion("kind", [
+  z
+    .object({
+      kind: z.literal("request"),
+      streamId,
+      at,
+      url: z.string().max(8192),
+      agentId: z.string().max(512).nullable(),
+      method: z.enum(["agent/run", "agent/connect"]),
+      input: z.unknown(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("event"),
+      streamId,
+      at,
+      agentId: z.string().max(512).nullable(),
+      threadId: z.string().max(512).nullable(),
+      event: z.looseObject({ type: z.string().min(1).max(100) }),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("end"),
+      streamId,
+      at,
+      outcome: z.enum(["complete", "failed"]),
+    })
+    .strict(),
+]);
+
 const externalToBackgroundSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("openbot.ping") }).strict(),
   z
@@ -279,6 +315,13 @@ const externalToBackgroundSchema = z.discriminatedUnion("type", [
   // From the MAIN-world fallback (Task 18), masked and trimmed to fit one event in the page; accepted only from a
   // recorded tab.
   z.object({ type: z.literal("recorder.page-network"), event }).strict(),
+  // From the same hook: what it saw of AG-UI, raw (the agent events mask it); accepted only from a recorded tab.
+  z
+    .object({
+      type: z.literal("recorder.page-agent"),
+      observation: pageAgentObservation,
+    })
+    .strict(),
 ]);
 export type ExternalToBackground = z.infer<typeof externalToBackgroundSchema>;
 export type ExternalResponse =
@@ -302,6 +345,8 @@ export type ExternalResponse =
   | { ok: false; error: "throttled"; retryAfterMs: number }; // too many connects from this origin lately, and how long until it may ask again
 
 const MAX_MESSAGE_BYTES = 64 * 1024;
+/** An AG-UI observation is not cut in the page: a run's input carries its whole Thread, a snapshot the agent's state. */
+const MAX_AGENT_MESSAGE_BYTES = 8 * 1024 * 1024;
 
 function jsonBytes(raw: unknown): number | null {
   try {
@@ -320,12 +365,20 @@ export function parseContentMessage(raw: unknown): ContentToBackground | null {
   return parsed.success ? parsed.data : null;
 }
 /** safeParse + 64 KiB JSON size cap: a recorder.page-network event arrives already trimmed to fit one Intelligence
- * event (16 KiB), so nothing larger is ever a real one. */
+ * event (16 KiB), so nothing larger is ever a real one. A recorder.page-agent observation is raw, up to 8 MiB. */
 export function parseExternalMessage(
   raw: unknown,
 ): ExternalToBackground | null {
   const bytes = jsonBytes(raw);
-  if (bytes === null || bytes > MAX_MESSAGE_BYTES) return null;
+  const agent =
+    typeof raw === "object" &&
+    raw !== null &&
+    (raw as { type?: unknown }).type === "recorder.page-agent";
+  if (
+    bytes === null ||
+    bytes > (agent ? MAX_AGENT_MESSAGE_BYTES : MAX_MESSAGE_BYTES)
+  )
+    return null;
   const parsed = externalToBackgroundSchema.safeParse(raw);
   return parsed.success ? parsed.data : null;
 }

@@ -189,6 +189,7 @@ function doubles(): Partial<RecordingDeps> {
       recordPageEvent: async (_tabId, event) => {
         network.recorded.push(event);
       },
+      recordPageAgent: () => {},
       stop: async () => {},
     }),
     createPageFallback: () => ({

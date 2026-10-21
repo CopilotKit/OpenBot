@@ -4,7 +4,9 @@
 // recorded.
 //
 // A step is held until its window closes (or the next step in its tab starts) and every call it may own has arrived,
-// then sent with its request in place; steps leave in the order they came.
+// then sent with its request in place; steps leave in the order they came. An event that is not a step (the agent's
+// side, agent/events.ts) is placed among them by its time: it leaves after every step that came before it and before
+// every later one, so the order Intelligence numbers them in is the order they happened.
 //
 // Which calls a step owns is drawn in time, per tab, since Chrome gives no reliable link from a call to the input that
 // caused it: a call is the latest step's when it starts no earlier than `leadMs` before that step (a handler can run on
@@ -284,6 +286,8 @@ type Pending = {
   tabId: number;
   at: number;
   event: CapturedEvent;
+  /** Not a step: an event placed among the steps by its time, sent as it is once every step before it left. */
+  placed?: true;
   /** A step the person took in the page (it can own calls); a page change, or an edit that echoes the action just
    * before it, only follows from one. */
   owner: boolean;
@@ -366,6 +370,7 @@ export function createStepAssembler(options: {
   }
 
   function isReady(step: Pending, at: number): boolean {
+    if (step.placed) return true;
     // A page change is ready once its page was looked up, `redirectMs` after its chain's last page change.
     if (!step.owner) return !step.waitingForPage;
     if (step.waitingForPage) return false;
@@ -429,6 +434,7 @@ export function createStepAssembler(options: {
 
   /** The step's event as it is sent: its page filled in, its save attached, cut to fit one Intelligence event. */
   function finish(step: Pending): CapturedEvent {
+    if (step.placed) return step.event;
     const value: Record<string, unknown> = { ...stepValue(step.event) };
     if (step.page && !isObject(value.page)) value.page = step.page;
     if (step.owner) {
@@ -608,6 +614,26 @@ export function createStepAssembler(options: {
       queue.push(step);
       openChange.set(tabId, step);
       step.pageTimer = timers.set(() => fetchPage(step), tune.redirectMs);
+    },
+
+    /** An event that is not a step (the agent's side): it leaves after every step held from before its time and
+     * before every held step from after it. With nothing held from before it, it leaves at once. */
+    place(tabId: number, event: CapturedEvent): void {
+      if (ended) return;
+      const at = event.timestamp;
+      let index = queue.length;
+      while (index > 0 && (queue[index - 1]?.at ?? 0) > at) index--;
+      queue.splice(index, 0, {
+        tabId,
+        at,
+        event,
+        placed: true,
+        owner: false,
+        closeAt: at,
+        values: [],
+        waitingForPage: false,
+      });
+      pump();
     },
 
     /** A finished call that passed the screens. */
