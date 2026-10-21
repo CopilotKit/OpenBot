@@ -3618,18 +3618,28 @@ fn restore_window_on<R: tauri::Runtime>(app: &tauri::AppHandle<R>, ports: &openb
         return;
     };
     let shell = app.state::<Shell>();
-    let _startup = shell.startup.lock().unwrap();
-    let root = cleanup_root(&shell, &stack::default_root());
+    // Reopen and the menus call this on the event-loop thread, and installation holds startup for
+    // the whole download. Waiting for it there froze the window until the download finished. A
+    // busy lock means setup is at work and the window is already on its screen, so show it as it
+    // is and leave which page it belongs on to the next restore.
+    let startup = match shell.startup.try_lock() {
+        Ok(guard) => Some(guard),
+        Err(std::sync::TryLockError::WouldBlock) => None,
+        Err(std::sync::TryLockError::Poisoned(error)) => panic!("{error}"),
+    };
     // Restore has the same deployment ownership requirement as the setup page's passive probe.
     // A successful app-port response alone may belong to another installation or application.
-    let destination = if let Some(url) = (!recovery_required_or_pending_quit_notice(&shell, &root))
-        .then(|| owned_app_url(&root, ports))
-        .flatten()
-    {
-        url.parse().ok()
-    } else {
-        setup_destination(app).ok()
-    };
+    let destination = startup.as_ref().and_then(|_| {
+        let root = cleanup_root(&shell, &stack::default_root());
+        if let Some(url) = (!recovery_required_or_pending_quit_notice(&shell, &root))
+            .then(|| owned_app_url(&root, ports))
+            .flatten()
+        {
+            url.parse().ok()
+        } else {
+            setup_destination(app).ok()
+        }
+    });
     if let Some(destination) = destination {
         let already_showing = window
             .url()
@@ -10343,6 +10353,39 @@ fn main() {
                 format!("http://127.0.0.1:{}/", f.ports.app)
             );
         }
+    }
+
+    #[test]
+    fn restore_window_shows_setup_without_waiting_for_startup_held_by_installation() {
+        let f = RestoreFixture::new();
+        let app = f.app(&f.owned, "tauri://localhost/");
+        let window = app.get_webview_window("main").unwrap();
+        let installing = "tauri://localhost/#installing";
+        window.navigate(installing.parse().unwrap()).unwrap();
+        window.hide().unwrap();
+        let shell = app.state::<Shell>();
+        let held = shell.startup.lock().unwrap();
+        let (done, finished) = std::sync::mpsc::channel();
+        let restoring = app.handle().clone();
+        let ports = f.ports;
+        std::thread::spawn(move || {
+            restore_window_on(&restoring, &ports);
+            let _ = done.send(());
+        });
+        let returned = finished.recv_timeout(std::time::Duration::from_secs(5));
+        drop(held);
+        returned.expect("restore waited on the startup lock an installation was holding");
+        assert_eq!(window.url().unwrap().as_str(), installing);
+        assert!(window.is_visible().unwrap());
+
+        // Free again, the next restore makes the decision it skipped.
+        window.hide().unwrap();
+        restore_window_on(app.handle(), &f.ports);
+        assert_eq!(
+            window.url().unwrap().as_str(),
+            format!("http://127.0.0.1:{}/", f.ports.app)
+        );
+        assert!(window.is_visible().unwrap());
     }
 
     #[test]

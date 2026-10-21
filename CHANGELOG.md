@@ -32,6 +32,11 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `code_required` (below). A server and a computer must be upgraded together: an older computer has
   no `/sign-in/code`.
 
+### The desktop window answers while software is installing
+
+Clicking or focusing the desktop window while it downloaded local software showed a spinning cursor
+until the download finished. The window now comes forward at once and keeps the setup screen.
+
 ### A new desktop install starts its server again
 
 A desktop install of v0.2.0 stopped at start with `server stopped straight away (exit status: 1)` and
