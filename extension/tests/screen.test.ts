@@ -171,3 +171,51 @@ test("CopilotKit's own capture batch is the page reporting on itself, whatever r
       false,
     );
 });
+
+test("CopilotKit's own capture asking its runtime for a capture pass is the page reporting on itself, never a save", () => {
+  // The two requests @copilotkit/core's TrajectoryConnection sends (CopilotKit main c21eeda029): the REST route with an
+  // empty body, and the single route's envelope.
+  const trajectoryId = "6b0e2f1c-9d3a-4c5e-8f7a-1b2c3d4e5f60";
+  const rest = {
+    url: `https://crm.example.test/api/copilotkit/trajectory/${encodeURIComponent(trajectoryId)}/connect`,
+    body: JSON.stringify({}),
+  };
+  const single = {
+    url: "https://crm.example.test/api/copilotkit",
+    body: JSON.stringify({
+      method: "trajectory/connect",
+      params: { trajectoryId },
+      body: {},
+    }),
+  };
+  for (const { url, body } of [rest, single]) {
+    expect(isTelemetry(url, body)).toBe(true);
+    expect(
+      screenCall({
+        url,
+        method: "POST",
+        outcome: "ok",
+        headers: { "content-type": "application/json" },
+        body,
+        repeat: false,
+      }),
+    ).toBe("telemetry");
+  }
+  // The same runtime's agent run, and an app's own route that mentions trajectories, are not.
+  expect(
+    isTelemetry(
+      "https://crm.example.test/api/copilotkit",
+      JSON.stringify({
+        method: "agent/run",
+        params: { agentId: "default" },
+        body: { threadId: "t-1", runId: "r-1", messages: [] },
+      }),
+    ),
+  ).toBe(false);
+  expect(
+    isTelemetry(
+      "https://crm.example.test/api/trajectory/review",
+      '{"note":"connect the trajectory/connect dots"}',
+    ),
+  ).toBe(false);
+});

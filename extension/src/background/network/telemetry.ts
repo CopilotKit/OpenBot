@@ -114,6 +114,8 @@ const TELEMETRY_PATHS = [
   /^\/(?:tr|mon|beacon|pixel|ping|track|t\.gif)\/?$/,
   // OpenTelemetry's export paths
   /\/v1\/(?:traces|metrics|logs)\/?$/,
+  // CopilotKit's own capture asking its runtime for a capture pass (the REST route; the single route is known by its body)
+  /\/trajectory\/[^/]+\/connect\/?$/,
   // Sentry's ingest, Elastic's RUM intake, Vercel and Cloudflare insights
   /\/api\/\d+\/(?:envelope|store|security|minidump)\/?$/,
   /\/intake\/v2\/rum\//,
@@ -183,6 +185,18 @@ export function isLearningBatch(body: string): boolean {
 const onHost = (host: string, suffix: string) =>
   host === suffix || host.endsWith(`.${suffix}`);
 
+/** CopilotKit's own capture asking a single-route runtime for its capture pass (`@copilotkit/core`'s TrajectoryConnection):
+ * the page setting up its report on itself. */
+function isCapturePassRequest(body: string): boolean {
+  if (!body.includes('"trajectory/connect"')) return false;
+  try {
+    const parsed: unknown = JSON.parse(body);
+    return isRecord(parsed) && parsed.method === "trajectory/connect";
+  } catch {
+    return false;
+  }
+}
+
 /** True for a call that only reports on the page (analytics, ads, errors, monitoring, CopilotKit's own capture), never one
  * doing the task. */
 export function isTelemetry(url: string, body?: string): boolean {
@@ -199,7 +213,9 @@ export function isTelemetry(url: string, body?: string): boolean {
   if (TELEMETRY_PATHS.some((pattern) => pattern.test(path))) return true;
   return (
     body !== undefined &&
-    (ERROR_ENVELOPE.test(body.slice(0, 2_048)) || isLearningBatch(body))
+    (ERROR_ENVELOPE.test(body.slice(0, 2_048)) ||
+      isLearningBatch(body) ||
+      isCapturePassRequest(body))
   );
 }
 
