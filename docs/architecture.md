@@ -317,7 +317,7 @@ Whether a person can use an app through a Bot is answered once, on the server, f
 
 ### Writing a skill in a conversation
 
-A skill can be written from the composer as well as from `/skills`. The deployment ships a skill called `skill-creator` whose instruction is how to interview somebody about the skill they want; a Bot holding it is also offered four tools the app registers — `list_skills`, `read_skill`, `list_skill_tools`, and `save_skill`, which suspends the run on a card showing the command, the title and the whole instruction. Nothing is written until the person presses the button.
+A skill can be written from the composer as well as from `/capabilities/skills`. The deployment ships a skill called `skill-creator` whose instruction is how to interview somebody about the skill they want; a Bot holding it is also offered four tools the app registers — `list_skills`, `read_skill`, `list_skill_tools`, and `save_skill`, which suspends the run on a card showing the command, the title and the whole instruction. Nothing is written until the person presses the button.
 
 The grant is the gate. Those four tools are offered only while the Bot holds `skill-creator`, because four extra tools on every run costs the narrowing above what it exists to buy, and a Bot for looking up transactions has no business drafting skills.
 

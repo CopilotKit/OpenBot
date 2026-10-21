@@ -2,6 +2,7 @@ import {
   IconBolt,
   IconBox,
   IconLogout,
+  IconPlug,
   IconPlus,
   IconSearch,
   IconSettings,
@@ -366,14 +367,18 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
               <BotsNavBadge />
             </SidebarMenuButton>
           </SidebarMenuItem>
+          {/*
+           * Beside Bots rather than inside Admin: each is somebody's own. Capabilities are your skills
+           * and what your Bots remember about you; Connections are the apps a Bot reaches as you.
+           * Capabilities links to `/capabilities` rather than a tab, so it stays lit on both tabs.
+           */}
           <SidebarMenuItem>
-            {/* Beside Bots rather than inside Admin: writing a skill is something anybody does. */}
             <SidebarMenuButton
               className="hover:bg-foreground/5 h-10"
               render={(props) => (
                 <Link
                   {...props}
-                  to="/skills"
+                  to="/capabilities"
                   activeProps={{
                     className: "bg-foreground/5",
                   }}
@@ -383,7 +388,26 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
               <div className="size-[28px] flex items-center justify-center">
                 <IconBox />
               </div>
-              <span className="text-sm trackint-tight">Skills</span>
+              <span className="text-sm trackint-tight">Capabilities</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              className="hover:bg-foreground/5 h-10"
+              render={(props) => (
+                <Link
+                  {...props}
+                  to="/connections"
+                  activeProps={{
+                    className: "bg-foreground/5",
+                  }}
+                />
+              )}
+            >
+              <div className="size-[28px] flex items-center justify-center">
+                <IconPlug />
+              </div>
+              <span className="text-sm trackint-tight">Connections</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
           <SidebarMenuItem>

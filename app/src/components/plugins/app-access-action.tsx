@@ -152,12 +152,7 @@ function ConnectAction({ access }: { access: AppAccess }) {
   if (viaSettings)
     return (
       <Button
-        render={
-          <Link
-            params={{ key: access.key }}
-            to="/settings/connected-accounts/$key"
-          />
-        }
+        render={<Link params={{ key: access.key }} to="/connections/$key" />}
         aria-label={`${label} ${access.displayName}`}
         size="sm"
         variant="outline"

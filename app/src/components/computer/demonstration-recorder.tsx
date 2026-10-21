@@ -353,7 +353,7 @@ export function DemonstrationRecorder({
               {recording.status === "published" && recording.skillSlug ? (
                 <>
                   <Link
-                    to="/skills"
+                    to="/capabilities/skills"
                     search={{ edit: recording.skillSlug }}
                     className="text-xs underline"
                   >

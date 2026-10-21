@@ -55,7 +55,7 @@ export function GithubSources() {
         </Button>
       }
       description="Register a repository, then add its webhook in GitHub using the address below and the same secret. A responsibility can then start on one of its events, such as issues.opened."
-      title="GitHub events"
+      title="Repositories"
     >
       {error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">

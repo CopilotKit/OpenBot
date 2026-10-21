@@ -274,7 +274,7 @@ test("a refusal carrying an app card is said for the sources page, not stored ra
     );
     const { syncError } = await store.getSource(owner, value.id);
     expect(syncError).toBe(
-      "Your Docs account needs reconnecting. Reconnect it under Settings, Connected accounts, then sync again.",
+      "Your Docs account needs reconnecting. Reconnect it under Connections, then sync again.",
     );
     expect(syncError).not.toContain("[connect-app]");
   } finally {

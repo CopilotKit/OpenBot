@@ -16,7 +16,7 @@ Setting it up takes two people, and neither can do the other's half:
 | Who               | Does                                                    | Where                                    |
 | ----------------- | ------------------------------------------------------- | ---------------------------------------- |
 | An administrator  | Registers the OAuth client and enables the connector    | Google Cloud console, then `/admin/plugins/google-drive` |
-| Each person       | Consents with their own Google account                  | `/settings/connected-accounts/google-drive`              |
+| Each person       | Consents with their own Google account                  | `/connections/google-drive`              |
 
 There is deliberately no endpoint for an administrator to connect an account on somebody's behalf.
 
@@ -81,7 +81,7 @@ audit row.
 
 ## What each person does
 
-At `/settings/connected-accounts`, Google Drive appears once an administrator has enabled it. Open it
+At `/connections`, Google Drive appears once an administrator has enabled it. Open it
 and press **Connect**. That leaves OpenBot for Google's own consent screen — the arrow on the button
 says so — and returns to the same page, which then reads **Connected** with the scope Google actually
 granted.
@@ -130,7 +130,7 @@ Google client can have the URI registered on the wrong one.
 ### "Google Drive refused this request (401)."
 
 Google will not accept the token at all. Reconnecting the account at
-`/settings/connected-accounts/google-drive` is the usual fix. If it persists, the scopes granted do
+`/connections/google-drive` is the usual fix. If it persists, the scopes granted do
 not cover this connector — check what the **Access** section reports as granted against the
 `drive.readonly` scope this connector asks for.
 
@@ -156,7 +156,7 @@ than about the account.
 ### "You have not connected your Google Drive account."
 
 The Bot was asked to read as somebody with no connection stored. Connect at
-`/settings/connected-accounts/google-drive`. There is no fallback to a deployment-wide credential —
+`/connections/google-drive`. There is no fallback to a deployment-wide credential —
 by design, since a fallback would answer with somebody else's access.
 
 ### The connection worked and stopped about an hour later

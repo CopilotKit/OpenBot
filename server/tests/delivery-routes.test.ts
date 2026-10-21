@@ -287,7 +287,7 @@ test("an identity code from a Slack sender is redeemed through the adapter", asy
     ...linkMessage(IDENTITY_CODE),
   });
   expect(said(result.events)).toBe(
-    "Linked your Slack account to OpenBot. You can see it under Settings → Connected accounts.",
+    "Linked your Slack account to OpenBot. You can see it under Connections.",
   );
   expect(redeemed).toEqual([[IDENTITY_CODE, { teamId: "T1", userId: "U1" }]]);
 });

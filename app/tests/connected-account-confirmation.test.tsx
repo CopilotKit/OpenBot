@@ -28,7 +28,7 @@ import type { PluginServer, PluginsPage } from "@/lib/plugins/queries";
 import {
   landedActionFrom,
   Route as ConnectedAccountRoute,
-} from "@/routes/_authed/settings/connected-accounts/$key";
+} from "@/routes/_authed/_app/connections.$key";
 
 /**
  * The page a person reads before deciding to grant or end access to a mailbox, on each broker.
@@ -171,14 +171,14 @@ function renderScreen(search = "") {
     getParentRoute: () => rootRoute,
     component: Outlet,
   });
-  const settingsRoute = createRoute({
-    path: "/settings",
+  const appRoute = createRoute({
+    id: "/_app",
     getParentRoute: () => authedRoute,
     component: Outlet,
   });
   const indexRoute = createRoute({
-    path: "/connected-accounts/",
-    getParentRoute: () => settingsRoute,
+    path: "/connections/",
+    getParentRoute: () => appRoute,
     component: () => null,
   });
   const wired = (
@@ -186,16 +186,16 @@ function renderScreen(search = "") {
       update: (options: unknown) => typeof ConnectedAccountRoute;
     }
   ).update({
-    id: "/connected-accounts/$key",
-    path: "/connected-accounts/$key",
-    getParentRoute: () => settingsRoute,
+    id: "/connections/$key",
+    path: "/connections/$key",
+    getParentRoute: () => appRoute,
   });
   const router = createRouter({
     routeTree: rootRoute.addChildren([
-      authedRoute.addChildren([settingsRoute.addChildren([indexRoute, wired])]),
+      authedRoute.addChildren([appRoute.addChildren([indexRoute, wired])]),
     ]),
     history: createMemoryHistory({
-      initialEntries: [`/settings/connected-accounts/${APP}${search}`],
+      initialEntries: [`/connections/${APP}${search}`],
     }),
   });
   return render(

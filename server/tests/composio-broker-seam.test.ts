@@ -64,9 +64,9 @@ describe("brokerReturnUrl", () => {
 
   test("refuses an address no browser could come back through", () => {
     for (const unusable of [
-      "openbot.example.com/settings/connected-accounts/x",
-      "localhost:3001/settings/connected-accounts/x",
-      "/settings/connected-accounts/x",
+      "openbot.example.com/connections/x",
+      "localhost:3001/connections/x",
+      "/connections/x",
       "javascript:alert(1)",
     ]) {
       expect(() => brokerReturnUrl(unusable, "composio")).toThrow(
@@ -98,8 +98,7 @@ describe("brokerReturnUrl", () => {
    * an operator is still given it lives on `operatorMessage` in the voice test.
    */
   test("never quotes the address it refused", () => {
-    const address =
-      "openbot-tenant-42.internal.corp/settings/connected-accounts/9f3c";
+    const address = "openbot-tenant-42.internal.corp/connections/9f3c";
 
     let thrown: unknown;
     try {
@@ -112,16 +111,13 @@ describe("brokerReturnUrl", () => {
     expect(sentence).not.toBeNull();
     expect(sentence).not.toContain(address);
     expect(sentence).not.toContain("openbot-tenant-42.internal.corp");
-    expect(sentence).not.toContain("/settings/connected-accounts/9f3c");
+    expect(sentence).not.toContain("/connections/9f3c");
   });
 
   test("hands back the address a configured deployment built", () => {
     expect(
-      brokerReturnUrl(
-        "https://openbot.test/settings/connected-accounts/x",
-        "composio",
-      ),
-    ).toBe("https://openbot.test/settings/connected-accounts/x");
+      brokerReturnUrl("https://openbot.test/connections/x", "composio"),
+    ).toBe("https://openbot.test/connections/x");
     expect(
       brokerReturnUrl("http://localhost:3001/admin/plugins/x", "composio"),
     ).toBe("http://localhost:3001/admin/plugins/x");
@@ -144,15 +140,15 @@ describe("brokerReturnUrl", () => {
    * trimmed would pass the first half of this table and strand somebody on the second.
    */
   test("hands back the address it checked rather than the padding around it", () => {
-    const intended = "https://openbot.test/settings/connected-accounts/x";
+    const intended = "https://openbot.test/connections/x";
 
     for (const disguised of [
-      " https://openbot.test/settings/connected-accounts/x",
-      "https://openbot.test/settings/connected-accounts/x\n",
-      "\thttps://openbot.test/settings/connected-accounts/x ",
-      "https://openbot\n.test/settings/connected-accounts/x",
-      "https://openbot.test/settings/\tconnected-accounts/x",
-      "https://openbot.test/settings\r/connected-accounts/x",
+      " https://openbot.test/connections/x",
+      "https://openbot.test/connections/x\n",
+      "\thttps://openbot.test/connections/x ",
+      "https://openbot\n.test/connections/x",
+      "https://openbot.test/conn\tections/x",
+      "https://openbot.test/connections\r/x",
     ]) {
       expect(brokerReturnUrl(disguised, "composio")).toBe(intended);
     }
@@ -214,7 +210,7 @@ describe("grantIsLocal", () => {
         .authorize({
           account: { holder: "person", userId: "u", vendorUserId: "u" },
           toolkit: "linear",
-          returnUrl: "https://openbot.test/settings/connected-accounts/x",
+          returnUrl: "https://openbot.test/connections/x",
           action: "LINEAR_CREATE_ISSUE",
         })
         .then(

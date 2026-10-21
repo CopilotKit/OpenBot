@@ -195,7 +195,7 @@ function PutItOnABot({ slug }: { slug: string }) {
     <Link
       className="mt-2 inline-block text-sm underline underline-offset-4"
       search={{ edit: slug }}
-      to="/skills"
+      to="/capabilities/skills"
     >
       Put it on a Bot
     </Link>

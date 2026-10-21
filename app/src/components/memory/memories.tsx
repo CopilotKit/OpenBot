@@ -1,6 +1,6 @@
 import { IconPlus, IconRobot, IconUser } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Fragment, useId, useState } from "react";
+import { Fragment, type ReactNode, useId, useState } from "react";
 import {
   PageEmpty,
   PageRows,
@@ -127,14 +127,27 @@ export function RememberFact() {
   );
 }
 
-/** Everything the person's Bots remember about them, with who formed each memory. */
-export function MemoryList() {
+/**
+ * Everything the person's Bots remember about them, with who formed each memory. `action` and
+ * `description` belong to the section, since the page heading above it is the whole Plugins screen.
+ */
+export function MemoryList({
+  action,
+  description,
+}: {
+  action?: ReactNode;
+  description?: ReactNode;
+} = {}) {
   const memories = useQuery(memoriesQueryOptions());
   const agents = useQuery(agentListQueryOptions());
   const botName = (id: string | null) =>
     agents.data?.find((agent) => agent.id === id)?.name ?? "your Bot";
   return (
-    <PageSection title="Your memories">
+    <PageSection
+      action={action}
+      description={description}
+      title="Your memories"
+    >
       {memories.isPending ? null : memories.error ? (
         <p role="alert" className="mt-4 text-destructive text-sm">
           {memories.error.message}

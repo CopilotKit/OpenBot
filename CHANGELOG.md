@@ -35,6 +35,31 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   request for an administrator to switch on a work app, grant it to a Bot, or connect a Shared app's
   team account is kept, with who answered it and when. It starts empty and nothing is backfilled.
 
+### Every settings screen is the same, slightly wider column
+
+Settings, Admin, Connections, Capabilities and each Bot's pages share one column width, now 720px instead of 630px, so
+no screen is wider than another and a row has room for its label beside its control. Sentences keep
+their comfortable reading width inside it. The audit log stays wider, because it is a table.
+
+### Capabilities and Connections sit beside Bots in the sidebar
+
+The sidebar's Skills entry becomes two, below Bots: **Capabilities** (`/capabilities`), with Skills
+(`/capabilities/skills`) and Memory (`/capabilities/memory`) as tabs under its title, Memory leaving
+Settings; and **Connections** (`/connections`), the apps your Bots use as you, which leaves Settings
+too. On the home page, Explore agents shows each Bot as a white card with its avatar on top, the same
+card as elsewhere. The old
+addresses — `/skills`, `/settings/connected-accounts` with any account beneath it, and
+`/settings/memory` — redirect to the new ones, keeping `?connected=`, `?linked=` and a skill being
+written or edited, so a consent begun before upgrading still lands on its page. OAuth, GitHub linking
+and the Slack link confirmation now send people to `/connections`.
+
+Connections is one searchable list. Apps you connect, apps on your organisation's account (marked
+"Team account") and your GitHub and Slack links are rows of the same kind, with those already in use
+first, and each opens its own page. GitHub's page holds your link, the repositories whose events can
+start a responsibility (formerly "GitHub events"), and a way to a Composio GitHub app where one is
+enabled, so GitHub is listed once; linking GitHub now comes back to that page. The reset for what
+you let shared Bots use moves to Settings → Approvals, as **Shared Bots**.
+
 ### Each app on a Bot says whether you can use it, and you can ask an administrator for the rest
 
 A Bot's page now says, for every work app the Bot holds, what that app is for the person looking:

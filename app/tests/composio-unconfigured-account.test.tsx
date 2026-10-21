@@ -23,8 +23,8 @@ import {
   type PluginsPage,
   pluginKeys,
 } from "@/lib/plugins/queries";
-import { Route as ConnectedAccountRoute } from "@/routes/_authed/settings/connected-accounts/$key";
-import { serversListedFor } from "@/routes/_authed/settings/connected-accounts/index";
+import { Route as ConnectedAccountRoute } from "@/routes/_authed/_app/connections.$key";
+import { serversListedFor } from "@/routes/_authed/_app/connections.index";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -141,29 +141,36 @@ function renderAccount(composioConfigured: boolean) {
     getParentRoute: () => rootRoute,
     component: Outlet,
   });
-  const settingsRoute = createRoute({
-    path: "/settings",
+  const appRoute = createRoute({
+    id: "/_app",
     getParentRoute: () => authedRoute,
     component: Outlet,
   });
+  const connectionsRoute = createRoute({
+    path: "/connections",
+    getParentRoute: () => appRoute,
+    component: Outlet,
+  });
   const indexRoute = createRoute({
-    path: "/connected-accounts/",
-    getParentRoute: () => settingsRoute,
+    path: "/",
+    getParentRoute: () => connectionsRoute,
     component: () => null,
   });
   const account = (ConnectedAccountRoute as unknown as Updatable).update({
-    id: "/connected-accounts/$key",
-    path: "/connected-accounts/$key",
-    getParentRoute: () => settingsRoute,
+    id: "/$key",
+    path: "/$key",
+    getParentRoute: () => connectionsRoute,
   });
   const router = createRouter({
     routeTree: rootRoute.addChildren([
       authedRoute.addChildren([
-        settingsRoute.addChildren([indexRoute, account as never]),
+        appRoute.addChildren([
+          connectionsRoute.addChildren([indexRoute, account as never]),
+        ]),
       ]),
     ]),
     history: createMemoryHistory({
-      initialEntries: ["/settings/connected-accounts/composio-gmail"],
+      initialEntries: ["/connections/composio-gmail"],
     }),
   });
   return render(

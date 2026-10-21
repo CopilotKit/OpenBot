@@ -15,7 +15,7 @@ Setting it up takes three hands, and none of them can do another's:
 | Whoever deploys  | Sets `COMPOSIO_API_KEY`                                                    | The deployment's environment, or `secrets.composioApiKey` in the Helm chart. There is no screen for it |
 | An administrator | Enables an app                                                             | `/admin/plugins/composio`                                         |
 | An administrator | Grants its actions to a Bot                                                | `/admin/plugins/composio-<slug>`, then that page's per-Bot screen |
-| Each person      | Connects their own account to that app                                     | `/settings/connected-accounts`                                    |
+| Each person      | Connects their own account to that app                                     | `/connections`                                    |
 | An administrator | Chooses Personal or Shared for an app, and connects a Shared app's account | `/admin/plugins/composio-<slug>`                                  |
 | Each person      | Asks for access to an app a Bot needs and only an administrator can fix    | The Bot's page, or the card in a conversation                     |
 | An administrator | Approves or dismisses that request — approving does the change            | `/admin/plugins/composio-<slug>`                                  |
@@ -444,7 +444,7 @@ the deployment's account.
 
 ## What each person does
 
-At `/settings/connected-accounts`, a brokered app appears beside the OAuth connectors once an
+At `/connections`, a brokered app appears beside the OAuth connectors once an
 administrator has enabled it. Open it and press **Connect**. On a consent app — and on one whose
 OAuth client registers itself, which is the same trip from here — that leaves OpenBot for Composio's
 consent screen and returns to the same page, or, for an administrator who started from the app's own
@@ -520,7 +520,7 @@ finds out is refused with a card offering **Reconnect** (below).
 On the Bot's page, Connect opens the app's consent screen in a new tab through the same connect route
 Settings uses, and the row turns ready once the connection is recorded. An app connected with a typed
 key, and Reconnect on a Composio app (whose row has to be disconnected before a new account can be
-attached), go to the app's own page under `/settings/connected-accounts` instead.
+attached), go to the app's own page under `/connections` instead.
 
 ### In a conversation
 

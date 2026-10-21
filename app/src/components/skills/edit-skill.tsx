@@ -89,7 +89,7 @@ export function EditSkill({ slug }: { slug: string }) {
         footer={<SkillAgents grantedTo={skill.grantedTo} slug={skill.slug} />}
         onSubmit={async (values) => {
           await saveSkill.mutateAsync(values);
-          await navigate({ search: {}, to: "/skills" });
+          await navigate({ search: {}, to: "/capabilities/skills" });
         }}
         slugLocked
         submitLabel="Save changes"

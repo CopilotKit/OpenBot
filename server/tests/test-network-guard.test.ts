@@ -433,7 +433,7 @@ test("the test network guard is in force for a vendor SDK that binds its own tra
     broker.authorize({
       account: { holder: "person", userId: "u", vendorUserId: "u" },
       toolkit: "linear",
-      returnUrl: "https://openbot.test/settings/connected-accounts/x",
+      returnUrl: "https://openbot.test/connections/x",
     }),
   );
 

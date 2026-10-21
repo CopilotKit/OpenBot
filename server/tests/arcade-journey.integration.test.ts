@@ -858,7 +858,7 @@ describe("an Arcade deployment, from the picker to the disconnect", () => {
     // STILL ONE MINT. A second one here would mean the return leg was verifying somebody else's.
     expect(authorizeCalls).toEqual([{ tool_name: SEND, user_id: ADMIN }]);
     expect(response?.headers.get("location")).toBe(
-      `${APP_URL}/settings/connected-accounts/${MAIL_ROW}?action=${encodeURIComponent(SEND)}`,
+      `${APP_URL}/connections/${MAIL_ROW}?action=${encodeURIComponent(SEND)}`,
     );
 
     const connections = await connectionsOf(MAIL);
@@ -1063,7 +1063,7 @@ describe("two separately-shared apps", () => {
        * given.
        */
       expect(response.headers.get("location")).toBe(
-        `${APP_URL}/settings/connected-accounts/${rowId}?action=${encodeURIComponent(actionName)}`,
+        `${APP_URL}/connections/${rowId}?action=${encodeURIComponent(actionName)}`,
       );
 
       const connections = await connectionsOf(app);

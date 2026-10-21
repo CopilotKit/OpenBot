@@ -48,7 +48,7 @@ function RouteComponent() {
           </EmptyHeader>
         </Empty>
       ) : (
-        <div className="mx-auto mt-12 grid w-full max-w-2xl grid-cols-1 gap-4 md:grid-cols-2">
+        <div className="mt-12 grid w-full grid-cols-1 gap-4 md:grid-cols-2">
           {components.data?.map((component) => (
             /*
              * A real link rather than a button, so a component can be opened in a new tab the way

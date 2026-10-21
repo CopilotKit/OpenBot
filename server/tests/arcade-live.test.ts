@@ -309,7 +309,7 @@ describe.skipIf(!live)("Arcade, for real", () => {
       const client = arcade();
       const action = need(run.action, "no action was chosen");
       const values = [
-        "https://app.example.com/settings/connected-accounts",
+        "https://app.example.com/connections",
         `http://localhost:${PORT}/`,
         "https://cloud.arcade.dev",
         "http://localhost:3000/",

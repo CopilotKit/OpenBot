@@ -1524,8 +1524,7 @@ const DEV_ACTOR_ACCOUNT: AccountRef = {
  * assertion rather than a call to `connectedAccountsUrlFor`, because an assertion that builds the
  * expected value the way the code does cannot fail when the code's answer changes.
  */
-const RETURN_URL =
-  "http://localhost:3001/settings/connected-accounts/composio-linear";
+const RETURN_URL = "http://localhost:3001/connections/composio-linear";
 const ADMIN_RETURN_URL = "http://localhost:3001/admin/plugins/composio-linear";
 
 /**

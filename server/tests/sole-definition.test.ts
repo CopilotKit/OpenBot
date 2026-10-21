@@ -166,7 +166,7 @@ const KNOWN_DUPLICATES: Record<
     why: "One predicate for the app and one for the server, plus the same two-arm literal open-coded as `isBrokered` on the connected-accounts page; collapsing them is a cross-package move the fix cycle owns.",
     sites: [
       "app/src/lib/plugins/provider-vocabulary.ts",
-      "app/src/routes/_authed/settings/connected-accounts/index.tsx",
+      "app/src/routes/_authed/_app/connections.index.tsx",
       "server/src/plugins/access.ts",
     ],
   },

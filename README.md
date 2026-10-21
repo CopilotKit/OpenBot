@@ -193,14 +193,14 @@ Leave `EMBEDDED_POSTGRES` off and set `DATABASE_URL` to point at a database you 
 | `/bots/:id/reach`           | Continue a conversation with the Bot in Slack, Microsoft Teams, or by text message. |
 | `/bots/:id/memory`          | Which connected apps feed the Bot facts, and its background research. |
 | `/bots/:id/approvals`       | What the Bot may do without asking you first.                      |
-| `/skills`                   | Create and enable personal skills.                                 |
+| `/connections`              | Connect your apps so your Bots can work with them.                 |
+| `/capabilities/skills`      | Create and enable personal skills.                                 |
+| `/capabilities/memory`      | What your Bots remember about you, and facts you tell them.        |
 | `/routines`                 | See the routines that are standing, and stop one.                  |
 | `/settings`                 | User preferences.                                                  |
-| `/settings/connected-accounts` | Connect your apps so your Bots can work with them.              |
 | `/settings/passwords`       | Logins you saved when signing a Bot in to a website.               |
 | `/settings/notifications`   | Where updates go, your devices, and recent deliveries.             |
 | `/settings/approvals`       | Whether your Bots ask before acting, and rules for every Bot.      |
-| `/settings/memory`          | What your Bots remember about you, and facts you tell them.        |
 | `/admin/credentials`        | Store write-only encrypted credentials.                            |
 | `/admin/approvals`          | Team approval settings, team rules, and shared account requests.   |
 | `/admin/computers`          | View, stop, and reset Bot computers.                               |

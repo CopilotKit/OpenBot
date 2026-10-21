@@ -20,7 +20,7 @@ import { cleanup, render, waitFor } from "@testing-library/react";
 import type { ComponentType } from "react";
 import { EditSkill } from "@/components/skills/edit-skill";
 import { type PluginsPage, pluginKeys } from "@/lib/plugins/queries";
-import { Route as SkillsRoute } from "@/routes/_authed/_app/skills";
+import { Route as SkillsRoute } from "@/routes/_authed/_app/capabilities.skills";
 import { Route as AdminSkillsRoute } from "@/routes/_authed/admin/skills";
 
 /**

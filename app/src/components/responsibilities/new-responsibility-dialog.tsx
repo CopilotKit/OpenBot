@@ -251,7 +251,7 @@ export function NewResponsibilityDialog({
                   {source === "github" && (
                     <FieldDescription>
                       Events come from the repositories you connected in{" "}
-                      <Link to="/settings/connected-accounts">
+                      <Link to="/connections">
                         Settings → Connected accounts
                       </Link>
                       .

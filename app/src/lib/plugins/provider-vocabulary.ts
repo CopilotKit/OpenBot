@@ -171,7 +171,7 @@ export function brokeredConsentTrip(provider: PluginsProvider): string {
  * that is not there.
  *
  * `where` IS NOT DECORATION AND HAS NO DEFAULT. The two screens that draw this row do not both
- * draw the action list: the settings screen has it directly underneath, and the admin setup page
+ * draw the action list: the Connections page has it directly underneath, and the admin setup page
  * has none at all, so a single sentence saying "below" is a true direction on one screen and a
  * wrong one on the other — pointing somebody at a list that is not on their page is the same
  * failure as the Connect button this sentence replaces, one step further on. Each caller says
@@ -184,7 +184,7 @@ export function brokeredPerActionTrip(
   const stem = `${VOCABULARY[provider].name} approves one action at a time, so there is nothing to connect for the whole app.`;
   return where === "below"
     ? `${stem} Authorize the actions you want below.`
-    : `${stem} Authorize them from Connected accounts in Settings.`;
+    : `${stem} Authorize them from Connections.`;
 }
 
 /** What a person is told where the deployment has no key for the active broker. */

@@ -95,7 +95,7 @@ export function ConnectAppCard({
           <Link
             className="underline underline-offset-2"
             params={{ key: serverId }}
-            to="/settings/connected-accounts/$key"
+            to="/connections/$key"
           >
             Enter it on {title}'s page
           </Link>

@@ -26,7 +26,7 @@ import {
 import type { BrokerField } from "@/lib/plugins/mutations";
 import type { PluginServer, PluginsPage } from "@/lib/plugins/queries";
 import { Route as AdminAppRoute } from "@/routes/_authed/admin/plugins/$key";
-import { Route as ConnectedAccountRoute } from "@/routes/_authed/settings/connected-accounts/$key";
+import { Route as ConnectedAccountRoute } from "@/routes/_authed/_app/connections.$key";
 import { BROKERED_PROBE_OUTCOMES } from "../../server/src/plugins/store";
 
 /**
@@ -689,10 +689,10 @@ afterEach(() => {
 /**
  * The personal screen, at its real id.
  *
- * `routeTree.gen.ts` fixes both halves: id `/connected-accounts/$key` under `/_authed/settings`,
- * path `/connected-accounts/$key`. Decoy pathless/static parents are enough to make the join land
- * on the id `useParams({ from: … })` resolves against; the real ancestors check a session and mount
- * the settings shell, neither of which this file is about. The index route is registered only so
+ * `routeTree.gen.ts` fixes both halves: id `/$key` under `/_authed/_app/connections`, path
+ * `/connections/$key`. Decoy pathless/static parents are enough to make the join land on the id
+ * `useParams({ from: … })` resolves against; the real ancestors check a session and mount the app
+ * shell, neither of which this file is about. The index route is registered only so
  * the Back link has something to build an href from.
  */
 function renderAccountScreen(client: QueryClient) {
@@ -702,14 +702,19 @@ function renderAccountScreen(client: QueryClient) {
     getParentRoute: () => rootRoute,
     component: Outlet,
   });
-  const settingsRoute = createRoute({
-    path: "/settings",
+  const appRoute = createRoute({
+    id: "/_app",
     getParentRoute: () => authedRoute,
     component: Outlet,
   });
+  const connectionsRoute = createRoute({
+    path: "/connections",
+    getParentRoute: () => appRoute,
+    component: Outlet,
+  });
   const indexRoute = createRoute({
-    path: "/connected-accounts/",
-    getParentRoute: () => settingsRoute,
+    path: "/",
+    getParentRoute: () => connectionsRoute,
     component: () => null,
   });
   const wired = (
@@ -717,17 +722,19 @@ function renderAccountScreen(client: QueryClient) {
       update: (options: unknown) => typeof ConnectedAccountRoute;
     }
   ).update({
-    id: "/connected-accounts/$key",
-    path: "/connected-accounts/$key",
-    getParentRoute: () => settingsRoute,
+    id: "/$key",
+    path: "/$key",
+    getParentRoute: () => connectionsRoute,
   });
   const tree = rootRoute.addChildren([
-    authedRoute.addChildren([settingsRoute.addChildren([indexRoute, wired])]),
+    authedRoute.addChildren([
+      appRoute.addChildren([connectionsRoute.addChildren([indexRoute, wired])]),
+    ]),
   ]);
   const router = createRouter({
     routeTree: tree,
     history: createMemoryHistory({
-      initialEntries: [`/settings/connected-accounts/${APP_KEY}`],
+      initialEntries: [`/connections/${APP_KEY}`],
     }),
   });
   return render(

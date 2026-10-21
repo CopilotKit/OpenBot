@@ -122,7 +122,7 @@ function mounted(
   // The destination the card links to for an app connected with a typed key.
   const settings = createRoute({
     getParentRoute: () => root,
-    path: "/settings/connected-accounts/$key",
+    path: "/connections/$key",
     component: () => null,
   });
   const router = createRouter({
@@ -210,9 +210,7 @@ test("says where to type a key for an app that has no page to visit", async () =
   const link = await waitFor(() =>
     card.view.getByRole("link", { name: /Enter it on Notion's page/ }),
   );
-  expect(link.getAttribute("href")).toBe(
-    "/settings/connected-accounts/srv_notion",
-  );
+  expect(link.getAttribute("href")).toBe("/connections/srv_notion");
   // The blank tab claimed on the click is let go rather than left sitting on about:blank.
   expect(card.tabsClosed()).toBe(1);
 });

@@ -46,7 +46,7 @@ function RouteComponent() {
           </EmptyHeader>
         </Empty>
       ) : (
-        <div className="mx-auto mt-12 grid w-full max-w-2xl grid-cols-1 gap-4 md:grid-cols-2">
+        <div className="mt-12 grid w-full grid-cols-1 gap-4 md:grid-cols-2">
           {published?.map((component) => (
             /*
              * No status dot, unlike the Admin tiles. Everything listed here is published by

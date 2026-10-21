@@ -306,9 +306,9 @@ export function createMemoryIngestion(options: {
       case "shared":
         return `The shared ${prompt.title} account is not connected. An administrator has to connect it before this source can sync.`;
       case "reconnect":
-        return `Your ${prompt.title} account needs reconnecting. Reconnect it under Settings, Connected accounts, then sync again.`;
+        return `Your ${prompt.title} account needs reconnecting. Reconnect it under Connections, then sync again.`;
       default:
-        return `Your ${prompt.title} account is not connected. Connect it under Settings, Connected accounts, then sync again.`;
+        return `Your ${prompt.title} account is not connected. Connect it under Connections, then sync again.`;
     }
   }
 

@@ -661,7 +661,7 @@ export async function callTool(
     });
     if (answer.output?.authorization) {
       return failureResult(
-        `${toolName} has not been authorized on this account yet. Authorize it in Settings → Connected accounts and ask again.`,
+        `${toolName} has not been authorized on this account yet. Authorize it in Connections and ask again.`,
       );
     }
     if (answer.success === false || answer.output?.error) {
@@ -685,7 +685,7 @@ export async function callTool(
     const failure = arcadeFailure(thrown);
     if (failure && isAuthorizationRequired(failure)) {
       return failureResult(
-        `${toolName} has not been authorized on this account yet. Authorize it in Settings → Connected accounts and ask again.`,
+        `${toolName} has not been authorized on this account yet. Authorize it in Connections and ask again.`,
       );
     }
     return failureResult(`Arcade could not run ${toolName}.`);

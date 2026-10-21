@@ -12,7 +12,7 @@ import {
 import { cleanup, render, waitFor } from "@testing-library/react";
 import type { GrantState } from "@/lib/plugins/grants";
 import type { PluginServer, PluginsPage } from "@/lib/plugins/queries";
-import { Route as ConnectedAccountRoute } from "@/routes/_authed/settings/connected-accounts/$key";
+import { Route as ConnectedAccountRoute } from "@/routes/_authed/_app/connections.$key";
 
 /**
  * `?action=` IS DROPPED FROM THE URL AFTER ITS ONE READ, AND THE GRANT LIST STILL MARKS ITS ROW.
@@ -136,14 +136,14 @@ function renderScreen(search: string) {
     getParentRoute: () => rootRoute,
     component: Outlet,
   });
-  const settingsRoute = createRoute({
-    path: "/settings",
+  const appRoute = createRoute({
+    id: "/_app",
     getParentRoute: () => authedRoute,
     component: Outlet,
   });
   const indexRoute = createRoute({
-    path: "/connected-accounts/",
-    getParentRoute: () => settingsRoute,
+    path: "/connections/",
+    getParentRoute: () => appRoute,
     component: () => null,
   });
   const wired = (
@@ -151,16 +151,16 @@ function renderScreen(search: string) {
       update: (options: unknown) => typeof ConnectedAccountRoute;
     }
   ).update({
-    id: "/connected-accounts/$key",
-    path: "/connected-accounts/$key",
-    getParentRoute: () => settingsRoute,
+    id: "/connections/$key",
+    path: "/connections/$key",
+    getParentRoute: () => appRoute,
   });
   const router = createRouter({
     routeTree: rootRoute.addChildren([
-      authedRoute.addChildren([settingsRoute.addChildren([indexRoute, wired])]),
+      authedRoute.addChildren([appRoute.addChildren([indexRoute, wired])]),
     ]),
     history: createMemoryHistory({
-      initialEntries: [`/settings/connected-accounts/${APP}${search}`],
+      initialEntries: [`/connections/${APP}${search}`],
     }),
   });
   const view = render(

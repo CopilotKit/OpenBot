@@ -91,14 +91,13 @@ describe("brokerReturnUrl, as an operator reads it", () => {
   });
 
   test("neither sentence quotes the address it refused", () => {
-    const address =
-      "openbot-tenant-42.internal.corp/settings/connected-accounts/9f3c";
+    const address = "openbot-tenant-42.internal.corp/connections/9f3c";
     const error = refusalOf(address, "arcade");
 
     for (const sentence of [error.message, error.operatorMessage]) {
       expect(sentence).not.toContain(address);
       expect(sentence).not.toContain("openbot-tenant-42.internal.corp");
-      expect(sentence).not.toContain("/settings/connected-accounts/9f3c");
+      expect(sentence).not.toContain("/connections/9f3c");
     }
   });
 });

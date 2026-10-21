@@ -109,7 +109,7 @@ function draw() {
   });
   const settings = createRoute({
     getParentRoute: () => root,
-    path: "/settings/connected-accounts/$key",
+    path: "/connections/$key",
     component: () => null,
   });
   const router = createRouter({

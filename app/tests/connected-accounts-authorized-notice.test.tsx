@@ -3,7 +3,7 @@ import {
   AUTHORIZATION_NOTICES,
   authorizationNoticeFor,
   Route,
-} from "@/routes/_authed/settings/connected-accounts/index";
+} from "@/routes/_authed/_app/connections.index";
 
 /**
  * The notice channel the brokered per-action verifier reports back on, decided without drawing

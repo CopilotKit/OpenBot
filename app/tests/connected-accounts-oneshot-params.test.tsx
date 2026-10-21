@@ -11,7 +11,7 @@ import {
 import { cleanup, render, waitFor } from "@testing-library/react";
 import { identityKeys } from "@/lib/identity/queries";
 import { pluginKeys } from "@/lib/plugins/queries";
-import { Route } from "@/routes/_authed/settings/connected-accounts/index";
+import { Route } from "@/routes/_authed/_app/connections.index";
 
 /**
  * EVERY ONE-SHOT PARAMETER THIS SCREEN CONSUMES IS DROPPED FROM THE URL, NOT JUST `?linked=`.
@@ -30,7 +30,7 @@ import { Route } from "@/routes/_authed/settings/connected-accounts/index";
  * satisfied by a screen that says nothing at all.
  */
 
-const PATH = "/settings/connected-accounts";
+const PATH = "/connections";
 
 beforeAll(() => GlobalRegistrator.register());
 afterEach(cleanup);
@@ -50,6 +50,10 @@ function renderScreen(search: string) {
   queryClient.setQueryData(pluginKeys.page(), { servers: [], catalogue: [] });
   queryClient.setQueryData(pluginKeys.connections(), { connections: [] });
   queryClient.setQueryData(identityKeys.links(), []);
+  queryClient.setQueryData(identityKeys.providers(), {
+    slack: false,
+    github: false,
+  });
 
   const root = createRootRoute({ component: () => <Outlet /> });
   const screen = Route.update({

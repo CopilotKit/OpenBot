@@ -21,7 +21,7 @@ function MemoryPage() {
             What your Bots remember about you is in{" "}
             <Link
               className="underline underline-offset-4"
-              to="/settings/memory"
+              to="/capabilities/memory"
             >
               Settings → Memory
             </Link>

@@ -22,9 +22,10 @@ import { SidebarToggle, useSidebarToggleVisible } from "./sidebar-toggle";
  */
 
 /**
- * `prose` is the default because configuration is mostly reading. A measure of around 65 characters
- * is where prose stays comfortable, and a row of label-and-control has no business being wider than
- * the sentence explaining it.
+ * `prose` is the default because configuration is mostly reading, and every screen uses it so none is
+ * wider than another. It is `max-w-3xl`, 720px against this app's 15px root: room for a row's label
+ * and its control side by side. Sentences are held to `max-w-prose` (around 65 characters) inside it,
+ * which is where reading stays comfortable, so the column widening does not stretch them.
  *
  * `wide` exists for one page. An audit log is a table you scan, and forcing it into the prose column
  * would wrap every row. It is not a licence for anything else to be wide.
@@ -32,7 +33,7 @@ import { SidebarToggle, useSidebarToggleVisible } from "./sidebar-toggle";
 type ShellWidth = "prose" | "wide";
 
 const WIDTHS: Record<ShellWidth, string> = {
-  prose: "max-w-2xl",
+  prose: "max-w-3xl",
   wide: "max-w-5xl",
 };
 

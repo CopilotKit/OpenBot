@@ -76,7 +76,7 @@ function mount(children: ReactNode) {
   });
   const settings = createRoute({
     getParentRoute: () => root,
-    path: "/settings/connected-accounts/$key",
+    path: "/connections/$key",
     component: () => null,
   });
   const router = createRouter({
@@ -178,7 +178,7 @@ test("an account the vendor lost: Reconnect, though the server still reads ready
   );
   expect(
     (await view.findByText("Reconnect")).closest("a")?.getAttribute("href"),
-  ).toBe("/settings/connected-accounts/composio-gmail");
+  ).toBe("/connections/composio-gmail");
 });
 
 test("an account lost and then connected again: the newer connection wins", async () => {

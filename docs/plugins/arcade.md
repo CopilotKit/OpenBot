@@ -37,7 +37,7 @@ Setting it up takes three hands, and none of them can do another's:
 | Whoever deploys  | Sets `OPENBOT_BROKER_PROVIDER`, only where both keys are set | The deployment's environment                                      |
 | Whoever deploys  | Registers an OAuth app per provider, and sets the verifier   | Arcade's dashboard, below                                         |
 | An administrator | Enables an app and grants its actions to a Bot               | `/admin/plugins/arcade`, then the app's own page, as for Composio |
-| Each person      | Connects their own account to that app                       | `/settings/connected-accounts`                                    |
+| Each person      | Connects their own account to that app                       | `/connections`                                                    |
 
 The key is an environment variable and nothing else, as Composio's is. No administrator can turn
 Arcade on from a page; `/admin/plugins/arcade` is where a key that is already set gets used.
@@ -118,7 +118,7 @@ followed by the path, so paste:
 ```
 
 It is the API's origin, not the browser app's, where the two differ. A browser that arrives there
-is sent on to the connected-accounts page, with a reason beside it if the consent was refused.
+is sent on to the Connections page, with a reason beside it if the consent was refused.
 
 **Nothing checks this setting, so the deployment warns about it instead.** Arcade has no API that
 reads which verifier a project uses, so this deployment cannot tell a correctly pointed project from
@@ -134,7 +134,7 @@ refuses a consent for any `user_id` that is not a member of the Arcade project â
 deployment sends are its own internal ids, not project members â€” so in practice **nobody can
 connect**: the person is left on Arcade's
 page with _"the authorization process was not completed"_. A consent that does complete at Arcade
-that way is bound to no attempt; the connected-accounts page may later record it when it asks Arcade
+that way is bound to no attempt; the Connections page may later record it when it asks Arcade
 whether the person is connected, but without the identity check the verify leg exists to make.
 
 > **Do not save the custom-verifier setting without a URL.** It switches off the path that currently

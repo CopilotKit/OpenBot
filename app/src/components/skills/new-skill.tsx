@@ -33,7 +33,7 @@ export function NewSkill() {
           await createSkill.mutateAsync(values);
           // Panel closed rather than swapped for a detail view: there is nothing more to say about a
           // skill than the form just said, and the new row is already behind it in the list.
-          await navigate({ search: {}, to: "/skills" });
+          await navigate({ search: {}, to: "/capabilities/skills" });
         }}
         submitLabel="Save skill"
       />
