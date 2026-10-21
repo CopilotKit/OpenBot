@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import {
   isCredentialKey,
+  type JsonValue,
   isSensitiveTarget,
   luhnValid,
   maskBody,
@@ -232,6 +233,93 @@ test("a sensitive target loses its value, its mirrored value attribute, its text
   expect(target.attributes["aria-valuetext"]).toBe(REDACTED);
   expect(target.attributes.name).toBe("f7");
   expect("selectedValues" in target).toBe(false);
+});
+
+test("an edited field's copies of what was typed take the value's verdict: a copy a keystroke behind keeps no part of a card", () => {
+  // End-to-end run 1's strings: the chat box's value held a card, its text the same message a keystroke earlier, whose 15
+  // digits are no card on their own. A page that copies what is typed into another attribute, or into what names the
+  // field, copies it a render behind too.
+  const typed =
+    "Please look up this deal's history and then get it approved. Card on file for the invoice: 4111 1111 1111 1111";
+  const behind = typed.slice(0, -1);
+  const masked =
+    "Please look up this deal's history and then get it approved. Card on file for the invoice: [redacted]";
+  const edit = (target: { [key: string]: JsonValue }) =>
+    at(
+      maskCollectorEvent(
+        {
+          type: "CUSTOM" as const,
+          name: "input",
+          timestamp: 1,
+          value: { eventType: "input", target },
+        },
+        { sensitive: false },
+      ),
+      "target",
+    );
+  const attributes = {
+    rows: "1",
+    "data-testid": "copilot-chat-textarea",
+    placeholder: "Type a message...",
+  };
+  const chatBox = edit({
+    tag: "textarea",
+    text: behind,
+    value: typed,
+    attributes: {
+      ...attributes,
+      "data-draft": behind,
+      title: behind.slice(-30),
+      "aria-valuetext": behind,
+    },
+    label: behind,
+    name: behind,
+  });
+  expect(chatBox.value).toBe(masked);
+  expect(chatBox.text).toBe(masked);
+  expect(chatBox.attributes).toEqual({
+    ...attributes,
+    "data-draft": REDACTED,
+    title: REDACTED,
+    "aria-valuetext": masked,
+  });
+  expect([chatBox.label, chatBox.name]).toEqual([REDACTED, REDACTED]);
+  // An editable region's text is its value; an input has no text, and its value attribute is what React last rendered.
+  expect(
+    edit({
+      tag: "div",
+      text: behind,
+      value: typed,
+      attributes: { contenteditable: "true" },
+    }).text,
+  ).toBe(masked);
+  const input = edit({
+    tag: "input",
+    text: "",
+    value: typed,
+    attributes: { type: "text", value: behind },
+  });
+  expect([input.text, input.attributes.value]).toEqual(["", masked]);
+  // A select's text lists its options, and a field whose value the masking left whole keeps every copy as it was.
+  const select = edit({
+    tag: "select",
+    text: "Visa ending 1111 Mastercard ending 4444",
+    value: "4111 1111 1111 1111",
+  });
+  expect(select.text).toBe("Visa ending 1111 Mastercard ending 4444");
+  const plain = edit({
+    tag: "textarea",
+    text: "Please look up this deal's histor",
+    value: "Please look up this deal's history",
+    attributes: {
+      ...attributes,
+      "data-draft": "Please look up this deal's histor",
+    },
+  });
+  expect(plain.text).toBe("Please look up this deal's histor");
+  expect(plain.attributes["data-draft"]).toBe(
+    "Please look up this deal's histor",
+  );
 });
 
 test("a contenteditable field's text is redacted when it is sensitive", () => {
