@@ -9,6 +9,8 @@
 // the person typed it: each content script knows only its own document's secrets. And two one-time codes, typed into
 // fields that say only that the code was texted or sent to the phone, reached Intelligence in the edit and in the save.
 import { afterEach, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import {
   type CapturedEvent,
@@ -367,38 +369,44 @@ const edits = () =>
 /** The debugger's bodies for Network.getResponseBody, by request id. */
 let responses: Record<string, string> = {};
 
-/** A POST the page sent, as Chrome's debugger reports it: `at` is its start on the person's clock, in milliseconds. */
+/** A POST the page sent, as Chrome's debugger reports it: `at` is its start on the person's clock, in milliseconds. A
+ * JSON fetch answered 200 unless the spec says otherwise. */
 function debuggerPost(spec: {
   id: string;
   url: string;
   at: number;
   postData: string;
   body: string;
+  type?: string;
+  headers?: Record<string, string>;
+  status?: number;
+  responseHeaders?: Record<string, string>;
 }) {
   if (!fake) throw new Error("No worker");
   responses[spec.id] = spec.body;
   const target = { tabId: 7 };
   const seconds = spec.at / 1000;
+  const type = spec.type ?? "Fetch";
   fake.debugger.emit(target, "Network.requestWillBeSent", {
     requestId: spec.id,
-    type: "Fetch",
+    type,
     timestamp: 100,
     wallTime: seconds,
     request: {
       url: spec.url,
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: spec.headers ?? { "content-type": "application/json" },
       postData: spec.postData,
     },
   });
   fake.debugger.emit(target, "Network.responseReceived", {
     requestId: spec.id,
-    type: "Fetch",
+    type,
     timestamp: 100.04,
     response: {
       url: spec.url,
-      status: 200,
-      headers: { "content-type": "application/json" },
+      status: spec.status ?? 200,
+      headers: spec.responseHeaders ?? { "content-type": "application/json" },
       mimeType: "application/json",
     },
   });
@@ -859,4 +867,161 @@ test("a button or link that names a password keeps its text, and the password, i
   expect(
     Object.fromEntries(edits().map((edit) => [edit.attributes.id, edit.value])),
   ).toMatchObject({ "admin-password": REDACTED, "card-number": REDACTED });
+});
+
+// ---- A save whose only typed values are secrets --------------------------------------------------------------------
+
+/** The final run's verify recording on the checkout (fixtures/e2e-refund-secrets-only.json): its rows, and what the page
+ * sent at the Send refund click, `at` milliseconds after it, as the shop logged it. */
+const REFUND = JSON.parse(
+  readFileSync(
+    join(import.meta.dir, "fixtures", "e2e-refund-secrets-only.json"),
+    "utf8",
+  ),
+) as {
+  rows: (CapturedEvent & { row: string })[];
+  requests: {
+    at: number;
+    type: string;
+    method: string;
+    url: string;
+    headers: Record<string, string>;
+    postData: string;
+    status: number;
+    responseHeaders: Record<string, string>;
+    body: string;
+  }[];
+};
+
+type Step = {
+  name: string;
+  value: {
+    target?: {
+      name?: string;
+      value?: string;
+      attributes?: Record<string, string>;
+    };
+    request?: {
+      method: string;
+      url: string;
+      status: number | null;
+      body: { text?: string };
+      response: { text?: string };
+    };
+  };
+};
+
+test("Send refund with only the password and the card typed carries the refund it posted, masked, as the run's row did not", async () => {
+  const posted = browse(() => {
+    const checkout = openPage(
+      "/checkout?order=1043",
+      "Refund to card",
+      CHECKOUT_WITH_TOGGLE,
+    );
+    // The page's own handlers (shop.ts): Show password flips the field's type, and the card field puts the digits in
+    // groups of four as they are typed, which is how the refund's body carries them.
+    field("#show-pw").addEventListener("click", () => {
+      const password = field("#admin-password") as HTMLInputElement;
+      password.type = password.type === "password" ? "text" : "password";
+    });
+    const card = field("#card-number") as HTMLInputElement;
+    card.addEventListener("input", () => {
+      card.value = card.value
+        .replace(/\D/g, "")
+        .slice(0, 19)
+        .replace(/(\d{4})(?=\d)/g, "$1 ");
+    });
+    // Rows ...34004 to ...34012, as run-verify.ts took them: the password typed, shown, a 9 added at its end, hidden
+    // again, then the card, then Send refund. Nothing else was typed.
+    click("#admin-password");
+    type("#admin-password", PASSWORD);
+    pointerAt(field("#show-pw"));
+    click("#admin-password");
+    type("#admin-password", "9");
+    pointerAt(field("#show-pw"));
+    click("#card-number");
+    type("#card-number", CARD);
+    submitWith("Send refund");
+    checkout.leave();
+    return checkout.posted;
+  });
+  const isSendRefund = (message: PortMessage) =>
+    message.type === "content.event" &&
+    message.event.name === "click" &&
+    (message.event.value as Step["value"]).target?.attributes?.id === "pay";
+  const at = posted.findIndex(isSendRefund);
+  const sendRefund = posted[at];
+  if (sendRefund?.type !== "content.event") throw new Error("No Send refund");
+
+  await recordInWorker("/checkout?order=1043");
+  // What the person typed reaches the worker as they type it, seconds before the click.
+  postFromPage(posted.slice(0, at), "/checkout?order=1043");
+  await until(
+    () =>
+      [`${PASSWORD}9`, CARD].every(
+        (secret) => networkDeps?.digests().has(sha256HexSync(secret)) ?? false,
+      ),
+    "the password's and the card's digests in the worker",
+  );
+  // What the page sent at the click, by the shop's log: its telemetry, and the refund 4 ms after the click.
+  for (const [index, request] of REFUND.requests.entries())
+    debuggerPost({
+      ...request,
+      id: `refund-${index}`,
+      at: sendRefund.event.timestamp + request.at,
+    });
+  await until(
+    () => calls.some((call) => call.url.endsWith("/api/orders/1043/refunds")),
+    "the refund",
+  );
+  postFromPage(posted.slice(at), "/checkout?order=1043");
+  const steps = () =>
+    streamed().filter((event) =>
+      ["navigation", "click", "input"].includes(event.name),
+    ) as unknown as Step[];
+  await until(
+    () =>
+      steps().some(
+        (step) =>
+          step.name === "click" && step.value.target?.attributes?.id === "pay",
+      ),
+    "Send refund",
+  );
+
+  // The same steps as the run's rows ...34002 to ...34012.
+  const shape = (step: Step) => ({
+    name: step.name,
+    target: step.value.target?.name,
+    value: step.value.target?.value,
+  });
+  expect(steps().map(shape)).toEqual(
+    (REFUND.rows as unknown as Step[]).map(shape),
+  );
+  // Row ...34012 carried no request: Send refund now carries the refund the page posted, with what was typed masked.
+  const saves = steps().flatMap((step) =>
+    step.value.request
+      ? [{ on: step.value.target?.name, ...step.value.request }]
+      : [],
+  );
+  expect(saves).toHaveLength(1);
+  expect(saves[0]).toMatchObject({
+    on: "Send refund",
+    method: "POST",
+    url: `${SHOP}/api/orders/1043/refunds`,
+    status: 200,
+    body: {
+      text: `{"order":1043,"fullName":"","reason":"","password":"${REDACTED}","cardNumber":"${REDACTED}","notes":"","reference":"","amount":58.2}`,
+    },
+  });
+  expect(
+    leakedSecrets(streamed(), [
+      PASSWORD,
+      CARD,
+      "4929 7311 2846 5036",
+      "nocpkBearerTokAAAA1111BBBB2222CCCC3333",
+      "nocpkApiKey-7f3e9a2b4c5d6e7f8a9b0c1d",
+      "sess_nocpkSessTokQQQQRRRRSSSS112233",
+      "nocpkSetCookieVal44556677",
+    ]),
+  ).toEqual([]);
 });

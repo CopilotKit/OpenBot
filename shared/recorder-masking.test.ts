@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import {
+  holdsTypedSecret,
   isCredentialKey,
   type JsonValue,
   isSensitiveTarget,
@@ -1627,4 +1628,42 @@ test("an OAuth callback's code and state are redacted from its URL, and an ordin
   );
   const ordinary = "https://shop.example.test/search?code=summer&page=2";
   expect(scrubUrl(ordinary)).toBe(ordinary);
+});
+
+test("a body holds what was typed into a sensitive field wherever the masking takes it, and the page's own calls do not", () => {
+  // The final run's checkout (trajectory 7983e67d): the admin password, a 9 added at its end, and the card in groups of
+  // four, hashed as the content script hashes each keystroke's value; then bodies the shop logged that run.
+  const keystrokes = (text: string) =>
+    [...text].map((_, index) => text.slice(0, index + 1));
+  const typed = digestsOf(
+    ...keystrokes("Kestrel-Pw-58213!9"),
+    ...keystrokes("4929 7311 2846 5036"),
+  );
+  const refund =
+    '{"order":1043,"fullName":"","reason":"","password":"Kestrel-Pw-58213!9","cardNumber":"4929 7311 2846 5036","notes":"","reference":"","amount":58.2}';
+  const json = "application/json";
+  // The refund: both are under keys the masking redacts whatever they hold.
+  expect(holdsTypedSecret(refund, json, typed)).toBe(true);
+  expect(maskBody(refund, json, { digests: typed })).not.toContain("Kestrel");
+  // The account form, the password typed into its memo.
+  expect(
+    holdsTypedSecret(
+      "displayName=Shop+Admin&phone=&supportNote=&memo=memo+Kestrel-Pw-58213%21",
+      "application/x-www-form-urlencoded",
+      typed,
+    ),
+  ).toBe(true);
+  // The page's telemetry, its read of a conversation and its read receipt hold nothing typed.
+  for (const body of [
+    '{"type":"click","sid":"e3bvgvb5rxa","path":"/checkout"}',
+    '{"event":"ui_click","sid":"e3bvgvb5rxa","el":"BUTTON","at":1792561212746}',
+    '{"operationName":"Conversation","query":"query Conversation($id: ID!) { conversation(id: $id) { messages { body } } }","variables":{"id":"42"}}',
+    '{"upTo":7}',
+  ])
+    expect(holdsTypedSecret(body, json, typed)).toBe(false);
+  // Read only before the masking, and only for what this tab's person typed.
+  expect(
+    holdsTypedSecret(maskBody(refund, json, { digests: typed }), json, typed),
+  ).toBe(false);
+  expect(holdsTypedSecret(refund, json, new Set())).toBe(false);
 });

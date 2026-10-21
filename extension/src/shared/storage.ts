@@ -95,6 +95,9 @@ type SessionState = {
    * and is not readable by content scripts by default), so they survive a service-worker restart and vanish with
    * the browser; cleared at Stop. Never written to storage.local or IndexedDB. */
   digests?: string[];
+  /** The digests of what the person typed into sensitive fields in each followed tab (by tab id), latest last: a save
+   * from that tab whose body held one carries their values. Kept as `digests` are, and cleared with them. */
+  typedSecrets?: [number, string[]][];
   /** openbot.connect requests per origin in the last 10 minutes (timestamps), for Decision 22's limit (Task 8). */
   connectRequests?: Record<string, number[]>;
 };

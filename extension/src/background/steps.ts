@@ -18,8 +18,9 @@
 // - PUT, PATCH or DELETE;
 // - a GraphQL mutation (never a query);
 // - a POST whose masked body carries what the person just typed or chose, or whose path or operation is a write
-//   (create, update, save, delete, send, submit, mark, archive, assign, verify, confirm, redeem). Apps read their
-//   configuration through POSTs too, and those stay out;
+//   (create, update, save, delete, send, submit, mark, archive, assign, verify, confirm, redeem). What they typed into a
+//   sensitive field (a password, a card, a code) counts though its body holds it only as [redacted]: the network capture
+//   marks the exchange as it masks it (`typed`). Apps read their configuration through POSTs too, and those stay out;
 // - a form the top frame posted as a page load (a classic sign-in), whatever its address.
 // When several qualify, the one carrying the person's values wins, else the first. A write the page sends to keep itself
 // alive or to report on itself (presence, heartbeats, pings, typing, session refreshes, telemetry, tracking, logs) is
@@ -88,6 +89,8 @@ export type StepCall = {
     status: number | null;
     body: JsonValue;
     response: JsonValue;
+    /** Its body held what the person typed into a sensitive field in the tab, which the masking redacted. */
+    typed?: true;
   };
 };
 
@@ -282,7 +285,8 @@ export function carriesValues(
   });
 }
 
-/** Whether a call the step owns is its save, and whether it carries the person's values. */
+/** Whether a call the step owns is its save, and whether it carries the person's values: as typed, or, for what they
+ * typed into a sensitive field, by the capture's mark. */
 export function saveQuality(
   call: StepCall,
   values: readonly string[],
@@ -291,7 +295,7 @@ export function saveQuality(
   if (!WRITE_METHODS.has(method) || !call.exchange)
     return { save: false, carries: false };
   const text = bodyText(call.exchange.body);
-  const carries = carriesValues(text, values);
+  const carries = call.exchange.typed === true || carriesValues(text, values);
   const gql = graphql(call.url, text);
   let path = call.url;
   try {

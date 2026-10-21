@@ -1,11 +1,13 @@
 // Network capture for the tabs a recording follows: Chrome's debugger (CDP's Network domain) on each followed tab and
 // its frames, or, where Chrome refuses the debugger on a real site, the page-level fetch, XHR and WebSocket hook
 // (fallback.ts), which this capture owns. No call is recorded on its own: each one that passes the screens (screen.ts)
-// goes to the steps (steps.ts) with when it ran, and a write with its exchange masked with the shared rules, so it can
-// be the save of the step that sent it. The AG-UI traffic (agent.ts) goes to the agent events as observations; an
-// agent run is never a step's save. Nothing is stored or sent anywhere else.
+// goes to the steps (steps.ts) with when it ran, and a write with its exchange masked with the shared rules (and marked
+// when its body held what the person typed into a sensitive field in that tab), so it can be the save of the step that
+// sent it. The AG-UI traffic (agent.ts) goes to the agent events as observations; an agent run is never a step's save.
+// Nothing is stored or sent anywhere else.
 import {
   type CapturedEvent,
+  holdsTypedSecret,
   type JsonValue,
   maskNetworkEvent,
   scrubUrl,
@@ -35,6 +37,9 @@ export type NetworkCaptureDeps = {
   writeEnded(id: string): void;
   status(mode: NetworkMode | "stopped", reason?: string): void;
   digests(): ReadonlySet<string>;
+  /** The digests of what the person lately typed into sensitive fields in the tab (none when absent): a write whose body
+   * held one is marked, as it is masked, as carrying what they entered. */
+  typedSecrets?(tabId: number): ReadonlySet<string>;
   /** What the capture saw of AG-UI in a followed tab, raw, in the order it saw it (agent/observation.ts). */
   agent(observation: CaptureObservation): void;
 };
@@ -103,6 +108,25 @@ type NetworkValue = {
 };
 
 const WRITE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
+/** Whether a write's body, as it was sent, held one of `typed` (what the person typed into a sensitive field in its tab),
+ * which the masking took: read on the unmasked event, so only the answer goes on. */
+function sentTyped(event: CapturedEvent, typed: ReadonlySet<string>): boolean {
+  const request = (event.value as NetworkValue | null)?.request;
+  const body = request?.body;
+  const text =
+    typeof body === "object" &&
+    body !== null &&
+    !Array.isArray(body) &&
+    typeof body.text === "string"
+      ? body.text
+      : undefined;
+  if (text === undefined || typed.size === 0) return false;
+  const contentType = Object.entries(request?.headers ?? {}).find(
+    ([name]) => name.toLowerCase() === "content-type",
+  )?.[1];
+  return holdsTypedSecret(text, contentType, typed);
+}
 
 /** A masked network event's exchange, as a step carries its save. */
 function exchangeOf(value: NetworkValue): StepCall["exchange"] {
@@ -231,7 +255,16 @@ export function createNetworkCapture(
       const masked = maskNetworkEvent(event, { digests: deps.digests() });
       const value = (masked.value ?? {}) as NetworkValue;
       const exchange = exchangeOf(value);
-      deps.call({ ...timing, url: exchange?.url ?? "", exchange });
+      // A body that held what the person typed into a sensitive field reads [redacted] there now: the mark says so.
+      const typed = sentTyped(
+        event,
+        deps.typedSecrets?.(timing.tabId) ?? new Set(),
+      );
+      deps.call({
+        ...timing,
+        url: exchange?.url ?? "",
+        exchange: exchange && typed ? { ...exchange, typed: true } : exchange,
+      });
     },
     writeStarted: (id, tabId, startedAt) => {
       if (!ended && mode !== "stopped") deps.writeStarted(id, tabId, startedAt);
