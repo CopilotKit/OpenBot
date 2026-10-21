@@ -165,7 +165,7 @@ describe("connecting a shared app", () => {
     );
     expect(response.status).toBe(403);
     expect(await response.json()).toEqual({
-      error: "An administrator connects shared apps.",
+      error: "Only an admin can connect shared apps.",
     });
     expect(authorizedFor).toEqual([]);
   });
@@ -274,7 +274,7 @@ describe("connecting a shared app", () => {
       );
       expect(response.status).toBe(403);
       expect(await response.json()).toEqual({
-        error: "An administrator connects shared apps.",
+        error: "Only an admin can connect shared apps.",
       });
       expect(connectWithFieldsCalls).toBe(0);
     } finally {
@@ -301,7 +301,7 @@ describe("connecting a shared app", () => {
       );
       expect(response.status).toBe(403);
       expect(await response.json()).toEqual({
-        error: "An administrator connects shared apps.",
+        error: "Only an admin can connect shared apps.",
       });
       expect(authorizedFor).toEqual([]);
       expect(connectWithFieldsCalls).toBe(0);

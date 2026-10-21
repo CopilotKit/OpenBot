@@ -80,21 +80,19 @@ const searchOf = (router: TestRouter) => router.state.location.search;
 
 test("?connected=failed is said once and then dropped from the URL", async () => {
   const { view, router } = renderScreen("?connected=failed");
-  await view.findByText(/That account could not be connected/);
+  await view.findByText(/Couldn't connect that account/);
   await waitFor(() => expect(searchOf(router)).toEqual({}));
   // And the sentence survives the strip: the news is read once, not withdrawn.
-  expect(
-    view.queryByText(/That account could not be connected/),
-  ).not.toBeNull();
+  expect(view.queryByText(/Couldn't connect that account/)).not.toBeNull();
   expect(router.state.location.href).toBe(PATH);
 });
 
 test("?authorized= is said once and then dropped from the URL", async () => {
   const { view, router } = renderScreen("?authorized=no-attempt");
-  await view.findByText(/There is no authorization in progress/);
+  await view.findByText(/There's no authorization in progress/);
   await waitFor(() => expect(searchOf(router)).toEqual({}));
   expect(
-    view.queryByText(/There is no authorization in progress/),
+    view.queryByText(/There's no authorization in progress/),
   ).not.toBeNull();
   expect(router.state.location.href).toBe(PATH);
 });
@@ -102,11 +100,9 @@ test("?authorized= is said once and then dropped from the URL", async () => {
 /** The one that was already stripped, kept here so the three are pinned in one place. */
 test("?linked= is said once and then dropped from the URL", async () => {
   const { view, router } = renderScreen("?linked=failed");
-  await view.findByText(/Your GitHub account could not be linked/);
+  await view.findByText(/Couldn't link your GitHub account/);
   await waitFor(() => expect(searchOf(router)).toEqual({}));
-  expect(
-    view.queryByText(/Your GitHub account could not be linked/),
-  ).not.toBeNull();
+  expect(view.queryByText(/Couldn't link your GitHub account/)).not.toBeNull();
 });
 
 /**
@@ -118,15 +114,13 @@ test("all three arriving together leave nothing behind", async () => {
   const { view, router } = renderScreen(
     "?connected=failed&authorized=no-attempt&linked=failed",
   );
-  await view.findByText(/That account could not be connected/);
+  await view.findByText(/Couldn't connect that account/);
   await waitFor(() => expect(searchOf(router)).toEqual({}));
   expect(router.state.location.href).toBe(PATH);
   expect(
-    view.queryByText(/There is no authorization in progress/),
+    view.queryByText(/There's no authorization in progress/),
   ).not.toBeNull();
-  expect(
-    view.queryByText(/Your GitHub account could not be linked/),
-  ).not.toBeNull();
+  expect(view.queryByText(/Couldn't link your GitHub account/)).not.toBeNull();
 });
 
 /** Nothing to consume means nothing to clean up, and no navigation at all. */

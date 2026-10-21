@@ -157,7 +157,7 @@ export function AttachmentStrip({
                   className="truncate text-muted-foreground text-xs"
                   title={
                     file.mayTruncate === true
-                      ? "The model reads the first 120,000 characters of this file."
+                      ? "The Bot reads only the first 120,000 characters of this file."
                       : undefined
                   }
                 >

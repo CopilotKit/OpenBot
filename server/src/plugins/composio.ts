@@ -1210,7 +1210,7 @@ function thrownSentence(error: unknown): string | null {
  * is a person's own two-click fix on the page named here.
  */
 export function unexplained(toolName: string): string {
-  return `${toolName} failed and Composio did not say why. Check that this app is still connected on its Plugins page, then try again.`;
+  return `${toolName} failed without saying why. Check that the app is still connected on Connections, then try again.`;
 }
 
 /**
@@ -1657,7 +1657,7 @@ export async function askAction(
   }
   if (!installed) {
     return unreached(
-      "Composio is not configured for this deployment, so this action cannot be called.",
+      "Apps like this aren't set up yet, so this action can't be called. An admin has to turn them on.",
     );
   }
 

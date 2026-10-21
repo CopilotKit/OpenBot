@@ -113,55 +113,55 @@ export const Route = createFileRoute("/_authed/_app/connections/")({
 export const AUTHORIZATION_NOTICES: ReadonlyMap<string, string> = new Map([
   [
     "no-broker",
-    "This deployment is not set up to connect apps, so nothing was recorded. Ask an administrator to set it up.",
+    "Connecting apps isn't set up yet, so nothing was recorded. Ask an admin to set it up.",
   ],
   [
     "not-supported",
-    "This deployment's apps are connected once for the whole app, with the Connect button on the app's page; they are not authorized one action at a time.",
+    "Apps here connect once, with Connect on the app's page. They aren't authorized one action at a time.",
   ],
   [
     "missing-handle",
-    "That link is missing the part that says which authorization it finishes, so nothing was done. Start the authorization again from the app's page.",
+    "That link doesn't say which authorization it finishes, so nothing was done. Start again from the app's page.",
   ],
   [
     "no-attempt",
-    "There is no authorization in progress for you to finish — it may have expired, or it may have been started by somebody else or in another session. Start it again from the app's page.",
+    "There's no authorization in progress for you to finish. It may have expired, or started in another session. Start again from the app's page.",
   ],
   [
     "vendor-unavailable",
-    "The app's vendor did not answer when this deployment tried to finish that authorization, so nothing was recorded. Try the link again in a moment.",
+    "The app didn't answer when OpenBot tried to finish that authorization, so nothing was recorded. Try the link again in a moment.",
   ],
   [
     "not-your-authorization",
-    "That link does not finish the authorization you have in progress, so nothing was recorded and it is still waiting. Finish it from the tab it was started in, or start it again from the app's page.",
+    "That link doesn't match the authorization you have in progress, so nothing was recorded. Finish it in the tab you started it in, or start again from the app's page.",
   ],
   [
     "not-finished",
-    "That authorization has not finished yet, so nothing was recorded. Finish it at the app's vendor, then open the link again — it is still waiting.",
+    "That authorization hasn't finished yet, so nothing was recorded. Finish it at the app, then open the link again.",
   ],
   [
     "authorization-failed",
-    "The app's vendor did not complete that authorization, so nothing was recorded. Start it again from the app's page.",
+    "The app didn't complete that authorization, so nothing was recorded. Start again from the app's page.",
   ],
   [
     "context-changed",
-    "That app's account changed while the authorization was open, so nothing was recorded and anything granted for the old account was withdrawn. Start it again from the app's page.",
+    "That app's account changed while the authorization was open, so nothing was recorded. Access given to the old account was removed. Start again from the app's page.",
   ],
   [
     "not-permitted",
-    "You can no longer connect that app's account — your access or the app's set-up changed while the authorization was open — so nothing was recorded. Ask an administrator if you expected to finish it.",
+    "You can't connect that app's account anymore, so nothing was recorded. Your access or the app's setup changed while the authorization was open. Ask an admin if you expected to finish it.",
   ],
   [
     "cancelled",
-    "That authorization was cancelled while it was being finished, so it was not recorded, and what it granted at the app's vendor was withdrawn.",
+    "That authorization was cancelled while it was being finished, so nothing was recorded. The access it gave was removed.",
   ],
   [
     "cancelled-left-live",
-    "That authorization was cancelled while it was being finished, so it was not recorded — but what it granted could not be withdrawn at the app's vendor, so the vendor may still allow the action you cancelled. To remove it, disconnect the app from its page, which ends its whole connection there, then connect again and authorize only what you want.",
+    "That authorization was cancelled while it was being finished, so nothing was recorded. The access it gave couldn't be removed, so the app may still allow the action you cancelled. To remove it, disconnect the app from its page, then connect again and authorize only what you want.",
   ],
   [
     "not-recorded",
-    "This deployment could not record that authorization, so none of it was saved. Start it again from the app's page, and tell an administrator if it persists.",
+    "Couldn't record that authorization, so nothing was saved. Start again from the app's page, or ask an admin if it keeps happening.",
   ],
 ]);
 
@@ -369,7 +369,7 @@ function RouteComponent() {
        */}
       {arrival.outcome === "failed" ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          That account could not be connected. Nothing was saved — try again.
+          Couldn't connect that account. Nothing was saved. Try again.
         </p>
       ) : null}
       {notice ? (
@@ -405,14 +405,13 @@ function RouteComponent() {
          */}
         {loading ? null : plugins.error || connections.error ? (
           <p className="mt-4 text-destructive text-sm" role="alert">
-            Your connections could not be loaded, so nothing is listed here
-            rather than a list that may be wrong. Reload the page, and tell an
-            administrator if it persists.
+            Couldn't load your connections. Reload the page, or ask an admin if
+            it keeps happening.
           </p>
         ) : rows.length === 0 ? (
           <PageEmpty>
-            Nothing to connect yet. Apps appear here once an administrator
-            enables one that reads as the person asking.
+            Nothing to connect yet. Apps show up here once an admin turns them
+            on.
           </PageEmpty>
         ) : (
           <>
@@ -445,8 +444,8 @@ function RouteComponent() {
         )}
         {links.error || providers.error ? (
           <p className="mt-4 text-destructive text-sm" role="alert">
-            Whether you can link GitHub or Slack could not be loaded, so they
-            are not listed. Reload the page to try again.
+            Couldn't load GitHub and Slack, so they aren't listed. Reload the
+            page.
           </p>
         ) : null}
       </PageSection>

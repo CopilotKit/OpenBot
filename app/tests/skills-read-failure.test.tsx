@@ -181,9 +181,11 @@ test("a person's skills page says the skills failed to load, not that they have 
   await waitForFailedRead(client);
 
   expect(
-    await view.findByText("Your skills could not be loaded."),
+    await view.findByText("Couldn't load your skills. Reload the page."),
   ).toBeTruthy();
-  expect(view.queryByText("You don't have any skills yet.")).toBeNull();
+  expect(
+    view.queryByText("No skills yet. Write one with New skill."),
+  ).toBeNull();
 });
 
 test("a person with genuinely no skills is still told so", async () => {
@@ -191,8 +193,12 @@ test("a person with genuinely no skills is still told so", async () => {
   const view = renderSkills(client);
   await waitForFailedRead(client);
 
-  expect(await view.findByText("You don't have any skills yet.")).toBeTruthy();
-  expect(view.queryByText("Your skills could not be loaded.")).toBeNull();
+  expect(
+    await view.findByText("No skills yet. Write one with New skill."),
+  ).toBeTruthy();
+  expect(
+    view.queryByText("Couldn't load your skills. Reload the page."),
+  ).toBeNull();
 });
 
 test("the admin skills page says the skills failed to load, not that there are none", async () => {
@@ -203,8 +209,12 @@ test("the admin skills page says the skills failed to load, not that there are n
   );
   await waitForFailedRead(client);
 
-  expect(await view.findByText("Skills could not be loaded.")).toBeTruthy();
-  expect(view.queryByText("No skills yet.")).toBeNull();
+  expect(
+    await view.findByText("Couldn't load skills. Reload the page."),
+  ).toBeTruthy();
+  expect(
+    view.queryByText("No skills yet. Write one with Write a skill."),
+  ).toBeNull();
 });
 
 test("a deployment with genuinely no skills still says so on the admin page", async () => {
@@ -215,8 +225,10 @@ test("a deployment with genuinely no skills still says so on the admin page", as
   );
   await waitForFailedRead(client);
 
-  expect(await view.findByText("No skills yet.")).toBeTruthy();
-  expect(view.queryByText("Skills could not be loaded.")).toBeNull();
+  expect(
+    await view.findByText("No skills yet. Write one with Write a skill."),
+  ).toBeTruthy();
+  expect(view.queryByText("Couldn't load skills. Reload the page.")).toBeNull();
 });
 
 test("opening a skill to edit says it failed to load, not that it no longer exists", async () => {
@@ -224,10 +236,10 @@ test("opening a skill to edit says it failed to load, not that it no longer exis
   const view = renderAlone(client, () => <EditSkill slug="triage" />);
   await waitForFailedRead(client);
 
-  expect(await view.findByText("This skill could not be loaded.")).toBeTruthy();
   expect(
-    view.queryByText(
-      "That skill no longer exists, or it is not yours to edit.",
-    ),
+    await view.findByText("Couldn't load this skill. Reload the page."),
+  ).toBeTruthy();
+  expect(
+    view.queryByText("This skill was deleted, or it isn't yours to edit."),
   ).toBeNull();
 });

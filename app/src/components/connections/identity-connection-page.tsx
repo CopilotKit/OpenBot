@@ -117,7 +117,7 @@ function GithubTools() {
   ).some((row) => row.serverId === app.id);
   return (
     <PageSection
-      description="Lets your Bots read and change your repositories as you. A connection of its own, separate from your account above."
+      description="Lets your Bots read and change your repositories as you. You connect this separately from your account above."
       title="Tools"
     >
       <PageRows>

@@ -207,9 +207,8 @@ function PlaygroundPage() {
           <div>
             <h1 className="font-bold text-2xl">Playground</h1>
             <p className="mt-1 max-w-prose text-pretty text-muted-foreground text-sm leading-relaxed">
-              Write a component here and publish it without a deployment. What
-              you edit is a draft; a conversation only ever draws what is
-              published.
+              Write a component and publish it without redeploying. Your edits
+              are a draft. Conversations only show what is published.
             </p>
           </div>
         </div>
@@ -305,7 +304,7 @@ function PlaygroundPage() {
             {sample === null ? (
               <p className="text-sm text-destructive">
                 {validation.ok
-                  ? "The sample arguments are not available."
+                  ? "The sample arguments aren't available."
                   : (validation.fields.sampleArguments ??
                     "Fix the JSON fields before previewing.")}
               </p>
@@ -335,7 +334,7 @@ function PlaygroundPage() {
             </div>
             {(components ?? []).length === 0 ? (
               <p className="px-4 py-3 text-muted-foreground text-sm">
-                Nothing yet.
+                Nothing saved yet. Save a draft to see it here.
               </p>
             ) : (
               <ul className="divide-y divide-border">
@@ -378,9 +377,8 @@ function PlaygroundPage() {
               </ul>
             )}
             <p className="border-border border-t px-4 py-2 text-muted-foreground text-xs">
-              Publishing makes it available to every Bot. Switch it off for a
-              particular Bot on the Components page, the same as for a component
-              this build ships.
+              Publishing makes it available to every Bot. Turn it off for one
+              Bot on the UI components page.
             </p>
           </div>
         </div>
@@ -400,8 +398,8 @@ function PlaygroundPage() {
           <DialogHeader>
             <DialogTitle>Delete {deleting}?</DialogTitle>
             <DialogDescription>
-              It is removed from this deployment. Any Bot that could draw it no
-              longer can, and this cannot be undone.
+              It's removed from this deployment, and no Bot can draw it. You
+              can't undo this.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

@@ -1602,7 +1602,7 @@ const SCHEME_CONSUMERS: Consumer<SchemeKind>[] = [
           const pressed = await connectPress(APP.unreadable.id);
           expect(pressed.status).toBe(400);
           expect(String(pressed.payload.error)).toMatch(
-            /cannot tell how .* connects/,
+            /can't tell how .* connects/,
           );
 
           /*

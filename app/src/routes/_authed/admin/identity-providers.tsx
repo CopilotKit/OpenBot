@@ -105,11 +105,11 @@ function IdentityProvidersPage() {
           Add a provider
         </Button>
       }
-      description="A company's own identity provider, by SAML or OpenID Connect. Somebody types their email address and the domain decides which one they are sent to."
+      description="Your company's own SAML or OpenID Connect provider. People sign in with their email, and its domain picks the provider."
       title="Identity providers"
     >
       <PageSection
-        description="Google, Microsoft and Okta are configured in the environment instead and do not appear here."
+        description="Google, Microsoft and Okta are set in the environment. They don't show here."
         title="Registered"
       >
         {failure ? (
@@ -119,12 +119,12 @@ function IdentityProvidersPage() {
         ) : null}
         {providers.isPending ? null : providers.error ? (
           <p className="mt-4 text-destructive text-sm" role="alert">
-            Could not load identity providers.
+            Couldn't load identity providers. Reload the page.
           </p>
         ) : providers.data?.length === 0 ? (
           <PageEmpty>
-            No identity providers are registered. Add one with the metadata your
-            identity team supplied.
+            No identity providers yet. Add one with the metadata from your
+            identity team.
           </PageEmpty>
         ) : (
           <PageRows>
@@ -211,8 +211,8 @@ function IdentityProvidersPage() {
                 />
                 {/* Said out loud because it is the field that decides who this applies to. */}
                 <p className="text-muted-foreground text-xs">
-                  Anybody signing in with an address at this domain is sent
-                  here. Separate several with commas.
+                  Anybody with an address at this domain signs in here. Separate
+                  several with commas.
                 </p>
               </div>
 
@@ -259,8 +259,8 @@ function IdentityProvidersPage() {
                       value={draft.metadata}
                     />
                     <p className="text-muted-foreground text-xs">
-                      The document your identity team supplied. It carries the
-                      signing certificate.
+                      The file from your identity team. It includes the signing
+                      certificate.
                     </p>
                   </div>
                 </>

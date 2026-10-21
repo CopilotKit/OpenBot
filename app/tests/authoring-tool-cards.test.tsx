@@ -182,7 +182,7 @@ test("a proposed coworker named like an existing one says so", async () => {
     </Providers>,
   );
 
-  await tree.findByText("Writing the coworker…");
+  await tree.findByText("Writing the Bot…");
   // Whoever asks for it, the roster has loaded by now.
   await waitFor(() =>
     expect(

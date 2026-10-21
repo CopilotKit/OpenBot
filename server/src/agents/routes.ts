@@ -353,7 +353,7 @@ export function createAgentRoutes(
      */
     const agent = await store.get(context.var.actor, agentId);
     if (!agent) {
-      return context.json({ error: "Agent not found." }, 404);
+      return context.json({ error: "Couldn't find that Bot." }, 404);
     }
 
     if (auditStore) {
@@ -416,7 +416,7 @@ export function createAgentRoutes(
         context.req.param("agentId"),
       );
       if (!agent) {
-        return context.json({ error: "Agent not found." }, 404);
+        return context.json({ error: "Couldn't find that Bot." }, 404);
       }
       return context.json({ agent: dto(context.var.actor, agent) });
     } catch (error) {
@@ -769,7 +769,8 @@ export function createAgentRoutes(
       // Asked of the store, so a Bot somebody may not see is "not found" here as everywhere else,
       // rather than a list of who it can reach.
       const agent = await store.get(context.var.actor, agentId);
-      if (!agent) return context.json({ error: "Agent not found." }, 404);
+      if (!agent)
+        return context.json({ error: "Couldn't find that Bot." }, 404);
       return context.json({
         handoff: {
           enabled: handoff?.enabled ?? false,
@@ -831,16 +832,16 @@ function agentDto(actor: AgentActor, agent: AgentProfile) {
 
 function mapStoreError(context: Context, error: unknown): Response {
   if (error instanceof AgentNotFoundError) {
-    return context.json({ error: "Agent not found." }, 404);
+    return context.json({ error: "Couldn't find that Bot." }, 404);
   }
   if (error instanceof AgentNotManageableError) {
-    return context.json(
-      { error: "You do not have permission to manage this agent." },
-      403,
-    );
+    return context.json({ error: "You can't manage this Bot." }, 403);
   }
   if (error instanceof ProtectedAgentError) {
-    return context.json({ error: "System-owned agents are protected." }, 403);
+    return context.json(
+      { error: "This Bot is built in and can't be changed." },
+      403,
+    );
   }
   if (error instanceof ManagedAgentUnavailableError) {
     return context.json({ error: error.message }, 400);

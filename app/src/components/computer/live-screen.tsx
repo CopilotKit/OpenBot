@@ -200,7 +200,7 @@ export function LiveScreen({
       };
       if (typeof message.type !== "string") return;
       if (message.type === "error") {
-        onProblem?.(message.error ?? "The screen could not be shown.");
+        onProblem?.(message.error ?? "Couldn't show the screen.");
         return;
       }
       if (message.type !== "frame" || !message.data) return;
@@ -496,8 +496,8 @@ export function LiveScreen({
         : {})}
       aria-label={
         driving
-          ? "The assistant's screen. You have control: click and type here."
-          : "The assistant's screen, live"
+          ? "The Bot's screen. You have control. Click and type here."
+          : "The Bot's screen, live"
       }
       data-connected={connected}
     />

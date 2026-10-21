@@ -259,9 +259,8 @@ function overCap(draft: ComposerDraft): boolean {
 /** What the person is told when Send is held shut by the cap, and what to do about it. */
 function tooManyStagedReason(count: number): string {
   return (
-    `${count} attachments are staged and a message can carry at most ` +
-    `${MAX_ATTACHMENTS_PER_MESSAGE}. Remove ` +
-    `${count - MAX_ATTACHMENTS_PER_MESSAGE} to send the rest.`
+    `A message can take at most ${MAX_ATTACHMENTS_PER_MESSAGE} attachments. ` +
+    `Remove ${count - MAX_ATTACHMENTS_PER_MESSAGE} to send.`
   );
 }
 
@@ -274,11 +273,9 @@ function tooManyStagedReason(count: number): string {
  */
 const DROPPED_REASON: Record<DroppedAttachmentCause, string> = {
   "merged-over-cap":
-    "dropped when queued messages were merged into one: a " +
-    `message can carry at most ${MAX_ATTACHMENTS_PER_MESSAGE} ` +
-    "attachments.",
-  "queued-message-removed":
-    "removed along with the queued message it was attached to.",
+    "dropped when your queued messages were merged. A message can take " +
+    `at most ${MAX_ATTACHMENTS_PER_MESSAGE} attachments.`,
+  "queued-message-removed": "removed with its queued message.",
 };
 
 /**
@@ -306,11 +303,10 @@ const DROPPED_REASON: Record<DroppedAttachmentCause, string> = {
  * second time.
  */
 const UNACCEPTED_DROP_REASON = {
-  "cannot-send":
-    "was not attached: this conversation can no longer take messages.",
+  "cannot-send": "not attached. This conversation can no longer take messages.",
   "no-conversation":
-    "was not attached: there is no conversation here yet. Send this " +
-    "message first, then attach to the one it opens.",
+    "not attached. There is no conversation here yet. Send your message " +
+    "first, then attach files in the conversation it starts.",
 } as const;
 
 export function Composer({
@@ -1363,8 +1359,8 @@ export function Composer({
         callAction.supported
           ? callAction.active
             ? "Show voice call"
-            : "Call this agent"
-          : "Voice calls need HTTPS or localhost and microphone support"
+            : "Call this Bot"
+          : "Voice calls need a microphone and a secure (HTTPS) connection"
       }
       className={actionClassName}
       disabled={disabled || dictation.busy || !callAction.supported}

@@ -66,7 +66,7 @@ export function GrantList({
     onSuccess: (authorizationUrl) => {
       if (authorizationUrl === null) {
         setNotice(
-          "This deployment answered without a consent link, so there was nowhere to send you and nothing was authorized. Try again, and tell an administrator if it persists.",
+          "OpenBot answered without a consent link, so nothing was authorized. Try again, or ask an admin if it keeps happening.",
         );
         return;
       }
@@ -79,8 +79,7 @@ export function GrantList({
     return (
       <PageSection title="Actions">
         <p className="text-destructive text-sm" role="alert">
-          Could not read what this account holds just now, so nothing is said
-          about it either way.{" "}
+          Couldn't read what this account allows right now.{" "}
           <Button
             onClick={() => grants.refetch()}
             size="sm"
@@ -102,8 +101,7 @@ export function GrantList({
         {/* Not an action: the entry's label is the toolkit's own name, which a person must not
             see in their grant list as if it were one. */}
         <p data-could-not-read="" role="status" className="text-sm">
-          Could not read what this account holds just now, so nothing is said
-          about it either way.
+          Couldn't read what this account allows right now.
           {only?.state === "unknown" ? ` ${only.reason}` : null}{" "}
           <Button
             onClick={() => grants.refetch()}
@@ -143,7 +141,7 @@ export function GrantList({
 
   return (
     <PageSection
-      description="Grouped by the permission each action asks for, so what is here after you authorize matches what the consent screen said."
+      description="Grouped by the permission each action asks for. This matches what the consent screen shows."
       title="Actions"
     >
       {notice ? (
@@ -293,12 +291,12 @@ function describe(grant: GrantState, canAuthorize: boolean): string {
     case "needs-consent":
       return canAuthorize
         ? "Not authorized yet."
-        : "Not authorized yet. An administrator can authorize it.";
+        : "Not authorized yet. An admin can authorize it.";
     case "needs-operator":
       return grant.missing.length > 0
-        ? `Missing ${grant.missing.join(", ")}. An administrator sets it on this deployment; authorizing cannot fix it.`
-        : "A setting on this deployment is missing. An administrator sets it; authorizing cannot fix it.";
+        ? `Missing ${grant.missing.join(", ")}. An admin has to set it. Authorizing can't fix it.`
+        : "A setting is missing. An admin has to set it. Authorizing can't fix it.";
     case "unknown":
-      return `Could not read this one just now. ${grant.reason}`;
+      return `Couldn't read this one right now. ${grant.reason}`;
   }
 }

@@ -104,8 +104,8 @@ export function SharingSections({ agent }: { agent: AgentProfile }) {
                 </ItemTitle>
                 <ItemDescription>
                   {published.visibleToTeam
-                    ? "Each chat with it is private to the person having it."
-                    : "Hidden from teammates until it has a real name and a description."}
+                    ? "Each person's conversations with it are private."
+                    : "Teammates can't see it until it has a real name and a description."}
                 </ItemDescription>
               </ItemContent>
               {agent.mine ? (
@@ -128,7 +128,9 @@ export function SharingSections({ agent }: { agent: AgentProfile }) {
               </ItemMedia>
               <ItemContent>
                 <ItemTitle>Link</ItemTitle>
-                <ItemDescription>Opens a private chat with it.</ItemDescription>
+                <ItemDescription>
+                  Opens a private conversation with it.
+                </ItemDescription>
               </ItemContent>
               <ItemActions>
                 <Button
@@ -148,7 +150,7 @@ export function SharingSections({ agent }: { agent: AgentProfile }) {
         ) : (
           <PageEmpty>
             {agent.visibility === "public"
-              ? "Not published to the team. It is public, so everyone in the deployment can already use it."
+              ? "Not published to the team. It's public, so everyone on OpenBot can already use it."
               : agent.mine
                 ? "Not published. Only you can use it."
                 : "Not published."}
@@ -157,7 +159,7 @@ export function SharingSections({ agent }: { agent: AgentProfile }) {
       </PageSection>
       {agent.mine && (published || publishable) ? (
         <PageSection
-          description="Publishing does not change its visibility, and it can be undone."
+          description="Publishing doesn't change its visibility. You can unpublish at any time."
           title={published ? "Who it is published to" : "Publish"}
         >
           {/* More than one value — an audience, then people and groups — so a summary row and a
@@ -192,7 +194,7 @@ export function SharingSections({ agent }: { agent: AgentProfile }) {
       ) : null}
       {me?.role === "admin" && published ? (
         <PageSection
-          description="An assigned Bot is pinned at the top of every member's Bots list. Use * for the whole team."
+          description="Pins this Bot at the top of every group member's Bots list. Use * for the whole team."
           title="Assign to groups"
         >
           <Assignments bot={published} />
@@ -246,7 +248,8 @@ function PublishDialog({
             {current ? "Who it is published to" : "Publish"}
           </DialogTitle>
           <DialogDescription>
-            Publishing does not change its visibility, and it can be undone.
+            Publishing doesn't change its visibility. You can unpublish at any
+            time.
           </DialogDescription>
         </DialogHeader>
         <DialogBody className="mt-4 overflow-y-auto">
@@ -424,7 +427,7 @@ function AssignDialog({ bot, onClose }: { bot: TeamBot; onClose: () => void }) {
         <DialogHeader>
           <DialogTitle>Assign {bot.name} to a group</DialogTitle>
           <DialogDescription>
-            It is pinned at the top of every member's Bots list.
+            It's pinned at the top of every member's Bots list.
           </DialogDescription>
         </DialogHeader>
         <DialogBody className="mt-4">

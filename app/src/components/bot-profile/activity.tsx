@@ -184,7 +184,7 @@ export function BotActivitySections({ agentId }: { agentId: string }) {
     return (
       <PageSection title="Activity">
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Could not load this Bot's activity.
+          Couldn't load this Bot's activity. Reload the page.
         </p>
       </PageSection>
     );

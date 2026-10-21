@@ -125,11 +125,11 @@ export function BrokerDirectory({ provider }: { provider: PluginsProvider }) {
   return (
     <PageShell
       backButton={{ label: "Plugins", linkProps: { to: "/admin/plugins" } }}
-      description={`${name}'s own directory. Adding an app makes its tools available to grant; each person still connects their own account before any of them reads anything.`}
+      description={`${name}'s app directory. Add an app to make its tools available to Bots. Each person still connects their own account before it reads anything.`}
       title={directoryLabel}
     >
       <PageSection
-        description="Search by name. The directory is too long to read, and nothing here has been reviewed by this deployment."
+        description="Search by name. Nobody here has reviewed these apps."
         title="Apps"
       >
         {enableError ? (
@@ -160,7 +160,7 @@ export function BrokerDirectory({ provider }: { provider: PluginsProvider }) {
         ) : listed.length === 0 ? (
           <PageEmpty>
             {query
-              ? `Nothing in ${name}'s directory matches "${query}".`
+              ? `No ${name} app matches "${query}".`
               : `${name} returned no apps.`}
           </PageEmpty>
         ) : (

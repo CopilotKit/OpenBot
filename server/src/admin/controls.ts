@@ -201,7 +201,7 @@ export function decideFromSnapshot(
       if (!decision.allowed) {
         return refusal(
           `network:${policy.from}`,
-          `${decision.reason} An administrator can add it.`,
+          `${decision.reason} An admin can add it.`,
         );
       }
     }
@@ -920,7 +920,7 @@ export async function headlessTurnRefusal(input: {
       actorUserId: input.ownerUserId,
       payload: { model, source: "configured", headless: true },
     }).catch(() => undefined);
-    return `This Bot runs on ${model}, which is not on this deployment's model allowlist. An administrator can add it.`;
+    return `This Bot uses ${model}, which isn't an allowed model. Ask an admin to allow it.`;
   } catch (error) {
     console.error(
       JSON.stringify({

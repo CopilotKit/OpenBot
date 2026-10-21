@@ -159,12 +159,12 @@ export function ReachingYou({ agentId: fixedBot }: { agentId?: string }) {
       return "A verification code is on its way. Enter it to finish.";
     }
     if (heldLink(transport)) {
-      return "A link code is waiting to be sent. Open this to see it again.";
+      return "Your link code is ready to send. Open this to see it again.";
     }
     if (open(transport)) return TRANSPORT[transport].summary;
     return transport === "sms"
-      ? "Text messages are not set up on this deployment."
-      : "An administrator needs to pair OpenBot with OpenTag before Slack or Teams can be linked.";
+      ? "Text messages aren't set up yet. An admin has to turn them on first."
+      : "Not set up yet. An admin has to turn on Slack and Teams first.";
   };
 
   return (
@@ -212,7 +212,7 @@ export function ReachingYou({ agentId: fixedBot }: { agentId?: string }) {
                       <ItemDescription>
                         {botName(binding.agentId)}
                         {binding.optedOutAt
-                          ? " · Replied STOP; text START to resume"
+                          ? " · You texted STOP. Text START to resume."
                           : null}
                       </ItemDescription>
                     </ItemContent>
@@ -234,7 +234,7 @@ export function ReachingYou({ agentId: fixedBot }: { agentId?: string }) {
         )}
       </PageSection>
       <PageSection
-        description="In a channel other people can read, the Bot answers you in a direct message instead."
+        description="In a Slack or Teams channel that others can read, the Bot replies to you in a direct message."
         title="Connect a conversation"
       >
         {reach.data ? (
@@ -364,8 +364,8 @@ function ConnectDialog({
         <DialogHeader>
           <DialogTitle>{TRANSPORT[transport].link}</DialogTitle>
           <DialogDescription>
-            An account or phone number reaches one conversation at a time.
-            Linking it here moves it from wherever it is linked now.
+            Each account or phone number works with one conversation at a time.
+            Linking it here moves it from the one it's linked to now.
           </DialogDescription>
         </DialogHeader>
         <DialogBody className="mt-4 grid gap-4 overflow-y-auto">

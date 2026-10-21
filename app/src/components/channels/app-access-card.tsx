@@ -144,6 +144,6 @@ function refusedSentence(access: AppAccess, prompt: ConnectPrompt): string {
     prompt.reason === "shared" &&
     !access.requestKind
   )
-    return `Your organisation's ${access.displayName} account needs reconnecting. Only an administrator can reconnect it.`;
+    return `Your organisation's ${access.displayName} account needs reconnecting. Only an admin can reconnect it.`;
   return appAccessSentence(access);
 }

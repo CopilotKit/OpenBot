@@ -140,7 +140,7 @@ export function useConnectInNewTab() {
     error: connect.isError
       ? connect.error instanceof Error
         ? connect.error.message
-        : "That account could not be connected."
+        : "Couldn't connect that account."
       : null,
   };
 }

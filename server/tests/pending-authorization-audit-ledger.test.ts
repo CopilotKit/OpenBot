@@ -320,8 +320,7 @@ const NON_WRITES: Record<
   },
   "mint that found its attempt already cancelled": {
     file: "server/src/plugins/route-groups/connections.ts",
-    anchor:
-      "That authorization was cancelled before the app's vendor finished starting it",
+    anchor: "That authorization was cancelled before it started",
     name: "mint declined because the attempt was cancelled while the vendor was minting (B5d)",
     waived:
       "This branch ends no attempt: the attempt it would describe was already ended by the person's cancel, and that cancel filed `mcp.authorization_cancelled` for it. A second row would record the same withdrawal twice. What the branch adds is a refusal to hand out the consent url, and that url, like the `ar_...`, must never reach the trail.",

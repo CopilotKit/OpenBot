@@ -337,7 +337,7 @@ export function callMethods(context: StoreContext) {
         });
         throw new PluginRefusedError(
           contentDecision.reason === "sensitive_content"
-            ? "The tool call was refused because its arguments contain credential material."
+            ? "The tool call was refused because its arguments contain a password or key."
             : "The tool call was refused because its arguments could not be inspected safely.",
           null,
         );
@@ -416,7 +416,7 @@ export function callMethods(context: StoreContext) {
             })
           : {
               allowed: false as const,
-              message: `${row.title} is shared, and this deployment cannot check who may use it, so it was not called.`,
+              message: `${row.title} is shared, and OpenBot can't check who may use it, so it wasn't called.`,
             };
         if (!verdict.allowed) {
           await recordAuditEvent(auditStore, {
@@ -615,8 +615,8 @@ export function callMethods(context: StoreContext) {
           title: row.title,
           message:
             gatedMode === "shared"
-              ? `The shared ${row.title} account is no longer connected at the vendor, so this was not done. An administrator has to connect it again.`
-              : `Your ${row.title} account is no longer connected at the vendor, so this was not done. Reconnect it and ask again.`,
+              ? `The shared ${row.title} account is no longer connected, so this wasn't done. Ask an admin to reconnect it.`
+              : `Your ${row.title} account is no longer connected, so this wasn't done. Reconnect it and ask again.`,
           reason: gatedMode === "shared" ? "shared" : "reconnect",
           at: new Date().toISOString(),
         }),

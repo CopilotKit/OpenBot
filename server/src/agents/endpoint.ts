@@ -99,12 +99,12 @@ export function checkAgentEndpoint(
     return { allowed: true, url: new URL(raw.trim()).toString() };
   }
   if (!verdict.allowed) {
-    // The navigation wording talks about "the assistant opening" a page, which is not what is
+    // The navigation wording talks about "the Bot opening" a page, which is not what is
     // happening here, so the reason is restated for the form surface.
     return {
       allowed: false,
       reason: verdict.reason.replace(
-        /the assistant is never allowed to open it\.|the assistant is not allowed to open it\./,
+        /the Bot can never open it\.|the Bot can't open it\./,
         "an agent may not live there.",
       ),
     };

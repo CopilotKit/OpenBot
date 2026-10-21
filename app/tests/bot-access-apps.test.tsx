@@ -21,7 +21,7 @@ import { settleReactWork } from "./settle-react-work";
  * whether the person reading could use any of it.
  *
  * Each app is named by its own name — never "Composio Gmail" — and says what it is for the person
- * looking, with the one move they have. An administrator keeps the way to the Bot's grants for each
+ * looking, with the one move they have. An admin keeps the way to the Bot's grants for each
  * app; nobody gets anybody else's connection state, because the read answers for the asker alone.
  */
 
@@ -124,7 +124,7 @@ function draw() {
 }
 
 const row = async (view: ReturnType<typeof draw>, key: string) => {
-  await view.findByText("Granted");
+  await view.findByText("What it can use");
   const found = await view.findByText((_, element) =>
     Boolean(element?.getAttribute("data-app") === key),
   );
@@ -163,7 +163,7 @@ test("an app this person has not connected says so and offers Connect", async ()
   expect(gmail.getByRole("button", { name: "Connect Gmail" })).toBeTruthy();
 });
 
-test("an app only an administrator can fix offers Request access, and a pending one reads Requested", async () => {
+test("an app only an admin can fix offers Request access, and a pending one reads Requested", async () => {
   serving({
     apps: [
       appAccess({
@@ -192,7 +192,7 @@ test("an app only an administrator can fix offers Request access, and a pending 
   const slack = await row(view, "composio-slack");
   expect(
     slack.getByText(
-      "Your organisation's Slack account isn't connected yet. Only an administrator can connect it.",
+      "Your organisation's Slack account isn't connected yet. Only an admin can connect it.",
     ),
   ).toBeTruthy();
   expect(
@@ -201,7 +201,7 @@ test("an app only an administrator can fix offers Request access, and a pending 
   const notion = await row(view, "notion");
   expect(
     notion.getByText(
-      "Notion isn't switched on for this OpenBot. Only an administrator can switch it on.",
+      "Notion isn't turned on yet. Only an admin can turn it on.",
     ),
   ).toBeTruthy();
   expect(notion.getByText("Requested")).toBeTruthy();
@@ -210,7 +210,7 @@ test("an app only an administrator can fix offers Request access, and a pending 
   ).toBeTruthy();
 });
 
-test("an administrator keeps the way to this Bot's grants on each app, beside the action", async () => {
+test("an admin keeps the way to this Bot's grants on each app, beside the action", async () => {
   serving({ role: "admin", apps: [appAccess({ state: "not_connected" })] });
   const gmail = await row(draw(), "composio-gmail");
   const manage = gmail.getByRole("button", {
@@ -234,7 +234,7 @@ test("an app's sentence is never cut short, so who can fix it stays on screen at
   });
   const gmail = await row(draw(), "composio-gmail");
   const sentence = gmail.getByText(
-    "Gmail is not available on this OpenBot yet. An administrator has to finish setting it up.",
+    "Gmail isn't set up yet. An admin has to turn it on.",
   );
   expect(sentence.className).toContain("line-clamp-none");
   expect(sentence.className).not.toContain("line-clamp-2");
@@ -270,7 +270,7 @@ test("on somebody else's Team Bot, an app on its owner's account says so, and an
   expect(notion.queryByRole("button")).toBeNull();
 });
 
-test("a person who is not an administrator gets no way to the grants", async () => {
+test("a person who is not an admin gets no way to the grants", async () => {
   serving({ apps: [appAccess()] });
   const gmail = await row(draw(), "composio-gmail");
   expect(gmail.queryByRole("button", { name: /Manage/ })).toBeNull();
@@ -285,7 +285,7 @@ test("when the states cannot be read, the apps are still listed and the failure 
   });
   const view = draw();
   expect((await view.findByRole("alert")).textContent).toContain(
-    "Whether each app is ready for you could not be loaded.",
+    "Couldn't check whether each app is ready for you. Reload the page.",
   );
   expect(await view.findByText("Google Drive")).toBeTruthy();
 });

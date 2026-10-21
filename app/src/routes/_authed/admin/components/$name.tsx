@@ -68,7 +68,7 @@ import { queryClient } from "@/query-client";
  */
 /** The same way back from every state this route can be in. */
 const BACK = {
-  label: "UI Components",
+  label: "UI components",
   linkProps: { to: "/admin/components" },
 } as const;
 
@@ -107,7 +107,7 @@ function RouteComponent() {
     return (
       <PageShell backButton={BACK} title="Components">
         <p className="mt-8 text-destructive text-sm" role="alert">
-          Could not load components.
+          Couldn't load components. Reload the page.
         </p>
       </PageShell>
     );
@@ -121,15 +121,14 @@ function RouteComponent() {
     return (
       <PageShell
         backButton={BACK}
-        description="Nothing here answers to that name."
+        description="There is no component with that name."
         title="No such component"
       >
         <Empty className="mt-12 min-h-[30dvh] border border-dashed">
           <EmptyHeader>
             <EmptyTitle>{name}</EmptyTitle>
             <EmptyDescription className="text-pretty">
-              It may have been renamed, or this deployment may no longer ship
-              it.
+              It may have been renamed, or this deployment no longer ships it.
             </EmptyDescription>
           </EmptyHeader>
           <Button
@@ -274,7 +273,7 @@ function ComponentDetail({
 
   const grantSummary =
     bots.length === 0
-      ? "There are no Bots yet"
+      ? "No Bots yet"
       : granted.length === bots.length
         ? `All ${bots.length} Bots`
         : granted.length === 0
@@ -283,17 +282,16 @@ function ComponentDetail({
 
   const functionSummary =
     dataFunctions.length === 0
-      ? "This deployment grants no data functions"
+      ? "This deployment has no data functions"
       : held.length === 0
-        ? "Nothing — it draws only what the model hands it"
+        ? "Nothing. It shows only what the Bot passes it."
         : held.map((fn) => fn.name).join(", ");
 
   return (
     <PageShell
       backButton={BACK}
       description={
-        component.publishedDescription ??
-        "Nothing is published, so no Bot is told about this."
+        component.publishedDescription ?? "Not published. No Bot can see it."
       }
       title={component.title}
     >
@@ -311,7 +309,7 @@ function ComponentDetail({
       </div>
 
       <PageSection
-        description="What this component is for, and which Bots are allowed to answer with it."
+        description="What this component is for, and which Bots can answer with it."
         title="Configuration"
       >
         <PageRows>
@@ -328,7 +326,7 @@ function ComponentDetail({
                 <ItemContent>
                   <ItemTitle>Not in this build</ItemTitle>
                   <ItemDescription>
-                    Nothing here can draw it, whatever else is set.
+                    OpenBot can't draw it. The settings below have no effect.
                   </ItemDescription>
                 </ItemContent>
               </Item>
@@ -344,10 +342,10 @@ function ComponentDetail({
               <ItemTitle>Published</ItemTitle>
               <ItemDescription>
                 {component.published
-                  ? "Bots may answer with it."
-                  : "No Bot may use it."}
+                  ? "Bots can answer with it."
+                  : "No Bot can use it."}
                 {component.hasUnpublishedChanges
-                  ? " The description has changes that are not published."
+                  ? " The description has unpublished changes."
                   : null}
               </ItemDescription>
             </ItemContent>
@@ -385,7 +383,7 @@ function ComponentDetail({
 
           <SheetRow
             icon={<IconDatabase />}
-            label="May read"
+            label="Can read"
             onOpen={() => setSheet("functions")}
             summary={functionSummary}
             testId={`functions-${component.name}`}
@@ -430,8 +428,8 @@ function ComponentDetail({
           <DialogHeader>
             <DialogTitle>Description</DialogTitle>
             <DialogDescription>
-              What the model reads when deciding to call this. It changes
-              nothing until the component is published.
+              What the model reads when it decides to use this. It has no effect
+              until the component is published.
             </DialogDescription>
           </DialogHeader>
           <DialogBody className="mt-4">
@@ -475,16 +473,13 @@ function ComponentDetail({
           <DialogHeader>
             <DialogTitle>Available to</DialogTitle>
             <DialogDescription>
-              Switch a Bot off and it is never told this component exists, so it
-              cannot ask for it and does not apologise for not having it. Each
-              change takes effect immediately.
+              Turn a Bot off and it never learns this component exists. Changes
+              apply right away.
             </DialogDescription>
           </DialogHeader>
           <DialogBody className="mt-4">
             {bots.length === 0 ? (
-              <p className="text-muted-foreground text-sm">
-                There are no Bots yet.
-              </p>
+              <p className="text-muted-foreground text-sm">No Bots yet.</p>
             ) : (
               <div className="flex flex-col">
                 {bots.map((bot, index) => {
@@ -525,19 +520,18 @@ function ComponentDetail({
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>May read</DialogTitle>
+            <DialogTitle>Can read</DialogTitle>
             <DialogDescription>
-              A separate grant from Available to, and not implied by it: that
-              one decides who may draw this, and this decides what it may go and
-              fetch in order to draw itself. Until one of these is on it shows
-              only what the Bot passes it, and every read it does make is a row
-              in Audit. Each change takes effect immediately.
+              The data this component can fetch to draw itself. This is separate
+              from Available to. With all of these off, it shows only what the
+              Bot passes it. Every read shows in Audit. Changes apply right
+              away.
             </DialogDescription>
           </DialogHeader>
           <DialogBody className="mt-4">
             {dataFunctions.length === 0 ? (
               <p className="text-muted-foreground text-sm">
-                This deployment grants no data functions.
+                This deployment has no data functions.
               </p>
             ) : (
               <div className="flex flex-col">

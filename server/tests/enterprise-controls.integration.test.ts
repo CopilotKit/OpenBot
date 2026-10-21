@@ -489,7 +489,7 @@ describe("headless turns obey the same switches", () => {
     });
     try {
       const turn = headlessTurn(bot);
-      await expect(turn.run()).rejects.toThrow(/allowlist/);
+      await expect(turn.run()).rejects.toThrow(/isn't an allowed model/);
       expect(turn.ran).toEqual([]);
     } finally {
       await put(asAdmin, "/api/admin/enterprise/settings/modelAllowlist", {
@@ -557,7 +557,7 @@ describe("headless turns obey the same switches", () => {
     try {
       await expect(
         hop.deliver({ work, message: "m", shown: "s", assertion: "a" }),
-      ).rejects.toThrow(/allowlist/);
+      ).rejects.toThrow(/isn't an allowed model/);
     } finally {
       await put(asAdmin, "/api/admin/enterprise/settings/modelAllowlist", {
         value: { enabled: false, models: [] },

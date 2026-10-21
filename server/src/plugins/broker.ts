@@ -903,7 +903,7 @@ export class BrokerUnconfiguredError extends BrokerRefusalError {
     const { vendor, envVar } = BROKERED_PROFILE[provider];
     super(
       reader === "person"
-        ? "Connected apps are not set up for this deployment, so nothing was asked. An administrator can set them up."
+        ? "Connecting apps isn't set up yet, so nothing was asked. Ask an admin to set it up."
         : `${vendor} is not configured for this deployment, so nothing was asked. Set ${envVar} to make the brokered apps available; until it is set there is nothing to connect, nothing to grant and no ${vendor} tool for a Bot to call, and the admin Plugins page shows one row under More apps that goes nowhere.`,
     );
     this.name = "BrokerUnconfiguredError";
@@ -970,8 +970,8 @@ export class BrokerReturnUrlError extends BrokerRefusalError {
     const { vendor } = BROKERED_PROFILE[provider];
     super(
       address === "unbuilt"
-        ? "This deployment built no address to send you back to, so connecting was not begun rather than begun with nowhere to land. Nothing was asked of your account; an administrator can set this deployment's address up."
-        : "The address this deployment would send you back to is not a web address, so a consent granted now would end on a page with no way back here. Nothing was asked of your account; an administrator can correct this deployment's address.",
+        ? "OpenBot has no address to bring you back to, so connecting didn't start. Nothing was asked of your account. Ask an admin to set OpenBot's address."
+        : "OpenBot's return address isn't a web address, so connecting didn't start. Nothing was asked of your account. Ask an admin to fix OpenBot's address.",
     );
     this.operatorMessage =
       address === "unbuilt"

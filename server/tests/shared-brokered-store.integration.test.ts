@@ -403,7 +403,7 @@ describe("a shared app", () => {
         botId: bot,
         actorId: asker,
       }),
-    ).rejects.toThrow(/cannot check who may use it/);
+    ).rejects.toThrow(/can't check who may use it/);
   });
 });
 
@@ -729,9 +729,7 @@ describe("an account the vendor no longer holds", () => {
       title: "Team GitHub",
       reason: "shared",
     });
-    expect(prompt?.message).toContain(
-      "An administrator has to connect it again",
-    );
+    expect(prompt?.message).toContain("Ask an admin to reconnect it");
     expect(Date.parse(prompt?.at ?? "")).toBeGreaterThanOrEqual(before - 1000);
     expect(await failures()).toBe(already + 1);
     // The team account's row is gone with the account, so every screen reads it as not connected.

@@ -90,8 +90,7 @@ export function ConnectAppCard({
         </p>
       ) : needsKey ? (
         <p className="text-sm" role="status">
-          {title} is connected with a key you hold rather than by visiting a
-          page.{" "}
+          {title} needs a key from you.{" "}
           <Link
             className="underline underline-offset-2"
             params={{ key: serverId }}

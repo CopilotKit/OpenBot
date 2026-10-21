@@ -24,7 +24,7 @@ import { queryClient } from "@/query-client";
 const KIND_LABEL: Record<UpdateKind, { title: string; description: string }> = {
   progress: {
     title: "Progress",
-    description: "Replies and results from work you were not watching.",
+    description: "Replies and results from work you weren't watching.",
   },
   decision: {
     title: "Decisions",
@@ -62,12 +62,12 @@ export function UpdateRoutingSection() {
     reach.data ? reach.data.available[transport] : true;
   return (
     <PageSection
-      description="Where each kind of update goes when you are not looking. The web always shows everything."
+      description="Where each kind of update goes when you're away. OpenBot on the web always shows everything."
       title="Where updates go"
     >
       {routing.isPending || reach.isPending ? null : routing.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Could not load where your updates go.
+          Couldn't load where your updates go. Reload the page.
         </p>
       ) : (
         <PageRows>

@@ -442,7 +442,7 @@ export function connectionsQueryOptions() {
     queryKey: pluginKeys.connections(),
     queryFn: async (): Promise<PluginConnections> => {
       const response = await client("/api/plugins/connections", {
-        fallback: "Your connected accounts could not be loaded.",
+        fallback: "Couldn't load your connections.",
       });
       return response.json();
     },
@@ -465,7 +465,7 @@ export function connectionSiblingsQueryOptions(serverId: string) {
       const response = await client(
         `/api/plugins/servers/${encodeURIComponent(serverId)}/connection/siblings`,
         {
-          fallback: "Which other apps share this connection could not be read.",
+          fallback: "Couldn't read which other apps share this connection.",
         },
       );
       const body: Partial<ConnectionSiblings> = await response.json();
@@ -529,7 +529,7 @@ export function agentPluginsQueryOptions(agentId: string) {
     queryFn: async (): Promise<GrantedPlugins> => {
       const response = await client(
         `/api/plugins/for/${encodeURIComponent(agentId)}`,
-        { fallback: "This Bot's plugins could not be read." },
+        { fallback: "Couldn't load this Bot's apps." },
       );
       return response.json();
     },

@@ -275,7 +275,7 @@ async function governRun(
     }).catch(() => undefined);
     return context.json(
       {
-        error: `This Bot runs on ${configured}, which is not on this deployment's model allowlist. An administrator can add it.`,
+        error: `This Bot uses ${configured}, which isn't an allowed model. Ask an admin to allow it.`,
       },
       403,
     );

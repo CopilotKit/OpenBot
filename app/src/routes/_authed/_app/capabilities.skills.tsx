@@ -129,8 +129,8 @@ function SkillsPage() {
           }
           description={
             <>
-              A skill is a named instruction you invoke with <code>/</code> and
-              a Bot follows. Yours are yours alone, and go on the Bots you own.
+              Type <code>/</code> and a skill's name to give a Bot that
+              instruction. Only you see yours, and they work on Bots you own.
             </>
           }
           title="Your skills"
@@ -146,13 +146,13 @@ function SkillsPage() {
            */}
           {loading ? null : !data ? (
             <p className="mt-4 text-destructive text-sm" role="alert">
-              Your skills could not be loaded.
+              Couldn't load your skills. Reload the page.
             </p>
           ) : mine.length === 0 ? (
             <Empty className="mt-4 h-[180px] border border-dashed">
               <EmptyHeader>
                 <EmptyTitle className="text-muted-foreground">
-                  You don't have any skills yet.
+                  No skills yet. Write one with New skill.
                 </EmptyTitle>
               </EmptyHeader>
             </Empty>
@@ -235,7 +235,7 @@ function SkillsPage() {
          */}
         {deployment.length > 0 ? (
           <PageSection
-            description="Written for everyone by an administrator. Which Bots carry them is decided in Admin."
+            description="An admin writes these for everyone and picks which Bots use them."
             title="Workspace skills"
           >
             <PageRows>

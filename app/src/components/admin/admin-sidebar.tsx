@@ -83,12 +83,12 @@ const GROUPS: {
         linkOptions: { to: "/admin/skills" },
       },
       {
-        title: "Automatic Learning",
+        title: "Automatic learning",
         icon: IconFileText,
         linkOptions: { to: "/admin/learning" },
       },
       {
-        title: "UI Components",
+        title: "UI components",
         icon: IconLayoutGrid,
         linkOptions: { to: "/admin/components" },
       },

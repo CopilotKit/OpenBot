@@ -149,7 +149,7 @@ test("a Shared app with no team account: Request access, not a sentence", async 
       prompt={prompt({
         reason: "shared",
         message:
-          "Gmail is shared across this deployment and no account is connected to it yet. Ask an administrator to connect it.",
+          "Gmail is shared across this deployment and no account is connected to it yet. Ask an admin to connect it.",
       })}
     />,
   );
@@ -195,18 +195,18 @@ test("an account lost and then connected again: the newer connection wins", asyn
   expect(view.queryByText("Reconnect")).toBeNull();
 });
 
-test("a team account the vendor lost: says an administrator has to reconnect it, with nothing to press", async () => {
+test("a team account the vendor lost: says an admin has to reconnect it, with nothing to press", async () => {
   serving(appAccess({ state: "ready", account: "shared" }));
   const view = mount(<AppAccessCard prompt={prompt({ reason: "shared" })} />);
   const drawn = await card(view);
   expect(drawn.textContent).toContain(
-    "Your organisation's Gmail account needs reconnecting. Only an administrator can reconnect it.",
+    "Your organisation's Gmail account needs reconnecting. Only an admin can reconnect it.",
   );
   expect(view.queryByRole("button")).toBeNull();
 });
 
 test.each([
-  ["disabled", "enable", /Gmail isn't switched on for this OpenBot/],
+  ["disabled", "enable", /Gmail isn't turned on yet/],
   ["not_granted", "grant", /This Bot hasn't been given Gmail/],
 ] as const)(
   "the Bot asked about an app that is %s: Request access",
@@ -262,7 +262,7 @@ test("a Shared app whose audience is not approved: says so, with nothing to pres
   );
   const view = mount(<AppAccessCard prompt={prompt({ reason: "access" })} />);
   const drawn = await card(view);
-  expect(drawn.textContent).toContain("Only an administrator can approve it.");
+  expect(drawn.textContent).toContain("Only an admin can approve it.");
   expect(view.queryByRole("button")).toBeNull();
 });
 

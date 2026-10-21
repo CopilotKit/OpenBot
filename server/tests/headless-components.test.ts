@@ -277,7 +277,7 @@ describe("headless component tools", () => {
         signal: new AbortController().signal,
       }),
     );
-    expect(result).toContain("has not been granted the function auditSummary");
+    expect(result).toContain("can't use the function auditSummary");
     expect(result.startsWith(NOT_SHOWN)).toBeTrue();
   });
 });

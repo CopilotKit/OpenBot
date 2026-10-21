@@ -83,7 +83,7 @@ function AuditPage() {
     setExportCapped(null);
     try {
       const response = await client(auditExportUrl(search), {
-        fallback: "Could not export audit events",
+        fallback: "Couldn't export audit events. Try again.",
       });
       // A file that stopped early must say so, or it reads as the whole trail.
       const capped = Number(response.headers.get("x-audit-export-truncated"));
@@ -101,7 +101,7 @@ function AuditPage() {
       setExportError(
         error instanceof Error
           ? error.message
-          : "Could not export audit events",
+          : "Couldn't export audit events. Try again.",
       );
     } finally {
       setExporting(false);
@@ -160,13 +160,13 @@ function AuditPage() {
         ) : null}
         {exportCapped ? (
           <p className="mt-4 text-muted-foreground text-sm" role="status">
-            The file holds the newest {exportCapped.toLocaleString()} events,
-            not all of them. Narrow the filter or the dates to export the rest.
+            The file has the newest {exportCapped.toLocaleString()} events, not
+            all of them. Narrow the filter or dates to export the rest.
           </p>
         ) : null}
         {events.isPending ? null : events.isError ? (
           <p className="mt-4 text-destructive text-sm" role="alert">
-            The audit trail could not be loaded.
+            Couldn't load the audit log. Reload the page.
           </p>
         ) : rows.length === 0 ? (
           <PageEmpty>No events match this filter yet.</PageEmpty>
@@ -278,10 +278,10 @@ function Row({
   const routed =
     event.eventType === "channel.routed"
       ? payload.viaMention === true
-        ? "The person chose this coworker"
+        ? "The person chose this Bot"
         : payload.fallback === true
-          ? "Sent to the default coworker"
-          : "Sent to the coworker it is for"
+          ? "Sent to the default Bot"
+          : "Sent to the Bot it was meant for"
       : null;
   // Allowed by policy but not carried out. A stalled turn belongs in the same family: the Bot was
   // asked and the answer never arrived. Colour is how this table is read, and a row left in the
@@ -485,7 +485,7 @@ function Row({
 const DISCOVERY_REASONS: Record<string, string> = {
   "under-floor": "Few enough tools to offer them all",
   "nothing-declared": "No skill declares any of these tools",
-  unavailable: "Could not choose, so all were offered",
+  unavailable: "Couldn't choose, so all were offered",
   "nothing-chosen": "No skill applied, so all were offered",
   selected: "Chosen by skill",
 };
@@ -505,8 +505,8 @@ const DECISIONS: Record<string, string> = {
   "agent.stream_stalled": "The Bot stopped responding",
   "computer.policy_loaded": "Boundary at start-up",
   "computer.isolation_loaded": "Isolation at start-up",
-  "computer.control_taken": "A person took the wheel",
-  "computer.control_released": "The wheel was handed back",
+  "computer.control_taken": "A person took control",
+  "computer.control_released": "Control went back to the Bot",
   "computer.help_requested": "The Bot asked for help",
   "computer.secret_requested": "The Bot asked for a secret",
   "computer.secret_supplied": "A person supplied a secret",
@@ -516,25 +516,25 @@ const DECISIONS: Record<string, string> = {
 
   "component.granted": "Granted to this Bot",
   "component.revoked": "Taken away from this Bot",
-  "component.published": "Published, so every Bot may use it",
-  "component.unpublished": "Unpublished, so no Bot may use it",
+  "component.published": "Published. Every Bot can use it",
+  "component.unpublished": "Unpublished. No Bot can use it",
   "component.draft_saved": "Draft saved, not yet published",
   "component.refused": "Refused",
-  "component.function_granted": "May read this",
-  "component.function_revoked": "May no longer read this",
+  "component.function_granted": "Can read this",
+  "component.function_revoked": "Can no longer read this",
   "component.function_called": "Read real data",
   "component.function_refused": "Refused",
   // A function failure is execution failure, not a policy refusal.
-  "component.function_failed": "Could not be read",
+  "component.function_failed": "Couldn't read it",
 
   // Not a call and not a decision: the tools this run was allowed to see. Worded so nobody reads it
   // as permission, which it is not — everything named was already granted.
   "mcp.tools_discovered": "Tools offered for one run",
   "mcp.call_succeeded": "Called on this Bot's behalf",
   "mcp.call_rejected": "Blocked",
-  "mcp.call_failed": "The server did not answer",
+  "mcp.call_failed": "The server didn't answer",
   // Not "Blocked": nothing about the Bot was judged, because nothing proved which Bot it was.
-  "mcp.callback_refused": "Could not prove which Bot it was",
+  "mcp.callback_refused": "Couldn't confirm which Bot it was",
 
   "configuration.changed": "Configuration changed",
   "credential.created": "Credential saved",

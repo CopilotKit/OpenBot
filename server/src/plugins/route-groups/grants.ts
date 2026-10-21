@@ -111,7 +111,7 @@ export function mountGrantRoutes({
 
     if (kind === "mcp") {
       if (!actor.isAdmin) {
-        return "An administrator decides which Bots may reach a tool.";
+        return "Only an admin can choose which Bots use a tool.";
       }
       // Taking something away is always allowed: see the note on `intent`. It matters more here
       // than anywhere else, because the rows this check exists to prevent are the same shape as the
@@ -138,7 +138,7 @@ export function mountGrantRoutes({
        */
       const [serverId] = ref.split("/");
       if (!(await store.serverExists(serverId ?? ""))) {
-        return `${serverId} is not an app this deployment has added, so there is nothing for a Bot to reach. Add it first, and its tools can be granted then.`;
+        return `${serverId} hasn't been added yet. Add it first, then give its tools to a Bot.`;
       }
       /*
        * The Bot has to exist as well, which the `bot` branch below already says in the same words.
@@ -164,7 +164,7 @@ export function mountGrantRoutes({
        * this, deliberately, and this had it backwards.
        */
       if (!actor.isAdmin) {
-        return "An administrator decides which Bots may hand work to another Bot.";
+        return "Only an admin can choose which Bots hand work to another Bot.";
       }
       // Taking something away is always allowed: see the note on `intent`.
       if (intent === "revoke") return null;
@@ -219,7 +219,7 @@ export function mountGrantRoutes({
     if (owner === undefined) return `There is no skill called ${ref}.`;
     if (owner !== actor.id) {
       return owner === null
-        ? `${ref} belongs to this deployment. An administrator decides which Bots use it.`
+        ? `${ref} belongs to everyone. Only an admin can choose which Bots use it.`
         : `${ref} is somebody else's skill.`;
     }
 
@@ -448,7 +448,7 @@ export function mountGrantRoutes({
         return context.json(
           {
             error:
-              "That tool is not configured in a way this deployment can act on. An administrator has to look at the server it belongs to.",
+              "That tool isn't set up correctly. Ask an admin to check the server it belongs to.",
           },
           500,
         );

@@ -107,13 +107,13 @@ export function channelHistoryNotice({
     historyAvailability === "unavailable" &&
     (historyReadFailed || (messageCount === 0 && lastMessageAt !== null))
   ) {
-    return "Earlier messages are temporarily unavailable. You can keep using this conversation.";
+    return "Couldn't load earlier messages. You can keep using this conversation.";
   }
 
   if (unreadable > 0) {
     return unreadable === 1
-      ? "One earlier message could not be read and is not shown. The rest of this conversation is complete."
-      : `${unreadable} earlier messages could not be read and are not shown. The rest of this conversation is complete.`;
+      ? "One earlier message couldn't be read, so it isn't shown. Everything else is here."
+      : `${unreadable} earlier messages couldn't be read, so they aren't shown. Everything else is here.`;
   }
 
   return null;
@@ -651,7 +651,7 @@ export function ChannelChat({
     ])
       .catch(() => {
         setVoiceContextNotice(
-          "Earlier voice context wasn’t available for this message. The agent may need you to repeat details from the call.",
+          "Couldn’t bring in what was said on the call. You may need to repeat it.",
         );
         return cachedVoiceArchive(channel.id);
       })
@@ -779,7 +779,7 @@ export function ChannelChat({
     // Voice and typed requests share this turn boundary, including gaps between frontend tools.
     if (turnsRef.current > 0 || agentRef.current.isRunning) {
       throw new Error(
-        "The agent is still working on another request. Please wait or stop that task first.",
+        "This Bot is still working on something. Wait for it, or stop it first.",
       );
     }
 
@@ -968,7 +968,7 @@ export function ChannelChat({
                 />
                 {voiceArchive.error && (
                   <p className="pb-2 text-sm text-destructive" role="alert">
-                    Voice chats couldn’t be loaded. Refresh to try again.
+                    Couldn’t load voice chats. Reload the page.
                   </p>
                 )}
                 {voiceContextNotice && (
@@ -992,8 +992,8 @@ export function ChannelChat({
                     className="pb-2 text-sm text-muted-foreground"
                     role="status"
                   >
-                    This coworker has been deleted. The conversation stays
-                    readable, but it can no longer reply.
+                    This Bot was deleted. You can still read this conversation,
+                    but the Bot can't reply.
                   </p>
                 )}
               </>

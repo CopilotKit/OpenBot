@@ -401,7 +401,7 @@ describe("DELETE /servers/:id/authorize", () => {
         status: 409,
         body: {
           error:
-            "That authorization finished before it could be cancelled, so the account is connected. Disconnect it if you did not mean to connect it.",
+            "That authorization finished before it could be cancelled, so the account is connected. Disconnect it if you didn't mean to connect it.",
         },
         outcomes: ["completed"],
       });
@@ -482,7 +482,7 @@ describe("DELETE /servers/:id/authorize", () => {
       const response = await cancel(app, movedApp);
       expect(response.status).toBe(400);
       expect(await response.json()).toEqual({
-        error: "That app is not reached through a broker.",
+        error: "That app doesn't connect this way.",
       });
     } finally {
       await database
@@ -565,7 +565,7 @@ describe("DELETE /servers/:id/authorize on a deployment whose broker runs no aut
     );
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({
-      error: "That app is not reached through a broker.",
+      error: "That app doesn't connect this way.",
     });
   });
 
@@ -577,7 +577,7 @@ describe("DELETE /servers/:id/authorize on a deployment whose broker runs no aut
     );
     expect(response.status).toBe(403);
     expect(await response.json()).toEqual({
-      error: "An administrator connects shared apps.",
+      error: "Only an admin can connect shared apps.",
     });
   });
 });

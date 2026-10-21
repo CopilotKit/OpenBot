@@ -104,7 +104,7 @@ function SignScreen() {
       setError(
         caughtError instanceof Error
           ? caughtError.message
-          : "No identity provider is registered for that address.",
+          : "No company sign-in is set up for that address.",
       );
       setOpening(null);
     }
@@ -124,7 +124,7 @@ function SignScreen() {
       setError(
         caughtError instanceof Error
           ? caughtError.message
-          : `Could not start ${providerName(provider)} sign-in.`,
+          : `Couldn't open ${providerName(provider)} sign-in. Try again.`,
       );
       setOpening(null);
     }
@@ -205,14 +205,15 @@ function SignScreen() {
         >
           {options?.ssoRequired ? (
             <p className="mb-3 text-center text-sm text-muted-foreground">
-              Your organization requires single sign-on.
+              Your organization requires you to sign in with your company
+              account.
             </p>
           ) : null}
           {providers.length > 0 && !options?.ssoRequired ? (
             providerButtons
           ) : options?.sso || options?.ssoRequired ? null : (
             <p className="text-center text-sm text-muted-foreground">
-              No sign-in provider is configured for this deployment.
+              Sign-in isn't set up yet. An admin has to set it up first.
             </p>
           )}
           {/*
@@ -255,7 +256,7 @@ function SignScreen() {
           {options?.ssoRequired && providers.length > 0 ? (
             <details className="mt-4 text-sm">
               <summary className="cursor-pointer text-center text-muted-foreground">
-                Administrator sign-in
+                Admin sign-in
               </summary>
               <div className="mt-3">{providerButtons}</div>
             </details>

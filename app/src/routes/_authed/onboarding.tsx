@@ -45,7 +45,7 @@ function WelcomeStep() {
       <div className="h-8" />
       <IllustrationFrame
         className="flex flex-col items-center px-8 pt-16 pb-10"
-        label="A message box where you hand off tasks to your agents"
+        label="A message box where you hand off tasks to your Bots"
       >
         <AgentOrb size="72px" />
         {/*
@@ -69,7 +69,7 @@ function WelcomeStep() {
             compact
             className="scale-90"
             editorClassName="text-base"
-            initialValue="Hand off tasks to your team of agents"
+            initialValue="Hand off tasks to your team of Bots"
           />
         </div>
       </IllustrationFrame>
@@ -81,7 +81,7 @@ function ComputerUseStep() {
   return (
     <div className="w-full flex flex-col items-center justify-center">
       <h1 className="text-3xl font-semibold tracking-tight max-w-md text-center">
-        Each agent has its own computer
+        Each Bot has its own computer
       </h1>
       <div className="h-8" />
       <div className="relative aspect-5/3 w-full max-w-lg rounded-2xl overflow-hidden border border-border">
@@ -108,7 +108,7 @@ const AGENTS_PLACEHOLDER: RosterCard[] = [
   { id: "placeholder-data", name: "Data Analyst", avatarSeed: "data-analyst" },
   {
     id: "placeholder-support",
-    name: "Support Agent",
+    name: "Support Desk",
     avatarSeed: "support-agent",
   },
 ];
@@ -130,7 +130,7 @@ function RosterStep() {
   return (
     <div className="w-full flex flex-col items-center justify-center">
       <h1 className="text-3xl font-semibold tracking-tight max-w-md text-center">
-        Choose from a variety of agents or create your own
+        Pick a Bot or make your own
       </h1>
       <div className="h-8" />
       <IllustrationFrame
@@ -159,7 +159,7 @@ function RosterStep() {
         <div className="bg-card p-4 rounded-lg flex flex-row gap-4 items-center">
           <div className="rounded-full size-[40px] border border-foreground/30 border-dashed" />
           <h3 className="line-clamp-1 text-base font-medium tracking-tight text-foreground/70">
-            Your own agent
+            Your own Bot
           </h3>
         </div>
       </IllustrationFrame>
@@ -210,8 +210,7 @@ function AgentsStep() {
         Bring the agents you already have
       </h1>
       <p className="mt-3 max-w-md text-center text-muted-foreground">
-        Any agent that speaks AG-UI joins as a Bot. Add one any time from Bots,
-        then New Bot.
+        Any AG-UI agent can join as a Bot. Add one from Bots, then New Bot.
       </p>
       <div className="h-8" />
       <IllustrationFrame
@@ -239,8 +238,8 @@ function OrganizationStep() {
         Deploy it for your organization
       </h1>
       <p className="mt-3 max-w-md text-center text-muted-foreground">
-        One container image, or a Helm chart for EKS, GKE and AKS, with sign-in
-        through Google, Microsoft or Okta.
+        Run one container image, or a Helm chart for EKS, GKE or AKS. Your
+        people sign in with Google, Microsoft or Okta.
       </p>
       <div className="h-8" />
       <IllustrationFrame

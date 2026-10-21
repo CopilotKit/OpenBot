@@ -55,9 +55,11 @@ describe("brokerSentence", () => {
  */
 describe("brokerReturnUrl", () => {
   test("refuses an address that was never built", () => {
-    expect(() => brokerReturnUrl("", "composio")).toThrow(/built no address/);
+    expect(() => brokerReturnUrl("", "composio")).toThrow(
+      /no address to bring you back to/,
+    );
     expect(() => brokerReturnUrl("   ", "composio")).toThrow(
-      /built no address/,
+      /no address to bring you back to/,
     );
     expect(() => brokerReturnUrl("", "composio")).toThrow(BrokerReturnUrlError);
   });
@@ -70,7 +72,7 @@ describe("brokerReturnUrl", () => {
       "javascript:alert(1)",
     ]) {
       expect(() => brokerReturnUrl(unusable, "composio")).toThrow(
-        /not a web address/,
+        /isn't a web address/,
       );
     }
   });

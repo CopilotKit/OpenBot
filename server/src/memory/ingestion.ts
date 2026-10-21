@@ -239,7 +239,7 @@ export function createMemoryIngestion(options: {
         !(await plugins.deploymentConnectionFor(server.id))
       ) {
         throw new MemoryRefusedError(
-          `${server.title} is shared across this deployment and no account is connected to it yet. Ask an administrator to connect it.`,
+          `${server.title} uses a shared account, and nobody has connected it yet. Ask an admin to connect it.`,
         );
       }
       if (
@@ -304,7 +304,7 @@ export function createMemoryIngestion(options: {
     if (!prompt) return text;
     switch (prompt.reason) {
       case "shared":
-        return `The shared ${prompt.title} account is not connected. An administrator has to connect it before this source can sync.`;
+        return `The shared ${prompt.title} account isn't connected. An admin has to connect it before this source can sync.`;
       case "reconnect":
         return `Your ${prompt.title} account needs reconnecting. Reconnect it under Connections, then sync again.`;
       default:

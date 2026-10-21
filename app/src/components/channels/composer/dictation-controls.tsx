@@ -29,7 +29,7 @@ export function DictationButton({
       title={
         dictation.supported
           ? "Dictate a message"
-          : "Dictation requires a supported browser and HTTPS (or localhost)"
+          : "Dictation needs a supported browser and a secure (HTTPS) connection"
       }
       className="size-8 shrink-0 self-end rounded-full"
       disabled={disabled || !dictation.supported || dictation.busy}

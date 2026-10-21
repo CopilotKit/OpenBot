@@ -39,7 +39,7 @@ import { newId } from "../../../../lib/new-id";
  * profile links and reloads preserve the pending recipient without creating an empty channel.
  */
 /** What `GET /api/agents/:id` answers for a Bot this person cannot see. */
-const AGENT_NOT_FOUND = "Agent not found.";
+const AGENT_NOT_FOUND = "Couldn't find that Bot.";
 
 export const Route = createFileRoute("/_authed/_app/channel/new")({
   /*
@@ -90,7 +90,7 @@ function RouteComponent() {
   const urlAgentDetailFailed = needsUrlAgentDetail && detailError && !fetched;
   const loadError =
     rosterError && profiles === undefined
-      ? "Coworkers couldn't be loaded."
+      ? "Couldn't load your Bots. Reload the page."
       : urlAgentDetailFailed
         ? /*
            * The server's 404 sentence (agents/routes.ts `mapStoreError`) means this person cannot see
@@ -98,8 +98,8 @@ function RouteComponent() {
            * other failure is a load that can be retried, and says so.
            */
           detailFailure?.message === AGENT_NOT_FOUND
-          ? "This Bot isn't available to you. It may be unpublished, not shared with you, or not described yet."
-          : "Coworker couldn't be loaded."
+          ? "This Bot isn't available to you. It may be unpublished or not shared with you."
+          : "Couldn't load that Bot. Reload the page."
         : null;
   /** Bots picked in the To: field, in the order they will answer; the URL's Bot until one is picked. */
   const [picked, setPicked] = useState<AgentProfile[] | null>(null);
@@ -223,7 +223,7 @@ function RouteComponent() {
               setError(
                 caught instanceof Error
                   ? caught.message
-                  : "Could not start the group.",
+                  : "Couldn't start the group. Try again.",
               );
               throw caught;
             }
@@ -243,7 +243,7 @@ function RouteComponent() {
             setError(
               caught instanceof Error
                 ? caught.message
-                : "Could not start the conversation.",
+                : "Couldn't start the conversation. Try again.",
             );
             throw caught;
           }

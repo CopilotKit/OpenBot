@@ -224,7 +224,7 @@ test("a public Bot that is not published says everyone can already use it", asyn
   );
   const view = draw({ ...BOT, visibility: "public" });
   expect(
-    await view.findByText(/everyone in the deployment can already use it/),
+    await view.findByText(/everyone on OpenBot can already use it/),
   ).toBeTruthy();
   expect(view.queryByText(/Only you can use it/)).toBeNull();
 });

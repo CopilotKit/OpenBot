@@ -728,7 +728,7 @@ export function createSharedUseGate(
   audit: AuditStore,
 ): SharedUseGate {
   return async ({ botId, serverId, title, actorId, initiator }) => {
-    const message = `This Bot is reachable by more people than an administrator approved for the shared ${title} account. An administrator has been asked to approve it.`;
+    const message = `This Bot reaches more people than an admin approved for the shared ${title} account. An admin has been asked to approve it.`;
     const steering = await steeringOf(initiator, store.sourcesOf);
     /*
      * A RUN WHOSE STEERING CANNOT BE TOLD IS REFUSED WITHOUT A REQUEST. No approval an administrator

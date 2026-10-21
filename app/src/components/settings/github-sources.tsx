@@ -54,7 +54,7 @@ export function GithubSources() {
           Add a repository
         </Button>
       }
-      description="Register a repository, then add its webhook in GitHub using the address below and the same secret. A responsibility can then start on one of its events, such as issues.opened."
+      description="Add a repository here, then add a webhook in GitHub with the address below and the same secret. Its events, like issues.opened, can then start a responsibility."
       title="Repositories"
     >
       {error ? (
@@ -64,7 +64,9 @@ export function GithubSources() {
       ) : null}
       {bindings.isPending || !bindings.data ? null : bindings.data.length ===
         0 ? (
-        <PageEmpty>No repositories connected.</PageEmpty>
+        <PageEmpty>
+          No repositories yet. Add one with Add a repository.
+        </PageEmpty>
       ) : (
         <PageRows>
           {bindings.data.map((binding, index) => (

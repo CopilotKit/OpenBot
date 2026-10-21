@@ -47,12 +47,14 @@ function fixture() {
   const store: VoiceSessionStore = {
     save: async (receivedActor) => {
       expect(receivedActor.id).toBe(actor.id);
-      if (deny) throw new VoiceSessionError("Channel not found.", 404);
+      if (deny)
+        throw new VoiceSessionError("Couldn't find that conversation.", 404);
       calls.push("saved");
       return saved;
     },
     list: async (_actor, channelId, cursor) => {
-      if (deny) throw new VoiceSessionError("Channel not found.", 404);
+      if (deny)
+        throw new VoiceSessionError("Couldn't find that conversation.", 404);
       expect(channelId).toBe("channel");
       expect(cursor).toBe("cursor");
       return { sessions: [saved], nextCursor: null };

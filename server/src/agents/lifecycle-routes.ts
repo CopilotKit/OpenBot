@@ -86,7 +86,7 @@ export function createBotLifecycleRoutes(
     if (!agentId.trim())
       return context.json({ error: "A Bot id is required." }, 400);
     const agent = await profiles.get(context.var.actor, agentId);
-    if (!agent) return context.json({ error: "Agent not found." }, 404);
+    if (!agent) return context.json({ error: "Couldn't find that Bot." }, 404);
     return agent;
   };
 

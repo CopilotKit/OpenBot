@@ -21,8 +21,8 @@ export function NewSkill() {
       <header>
         <h1 className="text-2xl font-semibold">New skill</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          A named instruction you invoke with <code>/</code>. It goes on the
-          Bots you own, and nobody else sees it.
+          An instruction you start with <code>/</code>. Only you see it, and it
+          works on Bots you own.
         </p>
       </header>
 

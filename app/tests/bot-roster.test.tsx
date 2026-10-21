@@ -135,7 +135,9 @@ test("with every Bot of yours pinned, Yours says so instead of claiming none", a
   serving([bot({ id: "favourite", name: "Favourite", pinned: true })], []);
   const view = draw();
   expect(await view.findByText("Your Bots are all pinned above.")).toBeTruthy();
-  expect(view.queryByText("You have no Bots of your own yet.")).toBeNull();
+  expect(
+    view.queryByText("You don't have any Bots yet. Create one with New Bot."),
+  ).toBeNull();
 });
 
 test("a hidden Bot is under Hidden, folded until asked for, and its row opens its page", async () => {
@@ -168,7 +170,9 @@ test("a roster that never loaded says so, not that you have no Bots", async () =
     new Response(null, { status: 500 })) as unknown as typeof fetch;
   const view = draw();
   expect(await view.findByRole("alert")).toBeTruthy();
-  expect(view.queryByText("You have no Bots of your own yet.")).toBeNull();
+  expect(
+    view.queryByText("You don't have any Bots yet. Create one with New Bot."),
+  ).toBeNull();
 });
 
 test("a failed refetch keeps the roster it already had, not the error", async () => {

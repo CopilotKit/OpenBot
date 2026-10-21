@@ -187,7 +187,7 @@ export function createPluginRoutes(
     const owner = await store.skillOwner(slug);
     if (owner === undefined) return null; // A new skill. Ownership is decided on the way in.
     if (owner === null) {
-      return `${slug} belongs to this deployment. An administrator looks after it.`;
+      return `${slug} belongs to everyone. Only an admin can change it.`;
     }
     return owner === actor.id ? null : `${slug} is somebody else's skill.`;
   }

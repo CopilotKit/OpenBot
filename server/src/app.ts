@@ -571,7 +571,7 @@ export function createApp(
         : [];
       if (!roles.includes("admin")) {
         return context.json(
-          { error: "Only an administrator may change identity providers." },
+          { error: "Only an admin can change identity providers." },
           403,
         );
       }
@@ -1016,7 +1016,7 @@ export function createApp(
      */
     if (context.var.actor.id === userId && role !== "admin") {
       return context.json(
-        { error: "You cannot remove your own administrator role." },
+        { error: "You can't remove your own admin role." },
         409,
       );
     }

@@ -52,7 +52,7 @@ const VOCABULARY: Record<PluginsProvider, ProviderVocabulary> = {
     envVar: "COMPOSIO_API_KEY",
     directoryPath: "/admin/plugins/composio",
     directoryDescription:
-      "A few hundred apps, reached as whoever is asking. Each person connects their own account.",
+      "A few hundred apps. Each person connects their own account.",
   },
   arcade: {
     name: "Arcade",
@@ -60,7 +60,7 @@ const VOCABULARY: Record<PluginsProvider, ProviderVocabulary> = {
     envVar: "ARCADE_API_KEY",
     directoryPath: "/admin/plugins/arcade",
     directoryDescription:
-      "A directory this deployment has not reviewed, reached as whoever is asking. Each person connects their own account.",
+      "Apps nobody here has reviewed. Each person connects their own account.",
   },
 };
 
@@ -77,12 +77,12 @@ export function providerVocabulary(
  * fallback once spelled a vendor on its own and printed Composio's name on an Arcade deployment.
  */
 export function directoryReadFailure(provider: PluginsProvider): string {
-  return `${VOCABULARY[provider].name}'s app directory could not be read.`;
+  return `Couldn't load ${VOCABULARY[provider].name}'s app directory. Reload the page.`;
 }
 
 /** The "More apps" section's own sentence. */
 export function moreAppsSectionDescription(provider: PluginsProvider): string {
-  return `A directory this deployment has not reviewed, reached through ${VOCABULARY[provider].name}.`;
+  return `Apps from ${VOCABULARY[provider].name}. Nobody here has reviewed them.`;
 }
 
 /**
@@ -108,7 +108,7 @@ export function moreAppsRow(
   if (!configured) {
     return {
       title: name,
-      description: `Add your ${name} key to enable a catalogue of tools. Set ${envVar} on this deployment.`,
+      description: `Not set up. Set ${envVar} on this deployment to browse its apps.`,
       linked: false,
     };
   }
@@ -133,42 +133,27 @@ export function brokeredReach(provider: PluginsProvider): {
 } {
   const { name } = VOCABULARY[provider];
   return {
-    description: `This app is reached through ${name}, which holds the account. This deployment sends one key and the name of whoever is asking, so each person connects their own and a Bot sees only what that person can see. There is no token to paste.`,
+    description: `${name} holds the account. This deployment sends one key and who is asking. Each person connects their own, and a Bot sees only what that person can see. There is no token to paste.`,
     badge: `Through ${name}`,
   };
 }
 
 /** What disconnecting a brokered account does, said where the button is. */
 export function brokeredDisconnectNote(provider: PluginsProvider): string {
-  return `Disconnecting ends the account at ${VOCABULARY[provider].name}, not just here.`;
+  return `Disconnecting also ends the account at ${VOCABULARY[provider].name}.`;
 }
 
 /**
- * The line under a brokered app's own page title on a person's connected-accounts screen.
+ * What an admin's own brokered row says where the broker authorizes PER ACTION, in place of a
+ * consent trip.
  *
- * NOT {@link brokeredConnectionDescription}, which is the admin Connection card's sentence and says
- * something different ("each person's own account"). This one speaks to the person reading their
- * own page: the broker holds the account, so a Bot sees only what they can see.
- */
-export function brokeredAccountPageDescription(
-  provider: PluginsProvider,
-): string {
-  return `Reached through ${VOCABULARY[provider].name}, which holds the account, so a Bot sees only what you can see.`;
-}
-
-/** What Connect does on a consent app, said before the press: where it goes first. */
-export function brokeredConsentTrip(provider: PluginsProvider): string {
-  return `Connecting takes you to ${VOCABULARY[provider].name} and then to the vendor to consent.`;
-}
-
-/**
- * What stands in for {@link brokeredConsentTrip} where the broker authorizes PER ACTION.
+ * NOT A CONSENT TRIP WITH A WORD CHANGED, because it is not the same offer. Under a per-action broker
+ * there is no whole-app press to name — the row withholds Connect entirely — so this says where the
+ * act actually is instead. A person reading "Connecting takes you to…" beside no Connect button is
+ * being told about a button that is not there.
  *
- * NOT THE SAME SENTENCE WITH A WORD CHANGED, because it is not the same offer. The consent trip
- * names a press and says where it goes; under a per-action broker there is no whole-app press to
- * name — the row withholds Connect entirely — so this says where the act actually is instead. A
- * person reading "Connecting takes you to…" beside no Connect button is being told about a button
- * that is not there.
+ * The person's own page under Connections names no vendor, so it says this in its own words; the
+ * admin setup page may name the broker, and reads it from here.
  *
  * `where` IS NOT DECORATION AND HAS NO DEFAULT. The two screens that draw this row do not both
  * draw the action list: the Connections page has it directly underneath, and the admin setup page
@@ -181,7 +166,7 @@ export function brokeredPerActionTrip(
   provider: PluginsProvider,
   where: "below" | "settings",
 ): string {
-  const stem = `${VOCABULARY[provider].name} approves one action at a time, so there is nothing to connect for the whole app.`;
+  const stem = `${VOCABULARY[provider].name} approves one action at a time, so there's nothing to connect for the whole app.`;
   return where === "below"
     ? `${stem} Authorize the actions you want below.`
     : `${stem} Authorize them from Connections.`;
@@ -189,7 +174,7 @@ export function brokeredPerActionTrip(
 
 /** What a person is told where the deployment has no key for the active broker. */
 export function brokeredKeyMissing(provider: PluginsProvider): string {
-  return `Set ${VOCABULARY[provider].envVar} on this deployment. Without it there is no broker to reach, so this account can be neither connected nor ended from here. The app stays enabled and every grant on its tools still stands.`;
+  return `Set ${VOCABULARY[provider].envVar} on this deployment. Until then, this account can't be connected or disconnected here. The app stays turned on, and its tool grants still stand.`;
 }
 
 /**
@@ -218,8 +203,8 @@ export function disconnectSiblingsNotice(answer: {
   if (unanswered > 0) {
     parts.push(
       siblings.length > 0
-        ? `${unanswered} other ${unanswered === 1 ? "app" : "apps"} could not be checked and may be affected too.`
-        : `${unanswered} ${unanswered === 1 ? "app" : "apps"} on this connection could not be checked, so disconnecting may end ${unanswered === 1 ? "it" : "them"} too.`,
+        ? `${unanswered} other ${unanswered === 1 ? "app" : "apps"} couldn't be checked and may be affected too.`
+        : `${unanswered} ${unanswered === 1 ? "app" : "apps"} on this connection couldn't be checked, so disconnecting may end ${unanswered === 1 ? "it" : "them"} too.`,
     );
   }
   return parts.length > 0 ? parts.join(" ") : null;

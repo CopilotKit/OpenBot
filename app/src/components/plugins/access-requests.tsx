@@ -58,7 +58,7 @@ export function AccessRequestsSection({ app }: { app?: string }) {
     return (
       <PageSection title="Requests">
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Access requests could not be loaded.
+          Couldn't load access requests. Reload the page.
         </p>
       </PageSection>
     );
@@ -68,8 +68,8 @@ export function AccessRequestsSection({ app }: { app?: string }) {
     <PageSection
       description={
         app
-          ? "People asking for this app. Approving does what they asked for, here and now."
-          : "People asking for an app to be switched on, given to a Bot, or connected. Approving does what they asked for, here and now."
+          ? "People asking for this app. Approve does what they asked, right away."
+          : "People asking for an app to be turned on, given to a Bot, or connected. Approve does what they asked, right away."
       }
       title="Requests"
     >

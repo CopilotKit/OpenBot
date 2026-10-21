@@ -139,13 +139,13 @@ function RouteComponent() {
 
   return (
     <PageShell
-      description="What this deployment can reach, and which Bots may reach it. Adding a plugin is account-wide; which Bots hold its tools is decided on its own page."
+      description="What this deployment can reach, and which Bots can use it. A plugin you add is for everybody. Choose which Bots get its tools on its page."
       title="Plugins"
     >
       {/* Pending, error, empty, rows — pending first, so no sentence asserts anything mid-fetch. */}
       {plugins.isPending ? null : plugins.error ? (
         <p className="mt-12 text-destructive text-sm" role="alert">
-          Plugins could not be loaded.
+          Couldn't load plugins. Reload the page.
         </p>
       ) : (
         <>
@@ -156,12 +156,12 @@ function RouteComponent() {
           <AccessRequestsSection />
 
           <PageSection
-            description="Added for the whole deployment. Open one to set what it needs and which Bots hold its tools."
+            description="Added for everybody. Open one to set it up and choose which Bots get its tools."
             title="Connected"
           >
             {plugins.data?.servers.length === 0 ? (
               <PageEmpty>
-                Nothing connected yet. Everything available is below.
+                Nothing connected yet. Pick one from the list below.
               </PageEmpty>
             ) : (
               <PageRows>
@@ -227,11 +227,11 @@ function RouteComponent() {
           </PageSection>
 
           <PageSection
-            description="Reviewed, first-party servers this build will talk to. Open one to add it."
+            description="Reviewed, first-party servers. Open one to add it."
             title="Explore plugins"
           >
             {explore.length === 0 ? (
-              <PageEmpty>Everything in the catalogue is connected.</PageEmpty>
+              <PageEmpty>Every plugin in the catalogue is connected.</PageEmpty>
             ) : (
               <PageRows>
                 {explore.map((entry: CatalogueItem, index) => {

@@ -291,7 +291,7 @@ test("Authorize appears for needs-consent and for nothing else", async () => {
   expect(buttons("Gmail.Flaky")).not.toContain("Authorize");
 });
 
-test("needs-operator names the missing secret, says an administrator sets it, and offers no Authorize", async () => {
+test("needs-operator names the missing secret, says an admin has to set it, and offers no Authorize", async () => {
   install({
     provider: "arcade",
     connected: true,
@@ -307,7 +307,7 @@ test("needs-operator names the missing secret, says an administrator sets it, an
   await waitFor(() => row(view, "Gmail.Setup"));
   const text = row(view, "Gmail.Setup").textContent ?? "";
   expect(text).toContain("GOOGLE_CLIENT_SECRET");
-  expect(text).toContain("An administrator sets it");
+  expect(text).toContain("An admin has to set it");
   expect(row(view, "Gmail.Setup").querySelector("button")).toBeNull();
   expect(view.queryByText("Authorize")).toBeNull();
 });
@@ -348,13 +348,13 @@ test("the route's synthetic toolkit-named unknown reads as could not read and ne
         action: "Gmail",
         state: "unknown",
         reason:
-          "This deployment could not read what this account holds just now, so nothing is said about it either way. Try again in a moment.",
+          "Couldn't read what this account allows right now. Try again in a moment.",
       },
     ],
   });
   const view = renderScreen();
   const notice = await view.findByRole("status");
-  expect(notice.textContent?.toLowerCase()).toContain("could not read");
+  expect(notice.textContent?.toLowerCase()).toContain("couldn't read");
   expect(view.container.querySelector("[data-action]")).toBeNull();
   expect(view.container.querySelector('[data-action="Gmail"]')).toBeNull();
   expect(

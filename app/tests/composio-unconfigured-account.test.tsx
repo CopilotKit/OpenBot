@@ -182,9 +182,7 @@ function renderAccount(composioConfigured: boolean) {
 
 test("the app's page says it is not available yet, and names no setting", async () => {
   const view = renderAccount(false);
-  expect(
-    await view.findByText(/Gmail is not available on this OpenBot yet/),
-  ).toBeTruthy();
+  expect(await view.findByText(/Gmail isn't set up yet/)).toBeTruthy();
   expect(view.queryByText(/COMPOSIO_API_KEY/)).toBeNull();
   expect(view.queryByRole("button", { name: "Connect" })).toBeNull();
 });
@@ -192,5 +190,5 @@ test("the app's page says it is not available yet, and names no setting", async 
 test("with the key set, the app's page offers the account as before", async () => {
   const view = renderAccount(true);
   expect(await view.findByText("Your account")).toBeTruthy();
-  expect(view.queryByText(/not available on this OpenBot yet/)).toBeNull();
+  expect(view.queryByText(/isn't set up yet/)).toBeNull();
 });

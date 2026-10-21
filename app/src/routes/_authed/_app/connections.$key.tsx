@@ -32,10 +32,6 @@ import { Separator } from "@/components/ui/separator";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { connectAccountMutationOptions } from "@/lib/plugins/mutations";
 import {
-  brokeredAccountPageDescription,
-  brokeredConsentTrip,
-  brokeredDisconnectNote,
-  brokeredPerActionTrip,
   brokeredProvenance,
   disconnectSiblingsNotice,
 } from "@/lib/plugins/provider-vocabulary";
@@ -196,7 +192,7 @@ function AppConnectionPage() {
        */
       if (authorizationUrl === null) {
         setNotice(
-          "This deployment answered without a consent link, so there was nowhere to send you and nothing was connected. Try again, and tell an administrator if it persists.",
+          "Couldn't start connecting, so nothing was connected. Try again, or ask an admin if it keeps happening.",
         );
         return;
       }
@@ -334,9 +330,8 @@ function AppConnectionPage() {
     return (
       <PageShell backButton={back} title={server?.title ?? key}>
         <p className="mt-12 text-destructive text-sm" role="alert">
-          Whether you have connected this account could not be loaded, so
-          nothing about it is shown here rather than something that may be
-          wrong. Reload the page, and tell an administrator if it persists.
+          Couldn't load this connection. Reload the page, or ask an admin if it
+          keeps happening.
         </p>
       </PageShell>
     );
@@ -351,9 +346,8 @@ function AppConnectionPage() {
     return (
       <PageShell backButton={back} title={key}>
         <p className="mt-12 text-destructive text-sm" role="alert">
-          This connector could not be loaded, so nothing about it is shown here
-          rather than something that may be wrong. Reload the page, and tell an
-          administrator if it persists.
+          Couldn't load this app. Reload the page, or ask an admin if it keeps
+          happening.
         </p>
       </PageShell>
     );
@@ -370,8 +364,8 @@ function AppConnectionPage() {
     return (
       <PageShell backButton={back} title={server.title}>
         <PageEmpty>
-          {server.title} is not available on this OpenBot yet. An administrator
-          has to finish setting it up before anybody can connect it.
+          {server.title} isn't set up yet. An admin has to turn it on before
+          anyone can connect it.
         </PageEmpty>
       </PageShell>
     );
@@ -445,12 +439,17 @@ function AppConnectionPage() {
   if (brokered && server) {
     /* Bound once because the row below is told it twice — once inside the whole disconnected
        sentence and once on its own — and two copies of it would drift. */
-    const reassurance = "No Bot can read this as you.";
+    const reassurance = "No Bot can use this as you.";
+    /* Where the next step is. A broker that approves one action at a time has no whole-app Connect,
+       so the sentence points at the action list underneath instead of a button that is not there. */
+    const trip = perActionGrants
+      ? "Authorize the actions you want below."
+      : `Connecting takes you to ${server.title} to approve access.`;
 
     return (
       <PageShell
         backButton={back}
-        description={brokeredAccountPageDescription(provider)}
+        description="Bots use this as you, and see only what you can see."
         title={server.title}
       >
         {notice ? (
@@ -477,8 +476,8 @@ function AppConnectionPage() {
               /* Said beside the button rather than after it: disconnecting ends the account at
                  Composio, so what it undoes is not the row here but the grant on your own mailbox,
                  and connecting again is a fresh consent. */
-              connectedDescription={`A Bot granted its tools reads your ${server.title} as you. ${brokeredDisconnectNote(provider)}`}
-              disconnectedDescription={`${reassurance} ${perActionGrants ? brokeredPerActionTrip(provider, "below") : brokeredConsentTrip(provider)}`}
+              connectedDescription={`Bots you allow use your ${server.title} as you. Disconnecting removes their access everywhere.`}
+              disconnectedDescription={`${reassurance} ${trip}`}
               /* What is true either way. The trip to Composio is not — an app whose key somebody
                  types never leaves this page — but which Bots can read this person's mail is the
                  whole point of the screen and holds for both kinds. */
@@ -512,13 +511,13 @@ function AppConnectionPage() {
     return (
       <PageShell
         backButton={back}
-        description="This is not a service you connect for yourself."
+        description="You don't connect this app yourself."
         title={entry?.title ?? key}
       >
         <PageEmpty>
           {entry
-            ? "A Bot reaches this one with a credential the deployment holds, the same for everybody."
-            : "This deployment has no connector by that name."}
+            ? "Bots use one shared account for this app, the same for everybody."
+            : "OpenBot has no app by that name."}
         </PageEmpty>
       </PageShell>
     );
@@ -546,10 +545,10 @@ function AppConnectionPage() {
               <ItemTitle>Your account</ItemTitle>
               <ItemDescription>
                 {!enabled
-                  ? "An administrator has not enabled this connector, so there is nothing to connect to yet."
+                  ? "Not available yet. An admin has to turn this on first."
                   : connection
-                    ? "A Bot granted its tools reads this as you, and sees only what you can see."
-                    : "No Bot can read this as you. Connecting takes you to the vendor to consent."}
+                    ? "Bots you allow use this as you, and see only what you can see."
+                    : `No Bot can use this as you. Connecting takes you to ${entry.vendor} to approve access.`}
               </ItemDescription>
             </ItemContent>
             <ItemActions>
@@ -591,7 +590,7 @@ function AppConnectionPage() {
                          * had not, which is the one outcome worse than not offering it.
                          */
                         setNotice(
-                          `Disconnecting is not built yet. Until it is, revoke it in your ${entry.vendor} account's third-party access settings — that stops this deployment reading anything immediately.`,
+                          `You can't disconnect here yet. To stop access now, remove OpenBot in your ${entry.vendor} account's third-party access settings.`,
                         )
                       }
                       className="whitespace-nowrap"
@@ -627,15 +626,15 @@ function AppConnectionPage() {
 
       {connection ? (
         <PageSection
-          description="What you agreed to, as the vendor recorded it — not what was asked for. The two differ when a consent screen is only partly accepted."
+          description={`What you allowed, as ${entry.vendor} recorded it. This can be less than OpenBot asked for.`}
           title="Access"
         >
           <PageRows>
             <Item size="sm">
               <ItemContent>
-                <ItemTitle>Granted</ItemTitle>
+                <ItemTitle>Allowed</ItemTitle>
                 <ItemDescription className="line-clamp-none">
-                  {connection.scope || "The vendor named no scope."}
+                  {connection.scope || `${entry.vendor} didn't say.`}
                 </ItemDescription>
               </ItemContent>
             </Item>

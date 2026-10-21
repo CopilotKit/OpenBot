@@ -101,7 +101,7 @@ function YourSkills({ agentId }: { agentId: string }) {
   );
   return (
     <PageSection
-      description="A skill this Bot carries is offered in its composer as /name."
+      description="Turn on a skill to use it with this Bot. Type / in a conversation to run it."
       title="Your skills"
     >
       {grant.error ? (
@@ -111,11 +111,11 @@ function YourSkills({ agentId }: { agentId: string }) {
       ) : null}
       {page.isPending ? null : page.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Could not load your skills.
+          Couldn't load your skills. Reload the page.
         </p>
       ) : skills.length === 0 ? (
         <PageEmpty>
-          You have not written a skill yet.{" "}
+          No skills yet.{" "}
           <Link
             className="underline underline-offset-4"
             to="/capabilities/skills"
@@ -185,7 +185,7 @@ function Granted({ agentId }: { agentId: string }) {
   if (!plugins.data) {
     return (
       <p className="mt-6 text-destructive text-sm" role="alert">
-        What this Bot may reach could not be loaded.
+        Couldn't load what this Bot can use. Reload the page.
       </p>
     );
   }
@@ -203,18 +203,18 @@ function Granted({ agentId }: { agentId: string }) {
   const count = states.length + rest.length + skills.length;
   return (
     <PageSection
-      description="What this Bot may reach when it works, and whether each app is ready for you. Anything not listed is refused when called."
-      title="Granted"
+      description="The apps and skills this Bot can use, and whether each app is ready for you. It can't use anything else."
+      title="What it can use"
     >
       {apps.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Whether each app is ready for you could not be loaded.
+          Couldn't check whether each app is ready for you. Reload the page.
         </p>
       ) : null}
       {count === 0 ? (
         <PageEmpty>
-          Nothing granted yet. An administrator grants apps from the Plugins
-          screens; until then this Bot can converse, and nothing more.
+          No apps yet. An admin has to add them. Until then this Bot can only
+          talk with you.
         </PageEmpty>
       ) : (
         <PageRows>

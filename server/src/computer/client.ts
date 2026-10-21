@@ -233,8 +233,8 @@ export function createComputerTransport(
       }
       throw new ComputerUnavailableError(
         error instanceof Error && error.name === "TimeoutError"
-          ? "The assistant's computer did not respond in time."
-          : "The assistant's computer is not running.",
+          ? "The Bot's computer didn't respond in time."
+          : "The Bot's computer isn't running.",
       );
     }
     return response;
@@ -298,7 +298,7 @@ export function createComputerTransport(
       // fails must not replace the refusal the caller is told about.
       await response.body?.cancel().catch(() => undefined);
       throw new ComputerUnavailableError(
-        "The assistant's computer returned an invalid file download.",
+        "The Bot's computer sent back a file that couldn't be read.",
       );
     }
     return { body: response.body, bytes };

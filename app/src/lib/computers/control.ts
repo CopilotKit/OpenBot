@@ -84,11 +84,14 @@ export async function supplySecret(
     const body = (await response.json().catch(() => null)) as {
       error?: string;
     } | null;
-    return { ok: false, error: body?.error ?? "That could not be entered." };
+    return {
+      ok: false,
+      error: body?.error ?? "Couldn't type that into the page. Try again.",
+    };
   } catch {
     return {
       ok: false,
-      error: "The assistant's computer could not be reached.",
+      error: "Couldn't reach the Bot's computer. Try again.",
     };
   }
 }

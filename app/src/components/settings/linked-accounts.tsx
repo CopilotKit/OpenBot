@@ -203,8 +203,8 @@ export function LinkedAccountSection({
     return (
       <PageSection title="Your account">
         <PageEmpty>
-          This OpenBot cannot link {linkableProviderTitle(provider)} accounts
-          yet. An administrator has to set it up first.
+          You can't link a {linkableProviderTitle(provider)} account yet. An
+          admin has to set it up first.
         </PageEmpty>
       </PageSection>
     );
@@ -248,22 +248,23 @@ export function LinkedAccountSection({
       ) : null}
       {state.error ? (
         <p className="mt-2 text-destructive text-sm" role="alert">
-          Your linked accounts could not be loaded: {state.error}
+          Couldn't load your account: {state.error}
         </p>
       ) : null}
       {state.providersError ? (
         <p className="mt-2 text-destructive text-sm" role="alert">
-          Could not check which accounts can be linked: {state.providersError}
+          Couldn't check whether you can link this account:{" "}
+          {state.providersError}
         </p>
       ) : null}
       {issueCode.error ? (
         <p className="mt-2 text-destructive text-sm" role="alert">
-          Could not create a Slack link code: {issueCode.error.message}
+          Couldn't create a Slack code: {issueCode.error.message}
         </p>
       ) : null}
       {connectGithub.error ? (
         <p className="mt-2 text-destructive text-sm" role="alert">
-          Could not connect GitHub: {connectGithub.error.message}
+          Couldn't connect GitHub: {connectGithub.error.message}
         </p>
       ) : null}
       <Dialog
@@ -389,7 +390,7 @@ function LinkedAccountRow({ account }: { account: LinkedAccount }) {
       </Item>
       {unlink.error ? (
         <p className="px-3 pb-2 text-destructive text-sm" role="alert">
-          Could not disconnect {account.title}: {unlink.error.message}
+          Couldn't disconnect {account.title}: {unlink.error.message}
         </p>
       ) : null}
     </>

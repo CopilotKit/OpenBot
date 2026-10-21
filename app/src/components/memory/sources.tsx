@@ -114,15 +114,15 @@ export function MemorySources({ agentId: fixedBot }: { agentId?: string }) {
           Add source
         </Button>
       }
-      description="Each app you connected in your own account that this Bot can read becomes a source on its own, and you can add more. Enabled sources refresh every 15 minutes, and their facts are available to this Bot only. Turn one off or remove it and it stays that way."
-      title="Connected app sources"
+      description="Apps you connected that this Bot can read show up here, and you can add more. Sources refresh every 15 minutes. Only this Bot sees what they hold."
+      title="App sources"
     >
       {sources.isPending ? null : sources.error ? (
         <p role="alert" className="mt-4 text-destructive text-sm">
           {sources.error.message}
         </p>
       ) : shown.length === 0 ? (
-        <PageEmpty>No connected app sources yet.</PageEmpty>
+        <PageEmpty>No sources yet. Add one with Add source.</PageEmpty>
       ) : (
         <PageRows>
           {shown.map((source, index) => (
@@ -139,7 +139,7 @@ export function MemorySources({ agentId: fixedBot }: { agentId?: string }) {
                       ? source.syncStatus === "succeeded"
                         ? "Up to date"
                         : source.syncStatus
-                      : "Disabled"}
+                      : "Turned off"}
                     {source.lastSyncAt
                       ? ` · Last read ${new Date(source.lastSyncAt).toLocaleString()}`
                       : ""}
@@ -203,7 +203,7 @@ export function MemorySources({ agentId: fixedBot }: { agentId?: string }) {
           <DialogHeader>
             <DialogTitle>Add a source</DialogTitle>
             <DialogDescription>
-              It is read now, and then every 15 minutes while it is enabled.
+              OpenBot reads it now, then every 15 minutes while it's on.
             </DialogDescription>
           </DialogHeader>
           <DialogBody className="mt-4 overflow-y-auto">
@@ -235,7 +235,7 @@ export function MemorySources({ agentId: fixedBot }: { agentId?: string }) {
                         .filter(Boolean);
                     else if (setting.schema.type === "object")
                       throw new Error(
-                        "Choose an action with simple search settings.",
+                        "This one has settings OpenBot can't show. Choose another.",
                       );
                     else values[setting.name] = value;
                   }
@@ -293,9 +293,7 @@ export function MemorySources({ agentId: fixedBot }: { agentId?: string }) {
                   </Field>
                 ) : null}
                 <Field>
-                  <FieldLabel htmlFor={`${id}-action`}>
-                    Connected app action
-                  </FieldLabel>
+                  <FieldLabel htmlFor={`${id}-action`}>What to read</FieldLabel>
                   <Select
                     items={tools.data?.map((tool) => ({
                       value: tool.ref,
@@ -309,7 +307,7 @@ export function MemorySources({ agentId: fixedBot }: { agentId?: string }) {
                     value={toolRef || null}
                   >
                     <SelectTrigger className="w-full" id={`${id}-action`}>
-                      <SelectValue placeholder="Choose a read action" />
+                      <SelectValue placeholder="Choose what to read" />
                     </SelectTrigger>
                     <SelectContent>
                       {tools.data?.map((tool) => (

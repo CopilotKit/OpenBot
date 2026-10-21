@@ -262,7 +262,7 @@ export function createStoreContext(options: PluginStoreOptions) {
       .limit(1);
     if (!dialled)
       return {
-        refusal: `${serverId} is not an app this deployment has added.`,
+        refusal: `OpenBot has no app called ${serverId}.`,
       };
     /*
      * THE NAME IS THE DIALLED ROW'S; THE ACCOUNT IS THE APP'S.
@@ -289,7 +289,7 @@ export function createStoreContext(options: PluginStoreOptions) {
     const app = toolkit ? await brokeredAppRow(toolkit) : null;
     if (toolkit && !app)
       return {
-        refusal: `${serverId} is not an app this deployment has added.`,
+        refusal: `OpenBot has no app called ${serverId}.`,
       };
     const row = app
       ? {
@@ -675,7 +675,7 @@ export function createStoreContext(options: PluginStoreOptions) {
             ? connectAppRefusal({
                 serverId: row.id,
                 title: row.title,
-                message: `${row.title} is shared across this deployment and no account is connected to it yet. Ask an administrator to connect it.`,
+                message: `${row.title} uses a shared account, and nobody has connected it yet. Ask an admin to connect it.`,
                 reason: "shared",
               })
             : connectAppRefusal({
@@ -698,7 +698,7 @@ export function createStoreContext(options: PluginStoreOptions) {
       const token = row.credentialId
         ? await secretFor(
             row.credentialId,
-            `${row.id} needs a credential this deployment no longer holds. An administrator has to add it again.`,
+            `${row.id} is missing its key, so this can't be done. Ask an admin to add it again.`,
           )
         : undefined;
       return { token };
@@ -789,11 +789,11 @@ export function createStoreContext(options: PluginStoreOptions) {
      * no step to take, which is worse than saying nothing.
      */
     const noClient = registrationUrl
-      ? `${title} has no OAuth client for this deployment, so this cannot be called. Connect ${title} again in Settings: the deployment registers itself with the vendor when somebody connects.`
-      : `${title} has no OAuth client registered for this deployment, so this cannot be called. An administrator has to add one.`;
+      ? `${title} needs connecting again, so this can't be done. Reconnect it on Connections and ask again.`
+      : `${title} isn't set up yet, so this can't be done. Ask an admin to finish setting it up.`;
     const unusableClient = registrationUrl
-      ? `${title} has no usable OAuth client for this deployment. Connect ${title} again in Settings: the deployment registers itself with the vendor on the next connect.`
-      : `${title} has no usable OAuth client for this deployment. An administrator has to add one again.`;
+      ? `${title} needs connecting again. Reconnect it on Connections and ask again.`
+      : `${title} isn't set up correctly. Ask an admin to set it up again.`;
     /**
      * What to say when the vendor has forgotten the client this person's grant was issued under.
      *
@@ -807,7 +807,7 @@ export function createStoreContext(options: PluginStoreOptions) {
      * refuses — and one that only ever appears to work against a vendor whose acceptance would
      * itself be the vulnerability. A new consent is the only thing that produces a usable grant.
      */
-    const clientReplaced = `${title} no longer recognises this deployment's OAuth client, so this cannot be called. The deployment has registered itself again — connect ${title} again in Settings.`;
+    const clientReplaced = `${title} needs connecting again, so this wasn't done. Reconnect it on Connections and ask again.`;
 
     if (!row.credentialId) {
       // The person did their part; the deployment has not. Refused before anything queues, because

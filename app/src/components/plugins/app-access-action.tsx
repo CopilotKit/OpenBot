@@ -49,33 +49,33 @@ export function appAccessSentence(access: AppAccess): string {
         ? `This Bot uses its owner's ${name} account, which needs reconnecting. Only the Bot's owner can reconnect it.`
         : `Your ${name} connection needs reconnecting.`;
     case "shared_not_connected":
-      return `Your organisation's ${name} account isn't connected yet. Only an administrator can connect it.`;
+      return `Your organisation's ${name} account isn't connected yet. Only an admin can connect it.`;
     case "shared_not_approved":
-      return `This Bot reaches more people than an administrator has approved for your organisation's ${name} account. Only an administrator can approve it.`;
+      return `This Bot reaches more people than an admin approved for your organisation's ${name} account. Only an admin can approve it.`;
     case "disabled":
       return disabledSentence(access);
     case "not_granted":
-      return `This Bot hasn't been given ${name}. Only an administrator can give it.`;
+      return `This Bot hasn't been given ${name}. Only an admin can give it.`;
   }
 }
 
 /**
- * Switched off, in the words for why. "Turned off by an administrator" was true of one reason in
- * five: an app nobody switched on, and a set-up somebody has not finished, are not a decision
- * anybody took — and the Composio case says what Settings → Connected accounts says about the same
- * app, so the two screens never disagree about it.
+ * Switched off, in the words for why. "Turned off by an admin" was true of one reason in five: an
+ * app nobody switched on, and a set-up somebody has not finished, are not a decision anybody took.
+ * The unconfigured-broker case says what the app's page under Connections says about the same app,
+ * so the two screens never disagree about it.
  */
 function disabledSentence(access: AppAccess): string {
   const name = access.displayName;
   switch (access.unavailable) {
     case "composio_unconfigured":
-      return `${name} is not available on this OpenBot yet. An administrator has to finish setting it up.`;
+      return `${name} isn't set up yet. An admin has to turn it on.`;
     case "scheme_unreadable":
     case "oauth_client_missing":
     case "token_missing":
-      return `${name} isn't fully set up yet. Only an administrator can finish setting it up.`;
+      return `${name} isn't fully set up yet. Only an admin can finish setting it up.`;
     default:
-      return `${name} isn't switched on for this OpenBot. Only an administrator can switch it on.`;
+      return `${name} isn't turned on yet. Only an admin can turn it on.`;
   }
 }
 

@@ -11,7 +11,7 @@ function MemoryPage() {
     <CapabilitiesShell>
       <MemoryList
         action={<RememberFact />}
-        description="What your Bots know about you. Facts you tell them reach every Bot; what a Bot learns stays with that Bot."
+        description="What your Bots know about you. Facts you add reach every Bot. What a Bot learns on its own stays with that Bot."
       />
     </CapabilitiesShell>
   );

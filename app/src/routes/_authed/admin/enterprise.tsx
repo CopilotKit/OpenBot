@@ -108,7 +108,7 @@ function rulesToText(rules: EgressRule[]): string {
 
 function summarizePolicy(policy: NetworkPolicy | undefined): string {
   if (!policy)
-    return "No policy: Bot computers may reach anything the cluster allows";
+    return "No policy. Bot computers can reach anything the cluster allows";
   const count = policy.rules.length;
   return `${MODE_NAMES[policy.mode]} · ${count} ${count === 1 ? "rule" : "rules"}${policy.locked ? " · locked" : ""}`;
 }
@@ -123,7 +123,7 @@ function EnterprisePage() {
 
   return (
     <PageShell
-      description="What members may use, how Bot computers reach the network, and what is recorded about it. Every change is on the audit trail."
+      description="What members can use, how Bot computers reach the network, and what is recorded. Every change shows in Audit."
       title="Enterprise controls"
     >
       {failure ? (
@@ -133,7 +133,7 @@ function EnterprisePage() {
       ) : null}
       {overview.isPending ? null : overview.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Could not load enterprise controls.
+          Couldn't load enterprise controls. Reload the page.
         </p>
       ) : (
         <EnterpriseSections
@@ -193,7 +193,7 @@ function EnterpriseSections({
   return (
     <>
       <PageSection
-        description="Social sign-in stays available to addresses in INITIAL_ADMIN_EMAILS as a break-glass way in, and every such sign-in is audited."
+        description="Addresses in INITIAL_ADMIN_EMAILS can always use social sign-in as an emergency way in. Each of those sign-ins shows in Audit."
         title="Sign-in"
       >
         <PageRows>
@@ -205,8 +205,8 @@ function EnterpriseSections({
               <ItemTitle>Require SSO</ItemTitle>
               <ItemDescription>
                 {settings.ssoRequired
-                  ? "Only a registered SAML or OpenID Connect provider may sign anybody in."
-                  : "People may also sign in with Google, Microsoft or Okta."}
+                  ? "People can only sign in through a registered SAML or OpenID Connect provider."
+                  : "People can also sign in with Google, Microsoft or Okta."}
               </ItemDescription>
             </ItemContent>
             <ItemActions>
@@ -227,7 +227,7 @@ function EnterpriseSections({
               <ItemTitle>SCIM provisioning</ItemTitle>
               <ItemDescription className="line-clamp-none">
                 {data.scim.configured
-                  ? `Directory base URL ${data.scim.baseUrl ?? "(set BETTER_AUTH_URL)"} with the SCIM_BEARER_TOKEN bearer token. Deprovisioning ends sessions, deny-lists the address, retires connector credentials and stops their computers.`
+                  ? `Directory base URL ${data.scim.baseUrl ?? "(set BETTER_AUTH_URL)"} with the SCIM_BEARER_TOKEN bearer token. Deprovisioning ends sessions, blocks the address, retires connector credentials and stops their computers.`
                   : "Off. Set SCIM_BEARER_TOKEN to accept provisioning from Okta, Entra or another directory."}
               </ItemDescription>
             </ItemContent>
@@ -241,7 +241,7 @@ function EnterpriseSections({
       </PageSection>
 
       <PageSection
-        description="The switch is the whole organization. Roles can be given a different answer, and a directory group can be granted a capability the organization has off."
+        description="Each switch applies to the whole organization. A role can override it, and a directory group can get a capability the organization has off."
         title="Capabilities"
       >
         <PageRows>
@@ -258,7 +258,7 @@ function EnterpriseSections({
                     <ItemDescription>
                       {effective
                         ? capability.description
-                        : "Nobody may, unless a role or group grants it."}
+                        : "Off for everybody, unless a role or group turns it on."}
                     </ItemDescription>
                   </ItemContent>
                   <ItemActions>
@@ -289,7 +289,7 @@ function EnterpriseSections({
               <ItemTitle>Role and group overrides</ItemTitle>
               <ItemDescription>
                 {overrideCount === 0
-                  ? "None: everybody gets the switches above"
+                  ? "None. Everybody gets the switches above"
                   : `${overrideCount} set`}
               </ItemDescription>
             </ItemContent>
@@ -301,7 +301,7 @@ function EnterpriseSections({
       </PageSection>
 
       <PageSection
-        description="Where Bot computers may connect. Applied to running computers within seconds, without a restart. A group policy replaces the organization's unless it is locked."
+        description="Where Bot computers can connect. Changes reach running computers within seconds, without a restart. A group policy replaces the organization's unless it is locked."
         title="Network"
       >
         <PageRows>
@@ -373,7 +373,7 @@ function EnterpriseSections({
       </PageSection>
 
       <PageSection
-        description="With the allowlist on, a Bot may call tools only on the MCP servers approved here. Every other server's calls are refused."
+        description="With the allowlist on, Bots can only call tools on the MCP servers approved here. Calls to any other server are refused."
         title="MCP servers"
       >
         <PageRows>
@@ -386,7 +386,7 @@ function EnterpriseSections({
               <ItemDescription>
                 {settings.mcpAllowlist.enabled
                   ? `${settings.mcpAllowlist.servers.length} approved`
-                  : "Off: every registered server may be used as its grants allow."}
+                  : "Off. Bots can use any registered server they have access to."}
               </ItemDescription>
             </ItemContent>
             <ItemActions>
@@ -441,7 +441,7 @@ function EnterpriseSections({
       </PageSection>
 
       <PageSection
-        description={`The built-in Bot runs on ${data.builtInModel ?? "the deployment's configured model"}. A remote Bot chooses its own; the model its stream names is recorded.`}
+        description={`The built-in Bot runs on ${data.builtInModel ?? "the deployment's configured model"}. A remote Bot chooses its own, and the model it reports is recorded.`}
         title="Models"
       >
         <PageRows>
@@ -453,8 +453,8 @@ function EnterpriseSections({
               <ItemTitle>Model allowlist</ItemTitle>
               <ItemDescription>
                 {settings.modelAllowlist.enabled
-                  ? "A built-in Bot on a model not listed is refused before it runs."
-                  : "Off: any model may serve a run."}
+                  ? "A built-in Bot on an unlisted model is refused before it runs."
+                  : "Off. Any model can be used."}
               </ItemDescription>
             </ItemContent>
             <ItemActions>
@@ -498,7 +498,7 @@ function EnterpriseSections({
       </PageSection>
 
       <PageSection
-        description="Audit events and Bot actions stream to your OpenTelemetry collector or SIEM when OTEL_EXPORTER_OTLP_ENDPOINT is set, tagged openbot.surface."
+        description="Set OTEL_EXPORTER_OTLP_ENDPOINT to stream audit events and Bot actions to your OpenTelemetry collector or SIEM. They are tagged openbot.surface."
         title="Recording and export"
       >
         <PageRows>
@@ -510,8 +510,8 @@ function EnterpriseSections({
               <ItemTitle>Action Recording</ItemTitle>
               <ItemDescription>
                 {settings.actionRecording
-                  ? `Shell commands Bots run are recorded with secrets scrubbed and kept ${data.actionRecordRetentionDays} days.`
-                  : "Off: commands are on the audit trail only."}
+                  ? `Shell commands Bots run are recorded with secrets removed, and kept ${data.actionRecordRetentionDays} days.`
+                  : "Off. Commands show in Audit only."}
               </ItemDescription>
             </ItemContent>
             <ItemActions>
@@ -535,7 +535,7 @@ function EnterpriseSections({
               <ItemDescription>
                 {data.otel.configured
                   ? "Exporting over OTLP/HTTP."
-                  : "Not configured. Set OTEL_EXPORTER_OTLP_ENDPOINT on the server."}
+                  : "Not set up. Set OTEL_EXPORTER_OTLP_ENDPOINT on the server."}
               </ItemDescription>
             </ItemContent>
             <ItemActions>
@@ -549,7 +549,7 @@ function EnterpriseSections({
       </PageSection>
 
       <PageSection
-        description="Stopping a computer ends its running Bots and keeps its disk. The Bot gets a fresh computer next session. Stop one person's from People."
+        description="Stopping a computer ends its running Bots and keeps its disk. The Bot gets a fresh computer next session. To stop one person's computers, go to People."
         title="Computers"
       >
         <PageRows>
@@ -614,13 +614,11 @@ function ModelUsage() {
   if (usage.error)
     return (
       <p className="mt-4 text-destructive text-sm" role="alert">
-        Could not load model usage.
+        Couldn't load model usage. Reload the page.
       </p>
     );
   if (usage.data.summary.length === 0)
-    return (
-      <PageEmpty>No Bot runs have been recorded in the last 30 days.</PageEmpty>
-    );
+    return <PageEmpty>No Bot runs in the last 30 days.</PageEmpty>;
   return (
     <PageRows>
       {usage.data.summary.map((row, index) => (
@@ -657,7 +655,7 @@ function RecordedActions() {
   if (actions.error)
     return (
       <p className="mt-4 text-destructive text-sm" role="alert">
-        Could not load recorded actions.
+        Couldn't load recorded actions. Reload the page.
       </p>
     );
   if (actions.data.length === 0)
@@ -726,7 +724,7 @@ function OverridesDialog({
 }) {
   const setCapability = useMutation(setCapabilityMutationOptions(queryClient));
   const scopes: { kind: "role" | "group"; id: string; label: string }[] = [
-    { kind: "role", id: "admin", label: "Administrators" },
+    { kind: "role", id: "admin", label: "Admins" },
     { kind: "role", id: "user", label: "Members" },
     ...data.groups.map((group) => ({
       kind: "group" as const,
@@ -766,8 +764,8 @@ function OverridesDialog({
           </Select>
           <p className="text-muted-foreground text-xs">
             {scope?.kind === "group"
-              ? "A group can only widen: Grant gives its members the capability even where the organization has it off."
-              : "A role's answer replaces the organization switch for everybody holding that role."}
+              ? "A group can only add. Grant gives its members the capability even when the organization has it off."
+              : "A role's setting replaces the organization switch for everybody with that role."}
           </p>
           {scope
             ? data.capabilities.map((capability) => {
@@ -941,8 +939,8 @@ function NetworkDialog({
                 value={rules}
               />
               <p className="text-muted-foreground text-xs">
-                One per line. A domain covers its subdomains; *.name covers only
-                subdomains. An IP range may name ports. Defaults are{" "}
+                One per line. A domain covers its subdomains. *.name covers only
+                subdomains. An IP range can list ports. Defaults are{" "}
                 {data.defaultDestinations.slice(0, 4).join(", ")} and{" "}
                 {data.defaultDestinations.length - 4} more package and source
                 hosts.
@@ -951,7 +949,7 @@ function NetworkDialog({
             {initial.scopeKind === "organization" ? (
               <div className="flex items-center justify-between gap-4">
                 <Label htmlFor="network-locked">
-                  Lock: groups may not replace this policy
+                  Lock so groups can't replace this policy
                 </Label>
                 <Switch
                   checked={locked}

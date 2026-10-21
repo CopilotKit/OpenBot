@@ -67,18 +67,18 @@ function unavailableSentence(
 ): string {
   switch (reason) {
     case "absent":
-      return `${title} is not an app this deployment can switch on from here.`;
+      return `${title} can't be turned on from here.`;
     case "composio_unconfigured": {
       const { vendor, envVar } = BROKERED_PROFILE[provider];
       const article = /^[aeiou]/i.test(vendor) ? "an" : "a";
-      return `${title} is ${article} ${vendor} app, and this deployment has no ${vendor} key. Set ${envVar}, then approve this request again.`;
+      return `${title} is ${article} ${vendor} app, and ${envVar} isn't set. Set it, then approve this request again.`;
     }
     case "scheme_unreadable":
-      return `${title} is enabled, but how it connects is not recorded in a way this deployment can read. Remove it and enable it again on its page under Plugins, then approve this request again.`;
+      return `${title} is turned on, but OpenBot can't read how it connects. Remove it and turn it on again under Plugins, then approve this request again.`;
     case "oauth_client_missing":
-      return `${title} is added, but has no OAuth client yet, so nobody can connect it. Register one on its page under Plugins, then approve this request again.`;
+      return `${title} has no OAuth client yet. Register one on its page under Plugins, then approve this request again.`;
     case "token_missing":
-      return `${title} is added, but has no token yet. Add one on its page under Plugins, then approve this request again.`;
+      return `${title} has no token yet. Add one on its page under Plugins, then approve this request again.`;
   }
 }
 
@@ -194,10 +194,7 @@ export function mountAppAccessRoutes({
             sharedAudience,
           });
     if (!inspected)
-      return context.json(
-        { error: `This deployment has no app called ${app}.` },
-        404,
-      );
+      return context.json({ error: `OpenBot has no app called ${app}.` }, 404);
     return context.json({ app: inspected.access });
   });
 
@@ -227,7 +224,7 @@ export function mountAppAccessRoutes({
     if (agentId.length > MAX_NAME || app.length > MAX_NAME)
       return context.json(
         {
-          error: `A Bot or an app is named in at most ${MAX_NAME} characters.`,
+          error: `Bot and app names are ${MAX_NAME} characters at most.`,
         },
         400,
       );
@@ -254,7 +251,7 @@ export function mountAppAccessRoutes({
         app,
         bot: agentId,
         reason: "no_such_app",
-        error: `This deployment has no app called ${app}.`,
+        error: `OpenBot has no app called ${app}.`,
         status: 404,
       });
     const { access } = inspected;
@@ -265,8 +262,8 @@ export function mountAppAccessRoutes({
         reason: `nothing_to_request:${access.state}`,
         error:
           access.state === "ready"
-            ? `${access.displayName} is ready to use. There is nothing to ask an administrator for.`
-            : `${access.displayName} is waiting on your own account, not on an administrator. Connect it yourself.`,
+            ? `${access.displayName} is ready to use. There's nothing to ask an admin for.`
+            : `${access.displayName} needs your own account, not an admin. Connect it yourself.`,
         status: 409,
       });
     /*
@@ -283,7 +280,7 @@ export function mountAppAccessRoutes({
         bot: agentId,
         reason: "too_many_pending",
         kind: access.requestKind,
-        error: `You already have ${MAX_PENDING_REQUESTS} requests waiting for an administrator. Withdraw one, or wait for them to be answered, then ask again.`,
+        error: `You already have ${MAX_PENDING_REQUESTS} requests waiting for an admin. Withdraw one, or wait for an answer, then ask again.`,
         status: 429,
       });
     const filed = await store.fileAppAccessRequest({
@@ -425,7 +422,7 @@ export function mountAppAccessRoutes({
       if (!inspected)
         return deny(
           "no_such_app",
-          `${request.appTitle} is no longer an app this deployment can find.`,
+          `${request.appTitle} isn't available anymore.`,
           409,
         );
 
@@ -461,7 +458,7 @@ export function mountAppAccessRoutes({
           if (needed)
             return deny(
               "needs_admin_input",
-              `${title} needs ${needed}, which only an administrator can supply. Add it on its page under Plugins, then approve this request again.`,
+              `${title} needs ${needed}. Add it on its page under Plugins, then approve this request again.`,
               409,
             );
           try {
@@ -491,7 +488,7 @@ export function mountAppAccessRoutes({
         if (!inspected || inspected.unavailable)
           return deny(
             "enable_failed",
-            `${title} was switched on and still cannot be used. Open its page under Plugins to see why.`,
+            `${title} was turned on but still can't be used. Open its page under Plugins to see why.`,
             409,
           );
       }
@@ -521,13 +518,13 @@ export function mountAppAccessRoutes({
         if (advertised.length === 0)
           return deny(
             "no_tools",
-            `${name} advertises no tools to grant yet. Refresh its tools on its page under Plugins, then approve this request again.`,
+            `${name} has no tools to give yet. Refresh its tools on its page under Plugins, then approve this request again.`,
             409,
           );
         if (refs.length === 0)
           return deny(
             "no_read_only_tools",
-            `None of ${name}'s actions is marked read-only, so approving here would grant nothing. Choose which actions this Bot may use on ${name}'s page for it under Plugins, then approve this request again.`,
+            `None of ${name}'s actions are marked read-only, so approving here gives this Bot nothing. Choose its actions on ${name}'s page under Plugins, then approve this request again.`,
             409,
           );
         for (const ref of refs) {

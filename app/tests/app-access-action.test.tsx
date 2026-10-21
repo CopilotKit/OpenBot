@@ -160,39 +160,39 @@ const COPY: [string, Partial<AppAccess>, RegExp][] = [
   [
     "shared_not_connected",
     { state: "shared_not_connected" },
-    /Your organisation's Gmail account isn't connected yet\. Only an administrator can connect it\./,
+    /Your organisation's Gmail account isn't connected yet\. Only an admin can connect it\./,
   ],
   [
     "shared_not_approved",
     { state: "shared_not_approved" },
-    /^This Bot reaches more people than an administrator has approved for your organisation's Gmail account\. Only an administrator can approve it\.$/,
+    /^This Bot reaches more people than an admin approved for your organisation's Gmail account\. Only an admin can approve it\.$/,
   ],
   [
     "disabled, never switched on",
     { state: "disabled", unavailable: "absent" },
-    /^Gmail isn't switched on for this OpenBot\. Only an administrator can switch it on\.$/,
+    /^Gmail isn't turned on yet\. Only an admin can turn it on\.$/,
   ],
   [
     "disabled, with no reason given",
     { state: "disabled", unavailable: null },
-    /^Gmail isn't switched on for this OpenBot\./,
+    /^Gmail isn't turned on yet\./,
   ],
   [
     "disabled, with no Composio key",
     { state: "disabled", unavailable: "composio_unconfigured" },
-    /^Gmail is not available on this OpenBot yet\. An administrator has to finish setting it up\.$/,
+    /^Gmail isn't set up yet\. An admin has to turn it on\.$/,
   ],
   ...(
     ["scheme_unreadable", "oauth_client_missing", "token_missing"] as const
   ).map((unavailable): [string, Partial<AppAccess>, RegExp] => [
     `disabled, ${unavailable}`,
     { state: "disabled", unavailable },
-    /^Gmail isn't fully set up yet\. Only an administrator can finish setting it up\.$/,
+    /^Gmail isn't fully set up yet\. Only an admin can finish setting it up\.$/,
   ]),
   [
     "not_granted",
     { state: "not_granted" },
-    /This Bot hasn't been given Gmail\. Only an administrator can give it\./,
+    /This Bot hasn't been given Gmail\. Only an admin can give it\./,
   ],
 ];
 
@@ -200,7 +200,7 @@ test.each(COPY)("says whose move it is: %s", (_, overrides, sentence) => {
   expect(appAccessSentence(appAccess(overrides))).toMatch(sentence);
 });
 
-test("no sentence about a switched-off app says an administrator turned it off", () => {
+test("no sentence about a switched-off app says an admin turned it off", () => {
   for (const [, overrides] of COPY.filter(([, o]) => o.state === "disabled"))
     expect(appAccessSentence(appAccess(overrides))).not.toMatch(/Turned off/);
 });
@@ -312,7 +312,7 @@ test("a Reconnect on the owner's account offers nothing: only the owner can reco
   expect(view.queryByRole("link")).toBeNull();
 });
 
-test("a Shared app waiting on an administrator's approval offers nothing: the refused call already asked", async () => {
+test("a Shared app waiting on an admin's approval offers nothing: the refused call already asked", async () => {
   const { view } = mounted(
     appAccess({
       state: "shared_not_approved",
@@ -320,7 +320,7 @@ test("a Shared app waiting on an administrator's approval offers nothing: the re
       accountMode: "shared",
     }),
   );
-  await view.findByText(/Only an administrator can approve it/);
+  await view.findByText(/Only an admin can approve it/);
   expect(view.queryByRole("button")).toBeNull();
 });
 

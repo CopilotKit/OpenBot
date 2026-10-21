@@ -224,7 +224,7 @@ test("the probe on Composio still reaches the Composio transport", async () => {
   expect(probed.outcome).toBe("unreachable");
   expect(probed).toHaveProperty("attempted", "GMAIL_GET_ME");
   expect((probed as { sentence: string }).sentence).toContain(
-    "Composio is not configured for this deployment",
+    "Apps like this aren't set up yet",
   );
 });
 

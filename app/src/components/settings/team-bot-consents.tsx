@@ -21,7 +21,7 @@ export function TeamBotConsents() {
   const clear = useMutation(clearTeamBotConsentsMutationOptions());
   return (
     <PageSection
-      description="A Bot someone shared with you uses their connected apps. It uses yours only where you allowed it, on the card it showed you in a conversation."
+      description="A Bot shared with you uses its owner's apps. It uses yours only where you said yes in a conversation."
       title="Shared Bots"
     >
       {clear.error ? (

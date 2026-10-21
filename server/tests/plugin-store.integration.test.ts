@@ -639,7 +639,7 @@ describe("the policy is asked as well as the grant", () => {
         botId: holderId,
         actorId,
       }),
-    ).rejects.toThrow("credential material");
+    ).rejects.toThrow("a password or key");
 
     const rows = await auditRowsFor(ref, holderId, actorId);
     const rejected = rows.filter(
@@ -1876,7 +1876,7 @@ describe("refresh token rotation", () => {
      */
     const UNREADABLE_PLAINTEXT = `secret_notJsonClient${suite}`;
     /** What the person and the trail are told instead, which is the operator's signal. */
-    const UNUSABLE = "Notion has no usable OAuth client for this deployment.";
+    const UNUSABLE = "Notion needs connecting again.";
 
     /** The client the suite registered, restored after each test repoints the server. */
     let registeredClientId: string | null = null;
@@ -2680,7 +2680,7 @@ describe("a dynamic client the vendor has evicted", () => {
      * usable one — only a new consent under the client that now exists.
      */
     await expect(call()).rejects.toThrow(
-      "Notion no longer recognises this deployment's OAuth client",
+      "Notion needs connecting again, so this wasn't done.",
     );
 
     /*
@@ -2723,7 +2723,7 @@ describe("a dynamic client the vendor has evicted", () => {
     issue = () => ({ clientId: "dyn-3", clientSecret: "" });
 
     await expect(call()).rejects.toThrow(
-      "Notion no longer recognises this deployment's OAuth client",
+      "Notion needs connecting again, so this wasn't done.",
     );
     expect(registrations.length).toBe(1);
     expect(exchanges).toEqual([
@@ -2789,7 +2789,7 @@ describe("a dynamic client the vendor has evicted", () => {
       );
 
     await expect(call()).rejects.toThrow(
-      "Notion no longer recognises this deployment's OAuth client",
+      "Notion needs connecting again, so this wasn't done.",
     );
 
     expect(offered).toEqual([EVICTED.clientId]);
@@ -3580,7 +3580,7 @@ describe("a dynamic client the vendor has evicted", () => {
     });
     /** What the operator must be told instead: the credential named, and nothing else claimed. */
     const UNUSABLE =
-      "Notion has no usable OAuth client for this deployment. Connect Notion again in Settings: the deployment registers itself with the vendor on the next connect.";
+      "Notion needs connecting again. Reconnect it on Connections and ask again.";
 
     /**
      * Plant arbitrary stored bytes as this server's client, the way {@link putClient} plants a real

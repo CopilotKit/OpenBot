@@ -69,9 +69,7 @@ export function RememberFact() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Remember a fact</DialogTitle>
-            <DialogDescription>
-              It reaches every one of your Bots.
-            </DialogDescription>
+            <DialogDescription>All your Bots will know it.</DialogDescription>
           </DialogHeader>
           <DialogBody className="mt-4">
             {/* The submit button is in the footer and reaches this form by id, so DialogBody stays a
@@ -165,7 +163,7 @@ export function MemoryList({
           ))}
         </PageRows>
       ) : (
-        <PageEmpty>You have no memories yet.</PageEmpty>
+        <PageEmpty>No memories yet. Add one with Remember a fact.</PageEmpty>
       )}
     </PageSection>
   );
@@ -196,11 +194,11 @@ function MemoryRow({
   const status = heldByIntelligence
     ? "Kept in Intelligence"
     : !memory.enabled
-      ? "Disabled"
+      ? "Turned off"
       : memory.formedBy === "bot"
-        ? `Formed by ${botName}${memory.reviewState === "unreviewed" ? " · awaiting review" : ""}`
+        ? `Formed by ${botName}${memory.reviewState === "unreviewed" ? " · needs review" : ""}`
         : memory.reviewState === "unreviewed"
-          ? "Imported · awaiting review"
+          ? "Imported · needs review"
           : "Reviewed";
   return (
     <Item size="sm">

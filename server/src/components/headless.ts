@@ -427,7 +427,7 @@ export async function createHeadlessComponentTools(options: {
           if (await store.mayCall(spec.name, functionName)) continue;
           return refuse(
             spec,
-            `${spec.name} has not been granted the function ${functionName}. An administrator grants each function to each component.`,
+            `${spec.name} can't use the function ${functionName}. An admin has to give it to this component.`,
             { function: functionName },
           );
         }

@@ -31,17 +31,17 @@ const PRESETS: { label: string; rule: string; cost?: string }[] = [
     // flag that presses it once the text is in, and a rule naming only `computer_key` left that door
     // open.
     rule: '(intent == "activate" && contains(element.name, "submit")) || ((tool.name == "computer_key" || tool.name == "computer_type") && key == "Enter")',
-    cost: "Also stops the Bot pressing Enter for anything else, because a form submits from Enter in any of its fields.",
+    cost: "Also stops the Bot pressing Enter anywhere else. A form can submit from Enter in any field.",
   },
   {
     label: "Never type into a password field",
     rule: 'intent == "type" && contains(element.name, "password")',
-    cost: "A password box the page labels something else is not covered, the rule matches the label.",
+    cost: "A password box with a different label isn't covered. The rule matches the label.",
   },
   {
     label: "Stay off social media",
     rule: 'intent == "navigate" && (contains(page.host, "facebook.com") || contains(page.host, "x.com"))',
-    cost: "Only the two hosts named. A link that redirects there from somewhere else is allowed.",
+    cost: "Only these two hosts. A link that redirects there from elsewhere is allowed.",
   },
 ];
 
@@ -136,18 +136,18 @@ function BoundariesPage() {
     <PageShell
       description={
         <>
-          What every Bot may and may not do with its computer. Rules are checked
-          on every action before it happens, and a refusal is recorded in{" "}
+          What a Bot can and can't do with its computer. Every action is checked
+          before it happens. Refusals show in{" "}
           <Link className="underline" to="/admin/audit">
             Audit
           </Link>{" "}
-          with the rule that refused it.
+          with the rule that refused them.
         </>
       }
       title="Boundaries"
     >
       <PageSection
-        description="Enforce stops the action. Record it and allow it writes the same row and lets the action through, which is how a rule is tried on real traffic before it starts refusing anybody."
+        description="Stop the action, or record it and let it through. Recording lets you try a rule on real activity before it refuses anything."
         title="When a rule matches"
       >
         <div className="mt-2 flex gap-2">
@@ -170,31 +170,28 @@ function BoundariesPage() {
         <p className="mt-2 text-xs text-muted-foreground">
           {policy.mode === "enforce"
             ? "The Bot is stopped and told which rule refused it."
-            : "Nothing is stopped. Every action a rule matches is recorded as it would have been refused, which is how a rule is tried out before it is switched on."}
+            : "Nothing is stopped. Each match is recorded as if it had been refused."}
         </p>
       </PageSection>
 
       <PageSection
         description={
           <>
-            Checked first, and a match ends it: nothing below is consulted and
-            the Bot is told which rule refused it. Rules are CEL, and can ask
-            about <code>tool.name</code>, <code>intent</code>,{" "}
-            <code>bot.id</code>, <code>actor.id</code>, <code>page.url</code>{" "}
-            and <code>page.host</code>, the element being acted on, the{" "}
-            <code>key</code> being pressed, the file being touched, the{" "}
-            <code>command</code> being run, and <code>mcp.server</code>,{" "}
-            <code>mcp.tool</code> and <code>mcp.effect</code> for a call to
-            somebody else&rsquo;s tools. <code>initiator.kind</code> says what
-            started the run &mdash; <code>person</code>, <code>routine</code> or{" "}
-            <code>handoff</code> &mdash; which <code>actor.id</code> cannot,
-            because a scheduled run carries its owner&rsquo;s authority while
-            nobody is watching. A rule that cannot be evaluated counts as a
-            match, so a mistyped deny refuses rather than quietly permitting
-            what it was meant to forbid.
+            Checked first. A match stops the action, and the Bot is told which
+            rule refused it. Rules are CEL. They can check{" "}
+            <code>tool.name</code>, <code>intent</code>, <code>bot.id</code>,{" "}
+            <code>actor.id</code>, <code>page.url</code>, <code>page.host</code>
+            , the element, the <code>key</code> pressed, the file, the{" "}
+            <code>command</code> run, and <code>mcp.server</code>,{" "}
+            <code>mcp.tool</code> and <code>mcp.effect</code> for outside tools.{" "}
+            <code>initiator.kind</code> says what started the run:{" "}
+            <code>person</code>, <code>routine</code> or <code>handoff</code>. A
+            scheduled run acts as its owner, so <code>actor.id</code> alone
+            can't tell you that. A rule that can't be evaluated counts as a
+            match. A typo never lets an action through.
           </>
         }
-        title="It may never"
+        title="Bots may never"
       >
         {policy.deny.length === 0 ? (
           <p className="mt-2 text-sm text-muted-foreground">
@@ -290,8 +287,8 @@ function BoundariesPage() {
       </PageSection>
 
       <PageSection
-        description="The floor, applied to anything the deny list did not catch. It is not a formality: an empty list here permits nothing, so a deployment that clears this refuses every action rather than allowing every action."
-        title="Otherwise it may"
+        description="Applies to anything the list above didn't catch. An empty list here allows nothing, and every action is refused."
+        title="Otherwise they may"
       >
         <ul className="mt-2 space-y-1">
           {policy.allow.map((rule) => (
@@ -310,7 +307,7 @@ function BoundariesPage() {
         ) : saved ? (
           "Saved. It applies to the next action any Bot takes."
         ) : (
-          "Changes apply to the next action any Bot takes, and are kept: a restart comes back up enforcing what is here."
+          "Changes apply to the next action any Bot takes. They stay after a restart."
         )}
       </p>
     </PageShell>
@@ -327,8 +324,8 @@ function DryRunResult({ report }: { report: DryRunReport }) {
   if (report.scanned === 0) {
     return (
       <p className="mt-2 text-xs text-muted-foreground" role="status">
-        No recorded computer actions to test against yet. The rule is valid;
-        what it matches will only be known once Bots have acted.
+        No recorded computer actions to test against yet. The rule is valid.
+        You'll see what it matches once Bots have acted.
       </p>
     );
   }
@@ -337,8 +334,8 @@ function DryRunResult({ report }: { report: DryRunReport }) {
     <div className="mt-2" role="status">
       <p className="text-xs text-muted-foreground">
         {report.wouldRefuse === 0
-          ? `Tested against the last ${report.scanned} recorded actions: this rule would have refused none of them. It may still match future actions.`
-          : `Tested against the last ${report.scanned} recorded actions: this rule would have refused ${report.wouldRefuse}.`}
+          ? `Tested on the last ${report.scanned} recorded actions. This rule would have refused none. It may still match future ones.`
+          : `Tested on the last ${report.scanned} recorded actions. This rule would have refused ${report.wouldRefuse}.`}
       </p>
       {report.changes.length > 0 ? (
         <ul className="mt-2 divide-y divide-border rounded-md border border-border">
@@ -371,8 +368,8 @@ function DryRunResult({ report }: { report: DryRunReport }) {
       ) : null}
       {report.wouldRefuse > report.changes.length ? (
         <p className="mt-1 text-muted-foreground text-xs">
-          Showing the first {report.changes.length}; the count above covers
-          everything scanned.
+          Showing the first {report.changes.length}. The count above covers
+          everything checked.
         </p>
       ) : null}
     </div>

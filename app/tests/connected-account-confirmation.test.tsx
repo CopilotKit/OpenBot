@@ -18,8 +18,6 @@ import {
 } from "@tanstack/react-router";
 import { cleanup, render } from "@testing-library/react";
 import {
-  brokeredAccountPageDescription,
-  brokeredConsentTrip,
   brokeredDisconnectNote,
   brokeredKeyMissing,
   disconnectSiblingsNotice,
@@ -36,8 +34,10 @@ import {
  * Three things are pinned, and the first two are RENDERED markup because a sentence computed and
  * never drawn is not shipped: the sibling list names what a Disconnect would also end and draws
  * NOTHING when there is none; an Arcade deployment's page never says Composio, in text or in
- * attributes; and a Composio deployment's three vendor sentences are character-for-character what
- * they were. The fourth is the landing parameter the verifier's redirect carries.
+ * attributes; and a person's own page names no broker on either deployment, because the broker is
+ * an internal a person cannot act on (see the openbot-copy skill). Where a vendor name is shown,
+ * on the admin pages, it comes from the provider vocabulary. The fourth is the landing parameter
+ * the verifier's redirect carries.
  */
 
 beforeAll(() => GlobalRegistrator.register());
@@ -214,12 +214,11 @@ function everythingRendered(view: ReturnType<typeof render>): string {
   return `${view.container.textContent ?? ""}\n${view.container.innerHTML}`;
 }
 
-const COMPOSIO_PAGE =
-  "Reached through Composio, which holds the account, so a Bot sees only what you can see.";
-const COMPOSIO_DISCONNECT_NOTE =
-  "Disconnecting ends the account at Composio, not just here.";
-const COMPOSIO_CONSENT_TRIP =
-  "Connecting takes you to Composio and then to the vendor to consent.";
+const PAGE = "Bots use this as you, and see only what you can see.";
+const CONNECTED =
+  "Signed in with Gmail. Bots you allow use your Gmail as you. Disconnecting removes their access everywhere.";
+const DISCONNECTED =
+  "No Bot can use this as you. Connecting takes you to Gmail to approve access.";
 
 // ---- 1 and 2: the sibling list, rendered ----
 
@@ -253,7 +252,7 @@ test("with no siblings NO sibling copy appears at all, not an empty block", asyn
   expect(siblingReads.length).toBeGreaterThan(0);
   const text = view.container.textContent ?? "";
   expect(text).not.toContain("also ends");
-  expect(text).not.toContain("could not be checked");
+  expect(text).not.toContain("couldn't be checked");
   expect(text).not.toContain("share this connection");
   // No second description under the row's own: the notice slot is not drawn.
   const descriptions = view.container.querySelectorAll(
@@ -273,10 +272,10 @@ test("a Composio deployment always answers empty, so it draws no sibling copy ei
 test("apps that could not be asked about are a count and never names", () => {
   expect(disconnectSiblingsNotice({ siblings: [], unanswered: 0 })).toBeNull();
   expect(disconnectSiblingsNotice({ siblings: ["slack"], unanswered: 2 })).toBe(
-    "Disconnecting also ends your access to slack, which shares this connection. 2 other apps could not be checked and may be affected too.",
+    "Disconnecting also ends your access to slack, which shares this connection. 2 other apps couldn't be checked and may be affected too.",
   );
   expect(disconnectSiblingsNotice({ siblings: [], unanswered: 1 })).toBe(
-    "1 app on this connection could not be checked, so disconnecting may end it too.",
+    "1 app on this connection couldn't be checked, so disconnecting may end it too.",
   );
 });
 
@@ -310,7 +309,7 @@ for (const connected of [true, false]) {
         siblings: { siblings: ["googledocs"], unanswered: 1 },
       });
       const view = renderScreen("?action=Gmail.ListEmails");
-      await view.findAllByText(/Arcade/);
+      await view.findByText("You just authorized Gmail.ListEmails.");
       if (connected && configured) await view.findByText(/googledocs/);
       const rendered = everythingRendered(view);
       expect(rendered).not.toMatch(/composio/i);
@@ -319,38 +318,41 @@ for (const connected of [true, false]) {
   }
 }
 
-test("on an Arcade deployment the three sentences name Arcade", () => {
-  expect(brokeredAccountPageDescription("arcade")).toBe(
-    "Reached through Arcade, which holds the account, so a Bot sees only what you can see.",
-  );
+test("where a screen does name the broker, the vocabulary names the active one", () => {
   expect(brokeredDisconnectNote("arcade")).toBe(
-    "Disconnecting ends the account at Arcade, not just here.",
+    "Disconnecting also ends the account at Arcade.",
   );
-  expect(brokeredConsentTrip("arcade")).toBe(
-    "Connecting takes you to Arcade and then to the vendor to consent.",
+  expect(brokeredDisconnectNote("composio")).toBe(
+    "Disconnecting also ends the account at Composio.",
   );
-});
-
-// ---- 4: Composio is byte-identical ----
-
-test("on Composio the three vendor sentences are exactly what they always were", () => {
-  expect(brokeredAccountPageDescription("composio")).toBe(COMPOSIO_PAGE);
-  expect(brokeredDisconnectNote("composio")).toBe(COMPOSIO_DISCONNECT_NOTE);
-  expect(brokeredConsentTrip("composio")).toBe(COMPOSIO_CONSENT_TRIP);
+  expect(brokeredKeyMissing("arcade")).toBe(
+    "Set ARCADE_API_KEY on this deployment. Until then, this account can't be connected or disconnected here. The app stays turned on, and its tool grants still stand.",
+  );
   expect(brokeredKeyMissing("composio")).toBe(
-    "Set COMPOSIO_API_KEY on this deployment. Without it there is no broker to reach, so this account can be neither connected nor ended from here. The app stays enabled and every grant on its tools still stands.",
+    "Set COMPOSIO_API_KEY on this deployment. Until then, this account can't be connected or disconnected here. The app stays turned on, and its tool grants still stand.",
   );
 });
+
+// ---- 4: a person's own page names no broker ----
+
+for (const provider of ["composio", "arcade"] as const) {
+  test(`a connected page on ${provider} says what Bots do, and names no broker`, async () => {
+    install({ provider, connected: true });
+    const view = renderScreen();
+    await view.findByText("Disconnect");
+    const rendered = everythingRendered(view);
+    expect(rendered).toContain(PAGE);
+    expect(rendered).not.toMatch(/composio|arcade/i);
+  });
+}
 
 test("a connected Composio page renders its sentences verbatim", async () => {
   install({ provider: "composio", connected: true });
   const view = renderScreen();
-  await view.findByText(/Disconnecting ends the account/);
+  await view.findByText(/Disconnecting removes their access/);
   const text = view.container.textContent ?? "";
-  expect(text).toContain(COMPOSIO_PAGE);
-  expect(text).toContain(
-    `Connected through Gmail's consent screen. A Bot granted its tools reads your Gmail as you. ${COMPOSIO_DISCONNECT_NOTE}`,
-  );
+  expect(text).toContain(PAGE);
+  expect(text).toContain(CONNECTED);
 });
 
 test("a disconnected Composio page renders its sentences verbatim", async () => {
@@ -358,9 +360,16 @@ test("a disconnected Composio page renders its sentences verbatim", async () => 
   const view = renderScreen();
   await view.findByText(/Connecting takes you to/);
   const text = view.container.textContent ?? "";
-  expect(text).toContain(COMPOSIO_PAGE);
-  expect(text).toContain(
-    `No Bot can read this as you. ${COMPOSIO_CONSENT_TRIP}`,
+  expect(text).toContain(PAGE);
+  expect(text).toContain(DISCONNECTED);
+});
+
+test("a disconnected Arcade page points at the action list, not at a Connect it does not draw", async () => {
+  install({ provider: "arcade", connected: false });
+  const view = renderScreen();
+  await view.findByText("Approved per action");
+  expect(view.container.textContent).toContain(
+    "No Bot can use this as you. Authorize the actions you want below.",
   );
 });
 

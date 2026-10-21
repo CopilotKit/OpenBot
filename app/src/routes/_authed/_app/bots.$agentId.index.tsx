@@ -18,12 +18,12 @@ function BotProfilePage() {
   return (
     <PageShell
       backButton={{ label: "Bots", linkProps: { to: "/bots" } }}
-      description="What this Bot is doing for you, and how it is set up."
+      description="What this Bot is doing for you and how it's set up."
       title={agent.data?.name ?? "Bot"}
     >
       {agent.isPending ? null : agent.error ? (
         <p className="mt-6 text-destructive text-sm" role="alert">
-          This Bot is not one you can reach.
+          Couldn't open this Bot. It may not be shared with you.
         </p>
       ) : (
         <BotProfile

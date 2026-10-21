@@ -48,7 +48,6 @@ export function mountConnectionRoutes({
   connect,
   composio,
   activeProvider,
-  activeVendor,
   appOfUrl,
   actorEmail,
 }: PluginRouteContext) {
@@ -180,7 +179,7 @@ export function mountConnectionRoutes({
       if (schemeKind(row.authScheme) === "none") {
         return context.json(
           {
-            error: `${row.title} needs no account, so there is nothing to connect. A Bot granted its tools can use it as it is.`,
+            error: `${row.title} needs no account, so there's nothing to connect. Bots that can use it already work.`,
           },
           400,
         );
@@ -364,7 +363,7 @@ export function mountConnectionRoutes({
         } catch (error) {
           const refusal = brokerRefusal(
             error,
-            `${activeVendor} would not say what ${row.title} asks for, and said nothing about why. Try again, and ask an administrator to check this deployment's ${activeVendor} key if it persists.`,
+            `Couldn't find out what ${row.title} needs to connect. Try again, or ask an admin if it keeps happening.`,
           );
           return context.json({ error: refusal.error }, refusal.status);
         }
@@ -394,7 +393,7 @@ export function mountConnectionRoutes({
         if (published.length === 0) {
           return context.json(
             {
-              error: `${row.title} publishes no boxes to fill in, so there is nothing you could type that would reach it and no account was made. An administrator has to look at how ${row.title} is set up at ${activeVendor}; removing it on the Plugins page and adding it again is what records the way ${activeVendor} connects it now.`,
+              error: `${row.title} doesn't ask for anything to connect with, so no account was made. Ask an admin to remove it under Plugins and add it again.`,
             },
             400,
           );
@@ -472,7 +471,7 @@ export function mountConnectionRoutes({
           const optional = published.map((field) => field.name).join(", ");
           return context.json(
             {
-              error: `${row.title} publishes no box it says has to be filled in — only ${optional} — so nothing you could type would be a credential it insists on, and no account was made. An app that genuinely needs none is one ${activeVendor} publishes as needing no authentication, and ${row.title} is recorded here as an app whose secret you type. An administrator has to look at how ${row.title} is set up at ${activeVendor}; removing it on the Plugins page and adding it again is what records the way ${activeVendor} connects it now.`,
+              error: `${row.title} marks nothing as required (only ${optional}), so no account was made. Ask an admin to remove it under Plugins and add it again.`,
             },
             400,
           );
@@ -538,7 +537,7 @@ export function mountConnectionRoutes({
              */
             return context.json(
               {
-                error: `That is not the form ${row.title} publishes, so nothing was sent to ${activeVendor}. Press Connect again to draw it from what the app asks for now, and fill in the boxes it shows; each one holds text.`,
+                error: `That isn't the form ${row.title} asks for, so nothing was sent. Press Connect again and fill in the form it shows.`,
               },
               400,
             );
@@ -586,7 +585,7 @@ export function mountConnectionRoutes({
         if (missing.length > 0) {
           return context.json(
             {
-              error: `${row.title} cannot be connected without ${missing.join(", ")}, so nothing was sent to ${activeVendor}. Fill in every box the form marks required — a box holding only spaces is an empty one — and press Connect again.`,
+              error: `${row.title} needs ${missing.join(", ")}, so nothing was sent. Fill in every required box and press Connect again.`,
             },
             400,
           );
@@ -627,7 +626,7 @@ export function mountConnectionRoutes({
           }
           const refusal = brokerRefusal(
             error,
-            `${row.title} could not be connected with what you entered, and ${activeVendor} said nothing about why. Try again, and ask an administrator to check this deployment's ${activeVendor} key if it persists.`,
+            `Couldn't connect ${row.title} with what you entered. Try again, or ask an admin if it keeps happening.`,
           );
           return context.json({ error: refusal.error }, refusal.status);
         }
@@ -654,7 +653,7 @@ export function mountConnectionRoutes({
       if (kind === "unreadable") {
         return context.json(
           {
-            error: `This deployment cannot tell how ${row.title} connects, so nothing was sent to ${activeVendor} and no account was made. An administrator has to remove it on the Plugins page and add it again, which records the way ${activeVendor} connects it now.`,
+            error: `OpenBot can't tell how ${row.title} connects, so no account was made. Ask an admin to remove it under Plugins and add it again.`,
           },
           400,
         );
@@ -688,7 +687,8 @@ export function mountConnectionRoutes({
       if (!connect?.appUrl) {
         return context.json(
           {
-            error: `This deployment has no app URL configured, so ${activeVendor} would have nowhere to send you back to. Set OPENBOT_APP_URL.`,
+            error:
+              "Connecting apps isn't set up yet. Ask an admin to set OPENBOT_APP_URL.",
           },
           503,
         );
@@ -760,7 +760,7 @@ export function mountConnectionRoutes({
         logReturnUrlRefusal(error, serverId);
         const refusal = brokerRefusal(
           error,
-          `${activeVendor} would not begin a connection to ${row.title}, and said nothing about why. Try again, and ask an administrator to check this deployment's ${activeVendor} key if it persists.`,
+          `Couldn't start connecting ${row.title}. Try again, or ask an admin if it keeps happening.`,
         );
         return context.json({ error: refusal.error }, refusal.status);
       }
@@ -771,7 +771,7 @@ export function mountConnectionRoutes({
       return context.json(
         {
           error:
-            "This deployment has no public URL configured, so it cannot complete a consent flow. Set OPENBOT_PUBLIC_URL.",
+            "Connecting apps isn't set up yet. Ask an admin to set OPENBOT_PUBLIC_URL.",
         },
         503,
       );
@@ -811,7 +811,7 @@ export function mountConnectionRoutes({
       if (error instanceof CatalogueEntryUnknownError) {
         return context.json(
           {
-            error: `${entry.title} has not been added to this deployment yet. An administrator has to add it first.`,
+            error: `${entry.title} hasn't been added yet. Ask an admin to add it.`,
           },
           409,
         );
@@ -822,14 +822,14 @@ export function mountConnectionRoutes({
       if (entry.auth.clientRegistration === "dynamic") {
         return context.json(
           {
-            error: `${entry.title} would not register this deployment, or could not be reached. Try again, and check the vendor's status if it persists.`,
+            error: `Couldn't set up ${entry.title}. Try again, or check ${entry.title}'s status if it keeps happening.`,
           },
           502,
         );
       }
       return context.json(
         {
-          error: `${entry.title} has no OAuth client registered yet. An administrator has to add one first.`,
+          error: `${entry.title} isn't set up yet. Ask an admin to finish setting it up.`,
         },
         409,
       );
@@ -929,7 +929,7 @@ export function mountConnectionRoutes({
     if (!toolkit) {
       return {
         refusal: {
-          error: "That app is not reached through a broker.",
+          error: "That app doesn't connect this way.",
           status: 400,
         },
       };
@@ -953,7 +953,7 @@ export function mountConnectionRoutes({
     ) {
       return {
         refusal: {
-          error: "An administrator connects shared apps.",
+          error: "Only an admin can connect shared apps.",
           status: 403,
         },
       };
@@ -1017,7 +1017,7 @@ export function mountConnectionRoutes({
           action: toolkit,
           state: "unknown",
           reason:
-            "This deployment could not read what this account holds just now, so nothing is said about it either way. Try again in a moment.",
+            "Couldn't read what this account allows right now. Try again in a moment.",
         },
       ];
     }
@@ -1096,7 +1096,7 @@ export function mountConnectionRoutes({
          */
         const refusal = brokerRefusal(
           error,
-          `${activeVendor} would not say whether this account is connected, and gave no reason, so what is shown here is the last answer it gave rather than a fresh one. Try again, and ask an administrator to check this deployment's ${activeVendor} key if it persists.`,
+          "Couldn't check whether this account is connected. This shows the last answer. Try again, or ask an admin if it keeps happening.",
         );
         return context.json({ error: refusal.error }, refusal.status);
       }
@@ -1184,7 +1184,7 @@ export function mountConnectionRoutes({
          */
         const refusal = brokerRefusal(
           error,
-          `${activeVendor} would not say whether this connection still works, and gave no reason, so what is shown here is the last answer it gave rather than a fresh one. Press Re-check again, and ask an administrator to check this deployment's ${activeVendor} key if it persists.`,
+          "Couldn't check whether this connection still works. This shows the last check. Press Re-check again, or ask an admin if it keeps happening.",
         );
         return context.json({ error: refusal.error }, refusal.status);
       }
@@ -1251,7 +1251,7 @@ export function mountConnectionRoutes({
        */
       const refusal = brokerRefusal(
         error,
-        `${activeVendor} would not end this account, and gave no reason. Press Disconnect again: the revoke at ${activeVendor} runs before anything here is deleted, so repeating it is safe and is the whole recovery. Ask an administrator to check this deployment's ${activeVendor} key if it persists.`,
+        "Couldn't disconnect this account. Press Disconnect again. It's safe to repeat. Ask an admin if it keeps happening.",
       );
       return context.json({ error: refusal.error }, refusal.status);
     }
@@ -1296,7 +1296,7 @@ export function mountConnectionRoutes({
       } catch (error) {
         const refusal = brokerRefusal(
           error,
-          "This deployment could not work out which other apps share this connection, and the vendor said nothing about why. Try again.",
+          "Couldn't work out which other apps share this connection. Try again.",
         );
         return context.json({ error: refusal.error }, refusal.status);
       }
@@ -1344,7 +1344,7 @@ export function mountConnectionRoutes({
       return context.json(
         {
           error:
-            "This deployment's apps are connected once for the whole app, with the Connect button on the app's page; they are not authorized one action at a time.",
+            "Apps here connect once, with Connect on the app's page. They aren't authorized one action at a time.",
         },
         503,
       );
@@ -1370,7 +1370,7 @@ export function mountConnectionRoutes({
       !(await store.serverPublishesAction(serverId, action))
     ) {
       return context.json(
-        { error: `${title} does not publish an action by that name.` },
+        { error: `${title} has no action by that name.` },
         400,
       );
     }
@@ -1379,7 +1379,7 @@ export function mountConnectionRoutes({
       return context.json(
         {
           error:
-            "This deployment has no app URL configured, so there is nowhere to send you back to. Set OPENBOT_APP_URL.",
+            "Connecting apps isn't set up yet. Ask an admin to set OPENBOT_APP_URL.",
         },
         503,
       );
@@ -1396,7 +1396,7 @@ export function mountConnectionRoutes({
       logReturnUrlRefusal(error, serverId);
       const refusal = brokerRefusal(
         error,
-        "This deployment could not build the address to send you back to, so nothing was started.",
+        "Couldn't build the address to bring you back to, so nothing was started.",
       );
       return context.json({ error: refusal.error }, refusal.status);
     }
@@ -1506,13 +1506,13 @@ export function mountConnectionRoutes({
         }
         const refusal = brokerRefusal(
           error,
-          "The app's vendor refused to start that authorization, so nothing was started. Try again in a moment.",
+          "The app refused to start that authorization. Try again in a moment.",
         );
         return context.json(
           {
             error: freed
               ? refusal.error
-              : `${refusal.error} The attempt could not be cleared either; it expires within fifteen minutes, and starting over works after that.`,
+              : `${refusal.error} This attempt expires within fifteen minutes. You can start over after that.`,
           },
           refusal.status,
         );
@@ -1590,7 +1590,7 @@ export function mountConnectionRoutes({
       return context.json(
         {
           error:
-            "The app's vendor did not answer clearly, so nobody was sent to a consent screen and nothing was connected. Whether an authorization started at the vendor is unknown, and one that did cannot be finished from here. This attempt expires within fifteen minutes, and starting over works after that.",
+            "The app didn't answer clearly, so nobody was sent to a consent screen and nothing was connected. This attempt expires within fifteen minutes. You can start over after that.",
         },
         502,
       );
@@ -1659,8 +1659,8 @@ export function mountConnectionRoutes({
       return context.json(
         {
           error: freed
-            ? "The app's vendor started that authorization, and this deployment could not record it — so it cannot be finished here and nothing was connected. Press Authorize again: the attempt was cleared, so starting over is safe."
-            : "The app's vendor started that authorization, and this deployment could not record it — so it cannot be finished here and nothing was connected. The attempt could not be cleared either; it expires within fifteen minutes, and starting over works after that.",
+            ? "The app started that authorization, but OpenBot couldn't record it, so nothing was connected. Press Authorize again. It's safe to start over."
+            : "The app started that authorization, but OpenBot couldn't record it, so nothing was connected. This attempt expires within fifteen minutes. You can start over after that.",
         },
         500,
       );
@@ -1691,7 +1691,7 @@ export function mountConnectionRoutes({
       return context.json(
         {
           error:
-            "That authorization was cancelled before the app's vendor finished starting it, so you were not sent on and nothing was connected. Press Authorize to start again.",
+            "That authorization was cancelled before it started, so nothing was connected. Press Authorize to start again.",
         },
         409,
       );
@@ -1797,7 +1797,7 @@ export function mountConnectionRoutes({
         return context.json(
           {
             error:
-              "That authorization finished before it could be cancelled, so the account is connected. Disconnect it if you did not mean to connect it.",
+              "That authorization finished before it could be cancelled, so the account is connected. Disconnect it if you didn't mean to connect it.",
           },
           409,
         );
@@ -1924,7 +1924,7 @@ export function mountConnectionRoutes({
         return context.json(
           {
             error:
-              "This deployment no longer recognises you, so nothing was recorded. Ask an administrator to restore your access, then start the authorization again from the app's page.",
+              "OpenBot doesn't recognise you anymore, so nothing was recorded. Ask an admin to restore your access, then authorize again from the app's page.",
           },
           403,
         );

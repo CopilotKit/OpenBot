@@ -72,7 +72,9 @@ function ComputersPage() {
    * A list that could not be read. A refused stop, reset or update is said beside the buttons
    * instead, because the top of this page is a long scroll away from them.
    */
-  const problem = fleet.error ? "The computers could not be listed." : null;
+  const problem = fleet.error
+    ? "Couldn't load the computers. Reload the page."
+    : null;
   const hostProblem = hostAccess.error
     ? hostAccess.error.message
     : requestGrant.error
@@ -92,7 +94,7 @@ function ComputersPage() {
 
   return (
     <PageShell
-      description="Each Bot's browser and the profile it keeps. A profile is what makes a Bot still signed in tomorrow, and resetting one signs it out of everything."
+      description="Each Bot's browser and the profile it keeps. The profile keeps a Bot signed in. Resetting it signs the Bot out of everything."
       title="Computers"
     >
       {problem ? (
@@ -109,14 +111,14 @@ function ComputersPage() {
           <span className="font-medium">
             Every Bot is sharing one computer.
           </span>{" "}
-          They share its logins, its files and its session, so a Bot can reach
-          what another signed into. Set <code>COMPUTER_SUPERVISOR_URL</code> to
-          give each Bot its own.
+          They share its logins, files and session. A Bot can reach what another
+          signed into. Set <code>COMPUTER_SUPERVISOR_URL</code> to give each Bot
+          its own.
         </p>
       ) : isolation === "per-bot" ? (
         <p className="mt-4 rounded-md border border-border bg-muted/40 px-3 py-2 text-muted-foreground text-sm">
-          Each Bot has a computer of its own: its own container, its own files
-          and its own browser profile.
+          Each Bot has its own computer, with its own container, files and
+          browser profile.
         </p>
       ) : null}
 
@@ -154,10 +156,10 @@ function ComputersPage() {
           </p>
         ) : null}
         {computers === null && problem ? (
-          <PageEmpty>The list could not be loaded.</PageEmpty>
+          <PageEmpty>Couldn't load the list.</PageEmpty>
         ) : computers === null ? null : computers.length === 0 ? (
           <PageEmpty>
-            No computers yet. One appears the first time a Bot opens a page.
+            No computers yet. One shows up the first time a Bot opens a page.
           </PageEmpty>
         ) : (
           <PageRows>
@@ -235,8 +237,8 @@ function ComputersPage() {
               Reset {confirming ? nameFor(confirming) : ""}'s computer?
             </DialogTitle>
             <DialogDescription>
-              Its profile is deleted, so the Bot is signed out of every service
-              it had logged into and starts clean. This cannot be undone.
+              Its profile is deleted. The Bot is signed out of every service and
+              starts clean. You can't undo this.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -274,9 +276,9 @@ function ComputersPage() {
               computer?
             </DialogTitle>
             <DialogDescription>
-              It moves onto the computer image this deployment now runs. Its
-              files and sign-ins are kept. If it is running it restarts, which
-              interrupts anything it is doing right now.
+              It moves to the computer image this deployment now runs. Its files
+              and sign-ins are kept. If it's running, it restarts and stops what
+              it's doing.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -301,13 +303,12 @@ function ComputersPage() {
       </Dialog>
 
       <p className="mt-4 text-muted-foreground text-sm">
-        <strong>Stop</strong> closes the browser and keeps its logins: the next
-        thing the Bot does starts it again where it left off.{" "}
-        <strong>Reset</strong> deletes the profile, so the Bot is signed out of
-        everything and starts clean. <strong>Update computer</strong> appears
-        when a computer runs an older image than this deployment, and moves it
-        onto the new one with its files and sign-ins kept. All three are
-        recorded in{" "}
+        <strong>Stop</strong> closes the browser and keeps its logins. It starts
+        again the next time the Bot needs it. <strong>Reset</strong> deletes the
+        profile and signs the Bot out of everything.{" "}
+        <strong>Update computer</strong> shows when a computer runs an older
+        image. It moves the computer to the new one and keeps its files and
+        sign-ins. All three show in{" "}
         <Link className="underline" to="/admin/audit">
           Audit
         </Link>
@@ -372,15 +373,13 @@ function HostFoldersSection({
 
       {!connected && !loading ? (
         <p className="mb-3 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm">
-          The desktop app is offline. Folders can only be approved from the
-          desktop app, and command access stays unavailable while it is offline.
+          The desktop app is offline. Open it to approve folders or run
+          commands.
         </p>
       ) : null}
 
       {loading ? null : botIds.length === 0 ? (
-        <PageEmpty>
-          No Bots yet. Create a Bot before choosing folders.
-        </PageEmpty>
+        <PageEmpty>No Bots yet. Create one, then choose its folders.</PageEmpty>
       ) : (
         <PageRows>
           {botIds.map((botId, index) => (
@@ -418,8 +417,8 @@ function HostFoldersSection({
 
       <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-muted-foreground text-sm">
         <p>
-          Grants are read-only by default. Writes are requested from the native
-          desktop prompt when a Bot needs them.
+          Folders are read-only. When a Bot needs to write, the desktop app asks
+          you first.
         </p>
         <div className="flex items-center gap-3">
           <Button
@@ -519,9 +518,9 @@ function ownerLabel(grant: { ownerName?: string; ownerEmail?: string }) {
 function pendingLabel(request: HostAccessPendingOperation) {
   switch (request.kind) {
     case "write_file":
-      return "File change awaiting approval or completion";
+      return "File change waiting for approval or to finish";
     case "run_command":
-      return "Command awaiting approval or completion";
+      return "Command waiting for approval or to finish";
     case "list_files":
       return "Listing files";
     case "read_file":
@@ -530,6 +529,6 @@ function pendingLabel(request: HostAccessPendingOperation) {
     case "stop":
       return "Stopping folder work";
     default:
-      return "Folder access awaiting approval";
+      return "Folder access waiting for approval";
   }
 }

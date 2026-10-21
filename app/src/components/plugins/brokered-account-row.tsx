@@ -20,7 +20,6 @@ import {
 import {
   type PluginsProvider,
   brokeredKeyMissing,
-  providerVocabulary,
 } from "@/lib/plugins/provider-vocabulary";
 import {
   type BrokerField,
@@ -420,7 +419,7 @@ export function useBrokeredAccount(input: {
        */
       if (authorizationUrl === null) {
         report(
-          "This app is connected with a key you hold rather than through a consent screen, so there was no page to send you to and nothing was connected. Reload this page and press Connect again.",
+          "This app connects with a key, not a sign-in page, so nothing was connected. Reload the page and press Connect again.",
         );
         return;
       }
@@ -722,7 +721,6 @@ function accountSentence(input: {
     provider,
     title,
   } = input;
-  const vendor = providerVocabulary(provider).name;
 
   if (!account.configured) {
     return brokeredKeyMissing(provider);
@@ -733,13 +731,13 @@ function accountSentence(input: {
      * Neither screen's own sentence fits: both are about an account, and there is none to have.
      * Capitalised because this is the one position the name opens a sentence in.
      */
-    return `${title.charAt(0).toUpperCase()}${title.slice(1)} needs no account. A Bot granted these tools can use it as it is.`;
+    return `${title.charAt(0).toUpperCase()}${title.slice(1)} doesn't need an account. Bots that have it can use it as it is.`;
   }
 
   if (account.kind === "fields") {
     if (account.connected) {
       if (account.verified && account.verifiedAt) {
-        return `Connected with a key you provided, last checked ${formatDate(account.verifiedAt)}.`;
+        return `Connected with your key. Last checked ${formatDate(account.verifiedAt)}.`;
       }
       /*
        * A CHECK WAS SPENT AND DID NOT COME BACK CLEAN, and the account it was spent in is still
@@ -765,7 +763,7 @@ function accountSentence(input: {
        * is worth a second press rather than a second connection.
        */
       if (account.probe && !account.verified) {
-        return `A check against ${title} was made with your key and did not come back clean — that may be the key, and it may be ${title} itself. The account still stands at ${vendor}, so press Re-check to try again, or disconnect it here and connect again with a fresh key.`;
+        return `Your key didn't pass a check with ${title}. That may be the key, or ${title} itself. Your account is still connected. Press Re-check to try again, or disconnect and connect with a new key.`;
       }
       /*
        * NOTHING WAS SPENT ON IT, WHICH IS A FACT ABOUT THE CHECK AND ABOUT THE APP AT THE TIME. The
@@ -786,7 +784,7 @@ function accountSentence(input: {
        * today.
        */
       if (account.probe === null) {
-        return `Connected with a key you provided. It was accepted without being checked against ${title}, which published nothing safe to try a key on at the time — that is about the app, not about your key.`;
+        return `Connected with your key. It hasn't been checked with ${title}. At the time, ${title} had no safe way to check a key. That's about the app, not your key.`;
       }
       /*
        * AND NOTHING HAS SAID WHICH, which is no longer the page load: the connections read carries
@@ -796,7 +794,7 @@ function accountSentence(input: {
        * two things a record can say; this is what stands where there is no record, and it must not
        * borrow either.
        */
-      return `Connected with a key you provided. It was accepted without being checked against ${title}.`;
+      return `Connected with your key. It hasn't been checked with ${title}.`;
     }
     /*
      * WHAT DISCONNECTING DID NOT DO. The account ends at Composio and the key does not end
@@ -805,7 +803,7 @@ function accountSentence(input: {
      * have live, so the row names the step this deployment cannot take for them.
      */
     if (account.disconnected) {
-      return `Removed from ${vendor}. Your key still works at ${title} — rotate it there if you meant to end its access.`;
+      return `Disconnected. Your key still works at ${title}. Change it there to stop all access.`;
     }
     /*
      * NOT THE SCREEN'S OWN SENTENCE, which is written for the kind that leaves: one of the two says
@@ -818,7 +816,7 @@ function accountSentence(input: {
      * way this app is connected, and a row that replaced the whole line took it away with the trip
      * it was right to drop.
      */
-    const asked = `This app is connected with a key you already hold, not a trip to ${title}'s consent screen. Connect asks for it.`;
+    const asked = `${title.charAt(0).toUpperCase()}${title.slice(1)} connects with a key you already have. Connect asks for it.`;
     return disconnectedReassurance
       ? `${asked} ${disconnectedReassurance}`
       : asked;
@@ -830,7 +828,7 @@ function accountSentence(input: {
    * mail is an argument, not a branch — see this file's opening comment.
    */
   return account.connected
-    ? `Connected through ${title}'s consent screen. ${connectedDescription}`
+    ? `Signed in with ${title}. ${connectedDescription}`
     : disconnectedDescription;
 }
 
@@ -1110,7 +1108,7 @@ export function BrokeredAccountRow({
               />
             ) : account.requestingFields ? (
               <p className="text-muted-foreground text-sm">
-                Asking the app what it needs…
+                Checking what the app needs…
               </p>
             ) : (
               /*
@@ -1122,8 +1120,7 @@ export function BrokeredAccountRow({
                * on a second open and not only on a first.
                */
               <p className="text-muted-foreground text-sm">
-                That app could not be asked what it needs. Close this and try
-                again.
+                Couldn't find out what this app needs. Close this and try again.
               </p>
             )}
             {/*

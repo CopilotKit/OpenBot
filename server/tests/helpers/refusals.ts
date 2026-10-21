@@ -141,7 +141,7 @@ const TABLE = {
   /** Shared-mode guard: this deployment's shared account for the app has not been connected yet. */
   sharedNotConnected: (app: string = "[^.]+") =>
     new RegExp(
-      `${app} is shared across this deployment and no account is connected to it yet\\. Ask an administrator to connect it\\.`,
+      `${app} uses a shared account, and nobody has connected it yet\\. Ask an admin to connect it\\.`,
     ),
   /** Shared-mode guard: the run does not say what started it, or what did cannot steer a shared account. */
   sharedSteering: (app: string = "[^.]+") =>
@@ -149,7 +149,7 @@ const TABLE = {
   /** Shared-mode guard: this Bot's audience reaches further than an administrator approved for the shared account. */
   sharedAudience: (app: string = "[^.]+") =>
     new RegExp(
-      `This Bot is reachable by more people than an administrator approved for the shared ${app} account\\. An administrator has been asked to approve it\\.`,
+      `This Bot reaches more people than an admin approved for the shared ${app} account\\. An admin has been asked to approve it\\.`,
     ),
 };
 

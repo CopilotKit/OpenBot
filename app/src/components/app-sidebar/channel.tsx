@@ -147,7 +147,7 @@ export const Channel = memo(function Channel({
             }}
           >
             {pinned ? <IconPinnedOff /> : <IconPin />}
-            {pinned ? "Unpin channel" : "Pin channel"}
+            {pinned ? "Unpin conversation" : "Pin conversation"}
           </ContextMenuItem>
           <ContextMenuItem
             variant="destructive"
@@ -158,7 +158,7 @@ export const Channel = memo(function Channel({
             }}
           >
             <IconTrash />
-            Delete channel…
+            Delete conversation…
           </ContextMenuItem>
         </ContextMenuContent>
       </ContextMenu>
@@ -177,7 +177,7 @@ export const Channel = memo(function Channel({
           <DialogHeader>
             <DialogTitle>Delete {name}?</DialogTitle>
             <DialogDescription>
-              The conversation will no longer appear for anyone in it.
+              It disappears for everyone in the conversation.
             </DialogDescription>
           </DialogHeader>
           {deleteChannel.error ? (

@@ -299,7 +299,7 @@ function vendorFailure(error: unknown): string {
       : undefined;
 
   if (status === 401) {
-    return "The vendor rejected this credential (401). For a connector reached as the person asking, reconnecting the account is the usual fix; if it persists, the scopes it was granted may not cover this server.";
+    return "The app turned down this account (401). Reconnect the account and try again. If it keeps happening, the account may not have access to this app.";
   }
   if (status === 403) {
     /*
@@ -321,8 +321,8 @@ function vendorFailure(error: unknown): string {
      */
     const detail = reasonFrom(error);
     return detail
-      ? `The vendor accepted the credential and refused the request (403). It said: ${detail}`
-      : "The vendor accepted the credential and refused the request (403). The account may lack access, or the API may not be enabled for this project.";
+      ? `The app refused the request (403). It said: ${detail}`
+      : "The app refused the request (403). The account may not have access, or the API may not be turned on for this project.";
   }
   if (typeof status === "number") {
     return `The vendor answered ${status}.`;

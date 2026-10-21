@@ -46,8 +46,8 @@ export function BotApprovalRules({ agentId }: { agentId: string }) {
     <PageSection
       description={
         <>
-          The strictest matching rule wins, so an "ask" rule beats an "allow"
-          one. Rules for every Bot are in{" "}
+          The strictest matching rule wins. An "ask" rule beats an "allow" rule.
+          Rules for every Bot are in{" "}
           <Link
             className="underline underline-offset-4"
             to="/settings/approvals"
@@ -56,7 +56,7 @@ export function BotApprovalRules({ agentId }: { agentId: string }) {
           </Link>
           .
           {rulesOff
-            ? " Your team has switched personal rules off, so they are kept but do not apply."
+            ? " An admin has turned off personal rules. Yours are kept but don't apply."
             : ""}
         </>
       }

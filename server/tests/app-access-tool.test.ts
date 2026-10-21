@@ -143,7 +143,7 @@ describe("a refusal carrying a card, on its way to the model", () => {
 
   test("names the Bot that refused, so the card asks about the right one", async () => {
     const answer = await refusedWith(
-      '[connect-app]{"serverId":"composio-gmail","title":"Gmail","reason":"shared"} Gmail is shared across this deployment and no account is connected to it yet. Ask an administrator to connect it.',
+      '[connect-app]{"serverId":"composio-gmail","title":"Gmail","reason":"shared"} Gmail uses a shared account, and nobody has connected it yet. Ask an admin to connect it.',
     );
     expect(answer.startsWith(`${REFUSAL_MARKER} `)).toBe(true);
     expect(

@@ -35,6 +35,17 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   request for an administrator to switch on a work app, grant it to a Bot, or connect a Shared app's
   team account is kept, with who answered it and when. It starts empty and nothing is backfilled.
 
+### Plainer words, and one word for each thing
+
+OpenBot now says **Bot** everywhere a person reads it, where screens used to mix Bot, agent, coworker
+and assistant; "agent" is kept only for an outside program you connect. It says **admin** rather
+than administrator, **conversation** rather than channel, and **OpenBot** rather than "this
+deployment" on pages anybody can open. Headings, descriptions, empty states, errors and the
+messages the server shows are shorter and say what happened and what to do next, across the home
+page, a Bot's pages, Capabilities, Connections, Settings, conversations and Admin. Admin keeps the
+exact setting names an admin needs, such as `COMPOSIO_API_KEY`. Text written for the model, such
+as tool descriptions and instructions, is unchanged.
+
 ### Every settings screen is the same, slightly wider column
 
 Settings, Admin, Connections, Capabilities and each Bot's pages share one column width, now 720px instead of 630px, so

@@ -46,7 +46,7 @@ export function BotRoster() {
   if (agents.data === undefined) {
     return (
       <p className="mt-6 text-destructive text-sm" role="alert">
-        Could not load your Bots.
+        Couldn't load your Bots. Reload the page.
       </p>
     );
   }
@@ -81,7 +81,7 @@ export function BotRoster() {
               ? "Your Bots are all pinned above."
               : yoursWaiting
                 ? "Your Bots are all under Needs you."
-                : "You have no Bots of your own yet."}
+                : "You don't have any Bots yet. Create one with New Bot."}
           </PageEmpty>
         )}
       </PageSection>
@@ -118,7 +118,7 @@ function HiddenSection({
           {open ? "Hide" : "Show"}
         </Button>
       }
-      description={`${agents.length} ${agents.length === 1 ? "Bot" : "Bots"} you took off this list. Nobody else's list changed.`}
+      description={`${agents.length} ${agents.length === 1 ? "Bot" : "Bots"} you hid. Only your list changes.`}
       title="Hidden"
     >
       {open ? <RosterRows agents={agents} byId={byId} /> : null}
