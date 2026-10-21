@@ -44,7 +44,21 @@ export type AgentStreamEnd = {
   outcome: "complete" | "failed";
 };
 
+/** The page asked its CopilotKit runtime what it serves (CopilotKit's `info` call: a GET or POST of `<runtime>/info`, or
+ * the single route's `{ method: "info" }`), and the runtime answered as CopilotKit's does: the page runs CopilotKit,
+ * so a click there carries the open-Thread context CopilotKit adds, `threadId: null` while no Thread is open. */
+export type AgentRuntimeInfo = {
+  kind: "runtime";
+  tabId: number;
+  /** Epoch milliseconds when the answer was seen. */
+  at: number;
+  url: string;
+};
+
 export type AgentObservation =
   | AgentRunRequest
   | AgentStreamEvent
   | AgentStreamEnd;
+
+/** Everything the network capture hands the agent events: the AG-UI streams, and that the page runs CopilotKit. */
+export type CaptureObservation = AgentObservation | AgentRuntimeInfo;

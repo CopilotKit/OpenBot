@@ -1,17 +1,27 @@
 // What AG-UI looks like on the wire, read the same way by the debugger capture in the service worker and by the page
 // hook in the MAIN world: which POST is an agent run, the events of a run's SSE or protobuf response as its bytes arrive,
-// and the AG-UI events a WebSocket receives (CopilotKit Intelligence's Phoenix channel, or AG-UI over a plain socket).
+// the AG-UI events a WebSocket receives (CopilotKit Intelligence's Phoenix channel, or AG-UI over a plain socket), and
+// the call by which a page running CopilotKit asks its runtime what it serves.
 // Everything here is raw and unmasked; the agent events (background/agent/events.ts) mask what leaves.
 import { EventType } from "@ag-ui/core";
 import { AGUIUnknownEventTypeError, decode } from "@ag-ui/proto";
 import { createParser } from "eventsource-parser";
-import type { AgentObservation } from "../background/agent/observation";
+import type {
+  AgentObservation,
+  AgentRuntimeInfo,
+} from "../background/agent/observation";
 
 /** An observation as a page or a socket reader produces it: the capture adds the tab. */
 export type StreamObservation =
   | Omit<Extract<AgentObservation, { kind: "request" }>, "tabId">
   | Omit<Extract<AgentObservation, { kind: "event" }>, "tabId">
   | Omit<Extract<AgentObservation, { kind: "end" }>, "tabId">;
+
+/** That the page runs CopilotKit, as a page or the debugger sees it: the capture adds the tab. */
+export type RuntimeObservation = Omit<AgentRuntimeInfo, "tabId">;
+
+/** Everything a capture hands over for one tab. */
+export type PageObservation = StreamObservation | RuntimeObservation;
 
 /** AG-UI's protobuf binding (`@ag-ui/proto` AGUI_MEDIA_TYPE). */
 export const AGUI_PROTO_TYPE = "application/vnd.ag-ui.event+proto";
@@ -137,6 +147,52 @@ export function matchRun(
     threadId: threadOf(parsed),
     input: parsed ?? null,
   };
+}
+
+/** CopilotKit's runtime `info` call, as its AgentRegistry makes it: a GET of `<runtime>/info` (the REST transport, and
+ * the first try of the automatic one), or a POST of the single route's `{ "method": "info" }`; a POST to a path ending
+ * in `/info` counts too. Whether it is CopilotKit's runtime that answers is for isRuntimeInfoAnswer to say. */
+export function matchRuntimeInfoRequest(
+  url: string,
+  method: string,
+  body: string | undefined,
+): boolean {
+  const verb = method.toUpperCase();
+  if (verb !== "GET" && verb !== "POST") return false;
+  let path: string;
+  try {
+    path = new URL(url).pathname;
+  } catch {
+    return false;
+  }
+  if (/\/info\/?$/.test(path)) return true;
+  if (verb !== "POST" || body === undefined) return false;
+  try {
+    const parsed: unknown = JSON.parse(body);
+    return isRecord(parsed) && parsed.method === "info";
+  } catch {
+    return false;
+  }
+}
+
+/** CopilotKit's RuntimeInfo (`@copilotkit/runtime` get-runtime-info.ts): a successful JSON answer naming the runtime's
+ * `version` and the `agents` it serves. An app's own `/info` says neither. */
+export function isRuntimeInfoAnswer(
+  status: number | null,
+  text: string | undefined,
+): boolean {
+  if (status === null || status < 200 || status >= 300 || text === undefined)
+    return false;
+  try {
+    const parsed: unknown = JSON.parse(text);
+    return (
+      isRecord(parsed) &&
+      typeof parsed.version === "string" &&
+      isRecord(parsed.agents)
+    );
+  } catch {
+    return false;
+  }
 }
 
 /** Reads one response's bytes into AG-UI events as they arrive. The first event decides: a stream whose first event

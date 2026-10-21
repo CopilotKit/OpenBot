@@ -189,18 +189,24 @@ export function firstThreadOf(fixture: Fixture): string {
   return threadId;
 }
 
-/** What only CopilotKit can see: a frontend tool running inside the page (`tool.call` executing and completed). */
+/** CopilotKit's agent rows: `agent.run`, `agent.message` and `tool.call`, a frontend tool's executing and completed among
+ * them. (`thread.linked` is CopilotKit's only where a chat opened the Thread: agent-events-parity.test.ts compares it on
+ * the conversation that had one.) */
 export const observable = (event: CapturedEvent): boolean =>
-  ["agent.run", "agent.message", "tool.call"].includes(event.name) &&
-  !(
-    event.name === "tool.call" &&
-    ["executing", "completed"].includes(
-      String((event.value as { phase?: unknown }).phase),
-    )
-  );
+  ["agent.run", "agent.message", "tool.call"].includes(event.name);
 
 export const withoutSeq = (event: CapturedEvent) => {
   const { seq: _seq, ...value } = event.value as Record<string, unknown>;
+  return { name: event.name, value };
+};
+
+/** A row without how long a frontend tool ran: the page times the tool itself, the network sees the gap from the run's
+ * end to the request that carries the tool's result (agent-events-parity.test.ts holds that gap). */
+export const withoutDuration = (event: {
+  name: string;
+  value: Record<string, unknown>;
+}) => {
+  const { durationMs: _duration, ...value } = event.value;
   return { name: event.name, value };
 };
 

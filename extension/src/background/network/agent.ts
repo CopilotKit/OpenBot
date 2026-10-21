@@ -1,16 +1,19 @@
 // The AG-UI traffic Chrome's debugger shows in a followed tab, as the agent events read it (agent/observation.ts): each
 // agent run a page posts, the events of its SSE or protobuf answer read live as they arrive (Network.streamResourceContent,
-// then each Network.dataReceived carries its bytes), and the AG-UI events its WebSockets receive. The request tracker
+// then each Network.dataReceived carries its bytes), the AG-UI events its WebSockets receive, and CopilotKit's runtime
+// `info` call when its runtime answers it (the page runs CopilotKit). The request tracker
 // (debugger.ts) asks this which requests are runs: a run is never a step's save, nor a write a step waits for.
-import type { AgentObservation } from "../agent/observation";
+import type { CaptureObservation } from "../agent/observation";
 import {
   createChannels,
   createHttpStream,
   createSocketReader,
+  isRuntimeInfoAnswer,
   matchRun,
+  matchRuntimeInfoRequest,
+  type PageObservation,
   type RunMatch,
   runChannel,
-  type StreamObservation,
   streamFormat,
 } from "../../shared/agui";
 import type { Debuggee } from "./debugger";
@@ -86,6 +89,10 @@ type Request = {
   early: { bytes: Uint8Array; at: number }[];
   /** Whether the request is an agent run, for the tracker. */
   verdict: Verdict;
+  /** CopilotKit's runtime `info` call: its answer is read once it finished. */
+  info: boolean;
+  /** The answer's status, once its headers came. */
+  status: number | null;
 };
 
 /** Whether a request is an agent run: known at once for most, after its answer's first event for a candidate. */
@@ -135,7 +142,7 @@ export type AgentCapture = ReturnType<typeof createAgentCapture>;
  */
 export function createAgentCapture(options: {
   send: Send;
-  observe(observation: AgentObservation): void;
+  observe(observation: CaptureObservation): void;
   ignore(url: string): boolean;
   onRun(key: string): void;
 }) {
@@ -158,9 +165,9 @@ export function createAgentCapture(options: {
 
   const emitFor =
     (tabId: number) =>
-    (observation: StreamObservation): void => {
+    (observation: PageObservation): void => {
       try {
-        options.observe({ ...observation, tabId } as AgentObservation);
+        options.observe({ ...observation, tabId } as CaptureObservation);
       } catch (error) {
         console.error("Recorder: an agent observation failed", error);
       }
@@ -224,6 +231,8 @@ export function createAgentCapture(options: {
       reading: "off",
       early: [],
       verdict: verdict(),
+      info: false,
+      status: null,
     };
     requests.set(key, request);
     if (method === "POST") {
@@ -234,6 +243,7 @@ export function createAgentCapture(options: {
       }
     }
     const inline = string(sent.postData);
+    request.info = matchRuntimeInfoRequest(url, method, inline);
     if (
       method !== "POST" ||
       inline !== undefined ||
@@ -252,6 +262,7 @@ export function createAgentCapture(options: {
     const matched = answer
       .then(postText, () => undefined)
       .then((body) => {
+        request.info = matchRuntimeInfoRequest(url, method, body);
         const match = matchRun(url, method, body);
         if (match?.kind !== "run" && match?.kind !== "candidate")
           request.verdict.decide(false);
@@ -301,6 +312,7 @@ export function createAgentCapture(options: {
       headerValue(response.headers, "content-type");
     const status = number(response.status) ?? 0;
     const at = wallAt(request.clock, number(raw.timestamp));
+    request.status = status;
     request.format = streamFormat(contentType);
     then(request, () => {
       request.stream?.response(contentType, status);
@@ -355,7 +367,26 @@ export function createAgentCapture(options: {
     });
   }
 
+  /** CopilotKit's runtime `info` call answered: when its answer is CopilotKit's RuntimeInfo, the page runs CopilotKit. */
+  async function runtimeInfo(request: Request, at: number) {
+    const body = await options
+      .send(request.target, "Network.getResponseBody", {
+        requestId: request.requestId,
+      })
+      .catch(() => null);
+    if (
+      isRecord(body) &&
+      typeof body.body === "string" &&
+      isRuntimeInfoAnswer(
+        request.status,
+        bodyText(body.body, body.base64Encoded === true),
+      )
+    )
+      emitFor(request.target.tabId)({ kind: "runtime", url: request.url, at });
+  }
+
   async function finish(request: Request, ok: boolean, at: number) {
+    if (ok && request.info) await runtimeInfo(request, at);
     const { stream, match } = request;
     if (!stream || match === "pending") return;
     const run = match?.kind === "run";

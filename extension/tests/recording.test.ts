@@ -16,7 +16,10 @@ import type {
   NetworkCaptureDeps,
   NetworkMode,
 } from "../src/background/network";
-import type { AgentObservation } from "../src/background/agent/observation";
+import type {
+  AgentObservation,
+  CaptureObservation,
+} from "../src/background/agent/observation";
 import type { PageFallback } from "../src/background/network/fallback";
 import {
   installRecording,
@@ -287,17 +290,26 @@ type NetworkDouble = {
   created: number;
   running: Set<number>;
   /** The AG-UI observations the page hook's messages reached the capture with. */
-  pageAgent: AgentObservation[];
+  pageAgent: CaptureObservation[];
 };
 
 /** Each recording's agent events (agent/events.ts), as a double that says what it was handed. */
 type AgentDouble = {
-  observed: AgentObservation[];
+  observed: CaptureObservation[];
   clicks: { tabId: number; click: CapturedEvent }[];
   navigated: number[];
   stopped: boolean;
   /** Whether a click comes back with agent context, as the real agent events add it when a Thread is open. */
   enrich: boolean;
+  /** Each click as it left the steps: its tab, and whether its window holds a run started 20 ms and 2 s after it. */
+  settled: {
+    tabId: number;
+    click: CapturedEvent;
+    soon: boolean;
+    late: boolean;
+  }[];
+  /** The Thread a settled click takes, as the real agent events give it the Thread of the run it started. */
+  settleTo: string | null;
   emit(tabId: number, event: CapturedEvent): void;
 };
 let agents: AgentDouble[] = [];
@@ -413,6 +425,8 @@ function doubles(): Partial<RecordingDeps> {
         navigated: [],
         stopped: false,
         enrich: false,
+        settled: [],
+        settleTo: null,
         emit: options.emit,
       };
       agents.push(agent);
@@ -424,6 +438,19 @@ function doubles(): Partial<RecordingDeps> {
           return {
             ...click,
             value: { ...(click.value as object), agent: { threadId: "t-1" } },
+          };
+        },
+        settleClick: (tabId, click, owns) => {
+          agent.settled.push({
+            tabId,
+            click,
+            soon: owns(click.timestamp + 20),
+            late: owns(click.timestamp + 2_000),
+          });
+          if (agent.settleTo === null) return click;
+          return {
+            ...click,
+            value: { ...(click.value as object), threadId: agent.settleTo },
           };
         },
         tabNavigated: (tabId) => agent.navigated.push(tabId),
@@ -3629,6 +3656,38 @@ test("each recording has its own agent events: every AG-UI observation, every cl
   expect(agents[1]?.stopped).toBe(false);
 });
 
+test("a click leaves the steps as the agent events settle it, with the window of the runs it started: a run 20 ms after it is its own, one 2 s after it is not", async () => {
+  await record();
+  const [agent] = agents;
+  if (!agent) throw new Error("no agent events");
+  agent.settleTo = "t-2";
+  const clicked = now - 10_000;
+  contentPort(7).postMessage({
+    type: "content.event",
+    event: {
+      ...event("click", {
+        step: "click",
+        target: { tag: "button", role: "button", name: "Send" },
+      }),
+      timestamp: clicked,
+    },
+  });
+  await until(() => agent.settled.length === 1, "the click leaving");
+  expect(agent.settled[0]).toMatchObject({ tabId: 7, soon: true, late: false });
+  const out = () =>
+    sentToDocument("offscreen.event").flatMap((m) =>
+      m.type === "offscreen.event" ? [m.event] : [],
+    );
+  await until(
+    () => out().some(({ name }) => name === "click"),
+    "the click going out",
+  );
+  expect(out().find(({ name }) => name === "click")?.value).toMatchObject({
+    step: "click",
+    threadId: "t-2",
+  });
+});
+
 test("an AG-UI observation from the page hook is accepted only from a recorded tab while page capture is on, whole however large, with its tab and a stream id of that tab and frame", async () => {
   await record();
   const observation = {
@@ -3678,5 +3737,32 @@ test("an AG-UI observation from the page hook is accepted only from a recorded t
       },
     }),
   ).toEqual({ ok: false, error: "invalid" });
+  expect(network.pageAgent).toHaveLength(1);
+});
+
+test("the page hook's word that the page runs CopilotKit (its runtime answered the info call) reaches the capture with its tab, and nothing else rides on it", async () => {
+  await record();
+  network.deps?.status("page");
+  const runtime = {
+    kind: "runtime" as const,
+    at: now,
+    url: "http://127.0.0.1:7620/api/copilotkit-learning",
+  };
+  const fromTab = (observation: object) =>
+    fake.sendExternal(
+      { type: "recorder.page-agent", observation },
+      {
+        tab: { id: 7 } as chrome.tabs.Tab,
+        frameId: 0,
+        url: DEAL,
+        origin: "https://crm.example.test",
+      },
+    );
+  expect(await fromTab(runtime)).toEqual({ ok: true });
+  expect(network.pageAgent).toEqual([{ ...runtime, tabId: 7 }]);
+  expect(await fromTab({ ...runtime, streamId: "k3x9/0" })).toEqual({
+    ok: false,
+    error: "invalid",
+  });
   expect(network.pageAgent).toHaveLength(1);
 });

@@ -3,7 +3,10 @@
 // stream is held to what CopilotKit's own client parsed from the same bytes (@ag-ui/client 1.0.2, phoenix.js).
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import type { CapturedEvent } from "@openbot/shared/recorder-masking";
-import type { AgentObservation } from "../src/background/agent/observation";
+import type {
+  AgentObservation,
+  AgentRuntimeInfo,
+} from "../src/background/agent/observation";
 import {
   createNetworkCapture,
   type NetworkCapture,
@@ -14,7 +17,11 @@ import {
   type StepAssembler,
   type StepCall,
 } from "../src/background/steps";
-import { AGUI_PROTO_TYPE } from "../src/shared/agui";
+import {
+  AGUI_PROTO_TYPE,
+  isRuntimeInfoAnswer,
+  matchRuntimeInfoRequest,
+} from "../src/shared/agui";
 import { clientEvents, phoenixFrame } from "./support/agui-client";
 import {
   events,
@@ -35,6 +42,8 @@ const OPENBOT = "https://openbot.example.test";
 let fake: ChromeFake;
 let capture: NetworkCapture;
 let observations: AgentObservation[] = [];
+/** The page's CopilotKit runtime answering its `info` call. */
+let runtimes: AgentRuntimeInfo[] = [];
 let calls: StepCall[] = [];
 let started: string[] = [];
 let steps: StepAssembler | null = null;
@@ -52,6 +61,7 @@ const fallback: PageFallback = {
 beforeEach(() => {
   fake = installChromeFake({ extensionId: "test" });
   observations = [];
+  runtimes = [];
   calls = [];
   started = [];
   steps = null;
@@ -70,7 +80,10 @@ beforeEach(() => {
       writeEnded: (id) => steps?.writeEnded(id),
       status: () => {},
       digests: () => new Set(),
-      agent: (observation) => observations.push(observation),
+      agent: (observation) =>
+        observation.kind === "runtime"
+          ? runtimes.push(observation)
+          : observations.push(observation),
     },
     { fallback },
   );
@@ -602,4 +615,98 @@ test("the chat's Send is no longer held for the run it starts, nor does it carry
   );
   const times = sent.map(({ timestamp }) => timestamp);
   expect(times).toEqual([...times].sort((a, b) => a - b));
+});
+
+/** Every request each recorded page made, with its body and its answer as Chrome gave them. */
+function exchanges(fixture: Fixture) {
+  const statuses = new Map<string, number>();
+  for (const entry of events(fixture, "Network.responseReceived"))
+    statuses.set(
+      String(entry.params.requestId),
+      (entry.params.response as { status: number }).status,
+    );
+  return [...requests(fixture)].map(([id, sent]) => {
+    const request = sent.request as {
+      url: string;
+      method: string;
+      postData?: string;
+    };
+    const read = fixture.entries.find(
+      (entry) =>
+        entry.kind === "command" &&
+        entry.method === "Network.getRequestPostData" &&
+        entry.params.requestId === id,
+    );
+    return {
+      id,
+      url: request.url,
+      method: request.method,
+      body:
+        request.postData ??
+        (read?.kind === "command"
+          ? (read.result?.postData as string | undefined)
+          : undefined),
+      status: statuses.get(id) ?? null,
+      answer: new TextDecoder().decode(responseBytes(fixture, id)),
+    };
+  });
+}
+
+const RECORDED = [
+  "single-route-sse",
+  "rest-sse",
+  "intelligence-websocket",
+  "generic-proto-ws-ticker",
+  "late-and-aborted",
+];
+
+test("CopilotKit's runtime info call, answered by CopilotKit's runtime, is known on the single route, over REST and through Intelligence; no other request the recorded pages made is", () => {
+  const found = RECORDED.flatMap((name) =>
+    exchanges(loadFixture(name))
+      .filter(
+        (exchange) =>
+          matchRuntimeInfoRequest(
+            exchange.url,
+            exchange.method,
+            exchange.body,
+          ) && isRuntimeInfoAnswer(exchange.status, exchange.answer),
+      )
+      .map(
+        ({ method, url, body }) =>
+          `${name}: ${method} ${new URL(url).pathname} ${body ?? ""}`,
+      ),
+  );
+  expect(found).toEqual([
+    'single-route-sse: POST /api/copilotkit-learning {"method":"info"}',
+    "rest-sse: GET /api/copilotkit/info ",
+    'intelligence-websocket: POST /api/copilotkit-learning {"method":"info"}',
+  ]);
+});
+
+test("the debugger capture says a page runs CopilotKit once its runtime answered the info call, at the answer's end", async () => {
+  const { fixture, replay: played } = await play("single-route-sse");
+  await played.run();
+  const info = exchanges(fixture).find(
+    ({ body }) => body === '{"method":"info"}',
+  );
+  if (!info) throw new Error("no info call");
+  const finished = events(fixture, "Network.loadingFinished").find(
+    (entry) => entry.params.requestId === info.id,
+  );
+  const sent = requests(fixture).get(info.id) as unknown as {
+    timestamp: number;
+    wallTime: number;
+  };
+  expect(runtimes).toEqual([
+    {
+      kind: "runtime",
+      tabId: TAB,
+      url: info.url,
+      // The answer's end on Chrome's monotonic clock, read against the wall clock its request carried.
+      at: Math.round(
+        Math.round(sent.wallTime * 1000) +
+          ((finished?.params.timestamp as number) - sent.timestamp) * 1000,
+      ),
+    },
+  ]);
 });

@@ -415,6 +415,25 @@ const conversations: Record<string, Parameters<typeof record>[1]> = {
       "Call showGreeting with name Ada and mood cheerful, then say done in one word.",
     );
   },
+  // A frontend tool that fails: CopilotKit puts `Error: <message>` in the history as the tool's result and runs no
+  // follow-up, so the result reaches the runtime only with the person's next message.
+  "frontend-tool-error": async ({ core }) => {
+    core.addTool({
+      name: "showGreeting",
+      description: "Show a greeting card to the person in the page.",
+      parameters: z.object({ name: z.string(), mood: z.string() }),
+      handler: async () => {
+        throw new Error("The greeting card could not be shown.");
+      },
+    });
+    const agent = await agentOf(core, "default");
+    await say(
+      core,
+      agent,
+      "Call showGreeting with name Ada and mood cheerful, then say done in one word.",
+    );
+    await say(core, agent, "Say ok in one word. Call no tools.");
+  },
   "two-runs": async ({ core }) => {
     const agent = await agentOf(core, "default");
     await say(core, agent, "Name one planet. One word only. Call no tools.");

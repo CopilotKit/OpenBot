@@ -11,9 +11,9 @@ import {
   test,
 } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import type { AgentObservation } from "../src/background/agent/observation";
+import type { CaptureObservation } from "../src/background/agent/observation";
 import { createNetworkCapture } from "../src/background/network";
-import type { StreamObservation } from "../src/shared/agui";
+import type { PageObservation } from "../src/shared/agui";
 import {
   type Fixture,
   loadFixture,
@@ -32,7 +32,7 @@ const NativeAbortController = AbortController;
 type Json = Record<string, unknown>;
 type Sent = {
   id: string;
-  message: { type: string; observation?: StreamObservation; event?: Json };
+  message: { type: string; observation?: PageObservation; event?: Json };
 };
 
 /** What one recorded fixture asks the server to answer: each request by method, path and body, and each socket by path. */
@@ -152,10 +152,10 @@ const pathOf = (url: string) => {
 /** The observations the debugger capture makes from the fixture's CDP. */
 async function debuggerObservations(
   fixture: Fixture,
-): Promise<AgentObservation[]> {
+): Promise<CaptureObservation[]> {
   const page = (globalThis as { chrome?: unknown }).chrome;
   const fake = installChromeFake({ extensionId: "test" });
-  const observations: AgentObservation[] = [];
+  const observations: CaptureObservation[] = [];
   const capture = createNetworkCapture(
     {
       openbotUrl: () => null,
@@ -384,14 +384,19 @@ async function playPage(steps: Recorded[]) {
 }
 
 /** An observation as both captures should make it, without what differs by design: the tab and stream ids (each
- * capture names its own), when it saw it, and the server's address. */
-function signature(observations: (AgentObservation | StreamObservation)[]) {
+ * capture names its own), when it saw it, and the server's address. The runtime's `info` answer is a stream of its
+ * own. */
+function signature(observations: (CaptureObservation | PageObservation)[]) {
   const streams = new Map<string, unknown[]>();
   for (const observation of observations) {
-    const { streamId, at: _at, ...rest } = observation as AgentObservation;
+    const {
+      streamId = "runtime",
+      at: _at,
+      ...rest
+    } = observation as Json & { streamId?: string; at: number };
     const { tabId: _tab, ...kept } = rest as Json;
     const shown =
-      kept.kind === "request"
+      kept.kind === "request" || kept.kind === "runtime"
         ? { ...kept, url: pathOf(String(kept.url)) }
         : kept;
     streams.set(streamId, [...(streams.get(streamId) ?? []), shown]);
@@ -405,6 +410,13 @@ const pageObservations = () =>
       ? [message.observation]
       : [],
   );
+
+/** The fixtures of a CopilotKit page: its runtime's `info` call is in their traffic (single route, REST, Intelligence). */
+const COPILOTKIT_PAGES = new Set([
+  "single-route-sse",
+  "rest-sse",
+  "intelligence-websocket",
+]);
 
 for (const name of [
   "single-route-sse",
@@ -429,8 +441,15 @@ for (const name of [
     expect(signature(observed)).toEqual(signature(expected));
     for (const observation of observed) {
       expect(observation.at).toBeGreaterThan(0);
-      expect(typeof observation.streamId).toBe("string");
+      if (observation.kind !== "runtime")
+        expect(typeof observation.streamId).toBe("string");
     }
+    // A CopilotKit page asked its runtime what it serves and the runtime answered: both captures say the page runs
+    // CopilotKit, once; the other servers' pages never do.
+    const runtimeAnswers = (list: (CaptureObservation | PageObservation)[]) =>
+      list.filter((observation) => observation.kind === "runtime").length;
+    expect(runtimeAnswers(expected)).toBe(COPILOTKIT_PAGES.has(name) ? 1 : 0);
+    expect(runtimeAnswers(observed)).toBe(runtimeAnswers(expected));
     // The page got every response untouched, byte for byte, read through to its end while the hook read its copy.
     for (const [id, answer] of recorded) {
       const bytes = answer?.chunks.reduce(

@@ -340,6 +340,13 @@ export type StepAssembler = ReturnType<typeof createStepAssembler>;
 
 export function createStepAssembler(options: {
   emit(event: CapturedEvent): void;
+  /** A step of the person's as it leaves, with what was seen while it was held: `owns` says whether something the page
+   * started at a time is the step's, by the rule its calls follow (a click's run, the agent events' `settleClick`). */
+  settle?(
+    tabId: number,
+    event: CapturedEvent,
+    owns: (at: number) => boolean,
+  ): CapturedEvent;
   /** The tab's top page (masked), for a page change and a step from an iframe. */
   pageOf?(tabId: number): Promise<{ url: string; title?: string } | null>;
   now?: () => number;
@@ -393,14 +400,14 @@ export function createStepAssembler(options: {
     step.timer = timers.set(pump, wait);
   }
 
+  /** Whether something that started at `at` falls in the step's span: from `leadMs` before it until the next step. */
+  const inSpan = (step: Pending, at: number): boolean =>
+    at >= step.at - tune.leadMs && at < step.closeAt;
+
   /** The calls the step owns, in the order they started, and the save among them. */
   function saveOf(step: Pending): StepCall | undefined {
     const mine = (calls.get(step.tabId) ?? [])
-      .filter(
-        (call) =>
-          call.startedAt >= step.at - tune.leadMs &&
-          call.startedAt < step.closeAt,
-      )
+      .filter((call) => inSpan(step, call.startedAt))
       .sort((a, b) => a.startedAt - b.startedAt);
     const links: { respondedAt: number; endedAt: number; depth: number }[] = [];
     let first: StepCall | undefined;
@@ -435,7 +442,16 @@ export function createStepAssembler(options: {
   /** The step's event as it is sent: its page filled in, its save attached, cut to fit one Intelligence event. */
   function finish(step: Pending): CapturedEvent {
     if (step.placed) return step.event;
-    const value: Record<string, unknown> = { ...stepValue(step.event) };
+    const event =
+      step.owner && options.settle
+        ? options.settle(
+            step.tabId,
+            step.event,
+            // What the step started itself, as its own calls (depth 0): in its span and within `windowMs` of it.
+            (at) => inSpan(step, at) && at - step.at <= tune.windowMs,
+          )
+        : step.event;
+    const value: Record<string, unknown> = { ...stepValue(event) };
     if (step.page && !isObject(value.page)) value.page = step.page;
     if (step.owner) {
       const save = saveOf(step);
@@ -450,13 +466,13 @@ export function createStepAssembler(options: {
           response: save.exchange.response,
         };
         value.request = fitRequest(
-          { ...step.event, value: value as JsonValue },
+          { ...event, value: value as JsonValue },
           request,
         );
       }
     }
     return trimEvent(
-      { ...step.event, value: value as JsonValue },
+      { ...event, value: value as JsonValue },
       EVENT_BUDGET_BYTES,
     ).event;
   }
