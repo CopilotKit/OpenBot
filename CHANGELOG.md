@@ -51,6 +51,11 @@ section on the app's own page, where Approve switches the app on and grants it t
 (or says what has to be done first) and Dismiss closes the request. Requests name who asked; nobody's
 connection status is shown to administrators.
 
+On a deployment with no `COMPOSIO_API_KEY`, Settings → Connected accounts no longer lists Composio
+apps, which nobody could connect there. An app's own page, reached from an older link, says it is not
+available yet and that an administrator has to finish setting it up, instead of naming the setting.
+The administrator's page for the app still names `COMPOSIO_API_KEY`.
+
 ### A new Bot is made from a sheet that asks where it runs first
 
 New Bot opens a sheet instead of the four-screen wizard. It asks where the Bot will run, with Run it
