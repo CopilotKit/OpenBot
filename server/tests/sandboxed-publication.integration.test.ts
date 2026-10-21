@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
 import type { MiddlewareHandler } from "hono";
@@ -243,4 +243,8 @@ describe("the generic Published switch on a sandboxed component", () => {
       (await sandboxedStore.published()).map((row) => row.name),
     ).not.toContain(name);
   });
+});
+
+afterAll(async () => {
+  await database.$client.close();
 });

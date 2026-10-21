@@ -117,3 +117,7 @@ test("a broker that will not answer still leaves the removal on the trail, and a
   expect(attempts).toBe(2);
   expect(events).toEqual(["person.access_revoked"]);
 });
+
+afterAll(async () => {
+  await database.$client.close();
+});

@@ -322,3 +322,7 @@ describe("a token does not outlive the server it was given to", () => {
     expect(sent).toEqual([]);
   });
 });
+
+afterAll(async () => {
+  await database.$client.close();
+});

@@ -142,3 +142,7 @@ test("CONTROL: replica B allows the same ref while the run is still current", as
   });
   expect(result).toMatchObject({ action: "click" });
 });
+
+afterAll(async () => {
+  await database.$client.close();
+});

@@ -202,3 +202,7 @@ describe("the tools a Bot is handed on the server", () => {
     }
   });
 });
+
+afterAll(async () => {
+  await database.$client.close();
+});
