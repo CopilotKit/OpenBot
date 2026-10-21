@@ -734,7 +734,7 @@ describe("an account the vendor no longer holds", () => {
       app,
       holder: "person",
       userId: asker,
-      vendorUserId: asker,
+      vendorUserId: `vendor-${asker}`,
     });
     gone();
     const said = await store
