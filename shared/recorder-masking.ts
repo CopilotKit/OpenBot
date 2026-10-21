@@ -132,6 +132,9 @@ const TARGET_VALUE_FIELDS = ["value", "text"] as const;
 /** Attributes that hold a field's value by name (`value`, `aria-valuetext`, `aria-valuenow`, `data-value`,
  * `data-initial-value`, `ng-reflect-value`); a sensitive field loses each, and any other attribute that echoes the value. */
 const VALUE_ATTRIBUTE = /value/i;
+/** The shortest stretch of an edited field's content another attribute must hold to be a copy of it, as an attribute a page
+ * set from what was typed a keystroke or a render earlier is: long enough that a short attribute (`rows="1"`) is never one. */
+const COPY_MIN_LENGTH = 8;
 /** Intelligence rejects a NUL at any depth. */
 const NUL = "\u0000";
 /** Longest `target.value` and `target.text` kept when trimming (plan Task 3 `trimEvent`). */
@@ -152,6 +155,34 @@ const echoes = (attribute: unknown, typed: readonly string[]): boolean => {
           normaliseSecret(attribute).includes(normalised)
       : attribute.trim() === trimmed;
   });
+};
+
+/** An attribute that copies what was typed into a field: it holds the whole of it (`echoes`), or a stretch of it at least
+ * COPY_MIN_LENGTH long, as a copy made a keystroke earlier does. */
+const copies = (attribute: unknown, typed: string): boolean => {
+  if (typeof attribute !== "string" || attribute === REDACTED) return false;
+  const copy = attribute.trim();
+  return (
+    echoes(attribute, [typed]) ||
+    (copy.length >= COPY_MIN_LENGTH && typed.includes(copy))
+  );
+};
+
+/** A field whose text and value attributes are copies of what is typed into it: an input (React keeps its `value`
+ * attribute at the value it last rendered), a textarea (its text is its default value, which React keeps at the value it
+ * last rendered, a keystroke behind the one an input event reads) and an editable region (its text is its value). Never a
+ * select: its text lists every option. */
+const mirrorsValue = (
+  tag: string | undefined,
+  attributes: Record<string, string> | undefined,
+): boolean => {
+  const name = tag?.toLowerCase();
+  const editable = attributes?.contenteditable;
+  return (
+    name === "input" ||
+    name === "textarea" ||
+    (typeof editable === "string" && editable.toLowerCase() !== "false")
+  );
 };
 
 const decodeQuietly = (text: string): string => {
@@ -1067,6 +1098,29 @@ export function maskCollectorEvent(
           if (VALUE_ATTRIBUTE.test(name) || echoes(item, typed))
             attributes[name] = REDACTED;
       delete target.selectedValues;
+    } else if (
+      mirrorsValue(tag, attributes) &&
+      typeof target.value === "string"
+    ) {
+      // The masking took part of what was typed (a card, an email, a token), now or before the event came here: every
+      // copy of the field's content takes the same verdict, so a copy that still held a keystroke less of it (the text of
+      // React's chat box held a card's first 15 digits, which are no card on their own) never leaves. The text and the
+      // value attributes are the field's own copies; any other attribute, and the field's name, goes whole if it holds a
+      // stretch of what was typed.
+      const typed = target.value;
+      const masked = scrubText(typed, options);
+      if (masked !== typed || masked.includes(REDACTED)) {
+        target.value = masked;
+        if (typeof target.text === "string" && target.text !== "")
+          target.text = masked;
+        if (attributes)
+          for (const [name, item] of Object.entries(attributes))
+            if (typeof item === "string" && item !== "")
+              if (VALUE_ATTRIBUTE.test(name)) attributes[name] = masked;
+              else if (copies(item, typed)) attributes[name] = REDACTED;
+        for (const field of ["label", "name"] as const)
+          if (copies(target[field], typed)) target[field] = REDACTED;
+      }
     }
     if (Array.isArray(target.files)) {
       target.files = target.files.map((file) =>

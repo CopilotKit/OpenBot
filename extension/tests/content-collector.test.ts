@@ -8,7 +8,12 @@ import {
   spyOn,
   test,
 } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { act, createElement, useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
+import { createRoot } from "react-dom/client";
 import {
   type CapturedEvent,
   sha256HexSync,
@@ -18,7 +23,11 @@ import {
   startEventCapture,
 } from "../src/content/collector";
 import { createSensitivityTracker } from "../src/content/masking-context";
-import { CODE_CLOCK, recordedText } from "./support/recorded-text";
+import {
+  CARD_AND_PIN_CLOCK,
+  CODE_CLOCK,
+  recordedText,
+} from "./support/recorded-text";
 
 beforeAll(() => GlobalRegistrator.register());
 afterAll(() => GlobalRegistrator.unregister());
@@ -127,6 +136,40 @@ describe("collectorBeforeSend", () => {
       value: { url: "https://example.test/", title: "Home" },
     };
     expect(beforeSend(page as never)).toBeNull();
+  });
+
+  test("run 1's edit, with a card in its value and the card's first 15 digits in its text, leaves with no part of the card", () => {
+    const run = JSON.parse(
+      readFileSync(
+        join(import.meta.dir, "fixtures/e2e-run1-card-edit.json"),
+        "utf8",
+      ),
+    ) as {
+      recorded: CapturedEvent & { value: { target: Record<string, unknown> } };
+      copilotkit: { value: { target: { value: string } } };
+    };
+    const beforeSend = collectorBeforeSend(createSensitivityTracker());
+    // As the Recorder's collector built it: the value as CopilotKit's capture read it on the same keystroke. And as
+    // Intelligence stored it, masked once already.
+    const built = structuredClone(run.recorded);
+    built.value.target.value = run.copilotkit.value.target.value;
+    for (const event of [built, run.recorded]) {
+      const out = beforeSend(event as never) as unknown as {
+        value: { target: Record<string, unknown> };
+      };
+      const target = out.value.target;
+      expect(target.value).toBe(
+        "Please look up this deal's history and then get it approved. Card on file for the invoice: [redacted]",
+      );
+      expect(target.text).toBe(target.value);
+      const { seq: _seq, ...value } = out.value as Record<string, unknown>;
+      const text = JSON.stringify(value);
+      expect(text).not.toContain("4111 1111 1111");
+      expect(text.replace(/\D/g, "")).not.toContain("411111111111");
+      // Everything else the edit says about its field is as the page had it.
+      expect(target.attributes).toEqual(run.recorded.value.target.attributes);
+      expect(target.name).toBe("Type a message...");
+    }
   });
 
   test("enrich adds what it finds before masking, so the masking covers it too", () => {
@@ -512,5 +555,149 @@ describe("startEventCapture drop reports", () => {
       name: "recorder.dropped",
       value: { count: 1, reason: "CAPTURE_FAILED" },
     });
+  });
+});
+
+describe("startEventCapture on a React chat box", () => {
+  // Run 1 of the end-to-end check: the person typed this into CopilotKit's chat box (a React-controlled textarea, its
+  // attributes exactly as the page served them) and pressed Send.
+  const CARD = "4111 1111 1111 1111";
+  const MESSAGE = `Please look up this deal's history and then get it approved. Card on file for the invoice: ${CARD}`;
+  const CHAT_BOX = {
+    "data-testid": "copilot-chat-textarea",
+    placeholder: "Type a message...",
+    rows: 1,
+    className:
+      "cpk:bg-transparent cpk:outline-none cpk:antialiased cpk:font-regular cpk:text-[16px] cpk:placeholder:text-[#00000077] cpk:dark:placeholder:text-[#fffc] cpk:w-full cpk:py-3 cpk:px-5",
+    style: { overflow: "auto", resize: "none", maxHeight: 144, height: 72 },
+  } as const;
+
+  /** A controlled field, rendered by React: each input sets its state and React renders it, which writes the value into
+   * the field's default value (react-dom 19 `updateTextarea` and `updateInput`): a textarea's text, an input's `value`
+   * attribute. The state is set from the field's own input listener rather than React's onChange, whose input-event
+   * support react-dom decides once, when it is first loaded, and the suite may load it before any DOM exists. */
+  function ControlledField(props: {
+    tag: "textarea" | "input";
+    attributes: Record<string, unknown>;
+  }) {
+    const [text, setText] = useState("");
+    const ref = useRef<HTMLTextAreaElement & HTMLInputElement>(null);
+    useEffect(() => {
+      const field = ref.current;
+      if (!field) return;
+      const onInput = () => flushSync(() => setText(field.value));
+      field.addEventListener("input", onInput);
+      return () => field.removeEventListener("input", onInput);
+    }, []);
+    return createElement(props.tag, {
+      ...props.attributes,
+      ref,
+      value: text,
+      onChange: () => {},
+    });
+  }
+
+  /** Types `text` a character at a time as Chrome does: the field's value changes, then a trusted input event goes out,
+   * which the collector hears on the window before the page renders what was typed. */
+  function typeInto(
+    field: HTMLTextAreaElement | HTMLInputElement,
+    text: string,
+  ) {
+    const prototype = Object.getPrototypeOf(field) as object;
+    const setValue = Object.getOwnPropertyDescriptor(prototype, "value")?.set;
+    for (let length = 1; length <= text.length; length++) {
+      setValue?.call(field, text.slice(0, length));
+      field.dispatchEvent(
+        trustedEvent(new Event("input", { bubbles: true, composed: true })),
+      );
+    }
+  }
+
+  async function renderField(
+    tag: "textarea" | "input",
+    attributes: Record<string, unknown>,
+  ) {
+    (
+      globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
+    ).IS_REACT_ACT_ENVIRONMENT = true;
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    await act(async () =>
+      root.render(createElement(ControlledField, { tag, attributes })),
+    );
+    tracked.push(() => act(() => root.unmount()));
+    return host.querySelector(tag) as HTMLTextAreaElement & HTMLInputElement;
+  }
+
+  /** The content capture as a recording runs it, on the collector's clock, with every event it sends. */
+  function useEditCapture() {
+    // The events' timestamps hold the card's first group, which the leak checks must not read as the card.
+    const clock = spyOn(Date, "now").mockReturnValue(CARD_AND_PIN_CLOCK);
+    tracked.push(() => clock.mockRestore());
+    const settling = useCollectorClock();
+    const sent: CapturedEvent[] = [];
+    const capture = startEventCapture({
+      tracker: newTracker(),
+      send: (event) => sent.push(event),
+      timers: fakeTimers(),
+    });
+    stops.push(capture.stop);
+    return { sent, settle: settling.settle };
+  }
+
+  const editTarget = (sent: CapturedEvent[]) => {
+    const edits = sent.filter((event) => event.name === "input");
+    expect(edits).toHaveLength(1);
+    const [edit] = edits;
+    return (
+      edit as CapturedEvent & { value: { target: Record<string, unknown> } }
+    ).value.target;
+  };
+
+  /** No stretch of the card leaves: not the 15 digits a copy a keystroke behind holds, not the 12 before its last group. */
+  const expectNoPartOfTheCard = (sent: CapturedEvent[]) => {
+    const recorded = recordedText(sent);
+    expect(recorded).not.toContain("4111 1111 1111");
+    expect(recorded.replace(/\D/g, "")).not.toContain("411111111111");
+  };
+
+  test("a card typed into the chat box leaves no part of it in the edit's text, which React keeps a keystroke behind the value", async () => {
+    const box = await renderField("textarea", CHAT_BOX);
+    const { sent, settle } = useEditCapture();
+    act(() => typeInto(box, MESSAGE));
+    settle();
+
+    const target = editTarget(sent);
+    // As the end-to-end run saw it: the value holds the whole card, the text one keystroke less of it.
+    expect(box.value).toBe(MESSAGE);
+    expect(box.textContent).toBe(MESSAGE);
+    expect(target.value).toBe(
+      "Please look up this deal's history and then get it approved. Card on file for the invoice: [redacted]",
+    );
+    expect(target.text).toBe(target.value);
+    expectNoPartOfTheCard(sent);
+  });
+
+  test("a card typed into a React input leaves no part of it in the value attribute React keeps a keystroke behind", async () => {
+    const field = await renderField("input", {
+      type: "text",
+      name: "note",
+      placeholder: "Note for the invoice",
+    });
+    const { sent, settle } = useEditCapture();
+    act(() => typeInto(field, MESSAGE));
+    settle();
+
+    const target = editTarget(sent);
+    expect(field.getAttribute("value")).toBe(MESSAGE);
+    expect(target.value).toBe(
+      "Please look up this deal's history and then get it approved. Card on file for the invoice: [redacted]",
+    );
+    expect((target.attributes as Record<string, string>).value).toBe(
+      target.value as string,
+    );
+    expect((target.attributes as Record<string, string>).name).toBe("note");
+    expectNoPartOfTheCard(sent);
   });
 });

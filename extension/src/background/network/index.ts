@@ -25,7 +25,8 @@ import { callSignature, createRepeatMemory, screenCall } from "./screen";
 
 export type NetworkMode = "debugger" | "page" | "waiting" | "off";
 export type NetworkCaptureDeps = {
-  /** The OpenBot the recording's passes come from: its own calls are never captured. Null once nothing records. */
+  /** The OpenBot the recording's passes come from: its own calls are never a step's, and the AG-UI capture follows only its
+   * chat with a Bot. Null once nothing records. */
   openbotUrl(): string | null;
   /** A call that passed the screens, masked: for the steps to tell which they caused and which saved something. */
   call(call: StepCall): void;
@@ -64,6 +65,13 @@ const CANCELLED =
 const PAGE = "Chrome refused its debugger here.";
 const refusedSentence = (message: string) =>
   `Chrome would not let the Recorder see what each step saves here (${message}).`;
+
+/** OpenBot's CopilotKit runtime routes that run a Bot's agent or join its run: the runtime is mounted at /api/copilotkit
+ * (server/src/copilot.ts) with REST routes only, `/agent/<id>/run` and `/agent/<id>/connect`. */
+const OPENBOT_AGENT_RUN = /^\/api\/copilotkit\/agent\/[^/]+\/(?:run|connect)$/;
+/** CopilotKit Intelligence's client socket, as the page opens it from a run's join credentials (`<clientUrl>/websocket?
+ * join_token=...`): on OpenBot's own origin when a deployment serves Intelligence's gateway there. */
+const INTELLIGENCE_SOCKET = /\/websocket$/;
 
 const AUTO_ATTACH = {
   autoAttach: true,
@@ -140,6 +148,8 @@ export function createNetworkCapture(
     params?: Record<string, unknown>,
   ) => chrome.debugger.sendCommand(target, method, params);
 
+  /** OpenBot's own calls are never a step's call or save: its API hands the page secrets (a live Recorder connect code)
+   * that must never reach Intelligence. */
   const ignore = (url: string): boolean => {
     const openbot = deps.openbotUrl();
     if (!openbot) return false;
@@ -147,6 +157,24 @@ export function createNetworkCapture(
       return new URL(url).origin === new URL(openbot).origin;
     } catch {
       return false;
+    }
+  };
+
+  /** The AG-UI capture follows OpenBot's own page as it follows any other site's, but only in its chat with a Bot: the
+   * runs and joins it posts to OpenBot's CopilotKit runtime, whose answers are the agent's events or the Intelligence
+   * channel they stream on, and an Intelligence client socket it opens with a run's join credentials. Every other call to
+   * OpenBot stays ignored. The Recorder's own calls to OpenBot (its connection, its capture pass) come from the extension,
+   * never from a tab, and match neither. */
+  const ignoreAgent = (url: string): boolean => {
+    if (!ignore(url)) return false;
+    try {
+      const { pathname, searchParams } = new URL(url);
+      return !(
+        OPENBOT_AGENT_RUN.test(pathname) ||
+        (INTELLIGENCE_SOCKET.test(pathname) && searchParams.has("join_token"))
+      );
+    } catch {
+      return true;
     }
   };
 
@@ -163,7 +191,7 @@ export function createNetworkCapture(
 
   const agent = createAgentCapture({
     send,
-    ignore,
+    ignore: ignoreAgent,
     observe: (observation) => {
       if (!ended && mode !== "stopped") deps.agent(observation);
     },

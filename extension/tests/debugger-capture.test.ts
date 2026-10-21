@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   afterEach,
   beforeEach,
@@ -16,6 +18,7 @@ import {
   type NetworkCapture,
   type NetworkMode,
 } from "../src/background/network";
+import type { AgentObservation } from "../src/background/agent/observation";
 import type { PageFallback } from "../src/background/network/fallback";
 import type { StepCall } from "../src/background/steps";
 import { NETWORK_BODY_READ_MAX_BYTES } from "../src/shared/network-body";
@@ -50,6 +53,8 @@ let emitted: CapturedEvent[] = [];
 let started: string[] = [];
 let ended: string[] = [];
 let statuses: [NetworkMode | "stopped", string | undefined][] = [];
+/** What the capture handed the agent events. */
+let agentSeen: AgentObservation[] = [];
 let digests = new Set<string>();
 let fallbackCalls: string[] = [];
 let fallbackStarts = true;
@@ -102,6 +107,7 @@ beforeEach(() => {
   started = [];
   ended = [];
   statuses = [];
+  agentSeen = [];
   digests = new Set();
   fallbackCalls = [];
   fallbackStarts = true;
@@ -147,7 +153,7 @@ function captureDeps() {
     },
     writeStarted: (id: string) => started.push(id),
     writeEnded: (id: string) => ended.push(id),
-    agent: () => {},
+    agent: (observation: AgentObservation) => agentSeen.push(observation),
     status: (mode: NetworkMode | "stopped", reason?: string) =>
       statuses.push([mode, reason]),
     digests: () => digests,
@@ -362,18 +368,29 @@ test("images, scripts, stylesheets, fonts and a document request outside the top
   expect(commandsTo("Network.getResponseBody")).toHaveLength(1);
 });
 
-test("calls to OpenBot itself are ignored", async () => {
+test("calls to OpenBot itself are ignored, by the steps and by the agent events alike", async () => {
   await capture.start(7, "https://crm.example.test/");
+  // The Recorder's own capture pass and connect code, had a tab made them: a pass answers join credentials as an
+  // Intelligence run does, and neither is ever followed.
   request(7, {
     id: "1",
     url: `${OPENBOT}/api/copilotkit/trajectory/x/connect`,
     method: "POST",
-    body: "{}",
+    postData: "{}",
+    body: '{"joinToken":"join-token-1","realtime":{"clientUrl":"wss://intelligence.example.test/client","topic":"trajectory:x"}}',
+  });
+  request(7, {
+    id: "3",
+    url: `${OPENBOT}/api/recorder/connect-codes`,
+    method: "POST",
+    postData: "{}",
+    body: '{"code":"obc_live_connect_code"}',
   });
   request(7, { id: "2", url: "https://crm.example.test/api", body: "{}" });
   await until(() => emitted.length === 1, "one event");
   await settle();
   expect(value(emitted[0]).url).toBe("https://crm.example.test/api");
+  expect(agentSeen).toEqual([]);
 });
 
 test("a value typed into a sensitive field is scrubbed from a request body, a URL and a response", async () => {
@@ -933,6 +950,79 @@ test("telemetry, a beacon, a prefetch, a cancelled call, a repeat, an iframe's d
       (command) => (command.params as { requestId: string }).requestId,
     ),
   ).toEqual(["note"]);
+});
+
+test("CopilotKit's own capture batch is never a step's save, through the debugger or the page, its body inline or read late", async () => {
+  // The batches end-to-end runs 1 and 2 attached to Send and to Approve as their save.
+  const [send, , approve] = (
+    JSON.parse(
+      readFileSync(
+        join(import.meta.dir, "fixtures/e2e-learning-batches.json"),
+        "utf8",
+      ),
+    ) as { batches: { url: string; body: string; response: string }[] }
+  ).batches;
+  if (!send || !approve) throw new Error("the fixture's batches");
+  const json = { "content-type": "application/json" };
+  await capture.start(7, "http://127.0.0.1:7620/learning/deals/deal-1");
+  request(7, {
+    id: "batch",
+    url: send.url,
+    headers: json,
+    postData: send.body,
+    body: send.response,
+  });
+  // A batch past the 64 KiB Chrome sends inline, posted to a route the app chose: its body is read, then screened.
+  postData.late = approve.body;
+  request(7, {
+    id: "late",
+    url: "http://127.0.0.1:7620/api/copilot-capture",
+    headers: json,
+    hasPostData: true,
+    body: approve.response,
+  });
+  request(7, {
+    id: "note",
+    url: "http://127.0.0.1:7620/api/deals/deal-1/notes",
+    headers: json,
+    postData: '{"text":"Approved without the agent"}',
+    body: '{"id":7}',
+  });
+  await until(
+    () => calls.some((call) => call.url.endsWith("/notes")),
+    "the note",
+  );
+  await until(() => ended.length === 3, "every write ended");
+  await settle();
+  // The page hook's copy of the same batch, masked as the page sends it.
+  const now = Date.now();
+  await capture.recordPageEvent(7, {
+    type: "CUSTOM",
+    name: "network",
+    timestamp: now,
+    value: {
+      transport: "fetch",
+      method: "POST",
+      url: send.url,
+      status: 200,
+      outcome: "ok",
+      completedAt: now,
+      durationMs: 20,
+      capturedBy: "page",
+      request: {
+        headers: json,
+        body: { status: "complete", text: send.body },
+      },
+      response: {
+        headers: json,
+        body: { status: "complete", text: send.response },
+      },
+    },
+  });
+  expect(calls.map((call) => `${call.method} ${call.url}`)).toEqual([
+    "POST http://127.0.0.1:7620/api/deals/deal-1/notes",
+  ]);
+  expect([...started].sort()).toEqual([...ended].sort());
 });
 
 test("a write is in flight from its start until the steps have it, or until it is screened out", async () => {

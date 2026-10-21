@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   callSignature,
   createRepeatMemory,
@@ -118,4 +120,54 @@ test("screening drops an aborted call, telemetry, a prefetch and a repeat before
     screenCall({ ...call, headers: { "next-router-prefetch": "1" } }),
   ).toBe("prefetch");
   expect(screenCall({ ...call, repeat: true })).toBe("repeat");
+});
+
+/** CopilotKit's own capture batches that end-to-end runs 1 and 2 attached to a click as its save. */
+const LEARNING_BATCHES = (
+  JSON.parse(
+    readFileSync(
+      join(import.meta.dir, "fixtures/e2e-learning-batches.json"),
+      "utf8",
+    ),
+  ) as { batches: { url: string; body: string }[] }
+).batches;
+
+test("CopilotKit's own capture batch is the page reporting on itself, whatever route the page posts it to", () => {
+  expect(LEARNING_BATCHES).toHaveLength(3);
+  for (const { url, body } of LEARNING_BATCHES) {
+    expect(isTelemetry(url, body)).toBe(true);
+    expect(isTelemetry("https://crm.example.test/api/v2/sync", body)).toBe(
+      true,
+    );
+    expect(
+      screenCall({
+        url,
+        method: "POST",
+        outcome: "ok",
+        headers: { "content-type": "application/json" },
+        body,
+        repeat: false,
+      }),
+    ).toBe("telemetry");
+    // Cut short, it is still known by how CopilotKit's httpSink writes it.
+    expect(isTelemetry(url, body.slice(0, 120))).toBe(true);
+  }
+  // A batch with no events reports only what was lost; a batch scoped to learning containers names them.
+  expect(
+    isTelemetry(
+      "https://crm.example.test/api/learning-events",
+      '{"trajectoryId":"t-1","learningContainerIds":["c-1"],"events":[],"dropped":4}',
+    ),
+  ).toBe(true);
+  // A save that names a trajectory, or keeps events of its own, is no capture batch.
+  for (const body of [
+    '{"trajectoryId":"t-1","title":"Q3 review"}',
+    '{"events":[{"type":"CUSTOM","name":"x","timestamp":1,"value":{}}],"dropped":0}',
+    '{"trajectoryId":"t-1","events":[{"name":"Kickoff","date":"2026-10-21"}],"dropped":0}',
+    '{"trajectoryId":"t-1","events":[],"dropped":0,"owner":"ana"}',
+    '{"trajectoryId":"t-1","events":[{"name":"Kickoff","date":"2026-10-21"}',
+  ])
+    expect(isTelemetry("https://crm.example.test/api/trajectories", body)).toBe(
+      false,
+    );
 });

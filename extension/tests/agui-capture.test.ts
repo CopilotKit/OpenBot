@@ -38,6 +38,8 @@ let observations: AgentObservation[] = [];
 let calls: StepCall[] = [];
 let started: string[] = [];
 let steps: StepAssembler | null = null;
+/** The OpenBot the recording is connected to: a test recording OpenBot's own page names it. */
+let openbot = OPENBOT;
 
 const fallback: PageFallback = {
   start: async () => false,
@@ -53,9 +55,10 @@ beforeEach(() => {
   calls = [];
   started = [];
   steps = null;
+  openbot = OPENBOT;
   capture = createNetworkCapture(
     {
-      openbotUrl: () => OPENBOT,
+      openbotUrl: () => openbot,
       call: (call) => {
         calls.push(call);
         steps?.call(call);
@@ -418,6 +421,85 @@ test("CopilotKit through Intelligence: each run answers with its channel, and th
   expect(observations.filter(({ kind }) => kind === "event").length).toBe(
     delivered,
   );
+});
+
+test("a recording made in OpenBot itself sees its chat's runs, as on any other site, and none of OpenBot's other calls", async () => {
+  // Run 3b of the end-to-end check, recorded again over CDP: OpenBot's chat posts connect, then run, to its own
+  // CopilotKit runtime, and joins the Thread's channel on Intelligence's socket with the credentials connect answered.
+  const fixture = loadFixture("openbot-chat");
+  const navigate = String(marks(fixture, "navigate")[0]?.data?.url);
+  openbot = new URL(navigate).origin;
+  await capture.start(TAB, navigate);
+  await replay(fake, TAB, fixture).run();
+
+  const all = posts(fixture);
+  const connect = all.find(({ url }) =>
+    url.endsWith("/api/copilotkit/agent/general-assistant/connect"),
+  );
+  const run = all.find(({ url }) =>
+    url.endsWith("/api/copilotkit/agent/general-assistant/run"),
+  );
+  if (!connect || !run) throw new Error("no connect or run");
+  const thread = (connect.body as { threadId: string }).threadId;
+  expect(on(streamOf(connect.id))).toEqual([
+    expect.objectContaining({
+      kind: "request",
+      agentId: "general-assistant",
+      method: "agent/connect",
+      input: connect.body,
+    }),
+    expect.objectContaining({ kind: "end", outcome: "complete" }),
+  ]);
+  // The run this Intelligence refused: its request, and its end, failed.
+  expect(on(streamOf(run.id))).toEqual([
+    expect.objectContaining({
+      kind: "request",
+      agentId: "general-assistant",
+      method: "agent/run",
+      input: run.body,
+    }),
+    expect.objectContaining({ kind: "end", outcome: "failed" }),
+  ]);
+  expect((run.body as { threadId: string }).threadId).toBe(thread);
+  // OpenBot's other calls (its router, the channel, its busy flag and activity, the runtime's info, its polling) and
+  // its own channel socket are nothing to the agent events, and none of OpenBot's calls is ever a step's.
+  expect(new Set(observations.map(({ streamId }) => streamId))).toEqual(
+    new Set([streamOf(connect.id), streamOf(run.id)]),
+  );
+  expect(calls).toEqual([]);
+  expect(started).toEqual([]);
+});
+
+test("an Intelligence gateway served on OpenBot's own origin: the channel's socket is followed, its events the run's", async () => {
+  // The traffic of the Intelligence test above, with the gateway's origin as the connected OpenBot's, as a deployment
+  // that serves Intelligence's socket on OpenBot's host has it: the sockets opened with join credentials are followed,
+  // and each channel's ag_ui_event payloads are still that run's events.
+  const fixture = loadFixture("intelligence-websocket");
+  const sockets = events(fixture, "Network.webSocketCreated").filter(
+    ({ params }) =>
+      String(params.url).includes("/client/websocket?join_token="),
+  );
+  const [socket] = sockets;
+  if (!socket) throw new Error("no Intelligence socket");
+  openbot = new URL(String(socket.params.url).replace(/^ws/, "http")).origin;
+  await capture.start(TAB, String(marks(fixture, "navigate")[0]?.data?.url));
+  await replay(fake, TAB, fixture).run();
+  const ids = new Set(sockets.map(({ params }) => params.requestId));
+  const delivered = events(fixture, "Network.webSocketFrameReceived")
+    .filter(({ params }) => ids.has(params.requestId))
+    .map(({ params }) =>
+      phoenixFrame((params.response as { payloadData: string }).payloadData),
+    )
+    .filter(({ event }) => event === "ag_ui_event");
+  expect(delivered.length).toBeGreaterThan(20);
+  const seen = observations.filter(({ kind }) => kind === "event");
+  expect(
+    seen.map(
+      (observation) => observation.kind === "event" && observation.event,
+    ),
+  ).toEqual(delivered.map(({ payload }) => payload));
+  for (const observation of seen)
+    expect(observation).toMatchObject({ agentId: "default" });
 });
 
 // ---- Steps ------------------------------------------------------------------------------------
