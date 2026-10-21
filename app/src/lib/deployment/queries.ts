@@ -24,6 +24,11 @@ export type DeploymentCapabilities = {
    * for a deployment on a paid Intelligence plan.
    */
   selfHostBanner: boolean;
+  /**
+   * Whether this is somebody trying OpenBot on their own machine rather than an organization's
+   * deployment: single-user mode on the server, which only a local, unreachable install can be in.
+   */
+  localEvaluation: boolean;
   transcription?: boolean;
   voice?: boolean;
 };
@@ -62,6 +67,7 @@ export function deploymentCapabilitiesQueryOptions() {
       ).json()) as {
         generativeUi?: boolean;
         selfHostBanner?: boolean;
+        localEvaluation?: boolean;
         transcription?: boolean;
         voice?: boolean;
       };
@@ -69,6 +75,7 @@ export function deploymentCapabilitiesQueryOptions() {
       return {
         generativeUi: body.generativeUi === true,
         selfHostBanner: body.selfHostBanner === true,
+        localEvaluation: body.localEvaluation === true,
         transcription: body.transcription === true,
         voice: body.voice === true,
       };

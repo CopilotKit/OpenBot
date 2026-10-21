@@ -114,7 +114,7 @@ function singular(word: string): string {
  * is that the first word is a verb. Splitting on both and sentence-casing the result gets a phrase
  * that reads as an action without anybody maintaining a table of names.
  */
-function humanise(tool: string): string {
+export function humanise(tool: string): string {
   const words = wordsOf(tool).join(" ");
   if (words.length === 0) return tool;
   return words.charAt(0).toUpperCase() + words.slice(1);

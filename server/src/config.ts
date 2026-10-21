@@ -582,6 +582,7 @@ function reachOf(raw: string): Reach {
     return "public";
   }
   bare = bare.replace(/^\[|\]$/g, "").replace(/\.+$/, "");
+  if (!bare) return "public";
 
   if (
     bare === "localhost" ||

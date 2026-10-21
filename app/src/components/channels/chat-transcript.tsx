@@ -65,6 +65,7 @@ import { VOICE_CHAT_ACTIVITY, type VoiceChatEntry } from "@/lib/voice/archive";
 import {
   groupToolSteps,
   ToolActivity,
+  useDrawnTool,
   type TranscriptItem,
 } from "./tool-activity";
 import {
@@ -1520,6 +1521,7 @@ export function ChatTranscript({
   restoring = false,
   stopped,
 }: ChatTranscriptProps) {
+  const isDrawn = useDrawnTool();
   /*
    * NOT MEMOISED, AND THAT IS DELIBERATE. `useMemo` keyed on `messages` looks obviously right and
    * silently broke the transcript: the agent hands back the SAME array and mutates it, so the
@@ -1530,7 +1532,7 @@ export function ChatTranscript({
    * cost was markdown parsing and chart SVGs, and those are skipped by the memoised children below,
    * which is where the 25x came from. This runs per render and is not worth guarding.
    */
-  const items = groupToolSteps(toVisibleChatItems(messages));
+  const items = groupToolSteps(toVisibleChatItems(messages), isDrawn);
 
   /*
    * ONLY WHILE THERE IS NOTHING ELSE TO LOOK AT. Once a reply starts streaming, or a tool line

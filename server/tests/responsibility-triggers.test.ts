@@ -696,6 +696,39 @@ describe("inbound email via SES -> SNS", () => {
   test("MIME text extraction prefers text/plain and decodes quoted-printable", () => {
     expect(extractEmailText(mime)).toBe("The disk on db-1 is at 99%.");
   });
+  test("MIME text extraction decodes character references in an HTML-only part", () => {
+    const html = [
+      "Content-Type: text/html; charset=utf-8",
+      "",
+      "<p>Q3&nbsp;numbers for AT&amp;T: margin &lt; 5%, we&#8217;re &quot;on&nbsp;track&quot; &#x2014; &amp;lt; stays</p>",
+    ].join("\r\n");
+    expect(extractEmailText(html)).toBe(
+      'Q3 numbers for AT&T: margin < 5%, we’re "on track" — &lt; stays',
+    );
+  });
+  test("MIME text extraction decodes in the charset the part names", () => {
+    const latin1 = [
+      "Content-Type: text/plain; charset=iso-8859-1",
+      "Content-Transfer-Encoding: quoted-printable",
+      "",
+      "Caf=E9 ferm=E9 =E0 minuit.",
+    ].join("\r\n");
+    expect(extractEmailText(latin1)).toBe("Café fermé à minuit.");
+    const base64 = [
+      'Content-Type: text/plain; charset="windows-1252"',
+      "Content-Transfer-Encoding: base64",
+      "",
+      Buffer.from("Na\xefve r\xe9sum\xe9", "latin1").toString("base64"),
+    ].join("\r\n");
+    expect(extractEmailText(base64)).toBe("Naïve résumé");
+    const utf8 = [
+      "Content-Type: text/plain; charset=utf-8",
+      "Content-Transfer-Encoding: quoted-printable",
+      "",
+      "Caf=C3=A9",
+    ].join("\r\n");
+    expect(extractEmailText(utf8)).toBe("Café");
+  });
   test("signing certificate URLs must be HTTPS on an sns.<region>.amazonaws.com host", () => {
     expect(isSnsUrl(CERT_URL, true)).toBe(true);
     expect(

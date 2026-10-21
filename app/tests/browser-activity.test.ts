@@ -20,14 +20,20 @@ function step(
   };
 }
 
+// The computer tools the app draws itself, as CopilotKit's renderer registry would list them.
+const drawn = (name: string) =>
+  name.startsWith("computer_request_") || name === "computer_run_command";
+
 test("navigation and intervening browser actions become one stable row as results stream", () => {
   const first = step("one");
   const items = [first, step("read", "computer_read"), step("two")];
-  const grouped = groupToolSteps(items);
+  const grouped = groupToolSteps(items, drawn);
   expect(grouped).toEqual([{ kind: "tools", id: "one", steps: items }]);
   expect(
-    groupToolSteps([{ ...first, result: '{"ok":true}' }, ...items.slice(1)])[0]
-      ?.id,
+    groupToolSteps(
+      [{ ...first, result: '{"ok":true}' }, ...items.slice(1)],
+      drawn,
+    )[0]?.id,
   ).toBe("one");
   expect(items).toHaveLength(3);
 });
@@ -46,7 +52,7 @@ test("grouping keeps messages, other tools, and human assistance requests in the
     step("shell", "computer_run_command"),
   ];
   for (const boundary of boundaries) {
-    const grouped = groupToolSteps([step("one"), boundary, step("two")]);
+    const grouped = groupToolSteps([step("one"), boundary, step("two")], drawn);
     expect(grouped.map((item) => item.id)).toEqual(["one", boundary.id, "two"]);
     expect(grouped[1]).toBe(boundary);
   }

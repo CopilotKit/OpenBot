@@ -1,18 +1,26 @@
+import { WEB_HARNESSES } from "@openbot/shared/harnesses";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import Avatar from "boring-avatars";
 import { AnimatePresence, MotionConfig, motion } from "motion/react";
 import * as React from "react";
 import useMeasure from "react-use-measure";
+import { HarnessMark } from "@/components/agents/harness-mark";
 import AgentOrb from "@/components/agents/orb/agent-orb";
 import { Composer } from "@/components/channels/composer";
 import { DesktopIllustration } from "@/components/computer/desktop-illustration";
 import { ComputerPlaceholder } from "@/components/computer/placeholder";
-import { Button } from "@/components/ui/button";
+import { SELF_HOST_URL } from "@/components/layout/self-host-banner";
+import { IllustrationFrame } from "@/components/onboarding/illustration-frame";
+import { LaptopIllustration } from "@/components/onboarding/laptop-illustration";
+import { OrganizationFlow } from "@/components/onboarding/organization-flow";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { type AgentProfile, agentListQueryOptions } from "@/lib/agents/queries";
 import { currentUserQueryOptions, needsOnboarding } from "@/lib/auth/queries";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { appConfig } from "@/lib/generated/application-config";
 import { completeOnboardingMutationOptions } from "@/lib/onboarding/mutations";
+import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
 
 export const Route = createFileRoute("/_authed/onboarding")({
@@ -34,31 +42,37 @@ function WelcomeStep() {
       <h1 className="text-3xl font-semibold tracking-tight max-w-md text-center">
         Welcome to {appConfig.brand.productName}
       </h1>
-      <div className="h-32" />
-      <AgentOrb size="72px" />
-      {/*
-       * A POSTER OF A COMPOSER, AND `pointer-events-none` IS WHAT MAKES IT ONE. Nothing here is
-       * meant to be typed in, clicked or dropped on: it is a picture of the thing the person is
-       * about to get, shown while they read a sentence about it.
-       *
-       * THE DROP THAT PASSES STRAIGHT THROUGH IT IS SOMEBODY ELSE'S TO CATCH, WHICH IS WORTH
-       * SAYING OUT LOUD. The composer guards its own form against a dropped file navigating the
-       * whole app away (`refuseDragOver` in `composer.tsx`), and that guard cannot fire here: an
-       * element with no pointer events is never the target of the drop, so the event goes past it
-       * to the document as if this composer were not on the page. What catches it is
-       * `useUnclaimedDropGuard` in `routes/__root.tsx`, which refuses every drop nobody claimed —
-       * the reason that guard lives at the root rather than in the composer, and the reason this
-       * wrapper does not need to change to be safe. Taking `pointer-events-none` off to "fix" the
-       * drop would turn the poster back into a live composer with nowhere to upload to.
-       */}
-      <div className="max-w-md w-full mx-auto pointer-events-none mt-10">
-        <Composer
-          compact
-          className="scale-90"
-          editorClassName="text-base"
-          initialValue="Hand off tasks to your team of agents"
-        />
-      </div>
+      <div className="h-8" />
+      <IllustrationFrame
+        className="flex flex-col items-center px-8 pt-16 pb-10"
+        label="A message box where you hand off tasks to your agents"
+      >
+        <AgentOrb size="72px" />
+        {/*
+         * A POSTER OF A COMPOSER, AND THE FRAME AROUND IT IS WHAT MAKES IT ONE: `IllustrationFrame` is
+         * `pointer-events-none` and `inert`. Nothing here is
+         * meant to be typed in, clicked or dropped on: it is a picture of the thing the person is
+         * about to get, shown while they read a sentence about it.
+         *
+         * THE DROP THAT PASSES STRAIGHT THROUGH IT IS SOMEBODY ELSE'S TO CATCH, WHICH IS WORTH
+         * SAYING OUT LOUD. The composer guards its own form against a dropped file navigating the
+         * whole app away (`refuseDragOver` in `composer.tsx`), and that guard cannot fire here: an
+         * element with no pointer events is never the target of the drop, so the event goes past it
+         * to the document as if this composer were not on the page. What catches it is
+         * `useUnclaimedDropGuard` in `routes/__root.tsx`, which refuses every drop nobody claimed —
+         * the reason that guard lives at the root rather than in the composer, and the reason this
+         * wrapper does not need to change to be safe. Taking `pointer-events-none` off to "fix" the
+         * drop would turn the poster back into a live composer with nowhere to upload to.
+         */}
+        <div className="max-w-md w-full mx-auto mt-10">
+          <Composer
+            compact
+            className="scale-90"
+            editorClassName="text-base"
+            initialValue="Hand off tasks to your team of agents"
+          />
+        </div>
+      </IllustrationFrame>
     </div>
   );
 }
@@ -119,7 +133,10 @@ function RosterStep() {
         Choose from a variety of agents or create your own
       </h1>
       <div className="h-8" />
-      <div className="w-full max-w-lg overflow-hidden grid grid-cols-1 md:grid-cols-2 gap-4">
+      <IllustrationFrame
+        className="grid grid-cols-1 md:grid-cols-2 gap-4 p-6"
+        label={`Bots you can work with, such as ${roster.map((a) => a.name).join(", ")}, and one of your own`}
+      >
         {roster.map((a) => {
           return (
             <div
@@ -145,7 +162,105 @@ function RosterStep() {
             Your own agent
           </h3>
         </div>
-      </div>
+      </IllustrationFrame>
+    </div>
+  );
+}
+
+/*
+ * THE THREE SLIDES BELOW ARE FOR SOMEBODY TRYING OPENBOT ON THEIR OWN MACHINE, and only they see them
+ * (see `localEvaluation` in RouteComponent). They answer what that person is deciding: where their
+ * data is, whether their own agents fit, and what taking it to their organization involves (OB-02 in
+ * the product backlog). None of it is said to an organization's own people, who are past all three.
+ */
+
+function LocalStep() {
+  return (
+    <div className="w-full flex flex-col items-center justify-center">
+      <h1 className="text-3xl font-semibold tracking-tight max-w-md text-center">
+        It runs on your machine
+      </h1>
+      {/*
+       * "Stored", and the model named, because "your data never leaves" would be untrue: every turn
+       * goes to the model provider this install was set up with. What stays is everything kept. No
+       * word about sign-in either: activating a local install signs you in to CopilotKit.
+       */}
+      <p className="mt-3 max-w-md text-center text-muted-foreground">
+        Your conversations, files and Bots are stored on this computer. Only
+        what you send to your model leaves it.
+      </p>
+      <div className="h-8" />
+      <IllustrationFrame
+        className="flex items-center justify-center px-8 py-12"
+        label={`A laptop running ${appConfig.brand.productName}`}
+      >
+        <LaptopIllustration />
+      </IllustrationFrame>
+    </div>
+  );
+}
+
+/** Every framework the New Bot wizard offers by name; "an agent you already run" is the sentence. */
+const FRAMEWORKS = WEB_HARNESSES.filter((harness) => harness.id !== "byo-url");
+
+function AgentsStep() {
+  return (
+    <div className="w-full flex flex-col items-center justify-center">
+      <h1 className="text-3xl font-semibold tracking-tight max-w-md text-center">
+        Bring the agents you already have
+      </h1>
+      <p className="mt-3 max-w-md text-center text-muted-foreground">
+        Any agent that speaks AG-UI joins as a Bot. Add one any time from Bots,
+        then New Bot.
+      </p>
+      <div className="h-8" />
+      <IllustrationFrame
+        className="flex flex-wrap justify-center gap-2 p-6"
+        label={`Frameworks that work as Bots: ${FRAMEWORKS.map((harness) => harness.name).join(", ")}`}
+      >
+        {FRAMEWORKS.map((harness) => (
+          <span
+            className="flex items-center gap-2 rounded-full bg-card px-3 py-1.5 text-sm"
+            key={harness.id}
+          >
+            <HarnessMark id={harness.mark} name={harness.name} />
+            {harness.name}
+          </span>
+        ))}
+      </IllustrationFrame>
+    </div>
+  );
+}
+
+function OrganizationStep() {
+  return (
+    <div className="w-full flex flex-col items-center justify-center">
+      <h1 className="text-3xl font-semibold tracking-tight max-w-md text-center">
+        Deploy it for your organization
+      </h1>
+      <p className="mt-3 max-w-md text-center text-muted-foreground">
+        One container image, or a Helm chart for EKS, GKE and AKS, with sign-in
+        through Google, Microsoft or Okta.
+      </p>
+      <div className="h-8" />
+      <IllustrationFrame
+        className="flex justify-center px-6 py-8"
+        label="Your people sign in with Google, Microsoft or Okta, and your organization gets its own rules, its own Bots and an audit trail"
+      >
+        <OrganizationFlow />
+      </IllustrationFrame>
+      {/*
+       * The one real control on these slides, so it sits outside the frame: a frame means picture.
+       * A new tab, because following it must not cost this person their place in onboarding.
+       */}
+      <a
+        className={cn(buttonVariants({ variant: "outline" }), "mt-6")}
+        href={SELF_HOST_URL}
+        rel="noopener noreferrer"
+        target="_blank"
+      >
+        Talk to an engineer
+      </a>
     </div>
   );
 }
@@ -174,7 +289,26 @@ function RouteComponent() {
   const [leaving, setLeaving] = React.useState(false);
   const [ref, bounds] = useMeasure();
 
-  const last = step === STEPS.length - 1;
+  /*
+   * The last three slides are for somebody evaluating OpenBot locally, never for an organization's people:
+   * the server says single-user mode, which an organization's deployment, always behind sign-in,
+   * cannot be in. Until the answer arrives they are left out, so a slow or failed request never
+   * shows an organization's employees a page about deploying OpenBot themselves.
+   *
+   * NOT GATED ON `selfHostBanner` AS WELL. That flag is off for any deployment with a paid
+   * Intelligence entitlement, and the stack `copilotkit local` installs runs on an enterprise
+   * evaluation licence, so every CLI evaluator, the person these slides are for, would never see them.
+   */
+  const { data: capabilities } = useQuery(deploymentCapabilitiesQueryOptions());
+  const steps = capabilities?.localEvaluation
+    ? [
+        ...STEPS,
+        () => <LocalStep />,
+        () => <AgentsStep />,
+        () => <OrganizationStep />,
+      ]
+    : STEPS;
+  const last = step === steps.length - 1;
 
   const go = (to: number) => {
     setDirection(to > step ? 1 : -1);
@@ -218,7 +352,7 @@ function RouteComponent() {
                   key={step}
                   variants={variants}
                 >
-                  {STEPS[step]()}
+                  {steps[step]?.()}
                 </motion.div>
               </AnimatePresence>
 

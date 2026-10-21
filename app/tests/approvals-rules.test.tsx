@@ -415,6 +415,8 @@ test("in the real transcript shape a waiting click is folded into browser activi
         content: '{"ok":true,"url":"https://httpbin.org/forms/post"}',
       },
     ] as never),
+    // Browser steps fold whatever the app draws, so nothing else needs naming here.
+    () => false,
   );
   const group = items.find((item) => item.kind === "tools");
   if (group?.kind !== "tools") throw new Error("no tool group");

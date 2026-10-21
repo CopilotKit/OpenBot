@@ -30,6 +30,10 @@ const IMAGES: &str = "container-images.json";
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Installed {
     pub version: String,
+    /// The top-level entries this app laid out. A stamp written before this existed reads as
+    /// empty, which never matches, so that deployment is laid out again.
+    #[serde(default)]
+    pub layout: Vec<String>,
 }
 
 /// The tarball GitHub publishes for a tag.
@@ -141,6 +145,7 @@ pub fn record(root: &Path, version: &str) -> std::io::Result<()> {
     std::fs::create_dir_all(root)?;
     let stamp = Installed {
         version: version.to_string(),
+        layout: layout(),
     };
     std::fs::write(
         stamp_path(root),
@@ -157,14 +162,29 @@ pub fn record(root: &Path, version: &str) -> std::io::Result<()> {
 /// The image manifest is the one exception. A deployment laid down by an app that predates it has a
 /// stamp that matches and no manifest, and re-fetching is a better answer than an error about a
 /// file the person has never heard of.
+///
+/// So is a stamp that laid out less than this app copies. An app that left a folder out wrote a
+/// stamp that still matches its version, and Repair would otherwise keep the gap forever.
 pub fn needs_fetch(root: &Path, wanted: &str) -> bool {
     if !images_path(root).exists() {
         return true;
     }
     match installed(root) {
-        Some(found) => found.version != wanted,
+        // A deployment laid out by an app that copied less is missing something this one runs.
+        Some(found) => found.version != wanted || found.layout != layout(),
         None => true,
     }
+}
+
+/// What this app lays out, in a fixed order, as recorded in the stamp.
+fn layout() -> Vec<String> {
+    let mut entries: Vec<String> = REQUIRED
+        .iter()
+        .chain(ALSO_COPIED.iter())
+        .map(|entry| entry.to_string())
+        .collect();
+    entries.sort();
+    entries
 }
 
 /// Everything the three host processes and Compose need from the tree.
@@ -175,8 +195,12 @@ pub fn needs_fetch(root: &Path, wanted: &str) -> bool {
 pub const REQUIRED: [&str; 4] = ["docker-compose.yml", "server", "app", "worker"];
 
 /// The rest of what a deployment needs, which is not what it is checked for.
-pub const ALSO_COPIED: [&str; 8] = [
+pub const ALSO_COPIED: [&str; 9] = [
     "shared",
+    // Not a workspace, but the server imports its egress rules from `agent-computer/src` and
+    // `scripts/start-local-chrome-computer.ts` its browser runtime. Without it the server exits at
+    // start with `Cannot find module '../../../agent-computer/src/egress'`.
+    "agent-computer",
     // A root workspace the server imports as `@openbot/toolkit`. Without it, `bun install
     // --frozen-lockfile` stops with `Workspace not found "toolkit"`.
     "toolkit",
@@ -531,6 +555,117 @@ mod tests {
         assert!(!docs, "the rest of the tree is not part of a deployment");
     }
 
+    /// Relative module specifiers in one source file: `from "..."`, `import("...")` and
+    /// `require("...")`, with either quote. Package names are not relative and are skipped.
+    fn relative_imports(source: &str) -> Vec<String> {
+        let mut found = Vec::new();
+        for opener in [
+            "from \"",
+            "from '",
+            "import(\"",
+            "import('",
+            "require(\"",
+            "require('",
+        ] {
+            let quote = opener.chars().last().unwrap();
+            for (at, _) in source.match_indices(opener) {
+                let rest = &source[at + opener.len()..];
+                if let Some(end) = rest.find(quote) {
+                    let specifier = &rest[..end];
+                    if specifier.starts_with("./") || specifier.starts_with("../") {
+                        found.push(specifier.to_owned());
+                    }
+                }
+            }
+        }
+        found
+    }
+
+    fn sources_under(dir: &Path, into: &mut Vec<PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if path.is_dir() {
+                // Tests and build output run from a checkout, never from a deployment.
+                if !matches!(
+                    name.as_str(),
+                    "node_modules" | "dist" | "tests" | "test" | "__tests__"
+                ) {
+                    sources_under(&path, into);
+                }
+            } else if [".ts", ".tsx", ".js", ".mjs", ".cjs"]
+                .iter()
+                .any(|suffix| name.ends_with(suffix))
+                && !name.contains(".test.")
+                && !name.contains(".spec.")
+            {
+                into.push(path);
+            }
+        }
+    }
+
+    /// `#673` made the server import `../../../agent-computer/src/egress`, and the unpacker kept
+    /// copying only the folders listed here, so every new Desktop install of v0.2.0 had a server
+    /// that exited at start with `Cannot find module`. A checkout has every folder, which is why
+    /// nothing caught it. This walks the real tree: whatever the unpacked code imports by a
+    /// relative path has to be something the unpacker keeps.
+    #[test]
+    fn everything_the_unpacked_code_imports_is_unpacked_too() {
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .unwrap();
+        let kept: Vec<&str> = REQUIRED.iter().chain(ALSO_COPIED.iter()).copied().collect();
+        let mut files = Vec::new();
+        for top in &kept {
+            sources_under(&repo.join(top), &mut files);
+        }
+        assert!(
+            files
+                .iter()
+                .any(|file| file.starts_with(repo.join("server"))),
+            "the walk found no server sources, so it proves nothing"
+        );
+
+        let mut missing = Vec::new();
+        for file in &files {
+            let Ok(source) = std::fs::read_to_string(file) else {
+                continue;
+            };
+            for specifier in relative_imports(&source) {
+                let mut resolved = file.parent().unwrap().to_path_buf();
+                for part in Path::new(&specifier).components() {
+                    match part {
+                        std::path::Component::ParentDir => {
+                            resolved.pop();
+                        }
+                        std::path::Component::Normal(name) => resolved.push(name),
+                        _ => {}
+                    }
+                }
+                let top = resolved
+                    .strip_prefix(&repo)
+                    .ok()
+                    .and_then(|inside| inside.components().next())
+                    .map(|first| first.as_os_str().to_string_lossy().into_owned());
+                if !top.as_deref().is_some_and(|top| kept.contains(&top)) {
+                    missing.push(format!(
+                        "{} imports {specifier}",
+                        file.strip_prefix(&repo).unwrap_or(file).display()
+                    ));
+                }
+            }
+        }
+        assert!(
+            missing.is_empty(),
+            "a deployment would not contain what these import:\n{}",
+            missing.join("\n")
+        );
+    }
+
     #[test]
     fn a_recorded_version_is_not_fetched_again() {
         let dir = std::env::temp_dir().join(format!("openbot-dep-same-{}", std::process::id()));
@@ -541,6 +676,24 @@ mod tests {
             needs_fetch(&dir, "v0.0.8"),
             "a newer version has to be fetched"
         );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// v0.2.0 installs were laid out by an app that did not copy `agent-computer`, and their stamp
+    /// matches the version they run, so Repair never fetched again and the server never started.
+    /// A stamp says what it laid out; one that laid out less than this app copies is fetched once.
+    #[test]
+    fn a_deployment_laid_out_by_an_app_that_copied_less_is_fetched_again() {
+        let dir = std::env::temp_dir().join(format!("openbot-dep-layout-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(images_path(&dir), "{}").unwrap();
+        // Exactly what an earlier app wrote.
+        std::fs::write(stamp_path(&dir), r#"{"version":"v0.2.0"}"#).unwrap();
+        assert!(needs_fetch(&dir, "v0.2.0"));
+        assert_eq!(installed(&dir).unwrap().version, "v0.2.0");
+
+        record(&dir, "v0.2.0").unwrap();
+        assert!(!needs_fetch(&dir, "v0.2.0"));
         std::fs::remove_dir_all(&dir).ok();
     }
 
