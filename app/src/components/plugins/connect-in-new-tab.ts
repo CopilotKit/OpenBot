@@ -1,6 +1,8 @@
 import { useMutation } from "@tanstack/react-query";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { connectAccountMutationOptions } from "@/lib/plugins/mutations";
+import { pluginKeys } from "@/lib/plugins/queries";
+import { queryClient } from "@/query-client";
 
 /**
  * Start this person's own connection to one app in a new tab, the way Settings starts it.
@@ -27,6 +29,56 @@ export function useConnectInNewTab() {
   const connect = useMutation(connectAccountMutationOptions());
   // Stable, so a caller can list it in an effect's dependencies without re-running it every render.
   const stopWaiting = useCallback(() => setWaiting(false), []);
+  /** The tab the consent is open in, while there is one to watch. */
+  const handle = useRef<Window | null>(null);
+
+  /*
+   * A CLOSED TAB ENDS THE WAIT ONCE THIS TAB HAS THE FOCUS BACK. Somebody who closes the sign-in
+   * tab without finishing has given up, and a button still saying "Waiting for Gmail…" a minute
+   * later is waiting for nothing — so the handle is checked every second, and once it reads closed
+   * the wait ends and the plugin screens are asked once more, in case the consent did finish before
+   * the tab went.
+   *
+   * CLOSED MAY ALSO MEAN SEVERED, WHICH IS WHY THE FOCUS DECIDES. A vendor's sign-in page that sends
+   * a strict Cross-Origin-Opener-Policy — Google's does — moves the tab into a browsing context of
+   * its own, and the handle this tab holds then reads closed while the person is still on the
+   * consent screen. The handle cannot tell the two apart; the focus can. Closing a tab hands the
+   * focus straight back here, so the wait ends at once; a severed tab keeps it, so the button goes
+   * on waiting until the person comes back to this one, which is when there is an answer to show.
+   */
+  const onReturn = useRef<(() => void) | null>(null);
+  useEffect(() => {
+    if (!waiting) return;
+    const finish = () => {
+      onReturn.current = null;
+      setWaiting(false);
+      void queryClient.invalidateQueries({ queryKey: pluginKeys.all });
+    };
+    const timer = setInterval(() => {
+      if (!handle.current?.closed || onReturn.current) return;
+      handle.current = null;
+      if (document.hasFocus()) {
+        finish();
+        return;
+      }
+      onReturn.current = finish;
+      window.addEventListener("focus", finish, { once: true });
+    }, 1_000);
+    return () => clearInterval(timer);
+  }, [waiting]);
+  // Goes with whoever drew the button, and with a wait that ended some other way first.
+  useEffect(() => {
+    if (waiting || !onReturn.current) return;
+    window.removeEventListener("focus", onReturn.current);
+    onReturn.current = null;
+  }, [waiting]);
+  useEffect(
+    () => () => {
+      if (onReturn.current)
+        window.removeEventListener("focus", onReturn.current);
+    },
+    [],
+  );
 
   /**
    * The tab, opened on the click itself rather than on the answer to it.
@@ -49,6 +101,7 @@ export function useConnectInNewTab() {
 
   const open = (serverId: string) => {
     const tab = claimTab();
+    handle.current = tab;
     connect.mutate(serverId, {
       onSuccess: (authorizationUrl) => {
         /*
@@ -58,6 +111,7 @@ export function useConnectInNewTab() {
          */
         if (!authorizationUrl) {
           tab?.close();
+          handle.current = null;
           setNeedsKey(true);
           return;
         }
@@ -66,7 +120,10 @@ export function useConnectInNewTab() {
         // The tab was blocked. The url is still good, so offer it as something to click.
         else setBlockedUrl(authorizationUrl);
       },
-      onError: () => tab?.close(),
+      onError: () => {
+        tab?.close();
+        handle.current = null;
+      },
     });
   };
 

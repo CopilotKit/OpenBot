@@ -55,8 +55,9 @@ export function cancelAppAccessRequestMutationOptions(
 }
 
 /**
- * Approve a request by doing what it asks. `refs` narrows a grant to those tools; absent, the Bot is
- * granted every tool the app advertises. Answers with what changed.
+ * Approve a request by doing what it asks. `refs` names the tools to grant; absent, the Bot is
+ * granted the app's read-only tools only, and an app with none is answered 409 with a sentence
+ * pointing at the Bot's page, where the others are chosen. Answers with what changed.
  */
 export function approveAppAccessRequestMutationOptions(
   queryClient: QueryClient,

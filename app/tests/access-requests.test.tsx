@@ -140,8 +140,13 @@ function draw(Page: () => ReactNode) {
     path: "/admin/plugins/composio",
     component: () => null,
   });
+  const bot = createRoute({
+    getParentRoute: () => root,
+    path: "/admin/plugins/$key/bots/$agentId",
+    component: () => null,
+  });
   const router = createRouter({
-    routeTree: root.addChildren([page, app, composio]),
+    routeTree: root.addChildren([page, app, composio, bot]),
     history: createMemoryHistory({ initialEntries: ["/"] }),
   });
   return render(
@@ -202,6 +207,66 @@ test("an approval the server cannot complete says why, on the request, and leave
     /^The shared Gmail account is not connected yet\./,
   );
   expect(row.getByRole("button", { name: "Approve" })).toBeTruthy();
+});
+
+test("a grant says approving gives the Bot read-only actions, and links to where the others are chosen", async () => {
+  serving({ requests: [request()] });
+  const view = draw(() => <AccessRequestsSection app="composio-gmail" />);
+  const element = (await view.findByText("Give Gmail to Expenses")).closest(
+    "[data-request]",
+  ) as HTMLElement;
+  const row = within(element);
+  expect(element.textContent).toContain(
+    "Approving gives Expenses only Gmail's read-only actions. Choose any others on the Bot's page under Gmail.",
+  );
+  const page = row.getByRole("link", {
+    name: "the Bot's page under Gmail",
+  });
+  expect(page.getAttribute("href")).toBe(
+    "/admin/plugins/composio-gmail/bots/expenses",
+  );
+});
+
+test("switching an app on for a Bot says the same, with no link to a page the app does not have yet", async () => {
+  serving({ requests: [request({ kind: "enable" })] });
+  const view = draw(() => <AccessRequestsSection app="composio-gmail" />);
+  const row = within(
+    (await view.findByText("Turn on Gmail for Expenses")).closest(
+      "[data-request]",
+    ) as HTMLElement,
+  );
+  expect(
+    row.getByText(
+      /Approving gives Expenses only Gmail's read-only actions\. Choose any others on the Bot's page under Gmail\./,
+    ),
+  ).toBeTruthy();
+  expect(row.queryByRole("link")).toBeNull();
+});
+
+test("connecting the shared account says nothing about actions", async () => {
+  serving({ requests: [request({ kind: "connect_shared" })] });
+  const view = draw(() => <AccessRequestsSection app="composio-gmail" />);
+  await view.findByText("Connect the shared Gmail account");
+  expect(view.queryByText(/read-only/)).toBeNull();
+});
+
+test("an app with no read-only actions is refused on the row, which stays", async () => {
+  serving({
+    requests: [request()],
+    approve: {
+      status: 409,
+      body: {
+        error:
+          "Gmail has no read-only actions to grant. Choose which actions Expenses may use on its page under Gmail.",
+      },
+    },
+  });
+  const view = draw(() => <AccessRequestsSection app="composio-gmail" />);
+  fireEvent.click(await view.findByRole("button", { name: "Approve" }));
+  expect((await view.findByRole("alert")).textContent).toMatch(
+    /^Gmail has no read-only actions to grant\./,
+  );
+  expect(view.getByText("Give Gmail to Expenses")).toBeTruthy();
 });
 
 test("dismiss goes to the dismiss route", async () => {

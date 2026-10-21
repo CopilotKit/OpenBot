@@ -63,7 +63,6 @@ test("every app-access key sits under the plugin root, so plugin writes refresh 
     appAccessKeys.all,
     appAccessKeys.bot("b"),
     appAccessKeys.app("b", "Gmail"),
-    appAccessKeys.mine(),
     appAccessKeys.inbox("composio-gmail"),
   ])
     expect(key.slice(0, 1)).toEqual([...pluginKeys.all]);

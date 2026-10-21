@@ -12,11 +12,15 @@ import { client } from "@/lib/client";
  */
 
 /**
- * The six things a person can be told about one app on one Bot.
+ * The seven things a person can be told about one app on one Bot.
  *
- * `ready` — usable now. `not_connected` / `reconnect` — waiting on this person's own account, which
- * they connect or reconnect themselves. `shared_not_connected` — a Shared app whose team account an
- * administrator has not connected. `disabled` — switched off at the deployment. `not_granted` —
+ * `ready` — usable now. `not_connected` / `reconnect` — waiting on an account: this person's own,
+ * which they connect or reconnect themselves, or on somebody else's Team Bot the owner's, which only
+ * the owner can (see `accountHolder`). `shared_not_connected` — a Shared app whose team account an
+ * administrator has not connected. `shared_not_approved` — a Shared app whose team account IS
+ * connected, but an administrator has not approved this Bot's audience for it, so every call is
+ * refused; the refused call files the administrator's request itself, so there is none to press.
+ * `disabled` — switched off at the deployment, for the reason `unavailable` gives. `not_granted` —
  * enabled, and this Bot holds none of it.
  */
 export type AppAccessState =
@@ -24,8 +28,21 @@ export type AppAccessState =
   | "not_connected"
   | "reconnect"
   | "shared_not_connected"
+  | "shared_not_approved"
   | "disabled"
   | "not_granted";
+
+/**
+ * Why an app is switched off. `absent` — nobody switched it on here. `composio_unconfigured` — a
+ * Composio app on a deployment with no Composio key. The other three — a scheme the server cannot
+ * read, an OAuth client nobody registered, a token nobody pasted — are a set-up left unfinished.
+ */
+export type AppUnavailable =
+  | "absent"
+  | "composio_unconfigured"
+  | "scheme_unreadable"
+  | "oauth_client_missing"
+  | "token_missing";
 
 /** What a press of Request access asks an administrator for. */
 export type AppAccessRequestKind = "enable" | "grant" | "connect_shared";
@@ -44,6 +61,19 @@ export type AppAccess = {
   authScheme: string | null;
   accountMode: "personal" | "shared" | null;
   state: AppAccessState;
+  /** Why the app is switched off, when state is "disabled"; null otherwise. */
+  unavailable: AppUnavailable | null;
+  /**
+   * Whose account a personal-account app's calls use for this person on this Bot: "you", or "owner"
+   * when this is somebody else's published Team Bot and its owner has connected the app (calls then
+   * run on the owner's account). null when the app is not a personal-account app.
+   */
+  accountHolder: "you" | "owner" | null;
+  /**
+   * True when calls will use this person's OWN account on somebody else's Team Bot and they have not
+   * given standing consent: the first use raises an "Allow once / Always allow" card. State is "ready".
+   */
+  asksFirst: boolean;
   /** Whether this Bot holds any of the app's tools. */
   granted: boolean;
   /**
@@ -90,7 +120,6 @@ export const appAccessKeys = {
   bot: (agentId: string) => ["plugins", "app-access", "bot", agentId] as const,
   app: (agentId: string, app: string) =>
     ["plugins", "app-access", "bot", agentId, "app", app] as const,
-  mine: () => ["plugins", "app-access", "mine"] as const,
   inbox: (app?: string) =>
     ["plugins", "app-access", "inbox", { app: app ?? null }] as const,
 };
@@ -119,17 +148,6 @@ export function botAppQueryOptions(agentId: string, app: string) {
         "app",
         { fallback: `What ${app} is for this Bot could not be loaded.` },
       ),
-  });
-}
-
-/** The person's own pending requests. */
-export function myAppAccessRequestsQueryOptions() {
-  return queryOptions({
-    queryKey: appAccessKeys.mine(),
-    queryFn: (): Promise<AppAccessRequest[]> =>
-      client("/api/plugins/access-requests/mine", "requests", {
-        fallback: "Your access requests could not be loaded.",
-      }),
   });
 }
 

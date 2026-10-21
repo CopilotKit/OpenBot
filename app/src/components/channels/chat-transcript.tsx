@@ -1364,7 +1364,8 @@ export function ServerToolLine({
   name: string;
   result?: string;
 }) {
-  const { label, detail } = readToolName(name);
+  const running = result === undefined;
+  const { label, detail } = readToolName(name, running);
   /*
    * A refusal is not a result, and must not read like one.
    *
@@ -1397,17 +1398,24 @@ export function ServerToolLine({
       ? readConnectPrompt(answer)
       : null;
   if (card) return <AppAccessCard prompt={card} />;
+  /*
+   * THAT TOOL'S OTHER ANSWERS ARE FOR THE MODEL. An app nobody can name comes back as plain text
+   * telling the Bot to say so plainly and not to browse to it — an instruction, which read by the
+   * person looks like the Bot being told off in front of them. The line still says the check
+   * happened; the Bot's own reply says what it found.
+   */
+  const shown = name === SHOW_APP_ACCESS_TOOL ? undefined : body;
   return (
     <ToolLine
       {...(detail ? { detail } : {})}
       label={label}
       refused={refused}
       failed={failed}
-      running={result === undefined}
+      running={running}
     >
-      {body ? (
+      {shown ? (
         <Streamdown components={markdownComponents}>
-          {forDisplay(body)}
+          {forDisplay(shown)}
         </Streamdown>
       ) : null}
     </ToolLine>

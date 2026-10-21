@@ -148,3 +148,18 @@ describe("naming a tool call", () => {
     });
   });
 });
+
+describe("this deployment's own tools", () => {
+  test("show_app_access is named for what it is doing, then for what it did", () => {
+    expect(readToolName("show_app_access", true)).toEqual({
+      label: "Checking app access",
+    });
+    expect(readToolName("show_app_access")).toEqual({
+      label: "Checked app access",
+    });
+  });
+
+  test("any other bare name is left exactly as it is", () => {
+    expect(readToolName("run_command", true)).toEqual({ label: "run_command" });
+  });
+});

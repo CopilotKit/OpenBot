@@ -1,3 +1,4 @@
+import { SHOW_APP_ACCESS_TOOL } from "@openbot/shared/connect-prompt";
 import {
   RESEARCH_ROLE_LABELS,
   researchRoleOfTool,
@@ -21,7 +22,9 @@ export type ToolName = {
   detail?: string;
 };
 
-export function readToolName(name: string): ToolName {
+export function readToolName(name: string, running = false): ToolName {
+  const own = ownToolLabel(name, running);
+  if (own) return { label: own };
   const parts = name.split("__");
   if (parts.length < 3 || parts[0] !== "mcp") return { label: name };
 
@@ -72,6 +75,28 @@ export function readToolName(name: string): ToolName {
   const serverWords = wordsOf(broker ?? server).map(singular);
   const named = containsPhrase(wordsActedOn, serverWords);
   return named ? { label } : { label, detail: broker ?? server };
+}
+
+/**
+ * The tools every Bot holds that this deployment wrote itself, named in words somebody chose.
+ *
+ * These are not MCP names, so nothing above rewrites them, and the bare identifier is what a line
+ * would otherwise say: "show_app_access", shimmering, while the Bot works out what an app is for the
+ * person. Named twice, for the moment and for afterwards, because only these lines are drawn while
+ * running AND left on screen once done.
+ */
+const OWN_TOOLS: Record<string, { running: string; done: string }> = {
+  [SHOW_APP_ACCESS_TOOL]: {
+    running: "Checking app access",
+    done: "Checked app access",
+  },
+};
+
+/** One of this deployment's own tools in words, or null for any other name. */
+export function ownToolLabel(name: string, running = false): string | null {
+  const own = OWN_TOOLS[name];
+  if (!own) return null;
+  return running ? own.running : own.done;
 }
 
 /**

@@ -7,11 +7,7 @@ import {
   cancelAppAccessRequestMutationOptions,
   requestAppAccessMutationOptions,
 } from "@/lib/app-access/mutations";
-import {
-  type AppAccess,
-  type AppAccessState,
-  appAccessKeys,
-} from "@/lib/app-access/queries";
+import { type AppAccess, appAccessKeys } from "@/lib/app-access/queries";
 import { queryClient } from "@/query-client";
 
 /**
@@ -22,10 +18,12 @@ import { queryClient } from "@/query-client";
  * whether this person can use this app through this Bot, whose move it is if not, and the button
  * for that move — so both draw it from here, and a sentence corrected for one is corrected for both.
  *
- * WHO CAN FIX IT IS THE WHOLE SENTENCE. Six states reduce to three answers: nothing to do, a step
- * that is yours (connect, reconnect), and a step only an administrator can take (switch it on,
- * grant it, connect the team account). The copy names which, because "Gmail is unavailable" sends
- * somebody hunting through their own settings for a switch that is not there.
+ * WHO CAN FIX IT IS THE WHOLE SENTENCE. Seven states reduce to four answers: nothing to do, a step
+ * that is yours (connect, reconnect), a step only an administrator can take (switch it on, finish
+ * setting it up, grant it, connect or approve the team account), and on somebody else's Team Bot a
+ * step only its owner can take (reconnect the account the Bot runs on). The copy names which,
+ * because "Gmail is unavailable" sends somebody hunting through their own settings for a switch that
+ * is not there.
  *
  * THE STATE IS THE SERVER'S. It arrives on `access` and is drawn as it is; nothing here works out
  * from `granted` or `accountMode` what the state ought to be. The one exception is the caller's: a
@@ -34,23 +32,50 @@ import { queryClient } from "@/query-client";
  */
 
 /** What the person is told about one app, in words that say whose move it is. */
-export function appAccessSentence(
-  state: AppAccessState,
-  displayName: string,
-): string {
-  switch (state) {
+export function appAccessSentence(access: AppAccess): string {
+  const name = access.displayName;
+  const owners = access.accountHolder === "owner";
+  switch (access.state) {
     case "ready":
+      if (owners)
+        return `Ready to use. This Bot uses its owner's ${name} account.`;
+      if (access.asksFirst)
+        return `Ready to use with your own ${name} account. You'll be asked to allow it the first time.`;
       return "Ready to use.";
     case "not_connected":
-      return `You haven't connected your ${displayName} account yet.`;
+      return `You haven't connected your ${name} account yet.`;
     case "reconnect":
-      return `Your ${displayName} connection needs reconnecting.`;
+      return owners
+        ? `This Bot uses its owner's ${name} account, which needs reconnecting. Only the Bot's owner can reconnect it.`
+        : `Your ${name} connection needs reconnecting.`;
     case "shared_not_connected":
-      return `Your organisation's ${displayName} account isn't connected yet. Only an administrator can connect it.`;
+      return `Your organisation's ${name} account isn't connected yet. Only an administrator can connect it.`;
+    case "shared_not_approved":
+      return `This Bot reaches more people than an administrator has approved for your organisation's ${name} account. Only an administrator can approve it.`;
     case "disabled":
-      return `Turned off by an administrator. Only they can turn ${displayName} on.`;
+      return disabledSentence(access);
     case "not_granted":
-      return `This Bot hasn't been given ${displayName}. Only an administrator can give it.`;
+      return `This Bot hasn't been given ${name}. Only an administrator can give it.`;
+  }
+}
+
+/**
+ * Switched off, in the words for why. "Turned off by an administrator" was true of one reason in
+ * five: an app nobody switched on, and a set-up somebody has not finished, are not a decision
+ * anybody took — and the Composio case says what Settings → Connected accounts says about the same
+ * app, so the two screens never disagree about it.
+ */
+function disabledSentence(access: AppAccess): string {
+  const name = access.displayName;
+  switch (access.unavailable) {
+    case "composio_unconfigured":
+      return `${name} is not available on this OpenBot yet. An administrator has to finish setting it up.`;
+    case "scheme_unreadable":
+    case "oauth_client_missing":
+    case "token_missing":
+      return `${name} isn't fully set up yet. Only an administrator can finish setting it up.`;
+    default:
+      return `${name} isn't switched on for this OpenBot. Only an administrator can switch it on.`;
   }
 }
 
@@ -58,6 +83,10 @@ export function appAccessSentence(
  * The button for the person's next move, and what it says while it happens.
  *
  * - `ready` — nothing.
+ * - `shared_not_approved` — nothing either: the call that was refused already filed the
+ *   administrator's request, so there is no second one to make.
+ * - `reconnect` on an account the Bot's owner holds — nothing. Only the owner can reconnect their
+ *   own account, and nobody else's press could do it for them.
  * - `not_connected` / `reconnect` — the person's own connection. Connect starts it in a new tab
  *   with the connect route Settings presses; an app connected with a typed key, and a Composio app
  *   that already has a row (which the connect route refuses until it is disconnected), go to the
@@ -72,7 +101,10 @@ export function AppAccessAction({
   agentId: string;
   access: AppAccess;
 }) {
-  if (access.state === "ready") return null;
+  if (access.state === "ready" || access.state === "shared_not_approved")
+    return null;
+  if (access.state === "reconnect" && access.accountHolder === "owner")
+    return null;
   if (access.state === "not_connected" || access.state === "reconnect")
     return <ConnectAction access={access} />;
   return <RequestAction agentId={agentId} access={access} />;
@@ -126,6 +158,7 @@ function ConnectAction({ access }: { access: AppAccess }) {
             to="/settings/connected-accounts/$key"
           />
         }
+        aria-label={`${label} ${access.displayName}`}
         size="sm"
         variant="outline"
       >
@@ -159,6 +192,8 @@ function ConnectAction({ access }: { access: AppAccess }) {
         </p>
       ) : null}
       <Button
+        // Named for the app while it is idle; while waiting, the visible words already name it.
+        aria-label={waiting ? undefined : `${label} ${access.displayName}`}
         disabled={tab.pending}
         onClick={() => {
           stopWaiting();
@@ -188,6 +223,29 @@ function RequestAction({
   const error = request.error ?? cancel.error;
 
   /*
+   * FOCUS FOLLOWS THE PRESS. Request access and Withdraw replace each other, so the button somebody
+   * pressed leaves the page the moment the server's answer is drawn, and the focus with it — onto
+   * the body, where a keyboard user starts again from the top. The press is remembered, and when
+   * the other button arrives in its place it takes the focus. A refused press leaves the same
+   * button standing, which gets it back.
+   */
+  const control = useRef<HTMLButtonElement>(null);
+  const pressed = useRef(false);
+  const requested = access.request !== null;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: runs on the swap between the two buttons.
+  useEffect(() => {
+    if (!pressed.current) return;
+    pressed.current = false;
+    control.current?.focus();
+  }, [requested]);
+  const refocus = {
+    onError: () => {
+      pressed.current = false;
+      control.current?.focus();
+    },
+  };
+
+  /*
    * Nothing to ask for where the server names no request: a state a caller overrode from a refusal
    * the server does not know about (the team account lost at the vendor), which the server would
    * answer 409 because as far as it knows nothing is wrong. The sentence still says whose move it is.
@@ -207,11 +265,18 @@ function RequestAction({
             Requested
           </span>
           <Button
+            aria-label={
+              cancel.isPending
+                ? undefined
+                : `Withdraw request for ${access.displayName}`
+            }
             disabled={cancel.isPending}
             onClick={() => {
               request.reset();
-              if (access.request) cancel.mutate(access.request.id);
+              pressed.current = true;
+              if (access.request) cancel.mutate(access.request.id, refocus);
             }}
+            ref={control}
             size="sm"
             variant="ghost"
           >
@@ -220,11 +285,18 @@ function RequestAction({
         </>
       ) : (
         <Button
+          aria-label={
+            request.isPending
+              ? undefined
+              : `Request access to ${access.displayName}`
+          }
           disabled={request.isPending}
           onClick={() => {
             cancel.reset();
-            request.mutate({ agentId, app: access.key });
+            pressed.current = true;
+            request.mutate({ agentId, app: access.key }, refocus);
           }}
+          ref={control}
           size="sm"
           variant="outline"
         >
