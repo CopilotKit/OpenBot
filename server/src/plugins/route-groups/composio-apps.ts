@@ -230,7 +230,10 @@ export async function enableComposioApp(
        * deployment whose key is wrong was told nothing at all, on the one screen where the key
        * had just been set.
        */
-      return { ok: false, ...brokerRefusal(error, directoryUnavailable(activeProvider)) };
+      return {
+        ok: false,
+        ...brokerRefusal(error, directoryUnavailable(activeProvider)),
+      };
     }
   }
   const app = directory.find((candidate) => candidate.slug === slug);
