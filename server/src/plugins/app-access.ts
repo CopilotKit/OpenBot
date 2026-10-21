@@ -24,7 +24,7 @@ import type { CatalogueEntry } from "./catalogue";
  */
 
 /**
- * The six things a person can be told about one app on one Bot.
+ * The seven things a person can be told about one app on one Bot.
  *
  * `ready` — usable now, as far as this deployment knows.
  * `not_connected` — enabled and held, and this app is used under each person's own account, which
@@ -33,6 +33,9 @@ import type { CatalogueEntry } from "./catalogue";
  * to fix.
  * `shared_not_connected` — a Shared app whose one team account is not connected, or whose key was
  * refused. Only an administrator can connect it.
+ * `shared_not_approved` — a Shared app whose team account is connected, on a Bot that reaches more
+ * people than an administrator approved for that account. Every call is refused by the shared-use
+ * gate, which files the administrator's request itself; nothing is left for a press to ask.
  * `disabled` — switched off at the deployment: no row, Composio not configured, or an app that
  * still needs something only an administrator can supply.
  * `not_granted` — enabled, and this Bot holds none of its tools. Only an administrator can grant.
@@ -42,6 +45,7 @@ export const APP_ACCESS_STATES = [
   "not_connected",
   "reconnect",
   "shared_not_connected",
+  "shared_not_approved",
   "disabled",
   "not_granted",
 ] as const;
@@ -66,6 +70,7 @@ export const REQUEST_KIND_FOR: Record<
   not_connected: null,
   reconnect: null,
   shared_not_connected: "connect_shared",
+  shared_not_approved: null,
   disabled: "enable",
   not_granted: "grant",
 };
@@ -106,16 +111,34 @@ export type AppAccess = {
   /** The app's mode, off its answering row; null for an app that is not brokered. */
   accountMode: "personal" | "shared" | null;
   state: AppAccessState;
+  /** Why nobody can use the app, when `state` is `disabled`; null otherwise. See {@link Unavailable}. */
+  unavailable: Unavailable | null;
+  /**
+   * Whose own account a personal app's calls go out on for this person: theirs, or — on somebody
+   * else's published Team Bot whose owner connected the app — the owner's, which only the owner can
+   * reconnect. Null where the app is not used under a person's own account.
+   *
+   * THE SAME ANSWER `credentialActorFor` GIVES A CALL, read without its side effects: the owner's
+   * account wherever the owner has one, and otherwise the person's own.
+   */
+  accountHolder: "you" | "owner" | null;
+  /**
+   * Whether the first call on the person's own account through somebody else's Team Bot will stop
+   * to ask them to allow it, because they have given that Bot no standing consent. The state is
+   * still `ready`: the question is asked in the conversation, and answering it is the next step.
+   */
+  asksFirst: boolean;
   /** Whether this Bot holds any of the app's tools. */
   granted: boolean;
   /**
    * When the account this app runs in for this person was connected — their own, or the team's for
    * a Shared app — and null where none is, or where no account is involved.
    *
-   * FOR THE ONE FACT THE STATE CANNOT CARRY. An account the vendor has lost still has its row here,
-   * so the state reads `ready`; a card drawn over the refusal that found out says Reconnect anyway.
-   * This is how that card tells "lost since the refusal" from "connected again since the refusal":
-   * a connection newer than the refusal is the reconnection, and the live state wins.
+   * FOR THE ONE FACT THE STATE CANNOT ALWAYS CARRY. The call that finds an account lost at the
+   * vendor now deletes its row, so the state says so itself from then on; a refusal written before
+   * that, over a row that still stands, reads `ready` here and its card says Reconnect anyway. This
+   * is how that card tells "lost since the refusal" from "connected again since the refusal": a
+   * connection newer than the refusal is the reconnection, and the live state wins.
    */
   connectedAt: string | null;
   /** The request a press of Request access files for this state, and null where there is none. */
@@ -149,6 +172,11 @@ export type AppAccessFacts = {
   personal: { usable: boolean } | null;
   /** The deployment's account at a Shared app, or null where none is connected. */
   shared: { usable: boolean } | null;
+  /**
+   * Whether the shared-use gate would let this person's calls through this Bot reach the team
+   * account, or null where nobody asked — no person named, or not a Shared app.
+   */
+  sharedAdmitted: boolean | null;
 };
 
 /** Whose account, from the same facts `accessFor` resolves a call with. */
@@ -213,7 +241,7 @@ export function unavailableReason(facts: AppAccessFacts): Unavailable | null {
 
 /**
  * The rule, in the order a person meets the obstacles: the deployment first, then the Bot, then
- * their own account.
+ * the account — and, for a team account, whether this Bot's audience was approved for it.
  *
  * A KEY THE VENDOR REFUSED READS AS `reconnect`, AND AN UNCHECKED ONE AS `ready`. The store
  * reduces each connection to `usable` the way `brokeredConnectionsFor` sets out its four states: a
@@ -225,8 +253,10 @@ export function appAccessState(facts: AppAccessFacts): AppAccessState {
   if (!facts.granted) return "not_granted";
   const account = accountOf(facts);
   if (account === "deployment") return "ready";
-  if (account === "shared")
-    return facts.shared?.usable ? "ready" : "shared_not_connected";
+  if (account === "shared") {
+    if (!facts.shared?.usable) return "shared_not_connected";
+    return facts.sharedAdmitted === false ? "shared_not_approved" : "ready";
+  }
   if (!facts.personal) return "not_connected";
   return facts.personal.usable ? "ready" : "reconnect";
 }

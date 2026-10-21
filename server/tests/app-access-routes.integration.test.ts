@@ -24,12 +24,16 @@ import {
   mcpUserCredentials,
   pluginGrants,
   sharedUseApprovals,
+  teamBotConsents,
+  teamBotPublications,
   users,
 } from "../src/db/schema";
 import type { AppAccess } from "../src/plugins/app-access";
 import type { BrokerApp, ConnectedAppBroker } from "../src/plugins/broker";
 import type { AppAccessRequestRecord } from "../src/plugins/plugin-store/app-access";
+import { MAX_PENDING_REQUESTS } from "../src/plugins/route-groups/app-access";
 import { createPluginRoutes } from "../src/plugins/routes";
+import { exposureOf } from "../src/plugins/shared-use";
 import { createSharedUseStore } from "../src/plugins/shared-use-store";
 import {
   createPluginStore,
@@ -115,9 +119,15 @@ const broker: ConnectedAppBroker = {
 
 const enabled: string[] = [];
 
-function storeFor(): PluginStore {
+/**
+ * Run before every grant the routes make, when set — how a test holds an approval partway through
+ * its change while something else answers the same request.
+ */
+let beforeGrant: (() => Promise<void>) | null = null;
+
+function storeFor(db = database): PluginStore {
   const real = createPluginStore({
-    database,
+    database: db,
     auditStore: audit,
     credentials: {} as never,
     encryptionKey: "x".repeat(44),
@@ -127,6 +137,10 @@ function storeFor(): PluginStore {
   });
   return {
     ...real,
+    async grant(...args) {
+      await beforeGrant?.();
+      return real.grant(...args);
+    },
     async addBrokeredApp(input) {
       enabled.push(input.slug);
       await database.insert(mcpServers).values({
@@ -143,6 +157,7 @@ function storeFor(): PluginStore {
         name: "LIST_FILES",
         description: "List files",
         inputSchema: {},
+        effect: "read",
       });
       return { id: `composio-${input.slug}` } as ServerRecord;
     },
@@ -152,9 +167,9 @@ function storeFor(): PluginStore {
 function appAs(
   actorId: string,
   role: "admin" | "user" = "user",
-  options: { composio?: boolean } = {},
+  options: { composio?: boolean; database?: typeof database } = {},
 ) {
-  const store = storeFor();
+  const store = storeFor(options.database);
   const signedIn: MiddlewareHandler<{ Variables: AppVariables }> = async (
     context,
     next,
@@ -166,7 +181,7 @@ function appAs(
     } as never);
     await next();
   };
-  const sharedUse = createSharedUseStore(database);
+  const sharedUse = createSharedUseStore(options.database ?? database);
   return new Hono().route(
     "/api/plugins",
     createPluginRoutes(
@@ -198,6 +213,9 @@ async function seedApp(input: {
   authScheme?: string | null;
   accountMode?: "personal" | "shared" | null;
   tools?: string[];
+  /** Each tool's `effect`, by name; a tool left out is unclassified, which reads as a write. */
+  effects?: Record<string, "read" | "write">;
+  destructive?: string[];
   grant?: boolean;
 }) {
   await database.insert(mcpServers).values({
@@ -218,6 +236,8 @@ async function seedApp(input: {
       name: tool,
       description: tool,
       inputSchema: {},
+      effect: input.effects?.[tool] ?? null,
+      destructive: input.destructive?.includes(tool) ?? false,
     });
   if (input.grant !== false)
     await database.insert(pluginGrants).values({
@@ -229,7 +249,34 @@ async function seedApp(input: {
 
 const ourServers = like(mcpServers.id, `%${suite}%`);
 
+/** An administrator's approval of the suite Bot's audience for a Shared app, as granting writes. */
+async function approveAudience(serverId: string) {
+  const sharedUse = createSharedUseStore(database);
+  await sharedUse.setApproval({
+    botId: bot,
+    serverId,
+    approval: exposureOf(await sharedUse.botFacts(bot)),
+    by: admin,
+  });
+}
+
+async function connectTeamAccount(name: string) {
+  await database.insert(brokeredConnections).values({
+    provider: "composio",
+    app: slug(name),
+    holder: "deployment",
+    vendorUserId: `openbot-deployment:${suite}`,
+    verified: true,
+  });
+}
+
 async function clearApps() {
+  await database
+    .delete(teamBotPublications)
+    .where(inArray(teamBotPublications.agentId, [bot, hidden]));
+  await database
+    .delete(teamBotConsents)
+    .where(inArray(teamBotConsents.userId, [person, other, admin]));
   await database
     .delete(appAccessRequests)
     .where(inArray(appAccessRequests.requestedBy, [person, other, admin]));
@@ -281,6 +328,7 @@ beforeAll(async () => {
 beforeEach(async () => {
   events.length = 0;
   enabled.length = 0;
+  beforeGrant = null;
   await clearApps();
 });
 
@@ -385,8 +433,9 @@ describe("what each app a Bot holds is, for the person asking", () => {
     expect(theirs.apps[0]?.connectedAt).toBe("2026-10-20T12:00:00.000Z");
   });
 
-  test("a Shared app with its team account connected is ready for everybody", async () => {
+  test("a Shared app with its team account connected and its audience approved is ready", async () => {
     await seedApp({ key: SLACK, title: "Slack", accountMode: "shared" });
+    await approveAudience(SLACK);
     await database.insert(brokeredConnections).values({
       provider: "composio",
       app: slug("slack"),
@@ -725,6 +774,7 @@ describe("answering a request", () => {
       title: "Slack",
       accountMode: "shared",
       tools: ["SEND", "LIST"],
+      effects: { LIST: "read", SEND: "write" },
       grant: false,
     });
     const request = await file(SLACK);
@@ -744,19 +794,17 @@ describe("answering a request", () => {
       { method: "POST" },
     );
     expect(response.status).toBe(200);
+    // The read only: sending is chosen on the Bot's page, never handed out by one press.
     expect(await response.json()).toMatchObject({
       request: { status: "approved", resolvedBy: admin },
       enabled: false,
-      granted: [`${SLACK}/LIST`, `${SLACK}/SEND`],
+      granted: [`${SLACK}/LIST`],
     });
     const grants = await database
       .select({ ref: pluginGrants.ref })
       .from(pluginGrants)
       .where(eq(pluginGrants.agentId, bot));
-    expect(grants.map((grant) => grant.ref).sort()).toEqual([
-      `${SLACK}/LIST`,
-      `${SLACK}/SEND`,
-    ]);
+    expect(grants.map((grant) => grant.ref).sort()).toEqual([`${SLACK}/LIST`]);
     const [approval] = await database
       .select()
       .from(sharedUseApprovals)
@@ -765,7 +813,7 @@ describe("answering a request", () => {
     expect(eventsOf("app_access.approved")[0]?.payload).toMatchObject({
       request: request.id,
       kind: "grant",
-      granted: 2,
+      granted: 1,
     });
 
     // The person now sees the next step, which is not theirs to ask for.
@@ -873,6 +921,7 @@ describe("answering a request", () => {
 
   test("a team-account request is approved only once the account is connected", async () => {
     await seedApp({ key: SLACK, title: "Slack", accountMode: "shared" });
+    await approveAudience(SLACK);
     const request = await file(SLACK);
     expect(request.kind).toBe("connect_shared");
     const early = await appAs(admin, "admin").request(
@@ -919,5 +968,398 @@ describe("answering a request", () => {
       { method: "POST" },
     );
     expect(again.status).toBe(409);
+  });
+});
+
+describe("what approving grants, and when it can be answered", () => {
+  async function file(app: string, as = person) {
+    const response = await appAs(as).request(
+      "/api/plugins/access-requests",
+      post({ agentId: bot, app }),
+    );
+    return (await json<{ request: AppAccessRequestRecord }>(response)).request;
+  }
+  const statusOf = async (id: string) =>
+    (
+      await database
+        .select({ status: appAccessRequests.status })
+        .from(appAccessRequests)
+        .where(eq(appAccessRequests.id, id))
+    )[0]?.status;
+
+  test("without refs only the read-only actions are granted, never a send or a delete", async () => {
+    await seedApp({
+      key: GMAIL,
+      title: "Gmail",
+      tools: ["READ_MAIL", "SEND_MAIL", "DELETE_ALL", "UNLABELLED"],
+      effects: { READ_MAIL: "read", SEND_MAIL: "write", DELETE_ALL: "write" },
+      destructive: ["DELETE_ALL"],
+      grant: false,
+    });
+    const request = await file("Gmail");
+    expect(request.kind).toBe("grant");
+    const response = await appAs(admin, "admin").request(
+      `/api/plugins/access-requests/${request.id}/approve`,
+      { method: "POST" },
+    );
+    expect(response.status).toBe(200);
+    expect((await json<{ granted: string[] }>(response)).granted).toEqual([
+      `${GMAIL}/READ_MAIL`,
+    ]);
+    const grants = await database
+      .select({ ref: pluginGrants.ref })
+      .from(pluginGrants)
+      .where(eq(pluginGrants.agentId, bot));
+    expect(grants.map((grant) => grant.ref)).toEqual([`${GMAIL}/READ_MAIL`]);
+  });
+
+  test("an app with no read-only action is refused with where to choose, and stays pending", async () => {
+    await seedApp({
+      key: GMAIL,
+      title: "Gmail",
+      tools: ["SEND_MAIL"],
+      effects: { SEND_MAIL: "write" },
+      grant: false,
+    });
+    const request = await file("Gmail");
+    const response = await appAs(admin, "admin").request(
+      `/api/plugins/access-requests/${request.id}/approve`,
+      { method: "POST" },
+    );
+    expect(response.status).toBe(409);
+    expect((await json<{ error: string }>(response)).error).toContain(
+      "read-only",
+    );
+    expect(await statusOf(request.id)).toBe("pending");
+    expect(
+      await database
+        .select()
+        .from(pluginGrants)
+        .where(eq(pluginGrants.agentId, bot)),
+    ).toEqual([]);
+    // Naming the actions is how an administrator grants more than the reads.
+    const chosen = await appAs(admin, "admin").request(
+      `/api/plugins/access-requests/${request.id}/approve`,
+      post({ refs: [`${GMAIL}/SEND_MAIL`] }),
+    );
+    expect(chosen.status).toBe(200);
+  });
+
+  for (const [loser, answer] of [
+    [
+      "a dismissal",
+      (id: string) =>
+        appAs(admin, "admin").request(
+          `/api/plugins/access-requests/${id}/dismiss`,
+          { method: "POST" },
+        ),
+    ],
+    [
+      "a withdrawal",
+      (id: string) =>
+        appAs(person).request(`/api/plugins/access-requests/${id}`, {
+          method: "DELETE",
+        }),
+    ],
+  ] as const) {
+    test(`${loser} arriving while an approval is granting loses to it`, async () => {
+      await seedApp({
+        key: CALENDAR,
+        title: "Google Calendar",
+        tools: ["READ"],
+        effects: { READ: "read" },
+        grant: false,
+      });
+      const request = await file(CALENDAR);
+
+      let release = () => {};
+      let granting = () => {};
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const reached = new Promise<void>((resolve) => {
+        granting = resolve;
+      });
+      beforeGrant = async () => {
+        granting();
+        await held;
+      };
+      try {
+        const approving = appAs(admin, "admin").request(
+          `/api/plugins/access-requests/${request.id}/approve`,
+          { method: "POST" },
+        );
+        await reached;
+        // Answered while the grant is still being written: the approval already claimed it.
+        const lost = await answer(request.id);
+        expect(lost.status).toBe(409);
+        release();
+        const approved = await approving;
+        expect(approved.status).toBe(200);
+        expect(await statusOf(request.id)).toBe("approved");
+        expect(eventsOf("app_access.approved")).toHaveLength(1);
+        expect(eventsOf("app_access.dismissed")).toHaveLength(0);
+        expect(eventsOf("app_access.cancelled")).toHaveLength(0);
+      } finally {
+        release();
+        beforeGrant = null;
+      }
+    });
+  }
+
+  test("an approval that throws partway puts the request back", async () => {
+    await seedApp({
+      key: CALENDAR,
+      title: "Google Calendar",
+      tools: ["READ"],
+      effects: { READ: "read" },
+      grant: false,
+    });
+    const request = await file(CALENDAR);
+    beforeGrant = async () => {
+      throw new Error("the grant failed");
+    };
+    const response = await appAs(admin, "admin").request(
+      `/api/plugins/access-requests/${request.id}/approve`,
+      { method: "POST" },
+    );
+    expect(response.status).toBe(500);
+    expect(await statusOf(request.id)).toBe("pending");
+    expect(eventsOf("app_access.approved")).toHaveLength(0);
+  });
+
+  test("a request filed again while the first was claimed is the one left waiting", async () => {
+    await seedApp({
+      key: GMAIL,
+      title: "Gmail",
+      tools: ["SEND_MAIL"],
+      effects: { SEND_MAIL: "write" },
+      grant: false,
+    });
+    const first = await file("Gmail");
+    const store = storeFor();
+    expect(
+      await store.claimAppAccessRequest({ id: first.id, by: admin }),
+    ).not.toBeNull();
+    const second = await file("Gmail");
+    expect(second.id).not.toBe(first.id);
+    await store.releaseAppAccessRequest({ id: first.id, by: admin });
+    expect(await statusOf(first.id)).toBe("cancelled");
+    expect(await statusOf(second.id)).toBe("pending");
+  });
+});
+
+describe("what a request may carry", () => {
+  const ask = (app: string, agentId = bot) =>
+    appAs(person).request(
+      "/api/plugins/access-requests",
+      post({ agentId, app }),
+    );
+
+  test("an app or Bot name past the cap is refused before anything is read or written", async () => {
+    const long = "x".repeat(201);
+    expect((await ask(`composio-${long}`)).status).toBe(400);
+    expect((await ask(GMAIL, long)).status).toBe(400);
+    expect(eventsOf("app_access.refused")).toEqual([]);
+    expect(
+      (await appAs(person).request(`/api/plugins/for/${bot}/apps/${long}`))
+        .status,
+    ).toBe(404);
+  });
+
+  test("enabling a composio- id the directory does not list is no such app", async () => {
+    const response = await ask(row("invented"));
+    expect(response.status).toBe(404);
+    const filed = await database
+      .select()
+      .from(appAccessRequests)
+      .where(eq(appAccessRequests.requestedBy, person));
+    expect(filed).toEqual([]);
+  });
+
+  test("a grant that outlived its app can still be asked about", async () => {
+    await database
+      .insert(pluginGrants)
+      .values({ kind: "mcp", ref: `${GONE}/SEND`, agentId: bot });
+    const response = await appAs(person, "user", { composio: false }).request(
+      "/api/plugins/access-requests",
+      post({ agentId: bot, app: GONE }),
+    );
+    expect(response.status).toBe(201);
+  });
+
+  test(`at ${MAX_PENDING_REQUESTS} waiting a new one is refused, and one already waiting is still shown`, async () => {
+    await database.insert(appAccessRequests).values(
+      Array.from({ length: MAX_PENDING_REQUESTS - 1 }, (_, index) => ({
+        id: randomUUID(),
+        requestedBy: person,
+        agentId: bot,
+        appKey: `composio-filler${index}_${suite}`,
+        appTitle: `Filler ${index}`,
+        kind: "enable" as const,
+      })),
+    );
+    await seedApp({ key: CALENDAR, title: "Google Calendar", grant: false });
+    const last = await ask(CALENDAR);
+    expect(last.status).toBe(201);
+    const over = await ask("Dropbox");
+    expect(over.status).toBe(429);
+    expect(eventsOf("app_access.refused").at(-1)?.payload).toMatchObject({
+      reason: "too_many_pending",
+    });
+    const again = await ask(CALENDAR);
+    expect(again.status).toBe(200);
+    expect((await json<{ created: boolean }>(again)).created).toBe(false);
+  });
+});
+
+describe("finding an app by its name", () => {
+  test("a name finds the enabled app before a catalogue entry nobody added", async () => {
+    const DRIVE = row("googledrive");
+    await seedApp({ key: DRIVE, title: "Google Drive", grant: false });
+    const { app } = await json<{ app: AppAccess }>(
+      await appAs(person).request(
+        `/api/plugins/for/${bot}/apps/Google%20Drive`,
+      ),
+    );
+    expect(app).toMatchObject({
+      key: DRIVE,
+      state: "not_granted",
+      requestKind: "grant",
+    });
+    // The entry is still what its own key names.
+    const { app: entry } = await json<{ app: AppAccess }>(
+      await appAs(person).request(`/api/plugins/for/${bot}/apps/google-drive`),
+    );
+    expect(entry).toMatchObject({ key: "google-drive", state: "disabled" });
+  });
+
+  test("of two enabled apps with one name, the one this Bot holds", async () => {
+    await seedApp({ key: row("drive_a"), title: "Drive", grant: false });
+    await seedApp({ key: row("drive_b"), title: "Drive" });
+    const { app } = await json<{ app: AppAccess }>(
+      await appAs(person).request(`/api/plugins/for/${bot}/apps/Drive`),
+    );
+    expect(app.key).toBe(row("drive_b"));
+  });
+});
+
+describe("why an app is off, and a Shared app's audience", () => {
+  test("a switched-off app says why", async () => {
+    await seedApp({ key: GMAIL, title: "Gmail" });
+    const { app } = await json<{ app: AppAccess }>(
+      await appAs(person, "user", { composio: false }).request(
+        `/api/plugins/for/${bot}/apps/${GMAIL}`,
+      ),
+    );
+    expect(app).toMatchObject({
+      state: "disabled",
+      unavailable: "composio_unconfigured",
+    });
+    const { app: ready } = await json<{ app: AppAccess }>(
+      await appAs(person).request(`/api/plugins/for/${bot}/apps/${GMAIL}`),
+    );
+    expect(ready.unavailable).toBeNull();
+  });
+
+  test("a Shared app whose audience nobody approved is refused, with nothing to file", async () => {
+    await seedApp({ key: SLACK, title: "Slack", accountMode: "shared" });
+    await connectTeamAccount("slack");
+    const { app } = await json<{ app: AppAccess }>(
+      await appAs(person).request(`/api/plugins/for/${bot}/apps/${SLACK}`),
+    );
+    expect(app).toMatchObject({
+      state: "shared_not_approved",
+      requestKind: null,
+    });
+    const filed = await appAs(person).request(
+      "/api/plugins/access-requests",
+      post({ agentId: bot, app: SLACK }),
+    );
+    expect(filed.status).toBe(409);
+    await approveAudience(SLACK);
+    const { app: approved } = await json<{ app: AppAccess }>(
+      await appAs(person).request(`/api/plugins/for/${bot}/apps/${SLACK}`),
+    );
+    expect(approved.state).toBe("ready");
+  });
+});
+
+describe("a teammate on somebody else's Team Bot", () => {
+  beforeEach(async () => {
+    await database
+      .insert(teamBotPublications)
+      .values({ agentId: bot, publishedBy: person, audience: "team" });
+    await seedApp({ key: GMAIL, title: "Gmail" });
+  });
+  const connect = (
+    userId: string,
+    over: { verified?: boolean; probeAction?: string } = {},
+  ) =>
+    database.insert(brokeredConnections).values({
+      provider: "composio",
+      app: slug("gmail"),
+      holder: "person",
+      userId,
+      vendorUserId: userId,
+      verified: over.verified ?? true,
+      ...(over.probeAction ? { probeAction: over.probeAction } : {}),
+    });
+  const asTeammate = async () =>
+    (
+      await json<{ app: AppAccess }>(
+        await appAs(other).request(`/api/plugins/for/${bot}/apps/${GMAIL}`),
+      )
+    ).app;
+
+  test("the owner's connection is the one their calls use", async () => {
+    await connect(person);
+    expect(await asTeammate()).toMatchObject({
+      state: "ready",
+      accountHolder: "owner",
+      asksFirst: false,
+    });
+  });
+
+  test("the owner's refused connection is theirs to reconnect, not the teammate's", async () => {
+    await connect(person, { verified: false, probeAction: "GMAIL_LIST" });
+    await connect(other);
+    expect(await asTeammate()).toMatchObject({
+      state: "reconnect",
+      accountHolder: "owner",
+      requestKind: null,
+    });
+  });
+
+  test("with no owner account, the teammate's own, asked first until they always allow it", async () => {
+    expect(await asTeammate()).toMatchObject({
+      state: "not_connected",
+      accountHolder: "you",
+    });
+    await connect(other);
+    expect(await asTeammate()).toMatchObject({
+      state: "ready",
+      accountHolder: "you",
+      asksFirst: true,
+    });
+    await database.insert(teamBotConsents).values({
+      userId: other,
+      agentId: bot,
+      serverId: GMAIL,
+      decision: "always",
+    });
+    expect((await asTeammate()).asksFirst).toBe(false);
+  });
+
+  test("the owner reads their own account, and is never asked", async () => {
+    await connect(person);
+    const { app } = await json<{ app: AppAccess }>(
+      await appAs(person).request(`/api/plugins/for/${bot}/apps/${GMAIL}`),
+    );
+    expect(app).toMatchObject({
+      state: "ready",
+      accountHolder: "you",
+      asksFirst: false,
+    });
   });
 });

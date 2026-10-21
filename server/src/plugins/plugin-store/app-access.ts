@@ -1,7 +1,18 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, inArray, isNull, or, type SQL } from "drizzle-orm";
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  inArray,
+  isNull,
+  or,
+  type SQL,
+} from "drizzle-orm";
 import { type AuditEventInput, recordAuditEvent } from "../../audit";
 import {
+  agentProfiles,
   agents,
   appAccessRequests,
   brokeredConnections,
@@ -10,6 +21,9 @@ import {
   mcpTools,
   mcpUserCredentials,
   pluginGrants,
+  teamBotConsentDefaults,
+  teamBotConsents,
+  teamBotPublications,
   users,
 } from "../../db/schema";
 import {
@@ -52,6 +66,12 @@ type AppCandidate = {
   authScheme: string | null;
   accountMode: "personal" | "shared" | null;
   hasCredential: boolean;
+  /**
+   * Whether anything but the caller's own word says this app exists: a row, a catalogue entry, or
+   * the vendor's directory. False only for a `composio-` id the directory did not list — named so a
+   * grant that outlived its row still reads, and never something a request may be filed to enable.
+   */
+  vouched: boolean;
 };
 
 type ServerRow = {
@@ -81,7 +101,19 @@ export type AppInspection = {
   entry: CatalogueEntry | null;
   /** Whether the Shared team account is connected and its key was not refused. */
   sharedUsable: boolean;
+  /** See {@link AppCandidate.vouched}. */
+  vouched: boolean;
 };
+
+/**
+ * Whether the shared-use gate would admit this person's calls through this Bot to a Shared app's
+ * team account — the gate's own rule, without the request it files when it refuses.
+ */
+export type SharedAudienceCheck = (input: {
+  botId: string;
+  serverId: string;
+  actorId: string;
+}) => Promise<boolean>;
 
 export type AppAccessRequestStatus =
   | "pending"
@@ -109,6 +141,18 @@ export type AppAccessRequestRecord = {
 };
 
 const SLUG_OF_ID = /^composio-/;
+
+/**
+ * Whether `error` is a Postgres unique_violation (SQLSTATE 23505). Bun's driver puts the SQLSTATE in
+ * `errno`, and drizzle wraps the driver error as `cause` — the same reading `identity/store.ts` makes.
+ */
+function isUniqueViolation(error: unknown): boolean {
+  type Driver = { errno?: unknown };
+  return [
+    error as Driver | null | undefined,
+    (error as { cause?: Driver } | null | undefined)?.cause,
+  ].some((candidate) => candidate?.errno === "23505");
+}
 
 /**
  * Per-person, per-Bot status of the work apps a Bot holds, and the requests a person files when
@@ -182,6 +226,7 @@ export function appAccessMethods(context: StoreContext) {
           authScheme: toolkit ? (head?.authScheme ?? null) : source.authScheme,
           accountMode: toolkit ? (head?.accountMode ?? null) : null,
           hasCredential: source.credentialId !== null,
+          vouched: true,
         };
         apps.set(key, app);
       }
@@ -204,6 +249,7 @@ export function appAccessMethods(context: StoreContext) {
     provider: AppProvider;
     toolkit?: string | null;
     entry?: CatalogueEntry | null;
+    vouched?: boolean;
   }): AppCandidate {
     return {
       key: input.key,
@@ -218,6 +264,7 @@ export function appAccessMethods(context: StoreContext) {
       authScheme: null,
       accountMode: null,
       hasCredential: false,
+      vouched: input.vouched ?? true,
     };
   }
 
@@ -273,6 +320,7 @@ export function appAccessMethods(context: StoreContext) {
         title: slug,
         provider: "composio",
         toolkit: slug,
+        vouched: false,
       });
     return null;
   }
@@ -281,33 +329,47 @@ export function appAccessMethods(context: StoreContext) {
    * One app by whatever a caller called it: a server id, a catalogue key, a Composio slug with or
    * without its `composio-` prefix, or the app's name. Null for a word that names no app here or
    * in the directory.
+   *
+   * A NAME FINDS WHAT IS ENABLED BEFORE WHAT COULD BE. "Google Drive" is the title of the built-in
+   * `google-drive` entry and of a Composio row alike; on a deployment that enabled the Composio one
+   * and never added the built-in, the name is about the app that is there, and answering with the
+   * entry instead would call it switched off and file a request to enable something nobody needs.
+   * So an exact id or key is taken as it was given, and a bare name is matched against the rows
+   * first — the one this Bot holds, where two rows share it — and only then against the catalogue.
    */
   async function candidateFor(
     app: string,
     directory: AppDirectory | undefined,
+    granted: Set<string>,
   ): Promise<AppCandidate | null> {
     const asked = app.trim();
     if (!asked) return null;
     const lower = asked.toLowerCase();
     const rows = await allRows();
     const byRow = await appsByRow(rows);
+    const enabled = [...new Set(byRow.values())];
 
     const byId = byRow.get(asked);
     if (byId) return byId;
 
     const slug = lower.replace(SLUG_OF_ID, "");
-    for (const candidate of new Set(byRow.values()))
+    for (const candidate of enabled)
       if (candidate.toolkit === slug) return candidate;
 
-    const entry =
-      catalogueEntry(lower) ??
-      CATALOGUE.find((item) => item.title.toLowerCase() === lower) ??
-      null;
-    if (entry)
-      return byRow.get(entry.key) ?? absentFor(entry.key, undefined, null);
+    const keyed = catalogueEntry(lower);
+    if (keyed)
+      return byRow.get(keyed.key) ?? absentFor(keyed.key, undefined, null);
 
-    for (const candidate of new Set(byRow.values()))
-      if (candidate.title.toLowerCase() === lower) return candidate;
+    const titled = enabled.filter(
+      (candidate) => candidate.title.toLowerCase() === lower,
+    );
+    const held = titled.find((candidate) =>
+      [candidate.key, ...candidate.rowIds].some((id) => granted.has(id)),
+    );
+    if (held ?? titled[0]) return held ?? titled[0] ?? null;
+
+    const entry = CATALOGUE.find((item) => item.title.toLowerCase() === lower);
+    if (entry) return absentFor(entry.key, undefined, null);
 
     const listed = await readDirectory(directory);
     const named = listed?.find(
@@ -456,94 +518,207 @@ export function appAccessMethods(context: StoreContext) {
       .orderBy(asc(appAccessRequests.createdAt));
   }
 
-  /** Every candidate described for one person and one Bot. */
+  /**
+   * The owner of a published Team Bot, when the person looking is somebody else; null for any other
+   * Bot, or for its owner. The same publication `credentialActorFor` reads before it decides whose
+   * account a call goes out on.
+   */
+  async function teamBotOwnerFor(
+    agentId: string,
+    userId: string,
+  ): Promise<string | null> {
+    const [row] = await database
+      .select({ ownerUserId: agentProfiles.ownerUserId })
+      .from(teamBotPublications)
+      .innerJoin(
+        agentProfiles,
+        eq(agentProfiles.agentId, teamBotPublications.agentId),
+      )
+      .where(
+        and(
+          eq(teamBotPublications.agentId, agentId),
+          isNull(agentProfiles.deletedAt),
+        ),
+      )
+      .limit(1);
+    const owner = row?.ownerUserId ?? null;
+    return owner && owner !== userId ? owner : null;
+  }
+
+  /**
+   * The servers this person lets one Team Bot use their own account on without asking: an
+   * "always" or a not-yet-spent "once" for this Bot, or a default for every Bot.
+   */
+  async function standingConsents(
+    userId: string,
+    agentId: string,
+  ): Promise<Set<string>> {
+    const [forBot, forEvery] = await Promise.all([
+      database
+        .select({ serverId: teamBotConsents.serverId })
+        .from(teamBotConsents)
+        .where(
+          and(
+            eq(teamBotConsents.userId, userId),
+            eq(teamBotConsents.agentId, agentId),
+          ),
+        ),
+      database
+        .select({ serverId: teamBotConsentDefaults.serverId })
+        .from(teamBotConsentDefaults)
+        .where(eq(teamBotConsentDefaults.userId, userId)),
+    ]);
+    return new Set([...forBot, ...forEvery].map((row) => row.serverId));
+  }
+
+  /**
+   * Every candidate described for one person and one Bot.
+   *
+   * THE ACCOUNT IS THE ONE THE CALL WILL USE. On somebody else's published Team Bot, a personal
+   * app's calls go out on the owner's account wherever the owner has one — connected, withdrawn or
+   * refused alike, exactly as `credentialActorFor` decides from `connectedServers` — and only
+   * otherwise on the person's own, after they allow it. So the owner's connection decides the state
+   * there, and a teammate is never offered a Connect that changes nothing, nor told `ready` over a
+   * call that will stop to ask them first without saying so.
+   */
   async function describe(
     apps: AppCandidate[],
     input: {
       userId: string | null;
       agentId: string;
       composioConfigured: boolean;
+      sharedAudience?: SharedAudienceCheck;
     },
   ): Promise<AppInspection[]> {
-    const [granted, connections, pending] = await Promise.all([
-      grantedServerIds(input.agentId),
-      connectionFacts(apps, input.userId),
-      input.userId
-        ? pendingRequestsFor(
-            input.userId,
-            input.agentId,
-            apps.map((app) => app.key),
-          )
-        : [],
-    ]);
-    return apps.map((app) => {
-      const teamAccount = app.toolkit
-        ? connections.deploymentBrokered.get(app.toolkit)
-        : undefined;
-      const sharedUsable = teamAccount?.usable === true;
-      const personal =
-        app.provider === "composio" && app.toolkit
-          ? connections.personalBrokered.get(app.toolkit)
-          : app.provider === "catalogue"
-            ? app.rowIds
-                .map((id) => connections.personalHeld.get(id))
-                .find((value) => value !== undefined)
-            : undefined;
-      const facts: AppAccessFacts = {
-        provider: app.provider,
-        present: app.present,
-        composioConfigured: input.composioConfigured,
-        authScheme: app.authScheme,
-        accountMode: app.accountMode,
-        catalogueAuth: app.entry?.auth ?? null,
-        hasCredential: app.hasCredential,
-        granted: [app.key, ...app.rowIds].some((id) => granted.has(id)),
-        personal: personal === undefined ? null : { usable: personal.usable },
-        shared: teamAccount ? { usable: sharedUsable } : null,
-      };
-      const account = accountOf(facts);
-      const state = appAccessState(facts);
-      const requestKind = REQUEST_KIND_FOR[state];
-      const request =
-        requestKind === null
-          ? undefined
-          : pending.find(
-              (row) => row.appKey === app.key && row.kind === requestKind,
-            );
-      return {
-        access: {
-          key: app.key,
-          displayName: app.title,
-          logo: app.logo,
+    const { userId } = input;
+    const owner = userId ? await teamBotOwnerFor(input.agentId, userId) : null;
+    const [granted, connections, ownerConnections, consented, pending] =
+      await Promise.all([
+        grantedServerIds(input.agentId),
+        connectionFacts(apps, userId),
+        owner ? connectionFacts(apps, owner) : null,
+        owner && userId
+          ? standingConsents(userId, input.agentId)
+          : new Set<string>(),
+        userId
+          ? pendingRequestsFor(
+              userId,
+              input.agentId,
+              apps.map((app) => app.key),
+            )
+          : [],
+      ]);
+    const personalIn = (
+      found: Awaited<ReturnType<typeof connectionFacts>>,
+      app: AppCandidate,
+    ) =>
+      app.provider === "composio" && app.toolkit
+        ? found.personalBrokered.get(app.toolkit)
+        : app.provider === "catalogue"
+          ? app.rowIds
+              .map((id) => found.personalHeld.get(id))
+              .find((value) => value !== undefined)
+          : undefined;
+    return Promise.all(
+      apps.map(async (app) => {
+        const ids = [app.key, ...app.rowIds];
+        const teamAccount = app.toolkit
+          ? connections.deploymentBrokered.get(app.toolkit)
+          : undefined;
+        const sharedUsable = teamAccount?.usable === true;
+        const own = personalIn(connections, app);
+        const owners = ownerConnections
+          ? personalIn(ownerConnections, app)
+          : undefined;
+        const personal = owners ?? own;
+        const known: AppAccessFacts = {
           provider: app.provider,
-          account,
-          connect: connectOf(facts),
-          authScheme: app.provider === "composio" ? app.authScheme : null,
+          present: app.present,
+          composioConfigured: input.composioConfigured,
+          authScheme: app.authScheme,
           accountMode: app.accountMode,
-          state,
-          granted: facts.granted,
-          connectedAt:
-            account === "shared"
-              ? (teamAccount?.connectedAt ?? null)
-              : account === "personal"
-                ? (personal?.connectedAt ?? null)
-                : null,
-          requestKind,
-          request: request
+          catalogueAuth: app.entry?.auth ?? null,
+          hasCredential: app.hasCredential,
+          granted: ids.some((id) => granted.has(id)),
+          personal: personal === undefined ? null : { usable: personal.usable },
+          shared: teamAccount ? { usable: sharedUsable } : null,
+          sharedAdmitted: null,
+        };
+        const account = accountOf(known);
+        /*
+         * Asked only where it can change the answer: a Shared app this Bot holds, whose team account
+         * is there, for a named person. The gate is asked again on every call; this is what it would
+         * say now.
+         */
+        const facts: AppAccessFacts =
+          account === "shared" &&
+          sharedUsable &&
+          known.granted &&
+          userId &&
+          input.sharedAudience &&
+          app.answeringId
             ? {
-                id: request.id,
-                kind: request.kind,
-                createdAt: iso(request.createdAt) ?? "",
+                ...known,
+                sharedAdmitted: await input.sharedAudience({
+                  botId: input.agentId,
+                  serverId: app.answeringId,
+                  actorId: userId,
+                }),
               }
-            : null,
-        },
-        unavailable: unavailableReason(facts),
-        answeringId: app.answeringId,
-        toolkit: app.toolkit,
-        entry: app.entry,
-        sharedUsable,
-      };
-    });
+            : known;
+        const state = appAccessState(facts);
+        const holder = owners !== undefined ? "owner" : "you";
+        const requestKind = REQUEST_KIND_FOR[state];
+        const request =
+          requestKind === null
+            ? undefined
+            : pending.find(
+                (row) => row.appKey === app.key && row.kind === requestKind,
+              );
+        return {
+          access: {
+            key: app.key,
+            displayName: app.title,
+            logo: app.logo,
+            provider: app.provider,
+            account,
+            connect: connectOf(facts),
+            authScheme: app.provider === "composio" ? app.authScheme : null,
+            accountMode: app.accountMode,
+            state,
+            unavailable: unavailableReason(facts),
+            accountHolder: account === "personal" ? holder : null,
+            asksFirst:
+              state === "ready" &&
+              account === "personal" &&
+              holder === "you" &&
+              owner !== null &&
+              !ids.some((id) => consented.has(id)),
+            granted: facts.granted,
+            connectedAt:
+              account === "shared"
+                ? (teamAccount?.connectedAt ?? null)
+                : account === "personal"
+                  ? (personal?.connectedAt ?? null)
+                  : null,
+            requestKind,
+            request: request
+              ? {
+                  id: request.id,
+                  kind: request.kind,
+                  createdAt: iso(request.createdAt) ?? "",
+                }
+              : null,
+          },
+          unavailable: unavailableReason(facts),
+          answeringId: app.answeringId,
+          toolkit: app.toolkit,
+          entry: app.entry,
+          sharedUsable,
+          vouched: app.vouched,
+        };
+      }),
+    );
   }
 
   const requestColumns = {
@@ -587,6 +762,35 @@ export function appAccessMethods(context: StoreContext) {
     return rows.map(toRecord);
   }
 
+  /** See `closeAppAccessRequest` below. */
+  async function closeRequest(input: {
+    id: string;
+    status: Exclude<AppAccessRequestStatus, "pending">;
+    by: string;
+    requestedBy?: string;
+  }): Promise<AppAccessRequestRecord | null> {
+    const [closed] = await database
+      .update(appAccessRequests)
+      .set({
+        status: input.status,
+        resolvedAt: new Date(),
+        resolvedBy: input.by,
+      })
+      .where(
+        and(
+          eq(appAccessRequests.id, input.id),
+          eq(appAccessRequests.status, "pending"),
+          input.requestedBy
+            ? eq(appAccessRequests.requestedBy, input.requestedBy)
+            : undefined,
+        ),
+      )
+      .returning({ id: appAccessRequests.id });
+    if (!closed) return null;
+    const [record] = await requestRows(eq(appAccessRequests.id, closed.id));
+    return record ?? null;
+  }
+
   return {
     /**
      * Every work app one Bot holds, each with what it is for this person.
@@ -604,6 +808,7 @@ export function appAccessMethods(context: StoreContext) {
       agentId: string;
       composioConfigured: boolean;
       directory?: AppDirectory;
+      sharedAudience?: SharedAudienceCheck;
     }): Promise<AppAccess[]> {
       const granted = await grantedServerIds(input.agentId);
       if (granted.size === 0) return [];
@@ -645,21 +850,36 @@ export function appAccessMethods(context: StoreContext) {
       userId: string | null;
       composioConfigured: boolean;
       directory?: AppDirectory;
+      sharedAudience?: SharedAudienceCheck;
     }): Promise<AppInspection | null> {
-      const candidate = await candidateFor(input.app, input.directory);
+      const candidate = await candidateFor(
+        input.app,
+        input.directory,
+        await grantedServerIds(input.agentId),
+      );
       if (!candidate) return null;
       const [described] = await describe([candidate], input);
       return described ?? null;
     },
 
-    /** Every tool the app's answering row advertises, as grant refs. */
-    async appToolRefs(serverId: string): Promise<string[]> {
+    /**
+     * Every tool the app's answering row advertises, as grant refs, and whether each is a read.
+     *
+     * `read` IS THE EXACT WORD AND NOTHING ELSE, as `classifyTool` reads `effect`: a null or an
+     * unrecognised value is a write, so a tool nobody classified is never handed out as a read.
+     */
+    async appTools(
+      serverId: string,
+    ): Promise<{ ref: string; read: boolean }[]> {
       const rows = await database
-        .select({ name: mcpTools.name })
+        .select({ name: mcpTools.name, effect: mcpTools.effect })
         .from(mcpTools)
         .where(eq(mcpTools.serverId, serverId))
         .orderBy(asc(mcpTools.name));
-      return rows.map((row) => `${serverId}/${row.name}`);
+      return rows.map((row) => ({
+        ref: `${serverId}/${row.name}`,
+        read: row.effect === "read",
+      }));
     },
 
     /**
@@ -718,6 +938,76 @@ export function appAccessMethods(context: StoreContext) {
       );
     },
 
+    /** How many requests this person has waiting, across every app and Bot. */
+    async countPendingAppAccessRequests(requestedBy: string): Promise<number> {
+      const [row] = await database
+        .select({ count: count() })
+        .from(appAccessRequests)
+        .where(
+          and(
+            eq(appAccessRequests.requestedBy, requestedBy),
+            eq(appAccessRequests.status, "pending"),
+          ),
+        );
+      return row?.count ?? 0;
+    },
+
+    /**
+     * Claim a pending request for an approval about to be carried out: closed as approved, by this
+     * administrator, before anything is changed — or null when somebody else answered it first.
+     *
+     * THE CLAIM COMES FIRST SO NOTHING CAN ANSWER IT UNDERNEATH THE CHANGE. Approving switches an
+     * app on and grants a Bot its tools, and used to close the request only afterwards; a dismiss or
+     * a withdrawal landing in between closed it first, the approve's close found nothing, and the
+     * Bot kept a grant under a request that read dismissed, with no `app_access.approved` in the
+     * trail. Claimed here by the same conditional update every close is, the approval is the answer
+     * the moment it starts, and anybody else closing meanwhile finds it answered and loses with a
+     * 409 — before the change, not after it.
+     *
+     * NOT A ROW LOCK HELD ACROSS THE CHANGE, which is the other way to get this and the wrong one
+     * here. The change is made through the store on connections of its own, and a transaction kept
+     * open around it is the shape `db/client.ts` warns about: every pooled connection inside such a
+     * transaction, each waiting for a second, is a hang under load and an immediate one on a pool
+     * of one.
+     *
+     * An approval that cannot be carried out puts the request back with
+     * {@link releaseAppAccessRequest}, so it waits again with the step that is missing.
+     */
+    async claimAppAccessRequest(input: {
+      id: string;
+      by: string;
+    }): Promise<AppAccessRequestRecord | null> {
+      return closeRequest({ id: input.id, status: "approved", by: input.by });
+    },
+
+    /**
+     * Put back a request {@link claimAppAccessRequest} claimed and the approval then could not carry
+     * out. Only this administrator's claim, and only while it still reads approved.
+     *
+     * A REQUEST FILED AGAIN MEANWHILE IS THE ONE THAT WAITS. The person saw theirs answered, and the
+     * partial unique index lets them file the same request again; two cannot both be pending, so
+     * this one is closed as cancelled instead — the same request, already waiting under the other id.
+     */
+    async releaseAppAccessRequest(input: { id: string; by: string }) {
+      const claimed = and(
+        eq(appAccessRequests.id, input.id),
+        eq(appAccessRequests.status, "approved"),
+        eq(appAccessRequests.resolvedBy, input.by),
+      );
+      try {
+        await database
+          .update(appAccessRequests)
+          .set({ status: "pending", resolvedAt: null, resolvedBy: null })
+          .where(claimed);
+      } catch (error) {
+        if (!isUniqueViolation(error)) throw error;
+        await database
+          .update(appAccessRequests)
+          .set({ status: "cancelled", resolvedAt: new Date() })
+          .where(claimed);
+      }
+    },
+
     async appAccessRequest(id: string): Promise<AppAccessRequestRecord | null> {
       const [request] = await requestRows(eq(appAccessRequests.id, id));
       return request ?? null;
@@ -750,33 +1040,7 @@ export function appAccessMethods(context: StoreContext) {
      * lost. `requestedBy`, when given, confines a cancel to the person's own requests in the same
      * statement.
      */
-    async closeAppAccessRequest(input: {
-      id: string;
-      status: Exclude<AppAccessRequestStatus, "pending">;
-      by: string;
-      requestedBy?: string;
-    }): Promise<AppAccessRequestRecord | null> {
-      const [closed] = await database
-        .update(appAccessRequests)
-        .set({
-          status: input.status,
-          resolvedAt: new Date(),
-          resolvedBy: input.by,
-        })
-        .where(
-          and(
-            eq(appAccessRequests.id, input.id),
-            eq(appAccessRequests.status, "pending"),
-            input.requestedBy
-              ? eq(appAccessRequests.requestedBy, input.requestedBy)
-              : undefined,
-          ),
-        )
-        .returning({ id: appAccessRequests.id });
-      if (!closed) return null;
-      const [record] = await requestRows(eq(appAccessRequests.id, closed.id));
-      return record ?? null;
-    },
+    closeAppAccessRequest: closeRequest,
 
     /**
      * A row in the trail about a request, written here so the routes write through the same

@@ -650,9 +650,34 @@ export function createSharedUseStore(database: Database) {
     return row;
   }
 
+  /**
+   * Whether the gate would let this person's own chat with this Bot reach the app's team account —
+   * the same approval, owner and audience test the gate makes for a person-started run, and nothing
+   * it does after refusing. For a screen saying what a call would meet; the gate still decides
+   * every call.
+   */
+  async function admitsPerson(input: {
+    botId: string;
+    serverId: string;
+    actorId: string;
+  }): Promise<boolean> {
+    const approval = await approvalFor(input.botId, input.serverId);
+    if (!approval) return false;
+    const facts = await botFacts(input.botId);
+    return admits(
+      approval,
+      facts.ownerUserId,
+      await actorFacts(input.actorId),
+      {
+        outside: false,
+      },
+    );
+  }
+
   return {
     appIdOf,
     approvalFor,
+    admitsPerson,
     setApproval,
     deleteApprovalsFor,
     botFacts,
