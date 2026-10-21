@@ -3396,6 +3396,56 @@ describe("a dynamic client the vendor has evicted", () => {
   });
 
   /**
+   * The warning is about the last refresh, so a clean one takes it away.
+   *
+   * CRITERION. After a refresh that skipped a name, a refresh whose listing has no such name leaves
+   * `skippedTools` empty, and the page's read hands on an empty list.
+   *
+   * REASON. The warning is drawn whenever the list is non-empty. A clean refresh that kept the old
+   * names would leave the app's page warning about an action the vendor no longer lists, for good.
+   */
+  test("a clean refresh after one that skipped a name clears the warning", async () => {
+    await putClient(EVICTED);
+    await connect();
+    accepted = new Set([EVICTED.clientId]);
+
+    const ordinary = {
+      name: "notion-fetch",
+      description: "An ordinary name.",
+      inputSchema: { type: "object", properties: {} },
+    };
+    await withMockedNotionListing(
+      dynamicServerId,
+      [
+        ordinary,
+        {
+          name: "notion.export",
+          description: "A name the MCP spec allows and a model API refuses.",
+          inputSchema: { type: "object", properties: {} },
+        },
+      ],
+      async () => {
+        await dynamicStore.refreshTools(dynamicServerId, dynamicUserId);
+      },
+    );
+    await withMockedNotionListing(dynamicServerId, [ordinary], async () => {
+      expect(
+        await dynamicStore.refreshTools(dynamicServerId, dynamicUserId),
+      ).toEqual({ tools: 1 });
+    });
+
+    const [server] = await database
+      .select({ skippedTools: mcpServers.skippedTools })
+      .from(mcpServers)
+      .where(eq(mcpServers.id, dynamicServerId));
+    expect(server?.skippedTools).toBeNull();
+    const listed = (await dynamicStore.listServers()).find(
+      (entry) => entry.id === dynamicServerId,
+    );
+    expect(listed?.skippedTools).toEqual([]);
+  });
+
+  /**
    * A listing where NOTHING survives is the empty answer by another route, and is kept like one.
    *
    * CRITERION. Held actions are not deleted when every name the vendor listed was skipped; the
