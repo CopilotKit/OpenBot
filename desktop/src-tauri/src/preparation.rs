@@ -141,17 +141,27 @@ fn fingerprint(root: &Path) -> Result<String, Problem> {
 }
 
 fn write_record(root: &Path, name: &str, value: &impl Serialize) -> Result<(), Problem> {
+    write_checkpoint(root, name, value).map_err(required)
+}
+
+/// Replace a checkpoint file through a temporary file. The error is the underlying cause, for the
+/// caller to put beside its own sentence.
+pub(crate) fn write_checkpoint(
+    root: &Path,
+    name: &str,
+    value: &impl Serialize,
+) -> Result<(), String> {
     let target = root.join(name);
     let temporary = root.join(format!("{name}.tmp"));
-    let bytes = serde_json::to_vec(value).map_err(|e| required(e.to_string()))?;
-    std::fs::write(&temporary, bytes).map_err(|e| required(e.to_string()))?;
+    let bytes = serde_json::to_vec(value).map_err(|e| e.to_string())?;
+    std::fs::write(&temporary, bytes).map_err(|e| e.to_string())?;
     // Windows rename does not replace an existing file. A missing checkpoint is safe on interruption.
     match std::fs::remove_file(&target) {
         Ok(()) => {}
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(e) => return Err(required(e.to_string())),
+        Err(e) => return Err(e.to_string()),
     }
-    std::fs::rename(temporary, target).map_err(|e| required(e.to_string()))
+    std::fs::rename(temporary, target).map_err(|e| e.to_string())
 }
 
 pub fn invalidate(root: &Path) -> Result<(), Problem> {

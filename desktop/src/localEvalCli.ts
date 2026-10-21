@@ -1,0 +1,220 @@
+/**
+ * The window's view of the local evaluation CLI boundary in src-tauri/src/local_eval.rs.
+ *
+ * The native layer runs the pinned CLI, normalizes its version-1 JSON and returns only allowlisted
+ * facts or a static failure category. Raw CLI output never reaches the window. Runtime and licence
+ * decisions stay in the CLI.
+ */
+import { invoke } from "@tauri-apps/api/core";
+import type { Problem } from "./Problem";
+
+export type LocalAction = "status" | "start" | "stop";
+export type LocalOutcome = "completed" | "blocked" | "failed";
+
+/** Static categories from `local_eval::Failure`. None carries CLI output. */
+export const localFailures = [
+  "unavailable",
+  "unverified",
+  "invalid-stack",
+  "spawn",
+  "timeout",
+  "cancelled",
+  "output-limit",
+  "invalid-json",
+  "unsupported-version",
+  "unexpected-command",
+  "invalid-status",
+  "missing-stack",
+  "unsafe-endpoint",
+  "contract-mismatch",
+  "unexpected-exit",
+] as const;
+export type LocalFailure = (typeof localFailures)[number];
+
+/** The CLI's own blocker reasons, from `local_eval::Reason`. */
+export type LocalReason =
+  | "authentication-required"
+  | "eula-acceptance-required"
+  | "eula-unavailable"
+  | "eula-declined"
+  | "release-unavailable"
+  | "feature-disabled"
+  | "unsupported-platform"
+  | "unsupported-engine"
+  | "port-unavailable"
+  | "docker-unavailable"
+  | "update-recovery-required"
+  | "incompatible-release"
+  | "local-command-busy"
+  | "local-command-failed"
+  | "unrecognized";
+
+export type LocalReport = {
+  outcome: LocalOutcome;
+  stack: null | {
+    id: string;
+    installedRelease: string;
+    step: string;
+    urls: { api: string; dashboard: string; gateway: string };
+    hasFailedStep: boolean;
+    updateInProgress: boolean;
+    observed: null | {
+      running: boolean;
+      services: { name: string; phase: string; ready: boolean }[];
+    };
+  };
+  reason: LocalReason | null;
+  // CLI v1 cannot state either fact. The native layer has no other value to send yet.
+  readiness: "unknown";
+  licence: "unknown";
+};
+
+/** The stacks the CLI has recorded. App folders are not included. */
+export type LocalListing = {
+  outcome: LocalOutcome;
+  stacks: NonNullable<LocalReport["stack"]>[];
+  reason: LocalReason | null;
+};
+
+export class LocalEvalError extends Error {
+  constructor(readonly category: LocalFailure | "unrecognized") {
+    super(category);
+    this.name = "LocalEvalError";
+  }
+}
+
+function failure(rejection: unknown): LocalEvalError {
+  // Only a known static category is passed on. Anything else is not echoed.
+  const known = localFailures.find((category) => category === rejection);
+  return new LocalEvalError(known ?? "unrecognized");
+}
+
+/**
+ * Starts one CLI call. `attempt` names it for `cancelLocalEval`, which works even before the
+ * native side has started the call.
+ */
+export function runLocalEval(
+  action: LocalAction,
+  stack: string,
+): { attempt: string; report: Promise<LocalReport> } {
+  const attempt = crypto.randomUUID();
+  const report = invoke<LocalReport>("run_local_eval", {
+    attempt,
+    action,
+    stack,
+  }).catch((rejection: unknown) => {
+    throw failure(rejection);
+  });
+  return { attempt, report };
+}
+
+/** Lists recorded stacks, so a stack id comes from the CLI. Cancel it like any other call. */
+export function listLocalEval(): {
+  attempt: string;
+  listing: Promise<LocalListing>;
+} {
+  const attempt = crypto.randomUUID();
+  const listing = invoke<LocalListing>("list_local_eval", { attempt }).catch(
+    (rejection: unknown) => {
+      throw failure(rejection);
+    },
+  );
+  return { attempt, listing };
+}
+
+/**
+ * `local setup` for this installation. A stack it completes is recorded as OpenBot's, so it
+ * starts and stops with OpenBot. Blocked is an answer, not an error: the first is usually the
+ * evaluation terms. A stack that was set up but could not be recorded rejects with a `Problem`.
+ */
+export function setUpLocalEval(root: string): {
+  attempt: string;
+  report: Promise<LocalReport>;
+} {
+  const attempt = crypto.randomUUID();
+  const report = invoke<LocalReport>("set_up_local_eval", {
+    attempt,
+    root,
+  }).catch((rejection: unknown) => {
+    if (rejection && typeof rejection === "object" && "said" in rejection) {
+      throw rejection as Problem;
+    }
+    throw failure(rejection);
+  });
+  return { attempt, report };
+}
+
+/** Stops one call; it then rejects with `cancelled`. */
+export function cancelLocalEval(attempt: string): Promise<void> {
+  return invoke("cancel_local_eval", { attempt });
+}
+
+export type ChatBlocker = "intelligence" | "openbot" | "provider";
+
+export type ChatGateInput = {
+  /** The latest status call: a report, a failure category, or nothing yet. */
+  intelligence: LocalReport | LocalFailure | null;
+  openBot: "connected" | "not-connected" | "unknown";
+  provider: "validated" | "invalid" | "unvalidated";
+};
+
+/**
+ * Chat opens only when all three independent facts are known good. Unknown is blocked, never
+ * guessed ready. No v1 report can open it, because v1 states neither readiness nor licence.
+ */
+export function chatGate(state: ChatGateInput): {
+  open: boolean;
+  blockers: ChatBlocker[];
+} {
+  const blockers: ChatBlocker[] = [];
+  if (!intelligenceReady(state.intelligence)) blockers.push("intelligence");
+  if (state.openBot !== "connected") blockers.push("openbot");
+  if (state.provider !== "validated") blockers.push("provider");
+  return { open: blockers.length === 0, blockers };
+}
+
+function intelligenceReady(report: ChatGateInput["intelligence"]): boolean {
+  if (report === null || typeof report === "string") return false;
+  return (
+    report.outcome === "completed" &&
+    canonical(report.readiness, "ready") &&
+    canonical(report.licence, "valid")
+  );
+}
+
+// Positive match only: a future value that is not exactly the good one still blocks.
+function canonical(value: string, good: string): boolean {
+  return value === good;
+}
+
+/** How main.rs starts an Intelligence stop failure (`INTELLIGENCE_STOP_FAILED`). */
+export const intelligenceStopFailed = "Intelligence stop failed: ";
+
+/**
+ * Splits a Stop failure into OpenBot's own lines and the local Intelligence stack's. OpenBot has
+ * stopped when only the second is present. Anything not in the native line format is OpenBot's.
+ */
+export function splitStopFailure(thrown: unknown): {
+  openBot: string | null;
+  intelligence: string | null;
+} {
+  if (typeof thrown !== "string") {
+    return { openBot: String(thrown), intelligence: null };
+  }
+  const lines = thrown.split("\n");
+  const own = lines.filter((line) => !line.startsWith(intelligenceStopFailed));
+  const intelligence = lines.filter((line) =>
+    line.startsWith(intelligenceStopFailed),
+  );
+  return {
+    openBot: own.length ? own.join("\n") : null,
+    intelligence: intelligence.length ? intelligence.join("\n") : null,
+  };
+}
+
+export function intelligenceStopProblem(line: string): Problem {
+  return {
+    said: "OpenBot stopped, but could not stop the local Intelligence stack it started.",
+    detail: line,
+  };
+}
