@@ -992,8 +992,10 @@ test("CopilotKit's own capture batch is never a step's save, through the debugge
     () => calls.some((call) => call.url.endsWith("/notes")),
     "the note",
   );
-  await until(() => ended.length === 3, "every write ended");
+  // The inline batch is screened as it starts, so no step ever waits for it; the one read late waits until it is read.
+  await until(() => ended.length === 2, "every write ended");
   await settle();
+  expect([...started].sort()).toEqual(["7//late", "7//note"]);
   // The page hook's copy of the same batch, masked as the page sends it.
   const now = Date.now();
   await capture.recordPageEvent(7, {
@@ -1025,7 +1027,7 @@ test("CopilotKit's own capture batch is never a step's save, through the debugge
   expect([...started].sort()).toEqual([...ended].sort());
 });
 
-test("a write is in flight from its start until the steps have it, or until it is screened out", async () => {
+test("a write is in flight from its start until the steps have it; one the screens drop as it starts never is", async () => {
   await capture.start(7, "https://crm.example.test/");
   fake.debugger.emit({ tabId: 7 }, "Network.requestWillBeSent", {
     requestId: "w1",
@@ -1077,8 +1079,9 @@ test("a write is in flight from its start until the steps have it, or until it i
     id: "w2",
     url: "https://www.google-analytics.com/g/collect",
   });
-  await until(() => ended.length === 2, "the screened write's end");
-  expect(started).toEqual(["7//w1", "7//w2"]);
+  await settle();
+  expect(started).toEqual(["7//w1"]);
+  expect(ended).toEqual(["7//w1"]);
   expect(calls).toHaveLength(1);
 });
 

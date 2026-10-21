@@ -29,6 +29,8 @@ test("a top-frame commit becomes a navigation event with scrubbed urls", () => {
       from: "https://crm.example.test/login",
       to: expect.not.stringContaining("abc123secret"),
       navigationType: "push",
+      transitionType: "link",
+      transitionQualifiers: [],
       frameId: 0,
       parentFrameId: -1,
     },
@@ -77,4 +79,44 @@ test("the event timestamp falls back to the clock without a timeStamp", () => {
     undefined,
   );
   expect(event.timestamp).toBeGreaterThanOrEqual(before);
+});
+
+test("an address typed into the address bar says so beside CopilotKit's navigationType, as Chrome reports it", () => {
+  // End-to-end run 2, row 89035: Wikipedia's address typed into the address bar was recorded as a plain push.
+  const value = (details: Partial<NavigationDetails>) =>
+    navigationEvent(
+      commit({ url: "https://en.wikipedia.org/wiki/Main_Page", ...details }),
+      "commit",
+      "https://the-internet.herokuapp.com/email_sent",
+    ).value as Record<string, unknown>;
+  expect(
+    value({
+      transitionType: "typed",
+      transitionQualifiers: ["from_address_bar"],
+    }),
+  ).toMatchObject({
+    navigationType: "push",
+    transitionType: "typed",
+    transitionQualifiers: ["from_address_bar"],
+  });
+  expect(
+    value({ transitionType: "link", transitionQualifiers: ["forward_back"] }),
+  ).toMatchObject({
+    navigationType: "traverse",
+    transitionType: "link",
+    transitionQualifiers: ["forward_back"],
+  });
+  expect(
+    value({ transitionType: "reload", transitionQualifiers: [] }),
+  ).toMatchObject({ navigationType: "reload", transitionType: "reload" });
+  expect(
+    value({
+      transitionType: "form_submit",
+      transitionQualifiers: ["server_redirect"],
+    }),
+  ).toMatchObject({
+    navigationType: "push",
+    transitionType: "form_submit",
+    transitionQualifiers: ["server_redirect"],
+  });
 });

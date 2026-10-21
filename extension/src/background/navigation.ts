@@ -27,7 +27,9 @@ function navigationType(
   return "push";
 }
 
-/** The collector's navigation event, for a commit or a history update in any frame. */
+/** The collector's navigation event, for a commit or a history update in any frame: `navigationType` in CopilotKit's
+ * own words (push, replace, traverse, reload), and beside it how Chrome says the page was reached (webNavigation's
+ * transitionType and transitionQualifiers: an address typed, a link, a form, a reload, a redirect). */
 export function navigationEvent(
   details: NavigationDetails,
   kind: NavigationKind,
@@ -41,6 +43,12 @@ export function navigationEvent(
       from: fromUrl === undefined ? "" : scrubUrl(fromUrl),
       to: scrubUrl(details.url),
       navigationType: navigationType(details, kind),
+      ...(details.transitionType
+        ? { transitionType: details.transitionType }
+        : {}),
+      ...(details.transitionQualifiers
+        ? { transitionQualifiers: [...details.transitionQualifiers] }
+        : {}),
       frameId: details.frameId,
       parentFrameId: details.parentFrameId ?? (details.frameId === 0 ? -1 : 0),
     },
