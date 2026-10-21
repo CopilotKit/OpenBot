@@ -25,6 +25,7 @@ import {
 } from "@/lib/plugins/queries";
 import { Route as ConnectedAccountRoute } from "@/routes/_authed/settings/connected-accounts/$key";
 import { serversListedFor } from "@/routes/_authed/settings/connected-accounts/index";
+import { settleReactWork } from "./settle-react-work";
 
 /**
  * A Composio app on a deployment with no Composio key, as the person who would connect it sees it.
@@ -40,7 +41,12 @@ import { serversListedFor } from "@/routes/_authed/settings/connected-accounts/i
 
 beforeAll(() => GlobalRegistrator.register());
 afterEach(cleanup);
-afterAll(() => GlobalRegistrator.unregister());
+// React may still have a passive effect queued when the last test ends; unregistering under it
+// throws "window is not defined" between tests, which fails the run though every test passed.
+afterAll(async () => {
+  await settleReactWork();
+  GlobalRegistrator.unregister();
+});
 
 const originalFetch = global.fetch;
 
