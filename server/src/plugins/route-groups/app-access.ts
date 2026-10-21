@@ -77,6 +77,8 @@ export function mountAppAccessRoutes({
   composio,
   shared,
   actorEmail,
+  activeProvider,
+  activeVendor,
 }: PluginRouteContext) {
   const composioConfigured = Boolean(composio);
   /*
@@ -375,7 +377,7 @@ export function mountAppAccessRoutes({
             503,
           );
         const outcome = await enableComposioApp(
-          { store, composio },
+          { store, composio, activeProvider, activeVendor },
           inspected.toolkit,
           actorEmail(context),
         );

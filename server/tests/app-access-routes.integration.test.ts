@@ -117,6 +117,7 @@ const enabled: string[] = [];
 
 function storeFor(): PluginStore {
   const real = createPluginStore({
+    brokerProvider: "composio",
     database,
     auditStore: audit,
     credentials: {} as never,
@@ -166,7 +167,7 @@ function appAs(
     } as never);
     await next();
   };
-  const sharedUse = createSharedUseStore(database);
+  const sharedUse = createSharedUseStore(database, "composio");
   return new Hono().route(
     "/api/plugins",
     createPluginRoutes(
@@ -175,7 +176,9 @@ function appAs(
       // Everybody may use the suite's Bot; nobody but an administrator may use the hidden one.
       async (actor, agentId) => agentId !== hidden || actor.role === "admin",
       undefined,
-      options.composio === false ? undefined : { broker },
+      options.composio === false
+        ? undefined
+        : { broker, provider: "composio" },
       { modes: {} as never, use: sharedUse },
     ),
   );

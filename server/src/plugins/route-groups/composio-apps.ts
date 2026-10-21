@@ -175,7 +175,7 @@ export function mountComposioAppRoutes({
      */
     const slug = typeof body?.slug === "string" ? body.slug.trim() : undefined;
     const outcome = await enableComposioApp(
-      { store, composio },
+      { store, composio, activeProvider, activeVendor },
       slug,
       actorEmail(context),
     );
@@ -200,7 +200,15 @@ export type EnableOutcome =
  * are administrator-only.
  */
 export async function enableComposioApp(
-  { store, composio }: Pick<PluginRouteContext, "store" | "composio">,
+  {
+    store,
+    composio,
+    activeProvider,
+    activeVendor,
+  }: Pick<
+    PluginRouteContext,
+    "store" | "composio" | "activeProvider" | "activeVendor"
+  >,
   slug: string | undefined,
   by: string,
 ): Promise<EnableOutcome> {
