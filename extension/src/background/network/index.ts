@@ -69,6 +69,10 @@ const refusedSentence = (message: string) =>
 /** OpenBot's CopilotKit runtime routes that run a Bot's agent or join its run: the runtime is mounted at /api/copilotkit
  * (server/src/copilot.ts) with REST routes only, `/agent/<id>/run` and `/agent/<id>/connect`. */
 const OPENBOT_AGENT_RUN = /^\/api\/copilotkit\/agent\/[^/]+\/(?:run|connect)$/;
+/** Where the page's CopilotKit asks OpenBot's runtime what it serves (`info`): a GET of /api/copilotkit/info, or, were
+ * its transport to fall back to the single route, a POST of `{ method: "info" }` to /api/copilotkit. The answer names no
+ * secret, only the runtime's version, mode and agents. */
+const OPENBOT_RUNTIME_INFO = /^\/api\/copilotkit(?:\/info)?\/?$/;
 /** CopilotKit Intelligence's client socket, as the page opens it from a run's join credentials (`<clientUrl>/websocket?
  * join_token=...`): on OpenBot's own origin when a deployment serves Intelligence's gateway there. */
 const INTELLIGENCE_SOCKET = /\/websocket$/;
@@ -160,17 +164,29 @@ export function createNetworkCapture(
     }
   };
 
+  /** OpenBot's runtime `info` route: followed for CopilotKit's info call alone (openbotInfo). */
+  const openbotInfo = (url: string): boolean => {
+    if (!ignore(url)) return false;
+    try {
+      return OPENBOT_RUNTIME_INFO.test(new URL(url).pathname);
+    } catch {
+      return false;
+    }
+  };
+
   /** The AG-UI capture follows OpenBot's own page as it follows any other site's, but only in its chat with a Bot: the
    * runs and joins it posts to OpenBot's CopilotKit runtime, whose answers are the agent's events or the Intelligence
-   * channel they stream on, and an Intelligence client socket it opens with a run's join credentials. Every other call to
-   * OpenBot stays ignored. The Recorder's own calls to OpenBot (its connection, its capture pass) come from the extension,
-   * never from a tab, and match neither. */
+   * channel they stream on, an Intelligence client socket it opens with a run's join credentials, and the runtime's
+   * answer to CopilotKit's `info` call (read for that alone: the page runs CopilotKit, so its clicks carry the open
+   * Thread). Every other call to OpenBot stays ignored. The Recorder's own calls to OpenBot (its connection, its capture
+   * pass) come from the extension, never from a tab, and match none of these. */
   const ignoreAgent = (url: string): boolean => {
     if (!ignore(url)) return false;
     try {
       const { pathname, searchParams } = new URL(url);
       return !(
         OPENBOT_AGENT_RUN.test(pathname) ||
+        OPENBOT_RUNTIME_INFO.test(pathname) ||
         (INTELLIGENCE_SOCKET.test(pathname) && searchParams.has("join_token"))
       );
     } catch {
@@ -192,6 +208,7 @@ export function createNetworkCapture(
   const agent = createAgentCapture({
     send,
     ignore: ignoreAgent,
+    infoOnly: openbotInfo,
     observe: (observation) => {
       if (!ended && mode !== "stopped") deps.agent(observation);
     },

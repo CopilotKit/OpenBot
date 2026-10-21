@@ -149,6 +149,13 @@ const pathOf = (url: string) => {
   return `${parsed.pathname}${parsed.search}`;
 };
 
+/** The OpenBot a recording of OpenBot's own page is connected to: the page's origin. The page hook knows nothing of
+ * OpenBot, and the debugger capture follows only OpenBot's chat and its runtime's `info`, so the two still agree. */
+const openbotOf = (fixture: Fixture): string | null =>
+  fixture === loadFixture("openbot-chat")
+    ? new URL(String(marks(fixture, "navigate")[0]?.data?.url)).origin
+    : null;
+
 /** The observations the debugger capture makes from the fixture's CDP. */
 async function debuggerObservations(
   fixture: Fixture,
@@ -158,7 +165,7 @@ async function debuggerObservations(
   const observations: CaptureObservation[] = [];
   const capture = createNetworkCapture(
     {
-      openbotUrl: () => null,
+      openbotUrl: () => openbotOf(fixture),
       call: () => {},
       writeStarted: () => {},
       writeEnded: () => {},
@@ -412,10 +419,12 @@ const pageObservations = () =>
   );
 
 /** The fixtures of a CopilotKit page: its runtime's `info` call is in their traffic (single route, REST, Intelligence). */
-const COPILOTKIT_PAGES = new Set([
-  "single-route-sse",
-  "rest-sse",
-  "intelligence-websocket",
+const COPILOTKIT_PAGES = new Map([
+  ["single-route-sse", 1],
+  ["rest-sse", 1],
+  ["intelligence-websocket", 1],
+  // OpenBot's own chat asks when it loads and again after the run.
+  ["openbot-chat", 2],
 ]);
 
 for (const name of [
@@ -424,6 +433,7 @@ for (const name of [
   "intelligence-websocket",
   "generic-proto-ws-ticker",
   "late-and-aborted",
+  "openbot-chat",
 ])
   test(`the page hook gives the same observations as the debugger for the same traffic: ${name}`, async () => {
     const fixture = loadFixture(name);
@@ -448,7 +458,7 @@ for (const name of [
     // CopilotKit, once; the other servers' pages never do.
     const runtimeAnswers = (list: (CaptureObservation | PageObservation)[]) =>
       list.filter((observation) => observation.kind === "runtime").length;
-    expect(runtimeAnswers(expected)).toBe(COPILOTKIT_PAGES.has(name) ? 1 : 0);
+    expect(runtimeAnswers(expected)).toBe(COPILOTKIT_PAGES.get(name) ?? 0);
     expect(runtimeAnswers(observed)).toBe(runtimeAnswers(expected));
     // The page got every response untouched, byte for byte, read through to its end while the hook read its copy.
     for (const [id, answer] of recorded) {

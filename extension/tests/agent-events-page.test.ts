@@ -4,7 +4,7 @@
 // the agent events and the steps, wired as the recording wires them, and each click is the content script's own capture
 // of the element the person clicked, at the moment the recording marks. What leaves is held to what CopilotKit's own
 // capture recorded for the same page flow (learning-page-copilotkit.json): its agent rows one for one, and the agent
-// context of each click.
+// context of each click. OpenBot's own chat (openbot-chat.json) goes the same way, with OpenBot connected.
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import type { CapturedEvent } from "@openbot/shared/recorder-masking";
@@ -56,6 +56,16 @@ function press(element: Element, type: string) {
 
 /** The content script's capture of a click on the element `selector` finds in `html`, at `at`. */
 function clickOn(html: string, selector: string, at: number): CapturedEvent {
+  const click = stepsOf(html, selector, at).find(
+    ({ name }) => name === "click",
+  );
+  if (!click) throw new Error("the click was not captured");
+  return click;
+}
+
+/** Every step the content script captured of a click on the element `selector` finds in `html`: the click, and the
+ * submit a form's submit button makes of it a moment later. */
+function stepsOf(html: string, selector: string, at: number): CapturedEvent[] {
   const sent: CapturedEvent[] = [];
   const tracker = createSensitivityTracker({ isTrusted: () => true });
   const untrack = tracker.install();
@@ -69,13 +79,25 @@ function clickOn(html: string, selector: string, at: number): CapturedEvent {
     if (!element) throw new Error(`nothing at ${selector}`);
     press(element, "pointerdown");
     press(element, "click");
+    // A form's submit button submits its form as the click's default action, a trusted submit, which happy-dom does
+    // not do for a click made by hand.
+    const form = element.closest("form");
+    if (form && element.getAttribute("type") === "submit") {
+      const submit = new Event("submit", { bubbles: true, cancelable: true });
+      Object.defineProperty(submit, "isTrusted", { value: true });
+      Object.defineProperty(submit, "submitter", { value: element });
+      form.dispatchEvent(submit);
+    }
   } finally {
     capture.stop();
     untrack();
   }
-  const click = sent.find(({ name }) => name === "click");
-  if (!click) throw new Error("the click was not captured");
-  return { ...click, timestamp: at };
+  return sent
+    .filter(({ name }) => name === "click" || name === "submit")
+    .map((step) => ({
+      ...step,
+      timestamp: step.name === "submit" ? at + 1 : at,
+    }));
 }
 
 const AGENT_ROWS = new Set([
@@ -88,9 +110,16 @@ const AGENT_ROWS = new Set([
 /**
  * Records the page: its traffic through the network capture into the agent events, whose events the steps place by
  * their time; each click enriched as it arrives and settled as it leaves, as recording.ts wires them. Returns what left
- * the steps, in the Trajectory's order.
+ * the steps, in the Trajectory's order. `openbot` is the OpenBot the recording is connected to; `steps` draws what each
+ * recorded click landed on and captures the steps it made, in place of the learning page's chat.
  */
-async function recordPage(name: string) {
+async function recordPage(
+  name: string,
+  page: {
+    openbot?: string;
+    steps?: (mark: FixtureMark) => CapturedEvent[];
+  } = {},
+) {
   fake = installChromeFake({ extensionId: "test" });
   const fixture = loadFixture(name);
   const sent: CapturedEvent[] = [];
@@ -115,7 +144,7 @@ async function recordPage(name: string) {
   });
   const capture = createNetworkCapture(
     {
-      openbotUrl: () => null,
+      openbotUrl: () => page.openbot ?? null,
       call: (call) => steps.call(call),
       writeStarted: (id, tabId, startedAt) =>
         steps.writeStarted(id, tabId, startedAt),
@@ -161,9 +190,16 @@ async function recordPage(name: string) {
   const played = replay(fake, TAB, fixture, {
     onMark(mark) {
       if (mark.name !== "click") return;
-      const [html, selector] = clicked(mark);
-      const click = clickOn(html, selector, mark.wall);
-      steps.step(TAB, agentEvents?.enrichClick(TAB, click) ?? click);
+      const made = page.steps
+        ? page.steps(mark)
+        : [clickOn(...clicked(mark), mark.wall)];
+      for (const step of made)
+        steps.step(
+          TAB,
+          step.name === "click"
+            ? (agentEvents?.enrichClick(TAB, step) ?? step)
+            : step,
+        );
     },
   });
   now = () => played.now();
@@ -319,3 +355,59 @@ for (const name of ["single-route-sse", "intelligence-websocket"])
     // carried again.
     expect(history?.map(({ role }) => role)).toEqual(["tool"]);
   });
+
+test("OpenBot's own chat: the composer, clicked before any Thread, names none, and Send names the Thread of the run it started", async () => {
+  // End-to-end run 3: neither click carried a threadId at all. The capture ignored OpenBot's runtime `info` call with
+  // the rest of OpenBot's own calls, so it never knew the page runs CopilotKit; and Send is the submit button of the
+  // composer's form, whose submit, a millisecond after the click, closed the click's span before the run it started.
+  // The clicks land on the composer as run 3 recorded it: its Message editor, then Send.
+  const fixture = loadFixture("openbot-chat");
+  const openbot = new URL(String(marks(fixture, "navigate")[0]?.data?.url))
+    .origin;
+  const { sent } = await recordPage("openbot-chat", {
+    openbot,
+    steps: (mark) =>
+      mark.data?.name === "focus"
+        ? stepsOf(
+            '<div role="textbox" aria-label="Message" aria-multiline="true" contenteditable="true"></div>',
+            '[aria-label="Message"]',
+            mark.wall,
+          )
+        : stepsOf(
+            '<form><div role="textbox" aria-label="Message" contenteditable="true">Hi! In one short sentence, what is 2 plus 2?</div><button type="submit" aria-label="Send message" data-slot="button"></button></form>',
+            'button[aria-label="Send message"]',
+            mark.wall,
+          ),
+  });
+  // The Thread of the run Send started, from the run's body (past 64 KiB, so read with getRequestPostData).
+  const [runRequest] = [...requests(fixture)].find(([, request]) =>
+    String((request.request as { url: string }).url).endsWith(
+      "/api/copilotkit/agent/general-assistant/run",
+    ),
+  ) ?? [""];
+  const body = fixture.entries.find(
+    (entry) =>
+      entry.kind === "command" &&
+      entry.method === "Network.getRequestPostData" &&
+      entry.params.requestId === runRequest,
+  );
+  const thread = (
+    JSON.parse(
+      String(body?.kind === "command" ? body.result?.postData : "{}"),
+    ) as { threadId?: string }
+  ).threadId;
+  expect(thread).toBeString();
+  expect(sent.filter(({ name }) => name === "submit")).toHaveLength(1);
+  const clicks = (sent as Row[])
+    .filter(({ name }) => name === "click")
+    .map(
+      (row): Record<string, unknown> => ({
+        label: (row.value.target as { label?: string }).label,
+        ...context(row),
+      }),
+    );
+  expect(clicks).toEqual([
+    { label: "Message", threadId: null },
+    { label: "Send message", threadId: thread },
+  ]);
+});

@@ -474,11 +474,43 @@ test("a recording made in OpenBot itself sees its chat's runs, as on any other s
     expect.objectContaining({ kind: "end", outcome: "failed" }),
   ]);
   expect((run.body as { threadId: string }).threadId).toBe(thread);
-  // OpenBot's other calls (its router, the channel, its busy flag and activity, the runtime's info, its polling) and
-  // its own channel socket are nothing to the agent events, and none of OpenBot's calls is ever a step's.
+  // OpenBot's other calls (its router, the channel, its busy flag and activity, its polling) and its own channel socket
+  // are nothing to the agent events, and none of OpenBot's calls is ever a step's.
   expect(new Set(observations.map(({ streamId }) => streamId))).toEqual(
     new Set([streamOf(connect.id), streamOf(run.id)]),
   );
+  expect(calls).toEqual([]);
+  expect(started).toEqual([]);
+});
+
+test("a recording made in OpenBot itself knows its page runs CopilotKit: its runtime answered the info call, and nothing else OpenBot answered says so", async () => {
+  // End-to-end run 3's clicks named no Thread at all: OpenBot's page asked its runtime's `info` (GET
+  // /api/copilotkit/info, answered with CopilotKit's RuntimeInfo) when it loaded and again after the run, but the capture
+  // ignored it with the rest of OpenBot's own calls.
+  const fixture = loadFixture("openbot-chat");
+  const navigate = String(marks(fixture, "navigate")[0]?.data?.url);
+  openbot = new URL(navigate).origin;
+  await capture.start(TAB, navigate);
+  await replay(fake, TAB, fixture).run();
+
+  const infos = exchanges(fixture).filter(
+    ({ url, method, body, status, answer }) =>
+      matchRuntimeInfoRequest(url, method, body) &&
+      isRuntimeInfoAnswer(status, answer),
+  );
+  expect(
+    infos.map(({ method, url }) => `${method} ${new URL(url).pathname}`),
+  ).toEqual(["GET /api/copilotkit/info", "GET /api/copilotkit/info"]);
+  expect(
+    runtimes.map(({ kind, tabId, url }) => ({ kind, tabId, url })),
+  ).toEqual(infos.map(({ url }) => ({ kind: "runtime", tabId: TAB, url })));
+  // Each at its answer's end, after its request.
+  for (const [index, runtime] of runtimes.entries()) {
+    const sent = requests(fixture).get(infos[index]?.id ?? "") as unknown as {
+      wallTime: number;
+    };
+    expect(runtime.at).toBeGreaterThanOrEqual(Math.round(sent.wallTime * 1000));
+  }
   expect(calls).toEqual([]);
   expect(started).toEqual([]);
 });

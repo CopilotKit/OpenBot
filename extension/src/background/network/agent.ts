@@ -91,6 +91,8 @@ type Request = {
   verdict: Verdict;
   /** CopilotKit's runtime `info` call: its answer is read once it finished. */
   info: boolean;
+  /** Followed for its `info` call alone (`infoOnly`): never read as AG-UI or as a run. */
+  infoOnly: boolean;
   /** The answer's status, once its headers came. */
   status: number | null;
 };
@@ -137,13 +139,15 @@ export type AgentCapture = ReturnType<typeof createAgentCapture>;
 
 /**
  * Follows the AG-UI traffic per debuggee from the Network domain's events, and hands each observation to `observe`.
- * `ignore` names URLs never followed (OpenBot's own); `onRun` says a request whose body was read late is a run, so
- * the tracker stops holding steps for it.
+ * `ignore` names URLs never followed (OpenBot's own); `infoOnly` names URLs followed only when the request is
+ * CopilotKit's runtime `info` call, and then only for its answer (OpenBot's own runtime); `onRun` says a request whose
+ * body was read late is a run, so the tracker stops holding steps for it.
  */
 export function createAgentCapture(options: {
   send: Send;
   observe(observation: CaptureObservation): void;
   ignore(url: string): boolean;
+  infoOnly(url: string): boolean;
   onRun(key: string): void;
 }) {
   const requests = new Map<string, Request>();
@@ -215,6 +219,10 @@ export function createAgentCapture(options: {
     )
       return;
     const method = (string(sent.method) ?? "GET").toUpperCase();
+    const inline = string(sent.postData);
+    const infoOnly = options.infoOnly(url);
+    // A URL followed for the info call alone: any other request to it is not followed at all.
+    if (infoOnly && !matchRuntimeInfoRequest(url, method, inline)) return;
     const wallTime = number(raw.wallTime);
     const clock: Clock = {
       monotonic: number(raw.timestamp) ?? 0,
@@ -231,10 +239,15 @@ export function createAgentCapture(options: {
       reading: "off",
       early: [],
       verdict: verdict(),
-      info: false,
+      info: infoOnly,
+      infoOnly,
       status: null,
     };
     requests.set(key, request);
+    if (infoOnly) {
+      request.verdict.decide(false);
+      return;
+    }
     if (method === "POST") {
       verdicts.set(key, request.verdict);
       for (const oldest of verdicts.keys()) {
@@ -242,7 +255,6 @@ export function createAgentCapture(options: {
         verdicts.delete(oldest);
       }
     }
-    const inline = string(sent.postData);
     request.info = matchRuntimeInfoRequest(url, method, inline);
     if (
       method !== "POST" ||
@@ -318,7 +330,7 @@ export function createAgentCapture(options: {
       request.stream?.response(contentType, status);
       if (request.stream?.isRun() === false) request.verdict.decide(false);
     });
-    if (request.format) stream(request, at);
+    if (request.format && !request.infoOnly) stream(request, at);
   }
 
   function onData(target: Debuggee, raw: Json): void {
