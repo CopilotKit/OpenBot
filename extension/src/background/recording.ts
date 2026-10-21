@@ -172,6 +172,9 @@ const STEP_EVENTS = ACTION_EVENTS;
 /** The held steps are written at once when they change, then at most this often while they keep changing: a step
  * reaches storage within this long of arriving, and a chatty page costs at most ten writes a second. */
 const HELD_WRITE_MS = 100;
+/** The most digests of what was typed into sensitive fields kept per tab, latest last: a digest comes with each keystroke,
+ * so this is a few secrets typed lately. */
+const TYPED_SECRETS = 64;
 /** How long Stop waits for the document to hand over the phrase being spoken (its speech service has 1.5 s). */
 const VOICE_END_MS = 2_000;
 const browserTimers: Timers = {
@@ -522,6 +525,10 @@ export function installRecording(
   let network: NetworkCapture | null = null;
   let networkMode: NetworkMode | "stopped" = "off";
   const digests = new Set<string>();
+  /** Each followed tab's digests of what the person typed into sensitive fields there, latest last (`TYPED_SECRETS` at
+   * most): a save whose body held one carries what they entered, though it reads [redacted] (network/index.ts). Kept as
+   * `digests` are. */
+  const typedSecrets = new Map<number, string[]>();
   /** The person's own Learning space as OpenBot last described it: a recording starts with it, for its popup line. */
   let learningSpace: LearningSpaceState | undefined;
   /** Each followed tab's last recorded top-frame address: the same one again is not recorded twice. */
@@ -649,6 +656,8 @@ export function installRecording(
     loadedPhase = state.phase;
     for (const digest of (await readSession("digests")) ?? [])
       digests.add(digest);
+    for (const [tabId, typed] of (await readSession("typedSecrets")) ?? [])
+      typedSecrets.set(tabId, typed);
     if (state.phase === "idle") return;
     const record = await readLocal("activeRecording");
     if (record)
@@ -1307,6 +1316,7 @@ export function installRecording(
         });
     },
     digests: () => digests,
+    typedSecrets: (tabId) => new Set(typedSecrets.get(tabId)),
   };
 
   async function record(
@@ -1559,9 +1569,11 @@ export function installRecording(
     }
     await stopRecordingScripts(tabIds);
     digests.clear();
+    typedSecrets.clear();
     forgetAddresses();
     openers.clear();
     await removeSession("digests");
+    await removeSession("typedSecrets");
     const capture = network;
     network = null;
     networkMode = "off";
@@ -2366,8 +2378,9 @@ export function installRecording(
   }
 
   /** A sensitive value's digest, from a content script or from the masking here: every later step, save, agent event and
-   * narration of the recording is masked with it. */
-  function keepDigest(digest: string): void {
+   * narration of the recording is masked with it. It is also what the person typed into a sensitive field in the tab, so
+   * a save from that tab whose body held it carries their values. */
+  function keepDigest(digest: string, tabId: number): void {
     // Memory only: it survives a service-worker restart, vanishes with the browser, and goes at Stop.
     digests.add(digest);
     void writeSession("digests", [...digests]).catch(
@@ -2375,6 +2388,13 @@ export function installRecording(
     );
     // The document masks the person's narration with them too; a document whose port is down gets them on ready.
     postOffscreen({ type: "offscreen.digests", digests: [...digests] });
+    const typed = (typedSecrets.get(tabId) ?? []).filter(
+      (known) => known !== digest,
+    );
+    typedSecrets.set(tabId, [...typed, digest].slice(-TYPED_SECRETS));
+    void writeSession("typedSecrets", [...typedSecrets]).catch(
+      report("keeping what was typed into a sensitive field"),
+    );
   }
 
   function onContentMessage(
@@ -2417,7 +2437,7 @@ export function installRecording(
         const event = maskContentEvent(
           message.event as CapturedEvent,
           digests,
-          keepDigest,
+          (digest) => keepDigest(digest, tabId),
         );
         if (!event) return;
         if (!STEP_EVENTS.has(event.name)) {
@@ -2434,7 +2454,7 @@ export function installRecording(
         return;
       }
       case "content.sensitive":
-        keepDigest(message.digest);
+        keepDigest(message.digest, tabId);
         return;
       case "content.notice":
         void noticeChoice(message.choice).catch(report("the notice choice"));

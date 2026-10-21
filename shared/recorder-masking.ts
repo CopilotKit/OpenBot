@@ -889,6 +889,75 @@ function maskBodyText(
   }
 }
 
+/**
+ * Whether a body, before it is masked, holds one of `typed`: the digests of what the person typed into sensitive fields.
+ * It is read as `maskBody` reads it and looked through where the masking looks for a typed secret (a JSON string or
+ * number, a form key or value, a word or a run of digits in text), so each value it finds is one the masking redacts, by
+ * its digest or first as a credential's value or a card number. Only the answer leaves: a save whose body this holds
+ * carries what the person entered, though all of it reads [redacted].
+ */
+export function holdsTypedSecret(
+  text: string,
+  contentType: string | undefined,
+  typed: ReadonlySet<string>,
+): boolean {
+  if (typed.size === 0) return false;
+  const matches = digestMatcher({ digests: typed });
+  /** `scrubText`'s candidates: a run of digit groups, or a word. */
+  const inWords = (value: string): boolean =>
+    (value.match(DIGIT_GROUPS) ?? []).some(
+      (run) => scrubDigestRun(run, matches) !== run,
+    ) ||
+    (value.match(TOKEN_CHARS) ?? []).some(matches) ||
+    (value.match(TOKEN_CHARS_FINE) ?? []).some(matches);
+  const inValue = (value: string): boolean => matches(value) || inWords(value);
+  const inJson = (value: JsonValue): boolean => {
+    if (typeof value === "string") return inValue(value);
+    if (typeof value === "number") return matches(String(value));
+    if (Array.isArray(value)) return value.some(inJson);
+    return isObject(value) && Object.values(value).some(inJson);
+  };
+  const inJsonText = (body: string): boolean => {
+    if (inWords(body)) return true;
+    for (let at = body.indexOf('"'); at !== -1; ) {
+      const close = closingQuote(body, at);
+      const end = close === -1 ? body.length : close + 1;
+      if (matches(jsonStringValue(body.slice(at, end), close !== -1)))
+        return true;
+      at = close === -1 ? -1 : body.indexOf('"', end);
+    }
+    return false;
+  };
+  const inPair = (pair: string): boolean => {
+    const at = pair.indexOf("=");
+    if (at === -1) return inValue(decodeQuietly(pair));
+    const key = decodeQuietly(pair.slice(0, at).replace(/\+/g, " "));
+    const value = decodeQuietly(pair.slice(at + 1).replace(/\+/g, " "));
+    return (at > 0 && inValue(key)) || inValue(value);
+  };
+  try {
+    let parsed: JsonValue | undefined;
+    try {
+      parsed = JSON.parse(text) as JsonValue;
+    } catch {
+      parsed = undefined;
+    }
+    if (parsed !== undefined && typeof parsed === "object")
+      return inJson(parsed);
+    if (JSON_START.test(text)) return inJsonText(text);
+    if (
+      (contentType && FORM_CONTENT_TYPE.test(contentType)) ||
+      looksLikeForm(text)
+    )
+      return text.split("&").some(inPair);
+    if (contentType && JSON_CONTENT_TYPE.test(contentType))
+      return inJsonText(text);
+    return inWords(text);
+  } catch {
+    return false;
+  }
+}
+
 /** A field whose name, label, placeholder, test id or class says it takes a one-time code: OTP, 2FA, two-factor, MFA,
  * verification, passcode, security, auth, SMS, login or confirmation code, a code from an authenticator. */
 const ONE_TIME_CODE_FIELD =
