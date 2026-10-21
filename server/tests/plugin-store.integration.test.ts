@@ -2795,12 +2795,29 @@ describe("a dynamic client the vendor has evicted", () => {
         "invalid_grant",
       );
 
-    await expect(call()).rejects.toThrow("invalid_grant");
+    // A withdrawn grant is the person's to fix by connecting again: the refusal draws the card that
+    // says so, rather than folding the vendor's code into a tool error.
+    const refusal = await call().catch((error: unknown) => error);
+    expect(refusal).toBeInstanceOf(PluginRefusedError);
+    expect(readConnectPrompt((refusal as Error).message)).toMatchObject({
+      serverId: dynamicServerId,
+      reason: "reconnect",
+    });
 
-    // A withdrawn grant is the person's to fix by connecting again. Minting a client for it would
-    // leave a spare client behind and still refuse.
+    // Minting a client for it would leave a spare client behind and still refuse.
     expect(registrations).toEqual([]);
     expect(offered).toEqual([EVICTED.clientId]);
+
+    // And the connection now reads as withdrawn, which is Reconnect on every screen.
+    const [connection] = await dynamicStore.connectionsFor(dynamicUserId);
+    expect(connection).toMatchObject({
+      serverId: dynamicServerId,
+      revoked: true,
+    });
+    // The next call is refused before anything is presented to the vendor again.
+    offered.length = 0;
+    await expect(call()).rejects.toBeInstanceOf(PluginRefusedError);
+    expect(offered).toEqual([]);
   });
 
   /**
