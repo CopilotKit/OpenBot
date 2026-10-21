@@ -568,6 +568,20 @@ describe("an account the vendor no longer holds", () => {
       },
     });
 
+  /** Who still holds a row at the app, by holder. */
+  const rowsFor = async (holder: "person" | "deployment") =>
+    (
+      await database
+        .select({ userId: brokeredConnections.userId })
+        .from(brokeredConnections)
+        .where(
+          and(
+            eq(brokeredConnections.app, app),
+            eq(brokeredConnections.holder, holder),
+          ),
+        )
+    ).map((row) => row.userId);
+
   /* Counted before and after: the trail is not cleaned between tests, which share the app id. */
   const failures = async () =>
     (
@@ -605,6 +619,8 @@ describe("an account the vendor no longer holds", () => {
     );
     expect(Date.parse(prompt?.at ?? "")).toBeGreaterThanOrEqual(before - 1000);
     expect(await failures()).toBe(already + 1);
+    // The team account's row is gone with the account, so every screen reads it as not connected.
+    expect(await rowsFor("deployment")).toEqual([]);
   });
 
   test("on a personal app: refused with a card offering Reconnect", async () => {
@@ -614,13 +630,23 @@ describe("an account the vendor no longer holds", () => {
       .update(mcpServers)
       .set({ accountMode: "personal", sharedVendorUserId: null })
       .where(eq(mcpServers.id, app));
-    await database.insert(brokeredConnections).values({
-      provider: "composio",
-      app,
-      holder: "person",
-      userId: asker,
-      vendorUserId: asker,
-    });
+    await database.insert(brokeredConnections).values([
+      {
+        provider: "composio",
+        app,
+        holder: "person",
+        userId: asker,
+        vendorUserId: asker,
+      },
+      // Somebody else's account at the same app, which the vendor still holds.
+      {
+        provider: "composio",
+        app,
+        holder: "person",
+        userId: admin,
+        vendorUserId: admin,
+      },
+    ]);
     gone();
     const said = await store
       .callTool({
@@ -638,5 +664,7 @@ describe("an account the vendor no longer holds", () => {
       reason: "reconnect",
     });
     expect(said).toContain("Reconnect it and ask again");
+    // Only the asker's row goes, so Connect on their card starts a fresh connection.
+    expect(await rowsFor("person")).toEqual([admin]);
   });
 });
