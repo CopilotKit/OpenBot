@@ -73,6 +73,15 @@ export class HeadlessToolsMiddleware extends Middleware {
       const tools = new Map(
         this.tools.map((tool) => [tool.definition.name, tool]),
       );
+      /*
+       * A computer_* call is claimed only when this turn cannot reach a browser for it. When
+       * the caller offered the tool itself (a chat with a browser attached), the call passes
+       * through unanswered so the caller executes it; the governed refusal below is reserved
+       * for genuinely browserless turns, where the call would otherwise die silently.
+       */
+      const callerTools = new Set(
+        (originalInput.tools ?? []).map((tool) => tool.name),
+      );
       const executed = new Set<string>();
       let subscription: Subscription | undefined;
       let started = false;
@@ -161,7 +170,8 @@ export class HeadlessToolsMiddleware extends Middleware {
           const owned = pending.filter(
             (call) =>
               tools.has(call.function.name) ||
-              call.function.name.startsWith("computer_"),
+              (call.function.name.startsWith("computer_") &&
+                !callerTools.has(call.function.name)),
           );
           if (owned.length === 0) {
             subscriber.next(terminal);
