@@ -370,6 +370,96 @@ test("installation completes before either sign-in is available", async () => {
   expect(view.getByRole("heading", { name: "Connect your AI" })).toBeTruthy();
 });
 
+async function reachConnect(view: Awaited<ReturnType<typeof renderApp>>) {
+  await enterInstallation(view);
+  await completeInstallation(view);
+  await userEvent.click(await view.findByRole("radio", { name: /OpenAI/ }));
+  await userEvent.type(view.getByLabelText("OpenAI API key"), "model-test-key");
+  await userEvent.click(view.getByRole("button", { name: "Continue" }));
+  await view.findByRole("heading", { name: "Connect to CopilotKit" });
+}
+
+const localListing = { outcome: "completed", stacks: [], reason: null };
+
+test("local Intelligence is not offered when this build has no CLI", async () => {
+  setupRootConfiguration("/tmp/local-eval-unavailable", async () =>
+    emptyConfiguration(),
+  );
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) => {
+    if (command === "list_local_eval") throw "unavailable";
+    return previous(command, args);
+  };
+  const view = await renderApp();
+  await reachConnect(view);
+  expect(view.queryByText("Use Intelligence on this computer")).toBeNull();
+});
+
+test("local Intelligence replaces the hosted sign-in and keeps Start closed", async () => {
+  setupRootConfiguration("/tmp/local-eval-available", async () =>
+    emptyConfiguration(),
+  );
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) => {
+    if (command === "list_local_eval") return localListing;
+    return previous(command, args);
+  };
+  const view = await renderApp();
+  await reachConnect(view);
+  await userEvent.click(view.getByText("Use Intelligence on this computer"));
+  await userEvent.click(
+    view.getByRole("button", { name: "Use local Intelligence" }),
+  );
+  expect(
+    view.getByRole("region", { name: "Intelligence on this computer" }),
+  ).toBeTruthy();
+  expect(view.queryByText("Point at your own Intelligence server")).toBeNull();
+  expect(view.getByRole("button", { name: "Start OpenBot" })).toHaveProperty(
+    "disabled",
+    true,
+  );
+  await userEvent.click(
+    view.getByRole("button", { name: "Use CopilotKit's service instead" }),
+  );
+  expect(view.getByText("Point at your own Intelligence server")).toBeTruthy();
+});
+
+test("a recorded local stack opens in local mode and is checked", async () => {
+  setupRootConfiguration("/tmp/local-eval-recorded", async () => ({
+    ...emptyConfiguration(),
+    localEval: {
+      stack: "local-abc123",
+      ownership: "created",
+      phase: "installed",
+    },
+  }));
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) => {
+    if (command === "list_local_eval") return localListing;
+    if (command === "run_local_eval")
+      return {
+        outcome: "completed",
+        stack: null,
+        reason: null,
+        readiness: "unknown",
+        licence: "unknown",
+      };
+    return previous(command, args);
+  };
+  const view = await renderApp();
+  await enterInstallation(view);
+  await completeInstallation(view);
+  await userEvent.click(await view.findByRole("radio", { name: /OpenAI/ }));
+  await userEvent.type(view.getByLabelText("OpenAI API key"), "model-test-key");
+  await userEvent.click(view.getByRole("button", { name: "Continue" }));
+  await view.findByRole("region", { name: "Intelligence on this computer" });
+  await waitFor(() =>
+    expect(
+      invokeCalls.find((call) => call.command === "run_local_eval")?.args,
+    ).toMatchObject({ action: "status", stack: "local-abc123" }),
+  );
+});
+
 test("CopilotKit Back preserves the selected AI and connection settings", async () => {
   setupRootConfiguration("/tmp/back-preserves-setup", async () =>
     emptyConfiguration(),
@@ -958,6 +1048,69 @@ function useInterruptedShutdownSetup() {
   };
   return { root, notice };
 }
+
+test("a local Intelligence stack left running at Quit is shown without holding auto-start", async () => {
+  useInterruptedShutdownSetup();
+  const notice = {
+    said: "OpenBot could not stop the local Intelligence stack it started when it last quit.",
+    detail: "Intelligence stop failed: the CLI timed out",
+  };
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) => {
+    if (command === "last_failure") return null;
+    if (command === "last_local_eval_stop_failure") return notice;
+    return previous(command, args);
+  };
+  const view = await renderApp();
+  await waitFor(() =>
+    expect(invokeCalls.some((call) => call.command === "start_stack")).toBe(
+      true,
+    ),
+  );
+  expect(view.getByRole("alert").textContent).toContain(notice.said);
+});
+
+test("Stop that fails only for the local Intelligence stack still stops OpenBot", async () => {
+  useInterruptedShutdownSetup();
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) => {
+    if (command === "last_failure") return null;
+    if (command === "stop_stack")
+      throw "Intelligence stop failed: the CLI timed out";
+    return previous(command, args);
+  };
+  const view = await renderApp();
+  await userEvent.click(
+    await view.findByRole("button", { name: "Stop OpenBot" }),
+  );
+  await waitFor(() =>
+    expect(view.queryByRole("button", { name: "Stop OpenBot" })).toBeNull(),
+  );
+  expect(view.getByRole("alert").textContent).toContain(
+    "OpenBot stopped, but could not stop the local Intelligence stack it started.",
+  );
+});
+
+test("Stop that fails for OpenBot itself keeps OpenBot running", async () => {
+  useInterruptedShutdownSetup();
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) => {
+    if (command === "last_failure") return null;
+    if (command === "stop_stack")
+      throw "Compose down failed: busy\nIntelligence stop failed: the CLI timed out";
+    return previous(command, args);
+  };
+  const view = await renderApp();
+  await userEvent.click(
+    await view.findByRole("button", { name: "Stop OpenBot" }),
+  );
+  await waitFor(() =>
+    expect(view.getByRole("alert").textContent).toContain(
+      "Compose down failed: busy",
+    ),
+  );
+  expect(view.getByRole("button", { name: "Stop OpenBot" })).toBeTruthy();
+});
 
 test("an interrupted shutdown restores saved setup for explicit recovery", async () => {
   const { root, notice } = useInterruptedShutdownSetup();

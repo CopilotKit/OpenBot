@@ -9,6 +9,12 @@ import {
   HarnessPicker,
 } from "./HarnessPicker";
 import { isHttpEndpointUrl } from "./http-endpoint-url";
+import { LocalIntelligence } from "./LocalIntelligence";
+import {
+  intelligenceStopProblem,
+  listLocalEval,
+  splitStopFailure,
+} from "./localEvalCli";
 import { OrganizationSignIn } from "./OrganizationSignIn";
 import { asProblem, Failure, type Problem } from "./Problem";
 import {
@@ -53,6 +59,8 @@ type AlreadyConfigured = {
   launch?: { harness: HarnessChoice | null } | null;
   installation?: { harness: HarnessChoice | null } | null;
   autoStart?: boolean;
+  /** The local evaluation's checkpoint, when this installation has one. */
+  localEval?: { stack: string; ownership: "created" | "shared"; phase: string };
 };
 
 function installationKeyFor(root: string, harness: HarnessChoice | null) {
@@ -83,6 +91,13 @@ export function App() {
   const [instruction, setInstruction] = useState("");
   const [root, setRoot] = useState("");
   const [reuseIntelligence, setReuseIntelligence] = useState(false);
+  // Offered only when this build has an Intelligence CLI to run; a local stack is its own mode,
+  // not another setup step.
+  const [localAvailable, setLocalAvailable] = useState(false);
+  const [intelligenceMode, setIntelligenceMode] = useState<"hosted" | "local">(
+    "hosted",
+  );
+  const [localStack, setLocalStack] = useState<string | null>(null);
   const [apiKey, setApiKey] = useState("");
   const [organizationAuthorityUrl, setOrganizationAuthorityUrl] = useState<
     string | null
@@ -295,7 +310,11 @@ export function App() {
     }
     if (problem.connection === "organization") setRefreshOrganization(true);
   }, []);
-  const displayedFailure = failure ?? recoveryFailure;
+  // A local Intelligence stack OpenBot could not stop. Shown, but it never holds a start.
+  const [intelligenceNotice, setIntelligenceNotice] = useState<Problem | null>(
+    null,
+  );
+  const displayedFailure = failure ?? recoveryFailure ?? intelligenceNotice;
   const credentialContext = useRef([
     root,
     model,
@@ -334,6 +353,8 @@ export function App() {
     setOrganizationAuthorityUrl(null);
     setApiKey("");
     setReuseIntelligence(false);
+    setIntelligenceMode("hosted");
+    setLocalStack(null);
     setApiUrl(MANAGED_INTELLIGENCE_API_URL);
     setWsUrl(MANAGED_INTELLIGENCE_GATEWAY_WS_URL);
     setAlreadyHeld({});
@@ -358,6 +379,10 @@ export function App() {
         if (values.INTELLIGENCE_GATEWAY_WS_URL)
           setWsUrl(values.INTELLIGENCE_GATEWAY_WS_URL);
         setAlreadyHeld({ ...values, saved });
+        if (configured.localEval) {
+          setLocalStack(configured.localEval.stack);
+          setIntelligenceMode("local");
+        }
         setOrganizationAuthorityUrl(
           values.OPENBOT_ORGANIZATION_AUTH_URL ?? null,
         );
@@ -392,6 +417,18 @@ export function App() {
         setBlockerFailure(asProblem(error));
         return false;
       });
+    // A build without a pinned CLI answers `unavailable`, and local Intelligence is not offered.
+    listLocalEval()
+      .listing.then(() => {
+        if (active) setLocalAvailable(true);
+      })
+      .catch(() => {});
+    // Read once and kept apart from `last_failure`, which would hold auto-start.
+    invoke<Problem | null>("last_local_eval_stop_failure")
+      .then((found) => {
+        if (active && found) setIntelligenceNotice(found);
+      })
+      .catch(() => {});
     // A supervisor that stopped retrying must stay stopped when it returns to this window.
     const interruptedRun = invoke<Problem | null>("last_failure")
       .then((found) => {
@@ -639,16 +676,32 @@ export function App() {
     return model.login === "plan" || model.login === "api-key";
   }
 
+  /** True when OpenBot stopped, even if the local Intelligence stack it started did not. */
+  async function stopStack(): Promise<boolean> {
+    try {
+      await invoke("stop_stack", { root });
+      setIntelligenceNotice(null);
+      return true;
+    } catch (error) {
+      const stopped = splitStopFailure(error);
+      if (stopped.openBot === null && stopped.intelligence !== null) {
+        setIntelligenceNotice(intelligenceStopProblem(stopped.intelligence));
+        return true;
+      }
+      setFailure(asProblem(error));
+      return false;
+    }
+  }
+
   async function stop() {
     setBusy(true);
     try {
-      await invoke("stop_stack", { root });
-      setRunning(false);
-      setRecoveryFailure(null);
-      setStep("connect");
-      setRefreshIntelligence(false);
-    } catch (error) {
-      setFailure(asProblem(error));
+      if (await stopStack()) {
+        setRunning(false);
+        setRecoveryFailure(null);
+        setStep("connect");
+        setRefreshIntelligence(false);
+      }
     } finally {
       setBusy(false);
     }
@@ -658,12 +711,11 @@ export function App() {
     setBusy(true);
     setFailure(null);
     try {
-      await invoke("stop_stack", { root });
-      setRunning(false);
-      setRecoveryFailure(null);
-      setStep("model");
-    } catch (error) {
-      setFailure(asProblem(error));
+      if (await stopStack()) {
+        setRunning(false);
+        setRecoveryFailure(null);
+        setStep("model");
+      }
     } finally {
       setBusy(false);
     }
@@ -1009,7 +1061,15 @@ export function App() {
               : "Local installation is complete. Connect CopilotKit, then start OpenBot."}
         </p>
 
-        {!running && (
+        {!running && intelligenceMode === "local" && (
+          <LocalIntelligence
+            root={root}
+            stack={localStack}
+            onLeave={() => setIntelligenceMode("hosted")}
+          />
+        )}
+
+        {!running && intelligenceMode === "hosted" && (
           <fieldset className="connection-form" disabled={busy}>
             {/*
             Sign in on the main path; paste behind the disclosure.
@@ -1255,6 +1315,22 @@ export function App() {
                 />
               </div>
             </details>
+            {localAvailable && (
+              <details>
+                <summary>Use Intelligence on this computer</summary>
+                <p className="footnote">
+                  Runs Intelligence in Docker Desktop for a local evaluation.
+                  The Intelligence CLI sets it up and manages it.
+                </p>
+                <button
+                  type="button"
+                  className="quiet"
+                  onClick={() => setIntelligenceMode("local")}
+                >
+                  Use local Intelligence
+                </button>
+              </details>
+            )}
           </fieldset>
         )}
 
@@ -1333,6 +1409,8 @@ export function App() {
               disabled={
                 busy ||
                 signingIn ||
+                // Local Intelligence cannot report readiness or credential OpenBot yet.
+                intelligenceMode === "local" ||
                 !installationReady ||
                 (apiKey.trim() === "" &&
                   !alreadyHeld.saved?.intelligenceApiKey &&
