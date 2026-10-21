@@ -20,12 +20,13 @@ afterEach(() => {
 });
 
 function answering(status: number, body: unknown) {
-  const sent: { url: string; method: string; body: unknown }[] = [];
+  const sent: { url: string; method: string; body?: unknown }[] = [];
   globalThis.fetch = (async (url: string, init?: RequestInit) => {
+    // A request with no body is recorded with no `body` key, so its absence can be asserted.
     sent.push({
       url,
       method: init?.method ?? "GET",
-      body: init?.body ? JSON.parse(String(init.body)) : undefined,
+      ...(init?.body ? { body: JSON.parse(String(init.body)) } : {}),
     });
     return new Response(JSON.stringify(body), {
       status,
@@ -94,17 +95,16 @@ test("approving sends refs only when given", async () => {
     refs: ["composio-gmail/SEND"],
   });
   expect(sent).toEqual([
-    {
-      url: "/api/plugins/access-requests/r1/approve",
-      method: "POST",
-      body: undefined,
-    },
+    { url: "/api/plugins/access-requests/r1/approve", method: "POST" },
     {
       url: "/api/plugins/access-requests/r2/approve",
       method: "POST",
       body: { refs: ["composio-gmail/SEND"] },
     },
   ]);
+  // `toEqual` passes over a key it is not given, so the first approval's missing body is its own
+  // assertion: no refs means no body at all, not an empty one.
+  expect(sent[0]).not.toHaveProperty("body");
 });
 
 test("a refused write still refreshes every plugin screen", async () => {
