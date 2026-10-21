@@ -14,11 +14,14 @@ import { createStepAssembler } from "../src/background/steps";
 import { startEventCapture } from "../src/content/collector";
 import { createSensitivityTracker } from "../src/content/masking-context";
 import {
+  events,
+  type Fixture,
   type FixtureMark,
   loadFixture,
   marks,
   replay,
   requests,
+  wallClock,
 } from "./support/cdp-replay";
 import { type ChromeFake, installChromeFake } from "./support/chrome-fake";
 
@@ -111,27 +114,58 @@ const AGENT_ROWS = new Set([
  * Records the page: its traffic through the network capture into the agent events, whose events the steps place by
  * their time; each click enriched as it arrives and settled as it leaves, as recording.ts wires them. Returns what left
  * the steps, in the Trajectory's order. `openbot` is the OpenBot the recording is connected to; `steps` draws what each
- * recorded click landed on and captures the steps it made, in place of the learning page's chat.
+ * recorded click landed on and captures the steps it made, in place of the learning page's chat; `fixture` is the
+ * traffic in place of the recorded one. The steps' timers run on the page's own clock: each fires before the first of
+ * Chrome's messages that came after it, so a step leaves when the steps let it go, knowing what the page did by then.
  */
 async function recordPage(
   name: string,
   page: {
     openbot?: string;
     steps?: (mark: FixtureMark) => CapturedEvent[];
+    fixture?: Fixture;
   } = {},
 ) {
   fake = installChromeFake({ extensionId: "test" });
-  const fixture = loadFixture(name);
+  const fixture = page.fixture ?? loadFixture(name);
   const sent: CapturedEvent[] = [];
-  let now = () => 0;
+  let pageNow = () => 0;
+  /** The time of the timer firing now, ahead of the page's clock until Chrome's next message. */
+  let firing = 0;
+  const now = () => Math.max(pageNow(), firing);
+  const due: { at: number; fn: () => void; live: boolean }[] = [];
+  const fireUntil = (at: number) => {
+    for (;;) {
+      due.sort((a, b) => a.at - b.at);
+      const next = due.find((timer) => timer.live && timer.at < at);
+      if (!next) break;
+      next.live = false;
+      firing = Math.max(firing, next.at);
+      next.fn();
+    }
+  };
   let agentEvents: ReturnType<typeof createAgentEvents> | null = null;
   const steps = createStepAssembler({
     emit: (event) => sent.push(event),
-    now: () => now(),
-    settle: (tabId, event, owns) =>
+    now,
+    timers: {
+      set: (fn, ms) => {
+        const timer = { at: now() + ms, fn, live: true };
+        due.push(timer);
+        return timer;
+      },
+      clear: (handle) => {
+        (handle as { live: boolean }).live = false;
+      },
+    },
+    settle: (tabId, event, joins) =>
       event.name === "click" && agentEvents
-        ? agentEvents.settleClick(tabId, event, owns)
+        ? agentEvents.settleClick(tabId, event, joins)
         : event,
+    awaits: (tabId, event, joins) =>
+      event.name === "click" &&
+      agentEvents !== null &&
+      agentEvents.awaitsRun(tabId, event, joins),
   });
   const emitted: CapturedEvent[] = [];
   agentEvents = createAgentEvents({
@@ -202,8 +236,15 @@ async function recordPage(
         );
     },
   });
-  now = () => played.now();
-  await played.run();
+  pageNow = () => played.now();
+  const wall = wallClock(fixture);
+  let position = 0;
+  await played.run((entry) => {
+    position = fixture.entries.indexOf(entry, position);
+    const next = fixture.entries[position + 1];
+    fireUntil(next ? wall(next.t) : Number.POSITIVE_INFINITY);
+    return false;
+  });
   steps.flush();
   await capture.stop();
   return { fixture, sent };
@@ -356,6 +397,102 @@ for (const name of ["single-route-sse", "intelligence-websocket"])
     expect(history?.map(({ role }) => role)).toEqual(["tool"]);
   });
 
+/** OpenBot's composer as run 3 recorded it: its Message editor, then Send, the submit button of its form. */
+const composer = (mark: FixtureMark): CapturedEvent[] =>
+  mark.data?.name === "focus"
+    ? stepsOf(
+        '<div role="textbox" aria-label="Message" aria-multiline="true" contenteditable="true"></div>',
+        '[aria-label="Message"]',
+        mark.wall,
+      )
+    : stepsOf(
+        '<form><div role="textbox" aria-label="Message" contenteditable="true">Hi! In one short sentence, what is 2 plus 2?</div><button type="submit" aria-label="Send message" data-slot="button"></button></form>',
+        'button[aria-label="Send message"]',
+        mark.wall,
+      );
+
+const RUN_URL = "/api/copilotkit/agent/general-assistant/run";
+
+/** The Thread of the run OpenBot's Send started, from the run's body (past 64 KiB, so read with getRequestPostData). */
+function sentThread(fixture: Fixture): string | undefined {
+  const [runRequest] = [...requests(fixture)].find(([, request]) =>
+    String((request.request as { url: string }).url).endsWith(RUN_URL),
+  ) ?? [""];
+  const body = fixture.entries.find(
+    (entry) =>
+      entry.kind === "command" &&
+      entry.method === "Network.getRequestPostData" &&
+      entry.params.requestId === runRequest,
+  );
+  return (
+    JSON.parse(
+      String(body?.kind === "command" ? body.result?.postData : "{}"),
+    ) as { threadId?: string }
+  ).threadId;
+}
+
+/** The clicks that left, with what the person clicked and the agent context each carries. */
+const clicksIn = (sent: CapturedEvent[]) =>
+  (sent as Row[])
+    .filter(({ name }) => name === "click")
+    .map(
+      (row): Record<string, unknown> => ({
+        label: (row.value.target as { label?: string }).label,
+        ...context(row),
+      }),
+    );
+
+/**
+ * OpenBot's chat with its composer's routing call as slow as in end-to-end run 3: there an LLM picked the Bot, the
+ * call (POST /api/route) answered 2.06 s after Send, and the page asked for the run 2.18 s after the click, where this
+ * traffic has it 0.29 s after. Everything Chrome sent from that call on comes later by the difference, its own clocks
+ * with it. `marks` adds what the person did meanwhile, each so long after Send.
+ */
+function routedSlowly(
+  fixture: Fixture,
+  runAfterSend: number,
+  extra: { after: number; mark: Pick<FixtureMark, "name" | "data"> }[] = [],
+): Fixture {
+  const send = marks(fixture, "click").find(
+    ({ data }) => data?.name === "send",
+  ) as FixtureMark;
+  const sentBy = (path: string) =>
+    events(fixture, "Network.requestWillBeSent").find(({ params }) =>
+      String((params.request as { url: string }).url).endsWith(path),
+    );
+  const route = sentBy("/api/route");
+  const run = sentBy(RUN_URL);
+  if (!route || !run) throw new Error("no routing call or run in the traffic");
+  const by =
+    runAfterSend -
+    (Math.round((run.params.wallTime as number) * 1000) - send.wall);
+  const from = fixture.entries.indexOf(route);
+  const entries = fixture.entries.map((entry, index) => {
+    if (index <= from)
+      return entry.kind === "command" && entry.tEnd > route.t
+        ? { ...entry, tEnd: entry.tEnd + by }
+        : entry;
+    const moved = structuredClone(entry);
+    moved.t += by;
+    if (moved.kind === "command") moved.tEnd += by;
+    if (moved.kind === "mark") moved.wall += by;
+    if (moved.kind === "event")
+      for (const clock of ["timestamp", "wallTime"])
+        if (typeof moved.params[clock] === "number")
+          moved.params[clock] = (moved.params[clock] as number) + by / 1000;
+    return moved;
+  });
+  for (const { after, mark } of extra)
+    entries.push({
+      kind: "mark",
+      t: send.t + after,
+      wall: send.wall + after,
+      ...mark,
+    });
+  entries.sort((a, b) => a.t - b.t);
+  return { ...fixture, entries };
+}
+
 test("OpenBot's own chat: the composer, clicked before any Thread, names none, and Send names the Thread of the run it started", async () => {
   // End-to-end run 3: neither click carried a threadId at all. The capture ignored OpenBot's runtime `info` call with
   // the rest of OpenBot's own calls, so it never knew the page runs CopilotKit; and Send is the submit button of the
@@ -366,48 +503,61 @@ test("OpenBot's own chat: the composer, clicked before any Thread, names none, a
     .origin;
   const { sent } = await recordPage("openbot-chat", {
     openbot,
-    steps: (mark) =>
-      mark.data?.name === "focus"
-        ? stepsOf(
-            '<div role="textbox" aria-label="Message" aria-multiline="true" contenteditable="true"></div>',
-            '[aria-label="Message"]',
-            mark.wall,
-          )
-        : stepsOf(
-            '<form><div role="textbox" aria-label="Message" contenteditable="true">Hi! In one short sentence, what is 2 plus 2?</div><button type="submit" aria-label="Send message" data-slot="button"></button></form>',
-            'button[aria-label="Send message"]',
-            mark.wall,
-          ),
+    steps: composer,
   });
-  // The Thread of the run Send started, from the run's body (past 64 KiB, so read with getRequestPostData).
-  const [runRequest] = [...requests(fixture)].find(([, request]) =>
-    String((request.request as { url: string }).url).endsWith(
-      "/api/copilotkit/agent/general-assistant/run",
-    ),
-  ) ?? [""];
-  const body = fixture.entries.find(
-    (entry) =>
-      entry.kind === "command" &&
-      entry.method === "Network.getRequestPostData" &&
-      entry.params.requestId === runRequest,
-  );
-  const thread = (
-    JSON.parse(
-      String(body?.kind === "command" ? body.result?.postData : "{}"),
-    ) as { threadId?: string }
-  ).threadId;
+  const thread = sentThread(fixture);
   expect(thread).toBeString();
   expect(sent.filter(({ name }) => name === "submit")).toHaveLength(1);
-  const clicks = (sent as Row[])
-    .filter(({ name }) => name === "click")
-    .map(
-      (row): Record<string, unknown> => ({
-        label: (row.value.target as { label?: string }).label,
-        ...context(row),
-      }),
-    );
-  expect(clicks).toEqual([
+  expect(clicksIn(sent)).toEqual([
     { label: "Message", threadId: null },
     { label: "Send message", threadId: thread },
+  ]);
+});
+
+test("OpenBot's first Send names the Thread of its run when the page routes the message first and runs it 2.18 s later, as in end-to-end run 3", async () => {
+  // End-to-end run 3, row 005: OpenBot's routing call took 2.06 s, the run came 2.18 s after Send, and the click had
+  // left the steps a second after it (its form's submit closed its span), naming no Thread. Its run is the next one the
+  // page asked for in the tab, before the person did anything else, inside the click's join.
+  const fixture = routedSlowly(loadFixture("openbot-chat"), 2_180);
+  const openbot = new URL(String(marks(fixture, "navigate")[0]?.data?.url))
+    .origin;
+  const { sent } = await recordPage("openbot-chat", {
+    openbot,
+    steps: composer,
+    fixture,
+  });
+  const thread = sentThread(fixture);
+  expect(thread).toBeString();
+  expect(clicksIn(sent)).toEqual([
+    { label: "Message", threadId: null },
+    { label: "Send message", threadId: thread },
+  ]);
+  // The click waited for its run and no longer: it left before the first agent row of that run.
+  const send = sent.findIndex(
+    (row) =>
+      row.name === "click" &&
+      (row.value as { target: { label?: string } }).target.label ===
+        "Send message",
+  );
+  const linked = sent.findIndex(({ name }) => name === "thread.linked");
+  expect(send).toBeGreaterThan(-1);
+  expect(send).toBeLessThan(linked);
+});
+
+test("a Send whose run comes only after the person's next step names no Thread: the run is not the Send's to claim", async () => {
+  // The crappy path of the join: the person clicks the composer again a second after Send, before the slow run.
+  const fixture = routedSlowly(loadFixture("openbot-chat"), 2_180, [
+    { after: 1_000, mark: { name: "click", data: { name: "focus" } } },
+  ]);
+  const openbot = new URL(String(marks(fixture, "navigate")[0]?.data?.url))
+    .origin;
+  const { sent } = await recordPage("openbot-chat", {
+    openbot,
+    steps: composer,
+    fixture,
+  });
+  expect(clicksIn(sent).slice(0, 2)).toEqual([
+    { label: "Message", threadId: null },
+    { label: "Send message", threadId: null },
   ]);
 });

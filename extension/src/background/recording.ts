@@ -972,11 +972,16 @@ export function installRecording(
       emit: (event) => {
         if (steps === assembler) forwardEvent(event);
       },
-      // A click that named no Thread takes the Thread of the run it started, seen while it was held.
-      settle: (tabId, event, owns) =>
+      // A click takes the Thread of the run it sent, seen while it was held: one with the open-Thread context is held
+      // for its run as long as its join is open.
+      settle: (tabId, event, joins) =>
         event.name === "click" && paired
-          ? paired.settleClick(tabId, event, owns)
+          ? paired.settleClick(tabId, event, joins)
           : event,
+      awaits: (tabId, event, joins) =>
+        event.name === "click" &&
+        paired !== null &&
+        paired.awaitsRun(tabId, event, joins),
       pageOf,
       now: deps.now,
     });

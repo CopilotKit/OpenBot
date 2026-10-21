@@ -42,6 +42,11 @@ export type ThreadAgentOutput = {
 /** One observed AG-UI event, as it is fed to the run, with when the capture saw it. */
 export type FedEvent = { event: BaseEvent; at: number };
 
+/** CopilotKit's agent in the page for one agent id, which every Thread of that agent in the page shares: the page keeps
+ * one instance and moves it from Thread to Thread, so LearningBridge's `lastRunIds.get(agent)` (the run it gives a
+ * message, a tool call or an error with no run of its own) carries over to the agent's next Thread. */
+export type PageAgent = { lastRunId: string | undefined };
+
 /** A run that continues an earlier one (CopilotKit's StateManager `markNextRunAsContinuation`): a frontend tool's
  * follow-up or the answer to an interrupt. Its messages belong to the run it continues. */
 export type Continuation = { expectedRunId: string | undefined };
@@ -120,7 +125,7 @@ export class ThreadAgent extends AbstractAgent {
     | { runId: string; interruptIds: string[] | null }
     | undefined;
   private readonly messageRuns = new Map<string, string>();
-  // CopilotKit LearningBridge.lastRunIds, for this agent.
+  /** The run this Thread's events belong to: the run it started last, which `agent.event` names. */
   private lastRunId: string | undefined;
   // CopilotKit LearningBridge.toolCalls: the message and run each tool call came from.
   private readonly toolOrigins = new Map<
@@ -142,6 +147,8 @@ export class ThreadAgent extends AbstractAgent {
     threadId: string,
     private readonly output: ThreadAgentOutput,
     expressed: Expressed,
+    /** CopilotKit LearningBridge.lastRunIds, for the page's agent this Thread is one of. */
+    private readonly page: PageAgent,
   ) {
     super({ threadId, ...(agentId === null ? {} : { agentId }) });
     this.builder = createAgentEventBuilder(expressed);
@@ -229,9 +236,10 @@ export class ThreadAgent extends AbstractAgent {
     for (const pending of this.builder.flushAll()) this.emitPending(pending);
   }
 
-  /** CopilotKit's run id for a message: the StateManager's, else the agent's last run (LearningBridge.runIdForMessage). */
+  /** CopilotKit's run id for a message: the StateManager's, else the page agent's last run, whichever Thread it ran on
+   * (LearningBridge.runIdForMessage): the person's first message in a new Thread names the previous Thread's last run. */
   runIdForMessage(messageId: string): string | null {
-    return this.messageRuns.get(messageId) ?? this.lastRunId ?? null;
+    return this.messageRuns.get(messageId) ?? this.page.lastRunId ?? null;
   }
 
   /** StateManager.getContinuationRunId: the interrupted run an input answers, without consuming it. */
@@ -421,6 +429,7 @@ export class ThreadAgent extends AbstractAgent {
         this.activeRun = effective(input);
         // LearningBridge
         this.lastRunId = event.runId;
+        this.page.lastRunId = event.runId;
         this.emit("agent.run", {
           phase: "started",
           runId: event.runId,
@@ -461,7 +470,7 @@ export class ThreadAgent extends AbstractAgent {
         this.activeRun = undefined;
         this.emit("agent.run", {
           phase: "error",
-          runId: this.lastRunId ?? null,
+          runId: this.page.lastRunId ?? null,
           threadId: this.threadId,
           agentId: this.id,
         });
@@ -480,7 +489,7 @@ export class ThreadAgent extends AbstractAgent {
       onToolCallStartEvent: ({ event }) => {
         this.toolOrigins.set(event.toolCallId, {
           messageId: event.parentMessageId,
-          runId: this.lastRunId,
+          runId: this.page.lastRunId,
         });
         this.emit("tool.call", {
           phase: "started",
@@ -489,7 +498,7 @@ export class ThreadAgent extends AbstractAgent {
           agentId: this.id,
           threadId: this.threadId,
           messageId: event.parentMessageId,
-          runId: this.lastRunId,
+          runId: this.page.lastRunId,
         });
         builder.toolCallStarted(event);
         extra(builder.rest(event));

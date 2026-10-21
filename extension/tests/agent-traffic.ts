@@ -174,6 +174,53 @@ export function observationsOf(
   return out.sort((a, b) => a.at - b.at);
 }
 
+/** A conversation recorded on its own, as the same tab has it after another: its times moved by `by`, its streams its
+ * own. */
+export const later = (
+  observations: AgentObservation[],
+  by: number,
+  streams: string,
+): AgentObservation[] =>
+  observations.map((observation) => ({
+    ...observation,
+    at: observation.at + by,
+    streamId: `${streams}:${observation.streamId}`,
+  }));
+
+/** Two conversations of one agent, each recorded on its own, as one page has them when its chat moves from the first's
+ * Thread to a new one (the second's): the second's first request comes at `at`, an epoch time after the first ended. */
+export function movedTo(
+  first: Fixture,
+  second: Fixture,
+  at: number,
+): AgentObservation[] {
+  const next = observationsOf(second);
+  const asked = next.find(({ kind }) => kind === "request")?.at ?? at;
+  return [...observationsOf(first), ...later(next, at - asked, "moved")].sort(
+    (a, b) => a.at - b.at,
+  );
+}
+
+/** End-to-end runs 1 and 2 on CopilotKit's learning deal page (fixtures/e2e-new-thread.json): what CopilotKit's own
+ * legacy sink stored as the person moved the chat to a new Thread, the edit step the Recorder captured as they typed the
+ * question for it, and when the page asked for the run on it. */
+export type NewThreadRun = {
+  name: string;
+  copilotKit: CapturedEvent[];
+  typed: CapturedEvent;
+  secondRunRequestAt: number;
+};
+
+export const newThreadRuns = (): NewThreadRun[] =>
+  (
+    JSON.parse(
+      readFileSync(
+        join(import.meta.dir, "fixtures/e2e-new-thread.json"),
+        "utf8",
+      ),
+    ) as { runs: NewThreadRun[] }
+  ).runs;
+
 /** The events CopilotKit emitted, in order, with the collector's own sequence number left out. */
 export function sinkEvents(batches: SinkBatch[]): CapturedEvent[] {
   return batches.flatMap((batch) => batch.events);

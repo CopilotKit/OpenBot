@@ -301,12 +301,13 @@ type AgentDouble = {
   stopped: boolean;
   /** Whether a click comes back with agent context, as the real agent events add it when a Thread is open. */
   enrich: boolean;
-  /** Each click as it left the steps: its tab, and whether its window holds a run started 20 ms and 2 s after it. */
+  /** Each click as it left the steps: its tab, and whether its join holds a run started 20 ms, 2 s and 5 s after it. */
   settled: {
     tabId: number;
     click: CapturedEvent;
     soon: boolean;
     late: boolean;
+    past: boolean;
   }[];
   /** The Thread a settled click takes, as the real agent events give it the Thread of the run it started. */
   settleTo: string | null;
@@ -440,12 +441,13 @@ function doubles(): Partial<RecordingDeps> {
             value: { ...(click.value as object), agent: { threadId: "t-1" } },
           };
         },
-        settleClick: (tabId, click, owns) => {
+        settleClick: (tabId, click, joins) => {
           agent.settled.push({
             tabId,
             click,
-            soon: owns(click.timestamp + 20),
-            late: owns(click.timestamp + 2_000),
+            soon: joins(click.timestamp + 20),
+            late: joins(click.timestamp + 2_000),
+            past: joins(click.timestamp + 5_000),
           });
           if (agent.settleTo === null) return click;
           return {
@@ -453,6 +455,7 @@ function doubles(): Partial<RecordingDeps> {
             value: { ...(click.value as object), threadId: agent.settleTo },
           };
         },
+        awaitsRun: () => false,
         tabNavigated: (tabId) => agent.navigated.push(tabId),
         stop: () => {
           agent.stopped = true;
@@ -3656,7 +3659,7 @@ test("each recording has its own agent events: every AG-UI observation, every cl
   expect(agents[1]?.stopped).toBe(false);
 });
 
-test("a click leaves the steps as the agent events settle it, with the window of the runs it started: a run 20 ms after it is its own, one 2 s after it is not", async () => {
+test("a click leaves the steps as the agent events settle it, with the join of the runs it started: a run 20 ms after it is its own, and one 2 s after it while the person did nothing else, but not one 5 s after it", async () => {
   await record();
   const [agent] = agents;
   if (!agent) throw new Error("no agent events");
@@ -3673,7 +3676,12 @@ test("a click leaves the steps as the agent events settle it, with the window of
     },
   });
   await until(() => agent.settled.length === 1, "the click leaving");
-  expect(agent.settled[0]).toMatchObject({ tabId: 7, soon: true, late: false });
+  expect(agent.settled[0]).toMatchObject({
+    tabId: 7,
+    soon: true,
+    late: true,
+    past: false,
+  });
   const out = () =>
     sentToDocument("offscreen.event").flatMap((m) =>
       m.type === "offscreen.event" ? [m.event] : [],
