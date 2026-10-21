@@ -128,6 +128,8 @@ function renderAccount(composioConfigured: boolean) {
     botsMayCallBack: true,
     redirectUri: null,
     composioConfigured,
+    // Composio's answer: its auth config fixes one state for a whole toolkit.
+    authorizesPerAction: false,
   };
   const connections: PluginConnections = { connections: [], redirectUri: null };
   client.setQueryData(pluginKeys.page(), page);
