@@ -1,5 +1,6 @@
 import type { useFrontendTool } from "@copilotkit/react-core/v2";
 import type { ReactElement } from "react";
+import { keyedLookup } from "@/lib/lookup";
 
 /**
  * Discover gallery components from files that export `GALLERY`; deployment state owns publication,
@@ -118,5 +119,5 @@ const BY_NAME: ReadonlyMap<string, GalleryComponent> = new Map(
  * name arriving from the server is not a promise that anything here can draw it.
  */
 export function galleryComponent(name: string): GalleryComponent | undefined {
-  return BY_NAME.get(name);
+  return keyedLookup(BY_NAME, name);
 }

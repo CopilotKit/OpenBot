@@ -17,13 +17,20 @@ import { tryClient } from "@/lib/client";
 import { useActiveBot } from "@/lib/copilot/active-bot";
 import { useBotThread } from "@/lib/copilot/bot-thread";
 import { useStoppedTurn } from "@/lib/copilot/stopped-turn";
+import { searchTextEntry } from "@/lib/search-text";
 
 export const Route = createFileRoute("/_authed/_app/bot")({
   component: RouteComponent,
+  /*
+   * `?agent=` is read as text whatever the router parsed it into (`searchText`), because search
+   * values are JSON-parsed and a Bot id made of digits would otherwise arrive as a number and open
+   * this deployment's default Bot rather than the named one. `?watch=` is a flag and is read as the
+   * boolean it is parsed into: anything else is not the flag being set.
+   */
   validateSearch: (
     search: Record<string, unknown>,
   ): { agent?: string; watch?: boolean } => ({
-    ...(typeof search.agent === "string" ? { agent: search.agent } : {}),
+    ...searchTextEntry("agent", search.agent),
     ...(search.watch === true ? { watch: true } : {}),
   }),
 });

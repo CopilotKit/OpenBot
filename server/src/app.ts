@@ -99,6 +99,7 @@ import type { OnboardingStore } from "./people/onboarding";
 import { MAX_PAGE, type PeopleStore } from "./people/store";
 import type { AccountModeSwitch } from "./plugins/account-mode";
 import type { ComposioBroker } from "./plugins/broker";
+import type { BrokerProvider } from "./plugins/access";
 import { createPluginRoutes } from "./plugins/routes";
 import { createSharedUseRoutes } from "./plugins/shared-use-routes";
 import type { SharedUseStore } from "./plugins/shared-use-store";
@@ -386,7 +387,7 @@ export function createApp(
    * configured, which is the correct degraded behaviour: a deployment with no Composio API key has
    * no app directory to offer, rather than one that lists apps nobody can connect.
    */
-  composio?: { broker: ComposioBroker },
+  composio?: { broker: ComposioBroker; provider: BrokerProvider },
   /** Native model OAuth stays server-side; callers hold only a separate local bearer. */
   modelProviderProxy?: ModelProviderProxy,
   userPreferences?: UserPreferencesStore,

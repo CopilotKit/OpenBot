@@ -37,10 +37,21 @@ const duplicate = `zz-dup-${suite}`;
 
 const revoked: string[] = [];
 const broker: ConnectedAppBroker = {
+  // This stub stands in for Composio, whose grant is held locally; see `ConnectedAppBroker.grantIsLocal`.
+  grantIsLocal: true,
+  // Nothing here asks what auth provider a connection is held under.
+  authProviderOf: async () => null,
+  // Nothing here reads either member; both are declared because the seam requires a broker to
+  // SAY what it runs — see `ConnectedAppBroker.authorizations`.
+  authorizations: null,
+  grantsFor: async () => [],
   listApps: async () => [],
   ensureAuthConfig: async () => "standing",
   deleteAuthConfig: async () => {},
-  authorize: async () => ({ redirectUrl: "https://vendor.example/consent" }),
+  authorize: async () => ({
+    redirectUrl: "https://vendor.example/consent",
+    authorizationId: null,
+  }),
   isConnected: async () => true,
   revoke: async ({ account }) => {
     revoked.push(account.vendorUserId);
@@ -57,6 +68,7 @@ const credentialsStub = {} as never;
 
 function freshStore() {
   return createPluginStore({
+    brokerProvider: "composio",
     database,
     auditStore: createAuditStore(database),
     credentials: credentialsStub,
@@ -85,6 +97,7 @@ async function seedShared(
   await database.insert(mcpTools).values({
     serverId: app,
     name: "GITHUB_LIST_ISSUES",
+    vendorName: "GITHUB_LIST_ISSUES",
     description: "List issues.",
     effect: "read",
     version: "1",
@@ -234,6 +247,101 @@ describe("a shared app", () => {
     expect(rows).toEqual([{ connectedBy: "admin-b" }]);
   });
 
+  /*
+   * THE SUPERSEDE IS CONDITIONAL, AND THAT IS ITS OWN GUARD. A confirm or re-check that names no
+   * administrator must not blank out the one an earlier connect recorded.
+   */
+  test("a write that names no administrator keeps the one already recorded", async () => {
+    const store = freshStore();
+    await store.recordBrokeredConnection({
+      toolkit: app,
+      account: { holder: "deployment", vendorUserId: VENDOR_ID },
+      connectedBy: "admin-a",
+      verified: true,
+      probeAction: null,
+    });
+    await store.recordBrokeredConnection({
+      toolkit: app,
+      account: { holder: "deployment", vendorUserId: VENDOR_ID },
+      verified: false,
+      probeAction: null,
+    });
+    const rows = await database
+      .select({ connectedBy: brokeredConnections.connectedBy })
+      .from(brokeredConnections)
+      .where(eq(brokeredConnections.app, app));
+    expect(rows).toEqual([{ connectedBy: "admin-a" }]);
+  });
+
+  /*
+   * THE ROW NAMES THE IDENTITY THE LATEST CONNECTION WAS MADE UNDER. Calls go out under the row's
+   * `vendor_user_id`, so a reconnect under a new identity that rewrote the verdict and kept the old
+   * id sent every later call to the account the verdict was not about.
+   */
+  test.each(["deployment", "person"] as const)(
+    "a %s reconnect under a NEW vendor identity moves the row to it",
+    async (holder) => {
+      const store = freshStore();
+      const as = (vendorUserId: string) =>
+        holder === "deployment"
+          ? { holder, vendorUserId }
+          : { holder, userId: asker, vendorUserId };
+      await store.recordBrokeredConnection({
+        toolkit: app,
+        account: as(`old-${suite}`),
+        connectedBy: "admin-a",
+        verified: true,
+        probeAction: null,
+      });
+      await store.recordBrokeredConnection({
+        toolkit: app,
+        account: as(`new-${suite}`),
+        connectedBy: "admin-b",
+        verified: true,
+        probeAction: null,
+      });
+      const rows = await database
+        .select({ vendorUserId: brokeredConnections.vendorUserId })
+        .from(brokeredConnections)
+        .where(eq(brokeredConnections.app, app));
+      expect(rows).toEqual([{ vendorUserId: `new-${suite}` }]);
+    },
+  );
+
+  /*
+   * AND A RE-CHECK NEVER RE-POINTS IT. The `only` branch records a check of a connection that
+   * exists; it is not evidence of a grant under any identity, so it may not move the row's. Nor
+   * may it stamp its verdict on the row: a probe of ANOTHER identity says nothing about the account
+   * this row holds, so it finds no row of its own and writes nothing — `accountRow` matches the
+   * deployment's identity as well as its holder.
+   */
+  test("a re-check write under another identity leaves the row alone", async () => {
+    const store = freshStore();
+    await store.recordBrokeredConnection({
+      toolkit: app,
+      account: { holder: "deployment", vendorUserId: VENDOR_ID },
+      connectedBy: "admin-a",
+      verified: true,
+      probeAction: null,
+    });
+    const { wrote } = await store.recordBrokeredConnection({
+      toolkit: app,
+      account: { holder: "deployment", vendorUserId: `other-${suite}` },
+      verified: false,
+      probeAction: "GITHUB_LIST_ISSUES",
+      only: "a row that is still there",
+    });
+    expect(wrote).toBe(false);
+    const rows = await database
+      .select({
+        vendorUserId: brokeredConnections.vendorUserId,
+        verified: brokeredConnections.verified,
+      })
+      .from(brokeredConnections)
+      .where(eq(brokeredConnections.app, app));
+    expect(rows).toEqual([{ vendorUserId: VENDOR_ID, verified: true }]);
+  });
+
   test("removing the app revokes the deployment account too", async () => {
     const store = freshStore();
     await seedShared(store, true);
@@ -245,6 +353,7 @@ describe("a shared app", () => {
     const events: { eventType: string; payload: Record<string, unknown> }[] =
       [];
     const store = createPluginStore({
+      brokerProvider: "composio",
       database,
       auditStore: { insert: async (event) => void events.push(event as never) },
       credentials: credentialsStub,
@@ -277,6 +386,7 @@ describe("a shared app", () => {
 
   test("with no audience gate configured, a shared call is refused rather than allowed", async () => {
     const store = createPluginStore({
+      brokerProvider: "composio",
       database,
       auditStore: createAuditStore(database),
       credentials: credentialsStub,
@@ -368,6 +478,7 @@ describe("a duplicate row at an app's url", () => {
     await database.insert(mcpTools).values({
       serverId: duplicate,
       name: "GITHUB_LIST_ISSUES",
+      vendorName: "GITHUB_LIST_ISSUES",
       description: "List issues.",
       effect: "read",
       version: "1",
@@ -385,6 +496,7 @@ describe("a duplicate row at an app's url", () => {
     const events: { eventType: string; payload: Record<string, unknown> }[] =
       [];
     const store = createPluginStore({
+      brokerProvider: "composio",
       database,
       auditStore: { insert: async (event) => void events.push(event as never) },
       credentials: credentialsStub,
@@ -430,6 +542,7 @@ describe("a duplicate row at an app's url", () => {
     const events: { eventType: string; payload: Record<string, unknown> }[] =
       [];
     const store = createPluginStore({
+      brokerProvider: "composio",
       database,
       auditStore: { insert: async (event) => void events.push(event as never) },
       credentials: credentialsStub,
@@ -484,6 +597,7 @@ describe("a duplicate row at an app's url", () => {
   test("asks the approval gate under the app's id for a write granted through it", async () => {
     const gateSaw: { toolRef: string; scope: string }[] = [];
     const store = createPluginStore({
+      brokerProvider: "composio",
       database,
       auditStore: createAuditStore(database),
       credentials: credentialsStub,
@@ -505,6 +619,7 @@ describe("a duplicate row at an app's url", () => {
     await database.insert(mcpTools).values({
       serverId: duplicate,
       name: "GITHUB_CREATE_ISSUE",
+      vendorName: "GITHUB_CREATE_ISSUE",
       description: "Create an issue.",
       effect: "write",
       version: "1",

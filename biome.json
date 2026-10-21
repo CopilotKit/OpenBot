@@ -11,7 +11,8 @@
       "!app/src/routeTree.gen.ts",
       "!desktop/src-tauri/gen",
       "!**/target",
-      "!server/drizzle"
+      "!server/drizzle",
+      "!server/tests/fixtures/arcade-catalogue.json"
     ]
   },
   "formatter": {

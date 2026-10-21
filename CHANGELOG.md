@@ -31,7 +31,7 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - Migration `0056_sign_in_code_step` widens the check on `sign_in_requests.status` to allow
   `code_required` (below). A server and a computer must be upgraded together: an older computer has
   no `/sign-in/code`.
-- Migration `0057_app_access_requests` adds one table, `app_access_requests`, where a person's
+- Migration `0060_app_access_requests` adds one table, `app_access_requests`, where a person's
   request for an administrator to switch on a work app, grant it to a Bot, or connect a Shared app's
   team account is kept, with who answered it and when. It starts empty and nothing is backfilled.
 
@@ -55,6 +55,15 @@ On a deployment with no `COMPOSIO_API_KEY`, Settings → Connected accounts no l
 apps, which nobody could connect there. An app's own page, reached from an older link, says it is not
 available yet and that an administrator has to finish setting it up, instead of naming the setting.
 The administrator's page for the app still names `COMPOSIO_API_KEY`.
+
+### A new desktop install starts its server again
+
+A desktop install of v0.2.0 stopped at start with `server stopped straight away (exit status: 1)` and
+`Cannot find module '../../../agent-computer/src/egress'`. The server imports its egress rules from
+`agent-computer`, and the desktop app did not copy that folder when it laid out the deployment. It
+does now, and a test fails if the deployment's code imports anything the desktop app does not copy.
+An install laid out by an earlier app is asked to finish installing when it starts; installing
+downloads the same release again with the missing folder. Settings and data are kept.
 
 ### A new Bot is made from a sheet that asks where it runs first
 

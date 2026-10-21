@@ -24,10 +24,21 @@ const asker = `asker-${suite}`;
 const VENDOR_ID = `openbot-deployment:acme-${suite}:R`;
 
 const broker: ConnectedAppBroker = {
+  // This stub stands in for Composio, whose grant is held locally; see `ConnectedAppBroker.grantIsLocal`.
+  grantIsLocal: true,
+  // Nothing here asks what auth provider a connection is held under.
+  authProviderOf: async () => null,
+  // Nothing here reads either member; both are declared because the seam requires a broker to
+  // SAY what it runs — see `ConnectedAppBroker.authorizations`.
+  authorizations: null,
+  grantsFor: async () => [],
   listApps: async () => [],
   ensureAuthConfig: async () => "standing",
   deleteAuthConfig: async () => {},
-  authorize: async () => ({ redirectUrl: "https://vendor.example/consent" }),
+  authorize: async () => ({
+    redirectUrl: "https://vendor.example/consent",
+    authorizationId: null,
+  }),
   isConnected: async () => true,
   revoke: async () => true,
   connectionFields: async () => [],
@@ -53,6 +64,7 @@ async function seed() {
   await database.insert(mcpTools).values({
     serverId: app,
     name: "GITHUB_LIST_ISSUES",
+    vendorName: "GITHUB_LIST_ISSUES",
     description: "List issues.",
     effect: "read",
     version: "1",
@@ -97,6 +109,7 @@ describe("connectionTokenFor's gatedMode guard", () => {
       },
     });
     const store = createPluginStore({
+      brokerProvider: "composio",
       database,
       auditStore: createAuditStore(database),
       credentials: credentialsStub,

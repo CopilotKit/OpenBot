@@ -13,7 +13,7 @@ import {
   mcpTools,
   pluginGrants,
 } from "../../db/schema";
-import { accessFor } from "../access";
+import { BROKERED_PROFILE, brokeredProvenance, toolkitOfFor } from "../access";
 import {
   type BrokerConnection,
   BrokerUnconfiguredError,
@@ -28,12 +28,17 @@ import {
   serverCredentialKind,
   tokenHeaderFor,
 } from "../catalogue";
-import { toolkitOf } from "../composio";
 import type { ListedTool } from "../mcp";
-import type { AccountMode, AccountRef } from "../shared-accounts";
+import {
+  type AccountMode,
+  type AccountRef,
+  asAccountRef,
+} from "../shared-accounts";
 import { transportFor } from "../transport";
 import type { StoreContext } from "./context";
 import {
+  BROKERED_ID_PREFIXES,
+  BROKERED_SCREEN_NAMES,
   CatalogueEntryUnknownError,
   CustomServerRefusedError,
   DEPLOYMENT_ACTOR,
@@ -43,6 +48,7 @@ import {
   PluginInvariantError,
   type ServerAddress,
   type ServerRecord,
+  type StorableTool,
   schemeFor,
   storableTools,
   unlistedAdvertisedTools,
@@ -64,8 +70,24 @@ export function serverMethods(context: StoreContext) {
     brokeredAppRow,
     brokeredAppRowsAt,
     brokeredAppScheme,
+    brokerProvider,
+    resolveSiblings,
+    vendorRevocationClaim,
+    clearEndedSiblings,
   } = context;
   return {
+    /**
+     * The one provider this store's rows belong to, readable by the layer above it.
+     *
+     * EXPOSED SO THE ROUTES DO NOT DECIDE IT A SECOND TIME. `routes.ts` used to take the name off
+     * the broker it was handed and write `?? "composio"` when there was none — which is a second
+     * answer to the question {@link PluginStoreOptions.brokerProvider} argues must have exactly one.
+     * The two came apart precisely where it hurt: a deployment with both keys set and
+     * `OPENBOT_BROKER_PROVIDER` unset is wired with no broker at all, so the routes read every
+     * `arcade://` row of this store with Composio's parser. Read from here, the parser the routes
+     * use and the filter this store queries with cannot disagree.
+     */
+    brokerProvider,
     accountRefFor,
     /**
      * Add a server from the catalogue.
@@ -227,23 +249,32 @@ export function serverMethods(context: StoreContext) {
 
       /*
        * Nor may it take the name of a screen. `/admin/plugins/composio` is a static route — the app
-       * directory's own page — and a static route is matched ahead of `/admin/plugins/$key`, so a
-       * server sitting at this id would be listed and then open somebody else's page instead of its
-       * own. Brokered servers are `composio-<slug>` and no catalogue entry is called this, which
-       * leaves a hand-typed id as the only way to reach it.
+       * directory's own page — and `/admin/plugins/arcade` is the Arcade equivalent, and a static
+       * route is matched ahead of `/admin/plugins/$key`, so a server sitting at either id would be
+       * listed and then open somebody else's page instead of its own. Brokered servers are
+       * `<provider>-<slug>` and no catalogue entry is called either of these, which leaves a
+       * hand-typed id as the only way to reach them.
+       *
+       * BOTH, ON WHICHEVER BROKER THIS DEPLOYMENT RUNS, and derived from
+       * {@link BROKERED_SCREEN_NAMES} rather than from a literal — the same argument the id-prefix
+       * loop six lines below makes for its own namespace: the screen is there to be collided with
+       * whether or not this deployment brokers through it today, and a reservation spelled twice is
+       * the one that gets added to once. Each refusal still names the id it refused.
        */
-      if (input.id === "composio") {
-        throw new CustomServerRefusedError(
-          "composio is the name of this deployment's own Composio screen, so a server added there could never be opened. Choose another.",
-        );
+      for (const [screen, { vendor }] of BROKERED_SCREEN_NAMES) {
+        if (input.id === screen) {
+          throw new CustomServerRefusedError(
+            `${screen} is the name of this deployment's own ${vendor} screen, so a server added there could never be opened. Choose another.`,
+          );
+        }
       }
 
       /*
        * NOR THE NAMESPACE THE BROKERED ROWS ARE MINTED IN, which is the reservation above one step
        * further out.
        *
-       * CRITERION. No server added by URL may take an id beginning `composio-`, whether or not a row
-       * is sitting there today.
+       * CRITERION. No server added by URL may take an id beginning `composio-` or `arcade-`, whether
+       * or not a row is sitting there today, and on whichever broker this deployment runs.
        *
        * REASON. {@link addBrokeredApp} composes its id as `composio-<slug>` from the app an
        * administrator enabled, so that space is already spoken for by a path that writes
@@ -262,10 +293,12 @@ export function serverMethods(context: StoreContext) {
        * and a policy rule are written against, so a row shadowing another path's namespace inherits
        * rules that were written about something else.
        */
-      if (input.id.startsWith("composio-")) {
-        throw new CustomServerRefusedError(
-          `Names beginning composio- belong to the Composio apps this deployment enables, so ${input.id} is not a name a server added by URL can take. Choose another.`,
-        );
+      for (const { idPrefix, vendor } of BROKERED_ID_PREFIXES) {
+        if (input.id.startsWith(idPrefix)) {
+          throw new CustomServerRefusedError(
+            `Names beginning ${idPrefix} belong to the ${vendor} apps this deployment enables, so ${input.id} is not a name a server added by URL can take. Choose another.`,
+          );
+        }
       }
       if (!/^[a-z0-9][a-z0-9-]{0,38}[a-z0-9]$/.test(input.id)) {
         throw new CustomServerRefusedError(
@@ -439,10 +472,10 @@ export function serverMethods(context: StoreContext) {
      *
      * NO URL IS TAKEN FROM A CALLER, WHICH IS WHY THERE IS NO HOST RULE HERE. `addCustomServer`
      * guards the address because the address is what an administrator typed and what a credential
-     * would then be spent at; this one composes `composio://<slug>` itself, and a brokered row is
-     * never dialled at a host at all — the transport reads the app off that url and asks Composio,
-     * over the deployment's own key. So the only thing left to check about the url is that it says
-     * what this call meant, and {@link toolkitOf} is what checks it: the slug goes in, the url comes
+     * would then be spent at; this one composes `<scheme>://<slug>` itself from the store's provider, and a brokered row is
+     * never dialled at a host at all — the transport reads the app off that url and asks the active
+     * broker, over the deployment's own key. So the only thing left to check about the url is that it says
+     * what this call meant, and {@link toolkitOfFor} is what checks it: the slug goes in, the url comes
      * back out through the very function `accessFor` will read it with, and a slug those two
      * disagree about is refused rather than stored. A pattern written here instead would be a second
      * opinion about the shape of an app name, and the reading that decides which app a call runs
@@ -481,12 +514,15 @@ export function serverMethods(context: StoreContext) {
     }): Promise<ServerRecord> {
       // Before anything at all. A deployment with no key has no catalogue for this app to have been
       // chosen from, so there is nothing here to half-do and nothing to say but the setting.
-      if (!broker) throw new BrokerUnconfiguredError();
+      if (!broker)
+        throw new BrokerUnconfiguredError(brokerProvider, "operator");
 
-      const url = `composio://${input.slug}`;
-      if (toolkitOf(url) !== input.slug) {
+      const profile = BROKERED_PROFILE[brokerProvider];
+      const url = `${profile.scheme}${input.slug}`;
+      const rowId = `${profile.idPrefix}${input.slug}`;
+      if (toolkitOfFor(brokerProvider, url) !== input.slug) {
         throw new CustomServerRefusedError(
-          `${input.slug} is not a name a Composio app can have. An app is named in letters, numbers, underscores and hyphens, because that name is read back out of this row's url to decide which app a call is against.`,
+          `${input.slug} is not a name ${brokerProvider === "arcade" ? "an" : "a"} ${profile.vendor} app can have. An app is named in letters, numbers, underscores and hyphens, because that name is read back out of this row's url to decide which app a call is against.`,
         );
       }
 
@@ -547,14 +583,14 @@ export function serverMethods(context: StoreContext) {
       await database
         .insert(mcpServers)
         .values({
-          id: `composio-${input.slug}`,
+          id: rowId,
           title: input.title,
           logo: input.logo ?? null,
           // The broker, whoever publishes the app behind it. `vendor` is what the first-party rule
           // is checked against, and Composio is who this deployment is actually talking to.
-          vendor: "Composio",
+          vendor: profile.vendor,
           url,
-          provenance: "composio",
+          provenance: brokerProvider,
           // Nothing for the vault to hold. A brokered call runs as the person asking, on their own
           // connection at the vendor, which is a `composio_connections` row rather than a secret.
           credentialId: null,
@@ -628,8 +664,8 @@ export function serverMethods(context: StoreContext) {
              * host somebody typed is answering that rule about a server this deployment no longer
              * dials.
              */
-            provenance: "composio",
-            vendor: "Composio",
+            provenance: brokerProvider,
+            vendor: profile.vendor,
             addedBy: input.by,
             updatedAt: new Date(),
             /*
@@ -679,8 +715,7 @@ export function serverMethods(context: StoreContext) {
        * insert above and this read disagree about what was stored; it is respelled rather than held
        * in a binding so that nothing below can take it by mistake.
        */
-      const answering =
-        (await brokeredAppRow(input.slug))?.id ?? `composio-${input.slug}`;
+      const answering = (await brokeredAppRow(input.slug))?.id ?? rowId;
 
       /**
        * WHICH ROW EACH ACT OF AN ENABLE NAMES, WRITTEN DOWN BECAUSE NOTHING ELSE CAN SAY IT.
@@ -764,39 +799,81 @@ export function serverMethods(context: StoreContext) {
         .from(brokeredConnections)
         .where(
           and(
-            eq(brokeredConnections.provider, "composio"),
+            eq(brokeredConnections.provider, brokerProvider),
             eq(brokeredConnections.app, input.slug),
           ),
         )
         .limit(1);
 
       if (configured !== "standing" && connections.length === 0) {
-        /*
-         * MODE PICKED FOR THE PERSON ONLY WHERE THIS REWRITE IS WHAT GIVES THE APP AN ACCOUNT AT
-         * ALL, AND NEVER WHERE ONE WAS ALREADY CHOSEN. A row enabled `no-auth` has `accountMode`
-         * null — there was nothing to hold a mode about, see the insert above — and if this same
-         * re-add is what turns it into a key or consent app, it needs the ordinary default an
-         * insert would have given it, or every later read that asks "personal or shared" finds
-         * null and has no answer. An administrator who already chose Shared keeps that choice.
-         */
-        const [current] = await database
-          .select({ accountMode: mcpServers.accountMode })
-          .from(mcpServers)
-          .where(eq(mcpServers.id, answering))
-          .limit(1);
-        const bumpAccountMode =
-          schemeKind(recorded) === "none" &&
-          schemeKind(scheme) !== "none" &&
-          (current?.accountMode ?? null) === null;
-
         await database
           .update(mcpServers)
-          .set({
-            authScheme: scheme,
-            updatedAt: new Date(),
-            ...(bumpAccountMode ? { accountMode: "personal" as const } : {}),
-          })
+          .set({ authScheme: scheme, updatedAt: new Date() })
           .where(eq(mcpServers.id, answering));
+      }
+
+      /*
+       * AN APP WITH AN ACCOUNT LEAVES THIS METHOD SAYING WHOSE, ALWAYS — AND THAT IS A SEPARATE
+       * STATEMENT FROM THE SCHEME ABOVE FOR A REASON.
+       *
+       * CRITERION. After `addBrokeredApp` returns, the row that answers for the app either records
+       * a mode or is an app with no account to hold one about ({@link schemeKind} `none`). There is
+       * no third state, and in particular no enabled key-or-consent app with a null here.
+       *
+       * REASON. The null is not a cosmetic gap: {@link accountFor} refuses a call against such a
+       * row as `ambiguous` — "does not say whether it is reached through each person's account or a
+       * shared one, so it was not called" — so an app in that state is enabled, listed, connectable
+       * and dead. THREE THINGS HAD TO BE TRUE AT ONCE FOR IT TO HAPPEN AND ALL THREE WERE. The
+       * INSERT above settles the column, but this method's second branch is the upsert's CONFLICT
+       * arm, which writes the url and the provenance — it CONVERTS a row that was not brokered
+       * into one that is — and never wrote this column at all. The guard that stood here then asked
+       * `schemeKind(recorded) === "none"`, which is the question "was this a no-auth app a moment
+       * ago"; `recorded` is {@link brokeredAppScheme}, and a row that was not brokered a moment ago
+       * answers `null`, which is `unreadable` rather than `none`. And the whole block was gated on
+       * `configured !== "standing"`, so the one obvious remedy — press Add again — reaches it only
+       * on the single press that created the config and never afterwards. An administrator
+       * converting a hand-added or restored row got an app that refused every call, and nothing
+       * they could press repaired it: the Plugins page offers "Make shared" for a null mode (it
+       * reads any non-`shared` value as Personal) and no way to say Personal at all.
+       *
+       * SO THE QUESTION ASKED HERE IS THE ONE THE REFUSAL ASKS, and nothing else: does the row
+       * answering for this app have an account to hold, and does it fail to say whose. The scheme
+       * is re-read rather than taken from `scheme` because the branch above may or may not have
+       * written it, and what matters is what now STANDS on the answering row — including the
+       * `unreadable` null a converted row carries, which {@link accountFor} treats as having an
+       * account and which is therefore exactly as dead without a mode as a recorded `OAUTH2`.
+       *
+       * `personal` IS THE FILL, which is the insert's own default and the conservative one: it
+       * reaches each asking person's own account. `shared` would hand everybody one account nobody
+       * chose to share.
+       *
+       * AND NEVER OVER A MODE THAT IS THERE. The `IS NULL` lives in the WHERE rather than in a
+       * read-then-write, so an administrator's Shared choice cannot be lost to this statement, nor
+       * to a switch racing it.
+       *
+       * ON THE ANSWERING ROW, WHICH IS WHY THE CONFLICT ARM STILL DOES NOT WRITE THE COLUMN. Every
+       * reader of a brokered app's mode — {@link brokeredAppRowsAt} and so `serverAddress`, the
+       * listing, the call gate — resolves it off the row that answers for the url, which is not
+       * always the row the upsert keyed on. A fill in the conflict arm would settle the minted row
+       * and leave the one that is actually read still null.
+       *
+       * ROWS ALREADY STUCK IN THE NULL STATE ARE NOT REACHED FROM HERE AT ALL, because an enabled
+       * app cannot be re-added without first being removed. They are repaired by
+       * `0058_arcade_provider_backfill`, which is the same decision written once against the
+       * table; see `tests/brokered-account-mode-backfill.integration.test.ts`.
+       */
+      const [settled] = await database
+        .select({ authScheme: mcpServers.authScheme })
+        .from(mcpServers)
+        .where(eq(mcpServers.id, answering))
+        .limit(1);
+      if (schemeKind(settled?.authScheme ?? null) !== "none") {
+        await database
+          .update(mcpServers)
+          .set({ accountMode: "personal", updatedAt: new Date() })
+          .where(
+            and(eq(mcpServers.id, answering), isNull(mcpServers.accountMode)),
+          );
       }
 
       await recordAuditEvent(auditStore, {
@@ -818,7 +895,7 @@ export function serverMethods(context: StoreContext) {
           // Named for the same reason the custom path names its own: "who enabled an app whose
           // actions nobody reviewed" is a question somebody will ask, and the answer should not
           // require knowing how ids were spelled in a past build.
-          provenance: "composio",
+          provenance: brokerProvider,
         },
       });
 
@@ -979,7 +1056,9 @@ export function serverMethods(context: StoreContext) {
        * KEYED ON THE APP THE URL NAMES, exactly as `connectionTokenFor` keys the gate. `row.id` is a
        * display key and nothing holds it equal to the slug in the url, so a delete by id would clear
        * some other app's connections, or none, for the very row shape that gate already refuses to
-       * trust. `accessFor` is asked rather than the url parsed here, so this cannot drift from it.
+       * trust. The slug is read with {@link toolkitOfFor} — the one per-provider parser `accessFor`
+       * itself reads it with — so this cannot drift from what the gate resolves; see the comment on
+       * `rowProvider` below for why the PROVIDER is read beside it rather than the slug alone.
        *
        * ASKED WITH NO ENTRY, deliberately, and that is not the entry-wins order being dodged. An
        * entry can only ever SUPPRESS this answer — `accessFor` returns a null toolkit for every row
@@ -1017,9 +1096,52 @@ export function serverMethods(context: StoreContext) {
        * deployment holds at Composio, not an account — while a live account whose config has
        * already been deleted is access that nothing left here can end.
        */
-      const toolkit = existing ? accessFor(existing, null).toolkit : null;
+      /*
+       * AND ALL OF IT IS ABOUT THE BROKER THE ROW WAS MINTED AT, which is not always the one this
+       * deployment is configured with.
+       *
+       * CRITERION. One removal names ONE vendor. The app slug, the connection rows it clears and
+       * the account it ends are all that row's own broker's, and a vendor is asked only where it is
+       * the one this deployment can reach.
+       *
+       * REASON. These three were read three different ways in one operation: the slug off the ROW's
+       * provenance (through `accessFor`, which parses the url with the parser belonging to whatever
+       * that column says), the connection rows off the CONFIGURED `brokerProvider`, and the
+       * revocation off the ACTIVE broker. A deployment that has switched broker — or a restore, or a
+       * hand edit — holds rows whose provenance is the other vendor, and for one of those the three
+       * disagreed: a non-null FOREIGN slug went to `revoke` and `deleteAuthConfig` at the wrong
+       * vendor, naming one of its apps by a name that means something else there, while the deletes
+       * beneath matched no row at all. The removal then reported the connector gone, with every
+       * local consent row still standing and the right vendor never asked.
+       *
+       * SO THE ROW'S PROVENANCE DECIDES WHAT IS CLEARED, AND THE CONFIGURED PROVIDER DECIDES ONLY
+       * WHETHER A VENDOR IS ASKED. The local half always runs: the criterion two comments up —
+       * removing an app leaves nobody holding brokered access to it — is about this deployment's own
+       * gate, and it holds whichever broker minted the row. The vendor half is skipped where the
+       * row's broker is not the configured one, because there is no client for it here and no
+       * credential to reach it with; `vendorRevocationRequested` then says `false` on every trail
+       * row, which is exactly what that field is for and the same answer a deployment with no broker
+       * at all gets. An account left standing at a vendor this deployment can no longer reach is not
+       * a thing a removal can end, and saying so is better than asking the wrong vendor to.
+       *
+       * The parse is {@link toolkitOfFor} with the ROW's provider rather than `accessFor`, because
+       * what this needs is the pair — which broker, and which app at it — and `accessFor` answers
+       * only the second. It is the same answer for the same rows: `accessFor` reads the slug with
+       * the very same per-provider parser, under the same brokered-provenance test, and is asked
+       * with no entry here for the reason the comment above gives.
+       */
+      const rowProvider =
+        existing && brokeredProvenance(existing.provenance)
+          ? existing.provenance
+          : null;
+      const toolkit =
+        existing && rowProvider
+          ? toolkitOfFor(rowProvider, existing.url)
+          : null;
+      /** The broker to ask, which is none at all where the row is the other vendor's. */
+      const rowBroker = rowProvider === brokerProvider ? broker : null;
 
-      if (toolkit) {
+      if (rowProvider && toolkit) {
         /*
          * Read before anything is deleted, because the revokes below need the people and the rows
          * are where the people are. Sorted, so two removals of the same app revoke in the same
@@ -1034,7 +1156,8 @@ export function serverMethods(context: StoreContext) {
           .from(brokeredConnections)
           .where(
             and(
-              eq(brokeredConnections.provider, "composio"),
+              // The row's own broker, not the configured one: see the comment above `rowProvider`.
+              eq(brokeredConnections.provider, rowProvider),
               eq(brokeredConnections.app, toolkit),
             ),
           )
@@ -1049,20 +1172,32 @@ export function serverMethods(context: StoreContext) {
          * which may still be standing after a switch back that has not retired it yet. Each is
          * revoked as the account its row says it is, under the vendor id the row was filed under,
          * so the deployment's account is asked for as the deployment's and never as whoever
-         * pressed "remove". A person row always carries its user id (the table's holder check),
-         * so the fallback to the deployment form below is the shape a corrupt row would need, not
-         * a reading anything here relies on.
+         * pressed "remove".
+         *
+         * READ THROUGH {@link asAccountRef}, AND A ROW THAT NAMES NO ACCOUNT STOPS THE REMOVAL
+         * BEFORE ANYTHING IS ASKED OR DELETED. This was a ternary whose else-branch absorbed every
+         * pair it did not recognise into `{ holder: "deployment" }`, and the two readings below —
+         * the revoke and the trail's `owner` — each repeated it. `brokered_connections_holder_check`
+         * makes `person` with a NULL user id unwritable, which is exactly why this is a refusal
+         * rather than a coercion: a state the database says cannot exist, absorbed into the other
+         * holder, is a withdrawal aimed at the DEPLOYMENT's account over a person's row. The
+         * EMPTY STRING is not hypothetical — `IS NOT NULL` does not stop `''` — and the old
+         * reading's `!== null` let it through as a person ref under nobody's id, which reached
+         * `rowBroker.revoke` and was filed as an `owner` of `""`.
+         *
+         * RESOLVED FOR THE WHOLE SET UP FRONT, so the throw lands before the first revoke rather
+         * than part-way through one: a removal that had already withdrawn two accounts at the
+         * vendor and then threw would leave their rows standing and no trail for either.
          */
-        const accountOf = (
-          connection: (typeof connected)[number],
-        ): AccountRef =>
-          connection.holder === "person" && connection.userId !== null
-            ? {
-                holder: "person",
-                userId: connection.userId,
-                vendorUserId: connection.vendorUserId,
-              }
-            : { holder: "deployment", vendorUserId: connection.vendorUserId };
+        const accounts = connected.map((connection): AccountRef => {
+          const account = asAccountRef(connection);
+          if (!account) {
+            throw new PluginInvariantError(
+              `${toolkit} holds a connection row whose holder and user id name no account, so the accounts standing for it cannot be ended.`,
+            );
+          }
+          return account;
+        });
 
         /*
          * What the broker was actually asked for each of them, kept so the trail below records the
@@ -1070,25 +1205,62 @@ export function serverMethods(context: StoreContext) {
          * key has since been unset can still remove the app, and it could not have been calling it
          * either way — but nothing was asked of Composio and the row must not claim otherwise.
          */
-        const vendorRevocationRequested: boolean[] = [];
-        for (const connection of connected) {
-          vendorRevocationRequested.push(
-            broker
-              ? await broker.revoke({ account: accountOf(connection), toolkit })
-              : false,
+        const revokeAnswers: boolean[] = [];
+        /*
+         * What the trail may CLAIM from those answers about this app, read before anything is
+         * revoked, as {@link disconnectBrokered} reads its own; see {@link vendorRevocationClaim}.
+         */
+        const claim = await vendorRevocationClaim(toolkit);
+        /*
+         * THE APPS EACH ACCOUNT'S REVOCATION ENDS BESIDES THIS ONE, read BEFORE anything is revoked
+         * and through {@link resolveSiblings}, the one place that answers it. Where a connection is
+         * keyed `(identity, auth provider)` — Arcade — withdrawing it ends every app sharing it, so a
+         * local row left for one of them claims an account the vendor no longer holds. On Composio the
+         * set is empty by construction and nothing below differs from what this method always did.
+         */
+        const endedBesides: { siblings: string[]; unanswered: number }[] = [];
+        /*
+         * ONE AUTH-PROVIDER RESOLUTION PER TOOLKIT FOR THE WHOLE REMOVAL, not one per person.
+         *
+         * `connected` holds a row per PERSON who connected this app, and each `resolveSiblings`
+         * above resolves the asked toolkit plus every app that person holds. Unmemoized that is a
+         * live vendor call per (person × app) on Arcade — a removal on a deployment with two
+         * hundred people holding five apps each is over a thousand serial calls inside one admin
+         * request, which times out partway and leaves accounts revoked at the vendor with every
+         * local row still standing. Memoized, the bound is the number of DISTINCT TOOLKITS across
+         * those rows, whatever the number of people.
+         *
+         * The memo lives exactly as long as this removal and is dropped with it; see
+         * {@link resolveSiblings} for why one call's worth is semantically free.
+         */
+        const authProviders = new Map<string, Promise<string | null>>();
+        for (const account of accounts) {
+          /*
+           * ASKED OF `rowBroker` AND NOT OF `broker`, both here and at the revoke below.
+           * {@link resolveSiblings} resolves against the CONFIGURED provider's rows and the active
+           * broker's `authProviderOf`, so asking it about a foreign row's app would be the same
+           * wrong-vendor question the revoke was asking. No broker for this row means nothing was
+           * asked, which is the answer the empty set and the `false` beside it already carry.
+           */
+          endedBesides.push(
+            rowBroker
+              ? await resolveSiblings({ toolkit, account }, authProviders)
+              : { siblings: [], unanswered: 0 },
+          );
+          revokeAnswers.push(
+            rowBroker ? await rowBroker.revoke({ account, toolkit }) : false,
           );
         }
 
-        await database
-          .delete(brokeredConnections)
-          .where(
-            and(
-              eq(brokeredConnections.provider, "composio"),
-              eq(brokeredConnections.app, toolkit),
-            ),
-          );
+        await database.delete(brokeredConnections).where(
+          and(
+            // The row's own broker, as the read above.
+            eq(brokeredConnections.provider, rowProvider),
+            eq(brokeredConnections.app, toolkit),
+          ),
+        );
 
-        for (const [index, connection] of connected.entries()) {
+        for (const [index, account] of accounts.entries()) {
           await recordAuditEvent(auditStore, {
             eventType: "mcp.account_disconnected",
             targetType: "mcp_server",
@@ -1117,11 +1289,11 @@ export function serverMethods(context: StoreContext) {
               server: toolkit,
               // Whose account this was, by the rule {@link disconnectBrokered} names it by: a
               // person's own under their id, the deployment's own as the deployment, never as
-              // the administrator who removed the app.
+              // the administrator who removed the app. Taken off the SAME `AccountRef` the revoke
+              // above was asked with — read once, by `asAccountRef` — so the trail cannot name a
+              // holder the withdrawal did not use.
               owner:
-                connection.holder === "person" && connection.userId !== null
-                  ? connection.userId
-                  : "deployment",
+                account.holder === "person" ? account.userId : "deployment",
               // The same three-way distinction the vault loop above draws, and the same answer: an
               // administrator took the whole app away and the person did nothing.
               reason: "mcp_server_removed",
@@ -1134,16 +1306,57 @@ export function serverMethods(context: StoreContext) {
                * outlives it somewhere else, so a constant here would be worse than none. It says
                * "requested" because that is the strongest thing the vendor's answer supports:
                * the upstream withdrawal runs as a background job nothing here can poll.
+               *
+               * AND NEVER FOR A KEY: the claim is {@link vendorRevocationClaim}'s, the one
+               * {@link disconnectBrokered} and {@link retireConnectionsFor} make, and for a key app
+               * it is `false` whatever the vendor answered. This row used to pass the raw answer
+               * through for a key (round 2, A5c).
                */
-              vendorRevocationRequested:
-                vendorRevocationRequested[index] ?? false,
+              ...claim(revokeAnswers[index] ?? false),
             },
           });
         }
 
+        /*
+         * THE SIBLINGS THE VENDOR ENDED WITH THIS APP, by the three rules written down once in
+         * {@link clearEndedSiblings} — the same call {@link disconnectBrokered} and
+         * {@link clearWithdrawnAccount} make. This loop used to spell rules 2 and 3 itself and so
+         * missed rule 1: a KEY sibling's row was deleted on the strength of an OAuth revoke that
+         * never ended it, leaving a live account at the vendor with no local row to reach it.
+         *
+         * WHAT DIFFERS FROM THOSE CALLERS IS ONLY THE ASKED APP, and it is handled above rather
+         * than here: a removal ends EVERY holder's row for `toolkit` in one delete keyed on the
+         * ROW's provider, where a disconnect ends one account's. So `endedWith` is `toolkit`, whose
+         * rows are already gone, and the helper never clears it. `revoked` is the vendor's raw
+         * answer per account, as `disconnectBrokered` passes its own `ended`.
+         *
+         * It sits after the revokes above for the same reason the asked app's rows do: an exception
+         * from any of them left every row standing. AND IT CAN CLEAR ONLY THE CONFIGURED PROVIDER'S
+         * OWN ROWS, which is what keeps the helper's `accountRow` delete — keyed on `brokerProvider`
+         * — about the same broker as the siblings it deletes: `revoked` true requires `rowBroker`,
+         * and there is no `rowBroker` for a row the other broker minted.
+         */
+        for (const [index, account] of accounts.entries()) {
+          const { siblings, unanswered } = endedBesides[index] ?? {
+            siblings: [],
+            unanswered: 0,
+          };
+          await clearEndedSiblings({
+            siblings,
+            account,
+            endedWith: toolkit,
+            revoked: revokeAnswers[index] ?? false,
+            unanswered,
+            by,
+            reason: "mcp_server_removed",
+          });
+        }
+
         // Last of all, for the reason above, and skipped entirely on a deployment with no
-        // broker to have made one.
-        if (broker) await broker.deleteAuthConfig(toolkit);
+        // broker to have made one — or, for a row of the other broker's, no broker of ITS that
+        // this deployment can reach. Nothing here holds an auth config at a vendor it is not
+        // configured for, and this slug is not a name that vendor's apps go by.
+        if (rowBroker) await rowBroker.deleteAuthConfig(toolkit);
       }
 
       const released = await database.transaction(async (transaction) => {
@@ -1448,6 +1661,9 @@ export function serverMethods(context: StoreContext) {
        * refreshes before it answers, so the add died AFTER its server row and its audit row had
        * committed, leaving a configured app nobody had finished configuring.
        *
+       * A NAME NO MODEL COULD BE OFFERED IS NOT ONE OF THESE THROWS. It costs only its own action:
+       * it comes back in `skipped` and is reported below, while the rest of the listing is stored.
+       *
        * RECORDED RATHER THAN RAISED, which is the same answer the vendor `try` gives, because this
        * is the same kind of event: the app was reached, it answered, and its answer is not something
        * this deployment can write down. The actions it already holds are kept, no `toolsRefreshedAt`
@@ -1457,9 +1673,10 @@ export function serverMethods(context: StoreContext) {
        * `withoutStatement` rather than `error.message`, so that the one shape whose message must
        * never travel cannot reach the column even from a line that should never produce one.
        */
-      let storable: ReturnType<typeof storableTools>;
+      let storable: StorableTool[];
+      let skipped: string[];
       try {
-        storable = storableTools(serverId, listed);
+        ({ rows: storable, skipped } = storableTools(serverId, listed));
       } catch (error) {
         const reason =
           error instanceof Error ? withoutStatement(error) : String(error);
@@ -1478,6 +1695,68 @@ export function serverMethods(context: StoreContext) {
           })
           .where(eq(mcpServers.id, serverId));
         return { tools: 0 };
+      }
+
+      /*
+       * ACTIONS LEFT OUT FOR THEIR NAMES, said where the person who pressed Refresh will read it.
+       *
+       * CRITERION. A name {@link storableTools} skipped is recorded in `skippedTools`, which the
+       * app's page draws as a warning, and in a log line with the server id, and costs only
+       * itself: every other action in the listing is still recorded.
+       *
+       * REASON. The guard used to refuse the whole listing over one name, and the MCP spec allows a
+       * dot in a tool name, so a custom server with one dotted action stored nothing on its add and
+       * froze on every refresh after. Skipped silently instead, the action would simply be missing
+       * with nobody told why.
+       *
+       * NOT `lastError`, which is where this used to go. That column is a failure, and the Plugins
+       * list turns a row red for it; a refresh that stored every other action did not fail, and a
+       * server that keeps listing a dotted name would have read as broken on every refresh, for
+       * good. The sentence is still built, for the one case below where nothing was stored at all —
+       * that refresh did learn nothing, and says so as a failure.
+       */
+      const skippedSentence =
+        skipped.length > 0
+          ? `This app listed ${skipped.length === 1 ? "an action" : `${skipped.length} actions`} that cannot be offered to a model, so ${skipped.length === 1 ? "it was" : "they were"} left out: ${skipped.map((name) => `"${name}"`).join(", ")}. A tool name may only use letters, digits, underscores and hyphens.`
+          : null;
+      if (skipped.length > 0) {
+        console.warn(
+          JSON.stringify({
+            type: "mcp-tools-unofferable-names-skipped",
+            serverId,
+            names: skipped,
+          }),
+        );
+      }
+
+      /*
+       * A LISTING WHERE NOTHING SURVIVED THE GUARD IS THE EMPTY ANSWER BY ANOTHER ROUTE, and is kept
+       * like one — see the guard on an empty listing above. Before names were skipped, a listing of
+       * nothing but unofferable names threw and kept what was held; replacing with nothing here
+       * would be the deletion that guard exists to prevent, arriving through a vendor that renamed
+       * every action at once.
+       */
+      if (storable.length === 0 && skippedSentence !== null) {
+        const held = await database
+          .select({ name: mcpTools.name })
+          .from(mcpTools)
+          .where(eq(mcpTools.serverId, serverId));
+
+        if (held.length > 0) {
+          await database
+            .update(mcpServers)
+            .set({
+              lastError:
+                `Nothing else was listed, so the ${held.length} actions already recorded for this app were kept rather than deleted. ${skippedSentence}`.slice(
+                  0,
+                  400,
+                ),
+              skippedTools: skipped,
+              updatedAt: new Date(),
+            })
+            .where(eq(mcpServers.id, serverId));
+          return { tools: held.length };
+        }
       }
 
       /*
@@ -1538,7 +1817,9 @@ export function serverMethods(context: StoreContext) {
         .update(mcpServers)
         .set({
           toolsRefreshedAt: new Date(),
+          // Cleared: the listing was stored. The names it left out are a warning — see above.
           lastError: null,
+          skippedTools: skipped.length > 0 ? skipped : null,
           updatedAt: new Date(),
         })
         .where(eq(mcpServers.id, serverId));
@@ -1662,7 +1943,9 @@ export function serverMethods(context: StoreContext) {
        * ONE EXTRA READ FOR THE WHOLE LIST, and none where the deployment has enabled no apps.
        */
       const brokeredApps = await brokeredAppRowsAt(
-        rows.filter((row) => toolkitOf(row.url) !== null).map((row) => row.url),
+        rows
+          .filter((row) => toolkitOfFor(brokerProvider, row.url) !== null)
+          .map((row) => row.url),
       );
 
       /*
@@ -1677,7 +1960,7 @@ export function serverMethods(context: StoreContext) {
             .from(brokeredConnections)
             .where(
               and(
-                eq(brokeredConnections.provider, "composio"),
+                eq(brokeredConnections.provider, brokerProvider),
                 eq(brokeredConnections.holder, "deployment"),
               ),
             )
@@ -1686,7 +1969,7 @@ export function serverMethods(context: StoreContext) {
 
       return rows.map((row) => {
         const entry = catalogueEntry(row.id);
-        const toolkit = toolkitOf(row.url);
+        const toolkit = toolkitOfFor(brokerProvider, row.url);
         return {
           id: row.id,
           title: row.title,
@@ -1699,6 +1982,7 @@ export function serverMethods(context: StoreContext) {
           hasCredential: row.credentialId !== null,
           toolsRefreshedAt: iso(row.toolsRefreshedAt),
           lastError: row.lastError,
+          skippedTools: row.skippedTools ?? [],
           addedBy: row.addedBy,
           dynamicClient:
             entry?.auth.kind === "user-oauth" &&
@@ -1809,7 +2093,7 @@ export function serverMethods(context: StoreContext) {
         .where(eq(mcpServers.id, serverId))
         .limit(1);
       if (!row) return undefined;
-      const toolkit = toolkitOf(row.url);
+      const toolkit = toolkitOfFor(brokerProvider, row.url);
       if (!toolkit) return { ...row, accountMode: null };
       const app = await brokeredAppRow(toolkit);
       return {
@@ -1840,7 +2124,20 @@ export function serverMethods(context: StoreContext) {
       return rows.map((row) => row.url);
     },
 
-    /** Every account any holder has on a brokered app, as the broker would be asked to end it. */
+    /**
+     * Every account any holder has on a brokered app, as the broker would be asked to end it.
+     *
+     * READ THROUGH {@link asAccountRef}, AND A ROW THAT NAMES NO ACCOUNT STOPS THE READ. Every
+     * account handed back here is passed straight to {@link disconnectBrokered} by the mode
+     * switch, so what is minted here is what a revoke is aimed at and what the trail records. The
+     * reading this replaces was `userId: row.userId ?? ""`, the quiet direction of the same
+     * coercion `asAccountRef` exists to refuse: a person row carrying no user id came out as a
+     * person ref belonging to NOBODY and was withdrawn under an owner of `""`. `''` is the pair
+     * that is actually reachable — `brokered_connections_holder_check` tests `IS NOT NULL`, which
+     * `''` satisfies — and `null` is unwritable, which is why both are a refusal rather than a
+     * default. The `null` answer below still means only "not a brokered app at this broker";
+     * a row that cannot be read is this deployment contradicting its own CHECK, and says so.
+     */
     async accountsOn(
       serverId: string,
     ): Promise<{ toolkit: string; accounts: AccountRef[] } | null> {
@@ -1849,7 +2146,7 @@ export function serverMethods(context: StoreContext) {
         .from(mcpServers)
         .where(eq(mcpServers.id, serverId))
         .limit(1);
-      const toolkit = row ? toolkitOf(row.url) : null;
+      const toolkit = row ? toolkitOfFor(brokerProvider, row.url) : null;
       if (!toolkit) return null;
       const held = await database
         .select({
@@ -1860,22 +2157,21 @@ export function serverMethods(context: StoreContext) {
         .from(brokeredConnections)
         .where(
           and(
-            eq(brokeredConnections.provider, "composio"),
+            eq(brokeredConnections.provider, brokerProvider),
             eq(brokeredConnections.app, toolkit),
           ),
         );
       return {
         toolkit,
-        accounts: held.map(
-          (row): AccountRef =>
-            row.holder === "person"
-              ? {
-                  holder: "person",
-                  userId: row.userId ?? "",
-                  vendorUserId: row.vendorUserId,
-                }
-              : { holder: "deployment", vendorUserId: row.vendorUserId },
-        ),
+        accounts: held.map((row): AccountRef => {
+          const account = asAccountRef(row);
+          if (!account) {
+            throw new PluginInvariantError(
+              `${toolkit} holds a connection row whose holder and user id name no account, so the accounts standing for it cannot be listed.`,
+            );
+          }
+          return account;
+        }),
       };
     },
 
@@ -1898,7 +2194,9 @@ export function serverMethods(context: StoreContext) {
         .from(mcpServers)
         .where(eq(mcpServers.id, serverId))
         .limit(1);
-      const toolkit = dialled ? toolkitOf(dialled.url) : null;
+      const toolkit = dialled
+        ? toolkitOfFor(brokerProvider, dialled.url)
+        : null;
       const app = toolkit ? await brokeredAppRow(toolkit) : null;
       await database
         .update(mcpServers)

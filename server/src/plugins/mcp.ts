@@ -192,6 +192,20 @@ export type McpTool = {
  * `McpTool` stays exactly what a `tools/list` answer contains, because that is what it is for.
  */
 export type ListedTool = McpTool & {
+  /**
+   * The vendor's own spelling, when it differs from the name this deployment records.
+   *
+   * ABSENT MEANS THEY ARE THE SAME STRING, which is the honest answer for every transport but
+   * Arcade: Composio's `GMAIL_FETCH_EMAILS`, an MCP server's names and the Drive REST names are all
+   * offerable to a model exactly as the vendor spells them, so there is nothing to keep apart.
+   *
+   * THE TRANSPORT DECIDES, because only it knows the vendor's naming convention. Arcade's listing
+   * answers `Toolkit.Action` and the dot is illegal in a model tool name, so its transport splits
+   * the two: `name` is the action, this is the qualified name the vendor is called by. Deriving it
+   * here instead would make a rule out of the shape of one vendor's listing. See
+   * {@link mcpTools.vendorName}.
+   */
+  vendorName?: string;
   /** What the vendor said this action does, when it said anything. */
   effect?: "read" | "write";
   /** Whether the vendor marked it as destroying something. */

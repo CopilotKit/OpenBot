@@ -16,12 +16,12 @@ import {
 } from "@/components/layout/page-shell";
 import { RowMark } from "@/components/layout/row-mark";
 import { PluginLogo } from "@/components/plugins/plugin-logo";
+import { GithubSources } from "@/components/settings/github-sources";
 import { LinkedAccountsSection } from "@/components/settings/linked-accounts";
 import {
   linkedNotice,
   visibleLinkedNotice,
 } from "@/components/settings/linked-notice";
-import { GithubSources } from "@/components/settings/github-sources";
 import { Button } from "@/components/ui/button";
 import {
   InputGroup,
@@ -36,12 +36,14 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { linkedAccountsQueryOptions } from "@/lib/identity/queries";
+import { keyedLookup } from "@/lib/lookup";
 import {
   connectionsQueryOptions,
   type PluginServer,
   personalConnections,
   pluginsPageQueryOptions,
 } from "@/lib/plugins/queries";
+import { searchTextEntry } from "@/lib/search-text";
 import { clearTeamBotConsentsMutationOptions } from "@/lib/team-bots";
 
 /**
@@ -63,24 +65,138 @@ export const Route = createFileRoute("/_authed/settings/connected-accounts/")({
    *
    * The key is omitted rather than set to undefined. Present-but-undefined makes `search` a required
    * prop on every Link to this route, which is a lot of ripple for a parameter only the callback sets.
+   *
+   * EACH IS READ AS TEXT WHATEVER THE ROUTER PARSED IT INTO (`searchText`): the router JSON-parses
+   * search values, so a server key or reason code that happens to be digits or JSON-shaped arrives
+   * as a number or an object, and a `typeof` guard would quietly turn the callback's report into
+   * no report at all.
    */
   validateSearch: (
     search: Record<string, unknown>,
-  ): { connected?: string; linked?: string } => ({
-    ...(typeof search.connected === "string"
-      ? { connected: search.connected }
-      : {}),
-    ...(typeof search.linked === "string" ? { linked: search.linked } : {}),
+  ): { connected?: string; authorized?: string; linked?: string } => ({
+    ...searchTextEntry("connected", search.connected),
+    /*
+     * A CHANNEL OF ITS OWN, BESIDE `?connected=` AND NEVER FOLDED INTO IT. That one is the Composio
+     * OAuth callback's and carries a server key or `failed`; this one is the brokered per-action
+     * verifier's and carries a reason code. Two senders answering different questions on one
+     * parameter is how a notice comes to be drawn for the wrong thing.
+     */
+    ...searchTextEntry("authorized", search.authorized),
+    ...searchTextEntry("linked", search.linked),
   }),
 });
 
-/** The same marks the admin connector list uses: these are the same vendors seen from your side. */
-const MARKS: Record<string, React.ComponentType<{ className?: string }>> = {
-  "google-drive": IconBrandGoogleDrive,
-  notion: IconBrandNotion,
-};
+/**
+ * WHAT THE VERIFIER REFUSED, IN WORDS — AND THE WORDS LIVE HERE AND NOWHERE ELSE.
+ *
+ * THE SENTENCE NEVER TRAVELS IN THE URL. A message rendered from a query string is a message
+ * anybody can author on this deployment's own origin: a link could be sent around carrying whatever
+ * sentence its author liked, shown in this page's own voice under this deployment's own address.
+ * What travels is an opaque code the server chose from a closed set, and this map is the only place
+ * it becomes something a person reads — which is also what keeps one sentence from being maintained
+ * in two places that drift apart.
+ *
+ * AN UNRECOGNISED CODE DRAWS NOTHING, deliberately. A code this build does not know is either
+ * somebody probing the parameter or a deployment mid-upgrade, and a generic "something went wrong"
+ * for both would be a sentence that tells a person nothing and an invitation to keep trying.
+ *
+ * A MAP, NOT AN OBJECT, BECAUSE THE KEY COMES OUT OF A URL. An object literal inherits from
+ * `Object.prototype`, so an object lookup answers `toString`, `constructor` and `__proto__` with
+ * members nobody put here — none of them nullish, so no `?? null` turns them back into "draws
+ * nothing", and `Record<string, string>` says they cannot happen so the compiler never asks. What
+ * reached the page was a function (an alert with nothing in it) or, for `__proto__`, an object,
+ * which React refuses to draw: "Objects are not valid as a React child" took the whole Connected
+ * accounts screen down for whoever opened the link. A `Map` holds only what was put in it, so the
+ * unrecognised code and the borrowed member are once again the same case, by construction rather
+ * than by a list of names to keep out.
+ */
+export const AUTHORIZATION_NOTICES: ReadonlyMap<string, string> = new Map([
+  [
+    "no-broker",
+    "This deployment is not set up to connect apps, so nothing was recorded. Ask an administrator to set it up.",
+  ],
+  [
+    "not-supported",
+    "This deployment's apps are connected once for the whole app, with the Connect button on the app's page; they are not authorized one action at a time.",
+  ],
+  [
+    "missing-handle",
+    "That link is missing the part that says which authorization it finishes, so nothing was done. Start the authorization again from the app's page.",
+  ],
+  [
+    "no-attempt",
+    "There is no authorization in progress for you to finish — it may have expired, or it may have been started by somebody else or in another session. Start it again from the app's page.",
+  ],
+  [
+    "vendor-unavailable",
+    "The app's vendor did not answer when this deployment tried to finish that authorization, so nothing was recorded. Try the link again in a moment.",
+  ],
+  [
+    "not-your-authorization",
+    "That link does not finish the authorization you have in progress, so nothing was recorded and it is still waiting. Finish it from the tab it was started in, or start it again from the app's page.",
+  ],
+  [
+    "not-finished",
+    "That authorization has not finished yet, so nothing was recorded. Finish it at the app's vendor, then open the link again — it is still waiting.",
+  ],
+  [
+    "authorization-failed",
+    "The app's vendor did not complete that authorization, so nothing was recorded. Start it again from the app's page.",
+  ],
+  [
+    "context-changed",
+    "That app's account changed while the authorization was open, so nothing was recorded and anything granted for the old account was withdrawn. Start it again from the app's page.",
+  ],
+  [
+    "not-permitted",
+    "You can no longer connect that app's account — your access or the app's set-up changed while the authorization was open — so nothing was recorded. Ask an administrator if you expected to finish it.",
+  ],
+  [
+    "cancelled",
+    "That authorization was cancelled while it was being finished, so it was not recorded, and what it granted at the app's vendor was withdrawn.",
+  ],
+  [
+    "cancelled-left-live",
+    "That authorization was cancelled while it was being finished, so it was not recorded — but what it granted could not be withdrawn at the app's vendor, so the vendor may still allow the action you cancelled. To remove it, disconnect the app from its page, which ends its whole connection there, then connect again and authorize only what you want.",
+  ],
+  [
+    "not-recorded",
+    "This deployment could not record that authorization, so none of it was saved. Start it again from the app's page, and tell an administrator if it persists.",
+  ],
+]);
 
-const markFor = (key: string) => MARKS[key] ?? IconPlug;
+/** The sentence for a code the verifier sent back, or null for one this build does not know. */
+export function authorizationNoticeFor(
+  authorized: string | undefined,
+): string | null {
+  return authorized
+    ? (keyedLookup(AUTHORIZATION_NOTICES, authorized) ?? null)
+    : null;
+}
+
+/** The same marks the admin connector list uses: these are the same vendors seen from your side. */
+const MARKS: ReadonlyMap<
+  string,
+  React.ComponentType<{ className?: string }>
+> = new Map([
+  ["google-drive", IconBrandGoogleDrive],
+  ["notion", IconBrandNotion],
+]);
+
+/* A Map for the same reason the notices above are one: a lookup answers with what was put in it and
+ * nothing a plain object would have inherited, so a catalogue key called `toString` draws the
+ * fallback mark rather than handing React `Object.prototype.toString` to render as a component.
+ * The read goes through `keyedLookup` so the rule has one home rather than one comment per page;
+ * see `app/src/lib/lookup.ts`. The `?? IconPlug` stays here, because what a missing key draws is
+ * this page's decision. */
+const markFor = (key: string) => keyedLookup(MARKS, key) ?? IconPlug;
+
+/**
+ * Whether a row came through a broker. A deployment only ever holds rows from one provider, so the
+ * page needs to recognise "brokered", not to know which broker.
+ */
+const isBrokered = (server: PluginServer): boolean =>
+  server.provenance === "composio" || server.provenance === "arcade";
 
 /**
  * The brokered apps this page lists, which is not every brokered row.
@@ -94,7 +210,7 @@ export function brokeredAccountsListedOn(
 ): PluginServer[] {
   return servers.filter(
     (server) =>
-      server.provenance === "composio" &&
+      isBrokered(server) &&
       server.authScheme !== "NO_AUTH" &&
       server.accountMode !== "shared",
   );
@@ -122,8 +238,7 @@ export function sharedAccountsListedOn(
   servers: PluginServer[],
 ): PluginServer[] {
   return servers.filter(
-    (server) =>
-      server.provenance === "composio" && server.accountMode === "shared",
+    (server) => isBrokered(server) && server.accountMode === "shared",
   );
 }
 
@@ -156,18 +271,51 @@ export function connectedAccountSections(
 }
 
 function RouteComponent() {
-  const { connected: outcome, linked } = Route.useSearch();
-  /* Read once, then dropped from the URL, so a refresh does not repeat the news. */
-  const [arrival] = React.useState(() => linkedNotice(linked));
+  const { connected: outcome, authorized, linked } = Route.useSearch();
+  /*
+   * ALL THREE READ ONCE HERE, AND ALL THREE DROPPED FROM THE URL BELOW — not just `?linked=`.
+   *
+   * Every parameter this screen accepts is a report of something that has already happened: the
+   * Composio callback's `?connected=`, the brokered verifier's `?authorized=` and the GitHub
+   * account-link callback's `?linked=`. A report is news exactly once. Left in the address bar it
+   * is read again on every reload and on every back-navigation, so a failure that is minutes old
+   * is redrawn as though it had just happened — somebody is told again that their account could
+   * not be connected, or that there is no authorization in progress, about an attempt they have
+   * since finished successfully. Only `?linked=` was ever cleaned, which is how the other two came
+   * to replay.
+   *
+   * THE SNAPSHOT IS WHAT THE PAGE DRAWS FROM, and it is why the strip can be unconditional. Read
+   * live off the search, the notice would vanish the instant the parameter did; held here, the
+   * sentence outlives the URL it arrived in. That is what `?linked=` was already doing, and the
+   * other two now do it for the same reason rather than by accident.
+   */
+  const [arrival] = React.useState(() => ({
+    outcome,
+    authorizationNotice: authorizationNoticeFor(authorized),
+    linked: linkedNotice(linked),
+  }));
   /* The same cached list the Linked accounts section reads, so a Disconnect there retracts a success here. */
   const links = useQuery(linkedAccountsQueryOptions());
-  const notice = visibleLinkedNotice(arrival, links.data);
+  const notice = visibleLinkedNotice(arrival.linked, links.data);
   const navigate = Route.useNavigate();
+  /*
+   * ONE NAVIGATE FOR ALL THREE, never one per parameter. `search` replaces the whole object, so two
+   * effects each dropping their own key race: whichever lands second rebuilds from a snapshot taken
+   * before the first, and puts the key the first had just removed back.
+   */
   React.useEffect(() => {
-    if (linked !== undefined) {
-      navigate({ search: ({ linked: _l, ...rest }) => rest, replace: true });
+    if (
+      outcome === undefined &&
+      authorized === undefined &&
+      linked === undefined
+    ) {
+      return;
     }
-  }, [linked, navigate]);
+    navigate({
+      search: ({ connected: _c, authorized: _a, linked: _l, ...rest }) => rest,
+      replace: true,
+    });
+  }, [outcome, authorized, linked, navigate]);
   const [search, setSearch] = React.useState("");
   const plugins = useQuery(pluginsPageQueryOptions());
   const connections = useQuery(connectionsQueryOptions());
@@ -273,7 +421,7 @@ function RouteComponent() {
        * came back to now reads "Connected", which is the same news told by the thing it is news
        * about. `?linked=` is different and says both outcomes, through `linkedNotice` below.
        */}
-      {outcome === "failed" ? (
+      {arrival.outcome === "failed" ? (
         <p className="text-destructive text-sm" role="alert">
           That account could not be connected. Nothing was saved — try again.
         </p>
@@ -288,6 +436,16 @@ function RouteComponent() {
             {notice.text}
           </p>
         )
+      ) : null}
+      {/*
+       * The brokered per-action verifier's own channel. It lands here rather than on an app's page
+       * because three of its refusals have no app to name, and a notice that sometimes appears one
+       * level in and sometimes here would be a notice people learn to look for in two places.
+       */}
+      {arrival.authorizationNotice ? (
+        <p className="text-destructive text-sm" role="alert">
+          {arrival.authorizationNotice}
+        </p>
       ) : null}
       {/*
        * BOTH READS DECIDE THIS, AND ONLY ONE OF THEM USED TO. The waits were already paired here;

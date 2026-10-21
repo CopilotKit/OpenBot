@@ -59,7 +59,12 @@ services:
     # than relying on this variable.
     image: ${SERVER_IMAGE:-openbot-server:latest}
     pull_policy: ${IMAGE_PULL_POLICY:-build}
-    command: ["bun", "x", "drizzle-kit", "migrate", "--config=drizzle.config.ts"]
+    # The server's own migrator, which is what this image actually ships: `drizzle-kit` is a
+    # development dependency that `bun x` had to fetch at run time, and it is the one migrator that
+    # will skip a migration stamped below what the database has already recorded and still report
+    # success (see server/src/db/migration-reach.ts). The local stack is a developer's database and
+    # therefore one of the places that happens.
+    command: ["bun", "scripts/migrate.ts"]
     environment:
       DATABASE_URL: postgres://openbot:openbot@postgres:5432/openbot
     depends_on:

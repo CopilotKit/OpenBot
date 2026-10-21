@@ -27,7 +27,7 @@ const suite = randomUUID().slice(0, 8);
 const id = (name: string) => `${name}-${suite}`;
 const app = id("gh");
 const bot = id("bot");
-const store = createSharedUseStore(database);
+const store = createSharedUseStore(database, "composio");
 const gate = createSharedUseGate(store, createAuditStore(database));
 
 async function seedUser(name: string, groups: string[] = []) {

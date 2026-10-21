@@ -16,6 +16,7 @@ import {
   type TranscriptionConfig,
   transcriptionConfig,
 } from "./dictation/config";
+import type { BrokerProvider } from "./plugins/access";
 import { type VoiceConfig, voiceConfig } from "./voice/config";
 import { type WebBotAuth, webBotAuthFromEnv } from "./web-bot-auth";
 
@@ -250,6 +251,16 @@ export type DeploymentConfig = {
   /** GitHub App user sign-in, so people can link their GitHub account. Both or neither of GITHUB_APP_CLIENT_ID / GITHUB_APP_CLIENT_SECRET. */
   githubApp?: GithubAppConfig;
   /**
+   * The Arcade API key, from `ARCADE_API_KEY`. Unset is the ordinary state. Trimmed and never
+   * validated here, for the same reason as `composioApiKey`.
+   */
+  arcadeApiKey: string | undefined;
+  /**
+   * Which tool broker the operator asked for, from `OPENBOT_BROKER_PROVIDER`. Only read and
+   * validated here: which provider is active is decided elsewhere. Unset is `undefined`.
+   */
+  brokerProvider: BrokerProvider | undefined;
+  /**
    * Where this deployment is reached from outside, with no trailing slash.
    *
    * Needed because an OAuth redirect URI has to match what an administrator registered with the
@@ -419,6 +430,17 @@ function required(environment: Environment, name: string): string {
 
 function optional(environment: Environment, name: string): string | undefined {
   return environment[name]?.trim() || undefined;
+}
+
+function brokerProvider(environment: Environment): BrokerProvider | undefined {
+  const raw = optional(environment, "OPENBOT_BROKER_PROVIDER");
+  if (raw === undefined) return undefined;
+  if (raw !== "composio" && raw !== "arcade") {
+    throw new Error(
+      `OPENBOT_BROKER_PROVIDER must be "composio" or "arcade", got "${raw}". Leave it unset to choose by which API key is configured.`,
+    );
+  }
+  return raw;
 }
 
 /**
@@ -1354,6 +1376,8 @@ export function loadConfig(
     agentEndpointAllowedHosts: agentEndpointAllowedHosts(environment),
     deploymentId: optional(environment, "DEPLOYMENT_ID"),
     composioApiKey: optional(environment, "COMPOSIO_API_KEY"),
+    arcadeApiKey: optional(environment, "ARCADE_API_KEY"),
+    brokerProvider: brokerProvider(environment),
     publicUrl,
     appUrl: (
       optional(environment, "OPENBOT_APP_URL") ??

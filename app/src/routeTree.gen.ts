@@ -52,6 +52,7 @@ import { Route as AuthedAdminComponentsIndexRouteImport } from './routes/_authed
 import { Route as AuthedAdminComponentsNameRouteImport } from './routes/_authed/admin/components/$name'
 import { Route as AuthedAdminPluginsIndexRouteImport } from './routes/_authed/admin/plugins/index'
 import { Route as AuthedAdminPluginsKeyRouteImport } from './routes/_authed/admin/plugins/$key'
+import { Route as AuthedAdminPluginsArcadeRouteImport } from './routes/_authed/admin/plugins/arcade'
 import { Route as AuthedAdminPluginsComposioRouteImport } from './routes/_authed/admin/plugins/composio'
 import { Route as AuthedSettingsComponentsGalleryIndexRouteImport } from './routes/_authed/settings/components-gallery/index'
 import { Route as AuthedSettingsComponentsGalleryNameRouteImport } from './routes/_authed/settings/components-gallery/$name'
@@ -288,6 +289,12 @@ const AuthedAdminPluginsKeyRoute = AuthedAdminPluginsKeyRouteImport.update({
   path: '/plugins/$key',
   getParentRoute: () => AuthedAdminRouteRoute,
 } as any)
+const AuthedAdminPluginsArcadeRoute =
+  AuthedAdminPluginsArcadeRouteImport.update({
+    id: '/plugins/arcade',
+    path: '/plugins/arcade',
+    getParentRoute: () => AuthedAdminRouteRoute,
+  } as any)
 const AuthedAdminPluginsComposioRoute =
   AuthedAdminPluginsComposioRouteImport.update({
     id: '/plugins/composio',
@@ -423,6 +430,7 @@ export interface FileRoutesByFullPath {
   '/group/new': typeof AuthedAppGroupNewRoute
   '/admin/components/$name': typeof AuthedAdminComponentsNameRoute
   '/admin/plugins/$key': typeof AuthedAdminPluginsKeyRoute
+  '/admin/plugins/arcade': typeof AuthedAdminPluginsArcadeRoute
   '/admin/plugins/composio': typeof AuthedAdminPluginsComposioRoute
   '/settings/components-gallery/$name': typeof AuthedSettingsComponentsGalleryNameRoute
   '/settings/connected-accounts/$key': typeof AuthedSettingsConnectedAccountsKeyRoute
@@ -480,6 +488,7 @@ export interface FileRoutesByTo {
   '/group/new': typeof AuthedAppGroupNewRoute
   '/admin/components/$name': typeof AuthedAdminComponentsNameRoute
   '/admin/plugins/$key': typeof AuthedAdminPluginsKeyRoute
+  '/admin/plugins/arcade': typeof AuthedAdminPluginsArcadeRoute
   '/admin/plugins/composio': typeof AuthedAdminPluginsComposioRoute
   '/settings/components-gallery/$name': typeof AuthedSettingsComponentsGalleryNameRoute
   '/settings/connected-accounts/$key': typeof AuthedSettingsConnectedAccountsKeyRoute
@@ -542,6 +551,7 @@ export interface FileRoutesById {
   '/_authed/_app/group/new': typeof AuthedAppGroupNewRoute
   '/_authed/admin/components/$name': typeof AuthedAdminComponentsNameRoute
   '/_authed/admin/plugins/$key': typeof AuthedAdminPluginsKeyRoute
+  '/_authed/admin/plugins/arcade': typeof AuthedAdminPluginsArcadeRoute
   '/_authed/admin/plugins/composio': typeof AuthedAdminPluginsComposioRoute
   '/_authed/settings/components-gallery/$name': typeof AuthedSettingsComponentsGalleryNameRoute
   '/_authed/settings/connected-accounts/$key': typeof AuthedSettingsConnectedAccountsKeyRoute
@@ -603,6 +613,7 @@ export interface FileRouteTypes {
     | '/group/new'
     | '/admin/components/$name'
     | '/admin/plugins/$key'
+    | '/admin/plugins/arcade'
     | '/admin/plugins/composio'
     | '/settings/components-gallery/$name'
     | '/settings/connected-accounts/$key'
@@ -660,6 +671,7 @@ export interface FileRouteTypes {
     | '/group/new'
     | '/admin/components/$name'
     | '/admin/plugins/$key'
+    | '/admin/plugins/arcade'
     | '/admin/plugins/composio'
     | '/settings/components-gallery/$name'
     | '/settings/connected-accounts/$key'
@@ -721,6 +733,7 @@ export interface FileRouteTypes {
     | '/_authed/_app/group/new'
     | '/_authed/admin/components/$name'
     | '/_authed/admin/plugins/$key'
+    | '/_authed/admin/plugins/arcade'
     | '/_authed/admin/plugins/composio'
     | '/_authed/settings/components-gallery/$name'
     | '/_authed/settings/connected-accounts/$key'
@@ -1051,6 +1064,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedAdminPluginsKeyRouteImport
       parentRoute: typeof AuthedAdminRouteRoute
     }
+    '/_authed/admin/plugins/arcade': {
+      id: '/_authed/admin/plugins/arcade'
+      path: '/plugins/arcade'
+      fullPath: '/admin/plugins/arcade'
+      preLoaderRoute: typeof AuthedAdminPluginsArcadeRouteImport
+      parentRoute: typeof AuthedAdminRouteRoute
+    }
     '/_authed/admin/plugins/composio': {
       id: '/_authed/admin/plugins/composio'
       path: '/plugins/composio'
@@ -1181,6 +1201,7 @@ interface AuthedAdminRouteRouteChildren {
   AuthedAdminIndexRoute: typeof AuthedAdminIndexRoute
   AuthedAdminComponentsNameRoute: typeof AuthedAdminComponentsNameRoute
   AuthedAdminPluginsKeyRoute: typeof AuthedAdminPluginsKeyRoute
+  AuthedAdminPluginsArcadeRoute: typeof AuthedAdminPluginsArcadeRoute
   AuthedAdminPluginsComposioRoute: typeof AuthedAdminPluginsComposioRoute
   AuthedAdminComponentsIndexRoute: typeof AuthedAdminComponentsIndexRoute
   AuthedAdminPluginsIndexRoute: typeof AuthedAdminPluginsIndexRoute
@@ -1203,6 +1224,7 @@ const AuthedAdminRouteRouteChildren: AuthedAdminRouteRouteChildren = {
   AuthedAdminIndexRoute: AuthedAdminIndexRoute,
   AuthedAdminComponentsNameRoute: AuthedAdminComponentsNameRoute,
   AuthedAdminPluginsKeyRoute: AuthedAdminPluginsKeyRoute,
+  AuthedAdminPluginsArcadeRoute: AuthedAdminPluginsArcadeRoute,
   AuthedAdminPluginsComposioRoute: AuthedAdminPluginsComposioRoute,
   AuthedAdminComponentsIndexRoute: AuthedAdminComponentsIndexRoute,
   AuthedAdminPluginsIndexRoute: AuthedAdminPluginsIndexRoute,

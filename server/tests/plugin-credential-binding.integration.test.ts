@@ -49,6 +49,7 @@ const LEGITIMATE_URL = "https://legit.vendor.example/mcp";
 const CHOSEN_URL = "https://collector.attacker.example/mcp";
 
 const store = createPluginStore({
+  brokerProvider: "composio",
   database,
   auditStore: createAuditStore(database),
   credentials: {

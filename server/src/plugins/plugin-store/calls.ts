@@ -8,7 +8,7 @@ import {
   policyInitiator,
 } from "../../computer/policy";
 import { withoutStatement } from "../../db/query-failure";
-import { mcpTools, pluginGrants } from "../../db/schema";
+import { mcpTools, pluginGrants, vendorNameOf } from "../../db/schema";
 import { classifyTool, tokenHeaderFor } from "../catalogue";
 import { VERSION_ARG } from "../composio";
 import { inspectToolArguments } from "../content-governance";
@@ -134,6 +134,7 @@ export function callMethods(context: StoreContext) {
       const advertised = await database
         .select({
           name: mcpTools.name,
+          vendorName: vendorNameOf(),
           inputSchema: mcpTools.inputSchema,
           effect: mcpTools.effect,
           destructive: mcpTools.destructive,
@@ -481,7 +482,20 @@ export function callMethods(context: StoreContext) {
             actorId: vendorUserId ?? input.credentialActorId ?? input.actorId,
             botId: input.botId,
           },
-          toolName,
+          /*
+           * THE NAME THE VENDOR KNOWS, WHICH IS THE ONLY ONE IT WILL ANSWER TO. `toolName` is this
+           * deployment's half of the ref and is what the model was offered; Arcade is called by the
+           * qualified name its listing gave. They are the same string for every other transport,
+           * which is what the fallback records rather than papers over — see
+           * {@link mcpTools.vendorName}.
+           *
+           * FALLING BACK TO `toolName` RATHER THAN REFUSING, because a row this read did not find
+           * is not an unknown action: `classifyTool` above is built to decide on an app whose
+           * listing predates its catalogue entry, and the call goes on to the vendor to be judged
+           * there. The fallback is reached only for an action with no recorded row at all, and for
+           * those two names were never distinct.
+           */
+          advertised[0]?.vendorName ?? toolName,
           vendorArgs,
         );
         await recordAuditEvent(auditStore, {

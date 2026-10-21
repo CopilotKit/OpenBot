@@ -1,13 +1,17 @@
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
-import { recordAuditEvent } from "../../audit";
+import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { createAuditStore, recordAuditEvent } from "../../audit";
+import type { Database } from "../../db/client";
 import {
   brokeredConnections,
   credentials as credentialRows,
   mcpServers,
   mcpTools,
   mcpUserCredentials,
+  pendingAuthorizations,
   users,
+  vendorNameOf,
 } from "../../db/schema";
+import { BROKERED_PROFILE, toolkitOfFor } from "../access";
 import {
   BrokerRefusalError,
   BrokerUnconfiguredError,
@@ -18,17 +22,19 @@ import {
 import {
   asksForArguments,
   askAction as composioAskAction,
-  toolkitOf,
   VERSION_ARG,
 } from "../composio";
-import type { AccountRef } from "../shared-accounts";
+import { type AccountRef, personAccount } from "../shared-accounts";
 import type { StoreContext } from "./context";
 import {
+  attemptNamed,
   type BrokeredProbe,
   IDENTITY_ACTION,
   iso,
   type OAuthClient,
+  type PendingAuthorization,
   PluginRefusedError,
+  pendingAuthorizationFromRow,
 } from "./model";
 
 /** OAuth clients and a person's connections, including every brokered (Composio) connection flow. */
@@ -53,6 +59,13 @@ export function connectionMethods(context: StoreContext) {
     brokeredAppRowsAt,
     brokeredAppScheme,
     brokeredAppKind,
+    brokerProvider,
+    closeAuthorizationAttempt,
+    resolveSiblings,
+    consentRevokeReaches,
+    vendorRevocationClaim,
+    siblingsEndedBy,
+    clearEndedSiblings,
   } = context;
   return {
     /**
@@ -391,6 +404,14 @@ export function connectionMethods(context: StoreContext) {
        * draw the deployment's shared account as one of them — a deployment row has no `user_id`,
        * and the filter keeps that a fact this query states rather than one it happens to rely on.
        */
+      /*
+       * NO PROVIDER PREDICATE HERE, DELIBERATELY, AND THAT IS NOT AN OVERSIGHT. Each row is resolved
+       * below at the ACTIVE provider's canonical url, so another provider's row would be silently
+       * dropped from the page. What keeps that unreachable is the startup activation refusal
+       * (`assertActivatable`, called from `server/src/index.ts`): it will not boot when the
+       * configured provider differs from the one on the existing rows. No flow relaxes that refusal
+       * today; whoever builds one must add the `brokerProvider` predicate here.
+       */
       const connections = await database
         .select({
           toolkit: brokeredConnections.app,
@@ -453,13 +474,21 @@ export function connectionMethods(context: StoreContext) {
        * join answered and what the missing `serverId` below drops. A person can hold an account at
        * an app this deployment has since removed, and the settings page has no row to draw for it.
        */
+      /*
+       * AT THE ACTIVE BROKER'S SCHEME, which is the one {@link brokeredAppRow} resolves every other
+       * url against. Spelled `composio://` here, this read answered an empty map on any other
+       * broker — every `serverId` undefined, every connection dropped, and the connected-accounts
+       * page drawn empty for somebody holding accounts. Fail-closed and visible, and total.
+       */
+      const canonical = (toolkit: string) =>
+        `${BROKERED_PROFILE[brokerProvider].scheme}${toolkit}`;
       const named = await brokeredAppRowsAt(
-        connections.map((row) => `composio://${row.toolkit}`),
+        connections.map((row) => canonical(row.toolkit)),
       );
 
       const rows = connections
         .flatMap((row) => {
-          const serverId = named.get(`composio://${row.toolkit}`)?.id;
+          const serverId = named.get(canonical(row.toolkit))?.id;
           return serverId === undefined ? [] : [{ ...row, serverId }];
         })
         // By server id, as the join's own `order by` was, so this read and `connectionsFor` hand the
@@ -519,7 +548,7 @@ export function connectionMethods(context: StoreContext) {
         .from(mcpServers)
         .where(eq(mcpServers.id, serverId))
         .limit(1);
-      const toolkit = server ? toolkitOf(server.url) : null;
+      const toolkit = server ? toolkitOfFor(brokerProvider, server.url) : null;
       if (!toolkit) return null;
 
       const [row] = await database
@@ -536,7 +565,7 @@ export function connectionMethods(context: StoreContext) {
         .leftJoin(users, eq(users.id, brokeredConnections.connectedBy))
         .where(
           and(
-            eq(brokeredConnections.provider, "composio"),
+            eq(brokeredConnections.provider, brokerProvider),
             eq(brokeredConnections.app, toolkit),
             eq(brokeredConnections.holder, "deployment"),
           ),
@@ -603,7 +632,7 @@ export function connectionMethods(context: StoreContext) {
         .orderBy(asc(mcpServers.id));
       const answering = await brokeredAppRowsAt(
         marked
-          .filter((row) => toolkitOf(row.url) !== null)
+          .filter((row) => toolkitOfFor(brokerProvider, row.url) !== null)
           .map((row) => row.url),
       );
       const shared = marked.filter(
@@ -612,7 +641,7 @@ export function connectionMethods(context: StoreContext) {
 
       return await Promise.all(
         shared.map(async (server) => {
-          const toolkit = toolkitOf(server.url);
+          const toolkit = toolkitOfFor(brokerProvider, server.url);
           const [connection, kind] = await Promise.all([
             this.deploymentConnectionFor(server.id),
             toolkit ? brokeredAppKind(toolkit) : null,
@@ -734,7 +763,15 @@ export function connectionMethods(context: StoreContext) {
       // property of whichever plan the server happened to pick.
       const actions = await database
         .select({
-          name: mcpTools.name,
+          /*
+           * THE VENDOR'S SPELLING, BECAUSE THIS NAME IS CALLED RATHER THAN DISPLAYED. The pair this
+           * answers goes to the transport directly (see `probeConnection`), and a transport answers
+           * only to the name its own listing gave. {@link IDENTITY_ACTION} is written in that same
+           * vocabulary — `_GET_ME`, `_WHOAMI` — so it is matched against this for the same reason.
+           * Identical to `name` on every transport this path actually reaches. See
+           * {@link mcpTools.vendorName}.
+           */
+          name: vendorNameOf(),
           inputSchema: mcpTools.inputSchema,
           effect: mcpTools.effect,
           destructive: mcpTools.destructive,
@@ -866,6 +903,11 @@ export function connectionMethods(context: StoreContext) {
          * AN UPDATE AND NEVER AN INSERT, and `returning` is how "there was a row" is ANSWERED rather
          * than assumed. An update that matches nothing is not a failure — it is the row having been
          * deleted while the vendor was being asked — and the caller has a sentence for that.
+         *
+         * `vendor_user_id` IS DELIBERATELY NOT IN THIS `set`. This branch records a CHECK of a
+         * connection that already exists, never a connection; it may not re-point the row at a
+         * different vendor identity, because only a connect or a confirm (the upsert below) is
+         * evidence of a grant held under the identity it names.
          */
         const written = await database
           .update(brokeredConnections)
@@ -875,10 +917,38 @@ export function connectionMethods(context: StoreContext) {
         return { verifiedAt, wrote: written.length > 0 };
       }
 
+      /*
+       * THE VENDOR IDENTITY THIS WRITE'S EVIDENCE IS ABOUT, WRITTEN ON BOTH BRANCHES OF THE UPSERT.
+       *
+       * CRITERION. After this upsert the row names `input.account.vendorUserId`, whatever it named
+       * before.
+       *
+       * REASON. Every caller of the upsert has just heard from the vendor about the account held
+       * under THIS id — a consent, or the vendor confirming it holds an account — and
+       * `connectionTokenFor` sends calls out under the ROW's `vendor_user_id`, never a recomputed
+       * one. A conflict arm that rewrote `verified`/`verified_at` and left the old id standing
+       * wrote a verdict about one account onto a row naming another, and every later call landed
+       * in the account the evidence was not about. The insert always set it; the arms did not.
+       */
+      const connectedAs = input.account.vendorUserId;
       await database
         .insert(brokeredConnections)
         .values({
-          provider: "composio",
+          /*
+           * THE BROKER THIS ROW WAS ACTUALLY MINTED AT, which is this store's own, because this
+           * insert only ever runs behind a connection just made at the broker this store holds.
+           *
+           * CRITERION. A row inserted here carries the provider whose grant it stands for, so the
+           * reads keyed on `provider` above find exactly the rows this writer wrote.
+           *
+           * REASON. The literal `composio` here was the one line that could not fail loudly. An
+           * Arcade deployment writing it would read its own rows back through a `composio` filter
+           * and APPEAR TO WORK, while the refusal that is supposed to fire when the other provider
+           * holds rows never fired — nothing would ever be filed under the other name — and the
+           * offboarding sweep, keyed the same way, would sweep a slice of the table that was not
+           * this deployment's. Every symptom of that is silence.
+           */
+          provider: brokerProvider,
           app: input.toolkit,
           holder: input.account.holder,
           userId:
@@ -901,7 +971,7 @@ export function connectionMethods(context: StoreContext) {
                   brokeredConnections.userId,
                 ],
                 targetWhere: sql`${brokeredConnections.holder} = 'person'`,
-                set,
+                set: { ...set, vendorUserId: connectedAs },
               }
             : {
                 target: [brokeredConnections.provider, brokeredConnections.app],
@@ -911,13 +981,589 @@ export function connectionMethods(context: StoreContext) {
                 // which `set` otherwise never said, leaving the row crediting whoever
                 // connected it the first time. Added only when this call names a
                 // `connectedBy` at all, so a re-check or a confirm that passes none does not
-                // blank out the administrator an earlier connect already recorded.
+                // blank out the administrator an earlier connect already recorded. That
+                // condition is the point: do NOT make this unconditional.
                 set: input.connectedBy
-                  ? { ...set, connectedBy: input.connectedBy ?? null }
-                  : set,
+                  ? {
+                      ...set,
+                      vendorUserId: connectedAs,
+                      connectedBy: input.connectedBy,
+                    }
+                  : { ...set, vendorUserId: connectedAs },
               },
         );
       return { verifiedAt, wrote: true };
+    },
+
+    /**
+     * The other apps this deployment holds a connection for that share THIS app's connection: the
+     * apps on the same vendor identity AND the same AUTH PROVIDER, never the provider alone. The
+     * reason is written out on {@link connectionSiblings}; this is that computation over the rows
+     * this deployment actually holds under the active provider.
+     *
+     * THE BROKER THIS STORE WAS BUILT WITH ANSWERS IT, AND NO CALLER SUPPLIES A RESOLVER. The auth
+     * provider is the vendor's fact and this store keeps no copy of it, so it is asked for — of
+     * {@link ConnectedAppBroker.authProviderOf}, which both providers implement. A resolver taken as
+     * a parameter would be a question every caller had to answer identically or see a different
+     * sibling set; with the store calling its own broker there is ONE answer by construction and
+     * nothing to keep in step. A deployment with no broker answers `[]` — a presence test on a
+     * declared value, and correct, because such a deployment holds no brokered rows at all.
+     *
+     * THE SCAN IS PRE-FILTERED ON THE ASKING IDENTITY, IN THE `WHERE`. Resolving the auth provider
+     * is a vendor call per app, on a screen somebody is waiting on; resolving it for every brokered
+     * row of the whole deployment and only then discarding the rows on other identities is unbounded
+     * in the one dimension that grows. `vendor_user_id` is a column, so the filter is free — and
+     * semantically identical, because {@link connectionSiblings} discards exactly those rows.
+     *
+     * An app the broker cannot answer for (`null`) is left out rather than guessed at: claiming a
+     * sibling that is not one is the failure D26 exists to prevent. If the asking app itself is
+     * unanswered the list is empty.
+     *
+     * `unanswered` IS HOW MANY OTHER APPS ON THE ASKING IDENTITY WERE LEFT OUT FOR THAT REASON — an
+     * integer, never names; see {@link resolveSiblings} for why it is surfaced.
+     *
+     * IT ANSWERS A FACT AND ACTS ON NOTHING: no revocation, no deletion, no audit write. Returns the
+     * sibling toolkits, sorted, never including `toolkit`, and the unanswered count.
+     */
+    async siblingApps(input: {
+      toolkit: string;
+      account: AccountRef;
+    }): Promise<{ siblings: string[]; unanswered: number }> {
+      return resolveSiblings(input);
+    },
+
+    /**
+     * Start an Arcade authorization attempt for one person: take the key if it is free, expired or
+     * completed, and refuse if a LIVE attempt holds it. ONE STATEMENT.
+     *
+     * `actorId` IS THE SESSION SUBJECT (`users.id`), NEVER `credentialActorId`. This file reads
+     * `input.credentialActorId ?? input.actorId`, and on a Team Bot those differ, and neither is the
+     * person holding the browser. The verifier finds the attempt from the returning browser's
+     * session, so any other key writes attempts a browser can never match.
+     *
+     * ONE STATEMENT BECAUSE A READ-THEN-WRITE LETS TWO REQUESTS BOTH SEE "NO LIVE ATTEMPT" AND BOTH
+     * INSERT. The conditional `ON CONFLICT ... DO UPDATE ... WHERE` is what makes the claim atomic:
+     * the second request waits on the first's row and then evaluates the WHERE against it. The
+     * live row is answered by the same statement, in a branch that only produces rows when the
+     * claim produced none. It can be null: a rival that committed after this statement took its
+     * snapshot is live but not yet visible to it, and the caller's 409 then names nothing.
+     *
+     * `created_at` is truncated to milliseconds so the `Date` handed back names the stored value
+     * exactly — a microsecond no `Date` can carry would otherwise sit in the row unreachable.
+     * {@link recordAuthorizationMint} and {@link discardAuthorizationAttempt} do not RELY on that:
+     * they truncate the column in the comparison too, so a row written by anything else — the
+     * column's own `defaultNow()`, say — is still reachable. See {@link attemptNamed}.
+     */
+    async claimAuthorizationAttempt(input: {
+      actorId: string;
+      serverId: string;
+      action: string;
+      account: AccountRef;
+    }): Promise<
+      | { claimed: true; attempt: PendingAuthorization }
+      | { claimed: false; live: PendingAuthorization | null }
+    > {
+      const rows = await database.execute(sql`
+        WITH claimed AS (
+          INSERT INTO pending_authorizations
+            (actor_id, server_id, action, holder, user_id, vendor_user_id, created_at)
+          VALUES (
+            ${input.actorId}, ${input.serverId}, ${input.action}, ${input.account.holder},
+            ${input.account.holder === "person" ? input.account.userId : null},
+            ${input.account.vendorUserId}, date_trunc('milliseconds', now())
+          )
+          ON CONFLICT (actor_id) DO UPDATE SET
+            server_id = EXCLUDED.server_id,
+            action = EXCLUDED.action,
+            holder = EXCLUDED.holder,
+            user_id = EXCLUDED.user_id,
+            vendor_user_id = EXCLUDED.vendor_user_id,
+            auth_id = NULL,
+            created_at = EXCLUDED.created_at,
+            completed_at = NULL,
+            outcome = NULL
+          WHERE pending_authorizations.created_at < now() - interval '15 minutes'
+            OR pending_authorizations.completed_at IS NOT NULL
+          RETURNING *
+        )
+        SELECT true AS claimed, claimed.* FROM claimed
+        UNION ALL
+        SELECT false AS claimed, p.* FROM pending_authorizations p
+        WHERE p.actor_id = ${input.actorId}
+          AND NOT EXISTS (SELECT 1 FROM claimed)
+      `);
+      const row = rows[0] as Record<string, unknown> | undefined;
+      if (!row) return { claimed: false, live: null };
+      const attempt = pendingAuthorizationFromRow(row);
+      return row.claimed === true
+        ? { claimed: true, attempt }
+        : { claimed: false, live: attempt };
+    },
+
+    /**
+     * Write the `ar_...` the vendor minted onto the attempt, matched on `(actor_id, created_at)`
+     * through {@link attemptNamed}, which is where the precision of that match is argued.
+     *
+     * WRITE-ONCE, AND NEVER AFTER SETTLEMENT: the UPDATE also requires `auth_id IS NULL` and
+     * `completed_at IS NULL`. `auth_id` is what binds the attempt to the authorization the person
+     * was actually sent to consent to, and both conditions are needed to keep that binding fixed.
+     *
+     * `completed_at IS NULL` is {@link closeAuthorizationAttempt}'s rule, for the same reason: a
+     * settled attempt is a record, not a draft. Without it, a late or duplicated mint rewrote a
+     * completed attempt's `ar_...`, even to NULL, and the row no longer named the authorization
+     * the person consented to.
+     *
+     * `auth_id IS NULL` is needed because `completed_at IS NULL` alone still lets a duplicated mint
+     * rebind a LIVE attempt. Once the person has the first id's consent URL, writing a second id
+     * (or NULL) makes their return leg match nothing. A NULL `auth_id` is never valid after
+     * settlement: every settling write (`completeAuthorizationAttempt` and the three verdicts
+     * through `closeAuthorizationAttempt`) matches `auth_id = $1`, which NULL never satisfies.
+     * So `auth_id IS NULL` alone would already rule out any row the store settled. `completed_at
+     * IS NULL` is kept anyway, so the guard does not depend on every future writer settling
+     * through those paths.
+     *
+     * The first write is the only one, and it can be NULL: a vendor that answered with no id
+     * leaves the attempt null, and it expires. Answers whether it wrote. False means the attempt
+     * was discarded, replaced, already minted or already settled. The authorize route acts on it:
+     * on false it does not hand out the consent url, because nothing here records that flow.
+     */
+    async recordAuthorizationMint(input: {
+      actorId: string;
+      /** A `Date`, or the ISO string one becomes through JSON; see {@link attemptInstant}. */
+      createdAt: Date | string;
+      /** Null when the vendor answered with no id: the attempt then can never complete. */
+      authId: string | null;
+    }): Promise<boolean> {
+      const written = await database
+        .update(pendingAuthorizations)
+        .set({ authId: input.authId })
+        .where(
+          and(
+            attemptNamed(input.actorId, input.createdAt),
+            isNull(pendingAuthorizations.authId),
+            isNull(pendingAuthorizations.completedAt),
+          ),
+        )
+        .returning({ actorId: pendingAuthorizations.actorId });
+      return written.length > 0;
+    },
+
+    /**
+     * Delete one attempt, matched on `(actor_id, created_at)` SO IT CAN NEVER DELETE A NEWER
+     * ATTEMPT BY THE SAME ACTOR. Matching on `auth_id` would be wrong: an attempt whose mint never
+     * completed has none, and that is exactly the one most worth cancelling.
+     *
+     * CONDITIONAL ON `completed_at IS NULL`, THE SAME RULE {@link closeAuthorizationAttempt} AND
+     * THE COMPLETION HOLD, BECAUSE A SETTLED ATTEMPT IS A RECORD AND NOT A DRAFT. `(actor_id,
+     * created_at)` does not stop naming a row when the row settles, and every caller of this reads
+     * the attempt FIRST and deletes it AFTER. Unconditional, a completion committing in that gap
+     * was erased outright — the one row saying this person's consent went through, with the grant
+     * live at the vendor, the `brokered_connections` row written and `mcp.account_connected` on
+     * the trail — and the cancel route then answered `{ cancelled: true }` for a consent that had
+     * succeeded. The DELETE waits on the completion's row lock and re-evaluates this condition
+     * against the committed row, so the guard holds under the race and not merely before it.
+     *
+     * `false` therefore means one of three things — no row under that key, a row under a different
+     * `created_at`, or a row that has settled — and all three are "nothing was discarded". A caller
+     * that must tell the third apart asks {@link settledAuthorizationOutcome}.
+     */
+    async discardAuthorizationAttempt(input: {
+      actorId: string;
+      /** A `Date`, or the ISO string one becomes through JSON; see {@link attemptInstant}. */
+      createdAt: Date | string;
+    }): Promise<boolean> {
+      const deleted = await database
+        .delete(pendingAuthorizations)
+        .where(
+          and(
+            attemptNamed(input.actorId, input.createdAt),
+            isNull(pendingAuthorizations.completedAt),
+          ),
+        )
+        .returning({ actorId: pendingAuthorizations.actorId });
+      return deleted.length > 0;
+    },
+
+    /**
+     * How the attempt named by `(actor_id, created_at)` ended, or null while it has not ended, or
+     * when no row carries that key.
+     *
+     * FOR THE ONE CALLER THAT HAS TO SAY WHY A DISCARD REFUSED: the cancel route, which must not
+     * answer a person whose consent COMPLETED while they were cancelling it as though nothing had
+     * happened. Named through {@link attemptNamed} like the discard it explains, so it can only
+     * report the attempt that discard was aimed at and never a newer one by the same actor. Once
+     * settled, a row keeps that `created_at` until a new claim takes the key and rewrites it, so a
+     * reading after the refused DELETE answers for the same attempt the DELETE refused.
+     */
+    async settledAuthorizationOutcome(input: {
+      actorId: string;
+      createdAt: Date | string;
+    }): Promise<PendingAuthorization["outcome"]> {
+      const [row] = await database
+        .select({ outcome: pendingAuthorizations.outcome })
+        .from(pendingAuthorizations)
+        .where(attemptNamed(input.actorId, input.createdAt));
+      return row?.outcome ?? null;
+    },
+
+    /**
+     * Finish one Arcade authorization: consume the attempt, record the connection and file the
+     * trail, ALL THREE IN ONE TRANSACTION OR NONE OF THEM.
+     *
+     * THE ATTEMPT ROW IS THE SERIALIZATION POINT AND THE DATABASE ENFORCES IT. The first statement
+     * is a conditional `UPDATE ... WHERE actor_id = $1 AND auth_id = $2 AND completed_at IS NULL
+     * RETURNING`, and it is what makes completion happen exactly once. A read of the attempt
+     * followed by a write would not: two callbacks can both read the row before either consumes it,
+     * and both would then write a connection and a second `mcp.account_connected`. The second
+     * caller's UPDATE instead waits on the first's row lock, re-evaluates `completed_at IS NULL`
+     * against the committed row, and matches nothing.
+     *
+     * AN `auth_id` IN AN AUDIT PAYLOAD ENFORCES NOTHING, which is the shape this replaces.
+     * {@link auditEvents.id} is `uuid().defaultRandom()`, so the trail has no key a second callback
+     * could collide with — it would simply hold two rows for one connection, and the connection
+     * upsert would have run twice on the way there.
+     *
+     * ZERO ROWS MEANS STOP, AND THE CALLER IS TOLD SO: `{ claimed: false }`, with nothing written.
+     * It is still not an error — a replayed callback is a no-op rather than something somebody has
+     * to explain — but it is no longer silent, because zero rows is not one fact. It is somebody
+     * else completing this attempt first, where the account IS connected; or the attempt having
+     * ended some other way underneath the caller — most sharply the person's own Cancel, whose
+     * DELETE can land after the vendor confirmed the return and before this UPDATE, leaving a grant
+     * live at the vendor that the person asked not to have. This used to answer the same for all
+     * of them, and the verifier then told a person who had just cancelled that they were
+     * connected. Which one it was is not this method's to decide: a caller holding `false` asks
+     * {@link authorizationAttemptCompleted} whether the row says `completed`.
+     *
+     * THE CONNECTION AND THE AUDIT ROW ARE IN THE SAME TRANSACTION AS THAT UPDATE and not merely
+     * after it. A failure between them used to leave the attempt consumed and nothing recording
+     * what it was consumed FOR: the person's account is live at the vendor, this deployment holds
+     * no `brokered_connections` row — which is the whole of the permission a brokered call is
+     * decided on — and the attempt can never be completed again. The audit insert is bound to the
+     * transaction for the same reason, through {@link createAuditStore} over the transaction handle
+     * rather than the store's own `auditStore`, which holds the pool and would commit on its own.
+     *
+     * `scopes` IS WHAT THE VENDOR GRANTED, AND IT IS THE ONLY THING FROM THAT ANSWER THAT IS
+     * WRITTEN ANYWHERE. Arcade's `auth.status` carries a live provider access token and an
+     * authorization URL beside it; neither reaches this row, this method's arguments, a log line or
+     * an error. What the trail gets is the action the attempt was for and the scopes that came
+     * back, which is exactly what is needed later to explain a tool call refused for want of a
+     * scope — the question {@link mcpUserCredentials.scope} exists to answer for a `user-oauth`
+     * grant. `authProvider` is the authorization provider this deployment ASKED for (`google`, say, as
+     * distinct from the broker, `brokered_connections.provider`). The caller resolves it from the
+     * app's own row at freshness-revalidation time and passes it in; the attempt row has no
+     * provider column to carry it. It is never read back out of a vendor reply, and the narrowed
+     * `status` return of D31 makes that structurally impossible.
+     */
+    async completeAuthorizationAttempt(input: {
+      actorId: string;
+      authId: string;
+      toolkit: string;
+      account: AccountRef;
+      action: string;
+      scopes: string[];
+      authProvider: string;
+    }): Promise<{ claimed: boolean }> {
+      return await database.transaction(async (transaction) => {
+        /*
+         * ONE STATEMENT, AND THE FIRST ONE. `completed_at` is truncated to milliseconds for the
+         * reason `claimAuthorizationAttempt` truncates `created_at`: a `Date` carries only
+         * milliseconds, and a column this deployment writes at microsecond precision is one no
+         * later `Date`-valued filter can ever match. Nothing matches on this column today; writing
+         * it the same way is what keeps that true if something does.
+         */
+        const claimed = await transaction.execute(sql`
+          UPDATE pending_authorizations
+             SET completed_at = date_trunc('milliseconds', now()),
+                 outcome = 'completed'
+           WHERE actor_id = ${input.actorId}
+             AND auth_id = ${input.authId}
+             AND completed_at IS NULL
+          RETURNING actor_id
+        `);
+        if (claimed.length === 0) return { claimed: false };
+
+        // Read inside the transaction, under the attempt's lock, so the answer the audit row
+        // carries is the one this very write acted on rather than one a rival moved underneath it.
+        const [existing] = await transaction
+          .select({ app: brokeredConnections.app })
+          .from(brokeredConnections)
+          .where(accountRow(input.toolkit, input.account));
+
+        const verifiedAt = new Date();
+        const set = {
+          verified: true,
+          verifiedAt,
+          // NOTHING WAS SPENT TO EARN THAT FLAG. A consent screen is the vendor's own yes, and no
+          // action of the app's is ever called against it; see `confirmBrokeredConnection`, which
+          // writes the same pair for the same reason.
+          probeAction: null,
+          updatedAt: verifiedAt,
+        };
+        /*
+         * WHO CONNECTED THE TEAM ACCOUNT, WRITTEN HERE FOR THE SAME REASON EVERY OTHER WRITER
+         * WRITES IT. `connectedBy` is only ever a deployment-held row's column — a person's row is
+         * attributed by `user_id` already — and for a Shared app it is the attribution an
+         * administrator reads off `deploymentConnectionFor` to decide whether a team connection is
+         * legitimate and who to ask about it. This writer held `actorId`, the session subject
+         * (`users.id`) the attempt is keyed on and the id the admin read joins `users` on, and
+         * recorded none of it: an Arcade-consented Shared app's row was permanently null, and the
+         * page then said nobody connected it. The null is a real state for rows written before
+         * this, which is why both readers keep answering `null` rather than inventing a name.
+         *
+         * AND THE RE-CONSENT SUPERSEDES, which is `recordBrokeredConnection`'s rule spelled the
+         * same way: a deployment account is shared, so the administrator who most recently
+         * completed a consent for it is the one the row credits. Unconditional here, unlike there,
+         * because this path always holds an actor — there is no caller that passes none.
+         */
+        const connectedBy =
+          input.account.holder === "deployment" ? input.actorId : null;
+        await transaction
+          .insert(brokeredConnections)
+          .values({
+            // The broker this row was actually minted at, which is this store's own — never a
+            // literal, for the reason `recordBrokeredConnection` sets out at length.
+            provider: brokerProvider,
+            app: input.toolkit,
+            holder: input.account.holder,
+            userId:
+              input.account.holder === "person" ? input.account.userId : null,
+            vendorUserId: input.account.vendorUserId,
+            connectedBy,
+            ...set,
+          })
+          .onConflictDoUpdate(
+            input.account.holder === "person"
+              ? {
+                  target: [
+                    brokeredConnections.provider,
+                    brokeredConnections.app,
+                    brokeredConnections.userId,
+                  ],
+                  targetWhere: sql`${brokeredConnections.holder} = 'person'`,
+                  // The identity the grant was just made under, for `recordBrokeredConnection`'s
+                  // reason: calls go out under the row's id, so a re-consent that left the old one
+                  // standing sent them to an account this consent says nothing about.
+                  set: { ...set, vendorUserId: input.account.vendorUserId },
+                }
+              : {
+                  target: [
+                    brokeredConnections.provider,
+                    brokeredConnections.app,
+                  ],
+                  targetWhere: sql`${brokeredConnections.holder} = 'deployment'`,
+                  set: {
+                    ...set,
+                    vendorUserId: input.account.vendorUserId,
+                    connectedBy,
+                  },
+                },
+          );
+
+        await recordAuditEvent(
+          createAuditStore(transaction as unknown as Database),
+          {
+            eventType: "mcp.account_connected",
+            targetType: "mcp_server",
+            // The app, the id every other writer of this event files a brokered connection under,
+            // so one query answers what happened to one person's access to one app however it
+            // began and however it ended.
+            targetId: input.toolkit,
+            payload: {
+              actor: input.actorId,
+              server: input.toolkit,
+              /*
+               * WHAT THE VENDOR GRANTED, WHICH A BROKERED ROW HAS NEVER BEEN ABLE TO SAY BEFORE.
+               * Both Composio writers carry `""` because Composio holds the grant and never tells
+               * this deployment what it covers; Arcade does tell us, on the key all four writers
+               * already agree on, so the same query reads both.
+               */
+              scope: input.scopes.join(" "),
+              // The action the attempt was for: what this grant was obtained in order to call.
+              action: input.action,
+              authProvider: input.authProvider,
+              reconnected: Boolean(existing),
+              holder: input.account.holder,
+            },
+          },
+        );
+        return { claimed: true };
+      });
+    },
+
+    /**
+     * Close an attempt as `failed` or `unreconciled`, matched on `(actor_id, auth_id)`.
+     *
+     * ON THE PAIR AND NOT ON `created_at`, unlike {@link recordAuthorizationMint} and
+     * {@link discardAuthorizationAttempt}, because the caller here is the returning callback and
+     * all it holds is the `ar_...`. An attempt with no `auth_id` matches nothing, which is correct:
+     * no callback can be about an attempt that never minted one.
+     *
+     * CONDITIONAL ON `completed_at IS NULL`, exactly as the completion above is: an attempt that
+     * has settled — completed, failed, unreconciled or withdrawn — is not reopened by a later
+     * callback, and `false` says so. See {@link closeAuthorizationAttempt} for what the asymmetry
+     * used to be and what it cost.
+     */
+    async failAuthorizationAttempt(input: {
+      actorId: string;
+      authId: string;
+    }): Promise<boolean> {
+      return await closeAuthorizationAttempt(input, "failed");
+    },
+
+    /**
+     * Mark an attempt whose outcome this deployment could not settle — the vendor answered, and
+     * what it answered could not be reconciled with the attempt. Kept apart from `failed` so an
+     * operator can tell "the person declined" from "we do not know what happened".
+     */
+    async markAuthorizationUnreconciled(input: {
+      actorId: string;
+      authId: string;
+    }): Promise<boolean> {
+      return await closeAuthorizationAttempt(input, "unreconciled");
+    },
+
+    /**
+     * Mark an attempt whose consent completed at the vendor and which this deployment then refused
+     * and ended by withdrawing the grant — neither a decline nor an unknown. An operator seeing a
+     * run of these is seeing apps whose mode is being switched inside a consent window, which is a
+     * different problem from people declining.
+     */
+    async markAuthorizationWithdrawn(input: {
+      actorId: string;
+      authId: string;
+    }): Promise<boolean> {
+      return await closeAuthorizationAttempt(input, "withdrawn");
+    },
+
+    /**
+     * The live attempt for a session subject (`users.id`, never `credentialActorId`), or null when
+     * there is none, it is past the 15-minute TTL, or it has completed.
+     */
+    /**
+     * Whether this attempt's completion COMMITTED — asked of the row the transaction serializes on.
+     *
+     * FOR ONE CALLER AND ONE QUESTION: `/arcade/verify`'s completion rejected, and "the call threw"
+     * is not "the work rolled back". A connection lost on the way back from a COMMIT the server had
+     * already applied rejects at the client over a grant that is written down, and the verifier
+     * telling that person `not-recorded` sends them to mint a second consent at the vendor against
+     * a connection they already hold. The attempt row is the one place that can say which happened:
+     * {@link createPluginStore}'s `completeAuthorizationAttempt` stamps `outcome = 'completed'` in
+     * the first statement of the transaction, so the stamp exists exactly when the transaction did.
+     *
+     * NOT {@link authorizationAttemptFor}, which cannot answer this. It filters on `completed_at IS
+     * NULL` AND on the fifteen-minute TTL, so it answers `null` for a completed attempt and for an
+     * expired one alike — and a verifier that read "no live attempt" as "it committed" would
+     * report a grant that is not there for any completion that ran long enough to age out.
+     *
+     * MATCHED ON `(actor_id, auth_id)` like the closers above and never on `created_at`, because
+     * what the caller holds at this point is the `ar_...`. A rival callback having completed the
+     * same attempt first answers `true` here, which is correct: the grant is recorded either way,
+     * and this deployment has never been able or willing to tell the winner from the loser.
+     */
+    async authorizationAttemptCompleted(input: {
+      actorId: string;
+      authId: string;
+    }): Promise<boolean> {
+      const [row] = await database
+        .select({ actorId: pendingAuthorizations.actorId })
+        .from(pendingAuthorizations)
+        .where(
+          and(
+            eq(pendingAuthorizations.actorId, input.actorId),
+            eq(pendingAuthorizations.authId, input.authId),
+            eq(pendingAuthorizations.outcome, "completed"),
+          ),
+        );
+      return row !== undefined;
+    },
+
+    async authorizationAttemptFor(
+      actorId: string,
+    ): Promise<PendingAuthorization | null> {
+      const [row] = await database
+        .select()
+        .from(pendingAuthorizations)
+        .where(
+          and(
+            eq(pendingAuthorizations.actorId, actorId),
+            isNull(pendingAuthorizations.completedAt),
+            sql`${pendingAuthorizations.createdAt} >= now() - interval '15 minutes'`,
+          ),
+        );
+      return row ?? null;
+    },
+
+    /**
+     * File `mcp.authorization_cancelled` for an attempt its own person has just retracted.
+     *
+     * CALLED ONLY AFTER {@link discardAuthorizationAttempt} ANSWERED TRUE, by the cancel route and by
+     * nothing else. The same deletion also tidies up after a refused or unrecorded mint, and those
+     * are this deployment cleaning up after itself, not a person withdrawing consent — so the row is
+     * filed here, for the one caller whose act it describes, and not inside the deletion.
+     *
+     * TARGETED AT THE APP'S SLUG, read off the attempt's server row with {@link toolkitOfFor}, which
+     * is the id `mcp.account_connected` and `mcp.account_disconnected` file a brokered app under, so
+     * one query on the target answers every ending of one app's consent. An attempt OUTLIVES what
+     * its row's url says — an administrator can re-point the row while a consent is in flight, and
+     * the cancel route deliberately still lets the person retract it — and once the url names no
+     * app the row's own id is the only name left for what was cancelled, so that is what the row is
+     * filed under; `serverId` is in the payload either way.
+     *
+     * WHO DID IT GOES IN THE PAYLOAD, as on every writer here, never in `actorUserId`. And the
+     * payload carries NEITHER the consent url NOR the attempt's `auth_id`: the attempt row never held
+     * the url, and the vendor's handle is not needed to say what a person withdrew. `minted` is
+     * whether a flow had been started at the vendor at all.
+     */
+    async recordAuthorizationCancelled(input: {
+      actorId: string;
+      attempt: PendingAuthorization;
+    }): Promise<void> {
+      const [row] = await database
+        .select({ url: mcpServers.url })
+        .from(mcpServers)
+        .where(eq(mcpServers.id, input.attempt.serverId))
+        .limit(1);
+      const toolkit = row ? toolkitOfFor(brokerProvider, row.url) : null;
+      await recordAuditEvent(auditStore, {
+        eventType: "mcp.authorization_cancelled",
+        targetType: "mcp_server",
+        targetId: toolkit ?? input.attempt.serverId,
+        payload: {
+          actor: input.actorId,
+          server: toolkit,
+          serverId: input.attempt.serverId,
+          action: input.attempt.action,
+          holder: input.attempt.holder,
+          minted: input.attempt.authId !== null,
+        },
+      });
+    },
+
+    /**
+     * A cancelled consent whose grant was left live at the vendor. See `mcp.cancelled_grant_left_live`.
+     * Filed under the app's slug, beside the `mcp.authorization_cancelled` row the cancel filed.
+     */
+    async recordCancelledGrantLeftLive(input: {
+      actorId: string;
+      attempt: PendingAuthorization;
+      toolkit: string;
+      why: string;
+      siblings: readonly string[];
+    }): Promise<void> {
+      await recordAuditEvent(auditStore, {
+        eventType: "mcp.cancelled_grant_left_live",
+        targetType: "mcp_server",
+        targetId: input.toolkit,
+        payload: {
+          actor: input.actorId,
+          server: input.toolkit,
+          serverId: input.attempt.serverId,
+          action: input.attempt.action,
+          holder: input.attempt.holder,
+          why: input.why,
+          siblings: [...input.siblings],
+        },
+      });
     },
 
     /**
@@ -1044,9 +1690,42 @@ export function connectionMethods(context: StoreContext) {
        * Composio transport strips before anything reaches the vendor and asserts that it did, so
        * what Composio is handed is the action and an empty argument object.
        */
+      /*
+       * AND ON ANY OTHER BROKER THIS REFUSES RATHER THAN DIALS, because `composioAskAction` is
+       * Composio's own `askAction` and no counterpart has been written for a second broker.
+       *
+       * CRITERION. A deployment whose broker is not Composio gets a stated refusal here, and no
+       * request leaves this process.
+       *
+       * REASON. The url this used to compose was `composio://<toolkit>` whatever the broker was, so
+       * an Arcade deployment's check was sent to Composio with a Composio-shaped url. On a
+       * deployment holding no Composio key that fails at a vendor it has no business talking to and
+       * the person is told their connection could not be checked — an outage reported where there
+       * was none. Where a Composio key IS present it is worse: the slug is a plain app name, so the
+       * call lands on an UNRELATED app of the same name at the wrong vendor and succeeds, and the
+       * row records a verified check of an account nobody holds.
+       *
+       * `unreachable` IS THE HONEST OUTCOME, not `nothing`. Nothing was learned about the key and
+       * nothing is recorded about it — `probe` is null, so {@link _ProbeOutcomeLeaves} leaves the
+       * row untouched and `probe_action` unwritten — and `attempted` is what WOULD have been spent,
+       * which is the fact about this deployment's intent that field exists to carry. The sentence
+       * names the state rather than blaming the connection, because the gap is ours.
+       *
+       * TODO: delete this once a probe is designed for the second broker. Until then a refusal that
+       * says so is the only answer that is not a claim about somebody's account.
+       */
+      if (brokerProvider !== "composio") {
+        return {
+          outcome: "unreachable",
+          probe: null,
+          attempted: candidate.name,
+          sentence: `This deployment brokers its apps through ${BROKERED_PROFILE[brokerProvider].vendor}, and the only connection check this deployment knows how to make is Composio's. Nothing was asked about this connection, so nothing is recorded about it.`,
+        };
+      }
+
       const { result, answered } = await composioAskAction(
         {
-          url: `composio://${input.toolkit}`,
+          url: `${BROKERED_PROFILE.composio.scheme}${input.toolkit}`,
           actorId: input.account.vendorUserId,
           // Spread rather than passed as `undefined`, so "any account of theirs" reaches the wire
           // as a body with no such key. See {@link ComposioActions.execute}.
@@ -1171,7 +1850,7 @@ export function connectionMethods(context: StoreContext) {
     }): Promise<{ connected: boolean }> {
       // Before anything, and for the reason `addBrokeredApp` says it first too: a deployment with
       // no key has no broker to have connected anybody at, so there is nothing here to ask.
-      if (!broker) throw new BrokerUnconfiguredError();
+      if (!broker) throw new BrokerUnconfiguredError(brokerProvider, "person");
 
       const connected = await broker.isConnected({
         account: input.account,
@@ -1485,7 +2164,7 @@ export function connectionMethods(context: StoreContext) {
     }): Promise<{ connected: true; verified: boolean; probe: string | null }> {
       // First, and for `confirmBrokeredConnection`'s reason: a deployment with no key has nobody to
       // connect anybody at, and the refusal must happen before the values are touched at all.
-      if (!broker) throw new BrokerUnconfiguredError();
+      if (!broker) throw new BrokerUnconfiguredError(brokerProvider, "person");
 
       // Keyed on the url and on the one row that answers for it — see `brokeredAppScheme`. It is
       // the same reasoning the connection gate in `connectionTokenFor` is keyed on, and for the
@@ -1887,7 +2566,7 @@ export function connectionMethods(context: StoreContext) {
       verifiedAt: string | null;
       probe: string | null;
     }> {
-      if (!broker) throw new BrokerUnconfiguredError();
+      if (!broker) throw new BrokerUnconfiguredError(brokerProvider, "person");
 
       // Keyed on the url and on the one row that answers for it — see `brokeredAppKind`. It is the
       // read `connectBrokeredWithFields`, `confirmBrokeredConnection` and `disconnectBrokered` all
@@ -1974,7 +2653,7 @@ export function connectionMethods(context: StoreContext) {
        */
       if (probed.outcome === "unreachable") {
         throw new PluginRefusedError(
-          `${input.toolkit} could not be checked just now: ${probed.sentence} Nothing here changed — your connection is still recorded exactly as the last check left it — so pressing Re-check again when Composio is answering is the whole of the retry.`,
+          `${input.toolkit} could not be checked just now: ${probed.sentence} Nothing here changed — your connection is still recorded exactly as the last check left it — so pressing Re-check again when ${BROKERED_PROFILE[brokerProvider].vendor} is answering is the whole of the retry.`,
           null,
         );
       }
@@ -2194,7 +2873,7 @@ export function connectionMethods(context: StoreContext) {
        */
       reason: "self" | "person_removed" | "admin" | "mode_switched";
     }): Promise<{ vendorRevocationRequested: boolean }> {
-      if (!broker) throw new BrokerUnconfiguredError();
+      if (!broker) throw new BrokerUnconfiguredError(brokerProvider, "person");
 
       /*
        * Keyed on the url and on the one row that answers for it — see {@link brokeredAppKind}.
@@ -2211,7 +2890,10 @@ export function connectionMethods(context: StoreContext) {
        * and an app it cannot say holds a key is one whose withdrawal it has to report as asked.
        */
       /**
-       * WHAT THIS DISCONNECT CLAIMS ON THE TRAIL FOR EACH KIND OF APP.
+       * WHAT THIS DISCONNECT CLAIMS ON THE TRAIL FOR THE ASKED APP, BY KIND. What it does about a
+       * SIBLING of each kind is a different decision and is written down where it is made — see
+       * rule 1 on {@link clearEndedSiblings}, which for a key DELETES NOTHING AND CLAIMS NOTHING
+       * rather than claiming no revocation about a row it removed.
        *
        * Type-only and erased; see {@link Decides}. `=== "key"` collapses three answers into two,
        * and the collapse is deliberate here rather than accidental: the field below is a claim that
@@ -2228,20 +2910,64 @@ export function connectionMethods(context: StoreContext) {
           unreadable: "reports it as asked for too, which is the claim that cannot be too weak";
         }
       >;
-      const fieldScheme = (await brokeredAppKind(input.toolkit)) === "key";
+      /*
+       * THE APPS THIS REVOCATION ENDS BESIDES THE ONE ASKED ABOUT, read BEFORE anything is revoked.
+       * Where a connection is keyed `(identity, auth provider)` — Arcade — withdrawing one app's
+       * connection ends every app that shares it, so a local row left for one of them claims an
+       * account the vendor no longer holds, which is the other way to lie. Where each app is its
+       * own auth provider — Composio — this is always empty and nothing below differs from a
+       * disconnect of one. The question is {@link resolveSiblings}' and none of it is derived here.
+       */
+      const { siblings, unanswered } = await resolveSiblings({
+        toolkit: input.toolkit,
+        account: input.account,
+      });
+
+      /*
+       * WHETHER THE ASKED APP IS ONE THIS DEPLOYMENT HOLDS A KEY FOR, which decides WHAT THE TRAIL
+       * CLAIMS about it and nothing else. Its row goes either way: the person pressed Disconnect on
+       * THIS app, the row is the whole of what Disconnect works off, and leaving it would be
+       * refusing the act. The siblings are the opposite question — nobody asked about them — and
+       * {@link clearEndedSiblings} answers it, rule 1 included.
+       *
+       * This was one `keyApps` set spanning the asked app and its siblings, and the set only ever
+       * weakened the trail claim: a KEY sibling's row was deleted anyway, by the single OAuth
+       * revoke that never ended it, leaving a live account at the vendor with no local row to
+       * reach it.
+       *
+       * The claim is {@link vendorRevocationClaim}'s, which {@link removeServer} and
+       * {@link retireConnectionsFor} make for their own asked apps: this method was the one of the
+       * three that said `false` for a key, and now none of them says it for itself.
+       */
+      const claim = await vendorRevocationClaim(input.toolkit);
 
       // Whether there was an account to end at all, which is what decides if anybody was
       // disconnected. Named apart from the field below because for a key the two differ: something
       // ended, and nothing was asked of the provider.
+      //
+      // REVOKE BEFORE ANY LOCAL DELETE, and ONE ask: it ends the siblings with it. It THROWS on a
+      // partial ask, which is the partial failure — the throw leaves this method before a single
+      // row is deleted or written, every app's row standing, so pressing Disconnect again is the
+      // recovery.
       const ended = await broker.revoke({
         account: input.account,
         toolkit: input.toolkit,
       });
 
-      const vendorRevocationRequested = fieldScheme ? false : ended;
+      const asked = claim(ended);
 
-      // `returning` because whether a row was here is half of what decides if anybody was
-      // disconnected, and a delete that answered nothing would leave the two cases indistinguishable.
+      /*
+       * THE ASKED APP FIRST, and on its own terms — this is the act, not a cascade of it.
+       *
+       * `deleted || ended` RATHER THAN RULE 3, deliberately and only here: a disconnect of an app
+       * whose row this deployment never held is still a withdrawal the vendor made, and the trail
+       * has to carry it. A SIBLING has no such act of its own to record, which is why
+       * {@link clearEndedSiblings} files nothing without a row.
+       *
+       * `returning` because whether a row was here is half of what decides if anybody was
+       * disconnected, and a delete that answered nothing would leave the two cases
+       * indistinguishable.
+       */
       const [deleted] = await database
         .delete(brokeredConnections)
         .where(accountRow(input.toolkit, input.account))
@@ -2257,19 +2983,154 @@ export function connectionMethods(context: StoreContext) {
             server: input.toolkit,
             // Whose account this was, which is not always who ended it: an administrator
             // offboarding somebody and a person disconnecting themselves write the same shape of
-            // row, and only these two fields tell them apart. The deployment's own account has no
-            // person behind it, so it is named as the deployment rather than as whoever pressed.
+            // row, and only these two fields tell them apart. The deployment's own account has
+            // no person behind it, so it is named as the deployment rather than as whoever
+            // pressed.
             owner:
               input.account.holder === "person"
                 ? input.account.userId
                 : "deployment",
             reason: input.reason,
-            vendorRevocationRequested,
+            ...asked,
+            /*
+             * HOW MANY apps on this identity could not be asked about and so were left out of
+             * the set below, never their names. An integer, so an operator can see that "we did
+             * not know" happened; see {@link resolveSiblings}.
+             */
+            unansweredSiblings: unanswered,
           },
         });
       }
 
-      return { vendorRevocationRequested };
+      // Then the apps that went with it, each naming the disconnect that ended it, by the three
+      // rules that are written down once; see {@link clearEndedSiblings}.
+      await clearEndedSiblings({
+        siblings,
+        account: input.account,
+        endedWith: input.toolkit,
+        revoked: ended,
+        unanswered,
+        by: input.by,
+        reason: input.reason,
+      });
+
+      return asked;
+    },
+
+    /**
+     * THE LOCAL SIDE OF A WITHDRAWAL SOMEBODY ELSE ALREADY MADE AT THE VENDOR: the rows this
+     * deployment holds for an account a revoke has just ended, and the trail that says why they
+     * went.
+     *
+     * WHO THIS IS FOR. The verifier refuses a consent whose context moved on and withdraws the
+     * RETIRED identity's app at the vendor — a revoke it issues itself, outside this store,
+     * because the decision is the route's and the attempt row is what records it. On Arcade that
+     * one revoke ends the whole `(identity, auth provider)` connection and so every app sharing
+     * it, and the rows here for those apps would otherwise be left standing: this deployment's own
+     * records claiming live connections for apps the vendor has already disconnected. A person
+     * then sees apps listed as connected that fail on first use, and nothing tells them otherwise.
+     * This is the write that stops that, and it is a STORE method rather than route code for the
+     * reason every other row write is: `brokered_connections` and the trail are this file's.
+     *
+     * IT ASKS NOTHING OF ANY VENDOR AND DECIDES NOTHING BUT WHAT A LOCAL ROW SAYS. The caller
+     * resolved the siblings — of
+     * {@link siblingApps}, BEFORE its revoke went out, which is the ordering {@link
+     * disconnectBrokered} and {@link removeServer} both keep — and the caller watched its revoke
+     * ANSWER TRUE. Called on anything less, it would be claiming an account gone on the strength
+     * of an answer nobody got; that rule is {@link removeServer}'s and this one is its other half.
+     *
+     * ONLY A ROW THAT WAS ACTUALLY HERE GETS A TRAIL ROW, which is again {@link removeServer}'s
+     * rule. The act itself is already recorded — on the attempt row, as `withdrawn` — so these
+     * rows exist to explain why an app's connection VANISHED from this deployment's records, and
+     * an app that had no row here had nothing to explain.
+     *
+     * THAT RULE AND THE TWO BESIDE IT NOW LIVE IN {@link clearEndedSiblings}, which this method
+     * hands its siblings to and which {@link disconnectBrokered} and {@link removeServer} hand
+     * their own to. They were spelled three times and the spellings disagreed about every one of
+     * them.
+     *
+     * `reason` IS ONE WORD AND IT IS THIS ONE. "The consent's context moved on" is not any of the
+     * four {@link disconnectBrokered} takes — nobody disconnected anything, nobody was offboarded,
+     * and a mode switch is only one of the several ways the context can move — so the trail gets
+     * its own word rather than the nearest-looking lie. Fixed in the type so there is no second
+     * caller spelling it differently.
+     */
+    async clearWithdrawnAccount(input: {
+      toolkit: string;
+      account: AccountRef;
+      /** The apps the caller's revoke ended besides `toolkit`; {@link siblingApps} answers it. */
+      siblings: string[];
+      /**
+       * How many apps on this identity could not be asked about, an integer and never names, which
+       * qualifies the `endedWith` claim and goes beside it and nowhere else; see
+       * {@link resolveSiblings}.
+       */
+      unanswered: number;
+      by: string;
+      reason: "context_changed";
+    }): Promise<{ cleared: string[] }> {
+      const cleared: string[] = [];
+      /*
+       * THE ASKED APP FIRST, then the apps that went with it, so the trail reads in the order the
+       * withdrawal happened. The asked app's own row names no other app beside it — it was ended
+       * by its own ask — and a sibling's names the app that asked, which is the only thing that
+       * tells a reader why a connection they never touched is gone.
+       *
+       * THE ASKED APP TAKES THE SAME THREE RULES, which is this method's whole difference from
+       * {@link disconnectBrokered}'s asked app and is right for the same reason the rules are:
+       * nobody here pressed anything about this app either. A caller's revoke ended an OAuth
+       * connection for a RETIRED identity, so an app this deployment holds a key for was not in
+       * it (rule 1); the caller watched that revoke answer true, which is the contract above and
+       * is rule 2 discharged at the door; and a row that was not here had nothing to explain
+       * (rule 3). The act itself is already recorded on the attempt row, as `withdrawn`.
+       *
+       * Rule 1 is asked of {@link consentRevokeReaches}, its one spelling, rather than of the kind
+       * directly — this was the one site that compared the kind for itself (round 2, K5).
+       */
+      if (await consentRevokeReaches(input.toolkit)) {
+        const [deleted] = await database
+          .delete(brokeredConnections)
+          .where(accountRow(input.toolkit, input.account))
+          .returning({ app: brokeredConnections.app });
+        if (deleted) {
+          cleared.push(input.toolkit);
+          await recordAuditEvent(auditStore, {
+            eventType: "mcp.account_disconnected",
+            targetType: "mcp_server",
+            targetId: input.toolkit,
+            payload: {
+              actor: input.by,
+              server: input.toolkit,
+              owner:
+                input.account.holder === "person"
+                  ? input.account.userId
+                  : "deployment",
+              reason: input.reason,
+              /*
+               * TRUE FOR EVERY ROW HERE, AND IT IS NOT A GUESS: this method is reached only from a
+               * revoke that answered true, and on Arcade that ask ended the siblings with the app
+               * it named. `vendorRevocationRequested: false` means "no vendor was asked", which is
+               * the one thing none of these rows may say.
+               */
+              vendorRevocationRequested: true,
+            },
+          });
+        }
+      }
+
+      cleared.push(
+        ...(await clearEndedSiblings({
+          siblings: input.siblings,
+          account: input.account,
+          endedWith: input.toolkit,
+          // The contract above: the caller watched its revoke answer true before calling this.
+          revoked: true,
+          unanswered: input.unanswered,
+          by: input.by,
+          reason: input.reason,
+        })),
+      );
+      return { cleared };
     },
 
     /**
@@ -2399,6 +3260,15 @@ export function connectionMethods(context: StoreContext) {
        * retirements of the same person revoke in the same order and write their rows in the same
        * order.
        */
+      /*
+       * NO PROVIDER PREDICATE HERE, DELIBERATELY, AND THAT IS NOT AN OVERSIGHT. The sweep below
+       * revokes through the ACTIVE broker, so a row filed under another provider would be a
+       * revocation requested at the wrong vendor, which would not recognise the connection, and an
+       * audit row claiming `vendorRevocationRequested` about access that was never removed. What
+       * keeps that unreachable is the startup activation refusal (`assertActivatable`, called from
+       * `server/src/index.ts`): a deployment holding both providers' rows cannot boot. No flow relaxes
+       * that refusal today; whoever builds one must add the `brokerProvider` predicate here.
+       */
       const brokered = await database
         .select({ toolkit: brokeredConnections.app })
         .from(brokeredConnections)
@@ -2409,6 +3279,66 @@ export function connectionMethods(context: StoreContext) {
           ),
         )
         .orderBy(asc(brokeredConnections.app));
+
+      /*
+       * THE APPS EACH OF THIS PERSON'S REVOCATIONS ENDS BESIDES THE ONE ASKED ABOUT, read BEFORE a
+       * single revoke goes out and through {@link resolveSiblings}, the one place that answers it.
+       *
+       * WHY THIS LOOP NEEDS IT AT ALL, when it already asks about every app the person holds.
+       * Where a connection is keyed `(identity, auth provider)` — Arcade — the FIRST app's revoke
+       * ends the connection and every app sharing it, so the ask for a sibling that follows finds
+       * nothing left and answers `false`. Passed through, that is `vendorRevocationRequested:
+       * false` on the trail for a grant this deployment asked for and got, which is the one
+       * reading of that field that must never be written: it says "no vendor was asked" about an
+       * account that was withdrawn, to whoever later checks that an offboarding completed. The
+       * order the rows come back in decides which app gets the truthful row and which gets the
+       * false one, which is to say nothing decides it.
+       *
+       * Where each app is its own auth provider — Composio — every set here is empty by
+       * construction, each ask stands alone, and nothing below differs from what this method
+       * always did.
+       *
+       * RESOLVED AGAINST THE PERSON'S OWN IDENTITY, the same `account` the revokes below are asked
+       * with. MEMOIZED ACROSS THE WHOLE OFFBOARDING for the reason {@link removeServer} gives:
+       * `authProviderOf` is a live vendor call on Arcade, and the bound is then the number of
+       * DISTINCT TOOLKITS this person holds rather than that number squared. Empty with no broker
+       * configured, where nothing is asked of anybody and the `false` below is the whole truth.
+       */
+      const account = personAccount(userId);
+      const authProviders = new Map<string, Promise<string | null>>();
+      const endedBesides = new Map<
+        string,
+        { siblings: string[]; unanswered: number }
+      >();
+      if (broker) {
+        for (const connection of brokered) {
+          endedBesides.set(
+            connection.toolkit,
+            await resolveSiblings(
+              { toolkit: connection.toolkit, account },
+              authProviders,
+            ),
+          );
+        }
+      }
+
+      /*
+       * WHAT THE TRAIL MAY CLAIM WAS ASKED OF THE VENDOR FOR EACH APP, read before a single revoke
+       * goes out, as {@link disconnectBrokered} reads its own. A KEY app's row says `false` whatever
+       * the vendor answered — see {@link vendorRevocationClaim}, which all three writers of an asked
+       * app's row now ask. This one used to pass the vendor's answer through for a key (round 2,
+       * L5-a), the same divergence {@link removeServer} had (A5c).
+       */
+      const toRetire: {
+        toolkit: string;
+        claim: Awaited<ReturnType<typeof vendorRevocationClaim>>;
+      }[] = [];
+      for (const connection of brokered) {
+        toRetire.push({
+          toolkit: connection.toolkit,
+          claim: await vendorRevocationClaim(connection.toolkit),
+        });
+      }
 
       /*
        * What the broker was actually asked for each app, kept so the trail below records the answer
@@ -2429,21 +3359,29 @@ export function connectionMethods(context: StoreContext) {
        * asked — a later one is not punished for an earlier one — and the first refusal is rethrown
        * below, so the act still fails loudly and the administrator still gets a 500.
        */
-      const withdrawn: { toolkit: string; requested: boolean }[] = [];
+      const withdrawn: {
+        toolkit: string;
+        requested: boolean;
+        claim: Awaited<ReturnType<typeof vendorRevocationClaim>>;
+      }[] = [];
       const refusals: unknown[] = [];
-      for (const connection of brokered) {
+      for (const connection of toRetire) {
         try {
           withdrawn.push({
             toolkit: connection.toolkit,
+            claim: connection.claim,
             requested: broker
               ? await broker.revoke({
                   /*
                    * THE PERSON'S OWN ACCOUNT, NAMED AS ONE. Offboarding somebody ends what they
                    * held and never the deployment's shared account, whoever connected it — so the
-                   * holder is fixed here rather than read off anything, and the vendor id is the
-                   * person's own, which is what a personal account is filed under at Composio.
+                   * holder is fixed above rather than read off anything, and the vendor id is the
+                   * person's own, which is what a personal account is filed under at Composio. The
+                   * SAME value the siblings were resolved against, because an answer about one
+                   * identity describing a revocation on another is the whole of what that set is
+                   * for.
                    */
-                  account: { holder: "person", userId, vendorUserId: userId },
+                  account,
                   toolkit: connection.toolkit,
                 })
               : false,
@@ -2483,8 +3421,49 @@ export function connectionMethods(context: StoreContext) {
         );
       }
 
+      /*
+       * WHICH OF THIS PERSON'S APPS WERE ENDED BY ANOTHER APP'S REVOCATION, and by which one.
+       *
+       * Only from a revoke that ANSWERED TRUE: `false` means nothing was found to withdraw or the
+       * auth provider could not be resolved, and the vendor was not shown to have ended anything,
+       * so nothing is claimed on the strength of it — the rule {@link removeServer} files its
+       * siblings by. The asked app is skipped in favour of its own answer, and the first ender
+       * wins, which is deterministic because the rows are walked in app order.
+       *
+       * APPS THIS PERSON HOLDS ARE ALL THIS CAN SPEAK FOR. A sibling resolved on the same identity
+       * but held by the deployment, or an app whose own revoke threw and so has no row here, is
+       * left alone: this map only corrects what the loop below is already about to write.
+       *
+       * WHICH SIBLINGS A REVOKE ENDED IS {@link siblingsEndedBy}'S ANSWER, the one
+       * {@link clearEndedSiblings} deletes on — rules 1 and 2 — and not a walk of this method's
+       * own. It was one: rule 2 without rule 1, so a KEY app whose own ask answered false was filed
+       * as ended by an OAuth sibling's revoke that never reached it (round 2, A5b). What differs
+       * here is only what is DONE with the answer: this method deletes its own rows as its own acts
+       * above, so it takes the judgement without the delete and files `endedWith` from it.
+       */
+      const endedWith = new Map<string, string>();
+      for (const entry of withdrawn) {
+        const ended = await siblingsEndedBy({
+          siblings: endedBesides.get(entry.toolkit)?.siblings ?? [],
+          endedWith: entry.toolkit,
+          revoked: entry.requested,
+        });
+        for (const app of ended) {
+          if (!endedWith.has(app)) endedWith.set(app, entry.toolkit);
+        }
+      }
+
       for (const connection of withdrawn) {
         retired += 1;
+        /*
+         * The app whose revocation ended this one, where this one's own ask came back empty
+         * because that revocation had already taken it. Absent for an app that was ended by its
+         * own ask, which needs no other grant named beside it.
+         */
+        const endedBy = connection.requested
+          ? undefined
+          : endedWith.get(connection.toolkit);
+        const resolved = endedBesides.get(connection.toolkit);
         await recordAuditEvent(auditStore, {
           eventType: "mcp.account_disconnected",
           targetType: "mcp_server",
@@ -2505,8 +3484,30 @@ export function connectionMethods(context: StoreContext) {
              * withdrawal asked for, or there was nothing to ask about, or there was no broker to
              * ask. The value of the field is exactly that a reader can tell those apart, so a
              * constant here would be worse than none.
+             *
+             * OR WHAT WAS ASKED ABOUT THE CONNECTION THIS APP SHARES, which is the same claim
+             * made about the same grant. On Arcade the ask that ended this app may have been
+             * spelled with a sibling's name, and `revoke`'s `false` here then means "already
+             * gone", not "nobody asked" — `endedWith` beside it names the app that asked.
+             *
+             * AND NEVER FOR A KEY: {@link vendorRevocationClaim} makes the claim from that
+             * reading, and for a key app it is `false` whatever the vendor answered.
              */
-            vendorRevocationRequested: connection.requested,
+            ...connection.claim(connection.requested || Boolean(endedBy)),
+            /*
+             * AND WHERE A SIBLING RELATIONSHIP IS BEING CLAIMED, HOW MANY apps on this identity
+             * could not be asked about and so could not be ruled siblings either way — an
+             * integer, never their names; see {@link resolveSiblings}. Beside `endedWith` and
+             * nowhere else, which is where {@link removeServer} puts it and for its reason: the
+             * count qualifies a claim about which apps went together, and a row making no such
+             * claim would be carrying a number about nothing.
+             */
+            ...(endedBy
+              ? {
+                  endedWith: endedBy,
+                  unansweredSiblings: resolved?.unanswered ?? 0,
+                }
+              : {}),
           },
         });
       }

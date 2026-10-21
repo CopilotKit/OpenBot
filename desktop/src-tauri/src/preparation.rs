@@ -322,6 +322,15 @@ fn require_with(
     if let Some(problem) = stack::deployment_problem(root) {
         return Err(required(problem));
     }
+    // A deployment laid out by an app that copied less still matches its own fingerprint. Install
+    // lays it out again; Start cannot.
+    if deployment::installed(root)
+        .is_some_and(|found| deployment::needs_fetch(root, &found.version))
+    {
+        return Err(required(
+            "The deployment was laid out by an earlier OpenBot and is missing files this version runs.",
+        ));
+    }
     let bun = dependencies_ready(root)?;
     verify(&record.images)?;
     Ok(bun)
@@ -447,6 +456,20 @@ fn main() {
             std::fs::read_to_string(f.root.join(".env")).unwrap(),
             "KEEP_THIS_PUBLIC_SETTING=yes\n"
         );
+    }
+
+    /// A v0.2.0 install prepared by an app that did not copy `agent-computer` still matched its
+    /// fingerprint, so Start ran a server that could not load. Start now sends it back to Install,
+    /// which lays the deployment out again.
+    #[test]
+    fn a_deployment_laid_out_by_an_earlier_app_requires_installation_before_start() {
+        let f = Fixture::new();
+        // Exactly what an earlier app wrote, in place before it prepared the installation.
+        std::fs::write(deployment::stamp_path(&f.root), r#"{"version":"v-test"}"#).unwrap();
+        f.prepared(None);
+        let problem = require_with(&f.root, None, |_| Ok(()))
+            .expect_err("a deployment missing folders this app copies cannot start");
+        assert!(problem.said.contains("Finish installing"));
     }
 
     #[test]

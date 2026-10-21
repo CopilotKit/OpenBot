@@ -41,6 +41,8 @@ function app(store: {
 }) {
   const routes = createPluginRoutes(
     {
+      // The provider these rows belong to, which the routes read rather than guess.
+      brokerProvider: "composio" as const,
       /*
        * The read that decides whether this is a brokered row, which the handler makes before
        * anything about the consent flow. None of these vendors is one: a brokered app is reached

@@ -32,6 +32,7 @@ const other = `${prefix}-other`;
 const bot = `${prefix}-bot`;
 const skillSlug = `demo-${randomUUID().slice(0, 8)}`;
 const plugins = createPluginStore({
+  brokerProvider: "composio",
   database,
   auditStore: createAuditStore(database),
   credentials: createCredentialStore(database),

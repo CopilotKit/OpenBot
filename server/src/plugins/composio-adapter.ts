@@ -109,7 +109,7 @@ export function buildComposioClient(
 
   const broker: ComposioBroker = {
     ...directoryMethods(context),
-    ...consentMethods(context),
+    ...consentMethods(context, actions),
     ...fieldMethods(context),
     ...accountMethods(context),
   };

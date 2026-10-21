@@ -4,10 +4,8 @@ import {
   HANDOFF_KIND,
   type HandoffCaps,
 } from "../src/agents/handoff";
-import type {
-  AgentProfile,
-  AgentProfileStore,
-} from "../src/agents/profile-store";
+import type { AgentProfileStore } from "../src/agents/profile-store";
+import type { AgentProfile } from "../src/agents/profile-types";
 import type { AuditStore } from "../src/audit";
 import type { WorkQueue } from "../src/work/queue";
 

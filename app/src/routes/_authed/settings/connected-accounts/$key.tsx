@@ -1,7 +1,7 @@
 import { IconArrowUpRight, IconChevronDown } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { createFileRoute, useParams } from "@tanstack/react-router";
-import { useState } from "react";
+import { createFileRoute, useParams, useSearch } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
 import {
   PageEmpty,
   PageRows,
@@ -12,6 +12,7 @@ import {
   BrokeredAccountRow,
   useBrokeredAccount,
 } from "@/components/plugins/brokered-account-row";
+import { GrantList } from "@/components/plugins/grant-list";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -27,13 +28,25 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
+import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { connectAccountMutationOptions } from "@/lib/plugins/mutations";
 import {
+  brokeredAccountPageDescription,
+  brokeredConsentTrip,
+  brokeredDisconnectNote,
+  brokeredPerActionTrip,
+  brokeredProvenance,
+  disconnectSiblingsNotice,
+} from "@/lib/plugins/provider-vocabulary";
+import {
+  connectionSiblingsQueryOptions,
   connectionsQueryOptions,
   type PluginServer,
   personalConnections,
   pluginsPageQueryOptions,
+  pluginsProvider,
 } from "@/lib/plugins/queries";
+import { searchTextEntry } from "@/lib/search-text";
 
 /**
  * Whether this server is reached through Composio AS THIS PERSON.
@@ -44,7 +57,38 @@ import {
  * pin the distinction without rendering the page.
  */
 export function brokeredFor(server: PluginServer | undefined): boolean {
-  return server?.provenance === "composio" && server.accountMode !== "shared";
+  /*
+   * A FILTER, so it asks whether the row came through a broker at all and needs no vendor name: one
+   * provider holds rows at a time (spec D3). Naming the vendor on this page is a different question
+   * and reads the active provider, below.
+   */
+  return (
+    server !== undefined &&
+    brokeredProvenance(server.provenance) &&
+    server.accountMode !== "shared"
+  );
+}
+
+/** The longest action name this page will repeat back. Real ones are far shorter. */
+const MAX_LANDED_ACTION = 200;
+
+/**
+ * The action the verifier's redirect says was just authorized, or null.
+ *
+ * A TRIMMED, BOUNDED NAME AND NOTHING ELSE: it is read off a query string, which anybody can write
+ * on this origin, so it is only ever drawn as a quoted name inside this page's own sentence and
+ * never as a sentence of its own.
+ */
+export function landedActionFrom(action: string | undefined): string | null {
+  const trimmed = (action ?? "").trim();
+  return trimmed.length > 0 && trimmed.length <= MAX_LANDED_ACTION
+    ? trimmed
+    : null;
+}
+
+/** What the landing says about the action somebody has just come back from authorizing. */
+export function landedActionNotice(action: string): string {
+  return `You just authorized ${action}.`;
 }
 
 /**
@@ -57,12 +101,61 @@ export function brokeredFor(server: PluginServer | undefined): boolean {
  */
 export const Route = createFileRoute(
   "/_authed/settings/connected-accounts/$key",
-)({ component: RouteComponent });
+)({
+  component: RouteComponent,
+  /*
+   * `?action=` is the verifier's redirect saying WHICH action the consent just completed was for,
+   * so the page can land on it rather than on the app. The key is omitted when absent rather than
+   * set to undefined, which would make `search` a required prop on every Link to this route.
+   *
+   * Read as text whatever the router parsed it into (`searchText`): an action name made of digits
+   * or shaped like JSON arrives as a number or an object, and a `typeof` guard would land the page
+   * on the app as though the verifier had never said which action it was.
+   */
+  validateSearch: (search: Record<string, unknown>): { action?: string } =>
+    searchTextEntry("action", search.action),
+});
 
 function RouteComponent() {
   const { key } = useParams({
     from: "/_authed/settings/connected-accounts/$key",
   });
+  const { action } = useSearch({
+    from: "/_authed/settings/connected-accounts/$key",
+  });
+  /*
+   * `?action=` IS READ ONCE HERE AND DROPPED FROM THE URL BELOW, BUT IT FEEDS TWO THINGS.
+   *
+   * Its only sender is the per-action verifier's redirect (`server/src/plugins/routes.ts`), so it is
+   * a report of a consent that has just completed — news exactly once. Left in the address bar it is
+   * read again on every reload and back-navigation, and "You just authorized X" is redrawn about a
+   * consent that may be hours old. That is the omission `index.tsx` closed for its own three report
+   * parameters.
+   *
+   * It is NOT only the notice, though: the same value marks the matching row of the grant list with
+   * `data-landed`, and that list draws only once its own read answers — which can be well after the
+   * strip has landed. So the strip is safe only because BOTH readers draw from this snapshot, never
+   * from the live search: read live, the notice would vanish with the parameter and the grant list
+   * would come up with nothing marked. The mark is the same news as the notice, so it is right for
+   * both to outlive the URL for this visit and for both to be gone on a reload.
+   *
+   * KEYED ON THE APP, so a snapshot taken on one app's page is never repeated on another's should the
+   * router keep this component mounted across a change of `$key`.
+   */
+  const [arrival] = useState(() => ({
+    key,
+    landedAction: landedActionFrom(action),
+  }));
+  const navigate = Route.useNavigate();
+  /*
+   * ONE NAVIGATE, the same shape as `index.tsx`'s: `search` replaces the whole object, so a strip is
+   * written as dropping its keys from what is there and keeping the rest, never as a rebuilt object.
+   * `action` is the only key this route accepts, so it is the only one dropped.
+   */
+  useEffect(() => {
+    if (action === undefined) return;
+    navigate({ search: ({ action: _a, ...rest }) => rest, replace: true });
+  }, [action, navigate]);
   const plugins = useQuery(pluginsPageQueryOptions());
   const connections = useQuery(connectionsQueryOptions());
   const [notice, setNotice] = useState<string | null>(null);
@@ -109,10 +202,51 @@ function RouteComponent() {
    * only thing here that knows.
    */
   const brokered = brokeredFor(server);
+  /*
+   * THE VENDOR'S NAME, from the active provider and never from a row: a deployment with the key set
+   * and nothing enabled has no row, and a row cannot say which broker holds the account.
+   */
+  const provider = pluginsProvider(plugins.data);
+  /*
+   * WHAT A DISCONNECT WOULD ALSO END, asked only while there is an account for it to end. The query
+   * is gated on the connection and its answer is read only through the same gate, so a cached answer
+   * from before a disconnect is never drawn beside "Connect".
+   */
+  const siblings = useQuery({
+    ...connectionSiblingsQueryOptions(key),
+    enabled: brokered && connection !== undefined,
+  });
+  const siblingsNotice =
+    brokered && connection !== undefined && siblings.data
+      ? disconnectSiblingsNotice(siblings.data)
+      : null;
+  /* From the snapshot above and never from the live search, which is stripped. */
+  const landedAction = arrival.key === key ? arrival.landedAction : null;
+  /*
+   * THE GRANT LIST IS DRAWN WHERE THE BROKER AUTHORIZES PER ACTION, read off the declared
+   * capability and never off the vendor's name. The server computes `authorizesPerAction` from the
+   * same expression `/servers/:id/authorize` behind the Authorize button gates on, so the list this
+   * screen draws and the route its buttons call cannot key on different facts. `provider ===
+   * "arcade"` keyed on a different one: the day a broker named arcade is reached with that flow
+   * absent, this drew the list and every press 503'd. False on Composio — whose auth config fixes
+   * one state for the whole toolkit — so every Composio render is unchanged.
+   */
+  const perActionGrants = plugins.data?.authorizesPerAction ?? false;
+  /* Who is asking only matters to a Shared app's Authorize, so it is not read for anything else. */
+  const sharedHere = server?.accountMode === "shared";
+  const me = useQuery({
+    ...currentUserQueryOptions(),
+    enabled: perActionGrants && sharedHere,
+  }).data;
+  const isAdmin = me?.role === "admin";
+  const appNames = [key, server?.title ?? key];
 
   /* Everything the brokered row below reads and does. See `brokered-account-row.tsx`. */
   const brokeredAccount = useBrokeredAccount({
     authScheme: server?.authScheme ?? null,
+    /* The same capability the grant list below is drawn on, read once above and passed to both, so
+       the row's offer and the list's presence cannot come from different facts. */
+    authorizesPerAction: perActionGrants,
     brokered,
     configured: plugins.data?.composioConfigured ?? false,
     recorded: connection !== undefined,
@@ -236,6 +370,23 @@ function RouteComponent() {
   if (server?.accountMode === "shared") {
     return (
       <PageShell backButton={back} title={server.title}>
+        {/*
+         * THE LANDING NOTICE BELONGS HERE TOO, because a Shared app's account is the deployment's
+         * and the verifier lands BOTH holders on this page. Without it the one flow whose Authorize
+         * is admin-only completed a consent at the vendor and came back to a screen that named
+         * nothing — the grant list's mark alone, several rows down a search box, is not the page
+         * saying what just happened.
+         */}
+        {landedAction ? (
+          <p
+            className="text-sm"
+            data-landed-action={landedAction}
+            role="status"
+          >
+            {landedActionNotice(landedAction)}
+          </p>
+        ) : null}
+
         {/* One fact, so no heading and no actions: there is nothing here for this person to do. */}
         <PageSection>
           <PageRows className="mt-0">
@@ -249,6 +400,17 @@ function RouteComponent() {
             </Item>
           </PageRows>
         </PageSection>
+
+        {/* State is shown to everyone; minting a consent is the administrator's act. */}
+        {perActionGrants ? (
+          <GrantList
+            appNames={appNames}
+            canAuthorize={isAdmin}
+            landedAction={landedAction}
+            returnTo="settings"
+            serverId={key}
+          />
+        ) : null}
       </PageShell>
     );
   }
@@ -269,12 +431,22 @@ function RouteComponent() {
     return (
       <PageShell
         backButton={back}
-        description="Reached through Composio, which holds the account, so a Bot sees only what you can see."
+        description={brokeredAccountPageDescription(provider)}
         title={server.title}
       >
         {notice ? (
           <p className="text-destructive text-sm" role="alert">
             {notice}
+          </p>
+        ) : null}
+
+        {landedAction ? (
+          <p
+            className="text-sm"
+            data-landed-action={landedAction}
+            role="status"
+          >
+            {landedActionNotice(landedAction)}
           </p>
         ) : null}
 
@@ -286,16 +458,28 @@ function RouteComponent() {
               /* Said beside the button rather than after it: disconnecting ends the account at
                  Composio, so what it undoes is not the row here but the grant on your own mailbox,
                  and connecting again is a fresh consent. */
-              connectedDescription={`A Bot granted its tools reads your ${server.title} as you. Disconnecting ends the account at Composio, not just here.`}
-              disconnectedDescription={`${reassurance} Connecting takes you to Composio and then to the vendor to consent.`}
+              connectedDescription={`A Bot granted its tools reads your ${server.title} as you. ${brokeredDisconnectNote(provider)}`}
+              disconnectedDescription={`${reassurance} ${perActionGrants ? brokeredPerActionTrip(provider, "below") : brokeredConsentTrip(provider)}`}
               /* What is true either way. The trip to Composio is not — an app whose key somebody
                  types never leaves this page — but which Bots can read this person's mail is the
                  whole point of the screen and holds for both kinds. */
               disconnectedReassurance={reassurance}
+              notice={siblingsNotice ?? undefined}
+              provider={provider}
               title={server.title}
             />
           </PageRows>
         </PageSection>
+
+        {perActionGrants ? (
+          <GrantList
+            appNames={appNames}
+            canAuthorize
+            landedAction={landedAction}
+            returnTo="settings"
+            serverId={key}
+          />
+        ) : null}
       </PageShell>
     );
   }

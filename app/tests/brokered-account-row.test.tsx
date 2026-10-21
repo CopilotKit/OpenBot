@@ -195,6 +195,7 @@ function pluginsPage(
     botsMayCallBack: true,
     redirectUri: null,
     composioConfigured,
+    authorizesPerAction: false,
   };
 }
 
@@ -1174,6 +1175,7 @@ test("the row names the app rather than calling it the app", async () => {
  */
 function accountState(overrides: Partial<BrokeredAccount>): BrokeredAccount {
   return {
+    authorizesPerAction: false,
     configured: true,
     connect: () => {},
     connected: false,
@@ -1221,6 +1223,7 @@ function renderRow(account: BrokeredAccount) {
       account={account}
       connectedDescription="A Bot granted its tools reads your Gmail as you."
       disconnectedDescription="No Bot can read this as you."
+      provider="composio"
       title="Gmail"
     />,
   );
@@ -1252,6 +1255,54 @@ test("both kinds say Connected, and the line beneath says how", () => {
       `Connected with a key you provided, last checked ${asDay(CHECKED_AT)}.`,
     ),
   ).toBeTruthy();
+});
+
+test("a per-action broker offers no whole-app Connect, and still offers Disconnect", () => {
+  /*
+   * THE DEFECT THIS CLOSES, FOUND BY PRESSING THE BUTTON AND NOT BY ANY TEST. Both screens drew
+   * this row unconditionally, so under Arcade a disconnected app offered Connect — and the adapter
+   * refuses an authorization carrying no action, so the press could only ever come back with
+   * "Arcade grants per action, so an authorization needs the action it is for and none was given."
+   * Every time, with no state in which it could succeed, and with the thing the person actually
+   * wanted sitting in the list underneath.
+   */
+  const disconnected = renderRow(
+    accountState({ authorizesPerAction: true, kind: "consent" }),
+  );
+
+  expect(disconnected.queryByRole("button", { name: /Connect/ })).toBeNull();
+  expect(disconnected.getByText("Approved per action")).toBeTruthy();
+
+  cleanup();
+
+  /*
+   * AND THE OTHER HALF OF THE ROW IS UNTOUCHED, which is the part worth guarding. Per-action
+   * authorizations still add up to ONE account at the vendor, `revoke` is a real act on it, and
+   * this row is the only place it is offered — so withholding Disconnect along with Connect would
+   * strand somebody holding a live connection with no way to end it.
+   */
+  const connected = renderRow(
+    accountState({
+      authorizesPerAction: true,
+      connected: true,
+      kind: "consent",
+    }),
+  );
+
+  expect(connected.getByText("Connected")).toBeTruthy();
+  expect(connected.getByRole("button", { name: "Disconnect" })).toBeTruthy();
+  expect(connected.queryByText("Approved per action")).toBeNull();
+});
+
+test("a whole-app broker keeps its Connect", () => {
+  /*
+   * THE OTHER SIDE OF THE GATE, so the case above cannot pass by the row having lost Connect
+   * outright. Composio fixes one auth state for a whole toolkit, and one press is the whole story.
+   */
+  const view = renderRow(accountState({ kind: "consent" }));
+
+  expect(view.getByRole("button", { name: /Connect/ })).toBeTruthy();
+  expect(view.queryByText("Approved per action")).toBeNull();
 });
 
 test("an app needing no account offers nothing to press", () => {
@@ -2502,6 +2553,7 @@ function AccountProbe() {
     verifiedAt: null,
     probe: null,
     checkable: true,
+    authorizesPerAction: false,
     authScheme: "API_KEY",
     returnTo: "settings",
     report: () => {},
