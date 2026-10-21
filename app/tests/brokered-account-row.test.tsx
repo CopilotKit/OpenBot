@@ -808,7 +808,11 @@ test("a disconnect that lands stops reading Connected and offers Connect again",
   expect(server.deletes).toBe(1);
 });
 
-test("a deployment with no Composio key names the setting and offers neither action", async () => {
+/*
+ * The setting is named on the admin page below, to somebody who can set it. Here the reader is the
+ * person who would connect the account, so the page says only that the app is not available yet.
+ */
+test("a deployment with no Composio key says the app is not available yet and offers neither action", async () => {
   installDeployment({
     composioConfigured: false,
     // A row left over from when a key WAS set: the app keeps its row and its grants, which is the
@@ -819,8 +823,10 @@ test("a deployment with no Composio key names the setting and offers neither act
 
   const view = renderAccountScreen(queryClient());
 
-  expect(await view.findByText(NAMES_THE_SETTING)).toBeTruthy();
-  expect(view.queryByText("Key missing")).toBeTruthy();
+  expect(
+    await view.findByText(/is not available on this OpenBot yet/),
+  ).toBeTruthy();
+  expect(view.queryByText(NAMES_THE_SETTING)).toBeNull();
   expect(view.queryByText("Connected")).toBeNull();
   expect(view.queryByRole("button", { name: "Disconnect" })).toBeNull();
   expect(view.queryByRole("button", { name: "Connect" })).toBeNull();
