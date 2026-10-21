@@ -15,6 +15,8 @@ import {
   firstThreadOf,
   fixtureNames,
   loadFixture,
+  movedTo,
+  newThreadRuns,
   observable,
   observationsOf,
   record,
@@ -156,3 +158,109 @@ test("thread.linked as CopilotKit's legacy capture sent it for two chats on one 
   ).toHaveLength(2);
   expect(rows(emitted)).toEqual(copilotKit);
 });
+
+/** A chat's move to its second Thread, ids named in the order they appear: the first Thread's last run, the second
+ * Thread's link, and the person's first message in it. */
+function moveRows(rows: CapturedEvent[]) {
+  const value = (row: CapturedEvent) => row.value as Record<string, unknown>;
+  const link = rows.filter(({ name }) => name === "thread.linked")[1];
+  if (!link) throw new Error("no second thread.linked");
+  const at = rows.indexOf(link);
+  const lastRun = rows
+    .slice(0, at)
+    .findLast(
+      (row) => row.name === "agent.run" && value(row).phase === "started",
+    );
+  const typed = rows
+    .slice(at)
+    .find((row) => row.name === "agent.message" && value(row).role === "user");
+  const ids = new Map<string, string>();
+  const named = (id: string) => {
+    if (!ids.has(id)) ids.set(id, `id-${ids.size + 1}`);
+    return ids.get(id);
+  };
+  return [lastRun, link, typed].map((row) => {
+    if (!row) throw new Error("a row of the move is missing");
+    const { name, value: fields } = withoutSeq(row);
+    return {
+      name,
+      value: Object.fromEntries(
+        Object.entries(fields)
+          .filter(([field]) => field !== "text" && field !== "textLength")
+          .map(([field, item]) => [
+            field,
+            ["threadId", "runId", "messageId"].includes(field) &&
+            typeof item === "string"
+              ? named(item)
+              : item,
+          ]),
+      ),
+    };
+  });
+}
+
+for (const transport of ["sse", "intelligence"] as const)
+  test(`a chat moved to a new Thread is linked "switch", and the person's first message there names the agent's last run on the Thread before, as CopilotKit's own capture sent it on the learning page: ${transport}`, async () => {
+    // End-to-end runs 1 and 2: CopilotKit's legacy capture linked the Thread New thread opened with reason "switch", and
+    // gave the person's first message in it the run its agent ran last, on the Thread before (LearningBridge's
+    // runIdForMessage falls back to lastRunIds.get(agent), and the page's agent outlives the move). The Recorder sent
+    // "open" and null.
+    const theirs = newThreadRuns().map(({ copilotKit }) =>
+      moveRows(copilotKit),
+    );
+    expect(theirs).toHaveLength(2);
+    expect(theirs[1]).toEqual(theirs[0] as ReturnType<typeof moveRows>);
+    expect(theirs[0]?.[1]?.value.reason).toBe("switch");
+    expect(theirs[0]?.[2]?.value.runId).toBe(theirs[0]?.[0]?.value.runId);
+
+    // The same move on real traffic: one agent's answer on one Thread, then, on a new Thread of the same agent, a
+    // question that calls a tool, 16 s later as in run 1.
+    const first = loadFixture(transport, "text-answer");
+    const second = loadFixture(transport, "backend-tool");
+    const ended = Math.max(...observationsOf(first).map(({ at }) => at));
+    const { emitted } = await record(movedTo(first, second, ended + 16_000));
+    expect(moveRows(emitted)).toEqual(theirs[0] as ReturnType<typeof moveRows>);
+    expect(
+      emitted
+        .filter(({ name }) => name === "thread.linked")
+        .map(({ value }) => value),
+    ).toEqual([
+      {
+        threadId: firstThreadOf(first),
+        agentId: "default",
+        hasMessages: false,
+        reason: "open",
+      },
+      {
+        threadId: firstThreadOf(second),
+        agentId: "default",
+        hasMessages: false,
+        reason: "switch",
+      },
+    ]);
+    // Field for field CopilotKit's own rows for each conversation, the one row the move changes changed as it does.
+    const lastStarted = sinkEvents(first.sink).findLast(
+      ({ name, value }) =>
+        name === "agent.run" &&
+        (value as { phase?: unknown }).phase === "started",
+    );
+    const lastRun = String(
+      (lastStarted?.value as { runId?: string } | undefined)?.runId,
+    );
+    const moved = sinkEvents(second.sink).map((event, index, all) =>
+      event.name === "agent.message" &&
+      (event.value as { role?: unknown }).role === "user" &&
+      all.findIndex(({ name }) => name === "agent.message") === index
+        ? { ...event, value: { ...(event.value as object), runId: lastRun } }
+        : event,
+    );
+    expect(
+      emitted.filter(observable).map(withoutSeq).map(withoutDuration),
+    ).toEqual(
+      [...sinkEvents(first.sink), ...moved]
+        .filter(observable)
+        .map(leaving)
+        .map(withoutSeq)
+        .map(withoutDuration),
+    );
+  });

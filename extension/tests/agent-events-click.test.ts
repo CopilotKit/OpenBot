@@ -6,6 +6,12 @@
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import type { CapturedEvent } from "@openbot/shared/recorder-masking";
+import {
+  type AgentEvents,
+  createAgentEvents,
+} from "../src/background/agent/events";
+import type { AgentObservation } from "../src/background/agent/observation";
+import { createStepAssembler } from "../src/background/steps";
 import { startEventCapture } from "../src/content/collector";
 import { createSensitivityTracker } from "../src/content/masking-context";
 import { AGENT_TARGET_FIELD } from "../src/shared/agent-target";
@@ -15,7 +21,10 @@ import {
   feed,
   firstThreadOf,
   loadFixture,
+  movedTo,
+  newThreadRuns,
   observationsOf,
+  settle,
   sinkEvents,
 } from "./agent-traffic";
 
@@ -143,3 +152,171 @@ test("a Thread closes when its tab reaches another page: the next click there na
     threadId: null,
   });
 });
+
+/** The steps and the agent events wired as recording.ts wires them, on a clock the test moves: each timer fires as the
+ * clock passes it, as a real one does, so a click leaves when its steps let it go, knowing what the page did by then. */
+function recordingOn(start: number) {
+  let clock = start;
+  const due: { at: number; fn: () => void; live: boolean }[] = [];
+  const sent: CapturedEvent[] = [];
+  let agentEvents: AgentEvents | null = null;
+  const steps = createStepAssembler({
+    emit: (event) => sent.push(event),
+    now: () => clock,
+    timers: {
+      set: (fn, ms) => {
+        const timer = { at: clock + ms, fn, live: true };
+        due.push(timer);
+        return timer;
+      },
+      clear: (handle) => {
+        (handle as { live: boolean }).live = false;
+      },
+    },
+    settle: (tabId, event, joins) =>
+      event.name === "click" && agentEvents
+        ? agentEvents.settleClick(tabId, event, joins)
+        : event,
+    awaits: (tabId, event, joins) =>
+      event.name === "click" &&
+      agentEvents !== null &&
+      agentEvents.awaitsRun(tabId, event, joins),
+  });
+  const events = createAgentEvents({
+    emit: (tabId, event) => steps.place(tabId, event),
+    digests: () => new Set(),
+    now: () => clock,
+  });
+  agentEvents = events;
+  return {
+    steps,
+    sent,
+    agentEvents: events,
+    /** Moves the clock to `to`, firing every timer due on the way. */
+    advance(to: number) {
+      for (;;) {
+        due.sort((a, b) => a.at - b.at);
+        const next = due.find((timer) => timer.live && timer.at <= to);
+        if (!next) break;
+        next.live = false;
+        clock = Math.max(clock, next.at);
+        next.fn();
+      }
+      clock = Math.max(clock, to);
+    },
+  };
+}
+
+for (const run of newThreadRuns())
+  test(`after New thread, the click that sends the next message names the new Thread, and one before that run names none, never the Thread left: end-to-end ${run.name}`, async () => {
+    // End-to-end runs 1 and 2 (rows 034 and 036): after New thread the chat box and Send both named the Thread the chat
+    // had left, where CopilotKit's own capture named the new one. New thread calls nothing, so the traffic shows the new
+    // Thread only with the run Send starts.
+    const copilotKit = run.copilotKit;
+    const value = (row: CapturedEvent) => row.value as Record<string, unknown>;
+    const [opened] = copilotKit.filter(({ name }) => name === "thread.linked");
+    const theirFirst = opened ? value(opened).threadId : undefined;
+    const answered = copilotKit.findLast(
+      (row) =>
+        row.name === "agent.run" &&
+        value(row).phase === "finished" &&
+        value(row).threadId === theirFirst,
+    )?.timestamp as number;
+    const theirClicks = copilotKit.filter(
+      (row) => row.name === "click" && row.timestamp > answered,
+    );
+    expect(
+      theirClicks.map(
+        (row) => (value(row).target as { label: string | null }).label,
+      ),
+    ).toEqual([
+      null,
+      "Approve without the agent",
+      "New thread",
+      null,
+      "Send message",
+    ]);
+
+    // The same page on real traffic: one agent's answer on one Thread, then the person's clicks at run's times after
+    // it, and the run on a new Thread of the agent when the page asked for it in the run.
+    const first = loadFixture("sse", "text-answer");
+    const second = loadFixture("sse", "backend-tool");
+    const shift =
+      Math.max(...observationsOf(first).map(({ at }) => at)) - answered;
+    const observations = movedTo(first, second, run.secondRunRequestAt + shift);
+    const elements: [string, string][] = [
+      ["<h1>Acme renewal</h1>", "h1"],
+      [
+        '<button type="button" data-copilotkit-action="deal.approve">Approve without the agent</button>',
+        "button",
+      ],
+      [
+        '<button type="button" data-copilotkit-action="thread.new">New thread</button>',
+        "button",
+      ],
+      [
+        '<textarea data-testid="copilot-chat-textarea" placeholder="Type a message..."></textarea>',
+        "textarea",
+      ],
+      [
+        '<button type="button" data-testid="copilot-send-button" aria-label="Send message"></button>',
+        "button",
+      ],
+    ];
+    type Due =
+      | { at: number; observation: AgentObservation }
+      | { at: number; click: [string, string] }
+      | { at: number; typed: CapturedEvent };
+    const timeline: Due[] = [
+      ...observations.map((observation) => ({
+        at: observation.at,
+        observation,
+      })),
+      ...theirClicks.map((row, index) => ({
+        at: row.timestamp + shift,
+        click: elements[index] as [string, string],
+      })),
+      { at: run.typed.timestamp + shift, typed: run.typed },
+    ].sort((a, b) => a.at - b.at);
+
+    const recording = recordingOn(CLOCK);
+    for (const due of timeline) {
+      recording.advance(due.at);
+      if ("observation" in due) recording.agentEvents.observe(due.observation);
+      else if ("click" in due) {
+        const [click] = clicksOn(due.click[0], [due.click[1]]);
+        recording.steps.step(
+          1,
+          recording.agentEvents.enrichClick(1, {
+            ...(click as CapturedEvent),
+            timestamp: due.at,
+          }),
+        );
+      } else recording.steps.step(1, { ...due.typed, timestamp: due.at });
+      await settle();
+    }
+    recording.advance((timeline.at(-1)?.at ?? CLOCK) + 30_000);
+    await settle();
+
+    const ours = recording.sent
+      .filter(({ name }) => name === "click")
+      .map((row) => value(row).threadId);
+    const left = firstThreadOf(first);
+    const moved = firstThreadOf(second);
+    // Each click before the move, and Send, as CopilotKit gave them; the chat box in between, which no traffic places in
+    // either Thread, names none.
+    const ourIds = new Map([
+      [theirFirst, left],
+      [
+        value(
+          copilotKit.filter(
+            ({ name }) => name === "thread.linked",
+          )[1] as CapturedEvent,
+        ).threadId,
+        moved,
+      ],
+    ]);
+    const theirs = theirClicks.map((row) => ourIds.get(value(row).threadId));
+    expect(theirs).toEqual([left, left, left, moved, moved]);
+    expect(ours).toEqual([left, left, left, null, moved]);
+  });

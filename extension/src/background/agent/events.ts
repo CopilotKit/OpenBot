@@ -4,10 +4,11 @@
 // through a legacy sink, the agent context CopilotKit adds to a click, and `agent.event` for every piece of AG-UI the
 // others leave out (agent-event.ts).
 //
-// LearningBridge links a Thread when a chat opens it (`thread.linked`, reason "open"), once per change of Thread in the
-// page. The network shows a chat's Thread when the page first talks to its agent about it, so a Thread is linked just
-// before its first event in the page, and again only when the page has turned to another Thread in between;
-// `hasMessages` says whether the Thread held messages before the page's new ones.
+// LearningBridge links a Thread when a chat opens it (`thread.linked`, reason "open") and when the same chat moves to
+// another Thread (reason "switch"), once per change of Thread in the page. The network shows a chat's Thread when the
+// page first talks to its agent about it, so the page's chat for an agent is on that agent's latest Thread in the page:
+// its first Thread in a page view is linked "open", a later one "switch", just before its first event; `hasMessages`
+// says whether the Thread held messages before the page's new ones. A Thread the chat moved away from is no longer open.
 //
 // Each Thread of each agent in a tab is an AG-UI agent of its own (thread-agent.ts): a run's request adds the page's new
 // messages to it as CopilotKit adds them before it runs, and the run's events are fed to it as they arrive, whatever the
@@ -36,27 +37,37 @@ import type {
   AgentStreamEvent,
   CaptureObservation,
 } from "./observation";
-import { type FedEvent, ThreadAgent } from "./thread-agent";
+import { type FedEvent, type PageAgent, ThreadAgent } from "./thread-agent";
 
 export type AgentEvents = {
   /** One observation from the network capture, in the order the capture saw it. */
   observe(observation: CaptureObservation): void;
   /** A click from a followed tab, before the steps see it: the agent context CopilotKit adds to a click. */
   enrichClick(tabId: number, click: CapturedEvent): CapturedEvent;
-  /** A click as it leaves the steps: one that named no Thread takes the Thread of the run it started, the page's run
-   * request that `owns` (the click's step window) says is the click's. */
+  /** A click as it leaves the steps, by what the page did after it. `joins` says whether a run the page asked for at a
+   * time is the click's doing (after it, before the person's next step, within the steps' join): a click with the
+   * open-Thread context takes the Thread of the first such run, the run it sent; one whose Thread the page has since
+   * left, by no doing of the click, names none, since the page may have left it before the click. */
   settleClick(
     tabId: number,
     click: CapturedEvent,
-    owns: (at: number) => boolean,
+    joins: (at: number) => boolean,
   ): CapturedEvent;
+  /** Whether a click held in the steps still waits for the run it may have sent: one with the open-Thread context in a
+   * tab whose page runs CopilotKit, whose join holds no run yet. */
+  awaitsRun(
+    tabId: number,
+    click: CapturedEvent,
+    joins: (at: number) => boolean,
+  ): boolean;
   /** The tab's top frame reached another page: its open Threads close. */
   tabNavigated(tabId: number): void;
   /** The recording ended: forget everything held. */
   stop(): void;
 };
 
-/** How many of a tab's latest run requests are kept for the clicks still held in their steps. */
+/** How many of a tab's latest run requests (and Threads its chats left) are kept for the clicks still held in their
+ * steps. */
 const MAX_RUNS_KEPT = 20;
 
 /** CopilotKit's suggestion tool (`@copilotkit/core` suggestion-engine.ts): a run that forces it is a suggestion run. */
@@ -115,12 +126,17 @@ type Stream = {
 type Tab = {
   /** The tab's page talks to a CopilotKit runtime: its clicks carry the open-Thread context. */
   traffic: boolean;
-  /** Threads open in the tab, in the order they opened. */
-  open: string[];
+  /** The Thread each agent's chat in the page has open (CopilotKit's open-Thread registrations), in the order the chats
+   * opened; a new document starts with none. */
+  views: Map<string, string>;
+  /** Threads a chat moved away from, and when the page showed the Thread it moved to. */
+  left: { threadId: string; at: number }[];
   /** The Thread the page linked last (LearningBridge.lastLinkedThreadId); a new document starts with none. */
   lastLinked: string | null;
   /** The page's latest run requests, when each was seen and for which Thread: a click's step window may hold one. */
   runs: { at: number; threadId: string }[];
+  /** CopilotKit's agent in the page, per agent id. */
+  agents: Map<string, PageAgent>;
   streams: Map<string, Stream>;
   threads: Map<string, Thread>;
   drops: Map<string, number>;
@@ -228,9 +244,11 @@ export function createAgentEvents(options: {
     if (!tab) {
       tab = {
         traffic: false,
-        open: [],
+        views: new Map(),
+        left: [],
         lastLinked: null,
         runs: [],
+        agents: new Map(),
         streams: new Map(),
         threads: new Map(),
         drops: new Map(),
@@ -272,8 +290,41 @@ export function createAgentEvents(options: {
     return expressed;
   };
 
-  const openThread = (tab: Tab, threadId: string) => {
-    if (!tab.open.includes(threadId)) tab.open.push(threadId);
+  const keyOf = (agentId: string | null) => JSON.stringify(agentId);
+
+  /** The Threads open in the tab, each once, in the order their chats opened (LearningBridge.distinctOpenThreadIds). */
+  const openIds = (tab: Tab): string[] => [...new Set(tab.views.values())];
+
+  const pageAgentOf = (tab: Tab, agentId: string | null): PageAgent => {
+    const key = keyOf(agentId);
+    let agent = tab.agents.get(key);
+    if (!agent) {
+      agent = { lastRunId: undefined };
+      tab.agents.set(key, agent);
+    }
+    return agent;
+  };
+
+  /** The page shows the Thread in its agent's chat: CopilotKit's registerOpenThread for the chat's first Thread in the
+   * page, its registration's update when the chat moves to another. Says how LearningBridge links it: "open" for a
+   * chat's first Thread, "switch" for a later one, null when that changes nothing or the Thread is open in another
+   * chat. */
+  const showThread = (
+    tab: Tab,
+    thread: Thread,
+    at: number,
+  ): "open" | "switch" | null => {
+    const key = keyOf(thread.agentId);
+    const previous = tab.views.get(key);
+    if (previous === thread.threadId) return null;
+    const elsewhere = openIds(tab).includes(thread.threadId);
+    tab.views.set(key, thread.threadId);
+    if (previous !== undefined && !openIds(tab).includes(previous)) {
+      tab.left.push({ threadId: previous, at });
+      if (tab.left.length > MAX_RUNS_KEPT) tab.left.shift();
+    }
+    if (elsewhere) return null;
+    return previous === undefined ? "open" : "switch";
   };
 
   /** The Thread an agent id and Thread id name in a tab; a stream that names no agent takes the tab's Thread of that id. */
@@ -311,6 +362,7 @@ export function createAgentEvents(options: {
           invalid: () => drop(tab, "agent-refused"),
         },
         expressedOf(threadId),
+        pageAgentOf(tab, agentId),
       ),
       chain: Promise.resolve(),
       open: null,
@@ -345,15 +397,17 @@ export function createAgentEvents(options: {
     return stream;
   };
 
-  /** LearningBridge.emitThreadLinked for the Thread the page now talks to its agent about: nothing when it is the Thread
-   * linked last in the page. Decided in the order the page's traffic came; the function it returns sends the link from
-   * inside the Thread's step, so it leaves before the Thread's events that follow. */
+  /** LearningBridge.emitThreadLinked for the Thread the page now talks to its agent about: nothing when its chat already
+   * shows it, or it is the Thread linked last in the page. Decided in the order the page's traffic came; the function
+   * it returns sends the link from inside the Thread's step, so it leaves before the Thread's events that follow. */
   const linkThread = (
     tabId: number,
     tab: Tab,
     thread: Thread,
+    at: number,
   ): ((hasMessages: boolean, at: number) => void) => {
-    if (tab.lastLinked === thread.threadId) return () => {};
+    const reason = showThread(tab, thread, at);
+    if (reason === null || tab.lastLinked === thread.threadId) return () => {};
     tab.lastLinked = thread.threadId;
     return (hasMessages, at) => {
       if (thread.born !== recording) return;
@@ -365,7 +419,7 @@ export function createAgentEvents(options: {
             threadId: thread.threadId,
             agentId: thread.agentId,
             hasMessages,
-            reason: "open",
+            reason,
           },
           at,
           options.digests(),
@@ -454,7 +508,7 @@ export function createAgentEvents(options: {
     const page = thread.pending;
     thread.pending = null;
     // A run no request of the page's showed (a channel joined on its own): its Thread shows itself here.
-    const link = page ? null : linkThread(tabId, tab, thread);
+    const link = page ? null : linkThread(tabId, tab, thread, first.at);
     const started = first.event as BaseEvent & {
       runId?: string;
       input?: unknown;
@@ -464,7 +518,6 @@ export function createAgentEvents(options: {
     if (runId !== undefined) runsOf(thread.threadId).add(runId);
     thread.open = run;
     stream.run = run;
-    openThread(tab, thread.threadId);
     const input =
       page?.input ??
       readInput(started.input) ??
@@ -516,8 +569,7 @@ export function createAgentEvents(options: {
     }
     const thread = threadOf(tabId, tab, request.agentId, input.threadId);
     stream.thread = thread;
-    openThread(tab, input.threadId);
-    const link = linkThread(tabId, tab, thread);
+    const link = linkThread(tabId, tab, thread, request.at);
     if (request.method !== "agent/run") {
       step(tab, thread, () => link(input.messages.length > 0, request.at));
       return;
@@ -559,7 +611,10 @@ export function createAgentEvents(options: {
       (event.runId !== undefined && runsOf(threadId).has(event.runId)) ||
       (id !== null && recordedEvents.has(id));
     if (replayed) {
-      openThread(tab, threadId);
+      showThread(tab, thread, fed.at);
+      // The page's agent applies the replay, so the run it saw last is this one, though the recording has it already.
+      if (event.runId !== undefined)
+        pageAgentOf(tab, thread.agentId).lastRunId = event.runId;
       drop(tab, "agent-replayed");
       // A run cut short whose replay names each event can carry on: its recorded events are skipped one by one.
       if (
@@ -692,12 +747,31 @@ export function createAgentEvents(options: {
         };
       }
     }
-    if (tab.open.length > 1)
+    const open = openIds(tab);
+    if (open.length > 1)
       return {
         threadId: null,
-        threadAmbiguity: { reason: "multiple-open", candidates: [...tab.open] },
+        threadAmbiguity: { reason: "multiple-open", candidates: open },
       };
-    return { threadId: tab.open[0] ?? null };
+    return { threadId: open[0] ?? null };
+  };
+
+  /** A click with the open-Thread context (no message of its own, no ambiguity) in a tab whose page runs CopilotKit. */
+  const openContextOf = (
+    tabId: number,
+    click: CapturedEvent,
+  ): { tab: Tab; value: Record<string, unknown> } | null => {
+    const value = click.value;
+    const tab = tabs.get(tabId);
+    if (
+      !tab?.traffic ||
+      !isRecord(value) ||
+      !Object.hasOwn(value, "threadId") ||
+      value.messageId !== undefined ||
+      value.threadAmbiguity !== undefined
+    )
+      return null;
+    return { tab, value };
   };
 
   return {
@@ -728,20 +802,36 @@ export function createAgentEvents(options: {
         value: { ...rest, ...clickContext(tab, readTarget(target)) },
       };
     },
-    settleClick(tabId, click, owns) {
-      const value = click.value;
-      if (!isRecord(value) || typeof value.threadId === "string") return click;
-      if (value.threadAmbiguity !== undefined) return click;
-      const run = tabs.get(tabId)?.runs.find(({ at }) => owns(at));
-      return run
-        ? { ...click, value: { ...value, threadId: run.threadId } }
-        : click;
+    settleClick(tabId, click, joins) {
+      const context = openContextOf(tabId, click);
+      if (!context) return click;
+      const { tab, value } = context;
+      // The run the click sent: a run goes out on its chat's open Thread, so that is the Thread the click was made in.
+      const run = tab.runs.find(({ at }) => joins(at));
+      if (run)
+        return run.threadId === value.threadId
+          ? click
+          : { ...click, value: { ...value, threadId: run.threadId } };
+      // The page showed the click's chat on another Thread after the click, by no doing of the click's: the chat may
+      // have left the click's Thread at any moment since that Thread's own traffic (a New thread button calls nothing),
+      // so which Thread the click was made in is not known, and a stale one is never given.
+      const left = tab.left.some(
+        ({ threadId, at }) =>
+          threadId === value.threadId && at >= click.timestamp && !joins(at),
+      );
+      return left ? { ...click, value: { ...value, threadId: null } } : click;
+    },
+    awaitsRun(tabId, click, joins) {
+      const context = openContextOf(tabId, click);
+      return context !== null && !context.tab.runs.some(({ at }) => joins(at));
     },
     tabNavigated(tabId) {
       const tab = tabs.get(tabId);
       if (!tab) return;
-      tab.open = [];
+      // A new document: its chats open their Threads anew, and CopilotKit's agents in it have run nothing yet.
+      tab.views.clear();
       tab.lastLinked = null;
+      for (const agent of tab.agents.values()) agent.lastRunId = undefined;
       for (const thread of tab.threads.values()) thread.agent.pageGone();
       reportDrops(tabId, tab);
     },

@@ -6,7 +6,9 @@
 // A step is held until its window closes (or the next step in its tab starts) and every call it may own has arrived,
 // then sent with its request in place; steps leave in the order they came. An event that is not a step (the agent's
 // side, agent/events.ts) is placed among them by its time: it leaves after every step that came before it and before
-// every later one, so the order Intelligence numbers them in is the order they happened.
+// every later one, so the order Intelligence numbers them in is the order they happened. A step whose `settle` still
+// awaits what the page may start for it (a Send's run, after a call of the page's own) is held for its join: until that
+// comes, the person's next step begins, or `horizonMs` + `settleMs` pass, as long as a step nothing follows is held.
 //
 // Which calls a step owns is drawn in time, per tab, since Chrome gives no reliable link from a call to the input that
 // caused it: a call is the latest step's when it starts no earlier than `leadMs` before that step (a handler can run on
@@ -409,13 +411,20 @@ export type StepAssembler = ReturnType<typeof createStepAssembler>;
 
 export function createStepAssembler(options: {
   emit(event: CapturedEvent): void;
-  /** A step of the person's as it leaves, with what was seen while it was held: `owns` says whether something the page
-   * started at a time is the step's, by the rule its calls follow (a click's run, the agent events' `settleClick`). */
+  /** A step of the person's as it leaves, with what was seen while it was held: `joins` says whether something the page
+   * started at a time is the step's doing, by its join (a click's run, the agent events' `settleClick`). */
   settle?(
     tabId: number,
     event: CapturedEvent,
-    owns: (at: number) => boolean,
+    joins: (at: number) => boolean,
   ): CapturedEvent;
+  /** Whether a step still waits for something the page may yet start in its join (a click's run, the agent events'
+   * `awaitsRun`): it is held until that comes or its join closes. */
+  awaits?(
+    tabId: number,
+    event: CapturedEvent,
+    joins: (at: number) => boolean,
+  ): boolean;
   /** The tab's top page (masked), for a page change and a step from an iframe. */
   pageOf?(tabId: number): Promise<{ url: string; title?: string } | null>;
   /** Something it holds changed (a step came or left, a call arrived, the phrase being spoken changed): `snapshot`
@@ -459,6 +468,43 @@ export function createStepAssembler(options: {
     return step.closeAt + tune.settleMs;
   }
 
+  /** How long after a step the page may still start what the step did: a Send whose page makes a call of its own before
+   * it runs the message (OpenBot's composer routes it first: 2.06 s in the end-to-end run, its run 2.18 s after the
+   * click). No longer than the steps already hold a step nothing follows (`horizonMs` + `settleMs`), so waiting for it
+   * never holds the recording longer than that. */
+  const joinMs = tune.horizonMs + tune.settleMs;
+
+  /** The person's steps in the step's tab after it, in order; the step may have left the queue already. */
+  const followers = (step: Pending): Pending[] => {
+    const index = queue.indexOf(step);
+    return (index === -1 ? queue : queue.slice(index + 1)).filter(
+      (other) => other.owner && other.tabId === step.tabId,
+    );
+  };
+
+  /** When the step's join closes: `joinMs` after it, or as the person's next step in its tab begins (less the lead a
+   * call may have on a step), a click's form submit being the click's own doing. */
+  function joinEnd(step: Pending): number {
+    const later = followers(step);
+    const next = submitOf(step) ? later[1] : later[0];
+    return Math.min(
+      step.at + joinMs,
+      next === undefined ? Number.POSITIVE_INFINITY : next.at - tune.leadMs,
+    );
+  }
+
+  /** Whether something the page started at a time falls in the step's join: from the step until its join closes. */
+  const joinsOf = (step: Pending): ((at: number) => boolean) => {
+    const end = joinEnd(step);
+    return (at) => at >= step.at && at < end;
+  };
+
+  /** Whether the step is still held for something the page may yet start in its join, which has not come. */
+  const awaiting = (step: Pending, at: number): boolean =>
+    options.awaits !== undefined &&
+    at < joinEnd(step) &&
+    options.awaits(step.tabId, step.event, joinsOf(step));
+
   function isReady(step: Pending, at: number): boolean {
     if (step.placed) return true;
     // A page change is ready once its page was looked up, `redirectMs` after its chain's last page change.
@@ -474,7 +520,7 @@ export function createStepAssembler(options: {
         flight.startedAt < step.closeAt
       )
         return false;
-    return true;
+    return !awaiting(step, at);
   }
 
   function schedule(step: Pending): void {
@@ -522,12 +568,10 @@ export function createStepAssembler(options: {
     return carrying ?? first;
   }
 
-  /** The submit a click (already off the queue) made of its form, which follows it at once and so closes its span. */
+  /** The submit a click made of its form, which follows it at once and so closes its span. */
   function submitOf(step: Pending): Pending | undefined {
     if (step.event.name !== "click") return undefined;
-    const next = queue.find(
-      (other) => other.owner && other.tabId === step.tabId,
-    );
+    const [next] = followers(step);
     return next?.event.name === "submit" &&
       next.at >= step.at &&
       next.at - step.at <= SUBMITTED_MS
@@ -538,20 +582,11 @@ export function createStepAssembler(options: {
   /** The step's event as it is sent: its page filled in, its save attached, cut to fit one Intelligence event. */
   function finish(step: Pending): CapturedEvent {
     if (step.placed) return step.event;
-    // A click's form submit is the click's doing: what the submit started, the click started (for `settle` only; a save
-    // in the submit's span stays the submit's).
-    const submit = submitOf(step);
+    // A click's form submit is the click's doing, so the click's join runs past it (for `settle` only; a save in the
+    // submit's span stays the submit's).
     const event =
       step.owner && options.settle
-        ? options.settle(
-            step.tabId,
-            step.event,
-            // What the step started itself, as its own calls (depth 0): in its span and within `windowMs` of it.
-            (at) =>
-              (inSpan(step, at) ||
-                (submit !== undefined && inSpan(submit, at))) &&
-              at - step.at <= tune.windowMs,
-          )
+        ? options.settle(step.tabId, step.event, joinsOf(step))
         : step.event;
     const value: Record<string, unknown> = { ...stepValue(event) };
     if (step.page && !isObject(value.page)) value.page = step.page;
@@ -590,13 +625,15 @@ export function createStepAssembler(options: {
       if (!isReady(head, at)) {
         if (head.owner && !head.waitingForPage) {
           if (head.timer !== undefined) timers.clear(head.timer);
-          // A timer may fire a moment early: it is set again for the rest. Past its time, a save in flight holds it
-          // until that save ends or its cap is reached.
+          // A timer may fire a moment early: it is set again for the rest. Past its time, what it awaits in its join holds
+          // it until that comes or the join closes, and a save in flight until that save ends or its cap is reached.
           head.timer = timers.set(
             pump,
             at < readyAt(head)
               ? readyAt(head) - at
-              : Math.max(0, head.closeAt + tune.inflightCapMs - at),
+              : awaiting(head, at)
+                ? joinEnd(head) - at
+                : Math.max(0, head.closeAt + tune.inflightCapMs - at),
           );
         }
         break;
@@ -706,7 +743,8 @@ export function createStepAssembler(options: {
       queue.push(step);
       if (fromFrame) fetchPage(step);
       if (step.owner) schedule(step);
-      else pump();
+      // The person's next step closes the join a step before it may still be held for.
+      pump();
       changed();
     },
 

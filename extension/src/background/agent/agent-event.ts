@@ -5,7 +5,10 @@
 // `agent.message` (its text) beside a `TOOL_CALL_RESULT` that names the call it answers; consecutive STATE_DELTAs (and
 // ACTIVITY_DELTAs of one activity) with nothing between them are one, their JSON Patch operations concatenated, which
 // applies exactly as the parts did. History in a RUN_STARTED's `input` or a MESSAGES_SNAPSHOT keeps only what no event
-// carried before: a message already carried is its id and role.
+// carried before: a message already carried is its id and role. A frontend tool's result, which the page puts into the
+// history itself and CopilotKit announces nowhere, is carried there, in the next run's `input`, once. A RUN_STARTED's
+// `tools` and `context` (the page's whole tool list and context, the same in every run of most pages) are carried when
+// they differ from what the Thread's runs carried before.
 import type { BaseEvent, Message } from "@ag-ui/client";
 
 /** An AG-UI event as `agent.event` carries it. */
@@ -13,15 +16,18 @@ export type AgentEventPayload = { type: string; [field: string]: unknown };
 
 /** What a Thread's events have already carried, so nothing is carried twice; shared by every tab's agent for the Thread.
  * A message maps to the text its `agent.message` carried (null when it carried none); a tool call to its name and the
- * arguments its `TOOL_CALL_ARGS` carried. */
+ * arguments its `TOOL_CALL_ARGS` carried; `setup` to the JSON of the `tools` and of the `context` a RUN_STARTED of the
+ * Thread carried last. */
 export type Expressed = {
   messages: Map<string, string | null>;
   toolCalls: Map<string, { name: string; arguments: string | null }>;
+  setup: Map<"tools" | "context", string>;
 };
 
 export const createExpressed = (): Expressed => ({
   messages: new Map(),
   toolCalls: new Map(),
+  setup: new Map(),
 });
 
 /**
@@ -180,10 +186,17 @@ export function createAgentEventBuilder(expressed: Expressed) {
         });
   };
 
-  /** A RUN_STARTED's `input` without its ids (they are the run's) and with only the history no event carried. */
+  /** A RUN_STARTED's `input` without its ids (they are the run's), with its `tools` and `context` only when they changed
+   * from what the Thread's runs carried, and with only the history no event carried. */
   const reduceInput = (input: unknown): unknown => {
     if (!isRecord(input)) return input;
     const { threadId: _thread, runId: _run, messages, ...rest } = input;
+    for (const field of ["tools", "context"] as const) {
+      if (rest[field] === undefined) continue;
+      const json = JSON.stringify(rest[field]);
+      if (expressed.setup.get(field) === json) delete rest[field];
+      else expressed.setup.set(field, json);
+    }
     if (!Array.isArray(messages)) return rest;
     const fresh = (messages as Message[])
       .map((message) => ({ original: message, ...reduceMessage(message) }))

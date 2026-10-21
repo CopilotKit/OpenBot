@@ -111,6 +111,77 @@ const flattened = (event: CapturedEvent): CapturedEvent => {
 const isMinimal = (event: CapturedEvent): boolean =>
   isRecord(event.value) && event.value.trimmed === true;
 
+/** Cuts at a code unit count without leaving the first half of a surrogate pair at the end. */
+const cutText = (text: string, length: number): string =>
+  text.slice(
+    0,
+    length > 0 &&
+      text.charCodeAt(length - 1) >= 0xd800 &&
+      text.charCodeAt(length - 1) <= 0xdbff
+      ? length - 1
+      : length,
+  );
+
+/** Every string under a value that is not one of the KEPT_WHOLE fields, with where it sits so it can be cut in place. */
+const cuttable = (
+  value: JsonValue,
+  out: { holder: Record_ | JsonValue[]; key: string | number; text: string }[],
+  field: string | null,
+): void => {
+  const visit = (
+    holder: Record_ | JsonValue[],
+    key: string | number,
+    item: JsonValue,
+    itemField: string | null,
+  ) => {
+    if (typeof item === "string") {
+      if (itemField === null || !KEPT_WHOLE.has(itemField))
+        out.push({ holder, key, text: item });
+    } else cuttable(item, out, itemField);
+  };
+  if (Array.isArray(value))
+    for (const [index, item] of value.entries())
+      visit(value, index, item, field);
+  else if (isRecord(value))
+    for (const [key, item] of Object.entries(value))
+      visit(value, key, item, key);
+};
+
+/** A RUN_STARTED over budget has the page's setup in its `input` (its tools' descriptions and schemas, its context) cut
+ * first, to the longest one length that fits, so the conversation it carries (the person's messages, a frontend tool's
+ * result, which nothing else carries) stays whole when cutting the setup is enough. */
+const cutSetup = (event: CapturedEvent): CapturedEvent => {
+  const value = event.value as Record_;
+  const payload = isRecord(value.event) ? value.event : null;
+  if (payload?.type !== "RUN_STARTED" || !isRecord(payload.input)) return event;
+  const copy = structuredClone(event);
+  const input = ((copy.value as Record_).event as Record_).input as Record_;
+  const leaves: Parameters<typeof cuttable>[1] = [];
+  for (const field of ["tools", "context"])
+    if (input[field] !== undefined)
+      cuttable(input[field] as JsonValue, leaves, field);
+  if (leaves.length === 0) return event;
+  const capAt = (length: number) => {
+    for (const { holder, key, text } of leaves)
+      (holder as Record<string | number, JsonValue>)[key] =
+        text.length > length ? cutText(text, length) : text;
+  };
+  let fits = 0;
+  let low = 0;
+  let high = Math.max(...leaves.map(({ text }) => text.length)) - 1;
+  while (low <= high) {
+    const length = Math.floor((low + high) / 2);
+    capAt(length);
+    if (bytes(copy) <= EVENT_BUDGET_BYTES) {
+      fits = length;
+      low = length + 1;
+    } else high = length - 1;
+  }
+  capAt(fits);
+  (copy.value as Record_).truncated = true;
+  return copy;
+};
+
 /** What survives of an event nothing could make fit: its ids, and that it was cut. */
 const skeleton = (event: CapturedEvent): CapturedEvent => {
   const value = event.value as Record_;
@@ -146,8 +217,9 @@ export function finishAgentEvent(
   };
   if (bytes(event) <= EVENT_BUDGET_BYTES) return event;
   const fit = { strings: true, keep: KEPT_WHOLE };
-  let fitted = trimEvent(event, EVENT_BUDGET_BYTES, fit).event;
+  const setupCut = name === "agent.event" ? cutSetup(event) : event;
+  let fitted = trimEvent(setupCut, EVENT_BUDGET_BYTES, fit).event;
   if (isMinimal(fitted) && name === "agent.event")
-    fitted = trimEvent(flattened(event), EVENT_BUDGET_BYTES, fit).event;
+    fitted = trimEvent(flattened(setupCut), EVENT_BUDGET_BYTES, fit).event;
   return isMinimal(fitted) ? skeleton(event) : fitted;
 }
