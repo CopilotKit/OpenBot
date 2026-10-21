@@ -207,6 +207,24 @@ function RouteComponent() {
   }
 
   /*
+   * A COMPOSIO APP ON A DEPLOYMENT WITH NO COMPOSIO KEY, BEFORE EITHER BRANCH BELOW DRAWS A ROW.
+   *
+   * The list on the way in no longer offers one, but a link from elsewhere still lands here, and the
+   * brokered row's own sentence for this case names an environment variable — an instruction for
+   * whoever runs the deployment, read by somebody who cannot act on it.
+   */
+  if (server?.provenance === "composio" && !plugins.data.composioConfigured) {
+    return (
+      <PageShell backButton={back} title={server.title}>
+        <PageEmpty>
+          {server.title} is not available on this OpenBot yet. An administrator
+          has to finish setting it up before anybody can connect it.
+        </PageEmpty>
+      </PageShell>
+    );
+  }
+
+  /*
    * A SHARED APP, BEFORE THE BROKERED BRANCH BELOW GETS A LOOK AT IT.
    *
    * `brokered` above already reads false for one of these — `brokeredFor` is what pulls a Shared
