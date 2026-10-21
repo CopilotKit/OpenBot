@@ -1,6 +1,7 @@
 // server/tests/app-access-routes.integration.test.ts
 import {
   afterAll,
+  afterEach,
   beforeAll,
   beforeEach,
   describe,
@@ -27,7 +28,7 @@ import {
   users,
 } from "../src/db/schema";
 import type { AppAccess } from "../src/plugins/app-access";
-import type { BrokerApp, ConnectedAppBroker } from "../src/plugins/broker";
+import type { BrokerApp } from "../src/plugins/broker";
 import type { AppAccessRequestRecord } from "../src/plugins/plugin-store/app-access";
 import { createPluginRoutes } from "../src/plugins/routes";
 import { createSharedUseStore } from "../src/plugins/shared-use-store";
@@ -37,6 +38,7 @@ import {
   type ServerRecord,
 } from "../src/plugins/store";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { stubBroker } from "./support/stub-broker";
 
 /**
  * What a work app is for one person on one Bot, the requests they file when only an administrator
@@ -100,7 +102,16 @@ const directory: BrokerApp[] = [
   },
 ];
 
-const broker: ConnectedAppBroker = {
+/**
+ * The broker, built by `stubBroker`: every member this file does not provide THROWS AND RECORDS,
+ * and the check after each test reads the record, so a path that reaches past what is provided is
+ * a red even where production catches the throw. Nothing here undoes one account, so
+ * `revokeAccount` is not provided rather than stubbed to answer "done" for a revoke that never ran.
+ */
+const stub = stubBroker({
+  // Composio's own declarations: the grant is held here, and there is no authorization flow.
+  grantIsLocal: true,
+  authorizations: null,
   listApps: async () => directory,
   ensureAuthConfig: async () => "created",
   deleteAuthConfig: async () => {},
@@ -109,9 +120,12 @@ const broker: ConnectedAppBroker = {
   revoke: async () => true,
   connectionFields: async () => [],
   connectWithFields: async () => ({ accountId: "ca_1" }),
-  revokeAccount: async () => {},
   accountName: async () => "team",
-};
+});
+const broker = stub.broker;
+afterEach(() => {
+  stub.expectNothingUnprovidedReached();
+});
 
 const enabled: string[] = [];
 
@@ -176,9 +190,7 @@ function appAs(
       // Everybody may use the suite's Bot; nobody but an administrator may use the hidden one.
       async (actor, agentId) => agentId !== hidden || actor.role === "admin",
       undefined,
-      options.composio === false
-        ? undefined
-        : { broker, provider: "composio" },
+      options.composio === false ? undefined : { broker, provider: "composio" },
       { modes: {} as never, use: sharedUse },
     ),
   );
@@ -315,7 +327,7 @@ describe("what each app a Bot holds is, for the person asking", () => {
       app: slug("linear"),
       holder: "person",
       userId: person,
-      vendorUserId: person,
+      vendorUserId: `vendor-${person}`,
       verified: false,
       probeAction: "LINEAR_LIST",
     });
@@ -370,7 +382,7 @@ describe("what each app a Bot holds is, for the person asking", () => {
       app: slug("gmail"),
       holder: "person",
       userId: other,
-      vendorUserId: other,
+      vendorUserId: `vendor-${other}`,
       verified: true,
       connectedAt: new Date("2026-10-20T12:00:00.000Z"),
     });
