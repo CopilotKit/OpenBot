@@ -1237,6 +1237,7 @@ test("leftover database recovery requires confirmation and keeps setup ready to 
       throw {
         said: "A previous OpenBot database remains without its encryption key.",
         database_reset: "fixture_postgres-data",
+        leftover_reset: ["fixture_postgres-data"],
       };
     if (command === "reset_leftover_database") return reset.promise;
     return previous(command, args);
@@ -1253,6 +1254,7 @@ test("leftover database recovery requires confirmation and keeps setup ready to 
     await view.findByRole("button", { name: "Reset leftover database" }),
   );
   expect(view.getByText(/permanently deletes/)).toBeTruthy();
+  expect(view.getByText("fixture_postgres-data")).toBeTruthy();
   expect(resets()).toHaveLength(0);
   await userEvent.click(view.getByRole("button", { name: "Keep saved data" }));
   expect(resets()).toHaveLength(0);
@@ -1268,7 +1270,8 @@ test("leftover database recovery requires confirmation and keeps setup ready to 
       command: "reset_leftover_database",
       args: {
         root: "/tmp/openbot-app-test",
-        volume: "fixture_postgres-data",
+        volumes: ["fixture_postgres-data"],
+        containers: [],
         confirmed: true,
       },
     },
@@ -1289,6 +1292,61 @@ test("leftover database recovery requires confirmation and keeps setup ready to 
   await userEvent.click(view.getByRole("button", { name: "Start OpenBot" }));
   await view.findByRole("button", { name: "Ask" });
   expect(installationCalls()).toHaveLength(1);
+});
+
+test("leftover data recovery names every container and volume and removes only that list", async () => {
+  useCompatibleEndpointSetup({});
+  const previous = invokeHandler;
+  const volumes = [
+    "openbot-profile-general-assistant",
+    "openbot-workspace-general-assistant",
+    "openbot_agent-profiles",
+  ];
+  const containers = [
+    "openbot-agent-computer-1",
+    "openbot-computer-general-assistant",
+  ];
+  invokeHandler = async (command, args) => {
+    if (command === "start_stack")
+      throw {
+        said: "OpenBot found data from a previous installation.",
+        leftover_reset: volumes,
+        leftover_containers: containers,
+      };
+    if (command === "reset_leftover_database") return null;
+    return previous(command, args);
+  };
+  const view = await enterCompatibleEndpoint(
+    "https://model.example/v1",
+    "synthetic-key",
+  );
+  await userEvent.click(view.getByRole("button", { name: "Continue" }));
+  await userEvent.click(view.getByRole("button", { name: "Start OpenBot" }));
+  await userEvent.click(
+    await view.findByRole("button", { name: "Reset leftover data" }),
+  );
+  expect(view.queryByText(/local OpenBot database/)).toBeNull();
+  expect(view.getByText(/browser sign-ins/)).toBeTruthy();
+  for (const volume of volumes) expect(view.getByText(volume)).toBeTruthy();
+  expect(view.getByText(/stopped containers/)).toBeTruthy();
+  for (const container of containers)
+    expect(view.getByText(container)).toBeTruthy();
+  await userEvent.click(
+    view.getByRole("button", { name: "Delete saved data" }),
+  );
+  expect(
+    invokeCalls.filter((call) => call.command === "reset_leftover_database"),
+  ).toEqual([
+    {
+      command: "reset_leftover_database",
+      args: {
+        root: "/tmp/openbot-app-test",
+        volumes,
+        containers,
+        confirmed: true,
+      },
+    },
+  ]);
 });
 
 test("database recovery failure is shown without restarting services", async () => {

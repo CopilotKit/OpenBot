@@ -32,6 +32,15 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `code_required` (below). A server and a computer must be upgraded together: an older computer has
   no `/sign-in/code`.
 
+### A reinstall no longer picks up the previous installation's Bot files and sign-ins
+
+A desktop installation set up again after its folder was deleted reused whatever the previous one
+left in the container engine: Bot workspace files, and each Bot's browser profile with its website
+sign-ins, under the same Bot ids. Only the database was checked. Start now lists every volume and
+stopped container the previous installation left, and offers one confirmed reset that removes them;
+nothing is reused without asking. A container from it that is still running stops the reset until it
+is stopped. An installation with its saved key keeps its data as before.
+
 ### A new desktop install starts its server again
 
 A desktop install of v0.2.0 stopped at start with `server stopped straight away (exit status: 1)` and

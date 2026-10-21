@@ -296,6 +296,13 @@ export function App() {
     if (problem.connection === "organization") setRefreshOrganization(true);
   }, []);
   const displayedFailure = failure ?? recoveryFailure;
+  // An older shell offered only the database. The list is exactly what a reset may remove.
+  const leftoverVolumes = displayedFailure?.leftover_reset?.length
+    ? displayedFailure.leftover_reset
+    : displayedFailure?.database_reset
+      ? [displayedFailure.database_reset]
+      : [];
+  const leftoverContainers = displayedFailure?.leftover_containers ?? [];
   const credentialContext = useRef([
     root,
     model,
@@ -602,12 +609,13 @@ export function App() {
     }
   }
 
-  async function resetLeftoverDatabase(volume: string) {
+  async function resetLeftoverData(volumes: string[], containers: string[]) {
     setBusy(true);
     try {
       await invoke("reset_leftover_database", {
         root: root.trim(),
-        volume,
+        volumes,
+        containers,
         confirmed: true,
       });
       setFailure(null);
@@ -982,12 +990,14 @@ export function App() {
         {/* A failure outranks `running`. The supervisor gives up on a process and sends the window
           back here, and a heading that still says everything is running while the box underneath
           names the process that stopped is a screen arguing with itself. */}
-        {!running && displayedFailure?.database_reset && (
+        {!running && leftoverVolumes.length > 0 && (
           <DatabaseReset
-            key={`${root}:${displayedFailure.database_reset}`}
+            key={`${root}:${leftoverVolumes.join(",")}:${leftoverContainers.join(",")}`}
             busy={busy}
-            volume={displayedFailure.database_reset}
-            onReset={resetLeftoverDatabase}
+            containers={leftoverContainers}
+            database={Boolean(displayedFailure?.database_reset)}
+            volumes={leftoverVolumes}
+            onReset={resetLeftoverData}
           />
         )}
 

@@ -13,6 +13,10 @@ export type Problem = {
   detail?: string | null;
   connection?: "model" | "intelligence" | "organization" | null;
   database_reset?: string | null;
+  /** Every volume a confirmed fresh-install reset removes, the database included. */
+  leftover_reset?: string[] | null;
+  /** Stopped containers that still hold those volumes, removed first by the same reset. */
+  leftover_containers?: string[] | null;
 };
 
 /** Anything thrown, as a problem. A bare string keeps working and reads as it always did. */
