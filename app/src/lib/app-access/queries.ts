@@ -34,7 +34,7 @@ export type AppAccessState =
 
 /**
  * Why an app is switched off. `absent` — nobody switched it on here. `composio_unconfigured` — a
- * Composio app on a deployment with no Composio key. The other three — a scheme the server cannot
+ * brokered app (Composio or Arcade) on a deployment with no key for its broker. The other three — a scheme the server cannot
  * read, an OAuth client nobody registered, a token nobody pasted — are a set-up left unfinished.
  */
 export type AppUnavailable =
