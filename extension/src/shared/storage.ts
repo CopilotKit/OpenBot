@@ -44,8 +44,11 @@ export type DrainRecord = {
   kept?: KeptEvents;
   /** The steps its service worker still held when the browser quit (`heldSteps`), as they are sent: the document that
    * recovers it puts them in its outbox before the interrupted outcome, and says so (offscreen.held). */
-  held?: CapturedEvent[];
+  held?: HeldEvent[];
 };
+/** A held step as it is sent, with its key (steps.ts `Pending.key`): the document stores a key once, so a step that left
+ * before the browser quit, which the held steps in storage may still list, is never sent again. */
+export type HeldEvent = { event: CapturedEvent; key?: string };
 /** The steps the live recording's service worker holds (steps.ts), written as they change: a service worker that
  * restarts takes them up again, and after a browser quit they go with the recording's drain. The events are masked
  * already, as the outbox stores them. */
@@ -120,7 +123,7 @@ export function isDrainRecord(value: unknown): value is DrainRecord {
     (drain.discarding === undefined || typeof drain.discarding === "boolean") &&
     (drain.kept === undefined || isKeptEvents(drain.kept)) &&
     (drain.held === undefined ||
-      (Array.isArray(drain.held) && drain.held.every(isEvent)))
+      (Array.isArray(drain.held) && drain.held.every(isHeldEvent)))
   );
 }
 
@@ -132,6 +135,12 @@ function isEvent(value: unknown): value is CapturedEvent {
     isString(event.name) &&
     typeof event.timestamp === "number"
   );
+}
+
+function isHeldEvent(value: unknown): value is HeldEvent {
+  if (typeof value !== "object" || value === null) return false;
+  const held = value as Record<string, unknown>;
+  return isEvent(held.event) && (held.key === undefined || isString(held.key));
 }
 
 function isHeldSteps(value: unknown): value is HeldSteps {

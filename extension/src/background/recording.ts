@@ -46,6 +46,7 @@ import { narrationLanguage } from "../shared/speech-language";
 import {
   type ConnectionRecord,
   type DrainRecord,
+  type HeldEvent,
   type HeldSteps,
   type KeptEvents,
   readLocal,
@@ -176,15 +177,16 @@ const browserTimers: Timers = {
 /** Timers for an assembler that only takes up held steps to send them at once (a browser restart): none ever fires. */
 const NO_TIMERS: Timers = { set: () => null, clear: () => {} };
 
-/** The events a snapshot of held steps sends, in order, with what each owns: after a browser quit nothing more can
- * arrive for them. */
+/** The events a snapshot of held steps sends, in order, with what each owns and its key: after a browser quit nothing
+ * more can arrive for them. */
 export function heldEvents(
   snapshot: StepSnapshot,
   now: () => number,
-): CapturedEvent[] {
-  const events: CapturedEvent[] = [];
+): HeldEvent[] {
+  const events: HeldEvent[] = [];
   const assembler = createStepAssembler({
-    emit: (event) => events.push(event),
+    emit: (event, key) =>
+      events.push(key === undefined ? { event } : { event, key }),
     now,
     timers: NO_TIMERS,
   });
@@ -646,7 +648,7 @@ export function installRecording(
   let connectWaiters: ((port: chrome.runtime.Port) => void)[] = [];
   /** Set while a document is opened for a start or a recovery: events wait until its session message is posted. */
   let holdEvents = false;
-  const queued: { event: CapturedEvent; bytes: number }[] = [];
+  const queued: { event: CapturedEvent; key?: string; bytes: number }[] = [];
   let queuedBytes = 0;
   let droppedEvents = 0;
   const stopWaiters = new Map<string, () => void>();
@@ -727,11 +729,16 @@ export function installRecording(
     flushEvents();
   }
 
-  function forwardEvent(event: CapturedEvent): void {
+  /** `key`: a held step's (steps.ts), which the document stores once. */
+  function forwardEvent(event: CapturedEvent, key?: string): void {
+    const message: BackgroundToOffscreen =
+      key === undefined
+        ? { type: "offscreen.event", event }
+        : { type: "offscreen.event", event, key };
     if (offscreen && !holdEvents && queued.length === 0 && droppedEvents === 0)
-      if (postOffscreen({ type: "offscreen.event", event })) return;
+      if (postOffscreen(message)) return;
     const bytes = JSON.stringify(event).length;
-    queued.push({ event, bytes });
+    queued.push(key === undefined ? { event, bytes } : { event, key, bytes });
     queuedBytes += bytes;
     while (queued.length > QUEUE_EVENTS || queuedBytes > QUEUE_BYTES) {
       const oldest = queued.shift();
@@ -757,7 +764,11 @@ export function installRecording(
       const next = queued[0];
       if (
         !next ||
-        !postOffscreen({ type: "offscreen.event", event: next.event })
+        !postOffscreen(
+          next.key === undefined
+            ? { type: "offscreen.event", event: next.event }
+            : { type: "offscreen.event", event: next.event, key: next.key },
+        )
       )
         return;
       queued.shift();
@@ -1092,8 +1103,8 @@ export function installRecording(
     agentEvents?.stop();
     let paired: AgentEvents | null = null;
     const assembler = createStepAssembler({
-      emit: (event) => {
-        if (steps === assembler) forwardEvent(event);
+      emit: (event, key) => {
+        if (steps === assembler) forwardEvent(event, key);
       },
       // A click takes the Thread of the run it sent, seen while it was held: one with the open-Thread context is held
       // for its run as long as its join is open.
@@ -1408,7 +1419,7 @@ export function installRecording(
 
   async function moveIntoDrains(
     recordingId: string,
-    flags: { discarding?: boolean; held?: CapturedEvent[] } = {},
+    flags: { discarding?: boolean; held?: HeldEvent[] } = {},
   ): Promise<void> {
     const drains = await serially(async () => {
       const record = await readLocal("activeRecording");

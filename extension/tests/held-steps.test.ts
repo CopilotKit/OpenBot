@@ -55,6 +55,14 @@ const rows = fixture<{
 const narration = fixture<{ rows: CapturedEvent[] }>(
   "e2e-run1b-narration.json",
 ).rows;
+const quitRun = fixture<{
+  quitAt: number;
+  startedAt: number;
+  nameClick: CapturedEvent;
+  nameInput: CapturedEvent;
+  reasonClick: CapturedEvent;
+  reasonInput: CapturedEvent;
+}>("e2e-quit-duplicate.json");
 
 type Globals = { indexedDB?: IDBFactory; IDBKeyRange?: unknown };
 const globals = globalThis as unknown as Globals;
@@ -151,6 +159,21 @@ async function advanceTo(to: number) {
     clock = Math.max(clock, next.at);
     next.fn();
     await settle();
+  }
+  clock = Math.max(clock, to);
+  await settle();
+}
+
+/** Fires the live service worker's timers already due at `to`, in order, and none they set: the browser quits right
+ * after, before a timer set meanwhile (a 0 ms one too) gets its turn. */
+async function fireDueAt(to: number) {
+  const due = worker.due
+    .filter((timer) => timer.at <= to)
+    .sort((a, b) => a.at - b.at);
+  for (const timer of due) {
+    worker.due.splice(worker.due.indexOf(timer), 1);
+    clock = Math.max(clock, timer.at);
+    timer.fn();
   }
   clock = Math.max(clock, to);
   await settle();
@@ -578,4 +601,113 @@ test("Stop while a phrase is being said: the phrase goes in ahead of the steps t
   ]);
   const times = sent(trajectoryId).map((event) => event.timestamp);
   expect(times).toEqual([...times].sort((a, b) => a - b));
+}, 15_000);
+
+test("the browser quits 2 ms after the typed name left for Intelligence: the next start never sends it again, and sends the click and typing still held once", async () => {
+  // The final run's Edge restart (trajectory 88456df7): the name's window closed as the click on Reason began, so it left
+  // a second later, at 57.772, and reached Intelligence as the browser quit at 57.774. The held steps in storage still
+  // listed it, and the restarted browser sent it a second time, with the same timestamp.
+  const steps = [
+    quitRun.nameClick,
+    quitRun.nameInput,
+    quitRun.reasonClick,
+    quitRun.reasonInput,
+  ];
+  const trajectoryId = await record(
+    quitRun.startedAt,
+    "Edge restart: archive, start a refund, then the browser quits",
+  );
+  const port = contentPort();
+  // Each step reaches the service worker as the collector stamps it.
+  for (const step of steps) {
+    await advanceTo(step.timestamp);
+    port.postMessage({ type: "content.event", event: step });
+    await settle();
+  }
+  const leaves = quitRun.reasonClick.timestamp - 250 + 1_000; // its window closed 250 ms before the next step; then 1 s to settle
+  expect(leaves).toBe(quitRun.quitAt - 2);
+  await fireDueAt(leaves);
+  const typedName = () =>
+    sent(trajectoryId).filter(
+      (event) =>
+        event.name === "input" &&
+        (event.value as { target?: { value?: string } }).target?.value ===
+          "Rita Restart",
+    );
+  await until(() => typedName().length === 1, "the name in Intelligence");
+  expect(fake.storage.local.get("heldSteps")).toBeDefined();
+
+  clock = quitRun.quitAt;
+  await restartBrowser();
+  await until(() => drains().length === 0, "the recording sent and forgotten");
+  expect(names(trajectoryId)).toEqual([
+    "recording.started",
+    "outcome",
+    "navigation",
+    "click",
+    "input",
+    "click",
+    "input",
+    "outcome",
+  ]);
+  expect(typedName()).toHaveLength(1);
+  const events = sent(trajectoryId);
+  expect(
+    events.slice(3, 7).map((event) => [event.name, event.timestamp]),
+  ).toEqual(steps.map((step) => [step.name, step.timestamp]));
+  expect(events.at(-1)?.value).toMatchObject({
+    phase: "failed",
+    reason: "interrupted",
+  });
+  expect(fake.storage.local.get("heldSteps")).toBeUndefined();
+}, 15_000);
+
+test("Chrome stops the service worker 2 ms after the typed name left: the restarted worker sends the steps it still held once, and never the name again", async () => {
+  // The same moment as the Edge restart above, with Chrome stopping only the service worker: the restarted worker takes
+  // up the held steps storage still lists, the name among them.
+  const steps = [
+    quitRun.nameClick,
+    quitRun.nameInput,
+    quitRun.reasonClick,
+    quitRun.reasonInput,
+  ];
+  const trajectoryId = await record(
+    quitRun.startedAt,
+    "Edge restart: archive, start a refund, then the browser quits",
+  );
+  const port = contentPort();
+  for (const step of steps) {
+    await advanceTo(step.timestamp);
+    port.postMessage({ type: "content.event", event: step });
+    await settle();
+  }
+  await fireDueAt(quitRun.quitAt - 2);
+  const typedName = () =>
+    sent(trajectoryId).filter(
+      (event) =>
+        event.name === "input" &&
+        (event.value as { target?: { value?: string } }).target?.value ===
+          "Rita Restart",
+    );
+  await until(() => typedName().length === 1, "the name in Intelligence");
+
+  clock = quitRun.quitAt;
+  await restartWorker();
+  await advanceTo(quitRun.quitAt + 5_000);
+  expect(await page({ type: "page.stop" })).toEqual({ ok: true });
+  await until(
+    () => names(trajectoryId).filter((name) => name === "outcome").length === 2,
+    "the recording stopped",
+  );
+  expect(names(trajectoryId)).toEqual([
+    "recording.started",
+    "outcome",
+    "navigation",
+    "click",
+    "input",
+    "click",
+    "input",
+    "outcome",
+  ]);
+  expect(typedName()).toHaveLength(1);
 }, 15_000);

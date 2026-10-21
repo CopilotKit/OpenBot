@@ -29,8 +29,20 @@ export const TRAJECTORY_META_PREFIX = "trajectory:";
 export const trajectoryMetaKey = (trajectoryId: string) =>
   `${TRAJECTORY_META_PREFIX}${trajectoryId}`;
 
+/** Where the meta store notes that a trajectory took a held step (by its key, steps.ts `Pending.key`): kept until the
+ * trajectory's records go, so a step the service worker sends again after a restart or a quit is never stored twice. */
+const stepKeyPrefix = (trajectoryId: string) => `step:${trajectoryId}:`;
+const stepRange = (trajectoryId: string) =>
+  IDBKeyRange.bound(
+    stepKeyPrefix(trajectoryId),
+    `${stepKeyPrefix(trajectoryId)}\uffff`,
+  );
+
 export type Outbox = {
-  put(item: OutboxEvent): Promise<void>;
+  /** Stores the event; with `stepKey`, notes in the same transaction that its trajectory took that held step. */
+  put(item: OutboxEvent, stepKey?: string): Promise<void>;
+  /** Whether any of these trajectories took the held step with this key. */
+  hasStep(trajectoryIds: readonly string[], stepKey: string): Promise<boolean>;
   oldest(
     trajectoryId: string,
     maxEvents: number,
@@ -55,9 +67,26 @@ const trajectoryRange = (trajectoryId: string) =>
 export async function openOutbox(databaseName?: string): Promise<Outbox> {
   const db = await openRecorderDatabase(databaseName);
   return {
-    put: (item) =>
-      tx(db, ["events"], "readwrite", (t) => {
+    put: (item, stepKey) =>
+      tx(db, ["events", "meta"], "readwrite", (t) => {
         t.objectStore("events").add(item);
+        if (stepKey !== undefined)
+          t.objectStore("meta").put(
+            true,
+            `${stepKeyPrefix(item.trajectoryId)}${stepKey}`,
+          );
+      }),
+
+    hasStep: (trajectoryIds, stepKey) =>
+      tx(db, ["meta"], "readonly", async (t) => {
+        const meta = t.objectStore("meta");
+        for (const trajectoryId of trajectoryIds) {
+          const found = await requestToPromise(
+            meta.count(`${stepKeyPrefix(trajectoryId)}${stepKey}`),
+          );
+          if (found > 0) return true;
+        }
+        return false;
       }),
 
     oldest: (trajectoryId, maxEvents, maxBytes) =>
@@ -109,6 +138,7 @@ export async function openOutbox(databaseName?: string): Promise<Outbox> {
       tx(db, ["events", "meta"], "readwrite", (t) => {
         t.objectStore("events").delete(trajectoryRange(trajectoryId));
         t.objectStore("meta").delete(trajectoryMetaKey(trajectoryId));
+        t.objectStore("meta").delete(stepRange(trajectoryId));
       }),
 
     trajectories: () =>

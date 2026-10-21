@@ -43,6 +43,21 @@ const item = (trajectoryId: string, seq: number, bytes = 10): OutboxEvent => ({
 });
 
 describe("outbox", () => {
+  test("a held step's key is noted with its event and goes with its trajectory's records, never another's", async () => {
+    const outbox = await openOutbox(freshName());
+    await outbox.put(item("t1", 1), "step-a");
+    await outbox.put(item("t2", 2), "step-b");
+    // Taken, sent and removed from the outbox: the trajectory still remembers it took the step.
+    await outbox.remove("t1", [1]);
+    expect(await outbox.hasStep(["t1"], "step-a")).toBe(true);
+    expect(await outbox.hasStep(["t0", "t1"], "step-a")).toBe(true);
+    expect(await outbox.hasStep(["t2"], "step-a")).toBe(false);
+    expect(await outbox.trajectories()).toEqual(["t2"]);
+    await outbox.clear("t1");
+    expect(await outbox.hasStep(["t1"], "step-a")).toBe(false);
+    expect(await outbox.hasStep(["t2"], "step-b")).toBe(true);
+  });
+
   test("oldest returns events in seq order and respects the event limit", async () => {
     const outbox = await openOutbox(freshName());
     for (const seq of [3, 1, 2, 4]) await outbox.put(item("t1", seq));
