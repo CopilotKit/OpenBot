@@ -1309,6 +1309,125 @@ test("a button that names a one-time code keeps its label", () => {
   ).toBe("Verify");
 });
 
+test("a button, link, label or toggle that names a password keeps its text; the field it names loses its value", () => {
+  // The final end-to-end run's clicks as the content script described them (rows ...95033, ...68032 and ...68058), whose
+  // text reached Intelligence as [redacted], and the checkbox and label a show-password toggle is as often drawn with.
+  const click = (target: Record<string, unknown>, url: string) => ({
+    type: "CUSTOM" as const,
+    name: "click",
+    timestamp: 1,
+    value: { target, url } as JsonValue,
+  });
+  const named = [
+    click(
+      {
+        tag: "button",
+        name: "Retrieve password",
+        role: null,
+        text: "Retrieve password",
+        input: "pointer",
+        label: "Retrieve password",
+        action: null,
+        ariaRole: "button",
+        attributes: { id: "form_submit", type: "submit", class: "radius" },
+      },
+      "https://the-internet.herokuapp.com/forgot_password",
+    ),
+    click(
+      {
+        tag: "button",
+        name: "Show password",
+        role: null,
+        text: "Show password",
+        input: "pointer",
+        label: "Show password",
+        action: null,
+        ariaRole: "button",
+        attributes: {
+          id: "show-pw",
+          type: "button",
+          class: "ghost",
+          style: "margin-top:6px",
+        },
+      },
+      "http://127.0.0.1:7420/checkout?order=1043",
+    ),
+    click(
+      {
+        tag: "a",
+        name: "Reset password link",
+        role: null,
+        text: "Reset password link",
+        input: "pointer",
+        label: "Reset password link",
+        action: null,
+        ariaRole: "link",
+        attributes: {
+          id: "reset",
+          href: "/reset?token=[redacted]&email=admin%40cornershop.example",
+        },
+      },
+      "http://127.0.0.1:7420/account?welcome=1",
+    ),
+    click(
+      {
+        tag: "input",
+        text: "",
+        value: "on",
+        checked: true,
+        label: "Show password",
+        attributes: { id: "show-password", type: "checkbox" },
+      },
+      "https://x.test/sign-in",
+    ),
+    click(
+      {
+        tag: "label",
+        text: "Your admin password",
+        label: "Your admin password",
+        attributes: { for: "admin-password" },
+      },
+      "http://127.0.0.1:7420/checkout?order=1043",
+    ),
+  ];
+  for (const event of named) {
+    const typed: string[][] = [];
+    const masked = maskCollectorEvent(event, {
+      sensitive: false,
+      onSensitive: (values) => typed.push(values),
+    });
+    expect(masked).toEqual(event);
+    expect(typed).toEqual([]);
+  }
+  // The field itself, as a password and after Show password made it a text field, loses its value.
+  for (const type of ["password", "text"]) {
+    const field = click(
+      {
+        tag: "input",
+        name: "Your admin password",
+        text: "",
+        value: "Kestrel-Pw-58213!",
+        attributes: {
+          id: "admin-password",
+          name: "password",
+          type,
+          autocomplete: "current-password",
+          value: "Kestrel-Pw-58213!",
+        },
+      },
+      "http://127.0.0.1:7420/checkout?order=1043",
+    );
+    const target = at(
+      maskCollectorEvent(field, { sensitive: false }),
+      "target",
+    );
+    expect([target.value, target.attributes.value]).toEqual([
+      REDACTED,
+      REDACTED,
+    ]);
+  }
+});
+
 test("every attribute that echoes a sensitive field's value is redacted, for one-time code, password and card fields alike", () => {
   const echoes = (attributes: Record<string, string>, value: string) => {
     const event = {

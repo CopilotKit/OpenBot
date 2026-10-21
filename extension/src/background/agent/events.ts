@@ -18,6 +18,10 @@
 // recorded for the Thread, or an event already recorded (Intelligence's event id), is not recorded again; a replay of a
 // run cut short carries on where the recording left it. Runs CopilotKit makes for its suggestions are left out, as
 // CopilotKit's own capture leaves them out. Whatever is dropped is counted in `recorder.dropped`.
+//
+// What a click's context and the links depend on survives a service-worker restart (`snapshot`, kept with the held
+// steps, and `restore`): the page's open Threads, its run requests, the Thread linked last and each agent's last run.
+// The AG-UI streams and the Threads' conversations are taken up again from the page's next traffic.
 import type { Message, RunAgentInput } from "@ag-ui/client";
 import type { BaseEvent } from "@ag-ui/core";
 import type {
@@ -62,8 +66,26 @@ export type AgentEvents = {
   ): boolean;
   /** The tab's top frame reached another page: its open Threads close. */
   tabNavigated(tabId: number): void;
+  /** What a click's context and the links depend on, as JSON, for a service worker that restarts to take up again. */
+  snapshot(): AgentSnapshot;
+  /** Takes up what another service worker's agent events knew (their `snapshot`), before any traffic or click. */
+  restore(snapshot: AgentSnapshot): void;
   /** The recording ended: forget everything held. */
   stop(): void;
+};
+
+/** What the agent events know that a click's agent context and the Thread links depend on: per tab, that its page runs
+ * CopilotKit, the Thread each chat has open and the Threads it left, the Thread linked last, the latest run requests and
+ * each agent's last run; and the runs recorded per Thread, so a replay of one is never recorded again. Ids and times
+ * only, never a message. The AG-UI streams and the Threads' conversations are not kept: a service worker that restarts
+ * takes them up from the page's next traffic. */
+export type AgentSnapshot = {
+  tabs: (LinkState & {
+    tabId: number;
+    runs: { at: number; threadId: string }[];
+    lastRunIds: [string, string][];
+  })[];
+  recordedRuns: [string, string[]][];
 };
 
 /** How many of a tab's latest run requests (and Threads its chats left) are kept for the clicks still held in their
@@ -135,11 +157,22 @@ type Tab = {
   lastLinked: string | null;
   /** The page's latest run requests, when each was seen and for which Thread: a click's step window may hold one. */
   runs: { at: number; threadId: string }[];
+  /** Links decided whose `thread.linked` the Thread's steps have not emitted yet, oldest first, each with what the tab's
+   * Threads were before it: `snapshot` gives the Threads as they were before the oldest, so a service worker that
+   * restarts before a link is emitted makes it again, and never takes up a link that went nowhere. */
+  pendingLinks: { before: LinkState; done: boolean }[];
   /** CopilotKit's agent in the page, per agent id. */
   agents: Map<string, PageAgent>;
   streams: Map<string, Stream>;
   threads: Map<string, Thread>;
   drops: Map<string, number>;
+};
+
+/** A tab's open Threads, the Threads its chats left and the Thread linked last, as a snapshot keeps them. */
+type LinkState = {
+  views: [string, string][];
+  left: { threadId: string; at: number }[];
+  lastLinked: string | null;
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -228,6 +261,8 @@ export function createAgentEvents(options: {
   /** The recording's sensitive-value digests. */
   digests(): ReadonlySet<string>;
   now(): number;
+  /** What `snapshot` reads changed: called as each change is made. */
+  onChange?(): void;
 }): AgentEvents {
   const tabs = new Map<number, Tab>();
   /** Per Thread, across tabs: the runs recorded, and what has been carried. */
@@ -238,6 +273,22 @@ export function createAgentEvents(options: {
   /** Bumped when the recording stops: what the library still applies afterwards belongs to no recording and is not
    * emitted. */
   let recording = 0;
+  const changed = () => options.onChange?.();
+
+  /** CopilotKit's agent in a page: its last run id, which says when it changes. */
+  const pageAgent = (lastRunId: string | undefined): PageAgent => {
+    let current = lastRunId;
+    return {
+      get lastRunId() {
+        return current;
+      },
+      set lastRunId(next) {
+        if (next === current) return;
+        current = next;
+        changed();
+      },
+    };
+  };
 
   const tabOf = (tabId: number): Tab => {
     let tab = tabs.get(tabId);
@@ -248,6 +299,7 @@ export function createAgentEvents(options: {
         left: [],
         lastLinked: null,
         runs: [],
+        pendingLinks: [],
         agents: new Map(),
         streams: new Map(),
         threads: new Map(),
@@ -292,6 +344,12 @@ export function createAgentEvents(options: {
 
   const keyOf = (agentId: string | null) => JSON.stringify(agentId);
 
+  const linkStateOf = (tab: Tab): LinkState => ({
+    views: [...tab.views],
+    left: tab.left.map((entry) => ({ ...entry })),
+    lastLinked: tab.lastLinked,
+  });
+
   /** The Threads open in the tab, each once, in the order their chats opened (LearningBridge.distinctOpenThreadIds). */
   const openIds = (tab: Tab): string[] => [...new Set(tab.views.values())];
 
@@ -299,7 +357,7 @@ export function createAgentEvents(options: {
     const key = keyOf(agentId);
     let agent = tab.agents.get(key);
     if (!agent) {
-      agent = { lastRunId: undefined };
+      agent = pageAgent(undefined);
       tab.agents.set(key, agent);
     }
     return agent;
@@ -323,6 +381,7 @@ export function createAgentEvents(options: {
       tab.left.push({ threadId: previous, at });
       if (tab.left.length > MAX_RUNS_KEPT) tab.left.shift();
     }
+    changed();
     if (elsewhere) return null;
     return previous === undefined ? "open" : "switch";
   };
@@ -406,10 +465,18 @@ export function createAgentEvents(options: {
     thread: Thread,
     at: number,
   ): ((hasMessages: boolean, at: number) => void) => {
+    const before = linkStateOf(tab);
     const reason = showThread(tab, thread, at);
     if (reason === null || tab.lastLinked === thread.threadId) return () => {};
     tab.lastLinked = thread.threadId;
+    const pending = { before, done: false };
+    tab.pendingLinks.push(pending);
+    changed();
     return (hasMessages, at) => {
+      // The link is decided for good as it goes to the steps.
+      pending.done = true;
+      while (tab.pendingLinks[0]?.done) tab.pendingLinks.shift();
+      changed();
       if (thread.born !== recording) return;
       options.emit(
         tabId,
@@ -515,7 +582,10 @@ export function createAgentEvents(options: {
     };
     const runId = started.runId ?? page?.input.runId;
     const run: Run = { thread, runId, events: new ReplaySubject<FedEvent>() };
-    if (runId !== undefined) runsOf(thread.threadId).add(runId);
+    if (runId !== undefined && !runsOf(thread.threadId).has(runId)) {
+      runsOf(thread.threadId).add(runId);
+      changed();
+    }
     thread.open = run;
     stream.run = run;
     const input =
@@ -576,6 +646,7 @@ export function createAgentEvents(options: {
     }
     tab.runs.push({ at: request.at, threadId: input.threadId });
     if (tab.runs.length > MAX_RUNS_KEPT) tab.runs.shift();
+    changed();
     // The page started a new run: a run of the Thread still open was cut short.
     endOpenRun(tab, thread);
     const page: PageRun = { input, at: request.at, followUp: false };
@@ -777,7 +848,10 @@ export function createAgentEvents(options: {
   return {
     observe(observation) {
       const tab = tabOf(observation.tabId);
-      tab.traffic = true;
+      if (!tab.traffic) {
+        tab.traffic = true;
+        changed();
+      }
       // The page asked its CopilotKit runtime what it serves: it runs CopilotKit, which is all this says.
       if (observation.kind === "runtime") return;
       try {
@@ -831,9 +905,45 @@ export function createAgentEvents(options: {
       // A new document: its chats open their Threads anew, and CopilotKit's agents in it have run nothing yet.
       tab.views.clear();
       tab.lastLinked = null;
+      changed();
       for (const agent of tab.agents.values()) agent.lastRunId = undefined;
       for (const thread of tab.threads.values()) thread.agent.pageGone();
       reportDrops(tabId, tab);
+    },
+    snapshot() {
+      return {
+        tabs: [...tabs]
+          .filter(([, tab]) => tab.traffic)
+          .map(([tabId, tab]) => ({
+            tabId,
+            ...(tab.pendingLinks[0]?.before ?? linkStateOf(tab)),
+            runs: tab.runs.map((run) => ({ ...run })),
+            lastRunIds: [...tab.agents].flatMap(([key, agent]) =>
+              agent.lastRunId === undefined
+                ? []
+                : [[key, agent.lastRunId] as [string, string]],
+            ),
+          })),
+        recordedRuns: [...recordedRuns].map(([threadId, runs]) => [
+          threadId,
+          [...runs],
+        ]),
+      };
+    },
+    restore(snapshot) {
+      for (const kept of snapshot.tabs) {
+        const tab = tabOf(kept.tabId);
+        tab.traffic = true;
+        tab.views = new Map(kept.views);
+        tab.left = kept.left.map((entry) => ({ ...entry }));
+        tab.lastLinked = kept.lastLinked;
+        tab.runs = kept.runs.map((run) => ({ ...run }));
+        tab.agents = new Map(
+          kept.lastRunIds.map(([key, runId]) => [key, pageAgent(runId)]),
+        );
+      }
+      for (const [threadId, runs] of snapshot.recordedRuns)
+        for (const runId of runs) runsOf(threadId).add(runId);
     },
     stop() {
       for (const [tabId, tab] of tabs) {

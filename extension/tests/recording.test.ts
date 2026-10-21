@@ -7,6 +7,8 @@ import {
   spyOn,
   test,
 } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   type LearningSpaceState,
   RECORDER_SIGNED_OUT,
@@ -457,6 +459,8 @@ function doubles(): Partial<RecordingDeps> {
         },
         awaitsRun: () => false,
         tabNavigated: (tabId) => agent.navigated.push(tabId),
+        snapshot: () => ({ tabs: [], recordedRuns: [] }),
+        restore: () => {},
         stop: () => {
           agent.stopped = true;
         },
@@ -2600,8 +2604,9 @@ test("content events wait while the offscreen port is down, and only the oldest 
     name: "recorder.dropped",
     value: { count: 10, reason: "offscreen-unreachable" },
   });
-  expect(events[1]?.value).toEqual({ i: 10 });
-  expect(events.at(-1)?.value).toEqual({ i: 2_009 });
+  // Each step names its tab, the one the recording started in.
+  expect(events[1]?.value).toEqual({ i: 10, tab: 1 });
+  expect(events.at(-1)?.value).toEqual({ i: 2_009, tab: 1 });
   expect(
     events.slice(1).map((e) => (e?.value as { i?: number } | undefined)?.i),
   ).toEqual(Array.from({ length: 2_000 }, (_, k) => k + 10));
@@ -2906,6 +2911,94 @@ test("a tab the recorded tab opened is followed", async () => {
   });
   await settle();
   expect((await state()).tabIds).toEqual([7, 8]);
+});
+
+test("a tab the recorded tab opened begins at the opener's page, and every step and page change names its tab", async () => {
+  // The final run's run 1 (trajectory 764dddf8): on /support the person opened the account in a new tab, saved the memo
+  // there, then went Home in the first tab. The new tab's first page change read from=/account to=/account, and nothing
+  // but the address told the two tabs' steps apart.
+  const { rows } = JSON.parse(
+    readFileSync(join(import.meta.dir, "fixtures", "e2e-new-tab.json"), "utf8"),
+  ) as { rows: (CapturedEvent & { row: string })[] };
+  const SHOP = "http://127.0.0.1:7420";
+  /** The rows the person made in the new tab: its first page change, the memo and its save. */
+  const inNewTab = new Set(["68105", "68107", "68108", "68109"]);
+  fake.tabs.set(7, {
+    id: 7,
+    url: `${SHOP}/address`,
+    title: "Delivery address - Corner Shop admin",
+  } as chrome.tabs.Tab);
+  await record();
+  const ports = new Map<number, FakePort>([[7, contentPort(7)]]);
+  for (const { row, ...step } of rows) {
+    const tabId = inNewTab.has(row) ? 8 : 7;
+    if (step.name === "navigation") {
+      const value = step.value as { to: string; transitionType: string };
+      fake.webNavigation.commit({
+        tabId,
+        frameId: 0,
+        url: value.to,
+        transitionType:
+          value.transitionType as chrome.webNavigation.WebNavigationTransitionCallbackDetails["transitionType"],
+        timeStamp: step.timestamp,
+      });
+    } else {
+      let port = ports.get(tabId);
+      if (!port) {
+        port = contentPort(tabId);
+        ports.set(tabId, port);
+      }
+      port.postMessage({ type: "content.event", event: step });
+    }
+    await settle();
+    if (row === "68104") {
+      // The link's target="_blank": Chrome opens tab 8 from tab 7's top frame.
+      fake.tabs.set(8, {
+        id: 8,
+        url: `${SHOP}/account`,
+        title: "Account - Corner Shop admin",
+      } as chrome.tabs.Tab);
+      fake.webNavigation.createdTarget({
+        sourceTabId: 7,
+        tabId: 8,
+        url: `${SHOP}/account`,
+      });
+      await until(async () => (await state()).tabIds.length === 2, "tab 8");
+    }
+  }
+  expect(await page({ type: "page.stop" })).toEqual({ ok: true });
+  const sent = sentToDocument("offscreen.event").flatMap((message) =>
+    message.type === "offscreen.event" ? [message.event] : [],
+  );
+
+  const changes = sent
+    .filter((recorded) => recorded.name === "navigation")
+    .map((recorded) => {
+      const { from, to, tab } = recorded.value as Record<string, unknown>;
+      return { from, to, tab };
+    });
+  expect(changes).toEqual([
+    { from: "", to: `${SHOP}/address`, tab: 1 },
+    { from: `${SHOP}/address`, to: `${SHOP}/support`, tab: 1 },
+    // Row ...68105: the new tab begins at the page it was opened from.
+    { from: `${SHOP}/support`, to: `${SHOP}/account`, tab: 2 },
+    { from: `${SHOP}/support`, to: `${SHOP}/`, tab: 1 },
+  ]);
+  const steps = sent.filter((recorded) => recorded.name !== "navigation");
+  const posted = rows.filter((row) => row.name !== "navigation");
+  expect(
+    steps.map((recorded) => [
+      recorded.timestamp,
+      (recorded.value as { tab?: number }).tab,
+    ]),
+  ).toEqual(
+    posted.map((row) => [row.timestamp, inNewTab.has(row.row) ? 2 : 1]),
+  );
+  // CopilotKit's own fields are as the page sent them: the tab is the Recorder's own field beside them.
+  steps.forEach((recorded, index) => {
+    const { tab: _tab, ...own } = recorded.value as Record<string, unknown>;
+    expect(own).toEqual(posted[index]?.value as Record<string, unknown>);
+  });
 });
 
 test("only a followed tab's top frame becomes a page-change step, once per address, with masked addresses", async () => {

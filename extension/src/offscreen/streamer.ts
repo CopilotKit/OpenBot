@@ -77,7 +77,8 @@ export type StreamerDeps = {
 };
 
 export type Streamer = {
-  push(event: CapturedEvent): void;
+  /** `stepKey`: a held step's key (steps.ts): one this streamer's trajectories already took is not stored again. */
+  push(event: CapturedEvent, stepKey?: string): void;
   /** Start over: the current trajectory gets `recording.restarted` naming the new one and a failed outcome with reason
    * `restarted`; the switch is at once (the new one's `recording.started` names the one it replaced), and it resolves
    * when the old one is drained and finished. */
@@ -1158,8 +1159,13 @@ export async function createStreamer(
     if (lane.conn?.joined) void pump(lane);
   };
 
-  /** Assigns the event the next seq and puts it in the lane's outbox, valid for Intelligence. */
-  const queue = async (lane: Lane, event: CapturedEvent): Promise<void> => {
+  /** Assigns the event the next seq and puts it in the lane's outbox, valid for Intelligence, with the held step's key it
+   * carries. */
+  const queue = async (
+    lane: Lane,
+    event: CapturedEvent,
+    stepKey?: string,
+  ): Promise<void> => {
     const seq = deps.sequencer.next();
     const prepared = prepareEvent(event, seq, now());
     if (!prepared) {
@@ -1169,12 +1175,15 @@ export async function createStreamer(
       emitStatus();
       return;
     }
-    await outbox.put({
-      trajectoryId: lane.id,
-      seq,
-      event: prepared.event,
-      bytes: prepared.bytes,
-    });
+    await outbox.put(
+      {
+        trajectoryId: lane.id,
+        seq,
+        event: prepared.event,
+        bytes: prepared.bytes,
+      },
+      stepKey,
+    );
     lane.pending += 1;
     lane.meta.pushed += 1;
     await persist(lane);
@@ -1256,7 +1265,16 @@ export async function createStreamer(
     return own[own.length - 1];
   };
 
-  const queueLive = async (event: CapturedEvent) => {
+  const queueLive = async (event: CapturedEvent, stepKey?: string) => {
+    // A step that left before a restart or a quit, sent again from the held steps the service worker kept: stored once.
+    if (
+      stepKey !== undefined &&
+      (await outbox.hasStep(
+        lanes.map((lane) => lane.id),
+        stepKey,
+      ))
+    )
+      return;
     let lane = currentLane();
     if (lane.meta.closed) {
       console.error(
@@ -1272,7 +1290,7 @@ export async function createStreamer(
     ) {
       lane = await rollover(lane);
     }
-    await queue(lane, event);
+    await queue(lane, event, stepKey);
   };
 
   // Open the trajectory, or reopen it and the ones it rolled over to.
@@ -1328,9 +1346,9 @@ export async function createStreamer(
   emitStatus();
 
   return {
-    push(event) {
+    push(event, stepKey) {
       if (discarded) return;
-      void enqueue(() => queueLive(event)).catch(() => undefined);
+      void enqueue(() => queueLive(event, stepKey)).catch(() => undefined);
     },
 
     async rotate(next) {

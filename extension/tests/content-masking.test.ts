@@ -225,6 +225,22 @@ describe("sensitivity tracker", () => {
     expect(tracker.sensitiveForEvent("click")).toBe(true);
   });
 
+  test("a show-password checkbox or button names the password field without being one; the field stays sensitive", () => {
+    document.body.innerHTML = `<label for="p">Your admin password</label><input id="p" name="password" type="password"><input id="show" type="checkbox"><label for="show">Show password</label><input id="reveal" type="button" name="show_password" value="Show password">`;
+    const tracker = track();
+    const sent = collectClicks(tracker);
+    for (const id of ["show", "reveal"]) {
+      const toggle = document.getElementById(id) as HTMLElement;
+      press(toggle, "pointerdown");
+      press(toggle, "click");
+      expect(tracker.sensitiveForEvent("click")).toBe(false);
+    }
+    expect(sent.map((target) => target.value)).toEqual(["on", "Show password"]);
+    const password = document.getElementById("p") as HTMLInputElement;
+    press(password, "pointerdown");
+    expect(tracker.sensitiveForEvent("click")).toBe(true);
+  });
+
   test("a field that was a password field stays sensitive after its type changes", () => {
     document.body.innerHTML = `<input id="p" type="password">`;
     const tracker = track();

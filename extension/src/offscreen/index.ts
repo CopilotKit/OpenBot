@@ -118,7 +118,7 @@ type Live = {
   stream: Stream | null;
   /** While above 0 (its streamer is being created, or Start over is switching it), events wait in `waiting`. */
   holds: number;
-  waiting: CapturedEvent[];
+  waiting: { event: CapturedEvent; key?: string }[];
   /** From the moment Stop queues its outcome: kept events are reported with offscreen.kept from then on. */
   ending: boolean;
   /** Its streamer could not be created: every event it is handed is dropped, counted. A resumed recording still has what
@@ -445,11 +445,11 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
     });
   }
 
-  function deliver(target: Live, event: CapturedEvent): void {
+  function deliver(target: Live, event: CapturedEvent, key?: string): void {
     const streamer = target.stream?.streamer;
     if (target.holds > 0 || !streamer) {
       if (target.holds > 0) {
-        target.waiting.push(event);
+        target.waiting.push({ event, key });
         return;
       }
       console.error(
@@ -460,13 +460,14 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
       if (target.notStarted) postNotStarted(target);
       return;
     }
-    streamer.push(event);
+    streamer.push(event, key);
   }
 
   function release(target: Live): void {
     target.holds -= 1;
     if (target.holds > 0) return;
-    for (const event of target.waiting.splice(0)) deliver(target, event);
+    for (const { event, key } of target.waiting.splice(0))
+      deliver(target, event, key);
   }
 
   async function begin(target: Live, resume: boolean): Promise<void> {
@@ -721,7 +722,9 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
   ): Promise<void> {
     // The steps its service worker still held when the browser quit go in first, in their order; the streamer queues
     // them ahead of the interrupted outcome, which it queues only when none was queued.
-    for (const event of drain.held ?? []) stream.streamer.push(event);
+    // One that left before the quit, which the held steps still listed, is in the outbox already: not stored again.
+    for (const { event, key } of drain.held ?? [])
+      stream.streamer.push(event, key);
     await stream.streamer.stop("failed", { reason: "interrupted" });
     // They are in the outbox now, ahead of the outcome: the drain need not carry them again.
     if (drain.held?.length)
@@ -895,7 +898,7 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
     const target = live;
     switch (message.type) {
       case "offscreen.event":
-        if (target) deliver(target, message.event);
+        if (target) deliver(target, message.event, message.key);
         else
           console.error(
             "Recorder: an event arrived with no recording in this document",

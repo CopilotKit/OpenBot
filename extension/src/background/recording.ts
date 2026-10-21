@@ -46,6 +46,7 @@ import { narrationLanguage } from "../shared/speech-language";
 import {
   type ConnectionRecord,
   type DrainRecord,
+  type HeldEvent,
   type HeldSteps,
   type KeptEvents,
   readLocal,
@@ -55,7 +56,11 @@ import {
   writeLocal,
   writeSession,
 } from "../shared/storage";
-import { type AgentEvents, createAgentEvents } from "./agent/events";
+import {
+  type AgentEvents,
+  type AgentSnapshot,
+  createAgentEvents,
+} from "./agent/events";
 import type { CaptureObservation } from "./agent/observation";
 import { showBadge } from "./badge";
 import {
@@ -175,16 +180,24 @@ const browserTimers: Timers = {
 };
 /** Timers for an assembler that only takes up held steps to send them at once (a browser restart): none ever fires. */
 const NO_TIMERS: Timers = { set: () => null, clear: () => {} };
+/** Held steps that hold nothing, written beside an agent context. */
+const NOTHING_HELD: StepSnapshot = {
+  queue: [],
+  calls: [],
+  typed: [],
+  speech: null,
+};
 
-/** The events a snapshot of held steps sends, in order, with what each owns: after a browser quit nothing more can
- * arrive for them. */
+/** The events a snapshot of held steps sends, in order, with what each owns and its key: after a browser quit nothing
+ * more can arrive for them. */
 export function heldEvents(
   snapshot: StepSnapshot,
   now: () => number,
-): CapturedEvent[] {
-  const events: CapturedEvent[] = [];
+): HeldEvent[] {
+  const events: HeldEvent[] = [];
   const assembler = createStepAssembler({
-    emit: (event) => events.push(event),
+    emit: (event, key) =>
+      events.push(key === undefined ? { event } : { event, key }),
     now,
     timers: NO_TIMERS,
   });
@@ -516,6 +529,25 @@ export function installRecording(
   const forgetAddresses = () => {
     recordedNavigations.clear();
   };
+  /** A tab a followed tab opened, until its first page change is recorded: the opener's top page when Chrome said it
+   * opened it (webNavigation.onCreatedNavigationTarget), which that page change comes from. */
+  const openers = new Map<number, string>();
+
+  /** The event with the tab's number in the recording, the Recorder's own field `tab`: 1 for the tab the recording
+   * started in, then 2, 3 in the order tabs join, so an agent can tell a multi-tab task's tabs apart. Never Chrome's tab
+   * id, which changes when the browser starts again. */
+  function inTab(tabId: number, event: CapturedEvent): CapturedEvent {
+    const index = state.tabIds.indexOf(tabId);
+    const value = event.value;
+    if (
+      index < 0 ||
+      typeof value !== "object" ||
+      value === null ||
+      Array.isArray(value)
+    )
+      return event;
+    return { ...event, value: { ...value, tab: index + 1 } };
+  }
   /** The live recording's steps, held until each one's save (if any) is known (steps.ts). */
   let steps: StepAssembler | null = null;
   /** What a previous service worker held for the recording it left live or stopping, until this one takes it up. */
@@ -646,7 +678,7 @@ export function installRecording(
   let connectWaiters: ((port: chrome.runtime.Port) => void)[] = [];
   /** Set while a document is opened for a start or a recovery: events wait until its session message is posted. */
   let holdEvents = false;
-  const queued: { event: CapturedEvent; bytes: number }[] = [];
+  const queued: { event: CapturedEvent; key?: string; bytes: number }[] = [];
   let queuedBytes = 0;
   let droppedEvents = 0;
   const stopWaiters = new Map<string, () => void>();
@@ -727,11 +759,16 @@ export function installRecording(
     flushEvents();
   }
 
-  function forwardEvent(event: CapturedEvent): void {
+  /** `key`: a held step's (steps.ts), which the document stores once. */
+  function forwardEvent(event: CapturedEvent, key?: string): void {
+    const message: BackgroundToOffscreen =
+      key === undefined
+        ? { type: "offscreen.event", event }
+        : { type: "offscreen.event", event, key };
     if (offscreen && !holdEvents && queued.length === 0 && droppedEvents === 0)
-      if (postOffscreen({ type: "offscreen.event", event })) return;
+      if (postOffscreen(message)) return;
     const bytes = JSON.stringify(event).length;
-    queued.push({ event, bytes });
+    queued.push(key === undefined ? { event, bytes } : { event, key, bytes });
     queuedBytes += bytes;
     while (queued.length > QUEUE_EVENTS || queuedBytes > QUEUE_BYTES) {
       const oldest = queued.shift();
@@ -757,7 +794,11 @@ export function installRecording(
       const next = queued[0];
       if (
         !next ||
-        !postOffscreen({ type: "offscreen.event", event: next.event })
+        !postOffscreen(
+          next.key === undefined
+            ? { type: "offscreen.event", event: next.event }
+            : { type: "offscreen.event", event: next.event, key: next.key },
+        )
       )
         return;
       queued.shift();
@@ -1040,10 +1081,19 @@ export function installRecording(
   // restarted service worker takes them up again, and after a browser quit they go with the recording's drain, as the
   // rest of the recording is kept (storage.session would not outlive the quit). The first change is written at once,
   // later ones at most every HELD_WRITE_MS.
+  //
+  // The agent events' context (the Threads open in each tab, the runs the page asked for, the Thread linked last) goes
+  // in the same write, so a restarted service worker's clicks carry the Thread they would have. A link takes its place
+  // in that context only as it goes to the steps, and when the context changed, the write comes before anything leaves:
+  // a restarted service worker never makes a link again that left, nor takes up one that went nowhere.
 
   const stepTimers = deps.stepTimers ?? browserTimers;
   let heldSource: { recordingId: string; assembler: StepAssembler } | null =
     null;
+  /** The live recording's agent events, whose context is written with its held steps. */
+  let heldAgent: AgentEvents | null = null;
+  /** The agent context in storage, as JSON (null: none). */
+  let agentWritten: string | null = null;
   let heldTimer: unknown = null;
   let heldWrittenAt = Number.NEGATIVE_INFINITY;
   /** What storage holds, as JSON (null: nothing); undefined until this service worker wrote it. */
@@ -1059,41 +1109,60 @@ export function installRecording(
     );
   }
 
-  /** Writes what the steps hold now (or removes it when they hold nothing); resolves once it is in storage. */
+  /** The agent events' context as it is written, or null when it holds nothing a restart needs. */
+  function agentContext(): AgentSnapshot | null {
+    const agent = heldAgent?.snapshot();
+    return agent && (agent.tabs.length > 0 || agent.recordedRuns.length > 0)
+      ? agent
+      : null;
+  }
+
+  /** Writes what the steps hold now and the agent context (or removes them when they hold nothing). The write is issued
+   * at once, in order with the ones before it; resolves once it is in storage. */
   function writeHeld(): Promise<void> {
     if (heldTimer !== null) stepTimers.clear(heldTimer);
     heldTimer = null;
     heldWrittenAt = deps.now();
     const source = heldSource;
     const snapshot = source?.assembler.snapshot() ?? null;
+    const agent = source ? agentContext() : null;
     const value: HeldSteps | null =
-      source && snapshot
-        ? { recordingId: source.recordingId, steps: snapshot }
+      source && (snapshot || agent)
+        ? {
+            recordingId: source.recordingId,
+            steps: snapshot ?? NOTHING_HELD,
+            ...(agent ? { agent } : {}),
+          }
         : null;
     const text = value ? JSON.stringify(value) : null;
     if (text === heldWritten) return heldWrites;
     heldWritten = text;
-    heldWrites = heldWrites
-      .then(() =>
-        value ? writeLocal("heldSteps", value) : removeLocal("heldSteps"),
-      )
-      .catch(report("keeping the held steps"));
+    agentWritten = agent ? JSON.stringify(agent) : null;
+    const write = (
+      value ? writeLocal("heldSteps", value) : removeLocal("heldSteps")
+    ).catch(report("keeping the held steps"));
+    heldWrites = Promise.all([heldWrites, write]).then(() => undefined);
     return heldWrites;
   }
 
+  /** Held items are about to leave: when the agent context changed since it was written, it is written first, with
+   * the items still in it, so nothing leaves ahead of the context it came from. */
+  function beforeLeaving(): void {
+    const agent = agentContext();
+    if ((agent ? JSON.stringify(agent) : null) !== agentWritten)
+      void writeHeld();
+  }
+
   /** A new set of held steps for the live recording, with its own agent events; the previous one's are sent first.
-   * `restore` takes up what a previous service worker held for it. */
-  function openSteps(
-    recordingId: string,
-    restore?: StepSnapshot,
-  ): StepAssembler {
+   * `restore` takes up what a previous service worker held for it, and its agent context. */
+  function openSteps(recordingId: string, restore?: HeldSteps): StepAssembler {
     steps?.flush();
     steps?.clear();
     agentEvents?.stop();
     let paired: AgentEvents | null = null;
     const assembler = createStepAssembler({
-      emit: (event) => {
-        if (steps === assembler) forwardEvent(event);
+      emit: (event, key) => {
+        if (steps === assembler) forwardEvent(event, key);
       },
       // A click takes the Thread of the run it sent, seen while it was held: one with the open-Thread context is held
       // for its run as long as its join is open.
@@ -1107,18 +1176,29 @@ export function installRecording(
         paired.awaitsRun(tabId, event, joins),
       pageOf,
       onChange: () => heldChanged(recordingId, assembler),
+      leaving: () => {
+        if (steps === assembler) beforeLeaving();
+      },
       now: deps.now,
       timers: stepTimers,
     });
     steps = assembler;
-    agentEvents = paired = deps.createAgentEvents({
+    const events = deps.createAgentEvents({
       emit: (tabId, event) => {
         if (steps === assembler) assembler.place(tabId, event);
       },
       digests: () => digests,
       now: deps.now,
+      onChange: () => {
+        if (agentEvents === events) heldChanged(recordingId, assembler);
+      },
     });
-    if (restore) assembler.restore(restore);
+    agentEvents = paired = events;
+    heldAgent = events;
+    // What the agent events of a previous service worker knew of this recording (the Threads open in each tab, the runs
+    // the page asked for, the Thread linked last) is taken up before anything reaches them, and its steps after.
+    if (restore?.agent) events.restore(restore.agent);
+    if (restore) assembler.restore(restore.steps);
     // A phrase still being spoken holds the new steps too (Start over); a restored one keeps its own hold until the
     // document says again.
     if (speechHold !== null) assembler.hold(speechHold);
@@ -1137,11 +1217,11 @@ export function installRecording(
   }
 
   /** The steps a previous service worker held for this recording, taken up by this one (once). */
-  function takeRestored(recordingId: string): StepSnapshot | undefined {
+  function takeRestored(recordingId: string): HeldSteps | undefined {
     const restored = restoredSteps;
     if (restored?.recordingId !== recordingId) return undefined;
     restoredSteps = null;
-    return restored.steps;
+    return restored;
   }
 
   // ---- The narration among the steps --------------------------------------------------------
@@ -1189,19 +1269,22 @@ export function installRecording(
   function startStep(tabId: number, url: string): void {
     if (!/^https?:/i.test(url)) return;
     const to = scrubUrl(url, { digests });
-    steps?.navigation(tabId, {
-      type: "CUSTOM",
-      name: "navigation",
-      timestamp: deps.now(),
-      value: {
-        step: "navigate",
-        from: "",
-        to,
-        navigationType: "start",
-        frameId: 0,
-        parentFrameId: -1,
-      },
-    });
+    steps?.navigation(
+      tabId,
+      inTab(tabId, {
+        type: "CUSTOM",
+        name: "navigation",
+        timestamp: deps.now(),
+        value: {
+          step: "navigate",
+          from: "",
+          to,
+          navigationType: "start",
+          frameId: 0,
+          parentFrameId: -1,
+        },
+      }),
+    );
   }
 
   const networkDeps: NetworkCaptureDeps = {
@@ -1408,7 +1491,7 @@ export function installRecording(
 
   async function moveIntoDrains(
     recordingId: string,
-    flags: { discarding?: boolean; held?: CapturedEvent[] } = {},
+    flags: { discarding?: boolean; held?: HeldEvent[] } = {},
   ): Promise<void> {
     const drains = await serially(async () => {
       const record = await readLocal("activeRecording");
@@ -1477,6 +1560,7 @@ export function installRecording(
     await stopRecordingScripts(tabIds);
     digests.clear();
     forgetAddresses();
+    openers.clear();
     await removeSession("digests");
     const capture = network;
     network = null;
@@ -2345,7 +2429,7 @@ export function installRecording(
           event.name === "click" && agentEvents
             ? agentEvents.enrichClick(tabId, event)
             : event;
-        steps?.step(tabId, step, port.sender?.frameId !== 0);
+        steps?.step(tabId, inTab(tabId, step), port.sender?.frameId !== 0);
         if (ACTION_EVENTS.has(event.name)) countAction();
         return;
       }
@@ -2364,22 +2448,30 @@ export function installRecording(
     kind: "commit" | "history",
   ): void {
     const { tabId, url } = details;
+    // A tab's first page change after a followed tab opened it comes from the opener's page, never from its own address.
     const event = navigationEvent(
       details,
       kind,
-      state.topUrls[tabId] || undefined,
+      openers.get(tabId) ?? (state.topUrls[tabId] || undefined),
       { digests },
     );
     dispatch({ type: "page", tabId, url });
     if (!/^https?:/i.test(url)) return;
+    openers.delete(tabId);
     const reload =
       (event.value as { navigationType?: string }).navigationType === "reload";
     if (!reload && recordedNavigations.get(tabId) === url) return;
     recordedNavigations.set(tabId, url);
-    steps?.navigation(tabId, {
-      ...event,
-      value: { ...(event.value as Record<string, unknown>), step: "navigate" },
-    });
+    steps?.navigation(
+      tabId,
+      inTab(tabId, {
+        ...event,
+        value: {
+          ...(event.value as Record<string, unknown>),
+          step: "navigate",
+        } as CapturedEvent["value"],
+      }),
+    );
     countAction();
   }
 
@@ -2412,6 +2504,7 @@ export function installRecording(
       state.tabIds.includes(details.tabId)
     )
       return;
+    openers.set(details.tabId, state.topUrls[details.sourceTabId] ?? "");
     dispatch({ type: "follow", tabId: details.tabId, url: details.url });
     void network
       ?.addTab(details.tabId, details.url)

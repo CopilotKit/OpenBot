@@ -147,7 +147,7 @@ export type StopFailure = "disconnected" | "signed-out";
 export type BackgroundToOffscreen =
   | { type: "offscreen.start"; session: StreamSession }
   | { type: "offscreen.resume"; session: StreamSession } // the service worker restarted and found no document: same outbox
-  | { type: "offscreen.event"; event: CapturedEvent }
+  | { type: "offscreen.event"; event: CapturedEvent; key?: string } // `key`: a held step's (steps.ts), stored once
   | {
       type: "offscreen.rotate";
       recordingId: string;

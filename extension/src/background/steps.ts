@@ -313,6 +313,9 @@ type Pending = {
   tabId: number;
   at: number;
   event: CapturedEvent;
+  /** Which held item it is, kept in a snapshot: it leaves with this key, so the document stores it once however often a
+   * restart sends it (a quit can come after it left and before the snapshot without it was written). */
+  key?: string;
   /** Not a step: an event placed among the steps by its time, sent as it is once every step before it left. */
   placed?: true;
   /** A placed transcript: the phrase being spoken holds back what came after its start, never its own words. */
@@ -410,7 +413,8 @@ function chosenText(event: CapturedEvent): string | undefined {
 export type StepAssembler = ReturnType<typeof createStepAssembler>;
 
 export function createStepAssembler(options: {
-  emit(event: CapturedEvent): void;
+  /** An item as it leaves, with its key (`Pending.key`). */
+  emit(event: CapturedEvent, key?: string): void;
   /** A step of the person's as it leaves, with what was seen while it was held: `joins` says whether something the page
    * started at a time is the step's doing, by its join (a click's run, the agent events' `settleClick`). */
   settle?(
@@ -427,9 +431,13 @@ export function createStepAssembler(options: {
   ): boolean;
   /** The tab's top page (masked), for a page change and a step from an iframe. */
   pageOf?(tabId: number): Promise<{ url: string; title?: string } | null>;
+  /** A new held item's key: a random UUID unless a test passes its own. */
+  newKey?(): string;
   /** Something it holds changed (a step came or left, a call arrived, the phrase being spoken changed): `snapshot`
    * would now read differently. */
   onChange?(): void;
+  /** Items are about to leave, and `snapshot` still holds them: what is kept beside the steps can be written first. */
+  leaving?(): void;
   now?: () => number;
   timers?: Timers;
   tuning?: Partial<StepTiming>;
@@ -437,6 +445,7 @@ export function createStepAssembler(options: {
   const now = options.now ?? Date.now;
   const timers = options.timers ?? realTimers;
   const tune: StepTiming = { ...STEP_TIMING, ...options.tuning };
+  const newKey = options.newKey ?? (() => crypto.randomUUID());
   const queue: Pending[] = [];
   const calls = new Map<number, StepCall[]>();
   const typed = new Map<number, string[]>();
@@ -617,6 +626,7 @@ export function createStepAssembler(options: {
   function pump(): void {
     if (ended) return;
     const at = now();
+    let announced = false;
     while (queue.length > 0) {
       const head = queue[0];
       if (!head) break;
@@ -638,10 +648,14 @@ export function createStepAssembler(options: {
         }
         break;
       }
+      if (!announced) {
+        announced = true;
+        options.leaving?.();
+      }
       queue.shift();
       if (head.timer !== undefined) timers.clear(head.timer);
       if (openChange.get(head.tabId) === head) openChange.delete(head.tabId);
-      options.emit(finish(head));
+      options.emit(finish(head), head.key);
     }
     prune(at);
     changed();
@@ -695,6 +709,7 @@ export function createStepAssembler(options: {
       tabId,
       at,
       event,
+      key: newKey(),
       placed: true,
       ...(speaking ? { speech: true as const } : {}),
       owner: false,
@@ -735,6 +750,7 @@ export function createStepAssembler(options: {
         tabId,
         at,
         event,
+        key: newKey(),
         owner: !echo,
         closeAt: at + tune.horizonMs,
         values,
@@ -793,6 +809,7 @@ export function createStepAssembler(options: {
         tabId,
         at: event.timestamp,
         event,
+        key: newKey(),
         owner: false,
         closeAt: event.timestamp,
         values: [],
@@ -916,12 +933,13 @@ export function createStepAssembler(options: {
     /** Sends every step held, with what it owns so far (the recording stops or starts over). */
     flush(): void {
       if (ended) return;
+      if (queue.length > 0) options.leaving?.();
       while (queue.length > 0) {
         const step = queue.shift();
         if (!step) break;
         if (step.timer !== undefined) timers.clear(step.timer);
         if (step.pageTimer !== undefined) timers.clear(step.pageTimer);
-        options.emit(finish(step));
+        options.emit(finish(step), step.key);
       }
       calls.clear();
       typed.clear();

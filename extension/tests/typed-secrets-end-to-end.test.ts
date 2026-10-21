@@ -94,12 +94,16 @@ function trusted<T extends Event>(event: T): T {
   return event;
 }
 
+/** A page's address: a path on the shop, or a whole address on another site. */
+const addressOf = (path: string) =>
+  /^https?:/.test(path) ? path : `${SHOP}${path}`;
+
 /** One document of the shop with the content script capturing in it, wired as content/index.ts wires it: the tracker's
  * digests and the capture's events go out on the one port, in order. */
 function openPage(path: string, title: string, markup: string) {
   (
     window as unknown as { happyDOM: { setURL(url: string): void } }
-  ).happyDOM.setURL(`${SHOP}${path}`);
+  ).happyDOM.setURL(addressOf(path));
   document.title = `${title} - Corner Shop admin`;
   document.body.innerHTML = markup;
   const posted: PortMessage[] = [];
@@ -331,7 +335,7 @@ function postFromPage(
     id: EXTENSION_ID,
     tab: { id: where.tabId ?? 7 } as chrome.tabs.Tab,
     frameId: where.frameId ?? 0,
-    url: `${SHOP}${path}`,
+    url: addressOf(path),
   });
   for (const message of messages) port.postMessage(message);
 }
@@ -698,4 +702,161 @@ test("a code a content script let through is caught in the worker, which masks i
   expect(
     leakedSecrets(calls.find((call) => call.exchange)?.exchange, [OTP_B2]),
   ).toEqual([]);
+});
+
+// ---- A button or link that only names a password ------------------------------------------------------------------
+
+/** The final run's checkout (shop.ts): the admin password with the Show password button beside it, whose click flips the
+ * field's type. */
+const CHECKOUT_WITH_TOGGLE = `<form id="refund-form">
+<label for="full-name">Name on the refund</label><input id="full-name" name="fullName" autocomplete="name">
+<label for="reason">Reason</label><textarea id="reason" name="reason"></textarea>
+<label for="admin-password">Your admin password</label><input id="admin-password" name="password" type="password" autocomplete="current-password"><button type="button" id="show-pw" class="ghost" style="margin-top:6px">Show password</button>
+<label for="card-number">Card number</label><div id="card-root"><input id="card-number" name="cardnumber" inputmode="numeric" value=""></div>
+<label for="notes">Notes for the team</label><textarea id="notes" name="notes"></textarea>
+<label for="ref">Reference for the customer</label><input id="ref" name="reference">
+<button id="pay" type="submit">Send refund</button>
+</form><pre id="result"></pre>`;
+
+/** The final run's account page links (shop.ts), the reset link among them. */
+const ACCOUNT_LINKS = `<p><a id="resign" href="/login-redirect?next=%2Faccount%3Fwelcome%3D1">Sign in again</a> · <a id="reset" href="/reset?token=nocpkResetTok55667788aabbccdd&email=admin%40cornershop.example">Reset password link</a> · <a href="/app">Open the orders app</a></p>`;
+
+/** the-internet.herokuapp.com/forgot_password as it serves the form. */
+const FORGOT = "https://the-internet.herokuapp.com/forgot_password";
+const FORGOT_PASSWORD = `<form name="forgot_password" id="forgot_password" action="/forgot_password" method="post" >
+     <div class="row">
+      <div class="large-6 small-12 columns">
+        <label for="email">E-mail</label>
+        <input type="text" name="email" id="email" />
+      </div>
+    </div>
+      <button id="form_submit" class="radius" type="submit"><i class="icon-2x icon-signin">Retrieve password</i></button>
+  </form>`;
+
+/** A pointer click as Chrome fires one on what lies under the pointer (the icon inside a button, say): pointerdown, then
+ * click, with the page's own default action held back (a link here goes nowhere). */
+function pointerAt(element: Element) {
+  element.addEventListener("click", (event) => event.preventDefault(), {
+    once: true,
+  });
+  element.dispatchEvent(
+    trusted(new PointerEvent("pointerdown", { bubbles: true, composed: true })),
+  );
+  element.dispatchEvent(
+    trusted(
+      new MouseEvent("click", { bubbles: true, composed: true, button: 0 }),
+    ),
+  );
+}
+
+test("a button or link that names a password keeps its text, and the password, its field and the card stay masked", async () => {
+  const pages = browse(() => {
+    const checkout = openPage(
+      "/checkout?order=1043",
+      "Refund to card",
+      CHECKOUT_WITH_TOGGLE,
+    );
+    // The page's own handler (shop.ts): Show password flips the field's type.
+    field("#show-pw").addEventListener("click", () => {
+      const password = field("#admin-password") as HTMLInputElement;
+      password.type = password.type === "password" ? "text" : "password";
+    });
+    // Rows ...68029 to ...68035: the password typed, shown and hidden again, then the card.
+    click("#admin-password");
+    type("#admin-password", PASSWORD);
+    pointerAt(field("#show-pw"));
+    click("#admin-password");
+    pointerAt(field("#show-pw"));
+    click("#card-number");
+    type("#card-number", CARD);
+    checkout.leave();
+
+    // Row ...68058: the reset link on the account page.
+    const account = openPage("/account?welcome=1", "Account", ACCOUNT_LINKS);
+    pointerAt(field("#reset"));
+    account.leave();
+
+    // Row ...95033: the-internet's Retrieve password, clicked on its icon.
+    const forgot = openPage(FORGOT, "The Internet", FORGOT_PASSWORD);
+    click("#email");
+    type("#email", "tom@example.test");
+    pointerAt(field("#form_submit > i"));
+    forgot.leave();
+    return {
+      checkout: checkout.posted,
+      account: account.posted,
+      forgot: forgot.posted,
+    };
+  });
+
+  await recordInWorker("/checkout?order=1043");
+  postFromPage(pages.checkout, "/checkout?order=1043");
+  await passwordKnown();
+  fake?.webNavigation.commit({
+    tabId: 7,
+    frameId: 0,
+    url: `${SHOP}/account?welcome=1`,
+    transitionType: "link",
+  });
+  postFromPage(pages.account, "/account?welcome=1");
+  fake?.webNavigation.commit({
+    tabId: 7,
+    frameId: 0,
+    url: FORGOT,
+    transitionType: "link",
+  });
+  postFromPage(pages.forgot, FORGOT);
+  const clicked = (id: string) =>
+    streamed()
+      .filter((event) => event.name === "click")
+      .map(
+        (event) =>
+          (
+            event.value as {
+              target: {
+                text?: string;
+                name?: string;
+                label?: string;
+                value?: string;
+                attributes: Record<string, string>;
+              };
+            }
+          ).target,
+      )
+      .filter((target) => target.attributes.id === id);
+  await until(() => clicked("form_submit").length === 1, "Retrieve password");
+
+  // CopilotKit's own copy of what the control says is kept as it sent it, beside its name and label.
+  const words = (id: string) =>
+    clicked(id).map(({ text, name, label }) => ({ text, name, label }));
+  expect(words("show-pw")).toEqual([
+    { text: "Show password", name: "Show password", label: "Show password" },
+    { text: "Show password", name: "Show password", label: "Show password" },
+  ]);
+  expect(words("reset")).toEqual([
+    {
+      text: "Reset password link",
+      name: "Reset password link",
+      label: "Reset password link",
+    },
+  ]);
+  expect(words("form_submit")).toEqual([
+    {
+      text: "Retrieve password",
+      name: "Retrieve password",
+      label: "Retrieve password",
+    },
+  ]);
+  // What a control says is no secret, so nothing after it is masked for holding those words.
+  for (const said of ["Show password", "Reset password link"])
+    expect(networkDeps?.digests().has(sha256HexSync(said))).toBe(false);
+
+  // The real secrets: the password, typed and then shown as text, its field's own copies, and the card.
+  expect(leakedSecrets(streamed(), [PASSWORD, CARD])).toEqual([]);
+  const passwordClicks = clicked("admin-password");
+  expect(passwordClicks).toHaveLength(2);
+  for (const target of passwordClicks) expect(target.value).toBe(REDACTED);
+  expect(
+    Object.fromEntries(edits().map((edit) => [edit.attributes.id, edit.value])),
+  ).toMatchObject({ "admin-password": REDACTED, "card-number": REDACTED });
 });
