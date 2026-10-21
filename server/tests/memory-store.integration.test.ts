@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { and, eq, inArray } from "drizzle-orm";
+import { createBotReset } from "../src/agents/lifecycle-reset";
 import { createAuditStore } from "../src/audit";
 import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
@@ -355,4 +356,106 @@ test("the same fact formed at once by two runs is stored once", async () => {
   expect(rows).toHaveLength(1);
   expect(new Set(results.map((result) => result.id)).size).toBe(1);
   expect(results.filter((result) => !result.duplicate)).toHaveLength(1);
+});
+
+test("the same fact formed by two Bots is kept for each, and each recalls only its own", async () => {
+  const content = `Two-Bot fact ${randomUUID()}`;
+  try {
+    const first = await store.formMemory(owner, {
+      agentId: bot,
+      content,
+      sourceApp: "Docs",
+    });
+    const second = await store.formMemory(owner, {
+      agentId: otherBot,
+      content,
+      sourceApp: "Docs",
+    });
+    expect(first.duplicate).toBe(false);
+    expect(second).toMatchObject({ duplicate: false, forgotten: false });
+    expect(second.id).not.toBe(first.id);
+    // The same Bot forming it again is still a duplicate of its own row.
+    expect(
+      await store.formMemory(owner, {
+        agentId: otherBot,
+        content,
+        sourceApp: "Docs",
+      }),
+    ).toEqual({ id: second.id, duplicate: true, forgotten: false });
+    const term = content.slice(-12);
+    expect(
+      (await ingestion.recall(owner, bot, term)).map((row) => row.id),
+    ).toEqual([first.id]);
+    expect(
+      (await ingestion.recall(owner, otherBot, term)).map((row) => row.id),
+    ).toEqual([second.id]);
+  } finally {
+    await database
+      .delete(personalMemories)
+      .where(eq(personalMemories.content, content));
+  }
+});
+
+test("a fact the person forgot from one Bot is not formed again by another", async () => {
+  const content = `Forgotten fact ${randomUUID()}`;
+  const later = `Forgotten later ${randomUUID()}`;
+  const formed: string[] = [];
+  const form = async (agentId: string, text: string) => {
+    const result = await store.formMemory(owner, {
+      agentId,
+      content: text,
+      sourceApp: "Docs",
+    });
+    formed.push(result.id);
+    return result;
+  };
+  try {
+    const first = await form(bot, content);
+    await store.remove(owner, first.id);
+    expect(await form(otherBot, content)).toEqual({
+      id: first.id,
+      duplicate: true,
+      forgotten: true,
+    });
+    // Also when the other Bot had already formed it before the person forgot the first copy.
+    const mine = await form(bot, later);
+    await form(otherBot, later);
+    await store.remove(owner, mine.id);
+    expect(await form(otherBot, later)).toEqual({
+      id: mine.id,
+      duplicate: true,
+      forgotten: true,
+    });
+  } finally {
+    // A forgotten row keeps no content, so it is found by id.
+    await database
+      .delete(personalMemories)
+      .where(inArray(personalMemories.id, formed));
+  }
+});
+
+test("resetting one Bot leaves another Bot's copy of the same fact", async () => {
+  const content = `Reset fact ${randomUUID()}`;
+  const reset = createBotReset({ database, softDeleteChannel: async () => {} });
+  try {
+    await store.formMemory(owner, { agentId: bot, content, sourceApp: "Docs" });
+    const kept = await store.formMemory(owner, {
+      agentId: otherBot,
+      content,
+      sourceApp: "Docs",
+    });
+    await reset.execute({ id: owner, role: "user" }, bot);
+    const rows = await database
+      .select({
+        id: personalMemories.id,
+        agentId: personalMemories.formedByAgentId,
+      })
+      .from(personalMemories)
+      .where(eq(personalMemories.content, content));
+    expect(rows).toEqual([{ id: kept.id, agentId: otherBot }]);
+  } finally {
+    await database
+      .delete(personalMemories)
+      .where(eq(personalMemories.content, content));
+  }
 });
