@@ -1,5 +1,6 @@
 import type { Context } from "hono";
 import { type AppVariables, requireAdmin } from "../../auth/guards";
+import { BROKERED_PROFILE, type BrokerProvider } from "../access";
 import type { Unavailable } from "../app-access";
 import type { CatalogueEntry } from "../catalogue";
 import type {
@@ -38,13 +39,25 @@ function adminInputFor(entry: CatalogueEntry): string | null {
   return null;
 }
 
-/** The sentence an approval is refused with when the app is there and still cannot be used. */
-function unavailableSentence(reason: Unavailable, title: string): string {
+/**
+ * The sentence an approval is refused with when the app is there and still cannot be used.
+ *
+ * The broker's name and key come from {@link BROKERED_PROFILE}, so an Arcade deployment is told
+ * to set ARCADE_API_KEY in the words a Composio one is told to set COMPOSIO_API_KEY.
+ */
+function unavailableSentence(
+  reason: Unavailable,
+  title: string,
+  provider: BrokerProvider,
+): string {
   switch (reason) {
     case "absent":
       return `${title} is not an app this deployment can switch on from here.`;
-    case "composio_unconfigured":
-      return `${title} is a Composio app, and this deployment has no Composio key. Set COMPOSIO_API_KEY, then approve this request again.`;
+    case "composio_unconfigured": {
+      const { vendor, envVar } = BROKERED_PROFILE[provider];
+      const article = /^[aeiou]/i.test(vendor) ? "an" : "a";
+      return `${title} is ${article} ${vendor} app, and this deployment has no ${vendor} key. Set ${envVar}, then approve this request again.`;
+    }
     case "scheme_unreadable":
       return `${title} is enabled, but how it connects is not recorded in a way this deployment can read. Remove it and enable it again on its page under Plugins, then approve this request again.`;
     case "oauth_client_missing":
@@ -366,14 +379,14 @@ export function mountAppAccessRoutes({
       if (inspected.unavailable !== "absent")
         return deny(
           inspected.unavailable,
-          unavailableSentence(inspected.unavailable, title),
+          unavailableSentence(inspected.unavailable, title, activeProvider),
           inspected.unavailable === "composio_unconfigured" ? 503 : 409,
         );
       if (inspected.toolkit) {
         if (!composio)
           return deny(
             "composio_unconfigured",
-            unavailableSentence("composio_unconfigured", title),
+            unavailableSentence("composio_unconfigured", title, activeProvider),
             503,
           );
         const outcome = await enableComposioApp(
@@ -407,7 +420,11 @@ export function mountAppAccessRoutes({
           throw error;
         }
       } else {
-        return deny("absent", unavailableSentence("absent", title), 409);
+        return deny(
+          "absent",
+          unavailableSentence("absent", title, activeProvider),
+          409,
+        );
       }
       enabled = true;
       inspected = await inspect();

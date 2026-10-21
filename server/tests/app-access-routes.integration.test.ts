@@ -936,3 +936,159 @@ describe("answering a request", () => {
     expect(again.status).toBe(409);
   });
 });
+
+/*
+ * THE SAME RULE ON AN ARCADE DEPLOYMENT. Which rows are brokered apps, which connections count and
+ * which id an app nobody enabled would get all come from the store's broker, so a personal Arcade
+ * app reads exactly as a personal Composio app does — under Arcade's case-sensitive toolkit name.
+ */
+describe("on an Arcade deployment", () => {
+  const toolkit = `ArcMail_${suite}`;
+  const ARC_MAIL = `arcade-${toolkit}`;
+  const docs = `ArcDocs_${suite}`;
+
+  function arcadeStore(): PluginStore {
+    return createPluginStore({
+      brokerProvider: "arcade",
+      database,
+      auditStore: audit,
+      credentials: {} as never,
+      encryptionKey: "x".repeat(44),
+      policy: () => ({ mode: "enforce", deny: [], allow: ["true"] }),
+      broker,
+      deploymentId: `acme-${suite}`,
+    });
+  }
+
+  async function seedArcadeApp() {
+    await database.insert(mcpServers).values({
+      id: ARC_MAIL,
+      title: "Arc Mail",
+      vendor: "Arcade",
+      url: `arcade://${toolkit}`,
+      provenance: "arcade",
+      authScheme: "OAUTH2",
+      accountMode: "personal",
+    });
+    await database.insert(mcpTools).values({
+      serverId: ARC_MAIL,
+      name: "READ",
+      description: "READ",
+      inputSchema: {},
+    });
+    await database
+      .insert(pluginGrants)
+      .values({ kind: "mcp", ref: `${ARC_MAIL}/READ`, agentId: bot });
+  }
+
+  const forBot = (composioConfigured = true) =>
+    arcadeStore().appAccessForBot({
+      userId: person,
+      agentId: bot,
+      composioConfigured,
+    });
+
+  test("a personal app is not_connected until the person connects it, then ready", async () => {
+    await seedArcadeApp();
+    expect(await forBot()).toMatchObject([
+      {
+        key: ARC_MAIL,
+        provider: "arcade",
+        account: "personal",
+        connect: "consent",
+        authScheme: "OAUTH2",
+        state: "not_connected",
+      },
+    ]);
+    // Somebody else's connection, and a Composio one at the same app name, are not this person's.
+    await database.insert(brokeredConnections).values([
+      {
+        provider: "arcade",
+        app: toolkit,
+        holder: "person",
+        userId: other,
+        vendorUserId: `vendor-${other}`,
+        verified: true,
+      },
+      {
+        provider: "composio",
+        app: toolkit,
+        holder: "person",
+        userId: person,
+        vendorUserId: `vendor-${person}`,
+        verified: true,
+      },
+    ]);
+    expect((await forBot())[0]?.state).toBe("not_connected");
+    await database.insert(brokeredConnections).values({
+      provider: "arcade",
+      app: toolkit,
+      holder: "person",
+      userId: person,
+      vendorUserId: `vendor-${person}`,
+      verified: true,
+      connectedAt: new Date("2026-10-21T08:00:00.000Z"),
+    });
+    expect(await forBot()).toMatchObject([
+      {
+        key: ARC_MAIL,
+        state: "ready",
+        connectedAt: "2026-10-21T08:00:00.000Z",
+      },
+    ]);
+  });
+
+  test("with no Arcade key the app is switched off at the deployment", async () => {
+    await seedArcadeApp();
+    const inspected = await arcadeStore().inspectApp({
+      app: ARC_MAIL,
+      agentId: bot,
+      userId: person,
+      composioConfigured: false,
+    });
+    expect(inspected?.unavailable).toBe("composio_unconfigured");
+    expect(inspected?.access.state).toBe("disabled");
+  });
+
+  test("an app is found by its id or its toolkit name as typed", async () => {
+    await seedArcadeApp();
+    for (const asked of [ARC_MAIL, toolkit, "arc mail"]) {
+      const inspected = await arcadeStore().inspectApp({
+        app: asked,
+        agentId: bot,
+        userId: person,
+        composioConfigured: true,
+      });
+      expect(inspected?.access.key).toBe(ARC_MAIL);
+      expect(inspected?.toolkit).toBe(toolkit);
+    }
+  });
+
+  test("an app only the directory knows is disabled, under the arcade- id enabling would mint", async () => {
+    const inspected = await arcadeStore().inspectApp({
+      app: "Arc Docs",
+      agentId: bot,
+      userId: person,
+      composioConfigured: true,
+      directory: async () => [
+        {
+          slug: docs,
+          name: "Arc Docs",
+          description: "",
+          logo: null,
+          categories: [],
+          actionCount: 1,
+          connection: { kind: "consent" },
+        },
+      ],
+    });
+    expect(inspected?.access).toMatchObject({
+      key: `arcade-${docs}`,
+      displayName: "Arc Docs",
+      provider: "arcade",
+      state: "disabled",
+      requestKind: "enable",
+    });
+    expect(inspected?.toolkit).toBe(docs);
+  });
+});

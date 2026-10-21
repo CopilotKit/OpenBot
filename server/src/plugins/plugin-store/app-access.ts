@@ -12,6 +12,7 @@ import {
   pluginGrants,
   users,
 } from "../../db/schema";
+import { BROKERED_PROFILE, brokeredProvenance, toolkitOfFor } from "../access";
 import {
   type AppAccess,
   type AppAccessFacts,
@@ -26,7 +27,6 @@ import {
 } from "../app-access";
 import type { BrokerApp } from "../broker";
 import { CATALOGUE, type CatalogueEntry, catalogueEntry } from "../catalogue";
-import { toolkitOf } from "../composio";
 import type { StoreContext } from "./context";
 import { iso } from "./model";
 
@@ -34,7 +34,7 @@ import { iso } from "./model";
  * One app as this module resolves it before anybody's connection is asked about: which rows are
  * it, which of them answers for it, and what the deployment holds for it.
  *
- * `rowIds` IS EVERY ROW THAT IS THIS APP, so a grant made through a duplicate row at a Composio
+ * `rowIds` IS EVERY ROW THAT IS THIS APP, so a grant made through a duplicate row at a brokered
  * app's url counts as holding the app — the same "the apps, not the rows" rule
  * `sharedAppsHeldBy` follows. `answeringId` is the one row whose columns decide, and the one a
  * grant made by approving a request is written against.
@@ -75,7 +75,7 @@ export type AppInspection = {
   unavailable: Unavailable | null;
   /** The row a grant is written against, and null for an app with no row. */
   answeringId: string | null;
-  /** The Composio app, for a brokered one. */
+  /** The app at the broker, for a brokered one. */
   toolkit: string | null;
   /** The catalogue entry, for an app this deployment ships. */
   entry: CatalogueEntry | null;
@@ -108,14 +108,24 @@ export type AppAccessRequestRecord = {
   resolvedBy: string | null;
 };
 
-const SLUG_OF_ID = /^composio-/;
-
 /**
  * Per-person, per-Bot status of the work apps a Bot holds, and the requests a person files when
  * only an administrator can change it. See `../app-access.ts` for the rule itself.
+ *
+ * ONE BROKER, THE STORE'S. Which rows are brokered apps, which connections are theirs, the scheme
+ * an app's url is minted at and the prefix its row id takes all come from `brokerProvider` and
+ * {@link BROKERED_PROFILE}, so a personal Arcade app is read exactly as a personal Composio app is
+ * — and a row left by the broker this deployment does not run is no brokered app here, as it is
+ * no brokered app to any other reader in the store.
  */
 export function appAccessMethods(context: StoreContext) {
-  const { database, auditStore, brokeredAppRowsAt } = context;
+  const { database, auditStore, brokeredAppRowsAt, brokerProvider } = context;
+  const { scheme, idPrefix } = BROKERED_PROFILE[brokerProvider];
+  /** Whether an id is in the namespace `addBrokeredApp` mints this broker's rows into. */
+  const isBrokeredId = (id: string) => id.startsWith(idPrefix);
+  /** An id with that namespace taken off, and any other word as it came. */
+  const slugOfId = (id: string) =>
+    isBrokeredId(id) ? id.slice(idPrefix.length) : id;
 
   /*
    * EVERY ROW, ONCE. `mcp_servers` is the deployment's list of apps — tens of rows, not thousands —
@@ -151,11 +161,14 @@ export function appAccessMethods(context: StoreContext) {
   async function appsByRow(rows: ServerRow[]) {
     const toolkitOfRow = new Map<string, string>();
     for (const row of rows) {
-      const toolkit = row.provenance === "composio" ? toolkitOf(row.url) : null;
+      const toolkit =
+        row.provenance === brokerProvider
+          ? toolkitOfFor(brokerProvider, row.url)
+          : null;
       if (toolkit && !catalogueEntry(row.id)) toolkitOfRow.set(row.id, toolkit);
     }
     const answering = await brokeredAppRowsAt([
-      ...new Set([...toolkitOfRow.values()].map((t) => `composio://${t}`)),
+      ...new Set([...toolkitOfRow.values()].map((t) => `${scheme}${t}`)),
     ]);
     const byId = new Map(rows.map((row) => [row.id, row]));
     const apps = new Map<string, AppCandidate>();
@@ -163,7 +176,7 @@ export function appAccessMethods(context: StoreContext) {
 
     for (const row of rows) {
       const toolkit = toolkitOfRow.get(row.id) ?? null;
-      const head = toolkit ? answering.get(`composio://${toolkit}`) : undefined;
+      const head = toolkit ? answering.get(`${scheme}${toolkit}`) : undefined;
       const key = head?.id ?? row.id;
       let app = apps.get(key);
       if (!app) {
@@ -173,7 +186,7 @@ export function appAccessMethods(context: StoreContext) {
           key,
           title: entry?.title ?? source.title,
           logo: source.logo,
-          provider: toolkit ? "composio" : entry ? "catalogue" : "custom",
+          provider: toolkit ? brokerProvider : entry ? "catalogue" : "custom",
           present: true,
           answeringId: key,
           rowIds: [],
@@ -192,10 +205,11 @@ export function appAccessMethods(context: StoreContext) {
   }
 
   /**
-   * An app with no row: a catalogue entry nobody added, or a Composio app nobody enabled.
+   * An app with no row: a catalogue entry nobody added, or a brokered app nobody enabled.
    *
-   * `key` is the id enabling it would mint — the entry's key, or `composio-<slug>` as
-   * `addBrokeredApp` names a row — so a request filed now names the row the approval creates.
+   * `key` is the id enabling it would mint — the entry's key, or the broker's prefix and the slug
+   * (`composio-<slug>`, `arcade-<Toolkit>`) as `addBrokeredApp` names a row — so a request filed
+   * now names the row the approval creates.
    */
   function absent(input: {
     key: string;
@@ -250,37 +264,41 @@ export function appAccessMethods(context: StoreContext) {
         provider: "catalogue",
         entry,
       });
-    const slug = key.replace(SLUG_OF_ID, "");
-    if (toolkitOf(`composio://${slug}`) !== slug) return null;
+    const slug = slugOfId(key);
+    if (toolkitOfFor(brokerProvider, `${scheme}${slug}`) !== slug) return null;
     const apps = listed === undefined ? await readDirectory(directory) : listed;
     const app = apps?.find((candidate) => candidate.slug === slug);
     if (app)
       return absent({
-        key: `composio-${app.slug}`,
+        key: `${idPrefix}${app.slug}`,
         title: app.name,
         logo: app.logo,
-        provider: "composio",
+        provider: brokerProvider,
         toolkit: app.slug,
       });
     /*
-     * A `composio-` id the directory cannot vouch for is still an app somebody once enabled — a
-     * grant can outlive its row — so it is named by its slug rather than dropped. A bare word that
-     * matches nothing is not an app at all.
+     * An id in the broker's namespace that the directory cannot vouch for is still an app somebody
+     * once enabled — a grant can outlive its row — so it is named by its slug rather than dropped.
+     * A bare word that matches nothing is not an app at all.
      */
-    if (SLUG_OF_ID.test(key))
+    if (isBrokeredId(key))
       return absent({
         key,
         title: slug,
-        provider: "composio",
+        provider: brokerProvider,
         toolkit: slug,
       });
     return null;
   }
 
   /**
-   * One app by whatever a caller called it: a server id, a catalogue key, a Composio slug with or
-   * without its `composio-` prefix, or the app's name. Null for a word that names no app here or
-   * in the directory.
+   * One app by whatever a caller called it: a server id, a catalogue key, a brokered app's slug
+   * with or without its id prefix (`composio-`, `arcade-`), or the app's name. Null for a word that
+   * names no app here or in the directory.
+   *
+   * A SLUG IS MATCHED AS TYPED FIRST, THEN LOWERCASED. Arcade's toolkit names are case-sensitive
+   * (`Gmail`), so the word as the caller typed it is the one that can reach them; Composio's slugs
+   * are lowercase, so the lowercased word is the one that always reached those, and still does.
    */
   async function candidateFor(
     app: string,
@@ -295,9 +313,12 @@ export function appAccessMethods(context: StoreContext) {
     const byId = byRow.get(asked);
     if (byId) return byId;
 
-    const slug = lower.replace(SLUG_OF_ID, "");
-    for (const candidate of new Set(byRow.values()))
-      if (candidate.toolkit === slug) return candidate;
+    const typed = slugOfId(asked);
+    const slug = slugOfId(lower);
+    const apps = new Set(byRow.values());
+    for (const wanted of new Set([typed, slug]))
+      for (const candidate of apps)
+        if (candidate.toolkit === wanted) return candidate;
 
     const entry =
       catalogueEntry(lower) ??
@@ -306,16 +327,20 @@ export function appAccessMethods(context: StoreContext) {
     if (entry)
       return byRow.get(entry.key) ?? absentFor(entry.key, undefined, null);
 
-    for (const candidate of new Set(byRow.values()))
+    for (const candidate of apps)
       if (candidate.title.toLowerCase() === lower) return candidate;
 
     const listed = await readDirectory(directory);
-    const named = listed?.find(
-      (candidate) =>
-        candidate.slug === slug || candidate.name.toLowerCase() === lower,
-    );
-    if (named) return absentFor(`composio-${named.slug}`, undefined, listed);
-    return absentFor(SLUG_OF_ID.test(lower) ? lower : asked, undefined, listed);
+    const named =
+      (typed !== slug
+        ? listed?.find((candidate) => candidate.slug === typed)
+        : undefined) ??
+      listed?.find(
+        (candidate) =>
+          candidate.slug === slug || candidate.name.toLowerCase() === lower,
+      );
+    if (named) return absentFor(`${idPrefix}${named.slug}`, undefined, listed);
+    return absentFor(isBrokeredId(lower) ? lower : asked, undefined, listed);
   }
 
   /** The server halves of a Bot's MCP grants. */
@@ -366,7 +391,7 @@ export function appAccessMethods(context: StoreContext) {
             .from(brokeredConnections)
             .where(
               and(
-                eq(brokeredConnections.provider, "composio"),
+                eq(brokeredConnections.provider, brokerProvider),
                 eq(brokeredConnections.holder, "person"),
                 eq(brokeredConnections.userId, userId),
                 inArray(brokeredConnections.app, toolkits),
@@ -384,7 +409,7 @@ export function appAccessMethods(context: StoreContext) {
             .from(brokeredConnections)
             .where(
               and(
-                eq(brokeredConnections.provider, "composio"),
+                eq(brokeredConnections.provider, brokerProvider),
                 eq(brokeredConnections.holder, "deployment"),
                 inArray(brokeredConnections.app, toolkits),
               ),
@@ -482,7 +507,7 @@ export function appAccessMethods(context: StoreContext) {
         : undefined;
       const sharedUsable = teamAccount?.usable === true;
       const personal =
-        app.provider === "composio" && app.toolkit
+        brokeredProvenance(app.provider) && app.toolkit
           ? connections.personalBrokered.get(app.toolkit)
           : app.provider === "catalogue"
             ? app.rowIds
@@ -518,7 +543,7 @@ export function appAccessMethods(context: StoreContext) {
           provider: app.provider,
           account,
           connect: connectOf(facts),
-          authScheme: app.provider === "composio" ? app.authScheme : null,
+          authScheme: brokeredProvenance(app.provider) ? app.authScheme : null,
           accountMode: app.accountMode,
           state,
           granted: facts.granted,
@@ -615,7 +640,7 @@ export function appAccessMethods(context: StoreContext) {
         if (app) apps.set(app.key, app);
         else missing.push(serverId);
       }
-      const listed = missing.some((id) => SLUG_OF_ID.test(id))
+      const listed = missing.some(isBrokeredId)
         ? await readDirectory(input.directory)
         : null;
       for (const serverId of missing) {

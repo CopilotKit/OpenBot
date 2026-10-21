@@ -1,3 +1,4 @@
+import { type BrokerProvider, brokeredProvenance } from "./access";
 import { schemeKind } from "./broker";
 import type { CatalogueEntry } from "./catalogue";
 
@@ -6,7 +7,7 @@ import type { CatalogueEntry } from "./catalogue";
  * whose it is.
  *
  * WHY THIS EXISTS AS ONE ANSWER. Every fact it reads already had a home: whether the app is
- * enabled is a row in `mcp_servers`, whether Composio is configured is a key in the environment,
+ * enabled is a row in `mcp_servers`, whether the broker is configured is a key in the environment,
  * whether the Bot holds the app is `plugin_grants`, whether the person connected is
  * `brokered_connections` or `mcp_user_credentials`, and whether a Shared app has its team account
  * is a deployment row in `brokered_connections`. Each screen that wanted to say "you can use this"
@@ -33,7 +34,7 @@ import type { CatalogueEntry } from "./catalogue";
  * to fix.
  * `shared_not_connected` — a Shared app whose one team account is not connected, or whose key was
  * refused. Only an administrator can connect it.
- * `disabled` — switched off at the deployment: no row, Composio not configured, or an app that
+ * `disabled` — switched off at the deployment: no row, the broker not configured, or an app that
  * still needs something only an administrator can supply.
  * `not_granted` — enabled, and this Bot holds none of its tools. Only an administrator can grant.
  */
@@ -81,12 +82,17 @@ export type AppAccount =
 
 /**
  * How the account is connected, for the screen that starts it: the deployment's own OAuth flow, a
- * Composio consent screen, a Composio key form, or nothing to connect.
+ * broker's consent screen, a broker's key form, or nothing to connect.
  */
 export type AppConnect = "oauth" | "consent" | "key" | null;
 
-/** Where the app comes from, which decides what enabling it takes. */
-export type AppProvider = "composio" | "catalogue" | "custom";
+/**
+ * Where the app comes from, which decides what enabling it takes.
+ *
+ * A BROKERED APP IS NAMED BY ITS BROKER, `composio` or `arcade`, and every rule below asks
+ * {@link brokeredProvenance} rather than comparing to one of them, so the two are read alike.
+ */
+export type AppProvider = BrokerProvider | "catalogue" | "custom";
 
 /** One app as the Bot page and the chat card draw it. */
 export type AppAccess = {
@@ -94,7 +100,7 @@ export type AppAccess = {
   key: string;
   /**
    * The app's own name — "Gmail", never "Composio Gmail" and never a humanised `composio-gmail`.
-   * A Composio row's title is the directory's name for the app; a catalogue row's is the entry's.
+   * A brokered row's title is the directory's name for the app; a catalogue row's is the entry's.
    */
   displayName: string;
   logo: string | null;
@@ -135,7 +141,7 @@ export type AppAccessFacts = {
   provider: AppProvider;
   /** Whether a row stands for the app at all. */
   present: boolean;
-  /** Whether this deployment has a Composio key, for a brokered app. */
+  /** Whether this deployment has its broker's key, for a brokered app. */
   composioConfigured: boolean;
   /** The scheme the app's answering row records, for a brokered app. */
   authScheme: string | null;
@@ -153,7 +159,7 @@ export type AppAccessFacts = {
 
 /** Whose account, from the same facts `accessFor` resolves a call with. */
 export function accountOf(facts: AppAccessFacts): AppAccount {
-  if (facts.provider === "composio") {
+  if (brokeredProvenance(facts.provider)) {
     if (schemeKind(facts.authScheme) === "none") return "deployment";
     return facts.accountMode === "shared" ? "shared" : "personal";
   }
@@ -165,7 +171,7 @@ export function accountOf(facts: AppAccessFacts): AppAccount {
 }
 
 export function connectOf(facts: AppAccessFacts): AppConnect {
-  if (facts.provider === "composio") {
+  if (brokeredProvenance(facts.provider)) {
     const kind = schemeKind(facts.authScheme);
     return kind === "consent" || kind === "key" ? kind : null;
   }
@@ -189,7 +195,7 @@ export type Unavailable =
 
 export function unavailableReason(facts: AppAccessFacts): Unavailable | null {
   if (!facts.present) return "absent";
-  if (facts.provider === "composio") {
+  if (brokeredProvenance(facts.provider)) {
     if (!facts.composioConfigured) return "composio_unconfigured";
     if (schemeKind(facts.authScheme) === "unreadable")
       return "scheme_unreadable";

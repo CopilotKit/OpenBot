@@ -34,7 +34,7 @@ export function appAccessTools(options: {
   botId: string;
   actorId: string;
   composioConfigured: boolean;
-  /** Names an app this deployment has no row for. Absent without a Composio key. */
+  /** Names an app this deployment has no row for. Absent without the broker's key. */
   directory?: AppDirectory;
 }): GrantedTool[] {
   const parameters = z

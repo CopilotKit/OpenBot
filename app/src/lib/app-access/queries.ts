@@ -36,10 +36,11 @@ export type AppAccess = {
   /** The app's own name — "Gmail", never a humanised server id. */
   displayName: string;
   logo: string | null;
-  provider: "composio" | "catalogue" | "custom";
+  /** A brokered app names its broker; a catalogue or custom app is reached directly. */
+  provider: "composio" | "arcade" | "catalogue" | "custom";
   /** Whose account calls land in: each person's own, one team account, or nobody's. */
   account: "personal" | "shared" | "deployment";
-  /** How the account is connected: this deployment's OAuth flow, a Composio consent, or a key form. */
+  /** How the account is connected: this deployment's OAuth flow, a broker's consent, or a key form. */
   connect: "oauth" | "consent" | "key" | null;
   authScheme: string | null;
   accountMode: "personal" | "shared" | null;
