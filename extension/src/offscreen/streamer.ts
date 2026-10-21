@@ -78,11 +78,15 @@ export type StreamerDeps = {
 
 export type Streamer = {
   push(event: CapturedEvent): void;
-  /** Start over: outcome failed to the current trajectory, switch at once, resolve when the old one is drained and finished. */
+  /** Start over: the current trajectory gets `recording.restarted` naming the new one and a failed outcome with reason
+   * `restarted`; the switch is at once (the new one's `recording.started` names the one it replaced), and it resolves
+   * when the old one is drained and finished. */
   rotate(next: {
     recordingId: string;
     trajectoryId: string;
     title: string;
+    /** When Start over began: the new trajectory's start events are stamped then. */
+    startedAt?: number;
   }): Promise<void>;
   /** Queues `outcome` last and resolves once it is in the outbox. */
   stop(
@@ -114,6 +118,9 @@ export type StreamerSession = {
   resume?: boolean;
   /** A streamer for offscreen.recover: no new rollover starts (only the final outcome follows). */
   recover?: boolean;
+  /** A new recording: when Record began. Its `recording.started` and started outcome are stamped then, so they come
+   * before (in time as in seq) every event it records. */
+  startedAt?: number;
 };
 
 const MAX_BATCH_EVENTS = 50;
@@ -1177,25 +1184,40 @@ export async function createStreamer(
   const custom = (
     name: string,
     value: Record<string, JsonValue>,
+    at: number = now(),
   ): CapturedEvent => ({
     type: "CUSTOM",
     name,
-    timestamp: now(),
+    timestamp: at,
     value,
   });
 
-  const begin = async (lane: Lane) => {
+  /** A new trajectory's first events, stamped when its recording began (never later than now, never in the future).
+   * After Start over they name the trajectory it replaced. */
+  const begin = async (
+    lane: Lane,
+    startedAt: number | undefined,
+    previousTrajectoryId?: string,
+  ) => {
+    const at = Math.min(startedAt ?? now(), now());
     await queue(
       lane,
-      custom("recording.started", {
-        recordingId: lane.meta.recordingId,
-        source: "openbot-recorder",
-        version: session.version,
-      }),
+      custom(
+        "recording.started",
+        {
+          recordingId: lane.meta.recordingId,
+          source: "openbot-recorder",
+          version: session.version,
+          ...(previousTrajectoryId === undefined
+            ? {}
+            : { previousTrajectoryId }),
+        },
+        at,
+      ),
     );
     await queue(
       lane,
-      custom("outcome", { workflow: lane.meta.title, phase: "started" }),
+      custom("outcome", { workflow: lane.meta.title, phase: "started" }, at),
     );
   };
 
@@ -1295,7 +1317,7 @@ export async function createStreamer(
     lanes.push(lane);
     void enqueue(async () => {
       await persist(lane);
-      await begin(lane);
+      await begin(lane, session.startedAt);
     }).catch(() => undefined);
   }
   for (const lane of lanes) {
@@ -1321,9 +1343,21 @@ export async function createStreamer(
       await enqueue(async () => {
         const old = currentLane();
         if (!old.meta.outcomeQueued && !old.meta.closed) {
+          // Ended by Start over, linked to the trajectory that takes over as a rollover links its next one.
           await queue(
             old,
-            custom("outcome", { workflow: old.meta.title, phase: "failed" }),
+            custom("recording.restarted", {
+              nextTrajectoryId: next.trajectoryId,
+              nextRecordingId: next.recordingId,
+            }),
+          );
+          await queue(
+            old,
+            custom("outcome", {
+              workflow: old.meta.title,
+              phase: "failed",
+              reason: "restarted",
+            }),
           );
           old.meta.outcomeQueued = true;
         }
@@ -1338,7 +1372,7 @@ export async function createStreamer(
         );
         lanes.push(lane);
         await persist(lane);
-        await begin(lane);
+        await begin(lane, next.startedAt, old.id);
         emitStatus();
         void connect(lane);
         maybeClose(old);

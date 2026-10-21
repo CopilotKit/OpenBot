@@ -148,7 +148,14 @@ export type BackgroundToOffscreen =
   | { type: "offscreen.start"; session: StreamSession }
   | { type: "offscreen.resume"; session: StreamSession } // the service worker restarted and found no document: same outbox
   | { type: "offscreen.event"; event: CapturedEvent }
-  | { type: "offscreen.rotate"; recordingId: string; trajectoryId: string } // "Start over"
+  | {
+      type: "offscreen.rotate";
+      recordingId: string;
+      trajectoryId: string;
+      /** When Start over began: the new trajectory's recording.started is stamped then, before its first step. */
+      startedAt?: number;
+    } // "Start over"
+  | { type: "offscreen.voice.end"; recordingId: string } // Stop: the phrase in progress goes to the service worker, placed among the steps it still holds, before they are sent; answered with offscreen.voice.ended
   | { type: "offscreen.stop"; outcome: "succeeded" } // the person's Stop; idempotent per recording (Task 11)
   | { type: "offscreen.stop"; outcome: "failed"; reason: StopFailure } // the browser was disconnected or signed out mid-recording
   | {
@@ -205,6 +212,10 @@ export type OffscreenToBackground =
       parked: boolean;
       events: number;
     } // a stopped recording's events are kept (Decision 19)
+  | { type: "offscreen.transcript"; recordingId: string; event: CapturedEvent } // a final phrase, stamped with its start: the service worker places it among the steps it holds
+  | { type: "offscreen.speaking"; recordingId: string; since: number | null } // when the phrase being spoken began (null: none is): steps from then on wait for its transcript
+  | { type: "offscreen.voice.ended"; recordingId: string } // the answer to offscreen.voice.end: every phrase was sent before it
+  | { type: "offscreen.held"; recordingId: string } // the steps a recovered drain carried (`held`) are in the outbox, before its outcome
   | OffscreenSignedOut; // a pass came back RECORDER_SIGNED_OUT, with the guard's reason; its events stay kept (Decision 19)
 
 /** The connect page's Connect or Cancel. `origin` is the one the page showed (its page.connect.pending answer), in the

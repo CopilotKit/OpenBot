@@ -18,6 +18,7 @@ import {
   scrubUrl,
 } from "@openbot/shared/recorder-masking";
 import type {
+  BackgroundToContent,
   BackgroundToOffscreen,
   CaptureStatus,
   ContentToBackground,
@@ -45,6 +46,7 @@ import { narrationLanguage } from "../shared/speech-language";
 import {
   type ConnectionRecord,
   type DrainRecord,
+  type HeldSteps,
   type KeptEvents,
   readLocal,
   readSession,
@@ -82,7 +84,11 @@ import {
   hasOffscreenDocument,
 } from "./offscreen-document";
 import type { RouterHandlers } from "./router";
-import { createStepAssembler, type StepAssembler } from "./steps";
+import {
+  createStepAssembler,
+  type StepAssembler,
+  type StepSnapshot,
+} from "./steps";
 
 type Timers = {
   set(fn: () => void, ms: number): unknown;
@@ -99,6 +105,9 @@ export type RecordingDeps = {
   now(): number;
   /** Every wait (the document's ready, the stop watchdog) goes through these. */
   timers: Timers;
+  /** The held steps' own timers (steps.ts) and the writes that keep them (`heldSteps`): the browser's timers unless a
+   * test passes its own. */
+  stepTimers?: Timers;
 };
 
 /** Called by the router after Task 8's handler answered: `connected` after a successful `page.connect.decide` (web or Desktop),
@@ -154,6 +163,35 @@ const QUEUE_BYTES = 8 * 1024 * 1024;
 const ACTION_EVENTS = new Set(["click", "input", "submit", "key"]);
 /** The content events that are the person's steps: held until each one's save is known (steps.ts). */
 const STEP_EVENTS = ACTION_EVENTS;
+/** The held steps are written at once when they change, then at most this often while they keep changing: a step
+ * reaches storage within this long of arriving, and a chatty page costs at most ten writes a second. */
+const HELD_WRITE_MS = 100;
+/** How long Stop waits for the document to hand over the phrase being spoken (its speech service has 1.5 s). */
+const VOICE_END_MS = 2_000;
+const browserTimers: Timers = {
+  set: (fn, ms) => setTimeout(fn, ms),
+  clear: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+};
+/** Timers for an assembler that only takes up held steps to send them at once (a browser restart): none ever fires. */
+const NO_TIMERS: Timers = { set: () => null, clear: () => {} };
+
+/** The events a snapshot of held steps sends, in order, with what each owns: after a browser quit nothing more can
+ * arrive for them. */
+export function heldEvents(
+  snapshot: StepSnapshot,
+  now: () => number,
+): CapturedEvent[] {
+  const events: CapturedEvent[] = [];
+  const assembler = createStepAssembler({
+    emit: (event) => events.push(event),
+    now,
+    timers: NO_TIMERS,
+  });
+  assembler.restore(snapshot);
+  assembler.flush();
+  assembler.clear();
+  return events;
+}
 
 const SENTENCES = {
   noConnection: "Connect this browser to OpenBot first.",
@@ -308,11 +346,17 @@ export function reduceRecorder(
         ...state,
         topUrls: { ...state.topUrls, [event.tabId]: event.url },
       };
-    case "capture":
-      return {
-        ...state,
-        capture: defined({ ...state.capture, ...event.capture }),
-      };
+    case "capture": {
+      const capture = { ...state.capture, ...event.capture };
+      // The document's Intelligence status comes whole, its reason left out when there is none (a message drops an
+      // undefined field): streaming again after a retry says nothing more of the retry.
+      if (
+        "intelligence" in event.capture &&
+        !("intelligenceReason" in event.capture)
+      )
+        delete capture.intelligenceReason;
+      return { ...state, capture: defined(capture) };
+    }
     case "stop":
       return {
         ...state,
@@ -473,6 +517,8 @@ export function installRecording(
   };
   /** The live recording's steps, held until each one's save (if any) is known (steps.ts). */
   let steps: StepAssembler | null = null;
+  /** What a previous service worker held for the recording it left live or stopping, until this one takes it up. */
+  let restoredSteps: HeldSteps | null = null;
   /** The live recording's agent side: the AG-UI the network capture observes, as CopilotKit's own events, placed among
    * the steps by time. A fresh one with each set of steps. */
   let agentEvents: AgentEvents | null = null;
@@ -577,10 +623,15 @@ export function installRecording(
         recordingId: record.recordingId,
         trajectoryIds: new Set(record.trajectoryIds),
       };
+    // What the previous service worker held for this recording is taken up as soon as it can be: a step that comes
+    // meanwhile takes its place behind them.
+    const held = record ? await readLocal("heldSteps") : undefined;
+    if (held && held.recordingId === record?.recordingId) restoredSteps = held;
     if (state.phase !== "recording") return;
     const connection = await currentConnection();
     if (!record || !connection || !ownedBy(record, connection)) return;
     live = liveFrom(record, connection.token);
+    openSteps(live.recordingId, takeRestored(live.recordingId));
   })();
   ready.catch(report("loading the recorder state"));
 
@@ -853,6 +904,25 @@ export function installRecording(
           at: deps.now(),
         }).catch(report("keeping events"));
         return;
+      case "offscreen.transcript":
+        placeTranscript(message.event);
+        return;
+      case "offscreen.speaking":
+        speechHold = message.since;
+        steps?.hold(message.since);
+        return;
+      case "offscreen.voice.ended":
+        voiceEndWaiters.get(message.recordingId)?.();
+        return;
+      case "offscreen.held":
+        void updateDrains((drains) =>
+          drains.map((drain) => {
+            if (drain.recordingId !== message.recordingId) return drain;
+            const { held: _sent, ...rest } = drain;
+            return rest;
+          }),
+        ).catch(report("forgetting a drain's held steps"));
+        return;
       case "offscreen.signed-out": {
         const signedOut = parseOffscreenSignedOut(message);
         if (signedOut)
@@ -962,8 +1032,60 @@ export function installRecording(
     };
   }
 
-  /** A new set of held steps for the live recording, with its own agent events; the previous one's are sent first. */
-  function openSteps(): StepAssembler {
+  // ---- The held steps, kept in storage ----------------------------------------------------------
+  //
+  // A service worker's memory goes when Chrome stops it, and with it every step it still held (waiting out its window
+  // for the call that saves it). So the live recording's held steps are written to storage.local as they change: a
+  // restarted service worker takes them up again, and after a browser quit they go with the recording's drain, as the
+  // rest of the recording is kept (storage.session would not outlive the quit). The first change is written at once,
+  // later ones at most every HELD_WRITE_MS.
+
+  const stepTimers = deps.stepTimers ?? browserTimers;
+  let heldSource: { recordingId: string; assembler: StepAssembler } | null =
+    null;
+  let heldTimer: unknown = null;
+  let heldWrittenAt = Number.NEGATIVE_INFINITY;
+  /** What storage holds, as JSON (null: nothing); undefined until this service worker wrote it. */
+  let heldWritten: string | null | undefined;
+  let heldWrites: Promise<void> = Promise.resolve();
+
+  function heldChanged(recordingId: string, assembler: StepAssembler): void {
+    heldSource = { recordingId, assembler };
+    if (heldTimer !== null) return;
+    heldTimer = stepTimers.set(
+      () => void writeHeld(),
+      Math.max(0, heldWrittenAt + HELD_WRITE_MS - deps.now()),
+    );
+  }
+
+  /** Writes what the steps hold now (or removes it when they hold nothing); resolves once it is in storage. */
+  function writeHeld(): Promise<void> {
+    if (heldTimer !== null) stepTimers.clear(heldTimer);
+    heldTimer = null;
+    heldWrittenAt = deps.now();
+    const source = heldSource;
+    const snapshot = source?.assembler.snapshot() ?? null;
+    const value: HeldSteps | null =
+      source && snapshot
+        ? { recordingId: source.recordingId, steps: snapshot }
+        : null;
+    const text = value ? JSON.stringify(value) : null;
+    if (text === heldWritten) return heldWrites;
+    heldWritten = text;
+    heldWrites = heldWrites
+      .then(() =>
+        value ? writeLocal("heldSteps", value) : removeLocal("heldSteps"),
+      )
+      .catch(report("keeping the held steps"));
+    return heldWrites;
+  }
+
+  /** A new set of held steps for the live recording, with its own agent events; the previous one's are sent first.
+   * `restore` takes up what a previous service worker held for it. */
+  function openSteps(
+    recordingId: string,
+    restore?: StepSnapshot,
+  ): StepAssembler {
     steps?.flush();
     steps?.clear();
     agentEvents?.stop();
@@ -978,7 +1100,9 @@ export function installRecording(
           ? paired.settleClick(tabId, event, owns)
           : event,
       pageOf,
+      onChange: () => heldChanged(recordingId, assembler),
       now: deps.now,
+      timers: stepTimers,
     });
     steps = assembler;
     agentEvents = paired = deps.createAgentEvents({
@@ -988,6 +1112,10 @@ export function installRecording(
       digests: () => digests,
       now: deps.now,
     });
+    if (restore) assembler.restore(restore);
+    // A phrase still being spoken holds the new steps too (Start over); a restored one keeps its own hold until the
+    // document says again.
+    if (speechHold !== null) assembler.hold(speechHold);
     return assembler;
   }
 
@@ -1000,6 +1128,55 @@ export function installRecording(
     if (steps === held) steps = null;
     agentEvents?.stop();
     agentEvents = null;
+  }
+
+  /** The steps a previous service worker held for this recording, taken up by this one (once). */
+  function takeRestored(recordingId: string): StepSnapshot | undefined {
+    const restored = restoredSteps;
+    if (restored?.recordingId !== recordingId) return undefined;
+    restoredSteps = null;
+    return restored.steps;
+  }
+
+  // ---- The narration among the steps --------------------------------------------------------
+  //
+  // The document transcribes the person's narration. Each phrase's transcript is stamped with its start but exists only
+  // once the phrase ends, so the document says when a phrase begins (offscreen.speaking: the steps from then on wait)
+  // and sends the transcript here to be placed among the held steps.
+
+  /** When the phrase being spoken began, as the document last said (null: none is). */
+  let speechHold: number | null = null;
+  const voiceEndWaiters = new Map<string, () => void>();
+
+  function placeTranscript(event: CapturedEvent): void {
+    // A phrase that began before Start over is stamped no earlier than the recording it lands in (its own startedAt
+    // still says when it began).
+    const startedAt = state.startedAt;
+    const placed =
+      startedAt !== undefined && event.timestamp < startedAt
+        ? { ...event, timestamp: startedAt }
+        : event;
+    if (steps) steps.transcript(state.tabIds[0] ?? -1, placed);
+    else forwardEvent(placed);
+  }
+
+  /** Before Stop sends the held steps: the document hands over the phrase being spoken, placed among them, and lets go
+   * of the microphone. Only while a phrase is being spoken, and never longer than VOICE_END_MS. */
+  function endVoiceFirst(recordingId: string): Promise<void> {
+    if (speechHold === null || !steps || !offscreen) return Promise.resolve();
+    return new Promise((resolve) => {
+      let handle: unknown = null;
+      const finish = () => {
+        if (voiceEndWaiters.get(recordingId) === finish)
+          voiceEndWaiters.delete(recordingId);
+        if (handle !== null) deps.timers.clear(handle);
+        resolve();
+      };
+      voiceEndWaiters.set(recordingId, finish);
+      handle = deps.timers.set(finish, VOICE_END_MS);
+      if (!postOffscreen({ type: "offscreen.voice.end", recordingId }))
+        finish();
+    });
   }
 
   /** The page a tab is on when a recording starts in it: its first step. */
@@ -1177,7 +1354,7 @@ export function installRecording(
         },
       });
       injected = true;
-      openSteps();
+      openSteps(recordingId);
       startStep(tabId, url ?? "");
       // A page the Recorder may not read refuses the script; its first commit to a website injects it.
       await injectRecordingScripts(tabId, recordingId).catch(() => undefined);
@@ -1225,7 +1402,7 @@ export function installRecording(
 
   async function moveIntoDrains(
     recordingId: string,
-    flags: { discarding?: boolean } = {},
+    flags: { discarding?: boolean; held?: CapturedEvent[] } = {},
   ): Promise<void> {
     const drains = await serially(async () => {
       const record = await readLocal("activeRecording");
@@ -1237,6 +1414,7 @@ export function installRecording(
         ...record,
         discarding: flags.discarding ? true : undefined,
         kept: flags.discarding ? undefined : kept,
+        held: flags.held?.length ? flags.held : undefined,
       });
       const next = [
         ...current.filter((entry) => entry.recordingId !== recordingId),
@@ -1298,8 +1476,16 @@ export function installRecording(
     network = null;
     networkMode = "off";
     if (capture) await capture.stop().catch(report("stopping network capture"));
-    // The steps still held go before the outcome, with the saves they have.
+    // A stop this service worker finishes for one before it: what that one held is sent as this one's would be.
+    const restored = steps ? undefined : takeRestored(recordingId);
+    if (restored) openSteps(recordingId, restored);
+    // The phrase being said is placed among the held steps, before they go (not for a Disconnect, which discards it).
+    if (mode.kind !== "disconnect") await endVoiceFirst(recordingId);
+    // The steps still held go before the outcome, with the saves they have; storage forgets them at once.
     closeSteps();
+    // The recording's voice has ended with it: a phrase it was hearing holds nothing of the next recording.
+    speechHold = null;
+    await writeHeld();
     // Only the person's Stop succeeds. A Disconnect or a sign-out ends the recording midway: what it streamed live is in
     // Intelligence already, and its outcome says why it ended.
     const message: BackgroundToOffscreen =
@@ -1652,8 +1838,13 @@ export function installRecording(
     live = { ...current, recordingId };
     shown = { recordingId, trajectoryIds: new Set([trajectoryId]) };
     forgetAddresses();
-    postOffscreen({ type: "offscreen.rotate", recordingId, trajectoryId });
-    openSteps();
+    postOffscreen({
+      type: "offscreen.rotate",
+      recordingId,
+      trajectoryId,
+      startedAt,
+    });
+    openSteps(recordingId);
     for (const tabId of state.tabIds) {
       const top = state.topUrls[tabId] ?? "";
       recordedNavigations.set(tabId, top);
@@ -1806,8 +1997,21 @@ export function installRecording(
     // Only what the browser restart left: a Record this service worker started since is not touched.
     if (loadedPhase !== "idle" || state.phase !== "idle" || starting) return;
     const record = await readLocal("activeRecording");
-    if (!record) return;
-    await moveIntoDrains(record.recordingId);
+    const held = await readLocal("heldSteps");
+    if (!record) {
+      // Steps of a recording already moved into the drains were sent with it.
+      if (held) await removeLocal("heldSteps");
+      return;
+    }
+    // The steps its service worker still held when the browser quit go with it, sent as they would have been at Stop,
+    // ahead of its interrupted outcome.
+    await moveIntoDrains(record.recordingId, {
+      held:
+        held?.recordingId === record.recordingId
+          ? heldEvents(held.steps, deps.now)
+          : undefined,
+    });
+    if (held) await removeLocal("heldSteps");
     await writeLocal("notice", { kind: "interrupted", at: deps.now() });
   }
 
@@ -1871,7 +2075,8 @@ export function installRecording(
       fallback: deps.createPageFallback(),
     });
     network = capture;
-    openSteps();
+    // Taken up when this service worker loaded, unless that could not happen then.
+    if (!steps) openSteps(live.recordingId, takeRestored(live.recordingId));
     const mode = await capture.resume(
       state.tabIds.map((tabId) => ({
         tabId,
@@ -2082,6 +2287,17 @@ export function installRecording(
       state.tabIds.includes(tabId);
     if (message.type === "content.hello") {
       tellPort(port, followed);
+      // The 50-action notice is still open: a page the tab moved to shows it again, as the one it left did.
+      if (followed && message.top && state.noticeOpen)
+        try {
+          port.postMessage({
+            type: "background.notice",
+            show: true,
+            actions: state.noticeAt ?? state.actions,
+          } satisfies BackgroundToContent);
+        } catch {
+          // The frame went away.
+        }
       return;
     }
     if (state.phase !== "recording" || tabId === undefined) return;
@@ -2316,6 +2532,10 @@ export function installRecording(
     async connected() {
       await ready;
       await adoptConnection();
+      // Connected again: the sentence that said the stopped recording waits for a connection no longer holds. The kept
+      // row says what still waits, and for whom.
+      if (state.error !== undefined && KEPT_SENTENCES.includes(state.error))
+        dispatch({ type: "clear-error" });
       // The connect page waits on this answer: the sending runs on its own.
       void sendDrains({ recovering: false }).catch(
         report("sending kept recordings"),

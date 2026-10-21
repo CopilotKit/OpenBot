@@ -5,6 +5,7 @@ import {
   scrubTranscript,
 } from "@openbot/shared/recorder-masking";
 import {
+  browserName,
   FLUSH_MS,
   NO_WORDS_MS,
   NO_WORDS_SENTENCE,
@@ -82,6 +83,7 @@ function setup(
     noRecognition?: boolean;
     microphone?: () => Promise<void>;
     digests?: Set<string>;
+    browser?: string;
   } = {},
 ) {
   const clock = virtualClock();
@@ -115,6 +117,7 @@ function setup(
       status: (voice) => s.statuses.push(voice),
       mask: (text, before) =>
         scrubTranscript(text, { digests: options.digests, before }),
+      ...(options.browser ? { browser: options.browser } : {}),
     },
     deps,
   );
@@ -472,6 +475,53 @@ describe("voice", () => {
     expect(s.speech.instances).toHaveLength(2);
     s.recognition().begin();
     expect(s.last()?.state).toBe("listening");
+  });
+
+  test("in Edge the speech service the popup names is Edge's, never Chrome's", async () => {
+    // Edge run 1: the popup said "Chrome's speech service cannot be reached" in Edge. What Edge 155 and Chrome 156 on
+    // macOS say they are, with their client hints and without them.
+    const edge = {
+      userAgent:
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36 Edg/155.0.0.0",
+      userAgentData: {
+        brands: [
+          { brand: "Microsoft Edge", version: "155" },
+          { brand: "Not.A/Brand", version: "99" },
+          { brand: "Chromium", version: "155" },
+        ],
+      },
+    };
+    const chrome = {
+      userAgent:
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
+      userAgentData: {
+        brands: [
+          { brand: "Chromium", version: "156" },
+          { brand: "Google Chrome", version: "156" },
+          { brand: "Not_A Brand", version: "24" },
+        ],
+      },
+    };
+    expect(browserName(edge)).toBe("Edge");
+    expect(browserName({ userAgent: edge.userAgent })).toBe("Edge");
+    expect(browserName(chrome)).toBe("Chrome");
+    expect(browserName({ userAgent: chrome.userAgent })).toBe("Chrome");
+
+    const s = setup({ browser: browserName(edge) });
+    await s.clock.advance(0);
+    s.recognition().begin();
+    s.recognition().error("network");
+    expect(s.last()?.reason).toBe(
+      "Edge's speech service cannot be reached. Recording goes on, and voice tries again in a moment.",
+    );
+    s.recognition().end();
+    await s.clock.advance(2_000);
+    s.recognition().begin();
+    s.recognition().error("service-not-allowed");
+    expect(s.last()?.reason).toBe(
+      "Edge's speech recognition is turned off or not available here. Recording goes on without your voice.",
+    );
+    expect(JSON.stringify(s.statuses)).not.toContain("Chrome");
   });
 
   test("mute keeps the phrase in progress, lets go of the microphone, and unmute opens it again", async () => {

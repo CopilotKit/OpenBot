@@ -232,6 +232,12 @@ async function setup(): Promise<Harness> {
         const entry: ServiceWorkerPort = { port, messages: [] };
         port.onMessage.addListener((message: OffscreenToBackground) => {
           entry.messages.push(message);
+          // As the service worker does when it holds no step: a phrase's transcript goes straight back to be streamed.
+          if (message.type === "offscreen.transcript")
+            port.postMessage({
+              type: "offscreen.event",
+              event: message.event,
+            } satisfies BackgroundToOffscreen);
         });
         h.ports.push(entry);
       });
@@ -1554,6 +1560,50 @@ describe("offscreen controller", () => {
   });
 });
 
+describe("the recording's start", () => {
+  test("recording.started and its started outcome are stamped when Record began, so they come before the recording's first page in time as in seq", async () => {
+    // Every trajectory of the end-to-end run had its first page stamped 7 to 25 ms before recording.started. Run 5:
+    // Record at .836, the service worker stamped the tab's page at .846 when it made the recording live, and the document
+    // stamped the start when it got to it, at .857.
+    const h = await setup();
+    await h.open();
+    const startedAt = h.clock.now() - 21;
+    const session = h.session({ startedAt });
+    const t = session.trajectoryId;
+    h.post({ type: "offscreen.start", session });
+    h.post({
+      type: "offscreen.event",
+      event: {
+        type: "CUSTOM",
+        name: "navigation",
+        timestamp: startedAt + 10,
+        value: {
+          step: "navigate",
+          from: "",
+          to: "http://127.0.0.1:7420/orders/1043",
+          navigationType: "start",
+          frameId: 0,
+          parentFrameId: -1,
+        },
+      },
+    });
+    await streaming(h, t, 3);
+    const stored = h.gateway
+      .events(t)
+      .map((entry) => entry.raw as CapturedEvent);
+    expect(stored.map((event) => event.name)).toEqual([
+      "recording.started",
+      "outcome",
+      "navigation",
+    ]);
+    expect(stored.map((event) => event.timestamp)).toEqual([
+      startedAt,
+      startedAt,
+      startedAt + 10,
+    ]);
+  });
+});
+
 describe("voice", () => {
   /** A document whose voice listens through a fake speech recognition and microphone. */
   async function withVoice() {
@@ -1607,6 +1657,8 @@ describe("voice", () => {
     h.post({ type: "offscreen.event", event: click(1) });
     await until(() => h.names(t).includes("click"), "the first click");
     listening.say([["my card number is 4242 4242 4242 4242", true]]);
+    // The phrase goes through the service worker, which places it among its steps and sends it back.
+    await until(() => spoken(h, t).length === 1, "the first phrase");
     h.post({ type: "offscreen.event", event: click(2) });
     await until(
       () => h.names(t).filter((name) => name === "click").length === 2,

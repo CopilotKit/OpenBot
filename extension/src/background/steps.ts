@@ -25,6 +25,14 @@
 // Page changes the page makes one after another, with no step of the person's between them and none more than
 // `redirectMs` after the last (a sign-in's redirects, an app settling on its default view), are one step to the final
 // page, `from` the address the chain began at.
+//
+// The person's narration is placed the same way: a phrase's transcript is stamped with the phrase's start, but exists
+// only once the phrase ends, seconds later. While a phrase is being spoken (`hold`), nothing from its start on leaves
+// until its transcript is placed, or `speechCapMs` after its start at most, so it goes in ahead of the steps taken while
+// it was said.
+//
+// What is held can be written down (`snapshot`) and taken up again by a new assembler (`restore`), under the same rules:
+// a service worker that restarts, or a browser that quits, still sends every step it held.
 import {
   type CapturedEvent,
   EVENT_BUDGET_BYTES,
@@ -51,6 +59,9 @@ export const STEP_TIMING = {
   redirectMs: 2_000,
   /** The longest a step waits for a save still in flight. */
   inflightCapMs: 10_000,
+  /** The longest anything after a phrase's start waits for its transcript, counted from that start: a phrase longer than
+   * this lets the steps taken while it is said go first. */
+  speechCapMs: 15_000,
 } as const;
 
 export type StepTiming = { [key in keyof typeof STEP_TIMING]: number };
@@ -291,6 +302,8 @@ type Pending = {
   event: CapturedEvent;
   /** Not a step: an event placed among the steps by its time, sent as it is once every step before it left. */
   placed?: true;
+  /** A placed transcript: the phrase being spoken holds back what came after its start, never its own words. */
+  speech?: true;
   /** A step the person took in the page (it can own calls); a page change, or an edit that echoes the action just
    * before it, only follows from one. */
   owner: boolean;
@@ -307,6 +320,22 @@ type Pending = {
   /** A page change: when its chain's last page change came, and which lookup of its page counts. */
   lastHop?: number;
   lookup?: number;
+};
+
+/** One held item as a snapshot keeps it: its timers are set again when it is restored. `open` marks its tab's page
+ * change that a redirect may still join. */
+export type HeldStep = Omit<Pending, "timer" | "pageTimer" | "lookup"> & {
+  open?: true;
+};
+
+/** Everything an assembler holds, as JSON: the held steps and placed events in their order, the calls a held step may
+ * still own, what the person typed in each tab, and the phrase being spoken. Saves in flight are not kept: the capture
+ * that would report their end went with the service worker that saw them start. */
+export type StepSnapshot = {
+  queue: HeldStep[];
+  calls: StepCall[];
+  typed: [number, string[]][];
+  speech: { since: number; until: number } | null;
 };
 
 const stepValue = (event: CapturedEvent): Record<string, unknown> =>
@@ -352,6 +381,9 @@ export function createStepAssembler(options: {
   ): CapturedEvent;
   /** The tab's top page (masked), for a page change and a step from an iframe. */
   pageOf?(tabId: number): Promise<{ url: string; title?: string } | null>;
+  /** Something it holds changed (a step came or left, a call arrived, the phrase being spoken changed): `snapshot`
+   * would now read differently. */
+  onChange?(): void;
   now?: () => number;
   timers?: Timers;
   tuning?: Partial<StepTiming>;
@@ -365,7 +397,18 @@ export function createStepAssembler(options: {
   const inflight = new Map<string, { tabId: number; startedAt: number }>();
   /** Each tab's page change still held with no step of the person's after it: a redirect joins it. */
   const openChange = new Map<number, Pending>();
+  /** The phrase being spoken: from its start until its transcript is placed, or `until` at the latest. */
+  let speech: { since: number; until: number } | null = null;
+  let speechTimer: unknown;
   let ended = false;
+  const changed = () => options.onChange?.();
+
+  /** Whether the phrase being spoken holds the item back: it came after the phrase began (its own transcript never). */
+  const heldBySpeech = (step: Pending, at: number): boolean =>
+    speech !== null &&
+    !step.speech &&
+    step.at >= speech.since &&
+    at < speech.until;
 
   const lastOwner = (tabId: number): Pending | undefined => {
     for (let i = queue.length - 1; i >= 0; i--) {
@@ -505,6 +548,8 @@ export function createStepAssembler(options: {
     while (queue.length > 0) {
       const head = queue[0];
       if (!head) break;
+      // The phrase's transcript, or the end of its hold (its own timer), pumps again.
+      if (heldBySpeech(head, at)) break;
       if (!isReady(head, at)) {
         if (head.owner && !head.waitingForPage) {
           if (head.timer !== undefined) timers.clear(head.timer);
@@ -525,6 +570,7 @@ export function createStepAssembler(options: {
       options.emit(finish(head));
     }
     prune(at);
+    changed();
   }
 
   function prune(at: number): void {
@@ -563,6 +609,26 @@ export function createStepAssembler(options: {
       if (page && !done && step.lookup === lookup) step.page = page;
       finish();
     }, finish);
+  }
+
+  /** Puts an event that is not a step among the held ones by its time, after every one from before it. */
+  function insert(tabId: number, event: CapturedEvent, speaking: boolean) {
+    if (ended) return;
+    const at = event.timestamp;
+    let index = queue.length;
+    while (index > 0 && (queue[index - 1]?.at ?? 0) > at) index--;
+    queue.splice(index, 0, {
+      tabId,
+      at,
+      event,
+      placed: true,
+      ...(speaking ? { speech: true as const } : {}),
+      owner: false,
+      closeAt: at,
+      values: [],
+      waitingForPage: false,
+    });
+    pump();
   }
 
   return {
@@ -604,6 +670,7 @@ export function createStepAssembler(options: {
       if (fromFrame) fetchPage(step);
       if (step.owner) schedule(step);
       else pump();
+      changed();
     },
 
     /** A page change in the tab's top frame: sent in its place among the steps, once its page has a title. */
@@ -637,6 +704,7 @@ export function createStepAssembler(options: {
         open.lookup = (open.lookup ?? 0) + 1;
         if (open.pageTimer !== undefined) timers.clear(open.pageTimer);
         open.pageTimer = timers.set(() => fetchPage(open), tune.redirectMs);
+        changed();
         return;
       }
       const step: Pending = {
@@ -652,25 +720,94 @@ export function createStepAssembler(options: {
       queue.push(step);
       openChange.set(tabId, step);
       step.pageTimer = timers.set(() => fetchPage(step), tune.redirectMs);
+      changed();
     },
 
     /** An event that is not a step (the agent's side): it leaves after every step held from before its time and
      * before every held step from after it. With nothing held from before it, it leaves at once. */
     place(tabId: number, event: CapturedEvent): void {
+      insert(tabId, event, false);
+    },
+
+    /** A phrase's transcript, stamped with the phrase's start: placed as `place` places an event, and the phrase being
+     * spoken never holds it back. */
+    transcript(tabId: number, event: CapturedEvent): void {
+      insert(tabId, event, true);
+    },
+
+    /** A phrase began at `since` (null: none is being spoken): nothing from then on leaves until its transcript is
+     * placed and the hold moves on, or `speechCapMs` after `since`. */
+    hold(since: number | null): void {
       if (ended) return;
-      const at = event.timestamp;
-      let index = queue.length;
-      while (index > 0 && (queue[index - 1]?.at ?? 0) > at) index--;
-      queue.splice(index, 0, {
-        tabId,
-        at,
-        event,
-        placed: true,
-        owner: false,
-        closeAt: at,
-        values: [],
-        waitingForPage: false,
-      });
+      if (speechTimer !== undefined) timers.clear(speechTimer);
+      speechTimer = undefined;
+      speech =
+        since === null ? null : { since, until: since + tune.speechCapMs };
+      if (speech)
+        speechTimer = timers.set(pump, Math.max(0, speech.until - now()));
+      pump();
+    },
+
+    /** What it holds now, as JSON, or null when it holds nothing that would be lost. */
+    snapshot(): StepSnapshot | null {
+      const values = [...typed].filter(([, list]) => list.length > 0);
+      if (queue.length === 0 && values.length === 0 && speech === null)
+        return null;
+      // Only the calls a held step may still own: from `leadMs` before the earliest one on.
+      let from = Number.POSITIVE_INFINITY;
+      for (const step of queue)
+        if (step.owner) from = Math.min(from, step.at - tune.leadMs);
+      return {
+        queue: queue.map(
+          ({ timer: _t, pageTimer: _p, lookup: _l, ...held }, index) =>
+            openChange.get(held.tabId) === queue[index]
+              ? { ...held, open: true }
+              : held,
+        ),
+        calls: [...calls.values()]
+          .flat()
+          .filter((call) => call.startedAt >= from),
+        typed: values,
+        speech,
+      };
+    },
+
+    /** Takes up what another assembler held (its `snapshot`), on a fresh one, and goes on under the same rules: each
+     * step waits out what is left of its window, a page change looks its page up again, and the phrase's hold runs to
+     * its end. */
+    restore(snapshot: StepSnapshot): void {
+      if (ended) return;
+      const restored: Pending[] = [];
+      for (const { open, ...held } of snapshot.queue) {
+        const step: Pending = { ...held };
+        restored.push(step);
+        if (open) openChange.set(step.tabId, step);
+      }
+      queue.push(...restored);
+      for (const call of snapshot.calls) {
+        const list = calls.get(call.tabId) ?? [];
+        list.push(call);
+        calls.set(call.tabId, list);
+      }
+      for (const [tabId, values] of snapshot.typed) typed.set(tabId, values);
+      if (snapshot.speech) {
+        speech = snapshot.speech;
+        speechTimer = timers.set(
+          pump,
+          Math.max(0, snapshot.speech.until - now()),
+        );
+      }
+      for (const step of restored) {
+        if (step.placed) continue;
+        if (step.waitingForPage) {
+          if (step.lastHop !== undefined) {
+            // A page change: its page is looked up `redirectMs` after its chain's last hop, as before.
+            const wait = Math.max(0, step.lastHop + tune.redirectMs - now());
+            step.pageTimer = timers.set(() => fetchPage(step), wait);
+          } else fetchPage(step);
+        }
+        if (step.owner) schedule(step);
+      }
       pump();
     },
 
@@ -708,6 +845,7 @@ export function createStepAssembler(options: {
       typed.clear();
       inflight.clear();
       openChange.clear();
+      changed();
     },
 
     forgetTab(tabId: number): void {
@@ -726,10 +864,15 @@ export function createStepAssembler(options: {
         if (step.timer !== undefined) timers.clear(step.timer);
         if (step.pageTimer !== undefined) timers.clear(step.pageTimer);
       }
+      if (speechTimer !== undefined) timers.clear(speechTimer);
+      speechTimer = undefined;
+      speech = null;
       queue.length = 0;
       calls.clear();
       typed.clear();
       inflight.clear();
+      openChange.clear();
+      changed();
     },
   };
 }
