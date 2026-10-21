@@ -1513,18 +1513,20 @@ describe("streamer", () => {
     expect(h.last().intelligence).toBe("off");
   });
 
-  test("Start over finishes the old trajectory as failed, switches at once and resolves after the old one drained", async () => {
+  test("Start over finishes the old trajectory as failed with reason restarted, linked to the new one both ways, switches at once and resolves after the old one drained", async () => {
     const h = await setup();
     const s = await h.start();
     await started(h);
     s.push(click(0));
     const next = crypto.randomUUID();
     let atRotated: string[] = [];
+    const startOverAt = h.clock.now() - 5;
     const rotating = s
       .rotate({
         recordingId: "rec-2",
         trajectoryId: next,
         title: "Try again",
+        startedAt: startOverAt,
       })
       .then(() => {
         atRotated = h.stored(h.trajectoryId).map((entry) => entry.name);
@@ -1540,14 +1542,21 @@ describe("streamer", () => {
       "recording.started",
       "outcome",
       "click",
+      "recording.restarted",
       "outcome",
     ]);
     expect(h.closed).toEqual([h.trajectoryId]);
     const old = h.stored(h.trajectoryId);
+    // Why it ended and where it went on, as a rollover's recording.continued names its next trajectory.
+    expect(payloadOf(old.at(-2) ?? old[0])).toMatchObject({
+      nextTrajectoryId: next,
+      nextRecordingId: "rec-2",
+    });
     expect(old.at(-1)?.name).toBe("outcome");
     expect(payloadOf(old.at(-1) ?? old[0])).toMatchObject({
       workflow: "File the weekly report",
       phase: "failed",
+      reason: "restarted",
     });
     const fresh = h.stored(next);
     expect(fresh.map((entry) => entry.name)).toEqual([
@@ -1555,11 +1564,20 @@ describe("streamer", () => {
       "outcome",
       "click",
     ]);
-    expect(payloadOf(fresh[0]).recordingId).toBe("rec-2");
+    expect(payloadOf(fresh[0])).toMatchObject({
+      recordingId: "rec-2",
+      previousTrajectoryId: h.trajectoryId,
+    });
     expect(payloadOf(fresh[1])).toMatchObject({
       workflow: "Try again",
       phase: "started",
     });
+    // Stamped when Start over began, before the new recording's first step.
+    expect(
+      fresh
+        .slice(0, 2)
+        .map((entry) => (entry.raw as { timestamp: number }).timestamp),
+    ).toEqual([startOverAt, startOverAt]);
     expect(clicks(old)).toEqual([0]);
     expect(clicks(fresh)).toEqual([1]);
   });
@@ -1606,14 +1624,15 @@ describe("streamer", () => {
       });
     await until(() => h.stored(next).length === 2, "the new recording streams");
     expect(h.kept).toHaveLength(2);
+    // Its start, its link to the new trajectory and its outcome.
     expect(h.kept[1]).toEqual({
       reason: GATEWAY_OFF,
       parked: true,
-      events: 3,
+      events: 4,
       recordingId: "rec-1",
       trajectoryId: h.trajectoryId,
     });
-    expect(await h.pending(h.trajectoryId)).toBe(3);
+    expect(await h.pending(h.trajectoryId)).toBe(4);
     expect(rotated).toBe(false);
   });
 

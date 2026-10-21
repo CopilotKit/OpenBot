@@ -912,3 +912,77 @@ test("a reload or a step back is the person's own page change, never folded into
     ),
   ).toEqual(["push", "reload", "traverse"]);
 });
+
+test("a phrase being spoken holds the steps taken from its start until its transcript is placed, never longer than its cap", () => {
+  const h = harness();
+  const phrase = (at: number, text: string): CapturedEvent => ({
+    type: "CUSTOM",
+    name: "transcript",
+    timestamp: at,
+    value: { text },
+  });
+  const sentNames = () =>
+    h.sent.map((event) =>
+      event.name === "click"
+        ? String((event.value as { target: { name: string } }).target.name)
+        : event.name,
+    );
+  // A click before the phrase began is not held by it.
+  h.steps.step(1, click(START, "Search"));
+  h.advance(400);
+  h.steps.hold(START + 500);
+  h.advance(600);
+  h.steps.step(1, click(h.now, "Order 1043"));
+  h.advance(5_000);
+  // The first click's window closed long ago; the second waits for the phrase.
+  expect(sentNames()).toEqual(["Search"]);
+  h.steps.transcript(1, phrase(START + 500, "I open the order"));
+  h.steps.hold(null);
+  expect(sentNames()).toEqual(["Search", "transcript", "Order 1043"]);
+
+  // A phrase that never ends in words holds what came after it for `speechCapMs` from its start, no longer.
+  const since = h.now;
+  h.steps.hold(since);
+  h.advance(100);
+  h.steps.step(1, click(h.now, "Archive order"));
+  h.advance(STEP_TIMING.speechCapMs - 200);
+  expect(sentNames()).toHaveLength(3);
+  h.advance(100);
+  expect(sentNames()).toEqual([
+    "Search",
+    "transcript",
+    "Order 1043",
+    "Archive order",
+  ]);
+  expect(STEP_TIMING.speechCapMs).toBe(15_000);
+});
+
+test("what an assembler holds is taken up by a new one, which sends it under the same rules with the call that saves it", () => {
+  const first = harness();
+  first.steps.step(1, click(START, "Archive order"));
+  first.steps.call(
+    call(
+      START + 2,
+      "PATCH",
+      "https://crm.example.test/api/orders/1043",
+      '{"archived":true}',
+    ),
+  );
+  first.advance(600);
+  const snapshot = first.steps.snapshot();
+  expect(first.sent).toEqual([]);
+  expect(snapshot?.queue).toHaveLength(1);
+  // A new service worker: its own assembler, the same clock.
+  const second = harness();
+  second.advance(first.now - START);
+  if (!snapshot) throw new Error("nothing held");
+  second.steps.restore(JSON.parse(JSON.stringify(snapshot)));
+  second.advance(STEP_TIMING.horizonMs + STEP_TIMING.settleMs - 600 - 1);
+  expect(second.sent).toEqual([]);
+  second.advance(1);
+  expect(second.sent).toHaveLength(1);
+  expect(second.sent[0]?.value).toMatchObject({
+    request: { method: "PATCH" },
+  });
+  expect(second.steps.snapshot()).toBeNull();
+});

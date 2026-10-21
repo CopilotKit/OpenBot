@@ -65,7 +65,13 @@ export type VoiceOptions = {
   muted: boolean;
   /** One `transcript` event per final phrase, already masked. */
   emit(event: CapturedEvent): void;
+  /** When the phrase being spoken began, as its transcript will be stamped, or null once none is: called on each
+   * change, after the phrase's transcript when one ends. What the person does from then on happened while they said it,
+   * so it waits for that transcript (steps.ts). */
+  speaking?(since: number | null): void;
   status(voice: VoiceCapture): void;
+  /** The browser's own name for its speech service in the sentences the popup shows: Chrome, or Edge, as it is. */
+  browser?: string;
   /** The Recorder's text masking for a transcript, with the recording's sensitive-value digests. `before` is the phrase
    * said just before (empty for the first): Chrome ends a phrase at a pause, so a number read out after "my card number
    * is" can come as a phrase of its own. */
@@ -111,8 +117,12 @@ function languageName(language: string): string {
   }
 }
 
-/** The plain sentence the popup shows for each failure. */
-export function voiceSentence(problem: VoiceProblem, language: string): string {
+/** The plain sentence the popup shows for each failure, naming the browser the Recorder runs in (Chrome by default). */
+export function voiceSentence(
+  problem: VoiceProblem,
+  language: string,
+  browser = "Chrome",
+): string {
   switch (problem) {
     case "microphone":
       return `The Recorder is not allowed to use the microphone. ${GOES_ON}`;
@@ -121,12 +131,32 @@ export function voiceSentence(problem: VoiceProblem, language: string): string {
     case "no-recognition":
       return `This browser cannot turn speech into text. ${GOES_ON}`;
     case "service":
-      return `Chrome's speech recognition is turned off or not available here. ${GOES_ON}`;
+      return `${browser}'s speech recognition is turned off or not available here. ${GOES_ON}`;
     case "network":
-      return "Chrome's speech service cannot be reached. Recording goes on, and voice tries again in a moment.";
+      return `${browser}'s speech service cannot be reached. Recording goes on, and voice tries again in a moment.`;
     case "language":
-      return `Chrome cannot turn ${languageName(language)} speech into text. ${GOES_ON}`;
+      return `${browser} cannot turn ${languageName(language)} speech into text. ${GOES_ON}`;
   }
+}
+
+/** The name the person knows their browser by, from what it says it is: Chrome and Edge run this same build, and
+ * Edge's own speech service is Microsoft's, not Google's. Any other Chromium browser goes by its own brand. */
+export function browserName(
+  navigator: {
+    userAgent?: string;
+    userAgentData?: { brands?: readonly { brand: string }[] };
+  } = globalThis.navigator ?? {},
+): string {
+  const brands = (navigator.userAgentData?.brands ?? [])
+    .map((entry) => entry.brand)
+    .filter((brand) => !/chromium|not.?a.?brand/i.test(brand));
+  const brand = brands[0];
+  if (brand !== undefined)
+    return brand.replace(/^Google /, "").replace(/^Microsoft /, "");
+  const agent = navigator.userAgent ?? "";
+  if (/\bEdg(?:e|A|iOS)?\//.test(agent)) return "Edge";
+  if (/\bOPR\//.test(agent)) return "Opera";
+  return "Chrome";
 }
 
 /** Why getUserMedia refused, as the Voice row says it. */
@@ -181,6 +211,24 @@ export function startVoice(options: VoiceOptions, deps: VoiceDeps): Voice {
   /** Runs from the first speech heard until a phrase comes back in words; when it fires, the popup says none do. */
   let noWordsTimer: unknown = null;
   let noWords = false;
+  /** When the phrase being spoken began, as last reported (`speaking`). */
+  let speakingSince: number | null = null;
+
+  /** Reports when the earliest phrase heard and not yet sent began, stamped as its transcript will be (never before the
+   * phrase ahead of it ended), or null when none is: a recognition that ended or was let go sends no more phrases. */
+  function reportSpeaking(): void {
+    const listening = current;
+    let since: number | null = null;
+    if (listening?.recognition && !closed)
+      for (const [index, heardAt] of listening.firstHeard) {
+        if (listening.emitted.has(index)) continue;
+        const start = Math.max(heardAt, listening.lastFinalAt);
+        since = since === null ? start : Math.min(since, start);
+      }
+    if (since === speakingSince) return;
+    speakingSince = since;
+    options.speaking?.(since);
+  }
 
   const status = (voice: VoiceCapture) => {
     if (closed) return;
@@ -228,6 +276,7 @@ export function startVoice(options: VoiceOptions, deps: VoiceDeps): Voice {
     listening.track.onended = null;
     for (const track of listening.stream.getTracks()) track.stop();
     if (current === listening) current = null;
+    reportSpeaking();
   }
 
   /** Lets go of an opening at once: a Stop or mute waiting on its last phrase stops waiting. */
@@ -253,7 +302,7 @@ export function startVoice(options: VoiceOptions, deps: VoiceDeps): Voice {
     status({
       state: "failed",
       problem,
-      reason: voiceSentence(problem, language),
+      reason: voiceSentence(problem, language, options.browser),
     });
   }
 
@@ -311,6 +360,7 @@ export function startVoice(options: VoiceOptions, deps: VoiceDeps): Voice {
       networkFailures = 0;
       quickEnds = 0;
     }
+    reportSpeaking();
     // While a mute or Stop waits for the last phrase, its words are still sent but the popup already says muted.
     if (muted) return;
     const said = interim.trim();
@@ -334,6 +384,8 @@ export function startVoice(options: VoiceOptions, deps: VoiceDeps): Voice {
   function ended(listening: Listening, networkError: boolean): void {
     const recognition = listening.recognition;
     listening.recognition = null;
+    // Its phrases still unsent never will be.
+    reportSpeaking();
     const waiter = listening.ended;
     listening.ended = null;
     if (waiter) {
@@ -408,7 +460,7 @@ export function startVoice(options: VoiceOptions, deps: VoiceDeps): Voice {
           status({
             state: "failed",
             problem: "network",
-            reason: voiceSentence("network", language),
+            reason: voiceSentence("network", language, options.browser),
           });
           return;
         case "language-not-supported":
@@ -437,6 +489,7 @@ export function startVoice(options: VoiceOptions, deps: VoiceDeps): Voice {
     listening.emitted = new Set();
     listening.firstHeard = new Map();
     listening.lastFinalAt = 0;
+    reportSpeaking();
     try {
       recognition.start(listening.track);
     } catch (error) {

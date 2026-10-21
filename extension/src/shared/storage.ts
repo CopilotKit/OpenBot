@@ -3,6 +3,8 @@ import type {
   RecorderMe,
   RecorderUser,
 } from "@openbot/shared/recorder-api";
+import type { CapturedEvent } from "@openbot/shared/recorder-masking";
+import type { StepSnapshot } from "../background/steps";
 import type { RecorderState, StreamSession } from "../protocol/messages";
 export type ConnectionRecord = {
   openbotUrl: string;
@@ -40,7 +42,14 @@ export type DrainRecord = {
   /** Set while its events are kept after a stop (hold) or stop (park) row, or while it waits for its person to connect
    * again; cleared on offscreen.done. */
   kept?: KeptEvents;
+  /** The steps its service worker still held when the browser quit (`heldSteps`), as they are sent: the document that
+   * recovers it puts them in its outbox before the interrupted outcome, and says so (offscreen.held). */
+  held?: CapturedEvent[];
 };
+/** The steps the live recording's service worker holds (steps.ts), written as they change: a service worker that
+ * restarts takes them up again, and after a browser quit they go with the recording's drain. The events are masked
+ * already, as the outbox stores them. */
+export type HeldSteps = { recordingId: string; steps: StepSnapshot };
 export type RecorderNotice =
   | { kind: "interrupted"; at: number }
   | {
@@ -55,6 +64,7 @@ type LocalState = {
   connection?: ConnectionRecord;
   activeRecording?: DrainRecord; // the recording in progress; moved into `drains` at Stop, Start over and on recovery
   drains?: DrainRecord[]; // stopped recordings still sending; removed on offscreen.done
+  heldSteps?: HeldSteps; // the live recording's held steps; absent while it holds nothing
   notice?: RecorderNotice;
   /** When the organization-session keep-alive last reached OpenBot (Decision 2, Task 8). */
   lastKeepAliveAt?: number;
@@ -108,7 +118,39 @@ export function isDrainRecord(value: unknown): value is DrainRecord {
     drain.trajectoryIds.every(isString) &&
     typeof drain.startedAt === "number" &&
     (drain.discarding === undefined || typeof drain.discarding === "boolean") &&
-    (drain.kept === undefined || isKeptEvents(drain.kept))
+    (drain.kept === undefined || isKeptEvents(drain.kept)) &&
+    (drain.held === undefined ||
+      (Array.isArray(drain.held) && drain.held.every(isEvent)))
+  );
+}
+
+function isEvent(value: unknown): value is CapturedEvent {
+  if (typeof value !== "object" || value === null) return false;
+  const event = value as Record<string, unknown>;
+  return (
+    event.type === "CUSTOM" &&
+    isString(event.name) &&
+    typeof event.timestamp === "number"
+  );
+}
+
+function isHeldSteps(value: unknown): value is HeldSteps {
+  if (typeof value !== "object" || value === null) return false;
+  const held = value as Record<string, unknown>;
+  const steps = held.steps as Record<string, unknown> | null | undefined;
+  return (
+    isString(held.recordingId) &&
+    typeof steps === "object" &&
+    steps !== null &&
+    Array.isArray(steps.queue) &&
+    steps.queue.every(
+      (step) =>
+        typeof step === "object" &&
+        step !== null &&
+        isEvent((step as Record<string, unknown>).event),
+    ) &&
+    Array.isArray(steps.calls) &&
+    Array.isArray(steps.typed)
   );
 }
 
@@ -125,6 +167,8 @@ function checked<K extends keyof LocalState>(
     ) as LocalState[K];
   if (key === "activeRecording")
     return (isDrainRecord(value) ? value : undefined) as LocalState[K];
+  if (key === "heldSteps")
+    return (isHeldSteps(value) ? value : undefined) as LocalState[K];
   return value as LocalState[K];
 }
 

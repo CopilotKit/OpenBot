@@ -1430,6 +1430,45 @@ async function recordUntilNotice(top?: FakePort) {
   return port;
 }
 
+test("the 50-action notice still open follows the tab to its next page: the new page's script hears it on its hello", async () => {
+  // Run 3: the notice was up on the order page, the person moved to the next page, and it was gone there while the
+  // popup still said it was open.
+  const top = await recordUntilNotice();
+  expect(notices(top)).toEqual([
+    { type: "background.notice", show: true, actions: 50 },
+  ]);
+  // The tab moves on: the old document's script goes, the new one's says hello (and an iframe's too).
+  top.disconnect();
+  const next = contentPort(7, 0);
+  const frame = contentPort(7, 3);
+  next.postMessage({
+    type: "content.hello",
+    top: true,
+    url: "https://crm.example.test/deals/43",
+  });
+  frame.postMessage({
+    type: "content.hello",
+    top: false,
+    url: "https://widgets.example.test/",
+  });
+  await until(() => notices(next).length === 1, "the notice on the new page");
+  expect(notices(next)).toEqual([
+    { type: "background.notice", show: true, actions: 50 },
+  ]);
+  expect(notices(frame)).toEqual([]);
+  // Once answered it is down, and a later page does not show it again.
+  next.postMessage({ type: "content.notice", choice: "continue" });
+  await until(async () => !(await state()).noticeOpen, "answered");
+  const later = contentPort(7, 0);
+  later.postMessage({
+    type: "content.hello",
+    top: true,
+    url: "https://crm.example.test/deals/44",
+  });
+  await until(() => captureMessages(later).length === 1, "the hello answered");
+  expect(notices(later)).toEqual([]);
+});
+
 const pageStateNoticeOpen = async () =>
   ((await page({ type: "page.state" })) as PageStateResponse).state.noticeOpen;
 
@@ -1604,6 +1643,62 @@ test("after Start over, a status about the old recording's trajectory leaves the
     async () => (await state()).capture.intelligence === "streaming",
     "the rollover's status",
   );
+});
+
+test("once Intelligence takes events again the popup says Streaming, and nothing more of the retry", async () => {
+  // Run 5: back online, the popup said "Streaming to Intelligence. Intelligence is busy or unreachable. Retrying;
+  // nothing is lost." The document's status for streaming leaves the reason out, and the reason of the retry stayed.
+  const id = await record();
+  const trajectory = trajectoryOf(id);
+  const busy =
+    "Intelligence is busy or unreachable. Retrying; nothing is lost.";
+  doc?.postMessage({
+    type: "offscreen.status",
+    capture: {
+      intelligence: "retrying",
+      intelligenceReason: busy,
+      events: { sent: 3, pending: 4, rejected: 0, dropped: 0 },
+    },
+    trajectoryId: trajectory,
+  });
+  await until(
+    async () => (await state()).capture.intelligenceReason === busy,
+    "the retry",
+  );
+  // What the document posts when the socket joins again: the status, without a reason.
+  doc?.postMessage({
+    type: "offscreen.status",
+    capture: {
+      intelligence: "streaming",
+      events: { sent: 7, pending: 0, rejected: 0, dropped: 0 },
+    },
+    trajectoryId: trajectory,
+  });
+  await until(
+    async () => (await state()).capture.intelligence === "streaming",
+    "streaming again",
+  );
+  const view = (await page({ type: "page.state" })) as PageStateResponse;
+  expect(view.state.capture.intelligenceReason).toBeUndefined();
+  // A status that says nothing of Intelligence (the voice, the counts) leaves a reason alone.
+  doc?.postMessage({
+    type: "offscreen.status",
+    capture: {
+      intelligence: "retrying",
+      intelligenceReason: busy,
+    },
+    trajectoryId: trajectory,
+  });
+  doc?.postMessage({
+    type: "offscreen.status",
+    capture: { voice: { state: "listening" } },
+    trajectoryId: trajectory,
+  });
+  await until(
+    async () => (await state()).capture.voice?.state === "listening",
+    "the voice",
+  );
+  expect((await state()).capture.intelligenceReason).toBe(busy);
 });
 
 test("a rollover adds its trajectory to the recording, and to a drain it belongs to", async () => {
@@ -2243,6 +2338,38 @@ test("Disconnect clears a sentence that says everything is kept until you connec
   expect(await page({ type: "page.disconnect" })).toEqual({ ok: true });
   expect(drains()).toEqual([]);
   expect((await state()).error).toBeUndefined();
+});
+
+test("connecting again clears the sentence that the stopped recording waits for a connection, so the popup no longer says both sent and kept", async () => {
+  // Run 6: after the person connected the browser again, the popup said "Sent to Intelligence" above "This browser was
+  // disconnected from OpenBot ... kept in this browser until you connect again".
+  fake.tabs.set(7, { id: 7, url: "chrome://newtab/" } as chrome.tabs.Tab);
+  const id = await record();
+  doc?.postMessage({
+    type: "offscreen.signed-out",
+    reason: "revoked",
+    token: "obr_one",
+  });
+  await until(
+    async () => (await state()).error === SIGNED_OUT,
+    "the signed-out sentence",
+  );
+  connect(ada, "obr_two");
+  await handlers.connected();
+  expect((await state()).error).toBeUndefined();
+  // The kept recording goes to Intelligence under the new connection, and the popup then says it was sent.
+  await until(
+    () => sentToDocument("offscreen.recover").length === 1,
+    "the kept recording recovered",
+  );
+  doc?.postMessage({ type: "offscreen.done", recordingId: id });
+  await until(() => drains().length === 0, "the drain is forgotten");
+  const view = (await page({ type: "page.state" })) as PageStateResponse;
+  expect(view.state).toMatchObject({
+    lastStopped: { recordingId: id },
+    draining: 0,
+  });
+  expect(view.state.error).toBeUndefined();
 });
 
 // ---- A connection lost without a Disconnect ---------------------------------------------------

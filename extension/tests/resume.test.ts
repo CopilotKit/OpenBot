@@ -752,10 +752,13 @@ test("a service-worker restart restores followed tabs, digests and network captu
     type: "content.event",
     event: capturedEvent("click", { text: "Save" }),
   });
-  await until(
-    () => sentToDocument("offscreen.event", port).length === 1,
-    "the event forwarded",
-  );
+  const forwarded = () =>
+    toDocument(port).flatMap((message) =>
+      message.type === "offscreen.event" ? [message.event.name] : [],
+    );
+  await until(() => forwarded().includes("click"), "the click forwarded");
+  // The old worker still held the recording's first page (waiting for its title): this one sent it, ahead of the click.
+  expect(forwarded()).toEqual(["navigation", "click"]);
   expect(tab8.messages).toContainEqual({
     type: "background.capture",
     active: true,

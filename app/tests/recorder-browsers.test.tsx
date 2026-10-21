@@ -15,6 +15,7 @@ import {
   render,
   waitFor,
 } from "@testing-library/react";
+import { BrowserSections } from "@/components/settings/browsers/browser-sections";
 import { ConnectedBrowsers } from "@/components/settings/browsers/connected-browsers";
 import { ThisBrowser } from "@/components/settings/browsers/this-browser";
 import { queryClient } from "@/query-client";
@@ -274,8 +275,12 @@ test("Disconnect sends the DELETE and the row disappears", async () => {
   connections = [connection()];
   const view = draw(<ConnectedBrowsers />);
   await view.findByText("Chrome on Mac");
+  const at = new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(String(connections[0]?.createdAt)));
   expect(
-    view.getByText(/Connected 3 hours ago from OpenBot, never used/),
+    view.getByText(`Connected ${at} from OpenBot, never used`),
   ).toBeTruthy();
   fireEvent.click(
     view.getByRole("button", { name: "Disconnect Chrome on Mac" }),
@@ -343,3 +348,50 @@ test("a connect request nobody confirms expires after five minutes and stops pol
     globalThis.setTimeout = realSetTimeout;
   }
 }, 15_000);
+
+test("the copy in this browser is marked among connected browsers that share a name, and each row says when it connected", async () => {
+  // End-to-end run 6: three rows all read "Google Chrome on macOS" (three Chrome profiles), and none said which one was
+  // the browser the page was open in.
+  const hour = 3_600_000;
+  connections = [
+    connection({
+      id: "conn-1",
+      label: "Google Chrome on macOS",
+      installId: OTHER_COPY,
+      createdAt: new Date(Date.now() - 30 * hour).toISOString(),
+      lastUsedAt: new Date(Date.now() - 5 * hour).toISOString(),
+    }),
+    connection({
+      id: "conn-2",
+      label: "Google Chrome on macOS",
+      installId: "e".repeat(32),
+      createdAt: new Date(Date.now() - 2 * hour - 60_000).toISOString(),
+      lastUsedAt: new Date(Date.now() - 2 * hour).toISOString(),
+    }),
+    connection({
+      id: "conn-3",
+      label: "Google Chrome on macOS",
+      installId: THIS_COPY,
+      createdAt: new Date(Date.now() - 2 * hour).toISOString(),
+      lastUsedAt: new Date(Date.now() - 45 * 60_000).toISOString(),
+    }),
+  ];
+  // A connected copy answers the ping with its install id.
+  recorder = {
+    ping: { ok: true, installId: THIS_COPY },
+    connect: { ok: true },
+  };
+  const view = draw(<BrowserSections />);
+  await view.findByText("Google Chrome on macOS · This browser");
+  expect(view.getAllByText("Google Chrome on macOS")).toHaveLength(2);
+  expect(
+    view.getByRole("button", {
+      name: "Disconnect Google Chrome on macOS · This browser",
+    }),
+  ).toBeTruthy();
+  // Two copies connected two hours ago, a minute apart, read differently.
+  const descriptions = view
+    .getAllByText(/^Connected .* from OpenBot, last used /)
+    .map((element) => element.textContent);
+  expect(new Set(descriptions).size).toBe(3);
+});

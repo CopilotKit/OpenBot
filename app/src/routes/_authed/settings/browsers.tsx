@@ -1,7 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { PageShell } from "@/components/layout/page-shell";
-import { ConnectedBrowsers } from "@/components/settings/browsers/connected-browsers";
-import { ThisBrowser } from "@/components/settings/browsers/this-browser";
+import { BrowserSections } from "@/components/settings/browsers/browser-sections";
 
 export const Route = createFileRoute("/_authed/settings/browsers")({
   component: BrowsersPage,
@@ -14,8 +13,7 @@ function BrowsersPage() {
       title="Browsers"
       description="Connect the OpenBot Recorder in this browser to teach your Bots by doing a task yourself. What you record goes into your own Learning space."
     >
-      <ThisBrowser />
-      <ConnectedBrowsers />
+      <BrowserSections />
     </PageShell>
   );
 }

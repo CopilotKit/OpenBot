@@ -27,6 +27,7 @@ import {
   type StreamerStatus,
 } from "./streamer";
 import {
+  browserName,
   type RecognitionConstructor,
   startVoice,
   type Voice,
@@ -82,6 +83,10 @@ const DELIVER_ONCE_BACK = new Set<OffscreenToBackground["type"]>([
   "offscreen.kept",
   "offscreen.done",
   "offscreen.signed-out",
+  // A phrase the person said is part of the recording: it waits for the service worker as a step would.
+  "offscreen.transcript",
+  "offscreen.voice.ended",
+  "offscreen.held",
 ]);
 
 const realTimers: Timers = {
@@ -123,6 +128,14 @@ type Live = {
   stopped: { trajectoryIds: string[] } | null;
   /** The person's narration, transcribed here; null when the session has none, and once Stop has ended it. */
   voice: Voice | null;
+  /** When the phrase being spoken began (null: none is), as the service worker was last told. */
+  speaking: number | null;
+  /** From the moment Stop reaches this document the service worker has sent every step it held: a phrase still to
+   * come goes straight into the stream, before the outcome. Until then each goes to the service worker, which places
+   * it among the steps it holds. */
+  voiceDirect: boolean;
+  /** The voice's end, once something asked for it. */
+  voiceEnded: Promise<void> | null;
 };
 
 /**
@@ -195,6 +208,13 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
     post({ type: "offscreen.ready" });
     if (lastStatus) post({ type: "offscreen.status", ...lastStatus });
     for (const message of undelivered.splice(0)) post(message);
+    // A service worker that restarted knows the phrase being spoken only from its last snapshot: it hears it again.
+    if (live?.session.voice)
+      post({
+        type: "offscreen.speaking",
+        recordingId: live.recordingId,
+        since: live.speaking,
+      });
   }
 
   function scheduleReconnect(): void {
@@ -464,7 +484,8 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
           title: session.title,
           recordingId: session.recordingId,
           version: session.version,
-          ...(resume ? { resume: true } : {}),
+          // Record's own moment: the recording starts before anything it records.
+          ...(resume ? { resume: true } : { startedAt: session.startedAt }),
         },
         { openbotUrl: session.openbotUrl, token: session.token },
         {
@@ -489,8 +510,9 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
     }
   }
 
-  /** The live recording's voice: each final phrase is a masked `transcript` event in its stream, in order with the rest,
-   * and its status goes to the popup with the recording's other capture statuses. */
+  /** The live recording's voice: each final phrase is a masked `transcript` event stamped with its start, which the
+   * service worker places among the steps it holds (steps taken while the phrase was said wait for it), so it reaches
+   * the stream in order with the rest. Its status goes to the popup with the recording's other capture statuses. */
   function startVoiceFor(target: Live): void {
     const voice = target.session.voice;
     if (!voice) return;
@@ -499,20 +521,55 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
         language: voice.language,
         muted: voice.muted,
         emit: (event) => {
-          if (live === target && !target.ending) deliver(target, event);
+          if (live !== target || target.ending) return;
+          if (target.voiceDirect) deliver(target, event);
+          else
+            post({
+              type: "offscreen.transcript",
+              recordingId: target.recordingId,
+              event,
+            });
+        },
+        speaking: (since) => {
+          target.speaking = since;
+          if (live !== target || target.voiceDirect) return;
+          post({
+            type: "offscreen.speaking",
+            recordingId: target.recordingId,
+            since,
+          });
         },
         status: (update) => postStatus(target, { voice: update }),
         mask: (text, before) => scrubTranscript(text, { digests, before }),
+        browser: browserName(),
       },
       { ...(deps.voice ?? browserVoice()), now, timers },
     );
   }
 
+  /** Stop is coming: the phrase in progress goes to the service worker (offscreen.transcript) and the microphone is let
+   * go, then the service worker hears that nothing more will come, so it sends its held steps with the phrase in place. */
+  function endVoiceFirst(target: Live): void {
+    void endVoice(target)
+      .catch((error) => {
+        console.error("Recorder: the voice could not end", error);
+      })
+      .then(() =>
+        post({
+          type: "offscreen.voice.ended",
+          recordingId: target.recordingId,
+        }),
+      );
+  }
+
   /** Ends the voice of a recording that ends: the phrase in progress goes into its stream first. */
+  /** Ends the voice once, whoever asks first (the service worker before Stop, or Stop itself); every caller waits for
+   * that same end, so a phrase still coming is never left behind. */
   async function endVoice(target: Live): Promise<void> {
     const voice = target.voice;
     target.voice = null;
-    await voice?.stop();
+    if (voice) target.voiceEnded = voice.stop();
+    await target.voiceEnded;
   }
 
   function startLive(session: StreamSession, resume: boolean): void {
@@ -532,6 +589,9 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
       ending: false,
       stopped: null,
       voice: null,
+      speaking: null,
+      voiceDirect: false,
+      voiceEnded: null,
     };
     live = target;
     startVoiceFor(target);
@@ -545,6 +605,7 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
     target: Live,
     recordingId: string,
     trajectoryId: string,
+    startedAt: number | undefined,
   ): Promise<void> {
     try {
       const stream = target.stream;
@@ -566,6 +627,7 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
         recordingId,
         trajectoryId,
         title: target.session.title,
+        ...(startedAt === undefined ? {} : { startedAt }),
       });
       void rotated.then(
         () => {
@@ -591,7 +653,9 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
     target: Live,
     message: Extract<BackgroundToOffscreen, { type: "offscreen.stop" }>,
   ): Promise<void> {
-    // The phrase being spoken goes in before the outcome; the microphone is let go whatever happens next.
+    // The phrase being spoken goes in before the outcome; the microphone is let go whatever happens next. The service
+    // worker sent every step it held before this stop, so the phrase goes straight into the stream.
+    target.voiceDirect = true;
     await endVoice(target);
     if (target.stopped) {
       // The service worker restarted mid-Stop and asks again.
@@ -655,8 +719,13 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
     stream: Stream & { streamer: Streamer },
     drain: DrainRecord,
   ): Promise<void> {
-    // The streamer queues the interrupted outcome only when none was queued.
+    // The steps its service worker still held when the browser quit go in first, in their order; the streamer queues
+    // them ahead of the interrupted outcome, which it queues only when none was queued.
+    for (const event of drain.held ?? []) stream.streamer.push(event);
     await stream.streamer.stop("failed", { reason: "interrupted" });
+    // They are in the outbox now, ahead of the outcome: the drain need not carry them again.
+    if (drain.held?.length)
+      post({ type: "offscreen.held", recordingId: drain.recordingId });
     await stream.streamer.drained();
     finished(stream, drain.recordingId);
     post({ type: "offscreen.done", recordingId: drain.recordingId });
@@ -846,7 +915,13 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
         }
         target.holds += 1;
         serially(
-          () => rotate(target, message.recordingId, message.trajectoryId),
+          () =>
+            rotate(
+              target,
+              message.recordingId,
+              message.trajectoryId,
+              message.startedAt,
+            ),
           "start over",
         );
         return;
@@ -882,6 +957,16 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
         return;
       case "offscreen.policy":
         allow(message.allowedIntelligenceUrls);
+        return;
+      case "offscreen.voice.end":
+        // At once, not behind the queue: the service worker waits for the answer before it sends the steps it holds.
+        if (target && target.recordingId === message.recordingId)
+          endVoiceFirst(target);
+        else
+          post({
+            type: "offscreen.voice.ended",
+            recordingId: message.recordingId,
+          });
         return;
       case "offscreen.voice":
         if (!target?.session.voice) return;
