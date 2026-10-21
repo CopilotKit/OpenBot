@@ -115,7 +115,10 @@ const stub = stubBroker({
   listApps: async () => directory,
   ensureAuthConfig: async () => "created",
   deleteAuthConfig: async () => {},
-  authorize: async () => ({ redirectUrl: "https://vendor.example/consent" }),
+  authorize: async () => ({
+    redirectUrl: "https://vendor.example/consent",
+    authorizationId: null,
+  }),
   isConnected: async () => true,
   revoke: async () => true,
   connectionFields: async () => [],
