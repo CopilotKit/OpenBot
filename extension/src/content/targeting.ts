@@ -3,6 +3,7 @@
 // the step is masked, so the shared masking rules apply to all of it as they do to the rest of the step. Nothing here
 // ever reads a field's value into a name or a selector. A click names the element the person meant (meantElement): the
 // collector's own description of what was clicked (its tag, text and attributes) stays beside it as the collector wrote it.
+import { REDACTED } from "@openbot/shared/recorder-masking";
 import type { AgentTarget } from "../shared/agent-target";
 
 /** Attributes a team puts on an element for tests and automation: the steadiest handle there is. */
@@ -436,11 +437,50 @@ const isRootOrDetached = (element: Element) =>
   element.localName === "html" ||
   !element.isConnected;
 
+/** The attributes that tell one field from another; a value the collector redacted is not compared. */
+const IDENTITY_ATTRIBUTES = [
+  "id",
+  "name",
+  "type",
+  "placeholder",
+  "aria-label",
+  "aria-labelledby",
+  "autocomplete",
+  "maxlength",
+];
+const MAX_WAITING_EDITS = 50;
+
+/** Whether a collector edit's target (its tag and attribute snapshot) describes `element`. */
+function describes(target: unknown, element: Element): boolean {
+  if (typeof target !== "object" || target === null) return false;
+  const { tag, attributes } = target as {
+    tag?: unknown;
+    attributes?: unknown;
+  };
+  if (tag !== element.localName) return false;
+  const seen =
+    typeof attributes === "object" && attributes !== null
+      ? (attributes as Record<string, unknown>)
+      : {};
+  return IDENTITY_ATTRIBUTES.every((name) => {
+    const recorded = seen[name];
+    if (recorded === REDACTED) return true;
+    return (
+      (typeof recorded === "string" ? recorded : null) ===
+      element.getAttribute(name)
+    );
+  });
+}
+
 /** Which element the collector's click or edit event is about, seen by listeners installed before the collector's (on
  * the same window, in the capture phase, so they run first for every event and the collector's beforeSend reads them). */
 export function createElementTracker() {
   let pressed: Element | null = null;
   let current: { type: string; element: Element } | null = null;
+  // The collector holds a field's text edit until it settles (or another field is edited, a click or a submit comes, or
+  // capture stops), at most one per field, and lets them go in the order they were edited: the edited fields still
+  // waiting, in that order, so an edit that arrives while the person is in the next field is still that field's.
+  let waiting: Element[] = [];
   const onPointerDown = (event: Event) => {
     pressed = eventElement(event);
   };
@@ -459,6 +499,10 @@ export function createElementTracker() {
   const onEdit = (event: Event) => {
     const element = eventElement(event);
     current = element ? { type: event.type, element } : null;
+    if (!element) return;
+    waiting = waiting.filter((other) => other !== element);
+    waiting.push(element);
+    if (waiting.length > MAX_WAITING_EDITS) waiting.shift();
   };
   const listeners: [string, (event: Event) => void][] = [
     ["pointerdown", onPointerDown],
@@ -479,6 +523,13 @@ export function createElementTracker() {
     /** The element of the event being dispatched now, when it is the one `type` names. */
     elementFor(type: string): Element | null {
       return current?.type === type ? current.element : null;
+    },
+    /** The field a collector edit came from: the earliest edited field still waiting that its target describes. */
+    elementForEdit(target: unknown): Element | null {
+      const index = waiting.findIndex((element) => describes(target, element));
+      if (index === -1) return null;
+      const [element] = waiting.splice(index, 1);
+      return element ?? null;
     },
   };
 }

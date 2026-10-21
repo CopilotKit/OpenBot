@@ -12,7 +12,6 @@ import { installActionCapture } from "./actions";
 import type { SensitivityTracker } from "./masking-context";
 import { agentTargetOf, createElementTracker, enrichStep } from "./targeting";
 
-const COALESCE_MS = 750;
 const DROP_REPORT_MS = 5_000;
 
 type Timers = {
@@ -65,60 +64,38 @@ export function collectorBeforeSend(
   };
 }
 
-const inputKey = (event: CapturedEvent): string => {
-  const value = event.value as {
-    target?: { tag?: string; attributes?: Record<string, string> };
-    url?: string;
-  } | null;
-  return JSON.stringify([
-    value?.target?.tag,
-    value?.target?.attributes?.id,
-    value?.target?.attributes?.name,
-    value?.url,
-  ]);
-};
-
 /** Captures the person's steps: clicks and edits through the collector, each with its targeting, plus form submits and
- * Enter in a field (actions.ts). `send` also receives one `recorder.dropped { count, reason }` event per 5 s while the collector
- * reported errors (INVALID_EVENT, EVENT_TOO_LARGE, PERSISTENCE_UNKNOWN, CAPTURE_FAILED) or beforeSend dropped one, so no event
- * vanishes uncounted. Network is off (the collector's patch of `fetch` sees nothing in this isolated world; the debugger or
- * the MAIN-world bundle capture it) and navigation is off (the service worker records it from `webNavigation`). */
+ * Enter in a field (actions.ts). Edits leave as the collector settles them (one per field once typing pauses, or at once
+ * when the next action, field or stop comes), exactly as CopilotKit's own capture sends them. `send` also receives one
+ * `recorder.dropped { count, reason }` event per 5 s while the collector reported errors (INVALID_EVENT, EVENT_TOO_LARGE,
+ * PERSISTENCE_UNKNOWN, CAPTURE_FAILED) or beforeSend dropped one, so no event vanishes uncounted. Network is off (the
+ * collector's patch of `fetch` sees nothing in this isolated world; the debugger or the MAIN-world bundle capture it) and
+ * navigation is off (the service worker records it from `webNavigation`). */
 export function startEventCapture(options: {
   tracker: SensitivityTracker;
   send(event: CapturedEvent): void;
-  coalesceMs?: number;
   timers?: Timers;
 }): { stop(): void } {
   const { tracker, send } = options;
-  const coalesceMs = options.coalesceMs ?? COALESCE_MS;
   const timers = options.timers ?? realTimers;
   const drops = new Map<string, number>();
   let dropTimer: unknown;
-  const pending = new Map<string, { event: CapturedEvent; timer: unknown }>();
 
   const countDrop = (reason: string) => {
     drops.set(reason, (drops.get(reason) ?? 0) + 1);
     dropTimer ??= timers.set(reportDrops, DROP_REPORT_MS);
   };
-  const deliver = (event: CapturedEvent) => {
+  const deliver = (event: TrajectoryEvent) => {
     try {
-      send(event);
+      send(event as CapturedEvent);
     } catch {
       countDrop("PERSISTENCE_UNKNOWN");
-    }
-  };
-  const flushInputs = () => {
-    for (const [key, entry] of pending) {
-      timers.clear(entry.timer);
-      pending.delete(key);
-      deliver(entry.event);
     }
   };
   function reportDrops() {
     dropTimer = undefined;
     const counted = [...drops];
     drops.clear();
-    flushInputs();
     for (const [reason, count] of counted)
       deliver({
         type: "CUSTOM",
@@ -127,38 +104,6 @@ export function startEventCapture(options: {
         value: { count, reason },
       });
   }
-
-  const coalescing = (event: TrajectoryEvent) => {
-    const captured = event as CapturedEvent;
-    if (captured.name !== "input") {
-      flushInputs();
-      deliver(captured);
-      return;
-    }
-    const key = inputKey(captured);
-    if ((captured.value as { eventType?: string }).eventType === "change") {
-      // The change event is the field's latest value: it replaces the field's own pending input.
-      const own = pending.get(key);
-      if (own) {
-        timers.clear(own.timer);
-        pending.delete(key);
-      }
-      flushInputs();
-      deliver(captured);
-      return;
-    }
-    const previous = pending.get(key);
-    if (previous) timers.clear(previous.timer);
-    pending.set(key, {
-      event: captured,
-      timer: timers.set(() => {
-        const entry = pending.get(key);
-        if (!entry) return;
-        pending.delete(key);
-        deliver(entry.event);
-      }, coalesceMs),
-    });
-  };
 
   // Installed before the collector's own listeners, so for every click and edit it knows the element first.
   const elements = createElementTracker();
@@ -174,22 +119,19 @@ export function startEventCapture(options: {
       tracker,
       countDrop,
       (event) =>
-        event.name === "click" || event.name === "input"
-          ? enrichStep(
-              event,
-              elements.elementFor(
-                event.name === "click"
-                  ? "click"
-                  : String(
-                      (event.value as { eventType?: unknown } | null)
-                        ?.eventType ?? "",
-                    ),
-              ),
-            )
-          : event,
+        event.name === "click"
+          ? enrichStep(event, elements.elementFor("click"))
+          : event.name === "input"
+            ? enrichStep(
+                event,
+                elements.elementForEdit(
+                  (event.value as { target?: unknown } | null)?.target,
+                ),
+              )
+            : event,
       () => agentTargetOf(elements.elementFor("click")),
     ),
-    send: coalescing,
+    send: deliver,
     onError: (error) => countDrop(error.code),
   });
   collector.start();
@@ -207,9 +149,9 @@ export function startEventCapture(options: {
   return {
     stop() {
       uninstallActions();
+      // The collector's stop lets every held edit go first.
       collector.stop();
       uninstallElements();
-      flushInputs();
       if (dropTimer !== undefined) {
         timers.clear(dropTimer);
         reportDrops();

@@ -4,6 +4,7 @@ import {
   beforeAll,
   describe,
   expect,
+  jest,
   spyOn,
   test,
 } from "bun:test";
@@ -50,6 +51,15 @@ function fakeTimers() {
       now = end;
     },
   };
+}
+
+/** CopilotKit's input capture holds a field's text edit until typing pauses for this long (TEXT_DEBOUNCE_MS in
+ * @copilotkit/learning's inputs.ts), on the page's own clock. */
+const SETTLE_MS = 300;
+function useCollectorClock() {
+  jest.useFakeTimers();
+  tracked.push(() => jest.useRealTimers());
+  return { settle: () => jest.advanceTimersByTime(SETTLE_MS) };
 }
 
 const tracked: Array<() => void> = [];
@@ -158,20 +168,21 @@ describe("startEventCapture coalescing", () => {
     return { timers, sent, capture };
   }
 
-  test("keystrokes in one field become one input event after a pause", () => {
+  test("keystrokes in one field become one input event once typing pauses", () => {
     document.body.innerHTML = `<input id="f1" name="f1">`;
-    const { timers, sent } = drive();
+    const clock = useCollectorClock();
+    const { sent } = drive();
     const field = document.getElementById("f1") as HTMLInputElement;
     for (const value of ["h", "he", "hel", "hell", "hello"]) {
       field.value = value;
       field.dispatchEvent(
         trustedEvent(new Event("input", { bubbles: true, composed: true })),
       );
-      timers.advance(20);
+      jest.advanceTimersByTime(20);
     }
     const typed = () => sent.filter((event) => event.name === "input");
     expect(typed()).toHaveLength(0);
-    timers.advance(750);
+    clock.settle();
     expect(typed()).toHaveLength(1);
     expect(JSON.stringify(typed()[0])).toContain("hello");
   });
@@ -194,7 +205,7 @@ describe("startEventCapture coalescing", () => {
     ).toEqual(["input", "click"]);
   });
 
-  test("a change event flushes its field at once", () => {
+  test("a change right after typing lets the typed value go at once, and only once", () => {
     document.body.innerHTML = `<input id="f1" name="f1">`;
     const { sent } = drive();
     const field = document.getElementById("f1") as HTMLInputElement;
@@ -205,14 +216,19 @@ describe("startEventCapture coalescing", () => {
     field.dispatchEvent(
       trustedEvent(new Event("change", { bubbles: true, composed: true })),
     );
+    // CopilotKit's capture takes the change as the echo of the edit it holds: the edit goes now, the echo never.
     const typed = sent.filter((event) => event.name === "input");
     expect(typed).toHaveLength(1);
-    expect(typed[0]?.value).toMatchObject({ eventType: "change" });
+    expect(typed[0]?.value).toMatchObject({
+      eventType: "input",
+      target: { value: "abc" },
+    });
   });
 
-  test("two fields coalesce separately", () => {
+  test("typing in two fields in turn sends each visit's value as the next field begins", () => {
     document.body.innerHTML = `<input id="f1" name="f1"><input id="f2" name="f2">`;
-    const { timers, sent } = drive();
+    const clock = useCollectorClock();
+    const { sent } = drive();
     for (const id of ["f1", "f2", "f1", "f2"]) {
       const field = document.getElementById(id) as HTMLInputElement;
       field.value += "x";
@@ -220,8 +236,16 @@ describe("startEventCapture coalescing", () => {
         trustedEvent(new Event("input", { bubbles: true, composed: true })),
       );
     }
-    timers.advance(750);
-    expect(sent.filter((event) => event.name === "input")).toHaveLength(2);
+    clock.settle();
+    const typed = sent.filter((event) => event.name === "input");
+    expect(
+      typed.map((event) => {
+        const value = event.value as {
+          target: { attributes: Record<string, string>; value: string };
+        };
+        return `${value.target.attributes.id}=${value.target.value}`;
+      }),
+    ).toEqual(["f1=x", "f2=x", "f1=xx", "f2=xx"]);
   });
 
   test("stop flushes a pending input", () => {
@@ -238,13 +262,14 @@ describe("startEventCapture coalescing", () => {
 
   test("a value with a NUL character reaches send with U+FFFD", () => {
     document.body.innerHTML = `<input id="f1" name="f1">`;
-    const { timers, sent } = drive();
+    const clock = useCollectorClock();
+    const { sent } = drive();
     const field = document.getElementById("f1") as HTMLInputElement;
     field.value = "a\u0000b";
     field.dispatchEvent(
       trustedEvent(new Event("input", { bubbles: true, composed: true })),
     );
-    timers.advance(750);
+    clock.settle();
     const typed = sent.filter((event) => event.name === "input");
     expect(typed).toHaveLength(1);
     expect(JSON.stringify(typed[0])).toContain("a\uFFFDb");
@@ -260,11 +285,12 @@ describe("startEventCapture coalescing", () => {
 
   test("a 2FA code typed into a real sign-in's code field, with no autocomplete=one-time-code, never leaves in any copy", () => {
     // The events' timestamps hold the code's digits, which the leak check below must not read as the code.
+    const settling = useCollectorClock();
     const clock = spyOn(Date, "now").mockReturnValue(CODE_CLOCK);
     tracked.push(() => clock.mockRestore());
     // The field exactly as the sign-in served it; its framework mirrors what is typed into the value attribute.
     document.body.innerHTML = `<label id="FormControl-label2">Code</label><input id="codeEntry" type="text" placeholder="Enter 6-digit code" data-test-id="two-factor-code-input" aria-labelledby="FormControl-label2"><button id="b">Log in</button>`;
-    const { timers, sent } = drive();
+    const { sent } = drive();
     const field = document.getElementById("codeEntry") as HTMLInputElement;
     field.dispatchEvent(
       trustedEvent(new MouseEvent("click", { bubbles: true, composed: true })),
@@ -276,7 +302,7 @@ describe("startEventCapture coalescing", () => {
         trustedEvent(new Event("input", { bubbles: true, composed: true })),
       );
     }
-    timers.advance(750);
+    settling.settle();
     field.dispatchEvent(
       trustedEvent(new MouseEvent("click", { bubbles: true, composed: true })),
     );
@@ -302,6 +328,7 @@ describe("startEventCapture with a code typed a digit per box", () => {
           `<div class="cell"><input id="otp-${n}" type="text" maxlength="1" autocomplete="off"></div>`,
       )
       .join("")}<button id="b" type="button">Verify</button></form>`;
+    const clock = useCollectorClock();
     const timers = fakeTimers();
     const sent: CapturedEvent[] = [];
     const tracker = newTracker();
@@ -324,7 +351,7 @@ describe("startEventCapture with a code typed a digit per box", () => {
         trustedEvent(new Event("input", { bubbles: true, composed: true })),
       );
     });
-    timers.advance(750);
+    clock.settle();
     const typed = sent.filter((event) => event.name === "input");
     expect(typed).toHaveLength(6);
     for (const event of typed) {
@@ -334,6 +361,48 @@ describe("startEventCapture with a code typed a digit per box", () => {
       expect(target.attributes.value).toBe("[redacted]");
     }
     expect(reported).toContain(sha256HexSync("731946"));
+  });
+});
+
+describe("startEventCapture targeting of held edits", () => {
+  test("an edit that leaves while the next field is being typed in carries its own field's selectors", () => {
+    // CopilotKit's capture holds each field's edit until typing there pauses or another field is edited, so box 1's value
+    // leaves the moment box 2 receives its first input: it must still name box 1.
+    document.body.innerHTML = `<form>${[1, 2, 3]
+      .map((n) => `<input id="part-${n}" name="part-${n}" type="text">`)
+      .join("")}</form>`;
+    const clock = useCollectorClock();
+    const sent: CapturedEvent[] = [];
+    const capture = startEventCapture({
+      tracker: newTracker(),
+      send: (event) => sent.push(event),
+      timers: fakeTimers(),
+    });
+    stops.push(capture.stop);
+    for (const [index, text] of ["alpha", "bravo", "charlie"].entries()) {
+      const field = document.getElementById(
+        `part-${index + 1}`,
+      ) as HTMLInputElement;
+      field.value = text;
+      field.dispatchEvent(
+        trustedEvent(new Event("input", { bubbles: true, composed: true })),
+      );
+    }
+    clock.settle();
+    const edits = sent
+      .filter((event) => event.name === "input")
+      .map((event) => {
+        const value = event.value as {
+          target: { value: string };
+          selectors?: { by: string; selector: string }[];
+        };
+        return `${value.target.value} ${value.selectors?.find((s) => s.by === "id")?.selector}`;
+      });
+    expect(edits).toEqual([
+      "alpha #part-1",
+      "bravo #part-2",
+      "charlie #part-3",
+    ]);
   });
 });
 
