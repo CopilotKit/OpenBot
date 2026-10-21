@@ -50,10 +50,21 @@ The OpenBot Recorder is a Chrome and Edge extension. A person names the task, do
 browser, and the Recorder sends what they did, step by step (each click, entry, choice, submit,
 Enter and page change, with what an agent needs to find that element again, and the one request a
 step sent when it saved something), masked in the browser first, straight to Intelligence as a
-trajectory in that person's own Learning space; the page's own traffic is never recorded. Every Bot
+trajectory in that person's own Learning space; the page's own traffic is never recorded, except the
+agent's AG-UI events (below). Every Bot
 they use then gets the Skills learned there, beside the Bot's own. OpenBot connects the browser and
 hands out each capture pass; it receives nothing that is recorded.
 
+- **The agent's side too.** On a page whose agent speaks AG-UI (over SSE or the Intelligence
+  WebSocket, OpenBot's own chat included), the Recorder also sends the agent's side, in exactly the
+  shape the CopilotKit SDK emits so Intelligence cannot tell the two apart: `agent.run`,
+  `agent.message` (the person's own messages too), `tool.call` and `thread.linked`, a click inside a
+  chat message with its Thread and message, and `agent.event` for what those leave out (a tool
+  call's arguments and result, state, reasoning, errors), never one row per streamed token.
+  CopilotKit's suggestion runs are left out, as its own capture leaves them out.
+- **Clicks and typing come from CopilotKit main's own capture code**, carried as a Bun patch over
+  `@copilotkit/learning` 0.0.1 (`patches/`, which the images and OpenBot Desktop copy) until main is
+  published.
 - **Settings → Browsers** connects the Recorder in this browser and lists every browser connected
   as you, each with a Disconnect. OpenBot Desktop can connect the Recorder on its own computer too.
 - **Only a connected browser gets a capture pass.** The runtime's `trajectory/<id>/connect` route
@@ -78,8 +89,8 @@ hands out each capture pass; it receives nothing that is recorded.
   open from memory, refreshed at once on the replica that saved a change and within 30 seconds on
   the others.
 - **Intelligence must allow trajectories:** the `trajectories` licence feature,
-  `FF_LEARNING_TRAJECTORIES=true`, and an `INTELLIGENCE_GATEWAY_WS_URL` that people's browsers can
-  reach.
+  `FF_LEARNING_TRAJECTORIES=true`, a realtime gateway that can ask Intelligence whether an
+  organization may capture, and an `INTELLIGENCE_GATEWAY_WS_URL` that people's browsers can reach.
 - **`OPENBOT_RECORDER_EXTRA_EXTENSION_IDS`** lists other extension ids to trust besides the
   Recorder's own, for a fork or a build signed with another key. Each must be 32 letters from a to
   p, comma separated; **a value that is not stops the server at boot.**
