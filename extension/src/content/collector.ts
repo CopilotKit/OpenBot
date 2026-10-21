@@ -8,7 +8,7 @@ import {
   trimEvent,
 } from "@openbot/shared/recorder-masking";
 import { AGENT_TARGET_FIELD, type AgentTarget } from "../shared/agent-target";
-import { installActionCapture } from "./actions";
+import { type ActionCapture, installActionCapture } from "./actions";
 import type { SensitivityTracker } from "./masking-context";
 import { agentTargetOf, createElementTracker, enrichStep } from "./targeting";
 
@@ -64,13 +64,14 @@ export function collectorBeforeSend(
   };
 }
 
-/** Captures the person's steps: clicks and edits through the collector, each with its targeting, plus form submits and
- * Enter in a field (actions.ts). Edits leave as the collector settles them (one per field once typing pauses, or at once
- * when the next action, field or stop comes), exactly as CopilotKit's own capture sends them. `send` also receives one
- * `recorder.dropped { count, reason }` event per 5 s while the collector reported errors (INVALID_EVENT, EVENT_TOO_LARGE,
- * PERSISTENCE_UNKNOWN, CAPTURE_FAILED) or beforeSend dropped one, so no event vanishes uncounted. Network is off (the
- * collector's patch of `fetch` sees nothing in this isolated world; the debugger or the MAIN-world bundle capture it) and
- * navigation is off (the service worker records it from `webNavigation`). */
+/** Captures the person's steps: clicks and edits through the collector, each with its targeting, plus Enter in a field
+ * and a form submit that no click the collector sent explains (actions.ts). Edits leave as the collector settles them
+ * (one per field once typing pauses, or at once when the next action, field or stop comes), exactly as CopilotKit's own
+ * capture sends them. `send` also receives one `recorder.dropped { count, reason }` event per 5 s while the collector
+ * reported errors (INVALID_EVENT, EVENT_TOO_LARGE, PERSISTENCE_UNKNOWN, CAPTURE_FAILED) or beforeSend dropped one, so no
+ * event vanishes uncounted. Network is off (the collector's patch of `fetch` sees nothing in this isolated world; the
+ * debugger or the MAIN-world bundle capture it) and navigation is off (the service worker records it from
+ * `webNavigation`). */
 export function startEventCapture(options: {
   tracker: SensitivityTracker;
   send(event: CapturedEvent): void;
@@ -85,11 +86,18 @@ export function startEventCapture(options: {
     drops.set(reason, (drops.get(reason) ?? 0) + 1);
     dropTimer ??= timers.set(reportDrops, DROP_REPORT_MS);
   };
+  let actions: ActionCapture | null = null;
   const deliver = (event: TrajectoryEvent) => {
     try {
       send(event as CapturedEvent);
     } catch {
       countDrop("PERSISTENCE_UNKNOWN");
+    }
+    // The Recorder's own submit and Enter steps never repeat a click CopilotKit's collector sent (actions.ts).
+    if (event.name === "click") {
+      const target = (event.value as { target?: { input?: unknown } } | null)
+        ?.target;
+      actions?.collectorClicked(target?.input === "keyboard");
     }
   };
   function reportDrops() {
@@ -138,17 +146,19 @@ export function startEventCapture(options: {
   // Submit and Enter go through the collector too, so they are masked and trimmed like a click. A page that refused the
   // collector's own listeners has already been counted as CAPTURE_FAILED.
   const failed = drops.has("CAPTURE_FAILED");
-  const installed = failed
+  actions = failed
     ? null
     : installActionCapture({
         emit: (name, value) => collector.emit(name, value as JsonValue),
+        timers,
       });
-  if (!failed && !installed) countDrop("CAPTURE_FAILED");
-  const uninstallActions = installed ?? (() => {});
+  if (!failed && !actions) countDrop("CAPTURE_FAILED");
 
   return {
     stop() {
-      uninstallActions();
+      // An Enter still held for its click goes first, while the collector can still send it.
+      actions?.uninstall();
+      actions = null;
       // The collector's stop lets every held edit go first.
       collector.stop();
       uninstallElements();

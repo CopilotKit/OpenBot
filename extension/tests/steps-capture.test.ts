@@ -450,3 +450,410 @@ test("a step waits for its save still in flight through the debugger, then carri
   await until(() => sent.length === 1, "the step with its save");
   expect(saves()).toEqual(["POST /api/messages/send"]);
 });
+
+// ---- Saves the end-to-end run left off its steps, and steps it held -------------------------------------------------
+
+/** A request of the tab's top frame's own document (a link followed, a form posted), as Chrome reports a navigation:
+ * its request id is its loader's, and a redirect comes as a second requestWillBeSent for the same id carrying the
+ * redirect's response. */
+function documentRequest(spec: {
+  id: string;
+  at: number;
+  url: string;
+  method?: string;
+  headers?: Record<string, string>;
+  postData?: string;
+  redirect?: { at: number; status: number; to: string };
+  respondedAt: number;
+}) {
+  const target = { tabId: 7 };
+  const base = {
+    requestId: spec.id,
+    loaderId: spec.id,
+    type: "Document",
+    frameId: "target-7",
+    initiator: { type: "other" },
+  };
+  fake.debugger.emit(target, "Network.requestWillBeSent", {
+    ...base,
+    documentURL: spec.url,
+    timestamp: 100 + spec.at,
+    wallTime: CLICK + spec.at,
+    request: {
+      url: spec.url,
+      method: spec.method ?? "GET",
+      headers: spec.headers ?? {},
+      ...(spec.postData !== undefined
+        ? { postData: spec.postData, hasPostData: true }
+        : {}),
+    },
+  });
+  let url = spec.url;
+  if (spec.redirect) {
+    fake.debugger.emit(target, "Network.requestWillBeSent", {
+      ...base,
+      documentURL: spec.redirect.to,
+      timestamp: 100 + spec.redirect.at,
+      wallTime: CLICK + spec.redirect.at,
+      redirectHasExtraInfo: true,
+      redirectResponse: {
+        url: spec.url,
+        status: spec.redirect.status,
+        statusText: "See Other",
+        headers: {
+          "content-type": "text/html;charset=utf-8",
+          "content-length": "0",
+          location: spec.redirect.to,
+          server: "Heroku",
+        },
+        mimeType: "text/html",
+      },
+      request: { url: spec.redirect.to, method: "GET", headers: {} },
+    });
+    url = spec.redirect.to;
+  }
+  bodies[spec.id] = "<html><body>The Internet</body></html>";
+  fake.debugger.emit(target, "Network.responseReceived", {
+    ...base,
+    timestamp: 100 + spec.respondedAt,
+    response: {
+      url,
+      status: 200,
+      headers: { "content-type": "text/html;charset=utf-8" },
+      mimeType: "text/html",
+    },
+  });
+  fake.debugger.emit(target, "Network.loadingFinished", {
+    requestId: spec.id,
+    timestamp: 100 + spec.respondedAt + 0.01,
+  });
+}
+
+/** A write the page starts and Chrome never reports again: its page went away under it. */
+function abandonedWrite(spec: {
+  id: string;
+  at: number;
+  url: string;
+  method: string;
+  postData: string;
+}) {
+  fake.debugger.emit({ tabId: 7 }, "Network.requestWillBeSent", {
+    requestId: spec.id,
+    loaderId: "page-loader",
+    type: "Fetch",
+    frameId: "target-7",
+    timestamp: 100 + spec.at,
+    wallTime: CLICK + spec.at,
+    request: {
+      url: spec.url,
+      method: spec.method,
+      headers: { "content-type": "application/json" },
+      postData: spec.postData,
+    },
+  });
+}
+
+const followTab = (url: string) =>
+  fake.tabs.set(7, { id: 7, url, title: "" } as chrome.tabs.Tab);
+
+test("archiving the same order twice is two saves: a write the tab already made is the person's, never screened as the page's repeat", async () => {
+  // End-to-end run 5, rows 57006 and 57015: the second Archive order, the same PATCH with the same body, carried nothing.
+  followTab("http://127.0.0.1:7420/orders/1043");
+  await capture.start(7, "http://127.0.0.1:7420/orders/1043");
+  const archive = (at: number) => {
+    steps.step(
+      7,
+      step("click", at, {
+        step: "click",
+        target: { tag: "button", ariaRole: "button", name: "Archive order" },
+      }),
+    );
+    request({
+      id: `archive-${at}`,
+      url: "http://127.0.0.1:7420/api/orders/1043",
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      postData: '{"archived":true}',
+      at: at + 0.002,
+      body: `{"id":1043,"archived":true,"archivedAt":"2026-10-21T02:2${at}:35.252Z"}`,
+    });
+    // The page's polling, the same read each time: still the page's own repeat.
+    request({
+      id: `poll-${at}`,
+      url: "http://127.0.0.1:7420/api/notifications/count",
+      at: at + 0.05,
+      body: '{"unread":2}',
+    });
+  };
+  archive(0);
+  archive(0.7);
+  await until(() => sent.length === 2, "both clicks");
+  expect(saves()).toEqual(["PATCH /api/orders/1043", "PATCH /api/orders/1043"]);
+});
+
+test("a one-time code checked, a phone confirmed and a backup code redeemed are each their step's save, the code redacted", async () => {
+  // End-to-end run 1, rows 8072 to 8092: the shop's three code forms. Each code arrives redacted in its edit and its
+  // request, so neither matches the other, and none of verify, confirm or redeem was a word for a save.
+  followTab("http://127.0.0.1:7420/security");
+  await capture.start(7, "http://127.0.0.1:7420/security");
+  const form = (
+    at: number,
+    field: string,
+    button: string,
+    path: string,
+    body: string,
+  ) => {
+    steps.step(
+      7,
+      step("input", at, {
+        step: "input",
+        eventType: "input",
+        target: {
+          tag: "input",
+          ariaRole: "textbox",
+          name: field,
+          value: "[redacted]",
+        },
+      }),
+    );
+    steps.step(
+      7,
+      step("click", at + 0.1, {
+        step: "click",
+        target: {
+          tag: "button",
+          ariaRole: "button",
+          name: button,
+          input: "keyboard",
+        },
+      }),
+    );
+    request({
+      id: path,
+      url: `http://127.0.0.1:7420${path}`,
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      postData: body,
+      at: at + 0.105,
+      body: '{"verified":true,"accessToken":"[redacted]"}',
+    });
+  };
+  form(
+    0,
+    "Code from your authenticator app",
+    "Verify app",
+    "/api/mfa/verify",
+    '{"code":"[redacted]","method":"app"}',
+  );
+  form(
+    0.5,
+    "Enter the code we texted you",
+    "Confirm phone",
+    "/api/phone/confirm",
+    '{"phoneNumber":"+44 7700 900123","smsCode":"[redacted]"}',
+  );
+  form(
+    1,
+    "Digit 6",
+    "Use backup",
+    "/api/backup/redeem",
+    '{"value":"[redacted]"}',
+  );
+  await until(() => sent.length === 6, "every step");
+  expect(saves()).toEqual([
+    null,
+    "POST /api/mfa/verify",
+    null,
+    "POST /api/phone/confirm",
+    null,
+    "POST /api/backup/redeem",
+  ]);
+});
+
+test("a form posted as a page load and answered with a redirect is the save of the click that sent it: the-internet's sign-in and password reset", async () => {
+  // End-to-end run 2, rows 89010 to 89012 and 89032 to 89034: the-internet.herokuapp.com answers POST /authenticate and
+  // POST /forgot_password with 303 See Other, and neither post reached its click.
+  followTab("https://the-internet.herokuapp.com/login");
+  await capture.start(7, "https://the-internet.herokuapp.com/login");
+  steps.step(
+    7,
+    step("input", -0.6, {
+      step: "input",
+      eventType: "input",
+      target: {
+        tag: "input",
+        ariaRole: "textbox",
+        name: "Username",
+        value: "tomsmith",
+      },
+    }),
+  );
+  steps.step(
+    7,
+    step("click", 0, {
+      step: "click",
+      target: {
+        tag: "button",
+        ariaRole: "button",
+        name: "Login",
+        input: "pointer",
+      },
+    }),
+  );
+  documentRequest({
+    id: "login-loader",
+    at: 0.01,
+    url: "https://the-internet.herokuapp.com/authenticate",
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    postData: "username=tomsmith&password=SuperSecretPassword%21",
+    redirect: {
+      at: 0.18,
+      status: 303,
+      to: "https://the-internet.herokuapp.com/secure",
+    },
+    respondedAt: 0.3,
+  });
+  steps.navigation(
+    7,
+    step("navigation", 0.31, {
+      step: "navigate",
+      to: "https://the-internet.herokuapp.com/secure",
+      navigationType: "push",
+      transitionType: "form_submit",
+      transitionQualifiers: ["server_redirect"],
+    }),
+  );
+  steps.step(
+    7,
+    step("input", 0.7, {
+      step: "input",
+      eventType: "input",
+      target: {
+        tag: "input",
+        ariaRole: "textbox",
+        name: "E-mail",
+        value: "[redacted]",
+      },
+    }),
+  );
+  steps.step(
+    7,
+    step("click", 0.8, {
+      step: "click",
+      target: {
+        tag: "button",
+        ariaRole: "button",
+        name: "Retrieve password",
+        input: "pointer",
+      },
+    }),
+  );
+  documentRequest({
+    id: "reset-loader",
+    at: 0.81,
+    url: "https://the-internet.herokuapp.com/forgot_password",
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    postData: "email=ada%40example.test",
+    redirect: {
+      at: 0.95,
+      status: 303,
+      to: "https://the-internet.herokuapp.com/email_sent",
+    },
+    respondedAt: 1.05,
+  });
+  await until(() => sent.length === 5, "every step");
+  expect(saves()).toEqual([
+    null,
+    "POST /authenticate",
+    null,
+    null,
+    "POST /forgot_password",
+  ]);
+  const login = (
+    sent[1]?.value as { request?: Record<string, unknown> } | undefined
+  )?.request;
+  expect(login).toMatchObject({
+    method: "POST",
+    url: "https://the-internet.herokuapp.com/authenticate",
+    status: 303,
+    body: { status: "complete", text: "username=tomsmith&password=[redacted]" },
+    response: { status: "empty" },
+  });
+  expect(leakedSecrets(sent, ["SuperSecretPassword"])).toEqual([]);
+});
+
+test("a link click whose page sends telemetry on every click leaves once its window closes, not when the in-flight cap runs out", async () => {
+  // End-to-end run 1, rows 8019, 8060, 8065, 8068, 8094 and 8113: the shop posts /api/telemetry/events on every click, a
+  // link's page change cancels it, and Chrome never reports the cancelled call. Each such click waited out the cap.
+  followTab("http://127.0.0.1:7420/orders/1043");
+  await capture.start(7, "http://127.0.0.1:7420/orders/1043");
+  const began = performance.now();
+  steps.step(
+    7,
+    step("click", 0, {
+      step: "click",
+      target: {
+        tag: "a",
+        ariaRole: "link",
+        name: "Ceramic mug, blue 1 x 58.20",
+      },
+    }),
+  );
+  abandonedWrite({
+    id: "telemetry",
+    at: 0.002,
+    url: "http://127.0.0.1:7420/api/telemetry/events",
+    method: "POST",
+    postData: '{"type":"click","sid":"k2j3h4","path":"/orders/1043"}',
+  });
+  documentRequest({
+    id: "products-loader",
+    at: 0.004,
+    url: "http://127.0.0.1:7420/products/7",
+    respondedAt: 0.012,
+  });
+  steps.navigation(
+    7,
+    step("navigation", 0.013, {
+      step: "navigate",
+      to: "http://127.0.0.1:7420/products/7",
+      navigationType: "push",
+      transitionType: "link",
+    }),
+  );
+  await until(() => sent.length >= 1, "the click");
+  expect(performance.now() - began).toBeLessThan(TIMING.inflightCapMs / 2);
+  expect(saves()[0]).toBeNull();
+});
+
+test("a save the page started and its page change cancelled no longer holds the click: the top frame's next document ends it", async () => {
+  // A draft the page autosaves as the person follows a link: the new page's answer means the old page, and the save it
+  // had in flight, are gone; Chrome sends no loadingFailed for it once that page's document is swapped out.
+  followTab("http://127.0.0.1:7420/checkout?order=1043");
+  await capture.start(7, "http://127.0.0.1:7420/checkout?order=1043");
+  const began = performance.now();
+  steps.step(
+    7,
+    step("click", 0, {
+      step: "click",
+      target: { tag: "a", ariaRole: "link", name: "Account" },
+    }),
+  );
+  abandonedWrite({
+    id: "draft",
+    at: 0.003,
+    url: "http://127.0.0.1:7420/api/refund-drafts/1043",
+    method: "PUT",
+    postData: '{"fullName":"Grace Hopper","reason":"Parcel arrived damaged"}',
+  });
+  documentRequest({
+    id: "account-loader",
+    at: 0.005,
+    url: "http://127.0.0.1:7420/account",
+    respondedAt: 0.014,
+  });
+  await until(() => sent.length >= 1, "the click");
+  expect(performance.now() - began).toBeLessThan(TIMING.inflightCapMs / 2);
+});

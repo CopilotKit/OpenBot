@@ -16,15 +16,17 @@
 // - PUT, PATCH or DELETE;
 // - a GraphQL mutation (never a query);
 // - a POST whose masked body carries what the person just typed or chose, or whose path or operation is a write
-//   (create, update, save, delete, send, submit, mark, archive, assign). Apps read their configuration through POSTs
-//   too, and those stay out.
+//   (create, update, save, delete, send, submit, mark, archive, assign, verify, confirm, redeem). Apps read their
+//   configuration through POSTs too, and those stay out;
+// - a form the top frame posted as a page load (a classic sign-in), whatever its address.
 // When several qualify, the one carrying the person's values wins, else the first. A write the page sends to keep itself
 // alive or to report on itself (presence, heartbeats, pings, typing, session refreshes, telemetry, tracking, logs) is
 // never a save.
 //
 // Page changes the page makes one after another, with no step of the person's between them and none more than
 // `redirectMs` after the last (a sign-in's redirects, an app settling on its default view), are one step to the final
-// page, `from` the address the chain began at.
+// page, `from` the address the chain began at. A reload, a step back or forward, or an address the person typed or
+// picked in the browser is never the page's: it starts a step of its own.
 //
 // The person's narration is placed the same way: a phrase's transcript is stamped with the phrase's start, but exists
 // only once the phrase ends, seconds later. While a phrase is being spoken (`hold`), nothing from its start on leaves
@@ -75,6 +77,8 @@ export type StepCall = {
   endedAt: number;
   method: string;
   url: string;
+  /** A request of the top frame's own document (debugger only): a form the page posted as a page load. */
+  document?: true;
   /** A write's masked exchange, read through the debugger or the page hook: absent for a read, which can only lead to a
    * save, never be one. */
   exchange?: {
@@ -107,6 +111,10 @@ const WRITE_WORDS = new Set(
     ["mark", "marks", "marked"],
     ["archive", "archives", "archived"],
     ["assign", "assigns", "assigned"],
+    // A one-time code checked, a phone or an address confirmed, a backup code or a voucher redeemed.
+    ["verify", "verifies", "verified"],
+    ["confirm", "confirms", "confirmed"],
+    ["redeem", "redeems", "redeemed"],
   ].flat(),
 );
 /** A value too short to tell anything apart (a digit, "ok") is never matched in a body. */
@@ -289,6 +297,9 @@ export function saveQuality(
   } catch {
     // Not a URL: its text is its path.
   }
+  // A form posted as a page load (a classic sign-in or a reset-password form) is the person sending that form, whatever
+  // its address says: no page keeps itself alive or reports on itself by navigating.
+  if (call.document) return { save: true, carries };
   if (isChatter(path, gql.operation, method)) return { save: false, carries };
   if (gql.kind === "query") return { save: false, carries };
   if (gql.kind === "mutation") return { save: true, carries };
@@ -340,6 +351,32 @@ export type StepSnapshot = {
 
 const stepValue = (event: CapturedEvent): Record<string, unknown> =>
   isObject(event.value) ? event.value : {};
+
+/** Chrome's transitions (webNavigation TransitionType) that are the person going somewhere from the browser itself: an
+ * address typed, a bookmark, a suggestion picked, a start page. */
+const PERSON_TRANSITIONS = new Set([
+  "typed",
+  "auto_bookmark",
+  "generated",
+  "keyword",
+  "keyword_generated",
+  "start_page",
+]);
+
+/** Whether a page change is the person's own: a reload, a step back or forward, or a place they went from the browser. */
+function byPerson(value: Record<string, unknown>): boolean {
+  const kind = value.navigationType;
+  if (kind === "reload" || kind === "traverse") return true;
+  if (
+    typeof value.transitionType === "string" &&
+    PERSON_TRANSITIONS.has(value.transitionType)
+  )
+    return true;
+  return (
+    Array.isArray(value.transitionQualifiers) &&
+    value.transitionQualifiers.includes("from_address_bar")
+  );
+}
 
 /** A typed value of an edit step, as masked: a redacted one is never matched. */
 function typedValue(event: CapturedEvent): string | undefined {
@@ -678,24 +715,31 @@ export function createStepAssembler(options: {
       if (ended) return;
       const open = openChange.get(tabId);
       const since = open ? event.timestamp - (open.lastHop ?? open.at) : -1;
-      // A reload or a step back or forward is the person's; a push or a replace this soon after the last is the page's.
-      const kind = stepValue(event).navigationType;
+      // A reload, a step back or forward, or an address the person typed or picked in the browser is the person's; a
+      // push or a replace this soon after the last is the page's.
       if (
         open &&
         queue.includes(open) &&
-        kind !== "reload" &&
-        kind !== "traverse" &&
+        !byPerson(stepValue(event)) &&
         since >= 0 &&
         since <= tune.redirectMs
       ) {
-        // A redirect: the held page change now ends where this one does, and still begins where it began.
+        // A redirect: the held page change now ends where this one does, and still begins where and how it began.
         const first = stepValue(open.event);
+        const { transitionType, transitionQualifiers, ...last } =
+          stepValue(event);
         open.event = {
           ...open.event,
           value: {
-            ...stepValue(event),
+            ...last,
             from: first.from ?? "",
             navigationType: first.navigationType ?? "push",
+            ...(first.transitionType !== undefined
+              ? { transitionType: first.transitionType }
+              : {}),
+            ...(first.transitionQualifiers !== undefined
+              ? { transitionQualifiers: first.transitionQualifiers }
+              : {}),
           } as unknown as JsonValue,
         };
         open.lastHop = event.timestamp;

@@ -63,8 +63,8 @@ function clickOn(html: string, selector: string, at: number): CapturedEvent {
   return click;
 }
 
-/** Every step the content script captured of a click on the element `selector` finds in `html`: the click, and the
- * submit a form's submit button makes of it a moment later. */
+/** Every step the content script captured of a click on the element `selector` finds in `html`: the click alone, as a
+ * form's submit button submits its form as the click's own default action. */
 function stepsOf(html: string, selector: string, at: number): CapturedEvent[] {
   const sent: CapturedEvent[] = [];
   const tracker = createSensitivityTracker({ isTrusted: () => true });
@@ -397,7 +397,8 @@ test("OpenBot's own chat: the composer, clicked before any Thread, names none, a
     ) as { threadId?: string }
   ).threadId;
   expect(thread).toBeString();
-  expect(sent.filter(({ name }) => name === "submit")).toHaveLength(1);
+  // Send's click is its one step: the submit it makes is the click's own, and the click owns the run it started.
+  expect(sent.filter(({ name }) => name === "submit")).toHaveLength(0);
   const clicks = (sent as Row[])
     .filter(({ name }) => name === "click")
     .map(

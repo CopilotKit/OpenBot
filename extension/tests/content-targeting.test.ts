@@ -143,7 +143,7 @@ test("the name is what a screen reader reads: aria-labelledby, aria-label, the l
   ]);
 });
 
-test("selectors come steadiest first: test attribute, hand-made id, name, role and name, text, then a short CSS path from a stable ancestor", () => {
+test("selectors come in the order Playwright's generator scores them: test attribute, role and name, text, hand-made id, name, then a short CSS path from a stable ancestor", () => {
   document.body.innerHTML = `
     <div data-testid="contact-card"><div><span>
       <button id="save-contact" name="save" data-testid="save-contact" class="x6s0dn4 xrvj5dj">Save</button>
@@ -152,10 +152,10 @@ test("selectors come steadiest first: test attribute, hand-made id, name, role a
   const save = $('[data-testid="save-contact"]');
   expect(selectorsOf(save, "button", "Save", () => false)).toEqual([
     { by: "testid", selector: '[data-testid="save-contact"]' },
-    { by: "id", selector: "#save-contact" },
-    { by: "name", selector: 'button[name="save"]' },
     { by: "role", selector: 'role=button[name="Save"]' },
     { by: "text", selector: 'text="Save"' },
+    { by: "id", selector: "#save-contact" },
+    { by: "name", selector: 'button[name="save"]' },
     {
       by: "css",
       selector:
@@ -168,6 +168,86 @@ test("selectors come steadiest first: test attribute, hand-made id, name, role a
   expect(selectors.map((s) => s.by)).toEqual(["role", "text", "css"]);
   expect(JSON.stringify(selectors)).not.toContain("sc-kcGFou");
   expect(JSON.stringify(selectors)).not.toContain(":r7:");
+});
+
+test("a selector that also finds another element ranks after every one that finds this one alone, as Playwright penalises it", () => {
+  // Two rows each with a Delete button and the same test id: role and name, text and the test id find both.
+  document.body.innerHTML = `
+    <ul id="contacts">
+      <li><span>Ada</span><button data-testid="row-delete" id="delete-ada">Delete</button></li>
+      <li><span>Grace</span><button data-testid="row-delete">Delete</button></li>
+    </ul>`;
+  const ada = $("#delete-ada");
+  expect(selectorsOf(ada, "button", "Delete", () => false)).toEqual([
+    { by: "id", selector: "#delete-ada" },
+    { by: "testid", selector: '[data-testid="row-delete"]' },
+    { by: "role", selector: 'role=button[name="Delete"]' },
+    { by: "text", selector: 'text="Delete"' },
+    { by: "css", selector: "#contacts > li:nth-of-type(1) > button" },
+  ]);
+});
+
+test("Wikipedia's generated ids are never a selector: run 2's click on Charles Babbage leads with its role and name, not #mwGQ", () => {
+  // Ada Lovelace's article as Wikipedia serves it (Parsoid gives every element an `mw` id counted in base 64), clicked in
+  // end-to-end run 2, row 89043: its selectors led with #mwGQ and its CSS path hung off #mwEw.
+  document.title = "Ada Lovelace - Wikipedia";
+  document.body.innerHTML = `
+    <div id="mw-content-text" class="mw-body-content"><div class="mw-content-ltr mw-parser-output" lang="en" dir="ltr">
+      <p id="mwEw">Lovelace became close friends with her tutor <a rel="mw:WikiLink" href="/wiki/Mary_Somerville" title="Mary Somerville" id="mwGA">Mary Somerville</a>, who introduced her to <a rel="mw:WikiLink" href="/wiki/Charles_Babbage" title="Charles Babbage" id="mwGQ">Charles Babbage</a> in 1833.</p>
+    </div></div>`;
+  for (const id of ["mwGQ", "mwEw", "mwAQ", "mwBA"])
+    expect([id, isGeneratedId(id)]).toEqual([id, true]);
+  for (const id of ["mw-content-text", "searchInput", "mce_0_ifr"])
+    expect([id, isGeneratedId(id)]).toEqual([id, false]);
+  const link = $("#mwGQ");
+  const targeting = targetingOf(link);
+  expect(targeting).toMatchObject({
+    ariaRole: "link",
+    name: "Charles Babbage",
+  });
+  expect(targeting.selectors).toEqual([
+    { by: "role", selector: 'role=link[name="Charles Babbage"]' },
+    { by: "text", selector: 'text="Charles Babbage"' },
+    { by: "href", selector: 'a[href="/wiki/Charles_Babbage"]' },
+    {
+      by: "css",
+      selector: "#mw-content-text > div > p > a:nth-of-type(2)",
+    },
+  ]);
+  expect(JSON.stringify(targeting.selectors)).not.toContain("mwGQ");
+  expect(JSON.stringify(targeting.selectors)).not.toContain("mwEw");
+});
+
+test("OpenBot's new-chat link, an icon with no name, is found by its address before its position; a volatile address never is", () => {
+  // The sidebar header as OpenBot renders it (app-sidebar.tsx: a Base UI Button rendered as the router's Link to
+  // /channel/new, holding Tabler's IconPlus with no title), clicked in the CopilotKit-site end-to-end run 3, row 044:
+  // its one selector was its position.
+  document.body.innerHTML = `
+    <div data-slot="sidebar-wrapper"><div data-slot="sidebar"><div data-slot="sidebar-container"><div data-slot="sidebar-inner"><div data-slot="sidebar-header" class="h-12 p-2"><ul data-slot="sidebar-menu"><li data-slot="sidebar-menu-item" class="flex flex-row gap-1.5"><a data-slot="sidebar-menu-button" href="/">OpenBot</a><a href="/channel/new" role="button" class="group/button inline-flex shrink-0 items-center size-8" tabindex="0" data-slot="button"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="tabler-icon tabler-icon-plus "><path d="M12 5l0 14"></path><path d="M5 12l14 0"></path></svg></a></li></ul></div><div data-slot="sidebar-content"></div><div data-slot="sidebar-footer"></div></div></div></div></div>
+    <a id="invite" href="/join/2f9c41d07a1b4e6f8c3d5a7b9e1f0c2d?token=a8f3k2l9q">Join</a>
+    <p><a id="refund" href="/checkout?order=1043">Refund this order</a></p>`;
+  const plus = $('a[href="/channel/new"]');
+  const targeting = targetingOf(plus);
+  expect(targeting.selectors).toEqual([
+    { by: "href", selector: 'a[href="/channel/new"]' },
+    {
+      by: "css",
+      selector: "div > div:nth-of-type(1) > ul > li > a:nth-of-type(2)",
+    },
+  ]);
+  // The page gives the link no aria-label, no title and no text: it has no name to record.
+  expect(targeting).toMatchObject({ ariaRole: "button", name: "" });
+  // An address with a session or a random part in it changes from one visit to the next; an order number does not.
+  expect(
+    targetingOf($("#invite")).selectors.map((selector) => selector.by),
+  ).toEqual(["role", "text", "id", "css"]);
+  expect(targetingOf($("#refund")).selectors).toEqual([
+    { by: "role", selector: 'role=link[name="Refund this order"]' },
+    { by: "text", selector: 'text="Refund this order"' },
+    { by: "id", selector: "#refund" },
+    { by: "href", selector: 'a[href="/checkout?order=1043"]' },
+    { by: "css", selector: "html > body > p > a" },
+  ]);
 });
 
 test("nothing derived from a field ever repeats its value: a page that mirrors the value into its label loses that name", () => {
@@ -187,30 +267,141 @@ test("a step carries the page, its input type, its box and the viewport in the t
     value: () => ({ x: 10.4, y: 20.6, width: 300, height: 32 }),
   });
   expect(targetingOf(field)).toMatchObject({
-    role: "textbox",
+    ariaRole: "textbox",
     name: "Email",
     inputType: "email",
     box: { x: 10, y: 21, width: 300, height: 32 },
     viewport: { width: window.innerWidth, height: window.innerHeight },
     page: { url: "https://crm.example.test/contacts", title: "Contacts" },
   });
-  const top = Object.getOwnPropertyDescriptor(window, "top");
-  const parent = Object.getOwnPropertyDescriptor(window, "parent");
-  const outer = { top: null as unknown };
-  outer.top = outer;
-  Object.defineProperty(window, "top", { value: outer, configurable: true });
-  Object.defineProperty(window, "parent", { value: outer, configurable: true });
-  try {
-    const inFrame = targetingOf(field);
-    expect(inFrame.frame).toEqual({
-      url: "https://crm.example.test/contacts",
-      path: ["iframe"],
-    });
-    expect(inFrame.page).toBeUndefined();
-  } finally {
-    if (top) Object.defineProperty(window, "top", top);
-    if (parent) Object.defineProperty(window, "parent", parent);
+  const inFrame = inCrossSiteFrame([], () => targetingOf(field));
+  expect(inFrame.frame).toEqual({
+    url: "https://crm.example.test/contacts",
+    path: ['iframe[src*="//crm.example.test/contacts"]'],
+  });
+  expect(inFrame.page).toBeUndefined();
+});
+
+type FakeWindow = {
+  frames: unknown[];
+  length: number;
+  top: unknown;
+  parent: unknown;
+  readonly frameElement: Element | null;
+  readonly location: { host: string; pathname: string };
+};
+
+/** A window of another site, as a frame's script sees it in Chrome: its frames and their number can be read, its
+ * location and its iframe element cannot (SecurityError). `children` are its frames, in its document's order. */
+function crossSiteWindow(children: unknown[]): FakeWindow {
+  const blocked = () => {
+    throw new DOMException(
+      "Blocked a frame from accessing a cross-origin frame.",
+      "SecurityError",
+    );
+  };
+  const fake = {
+    frames: children,
+    length: children.length,
+    top: null as unknown,
+    parent: null as unknown,
+  } as FakeWindow;
+  Object.defineProperty(fake, "frameElement", { get: blocked });
+  Object.defineProperty(fake, "location", { get: blocked });
+  fake.top = fake;
+  fake.parent = fake;
+  return fake;
+}
+
+/** A frame of this frame's own site: its location can be read. */
+const sameSiteWindow = (href: string) => {
+  const url = new URL(href);
+  return { location: { host: url.host, pathname: url.pathname } };
+};
+
+/** Runs `fn` with this page as a frame of a cross-site parent whose frames are `siblings` with this window among them
+ * (at `at`, last by default), and the parent itself a frame of `grandparent` when one is given. */
+function inCrossSiteFrame<T>(
+  siblings: unknown[],
+  fn: () => T,
+  options: { at?: number; name?: string; grandparent?: FakeWindow } = {},
+): T {
+  const frames = [...siblings];
+  frames.splice(options.at ?? frames.length, 0, window);
+  const parent = crossSiteWindow(frames);
+  if (options.grandparent) {
+    options.grandparent.frames.push(parent);
+    options.grandparent.length = options.grandparent.frames.length;
+    parent.parent = options.grandparent;
+    parent.top = options.grandparent;
   }
+  const saved = ["top", "parent", "frameElement"].map(
+    (key) => [key, Object.getOwnPropertyDescriptor(window, key)] as const,
+  );
+  const name = window.name;
+  Object.defineProperty(window, "top", {
+    value: parent.top,
+    configurable: true,
+  });
+  Object.defineProperty(window, "parent", {
+    value: parent,
+    configurable: true,
+  });
+  // Chrome's frameElement is null for a frame whose parent is another site.
+  Object.defineProperty(window, "frameElement", {
+    value: null,
+    configurable: true,
+  });
+  window.name = options.name ?? "";
+  try {
+    return fn();
+  } finally {
+    window.name = name;
+    for (const [key, descriptor] of saved)
+      if (descriptor) Object.defineProperty(window, key, descriptor);
+      else delete (window as unknown as Record<string, unknown>)[key];
+  }
+}
+
+test("a field in a cross-site iframe names that iframe: by its name, else the address it loaded and which of the frames loading it, and an iframe further up by its position", () => {
+  // The shop's address page of end-to-end run 1: a same-site iframe (#same) and the courier's form from another site
+  // ([::1]), whose steps recorded their frame as just ["iframe"].
+  (
+    window as unknown as { happyDOM: { setURL(url: string): void } }
+  ).happyDOM.setURL("http://[::1]:7420/frame/courier");
+  document.body.innerHTML = `<form id="cour"><label for="slot">Delivery slot</label><select id="slot"><option value="am">Morning</option><option value="pm">Afternoon</option></select></form>`;
+  const slot = $("#slot");
+  const sameSite = crossSiteWindow([]);
+  const pathOf = (
+    siblings: unknown[],
+    options?: Parameters<typeof inCrossSiteFrame>[2],
+  ) => inCrossSiteFrame(siblings, () => targetingOf(slot).frame, options);
+  expect(pathOf([sameSite])).toEqual({
+    url: "http://[::1]:7420/frame/courier",
+    path: ['iframe[src*="//[::1]:7420/frame/courier"]'],
+  });
+  // Two courier forms on the page: which one, counting the frames that load the same address from 0.
+  expect(
+    pathOf([sameSite, sameSiteWindow("http://[::1]:7420/frame/courier")])?.path,
+  ).toEqual(['iframe[src*="//[::1]:7420/frame/courier"] >> nth=1']);
+  expect(
+    pathOf([sameSite, sameSiteWindow("http://[::1]:7420/frame/courier")], {
+      at: 1,
+    })?.path,
+  ).toEqual(['iframe[src*="//[::1]:7420/frame/courier"] >> nth=0']);
+  // The name the iframe gave its frame is the steadiest handle.
+  expect(pathOf([sameSite], { name: "courier" })?.path).toEqual([
+    'iframe[name="courier"]',
+  ]);
+  // Inside a cross-site frame that is itself the third frame of a cross-site page.
+  const top = crossSiteWindow([crossSiteWindow([]), crossSiteWindow([])]);
+  expect(pathOf([sameSite], { grandparent: top })?.path).toEqual([
+    "iframe >> nth=2",
+    'iframe[src*="//[::1]:7420/frame/courier"]',
+  ]);
+  (
+    window as unknown as { happyDOM: { setURL(url: string): void } }
+  ).happyDOM.setURL("https://crm.example.test/contacts");
 });
 
 test("the collector's click and edits become steps with their targeting, masked: a click, a choice, a box ticked and a password", () => {
@@ -258,7 +449,13 @@ test("the collector's click and edits become steps with their targeting, masked:
     ["input", "change"],
   ]);
   expect(sent[0]?.value).toMatchObject({
-    target: { tag: "button", role: "button", name: "Add contact" },
+    // CopilotKit's role is the role attribute (none here); the Recorder's computed role sits beside it.
+    target: {
+      tag: "button",
+      role: null,
+      ariaRole: "button",
+      name: "Add contact",
+    },
     page: { url: "https://crm.example.test/contacts", title: "New contact" },
     viewport: { width: window.innerWidth, height: window.innerHeight },
     box: { x: 0, y: 0, width: 0, height: 0 },
@@ -271,14 +468,15 @@ test("the collector's click and edits become steps with their targeting, masked:
     )?.selectors,
   ).toEqual([
     { by: "testid", selector: '[data-testid="add-contact"]' },
-    { by: "id", selector: "#add" },
     { by: "role", selector: 'role=button[name="Add contact"]' },
     { by: "text", selector: 'text="Add contact"' },
+    { by: "id", selector: "#add" },
     { by: "css", selector: "html > body > form > button" },
   ]);
   expect(sent[1]?.value).toMatchObject({
     target: {
-      role: "combobox",
+      role: null,
+      ariaRole: "combobox",
       name: "Stage",
       inputType: "select-one",
       value: "customer",
@@ -286,7 +484,8 @@ test("the collector's click and edits become steps with their targeting, masked:
   });
   expect(sent[2]?.value).toMatchObject({
     target: {
-      role: "checkbox",
+      role: null,
+      ariaRole: "checkbox",
       name: "VIP",
       inputType: "checkbox",
       checked: true,
@@ -294,7 +493,8 @@ test("the collector's click and edits become steps with their targeting, masked:
   });
   expect(sent[3]?.value).toMatchObject({
     target: {
-      role: "textbox",
+      role: null,
+      ariaRole: "textbox",
       name: "Password",
       inputType: "password",
       value: "[redacted]",
@@ -337,12 +537,17 @@ test("a click on the text inside a button names and selects the button, through 
   boxed(label, { x: 12, y: 40, width: 80, height: 16 });
   boxed($("#ask"), { x: 0, y: 30, width: 200, height: 36 });
   const step = clickStep(label);
-  expect(step.target).toMatchObject({ role: "button", name: "Ask a question" });
+  // CopilotKit's own target (the presentation wrapper it described, by its role attribute) stays as it wrote it.
+  expect(step.target).toMatchObject({
+    role: "presentation",
+    ariaRole: "button",
+    name: "Ask a question",
+  });
   expect(step.selectors).toEqual([
     { by: "testid", selector: '[data-testid="ask-ai"]' },
-    { by: "id", selector: "#ask" },
     { by: "role", selector: 'role=button[name="Ask a question"]' },
     { by: "text", selector: 'text="Ask a question"' },
+    { by: "id", selector: "#ask" },
     { by: "css", selector: "html > body > button" },
   ]);
   expect(step.box).toEqual({ x: 12, y: 40, width: 80, height: 16 });
@@ -350,10 +555,10 @@ test("a click on the text inside a button names and selects the button, through 
     cleanup();
   });
   const crm = clickStep($("#crm-text"));
-  expect(crm.target).toMatchObject({ role: "menuitem", name: "CRM" });
+  expect(crm.target).toMatchObject({ ariaRole: "menuitem", name: "CRM" });
   expect((crm.selectors as { by: string; selector: string }[])[0]).toEqual({
-    by: "id",
-    selector: "#crm",
+    by: "role",
+    selector: 'role=menuitem[name="CRM"]',
   });
 });
 
@@ -377,7 +582,7 @@ test("a click that meets nothing a person acts on names the clicked element by i
   });
   const menu = clickStep($("#nav"));
   expect(menu.target).toMatchObject({
-    role: "menu",
+    ariaRole: "menu",
     name: "Bookmarks CRM Marketing Content Sales Revenue Service",
   });
 });

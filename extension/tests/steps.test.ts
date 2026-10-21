@@ -3,6 +3,7 @@ import {
   type CapturedEvent,
   EVENT_BUDGET_BYTES,
 } from "@openbot/shared/recorder-masking";
+import { navigationEvent } from "../src/background/navigation";
 import {
   carriesValues,
   createStepAssembler,
@@ -985,4 +986,122 @@ test("what an assembler holds is taken up by a new one, which sends it under the
     request: { method: "PATCH" },
   });
   expect(second.steps.snapshot()).toBeNull();
+});
+
+test("an address the person types into the address bar is a page change of its own, never folded into the one before as a redirect", async () => {
+  // End-to-end run 2, rows 89034 and 89035: the-internet's reset form landed on /email_sent, then the person typed
+  // Wikipedia's address. Chrome's onCommitted says how each page was reached.
+  const h = harness();
+  const commit = (
+    at: number,
+    url: string,
+    from: string,
+    transitionType: string,
+    transitionQualifiers: string[],
+  ) => ({
+    ...navigationEvent(
+      {
+        tabId: 1,
+        frameId: 0,
+        parentFrameId: -1,
+        url,
+        transitionType,
+        transitionQualifiers,
+        timeStamp: at,
+      },
+      "commit",
+      from,
+    ),
+  });
+  h.steps.navigation(
+    1,
+    commit(
+      START,
+      "https://the-internet.herokuapp.com/email_sent",
+      "https://the-internet.herokuapp.com/forgot_password",
+      "form_submit",
+      ["server_redirect"],
+    ),
+  );
+  // Typed a moment later, well inside the time a redirect of the page before would take.
+  h.steps.navigation(
+    1,
+    commit(
+      START + 900,
+      "https://en.wikipedia.org/wiki/Main_Page",
+      "https://the-internet.herokuapp.com/email_sent",
+      "typed",
+      ["from_address_bar"],
+    ),
+  );
+  h.advance(30_000);
+  await flushPromises();
+  h.advance(1);
+  expect(
+    h.sent.map((event) => {
+      const value = event.value as Record<string, unknown>;
+      return [
+        value.to,
+        value.navigationType,
+        value.transitionType,
+        value.transitionQualifiers,
+      ];
+    }),
+  ).toEqual([
+    [
+      "https://the-internet.herokuapp.com/email_sent",
+      "push",
+      "form_submit",
+      ["server_redirect"],
+    ],
+    [
+      "https://en.wikipedia.org/wiki/Main_Page",
+      "push",
+      "typed",
+      ["from_address_bar"],
+    ],
+  ]);
+});
+
+test("a redirect folded into the page change before it keeps how that change began", async () => {
+  const h = harness();
+  const commit = (
+    at: number,
+    url: string,
+    transitionType: string,
+    transitionQualifiers: string[],
+  ) =>
+    navigationEvent(
+      {
+        tabId: 1,
+        frameId: 0,
+        parentFrameId: -1,
+        url,
+        transitionType,
+        transitionQualifiers,
+        timeStamp: at,
+      },
+      "commit",
+      undefined,
+    );
+  // A bookmark opened, which the site sends on to its sign-in page.
+  h.steps.navigation(
+    1,
+    commit(START, "https://crm.example.test/", "auto_bookmark", []),
+  );
+  h.steps.navigation(
+    1,
+    commit(START + 400, "https://crm.example.test/login", "link", [
+      "client_redirect",
+    ]),
+  );
+  h.advance(30_000);
+  await flushPromises();
+  h.advance(1);
+  expect(h.sent).toHaveLength(1);
+  expect(h.sent[0]?.value).toMatchObject({
+    to: "https://crm.example.test/login",
+    transitionType: "auto_bookmark",
+    transitionQualifiers: [],
+  });
 });

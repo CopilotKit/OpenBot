@@ -1,6 +1,7 @@
 // The checks a network call passes before it can be a step's save: never an aborted call, telemetry, analytics, ads or
-// monitoring, a prefetch, or a call the tab already made (polling, a refresh of what the page has). They need no body
-// and no timing, so a call they drop costs nothing more.
+// monitoring, a prefetch, or a read the tab already made (polling, a refresh of what the page has). A write the tab
+// already made is still the person's: archiving twice is two saves. They need no body and no timing, so a call they
+// drop costs nothing more.
 import { isPrefetch, isTelemetry } from "./telemetry";
 
 /** A call the tab already made this recently is the page's own repeat. */
@@ -16,9 +17,11 @@ export type CallFacts = {
   outcome: "ok" | "error" | "aborted";
   headers: Record<string, string>;
   body?: string;
-  /** The tab already made this exact call: see `createRepeatMemory`. */
+  /** The tab already made this exact call: see `createRepeatMemory`. Screens a read only. */
   repeat: boolean;
 };
+
+const WRITE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
 /** Query parameters that only bust a cache: two calls differing only in these are the same call. */
 const CACHE_BUSTERS = new Set([
@@ -78,7 +81,9 @@ export function screenCall(facts: CallFacts): Screened | null {
   if (facts.outcome === "aborted") return "aborted";
   if (isTelemetry(facts.url, facts.body)) return "telemetry";
   if (isPrefetch(facts.headers)) return "prefetch";
-  if (facts.repeat) return "repeat";
+  // A page polls and refreshes by reading; a write is the person's doing each time, however often it was made before.
+  if (facts.repeat && !WRITE_METHODS.has(facts.method.toUpperCase()))
+    return "repeat";
   return null;
 }
 

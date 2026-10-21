@@ -14,7 +14,7 @@ import {
 } from "../../shared/network-body";
 import { requestKey, type RunVerdict } from "./agent";
 import { callSignature, type RepeatMemory, screenCall } from "./screen";
-import { isTelemetry } from "./telemetry";
+import { isPrefetch, isTelemetry } from "./telemetry";
 
 /** A tab, or a frame's own session inside it (flattened auto-attach: cross-site iframes run in their own process). */
 export type Debuggee = { tabId: number; sessionId?: string };
@@ -42,6 +42,8 @@ type Pending = {
   respondedAt?: number;
   /** The tab already made this exact call before (polling, a refetch): see screen.ts createRepeatMemory. */
   repeat: boolean;
+  /** Answered with a redirect: its response is the redirect's, and it has no body of its own to read. */
+  redirected?: true;
   response?: {
     url: string;
     status: number;
@@ -66,6 +68,8 @@ export type TrackedCall = {
   endedAt: number;
   method: string;
   url: string;
+  /** A request of the top frame's own document: a link followed or a form posted as a page load. */
+  document?: true;
   event?: CapturedEvent;
 };
 
@@ -114,9 +118,12 @@ export type AgentRuns = {
 /**
  * Follows requests per debuggee from `Network.requestWillBeSent` to `Network.loadingFinished` or `loadingFailed`, and
  * hands every finished fetch, XHR or top-frame document request that passed the screens to `call`; a write comes with
- * its bodies, read only then. `writeStarted` and `writeEnded` bracket each write from its start until `call` had it (or
- * it was screened out), so a step waits for a save still in flight. `ignore` names URLs never recorded (OpenBot's own);
- * `topFrame` answers a tab's main frame id. An AG-UI run (`agent`) is none of these: the agent events have it.
+ * its bodies, read only then, and a write answered by a redirect to a read (a form posted, then sent on with 303) is
+ * handed over when its redirect comes. `writeStarted` and `writeEnded` bracket each write from its start until `call`
+ * had it, it was screened out, or the top frame's next document is answered (which ends the page that sent it), so a
+ * step waits for a save still in flight; a write the cheap screens (telemetry, a prefetch) drop never starts one.
+ * `ignore` names URLs never recorded (OpenBot's own); `topFrame` answers a tab's main frame id. An AG-UI run (`agent`)
+ * is none of these: the agent events have it.
  */
 export function createRequestTracker(options: {
   ignore(url: string): boolean;
@@ -164,6 +171,8 @@ export function createRequestTracker(options: {
   async function responseBody(request: Pending): Promise<NetworkBody> {
     const response = request.response;
     if (!response) return unavailableBody("no-response");
+    // A redirect's own body is never kept by Chrome: the request id now reads the page it led to.
+    if (request.redirected) return { status: "empty" };
     if (
       !isReadableBody(
         response.mimeType || headerValue(response.headers, "content-type"),
@@ -229,6 +238,7 @@ export function createRequestTracker(options: {
       endedAt,
       method: request.method,
       url: request.url,
+      ...(request.type === "Document" ? { document: true as const } : {}),
     };
     // A read can only lead to a save: when it ran is all a step needs, and its bodies are never read.
     if (!WRITE_METHODS.has(request.method)) {
@@ -309,6 +319,53 @@ export function createRequestTracker(options: {
     };
   }
 
+  /** A write answered by a redirect to a read: the write is finished as its own call, the redirect its answer. */
+  function redirect(
+    request: Pending,
+    key: string,
+    response: Record<string, unknown>,
+    timestamp: unknown,
+  ): void {
+    pending.delete(key);
+    const at = number(timestamp) ?? request.startedAt;
+    request.redirected = true;
+    request.respondedAt = at;
+    request.response = {
+      url: request.url,
+      status: number(response.status) ?? 0,
+      headers: headers(response.headers),
+      mimeType: text(response.mimeType) ?? "",
+    };
+    if (!request.type || !RECORDED_TYPES.has(request.type)) {
+      endWrite(key);
+      return;
+    }
+    void finish(request, key, "ok", at)
+      .catch((error) =>
+        console.error("Recorder: a network call could not be read", error),
+      )
+      .finally(() => endWrite(key));
+  }
+
+  /** The top frame's next document is being answered, and the page that sent the tab's writes still in flight goes with
+   * it: Chrome cancels them, and may never report it once the old document is gone. No step waits for them any longer;
+   * one that still finishes reaches the steps as any call does. */
+  async function committing(document: Pending, documentKey: string) {
+    const { tabId, sessionId } = document.target;
+    if (sessionId !== undefined) return;
+    const top = await options.topFrame(tabId);
+    if (top === undefined || document.frameId !== top) return;
+    for (const key of [...writes]) {
+      const request = pending.get(key);
+      if (
+        key !== documentKey &&
+        request?.target.tabId === tabId &&
+        request.type !== "Document"
+      )
+        endWrite(key);
+    }
+  }
+
   function settle(
     target: Debuggee,
     params: Record<string, unknown>,
@@ -359,24 +416,34 @@ export function createRequestTracker(options: {
           if (parsed.protocol !== "https:" && parsed.protocol !== "http:")
             return;
           const key = keyOf(target, requestId);
-          // A redirect reuses the request id: the call that matters is the one it lands on.
+          const method = (text(request.method) ?? "GET").toUpperCase();
+          // A redirect reuses the request id: the call that matters is the one it lands on, except a write answered by
+          // a redirect to a read (a form posted, then 303 See Other to the page it leads to), which is a call of its own.
+          const redirected = pending.get(key);
+          if (
+            redirected &&
+            isRecord(raw.redirectResponse) &&
+            WRITE_METHODS.has(redirected.method) &&
+            !WRITE_METHODS.has(method)
+          )
+            redirect(redirected, key, raw.redirectResponse, raw.timestamp);
           if (options.ignore(url)) {
             pending.delete(key);
             endWrite(key);
             return;
           }
-          const method = (text(request.method) ?? "GET").toUpperCase();
           const postData = text(request.postData);
           const type = text(raw.type);
           const wallTime = number(raw.wallTime);
           const wallStart =
             wallTime === undefined ? Date.now() : Math.round(wallTime * 1000);
+          const sent = headers(request.headers);
           pending.set(key, {
             target,
             requestId,
             url,
             method,
-            headers: headers(request.headers),
+            headers: sent,
             postData,
             hasPostData: request.hasPostData === true,
             type,
@@ -394,13 +461,16 @@ export function createRequestTracker(options: {
                 : false,
           });
           const agent = options.agent?.kind(key);
+          // A write the screens already drop (telemetry, a prefetch) is never a save, so no step waits for it.
           if (
             type !== undefined &&
             RECORDED_TYPES.has(type) &&
             WRITE_METHODS.has(method) &&
             agent !== "run" &&
             agent !== "candidate" &&
-            !writes.has(key)
+            !writes.has(key) &&
+            !isTelemetry(url, postData) &&
+            !isPrefetch(sent)
           ) {
             writes.add(key);
             options.writeStarted(key, target.tabId, wallStart);
@@ -410,10 +480,12 @@ export function createRequestTracker(options: {
         case "Network.responseReceived": {
           const requestId = text(raw.requestId);
           if (requestId === undefined) return;
-          const request = pending.get(keyOf(target, requestId));
+          const key = keyOf(target, requestId);
+          const request = pending.get(key);
           const response = isRecord(raw.response) ? raw.response : null;
           if (!request || !response) return;
           request.type = text(raw.type) ?? request.type;
+          if (request.type === "Document") void committing(request, key);
           request.respondedAt = number(raw.timestamp) ?? request.respondedAt;
           request.response = {
             url: text(response.url) ?? request.url,
