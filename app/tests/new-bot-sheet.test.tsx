@@ -289,5 +289,5 @@ test("going back keeps what was answered, and Run it here leaves a typed address
   await user.click(view.getByRole("button", { name: "Create" }));
   await view.findByText("Expense Review is ready");
   expect(creates[0]).toMatchObject({ endpoint: "", visibility: "public" });
-  expect(creates[0]?.auth).toBeUndefined();
+  expect(creates[0]).not.toHaveProperty("auth");
 });
