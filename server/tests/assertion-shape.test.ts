@@ -835,14 +835,18 @@ const ALLOW: Allowed[] = [
   },
   {
     file: "server/tests/composio-adapter.test.ts",
-    line: 5412,
+    // Moved from 5412 by OB-05, which added fifteen lines of tests above it; the offence is the same
+    // one and is re-keyed rather than re-found.
+    line: 5427,
     shape: "c",
     finding: "NEW (round 2 did not find this)",
     why: 'expect( await actions.listActions("gmail", { limit: WHOLE_LISTING }), ).toEqual([ { slug: "GMAIL_FETCH_EMAILS"',
   },
   {
     file: "server/tests/composio-adapter.test.ts",
-    line: 5458,
+    // Moved from 5458 by OB-05, which added fifteen lines of tests above it; the offence is the same
+    // one and is re-keyed rather than re-found.
+    line: 5473,
     shape: "c",
     finding: "NEW (round 2 did not find this)",
     why: 'expect( await actions.listActions("gmail", { limit: WHOLE_LISTING }), ).toEqual([ { slug: "GMAIL_FETCH_EMAILS"',
