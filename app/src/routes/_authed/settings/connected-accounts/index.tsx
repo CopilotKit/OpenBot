@@ -100,6 +100,23 @@ export function brokeredAccountsListedOn(
   );
 }
 
+/**
+ * The servers this page may list at all: none reached through Composio when the deployment has no
+ * Composio key.
+ *
+ * An app an administrator enabled while a key was set keeps its row after the key is removed, and
+ * listing it offered a person an account they cannot connect, under a sentence about an environment
+ * variable only an administrator can set. Without the broker there is nothing for them to decide.
+ */
+export function serversListedFor(page: {
+  servers: PluginServer[];
+  composioConfigured: boolean;
+}): PluginServer[] {
+  return page.composioConfigured
+    ? page.servers
+    : page.servers.filter((server) => server.provenance !== "composio");
+}
+
 /** Apps whose account is the organisation's, shown so a person knows a Bot does not act as them there. */
 export function sharedAccountsListedOn(
   servers: PluginServer[],
@@ -198,16 +215,17 @@ function RouteComponent() {
    * unrecorded scheme included: a row whose column was never written is far likelier to be a key or
    * consent app, and dropping it here would hide a connection somebody does have.
    */
-  const brokered = brokeredAccountsListedOn(plugins.data?.servers ?? []);
+  const listed = plugins.data ? serversListedFor(plugins.data) : [];
+  const brokered = brokeredAccountsListedOn(listed);
   /*
    * Listed, never connected here. A Shared app's account is the organisation's, not this person's to
    * make or to break, so this list draws no Connect action and links nowhere — it exists only so a
    * person can see that a Bot calling this app acts as the team, not as them.
    */
-  const shared = sharedAccountsListedOn(plugins.data?.servers ?? []);
+  const shared = sharedAccountsListedOn(listed);
   const sectionsToShow = connectedAccountSections(
     yours.length + brokered.length,
-    plugins.data?.servers ?? [],
+    listed,
   );
   const accounts = [
     ...yours.map((entry) => {
