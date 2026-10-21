@@ -18,6 +18,7 @@ import {
   type NetworkCapture,
   type NetworkMode,
 } from "../src/background/network";
+import type { AgentObservation } from "../src/background/agent/observation";
 import type { PageFallback } from "../src/background/network/fallback";
 import type { StepCall } from "../src/background/steps";
 import { NETWORK_BODY_READ_MAX_BYTES } from "../src/shared/network-body";
@@ -52,6 +53,8 @@ let emitted: CapturedEvent[] = [];
 let started: string[] = [];
 let ended: string[] = [];
 let statuses: [NetworkMode | "stopped", string | undefined][] = [];
+/** What the capture handed the agent events. */
+let agentSeen: AgentObservation[] = [];
 let digests = new Set<string>();
 let fallbackCalls: string[] = [];
 let fallbackStarts = true;
@@ -104,6 +107,7 @@ beforeEach(() => {
   started = [];
   ended = [];
   statuses = [];
+  agentSeen = [];
   digests = new Set();
   fallbackCalls = [];
   fallbackStarts = true;
@@ -149,7 +153,7 @@ function captureDeps() {
     },
     writeStarted: (id: string) => started.push(id),
     writeEnded: (id: string) => ended.push(id),
-    agent: () => {},
+    agent: (observation: AgentObservation) => agentSeen.push(observation),
     status: (mode: NetworkMode | "stopped", reason?: string) =>
       statuses.push([mode, reason]),
     digests: () => digests,
@@ -364,18 +368,29 @@ test("images, scripts, stylesheets, fonts and a document request outside the top
   expect(commandsTo("Network.getResponseBody")).toHaveLength(1);
 });
 
-test("calls to OpenBot itself are ignored", async () => {
+test("calls to OpenBot itself are ignored, by the steps and by the agent events alike", async () => {
   await capture.start(7, "https://crm.example.test/");
+  // The Recorder's own capture pass and connect code, had a tab made them: a pass answers join credentials as an
+  // Intelligence run does, and neither is ever followed.
   request(7, {
     id: "1",
     url: `${OPENBOT}/api/copilotkit/trajectory/x/connect`,
     method: "POST",
-    body: "{}",
+    postData: "{}",
+    body: '{"joinToken":"join-token-1","realtime":{"clientUrl":"wss://intelligence.example.test/client","topic":"trajectory:x"}}',
+  });
+  request(7, {
+    id: "3",
+    url: `${OPENBOT}/api/recorder/connect-codes`,
+    method: "POST",
+    postData: "{}",
+    body: '{"code":"obc_live_connect_code"}',
   });
   request(7, { id: "2", url: "https://crm.example.test/api", body: "{}" });
   await until(() => emitted.length === 1, "one event");
   await settle();
   expect(value(emitted[0]).url).toBe("https://crm.example.test/api");
+  expect(agentSeen).toEqual([]);
 });
 
 test("a value typed into a sensitive field is scrubbed from a request body, a URL and a response", async () => {
