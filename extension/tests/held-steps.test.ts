@@ -655,6 +655,10 @@ test("the browser quits 2 ms after the typed name left for Intelligence: the nex
   expect(
     events.slice(3, 7).map((event) => [event.name, event.timestamp]),
   ).toEqual(steps.map((step) => [step.name, step.timestamp]));
+  // The steps sent after the quit still name the tab they were taken in.
+  expect(
+    events.slice(2, 7).map((event) => (event.value as { tab?: number }).tab),
+  ).toEqual([1, 1, 1, 1, 1]);
   expect(events.at(-1)?.value).toMatchObject({
     phase: "failed",
     reason: "interrupted",

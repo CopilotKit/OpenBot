@@ -518,6 +518,25 @@ export function installRecording(
   const forgetAddresses = () => {
     recordedNavigations.clear();
   };
+  /** A tab a followed tab opened, until its first page change is recorded: the opener's top page when Chrome said it
+   * opened it (webNavigation.onCreatedNavigationTarget), which that page change comes from. */
+  const openers = new Map<number, string>();
+
+  /** The event with the tab's number in the recording, the Recorder's own field `tab`: 1 for the tab the recording
+   * started in, then 2, 3 in the order tabs join, so an agent can tell a multi-tab task's tabs apart. Never Chrome's tab
+   * id, which changes when the browser starts again. */
+  function inTab(tabId: number, event: CapturedEvent): CapturedEvent {
+    const index = state.tabIds.indexOf(tabId);
+    const value = event.value;
+    if (
+      index < 0 ||
+      typeof value !== "object" ||
+      value === null ||
+      Array.isArray(value)
+    )
+      return event;
+    return { ...event, value: { ...value, tab: index + 1 } };
+  }
   /** The live recording's steps, held until each one's save (if any) is known (steps.ts). */
   let steps: StepAssembler | null = null;
   /** What a previous service worker held for the recording it left live or stopping, until this one takes it up. */
@@ -1200,19 +1219,22 @@ export function installRecording(
   function startStep(tabId: number, url: string): void {
     if (!/^https?:/i.test(url)) return;
     const to = scrubUrl(url, { digests });
-    steps?.navigation(tabId, {
-      type: "CUSTOM",
-      name: "navigation",
-      timestamp: deps.now(),
-      value: {
-        step: "navigate",
-        from: "",
-        to,
-        navigationType: "start",
-        frameId: 0,
-        parentFrameId: -1,
-      },
-    });
+    steps?.navigation(
+      tabId,
+      inTab(tabId, {
+        type: "CUSTOM",
+        name: "navigation",
+        timestamp: deps.now(),
+        value: {
+          step: "navigate",
+          from: "",
+          to,
+          navigationType: "start",
+          frameId: 0,
+          parentFrameId: -1,
+        },
+      }),
+    );
   }
 
   const networkDeps: NetworkCaptureDeps = {
@@ -1488,6 +1510,7 @@ export function installRecording(
     await stopRecordingScripts(tabIds);
     digests.clear();
     forgetAddresses();
+    openers.clear();
     await removeSession("digests");
     const capture = network;
     network = null;
@@ -2356,7 +2379,7 @@ export function installRecording(
           event.name === "click" && agentEvents
             ? agentEvents.enrichClick(tabId, event)
             : event;
-        steps?.step(tabId, step, port.sender?.frameId !== 0);
+        steps?.step(tabId, inTab(tabId, step), port.sender?.frameId !== 0);
         if (ACTION_EVENTS.has(event.name)) countAction();
         return;
       }
@@ -2375,22 +2398,30 @@ export function installRecording(
     kind: "commit" | "history",
   ): void {
     const { tabId, url } = details;
+    // A tab's first page change after a followed tab opened it comes from the opener's page, never from its own address.
     const event = navigationEvent(
       details,
       kind,
-      state.topUrls[tabId] || undefined,
+      openers.get(tabId) ?? (state.topUrls[tabId] || undefined),
       { digests },
     );
     dispatch({ type: "page", tabId, url });
     if (!/^https?:/i.test(url)) return;
+    openers.delete(tabId);
     const reload =
       (event.value as { navigationType?: string }).navigationType === "reload";
     if (!reload && recordedNavigations.get(tabId) === url) return;
     recordedNavigations.set(tabId, url);
-    steps?.navigation(tabId, {
-      ...event,
-      value: { ...(event.value as Record<string, unknown>), step: "navigate" },
-    });
+    steps?.navigation(
+      tabId,
+      inTab(tabId, {
+        ...event,
+        value: {
+          ...(event.value as Record<string, unknown>),
+          step: "navigate",
+        } as CapturedEvent["value"],
+      }),
+    );
     countAction();
   }
 
@@ -2423,6 +2454,7 @@ export function installRecording(
       state.tabIds.includes(details.tabId)
     )
       return;
+    openers.set(details.tabId, state.topUrls[details.sourceTabId] ?? "");
     dispatch({ type: "follow", tabId: details.tabId, url: details.url });
     void network
       ?.addTab(details.tabId, details.url)
