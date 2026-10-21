@@ -178,6 +178,9 @@
       },
     },
   },
+  "patchedDependencies": {
+    "@copilotkit/learning@0.0.1": "patches/@copilotkit%2Flearning@0.0.1.patch",
+  },
   "overrides": {
     "lodash-es": "4.18.0",
   },
