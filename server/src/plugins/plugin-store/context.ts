@@ -44,6 +44,7 @@ import {
   connectionSiblings,
   exchangeRefreshTokenOverHttp,
   INVALID_CLIENT,
+  INVALID_GRANT,
   isUsableClient,
   type OAuthClient,
   PluginInvariantError,
@@ -937,6 +938,8 @@ export function createStoreContext(options: PluginStoreOptions) {
        * token it had read on the way in would present the one the first replica just spent, which is
        * the very double-spend this exists to prevent.
        */
+      /** The credential whose refresh token went to the vendor, once one has. */
+      let presented: string | null = null;
       try {
         return await database.transaction(async (transaction) => {
           const [current] = await transaction
@@ -994,6 +997,7 @@ export function createStoreContext(options: PluginStoreOptions) {
             locked.encryptedValue,
           );
 
+          presented = current.credentialId;
           const minted = await exchangeRefreshToken({
             tokenUrl,
             client: stored.client,
@@ -1027,6 +1031,31 @@ export function createStoreContext(options: PluginStoreOptions) {
           return { token: minted.accessToken };
         });
       } catch (error) {
+        /*
+         * THE VENDOR DISOWNED THE GRANT, NOT THE CLIENT. A refresh token answered `invalid_grant`
+         * will never be honoured again, and until now nothing here wrote that down: the connection
+         * read as connected on every screen, and every call came back as the same folded tool
+         * error. Revoked here — after the transaction, for the reason the recovery below gives — the
+         * connection reads as withdrawn, which is Reconnect on the Bot page and on the card this
+         * refusal draws, and the consent that fixes it replaces the credential as any reconnect does.
+         */
+        if (
+          error instanceof TokenRefusedError &&
+          error.code === INVALID_GRANT &&
+          presented
+        ) {
+          await credentials.revoke(presented);
+          throw new PluginRefusedError(
+            connectAppRefusal({
+              serverId: row.id,
+              title,
+              message: `Your ${title} access was withdrawn at the vendor, so this was not done. Reconnect it and ask again.`,
+              reason: "reconnect",
+              at: new Date().toISOString(),
+            }),
+            null,
+          );
+        }
         /*
          * Outside the transaction, so the row lock is already released and the vault read this does
          * is not a second connection held behind this one's.

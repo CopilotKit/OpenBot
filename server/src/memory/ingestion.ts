@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { readConnectPrompt } from "@openbot/shared/connect-prompt";
 import { accessFor } from "../plugins/access";
 import type { Decides } from "../plugins/broker";
 import { catalogueEntry } from "../plugins/catalogue";
@@ -280,14 +281,37 @@ export function createMemoryIngestion(options: {
       };
     } catch (error) {
       const message =
-        error instanceof MemoryRefusedError ||
         error instanceof PluginRefusedError
-          ? error.message
-          : "The source could not sync. Try again or check the connected app.";
+          ? syncRefusal(error.message)
+          : error instanceof MemoryRefusedError
+            ? error.message
+            : "The source could not sync. Try again or check the connected app.";
       await store.failSync(ownerUserId, id, message);
       throw error;
     }
   }
+  /**
+   * What the Memory sources page says about a refusal: the refusal's own sentence, except one that
+   * carries an app card.
+   *
+   * A CARD MARKER IS FOR A TRANSCRIPT, AND THIS IS NOT ONE. The marker is a JSON prefix the chat
+   * draws as a card with a Connect button; stored as the sync error it reached the sources page
+   * raw, and the sentence after it is written for a conversation ("ask again"). So a refusal with a
+   * marker is said for this page instead, naming where the account is connected.
+   */
+  function syncRefusal(text: string): string {
+    const prompt = readConnectPrompt(text);
+    if (!prompt) return text;
+    switch (prompt.reason) {
+      case "shared":
+        return `The shared ${prompt.title} account is not connected. An administrator has to connect it before this source can sync.`;
+      case "reconnect":
+        return `Your ${prompt.title} account needs reconnecting. Reconnect it under Settings, Connected accounts, then sync again.`;
+      default:
+        return `Your ${prompt.title} account is not connected. Connect it under Settings, Connected accounts, then sync again.`;
+    }
+  }
+
   async function eligibleSources(ownerUserId: string, botId: string) {
     const sources = (await store.sources(ownerUserId)).filter(
       (source) =>

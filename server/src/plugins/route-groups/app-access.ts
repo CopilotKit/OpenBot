@@ -20,6 +20,21 @@ import { sharedGrantApproval } from "./grants";
 type RouteContext = Context<{ Variables: AppVariables }>;
 
 /**
+ * The longest app name or Bot id a request may carry — the same cap the `show_app_access` tool puts
+ * on what a model may ask about. Both are written into the trail when a filing is refused, and an
+ * app's name becomes the title an administrator reads in the inbox, so neither is a field a caller
+ * may fill with whatever they like.
+ */
+const MAX_NAME = 200;
+
+/**
+ * How many requests one person may have waiting at once. A real person asks about the handful of
+ * apps a question needed; past this the inbox is being filled rather than asked, and each extra row
+ * is one an administrator has to answer by hand.
+ */
+export const MAX_PENDING_REQUESTS = 20;
+
+/**
  * What enabling a catalogue entry would need that only an administrator can type, or null when
  * adding its row is the whole of it.
  *
@@ -102,6 +117,13 @@ export function mountAppAccessRoutes({
   const directory: AppDirectory | undefined = composio
     ? () => composio.broker.listApps()
     : undefined;
+  /*
+   * What the shared-use gate would answer this person's chat through this Bot, so a Shared app
+   * whose audience was never approved reads as refused rather than ready. Without the store there
+   * is no gate to ask, and the call path refuses every Shared call anyway; the state says `ready`
+   * there exactly as it did before this was asked.
+   */
+  const sharedAudience = shared?.use.admitsPerson;
 
   const refused = async (
     context: RouteContext,
@@ -109,7 +131,7 @@ export function mountAppAccessRoutes({
       app: string;
       reason: string;
       error: string;
-      status: 400 | 403 | 404 | 409 | 502 | 503;
+      status: 400 | 403 | 404 | 409 | 429 | 502 | 503;
       request?: string;
       bot?: string | null;
       kind?: string;
@@ -146,6 +168,7 @@ export function mountAppAccessRoutes({
         agentId,
         composioConfigured,
         directory,
+        sharedAudience,
       }),
     });
   });
@@ -159,13 +182,17 @@ export function mountAppAccessRoutes({
     if (!(await canUseBot(context.var.actor, agentId)))
       return context.json({ error: "There is no such Bot." }, 404);
     const app = context.req.param("app");
-    const inspected = await store.inspectApp({
-      app,
-      agentId,
-      userId: context.var.actor.id,
-      composioConfigured,
-      directory,
-    });
+    const inspected =
+      app.length > MAX_NAME
+        ? null
+        : await store.inspectApp({
+            app,
+            agentId,
+            userId: context.var.actor.id,
+            composioConfigured,
+            directory,
+            sharedAudience,
+          });
     if (!inspected)
       return context.json(
         { error: `This deployment has no app called ${app}.` },
@@ -180,6 +207,12 @@ export function mountAppAccessRoutes({
    * A SECOND PRESS IS THE FIRST REQUEST. One pending request per person, app, Bot and kind, so
    * asking again answers with the one already waiting and `created: false`, and writes no second
    * trail row.
+   *
+   * ONLY FOR AN APP SOMETHING VOUCHES FOR, AND ONLY SO MANY. Asking to enable a `composio-` id the
+   * directory does not list would put whatever the caller typed in front of an administrator as an
+   * app's name, for an approval that can only fail; it is answered as no such app, unless the Bot
+   * already holds a grant for it and the request is about putting back something it was given. And
+   * a person with {@link MAX_PENDING_REQUESTS} waiting is told to wait for those to be answered.
    */
   routes.post("/access-requests", requireUser, async (context) => {
     const body = (await context.req.json().catch(() => null)) as {
@@ -191,6 +224,13 @@ export function mountAppAccessRoutes({
     const app = typeof body?.app === "string" ? body.app.trim() : "";
     if (!agentId || !app)
       return context.json({ error: "Name the Bot and the app." }, 400);
+    if (agentId.length > MAX_NAME || app.length > MAX_NAME)
+      return context.json(
+        {
+          error: `A Bot or an app is named in at most ${MAX_NAME} characters.`,
+        },
+        400,
+      );
     if (!(await canUseBot(context.var.actor, agentId)))
       return refused(context, {
         app,
@@ -199,13 +239,16 @@ export function mountAppAccessRoutes({
         error: "There is no such Bot.",
         status: 404,
       });
-    const inspected = await store.inspectApp({
+    const found = await store.inspectApp({
       app,
       agentId,
       userId: context.var.actor.id,
       composioConfigured,
       directory,
+      sharedAudience,
     });
+    const inspected =
+      found && (found.vouched || found.access.granted) ? found : null;
     if (!inspected)
       return refused(context, {
         app,
@@ -225,6 +268,23 @@ export function mountAppAccessRoutes({
             ? `${access.displayName} is ready to use. There is nothing to ask an administrator for.`
             : `${access.displayName} is waiting on your own account, not on an administrator. Connect it yourself.`,
         status: 409,
+      });
+    /*
+     * The one already waiting is answered as itself before the cap is counted, so a person at the
+     * cap pressing again on a request they filed is shown it, not refused.
+     */
+    if (
+      !access.request &&
+      (await store.countPendingAppAccessRequests(context.var.actor.id)) >=
+        MAX_PENDING_REQUESTS
+    )
+      return refused(context, {
+        app: access.key,
+        bot: agentId,
+        reason: "too_many_pending",
+        kind: access.requestKind,
+        error: `You already have ${MAX_PENDING_REQUESTS} requests waiting for an administrator. Withdraw one, or wait for them to be answered, then ask again.`,
+        status: 429,
       });
     const filed = await store.fileAppAccessRequest({
       requestedBy: context.var.actor.id,
@@ -306,30 +366,24 @@ export function mountAppAccessRoutes({
    * Approve a request by doing what it asks: switch the app on, grant its tools to the Bot, or —
    * for a team account, which only a consent screen can connect — confirm it has been connected.
    *
-   * THE CHANGE FIRST, THEN THE CONDITIONAL CLOSE. Enabling and granting are both idempotent, so
-   * two administrators approving at once both arrive at the same deployment and one of them is
-   * told the request was already answered. Closing first would leave an approved request over a
-   * change that then failed.
+   * CLAIMED, THEN CHANGED. The request is closed as approved by this administrator before anything
+   * is changed, so a dismiss, a withdrawal or a second approval arriving meanwhile finds it answered
+   * and loses, and the change can never land under a request somebody else answered. A change that
+   * cannot be carried out puts the request back, and it waits again with the step that is missing;
+   * so does one that throws. See `claimAppAccessRequest` in the store, which says why this is not a
+   * row lock held across the change.
    *
-   * `refs` NARROWS THE GRANT. Absent, the Bot is granted every tool the app advertises — which is
-   * what "let this Bot use Gmail" means — and every call is still policy-checked and audited. A
-   * ref outside the app is refused rather than dropped.
+   * `refs` NARROWS THE GRANT, AND WITHOUT IT ONLY THE READS ARE GRANTED. One press in the inbox
+   * gives the Bot every action the app has marked read-only — what the Bot page's bulk switch
+   * offers, and nothing that sends, writes or deletes. Anything more is chosen action by action, on
+   * the Bot's page for the app or by naming them here. An app with no read-only action is refused
+   * with that sentence rather than granted everything. A ref outside the app is refused rather than
+   * dropped.
    */
   routes.post("/access-requests/:id/approve", requireUser, async (context) => {
     const forbidden = requireAdmin(context);
     if (forbidden) return forbidden;
     const id = context.req.param("id");
-    const request = await store.appAccessRequest(id);
-    if (request?.status !== "pending")
-      return refused(context, {
-        app: request?.appKey ?? "",
-        request: id,
-        reason: request ? "already_resolved" : "no_such_request",
-        error: request
-          ? "That request has already been answered."
-          : "There is no such request.",
-        status: request ? 409 : 404,
-      });
     const body = (await context.req.json().catch(() => null)) as {
       refs?: unknown;
     } | null;
@@ -341,181 +395,215 @@ export function mountAppAccessRoutes({
       return context.json({ error: "Tools must be a list of refs." }, 400);
     const chosen = body?.refs as string[] | undefined;
 
-    const deny = (
-      reason: string,
-      error: string,
-      status: 400 | 404 | 409 | 502 | 503,
-    ) =>
-      refused(context, {
-        app: request.appKey,
-        request: request.id,
-        bot: request.agentId,
-        kind: request.kind,
-        reason,
-        error,
-        status,
-      });
+    let carriedOut = false;
+    const approve = async (request: AppAccessRequestRecord) => {
+      const deny = (
+        reason: string,
+        error: string,
+        status: 400 | 404 | 409 | 502 | 503,
+      ) =>
+        refused(context, {
+          app: request.appKey,
+          request: request.id,
+          bot: request.agentId,
+          kind: request.kind,
+          reason,
+          error,
+          status,
+        });
 
-    const inspect = () =>
-      store.inspectApp({
-        app: request.appKey,
-        agentId: request.agentId ?? "",
-        userId: null,
-        composioConfigured,
-        directory,
-      });
+      const inspect = () =>
+        store.inspectApp({
+          app: request.appKey,
+          agentId: request.agentId ?? "",
+          userId: null,
+          composioConfigured,
+          directory,
+        });
 
-    let inspected = await inspect();
-    if (!inspected)
-      return deny(
-        "no_such_app",
-        `${request.appTitle} is no longer an app this deployment can find.`,
-        409,
-      );
-
-    let enabled = false;
-    if (request.kind !== "connect_shared" && inspected.unavailable) {
-      const title = inspected.access.displayName;
-      if (inspected.unavailable !== "absent")
+      let inspected = await inspect();
+      if (!inspected)
         return deny(
-          inspected.unavailable,
-          unavailableSentence(inspected.unavailable, title, activeProvider),
-          inspected.unavailable === "composio_unconfigured" ? 503 : 409,
+          "no_such_app",
+          `${request.appTitle} is no longer an app this deployment can find.`,
+          409,
         );
-      if (inspected.toolkit) {
-        if (!composio)
+
+      let enabled = false;
+      if (request.kind !== "connect_shared" && inspected.unavailable) {
+        const title = inspected.access.displayName;
+        if (inspected.unavailable !== "absent")
           return deny(
-            "composio_unconfigured",
-            unavailableSentence("composio_unconfigured", title, activeProvider),
-            503,
+            inspected.unavailable,
+            unavailableSentence(inspected.unavailable, title, activeProvider),
+            inspected.unavailable === "composio_unconfigured" ? 503 : 409,
           );
-        const outcome = await enableComposioApp(
-          { store, composio, activeProvider, activeVendor },
-          inspected.toolkit,
-          actorEmail(context),
-        );
-        if (!outcome.ok)
-          return deny("enable_failed", outcome.error, outcome.status);
-      } else if (inspected.entry) {
-        const needed = adminInputFor(inspected.entry);
-        if (needed)
+        if (inspected.toolkit) {
+          if (!composio)
+            return deny(
+              "composio_unconfigured",
+              unavailableSentence(
+                "composio_unconfigured",
+                title,
+                activeProvider,
+              ),
+              503,
+            );
+          const outcome = await enableComposioApp(
+            { store, composio, activeProvider, activeVendor },
+            inspected.toolkit,
+            actorEmail(context),
+          );
+          if (!outcome.ok)
+            return deny("enable_failed", outcome.error, outcome.status);
+        } else if (inspected.entry) {
+          const needed = adminInputFor(inspected.entry);
+          if (needed)
+            return deny(
+              "needs_admin_input",
+              `${title} needs ${needed}, which only an administrator can supply. Add it on its page under Plugins, then approve this request again.`,
+              409,
+            );
+          try {
+            await store.addServer({
+              key: inspected.entry.key,
+              by: actorEmail(context),
+            });
+          } catch (error) {
+            if (
+              error instanceof CatalogueEntryUnknownError ||
+              error instanceof CustomServerRefusedError
+            )
+              return deny("enable_failed", error.message, 400);
+            if (isDeploymentFault(error))
+              return deny("enable_failed", deploymentFaultSentence(error), 409);
+            throw error;
+          }
+        } else {
           return deny(
-            "needs_admin_input",
-            `${title} needs ${needed}, which only an administrator can supply. Add it on its page under Plugins, then approve this request again.`,
+            "absent",
+            unavailableSentence("absent", title, activeProvider),
             409,
           );
-        try {
-          await store.addServer({
-            key: inspected.entry.key,
-            by: actorEmail(context),
-          });
-        } catch (error) {
-          if (
-            error instanceof CatalogueEntryUnknownError ||
-            error instanceof CustomServerRefusedError
-          )
-            return deny("enable_failed", error.message, 400);
-          if (isDeploymentFault(error))
-            return deny("enable_failed", deploymentFaultSentence(error), 409);
-          throw error;
         }
-      } else {
-        return deny(
-          "absent",
-          unavailableSentence("absent", title, activeProvider),
-          409,
-        );
+        enabled = true;
+        inspected = await inspect();
+        if (!inspected || inspected.unavailable)
+          return deny(
+            "enable_failed",
+            `${title} was switched on and still cannot be used. Open its page under Plugins to see why.`,
+            409,
+          );
       }
-      enabled = true;
-      inspected = await inspect();
-      if (!inspected || inspected.unavailable)
-        return deny(
-          "enable_failed",
-          `${title} was switched on and still cannot be used. Open its page under Plugins to see why.`,
-          409,
-        );
-    }
 
-    let granted: string[] = [];
-    if (
-      request.kind !== "connect_shared" &&
-      request.agentId &&
-      !inspected.access.granted
-    ) {
-      const agentId = request.agentId;
-      const serverId = inspected.answeringId;
-      if (!(await store.agentIsRegistered(agentId)) || !serverId)
-        return deny("no_such_bot", "That Bot is no longer here.", 409);
-      const advertised = await store.appToolRefs(serverId);
-      const refs = chosen ?? advertised;
-      const outside = refs.filter((ref) => !advertised.includes(ref));
-      if (outside.length > 0)
-        return deny(
-          "refs_outside_app",
-          `${outside.join(", ")} ${outside.length === 1 ? "is" : "are"} not among ${inspected.access.displayName}'s tools.`,
-          400,
+      let granted: string[] = [];
+      if (
+        request.kind !== "connect_shared" &&
+        request.agentId &&
+        !inspected.access.granted
+      ) {
+        const agentId = request.agentId;
+        const serverId = inspected.answeringId;
+        const name = inspected.access.displayName;
+        if (!(await store.agentIsRegistered(agentId)) || !serverId)
+          return deny("no_such_bot", "That Bot is no longer here.", 409);
+        const tools = await store.appTools(serverId);
+        const advertised = tools.map((tool) => tool.ref);
+        const refs =
+          chosen ?? tools.filter((tool) => tool.read).map((tool) => tool.ref);
+        const outside = refs.filter((ref) => !advertised.includes(ref));
+        if (outside.length > 0)
+          return deny(
+            "refs_outside_app",
+            `${outside.join(", ")} ${outside.length === 1 ? "is" : "are"} not among ${name}'s tools.`,
+            400,
+          );
+        if (advertised.length === 0)
+          return deny(
+            "no_tools",
+            `${name} advertises no tools to grant yet. Refresh its tools on its page under Plugins, then approve this request again.`,
+            409,
+          );
+        if (refs.length === 0)
+          return deny(
+            "no_read_only_tools",
+            `None of ${name}'s actions is marked read-only, so approving here would grant nothing. Choose which actions this Bot may use on ${name}'s page for it under Plugins, then approve this request again.`,
+            409,
+          );
+        for (const ref of refs) {
+          await store.grant("mcp", ref, agentId, actorEmail(context));
+        }
+        const sharedDecision = await sharedGrantApproval(
+          { store, shared },
+          refs[0] ?? "",
+          agentId,
+          undefined,
         );
-      if (refs.length === 0)
-        return deny(
-          "no_tools",
-          `${inspected.access.displayName} advertises no tools to grant yet. Refresh its tools on its page under Plugins, then approve this request again.`,
-          409,
-        );
-      for (const ref of refs) {
-        await store.grant("mcp", ref, agentId, actorEmail(context));
+        if (
+          sharedDecision !== "unreadable" &&
+          sharedDecision.approval &&
+          shared
+        )
+          await shared.use.setApproval({
+            botId: agentId,
+            serverId: sharedDecision.appId,
+            approval: sharedDecision.approval,
+            by: context.var.actor.id,
+          });
+        granted = refs;
       }
-      const decided = await sharedGrantApproval(
-        { store, shared },
-        refs[0] ?? "",
-        agentId,
-        undefined,
-      );
-      if (decided !== "unreadable" && decided.approval && shared)
-        await shared.use.setApproval({
-          botId: agentId,
-          serverId: decided.appId,
-          approval: decided.approval,
-          by: context.var.actor.id,
-        });
-      granted = refs;
-    }
 
-    if (
-      request.kind === "connect_shared" &&
-      inspected.access.account === "shared" &&
-      !inspected.sharedUsable
-    )
-      return deny(
-        "shared_not_connected",
-        `The shared ${inspected.access.displayName} account is not connected yet. Connect it on ${inspected.access.displayName}'s page under Plugins, then approve this request.`,
-        409,
-      );
+      if (
+        request.kind === "connect_shared" &&
+        inspected.access.account === "shared" &&
+        !inspected.sharedUsable
+      )
+        return deny(
+          "shared_not_connected",
+          `The shared ${inspected.access.displayName} account is not connected yet. Connect it on ${inspected.access.displayName}'s page under Plugins, then approve this request.`,
+          409,
+        );
 
-    const closed = await store.closeAppAccessRequest({
-      id: request.id,
-      status: "approved",
+      carriedOut = true;
+      const closed = request;
+      await store.recordAppAccessEvent({
+        eventType: "app_access.approved",
+        targetId: closed.appKey,
+        actorUserId: context.var.actor.id,
+        payload: {
+          request: closed.id,
+          app: closed.appKey,
+          bot: closed.agentId,
+          kind: closed.kind,
+          enabled,
+          granted: granted.length,
+        },
+      });
+      return context.json({ request: closed, enabled, granted });
+    };
+
+    const claimed = await store.claimAppAccessRequest({
+      id,
       by: context.var.actor.id,
     });
-    if (!closed)
-      return deny(
-        "already_resolved",
-        "That request has already been answered.",
-        409,
-      );
-    await store.recordAppAccessEvent({
-      eventType: "app_access.approved",
-      targetId: closed.appKey,
-      actorUserId: context.var.actor.id,
-      payload: {
-        request: closed.id,
-        app: closed.appKey,
-        bot: closed.agentId,
-        kind: closed.kind,
-        enabled,
-        granted: granted.length,
-      },
-    });
-    return context.json({ request: closed, enabled, granted });
+    if (!claimed) {
+      const existing = await store.appAccessRequest(id);
+      return refused(context, {
+        app: existing?.appKey ?? "",
+        request: id,
+        reason: existing ? "already_resolved" : "no_such_request",
+        error: existing
+          ? "That request has already been answered."
+          : "There is no such request.",
+        status: existing ? 409 : 404,
+      });
+    }
+    try {
+      return await approve(claimed);
+    } finally {
+      if (!carriedOut)
+        await store.releaseAppAccessRequest({ id, by: context.var.actor.id });
+    }
   });
 
   /** Dismiss a request: nothing changes but the request, which stops waiting. */

@@ -750,6 +750,14 @@ export class TokenRefusedError extends McpServerError {
 export const INVALID_CLIENT = "invalid_client";
 
 /**
+ * The OAuth error code for a refresh token the vendor will no longer honour (RFC 6749 §5.2): it was
+ * revoked, it expired, or the person withdrew the grant. Nothing this deployment can do brings it
+ * back — only the person consenting again — so the connection is recorded as withdrawn, the state
+ * every screen already reads as Reconnect.
+ */
+export const INVALID_GRANT = "invalid_grant";
+
+/**
  * A transaction, as the writes in this module hand one to each other.
  *
  * Named because two writes here are one decision — a secret in the vault, and the pointer that says

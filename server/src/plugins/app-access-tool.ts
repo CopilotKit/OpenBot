@@ -5,7 +5,10 @@ import {
 import type { GrantedTool } from "@openbot/toolkit/granted-tool";
 import { z } from "zod";
 import type { AppAccess, AppAccessState } from "./app-access";
-import type { AppDirectory } from "./plugin-store/app-access";
+import type {
+  AppDirectory,
+  SharedAudienceCheck,
+} from "./plugin-store/app-access";
 import type { PluginStore } from "./store";
 
 /**
@@ -36,6 +39,8 @@ export function appAccessTools(options: {
   composioConfigured: boolean;
   /** Names an app this deployment has no row for. Absent without the broker's key. */
   directory?: AppDirectory;
+  /** The shared-use gate's answer for this person, so a Shared app it would refuse says so. */
+  sharedAudience?: SharedAudienceCheck;
 }): GrantedTool[] {
   const parameters = z
     .object({
@@ -66,6 +71,9 @@ export function appAccessTools(options: {
           userId: options.actorId || null,
           composioConfigured: options.composioConfigured,
           ...(options.directory ? { directory: options.directory } : {}),
+          ...(options.sharedAudience
+            ? { sharedAudience: options.sharedAudience }
+            : {}),
         });
         /*
          * No card for an app nobody can name. A card about it would have nothing to ask the server
@@ -93,11 +101,17 @@ export function appAccessTools(options: {
  */
 function toldTheModel(access: AppAccess): string {
   const name = access.displayName;
+  const owners = access.accountHolder === "owner";
   const said: Record<AppAccessState, string> = {
-    ready: `${name} is ready for this person to use through you. Use its tools rather than the card.`,
+    ready: access.asksFirst
+      ? `${name} is ready for this person to use through you, on their own account; the first call will ask them to allow that. Use its tools rather than the card.`
+      : `${name} is ready for this person to use through you. Use its tools rather than the card.`,
     not_connected: `${name} is granted to you, and this person has not connected their own account. The card in front of them offers Connect; ask them to try again once they have.`,
-    reconnect: `${name} is granted to you, and this person's connection needs reconnecting. The card in front of them offers Reconnect; ask them to try again once they have.`,
+    reconnect: owners
+      ? `${name} is granted to you and runs on your owner's account, whose connection needs reconnecting. Only your owner can reconnect it; the card in front of the person says so.`
+      : `${name} is granted to you, and this person's connection needs reconnecting. The card in front of them offers Reconnect; ask them to try again once they have.`,
     shared_not_connected: `${name} uses one shared account for this deployment, and an administrator has not connected it yet. The card in front of the person lets them ask an administrator for it.`,
+    shared_not_approved: `${name} uses one shared account for this deployment, and you reach more people than an administrator approved for it, so its calls are refused. Only an administrator can approve that; the card in front of the person says so.`,
     disabled: `${name} is switched off on this deployment. The card in front of the person lets them ask an administrator to switch it on.`,
     not_granted: `${name} is switched on, and you have not been granted it. The card in front of the person lets them ask an administrator to grant it to you.`,
   };

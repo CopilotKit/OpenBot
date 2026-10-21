@@ -14,6 +14,7 @@ import type { ReactNode } from "react";
 import { AppAccessCard } from "@/components/channels/app-access-card";
 import { ServerToolLine } from "@/components/channels/chat-transcript";
 import type { AppAccess } from "@/lib/app-access/queries";
+import { ActiveBotProvider, useActiveBot } from "@/lib/copilot/active-bot";
 import { REFUSAL_MARKER } from "@/lib/plugins/tool-result";
 import {
   type ConnectPrompt,
@@ -121,7 +122,7 @@ test("not connected: names the app and offers Connect", async () => {
   expect(drawn.textContent).toContain(
     "You haven't connected your Gmail account yet.",
   );
-  expect(view.getByRole("button", { name: "Connect" })).toBeTruthy();
+  expect(view.getByRole("button", { name: "Connect Gmail" })).toBeTruthy();
 });
 
 test("connected since the refusal: says so and offers nothing stale", async () => {
@@ -156,7 +157,9 @@ test("a Shared app with no team account: Request access, not a sentence", async 
   expect(drawn.textContent).toContain(
     "Your organisation's Gmail account isn't connected yet.",
   );
-  expect(view.getByRole("button", { name: "Request access" })).toBeTruthy();
+  expect(
+    view.getByRole("button", { name: "Request access to Gmail" }),
+  ).toBeTruthy();
 });
 
 test("an account the vendor lost: Reconnect, though the server still reads ready", async () => {
@@ -203,7 +206,7 @@ test("a team account the vendor lost: says an administrator has to reconnect it,
 });
 
 test.each([
-  ["disabled", "enable", /Turned off by an administrator/],
+  ["disabled", "enable", /Gmail isn't switched on for this OpenBot/],
   ["not_granted", "grant", /This Bot hasn't been given Gmail/],
 ] as const)(
   "the Bot asked about an app that is %s: Request access",
@@ -214,7 +217,9 @@ test.each([
     );
     const drawn = await card(view);
     expect(drawn.textContent).toMatch(sentence);
-    expect(view.getByRole("button", { name: "Request access" })).toBeTruthy();
+    expect(
+      view.getByRole("button", { name: "Request access to Gmail" }),
+    ).toBeTruthy();
   },
 );
 
@@ -225,11 +230,68 @@ test("asked about an app that is ready, it says so without claiming it was just 
   expect(drawn.textContent).toContain("Ready to use.");
 });
 
-/*
- * The fallback to the Bot the surface declared is not asserted here: `bot-route-default-agent`'s
- * fixture replaces `useActiveBot` with a no-op for the whole process, so a declaration made in this
- * file is a no-op whenever bun has loaded that one first.
- */
+test("an account lost on somebody else's Team Bot that runs on its owner's: only the owner can reconnect it", async () => {
+  serving(
+    appAccess({
+      state: "ready",
+      accountHolder: "owner",
+      connectedAt: "2026-10-01T00:00:00.000Z",
+    }),
+  );
+  const view = mount(
+    <AppAccessCard
+      prompt={prompt({ reason: "reconnect", at: "2026-10-20T12:00:00.000Z" })}
+    />,
+  );
+  const drawn = await card(view);
+  expect(drawn.getAttribute("data-state")).toBe("reconnect");
+  expect(drawn.textContent).toContain(
+    "This Bot uses its owner's Gmail account, which needs reconnecting. Only the Bot's owner can reconnect it.",
+  );
+  expect(view.queryByRole("button")).toBeNull();
+  expect(view.queryByRole("link")).toBeNull();
+});
+
+test("a Shared app whose audience is not approved: says so, with nothing to press", async () => {
+  serving(
+    appAccess({
+      state: "shared_not_approved",
+      account: "shared",
+      accountMode: "shared",
+    }),
+  );
+  const view = mount(<AppAccessCard prompt={prompt({ reason: "access" })} />);
+  const drawn = await card(view);
+  expect(drawn.textContent).toContain("Only an administrator can approve it.");
+  expect(view.queryByRole("button")).toBeNull();
+});
+
+/** Declares a Bot the way a channel does, around whatever it is given. */
+function Declaring({
+  botId,
+  children,
+}: {
+  botId: string;
+  children: ReactNode;
+}) {
+  useActiveBot(botId);
+  return <>{children}</>;
+}
+
+test("an older refusal that names no Bot asks about the Bot the surface declared", async () => {
+  const asked = serving(appAccess({ state: "not_connected" }));
+  const view = mount(
+    <ActiveBotProvider>
+      <Declaring botId="travel">
+        <AppAccessCard prompt={prompt({ agentId: undefined })} />
+      </Declaring>
+    </ActiveBotProvider>,
+  );
+  const drawn = await card(view);
+  expect(drawn.getAttribute("data-state")).toBe("not_connected");
+  expect(asked).toContain("/api/plugins/for/travel/apps/composio-gmail");
+});
+
 test("with no Bot to ask about at all, it is the Connect card it always was", async () => {
   const asked = serving(null);
   const view = mount(<AppAccessCard prompt={prompt({ agentId: undefined })} />);
@@ -241,6 +303,24 @@ test("a live read that fails falls back to the Connect card for a connect refusa
   serving(null);
   const view = mount(<AppAccessCard prompt={prompt()} />);
   expect(await view.findByText("Connect Gmail")).toBeTruthy();
+});
+
+test("a live read that fails says so in the person's words, never the model's", async () => {
+  serving(null);
+  const view = mount(
+    <AppAccessCard
+      prompt={prompt({
+        reason: "access",
+        message:
+          "Gmail is switched off. Do not browse to its website or ask them to sign in there.",
+      })}
+    />,
+  );
+  const alert = await view.findByRole("alert");
+  expect(alert.textContent).toBe(
+    "Gmail's status couldn't be loaded. Try again in a moment.",
+  );
+  expect(view.container.textContent).not.toContain("Do not browse");
 });
 
 /*
@@ -286,4 +366,25 @@ test("an ordinary tool's answer is never read for a card, whatever it starts wit
   );
   await settleReactWork();
   expect(view.container.querySelector("[data-app-access]")).toBeNull();
+});
+
+test("show_app_access is named for the person while it runs, not by its identifier", () => {
+  const view = mount(<ServerToolLine name={SHOW_APP_ACCESS_TOOL} />);
+  return waitFor(() => {
+    expect(view.getByText("Checking app access")).toBeTruthy();
+    expect(view.container.textContent).not.toContain(SHOW_APP_ACCESS_TOOL);
+  });
+});
+
+test("show_app_access about an app nobody can name draws the line, never its words to the model", async () => {
+  const view = mount(
+    <ServerToolLine
+      name={SHOW_APP_ACCESS_TOOL}
+      result="This deployment has no app called Gmial, so there is nothing to show. Say so plainly; do not browse to it instead."
+    />,
+  );
+  expect(await view.findByText("Checked app access")).toBeTruthy();
+  expect(view.container.textContent).not.toContain("Say so plainly");
+  // Nothing behind a disclosure either: the line is not expandable.
+  expect(view.container.querySelector("details")).toBeNull();
 });

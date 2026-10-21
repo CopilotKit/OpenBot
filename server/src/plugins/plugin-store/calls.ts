@@ -8,7 +8,12 @@ import {
   policyInitiator,
 } from "../../computer/policy";
 import { withoutStatement } from "../../db/query-failure";
-import { mcpTools, pluginGrants, vendorNameOf } from "../../db/schema";
+import {
+  brokeredConnections,
+  mcpTools,
+  pluginGrants,
+  vendorNameOf,
+} from "../../db/schema";
 import { classifyTool, tokenHeaderFor } from "../catalogue";
 import { VERSION_ARG } from "../composio";
 import { inspectToolArguments } from "../content-governance";
@@ -36,6 +41,7 @@ export function callMethods(context: StoreContext) {
     injectedVendor,
     connectionTokenFor,
     requireServer,
+    brokerProvider,
   } = context;
   return {
     /**
@@ -574,7 +580,35 @@ export function callMethods(context: StoreContext) {
        * deployment's rows knows the account is gone — the app reads as ready on every screen — and
        * the card is the one place the person is told, with Reconnect beside it. A Shared app's
        * account is the deployment's, so there the card says an administrator has to reconnect it.
+       *
+       * AND THE ROW GOES, as it does when a confirm hears the same no from the vendor: the row is
+       * only the vendor's last answer, and one that outlived the account would go on reading
+       * `ready` on every screen — `show_app_access` telling the model to use the app straight after
+       * this card — and would make the connect route refuse a fresh connection until somebody
+       * found Disconnect. Deleted, the app reads not connected for the person, or the team account
+       * not connected for everybody, which is the truth and the state whose button fixes it. Like
+       * the confirm's, the delete files no trail entry: nobody disconnected anything here.
        */
+      if (access.credential === "brokered" && access.toolkit)
+        await database
+          .delete(brokeredConnections)
+          .where(
+            gatedMode === "shared"
+              ? and(
+                  eq(brokeredConnections.provider, brokerProvider),
+                  eq(brokeredConnections.app, access.toolkit),
+                  eq(brokeredConnections.holder, "deployment"),
+                )
+              : and(
+                  eq(brokeredConnections.provider, brokerProvider),
+                  eq(brokeredConnections.app, access.toolkit),
+                  eq(brokeredConnections.holder, "person"),
+                  eq(
+                    brokeredConnections.userId,
+                    input.credentialActorId ?? input.actorId,
+                  ),
+                ),
+          );
       throw new PluginRefusedError(
         connectAppRefusal({
           serverId: row.id,

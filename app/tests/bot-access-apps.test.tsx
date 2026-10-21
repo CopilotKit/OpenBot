@@ -160,7 +160,7 @@ test("an app this person has not connected says so and offers Connect", async ()
   expect(
     gmail.getByText("You haven't connected your Gmail account yet."),
   ).toBeTruthy();
-  expect(gmail.getByRole("button", { name: "Connect" })).toBeTruthy();
+  expect(gmail.getByRole("button", { name: "Connect Gmail" })).toBeTruthy();
 });
 
 test("an app only an administrator can fix offers Request access, and a pending one reads Requested", async () => {
@@ -195,11 +195,19 @@ test("an app only an administrator can fix offers Request access, and a pending 
       "Your organisation's Slack account isn't connected yet. Only an administrator can connect it.",
     ),
   ).toBeTruthy();
-  expect(slack.getByRole("button", { name: "Request access" })).toBeTruthy();
+  expect(
+    slack.getByRole("button", { name: "Request access to Slack" }),
+  ).toBeTruthy();
   const notion = await row(view, "notion");
-  expect(notion.getByText(/Turned off by an administrator/)).toBeTruthy();
+  expect(
+    notion.getByText(
+      "Notion isn't switched on for this OpenBot. Only an administrator can switch it on.",
+    ),
+  ).toBeTruthy();
   expect(notion.getByText("Requested")).toBeTruthy();
-  expect(notion.getByRole("button", { name: "Withdraw" })).toBeTruthy();
+  expect(
+    notion.getByRole("button", { name: "Withdraw request for Notion" }),
+  ).toBeTruthy();
 });
 
 test("an administrator keeps the way to this Bot's grants on each app, beside the action", async () => {
@@ -211,7 +219,55 @@ test("an administrator keeps the way to this Bot's grants on each app, beside th
   expect(manage.getAttribute("href")).toBe(
     "/admin/plugins/composio-gmail/bots/expenses",
   );
-  expect(gmail.getByRole("button", { name: "Connect" })).toBeTruthy();
+  expect(gmail.getByRole("button", { name: "Connect Gmail" })).toBeTruthy();
+});
+
+test("an app's sentence is never cut short, so who can fix it stays on screen at a phone's width", async () => {
+  serving({
+    apps: [
+      appAccess({
+        state: "disabled",
+        unavailable: "composio_unconfigured",
+        requestKind: "enable",
+      }),
+    ],
+  });
+  const gmail = await row(draw(), "composio-gmail");
+  const sentence = gmail.getByText(
+    "Gmail is not available on this OpenBot yet. An administrator has to finish setting it up.",
+  );
+  expect(sentence.className).toContain("line-clamp-none");
+  expect(sentence.className).not.toContain("line-clamp-2");
+});
+
+test("on somebody else's Team Bot, an app on its owner's account says so, and an owner's reconnection offers nothing", async () => {
+  serving({
+    apps: [
+      appAccess({ accountHolder: "owner" }),
+      appAccess({
+        key: "notion",
+        displayName: "Notion",
+        provider: "catalogue",
+        connect: "oauth",
+        state: "reconnect",
+        accountHolder: "owner",
+      }),
+    ],
+  });
+  const view = draw();
+  const gmail = await row(view, "composio-gmail");
+  expect(
+    gmail.getByText(
+      /^Ready to use\. This Bot uses its owner's Gmail account\./,
+    ),
+  ).toBeTruthy();
+  const notion = await row(view, "notion");
+  expect(
+    notion.getByText(
+      "This Bot uses its owner's Notion account, which needs reconnecting. Only the Bot's owner can reconnect it.",
+    ),
+  ).toBeTruthy();
+  expect(notion.queryByRole("button")).toBeNull();
 });
 
 test("a person who is not an administrator gets no way to the grants", async () => {

@@ -1,5 +1,6 @@
 import { IconInbox } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import { Fragment } from "react";
 import { PageRows, PageSection } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
@@ -38,6 +39,11 @@ import { queryClient } from "@/query-client";
  * or refuses with the step only an administrator can take first — a token to paste, a team account
  * to connect — and the request stays pending. That sentence is drawn on the row it is about, because
  * the screen's own banner is a long way from the button that was pressed.
+ *
+ * A GRANT IS READ-ONLY UNTIL SOMEBODY CHOOSES MORE. One press is not a decision about every action an
+ * app offers — Gmail's include sending and deleting mail — so approving gives the Bot the app's
+ * read-only actions and nothing else, and an app with none is refused with a sentence pointing at the
+ * Bot's page. The row says so before the press, and links to that page where it can.
  *
  * REQUESTS, NOT CONNECTIONS. Each row names who asked, because they asked; nothing here says who has
  * connected what, which stays private to each person (see the note on `admin/plugins/$key.tsx`).
@@ -110,12 +116,12 @@ function AccessRequestRow({ request }: { request: AppAccessRequest }) {
       </ItemMedia>
       <ItemContent>
         <ItemTitle>{askedFor(request)}</ItemTitle>
-        <ItemDescription>
+        <ItemDescription className="line-clamp-none">
           {who} asked {relativeTime(request.createdAt)}
           {request.kind === "connect_shared" && request.botName
             ? `, for ${request.botName}`
             : ""}
-          .
+          . <GrantNote request={request} />
         </ItemDescription>
       </ItemContent>
       <ItemActions>
@@ -149,6 +155,34 @@ function AccessRequestRow({ request }: { request: AppAccessRequest }) {
         </ItemFooter>
       ) : null}
     </Item>
+  );
+}
+
+/**
+ * What approving gives a Bot, for a request that grants one: the app's read-only actions, with the
+ * rest chosen on the Bot's page under the app. Linked there for a grant, whose app is already on
+ * and so has that page; an app still to be switched on has none until the press that switches it on.
+ */
+function GrantNote({ request }: { request: AppAccessRequest }) {
+  if (request.kind === "connect_shared" || !request.agentId) return null;
+  const bot = request.botName ?? "the Bot";
+  const where = `the Bot's page under ${request.appTitle}`;
+  const page =
+    request.kind === "grant" ? (
+      <Link
+        params={{ agentId: request.agentId, key: request.appKey }}
+        to="/admin/plugins/$key/bots/$agentId"
+      >
+        {where}
+      </Link>
+    ) : (
+      where
+    );
+  return (
+    <>
+      Approving gives {bot} only {request.appTitle}'s read-only actions. Choose
+      any others on {page}.
+    </>
   );
 }
 

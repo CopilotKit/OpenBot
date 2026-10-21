@@ -226,12 +226,16 @@ function Granted({ agentId }: { agentId: string }) {
                   </ItemMedia>
                   <ItemContent>
                     <ItemTitle>{app.displayName}</ItemTitle>
-                    <ItemDescription>
+                    {/*
+                     * Unclamped: the sentence ends on who can fix it, and two lines at a phone's
+                     * width cut exactly that off.
+                     */}
+                    <ItemDescription className="line-clamp-none">
                       {app.state === "ready"
-                        ? [appAccessSentence(app.state, app.displayName)]
+                        ? [appAccessSentence(app)]
                             .concat(labels.length > 0 ? [toolList(labels)] : [])
                             .join(" ")
-                        : appAccessSentence(app.state, app.displayName)}
+                        : appAccessSentence(app)}
                     </ItemDescription>
                   </ItemContent>
                   <ItemActions>

@@ -28,9 +28,9 @@ export const CONNECT_APP_MARKER = "[connect-app]";
  * behind it: switched off, not granted, or any of the above.
  *
  * A HINT, NOT THE STATE. The card asks the server for the app's state for this person and this Bot
- * when it is drawn, and draws that. The one place the hint wins is an account the vendor has lost:
- * nothing on this deployment records that, so the live state still reads `ready` there, and only the
- * refusal knows otherwise. See `AppAccessCard`.
+ * when it is drawn, and draws that. The one place the hint wins is an account the vendor has lost
+ * whose row still stands — a refusal from before the call that found out started deleting the row —
+ * where the live state reads `ready` and only the refusal knows otherwise. See `AppAccessCard`.
  */
 export type ConnectReason = "connect" | "reconnect" | "shared" | "access";
 

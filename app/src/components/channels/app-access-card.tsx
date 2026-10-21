@@ -25,11 +25,12 @@ import { ConnectAppCard } from "./connect-app-card";
  * now — connected since, granted since, the request approved — and never offers a step that has
  * already been taken. Every write those buttons make refreshes the same key, so the card follows.
  *
- * THE ONE PLACE THE REFUSAL WINS. An account the vendor no longer holds is not recorded anywhere on
- * this deployment: its row still stands, so the server reads `ready` until a call fails — and this
- * card is drawn over exactly the call that failed. So a `reconnect` or `shared` refusal over a live
- * `ready` is drawn as the refusal says — unless the account was connected after the refusal, which
- * is the reconnection. Anything else live is newer than the refusal and is drawn as it is.
+ * THE ONE PLACE THE REFUSAL WINS. The call that finds an account gone at the vendor deletes its row,
+ * so the live state normally says so itself. A refusal from before that, over a row that still
+ * stands, reads `ready` live — and this card is drawn over exactly the call that failed. So a
+ * `reconnect` or `shared` refusal over a live `ready` is drawn as the refusal says — unless the
+ * account was connected after the refusal, which is the reconnection. Anything else live is newer
+ * than the refusal and is drawn as it is.
  */
 export function AppAccessCard({ prompt }: { prompt: ConnectPrompt }) {
   const declared = useDeclaredBotId();
@@ -72,8 +73,10 @@ function LiveAppAccessCard({
         <div className="flex min-w-0 flex-1 flex-col gap-1">
           <p className="font-medium text-sm">{name}</p>
           {/*
-           * Nothing while the read is open — no placeholder, per the data-access rule — and the
-           * Bot's own sentence if it failed. Otherwise the state, which is the server's.
+           * Nothing while the read is open — no placeholder, per the data-access rule — and a
+           * sentence of the card's own if it failed. NOT the refusal's message: that was written for
+           * the model ("do not browse to its website"), and reads as an instruction to the wrong
+           * reader. Otherwise the state, which is the server's.
            */}
           {live.isPending ? null : access ? (
             <p className="text-muted-foreground text-sm">
@@ -83,7 +86,7 @@ function LiveAppAccessCard({
             </p>
           ) : (
             <p className="text-muted-foreground text-sm" role="alert">
-              {prompt.message}
+              {name}'s status couldn't be loaded. Try again in a moment.
             </p>
           )}
         </div>
@@ -104,6 +107,11 @@ function LiveAppAccessCard({
  * A lost team account is drawn as not connected with NO request to file — the server would answer
  * any request 409, since as far as it knows the account is fine — so the sentence says whose move it
  * is and the button is left out rather than offered and refused.
+ *
+ * A lost account on somebody else's Team Bot keeps the live `accountHolder`. Where that is the
+ * owner's account, the override reads as the owner's reconnection — the sentence says only the owner
+ * can, and `AppAccessAction` offers nothing — because a Reconnect pressed here would connect this
+ * person's own account, which the Bot does not run on.
  */
 function asRefused(live: AppAccess, prompt: ConnectPrompt): AppAccess {
   if (live.state !== "ready") return live;
@@ -137,5 +145,5 @@ function refusedSentence(access: AppAccess, prompt: ConnectPrompt): string {
     !access.requestKind
   )
     return `Your organisation's ${access.displayName} account needs reconnecting. Only an administrator can reconnect it.`;
-  return appAccessSentence(access.state, access.displayName);
+  return appAccessSentence(access);
 }

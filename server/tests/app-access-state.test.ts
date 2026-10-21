@@ -29,6 +29,7 @@ const composio = (overrides: Partial<AppAccessFacts> = {}): AppAccessFacts => ({
   granted: true,
   personal: null,
   shared: null,
+  sharedAdmitted: null,
   ...overrides,
 });
 
@@ -52,6 +53,7 @@ const catalogue = (
   granted: true,
   personal: null,
   shared: null,
+  sharedAdmitted: null,
   ...overrides,
 });
 
@@ -107,6 +109,21 @@ describe("a Shared Composio app", () => {
       "shared_not_connected",
     );
     expect(appAccessState(shared({ shared: { usable: true } }))).toBe("ready");
+    // Connected, and the gate would refuse this person's calls through this Bot.
+    expect(
+      appAccessState(
+        shared({ shared: { usable: true }, sharedAdmitted: false }),
+      ),
+    ).toBe("shared_not_approved");
+    expect(
+      appAccessState(
+        shared({ shared: { usable: true }, sharedAdmitted: true }),
+      ),
+    ).toBe("ready");
+    // The audience matters only once there is an account to reach.
+    expect(appAccessState(shared({ sharedAdmitted: false }))).toBe(
+      "shared_not_connected",
+    );
     expect(accountOf(shared({}))).toBe("shared");
   });
 });
@@ -171,6 +188,8 @@ test("only the three states an administrator can fix file a request", () => {
     not_connected: null,
     reconnect: null,
     shared_not_connected: "connect_shared",
+    // The refused call files the administrator's request itself.
+    shared_not_approved: null,
     disabled: "enable",
     not_granted: "grant",
   });

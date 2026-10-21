@@ -1375,6 +1375,7 @@ const loadToolsForActor =
       actorId,
       composioConfigured: Boolean(composio),
       ...(composio ? { directory: () => composio.broker.listApps() } : {}),
+      sharedAudience: sharedUseStore.admitsPerson,
     }),
     ...(await grantedTools({
       store: pluginStore,

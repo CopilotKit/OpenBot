@@ -10,7 +10,7 @@ import { useCallback, useContext, useMemo, useSyncExternalStore } from "react";
 import { Streamdown } from "streamdown";
 import { PendingApprovals } from "@/components/approvals/inline-approval";
 import { markdownComponents } from "@/lib/markdown";
-import { humanise, readToolName } from "@/lib/plugins/tool-name";
+import { humanise, ownToolLabel, readToolName } from "@/lib/plugins/tool-name";
 import {
   asText,
   forDisplay,
@@ -237,17 +237,25 @@ export function stepDetails(step: ToolItem): StepDetails {
   const answer = step.result === undefined ? undefined : asText(step.result);
   const refused = answer?.startsWith(REFUSAL_MARKER) ?? false;
   const body = refused ? answer?.slice(REFUSAL_MARKER.length).trim() : answer;
+  // This deployment's own tools answer the model, not the person; see `ServerToolLine`.
+  const own = ownToolLabel(name) !== null;
   const outcome = {
     id: step.id,
     pending: step.result === undefined,
     failed: !refused && toolResultFailed(step.result),
     refused,
     inputs,
-    ...(body ? { output: body } : {}),
+    ...(body && !own ? { output: body } : {}),
   };
-  // Not a connector: a tool an external agent runs itself. Named in words, never as an identifier.
+  // Not a connector: one of this deployment's own tools, or one an external agent runs itself.
+  // Named in words, never as an identifier.
   if (!name.startsWith("mcp__"))
-    return { ...outcome, kind: "tool", label: humanise(name), pages: 0 };
+    return {
+      ...outcome,
+      kind: "tool",
+      label: ownToolLabel(name, outcome.pending) ?? humanise(name),
+      pages: 0,
+    };
 
   const [, server = "", ...rest] = name.split("__");
   const role = researchRoleOfTool(server, rest.join("__"));
