@@ -248,3 +248,146 @@ test("OpenBot's RUN_STARTED, its 39 tools and 5 context entries far over 16 KiB,
   );
   for (const { text } of after) expect(text.length).toBeLessThanOrEqual(length);
 });
+
+type Tool = { name: string; description?: string; parameters?: unknown };
+type Started = {
+  truncated?: boolean;
+  event: {
+    type: string;
+    input: {
+      tools?: Tool[];
+      context?: { description: string; value: string }[];
+      messages?: { id: string; role: string; content?: unknown }[];
+    };
+  };
+};
+
+/** OpenBot's tool list and context as its chat sends them with every run: end-to-end run 3's run request. */
+function openBotSetup(): { tools: Tool[]; context: unknown[] } {
+  const fixture = JSON.parse(
+    readFileSync(
+      join(import.meta.dir, "fixtures/e2e-run3-openbot-run.json"),
+      "utf8",
+    ),
+  ) as { received: [{ input: { tools: Tool[]; context: unknown[] } }] };
+  const { tools, context } = fixture.received[0].input;
+  return { tools, context };
+}
+
+/** A conversation as OpenBot's page sends it: each run offers OpenBot's 39 tools beside the conversation's own, with
+ * OpenBot's 5 context entries, in its request and in a RUN_STARTED that echoes the request. */
+function onOpenBot(observations: AgentObservation[]): AgentObservation[] {
+  const { tools, context } = openBotSetup();
+  const dressed = (input: unknown) => {
+    const own = input as { tools?: Tool[] };
+    return { ...own, tools: [...(own.tools ?? []), ...tools], context };
+  };
+  return observations.map((observation) => {
+    if (observation.kind === "request")
+      return { ...observation, input: dressed(observation.input) };
+    const event =
+      observation.kind === "event"
+        ? (observation.event as { type?: unknown; input?: unknown })
+        : null;
+    if (event?.type === "RUN_STARTED" && event.input !== undefined)
+      return {
+        ...observation,
+        event: { ...event, input: dressed(event.input) },
+      };
+    return observation;
+  });
+}
+
+const runStarts = (emitted: { name: string; value: unknown }[]) =>
+  emitted
+    .filter(
+      ({ name, value }) =>
+        name === "agent.event" &&
+        (value as Started).event.type === "RUN_STARTED",
+    )
+    .map(({ value }) => value as Started);
+
+/** The frontend tool's result as the page put it into the history: the tool message of the follow-up run's request. */
+function pageResult(transport: "sse" | "intelligence") {
+  const fixture = loadFixture(transport, "frontend-tool");
+  const [, followUp] = fixture.exchanges;
+  const { body } = JSON.parse(followUp?.body ?? "{}") as {
+    body: { messages: { role: string; content: string }[] };
+  };
+  const result = body.messages.find(({ role }) => role === "tool")?.content;
+  if (!result) throw new Error("no result in the follow-up request");
+  return { fixture, result, followUpAt: followUp?.at as number };
+}
+
+for (const transport of ["sse", "intelligence"] as const)
+  test(`a Thread's tools and context are carried when they change, so a frontend tool's result, carried only in the next run's history, lands once and whole: ${transport}`, async () => {
+    // End-to-end run 3: every run's RUN_STARTED carried OpenBot's same 39 tool schemas and 5 context entries (61,104 of
+    // the trajectory's 82,300 bytes), so each was cut to fit, and with it the only copy of each frontend tool's result:
+    // list_bots's answer left as "3 coworkers already e".
+    const { fixture, result } = pageResult(transport);
+    expect(result.length).toBeGreaterThan(21);
+    const { emitted } = await record(onOpenBot(observationsOf(fixture)));
+    for (const event of emitted)
+      expect(bytes(event)).toBeLessThanOrEqual(EVENT_BUDGET_BYTES);
+    const [first, followUp, ...more] = runStarts(emitted);
+    expect(more).toHaveLength(0);
+    // The Thread's first run carries the page's whole setup, every tool by name.
+    const { tools } = openBotSetup();
+    expect(first?.event.input.tools?.map(({ name }) => name)).toEqual([
+      "showGreeting",
+      ...tools.map(({ name }) => name),
+    ]);
+    expect(first?.event.input.context).toHaveLength(5);
+    // The follow-up offers the same: nothing of it again, nothing cut, and the tool's result whole.
+    expect(followUp?.event.input).not.toHaveProperty("tools");
+    expect(followUp?.event.input).not.toHaveProperty("context");
+    expect(followUp?.truncated).toBeUndefined();
+    expect(
+      followUp?.event.input.messages?.find(({ role }) => role === "tool")
+        ?.content,
+    ).toBe(result);
+    // Once in the whole trajectory: CopilotKit announces a frontend tool's result nowhere else.
+    expect(JSON.stringify(emitted).split(result)).toHaveLength(2);
+  });
+
+for (const transport of ["sse", "intelligence"] as const)
+  test(`a RUN_STARTED over budget has the page's tools and context cut before its messages, so the person's words and a frontend tool's result stay whole: ${transport}`, async () => {
+    // A recording that began after the tool ran: the follow-up run is the first of its Thread the recording sees, so
+    // its RUN_STARTED carries OpenBot's whole setup beside the history, the tool's result in it.
+    const { fixture, result, followUpAt } = pageResult(transport);
+    const { emitted } = await record(
+      onOpenBot(observationsOf(fixture, { from: followUpAt })),
+    );
+    for (const event of emitted)
+      expect(bytes(event)).toBeLessThanOrEqual(EVENT_BUDGET_BYTES);
+    const [started] = runStarts(emitted);
+    expect(started?.truncated).toBe(true);
+    const { tools } = openBotSetup();
+    expect(started?.event.input.tools?.map(({ name }) => name)).toEqual([
+      "showGreeting",
+      ...tools.map(({ name }) => name),
+    ]);
+    // Every message of the history the run's RUN_STARTED holds (the runtime echoes the part new to it) whole, as the
+    // page sent it: the tool's result among them.
+    const [, sentFollowUp] = fixture.exchanges;
+    const sent = new Map(
+      (
+        JSON.parse(sentFollowUp?.body ?? "{}") as {
+          body: { messages: { id: string; content?: unknown }[] };
+        }
+      ).body.messages.map((message) => [message.id, message]),
+    );
+    const carried = started?.event.input.messages ?? [];
+    expect(carried.length).toBeGreaterThan(0);
+    for (const message of carried)
+      expect(message.content ?? null).toEqual(
+        sent.get(message.id)?.content ?? null,
+      );
+    expect(carried.find(({ role }) => role === "tool")?.content).toBe(result);
+    // What was cut is the setup's text.
+    const setupText = strings({
+      tools: started?.event.input.tools,
+      context: started?.event.input.context,
+    }).filter(({ field }) => field === "description" || field === "value");
+    expect(setupText.some(({ text }) => text.length < 21)).toBe(true);
+  });
