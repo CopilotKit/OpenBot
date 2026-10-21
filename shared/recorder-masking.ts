@@ -1252,42 +1252,56 @@ const truncateBodies = (event: CapturedEvent, maxBytes: number): void => {
   capAt(Math.max(fits, 0));
 };
 
-/** One string in an event's value and where it sits, so it can be cut in place. */
+/** One string in an event's value, where it sits so it can be cut in place, and the field that holds it: an array's
+ * items are its field's, so the names a JSON Schema's `required` lists are `required`. */
 type StringLeaf = {
   holder: { [key: string]: JsonValue } | JsonValue[];
   key: string | number;
   text: string;
+  field: string | null;
 };
 
 const stringLeaves = (
   value: JsonValue,
   out: StringLeaf[] = [],
+  field: string | null = null,
 ): StringLeaf[] => {
   const visit = (
     holder: StringLeaf["holder"],
     key: string | number,
     item: JsonValue,
+    itemField: string | null,
   ) => {
-    if (typeof item === "string") out.push({ holder, key, text: item });
-    else stringLeaves(item, out);
+    if (typeof item === "string")
+      out.push({ holder, key, text: item, field: itemField });
+    else stringLeaves(item, out, itemField);
   };
   if (Array.isArray(value))
-    for (const [index, item] of value.entries()) visit(value, index, item);
+    for (const [index, item] of value.entries())
+      visit(value, index, item, field);
   else if (isObject(value))
-    for (const [key, item] of Object.entries(value)) visit(value, key, item);
+    for (const [key, item] of Object.entries(value))
+      visit(value, key, item, key);
   return out;
 };
 
 /**
- * Cuts every string in the event's value to one length, the longest that fits the event in `maxBytes`, as
+ * Cuts the strings in the event's value to one length, the longest that fits the event in `maxBytes`, as
  * truncateBodies does for bodies: a string shorter than that length stays whole, so the longest (an agent's message, a
- * tool's arguments) are cut first and its ids and numbers stay. Called only on an event still over its budget.
+ * tool's arguments, a long description) are cut first and its numbers stay. A string of a field `keep` names (an id, a
+ * name) is never cut, at any depth. Called only on an event still over its budget.
  */
-const truncateStrings = (event: CapturedEvent, maxBytes: number): void => {
+const truncateStrings = (
+  event: CapturedEvent,
+  maxBytes: number,
+  keep: ReadonlySet<string>,
+): void => {
   const value = event.value;
   if (!isObject(value)) return;
   value.truncated = true;
-  const leaves = stringLeaves(value);
+  const leaves = stringLeaves(value).filter(
+    ({ field }) => field === null || !keep.has(field),
+  );
   if (leaves.length === 0) return;
   const capAt = (length: number) => {
     for (const { holder, key, text } of leaves)
@@ -1309,11 +1323,12 @@ const truncateStrings = (event: CapturedEvent, maxBytes: number): void => {
 };
 
 /** `strings`: before giving up on an event still over budget, cut its longest strings to fit (truncateStrings), as the
- * agent events do so that a long message keeps its ids and the start of its text. */
+ * agent events do so that a long message keeps its ids and the start of its text. `keep`, with `strings`: the fields
+ * whose strings are never cut, at any depth (the agent events' ids, names and enum-like fields). */
 export function trimEvent(
   event: CapturedEvent,
   maxBytes: number,
-  options: { strings?: boolean } = {},
+  options: { strings?: boolean; keep?: ReadonlySet<string> } = {},
 ): { event: CapturedEvent; trimmed: boolean } {
   const work = sanitiseForIntelligence(
     event as unknown as JsonValue,
@@ -1333,7 +1348,7 @@ export function trimEvent(
     work.value.truncated = true;
   }
   if (options.strings && byteLength(work) > maxBytes)
-    truncateStrings(work, maxBytes);
+    truncateStrings(work, maxBytes, options.keep ?? new Set());
   if (byteLength(work) > maxBytes) {
     const minimal: Obj = { trimmed: true };
     if (isObject(work.value) && typeof work.value.url === "string")

@@ -1,7 +1,8 @@
 // The agent events as they leave: masked by the Recorder's shared rules (shared/recorder-masking.ts) with the recording's
 // sensitive-value digests, so a password the person typed earlier and then pasted into the chat comes out [redacted], and
 // cut to fit one Intelligence event. CopilotKit's collector drops an event over 16 KiB; here the longest text is cut
-// instead, so nothing vanishes, and `textLength` keeps the full length.
+// instead, never an id, a name or an enum-like field, so nothing vanishes, the event still joins its Thread, run, messages
+// and tool calls, and `textLength` keeps the full length.
 import {
   type CapturedEvent,
   EVENT_BUDGET_BYTES,
@@ -26,6 +27,34 @@ const IDS: ReadonlySet<string> = new Set([
   "interruptId",
   "subagentRunId",
   "agentId",
+]);
+
+/** The fields never cut to fit, at any depth: the ids above; the names of a tool, a step or an activity; and the short
+ * enum-like fields an event, a message, a JSON Patch operation or a tool's JSON Schema hold (an event's type, a role, an
+ * operation and its paths, a schema's types, required properties and enum values). What is cut is the bulky text:
+ * descriptions, contents, arguments, context values, state. */
+const KEPT_WHOLE: ReadonlySet<string> = new Set([
+  ...IDS,
+  "name",
+  "toolCallName",
+  "toolName",
+  "stepName",
+  "activityType",
+  "type",
+  "role",
+  "phase",
+  "status",
+  "outcome",
+  "reason",
+  "code",
+  "op",
+  "path",
+  "from",
+  "format",
+  "mimeType",
+  "protocolVersion",
+  "required",
+  "enum",
 ]);
 
 type Record_ = { [key: string]: JsonValue };
@@ -116,10 +145,9 @@ export function finishAgentEvent(
     value: sanitiseForIntelligence(plain),
   };
   if (bytes(event) <= EVENT_BUDGET_BYTES) return event;
-  let fitted = trimEvent(event, EVENT_BUDGET_BYTES, { strings: true }).event;
+  const fit = { strings: true, keep: KEPT_WHOLE };
+  let fitted = trimEvent(event, EVENT_BUDGET_BYTES, fit).event;
   if (isMinimal(fitted) && name === "agent.event")
-    fitted = trimEvent(flattened(event), EVENT_BUDGET_BYTES, {
-      strings: true,
-    }).event;
+    fitted = trimEvent(flattened(event), EVENT_BUDGET_BYTES, fit).event;
   return isMinimal(fitted) ? skeleton(event) : fitted;
 }
