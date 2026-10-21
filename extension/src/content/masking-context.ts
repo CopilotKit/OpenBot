@@ -1,5 +1,6 @@
 import { describeDemonstrationTarget } from "@openbot/shared/demonstration-rules";
 import {
+  holdsValue,
   isSensitiveTarget,
   MIN_DIGEST_LENGTH,
   normaliseSecret,
@@ -165,16 +166,21 @@ export function createSensitivityTracker(options?: {
   let valueField: Element | null = null;
 
   const classify = (field: Element): boolean => {
+    const described = describeField(field);
+    // Only a field that holds what the person enters can hold a secret: a checkbox or a button input that says "Show
+    // password" only names one.
     const sensitive =
-      (field instanceof HTMLInputElement && field.type === "password") ||
-      describeDemonstrationTarget({ point: null, element: field }).sensitive ||
-      // The masking's own rule, with the label text: a one-time code field without autocomplete=one-time-code, by its id,
-      // placeholder, aria-labelledby text, test id or shape, or by a label that says the code was texted or sent to the
-      // person and the digits typed into it, so its value is hashed and masked wherever it reappears. Judged again on every
-      // edit, as the value changes; once sensitive, always sensitive.
-      isSensitiveTarget(describeField(field), { url: location.href }) ||
-      // One box of a code typed a character per box, with no label: every box's value is masked.
-      codeBoxes(field) !== null;
+      holdsValue(described) &&
+      ((field instanceof HTMLInputElement && field.type === "password") ||
+        describeDemonstrationTarget({ point: null, element: field })
+          .sensitive ||
+        // The masking's own rule, with the label text: a one-time code field without autocomplete=one-time-code, by its
+        // id, placeholder, aria-labelledby text, test id or shape, or by a label that says the code was texted or sent to
+        // the person and the digits typed into it, so its value is hashed and masked wherever it reappears. Judged again
+        // on every edit, as the value changes; once sensitive, always sensitive.
+        isSensitiveTarget(described, { url: location.href }) ||
+        // One box of a code typed a character per box, with no label: every box's value is masked.
+        codeBoxes(field) !== null);
     // A field that was ever sensitive (a show-password toggle flips its type) stays sensitive.
     const known = cache.get(field) === true || sensitive;
     cache.set(field, known);

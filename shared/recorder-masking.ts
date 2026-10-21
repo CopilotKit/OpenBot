@@ -1035,8 +1035,47 @@ const isOneTimeCodeField = (
   );
 };
 
+/** Inputs drawn as a button or a choice: what they hold is the page's own caption or option, never what the person typed. */
+const NAMING_INPUT_TYPES: ReadonlySet<string> = new Set([
+  "submit",
+  "button",
+  "reset",
+  "image",
+  "checkbox",
+  "radio",
+  "range",
+  "color",
+]);
+/** The roles of an element the person types into (CopilotKit's `TEXT_ENTRY` in clicks.ts). */
+const TEXT_ENTRY_ROLE = /^(?:textbox|searchbox|combobox)$/i;
+
+/** Whether the element holds a value the person enters: an input (one drawn as a button or a choice aside), a text area, a
+ * select, an editable region or a text-entry role, as CopilotKit's capture tells one (`holdsValue` in clicks.ts). Only such
+ * an element can hold a secret; a button, a link or a label only names one ("Show password", "Reset password link",
+ * "Retrieve password"). One described with no tag is judged as a field. */
+export function holdsValue(target: {
+  tag?: string;
+  attributes?: Record<string, string>;
+}): boolean {
+  const tag = target.tag?.toLowerCase();
+  if (tag === undefined) return true;
+  const attributes = target.attributes ?? {};
+  if (tag === "input")
+    return !NAMING_INPUT_TYPES.has(
+      (attributes.type ?? "").trim().toLowerCase(),
+    );
+  if (tag === "textarea" || tag === "select") return true;
+  const editable = attributes.contenteditable;
+  if (typeof editable === "string" && editable.toLowerCase() !== "false")
+    return true;
+  return TEXT_ENTRY_ROLE.test(
+    (attributes.role ?? "").trim().split(/\s+/)[0] ?? "",
+  );
+}
+
 /** A field whose value is a secret: a password, a card, a security or one-time code. `context.url` is the page it is on;
- * `target.value`, what it holds, tells a one-time code field that names no code by its shape. */
+ * `target.value`, what it holds, tells a one-time code field that names no code by its shape. Only an element that holds a
+ * value (`holdsValue`) is one: a control that names a secret holds none. */
 export function isSensitiveTarget(
   target: {
     attributes?: Record<string, string>;
@@ -1047,6 +1086,7 @@ export function isSensitiveTarget(
   },
   context?: { url?: string },
 ): boolean {
+  if (!holdsValue(target)) return false;
   const attributes = target.attributes ?? {};
   if (attributes.type === "password") return true;
   const words = [
