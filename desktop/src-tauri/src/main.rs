@@ -13,11 +13,15 @@ mod test_support;
 
 use openbot_desktop_lib::{
     acquire, deployment, deployment_release, engine, env as openbot_env, harness, host_access,
-    install, preparation, problem::Problem, provider, pull_metrics, quiet, stack, supervise,
-    telemetry, tray, windows as win,
+    install, local_eval, local_eval_state, preparation, problem::Problem, provider, pull_metrics,
+    quiet, stack, supervise, telemetry, tray, windows as win,
 };
 
 const QUIT_CLEANUP_NOTICE_FILE: &str = ".openbot-quit-cleanup-notice";
+/// Kept apart from the quit cleanup notice, whose presence alone means OpenBot needs recovery.
+const LOCAL_EVAL_STOP_NOTICE_FILE: &str = ".openbot-local-eval-stop-notice";
+/// How an Intelligence failure starts, so Stop and Quit can tell it from OpenBot's own.
+const INTELLIGENCE_STOP_FAILED: &str = "Intelligence stop failed: ";
 const QUIT_MENU_ACCELERATOR: &str = "CmdOrCtrl+KeyQ";
 const QUIT_CLEANUP_NOTICE_LIMIT: usize = 16 * 1024;
 use serde::{Deserialize, Serialize};
@@ -247,6 +251,10 @@ struct AlreadyConfigured {
     #[serde(skip_serializing_if = "Option::is_none")]
     installation: Option<preparation::Launch>,
     auto_start: bool,
+    /// Where the local evaluation has got to, if one was ever begun here. The checkpoint only:
+    /// whether its stack is running is the CLI's to say.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    local_eval: Option<local_eval_state::State>,
 }
 
 struct ReadyRespondingEngine {
@@ -1655,9 +1663,11 @@ async fn stop_stack<R: tauri::Runtime>(
 ) -> Result<(), String> {
     // Inventory, held-child cleanup and Compose all block. Keep the complete shutdown off both
     // Tauri's event loop and its async workers, and resolve IPC only when shutdown has finished.
-    tauri::async_runtime::spawn_blocking(move || stop_everything(&app, &stack::root_from(&root)))
-        .await
-        .map_err(|error| format!("the shutdown did not run: {error}"))?
+    tauri::async_runtime::spawn_blocking(move || {
+        stop_everything(&app, &stack::root_from(&root)).into_result()
+    })
+    .await
+    .map_err(|error| format!("the shutdown did not run: {error}"))?
 }
 
 #[cfg(test)]
@@ -1671,20 +1681,84 @@ fn shutdown_root(shell: &Shell, fallback_root: &Path) -> PathBuf {
     root
 }
 
-/// Take the whole stack down: the host processes, anything left over, and the containers.
+/// Take the whole stack down: the host processes, anything left over, the containers, and the
+/// local Intelligence stack if OpenBot created it.
 ///
 /// One implementation, because there are three ways to ask for it (the button, the menu bar, and
 /// quitting) and a person who used one of them and got a different amount of stopping would be
 /// right to call that a bug.
-fn stop_everything<R: tauri::Runtime>(
-    app: &tauri::AppHandle<R>,
-    fallback_root: &Path,
-) -> Result<(), String> {
-    let shell = app.state::<Shell>();
-    let root = root_for_stop(&shell, fallback_root);
-    stop_everything_with(&shell, &root, stack::stop_processes_under, |root| {
-        down_owned_containers(&shell, root)
-    })
+fn stop_everything<R: tauri::Runtime>(app: &tauri::AppHandle<R>, fallback_root: &Path) -> Stopped {
+    stop_everything_for(&app.state::<Shell>(), fallback_root)
+}
+
+/// Stop as the button and the menu bar run it.
+fn stop_everything_for(shell: &Shell, fallback_root: &Path) -> Stopped {
+    let root = root_for_stop(shell, fallback_root);
+    stop_everything_then(
+        shell,
+        &root,
+        stack::stop_processes_under,
+        |root| down_owned_containers(shell, root),
+        intelligence_step(Shutdown::Stop),
+    )
+}
+
+/// Quit's cleanup as the exit handler runs it.
+fn quit_cleanup(shell: &Shell) -> Stopped {
+    exit_cleanup_then(
+        shell,
+        &stack::default_root(),
+        stack::stop_processes_under,
+        |root| down_containers_on_quit(shell, root),
+        intelligence_step(Shutdown::Quit),
+    )
+}
+
+/// What a Stop or Quit could not do, kept apart: only OpenBot's own failures mean OpenBot needs
+/// recovery. A local Intelligence stack that would not stop is said, but it is not OpenBot's
+/// processes or containers left behind, and must not hold OpenBot's next start.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct Stopped {
+    openbot: Vec<String>,
+    /// The whole line, starting with `INTELLIGENCE_STOP_FAILED`.
+    intelligence: Option<String>,
+}
+
+impl Stopped {
+    /// Every failure, OpenBot's first.
+    fn lines(self) -> Vec<String> {
+        self.openbot.into_iter().chain(self.intelligence).collect()
+    }
+
+    fn into_result(self) -> Result<(), String> {
+        let lines = self.lines();
+        if lines.is_empty() {
+            Ok(())
+        } else {
+            Err(lines.join("\n"))
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Shutdown {
+    Stop,
+    Quit,
+}
+
+/// How long the CLI may take to stop the stack. Quit's is shorter: somebody is waiting for the
+/// app to close.
+fn intelligence_limits(kind: Shutdown) -> local_eval::Limits {
+    match kind {
+        Shutdown::Stop => local_eval::Limits::for_action(local_eval::Action::Stop),
+        Shutdown::Quit => local_eval::Limits::for_quit(),
+    }
+}
+
+/// The Intelligence step both production paths run, chosen here so they cannot drift apart.
+fn intelligence_step(kind: Shutdown) -> impl FnOnce(&Path) -> Result<(), String> {
+    let limits = intelligence_limits(kind);
+    move |root: &Path| stop_local_eval(root, limits)
 }
 
 fn root_for_stop(shell: &Shell, fallback_root: &Path) -> PathBuf {
@@ -1693,6 +1767,7 @@ fn root_for_stop(shell: &Shell, fallback_root: &Path) -> PathBuf {
     root
 }
 
+#[cfg(test)]
 fn stop_everything_with<C, D>(
     shell: &Shell,
     fallback_root: &Path,
@@ -1703,6 +1778,31 @@ where
     C: FnOnce(&Path) -> Result<usize, openbot_desktop_lib::problem::Problem>,
     D: FnOnce(&Path) -> Result<(), String>,
 {
+    stop_everything_then(shell, fallback_root, cleanup, down, |_| Ok(())).into_result()
+}
+
+/**
+Stop, then `intelligence` last, once OpenBot's own processes and containers have had their turn,
+and whether or not they stopped. Its failure is kept beside theirs, never instead of them.
+
+Local evaluation closes first, before any lock: calls in flight are cancelled and new ones refused
+until this returns, so neither a running `start` nor one the window sends now can hold the stop up
+or outlive it. The startup lock is released before the Intelligence step, which can take minutes,
+so a Quit arriving meanwhile is not held behind it.
+*/
+fn stop_everything_then<C, D, I>(
+    shell: &Shell,
+    fallback_root: &Path,
+    cleanup: C,
+    down: D,
+    intelligence: I,
+) -> Stopped
+where
+    C: FnOnce(&Path) -> Result<usize, openbot_desktop_lib::problem::Problem>,
+    D: FnOnce(&Path) -> Result<(), String>,
+    I: FnOnce(&Path) -> Result<(), String>,
+{
+    let _closing = local_eval::closing_for_stop();
     cancel_self_hosted_sign_in(shell);
     shell
         .stopped_in_session
@@ -1713,7 +1813,7 @@ where
     shell
         .generation
         .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    let _startup = shell.startup.lock().unwrap();
+    let startup = shell.startup.lock().unwrap();
     let root = cleanup_root(shell, fallback_root);
     let mut failures = Vec::new();
     if let Err(problem) = cleanup_host_state(shell, &root, cleanup) {
@@ -1724,12 +1824,91 @@ where
         failures.push(format!("Compose down failed: {problem}"));
     }
 
+    // Recovery is about what OpenBot runs, so only OpenBot's own failures keep it.
     if failures.is_empty() {
         clear_recovery_required(shell, &root);
-        Ok(())
-    } else {
-        Err(failures.join("\n"))
     }
+    drop(startup);
+    Stopped {
+        openbot: failures,
+        intelligence: intelligence(&root)
+            .err()
+            .map(|problem| format!("{INTELLIGENCE_STOP_FAILED}{problem}")),
+    }
+}
+
+/// The production Intelligence step for Stop and Quit, within `limits`.
+fn stop_local_eval(root: &Path, limits: local_eval::Limits) -> Result<(), String> {
+    #[cfg(test)]
+    INTELLIGENCE_TIMEOUT.with(|used| used.set(Some(limits.timeout)));
+    let attempt = format!("openbot-shutdown-{:016x}", rand::random::<u64>());
+    stop_local_eval_with(root, local_eval::cancel_all, |stack| {
+        local_eval::stop_for_shutdown(&attempt, stack, limits)
+    })
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The timeout the last `stop_local_eval` on this thread was given, so a test can tell which
+    /// limits a production path chose without a CLI to time.
+    static INTELLIGENCE_TIMEOUT: std::cell::Cell<Option<std::time::Duration>> =
+        const { std::cell::Cell::new(None) };
+}
+
+#[cfg(test)]
+fn last_intelligence_timeout() -> Option<std::time::Duration> {
+    INTELLIGENCE_TIMEOUT.with(std::cell::Cell::take)
+}
+
+/**
+Ask the CLI to stop the local Intelligence stack, if and only if OpenBot created it.
+
+No record, or a stack that was already there when OpenBot found it, is left exactly as it is: it
+may be serving other apps, and stopping OpenBot is not a reason to stop them. Docker and the
+stack's containers are never touched here; only the CLI stops what the CLI started.
+
+Calls already in flight are cancelled first, whoever owns the stack: cancelling ends only this
+app's own CLI processes, never the stack, and a `start` left running could otherwise hold the stop
+behind it, finish after it and leave the stack running, or outlive the app as an orphan.
+
+Every way this can fail is said in fixed words. There is no CLI output to repeat, and none would
+be repeated if there were.
+*/
+fn stop_local_eval_with<A, S>(root: &Path, cancel_all: A, stop: S) -> Result<(), String>
+where
+    A: FnOnce(),
+    S: FnOnce(&local_eval::StackId) -> Result<local_eval::Report, local_eval::Failure>,
+{
+    cancel_all();
+    let Some(state) = local_eval_state::read(root, None).filter(|state| state.tied_to_openbot())
+    else {
+        return Ok(());
+    };
+    let not_stopped = |why: String| {
+        format!("the Intelligence CLI did not stop the local Intelligence stack ({why})")
+    };
+    match stop(&state.stack_id()) {
+        Ok(report) => match report.outcome {
+            local_eval::Outcome::Completed => Ok(()),
+            outcome => Err(not_stopped(match report.reason {
+                Some(reason) => format!("{}: {}", wire_name(outcome), wire_name(reason)),
+                None => wire_name(outcome),
+            })),
+        },
+        Err(local_eval::Failure::Unavailable) => Err(
+            "this build has no Intelligence CLI to stop the local Intelligence stack OpenBot created"
+                .into(),
+        ),
+        Err(failure) => Err(not_stopped(wire_name(failure))),
+    }
+}
+
+/// A category's name as the window knows it, `local-command-busy` rather than `LocalCommandBusy`.
+fn wire_name(category: impl Serialize) -> String {
+    serde_json::to_value(category)
+        .ok()
+        .and_then(|value| value.as_str().map(str::to_owned))
+        .unwrap_or_default()
 }
 
 /// Called under the startup lock by both Stop and Quit. Host cleanup can clear its own root
@@ -2164,7 +2343,57 @@ fn quit_cleanup_failure_summary(failure: QuitCleanupFailure) -> &'static str {
     }
 }
 
+fn is_intelligence_quit_failure(line: &str) -> bool {
+    line.strip_prefix("[exit] cleanup failed: ")
+        .is_some_and(|failure| failure.starts_with(INTELLIGENCE_STOP_FAILED))
+}
+
+/// OpenBot's own failures go to the notice that means recovery; an Intelligence one goes to its
+/// own, which only says so.
 fn write_quit_cleanup_notice(root: &Path, lines: &[String]) -> Result<(), String> {
+    let (intelligence, openbot): (Vec<&String>, Vec<&String>) = lines
+        .iter()
+        .partition(|line| is_intelligence_quit_failure(line));
+    write_openbot_quit_cleanup_notice(root, &openbot)?;
+    if intelligence.is_empty() {
+        return Ok(());
+    }
+    let path = root.join(LOCAL_EVAL_STOP_NOTICE_FILE);
+    std::fs::create_dir_all(root)
+        .and_then(|()| std::fs::write(&path, br#"{"version":1}"#))
+        .map_err(|error| {
+            format!(
+                "{}: could not write the Intelligence shutdown notice: {error}",
+                path.display()
+            )
+        })
+}
+
+/**
+That the last Quit could not stop the local Intelligence stack, said once.
+
+Apart from `last_failure` on purpose. The window treats that as an interrupted run and holds its
+automatic start, and OpenBot's own processes are not what was left running. Fixed words: the
+notice records only that it happened.
+*/
+fn take_local_eval_stop_notice(root: &Path) -> Option<Problem> {
+    std::fs::remove_file(root.join(LOCAL_EVAL_STOP_NOTICE_FILE)).ok()?;
+    Some(Problem::with(
+        "When OpenBot last quit, it could not stop the local Intelligence stack it started.",
+        "It may still be running. Stopping OpenBot again asks it to stop.",
+    ))
+}
+
+/// What `take_local_eval_stop_notice` says, for the window.
+#[tauri::command]
+fn last_local_eval_stop_failure<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Option<openbot_desktop_lib::problem::Problem> {
+    let shell = app.state::<Shell>();
+    take_local_eval_stop_notice(&cleanup_root(&shell, &stack::default_root()))
+}
+
+fn write_openbot_quit_cleanup_notice(root: &Path, lines: &[&String]) -> Result<(), String> {
     if lines.is_empty() {
         return Ok(());
     }
@@ -2266,18 +2495,44 @@ fn recovery_required_or_pending_quit_notice(shell: &Shell, root: &Path) -> bool 
     true
 }
 
+#[cfg(test)]
 fn exit_cleanup_with<C, D>(shell: &Shell, fallback_root: &Path, cleanup: C, down: D) -> Vec<String>
 where
     C: FnOnce(&Path) -> Result<usize, openbot_desktop_lib::problem::Problem>,
     D: FnOnce(&Path) -> Result<(), String>,
 {
+    exit_cleanup_then(shell, fallback_root, cleanup, down, |_| Ok(())).lines()
+}
+
+/**
+Quit's cleanup, then `intelligence` last, as in `stop_everything_then`.
+
+Local evaluation closes for good here, which also cancels a Stop's own CLI stop, so Quit never
+waits behind one. The order is host processes, Compose down, on Linux the Podman API this session
+started, and only then Intelligence, with no lock held. So Quit's Intelligence cap starts after all
+of that: 120 seconds for the CLI, its turn included, plus up to five seconds of grace to stop the
+CLI's process tree if it overruns.
+*/
+fn exit_cleanup_then<C, D, I>(
+    shell: &Shell,
+    fallback_root: &Path,
+    cleanup: C,
+    down: D,
+    intelligence: I,
+) -> Stopped
+where
+    C: FnOnce(&Path) -> Result<usize, openbot_desktop_lib::problem::Problem>,
+    D: FnOnce(&Path) -> Result<(), String>,
+    I: FnOnce(&Path) -> Result<(), String>,
+{
+    local_eval::close_for_quit();
     shell
         .start_generation
         .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     shell
         .generation
         .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    let _startup = shell.startup.lock().unwrap();
+    let startup = shell.startup.lock().unwrap();
     let root = cleanup_root(shell, fallback_root);
     let mut failures = Vec::new();
     if let Err(problem) = cleanup_host_state(shell, &root, cleanup) {
@@ -2296,7 +2551,13 @@ where
     if failures.is_empty() {
         clear_recovery_required(shell, &root);
     }
-    failures
+    drop(startup);
+    Stopped {
+        openbot: failures,
+        intelligence: intelligence(&root)
+            .err()
+            .map(|problem| format!("{INTELLIGENCE_STOP_FAILED}{problem}")),
+    }
 }
 
 fn report_exit_cleanup_failures<F>(failures: Vec<String>, sink: F) -> Result<(), String>
@@ -2880,6 +3141,7 @@ fn already_configured_for_root(root: String) -> AlreadyConfigured {
         launch: preparation::launch(&root),
         installation: preparation::installation(&root),
         auto_start: true,
+        local_eval: local_eval_state::read(&root, None),
         saved: SavedConfiguration {
             intelligence_api_key: hint(
                 Category::Intelligence,
@@ -3334,6 +3596,97 @@ fn cancel_model_oauth(attempt_id: String) {
     openbot_desktop_lib::provider_oauth::cancel(&attempt_id);
 }
 
+/// One Intelligence CLI call for the local evaluation. Returns only the normalized report or a
+/// static failure category; the CLI's own output never reaches the window. `attempt` names the
+/// call so `cancel_local_eval` can stop it, including before it has started.
+#[tauri::command]
+async fn run_local_eval(
+    attempt: String,
+    action: local_eval::Action,
+    stack: String,
+) -> Result<local_eval::Report, local_eval::Failure> {
+    let stack = local_eval::StackId::parse(&stack)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        local_eval::run_installed(&attempt, action, &stack)
+    })
+    .await
+    .map_err(|_| local_eval::Failure::Spawn)?
+}
+
+/// The stacks the CLI has recorded, so a stack id comes from the CLI rather than being typed.
+/// Why a local evaluation setup produced nothing to show: the CLI's own static category, or a
+/// stack that was set up but could not be recorded. The second is not a CLI category, so it is
+/// not one: the window tells them apart by shape.
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+enum SetupError {
+    Failure(local_eval::Failure),
+    Unrecorded(Problem),
+}
+
+/**
+`local setup` for this installation, and the stack it made recorded as OpenBot's.
+
+Blocked is a normal answer here, not an error: the first one is the evaluation agreement, which the
+person accepts in their own terminal before the window asks again. Only a completed setup is
+recorded, and only then does Stop or Quit stop that stack.
+*/
+#[tauri::command]
+async fn set_up_local_eval(
+    attempt: String,
+    root: String,
+) -> Result<local_eval::Report, SetupError> {
+    let root = stack::root_from(&root);
+    tauri::async_runtime::spawn_blocking(move || {
+        set_up_local_eval_at(&root, |folder| {
+            local_eval::setup_installed(&attempt, folder)
+        })
+    })
+    .await
+    .map_err(|_| SetupError::Failure(local_eval::Failure::Spawn))?
+}
+
+/**
+Run `setup` in `root` and record what it made.
+
+A stack set up here was made for OpenBot, so it starts and stops with it. The one exception is a
+record that already calls the same stack shared: setting up again resumes that stack, it does not
+make OpenBot its owner.
+*/
+fn set_up_local_eval_at<S>(root: &Path, setup: S) -> Result<local_eval::Report, SetupError>
+where
+    S: FnOnce(&Path) -> Result<(local_eval::Report, String), local_eval::Failure>,
+{
+    let (report, cli_sha256) = setup(root).map_err(SetupError::Failure)?;
+    let Some(stack) = report
+        .stack
+        .as_ref()
+        .filter(|_| report.outcome == local_eval::Outcome::Completed)
+    else {
+        return Ok(report);
+    };
+    let stack = local_eval::StackId::parse(&stack.id).map_err(SetupError::Failure)?;
+    let ownership = match local_eval_state::read(root, None) {
+        Some(state) if state.stack_id() == stack => state.ownership,
+        _ => local_eval_state::Ownership::Created,
+    };
+    local_eval_state::begin(root, &stack, ownership, &cli_sha256)
+        .map_err(SetupError::Unrecorded)?;
+    Ok(report)
+}
+
+#[tauri::command]
+async fn list_local_eval(attempt: String) -> Result<local_eval::Listing, local_eval::Failure> {
+    tauri::async_runtime::spawn_blocking(move || local_eval::list_installed(&attempt))
+        .await
+        .map_err(|_| local_eval::Failure::Spawn)?
+}
+
+#[tauri::command]
+fn cancel_local_eval(attempt: String) {
+    local_eval::cancel(&attempt);
+}
+
 /// `bun` from PATH, or the places an installer puts it when PATH has not been reloaded.
 fn which_bun() -> Option<PathBuf> {
     if quiet::command("bun")
@@ -3690,32 +4043,49 @@ fn stop_from_menu<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
         let root = default_root();
         let root_path = PathBuf::from(&root);
         eprintln!("[menu] stopping the stack under {root}");
-        match stop_everything(&app, &root_path) {
-            Ok(()) => {
+        let stopped = stop_everything(&app, &root_path);
+        match settle_menu_stop(&app.state::<Shell>(), &root_path, stopped) {
+            None => {
                 eprintln!("[menu] stopped");
                 report(&app, "stopped", true, "OpenBot has been stopped");
             }
             // Said rather than swallowed. A menu item that fails silently is worse than one
             // that is not there: the person believes the stack is down and it is not.
-            Err(detail) => {
-                eprintln!("[menu] stop failed: {detail}");
-                let problem = Problem::with(
-                    "OpenBot could not finish stopping. Try Stop OpenBot again.",
-                    detail,
+            Some(problem) => {
+                eprintln!(
+                    "[menu] stop failed: {}",
+                    problem.detail.as_deref().unwrap_or_default()
                 );
-                let shell = app.state::<Shell>();
-                {
-                    let _startup = shell.startup.lock().unwrap();
-                    let root = cleanup_root(&shell, &root_path);
-                    let generation = shell.generation.load(std::sync::atomic::Ordering::SeqCst);
-                    mark_recovery_required(&shell, &root, generation);
-                    *shell.last_failure.lock().unwrap() = Some(problem.clone());
-                }
                 report(&app, "stopped", false, problem.said);
             }
         }
         let _ = show_setup(app.clone());
     });
+}
+
+/// Keep a menu Stop's failure for the setup screen, and mark recovery only when OpenBot's own
+/// processes or containers may still be running. None when everything stopped.
+fn settle_menu_stop(shell: &Shell, fallback_root: &Path, stopped: Stopped) -> Option<Problem> {
+    let openbot_failed = !stopped.openbot.is_empty();
+    let problem = if openbot_failed {
+        Problem::with(
+            "OpenBot could not finish stopping. Try Stop OpenBot again.",
+            stopped.lines().join("\n"),
+        )
+    } else {
+        Problem::with(
+            "OpenBot stopped, but could not stop the local Intelligence stack it started.",
+            stopped.intelligence?,
+        )
+    };
+    let _startup = shell.startup.lock().unwrap();
+    if openbot_failed {
+        let root = cleanup_root(shell, fallback_root);
+        let generation = shell.generation.load(std::sync::atomic::Ordering::SeqCst);
+        mark_recovery_required(shell, &root, generation);
+    }
+    *shell.last_failure.lock().unwrap() = Some(problem.clone());
+    Some(problem)
 }
 
 /// What each of the three items does, wherever it was chosen from.
@@ -3789,6 +4159,11 @@ fn main() {
             begin_organization_sign_in,
             finish_organization_sign_in,
             cancel_organization_sign_in,
+            run_local_eval,
+            list_local_eval,
+            cancel_local_eval,
+            set_up_local_eval,
+            last_local_eval_stop_failure,
             ask_the_bot,
         ])
         // A packaged application is not a browser tab. Left alone, WebView2 answers a right-click
@@ -3919,13 +4294,7 @@ fn main() {
                         || api.prevent_exit(),
                         move || {
                             desktop_telemetry::shutdown(&cleaning_app);
-                            let shell = cleaning_app.state::<Shell>();
-                            exit_cleanup_with(
-                                &shell,
-                                &stack::default_root(),
-                                stack::stop_processes_under,
-                                |root| down_containers_on_quit(&shell, root),
-                            )
+                            quit_cleanup(&cleaning_app.state::<Shell>()).lines()
                         },
                         QuitDiagnostics {
                             sink: move |failures: Vec<String>| {
@@ -6138,6 +6507,683 @@ mod tests {
         assert_eq!(shell.root.lock().unwrap().as_ref(), Some(&active));
         let _ = std::fs::remove_dir_all(active);
         let _ = std::fs::remove_dir_all(fallback);
+    }
+
+    const LOCAL_EVAL_PIN: &str = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+
+    fn local_eval_root(label: &str, ownership: Option<local_eval_state::Ownership>) -> PathBuf {
+        let root = temp_root(label);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("docker-compose.yml"), "services: {}\n").unwrap();
+        if let Some(ownership) = ownership {
+            let stack = local_eval::StackId::parse("local-abc123").unwrap();
+            local_eval_state::begin(&root, &stack, ownership, LOCAL_EVAL_PIN).unwrap();
+        }
+        root
+    }
+
+    fn local_eval_report(
+        outcome: local_eval::Outcome,
+        reason: Option<local_eval::Reason>,
+    ) -> local_eval::Report {
+        local_eval::Report {
+            outcome,
+            stack: None,
+            reason,
+            readiness: local_eval::Canonical::Unknown,
+            licence: local_eval::Canonical::Unknown,
+        }
+    }
+
+    #[test]
+    fn stop_asks_intelligence_last_even_after_compose_down_failed() {
+        let active = local_eval_root("openbot-stop-intelligence-order", None);
+        let fallback = temp_root("openbot-default-stop-intelligence-order");
+        let shell = Shell::default();
+        *shell.root.lock().unwrap() = Some(active.clone());
+        let phases = std::cell::RefCell::new(Vec::new());
+
+        let stopped = stop_everything_then(
+            &shell,
+            &fallback,
+            |root| {
+                phases
+                    .borrow_mut()
+                    .push(format!("cleanup:{}", root.display()));
+                Ok(0)
+            },
+            |root| {
+                phases.borrow_mut().push(format!("down:{}", root.display()));
+                Err("compose refused".to_string())
+            },
+            |root| {
+                phases
+                    .borrow_mut()
+                    .push(format!("intelligence:{}", root.display()));
+                Err("the CLI timed out".to_string())
+            },
+        );
+
+        assert_eq!(
+            phases.into_inner(),
+            vec![
+                format!("cleanup:{}", active.display()),
+                format!("down:{}", active.display()),
+                format!("intelligence:{}", active.display()),
+            ]
+        );
+        assert_eq!(
+            stopped,
+            Stopped {
+                openbot: vec!["Compose down failed: compose refused".into()],
+                intelligence: Some("Intelligence stop failed: the CLI timed out".into()),
+            }
+        );
+        assert_eq!(
+            stopped.into_result(),
+            Err("Compose down failed: compose refused\n\
+                 Intelligence stop failed: the CLI timed out"
+                .into())
+        );
+        let _ = std::fs::remove_dir_all(active);
+        let _ = std::fs::remove_dir_all(fallback);
+    }
+
+    #[test]
+    fn quit_asks_intelligence_last_even_after_compose_down_failed() {
+        let active = local_eval_root("openbot-exit-intelligence-order", None);
+        let fallback = temp_root("openbot-default-exit-intelligence-order");
+        let shell = Shell::default();
+        *shell.root.lock().unwrap() = Some(active.clone());
+        let phases = std::cell::RefCell::new(Vec::new());
+
+        let failures = exit_cleanup_then(
+            &shell,
+            &fallback,
+            |root| {
+                phases
+                    .borrow_mut()
+                    .push(format!("cleanup:{}", root.display()));
+                Ok(0)
+            },
+            |root| {
+                phases.borrow_mut().push(format!("down:{}", root.display()));
+                Err("compose down refused".to_string())
+            },
+            |root| {
+                phases
+                    .borrow_mut()
+                    .push(format!("intelligence:{}", root.display()));
+                Err("the CLI timed out".to_string())
+            },
+        );
+
+        assert_eq!(
+            phases.into_inner(),
+            vec![
+                format!("cleanup:{}", active.display()),
+                format!("down:{}", active.display()),
+                format!("intelligence:{}", active.display()),
+            ]
+        );
+        assert_eq!(
+            failures,
+            Stopped {
+                openbot: vec!["Compose down failed: compose down refused".into()],
+                intelligence: Some("Intelligence stop failed: the CLI timed out".into()),
+            }
+        );
+        let _ = std::fs::remove_dir_all(active);
+        let _ = std::fs::remove_dir_all(fallback);
+    }
+
+    #[test]
+    fn an_intelligence_failure_is_reported_but_does_not_keep_openbot_in_recovery() {
+        let active = local_eval_root("openbot-stop-intelligence-recovery", None);
+        let shell = Shell::default();
+        *shell.root.lock().unwrap() = Some(active.clone());
+        mark_recovery_required(&shell, &active, 0);
+
+        let stopped = stop_everything_then(
+            &shell,
+            &active,
+            |_| Ok(0),
+            |_| Ok(()),
+            |_| Err("the CLI timed out".to_string()),
+        );
+
+        assert!(stopped.openbot.is_empty(), "{stopped:?}");
+        assert_eq!(
+            stopped.into_result(),
+            Err("Intelligence stop failed: the CLI timed out".into()),
+            "an Intelligence failure is not a silent success"
+        );
+        assert!(!recovery_required(&shell, &active));
+
+        *shell.root.lock().unwrap() = Some(active.clone());
+        mark_recovery_required(
+            &shell,
+            &active,
+            shell.generation.load(std::sync::atomic::Ordering::SeqCst),
+        );
+        let failures = exit_cleanup_then(
+            &shell,
+            &active,
+            |_| Ok(0),
+            |_| Ok(()),
+            |_| Err("the CLI timed out".to_string()),
+        );
+        assert_eq!(
+            failures.lines(),
+            ["Intelligence stop failed: the CLI timed out"]
+        );
+        assert!(!recovery_required(&shell, &active));
+        let _ = std::fs::remove_dir_all(active);
+    }
+
+    #[test]
+    fn a_stack_openbot_did_not_create_is_never_stopped() {
+        for ownership in [None, Some(local_eval_state::Ownership::Shared)] {
+            let root = local_eval_root("openbot-local-eval-untied", ownership);
+            let phases = std::cell::RefCell::new(Vec::new());
+
+            let result = stop_local_eval_with(
+                &root,
+                || phases.borrow_mut().push("cancel-all".to_string()),
+                |stack| {
+                    phases.borrow_mut().push(format!("stop:{}", stack.as_str()));
+                    Ok(local_eval_report(local_eval::Outcome::Completed, None))
+                },
+            );
+
+            assert_eq!(result, Ok(()), "{ownership:?}");
+            // Its own calls are cancelled; the stack is not stopped.
+            assert_eq!(phases.into_inner(), ["cancel-all"], "{ownership:?}");
+            // The production adapter too: had it tried, this build's missing CLI would have failed.
+            assert_eq!(
+                stop_local_eval(&root, local_eval::Limits::for_quit()),
+                Ok(()),
+                "{ownership:?}"
+            );
+            let _ = std::fs::remove_dir_all(root);
+        }
+    }
+
+    #[test]
+    fn a_stack_openbot_created_is_stopped_after_cancelling_calls_in_flight() {
+        let root = local_eval_root(
+            "openbot-local-eval-created",
+            Some(local_eval_state::Ownership::Created),
+        );
+        let phases = std::cell::RefCell::new(Vec::new());
+
+        let result = stop_local_eval_with(
+            &root,
+            || phases.borrow_mut().push("cancel-all".to_string()),
+            |stack| {
+                phases.borrow_mut().push(format!("stop:{}", stack.as_str()));
+                Ok(local_eval_report(local_eval::Outcome::Completed, None))
+            },
+        );
+
+        assert_eq!(result, Ok(()));
+        assert_eq!(phases.into_inner(), ["cancel-all", "stop:local-abc123"]);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn every_way_a_stop_can_fail_is_reported_in_fixed_words() {
+        let root = local_eval_root(
+            "openbot-local-eval-stop-failures",
+            Some(local_eval_state::Ownership::Created),
+        );
+        let failed = |result: Result<local_eval::Report, local_eval::Failure>| {
+            stop_local_eval_with(&root, || {}, move |_| result)
+                .expect_err("a stop that did not complete is reported")
+        };
+
+        assert_eq!(
+            failed(Err(local_eval::Failure::Unavailable)),
+            "this build has no Intelligence CLI to stop the local Intelligence stack OpenBot created"
+        );
+        assert_eq!(
+            failed(Err(local_eval::Failure::Timeout)),
+            "the Intelligence CLI did not stop the local Intelligence stack (timeout)"
+        );
+        assert_eq!(
+            failed(Ok(local_eval_report(
+                local_eval::Outcome::Blocked,
+                Some(local_eval::Reason::LocalCommandBusy)
+            ))),
+            "the Intelligence CLI did not stop the local Intelligence stack (blocked: local-command-busy)"
+        );
+        assert_eq!(
+            failed(Ok(local_eval_report(local_eval::Outcome::Failed, None))),
+            "the Intelligence CLI did not stop the local Intelligence stack (failed)"
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn quit_reports_a_created_stack_this_build_cannot_stop() {
+        let root = local_eval_root(
+            "openbot-local-eval-quit-no-cli",
+            Some(local_eval_state::Ownership::Created),
+        );
+        let shell = Shell::default();
+        *shell.root.lock().unwrap() = Some(root.clone());
+
+        let failures = exit_cleanup_then(
+            &shell,
+            &root,
+            |_| Ok(0),
+            |_| Err("compose down refused".to_string()),
+            |root| stop_local_eval(root, local_eval::Limits::for_quit()),
+        );
+
+        assert_eq!(
+            failures.lines(),
+            [
+                "Compose down failed: compose down refused",
+                "Intelligence stop failed: this build has no Intelligence CLI to stop the local \
+                 Intelligence stack OpenBot created"
+            ]
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    const NO_CLI_LINE: &str = "Intelligence stop failed: this build has no Intelligence CLI to \
+                               stop the local Intelligence stack OpenBot created";
+
+    #[test]
+    fn an_intelligence_failure_on_quit_is_shown_next_launch_without_recovery() {
+        let root = local_eval_root("openbot-quit-intelligence-notice", None);
+        let shell = Shell::default();
+        *shell.root.lock().unwrap() = Some(root.clone());
+        let failures = exit_cleanup_then(
+            &shell,
+            &root,
+            |_| Ok(0),
+            |_| Ok(()),
+            |_| Err("the CLI timed out".to_string()),
+        );
+        // The quit sink, exactly as production wires it.
+        report_exit_cleanup_failures(failures.lines(), |lines| {
+            write_quit_cleanup_notice(&root, &lines)
+        })
+        .unwrap();
+
+        // Next launch: nothing about OpenBot's own processes, and nothing holding its start.
+        let next = Shell::default();
+        assert!(!quit_cleanup_notice_path(&root).exists());
+        assert!(!recovery_required_or_pending_quit_notice(&next, &root));
+        assert!(!recovery_required(&next, &root));
+        assert_eq!(read_quit_cleanup_notice(&root).unwrap(), None);
+        let problem =
+            take_local_eval_stop_notice(&root).expect("the Intelligence failure is still shown");
+        assert!(problem.said.contains("Intelligence"), "{problem:?}");
+        assert!(!problem.said.contains("app processes"), "{problem:?}");
+        assert_eq!(take_local_eval_stop_notice(&root), None, "shown once");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_quit_notice_keeps_openbot_and_intelligence_failures_apart() {
+        let root = local_eval_root("openbot-quit-mixed-notice", None);
+        write_quit_cleanup_notice(
+            &root,
+            &[
+                "[exit] cleanup failed: Compose down failed: refused".to_string(),
+                format!("[exit] cleanup failed: {NO_CLI_LINE}"),
+            ],
+        )
+        .unwrap();
+
+        let next = Shell::default();
+        assert!(recovery_required_or_pending_quit_notice(&next, &root));
+        let openbot = read_quit_cleanup_notice(&root).unwrap().unwrap();
+        assert_eq!(
+            openbot.detail.as_deref(),
+            Some("OpenBot could not confirm all containers stopped.")
+        );
+        assert!(take_local_eval_stop_notice(&root).is_some());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn menu_stop_marks_recovery_only_for_openbot_failures() {
+        let root = local_eval_root("openbot-menu-stop-intelligence", None);
+        let shell = Shell::default();
+
+        let intelligence_only = Stopped {
+            openbot: Vec::new(),
+            intelligence: Some(NO_CLI_LINE.into()),
+        };
+        let problem = settle_menu_stop(&shell, &root, intelligence_only)
+            .expect("an Intelligence failure is still said");
+        assert!(problem.said.contains("Intelligence"), "{problem:?}");
+        assert_eq!(problem.detail.as_deref(), Some(NO_CLI_LINE));
+        assert!(!recovery_required(&shell, &root));
+        assert_eq!(shell.last_failure.lock().unwrap().as_ref(), Some(&problem));
+
+        let both = Stopped {
+            openbot: vec!["Compose down failed: refused".into()],
+            intelligence: Some(NO_CLI_LINE.into()),
+        };
+        let problem = settle_menu_stop(&shell, &root, both).unwrap();
+        assert_eq!(
+            problem.said,
+            "OpenBot could not finish stopping. Try Stop OpenBot again."
+        );
+        assert_eq!(
+            problem.detail.as_deref(),
+            Some(format!("Compose down failed: refused\n{NO_CLI_LINE}").as_str())
+        );
+        assert!(recovery_required(&shell, &root));
+
+        assert_eq!(
+            settle_menu_stop(&Shell::default(), &root, Stopped::default()),
+            None
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn quit_does_not_wait_behind_a_stop_asking_intelligence_to_stop() {
+        let root = local_eval_root("openbot-quit-behind-stop", None);
+        let shell = std::sync::Arc::new(Shell::default());
+        *shell.root.lock().unwrap() = Some(root.clone());
+        let (asking, asked) = std::sync::mpsc::channel();
+        let (release, released) = std::sync::mpsc::channel::<()>();
+        let stopping = {
+            let (shell, root) = (shell.clone(), root.clone());
+            std::thread::spawn(move || {
+                stop_everything_then(
+                    &shell,
+                    &root,
+                    |_| Ok(0),
+                    |_| Ok(()),
+                    |_| {
+                        asking.send(()).unwrap();
+                        released.recv().unwrap();
+                        Ok(())
+                    },
+                )
+            })
+        };
+        asked.recv().unwrap();
+        let quitting = {
+            let (shell, root) = (shell.clone(), root.clone());
+            std::thread::spawn(move || {
+                exit_cleanup_then(&shell, &root, |_| Ok(0), |_| Ok(()), |_| Ok(()))
+            })
+        };
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !quitting.is_finished() {
+            assert!(
+                std::time::Instant::now() < until,
+                "Quit waited behind Stop's Intelligence step"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        release.send(()).unwrap();
+        assert_eq!(quitting.join().unwrap(), Stopped::default());
+        assert_eq!(stopping.join().unwrap(), Stopped::default());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn stop_closes_local_eval_before_anything_else_and_reopens_after() {
+        // Closing is process-wide, and Quit's never reopens.
+        if test_support::isolated_process(
+            "tests::stop_closes_local_eval_before_anything_else_and_reopens_after",
+        ) {
+            return;
+        }
+        let root = local_eval_root("openbot-stop-closes-local-eval", None);
+        let shell = Shell::default();
+        let stack = local_eval::StackId::parse("local-abc123").unwrap();
+        let refused = |when: &str| {
+            assert_eq!(
+                local_eval::run_installed(when, local_eval::Action::Start, &stack),
+                Err(local_eval::Failure::Cancelled),
+                "{when}"
+            );
+        };
+        let stopped = stop_everything_then(
+            &shell,
+            &root,
+            |_| {
+                refused("during-cleanup");
+                Ok(0)
+            },
+            |_| Ok(()),
+            |_| {
+                refused("during-intelligence");
+                Ok(())
+            },
+        );
+        assert_eq!(stopped, Stopped::default());
+        assert_eq!(
+            local_eval::run_installed("after-stop", local_eval::Action::Status, &stack),
+            Err(local_eval::Failure::Unavailable)
+        );
+
+        exit_cleanup_then(
+            &shell,
+            &root,
+            |_| {
+                refused("during-quit-cleanup");
+                Ok(0)
+            },
+            |_| Ok(()),
+            |_| Ok(()),
+        );
+        refused("after-quit");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn stop_and_quit_choose_their_own_limits_for_the_real_adapter() {
+        assert_eq!(
+            intelligence_limits(Shutdown::Stop).timeout,
+            local_eval::Limits::for_action(local_eval::Action::Stop).timeout
+        );
+        assert_eq!(
+            intelligence_limits(Shutdown::Quit).timeout,
+            local_eval::Limits::for_quit().timeout
+        );
+        let root = local_eval_root(
+            "openbot-intelligence-step",
+            Some(local_eval_state::Ownership::Created),
+        );
+        for kind in [Shutdown::Stop, Shutdown::Quit] {
+            assert_eq!(
+                intelligence_step(kind)(&root),
+                Err(NO_CLI_LINE
+                    .strip_prefix(INTELLIGENCE_STOP_FAILED)
+                    .unwrap()
+                    .to_owned()),
+                "{kind:?}"
+            );
+            assert_eq!(
+                last_intelligence_timeout(),
+                Some(intelligence_limits(kind).timeout),
+                "{kind:?}"
+            );
+        }
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn production_stop_and_quit_ask_intelligence_with_their_own_limits() {
+        // Quit closes local evaluation for the rest of the process.
+        if test_support::isolated_process(
+            "tests::production_stop_and_quit_ask_intelligence_with_their_own_limits",
+        ) {
+            return;
+        }
+        let root = local_eval_root(
+            "openbot-production-intelligence-wiring",
+            Some(local_eval_state::Ownership::Created),
+        );
+        std::fs::remove_file(root.join("docker-compose.yml")).unwrap();
+        let shell = Shell::default();
+        *shell.root.lock().unwrap() = Some(root.clone());
+
+        let stopped = stop_everything_for(&shell, &root);
+        assert_eq!(
+            stopped,
+            Stopped {
+                openbot: Vec::new(),
+                intelligence: Some(NO_CLI_LINE.into()),
+            }
+        );
+        assert_eq!(
+            last_intelligence_timeout(),
+            Some(local_eval::Limits::for_action(local_eval::Action::Stop).timeout)
+        );
+
+        *shell.root.lock().unwrap() = Some(root.clone());
+        let quit = quit_cleanup(&shell);
+        assert_eq!(quit.lines(), [NO_CLI_LINE]);
+        assert_eq!(
+            last_intelligence_timeout(),
+            Some(local_eval::Limits::for_quit().timeout)
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    fn local_eval_completed(stack: &str) -> local_eval::Report {
+        let listing = serde_json::json!({
+            "version": 1,
+            "command": "local list",
+            "status": "completed",
+            "stacks": [{
+                "id": stack,
+                "installedRelease": "0.13.14",
+                "step": "ready",
+                "urls": {
+                    "api": "http://localhost:64770",
+                    "dashboard": "http://localhost:64771",
+                    "gateway": "ws://localhost:64772"
+                }
+            }]
+        });
+        let listed = local_eval::normalize_list(0, listing.to_string().as_bytes()).unwrap();
+        local_eval::Report {
+            stack: listed.stacks.into_iter().next(),
+            ..local_eval_report(local_eval::Outcome::Completed, None)
+        }
+    }
+
+    #[test]
+    fn a_completed_setup_records_the_stack_as_openbots() {
+        let root = local_eval_root("openbot-local-eval-setup-created", None);
+        let report = set_up_local_eval_at(&root, |folder| {
+            assert_eq!(folder, root.as_path(), "setup runs in the installation");
+            Ok((
+                local_eval_completed("local-67db320bed3f3e893a4f8122"),
+                LOCAL_EVAL_PIN.to_owned(),
+            ))
+        })
+        .unwrap();
+        assert_eq!(report.outcome, local_eval::Outcome::Completed);
+        let state = local_eval_state::read(&root, Some(LOCAL_EVAL_PIN)).unwrap();
+        assert_eq!(state.stack, "local-67db320bed3f3e893a4f8122");
+        assert!(state.tied_to_openbot());
+        assert_eq!(state.phase, local_eval_state::Phase::Installed);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_setup_that_did_not_complete_records_nothing() {
+        let root = local_eval_root("openbot-local-eval-setup-blocked", None);
+        let blocked = local_eval_report(
+            local_eval::Outcome::Blocked,
+            Some(local_eval::Reason::EulaAcceptanceRequired),
+        );
+        let report =
+            set_up_local_eval_at(&root, |_| Ok((blocked, LOCAL_EVAL_PIN.to_owned()))).unwrap();
+        assert_eq!(
+            report.reason,
+            Some(local_eval::Reason::EulaAcceptanceRequired)
+        );
+        assert_eq!(local_eval_state::read(&root, None), None);
+        assert!(matches!(
+            set_up_local_eval_at(&root, |_| Err(local_eval::Failure::Timeout)),
+            Err(SetupError::Failure(local_eval::Failure::Timeout))
+        ));
+        assert_eq!(local_eval_state::read(&root, None), None);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn setting_up_again_keeps_a_stack_openbot_found_shared() {
+        let root = local_eval_root(
+            "openbot-local-eval-setup-shared",
+            Some(local_eval_state::Ownership::Shared),
+        );
+        set_up_local_eval_at(&root, |_| {
+            Ok((
+                local_eval_completed("local-abc123"),
+                LOCAL_EVAL_PIN.to_owned(),
+            ))
+        })
+        .unwrap();
+        assert!(!local_eval_state::read(&root, None)
+            .unwrap()
+            .tied_to_openbot());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_stack_set_up_but_not_recorded_is_said() {
+        let parent = temp_root("openbot-local-eval-setup-unrecorded");
+        std::fs::create_dir_all(&parent).unwrap();
+        // A file where the installation folder should be: nothing can be written inside it.
+        let root = parent.join("not-a-folder");
+        std::fs::write(&root, "").unwrap();
+        let error = set_up_local_eval_at(&root, |_| {
+            Ok((
+                local_eval_completed("local-abc123"),
+                LOCAL_EVAL_PIN.to_owned(),
+            ))
+        })
+        .expect_err("an unrecorded stack would never be stopped with OpenBot");
+        let SetupError::Unrecorded(problem) = error else {
+            panic!("{error:?}");
+        };
+        assert!(problem.said.contains("local evaluation"), "{problem:?}");
+        let _ = std::fs::remove_dir_all(parent);
+    }
+
+    #[test]
+    fn already_configured_shows_the_local_evaluation_only_when_there_is_one() {
+        let root = local_eval_root("openbot-already-configured-local-eval", None);
+        let configured = already_configured_for_root(root.to_string_lossy().into_owned());
+        let json = serde_json::to_value(&configured).unwrap();
+        assert!(json.get("localEval").is_none(), "{json}");
+
+        let stack = local_eval::StackId::parse("local-abc123").unwrap();
+        local_eval_state::begin(
+            &root,
+            &stack,
+            local_eval_state::Ownership::Created,
+            LOCAL_EVAL_PIN,
+        )
+        .unwrap();
+        let configured = already_configured_for_root(root.to_string_lossy().into_owned());
+        let json = serde_json::to_value(&configured).unwrap();
+        assert_eq!(
+            json["localEval"],
+            serde_json::json!({
+                "stack": "local-abc123",
+                "ownership": "created",
+                "phase": "installed"
+            })
+        );
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
