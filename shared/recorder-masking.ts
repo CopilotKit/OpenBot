@@ -905,6 +905,20 @@ const DIGIT_COUNT =
  * A phone number is not among them: "the code we texted to your phone" names a one-time code. */
 const ORDINARY_NUMBER =
   / (?:zip|zipcode|postal|postcode|post code|year|years|yyyy|yy|month|mm|day|dd|date|dob|birth[a-z]*|bday[a-z]*|age|qty|quantity|amount|price|cost|total|count|tip|percent[a-z]*|weight|height|width|length|size|page|sku|product|item|order|tracking|house|street|address[a-z]*|apt|suite|building|floor|unit|extension|ext|country|area|dial[a-z]*|promo[a-z]*|coupon|discount|voucher|gift|referral|invite|currency|number of) /;
+/** Wording that says the field takes something the site just sent the person by text, email or message: "the code we
+ * texted you", "what we sent to your phone", "we've emailed you a code", "the code in the text message". Chromium's autofill
+ * (`ONE_TIME_CODE`: otp, verification code, 2fa, six digit), Bitwarden's `TotpFieldNames` and Proton Pass's `TWO_FA` and
+ * `OTP` dictionaries name the code; none names the delivery, which is all a field like these says. */
+const DELIVERED_TO_PERSON =
+  / (?:(?:we|we ve|we have|we just|we ll|we will|just|was|were|been|has been|have been|that|which|being) (?:just )?(?:sent|texted|txted|emailed|e mailed|messaged|mailed|smsed)|(?:sent|texted|txted|emailed|e mailed|messaged|mailed|delivered) (?:(?:it|this|them|you|a|an|the|code|codes|pin|number|digits|just) )*(?:to (?:you|your|\d)|you |your )|(?:by|via|in (?:the|your|a|an)|from (?:the|your|a|an)|over) (?:text|txt|sms|email|e mail)(?: message)? )/;
+/** What a site sends a person besides a one-time code, by name, which vetoes `DELIVERED_TO_PERSON`: an order, tracking,
+ * invoice or booking number we emailed you is no secret. */
+const ORDINARY_DELIVERED =
+  / (?:invoice|receipt|reference|ref|ticket|case|booking|reservation|itinerary|tracking|order|shipment|parcel|package|link|address|url|how many|how much|items|units|times) /;
+/** A short numeric value, 4 to 8 digits (spaces and dashes aside), the lengths a code field takes: the shape of a one-time
+ * code as typed, and never a phone number. */
+const isCodeValue = (value: string | undefined): boolean =>
+  typeof value === "string" && /^\d{4,8}$/.test(normaliseSecret(value));
 /** A `pattern` that admits digits only (`[0-9]*`, `\d{6}`, `[0-9 ]*`, `^[0-9]{4,8}$`); group 1 and 2 are its length bounds. */
 const DIGITS_PATTERN =
   /^\^?(?:\\d|\[(?:0-9|\\d) ?\])(?:[*+]|\{(\d+)(?:,(\d*))?\})\$?$/;
@@ -947,11 +961,18 @@ const hasCodeShape = (attributes: Record<string, string>): boolean => {
 };
 
 /** A field that takes a one-time code, though it lacks autocomplete=one-time-code: its words name one; or it says "code"
- * (no zip, promo or country code) and asks for a number of digits, has a code's shape or sits on a sign-in page; or it has
- * a code's shape (a short numeric input) or is one numeric box of a code typed a digit per box, and names no ordinary
+ * (no zip, promo or country code) and asks for a number of digits, has a code's shape or sits on a sign-in page; or it says
+ * the site just sent the person what it takes ("the code we texted you", "what we sent to your phone"), names no ordinary
+ * thing sent, and holds 4 to 8 digits, is numeric, takes 4 to 8 characters or sits on a sign-in or verification page; or
+ * it has a code's shape (a short numeric input) or is one numeric box of a code typed a digit per box, and names no ordinary
  * number. Text inputs, text areas and editable regions only. */
 const isOneTimeCodeField = (
-  target: { attributes?: Record<string, string>; label?: string; tag?: string },
+  target: {
+    attributes?: Record<string, string>;
+    label?: string;
+    tag?: string;
+    value?: string;
+  },
   url: string | undefined,
 ): boolean => {
   const attributes = target.attributes ?? {};
@@ -982,6 +1003,23 @@ const isOneTimeCodeField = (
       .slice(0, 2000),
   );
   if (ONE_TIME_CODE_FIELD.test(words)) return true;
+  if (
+    DELIVERED_TO_PERSON.test(words) &&
+    !ORDINARY_DELIVERED.test(words) &&
+    !ORDINARY_NUMBER.test(words) &&
+    words.replace(ORDINARY_CODE, "") === words
+  ) {
+    // A phone field ("we texted a code to this number", type=tel) is no code field: tel is not a code's shape here.
+    const length = Number.parseInt(attributes.maxlength ?? "", 10);
+    if (
+      isCodeValue(target.value) ||
+      attributes.inputmode?.toLowerCase() === "numeric" ||
+      DIGITS_PATTERN.test((attributes.pattern ?? "").trim()) ||
+      (length >= CODE_FIELD_MIN_LENGTH && length <= CODE_FIELD_MAX_LENGTH) ||
+      authFlowUrl(url)
+    )
+      return true;
+  }
   if (!input) return false;
   const shape = hasCodeShape(attributes);
   if (
@@ -997,13 +1035,15 @@ const isOneTimeCodeField = (
   );
 };
 
-/** A field whose value is a secret: a password, a card, a security or one-time code. `context.url` is the page it is on. */
+/** A field whose value is a secret: a password, a card, a security or one-time code. `context.url` is the page it is on;
+ * `target.value`, what it holds, tells a one-time code field that names no code by its shape. */
 export function isSensitiveTarget(
   target: {
     attributes?: Record<string, string>;
     label?: string;
     text?: string;
     tag?: string;
+    value?: string;
   },
   context?: { url?: string },
 ): boolean {
@@ -1064,9 +1104,21 @@ const scrubStrings = (
   return value;
 };
 
+/** A field a person types text into, whose accessible name comes from its label, aria-label or placeholder and never from
+ * what it holds: a text-like input or a text area (an editable region is named by its content). */
+const namedByLabel = (
+  tag: string | undefined,
+  attributes: Record<string, string> | undefined,
+): boolean =>
+  tag?.toLowerCase() === "textarea" ||
+  (tag?.toLowerCase() === "input" &&
+    TEXT_INPUT_TYPES.has((attributes?.type ?? "").toLowerCase()));
+
+/** `context.sensitive`: the content script judged the field sensitive. `context.onSensitive` hears what a field judged
+ * sensitive here held before it was redacted, so the service worker can mask it wherever it appears later. */
 export function maskCollectorEvent(
   event: CapturedEvent,
-  context: { sensitive: boolean },
+  context: { sensitive: boolean; onSensitive?: (typed: string[]) => void },
   options?: MaskOptions,
 ): CapturedEvent | null {
   if (typeof event !== "object" || event === null) return null;
@@ -1079,18 +1131,30 @@ export function maskCollectorEvent(
     const attributes = isObject(target.attributes)
       ? (target.attributes as Record<string, string>)
       : undefined;
-    const label = typeof target.label === "string" ? target.label : undefined;
     const tag = typeof target.tag === "string" ? target.tag : undefined;
+    // CopilotKit's capture gives only a click a label; an edit's field is named by the accessible name the targeting adds,
+    // which for a text field is its label text, so the rule reads the same words for both.
+    const label =
+      typeof target.label === "string"
+        ? target.label
+        : namedByLabel(tag, attributes) && typeof target.name === "string"
+          ? target.name
+          : undefined;
     const url = typeof value.url === "string" ? value.url : undefined;
+    const held =
+      typeof target.value === "string" && target.value !== REDACTED
+        ? target.value
+        : undefined;
     if (
       context.sensitive ||
-      isSensitiveTarget({ attributes, label, tag }, { url })
+      isSensitiveTarget({ attributes, label, tag, value: held }, { url })
     ) {
       // Every copy of the value goes: the live value and text, the value attributes, and any attribute that echoes it.
       const typed = TARGET_VALUE_FIELDS.map((field) => target[field]).filter(
         (item): item is string =>
           typeof item === "string" && item.trim() !== "" && item !== REDACTED,
       );
+      if (typed.length > 0) context.onSensitive?.(typed);
       for (const field of TARGET_VALUE_FIELDS)
         if (field in target) target[field] = REDACTED;
       if (attributes)
@@ -1108,7 +1172,10 @@ export function maskCollectorEvent(
       // value attributes are the field's own copies; any other attribute, and the field's name, goes whole if it holds a
       // stretch of what was typed.
       const typed = target.value;
-      const masked = scrubText(typed, options);
+      // A secret pasted whole is one value, though it holds spaces (a passphrase), and no single word of it matches.
+      const masked = matchesDigest(typed, options)
+        ? REDACTED
+        : scrubText(typed, options);
       if (masked !== typed || masked.includes(REDACTED)) {
         target.value = masked;
         if (typeof target.text === "string" && target.text !== "")

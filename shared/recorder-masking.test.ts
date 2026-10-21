@@ -1108,6 +1108,175 @@ test("ordinary codes and short numbers are not one-time codes: zip, postal, prom
   ).toBe(false);
 });
 
+/** An edit of one of the two code fields on the end-to-end run's security page (its fixture shop's /security), exactly as
+ * the step reached Intelligence in run 1b and on Edge: no autocomplete, no code-like name and no numeric shape; the label
+ * says only that the code was texted, or sent to the phone. */
+const securityPageEdit = (field: {
+  id: string;
+  form: string;
+  label: string;
+  code: string;
+  y: number;
+}) => ({
+  type: "CUSTOM" as const,
+  name: "input",
+  timestamp: 1_792_548_306_243,
+  value: {
+    box: { x: 273, y: field.y, width: 720, height: 40 },
+    url: "http://127.0.0.1:7420/security",
+    page: {
+      url: "http://127.0.0.1:7420/security",
+      title: "Security - Corner Shop admin",
+    },
+    step: "input",
+    route: "/security",
+    target: {
+      tag: "input",
+      name: field.label,
+      role: "textbox",
+      text: "",
+      value: field.code,
+      action: null,
+      inputType: "text",
+      attributes: { id: field.id, type: "text" },
+    },
+    viewport: { width: 1280, height: 860 },
+    eventType: "input",
+    selectors: [
+      { by: "id", selector: `#${field.id}` },
+      { by: "role", selector: `role=textbox[name="${field.label}"]` },
+      { by: "css", selector: `#${field.form} > input` },
+    ],
+  },
+});
+const TEXTED_CODE = {
+  id: "sms",
+  form: "otp-b",
+  label: "Enter the code we texted you",
+  code: "582046",
+  y: 411,
+};
+const PHONE_CODE = {
+  id: "pc",
+  form: "otp-b2",
+  label: "Enter what we sent to your phone",
+  code: "315827",
+  y: 611,
+};
+
+test("the run's codes typed into fields that say only they were texted or sent to the phone lose their value, wherever the step is masked", () => {
+  for (const field of [TEXTED_CODE, PHONE_CODE]) {
+    const heard: string[][] = [];
+    const masked = maskCollectorEvent(securityPageEdit(field), {
+      sensitive: false,
+      onSensitive: (typed) => heard.push(typed),
+    });
+    expect(JSON.stringify(masked)).not.toContain(field.code);
+    expect(at(masked, "target", "value")).toBe(REDACTED);
+    // The field is still named and found as the page drew it.
+    expect(at(masked, "target", "name")).toBe(field.label);
+    expect(at(masked, "selectors", "0", "selector")).toBe(`#${field.id}`);
+    // What it held is handed on, so the service worker masks it in everything after (the save's body and answer).
+    expect(heard).toEqual([[field.code]]);
+  }
+});
+
+test("a field that says what it takes was sent to the person takes a one-time code when it holds 4 to 8 digits, is numeric, takes 4 to 8 characters or sits on a verification page", () => {
+  const sensitive = (
+    label: string,
+    value?: string,
+    attributes: Record<string, string> = { type: "text" },
+    url = "http://127.0.0.1:7420/security",
+  ) => isSensitiveTarget({ tag: "input", attributes, label, value }, { url });
+  // The run's own two fields, as the person typed into them.
+  expect(sensitive(TEXTED_CODE.label, TEXTED_CODE.code)).toBe(true);
+  expect(sensitive(PHONE_CODE.label, PHONE_CODE.code)).toBe(true);
+  expect(sensitive(PHONE_CODE.label, "315 827")).toBe(true);
+  expect(sensitive("We've emailed you a code", "4821")).toBe(true);
+  expect(sensitive("Enter the code from the text message", "90412")).toBe(true);
+  expect(sensitive("Type the number we just texted you", "77310215")).toBe(
+    true,
+  );
+  expect(sensitive("Check your phone for what we sent", "662041")).toBe(true);
+  // Before anything is typed, the field's shape or page says so.
+  expect(
+    sensitive(TEXTED_CODE.label, "", { type: "text", inputmode: "numeric" }),
+  ).toBe(true);
+  expect(
+    sensitive(PHONE_CODE.label, "", { type: "text", maxlength: "6" }),
+  ).toBe(true);
+  expect(
+    sensitive(PHONE_CODE.label, "", { pattern: "[0-9]*" }, "https://x.test/"),
+  ).toBe(true);
+  expect(
+    sensitive(PHONE_CODE.label, "", {}, "https://bank.example.test/verify"),
+  ).toBe(true);
+  // Nothing that says so: an empty field, words, a phone number, a longer number.
+  expect(sensitive(PHONE_CODE.label, "")).toBe(false);
+  expect(sensitive(PHONE_CODE.label, "it never came")).toBe(false);
+  expect(sensitive(TEXTED_CODE.label, "4155551234")).toBe(false);
+  expect(
+    sensitive("We texted a code to this number", "+44 7700 900123", {
+      type: "tel",
+    }),
+  ).toBe(false);
+  // What else a site sends a person is kept: an order, tracking, invoice or booking number, a postcode.
+  expect(sensitive("Enter the order number we emailed you", "1043")).toBe(
+    false,
+  );
+  expect(sensitive("Tracking number sent to your email", "48213377")).toBe(
+    false,
+  );
+  expect(sensitive("Invoice number we sent you", "20931")).toBe(false);
+  expect(sensitive("Booking reference we emailed you", "5521")).toBe(false);
+  expect(sensitive("Zip code we have sent to your phone", "94107")).toBe(false);
+  expect(sensitive("How many items were sent to you", "1200")).toBe(false);
+  // Words that say nothing was sent keep their value.
+  expect(sensitive("Internal memo", "5821")).toBe(false);
+  expect(sensitive("Note to support", "1043")).toBe(false);
+});
+
+test("a passphrase typed into a sensitive field and pasted whole into an ordinary one goes whole, though no word of it matches", () => {
+  const passphrase = "correct horse battery staple";
+  const pasted = {
+    type: "CUSTOM" as const,
+    name: "input",
+    timestamp: 1,
+    value: {
+      url: "http://127.0.0.1:7420/account",
+      target: {
+        tag: "input",
+        name: "Internal memo",
+        text: "",
+        value: passphrase,
+        attributes: { id: "memo", name: "memo", "data-last": passphrase },
+      },
+    },
+  };
+  const masked = maskCollectorEvent(
+    pasted,
+    { sensitive: false },
+    { digests: digestsOf(passphrase) },
+  );
+  expect(at(masked, "target", "value")).toBe(REDACTED);
+  expect(JSON.stringify(masked)).not.toContain("horse");
+  // A memo that only holds words of it, or none, is kept.
+  const other = structuredClone(pasted);
+  other.value.target.value = "battery staple order";
+  other.value.target.attributes["data-last"] = "";
+  expect(
+    at(
+      maskCollectorEvent(
+        other,
+        { sensitive: false },
+        { digests: digestsOf(passphrase) },
+      ),
+      "target",
+      "value",
+    ),
+  ).toBe("battery staple order");
+});
+
 test("a button that names a one-time code keeps its label", () => {
   const event = {
     type: "CUSTOM" as const,

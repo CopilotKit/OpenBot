@@ -58,13 +58,15 @@ const labelText = (field: Element): string => {
   return parts.join(" ").slice(0, LABEL_TEXT_LIMIT);
 };
 
-/** The field as the collector describes it (its tag and every attribute), with its label text: what isSensitiveTarget reads. */
+/** The field as the collector describes it (its tag and every attribute), with its label text and what it holds: what
+ * isSensitiveTarget reads. */
 const describeField = (field: Element) => ({
   tag: field.localName,
   attributes: Object.fromEntries(
     Array.from(field.attributes, ({ name, value }) => [name, value]),
   ),
   label: labelText(field),
+  value: fieldValue(field),
 });
 
 /** A one-time code typed a character per box: a row of 4 to 8 boxes, each one character long. */
@@ -167,7 +169,9 @@ export function createSensitivityTracker(options?: {
       (field instanceof HTMLInputElement && field.type === "password") ||
       describeDemonstrationTarget({ point: null, element: field }).sensitive ||
       // The masking's own rule, with the label text: a one-time code field without autocomplete=one-time-code, by its id,
-      // placeholder, aria-labelledby text, test id or shape, so its value is hashed and masked wherever it reappears.
+      // placeholder, aria-labelledby text, test id or shape, or by a label that says the code was texted or sent to the
+      // person and the digits typed into it, so its value is hashed and masked wherever it reappears. Judged again on every
+      // edit, as the value changes; once sensitive, always sensitive.
       isSensitiveTarget(describeField(field), { url: location.href }) ||
       // One box of a code typed a character per box, with no label: every box's value is masked.
       codeBoxes(field) !== null;
