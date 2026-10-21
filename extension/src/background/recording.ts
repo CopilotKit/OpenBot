@@ -54,7 +54,7 @@ import {
   writeSession,
 } from "../shared/storage";
 import { type AgentEvents, createAgentEvents } from "./agent/events";
-import type { AgentObservation } from "./agent/observation";
+import type { CaptureObservation } from "./agent/observation";
 import { showBadge } from "./badge";
 import {
   type ConnectionLoss,
@@ -967,15 +967,21 @@ export function installRecording(
     steps?.flush();
     steps?.clear();
     agentEvents?.stop();
+    let paired: AgentEvents | null = null;
     const assembler = createStepAssembler({
       emit: (event) => {
         if (steps === assembler) forwardEvent(event);
       },
+      // A click that named no Thread takes the Thread of the run it started, seen while it was held.
+      settle: (tabId, event, owns) =>
+        event.name === "click" && paired
+          ? paired.settleClick(tabId, event, owns)
+          : event,
       pageOf,
       now: deps.now,
     });
     steps = assembler;
-    agentEvents = deps.createAgentEvents({
+    agentEvents = paired = deps.createAgentEvents({
       emit: (tabId, event) => {
         if (steps === assembler) assembler.place(tabId, event);
       },
@@ -2255,11 +2261,15 @@ export function installRecording(
         return { ok: false, error: "not-recording" };
       if (message.type === "recorder.page-agent") {
         // Stream ids are the page's own: the tab and frame keep two documents' apart.
-        const observation = {
-          ...message.observation,
-          tabId,
-          streamId: `${tabId}/page/${sender.frameId ?? 0}/${message.observation.streamId}`,
-        } as AgentObservation;
+        const observation = (
+          message.observation.kind === "runtime"
+            ? { ...message.observation, tabId }
+            : {
+                ...message.observation,
+                tabId,
+                streamId: `${tabId}/page/${sender.frameId ?? 0}/${message.observation.streamId}`,
+              }
+        ) as CaptureObservation;
         network.recordPageAgent(tabId, observation);
         return { ok: true };
       }

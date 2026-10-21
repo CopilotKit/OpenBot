@@ -1,8 +1,13 @@
 // The agent's side of a recording: the AG-UI traffic the network capture observes (observation.ts), turned into exactly
 // the events the CopilotKit SDK emits for the same traffic, so Intelligence cannot tell a Recorder trajectory from a
-// CopilotKit one: `agent.run`, `agent.message` and `tool.call` as CopilotKit's LearningBridge emits them through a legacy
-// sink, `thread.linked` as its authenticated capture sends it, the agent context CopilotKit adds to a click, and
-// `agent.event` for every piece of AG-UI the others leave out (agent-event.ts).
+// CopilotKit one: `thread.linked`, `agent.run`, `agent.message` and `tool.call` as CopilotKit's LearningBridge emits them
+// through a legacy sink, the agent context CopilotKit adds to a click, and `agent.event` for every piece of AG-UI the
+// others leave out (agent-event.ts).
+//
+// LearningBridge links a Thread when a chat opens it (`thread.linked`, reason "open"), once per change of Thread in the
+// page. The network shows a chat's Thread when the page first talks to its agent about it, so a Thread is linked just
+// before its first event in the page, and again only when the page has turned to another Thread in between;
+// `hasMessages` says whether the Thread held messages before the page's new ones.
 //
 // Each Thread of each agent in a tab is an AG-UI agent of its own (thread-agent.ts): a run's request adds the page's new
 // messages to it as CopilotKit adds them before it runs, and the run's events are fed to it as they arrive, whatever the
@@ -26,23 +31,33 @@ import {
 import { createExpressed, type Expressed } from "./agent-event";
 import { finishAgentEvent } from "./mask";
 import type {
-  AgentObservation,
   AgentRunRequest,
   AgentStreamEnd,
   AgentStreamEvent,
+  CaptureObservation,
 } from "./observation";
 import { type FedEvent, ThreadAgent } from "./thread-agent";
 
 export type AgentEvents = {
   /** One observation from the network capture, in the order the capture saw it. */
-  observe(observation: AgentObservation): void;
+  observe(observation: CaptureObservation): void;
   /** A click from a followed tab, before the steps see it: the agent context CopilotKit adds to a click. */
   enrichClick(tabId: number, click: CapturedEvent): CapturedEvent;
+  /** A click as it leaves the steps: one that named no Thread takes the Thread of the run it started, the page's run
+   * request that `owns` (the click's step window) says is the click's. */
+  settleClick(
+    tabId: number,
+    click: CapturedEvent,
+    owns: (at: number) => boolean,
+  ): CapturedEvent;
   /** The tab's top frame reached another page: its open Threads close. */
   tabNavigated(tabId: number): void;
   /** The recording ended: forget everything held. */
   stop(): void;
 };
+
+/** How many of a tab's latest run requests are kept for the clicks still held in their steps. */
+const MAX_RUNS_KEPT = 20;
 
 /** CopilotKit's suggestion tool (`@copilotkit/core` suggestion-engine.ts): a run that forces it is a suggestion run. */
 const SUGGEST_TOOL = "copilotkitSuggest";
@@ -69,6 +84,8 @@ type Run = {
 type Thread = {
   agentId: string | null;
   threadId: string;
+  /** The recording it belongs to: what it emits after that recording stopped goes nowhere. */
+  born: number;
   agent: ThreadAgent;
   /** Each step of the Thread (a request's messages, a run) waits for the one before it to be applied. */
   chain: Promise<void>;
@@ -96,9 +113,14 @@ type Stream = {
 };
 
 type Tab = {
+  /** The tab's page talks to a CopilotKit runtime: its clicks carry the open-Thread context. */
   traffic: boolean;
   /** Threads open in the tab, in the order they opened. */
   open: string[];
+  /** The Thread the page linked last (LearningBridge.lastLinkedThreadId); a new document starts with none. */
+  lastLinked: string | null;
+  /** The page's latest run requests, when each was seen and for which Thread: a click's step window may hold one. */
+  runs: { at: number; threadId: string }[];
   streams: Map<string, Stream>;
   threads: Map<string, Thread>;
   drops: Map<string, number>;
@@ -197,8 +219,6 @@ export function createAgentEvents(options: {
   const expressedByThread = new Map<string, Expressed>();
   /** Intelligence event ids already recorded. */
   const recordedEvents = new Set<string>();
-  /** Threads already linked to the Trajectory (TrajectoryConnection sends one `thread.linked` per Thread). */
-  const linked = new Set<string>();
   /** Bumped when the recording stops: what the library still applies afterwards belongs to no recording and is not
    * emitted. */
   let recording = 0;
@@ -209,6 +229,8 @@ export function createAgentEvents(options: {
       tab = {
         traffic: false,
         open: [],
+        lastLinked: null,
+        runs: [],
         streams: new Map(),
         threads: new Map(),
         drops: new Map(),
@@ -274,6 +296,7 @@ export function createAgentEvents(options: {
     const thread: Thread = {
       agentId,
       threadId,
+      born,
       agent: new ThreadAgent(
         agentId,
         threadId,
@@ -283,19 +306,6 @@ export function createAgentEvents(options: {
             options.emit(
               tabId,
               finishAgentEvent(name, value, at, options.digests()),
-            );
-          },
-          linkThread: (id, at) => {
-            if (born !== recording || linked.has(id)) return;
-            linked.add(id);
-            options.emit(
-              tabId,
-              finishAgentEvent(
-                "thread.linked",
-                { threadId: id },
-                at,
-                options.digests(),
-              ),
             );
           },
           invalid: () => drop(tab, "agent-refused"),
@@ -335,6 +345,35 @@ export function createAgentEvents(options: {
     return stream;
   };
 
+  /** LearningBridge.emitThreadLinked for the Thread the page now talks to its agent about: nothing when it is the Thread
+   * linked last in the page. Decided in the order the page's traffic came; the function it returns sends the link from
+   * inside the Thread's step, so it leaves before the Thread's events that follow. */
+  const linkThread = (
+    tabId: number,
+    tab: Tab,
+    thread: Thread,
+  ): ((hasMessages: boolean, at: number) => void) => {
+    if (tab.lastLinked === thread.threadId) return () => {};
+    tab.lastLinked = thread.threadId;
+    return (hasMessages, at) => {
+      if (thread.born !== recording) return;
+      options.emit(
+        tabId,
+        finishAgentEvent(
+          "thread.linked",
+          {
+            threadId: thread.threadId,
+            agentId: thread.agentId,
+            hasMessages,
+            reason: "open",
+          },
+          at,
+          options.digests(),
+        ),
+      );
+    };
+  };
+
   /** A step of the Thread, after the steps before it; a step the library refuses is counted, never thrown. */
   const step = (tab: Tab, thread: Thread, work: () => void | Promise<void>) => {
     thread.chain = thread.chain.then(work).catch(() => {
@@ -363,8 +402,13 @@ export function createAgentEvents(options: {
   };
 
   /** CopilotKit adds the person's new messages with `addMessage` before it runs (an `agent.message` each), and a frontend
-   * tool's result straight into the history: the request shows both, after what the Thread already holds. */
-  const addPageMessages = (thread: Thread, page: PageRun) => {
+   * tool's result straight into the history: the request shows both, after what the Thread already holds. The page's
+   * `link` goes first, saying whether the Thread held messages before the person's new ones. */
+  const addPageMessages = (
+    thread: Thread,
+    page: PageRun,
+    link: (hasMessages: boolean, at: number) => void,
+  ) => {
     const held = new Set(thread.agent.messages.map(({ id }) => id));
     const carried = expressedOf(thread.threadId).messages;
     const { messages } = page.input;
@@ -379,6 +423,7 @@ export function createAgentEvents(options: {
         break;
       start--;
     }
+    link(start > 0, page.at);
     const typed = messages.slice(start);
     const added = messages
       .slice(0, start)
@@ -398,6 +443,7 @@ export function createAgentEvents(options: {
   };
 
   const startRun = (
+    tabId: number,
     tab: Tab,
     stream: Stream,
     thread: Thread,
@@ -407,6 +453,8 @@ export function createAgentEvents(options: {
     endOpenRun(tab, thread);
     const page = thread.pending;
     thread.pending = null;
+    // A run no request of the page's showed (a channel joined on its own): its Thread shows itself here.
+    const link = page ? null : linkThread(tabId, tab, thread);
     const started = first.event as BaseEvent & {
       runId?: string;
       input?: unknown;
@@ -431,6 +479,7 @@ export function createAgentEvents(options: {
         raw: undefined,
       } satisfies RunInput);
     step(tab, thread, async () => {
+      link?.(thread.agent.messages.length > 0, first.at);
       const resumed = thread.agent.continuationRunIdFor(input);
       const followUp = page?.followUp === true;
       const continuation =
@@ -468,12 +517,18 @@ export function createAgentEvents(options: {
     const thread = threadOf(tabId, tab, request.agentId, input.threadId);
     stream.thread = thread;
     openThread(tab, input.threadId);
-    if (request.method !== "agent/run") return;
+    const link = linkThread(tabId, tab, thread);
+    if (request.method !== "agent/run") {
+      step(tab, thread, () => link(input.messages.length > 0, request.at));
+      return;
+    }
+    tab.runs.push({ at: request.at, threadId: input.threadId });
+    if (tab.runs.length > MAX_RUNS_KEPT) tab.runs.shift();
     // The page started a new run: a run of the Thread still open was cut short.
     endOpenRun(tab, thread);
     const page: PageRun = { input, at: request.at, followUp: false };
     thread.pending = page;
-    step(tab, thread, () => addPageMessages(thread, page));
+    step(tab, thread, () => addPageMessages(thread, page, link));
   };
 
   const onRunStarted = (
@@ -524,7 +579,7 @@ export function createAgentEvents(options: {
       stream.held = { fed, id };
       return;
     }
-    startRun(tab, stream, thread, fed, id);
+    startRun(tabId, tab, stream, thread, fed, id);
   };
 
   const onEvent = (tabId: number, tab: Tab, observation: AgentStreamEvent) => {
@@ -547,7 +602,7 @@ export function createAgentEvents(options: {
         return;
       }
       if (stream.thread)
-        startRun(tab, stream, stream.thread, held.fed, held.id);
+        startRun(tabId, tab, stream, stream.thread, held.fed, held.id);
     }
     const id = eventIdOf(event);
     if (event.type === "RUN_STARTED") {
@@ -572,7 +627,7 @@ export function createAgentEvents(options: {
         stream.events === 1 &&
         stream.thread?.pending
       )
-        startRun(tab, stream, stream.thread, fed, id);
+        startRun(tabId, tab, stream, stream.thread, fed, id);
       else drop(tab, "agent-mid-run");
       return;
     }
@@ -584,7 +639,14 @@ export function createAgentEvents(options: {
     const stream = tab.streams.get(end.streamId);
     if (!stream) return;
     if (stream.held && stream.thread)
-      startRun(tab, stream, stream.thread, stream.held.fed, stream.held.id);
+      startRun(
+        tabId,
+        tab,
+        stream,
+        stream.thread,
+        stream.held.fed,
+        stream.held.id,
+      );
     tab.streams.delete(end.streamId);
     reportDrops(tabId, tab);
   };
@@ -621,7 +683,11 @@ export function createAgentEvents(options: {
             : {
                 toolCallId: toolCall.id,
                 toolName: toolCall.function.name,
-                toolStatus: answered ? "complete" : "inProgress",
+                toolStatus: thread.agent.isExecuting(toolCall.id)
+                  ? "executing"
+                  : answered
+                    ? "complete"
+                    : "inProgress",
               }),
         };
       }
@@ -638,6 +704,8 @@ export function createAgentEvents(options: {
     observe(observation) {
       const tab = tabOf(observation.tabId);
       tab.traffic = true;
+      // The page asked its CopilotKit runtime what it serves: it runs CopilotKit, which is all this says.
+      if (observation.kind === "runtime") return;
       try {
         if (observation.kind === "request")
           onRequest(observation.tabId, tab, observation);
@@ -660,10 +728,21 @@ export function createAgentEvents(options: {
         value: { ...rest, ...clickContext(tab, readTarget(target)) },
       };
     },
+    settleClick(tabId, click, owns) {
+      const value = click.value;
+      if (!isRecord(value) || typeof value.threadId === "string") return click;
+      if (value.threadAmbiguity !== undefined) return click;
+      const run = tabs.get(tabId)?.runs.find(({ at }) => owns(at));
+      return run
+        ? { ...click, value: { ...value, threadId: run.threadId } }
+        : click;
+    },
     tabNavigated(tabId) {
       const tab = tabs.get(tabId);
       if (!tab) return;
       tab.open = [];
+      tab.lastLinked = null;
+      for (const thread of tab.threads.values()) thread.agent.pageGone();
       reportDrops(tabId, tab);
     },
     stop() {
@@ -679,7 +758,6 @@ export function createAgentEvents(options: {
       recordedRuns.clear();
       expressedByThread.clear();
       recordedEvents.clear();
-      linked.clear();
     },
   };
 }

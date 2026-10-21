@@ -23,9 +23,11 @@ import {
   createChannels,
   createHttpStream,
   createSocketReader,
+  isRuntimeInfoAnswer,
   matchRun,
+  matchRuntimeInfoRequest,
+  type PageObservation,
   runChannel,
-  type StreamObservation,
   streamFormat,
 } from "../shared/agui";
 import {
@@ -210,7 +212,7 @@ function createAgentContext(extensionId: string): AgentContext {
 
 function sendObservation(
   context: AgentContext,
-  observation: StreamObservation,
+  observation: PageObservation,
 ): void {
   try {
     const answer = send?.(context.extensionId, {
@@ -233,6 +235,7 @@ function followAgent(
   body: string | undefined,
 ) {
   const match = matchRun(url, method, body);
+  const info = matchRuntimeInfoRequest(url, method, body);
   const stream = createHttpStream({
     streamId: context.nextId(),
     url,
@@ -257,6 +260,24 @@ function followAgent(
     run: match?.kind === "candidate" ? decided : match?.kind === "run",
     /** The answer arrived: read synchronously from here, before the page can read its own copy. */
     response(response: Response): void {
+      if (
+        info &&
+        response.type !== "opaque" &&
+        response.type !== "opaqueredirect"
+      )
+        // CopilotKit's runtime `info` call: when its answer is CopilotKit's RuntimeInfo, the page runs CopilotKit.
+        void response
+          .clone()
+          .text()
+          .then((text) => {
+            if (isRuntimeInfoAnswer(response.status, text))
+              sendObservation(context, {
+                kind: "runtime",
+                url,
+                at: Date.now(),
+              });
+          })
+          .catch(() => {});
       const type = response.headers.get("content-type");
       stream.response(type, response.status);
       settle();

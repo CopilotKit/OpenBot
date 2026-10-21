@@ -268,8 +268,9 @@ export type PageResponse =
   | { ok: true }
   | { ok: false; error: string };
 
-/** An AG-UI observation from the MAIN-world hook (shared/agui.ts StreamObservation): raw, as the debugger's are; the
- * service worker adds the tab and prefixes the stream id with it. */
+/** An AG-UI observation from the MAIN-world hook (shared/agui.ts PageObservation): raw, as the debugger's are; the
+ * service worker adds the tab and prefixes a stream id with it. `runtime` says the page's CopilotKit runtime answered its
+ * `info` call. */
 const streamId = z.string().min(1).max(512);
 const at = z.number().positive().max(MAX_TIMESTAMP_MS);
 const pageAgentObservation = z.discriminatedUnion("kind", [
@@ -300,6 +301,13 @@ const pageAgentObservation = z.discriminatedUnion("kind", [
       streamId,
       at,
       outcome: z.enum(["complete", "failed"]),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("runtime"),
+      at,
+      url: z.string().max(8192),
     })
     .strict(),
 ]);

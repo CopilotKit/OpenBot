@@ -3,8 +3,14 @@
 // them exactly as it does for CopilotKit (chunk expansion, verification, message assembly, state patches, snapshots) and
 // calls its subscribers at the same moments, so the agent events below fire when CopilotKit's do and carry what it
 // carries. The subscriber is CopilotKit's (`@copilotkit/core`): its StateManager's bookkeeping of which run each message
-// belongs to, then its LearningBridge's `agent.run`, `agent.message` and `tool.call`, then TrajectoryConnection's
-// `thread.linked`; after each, `agent.event` carries what those leave out of the AG-UI event (agent-event.ts).
+// belongs to, then its LearningBridge's `agent.run`, `agent.message` and `tool.call`; after each, `agent.event` carries
+// what those leave out of the AG-UI event (agent-event.ts).
+//
+// A frontend tool runs inside the page, where the network cannot see it; what CopilotKit reports of it is read off the
+// traffic the way CopilotKit's own behaviour implies. Its RunHandler runs a tool the page offered in the run's `tools`
+// once the run that called it has finished without a result for it (`tool.call` executing, at that RUN_FINISHED), one
+// call at a time, and when the tool returns it puts the result into the Thread's history, which the page's next run
+// request carries (`tool.call` completed, at that request, before the run it starts).
 import {
   AbstractAgent,
   type AgentStateMutation,
@@ -29,8 +35,6 @@ type Json = AgentEventPayload;
  * out), and when the capture saw what caused it. */
 export type ThreadAgentOutput = {
   emit(name: string, value: Record<string, unknown>, at: number): void;
-  /** A run started in this Thread: TrajectoryConnection links the Thread to the Trajectory once. */
-  linkThread(threadId: string, at: number): void;
   /** The library refused part of a run (a stream that breaks the AG-UI rules): what was left of it is dropped. */
   invalid(error: unknown): void;
 };
@@ -48,6 +52,41 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 /** Text the person or the agent wrote, as LearningBridge reads it: only string content is text. */
 const textOf = (message: Message): string =>
   typeof message.content === "string" ? message.content : "";
+
+/** CopilotKit's FORWARDED_TO_CLIENT (tool-result-content.ts): a runtime's stand-in for a frontend tool's result, which
+ * RunHandler does not count as one. */
+const FORWARDED_TO_CLIENT = "Forwarded to client";
+
+/** CopilotKit's normalizeToolResultContent: a tool result's text, or null when it has none. */
+const resultText = (content: unknown): string | null => {
+  if (typeof content === "string") return content.trim();
+  if (Array.isArray(content)) {
+    const text = content
+      .flatMap((part) =>
+        typeof part === "string"
+          ? [part]
+          : isRecord(part) && typeof part.text === "string"
+            ? [part.text]
+            : [],
+      )
+      .join("")
+      .trim();
+    return text.length > 0 ? text : null;
+  }
+  if (isRecord(content) && typeof content.text === "string")
+    return content.text.trim();
+  return null;
+};
+
+/** A tool's result in the history, as RunHandler counts one: never the runtime's stand-in. */
+const isResultFor = (message: Message, toolCallId: string): boolean =>
+  message.role === "tool" &&
+  message.toolCallId === toolCallId &&
+  resultText(message.content) !== FORWARDED_TO_CLIENT;
+
+/** RunHandler.executeToolHandler: a tool that threw, or whose arguments did not parse, returns `Error: <message>`. */
+const failed = (message: Message): boolean =>
+  typeof message.content === "string" && message.content.startsWith("Error: ");
 
 /** StateManager's `isContinuation`: an input that answers an interrupt, by the standard `resume` or a legacy command. */
 const isContinuation = (
@@ -83,6 +122,20 @@ export class ThreadAgent extends AbstractAgent {
   private readonly messageRuns = new Map<string, string>();
   // CopilotKit LearningBridge.lastRunIds, for this agent.
   private lastRunId: string | undefined;
+  // CopilotKit LearningBridge.toolCalls: the message and run each tool call came from.
+  private readonly toolOrigins = new Map<
+    string,
+    { messageId: string | undefined; runId: string | undefined }
+  >();
+  // CopilotKit LearningBridge.executingTools: the frontend tool the page is running, from when.
+  private readonly executingTools = new Map<
+    string,
+    { name: string; startedAt: number }
+  >();
+  /** Frontend tool calls a finished run left without a result, after the one running: RunHandler runs them in turn. */
+  private waitingTools: { id: string; name: string }[] = [];
+  /** When the run being applied finished (its RUN_FINISHED was seen); undefined while it has not. */
+  private finishedAt: number | undefined;
 
   constructor(
     agentId: string | null,
@@ -123,13 +176,31 @@ export class ThreadAgent extends AbstractAgent {
     );
     if (this.pendingInterrupts.some((interrupt) => !answered.has(interrupt.id)))
       this.pendingInterrupts = [];
-    await this.runAgent({
+    this.finishedAt = undefined;
+    const { newMessages } = await this.runAgent({
       runId: input.runId,
       tools: input.tools ?? [],
       context: input.context ?? [],
       forwardedProps: input.forwardedProps ?? {},
       ...(input.resume === undefined ? {} : { resume: input.resume }),
     });
+    const finishedAt = this.finishedAt;
+    this.finishedAt = undefined;
+    // RunHandler.processAgentResult, once a run the page started has finished: the frontend tools it called and left
+    // without a result run in the page.
+    if (finishedAt !== undefined && requestInput !== undefined)
+      this.runPageTools(newMessages, input.tools ?? [], finishedAt);
+  }
+
+  /** Whether the page is running a frontend tool call (LearningBridge.toolStatus's `executing`). */
+  isExecuting(toolCallId: string): boolean {
+    return this.executingTools.has(toolCallId);
+  }
+
+  /** The page is gone (its tab reached another document): the tools it was running there never finish. */
+  pageGone(): void {
+    this.executingTools.clear();
+    this.waitingTools = [];
   }
 
   /** Messages the page added itself before a run, as CopilotKit adds them: the person's own through `addMessage` (an
@@ -140,6 +211,10 @@ export class ThreadAgent extends AbstractAgent {
     typed: Message[],
     at: number,
   ): void {
+    this.pageToolResults(
+      silent.map(({ message }) => message),
+      at,
+    );
     for (const { message, after } of silent) {
       const index =
         after === null ? -1 : this.messages.findIndex((m) => m.id === after);
@@ -219,6 +294,89 @@ export class ThreadAgent extends AbstractAgent {
     this.output.emit(name, value, this.at);
   }
 
+  /** The frontend tool calls among a finished run's new messages that the page runs: a tool it offered in the run, a
+   * call with no result in the history, not already running or waiting (RunHandler.processAgentResult). */
+  private runPageTools(
+    newMessages: Message[],
+    tools: readonly { name: string }[],
+    at: number,
+  ): void {
+    const offered = new Set(tools.map(({ name }) => name));
+    for (const message of newMessages) {
+      if (message.role !== "assistant") continue;
+      for (const call of message.toolCalls ?? []) {
+        if (
+          !offered.has(call.function.name) ||
+          this.executingTools.has(call.id) ||
+          this.waitingTools.some(({ id }) => id === call.id) ||
+          this.messages.some((other) => isResultFor(other, call.id))
+        )
+          continue;
+        this.waitingTools.push({ id: call.id, name: call.function.name });
+      }
+    }
+    this.nextPageTool(at);
+  }
+
+  /** The next waiting tool call starts once none is running (LearningBridge's `executing`). */
+  private nextPageTool(at: number): void {
+    if (this.executingTools.size > 0) return;
+    const next = this.waitingTools.shift();
+    if (!next) return;
+    this.executingTools.set(next.id, { name: next.name, startedAt: at });
+    this.emitToolCall("executing", next.id, next.name, {}, at);
+  }
+
+  /** The results the page put into the history, as its next run request carries them: each running tool call they
+   * answer is completed (LearningBridge's `completed`), and the next waiting one starts. */
+  private pageToolResults(messages: Message[], at: number): void {
+    for (;;) {
+      const running = this.executingTools.entries().next();
+      if (running.done) return;
+      const [id, { name, startedAt }] = running.value;
+      const result = messages.find((message) => isResultFor(message, id));
+      if (!result) return;
+      this.executingTools.delete(id);
+      this.emitToolCall(
+        "completed",
+        id,
+        name,
+        {
+          durationMs: at - startedAt,
+          outcome: failed(result) ? "error" : "ok",
+        },
+        at,
+      );
+      this.toolOrigins.delete(id);
+      this.nextPageTool(at);
+    }
+  }
+
+  /** LearningBridge.emitToolCall: the call's origin is where TOOL_CALL_START named it. */
+  private emitToolCall(
+    phase: "executing" | "completed",
+    toolCallId: string,
+    toolName: string,
+    extra: { durationMs?: number; outcome?: "ok" | "error" },
+    at: number,
+  ): void {
+    const origin = this.toolOrigins.get(toolCallId);
+    this.output.emit(
+      "tool.call",
+      {
+        phase,
+        toolCallId,
+        toolName,
+        agentId: this.id,
+        threadId: origin ? this.threadId : null,
+        messageId: origin?.messageId,
+        runId: origin?.runId,
+        ...extra,
+      },
+      at,
+    );
+  }
+
   private copilotKitSubscriber(
     builder: ReturnType<typeof createAgentEventBuilder>,
   ): AgentSubscriber {
@@ -261,8 +419,7 @@ export class ThreadAgent extends AbstractAgent {
         else this.subRunId = event.runId || input.runId;
         this.runFinished = false;
         this.activeRun = effective(input);
-        // TrajectoryConnection, then LearningBridge
-        if (event.threadId) this.output.linkThread(event.threadId, this.at);
+        // LearningBridge
         this.lastRunId = event.runId;
         this.emit("agent.run", {
           phase: "started",
@@ -280,6 +437,7 @@ export class ThreadAgent extends AbstractAgent {
       },
       onRunFinishedEvent: ({ event, input }) => {
         this.runFinished = true;
+        this.finishedAt = this.at;
         if (event.outcome?.type === "interrupt" || this.legacyInterrupted)
           this.interrupted = {
             runId: effective(input),
@@ -320,6 +478,10 @@ export class ThreadAgent extends AbstractAgent {
         extra(builder.rest(event));
       },
       onToolCallStartEvent: ({ event }) => {
+        this.toolOrigins.set(event.toolCallId, {
+          messageId: event.parentMessageId,
+          runId: this.lastRunId,
+        });
         this.emit("tool.call", {
           phase: "started",
           toolCallId: event.toolCallId,
@@ -336,7 +498,12 @@ export class ThreadAgent extends AbstractAgent {
         for (const payload of builder.toolCallEnded(event, messages))
           extra(payload);
       },
-      onToolCallResultEvent: ({ event }) => builder.toolCallResult(event),
+      onToolCallResultEvent: ({ event }) => {
+        // LearningBridge forgets a call's origin once it has a result, unless the page is running it.
+        if (!this.executingTools.has(event.toolCallId))
+          this.toolOrigins.delete(event.toolCallId);
+        builder.toolCallResult(event);
+      },
       onTextMessageStartEvent: ({ event }) => extra(builder.rest(event)),
       onTextMessageEndEvent: ({ event }) => extra(builder.rest(event)),
       onReasoningStartEvent: ({ event }) => extra(builder.rest(event)),

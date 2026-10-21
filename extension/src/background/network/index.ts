@@ -11,7 +11,7 @@ import {
   scrubUrl,
 } from "@openbot/shared/recorder-masking";
 import { isRecordablePage } from "../../shared/origin";
-import type { AgentObservation } from "../agent/observation";
+import type { CaptureObservation } from "../agent/observation";
 import type { StepCall } from "../steps";
 import { createAgentCapture } from "./agent";
 import {
@@ -35,7 +35,7 @@ export type NetworkCaptureDeps = {
   status(mode: NetworkMode | "stopped", reason?: string): void;
   digests(): ReadonlySet<string>;
   /** What the capture saw of AG-UI in a followed tab, raw, in the order it saw it (agent/observation.ts). */
-  agent(observation: AgentObservation): void;
+  agent(observation: CaptureObservation): void;
 };
 export type NetworkCapture = {
   start(tabId: number, url: string): Promise<NetworkMode>;
@@ -52,7 +52,7 @@ export type NetworkCapture = {
    * itself (the debugger never sees those either) or fails the screens, else handed to the steps like a debugger call. */
   recordPageEvent(tabId: number, event: CapturedEvent): Promise<void>;
   /** An AG-UI observation the page hook made in a followed tab: handed to the agent events like a debugger one. */
-  recordPageAgent(tabId: number, observation: AgentObservation): void;
+  recordPageAgent(tabId: number, observation: CaptureObservation): void;
   stop(): Promise<void>;
 };
 

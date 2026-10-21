@@ -61,24 +61,58 @@ const POLICY: Record<
   REASONING_END: { carried: [], keys: ["messageId"], when: "always" },
 };
 
-/** Intelligence's own bookkeeping on every event it relays (its event id, sequence and ingest id): not the agent's. */
+/** Intelligence's own bookkeeping (its event id, sequence and ingest id): not the agent's. It rides in the `metadata` of
+ * every event Intelligence relays, and in the `metadata` of each message the page got from it, so a run's history
+ * (RUN_STARTED's `input.messages`, a MESSAGES_SNAPSHOT) carries it too. */
 const INTELLIGENCE_METADATA = /^cpki_/;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
+/** A `metadata` without Intelligence's bookkeeping; undefined when nothing of it remains. */
+const ownMetadata = (
+  metadata: Record<string, unknown>,
+): Record<string, unknown> | undefined => {
+  const kept = Object.fromEntries(
+    Object.entries(metadata).filter(
+      ([key]) => !INTELLIGENCE_METADATA.test(key),
+    ),
+  );
+  return Object.keys(kept).length > 0 ? kept : undefined;
+};
+
+/** A value with Intelligence's bookkeeping taken out of every `metadata` in it, at any depth: a copy wherever something
+ * was taken out, the value itself where nothing was. */
+const withoutIntelligence = (value: unknown): unknown => {
+  if (Array.isArray(value)) {
+    const items = value.map(withoutIntelligence);
+    return items.some((item, index) => item !== value[index]) ? items : value;
+  }
+  if (!isRecord(value)) return value;
+  let out: Record<string, unknown> | null = null;
+  for (const [key, item] of Object.entries(value)) {
+    const kept =
+      key === "metadata" && isRecord(item)
+        ? ownMetadata(withoutIntelligence(item) as Record<string, unknown>)
+        : withoutIntelligence(item);
+    if (kept === item) continue;
+    out ??= { ...value };
+    if (kept === undefined) delete out[key];
+    else out[key] = kept;
+  }
+  return out ?? value;
+};
+
 /** A field of an event that is not the agent's: its own clock (the Trajectory event has one) and Intelligence's
- * bookkeeping in `metadata`. Undefined when nothing of it remains. */
+ * bookkeeping wherever it sits. Undefined when nothing of it remains. */
 const withoutTransport = (
   field: string,
   value: unknown,
 ): unknown | undefined => {
   if (field === "timestamp") return undefined;
-  if (field !== "metadata" || !isRecord(value)) return value;
-  const kept = Object.fromEntries(
-    Object.entries(value).filter(([key]) => !INTELLIGENCE_METADATA.test(key)),
-  );
-  return Object.keys(kept).length > 0 ? kept : undefined;
+  if (field === "metadata" && isRecord(value))
+    return ownMetadata(withoutIntelligence(value) as Record<string, unknown>);
+  return withoutIntelligence(value);
 };
 
 type Pending = {
@@ -94,11 +128,15 @@ export function createAgentEventBuilder(expressed: Expressed) {
   const textOf = (message: Message): string | null =>
     typeof message.content === "string" ? message.content : null;
 
-  /** A message as history carries it: what an earlier event carried taken out, its id and role kept. */
+  /** A message as history carries it: what an earlier event carried taken out, its id and role kept. Intelligence's
+   * bookkeeping in its `metadata` is not the message's, so a message an agent.message already carried is not carried
+   * again for it. */
   const reduceMessage = (
     message: Message,
   ): { message: Record<string, unknown>; carriedBefore: boolean } => {
-    const out: Record<string, unknown> = { ...message };
+    const out = {
+      ...(withoutIntelligence(message) as Record<string, unknown>),
+    };
     const known = expressed.messages.get(message.id);
     const text = textOf(message);
     if (
