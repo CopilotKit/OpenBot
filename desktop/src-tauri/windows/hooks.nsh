@@ -5,6 +5,11 @@
 ; browser's native messaging host key and the one manifest they all point at, which sits beside the app in
 ; %LOCALAPPDATA%\OpenBot. Not on an update, which runs the old uninstaller with /UPDATE; the new version writes them
 ; again when it starts.
+;
+; And what registered the Recorder from its stores with Chrome and Edge (src/recorder_external.rs): each store id's
+; HKCU Extensions key, with which the browser takes the Recorder it installed back out, and Desktop's note of them.
+; There is one DeleteRegKey per store id set in shared/recorder-extension.json, and a test holds the two in step;
+; none while the ids are empty.
 !macro NSIS_HOOK_POSTUNINSTALL
   ${If} $UpdateMode <> 1
     DeleteRegKey HKCU "Software\Google\Chrome\NativeMessagingHosts\ai.copilotkit.openbot.recorder"
@@ -12,6 +17,7 @@
     DeleteRegKey HKCU "Software\Chromium\NativeMessagingHosts\ai.copilotkit.openbot.recorder"
     SetShellVarContext current
     Delete "$LOCALAPPDATA\OpenBot\recorder\ai.copilotkit.openbot.recorder.json"
+    Delete "$LOCALAPPDATA\OpenBot\recorder\recorder-store-extensions.json"
     RMDir "$LOCALAPPDATA\OpenBot\recorder"
     RMDir "$LOCALAPPDATA\OpenBot"
   ${EndIf}

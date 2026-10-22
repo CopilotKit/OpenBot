@@ -23,6 +23,20 @@ fn extension_origin() -> String {
     format!("chrome-extension://{}/", shared("extensionId"))
 }
 
+/// Every origin a manifest allows: the fixed id's, then each store id's that is set and differs.
+fn allowed_origins() -> Value {
+    let store = serde_json::from_str::<Value>(SHARED).unwrap()["storeIds"].clone();
+    let mut origins = vec![extension_origin()];
+    for name in ["chrome", "edge"] {
+        let id = store[name].as_str().unwrap_or_default();
+        let origin = format!("chrome-extension://{id}/");
+        if !id.is_empty() && !origins.contains(&origin) {
+            origins.push(origin);
+        }
+    }
+    json!(origins)
+}
+
 /// A fresh, empty directory standing in for a person's home, removed when dropped.
 struct TempHome(PathBuf);
 
@@ -146,17 +160,36 @@ fn the_install_command_writes_a_manifest_for_the_only_browser_present() {
     let manifest_path = edge
         .join("NativeMessagingHosts")
         .join(format!("{}.json", shared("nativeHost")));
-    assert_eq!(
-        String::from_utf8_lossy(&output.stdout),
-        format!("{}\n", manifest_path.display())
-    );
+    // The Recorder is registered with Edge from Edge Add-ons only once it is published there.
+    let edge_store_id = serde_json::from_str::<Value>(SHARED).unwrap()["storeIds"]["edge"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let external = edge.join("External Extensions");
+    if edge_store_id.is_empty() {
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            format!("{}\n", manifest_path.display())
+        );
+        assert!(!external.exists());
+    } else {
+        let entry = external.join(format!("{edge_store_id}.json"));
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            format!("{}\n{}\n", manifest_path.display(), entry.display())
+        );
+        assert_eq!(
+            serde_json::from_str::<Value>(&std::fs::read_to_string(entry).unwrap()).unwrap(),
+            json!({ "external_update_url": "https://edge.microsoft.com/extensionwebstorebase/v1/crx" })
+        );
+    }
     let manifest: Value =
         serde_json::from_str(&std::fs::read_to_string(&manifest_path).unwrap()).unwrap();
     assert_eq!(
         std::fs::canonicalize(manifest["path"].as_str().unwrap()).unwrap(),
         std::fs::canonicalize(BINARY).unwrap()
     );
-    assert_eq!(manifest["allowed_origins"], json!([extension_origin()]));
+    assert_eq!(manifest["allowed_origins"], allowed_origins());
     assert_eq!(manifest["name"], shared("nativeHost"));
     assert!(!home
         .path()
