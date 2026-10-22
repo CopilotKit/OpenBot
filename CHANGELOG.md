@@ -205,12 +205,21 @@ what you do is recorded.
   (OpenBot Desktop sets it). The local Chrome helper (`scripts/start-local-chrome-computer.ts`) now also
   starts when only Edge is installed.
 - A computer's network rules can allow a site by name on given ports only (`ports` on a domain rule).
+- **Each browser on a shared computer follows its own network policy.** Browsers there now identify
+  themselves to the computer's network filter, so a Bot allowed to reach a service is no longer refused
+  because another browser on that computer is not, and no browser borrows another's allowances.
+- A hosted person's browser says who it is as a hosted Bot's does (no `HeadlessChrome`), but never
+  carries the deployment's Web Bot Auth signature: a person browsing is not the deployment's Bot.
+- A person's browser always runs the Recorder that came with its OpenBot, even in a profile that ran an
+  earlier one, and keeps it pinned to the toolbar once.
+- A Recorder that is slow to answer is refused instead of taking down the computer and every browser
+  on it. Typing on a live screen that records a demonstration reaches the page in the order typed.
 - **Google loads in Bots' browsers again.** Behind the computer's network filter, Google's pages never
   finished loading (Chromium restarts the request for client hints and the restart was lost); the
   computer now launches every filtered browser with that restart switched off.
 - When a page does not open, OpenBot names the site and says it did not load or was refused, instead of
-  showing a browser error, and a slow page says it is slow rather than that the browser could not be
-  reached.
+  showing a browser error, the address bar keeps the address that failed, and a slow page says it is
+  slow rather than that the browser could not be reached.
 - A package can no longer give a Bot an id shaped like `person-` and 32 hex digits.
 - The Recorder times a narrated phrase from its first word when Chrome reuses a result slot; it was
   stamped up to seconds early.
