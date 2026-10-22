@@ -11,6 +11,7 @@ import { parseApprovalContinuation } from "../src/approvals/types";
 import type { AuditEventInput } from "../src/audit";
 import { createComputerGateway } from "../src/computer/gateway";
 import * as headless from "../src/computer/headless-tools";
+import { HeadlessToolsMiddleware } from "@openbot/toolkit/headless-tools";
 import { createTurnRunner, type RunnerLike } from "@openbot/toolkit/run-turn";
 import { serverTurnAdmission } from "../src/agents/turn-admission";
 
@@ -521,6 +522,62 @@ test("remote backend tool results are persisted without executing the client too
   expect(
     persisted.filter((event) => event.type === EventType.TOOL_CALL_RESULT),
   ).toHaveLength(1);
+});
+
+test("a computer tool the caller offers is left to the caller when OpenBot adds plugin tools beside it", async () => {
+  const remote = remoteTurn((input) =>
+    lifecycle(
+      input,
+      toolCall("computer_navigate", '{"url":"https://example.com"}'),
+    ),
+  );
+  let executions = 0;
+  const middleware = new HeadlessToolsMiddleware([
+    {
+      definition: {
+        name: "web_search",
+        description: "Search the public web",
+        parameters: { type: "object", properties: {} },
+      },
+      execute: async () => {
+        executions += 1;
+        return "Results";
+      },
+    },
+  ]);
+  const events: BaseEvent[] = [];
+  await new Promise<void>((resolve, reject) =>
+    middleware
+      .run(
+        {
+          threadId: "thread",
+          runId: "run",
+          messages: [],
+          state: {},
+          context: [],
+          forwardedProps: {},
+          tools: [
+            {
+              name: "computer_navigate",
+              description: "Open a page in the Bot's browser",
+              parameters: { type: "object", properties: {} },
+            },
+          ],
+        },
+        remote.agent,
+      )
+      .subscribe({
+        next: (event) => events.push(event),
+        error: reject,
+        complete: resolve,
+      }),
+  );
+  expect(executions).toBe(0);
+  expect(remote.requests).toHaveLength(1);
+  expect(
+    events.filter((event) => event.type === EventType.TOOL_CALL_RESULT),
+  ).toHaveLength(0);
+  expect(events.at(-1)?.type).toBe(EventType.RUN_FINISHED);
 });
 
 test("unknown computer tool calls become error results rather than commands", async () => {
