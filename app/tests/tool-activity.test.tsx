@@ -245,6 +245,23 @@ test("the summary says what was done, never which provider searched", () => {
   ).toBe("Used Google Drive");
 });
 
+test("a brokered app is summarised as the app, never with its broker's name", () => {
+  const steps = [
+    call("l", "mcp__composio-airtable__AIRTABLE_LIST_BASES", {}, '"x"'),
+    call("s", "mcp__composio-airtable__AIRTABLE_GET_BASE_SCHEMA", {}, '"x"'),
+  ].map(stepDetails);
+  expect(summarise(steps)).toBe("Used Airtable");
+  expect(steps.map((step) => step.label)).toEqual([
+    "List bases",
+    "Get base schema",
+  ]);
+  expect(
+    summarise(
+      [call("a", "mcp__arcade-Gmail__ListEmails", {}, '"x"')].map(stepDetails),
+    ),
+  ).toBe("Used Gmail");
+});
+
 test("a refusal and a failure each count as an issue on the folded line", () => {
   const group: ToolGroup = {
     kind: "tools",
