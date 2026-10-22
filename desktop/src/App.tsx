@@ -139,6 +139,18 @@ function Setup() {
     id: DEFAULT_HARNESS,
   });
   const [model, setModel] = useState<ModelChoice | null>(null);
+  /*
+   * The model as of the latest choice, without waiting for a render.
+   *
+   * Local Intelligence starts OpenBot from its own sequence, a tick after the go-ahead. A choice
+   * made by a click has rendered by then; one made from an effect (a sign-in that finished and moved
+   * on by itself) may not have, and Start ran with the model from before it: null.
+   */
+  const chosenModel = useRef(model);
+  // Follows every other change to the model, once committed; a choice sets it at once (below).
+  useEffect(() => {
+    chosenModel.current = model;
+  }, [model]);
   /** Model credentials a previous run already wrote, so the provider screen arrives filled in. */
   const [alreadyHeld, setAlreadyHeld] = useState<HeldConfiguration>({});
   // A hosted connection somebody chose earlier: a saved key, or their own server's address.
@@ -390,7 +402,7 @@ function Setup() {
     root,
     stack: localStack,
     connected: localConnected,
-    onStart: (startable) => start(model, startable),
+    onStart: (startable) => start(chosenModel.current, startable),
     onRecorded: (stack, connected) => {
       setLocalStack(stack);
       if (connected) setLocalConnected(true);
@@ -1187,6 +1199,7 @@ function Setup() {
           status={localFlow && <LocalStatus sequence={local} />}
           onChoose={(choice) => {
             recordSetupEvent(modelChoiceEvent(choice));
+            chosenModel.current = choice;
             setModel(choice);
             if (localFlow) {
               // The go-ahead: OpenBot starts once Intelligence is ready, wherever it has got to.
