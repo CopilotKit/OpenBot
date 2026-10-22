@@ -8,7 +8,7 @@ import {
   IconPlayerRecordFilled,
 } from "@tabler/icons-react";
 import { useMutation } from "@tanstack/react-query";
-import { type ReactNode, useCallback, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -23,7 +23,6 @@ import {
   startBrowserRecordingMutationOptions,
   stopBrowserRecordingMutationOptions,
 } from "@/lib/browser/mutations";
-import { browserStateQueryOptions } from "@/lib/browser/queries";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
 
@@ -58,6 +57,8 @@ export function elapsed(seconds: number): string {
 
 const actionCount = (actions: number) =>
   `${actions} ${actions === 1 ? "action" : "actions"}`;
+const phraseCount = (phrases: number) =>
+  `${phrases} narrated ${phrases === 1 ? "phrase" : "phrases"}`;
 
 /**
  * Record and Stop for the person's browser, from the Recorder's own report in `state`.
@@ -78,7 +79,6 @@ export function useRecording(
   const seconds = useSecondsSince(
     phase === "recording" ? recorder?.startedAt : undefined,
   );
-  const { counted, keep } = useActionsAtStop(recorder);
   /**
    * Why Record cannot be pressed yet, in a sentence, or null when it can. A Recorder that reports itself disconnected
    * does not hold Record back: the server connects the person's own browser again before it starts (a Disconnect in
@@ -104,7 +104,7 @@ export function useRecording(
     starting: start.isPending || phase === "starting",
     stopping: finishing || stop.isPending || phase === "stopping",
     /** The recording Stop ended last, while nothing else is being recorded: what the page says after Stop. */
-    stopped: stoppedRecording(phase, recorder?.lastStopped, counted),
+    stopped: stoppedRecording(phase, recorder?.lastStopped),
     /** Why Record or Stop was refused, in the server's own sentence, and when it was asked (the latest of the page's
      * failures is the one it shows). */
     error: start.error ?? stop.error,
@@ -127,13 +127,6 @@ export function useRecording(
       setFinishing(true);
       try {
         await beforeStop?.();
-        // The count as Stop is pressed. The page reads it once a second, so an action taken just before Stop may not
-        // have been read yet, and a recording that holds one must not be said to hold nothing. A read that fails leaves
-        // the count the page read last.
-        const now = await queryClient
-          .fetchQuery({ ...browserStateQueryOptions(), retry: false })
-          .catch(() => undefined);
-        keep(now?.recorder);
       } finally {
         setFinishing(false);
       }
@@ -144,51 +137,21 @@ export function useRecording(
 
 export type Recording = ReturnType<typeof useRecording>;
 
-/** A recording's actions as the page last read them while it ran. */
-type Counted = { recordingId: string; actions: number };
-
 /**
- * The Recorder's count of the person's actions in the recording running now, as the page last read it, kept once it
- * stops: the Recorder's report after Stop counts nothing (its count is the live recording's), so this is the only way
- * the page knows what the recording it stopped held. `keep` takes a report the page read for itself (at Stop). A count
- * never goes down within one recording, so a report read earlier never lowers one read later.
- */
-function useActionsAtStop(recorder: LauncherState | undefined) {
-  const [counted, setCounted] = useState<Counted | null>(null);
-  const keep = useCallback((report: LauncherState | undefined) => {
-    const recordingId =
-      report?.phase === "recording" || report?.phase === "stopping"
-        ? report.recordingId
-        : undefined;
-    if (!report || recordingId === undefined) return;
-    setCounted((kept) =>
-      kept?.recordingId === recordingId && kept.actions >= report.actions
-        ? kept
-        : { recordingId, actions: report.actions },
-    );
-  }, []);
-  useEffect(() => keep(recorder), [keep, recorder]);
-  return { counted, keep };
-}
-
-/**
- * The recording Stop ended last, while nothing else is being recorded, and whether it held nothing: the page read it
- * running and it never counted an action. The Recorder names such a recording as sent all the same (the fourth
- * end-to-end run: two recordings that followed only the tab Record started in reached Intelligence with no steps after
- * the person switched tabs, and the page said both were saved). A recording now follows every tab the person uses, so
- * one holds nothing when nothing was done on a website while it ran. One the page never saw running (stopped from the
- * Recorder's own button while the page was closed) is taken as the Recorder reports it.
+ * The recording Stop ended last, while nothing else is being recorded, and whether it held nothing: the Recorder
+ * counted none of the person's actions in it and kept none of their narrated phrases. Read from the Recorder's own
+ * report, which names what it held, so a reload says the same. The fourth end-to-end run saw recordings with no steps
+ * said to be saved; the fifth saw one of narration alone said to hold nothing, from the only count the page had then,
+ * the actions it read while the recording ran.
  */
 function stoppedRecording(
   phase: LauncherState["phase"],
   lastStopped: LauncherState["lastStopped"],
-  counted: Counted | null,
 ) {
   if (phase !== "idle" || !lastStopped) return undefined;
   return {
     ...lastStopped,
-    empty:
-      counted?.recordingId === lastStopped.recordingId && counted.actions === 0,
+    empty: lastStopped.actions === 0 && lastStopped.phrases === 0,
   };
 }
 
@@ -199,11 +162,18 @@ type Stopped = NonNullable<ReturnType<typeof stoppedRecording>>;
 const WHAT_IT_RECORDS =
   "The Recorder records your clicks, typing and the pages you open on websites, in every tab you use while it records.";
 
+/** What a saved recording held: its actions, and its narrated phrases when there were any. */
+function heldIn(stopped: Stopped): string {
+  return stopped.phrases > 0
+    ? `${actionCount(stopped.actions)} and ${phraseCount(stopped.phrases)}`
+    : actionCount(stopped.actions);
+}
+
 /** What the page says once Stop ended a recording, naming it. */
 function stoppedSentence(stopped: Stopped): string {
   return stopped.empty
     ? `Nothing was recorded in “${stopped.title}”. ${WHAT_IT_RECORDS}`
-    : `Saved “${stopped.title}” to your Learning space.`;
+    : `Saved “${stopped.title}” to your Learning space: ${heldIn(stopped)}.`;
 }
 
 function StoppedIcon({
@@ -228,7 +198,7 @@ function StoppedIcon({
 
 /**
  * The recording Stop ended last, by name, on a page of rows (OpenBot Desktop), until the next one starts: Stop says
- * where the recording went, as the Recorder's own popup does, or that it held nothing.
+ * where the recording went and what it held, or that it held nothing.
  */
 export function StoppedRow({ stopped }: { stopped: Stopped }) {
   return (
@@ -241,7 +211,7 @@ export function StoppedRow({ stopped }: { stopped: Stopped }) {
         <ItemDescription className="line-clamp-none">
           {stopped.empty
             ? `Nothing was recorded. ${WHAT_IT_RECORDS}`
-            : "Saved to your Learning space."}
+            : `Saved to your Learning space: ${heldIn(stopped)}.`}
         </ItemDescription>
       </ItemContent>
     </Item>
