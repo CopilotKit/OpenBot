@@ -35,6 +35,13 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   request for an administrator to switch on a work app, grant it to a Bot, or connect a Shared app's
   team account is kept, with who answered it and when. It starts empty and nothing is backfilled.
 
+### A Bot with an app or web research can use its browser in a conversation again
+
+A Bot that held any app or research tool, such as Parallel Search, could not open a page, click or
+type in a conversation: every browser and computer step came back as unavailable, and the Bot
+fetched the page some other way instead. Its browser now works beside those tools, as it does for a
+Bot that holds none. Routines and other unattended turns are unchanged.
+
 ### Plainer words, and one word for each thing
 
 OpenBot now says **Bot** everywhere a person reads it, where screens used to mix Bot, agent, coworker
