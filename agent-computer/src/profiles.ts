@@ -216,6 +216,14 @@ console.info(
 const CLOSE_SETTLE_MS = 2_000;
 
 /**
+ * How long a change of the page in front of a person's browser waits before it is logged. A person
+ * who closes their browser's window, or quits it, closes its tabs one after another, each making the
+ * next the page in front, and none of those is a change the browser stays open for. A quit of Google
+ * Chrome 156 (headless, three tabs) closed the tabs within 20 ms and the browser within 60 ms.
+ */
+const PAGE_CHANGE_SETTLE_MS = 500;
+
+/**
  * How long telling a viewer its browser went away may take before the close carries on without it.
  *
  * The close is what has to happen; the announcement is courtesy. Unbounded, one screencast that will
@@ -624,13 +632,18 @@ export function createProfiles(
     const bringForward = (next: Page) => {
       if (next === record.page) return;
       record.page = next;
-      console.info(
-        JSON.stringify({
-          type: "computer-page-changed",
-          botId,
-          url: next.url(),
-        }),
-      );
+      // In front at once; said once the browser has stayed open with it in front.
+      setTimeout(() => {
+        if (live.get(botId) !== record || record.page !== next) return;
+        if (next.isClosed() || !context.browser()?.isConnected()) return;
+        console.info(
+          JSON.stringify({
+            type: "computer-page-changed",
+            botId,
+            url: next.url(),
+          }),
+        );
+      }, PAGE_CHANGE_SETTLE_MS).unref();
     };
     record.retarget = () => {
       if (

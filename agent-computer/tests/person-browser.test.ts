@@ -1036,8 +1036,27 @@ for (const variant of VARIANTS) {
           open: false,
           tabs: [],
         });
-        await wait(500);
+        await wait(1_000);
         expect(pageChanges()).toBe(closing);
+
+        // Nor when the person quits the browser themselves, which closes its tabs one by one too.
+        await api("/browser/open", { connection: CONNECTION });
+        for (const name of ["four", "five", "six"])
+          await api("/browser/tabs", {
+            action: "new",
+            url: `${ORIGIN}/page/${name}`,
+          });
+        await wait(1_000);
+        const quitting = pageChanges();
+        const person = profiles.person(PERSON);
+        if (!person) throw new Error("The browser should be open.");
+        await person.session.send("Browser.close").catch(() => undefined);
+        await until(
+          () => !profiles.isLive(PERSON),
+          "the browser to count as closed",
+        );
+        await wait(1_000);
+        expect(pageChanges()).toBe(quitting);
       } finally {
         said.mockRestore();
         await api("/browser/open", { connection: CONNECTION });
