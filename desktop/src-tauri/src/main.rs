@@ -676,20 +676,36 @@ async fn engine_ready(app: &tauri::AppHandle) -> Result<engine::Address, Problem
         None,
     );
     let telemetry_app = app.clone();
+    let progress_app = app.clone();
     let installed = tauri::async_runtime::spawn_blocking(move || {
-        install::install_engine_observed(&stack::default_root(), |success| {
-            desktop_telemetry::record(
-                &telemetry_app,
-                telemetry::EventData::EngineInstalled {
-                    engine: telemetry::Engine::Podman,
-                    outcome: if success {
-                        telemetry::EngineInstallOutcome::Success
-                    } else {
-                        telemetry::EngineInstallOutcome::Failure
+        install::install_engine_observed(
+            &stack::default_root(),
+            |engine, success| {
+                desktop_telemetry::record(
+                    &telemetry_app,
+                    telemetry::EventData::EngineInstalled {
+                        engine: match engine {
+                            engine::Engine::Docker => telemetry::Engine::Docker,
+                            engine::Engine::Podman => telemetry::Engine::Podman,
+                        },
+                        outcome: if success {
+                            telemetry::EngineInstallOutcome::Success
+                        } else {
+                            telemetry::EngineInstallOutcome::Failure
+                        },
                     },
-                },
-            );
-        })
+                );
+            },
+            // Starting or installing Docker Desktop takes minutes; each line says where it is.
+            &mut |progress| {
+                report_running(
+                    &progress_app,
+                    "install-engine",
+                    progress.said,
+                    progress.downloaded,
+                )
+            },
+        )
     })
     .await
     .map_err(|error| {
