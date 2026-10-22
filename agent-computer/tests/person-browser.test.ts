@@ -931,6 +931,40 @@ for (const variant of VARIANTS) {
       60_000,
     );
 
+    test("says the page in front changed when a tab closes, and not for every tab as the browser closes", async () => {
+      // The fifth end-to-end run: after a close, both computers logged `computer-page-changed` for
+      // each tab as it went.
+      const said = spyOn(console, "info");
+      const pageChanges = () =>
+        said.mock.calls.filter(([line]) =>
+          String(line).includes('"computer-page-changed"'),
+        ).length;
+      try {
+        for (const name of ["one", "two", "three"])
+          await api("/browser/tabs", {
+            action: "new",
+            url: `${ORIGIN}/page/${name}`,
+          });
+        // The browser stays open while the tab in front closes: the one now in front is a change.
+        const three = activeTab(await state());
+        if (!three) throw new Error("A tab should be in front.");
+        const before = pageChanges();
+        await api("/browser/tabs", { action: "close", tabId: three.id });
+        await until(() => pageChanges() > before, "the page change");
+
+        const closing = pageChanges();
+        expect((await api("/browser/close", {})).json).toEqual({
+          open: false,
+          tabs: [],
+        });
+        await wait(500);
+        expect(pageChanges()).toBe(closing);
+      } finally {
+        said.mockRestore();
+        await api("/browser/open", { connection: CONNECTION });
+      }
+    }, 60_000);
+
     test("closes, opens nothing until asked, and opens again with the Recorder", async () => {
       expect(await api("/browser/close", {})).toEqual({
         status: 200,

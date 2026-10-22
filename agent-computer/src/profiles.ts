@@ -646,8 +646,11 @@ export function createProfiles(
       if (next) bringForward(next);
     };
     const closed = () => {
+      // A browser being closed closes its tabs one by one, and none of them is a page change: a
+      // close takes the browser out of `live` before it closes it.
+      if (live.get(botId) !== record) return;
       record.retarget();
-      if (live.get(botId) === record && windowPages(context).length === 0)
+      if (windowPages(context).length === 0)
         void evict(botId, "its last window was closed");
     };
     const follow = (opened: Page) => {
@@ -796,6 +799,14 @@ export function createProfiles(
             }),
           );
         };
+        /*
+         * A page that closes while the browser stays open moves the record on. One closing because the
+         * browser is being closed (out of `live` already) moves nothing: it is not a page change, and
+         * saying so for every tab as it went only filled the log.
+         */
+        const closed = () => {
+          if (live.get(botId) === record) record.retarget();
+        };
         // Without this the Bot stays pinned to the page it launched with, so a sign-in the site opens
         // in a new window is neither shown to the person taking the wheel nor reachable by input.
         context.on("page", (opened) => {
@@ -803,9 +814,9 @@ export function createProfiles(
           record.retarget();
           // A popup closes itself when it succeeds, and the record must move back to the opener
           // rather than leave a closed page to be read as a dead browser.
-          opened.on("close", () => record.retarget());
+          opened.on("close", closed);
         });
-        page.on("close", () => record.retarget());
+        page.on("close", closed);
         live.set(botId, record);
         // After the new one is in the map, so the cap counts what is really running and the Bot that
         // just asked is the most recently used and therefore never the one closed.
