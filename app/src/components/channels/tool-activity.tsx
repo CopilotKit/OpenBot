@@ -10,7 +10,12 @@ import { useCallback, useContext, useMemo, useSyncExternalStore } from "react";
 import { Streamdown } from "streamdown";
 import { PendingApprovals } from "@/components/approvals/inline-approval";
 import { markdownComponents } from "@/lib/markdown";
-import { humanise, ownToolLabel, readToolName } from "@/lib/plugins/tool-name";
+import {
+  connectorName,
+  humanise,
+  ownToolLabel,
+  readToolName,
+} from "@/lib/plugins/tool-name";
 import {
   asText,
   forDisplay,
@@ -194,15 +199,6 @@ function hostOf(url: string): string {
   } catch {
     return url;
   }
-}
-
-/** "google-drive" as "Google Drive". */
-function connectorName(key: string): string {
-  return key
-    .split(/[-_]/)
-    .filter(Boolean)
-    .map((word) => word[0]?.toUpperCase() + word.slice(1))
-    .join(" ");
 }
 
 /** A value from a tool's arguments, short enough for one line. */
