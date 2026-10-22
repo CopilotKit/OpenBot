@@ -22,8 +22,9 @@ const { LocalIntelligence } = await import("./LocalIntelligence");
 
 beforeAll(() => GlobalRegistrator.register());
 afterEach(() => {
-  invokeCalls = [];
+  // Unmounting cancels a running step, so clear the record after it.
   cleanup();
+  invokeCalls = [];
 });
 afterAll(() => GlobalRegistrator.unregister());
 
@@ -94,7 +95,7 @@ function view(
     connected?: boolean;
     auto?: boolean;
     onStart?: (startable: Startable) => Promise<boolean>;
-    onLeave?: () => void;
+    onCancel?: () => void;
     pollDelays?: number[];
   } = {},
 ) {
@@ -105,7 +106,7 @@ function view(
       connected={props.connected ?? false}
       developer={props.developer ?? false}
       auto={props.auto ?? true}
-      onLeave={props.onLeave ?? (() => {})}
+      onCancel={props.onCancel}
       onStart={props.onStart ?? (async () => true)}
       pollDelays={props.pollDelays ?? [0, 0, 0]}
     />,
@@ -455,16 +456,29 @@ test("without auto, nothing runs until Start OpenBot is chosen", async () => {
   await waitFor(() => expect(started).toEqual([startableUrls]));
 });
 
-test("the hosted service is one quiet link away", async () => {
+test("with onCancel, Cancel stops the CLI call and hands back to the choice", async () => {
+  const pending = deferred<LocalReport>();
+  invokeHandler = async (command) => {
+    if (command === "set_up_local_eval") return pending.promise;
+    if (command === "cancel_local_eval") {
+      pending.reject("cancelled");
+      return null;
+    }
+    throw new Error(`unexpected ${command}`);
+  };
+  let cancelled = 0;
+  const screen = view({ onCancel: () => cancelled++ });
+  await userEvent.click(await screen.findByRole("button", { name: "Cancel" }));
+  expect(cancelled).toBe(1);
+  expect(commands()).toEqual(["set_up_local_eval", "cancel_local_eval"]);
+  expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+});
+
+test("the running screen offers no way to the hosted service", async () => {
   invokeHandler = answers({ set_up_local_eval: [blockedOnTerms] });
-  let left = 0;
-  const screen = view({ onLeave: () => left++ });
-  await userEvent.click(
-    screen.getByRole("button", {
-      name: "Use CopilotKit's hosted service instead",
-    }),
-  );
-  expect(left).toBe(1);
+  const screen = view();
+  await screen.findByRole("button", { name: "Retry" });
+  expect(screen.queryByRole("button", { name: /hosted/ })).toBeNull();
 });
 
 test("failures arrive as categories, and a stack that could not be recorded as a problem", async () => {

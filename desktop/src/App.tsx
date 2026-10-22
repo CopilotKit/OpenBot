@@ -9,7 +9,12 @@ import {
   HarnessPicker,
 } from "./HarnessPicker";
 import { isHttpEndpointUrl } from "./http-endpoint-url";
-import { LocalIntelligence, type LocalStartable } from "./LocalIntelligence";
+import {
+  IntelligenceChoice,
+  type IntelligenceMode,
+  LocalIntelligence,
+  type LocalStartable,
+} from "./LocalIntelligence";
 import {
   intelligenceStopProblem,
   listLocalEval,
@@ -93,10 +98,15 @@ export function App() {
   // Offered only when this build has an Intelligence CLI to run; a local stack is its own mode,
   // not another setup step.
   const [localAvailable, setLocalAvailable] = useState(false);
-  // Null until somebody chooses; then local is the default where it is available.
-  const [intelligenceChoice, setIntelligenceMode] = useState<
-    "hosted" | "local" | null
-  >(null);
+  // Null until somebody presses Continue on the choice, or a recorded local stack implies it.
+  // Held per root in memory, so returning to step 4 does not ask again.
+  const [intelligenceChoice, setIntelligenceMode] =
+    useState<IntelligenceMode | null>(null);
+  // The choice screen's selection, before Continue commits it.
+  const [pickedIntelligence, setPickedIntelligence] =
+    useState<IntelligenceMode | null>(null);
+  // Continue chose local in this window: that click is the go-ahead, wherever step 4 is reached.
+  const [localContinued, setLocalContinued] = useState(false);
   const [localStack, setLocalStack] = useState<string | null>(null);
   const [localConnected, setLocalConnected] = useState(false);
   // A relaunch found a connected stack it may start, as a hosted launch resumes.
@@ -123,9 +133,12 @@ export function App() {
   const hostedChosen =
     Boolean(alreadyHeld.saved?.intelligenceApiKey) ||
     Boolean(alreadyHeld.INTELLIGENCE_API_URL);
+  // Before a choice, the preselection: local only when the CLI answered and nothing hosted is saved.
   const intelligenceMode =
     intelligenceChoice ??
     (localAvailable && !hostedChosen ? "local" : "hosted");
+  // Step 4 asks first, and runs nothing until Continue.
+  const choosingIntelligence = localAvailable && intelligenceChoice === null;
   const [projects, setProjects] = useState<
     { id: string; name: string }[] | null
   >(null);
@@ -263,6 +276,25 @@ export function App() {
     }
   }
 
+  function chooseIntelligence(mode: IntelligenceMode | null) {
+    setIntelligenceMode(mode);
+    setLocalContinued(mode === "local");
+  }
+
+  function continueWithIntelligence() {
+    const mode = pickedIntelligence ?? intelligenceMode;
+    chooseIntelligence(mode);
+    // Hosted begins at the sign-in, unless a connection is already saved to be checked at Start.
+    if (
+      mode === "hosted" &&
+      !hostedChosen &&
+      !apiKey.trim() &&
+      !reuseIntelligence
+    ) {
+      void signInToCopilotKit();
+    }
+  }
+
   const [step, setStep] = useState<SetupStep>("welcome");
   const [apiUrl, setApiUrl] = useState(MANAGED_INTELLIGENCE_API_URL);
   const [wsUrl, setWsUrl] = useState(MANAGED_INTELLIGENCE_GATEWAY_WS_URL);
@@ -366,6 +398,8 @@ export function App() {
     setApiKey("");
     setReuseIntelligence(false);
     setIntelligenceMode(null);
+    setPickedIntelligence(null);
+    setLocalContinued(false);
     setLocalStack(null);
     setLocalConnected(false);
     setLocalAutoStart(false);
@@ -641,12 +675,11 @@ export function App() {
       setSteps((current) => settleProgress(current));
       setRunning(true);
       setRecoveryFailure(null);
-      // Refreshing credentials does not turn an existing installation into a first run. A local
-      // stack has already reported itself ready, so it is shown as the hosted reopen is.
+      // Refreshing credentials does not turn an existing installation into a first run. A first
+      // local run asks its question too: Intelligence reporting ready says nothing about the model.
       if (
         savedLaunch.current === installationKey ||
-        organizationAuthorityUrl?.trim() ||
-        local
+        organizationAuthorityUrl?.trim()
       ) {
         savedLaunch.current = installationKey;
         setStep("connect");
@@ -1007,20 +1040,29 @@ export function App() {
   }
 
   // Local Intelligence runs its own steps and starts OpenBot only once its CLI reports it ready.
-  const localIntelligence = (auto: boolean) => (
+  const localIntelligence = (auto: boolean, onCancel?: () => void) => (
     <LocalIntelligence
       root={root}
       stack={localStack}
       connected={localConnected}
       auto={auto}
-      onStart={(local) => start(model, local)}
+      onStart={async (local) => {
+        const started = await start(model, local);
+        // Continue's go-ahead is spent once OpenBot starts; reopening waits for Start again.
+        if (started) setLocalContinued(false);
+        return started;
+      }}
       onConnected={(stack) => {
         setLocalStack(stack);
         setLocalConnected(true);
       }}
-      onLeave={() => setIntelligenceMode("hosted")}
+      onCancel={onCancel}
     />
   );
+
+  // On step 4 the local sequence replaces the hosted form, once local is chosen.
+  const localSequenceShown =
+    !running && !choosingIntelligence && intelligenceMode === "local";
 
   if (!running && returningToInstallation && !refreshIntelligence) {
     return (
@@ -1053,7 +1095,11 @@ export function App() {
           type="button"
           className="quiet"
           disabled={busy}
-          onClick={() => setRefreshIntelligence(true)}
+          onClick={() => {
+            // Changing it asks again where Intelligence runs.
+            chooseIntelligence(null);
+            setRefreshIntelligence(true);
+          }}
         >
           Change CopilotKit connection
         </button>
@@ -1107,32 +1153,44 @@ export function App() {
         <h1>
           {running && !displayedFailure
             ? "OpenBot is running"
-            : intelligenceMode === "local" && !running
-              ? "Starting OpenBot on this computer"
-              : returningToInstallation
-                ? "Refresh your CopilotKit connection"
-                : "Connect to CopilotKit"}
+            : choosingIntelligence && !running
+              ? "Choose where Intelligence runs"
+              : intelligenceMode === "local" && !running
+                ? "Starting OpenBot on this computer"
+                : returningToInstallation
+                  ? "Refresh your CopilotKit connection"
+                  : "Connect to CopilotKit"}
         </h1>
         <p className="lede">
           {running && !displayedFailure
             ? "The stack is up. OpenBot is in this window; the menu bar has it too, and stops it."
-            : intelligenceMode === "local" && !running
-              ? "Intelligence runs on this computer in Docker Desktop. The Intelligence CLI sets it up and manages it."
-              : returningToInstallation
-                ? "Update this connection to reopen your existing OpenBot."
-                : "Local installation is complete. Connect CopilotKit, then start OpenBot."}
+            : choosingIntelligence && !running
+              ? "OpenBot keeps your conversations in CopilotKit Intelligence. Nothing is set up until you continue."
+              : intelligenceMode === "local" && !running
+                ? "Intelligence runs on this computer in Docker Desktop. The Intelligence CLI sets it up and manages it."
+                : returningToInstallation
+                  ? "Update this connection to reopen your existing OpenBot."
+                  : "Local installation is complete. Connect CopilotKit, then start OpenBot."}
         </p>
 
-        {/* Reaching this step with a model chosen is the go-ahead, unless a run was interrupted. */}
-        {!running &&
-          intelligenceMode === "local" &&
+        {!running && choosingIntelligence && (
+          <IntelligenceChoice
+            chosen={pickedIntelligence ?? intelligenceMode}
+            onChoose={setPickedIntelligence}
+          />
+        )}
+
+        {/* Continue on the choice is the go-ahead. A recorded stack implies it, unless a run was
+          interrupted; reopening an installation waits for Start. Cancel goes back to the choice. */}
+        {localSequenceShown &&
           localIntelligence(
-            !returningToInstallation &&
-              !interruptedAtLaunch.current &&
-              modelCanStart(),
+            modelCanStart() &&
+              (localContinued ||
+                (!returningToInstallation && !interruptedAtLaunch.current)),
+            () => chooseIntelligence(null),
           )}
 
-        {!running && intelligenceMode === "hosted" && (
+        {!running && !choosingIntelligence && intelligenceMode === "hosted" && (
           <fieldset className="connection-form" disabled={busy}>
             {/*
             Sign in on the main path; paste behind the disclosure.
@@ -1382,9 +1440,10 @@ export function App() {
               <button
                 type="button"
                 className="quiet"
-                onClick={() => setIntelligenceMode("local")}
+                disabled={signingIn}
+                onClick={() => chooseIntelligence(null)}
               >
-                Run Intelligence on this computer
+                Choose where Intelligence runs
               </button>
             )}
           </fieldset>
@@ -1394,7 +1453,7 @@ export function App() {
 
         {displayedFailure && <Failure problem={displayedFailure} />}
 
-        {!running && !returningToInstallation && (
+        {!running && !returningToInstallation && !localSequenceShown && (
           <details>
             <summary>Installation options</summary>
             <button
@@ -1456,6 +1515,10 @@ export function App() {
                 Stop OpenBot
               </button>
             </>
+          ) : choosingIntelligence ? (
+            <button type="button" onClick={continueWithIntelligence}>
+              Continue
+            </button>
           ) : intelligenceMode === "local" ? null : (
             <button
               type="button"
