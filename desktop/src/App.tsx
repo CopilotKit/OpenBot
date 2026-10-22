@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Ask, PRESET_QUESTIONS } from "./Ask";
+import { Ask } from "./Ask";
 import { DatabaseReset } from "./DatabaseReset";
 import {
   DEFAULT_HARNESS,
@@ -1153,7 +1153,6 @@ function Setup() {
     return (
       <main>
         <Ask
-          suggestion={PRESET_QUESTIONS[0]}
           local={localFlow}
           stepLabel={localFlow ? "Step 3 of 3" : undefined}
           onAsk={(question) =>
