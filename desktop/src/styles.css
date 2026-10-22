@@ -237,29 +237,31 @@ button.text-link:hover:not(:disabled) {
   opacity: 1;
 }
 
-/* Questions to try on the last screen: small pills that fill the box, not answers of their own. */
-ul.presets {
-  list-style: none;
-  margin: 0 0 0.5rem;
-  padding: 0;
+/* The last screen's question box, with the button that swaps in another question beside it. */
+.field-with-action {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem;
+  gap: 0.5rem;
 }
 
-button.preset {
+.field-with-action input {
+  flex: 1;
+  min-width: 0;
+}
+
+button.another-question {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
+  padding: 0;
   background: var(--raised);
   color: var(--ink-soft);
   border: 1px solid var(--hair);
-  border-radius: 999px;
-  padding: 0.3rem 0.75rem;
-  font-size: 0.8rem;
-  font-weight: 400;
-  text-align: left;
+  border-radius: var(--r-row);
 }
 
-button.preset:hover:not(:disabled),
-button.preset[aria-pressed="true"] {
+button.another-question:hover:not(:disabled) {
   color: var(--ink);
   border-color: var(--ink-faint);
   opacity: 1;

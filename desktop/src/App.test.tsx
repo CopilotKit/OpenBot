@@ -69,6 +69,7 @@ mock.module("./Mark", () => ({
 }));
 
 const { App } = await import("./App");
+const { PRESET_QUESTIONS } = await import("./Ask");
 const { ShuttingDownWindow, isShuttingDownPage } = await import(
   "./ShuttingDown"
 );
@@ -549,7 +550,6 @@ function localCliCalls() {
 const LOCAL_CHOICE = "Run Intelligence on this computer";
 const HOSTED_CHOICE = "Use CopilotKit's hosted Intelligence";
 const HOSTED_LINK = "Use CopilotKit's hosted service instead";
-const LOCAL_QUESTION = "How many r's are in strawberry?";
 
 /** Ask the question already in the Test OpenBot box, and wait for the answer. */
 async function askTheTest(
@@ -791,17 +791,24 @@ test("Continue during setup shows Getting ready, which starts, tests and opens O
     gatewayWsUrl: "ws://localhost:64772",
     apiKey: "",
   });
-  // A question is already in the box, nothing is asked until Ask, and a preset or a typed
-  // question replaces it.
+  // One of the questions is already in the box, nothing is asked until Ask, Another question
+  // steps through the rest in order and back round, and a typed question replaces it.
   const question = view.getByLabelText("Your question") as HTMLInputElement;
-  expect(question.value).toBe(LOCAL_QUESTION);
+  const first = PRESET_QUESTIONS.indexOf(
+    question.value as (typeof PRESET_QUESTIONS)[number],
+  );
+  expect(first).toBeGreaterThanOrEqual(0);
   expect(invokeCalls.some((call) => call.command === "ask_the_bot")).toBe(
     false,
   );
-  await userEvent.click(
-    view.getByRole("button", { name: "How many Die Hard movies are there?" }),
-  );
-  expect(question.value).toBe("How many Die Hard movies are there?");
+  for (let step = 1; step <= PRESET_QUESTIONS.length; step++) {
+    await userEvent.click(
+      view.getByRole("button", { name: "Another question" }),
+    );
+    expect(question.value).toBe(
+      PRESET_QUESTIONS[(first + step) % PRESET_QUESTIONS.length],
+    );
+  }
   await userEvent.type(question, "Who are you?", {
     initialSelectionStart: 0,
     initialSelectionEnd: question.value.length,

@@ -3,7 +3,7 @@ import { asProblem, Failure, type Problem } from "./Problem";
 import { StatusLine } from "./SetupProgress";
 
 /**
- * Questions a person can put in the box with one click. The first is the one already in it.
+ * Questions the box starts with: one at random, and the refresh button steps through the rest.
  *
  * Each has an answer somebody can check, or at least an opinion worth reading: "Tell me about
  * yourself" is answered convincingly by a Bot whose model credential is fine and whose everything
@@ -26,11 +26,11 @@ export const PRESET_QUESTIONS = [
  * find that out later, inside the product, with no idea which answer was the wrong one. So the
  * wizard ends by asking, and the answer on this screen is the proof.
  *
- * A question already in the box, a few more one click away, and room to type your own. Asking
+ * A question already in the box, another one a click away, and room to type your own. Asking
  * again with another question is always open, so trying the Bot does not end at the first answer.
  */
 export function Ask({
-  suggestion,
+  firstQuestion = Math.floor(Math.random() * PRESET_QUESTIONS.length),
   onAsk,
   onOpen,
   onBack,
@@ -38,7 +38,8 @@ export function Ask({
   local = false,
   stepLabel = "Last step",
 }: {
-  suggestion: string;
+  /** Which of `PRESET_QUESTIONS` the box starts with; one at random unless a test says. */
+  firstQuestion?: number;
   onAsk: (question: string) => Promise<string>;
   /** Shows OpenBot in the window; settles once it has, or has failed to. */
   onOpen: () => void | Promise<void>;
@@ -50,7 +51,13 @@ export function Ask({
   local?: boolean;
   stepLabel?: string;
 }) {
-  const [question, setQuestion] = useState(suggestion);
+  const [preset, setPreset] = useState(firstQuestion % PRESET_QUESTIONS.length);
+  const [question, setQuestion] = useState<string>(PRESET_QUESTIONS[preset]);
+  const anotherQuestion = () => {
+    const next = (preset + 1) % PRESET_QUESTIONS.length;
+    setPreset(next);
+    setQuestion(PRESET_QUESTIONS[next]);
+  };
   const [answer, setAnswer] = useState<string | null>(null);
   const [asking, setAsking] = useState(false);
   /*
@@ -120,50 +127,60 @@ export function Ask({
       <h1>{local ? "Test OpenBot" : "Ask it something."}</h1>
       <p className="lede">
         {local
-          ? "Ask your Bot a question to check that it answers. Pick one, or type your own."
+          ? "Ask your Bot a question to check that it answers. Use this one, try another, or type your own."
           : "Your Bot is set up. This proves it can answer before you start using it."}
       </p>
 
       <div className="field">
         <label htmlFor="question">Your question</label>
-        <input
-          id="question"
-          value={question}
-          onChange={(event) => {
-            setQuestion(event.target.value);
-          }}
-          disabled={asking}
-          onKeyDown={(event) => {
-            // Enter also confirms a character being composed through an input method (Japanese,
-            // Chinese, Korean). Asking on that Enter would send the question with its last character
-            // still unconfirmed. Chromium marks that keydown `isComposing`; the macOS WebKit webview
-            // instead sends it after compositionend with key code 229. Wait for either.
-            if (
-              event.key === "Enter" &&
-              !asking &&
-              !event.nativeEvent.isComposing &&
-              event.nativeEvent.keyCode !== 229
-            ) {
-              ask();
-            }
-          }}
-        />
-      </div>
-      <ul className="presets" aria-label="Questions to try">
-        {PRESET_QUESTIONS.map((preset) => (
-          <li key={preset}>
-            <button
-              type="button"
-              className="preset"
-              aria-pressed={question === preset}
-              disabled={asking}
-              onClick={() => setQuestion(preset)}
+        <div className="field-with-action">
+          <input
+            id="question"
+            value={question}
+            onChange={(event) => {
+              setQuestion(event.target.value);
+            }}
+            disabled={asking}
+            onKeyDown={(event) => {
+              // Enter also confirms a character being composed through an input method (Japanese,
+              // Chinese, Korean). Asking on that Enter would send the question with its last character
+              // still unconfirmed. Chromium marks that keydown `isComposing`; the macOS WebKit webview
+              // instead sends it after compositionend with key code 229. Wait for either.
+              if (
+                event.key === "Enter" &&
+                !asking &&
+                !event.nativeEvent.isComposing &&
+                event.nativeEvent.keyCode !== 229
+              ) {
+                ask();
+              }
+            }}
+          />
+          <button
+            type="button"
+            className="another-question"
+            aria-label="Another question"
+            title="Another question"
+            disabled={asking}
+            onClick={anotherQuestion}
+          >
+            <svg
+              aria-hidden="true"
+              viewBox="0 0 24 24"
+              width="18"
+              height="18"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
             >
-              {preset}
-            </button>
-          </li>
-        ))}
-      </ul>
+              <path d="M20 11a8.1 8.1 0 0 0-15.5-2m-.5-5v5h5" />
+              <path d="M4 13a8.1 8.1 0 0 0 15.5 2m.5 5v-5h-5" />
+            </svg>
+          </button>
+        </div>
+      </div>
 
       {asking && <StatusLine>Asking…</StatusLine>}
       {failure && <Failure problem={failure} />}
