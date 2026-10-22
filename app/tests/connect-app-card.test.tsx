@@ -54,8 +54,11 @@ type Row = { serverId: string; holder?: string; revoked?: boolean };
 function mounted(
   options: {
     connections?: Row[];
-    /** What `POST /connect` answers: a page to visit, or a form to fill in. */
-    answers?: "url" | "fields" | "failure";
+    /**
+     * What `POST /connect` answers: a page to visit, a form to fill in, or an account the vendor
+     * already held, which the route records on the press and lists from then on.
+     */
+    answers?: "url" | "fields" | "failure" | "connected";
     /** False stands in for a browser that refused the tab, which answers null. */
     popupsAllowed?: boolean;
   } = {},
@@ -84,6 +87,8 @@ function mounted(
     return tab as unknown as Window;
   }) as typeof window.open;
 
+  /** Whether the route has recorded the account, which is what the connections read lists. */
+  let recorded = false;
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     const json = (body: unknown, status = 200) =>
@@ -92,13 +97,23 @@ function mounted(
         headers: { "content-type": "application/json" },
       });
     if (url.includes("/api/plugins/connections"))
-      return json({ connections, redirectUri: null });
+      return json({
+        connections: recorded
+          ? [...connections, { serverId: "srv_notion", holder: "person" }]
+          : connections,
+        redirectUri: null,
+      });
     if (url.includes("/connect") && init?.method === "POST") {
       if (answers === "failure")
         return json({ error: "That account could not be connected." }, 502);
       // What a key-entry app answers: a form to fill in, and no page to visit.
       if (answers === "fields")
         return json({ fields: [{ name: "api_key", type: "string" }] });
+      // What the route answers once it has recorded an account the vendor already held.
+      if (answers === "connected") {
+        recorded = true;
+        return json({ connected: true });
+      }
       return json({ authorizationUrl: "https://notion.test/consent" });
     }
     return json({});
@@ -213,6 +228,26 @@ test("says where to type a key for an app that has no page to visit", async () =
   expect(link.getAttribute("href")).toBe("/connections/srv_notion");
   // The blank tab claimed on the click is let go rather than left sitting on about:blank.
   expect(card.tabsClosed()).toBe(1);
+});
+
+test("says connected when the press records an account the vendor already held", async () => {
+  /*
+   * The vendor refused a second link because it already held this person's account, and the route
+   * recorded that account on the press. Read as "no url", the card told the person to type a key
+   * for an app that had just been connected through a sign-in.
+   */
+  const card = mounted({ answers: "connected" });
+  await waitFor(() => card.view.getByRole("button", { name: /^Connect$/ }));
+
+  press(card);
+
+  await waitFor(() =>
+    expect(card.view.getByText(/Notion is connected/)).toBeTruthy(),
+  );
+  expect(card.view.queryByText(/needs a key from you/)).toBeNull();
+  // Nothing to visit: the claimed tab is let go without ever being pointed anywhere.
+  expect(card.tabsClosed()).toBe(1);
+  expect(card.sentTo).toEqual([]);
 });
 
 test("lets go of the claimed tab when connecting fails", async () => {

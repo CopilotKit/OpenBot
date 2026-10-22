@@ -3832,7 +3832,7 @@ describe("each vendor condition reaches the reader as its own remedy", () => {
     {
       name: "ComposioMultipleConnectedAccountsError",
       raisedBy: "connectedAccounts.link",
-      remedy: /disconnecting the account they already hold/,
+      remedy: /an account this person is already connected through/,
       ask: whileLinking,
     },
     {

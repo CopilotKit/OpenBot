@@ -1,8 +1,7 @@
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { connectAccountMutationOptions } from "@/lib/plugins/mutations";
 import { pluginKeys } from "@/lib/plugins/queries";
-import { queryClient } from "@/query-client";
 
 /**
  * Start this person's own connection to one app in a new tab, the way Settings starts it.
@@ -21,6 +20,12 @@ import { queryClient } from "@/query-client";
  * a connection with the same code rather than a second copy of the popup rules below.
  */
 export function useConnectInNewTab() {
+  /*
+   * The provider's client, which is the one whoever drew the button reads from. In the app it is
+   * the module's own singleton; a screen mounted under another provider is refetched through its
+   * own, so an account recorded on the press is drawn where the press was made.
+   */
+  const queryClient = useQueryClient();
   const [waiting, setWaiting] = useState(false);
   /** This app takes a key somebody types, so there is no page to send them to. */
   const [needsKey, setNeedsKey] = useState(false);
@@ -65,7 +70,7 @@ export function useConnectInNewTab() {
       window.addEventListener("focus", finish, { once: true });
     }, 1_000);
     return () => clearInterval(timer);
-  }, [waiting]);
+  }, [waiting, queryClient]);
   // Goes with whoever drew the button, and with a wait that ended some other way first.
   useEffect(() => {
     if (waiting || !onReturn.current) return;
@@ -103,18 +108,31 @@ export function useConnectInNewTab() {
     const tab = claimTab();
     handle.current = tab;
     connect.mutate(serverId, {
-      onSuccess: (authorizationUrl) => {
+      onSuccess: (start) => {
+        /*
+         * ALREADY CONNECTED: the account was held at the vendor with no row here, and the route
+         * recorded it on this press. There is no page to visit, so the claimed tab goes, and every
+         * query is refetched once, as the card does on its own connected edge. Whoever drew the
+         * button reads the new row there, and the Bot's next turn is asked against it.
+         */
+        if (start !== null && "connected" in start) {
+          tab?.close();
+          handle.current = null;
+          void queryClient.invalidateQueries();
+          return;
+        }
         /*
          * No url means this app is connected by typing a key rather than by visiting a page — the
          * route answers `{ fields }` and the mutation unwraps nothing. Saying so, with the page
          * that has the form, beats a button that silently does nothing.
          */
-        if (!authorizationUrl) {
+        if (start === null) {
           tab?.close();
           handle.current = null;
           setNeedsKey(true);
           return;
         }
+        const { authorizationUrl } = start;
         setWaiting(true);
         if (tab) tab.location.replace(authorizationUrl);
         // The tab was blocked. The url is still good, so offer it as something to click.

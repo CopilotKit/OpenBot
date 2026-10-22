@@ -398,21 +398,50 @@ export function registerOAuthClientMutationOptions(queryClient: QueryClient) {
  * assignment to `window.location.href` typechecks, and the compiler has been told the same lie in
  * a second place. `null` is the one absent-value this inference cannot quietly discard, which is
  * what makes the branch below it obligatory rather than advisory.
+ *
+ * AND A THIRD ANSWER, WHICH IS NOT A URL AND NOT A FORM: `{ connected: true }`. A brokered app
+ * whose account the vendor already holds, with no row for it here, is recorded by the route on
+ * the spot, so the press ends connected with no page to visit. Unwrapping only the url read that
+ * answer as `null`, and every caller drew `null` as "this app takes a key" or as a failure, over an
+ * account that had just been recorded as connected. It is its own member of {@link ConnectStart}
+ * so a caller has to say what it draws for it.
  */
 export function connectAccountMutationOptions(
   returnTo: "settings" | "admin" = "settings",
 ) {
   return mutationOptions({
-    mutationFn: async (serverId: string): Promise<string | null> => {
-      const authorizationUrl = await client<string | undefined>(
+    mutationFn: async (serverId: string): Promise<ConnectStart> => {
+      const fallback = "Couldn't connect that account.";
+      const response = await client(
         `/api/plugins/servers/${encodeURIComponent(serverId)}/connect?returnTo=${returnTo}`,
-        "authorizationUrl",
-        { method: "POST", fallback: "Couldn't connect that account." },
+        { method: "POST", fallback },
       );
-      return authorizationUrl ?? null;
+      // Read as `client` reads an envelope: a body that is not an object is a failed request.
+      const body = (await response.json().catch(() => null)) as unknown;
+      if (!body || typeof body !== "object" || Array.isArray(body)) {
+        throw new Error(fallback);
+      }
+      const answer = body as {
+        authorizationUrl?: unknown;
+        connected?: unknown;
+      };
+      if (answer.connected === true) return { connected: true };
+      return typeof answer.authorizationUrl === "string"
+        ? { authorizationUrl: answer.authorizationUrl }
+        : null;
     },
   });
 }
+
+/**
+ * What one press of Connect started: a consent page to visit, an account that is already
+ * connected, or `null` for neither (an app whose key somebody types). See
+ * {@link connectAccountMutationOptions}.
+ */
+export type ConnectStart =
+  | { authorizationUrl: string }
+  | { connected: true }
+  | null;
 
 /**
  * What asking the vendor about an account comes back with.
