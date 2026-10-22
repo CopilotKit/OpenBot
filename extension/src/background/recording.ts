@@ -2,7 +2,9 @@
 // drains that keep sending after it. A recording goes to Intelligence only: Record takes a new trajectory id, the
 // offscreen document asks OpenBot for a capture pass (the trajectory joins the person's own Learning space) and streams
 // every event to Intelligence, and
-// Stop queues the outcome and lets the outbox drain. OpenBot hears nothing of the recording itself. The phase lives in a
+// Stop queues the outcome and lets the outbox drain. OpenBot hears nothing of the recording itself, only what the
+// Recorder is doing (its phase, the recording's title and how many actions so far, activity.ts), for the Browser
+// button's red dot. The phase lives in a
 // reducer (`reduceRecorder`), persisted to storage.session after every transition so a restarted service worker finds
 // it; what must survive a browser restart lives in storage.local (`activeRecording`, `drains`) and in the document's
 // IndexedDB outbox.
@@ -64,6 +66,7 @@ import {
   createAgentEvents,
 } from "./agent/events";
 import type { CaptureObservation } from "./agent/observation";
+import { createActivityReport } from "./activity";
 import { showBadge } from "./badge";
 import {
   type ConnectionLoss,
@@ -639,6 +642,32 @@ export function installRecording(
    * trajectory (a recording Start over replaced, still draining) leaves that capture alone. */
   let shown: { recordingId: string; trajectoryIds: Set<string> } | null = null;
 
+  /** What this browser is recording, told to OpenBot whenever the phase or the recording changes and every 30 s while
+   * one runs (activity.ts): with the live recording's connection, else the stored one, whatever made it. A signed-out
+   * answer goes the way the connection check's does. */
+  const activity = createActivityReport({
+    state: () => state,
+    target: async () => {
+      if (live)
+        return {
+          openbotUrl: live.openbotUrl,
+          token: live.token,
+          userId: live.userId,
+        };
+      const connection = await currentConnection();
+      return connection
+        ? {
+            openbotUrl: connection.openbotUrl,
+            token: connection.token,
+            userId: connection.user.id,
+          }
+        : null;
+    },
+    signedOut: (reason, target) =>
+      handleSignedOut(reason, target.token, target.userId, target.openbotUrl),
+    timers: deps.timers,
+  });
+
   // ---- Persistence ---------------------------------------------------------------------------
 
   let persisted: Promise<void> = Promise.resolve();
@@ -652,6 +681,11 @@ export function installRecording(
     lastPersist = persisted;
     if (before.phase !== state.phase || before.actions !== state.actions)
       void showBadge(state).catch(report("updating the badge"));
+    if (
+      before.phase !== state.phase ||
+      before.recordingId !== state.recordingId
+    )
+      activity.changed();
   }
 
   /** storage.local read-then-write work (the active recording and the drains) runs one job at a time. */
@@ -733,6 +767,13 @@ export function installRecording(
     openSteps(live.recordingId, takeRestored(live.recordingId));
   })();
   ready.catch(report("loading the recorder state"));
+  // A service worker that restarted while a recording runs tells OpenBot again, and goes on every 30 s.
+  void ready.then(
+    () => {
+      if (state.phase !== "idle") activity.changed();
+    },
+    () => {},
+  );
 
   // ---- The offscreen document ----------------------------------------------------------------
 

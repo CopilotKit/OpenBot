@@ -12,6 +12,7 @@ import { join } from "node:path";
 import {
   type LearningSpaceState,
   RECORDER_SIGNED_OUT,
+  recorderActivitySchema,
 } from "@openbot/shared/recorder-api";
 import type { CapturedEvent } from "@openbot/shared/recorder-masking";
 import type {
@@ -76,9 +77,9 @@ const contentEvent = (value: unknown) => event("click", value);
 
 // ---- The fake OpenBot -------------------------------------------------------------------------
 //
-// The extension asks OpenBot only to connect: who is connected (`me`), the person's Learning space, and Disconnect. Every
-// other request
-// is recorded, so a test can say OpenBot heard nothing of a recording.
+// The extension asks OpenBot only to connect: who is connected (`me`), the person's Learning space, and Disconnect; and
+// tells it what it is doing (activity.ts), which holds nothing recorded. Every other request is recorded, so a test can
+// say OpenBot heard nothing of a recording.
 
 type Call = { method: string; path: string; auth: string | null };
 type HeldRoute = "me" | "disconnect";
@@ -91,6 +92,8 @@ const openbot = {
   holds: {} as Partial<Record<HeldRoute, Promise<void>>>,
   me: { status: 200, body: {} as object },
   learning: { state: "assigned", containerId: "space-1" } as LearningSpaceState,
+  /** Every report of what the Recorder is doing, as OpenBot received it. */
+  activity: [] as unknown[],
 };
 const meBody = {
   user: ada,
@@ -100,6 +103,7 @@ const CONNECTING = new Set([
   "GET /api/recorder/me",
   "GET /api/recorder/learning",
   "DELETE /api/recorder/connections/current",
+  "POST /api/recorder/activity",
 ]);
 
 function resetOpenBot() {
@@ -107,6 +111,7 @@ function resetOpenBot() {
   openbot.revoked = new Set();
   openbot.holds = {};
   openbot.me = { status: 200, body: meBody };
+  openbot.activity = [];
 }
 
 let server: ReturnType<typeof Bun.serve>;
@@ -141,6 +146,10 @@ beforeAll(() => {
       }
       if (route === "GET /api/recorder/learning")
         return signedOut() ?? Response.json({ learning: openbot.learning });
+      if (route === "POST /api/recorder/activity") {
+        openbot.activity.push(await request.json());
+        return signedOut() ?? new Response(null, { status: 204 });
+      }
       if (route === "DELETE /api/recorder/connections/current") {
         if (openbot.holds.disconnect) await openbot.holds.disconnect;
         return new Response(null, { status: 204 });
@@ -153,6 +162,9 @@ beforeAll(() => {
 afterAll(() => server.stop(true));
 
 const requests = () => openbot.calls.map((c) => `${c.method} ${c.path}`);
+/** OpenBot's calls other than the reports of what the Recorder is doing (activity.ts), which hold nothing recorded. */
+const callsBeyondActivity = () =>
+  openbot.calls.filter((call) => call.path !== "/api/recorder/activity");
 /** What OpenBot heard beyond connecting: nothing, ever, about a recording. */
 const recordingRequests = () =>
   requests().filter((request) => !CONNECTING.has(request));
@@ -654,7 +666,7 @@ test("Record opens the document and starts a new trajectory for the picked Bot, 
     language: "de-DE",
   });
   expect(id).toMatch(UUID);
-  expect(openbot.calls).toEqual([]);
+  expect(callsBeyondActivity()).toEqual([]);
   const created = fake.calls.indexOf("offscreen.createDocument");
   const ready = fake.calls.indexOf("port:recorder:offscreen offscreen.ready");
   const started = fake.calls.indexOf("port:recorder:offscreen offscreen.start");
@@ -874,7 +886,7 @@ test("a failure once the document started rolls everything back, and the documen
     phase: "idle",
     error: "The recording could not start. Try again.",
   });
-  expect(openbot.calls).toEqual([]);
+  expect(callsBeyondActivity()).toEqual([]);
 });
 
 // ---- Stop and the document --------------------------------------------------------------------
@@ -921,7 +933,7 @@ test("Stop queues the outcome in the document, and the recording waits as a drai
   await until(() => drains().length === 0, "the drain goes");
   await until(() => !fake.offscreen.open, "the document closes");
   expect((await state()).draining).toBe(0);
-  expect(openbot.calls).toEqual([]);
+  expect(callsBeyondActivity()).toEqual([]);
 });
 
 test("a recording the document could not send at all never reads as sent: Stop says nothing reached Intelligence", async () => {
@@ -1579,7 +1591,7 @@ test("Start over sends the recording it leaves to Intelligence with a failed out
   doc?.postMessage({ type: "offscreen.done", recordingId: old });
   await until(() => drains().length === 0, "the old one goes once sent");
   expect(sentToDocument("offscreen.discard")).toEqual([]);
-  expect(openbot.calls).toEqual([]);
+  expect(callsBeyondActivity()).toEqual([]);
 });
 
 test("Start over while the document's port reconnects moves the document to the new recording before the tabs capture for it", async () => {
@@ -1730,7 +1742,7 @@ test("a rollover adds its trajectory to the recording, and to a drain it belongs
     () => drains()[0]?.trajectoryIds.includes("t-3") === true,
     "the drain's trajectory is appended",
   );
-  expect(openbot.calls).toEqual([]);
+  expect(callsBeyondActivity()).toEqual([]);
 });
 
 test("Start over that comes when nothing records is refused", async () => {
@@ -2434,13 +2446,16 @@ test("a connection check that cannot reach OpenBot, or gets an error page, is no
     },
     { preconnect: realFetch.preconnect },
   );
+  // The 30 s report of what the Recorder is doing fails the same way, and changes nothing either.
+  const refusedChecks = () =>
+    refused.filter((url) => url.endsWith("/api/recorder/me"));
   try {
     await advance(30_000);
-    await until(() => refused.length === 1, "the check that fails");
+    await until(() => refusedChecks().length === 1, "the check that fails");
   } finally {
     globalThis.fetch = realFetch;
   }
-  expect(refused[0]).toBe(`${origin}/api/recorder/me`);
+  expect(refusedChecks()).toEqual([`${origin}/api/recorder/me`]);
   expect((await state()).phase).toBe("recording");
   expect(storedConnection()?.token).toBe("obr_one");
 
@@ -3422,7 +3437,7 @@ test("only a followed tab's top frame becomes a page-change step, once per addre
   });
   expect(JSON.stringify(events)).not.toContain("widgets.example.test");
   expect((await state()).topUrls["7"]).toBe("about:blank");
-  expect(openbot.calls).toEqual([]);
+  expect(callsBeyondActivity()).toEqual([]);
 });
 
 test("an address recorded before is recorded again in the next recording and after Start over", async () => {
@@ -3508,7 +3523,7 @@ test("steps leave in the order they came, from every frame and followed tab", as
   expect((await state()).actions).toBe(4);
 });
 
-test("a whole recording, Start over included, asks OpenBot for nothing", async () => {
+test("a whole recording, Start over included, asks OpenBot for nothing, and tells it only what the Recorder is doing", async () => {
   await page({ type: "page.learning" });
   const content = contentPort(7);
   await record();
@@ -3521,7 +3536,14 @@ test("a whole recording, Start over included, asks OpenBot for nothing", async (
   expect(await page({ type: "page.restart" })).toEqual({ ok: true });
   expect(await page({ type: "page.stop" })).toEqual({ ok: true });
   await settle();
-  expect(requests()).toEqual(["GET /api/recorder/learning"]);
+  expect(
+    requests().filter((request) => request !== "POST /api/recorder/activity"),
+  ).toEqual(["GET /api/recorder/learning"]);
+  // The phase, the recording's id, title and start, and a count: never a step, an address or anything typed.
+  expect(openbot.activity.length).toBeGreaterThan(0);
+  for (const report of openbot.activity)
+    expect(recorderActivitySchema.parse(report)).toEqual(report as never);
+  expect(openbot.activity.at(-1)).toEqual({ phase: "idle", actions: 0 });
 });
 
 // ---- The popup's state, Learning space and sign-out --------------------------------------------
