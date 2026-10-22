@@ -23,7 +23,7 @@ export const recorderConnectionsQueryOptions = (options?: {
     queryFn: async (): Promise<RecorderConnectionsResponse> =>
       (
         await client(recorderPaths.connections, {
-          fallback: "Could not load connected browsers",
+          fallback: "Couldn't load your connected browsers.",
         })
       ).json(),
     refetchInterval: options?.awaiting ? 2000 : false,

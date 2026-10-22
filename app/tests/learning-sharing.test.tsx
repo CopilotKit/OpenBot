@@ -115,7 +115,7 @@ test("three choices, each with one plain line saying who sees what", async () =>
     view.getByText("Only the Bots you use draw on your Skills."),
   ).toBeTruthy();
   expect(
-    view.getByText("Every Bot in this OpenBot draws on all of your Skills."),
+    view.getByText("Every Bot on OpenBot draws on all of your Skills."),
   ).toBeTruthy();
 });
 
@@ -197,7 +197,7 @@ test("a space with no Skills yet says so plainly", async () => {
   answer = { mode: "choose", skills: [] };
   const view = draw();
   await view.findByText(
-    "No Skills have been learned from your recordings yet. Each one you open here reaches every Bot once it is.",
+    "No Skills learned from your recordings yet. Once there are, each one you open here reaches every Bot.",
   );
   expect(view.queryByRole("switch")).toBeNull();
 });
@@ -206,7 +206,7 @@ test("Skills Intelligence did not deliver show a plain unavailable line, and the
   answer = { mode: "choose", skills: null, unavailable: "unavailable" };
   const view = draw();
   await view.findByText(
-    "Your Skills could not be read from Intelligence just now. Your choice above still applies to them.",
+    "Couldn't read your Skills from Intelligence just now. Your choice above still applies to them.",
   );
   fireEvent.click(choice(view, "Only my Bots"));
   await waitFor(() =>
@@ -222,14 +222,16 @@ test("Automatic Learning off says no Skills are learned", async () => {
   answer = { mode: "choose", skills: null, unavailable: "off" };
   const view = draw();
   await view.findByText(
-    "Automatic Learning is off in this OpenBot, so no Skills are learned from your recordings.",
+    "An admin has turned off Automatic Learning, so no Skills are learned from your recordings.",
   );
 });
 
 test("a read that fails says so, and a save that fails says why", async () => {
   failRead = true;
   const failed = draw();
-  await failed.findByText("Your Learning settings could not be loaded.");
+  await failed.findByText(
+    "Couldn't load your Learning settings. Reload the page.",
+  );
   cleanup();
   queryClient.clear();
   failRead = false;

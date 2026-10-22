@@ -25,7 +25,7 @@ export function personalLearningQueryOptions() {
     queryFn: async (): Promise<PersonalLearningSharing> =>
       (
         await client("/api/settings/learning", {
-          fallback: "Your Learning settings could not be loaded.",
+          fallback: "Couldn't load your Learning settings. Reload the page.",
         })
       ).json(),
   });

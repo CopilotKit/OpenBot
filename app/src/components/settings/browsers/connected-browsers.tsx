@@ -41,10 +41,10 @@ export function ConnectedBrowsers({
     <PageSection title="Connected browsers">
       {connections.isPending ? null : connections.error ? (
         <p className="text-destructive text-sm" role="alert">
-          Could not load connected browsers.
+          Couldn't load your connected browsers. Reload the page.
         </p>
       ) : connections.data.connections.length === 0 ? (
-        <PageEmpty>No browsers are connected.</PageEmpty>
+        <PageEmpty>No browsers connected yet.</PageEmpty>
       ) : (
         <PageRows>
           {connections.data.connections.map((connection, index) => {
