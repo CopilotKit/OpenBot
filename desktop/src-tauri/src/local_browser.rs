@@ -33,8 +33,8 @@ pub const BROWSER_URL_ENV: &str = "OPENBOT_BROWSER_URL";
 /// Where the Recorder's own build (`extension/scripts/build.ts`) writes, inside the deployment.
 pub const RECORDER_DIST: &str = "extension/dist";
 
-/// The port the computer asks for first. The contract's example and the developer helper's default,
-/// so a person who has run both recognises it; Desktop moves off it when something else holds it.
+/// The port the computer asks for first: the contract's example and the developer helper's default.
+/// Desktop moves off it when something else holds it, as it does for every port it chooses.
 pub const DEFAULT_PORT: u16 = 4101;
 
 /// Which browser the computer opens. Named as the contract's `BrowserProduct`, which is also the
