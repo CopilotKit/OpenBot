@@ -153,7 +153,7 @@ export const NO_INSTALLED_BROWSER = `Neither ${NAMES.chrome} nor ${NAMES.msedge}
  *   - `--enable-features=CDPScreenshotNewSurface`: how frames are captured for the live screen.
  *   - `--edge-skip-compat-layer-relaunch`: Edge on Windows can relaunch itself and drop the pipe.
  */
-const PLAYWRIGHT_DISABLED_FEATURES = [
+export const PLAYWRIGHT_DISABLED_FEATURES: readonly string[] = [
   "AvoidUnnecessaryBeforeUnloadCheckSync",
   "BoundaryEventDispatchTracksNodeRemoval",
   "DestroyProfileOnBrowserClose",

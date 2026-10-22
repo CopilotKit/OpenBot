@@ -14,6 +14,7 @@ import {
   type InstalledBrowser,
   installedBrowser,
   PLAYWRIGHT_DEFAULTS_A_PERSON_DOES_NOT_GET,
+  PLAYWRIGHT_DISABLED_FEATURES,
 } from "../src/person-launch";
 import type { Profiles } from "../src/profiles";
 
@@ -152,6 +153,17 @@ async function commandLine(page: Page): Promise<string[]> {
     .find((candidate) => candidate.includes("--remote-debugging-pipe"));
   if (!line) throw new Error("chrome://version showed no command line.");
   return line.split(/\s+/);
+}
+
+/**
+ * The features a browser runs without, from its own command line: Chromium keeps only the last
+ * `--disable-features` it is given, so that one is the one that counts.
+ */
+function disabledFeatures(switches: string[]): string[] {
+  const last = switches
+    .filter((value) => value.startsWith("--disable-features="))
+    .at(-1);
+  return last ? last.slice("--disable-features=".length).split(",") : [];
 }
 
 /** A port nothing listens on, so a page there is refused. */
@@ -582,6 +594,11 @@ for (const variant of VARIANTS) {
           expect(switches).toContain(`--load-extension=${FIXTURE}`);
           expect(switches).toContain(`--disable-extensions-except=${FIXTURE}`);
           expect(switches).not.toContain("--disable-extensions");
+          // Through the egress filter: Playwright's own features off, and the ACCEPT_CH restart.
+          expect(disabledFeatures(switches)).toEqual([
+            ...PLAYWRIGHT_DISABLED_FEATURES,
+            "AcceptCHFrame",
+          ]);
         }
       } finally {
         await page.close();
@@ -644,7 +661,12 @@ for (const variant of VARIANTS) {
               target.url.startsWith("chrome-extension://"),
             ),
           ).toEqual([]);
-          expect(await commandLine(page)).toContain("--disable-extensions");
+          const switches = await commandLine(page);
+          expect(switches).toContain("--disable-extensions");
+          expect(disabledFeatures(switches)).toEqual([
+            ...PLAYWRIGHT_DISABLED_FEATURES,
+            "AcceptCHFrame",
+          ]);
         } finally {
           if (previous === undefined) delete process.env.OPENBOT_RECORDER_DIR;
           else process.env.OPENBOT_RECORDER_DIR = previous;

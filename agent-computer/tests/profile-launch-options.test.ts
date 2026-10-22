@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { PLAYWRIGHT_DISABLED_FEATURES } from "../src/person-launch";
 
 const original = { ...process.env };
 afterEach(() => {
@@ -71,8 +72,14 @@ describe.skipIf(
          * The whole launch, pinned. A person's browser launches differently (the Recorder in it, an
          * everyday browser rather than a test one), and that is a person-only change: a Bot's browser
          * keeps exactly these options, with no extension allowed in and every Playwright default it
-         * had before, even when the computer carries a built Recorder.
+         * had before, even when the computer carries a built Recorder. Its features are Playwright's
+         * own and AcceptCHFrame, off for every browser behind the egress filter, or Google never
+         * loads in it (profiles.ts).
          */
+        const features = `--disable-features=${[
+          ...PLAYWRIGHT_DISABLED_FEATURES,
+          "AcceptCHFrame",
+        ].join(",")}`;
         expect(options).toEqual({
           channel: backend === "managed" ? "chromium" : "chrome",
           headless: backend === "managed" && process.platform !== "linux",
@@ -83,10 +90,12 @@ describe.skipIf(
                   "--disable-dev-shm-usage",
                   "--password-store=basic",
                   "--disable-blink-features=AutomationControlled",
+                  features,
                 ]
               : [
                   "--disable-dev-shm-usage",
                   "--disable-blink-features=AutomationControlled",
+                  features,
                 ],
           ignoreDefaultArgs: ["--enable-automation"],
           chromiumSandbox: backend === "local-chrome",
