@@ -6,7 +6,8 @@
 // (Runtime.evaluate in the worker's target). There is no chrome.runtime message route to it, internal or external, so
 // no web page, content script or other extension can reach it, and none of the Recorder's own pages does either: each
 // of them is its own global scope. A connection taken here is checked as a Connect would check it (the OpenBot address
-// rule and the organization's policy), and every command goes through the same paths the popup's own do.
+// rule and the organization's policy), and every command goes through the same paths the popup's own do. A revoke
+// OpenBot tells it of goes through the path a signed-out answer from OpenBot takes.
 import {
   LAUNCHER_GLOBAL,
   type LauncherApi,
@@ -382,6 +383,25 @@ export function createLauncher(
           return refuse(SENTENCES.invalid);
         const response = await controls.speaking(input.since);
         return response.ok ? { ok: true } : refuse(response.error);
+      },
+      () => refuse(SENTENCES.failed),
+    ),
+
+    // OpenBot revoked this browser's connection (the person disconnected it in Settings, Browsers) and says so now,
+    // rather than leaving the Recorder to hear it on its next call to OpenBot, which on a quiet browser is the keep-alive,
+    // hours away. It goes the way OpenBot answering that the token is gone goes: the connection is forgotten with the
+    // signed-out notice, a recording under it stops as signed out and is kept for its person, and the next connection
+    // the launcher hands in sends it. OpenBot has revoked the token already, so it is not asked to again.
+    disconnect: guarded(
+      async (): Promise<LauncherResult> => {
+        const connection = await currentConnection();
+        if (connection)
+          await controls.connectionLost({
+            kind: "signed-out",
+            reason: "revoked",
+            connection,
+          });
+        return { ok: true };
       },
       () => refuse(SENTENCES.failed),
     ),

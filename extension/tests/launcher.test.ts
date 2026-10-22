@@ -72,12 +72,16 @@ let gateway: FakeGateway;
 /** The tokens OpenBot still knows, and how often each asked who it is for. */
 let liveTokens = new Set<string>();
 let meAsked: string[] = [];
+/** Every call the Recorder made to OpenBot's own routes, as `<method> <path>`. */
+let openbotAsked: string[] = [];
 /** The person's own Learning space, as OpenBot answers the Recorder's popup; none until a test sets one. */
 let learning: LearningSpaceState | null = null;
 function route(request: Request): Response | null {
   const path = new URL(request.url).pathname;
   const token =
     request.headers.get("authorization")?.replace(/^Bearer /, "") ?? "";
+  if (path.startsWith("/api/recorder/"))
+    openbotAsked.push(`${request.method} ${path}`);
   if (path === "/api/recorder/me") {
     meAsked.push(token);
     if (!liveTokens.has(token))
@@ -273,6 +277,7 @@ beforeEach(async () => {
   microphone = fakeMicrophone();
   liveTokens = new Set([TOKEN]);
   meAsked = [];
+  openbotAsked = [];
   learning = null;
   gateway = await startFakeGateway({ extraRoutes: route });
   fake = installChromeFake({
@@ -418,6 +423,121 @@ test("a connection OpenBot already signed out is refused and forgotten, with the
   });
   expect((await launcher().state()).connected).toBe(false);
 });
+
+test("disconnect forgets the connection OpenBot revoked at once and reports signed out, as OpenBot's own signed-out answer does", async () => {
+  // The second end-to-end run: Disconnect in Settings, Browsers, and the Recorder went on reporting itself connected
+  // until its next call to OpenBot, which on a quiet browser is the keep-alive, twelve hours away.
+  await launcher().connect({ connection: connection(), narration: "external" });
+  // OpenBot revoked the connection, then told the browser.
+  liveTokens.delete(TOKEN);
+  const asked = openbotAsked.length;
+  expect(await launcher().disconnect()).toEqual({ ok: true });
+
+  expect(stored()).toBeUndefined();
+  expect(fake.storage.local.get("notice")).toMatchObject({
+    kind: "signed-out",
+    reason: "revoked",
+  });
+  expect(await launcher().state()).toEqual({
+    connected: false,
+    phase: "idle",
+    actions: 0,
+    narration: "own",
+    voice: "off",
+  });
+  // The popup shows what it shows after a sign-out.
+  expect(
+    await fake.sendFromPage(
+      { type: "page.state" },
+      { url: "chrome-extension://test/popup.html" },
+    ),
+  ).toMatchObject({
+    ok: true,
+    connection: null,
+    notice: { kind: "signed-out", reason: "revoked" },
+  });
+  // OpenBot revoked the token itself, so it is not asked to again, nor asked who the token is for.
+  expect(openbotAsked.slice(asked)).toEqual([]);
+  // Record is refused until the launcher hands in a connection again.
+  openOrder();
+  expect(
+    await launcher().record({ action: "start", title: "After Disconnect" }),
+  ).toEqual({ ok: false, error: "Connect this browser to OpenBot first." });
+
+  // Told again, or told with nothing stored: nothing more happens.
+  expect(await launcher().disconnect()).toEqual({ ok: true });
+  expect(fake.storage.local.get("notice")).toMatchObject({
+    kind: "signed-out",
+    reason: "revoked",
+  });
+  expect(openbotAsked.slice(asked)).toEqual([]);
+});
+
+test("a recording disconnect finds running stops as a sign-out stops one, kept for its person, and goes to Intelligence once the browser is connected again", async () => {
+  await launcher().connect({ connection: connection(), narration: "external" });
+  const click = rows.archiveClick;
+  const trajectoryId = await record(
+    click.timestamp - 7_000,
+    "Archive order 1043",
+  );
+  const port = contentPort();
+  clock = click.timestamp;
+  port.postMessage({ type: "content.event", event: click });
+  await settle();
+  expect((await launcher().state()).actions).toBe(1);
+
+  liveTokens.delete(TOKEN);
+  clock = click.timestamp + 1_000;
+  expect(await launcher().disconnect()).toEqual({ ok: true });
+  expect(await launcher().state()).toMatchObject({
+    connected: false,
+    phase: "idle",
+    actions: 0,
+  });
+  expect(fake.badge.text).toBe("");
+  // Kept, waiting for its person to connect this browser again, as a recording a sign-out stopped is.
+  expect(fake.storage.local.get("drains")).toMatchObject([
+    {
+      trajectoryIds: [trajectoryId],
+      userId: ada.id,
+      kept: { waitingForReconnect: true },
+    },
+  ]);
+  expect(names(trajectoryId)).not.toContain("click");
+
+  // Record after Disconnect: OpenBot connects the browser again first, and the kept recording goes, its outcome saying
+  // the browser was signed out.
+  const NEXT = "obr_openbot-browser-token-next";
+  liveTokens.add(NEXT);
+  expect(
+    await launcher().connect({
+      connection: connection({ token: NEXT, connectionId: `c-${NEXT}` }),
+      narration: "external",
+    }),
+  ).toEqual({ ok: true });
+  await until(
+    () => names(trajectoryId).filter((name) => name === "outcome").length === 2,
+    "the kept recording in Intelligence",
+  );
+  expect(names(trajectoryId)).toEqual([
+    "recording.started",
+    "outcome",
+    "navigation",
+    "click",
+    "outcome",
+  ]);
+  expect(sent(trajectoryId).at(-1)?.value).toMatchObject({
+    workflow: "Archive order 1043",
+    phase: "failed",
+    reason: "signed-out",
+  });
+  await until(
+    () =>
+      ((fake.storage.local.get("drains") as unknown[] | undefined) ?? [])
+        .length === 0,
+    "the kept recording sent",
+  );
+}, 15_000);
 
 test("an OpenBot browser shows no setup tab and no Connect page: none on a later launch, and the first launch's are closed", async () => {
   // OpenBot Desktop's native host answers in this profile too, and would hand over a code.
