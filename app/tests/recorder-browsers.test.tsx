@@ -271,6 +271,26 @@ test("an answer with no sentence of its own still gets one", async () => {
   await view.findByText("The Recorder didn't accept the request. Try again.");
 });
 
+test("the OpenBot browser's connection says it is the person's OpenBot browser", async () => {
+  connections = [
+    connection({
+      id: "conn-2",
+      label: "OpenBot browser",
+      via: "openbot-browser",
+      installId: "b".repeat(32),
+    }),
+  ];
+  const view = draw(<ConnectedBrowsers />);
+  await view.findByText("OpenBot browser");
+  const at = new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(String(connections[0]?.createdAt)));
+  expect(
+    view.getByText(`Your OpenBot browser, connected ${at}, never used`),
+  ).toBeTruthy();
+});
+
 test("Disconnect sends the DELETE and the row disappears", async () => {
   connections = [connection()];
   const view = draw(<ConnectedBrowsers />);

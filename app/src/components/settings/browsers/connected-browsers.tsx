@@ -64,11 +64,15 @@ export function ConnectedBrowsers({
                   <ItemContent>
                     <ItemTitle>{name}</ItemTitle>
                     <ItemDescription>
-                      Connected{" "}
-                      {connectedAt.format(new Date(connection.createdAt))} from{" "}
+                      {connection.via === "openbot-browser"
+                        ? "Your OpenBot browser, connected "
+                        : "Connected "}
+                      {connectedAt.format(new Date(connection.createdAt))}
                       {connection.via === "desktop"
-                        ? "OpenBot Desktop"
-                        : "OpenBot"}
+                        ? " from OpenBot Desktop"
+                        : connection.via === "web"
+                          ? " from OpenBot"
+                          : ""}
                       ,{" "}
                       {connection.lastUsedAt
                         ? `last used ${relativeTime(connection.lastUsedAt)}`
