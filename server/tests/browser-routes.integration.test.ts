@@ -34,6 +34,7 @@ import {
   withPersonBrowsers,
 } from "../src/browser/host";
 import { personBrowserId } from "../src/browser/person";
+import { CALL_TIMEOUT_MS } from "../src/browser/routes";
 import { createComputerGateway } from "../src/computer/gateway";
 import { withPolicyPushOnWake } from "../src/computer/policy-network";
 import {
@@ -71,11 +72,12 @@ const PEOPLE = { ada, ben, admin } as const;
 const COMPUTER_TOKEN = "browser-routes-computer-token";
 const PUBLIC = "https://openbot.example.com";
 const GATEWAY = "wss://gateway.example.com/socket";
-// This slice's own ports: the stand-in computer, the server the live screen is proxied through, and the organization's
-// sign-in server.
-const COMPUTER_PORT = 7721;
-const SERVER_PORT = 7722;
-const AUTHORITY_PORT = 7723;
+// Their own ports: the stand-in computer, the server the live screen is proxied through, the organization's sign-in
+// server, and a port nothing listens on.
+const COMPUTER_PORT = 7761;
+const SERVER_PORT = 7762;
+const AUTHORITY_PORT = 7763;
+const NOTHING_PORT = 7764;
 
 // ---- The stand-in computer --------------------------------------------------------------------
 
@@ -83,6 +85,8 @@ type Opened = {
   state: BrowserState;
   connection: unknown;
   narrated: unknown[];
+  /** The token the Recorder held when its recording started: the one its capture passes will carry. */
+  recordedUnder?: string;
 };
 const browsers = new Map<string, Opened>();
 const policies = new Map<string, unknown>();
@@ -90,6 +94,12 @@ const policies = new Map<string, unknown>();
 const asked: string[] = [];
 /** How the computer answers the next open instead of opening, when a test says so. */
 let refuseNextOpen: { status: number; error: string } | null = null;
+/** How the computer answers the next navigation, when a test says so: after `ms`, with `error` and `status`, as the real
+ * one answers a page that did not load in its navigation timeout; or not until `never` settles. */
+let slowNextNavigation:
+  | { ms: number; status: number; error: string }
+  | { never: Promise<void> }
+  | null = null;
 
 const recorderOf = (opened: Opened): LauncherState =>
   opened.state.recorder as LauncherState;
@@ -170,11 +180,18 @@ const computer = Bun.serve<{ bot: string }>({
           return Response.json({ error: "Bad request." }, { status: 400 });
         const recorder = recorderOf(opened);
         if (parsed.data.action === "start") {
+          // The Recorder's own refusals, in its words (extension/src/background/launcher.ts, recording.ts).
+          if (!recorder.connected)
+            return Response.json(
+              { error: "Connect this browser to OpenBot first." },
+              { status: 409 },
+            );
           if (recorder.phase !== "idle")
             return Response.json(
               { error: "A recording is already running." },
               { status: 409 },
             );
+          opened.recordedUnder = (opened.connection as { token: string }).token;
           opened.state.recorder = {
             ...recorder,
             phase: "recording",
@@ -218,6 +235,16 @@ const computer = Bun.serve<{ bot: string }>({
         const parsed = browserNavigateRequestSchema.safeParse(body);
         if (!parsed.success || !opened)
           return Response.json({ error: "Bad request." }, { status: 400 });
+        const slow = slowNextNavigation;
+        slowNextNavigation = null;
+        if (slow && "never" in slow) {
+          await slow.never;
+          return Response.json(opened.state);
+        }
+        if (slow) {
+          await Bun.sleep(slow.ms);
+          return Response.json({ error: slow.error }, { status: slow.status });
+        }
         if ("url" in parsed.data) {
           const url = parsed.data.url;
           opened.state.tabs = opened.state.tabs.map((tab) =>
@@ -285,6 +312,8 @@ function build(
     token?: string;
     /** The Bots' computer provider, in place of the shared stand-in computer. */
     provider?: ComputerProvider;
+    /** How long the browser routes wait for the computer, in place of their own deadline. */
+    callTimeoutMs?: number;
   } = {},
 ) {
   const base = {
@@ -358,6 +387,9 @@ function build(
       token: options.token ?? COMPUTER_TOKEN,
       recorder,
       openbotUrl: openbotAddress(config),
+      ...(options.callTimeoutMs
+        ? { callTimeoutMs: options.callTimeoutMs }
+        : {}),
     },
   };
   return { app: createApp(...args), gateway, config };
@@ -696,17 +728,21 @@ describe("opening a person's own browser", () => {
       error: "A recording is already running.",
     });
 
+    const now = Date.now();
     const phrase = {
       text: "refunding it now",
-      startedAt: 1_000,
-      endedAt: 2_000,
+      startedAt: now - 2_000,
+      endedAt: now - 1_000,
+      sentAt: now,
     };
     expect(await (await post("/api/browser/narration", phrase)).json()).toEqual(
       {
         ok: true,
       },
     );
-    expect(browsers.get(computerId)?.narrated).toEqual([phrase]);
+    expect(browsers.get(computerId)?.narrated).toEqual([
+      expect.objectContaining({ text: phrase.text }),
+    ]);
     expect(
       (
         await post("/api/browser/narration", {
@@ -836,6 +872,362 @@ describe("opening a person's own browser", () => {
         })
       ).json(),
     ).toMatchObject({ user: { id: ben.id } });
+  });
+});
+
+/** The lines the server logged at warning and at error level while `work` ran. */
+async function logged<T>(
+  work: () => T | Promise<T>,
+): Promise<{ result: T; warned: string[]; failed: string[] }> {
+  const warned: string[] = [];
+  const failed: string[] = [];
+  const { warn, error } = console;
+  console.warn = (...parts: unknown[]) => {
+    warned.push(parts.map(String).join(" "));
+  };
+  console.error = (...parts: unknown[]) => {
+    failed.push(parts.map(String).join(" "));
+  };
+  try {
+    return { result: await work(), warned, failed };
+  } finally {
+    console.warn = warn;
+    console.error = error;
+  }
+}
+const typesOf = (lines: string[]) =>
+  lines.flatMap((line) => {
+    try {
+      return [(JSON.parse(line) as { type?: string }).type];
+    } catch {
+      return [];
+    }
+  });
+
+describe("narration on the server's clock", () => {
+  const post = (json: unknown) =>
+    call(openbot, "/api/browser/narration", {
+      method: "POST",
+      as: "ada",
+      json,
+    });
+  const narrated = () =>
+    browsers.get(personBrowserId(ada.id))?.narrated.at(-1) as Record<
+      string,
+      unknown
+    >;
+  // The person's computer an hour behind this server's clock.
+  const SKEW_MS = -3_600_000;
+
+  test("a phrase is moved onto the server's clock by how far the page's clock is from it, and reaches the Recorder so", async () => {
+    await open(openbot, "ada");
+    const pageNow = Date.now() + SKEW_MS;
+    const before = Date.now();
+    const answer = await post({
+      text: "  I search Wikipedia for Charles Babbage  ",
+      startedAt: pageNow - 4_000,
+      endedAt: pageNow - 1_000,
+      sentAt: pageNow,
+    });
+    const after = Date.now();
+    expect(answer.status).toBe(200);
+    expect(await answer.json()).toEqual({ ok: true });
+    const phrase = narrated();
+    // `sentAt` is the server's own clock on arrival, and every time keeps its distance from it.
+    expect(phrase.sentAt as number).toBeGreaterThanOrEqual(before);
+    expect(phrase.sentAt as number).toBeLessThanOrEqual(after);
+    expect(phrase).toEqual({
+      text: "I search Wikipedia for Charles Babbage",
+      startedAt: (phrase.sentAt as number) - 4_000,
+      endedAt: (phrase.sentAt as number) - 1_000,
+      sentAt: phrase.sentAt,
+    });
+  });
+
+  test("the person starting and stopping a phrase reaches the Recorder on the server's clock too", async () => {
+    await open(openbot, "ada");
+    const pageNow = Date.now() + SKEW_MS;
+    const before = Date.now();
+    expect(
+      (await post({ speaking: true, since: pageNow - 1_500, sentAt: pageNow }))
+        .status,
+    ).toBe(200);
+    const began = narrated();
+    expect(began.sentAt as number).toBeGreaterThanOrEqual(before);
+    expect(began).toEqual({
+      speaking: true,
+      since: (began.sentAt as number) - 1_500,
+      sentAt: began.sentAt,
+    });
+    expect(
+      (await post({ speaking: false, sentAt: pageNow + 2_000 })).status,
+    ).toBe(200);
+    const ended = narrated();
+    expect(ended.sentAt as number).toBeGreaterThanOrEqual(before);
+    expect(ended.sentAt as number).toBeLessThanOrEqual(Date.now());
+    expect(ended).toEqual({ speaking: false, sentAt: ended.sentAt });
+  });
+
+  test("times no phrase sent now could have are refused, and nothing reaches the Recorder", async () => {
+    await open(openbot, "ada");
+    const computerId = personBrowserId(ada.id);
+    const pageNow = Date.now() + SKEW_MS;
+    const count = () => browsers.get(computerId)?.narrated.length;
+    const before = count();
+    for (const body of [
+      // Counted from the page's load rather than the epoch: decades before the recording.
+      { speaking: true, since: 12_345, sentAt: pageNow },
+      {
+        text: "from another clock",
+        startedAt: 12_345,
+        endedAt: 15_000,
+        sentAt: pageNow,
+      },
+      // Ten minutes after it was sent.
+      {
+        text: "from the future",
+        startedAt: pageNow + 9 * 60_000,
+        endedAt: pageNow + 10 * 60_000,
+        sentAt: pageNow,
+      },
+      { speaking: true, since: pageNow + 10 * 60_000, sentAt: pageNow },
+      // Begun long before anyone speaking now began.
+      {
+        text: "an hour long",
+        startedAt: pageNow - 60 * 60_000,
+        endedAt: pageNow - 1_000,
+        sentAt: pageNow,
+      },
+    ]) {
+      const refused = await post(body);
+      expect([body, refused.status]).toEqual([body, 400]);
+      expect(await refused.json()).toEqual({
+        error:
+          "That phrase's times do not fit the recording, so it was not added.",
+      });
+    }
+    for (const body of [
+      {
+        text: "ends first",
+        startedAt: pageNow,
+        endedAt: pageNow - 1,
+        sentAt: pageNow,
+      },
+      { text: "no sentAt", startedAt: pageNow - 2, endedAt: pageNow - 1 },
+      { speaking: true, sentAt: pageNow },
+    ])
+      expect([body, (await post(body)).status]).toEqual([body, 400]);
+    expect(count()).toBe(before);
+  });
+});
+
+describe("a slow page, and a browser that cannot be reached", () => {
+  test("OpenBot waits longer for its computer than the computer waits for a page", async () => {
+    // The computer's own navigation timeout, as it sets it (agent-computer/src/index.ts).
+    const source = await Bun.file(
+      new URL("../../agent-computer/src/index.ts", import.meta.url),
+    ).text();
+    const navigation =
+      /numberFromEnv\("NAVIGATION_TIMEOUT_MS",\s*([\d_]+)\)/.exec(source)?.[1];
+    expect(navigation).toBeDefined();
+    expect(CALL_TIMEOUT_MS).toBeGreaterThan(
+      Number(navigation?.replaceAll("_", "")),
+    );
+  });
+
+  test("a page the computer gave up on reaches the person in the computer's words, and is not logged as an outage", async () => {
+    const patient = build({}, { callTimeoutMs: 2_000 });
+    await open(patient, "ada");
+    slowNextNavigation = {
+      ms: 500,
+      status: 502,
+      error: "en.wikipedia.org did not load in time.",
+    };
+    const { result, warned, failed } = await logged(() =>
+      call(patient, "/api/browser/navigate", {
+        method: "POST",
+        as: "ada",
+        json: { url: "https://en.wikipedia.org" },
+      }),
+    );
+    expect(result.status).toBe(502);
+    expect(await result.json()).toEqual({
+      error: "en.wikipedia.org did not load in time.",
+    });
+    expect(typesOf(failed)).toEqual([]);
+    expect(typesOf(warned)).toEqual(["browser-computer-failed"]);
+  });
+
+  test("a computer that took the request and has not answered reads as slow, at warning level", async () => {
+    const impatient = build({}, { callTimeoutMs: 300 });
+    await open(impatient, "ada");
+    let release = () => {};
+    slowNextNavigation = {
+      never: new Promise<void>((resolve) => {
+        release = resolve;
+      }),
+    };
+    try {
+      const { result, warned, failed } = await logged(() =>
+        call(impatient, "/api/browser/navigate", {
+          method: "POST",
+          as: "ada",
+          json: { url: "https://accounts.google.com" },
+        }),
+      );
+      expect(result.status).toBe(504);
+      expect(await result.json()).toEqual({
+        error:
+          "Your browser is taking too long to answer. The page may still be loading.",
+      });
+      expect(typesOf(failed)).toEqual([]);
+      expect(typesOf(warned)).toEqual(["browser-computer-slow"]);
+    } finally {
+      release();
+    }
+  });
+
+  test("a computer nothing answers on reads as unreachable, at error level", async () => {
+    const nowhere = `http://127.0.0.1:${NOTHING_PORT}`;
+    const gone = build(
+      {},
+      {
+        provider: {
+          name: "shared",
+          isolation: "shared",
+          locate: async () => nowhere,
+          status: async (botId: string) => ({
+            botId,
+            state: "ready" as const,
+          }),
+          stop: async () => ({ wasRunning: false }),
+          reset: async () => ({ cleared: false }),
+          list: async () => [],
+        } satisfies ComputerProvider,
+      },
+    );
+    const { result, failed } = await logged(() =>
+      call(gone, "/api/browser/navigate", {
+        method: "POST",
+        as: "ada",
+        json: { url: "https://example.com" },
+      }),
+    );
+    expect(result.status).toBe(502);
+    expect(await result.json()).toEqual({
+      error: "Your browser could not be reached. Try again.",
+    });
+    expect(typesOf(failed)).toEqual(["browser-computer-unreachable"]);
+  });
+});
+
+describe("Record after the OpenBot browser is disconnected", () => {
+  const record = (title: string) =>
+    call(openbot, "/api/browser/recording", {
+      method: "POST",
+      as: "ada",
+      json: { action: "start", title },
+    });
+  const stop = () =>
+    call(openbot, "/api/browser/recording", {
+      method: "POST",
+      as: "ada",
+      json: { action: "stop" },
+    });
+  const disconnect = async (connectionId: string) =>
+    expect(
+      (
+        await call(openbot, `/api/recorder/connections/${connectionId}`, {
+          method: "DELETE",
+          as: "ada",
+        })
+      ).status,
+    ).toBe(204);
+  const computerId = () => personBrowserId(ada.id);
+  const opens = () =>
+    asked.filter((line) => line === `POST /browser/open ${computerId()}`)
+      .length;
+
+  test("Disconnect in Settings, Browsers, then Record: the browser is connected again first, and records under a connection that stands", async () => {
+    await open(openbot, "ada");
+    const revoked = handed(ada.id);
+    await disconnect(revoked.connectionId);
+    // The Recorder has not heard: it hears on its next call to OpenBot, hours away on a quiet browser.
+    expect(browsers.get(computerId())?.state.recorder?.connected).toBe(true);
+
+    const started = await record("Look up Charles Babbage");
+    expect(started.status).toBe(200);
+    expect(await started.json()).toMatchObject({
+      recorder: { phase: "recording", title: "Look up Charles Babbage" },
+    });
+    const now = handed(ada.id);
+    expect(now.connectionId).not.toBe(revoked.connectionId);
+    const recordedUnder = browsers.get(computerId())?.recordedUnder as string;
+    expect(recordedUnder).toBe(now.token);
+    // Its capture passes carry a token OpenBot takes as the person's.
+    const me = await call(openbot, "/api/recorder/me", {
+      headers: bearer(recordedUnder),
+    });
+    expect(me.status).toBe(200);
+    expect(await me.json()).toMatchObject({ user: { id: ada.id } });
+    // One OpenBot browser in Settings, Browsers again, the new one.
+    const listed = (await (
+      await call(openbot, "/api/recorder/connections", { as: "ada" })
+    ).json()) as RecorderConnectionsResponse;
+    expect(
+      listed.connections
+        .filter((row) => row.via === "openbot-browser")
+        .map((row) => row.id),
+    ).toEqual([now.connectionId]);
+    expect((await stop()).status).toBe(200);
+  });
+
+  test("a Recorder that holds no connection of its own is connected again too", async () => {
+    await open(openbot, "ada");
+    const opened = browsers.get(computerId()) as Opened;
+    opened.state.recorder = {
+      connected: false,
+      phase: "idle",
+      actions: 0,
+      narration: "own",
+    };
+    const started = await record("After the keep-alive heard");
+    expect(started.status).toBe(200);
+    expect(await started.json()).toMatchObject({
+      recorder: { phase: "recording", connected: true, userId: ada.id },
+    });
+    expect((await stop()).status).toBe(200);
+  });
+
+  test("a connection that stands is not made again for every recording", async () => {
+    await open(openbot, "ada");
+    const held = handed(ada.id);
+    const before = opens();
+    expect((await record("Refund order 1043")).status).toBe(200);
+    expect(opens()).toBe(before);
+    expect(handed(ada.id).token).toBe(held.token);
+    expect((await stop()).status).toBe(200);
+  });
+
+  test("when the Recorder refuses to connect again, Record says why and nothing is recorded", async () => {
+    await open(openbot, "ada");
+    await disconnect(handed(ada.id).connectionId);
+    const sentence =
+      "The Recorder could not be connected: Your organization's Recorder policy does not allow this OpenBot. Ask your IT team.";
+    refuseNextOpen = { status: 502, error: sentence };
+    const recordings = () =>
+      asked.filter((line) => line === `POST /browser/recording ${computerId()}`)
+        .length;
+    const before = recordings();
+    const refused = await record("Look up Ada Lovelace");
+    // The refusal was the reconnect's. Cleared either way, so a later open is not refused for this test's sake.
+    const reconnected = refuseNextOpen as unknown;
+    refuseNextOpen = null;
+    expect(reconnected).toBeNull();
+    expect(refused.status).toBe(502);
+    expect(await refused.json()).toEqual({ error: sentence });
+    expect(recordings()).toBe(before);
+    expect(browsers.get(computerId())?.state.recorder?.phase).toBe("idle");
   });
 });
 

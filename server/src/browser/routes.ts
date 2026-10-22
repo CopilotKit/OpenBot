@@ -1,5 +1,6 @@
 import {
   type BrowserApiState,
+  type BrowserNarrationRequest,
   type BrowserOpenRequest,
   type BrowserOpenResponse,
   type BrowserProduct,
@@ -18,7 +19,7 @@ import { Hono, type MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import type { z } from "zod";
 import type { AuditStore } from "../audit";
-import type { AppVariables } from "../auth/guards";
+import type { AppVariables, AuthenticatedActor } from "../auth/guards";
 import { checkComputerAddress } from "../computer/target";
 import { recorderAudit, recorderConnected } from "../recorder/connected";
 import type { RecorderExtensionDeps } from "../recorder/wiring";
@@ -52,13 +53,31 @@ export type BrowserRouteDeps = {
   openbotUrl: (requestOrigin: string | undefined) => string | null;
   auditStore?: AuditStore;
   fetchImpl?: typeof fetch;
+  /** How long a call to the computer may take before OpenBot stops waiting, other than open's. A test's own, shorter;
+   * otherwise {@link CALL_TIMEOUT_MS}. */
+  callTimeoutMs?: number;
 };
 
 /** Narration is the largest body here: 4,000 characters of one phrase, as UTF-8, with room for the rest. */
 const BODY_LIMIT_BYTES = 16 * 1024;
 /** Launching a browser, loading the Recorder and handing it its connection takes seconds; a cold computer more. */
 const OPEN_TIMEOUT_MS = 90_000;
-const CALL_TIMEOUT_MS = 30_000;
+/**
+ * How long OpenBot waits for the computer to answer. Longer than the computer's own navigation timeout
+ * (agent-computer's NAVIGATION_TIMEOUT_MS, 30 s by default), so a page that does not load is answered by the computer,
+ * which can say which page and why, rather than by OpenBot giving up at the same moment and blaming the browser. The
+ * deadline the Bots' computer transport gives a browser action (computer/client.ts).
+ */
+export const CALL_TIMEOUT_MS = 45_000;
+
+/**
+ * How far from its arrival a narration time may be once it is on this server's clock. A page sends a phrase as it ends,
+ * so its times are moments before it was sent: one later than that by more than a page could round to, or earlier by
+ * more than anyone speaks one phrase for, is a time from another clock (one counted from the page's load, say), and the
+ * Recorder would place the phrase among the wrong steps or hold every step since.
+ */
+const NARRATION_AHEAD_MS = 2 * 60_000;
+const NARRATION_BEHIND_MS = 10 * 60_000;
 
 const SENTENCES = {
   unavailable: "This OpenBot cannot open a browser for you.",
@@ -69,11 +88,47 @@ const SENTENCES = {
   notConnected: "Your browser could not be connected. Try again.",
   noPerson: "This person could not be found. Try again.",
   unreachable: "Your browser could not be reached. Try again.",
+  slow: "Your browser is taking too long to answer. The page may still be loading.",
   unclear: "Your browser opened but did not say how. Try again.",
   notWeb: "Only web addresses open here.",
+  phraseTimes:
+    "That phrase's times do not fit the recording, so it was not added.",
 } as const;
 
-class BrowserUnreachableError extends Error {}
+/** OpenBot did not get the computer's answer: 502 when nothing answered, 504 when it took too long to. */
+class BrowserCallError extends Error {
+  readonly status: 502 | 504;
+  constructor(message: string, status: 502 | 504 = 502) {
+    super(message);
+    this.status = status;
+  }
+}
+
+/**
+ * A narration request with every time moved onto this server's clock: shifted by (its arrival minus `sentAt`), which is
+ * how far the person's computer's clock is from this one, with `sentAt` made the arrival. The Recorder then places the
+ * phrase among steps stamped on the same clock. Null when a time still does not fit a phrase sent now
+ * ({@link NARRATION_AHEAD_MS}).
+ */
+function onServerClock(
+  request: BrowserNarrationRequest,
+  arrival: number,
+): BrowserNarrationRequest | null {
+  const shift = (time: number) => time + (arrival - request.sentAt);
+  const fits = (time: number) =>
+    time <= arrival + NARRATION_AHEAD_MS &&
+    time >= arrival - NARRATION_BEHIND_MS;
+  if ("text" in request) {
+    const startedAt = shift(request.startedAt);
+    const endedAt = shift(request.endedAt);
+    return fits(startedAt) && fits(endedAt)
+      ? { text: request.text, startedAt, endedAt, sentAt: arrival }
+      : null;
+  }
+  if (!request.speaking) return { speaking: false, sentAt: arrival };
+  const since = shift(request.since);
+  return fits(since) ? { speaking: true, since, sentAt: arrival } : null;
+}
 
 /** A cross-site form can only send these three content types, so requiring JSON stops one. */
 const jsonOnly: MiddlewareHandler = async (context, next) => {
@@ -133,6 +188,9 @@ export function createBrowserRoutes(deps: BrowserRouteDeps) {
   const routes = new Hono<{ Variables: AppVariables }>();
   const audit = recorderAudit(deps.auditStore);
   const doFetch = deps.fetchImpl ?? fetch;
+  const callTimeoutMs = deps.callTimeoutMs ?? CALL_TIMEOUT_MS;
+  /** When each narration request reached this server, read before signing the person in can take any time. */
+  const arrivals = new WeakMap<Request, number>();
 
   /** One computer route for this person's browser, under the computer token with the browser in `x-openbot-bot-id`. */
   async function ask(
@@ -140,10 +198,10 @@ export function createBrowserRoutes(deps: BrowserRouteDeps) {
     computerId: string,
     path: string,
     body?: unknown,
-    timeoutMs = CALL_TIMEOUT_MS,
+    timeoutMs = callTimeoutMs,
   ): Promise<{ status: number; body: unknown }> {
     const checked = checkComputerAddress(base);
-    if (!checked.allowed) throw new BrowserUnreachableError(checked.reason);
+    if (!checked.allowed) throw new BrowserCallError(checked.reason);
     let response: Response;
     try {
       response = await doFetch(`${base.replace(/\/$/, "")}${path}`, {
@@ -157,6 +215,15 @@ export function createBrowserRoutes(deps: BrowserRouteDeps) {
         signal: AbortSignal.timeout(timeoutMs),
       });
     } catch (error) {
+      // Nothing came back in time. A computer that is not running refuses the connection at once, so this one, as a rule,
+      // took the request and is still at it: a page that will not finish loading, most often. Not an outage, and not
+      // said as one.
+      if (error instanceof Error && error.name === "TimeoutError") {
+        console.warn(
+          JSON.stringify({ type: "browser-computer-slow", path, timeoutMs }),
+        );
+        throw new BrowserCallError(SENTENCES.slow, 504);
+      }
       console.error(
         JSON.stringify({
           type: "browser-computer-unreachable",
@@ -164,8 +231,17 @@ export function createBrowserRoutes(deps: BrowserRouteDeps) {
           error: error instanceof Error ? error.name : String(error),
         }),
       );
-      throw new BrowserUnreachableError(SENTENCES.unreachable);
+      throw new BrowserCallError(SENTENCES.unreachable);
     }
+    // The computer answered and said what went wrong, to the person: a page that did not load, a Recorder that failed.
+    if (response.status >= 500)
+      console.warn(
+        JSON.stringify({
+          type: "browser-computer-failed",
+          path,
+          status: response.status,
+        }),
+      );
     return {
       status: response.status,
       body: await response.json().catch(() => null),
@@ -197,15 +273,9 @@ export function createBrowserRoutes(deps: BrowserRouteDeps) {
   }
 
   function unreachable(error: unknown): Response {
-    return Response.json(
-      {
-        error:
-          error instanceof BrowserUnreachableError
-            ? error.message
-            : SENTENCES.unreachable,
-      },
-      { status: 502 },
-    );
+    return error instanceof BrowserCallError
+      ? Response.json({ error: error.message }, { status: error.status })
+      : Response.json({ error: SENTENCES.unreachable }, { status: 502 });
   }
 
   const closed = (computerId: string, available: boolean): BrowserApiState => ({
@@ -273,41 +343,65 @@ export function createBrowserRoutes(deps: BrowserRouteDeps) {
     return body.success ? body.data : null;
   }
 
-  routes.get("/", deps.requireUser, async (context) =>
-    context.json(await currentState(personBrowserId(context.var.actor.id))),
-  );
+  /** Who is asking, and what of their request opening their browser needs. */
+  type Asker = {
+    actor: AuthenticatedActor;
+    origin: string | undefined;
+    cookie: string | undefined;
+  };
+  const askerOf = (context: {
+    var: AppVariables;
+    req: { header(name: string): string | undefined };
+  }): Asker => ({
+    actor: context.var.actor,
+    origin: context.req.header("origin"),
+    cookie: context.req.header("cookie"),
+  });
 
-  routes.post("/open", deps.requireUser, async (context) => {
-    const actor = context.var.actor;
+  /**
+   * Opens the person's browser, or brings it forward, with its Recorder connected as them: what Open does, and what
+   * Record does first when the Recorder's connection has gone. Answers the browser's state, or what the person is told.
+   *
+   * The connection is minted here and exchanged at once, as the Recorder's own exchange would: the same store, the same
+   * checks, the sealed organization session carried from this request. Its install id is the browser's, so this revokes
+   * the token the last one made, in the same transaction, rather than adding another.
+   */
+  async function connect(
+    asker: Asker,
+  ): Promise<
+    { ok: true; state: BrowserState | null } | { ok: false; response: Response }
+  > {
+    const refuse = (error: string, status: number) => ({
+      ok: false as const,
+      response: Response.json({ error }, { status }),
+    });
+    const { actor } = asker;
     const computerId = personBrowserId(actor.id);
     const computers = deps.computers;
-    if (!computers) return context.json({ error: SENTENCES.unavailable }, 503);
-    const openbotUrl = deps.openbotUrl(context.req.header("origin"));
-    if (!openbotUrl) return context.json({ error: SENTENCES.noAddress }, 503);
+    if (!computers) return refuse(SENTENCES.unavailable, 503);
+    const openbotUrl = deps.openbotUrl(asker.origin);
+    if (!openbotUrl) return refuse(SENTENCES.noAddress, 503);
 
-    // The connection, minted here and exchanged at once, as the Recorder's own exchange would: the same store, the same
-    // checks, the sealed organization session carried from this request. Its install id is the browser's, so this open
-    // revokes the token the last one made, in the same transaction, rather than adding another.
     const minted = await deps.recorder.connections.mintCode(
       actor.id,
       "openbot-browser",
-      await deps.recorder.sealOrganizationSession(context.req.header("cookie")),
+      await deps.recorder.sealOrganizationSession(asker.cookie),
     );
-    if (!minted) return context.json({ error: SENTENCES.tooMany }, 429);
+    if (!minted) return refuse(SENTENCES.tooMany, 429);
     const made = await deps.recorder.connections.exchange({
       code: minted.code,
       label: OPENBOT_BROWSER_LABEL,
       extensionId: RECORDER_EXTENSION_ID,
       installId: personBrowserInstallId(computerId),
     });
-    if (!made) return context.json({ error: SENTENCES.notConnected }, 500);
+    if (!made) return refuse(SENTENCES.notConnected, 500);
     await recorderConnected({
       made,
       audit,
       onConnected: deps.recorder.onConnected,
     });
     const user = await deps.recorder.user(actor.id);
-    if (!user) return context.json({ error: SENTENCES.noPerson }, 500);
+    if (!user) return refuse(SENTENCES.noPerson, 500);
 
     const request = browserOpenRequestSchema.safeParse({
       connection: {
@@ -321,10 +415,8 @@ export function createBrowserRoutes(deps: BrowserRouteDeps) {
         },
       },
     } satisfies BrowserOpenRequest);
-    if (!request.success)
-      return context.json({ error: SENTENCES.notConnected }, 500);
+    if (!request.success) return refuse(SENTENCES.notConnected, 500);
 
-    let state: BrowserState | null;
     try {
       const base = await computers.locate(computerId);
       const answer = await ask(
@@ -334,16 +426,65 @@ export function createBrowserRoutes(deps: BrowserRouteDeps) {
         request.data,
         OPEN_TIMEOUT_MS,
       );
-      if (answer.status < 200 || answer.status >= 300) return refused(answer);
-      state = browserState(answer.body);
+      if (answer.status < 200 || answer.status >= 300)
+        return { ok: false, response: refused(answer) };
+      const state = browserState(answer.body);
+      if (state?.browser && state.window) return { ok: true, state };
       // The computer answers its state; one that answered something else is asked for it.
-      if (!state?.browser || !state.window) {
-        const asked = await ask(base, computerId, browserComputerPaths.state);
-        state = asked.status === 200 ? browserState(asked.body) : null;
-      }
+      const asked = await ask(base, computerId, browserComputerPaths.state);
+      return {
+        ok: true,
+        state: asked.status === 200 ? browserState(asked.body) : null,
+      };
+    } catch (error) {
+      return { ok: false, response: unreachable(error) };
+    }
+  }
+
+  /**
+   * Before Record: when the Recorder in the person's open browser has lost its connection, it is connected again as Open
+   * does, so the recording starts under a connection that stands. Disconnect in Settings, Browsers revokes it at once,
+   * and the Recorder hears of that only on its next call to OpenBot, which on a quiet browser is its keep-alive, hours
+   * away: until then it starts a recording that its first capture pass ends, and the person is told nothing. So this asks
+   * OpenBot's own record of the connection as well as the Recorder. Null to go on and record; otherwise what the person
+   * is told instead. A browser that is not open is left to the computer, which refuses Record for it.
+   */
+  async function connectedForRecording(asker: Asker): Promise<Response | null> {
+    const computers = deps.computers;
+    if (!computers) return null;
+    const computerId = personBrowserId(asker.actor.id);
+    let state: BrowserState | null;
+    try {
+      const base = await computers.locate(computerId);
+      const answer = await ask(base, computerId, browserComputerPaths.state);
+      state = answer.status === 200 ? browserState(answer.body) : null;
     } catch (error) {
       return unreachable(error);
     }
+    if (!state?.open) return null;
+    const installId = personBrowserInstallId(computerId);
+    const standing = (
+      await deps.recorder.connections.list(asker.actor.id)
+    ).some((connection) => connection.installId === installId);
+    // A Recorder that has not answered yet is taken at OpenBot's word.
+    const recorder = state.recorder;
+    const holdsIt =
+      recorder === undefined ||
+      (recorder.connected && recorder.userId === asker.actor.id);
+    if (standing && holdsIt) return null;
+    const again = await connect(asker);
+    return again.ok ? null : again.response;
+  }
+
+  routes.get("/", deps.requireUser, async (context) =>
+    context.json(await currentState(personBrowserId(context.var.actor.id))),
+  );
+
+  routes.post("/open", deps.requireUser, async (context) => {
+    const computerId = personBrowserId(context.var.actor.id);
+    const connected = await connect(askerOf(context));
+    if (!connected.ok) return connected.response;
+    const state = connected.state;
     const browser: BrowserProduct | undefined = state?.browser;
     const window: BrowserWindow | undefined = state?.window;
     const narration = state ? narrationOf(state) : undefined;
@@ -368,6 +509,10 @@ export function createBrowserRoutes(deps: BrowserRouteDeps) {
       const body = await parsed(context.req.raw, browserRecordingRequestSchema);
       if (!body)
         return context.json({ error: "Name what you are about to do." }, 400);
+      if (body.action === "start") {
+        const instead = await connectedForRecording(askerOf(context));
+        if (instead) return instead;
+      }
       return forward(
         personBrowserId(context.var.actor.id),
         browserComputerPaths.recording,
@@ -380,17 +525,25 @@ export function createBrowserRoutes(deps: BrowserRouteDeps) {
   // the page polls the state on its own.
   routes.post(
     "/narration",
+    async (context, next) => {
+      arrivals.set(context.req.raw, Date.now());
+      await next();
+    },
     deps.requireUser,
     jsonOnly,
     smallBody,
     async (context) => {
+      const arrival = arrivals.get(context.req.raw) ?? Date.now();
       const body = await parsed(context.req.raw, browserNarrationRequestSchema);
-      if (!body || body.endedAt < body.startedAt)
+      if (!body || ("text" in body && body.endedAt < body.startedAt))
         return context.json({ error: "That phrase was not complete." }, 400);
+      const corrected = onServerClock(body, arrival);
+      if (!corrected)
+        return context.json({ error: SENTENCES.phraseTimes }, 400);
       return forward(
         personBrowserId(context.var.actor.id),
         browserComputerPaths.narration,
-        body,
+        corrected,
         async () => ({ ok: true }),
       );
     },

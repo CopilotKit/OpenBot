@@ -14,8 +14,10 @@ import type { EgressPolicy, EgressRule } from "../computer/policy-network";
  *   service that must reach any public address: allow what is public, refuse private and reserved space. Written as
  *   the public ranges, because a policy here can only allow; the computer's filter checks every address a name
  *   resolves to and connects to the address it checked, so a name that points inside is refused too.
- * - Plus OpenBot itself and the Intelligence gateway by name, wherever they resolve: the Recorder reaches OpenBot for its
- *   capture passes and streams to the gateway, and either can sit on a private address inside the cluster.
+ * - Plus OpenBot itself and the Intelligence gateway, wherever they resolve: the Recorder reaches OpenBot for its capture
+ *   passes and streams to the gateway, and either can sit on a private address inside the cluster. Their origins only,
+ *   host and port: OpenBot and the gateway often share an address with other services (the Intelligence UI, a
+ *   database, every other port on 127.0.0.1), and a person's browser is let in to these two, not to their neighbours.
  *
  * A deployment that lets Bots reach private addresses (AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS, local development only) lets a
  * person's cloud browser reach everything too.
@@ -32,8 +34,8 @@ export function personBrowserEgressPolicy(input: {
   if (input.native || input.allowPrivateHosts)
     return { mode: "allow_all", rules: [] };
   const named = [...input.openbotUrls, input.gatewayUrl].flatMap((raw) => {
-    const host = hostOf(raw);
-    return host ? [ruleFor(host)] : [];
+    const origin = originOf(raw);
+    return origin ? rulesFor(origin) : [];
   });
   return {
     mode: "allowlist_only",
@@ -46,26 +48,52 @@ export function personBrowserEgressPolicy(input: {
   };
 }
 
-function hostOf(raw: string | undefined): string | null {
+/** The port a URL reaches when it names none: the gateway's address is a ws: or wss: one. */
+const DEFAULT_PORTS: Record<string, number> = {
+  "http:": 80,
+  "https:": 443,
+  "ws:": 80,
+  "wss:": 443,
+};
+
+type Origin = { host: string; port: number };
+
+function originOf(raw: string | undefined): Origin | null {
   if (!raw) return null;
+  let url: URL;
   try {
-    return new URL(raw).hostname.replace(/^\[|\]$/g, "") || null;
+    url = new URL(raw);
   } catch {
     return null;
   }
+  const host = url.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  const port = url.port ? Number(url.port) : DEFAULT_PORTS[url.protocol];
+  return host && port ? { host, port } : null;
 }
 
-/** A name is allowed by name; an address only as itself, since a domain rule never matches an address. */
-function ruleFor(host: string): EgressRule {
-  const version = isIP(host);
-  if (version === 0) return { type: "domain", value: host.toLowerCase() };
-  return { type: "cidr", value: `${host}/${version === 4 ? 32 : 128}` };
+/**
+ * An address is allowed as itself on its own port, since a domain rule never matches an address. `localhost` is this
+ * machine's loopback addresses on its port: as a name it would be a domain rule, and a domain rule takes no port.
+ *
+ * A name is allowed by name, on every port: the computer's rules carry ports on an address range only
+ * (agent-computer/src/egress.ts). Where the name resolves to a public address, that is no wider than the open web
+ * already is; where it resolves inside the cluster, it is that name and the names under it.
+ */
+function rulesFor({ host, port }: Origin): EgressRule[] {
+  const addresses = host === "localhost" ? ["127.0.0.1", "::1"] : [host];
+  if (addresses.some((address) => isIP(address) === 0))
+    return [{ type: "domain", value: host }];
+  return addresses.map((address) => ({
+    type: "cidr",
+    value: `${address}/${isIP(address) === 4 ? 32 : 128}`,
+    ports: String(port),
+  }));
 }
 
 function uniqueRules(rules: EgressRule[]): EgressRule[] {
   const seen = new Set<string>();
   return rules.filter((rule) => {
-    const key = `${rule.type}:${rule.value}`;
+    const key = `${rule.type}:${rule.value}:${rule.type === "cidr" ? (rule.ports ?? "") : ""}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
