@@ -27,7 +27,7 @@ import { browserStateQueryOptions } from "@/lib/browser/queries";
 import { queryClient } from "@/query-client";
 import { ScreenBrowser } from "./browser-screen";
 import { NativeNarrationRow } from "./narration";
-import { RecordingRow, SavedRow, useRecording } from "./recording";
+import { RecordingRow, StoppedRow, useRecording } from "./recording";
 
 const TITLE = "Browser";
 const DESCRIPTION =
@@ -185,10 +185,10 @@ function NativeBrowser({
       >
         <PageRows>
           <RecordingRow recording={recording} />
-          {recording.saved ? (
+          {recording.stopped ? (
             <>
               <Separator />
-              <SavedRow saved={recording.saved} />
+              <StoppedRow stopped={recording.stopped} />
             </>
           ) : null}
           <Separator />

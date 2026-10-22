@@ -2,9 +2,13 @@ import type {
   BrowserApiState,
   LauncherState,
 } from "@openbot/shared/openbot-browser";
-import { IconCircleCheck, IconPlayerRecordFilled } from "@tabler/icons-react";
+import {
+  IconAlertTriangle,
+  IconCircleCheck,
+  IconPlayerRecordFilled,
+} from "@tabler/icons-react";
 import { useMutation } from "@tanstack/react-query";
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -19,6 +23,7 @@ import {
   startBrowserRecordingMutationOptions,
   stopBrowserRecordingMutationOptions,
 } from "@/lib/browser/mutations";
+import { browserStateQueryOptions } from "@/lib/browser/queries";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
 
@@ -73,6 +78,7 @@ export function useRecording(
   const seconds = useSecondsSince(
     phase === "recording" ? recorder?.startedAt : undefined,
   );
+  const { counted, keep } = useActionsAtStop(recorder);
   /**
    * Why Record cannot be pressed yet, in a sentence, or null when it can. A Recorder that reports itself disconnected
    * does not hold Record back: the server connects the person's own browser again before it starts (a Disconnect in
@@ -97,8 +103,8 @@ export function useRecording(
       !!title.trim(),
     starting: start.isPending || phase === "starting",
     stopping: finishing || stop.isPending || phase === "stopping",
-    /** The recording Stop saved last, while nothing else is being recorded: what the page confirms after Stop. */
-    saved: phase === "idle" ? recorder?.lastStopped : undefined,
+    /** The recording Stop ended last, while nothing else is being recorded: what the page says after Stop. */
+    stopped: stoppedRecording(phase, recorder?.lastStopped, counted),
     /** Why Record or Stop was refused, in the server's own sentence, and when it was asked (the latest of the page's
      * failures is the one it shows). */
     error: start.error ?? stop.error,
@@ -121,6 +127,13 @@ export function useRecording(
       setFinishing(true);
       try {
         await beforeStop?.();
+        // The count as Stop is pressed. The page reads it once a second, so an action taken just before Stop may not
+        // have been read yet, and a recording that holds one must not be said to hold nothing. A read that fails leaves
+        // the count the page read last.
+        const now = await queryClient
+          .fetchQuery({ ...browserStateQueryOptions(), retry: false })
+          .catch(() => undefined);
+        keep(now?.recorder);
       } finally {
         setFinishing(false);
       }
@@ -130,43 +143,119 @@ export function useRecording(
 }
 
 export type Recording = ReturnType<typeof useRecording>;
-type Saved = NonNullable<LauncherState["lastStopped"]>;
 
-/** What the page says once Stop saved a recording, naming it. */
-function savedSentence(title: string): string {
-  return `Saved “${title}” to your Learning space.`;
+/** A recording's actions as the page last read them while it ran. */
+type Counted = { recordingId: string; actions: number };
+
+/**
+ * The Recorder's count of the person's actions in the recording running now, as the page last read it, kept once it
+ * stops: the Recorder's report after Stop counts nothing (its count is the live recording's), so this is the only way
+ * the page knows what the recording it stopped held. `keep` takes a report the page read for itself (at Stop). A count
+ * never goes down within one recording, so a report read earlier never lowers one read later.
+ */
+function useActionsAtStop(recorder: LauncherState | undefined) {
+  const [counted, setCounted] = useState<Counted | null>(null);
+  const keep = useCallback((report: LauncherState | undefined) => {
+    const recordingId =
+      report?.phase === "recording" || report?.phase === "stopping"
+        ? report.recordingId
+        : undefined;
+    if (!report || recordingId === undefined) return;
+    setCounted((kept) =>
+      kept?.recordingId === recordingId && kept.actions >= report.actions
+        ? kept
+        : { recordingId, actions: report.actions },
+    );
+  }, []);
+  useEffect(() => keep(recorder), [keep, recorder]);
+  return { counted, keep };
 }
 
 /**
- * The recording Stop saved last, by name, on a page of rows (OpenBot Desktop), until the next one starts: Stop says
- * where the recording went, as the Recorder's own popup does.
+ * The recording Stop ended last, while nothing else is being recorded, and whether it held nothing: the page read it
+ * running and it never counted an action. A recording follows the tab Record started in and tabs opened from it, so
+ * one where the person worked in another tab held nothing, and the Recorder still names it as sent (the fourth
+ * end-to-end run: two such recordings reached Intelligence with no steps, and the page said both were saved). One the
+ * page never saw running (stopped from the Recorder's own button while the page was closed) is taken as the Recorder
+ * reports it.
  */
-export function SavedRow({ saved }: { saved: Saved }) {
+function stoppedRecording(
+  phase: LauncherState["phase"],
+  lastStopped: LauncherState["lastStopped"],
+  counted: Counted | null,
+) {
+  if (phase !== "idle" || !lastStopped) return undefined;
+  return {
+    ...lastStopped,
+    empty:
+      counted?.recordingId === lastStopped.recordingId && counted.actions === 0,
+  };
+}
+
+type Stopped = NonNullable<ReturnType<typeof stoppedRecording>>;
+
+/** Why a recording can hold nothing, which the person can do something about next time. */
+const FOLLOWS_ITS_TAB =
+  "The Recorder follows the tab you started recording in, and tabs opened from it.";
+
+/** What the page says once Stop ended a recording, naming it. */
+function stoppedSentence(stopped: Stopped): string {
+  return stopped.empty
+    ? `Nothing was recorded in “${stopped.title}”. ${FOLLOWS_ITS_TAB}`
+    : `Saved “${stopped.title}” to your Learning space.`;
+}
+
+function StoppedIcon({
+  stopped,
+  className,
+}: {
+  stopped: Stopped;
+  className?: string;
+}) {
+  return stopped.empty ? (
+    <IconAlertTriangle
+      aria-hidden="true"
+      className={cn("text-amber-600 dark:text-amber-400", className)}
+    />
+  ) : (
+    <IconCircleCheck
+      aria-hidden="true"
+      className={cn("text-emerald-600 dark:text-emerald-400", className)}
+    />
+  );
+}
+
+/**
+ * The recording Stop ended last, by name, on a page of rows (OpenBot Desktop), until the next one starts: Stop says
+ * where the recording went, as the Recorder's own popup does, or that it held nothing.
+ */
+export function StoppedRow({ stopped }: { stopped: Stopped }) {
   return (
     <Item size="sm" role="status">
       <ItemMedia variant="icon">
-        <IconCircleCheck className="text-emerald-600 dark:text-emerald-400" />
+        <StoppedIcon stopped={stopped} />
       </ItemMedia>
       <ItemContent>
-        <ItemTitle>{saved.title}</ItemTitle>
-        <ItemDescription>Saved to your Learning space.</ItemDescription>
+        <ItemTitle>{stopped.title}</ItemTitle>
+        <ItemDescription className="line-clamp-none">
+          {stopped.empty
+            ? `Nothing was recorded. ${FOLLOWS_ITS_TAB}`
+            : "Saved to your Learning space."}
+        </ItemDescription>
       </ItemContent>
     </Item>
   );
 }
 
 /** The same, as a line under the bar above a browser shown in the page (hosted OpenBot). */
-export function SavedNotice({ saved }: { saved: Saved }) {
+export function StoppedNotice({ stopped }: { stopped: Stopped }) {
   return (
     <p
       className="flex items-center gap-2 border-b border-border px-3 py-2 text-sm"
       role="status"
     >
-      <IconCircleCheck
-        aria-hidden="true"
-        className="size-4 shrink-0 text-emerald-600 dark:text-emerald-400"
-      />
-      <span className="min-w-0">{savedSentence(saved.title)}</span>
+      <StoppedIcon stopped={stopped} className="size-4 shrink-0" />
+      <span className="min-w-0">{stoppedSentence(stopped)}</span>
     </p>
   );
 }

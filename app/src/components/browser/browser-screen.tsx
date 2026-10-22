@@ -32,7 +32,7 @@ import { NarrationNotice, NarrationSwitch } from "./narration";
 import {
   narrationLanguage,
   RecordingBar,
-  SavedNotice,
+  StoppedNotice,
   useRecording,
 } from "./recording";
 import { useNarration } from "./use-narration";
@@ -123,7 +123,7 @@ export function ScreenBrowser({
         </RecordingBar>
       </div>
       <NarrationNotice narration={narration} language={language} />
-      {recording.saved ? <SavedNotice saved={recording.saved} /> : null}
+      {recording.stopped ? <StoppedNotice stopped={recording.stopped} /> : null}
       {failure ? (
         <p
           className="border-b border-border px-3 py-2 text-destructive text-sm"

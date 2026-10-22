@@ -59,6 +59,8 @@ let openAnswer: BrowserOpenResponse;
 let stateFails = false;
 /** Requests the server refuses, by path, with the sentence it answers: as it passes on the Recorder's own (409). */
 let refusals: Partial<Record<string, string>> = {};
+/** The person's actions the Recorder counts by the read after Record. */
+let actionsAfterStart = 7;
 
 function nativeState(): BrowserApiState {
   return {
@@ -145,7 +147,7 @@ async function server(path: string, init?: RequestInit): Promise<Response> {
               recordingId: "rec-1",
               // As if the person had been at it for 42 seconds and seven actions by the next read.
               startedAt: Date.now() - 42_000,
-              actions: 7,
+              actions: actionsAfterStart,
             }
           : {
               ...state.recorder,
@@ -207,6 +209,7 @@ beforeEach(() => {
   writes.length = 0;
   stateFails = false;
   refusals = {};
+  actionsAfterStart = 7;
   state = nativeState();
   openAnswer = answerFor("native");
   QuietSocket.urls = [];
@@ -347,6 +350,92 @@ test("on OpenBot Desktop Record starts a recording named for the task, which sho
   expect(saved.textContent).toBe(
     "Submit an expense reportSaved to your Learning space.",
   );
+});
+
+/** What the page says Stop did with the recording: the status that names it saved, or that nothing was recorded. */
+async function stopSays(view: ReturnType<typeof draw>): Promise<string> {
+  let said = "";
+  await waitFor(async () => {
+    const statuses = await view.findAllByRole("status");
+    said =
+      statuses
+        .map((status) => status.textContent ?? "")
+        .find((text) => /Saved|Nothing was recorded/.test(text)) ?? "";
+    expect(said).not.toBe("");
+  });
+  return said;
+}
+
+/** Records a task named `title` on the page and stops it, once the page has read the recording running. */
+async function recordAndStop(
+  view: ReturnType<typeof draw>,
+  title: string,
+  beforeStop: () => void = () => {},
+) {
+  const user = userEvent.setup({ document });
+  await user.type(
+    await view.findByRole("textbox", { name: "Task name" }),
+    title,
+  );
+  await user.click(view.getByRole("button", { name: "Record" }));
+  await view.findByRole("timer");
+  beforeStop();
+  await user.click(view.getByRole("button", { name: "Stop" }));
+  await waitFor(() =>
+    expect(writes.at(-1)).toEqual({
+      path: "/api/browser/recording",
+      method: "POST",
+      body: { action: "stop" },
+    }),
+  );
+}
+
+test("Stop on a recording that held no actions says nothing was recorded and why, never that it was saved, on both shapes", async () => {
+  // The fourth end-to-end run: the person worked in a tab the recording did not follow, the trajectory reached
+  // Intelligence with no steps, and the page said it was saved to their Learning space.
+  for (const shape of ["native", "screen"] as const) {
+    cleanup();
+    queryClient.clear();
+    writes.length = 0;
+    state = shape === "native" ? nativeState() : screenState();
+    openAnswer = answerFor(shape);
+    actionsAfterStart = 0;
+    const view = draw(<BrowserPage />);
+    await recordAndStop(view, "Look up Ada Lovelace");
+    expect(await stopSays(view)).toBe(
+      shape === "native"
+        ? "Look up Ada LovelaceNothing was recorded. The Recorder follows the tab you started recording in, and tabs opened from it."
+        : "Nothing was recorded in “Look up Ada Lovelace”. The Recorder follows the tab you started recording in, and tabs opened from it.",
+    );
+    expect(view.queryByText(/Saved/)).toBeNull();
+  }
+});
+
+test("an action the page has not read yet when Stop is pressed still counts: the recording is said to be saved", async () => {
+  for (const shape of ["native", "screen"] as const) {
+    cleanup();
+    queryClient.clear();
+    writes.length = 0;
+    state = shape === "native" ? nativeState() : screenState();
+    openAnswer = answerFor(shape);
+    actionsAfterStart = 0;
+    const view = draw(<BrowserPage />);
+    // The person acts in their browser a moment before Stop, after the page's last read.
+    await recordAndStop(view, "Refund an order", () => {
+      state = {
+        ...state,
+        recorder: {
+          ...(state.recorder as NonNullable<BrowserApiState["recorder"]>),
+          actions: 1,
+        },
+      };
+    });
+    expect(await stopSays(view)).toBe(
+      shape === "native"
+        ? "Refund an orderSaved to your Learning space."
+        : "Saved “Refund an order” to your Learning space.",
+    );
+  }
 });
 
 test("Record is offered while the Recorder is disconnected: the server connects it first", async () => {
