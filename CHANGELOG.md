@@ -8,7 +8,7 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-**Before upgrading.** Eight things change for an existing deployment:
+**Before upgrading.** Nine things change for an existing deployment:
 - A hosted computer's browser is now headed by default. It uses a little more memory than headless
   did; set `COMPUTER_BROWSER_MODE=headless` (Helm: `computers.browserMode: headless`) to keep the old
   behaviour.
@@ -46,6 +46,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   the Responses API loses Responses-only features, such as reasoning summaries, without an error.
   `COPILOTKIT_OPENAI_API=responses` keeps the Responses API (`chat` forces Chat Completions); any
   other value is an error when a built-in Bot runs. Deployments on OpenAI or Azure are unchanged.
+- Migration `0062_recorder_activity` adds two nullable columns to `recorder_connections`, where each
+  OpenBot Recorder's latest recording activity is kept. Nothing existing changes.
 
 ### Plainer words, and one word for each thing
 
@@ -167,6 +169,30 @@ hands out each capture pass; it receives nothing that is recorded.
   `recorder.connect_refused`, `recorder.bearer_refused` and `recorder.trajectory_refused`; changing
   Settings → Learning as `learning.sharing_changed`, `learning.skill_opened` and
   `learning.skill_closed`.
+
+### Your own everyday Chrome or Edge, with the Recorder in it
+
+On OpenBot Desktop the Browser button now works with your own everyday Chrome or Edge: your profile,
+extensions, password manager and logins, not a separate copy.
+
+- **Once the OpenBot Recorder is published** on the Chrome Web Store and Edge Add-ons, OpenBot Desktop
+  registers it with your Chrome and Edge, and the browser installs it from the store and asks you once to
+  turn it on (on a Mac the next time you restart the browser, on Windows while it runs, on Linux in Edge
+  only). Before it is there, the Browser button opens the Recorder's store page in your Chrome (or Edge)
+  so you can add it at once. Until the Recorder is published, the Browser button opens the OpenBot browser
+  as before. Uninstalling Desktop on Windows takes the registration back out.
+- **The Recorder connects through OpenBot Desktop as it installs, with nothing to click.** "Connect with
+  OpenBot Desktop" in the Recorder's popup also connects at once; connecting from a web page still asks
+  you to confirm. Once it is connected, the Browser button brings that browser to the front.
+- **The red dot follows a recording in any of your browsers**, your everyday one included, on Desktop and
+  hosted: the Recorder tells OpenBot when it starts and stops recording, and every 30 seconds while it
+  records, and the dot goes out 90 seconds after a browser stops reporting.
+- **The Recorder says what it collects** on its setup page and its Record form, before anything is
+  recorded: every step in every tab you use until you stop, what is on those pages, your clicks and
+  typing (secrets masked in your browser first), what each step saves and what you say, all going to
+  your organization's own Intelligence through your organization's OpenBot.
+- Migration `0062_recorder_activity` adds two nullable columns to `recorder_connections` (each
+  Recorder's latest activity). Nothing existing changes.
 
 ### A recording follows every tab you use
 
