@@ -1002,6 +1002,40 @@ test("the popup keeps the person's Learning space after Stop", async () => {
   });
 });
 
+test("the popup keeps the person's Learning space after Stop when Chrome stopped the service worker before Record", async () => {
+  // End-to-end run 8: the popup opened and asked, the service worker went idle and Chrome stopped it, and the next one
+  // started the recording with no Learning space, so after Stop the popup said only "Sent to Intelligence".
+  await page({ type: "page.learning" });
+  fake.restartServiceWorker();
+  handlers = installRecording(doubles());
+  installRouter(handlers);
+  const id = await record();
+  expect((await state()).learning).toEqual({
+    state: "assigned",
+    containerId: "space-1",
+  });
+  expect(await page({ type: "page.stop" })).toEqual({ ok: true });
+  expect(await state()).toMatchObject({
+    phase: "idle",
+    lastStopped: { recordingId: id },
+    learning: { state: "assigned", containerId: "space-1" },
+  });
+  // Nothing more was asked of OpenBot for it: Record still tells OpenBot nothing.
+  expect(
+    requests().filter((request) => request === "GET /api/recorder/learning"),
+  ).toHaveLength(1);
+});
+
+test("a service worker that restarted takes up no Learning space read for another connection", async () => {
+  await page({ type: "page.learning" });
+  connect(bea, "obr_two");
+  fake.restartServiceWorker();
+  handlers = installRecording(doubles());
+  installRouter(handlers);
+  await record();
+  expect((await state()).learning).toBeUndefined();
+});
+
 test("a stop whose document never answers goes on after 120 seconds from when it began", async () => {
   await record();
   holdStop = true;

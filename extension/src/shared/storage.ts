@@ -1,5 +1,6 @@
 import type { Narration } from "@openbot/shared/openbot-browser";
 import type {
+  LearningSpaceState,
   RecorderConnectVia,
   RecorderMe,
   RecorderUser,
@@ -96,6 +97,10 @@ type SessionState = {
   pendingConnect?: PendingConnect;
   stream?: StreamSession; // so a restarted service worker can resume the offscreen document
   me?: { value: RecorderMe; fetchedAt: number };
+  /** The person's own Learning space as OpenBot last described it to the popup, and the connection it was asked with:
+   * Record copies it into the recording's state. Chrome stops a service worker idle for 30 s, so the one that answers
+   * Record is often not the one the popup asked; it takes this up for the same connection only. */
+  learning?: { value: LearningSpaceState; connectionId: string };
   /** Sensitive-value digests of the recording in progress. Memory only (storage.session is never written to disk
    * and is not readable by content scripts by default), so they survive a service-worker restart and vanish with
    * the browser; cleared at Stop. Never written to storage.local or IndexedDB. */
