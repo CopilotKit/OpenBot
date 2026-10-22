@@ -8008,8 +8008,9 @@ fn main() {
         let root = scratch.join("deployment");
         let home = scratch.join("home");
         std::fs::create_dir_all(&home).unwrap();
+        // From the repository root: run in a subdirectory, `git archive` packs only that directory.
         let tarball = Command::new("git")
-            .current_dir(env!("CARGO_MANIFEST_DIR"))
+            .current_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
             .args([
                 "archive",
                 "--format=tar.gz",
