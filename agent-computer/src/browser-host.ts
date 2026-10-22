@@ -347,6 +347,25 @@ export function createBrowserHost(options: BrowserHostOptions) {
       return json(closedState);
     }
 
+    /*
+     * OpenBot revoked this browser's connection: the Recorder forgets it now rather than at its next
+     * call to OpenBot. A closed browser has no Recorder running to tell, and is not opened to tell
+     * it: the next open hands the Recorder whatever connection OpenBot gives it then.
+     */
+    if (pathname === browserComputerPaths.disconnect) {
+      const browser = profiles.person(botId);
+      if (!browser) return json(closedState);
+      try {
+        const result = await browser.launcher.disconnect();
+        if (!result.ok) return json({ error: result.error }, 409);
+      } catch (error) {
+        if (error instanceof RecorderUnavailableError)
+          return json({ error: error.message }, 502);
+        throw error;
+      }
+      return json(await stateOf(browser));
+    }
+
     // Validated before asking whether the browser is open, so a malformed call says what is wrong
     // with it rather than that there is nothing to act on.
     const recording =

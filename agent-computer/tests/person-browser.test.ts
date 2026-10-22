@@ -579,6 +579,30 @@ for (const variant of VARIANTS) {
       expect(again.json.error).toBe("Nothing is being recorded.");
     }, 60_000);
 
+    test("disconnecting makes the Recorder forget its connection now, recording or not", async () => {
+      const started = await api("/browser/recording", {
+        action: "start",
+        title: "Disconnected part way",
+      });
+      expect(started.status).toBe(200);
+      const disconnected = await api("/browser/disconnect", {});
+      expect(disconnected.status).toBe(200);
+      const after = disconnected.json as BrowserState;
+      expect(after.open).toBe(true);
+      expect(after.tabs.length).toBeGreaterThan(0);
+      // The Recorder's own report: signed out, and the recording ended with it.
+      expect(after.recorder).toMatchObject({ connected: false, phase: "idle" });
+      expect(after.recorder?.userId).toBeUndefined();
+      expect(callsFor("disconnect")).toHaveLength(1);
+      // Asked again it is still signed out, and saying so twice is no error.
+      expect((await api("/browser/disconnect", {})).status).toBe(200);
+      expect((await state()).recorder?.connected).toBe(false);
+
+      // The next open connects it again with what OpenBot hands it then.
+      const reopened = await api("/browser/open", { connection: CONNECTION });
+      expect((reopened.json as BrowserState).recorder?.connected).toBe(true);
+    }, 60_000);
+
     test.skipIf(variant.window !== "screen")(
       "the live screen keeps the whole page while the Recorder records",
       async () => {
@@ -834,6 +858,12 @@ for (const variant of VARIANTS) {
       );
       // Nothing but an open starts it: the live screen asking for its page finds it closed.
       await expect(profiles.page(PERSON)).rejects.toThrow("not open");
+      expect(profiles.isLive(PERSON)).toBe(false);
+      // Nor does a disconnect: a closed browser answers that it is closed and stays closed.
+      expect(await api("/browser/disconnect", {})).toEqual({
+        status: 200,
+        json: { open: false, tabs: [] },
+      });
       expect(profiles.isLive(PERSON)).toBe(false);
 
       // Loaded again at the next launch, which a DevTools load needs, and still connected.

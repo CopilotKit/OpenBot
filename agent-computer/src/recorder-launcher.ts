@@ -352,6 +352,9 @@ export function createRecorderLauncher(input: {
     async speaking(argument) {
       return result(await call("speaking", argument));
     },
+    async disconnect() {
+      return result(await call("disconnect"));
+    },
     async state() {
       const value = await call("state", undefined, 5_000);
       if (!value || typeof value !== "object" || !("phase" in value))

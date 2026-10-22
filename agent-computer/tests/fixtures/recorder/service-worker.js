@@ -145,6 +145,18 @@ globalThis[LAUNCHER_GLOBAL] = {
     await report("speaking", input);
     return { ok: true };
   },
+  async disconnect() {
+    const now = await held();
+    // Said while it still knows where to say it, then forgotten. A recording ends as a sign-out ends
+    // one: stopped, with nothing kept as the last one Stop ended.
+    await report("disconnect", undefined);
+    if (now.recording)
+      await chrome.debugger
+        .detach({ tabId: now.recording.tabId })
+        .catch(() => undefined);
+    await chrome.storage.local.set({ connection: null, recording: null });
+    return { ok: true };
+  },
   async state() {
     return stateOf(await held());
   },
