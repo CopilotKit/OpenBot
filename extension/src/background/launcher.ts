@@ -15,7 +15,11 @@ import {
   type LauncherState,
   type Narration,
 } from "@openbot/shared/openbot-browser";
-import { type RecorderMe, recorderPaths } from "@openbot/shared/recorder-api";
+import {
+  joinedLearningContainer,
+  type RecorderMe,
+  recorderPaths,
+} from "@openbot/shared/recorder-api";
 import type { PageResponse, RecorderState } from "../protocol/messages";
 import { OpenBotError, openbotJson } from "../shared/openbot-client";
 import { normaliseOpenBotOrigin } from "../shared/origin";
@@ -158,6 +162,43 @@ function sameConnection(
   );
 }
 
+/**
+ * Whether the Recorder hears the person itself, from its own recogniser's report (the popup's Voice row): listening
+ * while the microphone is open or opening, muted as the person set it, unavailable when it failed (no permission, no
+ * microphone, no speech service, or one it cannot reach just now and tries again), and off while nothing is recorded
+ * (a Record still starting has opened no microphone yet). The contract has no word for a microphone still opening; it
+ * is reported as listening, as the popup's Voice row shows it on.
+ */
+function voiceOf(state: RecorderState): NonNullable<LauncherState["voice"]> {
+  if (state.phase === "idle") return "off";
+  switch (state.capture.voice?.state) {
+    case "starting":
+    case "listening":
+      return "listening";
+    case "muted":
+      return "muted";
+    case "failed":
+      return "unavailable";
+    case undefined:
+      return "off";
+  }
+}
+
+/** The recording Stop ended last, by name, once it went to Intelligence (a Disconnect or a failed send leaves none),
+ * and not when the person's own Learning space is known not to take it: OpenBot confirms it went there. */
+function lastStopped(state: RecorderState): LauncherState["lastStopped"] {
+  const stopped = state.lastStopped;
+  if (stopped?.title === undefined || stopped.stoppedAt === undefined)
+    return undefined;
+  if (state.learning && joinedLearningContainer(state.learning) === null)
+    return undefined;
+  return {
+    recordingId: stopped.recordingId,
+    title: stopped.title,
+    stoppedAt: stopped.stoppedAt,
+  };
+}
+
 export function createLauncher(
   controls: LauncherControls,
   overrides: Partial<LauncherDeps> = {},
@@ -167,6 +208,8 @@ export function createLauncher(
   async function launcherState(): Promise<LauncherState> {
     const connection = await currentConnection();
     const state: RecorderState = await controls.current();
+    const narration = connection?.narration ?? "own";
+    const stopped = lastStopped(state);
     return {
       connected: connection !== null,
       ...(connection ? { userId: connection.user.id } : {}),
@@ -175,7 +218,9 @@ export function createLauncher(
       ...(state.title ? { title: state.title } : {}),
       ...(state.startedAt !== undefined ? { startedAt: state.startedAt } : {}),
       actions: state.actions,
-      narration: connection?.narration ?? "own",
+      narration,
+      ...(narration === "own" ? { voice: voiceOf(state) } : {}),
+      ...(stopped ? { lastStopped: stopped } : {}),
     };
   }
 
@@ -326,6 +371,16 @@ export function createLauncher(
           startedAt: input.startedAt,
           endedAt: input.endedAt,
         });
+        return response.ok ? { ok: true } : refuse(response.error);
+      },
+      () => refuse(SENTENCES.failed),
+    ),
+
+    speaking: guarded(
+      async (input: unknown): Promise<LauncherResult> => {
+        if (!isRecord(input) || !(input.since === null || isTime(input.since)))
+          return refuse(SENTENCES.invalid);
+        const response = await controls.speaking(input.since);
         return response.ok ? { ok: true } : refuse(response.error);
       },
       () => refuse(SENTENCES.failed),

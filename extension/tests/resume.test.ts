@@ -390,7 +390,11 @@ test("a service-worker restart during Stop finishes the stop with the document a
   const after = await state();
   expect(after.phase).toBe("idle");
   expect(after.stopping).toBeUndefined();
-  expect(after.lastStopped).toEqual({ recordingId: id });
+  expect(after.lastStopped).toEqual({
+    recordingId: id,
+    title: "Update deal",
+    stoppedAt: now,
+  });
   expect(fake.storage.local.get("activeRecording")).toBeUndefined();
   expect(fake.storage.session.get("stream")).toBeUndefined();
   expect(drains().map((drain) => drain.recordingId)).toEqual([id]);
@@ -535,7 +539,11 @@ test("a service-worker restart just after Stop moved the recording into the drai
 
   const after = await state();
   expect(after.phase).toBe("idle");
-  expect(after.lastStopped).toEqual({ recordingId: RECORDING });
+  expect(after.lastStopped).toEqual({
+    recordingId: RECORDING,
+    title: "Update deal",
+    stoppedAt: now,
+  });
   expect(drains()).toEqual([seededRecord()]);
   expect(sentToDocument("offscreen.recover", port)).toEqual([
     {

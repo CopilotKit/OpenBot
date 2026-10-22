@@ -1,5 +1,8 @@
-import type { BrowserApiState } from "@openbot/shared/openbot-browser";
-import { IconPlayerRecordFilled } from "@tabler/icons-react";
+import type {
+  BrowserApiState,
+  LauncherState,
+} from "@openbot/shared/openbot-browser";
+import { IconCircleCheck, IconPlayerRecordFilled } from "@tabler/icons-react";
 import { useMutation } from "@tanstack/react-query";
 import { type ReactNode, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -92,7 +95,16 @@ export function useRecording(
       !!title.trim(),
     starting: start.isPending || phase === "starting",
     stopping: finishing || stop.isPending || phase === "stopping",
+    /** The recording Stop saved last, while nothing else is being recorded: what the page confirms after Stop. */
+    saved: phase === "idle" ? recorder?.lastStopped : undefined,
+    /** Why Record or Stop was refused, in the server's own sentence, and when it was asked (the latest of the page's
+     * failures is the one it shows). */
     error: start.error ?? stop.error,
+    failedAt: start.error
+      ? start.submittedAt
+      : stop.error
+        ? stop.submittedAt
+        : 0,
     record() {
       const name = title.trim();
       if (!name) return;
@@ -116,6 +128,46 @@ export function useRecording(
 }
 
 export type Recording = ReturnType<typeof useRecording>;
+type Saved = NonNullable<LauncherState["lastStopped"]>;
+
+/** What the page says once Stop saved a recording, naming it. */
+function savedSentence(title: string): string {
+  return `Saved “${title}” to your Learning space.`;
+}
+
+/**
+ * The recording Stop saved last, by name, on a page of rows (OpenBot Desktop), until the next one starts: Stop says
+ * where the recording went, as the Recorder's own popup does.
+ */
+export function SavedRow({ saved }: { saved: Saved }) {
+  return (
+    <Item size="sm" role="status">
+      <ItemMedia variant="icon">
+        <IconCircleCheck className="text-emerald-600 dark:text-emerald-400" />
+      </ItemMedia>
+      <ItemContent>
+        <ItemTitle>{saved.title}</ItemTitle>
+        <ItemDescription>Saved to your Learning space.</ItemDescription>
+      </ItemContent>
+    </Item>
+  );
+}
+
+/** The same, as a line under the bar above a browser shown in the page (hosted OpenBot). */
+export function SavedNotice({ saved }: { saved: Saved }) {
+  return (
+    <p
+      className="flex items-center gap-2 border-b border-border px-3 py-2 text-sm"
+      role="status"
+    >
+      <IconCircleCheck
+        aria-hidden="true"
+        className="size-4 shrink-0 text-emerald-600 dark:text-emerald-400"
+      />
+      <span className="min-w-0">{savedSentence(saved.title)}</span>
+    </p>
+  );
+}
 
 /** The red dot a recording carries, as a recording mark rather than a warning, in an icon's box so it lines up with
  * the icons of the rows around it. */

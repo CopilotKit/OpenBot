@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { sendNarration } from "@/lib/browser/mutations";
+import { type NarrationPost, sendNarration } from "@/lib/browser/mutations";
 import {
   browserNarrationDeps,
   type Narration,
@@ -11,12 +11,18 @@ import {
 /** The longest phrase the narration route takes. */
 const PHRASE_MAX = 4000;
 
+/** A narration post that did not arrive: the server's sentence for why, or null when it gave none. */
+export type LostNarration = { error: string | null };
+
 /**
  * The person's narration while a recording runs in the browser the page shows: listening from when `listening` turns
- * on, each final phrase sent to the Recorder as it comes, and a mute that lasts across recordings.
+ * on, and a mute that lasts across recordings. Everything the Recorder needs to place what they say among their steps
+ * goes to it in the order it happened: that a phrase began (its first words came back), the phrase once it is final,
+ * and that they stopped speaking. One post at a time, each after the last has been answered, because a phrase that
+ * overtook the word that it began would leave the Recorder holding the person's steps for a phrase already placed.
  *
- * `finish` is for Stop. It hands over the phrase in progress and waits until every phrase has reached the server, so
- * the last thing the person said is in the recording before the recording ends.
+ * `finish` is for Stop. It hands over the phrase in progress and waits until every post has been answered, so the
+ * last thing the person said is in the recording before the recording ends.
  */
 export function useNarration({
   listening,
@@ -30,36 +36,39 @@ export function useNarration({
 }) {
   const [muted, setMuted] = useState(false);
   const [status, setStatus] = useState<NarrationStatus | null>(null);
-  const [lostPhrase, setLostPhrase] = useState(false);
+  const [lost, setLost] = useState<LostNarration | null>(null);
   const session = useRef<Narration | null>(null);
-  const sending = useRef(new Set<Promise<boolean>>());
+  /** The last post, answered or not: the next one goes after it. */
+  const posted = useRef<Promise<void>>(Promise.resolve());
   const mutedNow = useRef(muted);
   mutedNow.current = muted;
   const depsNow = useRef(deps);
   depsNow.current = deps;
   const supported = (deps ?? browserNarrationDeps()).Recognition !== null;
 
+  const post = useCallback((body: NarrationPost) => {
+    posted.current = posted.current.then(async () => {
+      const answer = await sendNarration(body);
+      if (!answer.ok) setLost({ error: answer.error });
+    });
+  }, []);
+
   useEffect(() => {
     if (!listening) {
       setStatus(null);
       return;
     }
-    setLostPhrase(false);
+    setLost(null);
     const narration = startNarration(
       {
         language,
         muted: mutedNow.current,
-        phrase: (phrase) => {
-          const sent = sendNarration({
-            ...phrase,
-            text: phrase.text.slice(0, PHRASE_MAX),
-          });
-          sending.current.add(sent);
-          void sent.then((arrived) => {
-            sending.current.delete(sent);
-            if (!arrived) setLostPhrase(true);
-          });
-        },
+        phrase: (phrase) =>
+          post({ ...phrase, text: phrase.text.slice(0, PHRASE_MAX) }),
+        speaking: (since) =>
+          post(
+            since === null ? { speaking: false } : { speaking: true, since },
+          ),
         status: setStatus,
       },
       depsNow.current ?? browserNarrationDeps(),
@@ -69,7 +78,7 @@ export function useNarration({
       if (session.current === narration) session.current = null;
       void narration.stop();
     };
-  }, [listening, language]);
+  }, [listening, language, post]);
 
   useEffect(() => {
     session.current?.mute(muted);
@@ -79,10 +88,10 @@ export function useNarration({
     const narration = session.current;
     session.current = null;
     await narration?.stop();
-    await Promise.all(sending.current);
+    await posted.current;
   }, []);
 
-  return { supported, muted, setMuted, status, lostPhrase, finish };
+  return { supported, muted, setMuted, status, lost, finish };
 }
 
 export type NarrationControls = ReturnType<typeof useNarration>;

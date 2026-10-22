@@ -10,7 +10,11 @@ import {
   type LauncherApi,
   type LauncherConnection,
 } from "@openbot/shared/openbot-browser";
-import { RECORDER_SIGNED_OUT } from "@openbot/shared/recorder-api";
+import {
+  type LearningSpaceState,
+  RECORDER_SIGNED_OUT,
+  recorderPaths,
+} from "@openbot/shared/recorder-api";
 import {
   type CapturedEvent,
   sha256HexSync,
@@ -68,6 +72,8 @@ let gateway: FakeGateway;
 /** The tokens OpenBot still knows, and how often each asked who it is for. */
 let liveTokens = new Set<string>();
 let meAsked: string[] = [];
+/** The person's own Learning space, as OpenBot answers the Recorder's popup; none until a test sets one. */
+let learning: LearningSpaceState | null = null;
 function route(request: Request): Response | null {
   const path = new URL(request.url).pathname;
   const token =
@@ -85,6 +91,8 @@ function route(request: Request): Response | null {
       );
     return Response.json({ user: ada, connectionId: `c-${token}` });
   }
+  if (path === recorderPaths.learning && learning)
+    return Response.json({ learning });
   if (path.startsWith("/api/recorder/"))
     return Response.json({ error: "Not found." }, { status: 404 });
   const pass = /^\/api\/copilotkit\/trajectory\/([^/]+)\/connect$/.exec(path);
@@ -265,6 +273,7 @@ beforeEach(async () => {
   microphone = fakeMicrophone();
   liveTokens = new Set([TOKEN]);
   meAsked = [];
+  learning = null;
   gateway = await startFakeGateway({ extraRoutes: route });
   fake = installChromeFake({
     extensionId: EXTENSION_ID,
@@ -296,6 +305,7 @@ test("connect stores the connection as an approved Connect does, with no Connect
     phase: "idle",
     actions: 0,
     narration: "own",
+    voice: "off",
   });
   expect(
     await launcher().connect({
@@ -540,6 +550,203 @@ test("with narration external the Recorder hears nothing itself, and each phrase
       language: "en-US",
     },
   });
+}, 15_000);
+
+test("a phrase the person began before a click and finished after it is placed before that click, however long they took to finish it", async () => {
+  // The hosted end-to-end run: a long phrase began 0.4 s before a click into the search box and came back final after
+  // the click, the typing and the Search had all left, so it was placed after all three.
+  await launcher().connect({ connection: connection(), narration: "external" });
+  const click = rows.archiveClick;
+  const trajectoryId = await record(
+    click.timestamp - 7_000,
+    "Archive order 1043",
+  );
+  // The person's own browser heard their first words come back: the phrase began 0.4 s before the click.
+  clock = click.timestamp - 100;
+  expect(await launcher().speaking({ since: click.timestamp - 400 })).toEqual({
+    ok: true,
+  });
+  const port = contentPort();
+  clock = click.timestamp;
+  port.postMessage({ type: "content.event", event: click });
+  await settle();
+  // Long past the click's own window and its settling: it waits for the phrase it was taken during.
+  await advanceTo(click.timestamp + 6_000);
+  expect(names(trajectoryId)).not.toContain("click");
+  expect(
+    await launcher().narrate({
+      text: "I archive the order and give the reason",
+      startedAt: click.timestamp - 400,
+      endedAt: click.timestamp + 5_800,
+    }),
+  ).toEqual({ ok: true });
+  await until(
+    () => names(trajectoryId).includes("click"),
+    "the click in Intelligence",
+  );
+  expect(names(trajectoryId)).toEqual([
+    "recording.started",
+    "outcome",
+    "navigation",
+    "transcript",
+    "click",
+  ]);
+  expect(sent(trajectoryId)[3]).toMatchObject({
+    name: "transcript",
+    timestamp: click.timestamp - 400,
+    value: { text: "I archive the order and give the reason" },
+  });
+}, 15_000);
+
+test("a phrase that never comes holds the steps 15 s at most, and the person stopping lets them go at once", async () => {
+  await launcher().connect({ connection: connection(), narration: "external" });
+  const click = rows.archiveClick;
+  const trajectoryId = await record(
+    click.timestamp - 7_000,
+    "Archive order 1043",
+  );
+  clock = click.timestamp - 200;
+  await launcher().speaking({ since: click.timestamp - 300 });
+  const port = contentPort();
+  clock = click.timestamp;
+  port.postMessage({ type: "content.event", event: click });
+  await settle();
+  await advanceTo(click.timestamp + 14_000);
+  expect(names(trajectoryId)).not.toContain("click");
+  await advanceTo(click.timestamp + 14_800);
+  await until(
+    () => names(trajectoryId).includes("click"),
+    "the click, once the phrase's hold ran out",
+  );
+
+  // Another phrase begins and the person stops with no words for it (a cough, or a phrase Chrome returned empty).
+  const reason = { ...rows.reasonClick, timestamp: click.timestamp + 20_000 };
+  clock = reason.timestamp - 100;
+  await launcher().speaking({ since: reason.timestamp - 200 });
+  clock = reason.timestamp;
+  port.postMessage({ type: "content.event", event: reason });
+  await settle();
+  await advanceTo(reason.timestamp + 4_000);
+  expect(names(trajectoryId).filter((name) => name === "click")).toHaveLength(
+    1,
+  );
+  expect(await launcher().speaking({ since: null })).toEqual({ ok: true });
+  await until(
+    () => names(trajectoryId).filter((name) => name === "click").length === 2,
+    "the second click, once the person stopped speaking",
+  );
+  expect(names(trajectoryId)).not.toContain("transcript");
+}, 15_000);
+
+test("speaking is refused while nothing records and in a browser that hears its own voice, and stopping is always taken", async () => {
+  await launcher().connect({ connection: connection(), narration: "own" });
+  expect(await launcher().speaking({ since: clock - 500 })).toEqual({
+    ok: false,
+    error: "Nothing is being recorded.",
+  });
+  // A page that heard the person stop as the recording ended says so after it: there is nothing to hold.
+  expect(await launcher().speaking({ since: null })).toEqual({ ok: true });
+  await record(clock, "Own voice");
+  await until(() => speech.instances.length === 1, "the speech recognition");
+  expect(await launcher().speaking({ since: clock - 500 })).toEqual({
+    ok: false,
+    error: "This browser hears your voice itself.",
+  });
+  for (const bad of [
+    {},
+    { since: -1 },
+    { since: "now" },
+    { since: Number.NaN },
+    null,
+  ])
+    expect(
+      await (launcher().speaking as (input: unknown) => Promise<unknown>)(bad),
+    ).toMatchObject({ ok: false });
+}, 15_000);
+
+test("the Recorder says whether it hears the person: off while nothing records, listening, muted, or unavailable when the microphone is refused", async () => {
+  await launcher().connect({ connection: connection(), narration: "own" });
+  expect((await launcher().state()).voice).toBe("off");
+  await record(clock, "Own voice");
+  await until(() => speech.instances.length === 1, "the speech recognition");
+  speech.instances[0]?.begin();
+  await until(
+    async () => (await launcher().state()).voice === "listening",
+    "listening",
+  );
+  // The person mutes it in the Recorder's popup.
+  expect(
+    await fake.sendFromPage(
+      { type: "page.voice", muted: true },
+      { url: "chrome-extension://test/popup.html" },
+    ),
+  ).toEqual({ ok: true });
+  expect((await launcher().state()).voice).toBe("muted");
+  // On again, and this time the browser refuses the microphone to the speech service.
+  expect(
+    await fake.sendFromPage(
+      { type: "page.voice", muted: false },
+      { url: "chrome-extension://test/popup.html" },
+    ),
+  ).toEqual({ ok: true });
+  await until(() => speech.instances.length === 2, "listening again");
+  speech.instances[1]?.error("not-allowed");
+  await until(
+    async () => (await launcher().state()).voice === "unavailable",
+    "the refused microphone",
+  );
+  clock += 5_000;
+  await launcher().record({ action: "stop" });
+  expect((await launcher().state()).voice).toBe("off");
+
+  // A browser narrated from outside has no voice of its own to report.
+  await launcher().connect({ connection: connection(), narration: "external" });
+  expect((await launcher().state()).voice).toBeUndefined();
+}, 15_000);
+
+test("Stop leaves the recording it ended, by name, for OpenBot to confirm it went to the person's Learning space", async () => {
+  await launcher().connect({ connection: connection(), narration: "external" });
+  const trajectoryId = await record(clock, "Archive order 1043");
+  const recordingId = (await launcher().state()).recordingId;
+  expect((await launcher().state()).lastStopped).toBeUndefined();
+  clock += 30_000;
+  const stoppedAt = clock;
+  const stopped = await launcher().record({ action: "stop" });
+  expect(stopped).toMatchObject({
+    ok: true,
+    state: {
+      phase: "idle",
+      lastStopped: { recordingId, title: "Archive order 1043", stoppedAt },
+    },
+  });
+  await until(
+    () => names(trajectoryId).filter((name) => name === "outcome").length === 2,
+    "the recording stopped",
+  );
+  expect((await launcher().state()).lastStopped).toEqual({
+    recordingId: recordingId ?? "",
+    title: "Archive order 1043",
+    stoppedAt,
+  });
+}, 15_000);
+
+test("a recording the person's Learning space will not take is not confirmed as gone there", async () => {
+  await launcher().connect({ connection: connection(), narration: "external" });
+  // No Learning space is assigned to them, as OpenBot answers the Recorder's popup.
+  learning = { state: "unassigned", containerId: null };
+  expect(
+    await fake.sendFromPage(
+      { type: "page.learning" },
+      { url: "chrome-extension://test/popup.html" },
+    ),
+  ).toMatchObject({ ok: true });
+  await record(clock, "Refund order 1043");
+  clock += 30_000;
+  const stopped = await launcher().record({ action: "stop" });
+  expect(stopped).toMatchObject({ ok: true, state: { phase: "idle" } });
+  expect(
+    (stopped as { state: { lastStopped?: unknown } }).state.lastStopped,
+  ).toBeUndefined();
 }, 15_000);
 
 test("a phrase passed in is masked as the Recorder's own are: a value typed into a sensitive field, and a number after the phrase that named a PIN", async () => {

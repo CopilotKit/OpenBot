@@ -100,23 +100,41 @@ export function navigateBrowserMutationOptions(queryClient: QueryClient) {
   });
 }
 
+type Unsent<T> = T extends unknown ? Omit<T, "sentAt"> : never;
+/** A narration post as the page makes it: `sentAt` is stamped as it leaves (`sendNarration`). */
+export type NarrationPost = Unsent<BrowserNarrationRequest>;
+
 /**
- * One phrase the person said, with when they started and stopped saying it, handed to the Recorder in their browser.
+ * One thing the person's narration says to the Recorder in their browser: a phrase they said, with when they started
+ * and stopped saying it, or that they began a phrase or stopped speaking.
+ *
+ * `sentAt` is this computer's clock as the post leaves, stamped here rather than by the caller: the server shifts every
+ * time in it by its own clock on arrival minus `sentAt`, so a post that waited its turn must not carry the time it
+ * was queued.
  *
  * A plain function rather than a mutation: nothing cached changes, and it is a step inside a recording rather than a
- * write somebody pressed a button for. It answers whether the phrase arrived instead of throwing, because a phrase
- * that did not is told to the person beside the narration switch and the recording carries on.
+ * write somebody pressed a button for. It answers whether the post was taken, and when it was not, the server's own
+ * sentence if it said one, instead of throwing, because that is told to the person beside the narration switch and the
+ * recording carries on.
  */
 export async function sendNarration(
-  phrase: BrowserNarrationRequest,
-): Promise<boolean> {
+  post: NarrationPost,
+): Promise<{ ok: true } | { ok: false; error: string | null }> {
   try {
     const response = await tryClient(browserApiPaths.narration, {
       method: "POST",
-      body: phrase,
+      body: { ...post, sentAt: Date.now() },
     });
-    return response.ok;
+    if (response.ok) return { ok: true };
+    const said: unknown = await response
+      .json()
+      .then((body: { error?: unknown }) => body.error)
+      .catch(() => undefined);
+    return {
+      ok: false,
+      error: typeof said === "string" && said.trim() ? said.trim() : null,
+    };
   } catch {
-    return false;
+    return { ok: false, error: null };
   }
 }

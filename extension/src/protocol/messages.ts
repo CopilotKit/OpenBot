@@ -62,8 +62,9 @@ export type RecorderState = {
    * or the end of the recording. The popup shows its card from this. */
   noticeOpen: boolean;
   capture: CaptureStatus;
-  /** The recording Stop ended last: the popup says it went to Intelligence. */
-  lastStopped?: { recordingId: string };
+  /** The recording Stop ended last: the popup says it went to Intelligence, and the launcher tells OpenBot its name
+   * and when it stopped, so OpenBot can confirm it too. */
+  lastStopped?: { recordingId: string; title?: string; stoppedAt?: number };
   draining: number; // stopped recordings still sending
   learning?: LearningSpaceState; // the person's own Learning space at Record (Decision 10)
   topUrls: Record<string, string>; // followed tab id -> its top frame's current URL

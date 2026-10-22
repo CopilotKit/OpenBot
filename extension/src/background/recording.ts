@@ -135,6 +135,9 @@ export type LauncherSide = {
     startedAt: number;
     endedAt: number;
   }): Promise<PageResponse>;
+  /** The launcher heard the person begin a phrase at `since` (epoch ms), or stop speaking (null): with narration
+   * `external`, the steps from `since` on wait for that phrase, as they wait for one the document hears. */
+  speaking(since: number | null): Promise<PageResponse>;
   /** The recorder's state as it is now. */
   current(): Promise<RecorderState>;
 };
@@ -979,8 +982,7 @@ export function installRecording(
         placeTranscript(message.event);
         return;
       case "offscreen.speaking":
-        speechHold = message.since;
-        steps?.hold(message.since);
+        holdForSpeech(message.since);
         return;
       case "offscreen.voice.ended":
         voiceEndWaiters.get(message.recordingId)?.();
@@ -1280,7 +1282,8 @@ export function installRecording(
    * before it (a number read out after "my card number is" can come as a phrase of its own), then placed among the held
    * steps. Taken until the steps are sent at Stop, so a phrase the person finished as they pressed Stop is not lost.
    * Its start is never later than now: the clock it was timed on is the person's, and a phrase stamped ahead of what is
-   * happening would be placed after steps taken while it was said. */
+   * happening would be placed after steps taken while it was said. Once it is placed, the steps its start held go on,
+   * as they do after a final phrase of the document's own (the launcher says again if another phrase is under way). */
   function narrate(phrase: {
     text: string;
     startedAt: number;
@@ -1309,7 +1312,29 @@ export function installRecording(
         language: said.language,
       },
     });
+    holdForSpeech(null);
     return { ok: true };
+  }
+
+  /** The launcher heard the person begin a phrase (`external`), or stop speaking (null): what the document's
+   * `offscreen.speaking` does for a phrase it hears itself. While the phrase is said, the steps taken from its start
+   * wait for its transcript (`narrate`), or `speechCapMs` at most, so a phrase the person began before a click goes in
+   * ahead of it. Its start is never later than now, as a phrase's is not. Stopping is taken while nothing records too:
+   * there is nothing to hold then, and a page that heard the person stop as the recording ended says so after it. */
+  function speaking(since: number | null): PageResponse {
+    const recording =
+      (state.phase === "recording" || state.phase === "stopping") &&
+      steps !== null;
+    if (since === null && !recording) return { ok: true };
+    if (!recording) return { ok: false, error: SENTENCES.notRecording };
+    if (!external) return { ok: false, error: SENTENCES.ownVoice };
+    holdForSpeech(since === null ? null : Math.min(since, deps.now()));
+    return { ok: true };
+  }
+
+  function holdForSpeech(since: number | null): void {
+    speechHold = since;
+    steps?.hold(since);
   }
 
   /** Before Stop sends the held steps: the document hands over the phrase being spoken, placed among them, and lets go
@@ -1716,7 +1741,11 @@ export function installRecording(
       lastStopped:
         mode.kind === "disconnect" || failed !== undefined
           ? undefined
-          : { recordingId },
+          : {
+              recordingId,
+              ...(state.title !== undefined ? { title: state.title } : {}),
+              stoppedAt: deps.now(),
+            },
       error: signedOut ? stoppedSentence(signedOut) : failed,
     });
     if (signedOut)
@@ -2730,6 +2759,11 @@ export function installRecording(
     async narrate(phrase) {
       await ready;
       return narrate(phrase);
+    },
+
+    async speaking(since) {
+      await ready;
+      return speaking(since);
     },
 
     async current() {
