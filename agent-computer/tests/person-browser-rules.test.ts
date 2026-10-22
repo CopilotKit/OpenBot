@@ -163,6 +163,8 @@ describe("launching a person's browser", () => {
     // And keeps what OpenBot's control needs: the pipe and profile are not in the list at all.
     expect(native.ignoreDefaultArgs).not.toContain("--remote-debugging-pipe");
     expect(native.ignoreDefaultArgs).not.toContain("--no-first-run");
+    // And keeps the debugging bar: the person's own extensions are in it, and the bar is how they
+    // see that one attached.
     expect(native.args).toEqual([
       "--disable-blink-features=AutomationControlled",
       "--enable-unsafe-extension-debugging",
@@ -190,6 +192,8 @@ describe("launching a person's browser", () => {
       "--password-store=basic",
       `--disable-extensions-except=${FIXTURE}`,
       `--load-extension=${FIXTURE}`,
+      // No debugging bar to take the page's height from the live screen while the Recorder records.
+      "--silent-debugger-extension-api",
     ]);
     expect(screen.ignoreDefaultArgs).toEqual([
       "--enable-automation",

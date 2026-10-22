@@ -139,6 +139,50 @@ function closeRecorderSetupPages(context: BrowserContext, recorderId: string) {
 }
 
 /**
+ * Make a hosted browser's window hold exactly the page the live screen shows, as each tab opens.
+ *
+ * Playwright sizes the window to the viewport with its own allowance for the browser's toolbars, and
+ * that allowance is none when headless, though headless Chromium lays its toolbars out all the same
+ * (87 pixels here). The page is told it is 800 high, and a tab that has been laid out again (switched
+ * away from and back, say) is then shown in what is left of the window: the live screen lost the
+ * bottom of the page, 713 of 800, while the page's own viewport still said 800. Measured on bundled
+ * Chromium, headless, with Playwright 1.62.1. `Browser.setContentsSize` grows the window around the
+ * contents, so the toolbars come out of the window and not the page, headed or headless. After
+ * Playwright's own resize, which it makes as each tab starts and then leaves alone.
+ * https://chromedevtools.github.io/devtools-protocol/tot/Browser/#method-setContentsSize
+ */
+function fitWindowsToViewport(
+  context: BrowserContext,
+  viewport: { width: number; height: number },
+  botId: string,
+) {
+  const fit = async (page: Page) => {
+    const session = await context.newCDPSession(page);
+    try {
+      const { windowId } = await session.send("Browser.getWindowForTarget");
+      await session.send("Browser.setContentsSize", { windowId, ...viewport });
+    } finally {
+      await session.detach().catch(() => undefined);
+    }
+  };
+  const fitting = (page: Page) =>
+    void fit(page).catch((error: unknown) => {
+      // A tab that closed while it was being fitted needs nothing; anything else is said, because
+      // the live screen then shows less than the whole page.
+      if (page.isClosed()) return;
+      console.info(
+        JSON.stringify({
+          type: "computer-window-not-fitted",
+          botId,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
+    });
+  for (const page of context.pages()) fitting(page);
+  context.on("page", fitting);
+}
+
+/**
  * Start a person's browser, with the Recorder loaded and its microphone granted.
  *
  * All or nothing: a browser whose Recorder could not be put in is closed again rather than handed
@@ -219,6 +263,8 @@ export async function launchPersonBrowser(
       }
     }
     closeRecorderSetupPages(context, recorderId);
+    if (window === "screen")
+      fitWindowsToViewport(context, input.viewport, input.botId);
     // Narration in a native window is the Recorder hearing the person, and it asks nobody first.
     // The hosted browser has no microphone; the grant costs nothing there and keeps one launch.
     await session.send("Browser.grantPermissions", {

@@ -17,6 +17,7 @@ import {
   PLAYWRIGHT_DISABLED_FEATURES,
 } from "../src/person-launch";
 import type { Profiles } from "../src/profiles";
+import { startScreencast } from "../src/screencast";
 
 /**
  * A person's browser, launched for real and driven through the real browser routes.
@@ -550,6 +551,67 @@ for (const variant of VARIANTS) {
       expect(again.json.error).toBe("Nothing is being recorded.");
     }, 60_000);
 
+    test.skipIf(variant.window !== "screen")(
+      "the live screen keeps the whole page while the Recorder records",
+      async () => {
+        const person = profiles.person(PERSON);
+        if (!person) throw new Error("The browser should be open.");
+        const page = person.active();
+        // Away to another tab and back first, which lays the page out again in its window.
+        const front = activeTab(await state());
+        const other = activeTab(
+          (await api("/browser/tabs", { action: "new" })).json as BrowserState,
+        );
+        if (!front || !other) throw new Error("Both tabs should be listed.");
+        await api("/browser/tabs", { action: "activate", tabId: front.id });
+        await api("/browser/tabs", { action: "close", tabId: other.id });
+        const height = page.viewportSize()?.height;
+        if (!height) throw new Error("The hosted page should have a viewport.");
+        const heights: number[] = [];
+        const cast = await startScreencast(page, (frame) =>
+          heights.push(frame.height),
+        );
+        // The screen sends a frame when the page changes, so it is changed for as long as is asked.
+        const repaint = async (ms: number) => {
+          const until = Date.now() + ms;
+          for (let turn = 0; Date.now() < until; turn += 1) {
+            await page.evaluate(
+              (odd) => {
+                document.body.style.background = odd ? "#fefefe" : "#ffffff";
+              },
+              turn % 2 === 1,
+            );
+            await wait(100);
+          }
+        };
+        try {
+          await repaint(500);
+          expect(heights.at(-1)).toBe(height);
+          // The Recorder attaches its debugger to the tab here, which is when a browser shows its
+          // "started debugging this browser" bar.
+          const started = await api("/browser/recording", {
+            action: "start",
+            title: "Keep the whole page",
+          });
+          expect(started.status).toBe(200);
+          const from = heights.length;
+          await repaint(2_500);
+          const recording = heights.slice(from);
+          expect(recording.length).toBeGreaterThan(0);
+          expect(new Set(recording)).toEqual(new Set([height]));
+          expect(
+            (await api("/browser/recording", { action: "stop" })).status,
+          ).toBe(200);
+          const after = heights.length;
+          await repaint(1_000);
+          expect(new Set(heights.slice(after))).toEqual(new Set([height]));
+        } finally {
+          await cast.stop();
+        }
+      },
+      60_000,
+    );
+
     test("wakes a Recorder whose worker has stopped", async () => {
       const person = profiles.person(PERSON);
       if (!person) throw new Error("The browser should be open.");
@@ -590,10 +652,13 @@ for (const variant of VARIANTS) {
           expect(
             switches.filter((value) => value.startsWith("--disable-features=")),
           ).toEqual([]);
+          // The person's own extensions are in it: the bar that says one attached stays.
+          expect(switches).not.toContain("--silent-debugger-extension-api");
         } else {
           expect(switches).toContain(`--load-extension=${FIXTURE}`);
           expect(switches).toContain(`--disable-extensions-except=${FIXTURE}`);
           expect(switches).not.toContain("--disable-extensions");
+          expect(switches).toContain("--silent-debugger-extension-api");
           // Through the egress filter: Playwright's own features off, and the ACCEPT_CH restart.
           expect(disabledFeatures(switches)).toEqual([
             ...PLAYWRIGHT_DISABLED_FEATURES,
