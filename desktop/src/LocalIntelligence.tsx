@@ -511,7 +511,8 @@ export function IntelligenceChoice({
   chosen,
   onChoose,
 }: {
-  chosen: IntelligenceMode;
+  /** Null until somebody picks one, so neither is assumed. */
+  chosen: IntelligenceMode | null;
   onChoose: (mode: IntelligenceMode) => void;
 }) {
   const rows: [IntelligenceMode, string, string][] = [
