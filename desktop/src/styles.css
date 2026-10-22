@@ -773,3 +773,35 @@ details > summary:hover {
   color: var(--ink);
   white-space: pre-wrap;
 }
+
+/* Something running now, said beside the rows' spinner. */
+.status-line {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin: 0.75rem 0 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+.status-line .step-spinner {
+  flex: none;
+  margin-top: 0;
+}
+
+/* The menu's status on whichever setup screen is showing, without moving that screen. */
+.window-status {
+  position: fixed;
+  left: 50%;
+  bottom: 1.25rem;
+  transform: translateX(-50%);
+  max-width: calc(100% - 2rem);
+  padding: 0.5rem 0.9rem;
+  border: 1px solid var(--hair);
+  border-radius: var(--r-card);
+  background: var(--raised);
+}
+
+.window-status .status-line {
+  margin: 0;
+}

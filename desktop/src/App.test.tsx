@@ -32,6 +32,10 @@ let invokeHandler: Invoke = async () => {
 const progressListeners = new Set<
   (event: { payload: ProgressEvent }) => void
 >();
+type QuitEvent = { seq: number; steps: ProgressEvent[] };
+const quitListeners = new Set<(event: { payload: QuitEvent }) => void>();
+type OpeningEvent = { state: "opening" | "opened" | "failed"; said: string };
+const openingListeners = new Set<(event: { payload: OpeningEvent }) => void>();
 
 mock.module("@tauri-apps/api/core", () => ({
   invoke: (command: string, args?: unknown) => {
@@ -46,7 +50,17 @@ mock.module("@tauri-apps/api/event", () => ({
     listener: (event: { payload: ProgressEvent }) => void,
   ) => {
     if (name === "setup:progress") progressListeners.add(listener);
-    return () => progressListeners.delete(listener);
+    const quit = listener as unknown as (event: { payload: QuitEvent }) => void;
+    if (name === "quit:progress") quitListeners.add(quit);
+    const opening = listener as unknown as (event: {
+      payload: OpeningEvent;
+    }) => void;
+    if (name === "intelligence:opening") openingListeners.add(opening);
+    return () => {
+      progressListeners.delete(listener);
+      quitListeners.delete(quit);
+      openingListeners.delete(opening);
+    };
   },
 }));
 
@@ -55,6 +69,9 @@ mock.module("./Mark", () => ({
 }));
 
 const { App } = await import("./App");
+const { ShuttingDownWindow, isShuttingDownPage } = await import(
+  "./ShuttingDown"
+);
 
 beforeAll(() => GlobalRegistrator.register());
 afterEach(() => {
@@ -62,6 +79,8 @@ afterEach(() => {
   cleanup();
   invokeCalls = [];
   progressListeners.clear();
+  quitListeners.clear();
+  openingListeners.clear();
 });
 afterAll(() => GlobalRegistrator.unregister());
 
@@ -133,6 +152,55 @@ async function beginPendingInstallation() {
       return preparation;
     },
   };
+}
+
+async function emitQuit(payload: QuitEvent) {
+  await act(async () => {
+    for (const listener of quitListeners) listener({ payload });
+  });
+}
+
+/** One centred column, as every setup screen: the heading, its lede and rows in one sheet. */
+function expectStandardSheet(heading: HTMLElement) {
+  const sheet = heading.closest(".sheet");
+  expect(sheet).not.toBeNull();
+  expect(sheet?.classList.contains("connection-sheet")).toBe(true);
+  expect(sheet?.parentElement?.tagName).toBe("MAIN");
+  // Nothing beside the sheet: the grid would give each child its own row and spread them apart.
+  expect(sheet?.parentElement?.children).toHaveLength(1);
+  expect(sheet?.querySelector(".lede, [role=status]")).not.toBeNull();
+}
+
+const running = (step: string) => ({
+  step,
+  ok: true,
+  detail: "",
+  running: true,
+});
+const complete = (step: string) => ({
+  step,
+  ok: true,
+  detail: "",
+  running: false,
+});
+const failed = (step: string) => ({
+  step,
+  ok: false,
+  detail: "",
+  running: false,
+});
+
+/** A status line that is still working: its words, with the setup rows' spinner beside them. */
+function expectWorking(view: ReturnType<typeof render>, said: string) {
+  const status = view
+    .getAllByRole("status")
+    .find((line) => line.textContent === said);
+  expect(status?.textContent).toBe(said);
+  expect(status?.querySelector(".step-spinner")).not.toBeNull();
+}
+
+function rowStatus(view: ReturnType<typeof render>, name: string) {
+  return within(view.getByRole("listitem", { name }));
 }
 
 async function emitProgress(payload: ProgressEvent) {
@@ -752,8 +820,9 @@ test("a local Test OpenBot screen links to the Intelligence dashboard through th
     run_local_eval: localStatus("ready", "valid"),
     ask_the_bot: "I am working.",
     offer_local_intelligence: null,
-    open_local_intelligence: null,
+    open_local_intelligence: () => opening.promise,
   });
+  const opening = deferred<null>();
   const view = await renderApp();
   await userEvent.click(view.getByRole("button", { name: "Install" }));
   await chooseOpenAi(view);
@@ -768,6 +837,11 @@ test("a local Test OpenBot screen links to the Intelligence dashboard through th
   await userEvent.click(
     view.getByRole("button", { name: "View in Intelligence" }),
   );
+  // Said on the click, while the CLI call is still running.
+  expectWorking(view, "Opening the Intelligence dashboard…");
+  await act(async () => opening.resolve(null));
+  expect(view.getByRole("status").textContent).toBe("Opened in your browser.");
+  expect(view.queryByText("Opening the Intelligence dashboard…")).toBeNull();
   const opened = intelligenceCalls().filter(
     (call) => call.command === "open_local_intelligence",
   );
@@ -781,6 +855,27 @@ test("a local Test OpenBot screen links to the Intelligence dashboard through th
   expect(localSequence()).not.toContain("show_openbot");
   expect(view.getByRole("heading", { name: "Test OpenBot" })).toBeTruthy();
   expectPlain(view);
+});
+
+test("a local Test OpenBot step says it is asking, with a spinner, until the answer arrives", async () => {
+  setupRootConfiguration("/tmp/local-eval-asking", async () =>
+    emptyConfiguration(),
+  );
+  const answer = deferred<string>();
+  withLocalCli({
+    set_up_local_eval: localStatus("starting", "valid"),
+    connect_local_eval: localConnection,
+    run_local_eval: localStatus("ready", "valid"),
+    ask_the_bot: () => answer.promise,
+    offer_local_intelligence: null,
+  });
+  const view = await renderApp();
+  await userEvent.click(view.getByRole("button", { name: "Install" }));
+  await chooseOpenAi(view);
+  await view.findByRole("heading", { name: "Test OpenBot" });
+  await waitFor(() => expectWorking(view, "Asking…"));
+  await act(async () => answer.resolve("I am working."));
+  expect(view.queryByText("Asking…")).toBeNull();
 });
 
 test("View in Intelligence says the native sentence when the dashboard does not open", async () => {
@@ -1198,6 +1293,248 @@ test("relaunch says it is starting while it starts, and never offers a CopilotKi
     view.getByRole("button", { name: "Change AI connection" }),
   ).toBeTruthy();
   expectPlain(view);
+});
+
+test("Quit shows Shutting down with each part's row as it starts and ends", async () => {
+  setupConnectedLocalStack(
+    "/tmp/local-eval-quit-screen",
+    localStatus("ready", "valid"),
+  );
+  const view = await renderApp();
+  await view.findByRole("heading", { name: "OpenBot is running" });
+  const callsBefore = invokeCalls.length;
+
+  await emitQuit({ seq: 2, steps: [running("stop-openbot")] });
+  const heading = view.getByRole("heading", { name: "Shutting down OpenBot" });
+  expectStandardSheet(heading);
+  expect(
+    rowStatus(view, "Stopping OpenBot").getByText("In progress"),
+  ).toBeTruthy();
+  expect(
+    view.queryByRole("listitem", { name: "Stopping Intelligence" }),
+  ).toBeNull();
+  // Nothing to press: the app exits by itself.
+  expect(view.queryAllByRole("button")).toHaveLength(0);
+
+  await emitQuit({
+    seq: 4,
+    steps: [complete("stop-openbot"), running("stop-intelligence")],
+  });
+  expect(
+    rowStatus(view, "Stopping OpenBot").getByText("Complete"),
+  ).toBeTruthy();
+  expect(
+    rowStatus(view, "Stopping Intelligence").getByText("In progress"),
+  ).toBeTruthy();
+  // An older copy arriving late never undoes a newer one.
+  await emitQuit({ seq: 3, steps: [complete("stop-openbot")] });
+  expect(
+    rowStatus(view, "Stopping Intelligence").getByText("In progress"),
+  ).toBeTruthy();
+
+  await emitQuit({
+    seq: 5,
+    steps: [complete("stop-openbot"), failed("stop-intelligence")],
+  });
+  expect(
+    rowStatus(view, "Stopping Intelligence").getByText("Failed"),
+  ).toBeTruthy();
+  expect(view.getByRole("status").textContent).toBe(
+    "Part of it could not be stopped. OpenBot says what happened the next time it opens.",
+  );
+  // The window only shows; it never asks anything of the native side while it quits.
+  expect(invokeCalls.slice(callsBefore)).toEqual([]);
+});
+
+test("a window sent to the Shutting down page catches up, then follows the rows", async () => {
+  expect(isShuttingDownPage("#shutting-down")).toBe(true);
+  expect(isShuttingDownPage("")).toBe(false);
+  invokeHandler = async (command) => {
+    if (command === "quit_status")
+      return {
+        seq: 3,
+        steps: [complete("stop-openbot"), running("stop-intelligence")],
+      };
+    throw new Error(`unexpected ${command}`);
+  };
+  let view!: ReturnType<typeof render>;
+  await act(async () => {
+    view = render(<ShuttingDownWindow />);
+  });
+  const heading = await view.findByRole("heading", {
+    name: "Shutting down OpenBot",
+  });
+  expectStandardSheet(heading);
+  await waitFor(() =>
+    expect(
+      rowStatus(view, "Stopping OpenBot").getByText("Complete"),
+    ).toBeTruthy(),
+  );
+  expect(view.getByRole("status").textContent).toBe(
+    "OpenBot is stopping what it started on this computer, then it closes.",
+  );
+  await emitQuit({
+    seq: 4,
+    steps: [complete("stop-openbot"), complete("stop-intelligence")],
+  });
+  expect(
+    rowStatus(view, "Stopping Intelligence").getByText("Complete"),
+  ).toBeTruthy();
+  // Only the catch-up call; nothing that starts or stops anything.
+  expect(invokeCalls.map((call) => call.command)).toEqual(["quit_status"]);
+});
+
+test("Stop OpenBot and Show OpenBot say what they are doing at once", async () => {
+  setupConnectedLocalStack(
+    "/tmp/local-eval-stop-status",
+    localStatus("ready", "valid"),
+  );
+  const stopping = deferred<null>();
+  const showing = deferred<null>();
+  const previous = invokeHandler;
+  let shows = 0;
+  invokeHandler = async (command, args) => {
+    if (command === "stop_stack") return stopping.promise;
+    // The first show is the relaunch's own handover.
+    if (command === "show_openbot" && shows++ > 0) return showing.promise;
+    return previous(command, args);
+  };
+  const view = await renderApp();
+  await view.findByRole("heading", { name: "OpenBot is running" });
+
+  await userEvent.click(view.getByRole("button", { name: "Show OpenBot" }));
+  expectWorking(view, "Opening OpenBot…");
+  await act(async () => showing.resolve(null));
+  expect(view.queryByText("Opening OpenBot…")).toBeNull();
+
+  await userEvent.click(view.getByRole("button", { name: "Stop OpenBot" }));
+  expectWorking(view, "Stopping OpenBot…");
+  expect(view.getByRole("button", { name: "Stop OpenBot" })).toHaveProperty(
+    "disabled",
+    true,
+  );
+  await act(async () => stopping.resolve(null));
+  await view.findByRole("heading", { name: "OpenBot is stopped" });
+  expect(view.queryByText("Stopping OpenBot…")).toBeNull();
+});
+
+test("the menu's dashboard opening shows on a setup screen with a spinner, then how it went", async () => {
+  setupConnectedLocalStack(
+    "/tmp/local-eval-menu-opening",
+    localStatus("ready", "valid"),
+  );
+  const view = await renderApp();
+  await view.findByRole("heading", { name: "OpenBot is running" });
+  const emitOpening = async (payload: OpeningEvent) => {
+    await act(async () => {
+      for (const listener of openingListeners) listener({ payload });
+    });
+  };
+
+  await emitOpening({
+    state: "opening",
+    said: "Opening the Intelligence dashboard…",
+  });
+  expectWorking(view, "Opening the Intelligence dashboard…");
+  // The screen under it is unchanged.
+  expect(
+    view.getByRole("heading", { name: "OpenBot is running" }),
+  ).toBeTruthy();
+
+  await emitOpening({ state: "opened", said: "Opened in your browser." });
+  const opened = view
+    .getAllByRole("status")
+    .find((line) => line.textContent === "Opened in your browser.");
+  expect(opened?.querySelector(".step-spinner")).toBeNull();
+
+  await emitOpening({
+    state: "failed",
+    said: "Your browser did not open. Try again.",
+  });
+  expect(
+    view
+      .getAllByRole("status")
+      .some(
+        (line) => line.textContent === "Your browser did not open. Try again.",
+      ),
+  ).toBe(true);
+  expect(view.queryByText("Opened in your browser.")).toBeNull();
+});
+
+test("choosing a CopilotKit project says it is connecting until the key arrives", async () => {
+  const root = "/tmp/project-pick-status";
+  setupRootConfiguration(root, async () => ({
+    ...savedOpenAiConfiguration(),
+    saved: { ...savedOpenAiConfiguration().saved, model: "open-ai-api-key" },
+    launch: { harness: { id: "mastra" } },
+  }));
+  const key = deferred<string>();
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) => {
+    if (command === "start_stack")
+      throw {
+        said: "That saved CopilotKit connection is no longer available. Sign in again or enter a project key.",
+        connection: "intelligence",
+      };
+    if (command === "begin_intelligence_sign_in")
+      return "https://signin.example/fixture";
+    if (command === "finish_intelligence_sign_in")
+      return [{ id: "fixture", name: "Existing project" }];
+    if (command === "intelligence_key_for") return key.promise;
+    return previous(command, args);
+  };
+  const view = await renderApp();
+  await userEvent.click(
+    await view.findByRole("button", { name: "Sign in to CopilotKit again" }),
+  );
+  await userEvent.click(
+    await view.findByRole("button", { name: "Existing project" }),
+  );
+  expectWorking(view, "Connecting OpenBot to Existing project…");
+  await act(async () => key.resolve("refreshed-intelligence-key"));
+  expect(
+    view.queryByText("Connecting OpenBot to Existing project…"),
+  ).toBeNull();
+});
+
+test("relaunch's Starting and Opening screens use the standard setup column", async () => {
+  setupConnectedLocalStack(
+    "/tmp/local-eval-relaunch-layout",
+    localStatus("ready", "valid"),
+  );
+  const status = deferred<unknown>();
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) =>
+    command === "run_local_eval" ? status.promise : previous(command, args);
+  const view = await renderApp();
+  const starting = await view.findByRole("heading", {
+    name: "Starting OpenBot",
+  });
+  expectStandardSheet(starting);
+  const sheet = starting.closest(".sheet") as HTMLElement;
+  expect(
+    await within(sheet).findByRole("list", { name: "Setup progress" }),
+  ).toBeTruthy();
+  expect(within(sheet).getByRole("button", { name: "Cancel" })).toBeTruthy();
+  await act(async () => status.resolve(localStatus("ready", "valid")));
+  await view.findByRole("heading", { name: "OpenBot is running" });
+  await userEvent.click(view.getByRole("button", { name: "Stop OpenBot" }));
+  expectStandardSheet(
+    await view.findByRole("heading", { name: "OpenBot is stopped" }),
+  );
+  cleanup();
+
+  const reopened = "/tmp/reopen-layout";
+  const configuration = deferred<ReturnType<typeof savedOpenAiConfiguration>>();
+  setupRootConfiguration(reopened, async () => configuration.promise);
+  const reopening = invokeHandler;
+  invokeHandler = async (command, args) =>
+    command === "selected_root" ? reopened : reopening(command, args);
+  const opening = await renderApp();
+  expectStandardSheet(
+    opening.getByRole("heading", { name: "Opening OpenBot" }),
+  );
+  await act(async () => configuration.resolve(savedOpenAiConfiguration()));
 });
 
 function setupConnectedLocalStack(
@@ -2798,9 +3135,10 @@ test("Change the model after an Ask failure stops the stack and reaches the prov
     if (command === "ask_the_bot") {
       throw { said: "The model could not answer.", detail: "401" };
     }
-    if (command === "stop_stack") return null;
+    if (command === "stop_stack") return stopping.promise;
     throw new Error(`unexpected command ${command}`);
   };
+  const stopping = deferred<null>();
 
   const view = await renderApp();
 
@@ -2823,6 +3161,13 @@ test("Change the model after an Ask failure stops the stack and reaches the prov
   await userEvent.click(
     await view.findByRole("button", { name: "Change the model" }),
   );
+  // Stopping takes a while; it is said at once, and nothing else can be pressed meanwhile.
+  expectWorking(view, "Stopping OpenBot…");
+  expect(view.getByRole("button", { name: "Change the model" })).toHaveProperty(
+    "disabled",
+    true,
+  );
+  await act(async () => stopping.resolve(null));
 
   await waitFor(() =>
     expect(invokeCalls.some((call) => call.command === "stop_stack")).toBe(

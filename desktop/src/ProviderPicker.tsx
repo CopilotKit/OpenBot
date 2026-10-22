@@ -5,6 +5,7 @@ import { ExternalLink } from "./ExternalLink";
 import { isHttpEndpointUrl } from "./http-endpoint-url";
 import { Mark } from "./Mark";
 import { asProblem, InlineFailure, type Problem } from "./Problem";
+import { StatusLine } from "./SetupProgress";
 
 export type Login = "plan" | "api-key" | "endpoint" | "oauth";
 
@@ -586,9 +587,9 @@ export function ProviderPicker({
                 <p className="lede">Signed in to {row.name}.</p>
               ) : signInUrl ? (
                 <>
-                  <p role="status">
+                  <StatusLine>
                     Waiting for you to approve sign-in in your browser.
-                  </p>
+                  </StatusLine>
                   {oauthCode && (
                     <p>
                       Verification code: <strong>{oauthCode}</strong>
@@ -608,7 +609,9 @@ export function ProviderPicker({
                   {row.name}
                 </button>
               )}
-              {busy && !signInUrl && <p role="status">Preparing sign-in…</p>}
+              {busy && !signInUrl && (
+                <StatusLine>Preparing sign-in…</StatusLine>
+              )}
               <div className="field">
                 <label htmlFor="oauth-model">Model name</label>
                 <input
@@ -684,11 +687,10 @@ export function ProviderPicker({
                     >
                       {busy ? "Checking…" : "Finish signing in"}
                     </button>
+                    {busy && <StatusLine>Checking the code…</StatusLine>}
                   </>
                 ) : (
-                  <p className="footnote" style={{ margin: 0 }}>
-                    Waiting for you to approve it…
-                  </p>
+                  <StatusLine>Waiting for you to approve it…</StatusLine>
                 )}
               </>
             ) : (
@@ -716,10 +718,8 @@ export function ProviderPicker({
                       </button>
                     )}
                 </div>
-                {busy && progress && (
-                  <p className="footnote" style={{ marginBottom: 0 }}>
-                    {progress}
-                  </p>
+                {busy && (
+                  <StatusLine>{progress ?? "Preparing sign-in…"}</StatusLine>
                 )}
               </>
             ))}
