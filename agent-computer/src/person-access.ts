@@ -15,7 +15,10 @@
  * Free of Playwright, like `authorisation.ts`, so the list is testable without a browser.
  */
 import type { ComputerControlState } from "../../shared/computer-control";
-import { browserComputerPaths } from "../../shared/openbot-browser";
+import {
+  browserComputerPaths,
+  realBrowserComputerPaths,
+} from "../../shared/openbot-browser";
 
 /** Why a Bot route is refused for a person's browser id. */
 export const PERSONS_OWN_BROWSER =
@@ -34,6 +37,9 @@ export class BrowserNotOpenError extends Error {
 
 const PERSON_PATHS = new Set<string>([
   ...Object.values(browserComputerPaths),
+  // The person's own everyday browser, on OpenBot Desktop: brought forward, or shown the
+  // Recorder's store page. Nothing in it is read or driven (see real-browser.ts).
+  ...Object.values(realBrowserComputerPaths),
   // The live screen, and the person's own input through it.
   "/stream",
   "/human/click",

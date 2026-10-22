@@ -45,6 +45,7 @@ import {
   personMayUse,
 } from "./person-access";
 import { createProfiles, numberFromEnv, VIEWPORT } from "./profiles";
+import { createRealBrowserHost, isRealBrowserPath } from "./real-browser";
 import {
   parseExecTimeout,
   parseInputMessage,
@@ -317,6 +318,15 @@ const browserHost = createBrowserHost({
   profiles,
   recorderDir: () => process.env[RECORDER_DIR_ENV],
   navigationTimeoutMs: NAVIGATION_TIMEOUT_MS,
+});
+
+/**
+ * The person's own everyday Chrome or Edge, on OpenBot Desktop's computer only: brought forward, or
+ * handed the Recorder's store page. See real-browser.ts.
+ */
+const realBrowser = createRealBrowserHost({
+  backend: RUNTIME.backend,
+  display: PERSON_DISPLAY,
 });
 
 /**
@@ -846,6 +856,8 @@ serve<StreamData>({
       return json({ error: PERSONS_OWN_BROWSER }, 403);
     if (isBrowserPath(url.pathname))
       return browserHost.handle(request, url.pathname, botId);
+    if (isRealBrowserPath(url.pathname))
+      return realBrowser.handle(request, url.pathname, botId);
     const session = sessions.for(botId);
 
     /*

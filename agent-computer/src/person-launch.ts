@@ -93,7 +93,11 @@ export function browserExecutableCandidates(
   throw new Error(`A person's browser is not supported on ${platform}.`);
 }
 
-async function runnable(path: string, platform: string): Promise<boolean> {
+/** Whether an executable is there to run (on Windows, there at all), without running it. */
+export async function runnable(
+  path: string,
+  platform: string,
+): Promise<boolean> {
   try {
     await access(path, platform === "win32" ? constants.F_OK : constants.X_OK);
     return true;
