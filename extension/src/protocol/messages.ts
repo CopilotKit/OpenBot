@@ -295,8 +295,8 @@ export type PageResponse =
   | { ok: true; pending: { origin: string; via: "web" | "desktop" } | null }
   | { ok: true; learning: LearningSpaceState }
   | { ok: true; available: boolean }
-  | { ok: true; offered: true }
-  | { ok: true; offered: false; reason: string } // why OpenBot Desktop did not connect this browser, as a code (DesktopOffer)
+  | { ok: true; connected: true } // OpenBot Desktop connected this browser, with no Connect page
+  | { ok: true; connected: false; reason: string } // why OpenBot Desktop did not connect this browser, as a code (DesktopConnect)
   | { ok: true }
   | { ok: false; error: string };
 

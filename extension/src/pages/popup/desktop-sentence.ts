@@ -1,5 +1,5 @@
-/** Why Connect with OpenBot Desktop did not open the connect page, one plain sentence per code: OpenBot Desktop's own
- * error codes, and the Recorder's (no answer, the policy, an address it cannot use). */
+/** Why Connect with OpenBot Desktop did not connect this browser, one plain sentence per code: OpenBot Desktop's own
+ * error codes, and the Recorder's (no answer, the policy, an address it cannot use, OpenBot not taking Desktop's code). */
 const SENTENCES: Record<string, string> = {
   "origin-not-allowed":
     "OpenBot Desktop does not recognise this copy of the Recorder. Connect from OpenBot in your browser instead.",
@@ -25,6 +25,10 @@ const SENTENCES: Record<string, string> = {
     "Your organization connects the Recorder to a different OpenBot. Connect from that OpenBot instead.",
   "invalid-address":
     "OpenBot Desktop answered with an address the Recorder cannot use. Connect from OpenBot in your browser instead.",
+  "exchange-refused":
+    "OpenBot did not accept the code OpenBot Desktop gave the Recorder. Try again.",
+  "openbot-unreachable":
+    "OpenBot did not answer. Make sure OpenBot is running in OpenBot Desktop, then try again.",
 };
 
 const UNKNOWN =

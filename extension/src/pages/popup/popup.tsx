@@ -191,9 +191,10 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
                 const answer = await ask<PageResponse>({
                   type: "page.connect.desktop",
                 });
-                // A good ping does not promise a good handoff: OpenBot Desktop says why it could not connect.
+                // A good ping does not promise a good handoff: OpenBot Desktop says why it could not connect. Connected,
+                // the refresh shows the Record form; there is no Connect page to confirm.
                 if (!answer.ok) setError(answer.error);
-                else if ("offered" in answer && !answer.offered)
+                else if ("connected" in answer && !answer.connected)
                   setError(desktopSentence(answer.reason));
                 await refresh();
               }}

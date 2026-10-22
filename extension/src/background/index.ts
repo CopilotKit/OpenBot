@@ -11,8 +11,12 @@ import { installSetup } from "./setup";
 const recording = installRecording();
 installRouter(recording);
 // A connection that ends without the person's Disconnect (the keep-alive's sign-out, a policy move) also ends what it
-// still has running: the recording controller stops the live recording and the document's streams for it.
-installConnection({ connectionLost: recording.connectionLost });
+// still has running: the recording controller stops the live recording and the document's streams for it. One OpenBot
+// Desktop makes as the Recorder installs is followed up as an approved Connect is.
+installConnection({
+  connectionLost: recording.connectionLost,
+  connected: recording.connected,
+});
 // A fresh install opens the page that asks for the microphone; website access came with the install itself.
 installSetup();
 // What the process that launched this browser calls, over its DevTools pipe, when OpenBot opened the browser itself:

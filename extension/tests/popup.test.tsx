@@ -186,13 +186,37 @@ test("Connect with OpenBot Desktop is hidden unless Desktop answers available", 
   );
 });
 
+test("Connect with OpenBot Desktop connects this browser at once: no page opens, and the popup shows the Record form", async () => {
+  const response = stateResponse(NOT_CONNECTED);
+  const view = setup(response, {
+    desktop: true,
+    answers: { "page.connect.desktop": { ok: true, connected: true } },
+    onAsk: (message) => {
+      // The service worker stored the connection OpenBot Desktop made: page.state shows it from now on.
+      if (message.type === "page.connect.desktop")
+        Object.assign(response, {
+          connection: {
+            openbotUrl: "http://127.0.0.1:7470",
+            user: { name: "Ada Lovelace", email: "ada@example.test" },
+            via: "desktop",
+          },
+        });
+    },
+  });
+  fireEvent.click(await view.findByText("Connect with OpenBot Desktop"));
+  await view.findByLabelText("What are you about to do?");
+  expect(view.getByText("Ada Lovelace")).toBeTruthy();
+  expect(fake.opened).toEqual([]);
+  expect(view.queryByRole("alert")).toBeNull();
+});
+
 test("a Desktop connect that fails after a good ping shows a plain sentence for the host's code", async () => {
   const { findByText, findByRole } = setup(stateResponse(NOT_CONNECTED), {
     desktop: true,
     answers: {
       "page.connect.desktop": {
         ok: true,
-        offered: false,
+        connected: false,
         reason: "not-signed-in",
       },
     },
@@ -219,6 +243,8 @@ test("every code OpenBot Desktop or the Recorder can give has a sentence of its 
     "policy-invalid",
     "pinned-elsewhere",
     "invalid-address",
+    "exchange-refused",
+    "openbot-unreachable",
   ];
   const sentences = codes.map(desktopSentence);
   for (const sentence of sentences) expect(sentence).not.toBe(general);
@@ -232,7 +258,7 @@ test("a Desktop code the Recorder does not know gets the general sentence", asyn
     answers: {
       "page.connect.desktop": {
         ok: true,
-        offered: false,
+        connected: false,
         reason: "something-new",
       },
     },
