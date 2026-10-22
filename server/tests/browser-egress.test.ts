@@ -81,6 +81,34 @@ describe("a person's browser on a computer in the cloud", () => {
     expect(allowed("openbot.example.com", ["169.254.169.254"])).toBe(false);
   });
 
+  test("OpenBot and the gateway by name are allowed on their own ports, never the name's others", () => {
+    // Resolving inside the deployment, where the public ranges do not already allow them: a name on its own port only.
+    const port = (host: string, to: number, resolved: string[]) =>
+      egressDecision(cloud, host, to, resolved).allowed;
+    expect(port("openbot.example.com", 443, ["10.0.0.7"])).toBe(true);
+    expect(port("openbot.example.com", 8443, ["10.0.0.7"])).toBe(false);
+    expect(port("gateway.example.com", 443, ["172.20.1.1"])).toBe(true);
+    expect(port("gateway.example.com", 5432, ["172.20.1.1"])).toBe(false);
+    const ported = personBrowserEgressPolicy({
+      native: false,
+      allowPrivateHosts: false,
+      openbotUrls: ["http://openbot.internal:3001"],
+      gatewayUrl: "ws://gateway.internal:7103/socket",
+    });
+    expect(
+      egressDecision(ported, "openbot.internal", 3001, ["10.0.0.7"]).allowed,
+    ).toBe(true);
+    expect(
+      egressDecision(ported, "openbot.internal", 80, ["10.0.0.7"]).allowed,
+    ).toBe(false);
+    expect(
+      egressDecision(ported, "gateway.internal", 7103, ["10.0.0.8"]).allowed,
+    ).toBe(true);
+    expect(
+      egressDecision(ported, "gateway.internal", 3001, ["10.0.0.8"]).allowed,
+    ).toBe(false);
+  });
+
   test("an address given for OpenBot is allowed as that address alone, on its own port", () => {
     const literal = personBrowserEgressPolicy({
       native: false,

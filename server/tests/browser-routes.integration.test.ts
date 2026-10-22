@@ -604,19 +604,21 @@ describe("opening a person's own browser", () => {
     ).toMatchObject({ via: "openbot-browser", label: "OpenBot browser" });
 
     // The browser's network policy went to its computer ahead of the browser: the open web and this OpenBot and the
-    // Intelligence gateway by name, nothing inside the deployment.
+    // Intelligence gateway by name on their own ports, nothing inside the deployment.
     const policy = policies.get(computerId) as {
       mode: string;
-      rules: { type: string; value: string }[];
+      rules: { type: string; value: string; ports?: string }[];
     };
     expect(policy.mode).toBe("allowlist_only");
     expect(policy.rules).toContainEqual({
       type: "domain",
       value: "openbot.example.com",
+      ports: "443",
     });
     expect(policy.rules).toContainEqual({
       type: "domain",
       value: "gateway.example.com",
+      ports: "443",
     });
     expect(policy.rules.some((rule) => rule.value.startsWith("10."))).toBe(
       false,

@@ -72,17 +72,17 @@ function originOf(raw: string | undefined): Origin | null {
 }
 
 /**
- * An address is allowed as itself on its own port, since a domain rule never matches an address. `localhost` is this
- * machine's loopback addresses on its port: as a name it would be a domain rule, and a domain rule takes no port.
+ * Each is allowed on its own port only. An address is allowed as itself, since a domain rule never matches an address,
+ * and `localhost` is this machine's loopback addresses, which is what it reaches.
  *
- * A name is allowed by name, on every port: the computer's rules carry ports on an address range only
- * (agent-computer/src/egress.ts). Where the name resolves to a public address, that is no wider than the open web
- * already is; where it resolves inside the cluster, it is that name and the names under it.
+ * A name is allowed by name on its port (a domain rule also covers the names under it, on that port). Where the name
+ * resolves to a public address the open web already allows it on every port; the port matters where it resolves inside
+ * the deployment, which is the case this rule is for.
  */
 function rulesFor({ host, port }: Origin): EgressRule[] {
   const addresses = host === "localhost" ? ["127.0.0.1", "::1"] : [host];
   if (addresses.some((address) => isIP(address) === 0))
-    return [{ type: "domain", value: host }];
+    return [{ type: "domain", value: host, ports: String(port) }];
   return addresses.map((address) => ({
     type: "cidr",
     value: `${address}/${isIP(address) === 4 ? 32 : 128}`,
@@ -93,7 +93,7 @@ function rulesFor({ host, port }: Origin): EgressRule[] {
 function uniqueRules(rules: EgressRule[]): EgressRule[] {
   const seen = new Set<string>();
   return rules.filter((rule) => {
-    const key = `${rule.type}:${rule.value}:${rule.type === "cidr" ? (rule.ports ?? "") : ""}`;
+    const key = `${rule.type}:${rule.value}:${rule.ports ?? ""}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
