@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { ExternalLink } from "./ExternalLink";
 import { isHttpEndpointUrl } from "./http-endpoint-url";
 import { Mark } from "./Mark";
@@ -144,6 +144,8 @@ export function ProviderPicker({
   onBack,
   returning = false,
   busy: starting = false,
+  stepLabel = "Step 3 of 4",
+  status,
 }: {
   chosen: ModelChoice | null;
   /**
@@ -155,9 +157,13 @@ export function ProviderPicker({
   held: HeldConfiguration;
   root: string;
   onChoose: (choice: ModelChoice) => void;
-  onBack: () => void;
+  /** Without it there is no Back, as while local Intelligence sets up behind this screen. */
+  onBack?: () => void;
   returning?: boolean;
   busy?: boolean;
+  stepLabel?: string;
+  /** One line about work running behind this screen. */
+  status?: ReactNode;
 }) {
   const initialChoice = chosen ?? recordedModel(held);
   const [reuse, setReuse] = useState(
@@ -473,11 +479,12 @@ export function ProviderPicker({
 
   return (
     <div className="sheet">
-      {!returning && <p className="steps-of">Step 3 of 4</p>}
+      {!returning && <p className="steps-of">{stepLabel}</p>}
       <h1>{returning ? "Refresh your AI connection" : "Connect your AI"}</h1>
       <p className="lede">
         Connect your provider with a supported plan or an API key.
       </p>
+      {status}
 
       <fieldset className="picker providers">
         <legend className="sr-only">Model provider</legend>
@@ -863,14 +870,16 @@ export function ProviderPicker({
       )}
 
       <div className="row">
-        <button
-          type="button"
-          className="quiet"
-          onClick={onBack}
-          disabled={starting}
-        >
-          Back
-        </button>
+        {onBack && (
+          <button
+            type="button"
+            className="quiet"
+            onClick={onBack}
+            disabled={starting}
+          >
+            Back
+          </button>
+        )}
         <button
           type="button"
           disabled={starting || !row || !login || !ready}

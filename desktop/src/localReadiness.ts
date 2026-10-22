@@ -58,7 +58,7 @@ function blocked(said: string, action?: ReadinessAction): ReadinessRow {
 
 const unavailableHere =
   "Intelligence is not available on this computer or release.";
-const contract = "OpenBot does not understand this CLI's reply.";
+const contract = "OpenBot did not understand Intelligence's reply.";
 const couldNotStart = blocked(
   "Intelligence could not start.",
   "restart-intelligence",
@@ -84,10 +84,10 @@ const reasonRows: Record<LocalReason, ReadinessRow> = {
   "update-recovery-required": blocked(unavailableHere),
   // The runtime row carries the Docker detail. Here Intelligence is simply blocked behind it.
   "unsupported-engine": blocked(
-    "Intelligence cannot start on this Docker setup.",
+    "Intelligence cannot run on this computer's current setup.",
   ),
   "docker-unavailable": blocked(
-    "Intelligence cannot start until Docker Desktop is running.",
+    "Intelligence cannot start until the software it runs on is running.",
     "retry",
   ),
   "port-unavailable": blocked("A port Intelligence needs is in use.", "retry"),
@@ -95,7 +95,7 @@ const reasonRows: Record<LocalReason, ReadinessRow> = {
   "local-command-failed": couldNotStart,
   // OpenBot always approves the connection it asks for, so this is the CLI asking for more.
   "confirmation-required": blocked(
-    "The Intelligence CLI asked for a confirmation OpenBot cannot give.",
+    "Intelligence asked for a confirmation OpenBot cannot give.",
   ),
   unrecognized: couldNotStart,
 };
@@ -114,16 +114,15 @@ const licenceRows: Record<
 };
 
 const failureRows: Record<LocalFailure, ReadinessRow> = {
-  unavailable: blocked("This build does not include the Intelligence CLI."),
+  unavailable: blocked(
+    "This version of OpenBot cannot set up Intelligence on this computer.",
+  ),
   unverified: blocked(
-    "The Intelligence CLI failed its integrity check.",
+    "The Intelligence software failed its integrity check.",
     "repair",
   ),
   // Cancelled is the person's own call stopping, not another command holding the stack.
-  cancelled: blocked(
-    "The Intelligence command was stopped before it finished.",
-    "retry",
-  ),
+  cancelled: blocked("Stopped at your request before it finished.", "retry"),
   spawn: couldNotStart,
   timeout: couldNotStart,
   "unexpected-exit": couldNotStart,

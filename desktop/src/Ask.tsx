@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { asProblem, Failure, type Problem } from "./Problem";
 
 /**
@@ -19,11 +19,16 @@ export function Ask({
   onAsk,
   onOpen,
   onBack,
+  auto = false,
+  stepLabel = "Last step",
 }: {
   suggestion: string;
   onAsk: (question: string) => Promise<string>;
   onOpen: () => void;
   onBack: () => void;
+  /** Asks `suggestion` on arrival, with no field to change it: the test is the screen. */
+  auto?: boolean;
+  stepLabel?: string;
 }) {
   const [question, setQuestion] = useState(suggestion);
   const [answer, setAnswer] = useState<string | null>(null);
@@ -37,6 +42,14 @@ export function Ask({
    * built to replace, on the screen built to replace it.
    */
   const [failure, setFailure] = useState<Problem | null>(null);
+
+  // Deferred a tick, so a development double mount asks once.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: once, on arrival.
+  useEffect(() => {
+    if (!auto) return;
+    const timer = setTimeout(() => void ask(), 0);
+    return () => clearTimeout(timer);
+  }, []);
 
   async function ask() {
     setAsking(true);
@@ -52,9 +65,55 @@ export function Ask({
     }
   }
 
+  if (auto) {
+    return (
+      <div className="sheet">
+        <p className="steps-of">{stepLabel}</p>
+        <h1>Test OpenBot</h1>
+        <p className="lede">
+          OpenBot asks your AI provider one question to check that it answers.
+        </p>
+        <div className="answer">
+          <p className="answer-from">Question</p>
+          <p className="answer-text">{question}</p>
+        </div>
+        {asking && <p role="status">Asking…</p>}
+        {failure && <Failure problem={failure} />}
+        {answer !== null && (
+          <div className="answer">
+            <p className="answer-from">Your Bot said</p>
+            <p className="answer-text">{answer}</p>
+          </div>
+        )}
+        <div className="row">
+          {answer !== null && (
+            <button type="button" onClick={onOpen}>
+              Open OpenBot
+            </button>
+          )}
+          {failure && (
+            <>
+              <button type="button" disabled={asking} onClick={ask}>
+                Ask again
+              </button>
+              <button
+                type="button"
+                className="quiet"
+                disabled={asking}
+                onClick={onBack}
+              >
+                Change the model
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="sheet">
-      <p className="steps-of">Last step</p>
+      <p className="steps-of">{stepLabel}</p>
       <h1>Ask it something.</h1>
       <p className="lede">
         Your Bot is set up. This proves it can answer before you start using it.
