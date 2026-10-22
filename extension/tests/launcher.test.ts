@@ -864,10 +864,123 @@ test("Stop leaves the recording it ended, by name, for OpenBot to confirm it wen
     () => names(trajectoryId).filter((name) => name === "outcome").length === 2,
     "the recording stopped",
   );
+  // Nothing was done and nothing said in it: both counts say so, for OpenBot to say nothing was recorded.
   expect((await launcher().state()).lastStopped).toEqual({
     recordingId: recordingId ?? "",
     title: "Archive order 1043",
     stoppedAt,
+    actions: 0,
+    phrases: 0,
+  });
+}, 15_000);
+
+test("Stop reports what the recording held: narration alone is something, and actions and phrases are both counted", async () => {
+  // The fifth end-to-end run: a recording of three narrated phrases and no clicks reached Intelligence, and OpenBot's
+  // page said nothing was recorded, from the only count it had, the actions.
+  await launcher().connect({ connection: connection(), narration: "external" });
+  const click = rows.archiveClick;
+  const said = await record(click.timestamp - 7_000, "Talk it through");
+  for (const [offset, text] of [
+    [-6_000, "this is the order page"],
+    [-4_000, "I would archive it from here"],
+  ] as const) {
+    clock = click.timestamp + offset + 1_000;
+    expect(
+      await launcher().narrate({
+        text,
+        startedAt: click.timestamp + offset,
+        endedAt: click.timestamp + offset + 800,
+      }),
+    ).toEqual({ ok: true });
+  }
+  clock = click.timestamp;
+  const stopped = await launcher().record({ action: "stop" });
+  expect(stopped).toMatchObject({
+    ok: true,
+    state: { phase: "idle", lastStopped: { actions: 0, phrases: 2 } },
+  });
+  await until(
+    () => names(said).filter((name) => name === "outcome").length === 2,
+    "the narrated recording stopped",
+  );
+  expect(names(said).filter((name) => name === "transcript")).toHaveLength(2);
+}, 15_000);
+
+test("Stop counts a recording's actions and its phrases both", async () => {
+  await launcher().connect({ connection: connection(), narration: "external" });
+  const click = rows.archiveClick;
+  const trajectoryId = await record(
+    click.timestamp - 7_000,
+    "Archive order 1043",
+  );
+  const port = contentPort();
+  clock = click.timestamp;
+  port.postMessage({ type: "content.event", event: click });
+  await settle();
+  clock = click.timestamp + 600;
+  expect(
+    await launcher().narrate({
+      text: "archiving the order now",
+      startedAt: click.timestamp - 1_500,
+      endedAt: click.timestamp + 400,
+    }),
+  ).toEqual({ ok: true });
+  await advanceTo(click.timestamp + 5_000);
+  const stopped = await launcher().record({ action: "stop" });
+  expect(stopped).toMatchObject({
+    ok: true,
+    state: { phase: "idle", lastStopped: { actions: 1, phrases: 1 } },
+  });
+  await until(
+    () => names(trajectoryId).filter((name) => name === "outcome").length === 2,
+    "the recording stopped",
+  );
+}, 15_000);
+
+test("a recording the Recorder hears itself counts the phrases its own recogniser placed", async () => {
+  await launcher().connect({ connection: connection(), narration: "own" });
+  const trajectoryId = await record(clock, "Say it out loud");
+  await until(() => speech.instances.length === 1, "the speech recognition");
+  const listening = speech.instances[0];
+  listening?.begin();
+  listening?.say([["opening the first order", true]]);
+  await settle();
+  // Placed among the steps the service worker holds, which go once their wait is up.
+  await advanceTo(clock + 5_000);
+  await until(
+    () => names(trajectoryId).includes("transcript"),
+    "the phrase in Intelligence",
+  );
+  const stopped = await launcher().record({ action: "stop" });
+  expect(stopped).toMatchObject({
+    ok: true,
+    state: { phase: "idle", lastStopped: { actions: 0, phrases: 1 } },
+  });
+}, 15_000);
+
+test("a recording a sign-out stops leaves what it held too", async () => {
+  await launcher().connect({ connection: connection(), narration: "external" });
+  const click = rows.archiveClick;
+  await record(click.timestamp - 7_000, "Archive order 1043");
+  const port = contentPort();
+  clock = click.timestamp;
+  port.postMessage({ type: "content.event", event: click });
+  await settle();
+  expect(
+    await launcher().narrate({
+      text: "archiving it",
+      startedAt: click.timestamp - 300,
+      endedAt: click.timestamp + 200,
+    }),
+  ).toEqual({ ok: true });
+  // OpenBot revoked the connection and said so: the recording stops as a sign-out stops one.
+  liveTokens.delete(TOKEN);
+  clock = click.timestamp + 1_000;
+  expect(await launcher().disconnect()).toEqual({ ok: true });
+  expect((await launcher().state()).lastStopped).toMatchObject({
+    title: "Archive order 1043",
+    actions: 1,
+    phrases: 1,
   });
 }, 15_000);
 

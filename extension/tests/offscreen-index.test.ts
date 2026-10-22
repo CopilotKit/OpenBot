@@ -1699,6 +1699,16 @@ describe("voice", () => {
     expect(microphone.tracks[0]?.readyState).toBe("ended");
     expect(voiceStates(h)).toEqual(["starting", "listening"]);
     expect(heardWords(h)).toEqual(["my card number is [redacted]"]);
+    // The phrase finished after Stop went into the stream from here, so the service worker never placed it: it hears
+    // of it with stopped, and counts it among the recording's phrases.
+    expect(h.received("offscreen.stopped")).toEqual([
+      {
+        type: "offscreen.stopped",
+        recordingId: session.recordingId,
+        trajectoryIds: [t],
+        phrases: 1,
+      },
+    ]);
   });
 
   test("a stop that is not the person's (Disconnect, a sign-out, the policy) ends the voice too and lets go of the microphone", async () => {

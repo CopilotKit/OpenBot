@@ -394,6 +394,8 @@ test("a service-worker restart during Stop finishes the stop with the document a
     recordingId: id,
     title: "Update deal",
     stoppedAt: now,
+    actions: 0,
+    phrases: 0,
   });
   expect(fake.storage.local.get("activeRecording")).toBeUndefined();
   expect(fake.storage.session.get("stream")).toBeUndefined();
@@ -529,7 +531,8 @@ test("a resumed stop waits only for what is left of the 120 seconds", async () =
 
 test("a service-worker restart just after Stop moved the recording into the drains only finishes", async () => {
   seed(
-    { phase: "stopping", stopping: { since: now - 5_000 } },
+    // Three actions and two narrated phrases, as the service worker that went away persisted them.
+    { phase: "stopping", stopping: { since: now - 5_000 }, phrases: 2 },
     { activeRecording: false },
   );
   fake.storage.local.set("drains", [seededRecord()]);
@@ -539,10 +542,13 @@ test("a service-worker restart just after Stop moved the recording into the drai
 
   const after = await state();
   expect(after.phase).toBe("idle");
+  // What the recording held is reported by the worker that finished its stop.
   expect(after.lastStopped).toEqual({
     recordingId: RECORDING,
     title: "Update deal",
     stoppedAt: now,
+    actions: 3,
+    phrases: 2,
   });
   expect(drains()).toEqual([seededRecord()]);
   expect(sentToDocument("offscreen.recover", port)).toEqual([

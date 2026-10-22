@@ -304,6 +304,7 @@ type RecorderEvent =
       capture: CaptureStatus;
     }
   | { type: "action" }
+  | { type: "phrases"; recordingId: string; count: number }
   | { type: "notice" }
   | { type: "notice-answered" }
   | { type: "follow"; tabId: number; url: string }
@@ -362,6 +363,24 @@ export function reduceRecorder(
       };
     case "action":
       return { ...state, actions: state.actions + 1 };
+    case "phrases": {
+      // The recording they belong to, while it runs or stops; once it has stopped, what Stop reported of it.
+      if (
+        state.recordingId === event.recordingId &&
+        (state.phase === "recording" || state.phase === "stopping")
+      )
+        return { ...state, phrases: (state.phrases ?? 0) + event.count };
+      const stopped = state.lastStopped;
+      if (
+        stopped?.recordingId !== event.recordingId ||
+        stopped.phrases === undefined
+      )
+        return state;
+      return {
+        ...state,
+        lastStopped: { ...stopped, phrases: stopped.phrases + event.count },
+      };
+    }
     case "notice":
       return {
         ...state,
@@ -424,7 +443,7 @@ export function reduceRecorder(
         error: event.error,
       });
     case "restart": {
-      const { noticeAt: _previous, ...rest } = state;
+      const { noticeAt: _previous, phrases: _said, ...rest } = state;
       return {
         ...rest,
         recordingId: event.recordingId,
@@ -976,6 +995,13 @@ export function installRecording(
         );
         return;
       case "offscreen.stopped":
+        // Before the stop goes on to report the recording: the phrases the document put in the stream itself.
+        if (message.phrases)
+          dispatch({
+            type: "phrases",
+            recordingId: message.recordingId,
+            count: message.phrases,
+          });
         stopWaiters.get(message.recordingId)?.();
         return;
       case "offscreen.done":
@@ -1288,6 +1314,10 @@ export function installRecording(
       startedAt !== undefined && event.timestamp < startedAt
         ? { ...event, timestamp: startedAt }
         : event;
+    // Counted for the recording it lands in, which Stop reports with its actions: a recording of narration alone
+    // holds something.
+    if (state.recordingId !== undefined)
+      dispatch({ type: "phrases", recordingId: state.recordingId, count: 1 });
     if (steps) steps.transcript(state.tabIds[0] ?? -1, placed);
     else forwardEvent(placed);
   }
@@ -1760,6 +1790,9 @@ export function installRecording(
               recordingId,
               ...(state.title !== undefined ? { title: state.title } : {}),
               stoppedAt: deps.now(),
+              // What it held, for OpenBot to say: the badge's count and the phrases placed, both final now.
+              actions: state.actions,
+              phrases: state.phrases ?? 0,
             },
       error: signedOut ? stoppedSentence(signedOut) : failed,
     });

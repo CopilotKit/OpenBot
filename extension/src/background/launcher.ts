@@ -185,11 +185,18 @@ function voiceOf(state: RecorderState): NonNullable<LauncherState["voice"]> {
   }
 }
 
-/** The recording Stop ended last, by name, once it went to Intelligence (a Disconnect or a failed send leaves none),
- * and not when the person's own Learning space is known not to take it: OpenBot confirms it went there. */
+/** The recording Stop ended last, by name and with what it held, once it went to Intelligence (a Disconnect or a
+ * failed send leaves none), and not when the person's own Learning space is known not to take it: OpenBot confirms it
+ * went there, or says it held nothing. One stopped by an earlier build, which did not count, is not reported: OpenBot
+ * would say it held nothing. */
 function lastStopped(state: RecorderState): LauncherState["lastStopped"] {
   const stopped = state.lastStopped;
-  if (stopped?.title === undefined || stopped.stoppedAt === undefined)
+  if (
+    stopped?.title === undefined ||
+    stopped.stoppedAt === undefined ||
+    stopped.actions === undefined ||
+    stopped.phrases === undefined
+  )
     return undefined;
   if (state.learning && joinedLearningContainer(state.learning) === null)
     return undefined;
@@ -197,6 +204,8 @@ function lastStopped(state: RecorderState): LauncherState["lastStopped"] {
     recordingId: stopped.recordingId,
     title: stopped.title,
     stoppedAt: stopped.stoppedAt,
+    actions: stopped.actions,
+    phrases: stopped.phrases,
   };
 }
 
