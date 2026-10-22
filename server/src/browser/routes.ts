@@ -172,14 +172,28 @@ export function createBrowserRoutes(deps: BrowserRouteDeps) {
     };
   }
 
-  /** The computer's refusal, said as it said it: its own 4xx with its own sentence, anything else a 502. */
+  /**
+   * The computer's refusal, for the person. What is about their request keeps its status and the computer's sentence: a
+   * bad request (400), a browser that is not open or a Recorder that refused (409), a browser this computer cannot run
+   * (503: no Chrome or Edge, or no Recorder in it). What is about how OpenBot reaches its computer (the token, a route an
+   * older computer lacks) is never passed on as the person's own 401 or 404: it is the computer failing, 502, as a
+   * Recorder or a page that failed is, with the computer's sentence where it said one for the person.
+   */
   function refused(answer: { status: number; body: unknown }): Response {
     const said = (answer.body as { error?: unknown } | null)?.error;
-    const error =
-      typeof said === "string" && said ? said : SENTENCES.unreachable;
-    const status =
-      answer.status >= 400 && answer.status < 500 ? answer.status : 502;
-    return Response.json({ error }, { status });
+    const sentence = typeof said === "string" && said ? said : null;
+    if (answer.status === 400 || answer.status === 409 || answer.status === 503)
+      return Response.json(
+        { error: sentence ?? SENTENCES.unreachable },
+        { status: answer.status },
+      );
+    return Response.json(
+      {
+        error:
+          answer.status >= 500 && sentence ? sentence : SENTENCES.unreachable,
+      },
+      { status: 502 },
+    );
   }
 
   function unreachable(error: unknown): Response {

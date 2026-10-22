@@ -313,27 +313,6 @@ describe("tenant YAML validation", () => {
     });
   }
 
-  // A person's own OpenBot browser is a computer named `person-` and 32 hex digits, reached the way a Bot's is: a Bot
-  // with that id would share its computer with the person whose browser it is.
-  test("rejects an agent whose id is the shape of a person's OpenBot browser, and keeps one that is not", () => {
-    const withAgent = (id: string) =>
-      validateTenantPackage({
-        brand: "tenant: { id: fintech, product_name: Ledgerline }",
-        agents: `agents: [{ id: ${id}, name: Knowledge, title: Company Knowledge, role_description: Answer company questions., type: built-in, system_prompt: Answer from knowledge. }]`,
-        channels: "channels: []",
-        model:
-          "model: { provider: openai, credential_secret_ref: openai-key, default_model: gpt-5.6-terra }",
-        knowledge: "sources: []",
-        themeCss: "",
-      });
-    expect(() => withAgent(`person-${"0a".repeat(16)}`)).toThrow(
-      /person's OpenBot browser/,
-    );
-    expect(withAgent("person-helper").agents.map((agent) => agent.id)).toEqual([
-      "person-helper",
-    ]);
-  });
-
   test("an id that merely contains a reserved name is fine", () => {
     // The collision is exact: `/policy-desk/status` is a Bot path and reaches the guard normally.
     const tenantPackage = validateTenantPackage({
@@ -392,6 +371,27 @@ describe("tenant YAML validation", () => {
         themeCss: "",
       }),
     ).toThrow("agent.avatar_seed must be a non-empty string");
+  });
+
+  // A person's own OpenBot browser is a computer named `person-` and 32 hex digits, reached the way a Bot's is: a Bot
+  // with that id would share its computer with the person whose browser it is.
+  test("rejects an agent whose id is the shape of a person's OpenBot browser, and keeps one that is not", () => {
+    const withAgent = (id: string) =>
+      validateTenantPackage({
+        brand: "tenant: { id: fintech, product_name: Ledgerline }",
+        agents: `agents: [{ id: ${id}, name: Knowledge, title: Company Knowledge, role_description: Answer company questions., type: built-in, system_prompt: Answer from knowledge. }]`,
+        channels: "channels: []",
+        model:
+          "model: { provider: openai, credential_secret_ref: openai-key, default_model: gpt-5.6-terra }",
+        knowledge: "sources: []",
+        themeCss: "",
+      });
+    expect(() => withAgent(`person-${"0a".repeat(16)}`)).toThrow(
+      /person's OpenBot browser/,
+    );
+    expect(withAgent("person-helper").agents.map((agent) => agent.id)).toEqual([
+      "person-helper",
+    ]);
   });
 
   test("creates a browser-safe application configuration", () => {

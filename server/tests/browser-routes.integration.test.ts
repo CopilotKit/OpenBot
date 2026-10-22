@@ -88,6 +88,8 @@ const browsers = new Map<string, Opened>();
 const policies = new Map<string, unknown>();
 /** Every request the computer took, as `<method> <path> <browser>`. */
 const asked: string[] = [];
+/** How the computer answers the next open instead of opening, when a test says so. */
+let refuseNextOpen: { status: number; error: string } | null = null;
 
 const recorderOf = (opened: Opened): LauncherState =>
   opened.state.recorder as LauncherState;
@@ -132,6 +134,11 @@ const computer = Bun.serve<{ bot: string }>({
       case "/browser/state":
         return Response.json(opened?.state ?? closed);
       case "/browser/open": {
+        if (refuseNextOpen) {
+          const { status, error } = refuseNextOpen;
+          refuseNextOpen = null;
+          return Response.json({ error }, { status });
+        }
         const parsed = browserOpenRequestSchema.safeParse(body);
         if (!parsed.success)
           return Response.json({ error: "Bad request." }, { status: 400 });
@@ -274,6 +281,8 @@ function build(
     auth?: typeof better | ReturnType<typeof createOrganizationAuth>;
     organizationAuth?: ReturnType<typeof createOrganizationAuth>;
     computers?: false;
+    /** The token the browser routes call the computer with, in place of the right one. */
+    token?: string;
     /** The Bots' computer provider, in place of the shared stand-in computer. */
     provider?: ComputerProvider;
   } = {},
@@ -346,7 +355,7 @@ function build(
       ...(options.computers === false
         ? {}
         : { computers: gatewayBrowserComputers(gateway) }),
-      token: COMPUTER_TOKEN,
+      token: options.token ?? COMPUTER_TOKEN,
       recorder,
       openbotUrl: openbotAddress(config),
     },
@@ -580,6 +589,12 @@ describe("opening a person's own browser", () => {
     expect(policy.rules.some((rule) => rule.value.startsWith("10."))).toBe(
       false,
     );
+    // Pushed before the browser opened: the computer's filter refuses everything for a browser it has no policy for.
+    const pushedAt = asked.indexOf(`PUT /egress-policy ${computerId}`);
+    expect(pushedAt).toBeGreaterThanOrEqual(0);
+    expect(pushedAt).toBeLessThan(
+      asked.indexOf(`POST /browser/open ${computerId}`),
+    );
 
     // The state now shows the open browser, with its Recorder.
     expect(
@@ -753,6 +768,56 @@ describe("opening a person's own browser", () => {
         })
       ).status,
     ).toBe(415);
+  });
+
+  test("the computer's refusals reach the person as theirs, and its own failings never read as the person's", async () => {
+    // No Chrome or Edge here, or no Recorder in the computer: the computer's sentence, as unavailable.
+    refuseNextOpen = {
+      status: 503,
+      error: "Install Google Chrome or Microsoft Edge to open your browser.",
+    };
+    const unavailable = await call(openbot, "/api/browser/open", {
+      method: "POST",
+      as: "ada",
+    });
+    expect(unavailable.status).toBe(503);
+    expect(await unavailable.json()).toEqual({
+      error: "Install Google Chrome or Microsoft Edge to open your browser.",
+    });
+    // The Recorder refused: its sentence, as a conflict.
+    refuseNextOpen = {
+      status: 409,
+      error:
+        "Your organization's Recorder policy does not allow this OpenBot. Ask your IT team.",
+    };
+    const refused = await call(openbot, "/api/browser/open", {
+      method: "POST",
+      as: "ada",
+    });
+    expect(refused.status).toBe(409);
+    // The Recorder could not be reached in it: the computer failed, with what it said.
+    refuseNextOpen = {
+      status: 502,
+      error: "The Recorder in your browser does not offer its launcher.",
+    };
+    const failed = await call(openbot, "/api/browser/open", {
+      method: "POST",
+      as: "ada",
+    });
+    expect(failed.status).toBe(502);
+    expect(await failed.json()).toEqual({
+      error: "The Recorder in your browser does not offer its launcher.",
+    });
+    // OpenBot calling its computer with the wrong token is not the person signed out.
+    const misconfigured = build({}, { token: "not-the-computer-token" });
+    const wrong = await call(misconfigured, "/api/browser/open", {
+      method: "POST",
+      as: "ada",
+    });
+    expect(wrong.status).toBe(502);
+    expect(await wrong.json()).toEqual({
+      error: "Your browser could not be reached. Try again.",
+    });
   });
 
   test("each person reaches only their own browser", async () => {
