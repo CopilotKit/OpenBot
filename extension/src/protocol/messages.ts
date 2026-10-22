@@ -62,9 +62,19 @@ export type RecorderState = {
    * or the end of the recording. The popup shows its card from this. */
   noticeOpen: boolean;
   capture: CaptureStatus;
-  /** The recording Stop ended last: the popup says it went to Intelligence, and the launcher tells OpenBot its name
-   * and when it stopped, so OpenBot can confirm it too. */
-  lastStopped?: { recordingId: string; title?: string; stoppedAt?: number };
+  /** Narrated phrases this recording has kept so far: each final phrase placed among its steps, heard by the
+   * Recorder itself or passed in by its launcher. Absent while there are none. */
+  phrases?: number;
+  /** The recording Stop ended last: the popup says it went to Intelligence, and the launcher tells OpenBot its name,
+   * when it stopped and what it held (the person's actions as the badge counted them, and its narrated phrases), so
+   * OpenBot can confirm it too and say when it held nothing. */
+  lastStopped?: {
+    recordingId: string;
+    title?: string;
+    stoppedAt?: number;
+    actions?: number;
+    phrases?: number;
+  };
   draining: number; // stopped recordings still sending
   learning?: LearningSpaceState; // the person's own Learning space at Record (Decision 10)
   topUrls: Record<string, string>; // followed tab id -> its top frame's current URL
@@ -211,6 +221,9 @@ export type OffscreenToBackground =
       type: "offscreen.stopped";
       recordingId: string;
       trajectoryIds: string[];
+      /** Final phrases this document put straight into the stream after Stop reached it (the service worker had sent
+       * its held steps by then), which the service worker did not place and so has not counted. */
+      phrases?: number;
     } // final outcome queued
   | { type: "offscreen.done"; recordingId: string; failed?: string } // every event sent, every trajectory finished; `failed`: none of it could be sent, and why
   | {

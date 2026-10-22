@@ -478,6 +478,82 @@ for (const variant of VARIANTS) {
       ).toBe(400);
     }, 60_000);
 
+    test.skipIf(variant.window !== "native")(
+      "tabs behind the one in front are behind it, as in any browser, and the tab the person brings to front is the one OpenBot acts on",
+      async () => {
+        // The fifth end-to-end run: every tab of the Desktop window said it was visible and focused,
+        // background ones included, so sites behind the tab in front behaved as if in front, and
+        // OpenBot could not tell which tab the person had in front: it named and navigated another.
+        const person = profiles.person(PERSON);
+        if (!person) throw new Error("The browser should be open.");
+        const behind = activeTab(
+          (
+            await api("/browser/tabs", {
+              action: "new",
+              url: `${ORIGIN}/page/behind`,
+            })
+          ).json as BrowserState,
+        );
+        const front = activeTab(
+          (
+            await api("/browser/tabs", {
+              action: "new",
+              url: `${ORIGIN}/page/front`,
+            })
+          ).json as BrowserState,
+        );
+        if (!behind || !front) throw new Error("Both tabs should be listed.");
+        const tab = (path: string) => {
+          const page = person
+            .pages()
+            .find((candidate) =>
+              candidate.url().startsWith(`${ORIGIN}${path}`),
+            );
+          if (!page) throw new Error(`No tab shows ${path}.`);
+          return page;
+        };
+        const seen = (page: Page) =>
+          page.evaluate(() => ({
+            visibility: document.visibilityState,
+            focused: document.hasFocus(),
+          }));
+        const inFront = { visibility: "visible", focused: true } as const;
+        const atTheBack = { visibility: "hidden", focused: false } as const;
+        try {
+          expect(await seen(tab("/page/front"))).toEqual(inFront);
+          expect(await seen(tab("/page/behind"))).toEqual(atTheBack);
+          // Still behind once it has gone somewhere else, which is a new document in the same tab.
+          await tab("/page/behind").goto(`${ORIGIN}/page/behind-again`);
+          expect(await seen(tab("/page/behind-again"))).toEqual(atTheBack);
+
+          // The person brings it to front in the window itself, which OpenBot is not told of.
+          await person.session.send("Target.activateTarget", {
+            targetId: behind.id,
+          });
+          await until(
+            async () => activeTab(await state())?.id === behind.id,
+            "OpenBot to name the tab the person has in front",
+          );
+          expect(await seen(tab("/page/behind-again"))).toEqual(inFront);
+          expect(await seen(tab("/page/front"))).toEqual(atTheBack);
+          // And what OpenBot does next acts on that tab, not the one it opened last.
+          const went = (
+            await api("/browser/navigate", { url: `${ORIGIN}/page/went` })
+          ).json as BrowserState;
+          expect(went.tabs.find((each) => each.id === behind.id)?.url).toBe(
+            `${ORIGIN}/page/went`,
+          );
+          expect(went.tabs.find((each) => each.id === front.id)?.url).toBe(
+            `${ORIGIN}/page/front`,
+          );
+        } finally {
+          for (const id of [behind.id, front.id])
+            await api("/browser/tabs", { action: "close", tabId: id });
+        }
+      },
+      60_000,
+    );
+
     test("navigates the tab in front: an address, back, forward and reload", async () => {
       const there = (
         await api("/browser/navigate", { url: `${ORIGIN}/page/three` })
@@ -741,6 +817,9 @@ for (const variant of VARIANTS) {
       if (!person) throw new Error("The browser should be open.");
       const page = await person.context.newPage();
       try {
+        // What Google's sign-in refuses a browser for, false at the source in both.
+        await page.goto(`${ORIGIN}/page/webdriver`);
+        expect(await page.evaluate(() => navigator.webdriver)).toBe(false);
         const switches = await commandLine(page);
         if (variant.window === "native") {
           expect(switches).toContain("--enable-unsafe-extension-debugging");
@@ -930,6 +1009,59 @@ for (const variant of VARIANTS) {
       },
       60_000,
     );
+
+    test("says the page in front changed when a tab closes, and not for every tab as the browser closes", async () => {
+      // The fifth end-to-end run: after a close, both computers logged `computer-page-changed` for
+      // each tab as it went.
+      const said = spyOn(console, "info");
+      const pageChanges = () =>
+        said.mock.calls.filter(([line]) =>
+          String(line).includes('"computer-page-changed"'),
+        ).length;
+      try {
+        for (const name of ["one", "two", "three"])
+          await api("/browser/tabs", {
+            action: "new",
+            url: `${ORIGIN}/page/${name}`,
+          });
+        // The browser stays open while the tab in front closes: the one now in front is a change.
+        const three = activeTab(await state());
+        if (!three) throw new Error("A tab should be in front.");
+        const before = pageChanges();
+        await api("/browser/tabs", { action: "close", tabId: three.id });
+        await until(() => pageChanges() > before, "the page change");
+
+        const closing = pageChanges();
+        expect((await api("/browser/close", {})).json).toEqual({
+          open: false,
+          tabs: [],
+        });
+        await wait(1_000);
+        expect(pageChanges()).toBe(closing);
+
+        // Nor when the person quits the browser themselves, which closes its tabs one by one too.
+        await api("/browser/open", { connection: CONNECTION });
+        for (const name of ["four", "five", "six"])
+          await api("/browser/tabs", {
+            action: "new",
+            url: `${ORIGIN}/page/${name}`,
+          });
+        await wait(1_000);
+        const quitting = pageChanges();
+        const person = profiles.person(PERSON);
+        if (!person) throw new Error("The browser should be open.");
+        await person.session.send("Browser.close").catch(() => undefined);
+        await until(
+          () => !profiles.isLive(PERSON),
+          "the browser to count as closed",
+        );
+        await wait(1_000);
+        expect(pageChanges()).toBe(quitting);
+      } finally {
+        said.mockRestore();
+        await api("/browser/open", { connection: CONNECTION });
+      }
+    }, 60_000);
 
     test("closes, opens nothing until asked, and opens again with the Recorder", async () => {
       expect(await api("/browser/close", {})).toEqual({
@@ -1253,8 +1385,8 @@ for (const variant of VARIANTS) {
           said.mockClear();
           try {
             const answer = await openWith(connection("held"));
-            // Not the computer's setup: the person is told in a sentence of their own, and Playwright's
-            // own text, which named the profile and the browser's logs, stays in the log.
+            // Not the computer's setup: the person is told in a sentence of their own, and the
+            // browser's own words for why it would not start stay in the log.
             expect(answer.status).toBe(502);
             expect(await answer.json()).toEqual({
               error: "Your browser could not be opened. Try again.",
@@ -1265,7 +1397,9 @@ for (const variant of VARIANTS) {
                 botId: PERSON,
                 step: "launch",
                 status: 502,
-                error: expect.stringContaining("launchPersistentContext"),
+                error: expect.stringContaining(
+                  "Failed to create a ProcessSingleton for your profile directory",
+                ),
                 ms: expect.any(Number),
               },
             ]);

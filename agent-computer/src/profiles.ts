@@ -216,6 +216,14 @@ console.info(
 const CLOSE_SETTLE_MS = 2_000;
 
 /**
+ * How long a change of the page in front of a person's browser waits before it is logged. A person
+ * who closes their browser's window, or quits it, closes its tabs one after another, each making the
+ * next the page in front, and none of those is a change the browser stays open for. A quit of Google
+ * Chrome 156 (headless, three tabs) closed the tabs within 20 ms and the browser within 60 ms.
+ */
+const PAGE_CHANGE_SETTLE_MS = 500;
+
+/**
  * How long telling a viewer its browser went away may take before the close carries on without it.
  *
  * The close is what has to happen; the announcement is courtesy. Unbounded, one screencast that will
@@ -624,13 +632,18 @@ export function createProfiles(
     const bringForward = (next: Page) => {
       if (next === record.page) return;
       record.page = next;
-      console.info(
-        JSON.stringify({
-          type: "computer-page-changed",
-          botId,
-          url: next.url(),
-        }),
-      );
+      // In front at once; said once the browser has stayed open with it in front.
+      setTimeout(() => {
+        if (live.get(botId) !== record || record.page !== next) return;
+        if (next.isClosed() || !context.browser()?.isConnected()) return;
+        console.info(
+          JSON.stringify({
+            type: "computer-page-changed",
+            botId,
+            url: next.url(),
+          }),
+        );
+      }, PAGE_CHANGE_SETTLE_MS).unref();
     };
     record.retarget = () => {
       if (
@@ -646,8 +659,11 @@ export function createProfiles(
       if (next) bringForward(next);
     };
     const closed = () => {
+      // A browser being closed closes its tabs one by one, and none of them is a page change: a
+      // close takes the browser out of `live` before it closes it.
+      if (live.get(botId) !== record) return;
       record.retarget();
-      if (live.get(botId) === record && windowPages(context).length === 0)
+      if (windowPages(context).length === 0)
         void evict(botId, "its last window was closed");
     };
     const follow = (opened: Page) => {
@@ -796,6 +812,14 @@ export function createProfiles(
             }),
           );
         };
+        /*
+         * A page that closes while the browser stays open moves the record on. One closing because the
+         * browser is being closed (out of `live` already) moves nothing: it is not a page change, and
+         * saying so for every tab as it went only filled the log.
+         */
+        const closed = () => {
+          if (live.get(botId) === record) record.retarget();
+        };
         // Without this the Bot stays pinned to the page it launched with, so a sign-in the site opens
         // in a new window is neither shown to the person taking the wheel nor reachable by input.
         context.on("page", (opened) => {
@@ -803,9 +827,9 @@ export function createProfiles(
           record.retarget();
           // A popup closes itself when it succeeds, and the record must move back to the opener
           // rather than leave a closed page to be read as a dead browser.
-          opened.on("close", () => record.retarget());
+          opened.on("close", closed);
         });
-        page.on("close", () => record.retarget());
+        page.on("close", closed);
         live.set(botId, record);
         // After the new one is in the map, so the cap counts what is really running and the Bot that
         // just asked is the most recently used and therefore never the one closed.

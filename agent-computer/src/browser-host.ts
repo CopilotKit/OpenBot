@@ -157,29 +157,41 @@ export function createBrowserHost(options: BrowserHostOptions) {
 
   /**
    * In a native window the person changes tabs in the browser itself, which tells this process
-   * nothing, so the tab in front is asked of the pages: the one the browser is showing. The tab
-   * already in front stays when it is still showing (two windows show two tabs), and a minimised
-   * browser, where none is, keeps the one it had.
+   * nothing, so the tab in front is asked of the pages: the one the browser is showing, and of two
+   * windows showing a tab each, the one with the focus. With no window in focus (the person is in
+   * OpenBot), the tab already in front stays while it still shows; and a minimised browser, where
+   * none shows, keeps the one it had.
+   *
+   * This reads true only because a native window has no focus emulation (`native-browser.ts`): with
+   * it, every tab said it was showing and focused, and the person's own switch was never seen.
    */
   const followNativeTabs = async (browser: OpenPersonBrowser) => {
     if (browser.window !== "native") return;
     const pages = browser.pages();
-    const showing = await Promise.all(
+    const hidden = { showing: false, focused: false };
+    const shown = await Promise.all(
       pages.map((page) =>
         Promise.race([
           page
-            .evaluate(() => document.visibilityState === "visible")
-            .catch(() => false),
-          new Promise<boolean>((resolve) =>
-            setTimeout(() => resolve(false), VISIBILITY_MS),
+            .evaluate(() => ({
+              showing: document.visibilityState === "visible",
+              focused: document.hasFocus(),
+            }))
+            .catch(() => hidden),
+          new Promise<typeof hidden>((resolve) =>
+            setTimeout(() => resolve(hidden), VISIBILITY_MS),
           ),
         ]),
       ),
     );
-    const visible = pages.filter((_, index) => showing[index]);
-    if (visible.length === 0 || visible.includes(browser.active())) return;
-    const front = visible.at(-1);
-    if (front) browser.activate(front);
+    const showing = pages.filter((_, index) => shown[index]?.showing);
+    const focused = pages.find(
+      (_, index) => shown[index]?.showing && shown[index]?.focused,
+    );
+    const front =
+      focused ??
+      (showing.includes(browser.active()) ? undefined : showing.at(-1));
+    if (front && front !== browser.active()) browser.activate(front);
   };
 
   /** The address a tab shows: its page's, or on an error page the address that failed. */

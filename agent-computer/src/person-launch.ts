@@ -7,8 +7,9 @@
  * is their everyday browser (OpenBot Desktop opens their installed Chrome, or Edge, in a dedicated
  * OpenBot profile), and the same defaults would quietly take most of that away: no extensions, so
  * no password manager; no sync, so no Google sign-in; a mock keychain, so no saved passwords; no
- * component updates, so no streaming video. So a person's native browser drops every Playwright
- * default OpenBot's control does not need, each one decided below, and a Bot's launch is untouched.
+ * component updates, so no streaming video. So a person's native browser is not launched by
+ * Playwright at all (see `native-browser.ts`): it starts with exactly the switches below, and none
+ * of Playwright's defaults, each of which is decided below. A Bot's launch is untouched.
  *
  * The hosted person's browser is the computer's bundled Chromium, shown through the live screen.
  * It keeps a Bot's launch except for what the Recorder needs: extensions on, and only the Recorder.
@@ -120,13 +121,22 @@ export async function installedBrowser(
   env: Environment,
   platform: string = process.platform,
 ): Promise<InstalledBrowser | null> {
+  return (await installedBrowserAt(env, platform))?.browser ?? null;
+}
+
+/** The same, with the executable that is installed, which a person's native browser is started from. */
+export async function installedBrowserAt(
+  env: Environment,
+  platform: string = process.platform,
+): Promise<{ browser: InstalledBrowser; executable: string } | null> {
   for (const browser of INSTALLED_BROWSERS) {
     for (const candidate of browserExecutableCandidates(
       browser,
       env,
       platform,
     )) {
-      if (await runnable(candidate, platform)) return browser;
+      if (await runnable(candidate, platform))
+        return { browser, executable: candidate };
     }
   }
   return null;
@@ -136,22 +146,12 @@ export const NO_INSTALLED_BROWSER = `Neither ${NAMES.chrome} nor ${NAMES.msedge}
 
 /**
  * Playwright's own Chromium switches (playwright-core 1.62.1, `chromiumSwitches.ts`, plus what its
- * launcher adds) that a person's native browser does not get, each with the reason.
+ * launcher adds) that a person's native browser does not get, each with the reason. It is started
+ * without Playwright, so none of them is on its command line; `person-browser.test.ts` reads that
+ * command line from the browser itself and checks. The `--disable-features` value is spelled out
+ * exactly as Playwright builds it, which the hosted browser's and Bots' tests read it against.
  *
- * `ignoreDefaultArgs` drops a switch only on an exact match, so the `--disable-features` value is
- * spelled out exactly as Playwright builds it. A Playwright upgrade that changes it shows up in
- * `person-browser.test.ts`, which reads the launched browser's own command line, rather than as a
- * switch that silently came back.
- *
- * What stays, and why it stays:
- *   - `--remote-debugging-pipe` and `--user-data-dir`: how OpenBot holds the browser and keeps the
- *     dedicated profile separate from the person's own.
- *   - `--no-first-run`: the first-run flow can hold the first window behind a modal, and the launch
- *     waits on that window. The person signs in to Chrome from its profile menu instead.
- *   - `--no-default-browser-check`: the OpenBot window does not ask to become the default browser.
- *     The person's default browser stays the one they chose.
- *   - `--enable-features=CDPScreenshotNewSurface`: how frames are captured for the live screen.
- *   - `--edge-skip-compat-layer-relaunch`: Edge on Windows can relaunch itself and drop the pipe.
+ * What it keeps of Playwright's, and why, is `personNativeLaunch`.
  */
 export const PLAYWRIGHT_DISABLED_FEATURES: readonly string[] = [
   "AvoidUnnecessaryBeforeUnloadCheckSync",
@@ -263,17 +263,71 @@ export function personBrowserEnv(
   return env;
 }
 
+/**
+ * The command line a person's native browser starts with, all of it, and the environment it starts in.
+ *
+ * What it keeps of Playwright's own launch, and why:
+ *   - `--remote-debugging-pipe` and `--user-data-dir`: how OpenBot holds the browser and keeps the
+ *     dedicated profile separate from the person's own. A pipe, not a port: only this process can
+ *     reach the browser.
+ *   - `--no-first-run`: the first-run flow can hold the first window behind a modal, and the launch
+ *     waits on that window. The person signs in to Chrome from its profile menu instead.
+ *   - `--no-default-browser-check`: the OpenBot window does not ask to become the default browser.
+ *     The person's default browser stays the one they chose.
+ *   - `--enable-features=CDPScreenshotNewSurface`: how frames are captured for the live screen.
+ *   - `--edge-skip-compat-layer-relaunch`: Edge on Windows can relaunch itself and drop the pipe.
+ *
+ * No page to open: the browser opens what the person's own startup setting says, the new tab page or
+ * the tabs they had last time. `headless` only for the tests, which never open a window.
+ */
+export function personNativeLaunch(
+  input: { dir: string; headless: boolean; display: PersonDisplay },
+  platform: string = process.platform,
+): { args: string[]; env?: Record<string, string> } {
+  const env = personBrowserEnv("native", input.display, process.env, platform);
+  return {
+    args: [
+      "--remote-debugging-pipe",
+      `--user-data-dir=${input.dir}`,
+      "--no-first-run",
+      "--no-default-browser-check",
+      "--enable-features=CDPScreenshotNewSurface",
+      "--edge-skip-compat-layer-relaunch",
+      /*
+       * `navigator.webdriver` false, at the source, as for a Bot. A browser on a DevTools pipe turns on
+       * Blink's AutomationControlled feature by itself (Chromium's `runtime_features.cc` maps
+       * `--remote-debugging-pipe` to it, as it does `--enable-automation` and `--headless`), and only
+       * this switch, read after that, turns it off again. Without it Google refuses sign-in ("This
+       * browser or app may not be secure"), and with `navigator.webdriver` patched to false by a
+       * script instead, it still does: both measured on Google Chrome 156 against accounts.google.com.
+       *
+       * It costs a warning bar in the first window: Chrome lists `--disable-blink-features` among the
+       * switches it warns of ("unsupported command-line flag", `bad_flags_prompt.cc`), and hides that
+       * warning only under `--enable-automation` (which turns `navigator.webdriver` on again and shows
+       * a bar of its own), under `--test-type` (which changes Chrome's behaviour in a dozen other
+       * places), or by enterprise policy. No other switch here is one it warns of.
+       * https://chromium.googlesource.com/chromium/src/+/main/content/child/runtime_features.cc
+       * https://chromium.googlesource.com/chromium/src/+/main/chrome/browser/ui/startup/bad_flags_prompt.cc
+       */
+      "--disable-blink-features=AutomationControlled",
+      // What lets `Extensions.loadUnpacked` install the Recorder. Branded Chrome ignores
+      // `--load-extension` since Chrome 137, and only OpenBot holds this browser's DevTools pipe.
+      "--enable-unsafe-extension-debugging",
+      ...(input.headless ? ["--headless"] : []),
+    ],
+    ...(env ? { env } : {}),
+  };
+}
+
+/** The hosted person's browser, which Playwright launches: what it needs beyond a Bot's launch here. */
 export type PersonLaunchInput = {
-  window: BrowserWindow;
-  /** The built Recorder. The hosted browser loads it by flag; a native one through DevTools. */
+  /** The built Recorder, loaded by flag. */
   recorderDir: string;
   headless: boolean;
-  /** Chromium's own process sandbox. Always on for a native browser, as for a Bot's local Chrome. */
+  /** Chromium's own process sandbox. */
   sandbox: boolean;
   /** The switches a Bot's browser launches with on this computer, which the hosted browser keeps. */
   botArgs: readonly string[];
-  /** See `personBrowserEnv`. */
-  display: PersonDisplay;
 };
 
 export type PersonLaunchOptions = {
@@ -281,49 +335,20 @@ export type PersonLaunchOptions = {
   ignoreDefaultArgs: string[];
   chromiumSandbox: boolean;
   headless: boolean;
-  /** Null for a native window: pages take the window's size, as in any browser. */
-  viewport: null | { width: number; height: number };
-  colorScheme?: null;
-  reducedMotion?: null;
-  forcedColors?: null;
-  contrast?: null;
-  /** The browser's environment, when it differs from this process's. See `personBrowserEnv`. */
-  env?: Record<string, string>;
+  viewport: { width: number; height: number };
 };
 
+/**
+ * The hosted person's browser's launch: a Bot's, with the Recorder let in. It keeps Playwright's focus
+ * emulation, which a native window drops (`native-browser.ts`): nobody sits at this browser, so every
+ * tab of it says it is in front, and OpenBot itself decides which one is, from its own tab strip, and
+ * shows that one on the live screen. Bots' browsers keep it for the reason Playwright has it: a Bot
+ * acts in tabs that are not in front, and each must behave as if it were.
+ */
 export function personLaunchOptions(
   input: PersonLaunchInput,
   viewport: { width: number; height: number },
-  platform: string = process.platform,
 ): PersonLaunchOptions {
-  if (input.window === "native") {
-    const env = personBrowserEnv(
-      "native",
-      input.display,
-      process.env,
-      platform,
-    );
-    return {
-      ...(env ? { env } : {}),
-      args: [
-        // As for a Bot: the flag rather than a script patch, so `navigator.webdriver` is false at
-        // the source and Google sign-in works.
-        "--disable-blink-features=AutomationControlled",
-        // What lets `Extensions.loadUnpacked` install the Recorder. Branded Chrome ignores
-        // `--load-extension` since Chrome 137, and only OpenBot holds this browser's DevTools pipe.
-        "--enable-unsafe-extension-debugging",
-      ],
-      ignoreDefaultArgs: [...PLAYWRIGHT_DEFAULTS_A_PERSON_DOES_NOT_GET],
-      chromiumSandbox: true,
-      headless: input.headless,
-      viewport: null,
-      // Playwright emulates a light colour scheme by default; null leaves the person's own.
-      colorScheme: null,
-      reducedMotion: null,
-      forcedColors: null,
-      contrast: null,
-    };
-  }
   return {
     args: [
       ...input.botArgs,

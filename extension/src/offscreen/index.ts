@@ -134,6 +134,9 @@ type Live = {
    * come goes straight into the stream, before the outcome. Until then each goes to the service worker, which places
    * it among the steps it holds. */
   voiceDirect: boolean;
+  /** Final phrases that went straight into the stream that way: the service worker counts the others as it places
+   * them, and hears of these with offscreen.stopped. */
+  directPhrases: number;
   /** The voice's end, once something asked for it. */
   voiceEnded: Promise<void> | null;
 };
@@ -523,8 +526,10 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
         muted: voice.muted,
         emit: (event) => {
           if (live !== target || target.ending) return;
-          if (target.voiceDirect) deliver(target, event);
-          else
+          if (target.voiceDirect) {
+            target.directPhrases += 1;
+            deliver(target, event);
+          } else
             post({
               type: "offscreen.transcript",
               recordingId: target.recordingId,
@@ -592,6 +597,7 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
       voice: null,
       speaking: null,
       voiceDirect: false,
+      directPhrases: 0,
       voiceEnded: null,
     };
     live = target;
@@ -650,6 +656,10 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
     }
   }
 
+  /** The phrases a stopped recording put straight into the stream, for offscreen.stopped, when there were any. */
+  const said = (target: Live): { phrases?: number } =>
+    target.directPhrases > 0 ? { phrases: target.directPhrases } : {};
+
   async function stop(
     target: Live,
     message: Extract<BackgroundToOffscreen, { type: "offscreen.stop" }>,
@@ -664,6 +674,7 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
         type: "offscreen.stopped",
         recordingId: target.recordingId,
         trajectoryIds: target.stopped.trajectoryIds,
+        ...said(target),
       });
       return;
     }
@@ -698,7 +709,12 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
         ? await streamer.stop("failed", { reason: message.reason })
         : await streamer.stop("succeeded");
     target.stopped = { trajectoryIds };
-    post({ type: "offscreen.stopped", recordingId, trajectoryIds });
+    post({
+      type: "offscreen.stopped",
+      recordingId,
+      trajectoryIds,
+      ...said(target),
+    });
     void streamer.drained().then(
       () => {
         finished(stream, recordingId);

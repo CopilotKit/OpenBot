@@ -61,6 +61,10 @@ let stateFails = false;
 let refusals: Partial<Record<string, string>> = {};
 /** The person's actions the Recorder counts by the read after Record. */
 let actionsAfterStart = 7;
+/** Phrases the Recorder heard the person say itself (a native window's own narration) in the recording now running. */
+let phrasesHeard = 0;
+/** Phrases the page passed the Recorder in the recording now running (a hosted browser's narration). */
+let phrasesPassed = 0;
 
 function nativeState(): BrowserApiState {
   return {
@@ -153,20 +157,25 @@ async function server(path: string, init?: RequestInit): Promise<Response> {
               ...state.recorder,
               phase: "idle",
               actions: 0,
-              // The Recorder names the recording Stop ended, once it went to Intelligence.
+              // The Recorder names the recording Stop ended, once it went to Intelligence, with what it held: the
+              // actions its badge counted and the phrases it kept.
               lastStopped: {
                 recordingId: state.recorder.recordingId ?? "rec-1",
                 title: state.recorder.title ?? "",
                 stoppedAt: Date.now(),
+                actions: state.recorder.actions,
+                phrases: phrasesHeard + phrasesPassed,
               },
             },
     };
+    if (request.data.action === "start") phrasesPassed = 0;
     return Response.json(state);
   }
   if (path === browserApiPaths.narration && method === "POST") {
-    return browserNarrationRequestSchema.safeParse(body).success
-      ? Response.json({ ok: true })
-      : refuse();
+    const narrated = browserNarrationRequestSchema.safeParse(body);
+    if (!narrated.success) return refuse();
+    if ("text" in narrated.data) phrasesPassed += 1;
+    return Response.json({ ok: true });
   }
   if (path === browserApiPaths.tabs && method === "POST") {
     return browserTabsRequestSchema.safeParse(body).success
@@ -210,6 +219,8 @@ beforeEach(() => {
   stateFails = false;
   refusals = {};
   actionsAfterStart = 7;
+  phrasesHeard = 0;
+  phrasesPassed = 0;
   state = nativeState();
   openAnswer = answerFor("native");
   QuietSocket.urls = [];
@@ -345,10 +356,10 @@ test("on OpenBot Desktop Record starts a recording named for the task, which sho
     }),
   );
   expect(await view.findByRole("textbox", { name: "Task name" })).toBeTruthy();
-  // Stop says where the recording went, by its name, until the next one starts.
+  // Stop says where the recording went and what it held, by its name, until the next one starts.
   const saved = await view.findByRole("status");
   expect(saved.textContent).toBe(
-    "Submit an expense reportSaved to your Learning space.",
+    "Submit an expense reportSaved to your Learning space: 7 actions.",
   );
 });
 
@@ -412,6 +423,68 @@ test("Stop on a recording that held no actions says nothing was recorded and why
   }
 });
 
+test("a recording of narration alone is saved, with its phrases, never said to hold nothing, on both shapes", async () => {
+  // The fifth end-to-end run: three narrated phrases and no clicks reached Intelligence, and the page said nothing was
+  // recorded, from the actions it had read while the recording ran.
+  for (const shape of ["native", "screen"] as const) {
+    cleanup();
+    queryClient.clear();
+    writes.length = 0;
+    state = shape === "native" ? nativeState() : screenState();
+    openAnswer = answerFor(shape);
+    actionsAfterStart = 0;
+    // Three phrases the Recorder kept, whether it heard them itself or the page passed them in.
+    phrasesHeard = 3;
+    const view = draw(<BrowserPage />);
+    await recordAndStop(view, "Talk it through");
+    expect(await stopSays(view)).toBe(
+      shape === "native"
+        ? "Talk it throughSaved to your Learning space: 0 actions and 3 narrated phrases."
+        : "Saved “Talk it through” to your Learning space: 0 actions and 3 narrated phrases.",
+    );
+    expect(view.queryByText(/Nothing was recorded/)).toBeNull();
+  }
+});
+
+test("after a reload the page says what the last recording held as the Recorder reports it, on both shapes", async () => {
+  // The page never saw these recordings running: it was loaded again after Stop. It used to take any of them as saved.
+  for (const shape of ["native", "screen"] as const) {
+    for (const [held, says] of [
+      [
+        { actions: 0, phrases: 0 },
+        shape === "native"
+          ? "Look up Ada LovelaceNothing was recorded. The Recorder records your clicks, typing and the pages you open on websites, in every tab you use while it records."
+          : "Nothing was recorded in “Look up Ada Lovelace”. The Recorder records your clicks, typing and the pages you open on websites, in every tab you use while it records.",
+      ],
+      [
+        { actions: 1, phrases: 2 },
+        shape === "native"
+          ? "Look up Ada LovelaceSaved to your Learning space: 1 action and 2 narrated phrases."
+          : "Saved “Look up Ada Lovelace” to your Learning space: 1 action and 2 narrated phrases.",
+      ],
+    ] as const) {
+      cleanup();
+      queryClient.clear();
+      const base = shape === "native" ? nativeState() : screenState();
+      state = {
+        ...base,
+        recorder: {
+          ...(base.recorder as NonNullable<BrowserApiState["recorder"]>),
+          lastStopped: {
+            recordingId: "rec-0",
+            title: "Look up Ada Lovelace",
+            stoppedAt: Date.now() - 60_000,
+            ...held,
+          },
+        },
+      };
+      openAnswer = answerFor(shape);
+      const view = draw(<BrowserPage />);
+      expect(await stopSays(view)).toBe(says);
+    }
+  }
+});
+
 test("an action the page has not read yet when Stop is pressed still counts: the recording is said to be saved", async () => {
   for (const shape of ["native", "screen"] as const) {
     cleanup();
@@ -433,8 +506,8 @@ test("an action the page has not read yet when Stop is pressed still counts: the
     });
     expect(await stopSays(view)).toBe(
       shape === "native"
-        ? "Refund an orderSaved to your Learning space."
-        : "Saved “Refund an order” to your Learning space.",
+        ? "Refund an orderSaved to your Learning space: 1 action."
+        : "Saved “Refund an order” to your Learning space: 1 action.",
     );
   }
 });
@@ -601,10 +674,10 @@ test("on hosted OpenBot the page narrates a recording, and Stop sends the phrase
   expect(writes.indexOf(narration.at(-1) as Write)).toBeLessThan(
     writes.findLastIndex((write) => write.path === "/api/browser/recording"),
   );
-  // Then the page says where the recording went.
+  // Then the page says where the recording went, and what it held: the phrase it narrated among them.
   expect(
     await view.findByText(
-      "Saved “Submit an expense report” to your Learning space.",
+      "Saved “Submit an expense report” to your Learning space: 7 actions and 1 narrated phrase.",
     ),
   ).toBeTruthy();
 });
