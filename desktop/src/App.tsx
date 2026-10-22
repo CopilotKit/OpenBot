@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Ask } from "./Ask";
+import { Ask, PRESET_QUESTIONS } from "./Ask";
 import { DatabaseReset } from "./DatabaseReset";
 import {
   DEFAULT_HARNESS,
@@ -88,19 +88,6 @@ function installationKeyFor(root: string, harness: HarnessChoice | null) {
 const MANAGED_INTELLIGENCE_API_URL = "https://api.intelligence.copilotkit.ai";
 const MANAGED_INTELLIGENCE_GATEWAY_WS_URL =
   "wss://realtime.intelligence.copilotkit.ai";
-
-/**
- * What the last screen offers to ask, mirroring `ask::SUGGESTED`.
- *
- * Two copies of one sentence, and a test in `ask.rs` pins what it has to contain. The window needs
- * it before it calls anything, and the Rust side needs it for the case where somebody clears the
- * field, so neither can be the only one that has it.
- */
-const SUGGESTED_QUESTION = "What is 17 times 23?";
-
-/** What a first local run asks by itself on its test step. */
-const LOCAL_TEST_QUESTION =
-  "Reply with one short sentence to confirm you are working.";
 
 export function App() {
   return (
@@ -1166,8 +1153,8 @@ function Setup() {
     return (
       <main>
         <Ask
-          suggestion={localFlow ? LOCAL_TEST_QUESTION : SUGGESTED_QUESTION}
-          auto={localFlow}
+          suggestion={PRESET_QUESTIONS[0]}
+          local={localFlow}
           stepLabel={localFlow ? "Step 3 of 3" : undefined}
           onAsk={(question) =>
             invoke<string>("ask_the_bot", { root, question })

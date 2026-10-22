@@ -549,8 +549,16 @@ function localCliCalls() {
 const LOCAL_CHOICE = "Run Intelligence on this computer";
 const HOSTED_CHOICE = "Use CopilotKit's hosted Intelligence";
 const HOSTED_LINK = "Use CopilotKit's hosted service instead";
-const LOCAL_QUESTION =
-  "Reply with one short sentence to confirm you are working.";
+const LOCAL_QUESTION = "How many r's are in strawberry?";
+
+/** Ask the question already in the Test OpenBot box, and wait for the answer. */
+async function askTheTest(
+  view: Awaited<ReturnType<typeof renderApp>>,
+  answer = "I am working.",
+) {
+  await userEvent.click(await view.findByRole("button", { name: "Ask" }));
+  return view.findByText(answer);
+}
 
 function choice(view: Awaited<ReturnType<typeof renderApp>>, name: string) {
   return view.getByRole("radio", { name: new RegExp(name) });
@@ -783,17 +791,32 @@ test("Continue during setup shows Getting ready, which starts, tests and opens O
     gatewayWsUrl: "ws://localhost:64772",
     apiKey: "",
   });
-  // The test question goes by itself, once.
+  // A question is already in the box, nothing is asked until Ask, and a preset or a typed
+  // question replaces it.
+  const question = view.getByLabelText("Your question") as HTMLInputElement;
+  expect(question.value).toBe(LOCAL_QUESTION);
+  expect(invokeCalls.some((call) => call.command === "ask_the_bot")).toBe(
+    false,
+  );
+  await userEvent.click(
+    view.getByRole("button", { name: "How many Die Hard movies are there?" }),
+  );
+  expect(question.value).toBe("How many Die Hard movies are there?");
+  await userEvent.type(question, "Who are you?", {
+    initialSelectionStart: 0,
+    initialSelectionEnd: question.value.length,
+  });
+  await userEvent.click(view.getByRole("button", { name: "Ask" }));
   await view.findByText("I am working.");
-  expect(view.getByText(LOCAL_QUESTION)).toBeTruthy();
-  expect(view.queryByLabelText("Your question")).toBeNull();
   const asked = invokeCalls.filter((call) => call.command === "ask_the_bot");
   expect(asked).toEqual([
     {
       command: "ask_the_bot",
-      args: { root: "/tmp/local-eval-auto", question: LOCAL_QUESTION },
+      args: { root: "/tmp/local-eval-auto", question: "Who are you?" },
     },
   ]);
+  // Asking again stays open after an answer.
+  expect(view.getByRole("button", { name: "Ask again" })).toBeTruthy();
   expectPlain(view);
   await userEvent.click(view.getByRole("button", { name: "Open OpenBot" }));
   await waitFor(() => expect(localSequence()).toContain("show_openbot"));
@@ -826,7 +849,7 @@ test("a local Test OpenBot screen links to the Intelligence dashboard through th
   const view = await renderApp();
   await userEvent.click(view.getByRole("button", { name: "Install" }));
   await chooseOpenAi(view);
-  await view.findByText("I am working.");
+  await askTheTest(view);
   // The menus offer the dashboard once local mode has a recorded stack.
   expect(intelligenceCalls()).toEqual([
     {
@@ -873,6 +896,7 @@ test("a local Test OpenBot step says it is asking, with a spinner, until the ans
   await userEvent.click(view.getByRole("button", { name: "Install" }));
   await chooseOpenAi(view);
   await view.findByRole("heading", { name: "Test OpenBot" });
+  await userEvent.click(view.getByRole("button", { name: "Ask" }));
   await waitFor(() => expectWorking(view, "Asking…"));
   await act(async () => answer.resolve("I am working."));
   expect(view.queryByText("Asking…")).toBeNull();
@@ -897,7 +921,7 @@ test("View in Intelligence says the native sentence when the dashboard does not 
   const view = await renderApp();
   await userEvent.click(view.getByRole("button", { name: "Install" }));
   await chooseOpenAi(view);
-  await view.findByText("I am working.");
+  await askTheTest(view);
   await userEvent.click(
     view.getByRole("button", { name: "View in Intelligence" }),
   );
@@ -989,7 +1013,7 @@ test("a Claude plan signed in on the provider screen reaches Start with its toke
   });
 });
 
-test("a development double mount runs each local step and asks the question once", async () => {
+test("a development double mount runs each local step and asks the question once, on Ask", async () => {
   setupRootConfiguration("/tmp/local-eval-strict", async () =>
     emptyConfiguration(),
   );
@@ -1002,7 +1026,7 @@ test("a development double mount runs each local step and asks the question once
   const view = await renderApp(true);
   await userEvent.click(view.getByRole("button", { name: "Install" }));
   await chooseOpenAi(view);
-  await view.findByText("I am working.");
+  await askTheTest(view);
   expect(localSequence()).toEqual([
     "set_up_local_eval",
     "connect_local_eval",
@@ -1032,7 +1056,7 @@ test("Continue after Intelligence is ready starts OpenBot with the chosen model"
   );
   expect(localSequence()).not.toContain("start_stack");
   await chooseOpenAi(view);
-  await view.findByText("I am working.");
+  await askTheTest(view);
   expect(getStartStackPayload()).toMatchObject({
     model: { provider: "openai" },
   });
@@ -1098,6 +1122,7 @@ test("a first local run whose model cannot answer offers Change the model, as ho
   const view = await renderApp();
   await userEvent.click(view.getByRole("button", { name: "Install" }));
   await chooseOpenAi(view);
+  await userEvent.click(await view.findByRole("button", { name: "Ask" }));
   await view.findByText("The model could not answer.");
   expect(localSequence()).not.toContain("show_openbot");
   expect(view.queryByRole("button", { name: "Open OpenBot" })).toBeNull();
@@ -1153,7 +1178,7 @@ test("a blocked setup stops at its row in plain words and Retry resumes there", 
     false,
   );
   await userEvent.click(view.getByRole("button", { name: "Retry" }));
-  await view.findByText("I am working.");
+  await askTheTest(view);
   expect(setups).toBe(2);
 });
 
@@ -1183,7 +1208,7 @@ test("an installation from before the first-screen choice still asks at step 4",
   await new Promise((resolve) => setTimeout(resolve, 20));
   expect(localCliCalls()).toEqual([]);
   await userEvent.click(view.getByRole("button", { name: "Continue" }));
-  await view.findByText("I am working.");
+  await askTheTest(view);
   expect(localSequence()).toEqual([
     "set_up_local_eval",
     "connect_local_eval",
@@ -1259,7 +1284,7 @@ test("a recorded, connected stack on step 4 skips the choice and starts", async 
   });
   const view = await renderApp();
   // Never launched, so this is a first run: it tests the model before handing over.
-  await view.findByText("I am working.");
+  await askTheTest(view);
   expect(
     view.queryByRole("radio", { name: new RegExp(LOCAL_CHOICE) }),
   ).toBeNull();
