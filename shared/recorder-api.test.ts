@@ -57,6 +57,7 @@ describe("recorder constants and paths", () => {
       currentConnection: recorderPaths.currentConnection,
       me: recorderPaths.me,
       learning: recorderPaths.learning,
+      activity: recorderPaths.activity,
       trajectoryConnect: recorderPaths.trajectoryConnect("t"),
     };
     expect(Object.keys(samples).sort()).toEqual(
