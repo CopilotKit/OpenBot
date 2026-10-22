@@ -91,7 +91,22 @@ export function useNarration({
     await posted.current;
   }, []);
 
-  return { supported, muted, setMuted, status, lost, finish };
+  /**
+   * Whether narration is on as it really is, which the switch shows. Muted is off. So is a narration that failed and
+   * stopped listening (no microphone, or the browser refused it): the page says narration is off then, and a switch that
+   * still read on contradicted it (seen in the fourth end-to-end run, in a browser with no microphone). A speech service
+   * that could not be reached is still on: narration tries again by itself.
+   */
+  const stopped = status?.state === "failed" && status.problem !== "network";
+  const on = !muted && !stopped;
+
+  /** Turns narration on or off. On after a failure tries again: the person was never muted, so muting alone would not. */
+  const setOn = useCallback((next: boolean) => {
+    setMuted(!next);
+    if (next) session.current?.mute(false);
+  }, []);
+
+  return { supported, on, setOn, status, lost, finish };
 }
 
 export type NarrationControls = ReturnType<typeof useNarration>;

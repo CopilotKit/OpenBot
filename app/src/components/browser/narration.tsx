@@ -108,7 +108,8 @@ export function NativeNarrationRow({
 
 /**
  * Narration on and off, for the bar above a browser shown in the page. A switch, because it takes effect at once:
- * off stops listening after the phrase being said, on listens again (and tries again after a failure).
+ * off stops listening after the phrase being said, on listens again (and tries again after a failure). It shows the
+ * state narration is in, so a narration that failed reads off, as the notice under the bar says.
  */
 export function NarrationSwitch({
   narration,
@@ -118,7 +119,7 @@ export function NarrationSwitch({
   const id = useId();
   const labelId = useId();
   if (!narration.supported) return null;
-  const on = !narration.muted;
+  const on = narration.on;
   const Icon = on ? IconMicrophone : IconMicrophoneOff;
   return (
     <span className="flex shrink-0 items-center gap-2 text-sm">
@@ -131,7 +132,7 @@ export function NarrationSwitch({
         aria-labelledby={labelId}
         id={id}
         checked={on}
-        onCheckedChange={(checked) => narration.setMuted(!checked)}
+        onCheckedChange={narration.setOn}
       />
     </span>
   );

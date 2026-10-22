@@ -541,6 +541,80 @@ test("on hosted OpenBot a narration the Recorder refused says why, beside the na
   ).toBeTruthy();
 });
 
+test("on hosted OpenBot narration that cannot hear the person shows its switch off, and turning it on tries again", async () => {
+  // The fourth end-to-end run: in a browser with no microphone the page said narration was off while its switch read on.
+  for (const [error, sentence] of [
+    [
+      "not-allowed",
+      "OpenBot can't use your microphone, so narration is off. Allow the microphone for this site, then turn narration on again. Recording still works.",
+    ],
+    [
+      "audio-capture",
+      "No microphone was found, or another app is using it. Recording still works.",
+    ],
+  ] as const) {
+    cleanup();
+    queryClient.clear();
+    writes.length = 0;
+    state = screenState();
+    openAnswer = answerFor("screen");
+    const chrome = installRefusingChrome();
+    chrome.error = error;
+    const view = draw(<BrowserPage />);
+    const user = userEvent.setup({ document });
+    const toggle = await view.findByRole("switch", { name: "Narration" });
+    // Before a recording narration is on, as nothing has failed yet.
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+    await user.type(
+      view.getByRole("textbox", { name: "Task name" }),
+      "Submit an expense report",
+    );
+    await user.click(view.getByRole("button", { name: "Record" }));
+    expect(await view.findByText(sentence)).toBeTruthy();
+    expect(
+      view
+        .getByRole("switch", { name: "Narration" })
+        .getAttribute("aria-checked"),
+    ).toBe("false");
+
+    // The person allows the microphone, or plugs one in, and turns narration on: it listens again.
+    chrome.error = null;
+    const listened = chrome.listening;
+    await user.click(view.getByRole("switch", { name: "Narration" }));
+    await waitFor(() => expect(chrome.listening).toBe(listened + 1));
+    expect(
+      view
+        .getByRole("switch", { name: "Narration" })
+        .getAttribute("aria-checked"),
+    ).toBe("true");
+    expect(view.queryByText(sentence)).toBeNull();
+  }
+});
+
+test("on hosted OpenBot narration whose speech service cannot be reached stays on: it tries again by itself", async () => {
+  state = screenState();
+  openAnswer = answerFor("screen");
+  const chrome = installRefusingChrome();
+  chrome.error = "network";
+  const view = draw(<BrowserPage />);
+  const user = userEvent.setup({ document });
+  await user.type(
+    await view.findByRole("textbox", { name: "Task name" }),
+    "Submit an expense report",
+  );
+  await user.click(view.getByRole("button", { name: "Record" }));
+  expect(
+    await view.findByText(
+      "Can't reach this browser's speech service. Narration tries again in a moment.",
+    ),
+  ).toBeTruthy();
+  expect(
+    view
+      .getByRole("switch", { name: "Narration" })
+      .getAttribute("aria-checked"),
+  ).toBe("true");
+});
+
 test("Record and Stop the server refused say the server's sentence where the person pressed them, on both shapes", async () => {
   for (const shape of ["native", "screen"] as const) {
     cleanup();
@@ -745,4 +819,50 @@ function installChrome() {
   }
   speechGlobals.webkitSpeechRecognition = ChromeRecognition;
   return recognitions;
+}
+
+/**
+ * Chrome's speech recognition where it cannot hear the person: each recognition started while `error` is set fails
+ * with it and then ends, as Chrome does for a microphone it may not use (`not-allowed`), none at all
+ * (`audio-capture`), or a speech service it cannot reach (`network`). With no `error` it listens, and `listening`
+ * counts the recognitions that did.
+ */
+function installRefusingChrome() {
+  const chrome: { error: string | null; listening: number } = {
+    error: null,
+    listening: 0,
+  };
+  class RefusingRecognition implements Recognition {
+    lang = "";
+    continuous = false;
+    interimResults = false;
+    maxAlternatives = 0;
+    onstart: Recognition["onstart"] = null;
+    onresult: Recognition["onresult"] = null;
+    onerror: Recognition["onerror"] = null;
+    onend: Recognition["onend"] = null;
+    #starting: ReturnType<typeof setTimeout> | undefined;
+    start() {
+      const error = chrome.error;
+      this.#starting = setTimeout(() => {
+        if (error) {
+          this.onerror?.({ error });
+          this.onend?.();
+          return;
+        }
+        chrome.listening += 1;
+        this.onstart?.();
+      }, 0);
+    }
+    stop() {
+      clearTimeout(this.#starting);
+      queueMicrotask(() => this.onend?.());
+    }
+    abort() {
+      clearTimeout(this.#starting);
+      queueMicrotask(() => this.onend?.());
+    }
+  }
+  speechGlobals.webkitSpeechRecognition = RefusingRecognition;
+  return chrome;
 }
