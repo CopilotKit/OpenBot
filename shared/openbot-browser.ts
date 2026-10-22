@@ -66,8 +66,17 @@ export type LauncherState = {
    * the recogniser failed), `off` when nothing is being recorded. Absent for narration `external`.
    */
   voice?: "off" | "listening" | "muted" | "unavailable";
-  /** The recording Stop ended last, so OpenBot can confirm it went to the person's Learning space. */
-  lastStopped?: { recordingId: string; title: string; stoppedAt: number };
+  /**
+   * The recording Stop ended last, so OpenBot can confirm it went to the person's Learning space: how many of the
+   * person's actions it held (as the badge counted them) and how many narrated phrases. Both 0: nothing was recorded.
+   */
+  lastStopped?: {
+    recordingId: string;
+    title: string;
+    stoppedAt: number;
+    actions: number;
+    phrases: number;
+  };
 };
 
 export type LauncherResult<T = Record<never, never>> =
