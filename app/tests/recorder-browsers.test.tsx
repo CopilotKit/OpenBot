@@ -144,7 +144,7 @@ function draw(screen = <ThisBrowser />) {
 test("without the Recorder the row says so and offers no button or link", async () => {
   const view = draw();
   await view.findByText(
-    "The OpenBot Recorder is not installed in this browser.",
+    "The OpenBot Recorder isn't installed in this browser.",
   );
   expect(view.queryByRole("button")).toBeNull();
   expect(view.queryByRole("link")).toBeNull();
@@ -268,7 +268,7 @@ test("an answer with no sentence of its own still gets one", async () => {
   fireEvent.click(
     await view.findByRole("button", { name: "Connect this browser" }),
   );
-  await view.findByText("The Recorder did not accept the request. Try again.");
+  await view.findByText("The Recorder didn't accept the request. Try again.");
 });
 
 test("Disconnect sends the DELETE and the row disappears", async () => {
@@ -292,7 +292,7 @@ test("Disconnect sends the DELETE and the row disappears", async () => {
       body: undefined,
     }),
   );
-  await view.findByText("No browsers are connected.");
+  await view.findByText("No browsers connected yet.");
   expect(view.queryByText("Chrome on Mac")).toBeNull();
 });
 
@@ -300,7 +300,7 @@ test("when the connections cannot be loaded This browser says it cannot tell, an
   connectionsFail = true;
   const view = draw();
   await view.findByText(
-    "Could not check whether this browser is connected.",
+    "Couldn't check whether this browser is connected. Reload the page.",
     {},
     { timeout: 4000 },
   );

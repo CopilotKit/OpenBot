@@ -50,7 +50,7 @@ export const SHARING_CHOICES: {
     mode: "open",
     icon: IconUsersGroup,
     title: "Everyone's Bots",
-    description: "Every Bot in this OpenBot draws on all of your Skills.",
+    description: "Every Bot on OpenBot draws on all of your Skills.",
   },
   {
     mode: "choose",
@@ -64,10 +64,10 @@ export const SHARING_CHOICES: {
 /** What the Skills list says when it has none to show. */
 function emptySentence(data: PersonalLearningSharing): string {
   if (data.unavailable === "off")
-    return "Automatic Learning is off in this OpenBot, so no Skills are learned from your recordings.";
+    return "An admin has turned off Automatic Learning, so no Skills are learned from your recordings.";
   if (data.skills === null)
-    return "Your Skills could not be read from Intelligence just now. Your choice above still applies to them.";
-  return "No Skills have been learned from your recordings yet. Each one you open here reaches every Bot once it is.";
+    return "Couldn't read your Skills from Intelligence just now. Your choice above still applies to them.";
+  return "No Skills learned from your recordings yet. Once there are, each one you open here reaches every Bot.";
 }
 
 /**
@@ -143,7 +143,7 @@ export function LearningSharing() {
       {mode === "choose" ? (
         <PageSection
           title="Your Skills"
-          description="Open a Skill to let every Bot in this OpenBot use it."
+          description="Open a Skill to let every Bot on OpenBot use it."
         >
           {data.skills === null || data.skills.length === 0 ? (
             <PageEmpty>{emptySentence(data)}</PageEmpty>

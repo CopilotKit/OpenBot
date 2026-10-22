@@ -11,7 +11,7 @@ export function revokeRecorderConnectionMutationOptions(
     mutationFn: async (connectionId: string): Promise<void> => {
       await client(recorderPaths.connection(connectionId), {
         method: "DELETE",
-        fallback: "Could not disconnect this browser",
+        fallback: "Couldn't disconnect this browser.",
       });
     },
     onSuccess: () =>
@@ -25,7 +25,7 @@ export async function mintRecorderConnectCode(): Promise<ConnectCodeResponse> {
     await client(recorderPaths.connectCodes, {
       method: "POST",
       body: { via: "web" },
-      fallback: "Could not start connecting this browser",
+      fallback: "Couldn't start connecting this browser.",
     })
   ).json();
 }

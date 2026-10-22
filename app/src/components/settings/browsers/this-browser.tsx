@@ -26,11 +26,11 @@ const REFUSALS: Record<string, string> = {
   "not-https": "The Recorder only connects to OpenBot over HTTPS.",
   "pinned-elsewhere": "Your organization set the Recorder to another OpenBot.",
   "policy-invalid":
-    "Your organization's Recorder policy names an OpenBot address the Recorder cannot use. Ask your IT team.",
+    "Your organization's Recorder policy names an OpenBot address the Recorder can't use. Ask your IT team.",
   busy: "The Recorder is finishing another connect request. Try again in a moment.",
 };
 /** The Recorder can also answer `unreachable` or `invalid`, which have no sentence of their own. */
-const REFUSAL_FALLBACK = "The Recorder did not accept the request. Try again.";
+const REFUSAL_FALLBACK = "The Recorder didn't accept the request. Try again.";
 
 /** The Recorder takes only so many connects from one OpenBot in ten minutes; its refusal says how long is left. */
 function throttledSentence(retryAfterMs: number | undefined): string {
@@ -129,7 +129,7 @@ export function ThisBrowser({
         message:
           error instanceof Error
             ? error.message
-            : "Could not connect this browser.",
+            : "Couldn't connect this browser.",
       });
     }
   }
@@ -138,7 +138,7 @@ export function ThisBrowser({
     <PageSection title="This browser">
       {connections.error ? (
         <p className="text-destructive text-sm" role="alert">
-          Could not check whether this browser is connected.
+          Couldn't check whether this browser is connected. Reload the page.
         </p>
       ) : detected === undefined ? null : (
         <PageRows>
@@ -175,8 +175,7 @@ function describe(
   connected: boolean,
   attempt: Attempt,
 ): string {
-  if (!detected)
-    return "The OpenBot Recorder is not installed in this browser.";
+  if (!detected) return "The OpenBot Recorder isn't installed in this browser.";
   if (connected) return "Connected";
   switch (attempt.state) {
     case "awaiting":

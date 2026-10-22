@@ -93,6 +93,8 @@ type Props = {
   /** Called with a human-readable reason when the stream cannot be established. */
   onProblem?: (problem: string | null) => void;
   retryKey?: number;
+  /** What a screen reader calls the screen while driving. A Bot's screen unless this says whose it is. */
+  label?: string;
 };
 
 type FrameMessage = {
@@ -106,6 +108,7 @@ export function LiveScreen({
   driving,
   onProblem,
   retryKey = 0,
+  label = "The Bot's screen. You have control. Click and type here.",
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
@@ -494,11 +497,7 @@ export function LiveScreen({
             onContextMenu: (event: React.MouseEvent) => event.preventDefault(),
           }
         : {})}
-      aria-label={
-        driving
-          ? "The Bot's screen. You have control. Click and type here."
-          : "The Bot's screen, live"
-      }
+      aria-label={driving ? label : "The Bot's screen, live"}
       data-connected={connected}
     />
   );

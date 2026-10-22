@@ -1,0 +1,555 @@
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  expect,
+  test,
+} from "bun:test";
+import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import {
+  type BrowserApiState,
+  type BrowserOpenResponse,
+  browserApiPaths,
+  browserNarrationRequestSchema,
+  browserNavigateRequestSchema,
+  browserRecordingRequestSchema,
+  browserTabsRequestSchema,
+} from "@openbot/shared/openbot-browser";
+import { QueryClientProvider } from "@tanstack/react-query";
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRouter,
+  RouterProvider,
+} from "@tanstack/react-router";
+import { cleanup, render, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { type ReactNode, StrictMode } from "react";
+import { BrowserNavItem } from "@/components/browser/browser-nav-item";
+import { BrowserPage } from "@/components/browser/browser-page";
+import { SidebarMenu, SidebarProvider } from "@/components/ui/sidebar";
+import type { Recognition } from "@/lib/browser/narration";
+import { queryClient } from "@/query-client";
+import {
+  isResult,
+  STOPPED_MID_PHRASE,
+  speechEvent,
+} from "./browser-narration.fixture";
+import { settleReactWork } from "./settle-react-work";
+
+/**
+ * The Browser button and the Browser page, against the server's Browser routes as the contract in
+ * shared/openbot-browser.ts defines them. Those routes are another slice's work, so they are stood in for here: every
+ * body this page sends is parsed with the contract's own schemas, and every answer is a contract type.
+ */
+
+beforeAll(() => GlobalRegistrator.register());
+afterAll(async () => {
+  await settleReactWork();
+  GlobalRegistrator.unregister();
+});
+
+const PERSON_BROWSER = `person-${"ab12".repeat(8)}`;
+
+type Write = { path: string; method: string; body: unknown };
+const writes: Write[] = [];
+let state: BrowserApiState;
+let openAnswer: BrowserOpenResponse;
+let stateFails = false;
+
+function nativeState(): BrowserApiState {
+  return {
+    available: true,
+    computerId: PERSON_BROWSER,
+    open: true,
+    browser: "chrome",
+    window: "native",
+    narration: "own",
+    recorder: { connected: true, phase: "idle", actions: 0, narration: "own" },
+    tabs: [],
+  };
+}
+
+function screenState(): BrowserApiState {
+  return {
+    available: true,
+    computerId: PERSON_BROWSER,
+    open: true,
+    browser: "chromium",
+    window: "screen",
+    narration: "external",
+    recorder: {
+      connected: true,
+      phase: "idle",
+      actions: 0,
+      narration: "external",
+    },
+    tabs: [
+      {
+        id: "tab-1",
+        url: "https://example.com/",
+        title: "Example Domain",
+        active: true,
+      },
+      { id: "tab-2", url: "about:blank", title: "", active: false },
+    ],
+  };
+}
+
+function answerFor(window: "native" | "screen"): BrowserOpenResponse {
+  return {
+    ok: true,
+    computerId: PERSON_BROWSER,
+    browser: window === "native" ? "chrome" : "chromium",
+    window,
+    narration: window === "native" ? "own" : "external",
+  };
+}
+
+/** The server's Browser routes, as the contract has them. A body the contract refuses is a 400, as Zod would make it. */
+async function server(path: string, init?: RequestInit): Promise<Response> {
+  const method = init?.method ?? "GET";
+  const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+  if (method !== "GET") writes.push({ path, method, body });
+  const refuse = () =>
+    Response.json({ error: "Invalid request" }, { status: 400 });
+  if (path === browserApiPaths.state && method === "GET") {
+    if (stateFails)
+      return Response.json({ error: "Unavailable" }, { status: 500 });
+    return Response.json(state);
+  }
+  if (path === browserApiPaths.open && method === "POST") {
+    if (body !== undefined) return refuse();
+    state = { ...state, open: true };
+    return Response.json(openAnswer);
+  }
+  if (path === browserApiPaths.recording && method === "POST") {
+    const request = browserRecordingRequestSchema.safeParse(body);
+    if (!request.success || !state.recorder) return refuse();
+    state = {
+      ...state,
+      recorder:
+        request.data.action === "start"
+          ? {
+              ...state.recorder,
+              phase: "recording",
+              title: request.data.title,
+              recordingId: "rec-1",
+              // As if the person had been at it for 42 seconds and seven actions by the next read.
+              startedAt: Date.now() - 42_000,
+              actions: 7,
+            }
+          : { ...state.recorder, phase: "idle", actions: 0 },
+    };
+    return Response.json(state);
+  }
+  if (path === browserApiPaths.narration && method === "POST") {
+    return browserNarrationRequestSchema.safeParse(body).success
+      ? Response.json({ ok: true })
+      : refuse();
+  }
+  if (path === browserApiPaths.tabs && method === "POST") {
+    return browserTabsRequestSchema.safeParse(body).success
+      ? Response.json(state)
+      : refuse();
+  }
+  if (path === browserApiPaths.navigate && method === "POST") {
+    return browserNavigateRequestSchema.safeParse(body).success
+      ? Response.json(state)
+      : refuse();
+  }
+  return new Response(null, { status: 404 });
+}
+
+/** The live screen's socket, which the page opens to the person's browser and nothing here answers. */
+class QuietSocket {
+  static urls: string[] = [];
+  static readonly OPEN = 1;
+  readyState = 0;
+  onopen: (() => void) | null = null;
+  onclose: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  onmessage: ((event: { data: unknown }) => void) | null = null;
+  constructor(url: string) {
+    QuietSocket.urls.push(url);
+  }
+  send() {}
+  close() {}
+}
+
+const originalFetch = global.fetch;
+const originalSocket = globalThis.WebSocket;
+const speechGlobals = globalThis as {
+  SpeechRecognition?: unknown;
+  webkitSpeechRecognition?: unknown;
+};
+
+beforeEach(() => {
+  queryClient.clear();
+  writes.length = 0;
+  stateFails = false;
+  state = nativeState();
+  openAnswer = answerFor("native");
+  QuietSocket.urls = [];
+  global.fetch = Object.assign(
+    (input: Parameters<typeof fetch>[0], init?: RequestInit) =>
+      server(String(input), init),
+    { preconnect: originalFetch.preconnect },
+  );
+  globalThis.WebSocket = QuietSocket as unknown as typeof WebSocket;
+  delete speechGlobals.SpeechRecognition;
+  delete speechGlobals.webkitSpeechRecognition;
+});
+afterEach(() => {
+  cleanup();
+  global.fetch = originalFetch;
+  globalThis.WebSocket = originalSocket;
+  delete speechGlobals.SpeechRecognition;
+  delete speechGlobals.webkitSpeechRecognition;
+});
+
+/** Drawn as the app draws it: strict mode, the app's one query client, a router. */
+function draw(ui: ReactNode) {
+  const router = createRouter({
+    history: createMemoryHistory({ initialEntries: ["/"] }),
+    routeTree: createRootRoute({ component: () => ui }),
+  });
+  return render(
+    <StrictMode>
+      <QueryClientProvider client={queryClient}>
+        <RouterProvider router={router as never} />
+      </QueryClientProvider>
+    </StrictMode>,
+  );
+}
+
+const opens = () =>
+  writes.filter((write) => write.path === browserApiPaths.open).length;
+
+test("the sidebar shows Browser when OpenBot can run a browser for the person, linking to the Browser page", async () => {
+  const view = draw(
+    <SidebarProvider>
+      <SidebarMenu>
+        <BrowserNavItem />
+      </SidebarMenu>
+    </SidebarProvider>,
+  );
+  const link = await view.findByRole("link", { name: "Browser" });
+  expect(link.getAttribute("href")).toBe("/browser");
+});
+
+test("the sidebar has no Browser button where OpenBot cannot run one, or cannot say", async () => {
+  state = { ...nativeState(), available: false, open: false };
+  const view = draw(
+    <SidebarProvider>
+      <SidebarMenu>
+        <BrowserNavItem />
+      </SidebarMenu>
+    </SidebarProvider>,
+  );
+  await waitFor(() =>
+    expect(queryClient.getQueryState(["browser", "state"])?.status).toBe(
+      "success",
+    ),
+  );
+  expect(view.queryByRole("link", { name: "Browser" })).toBeNull();
+  cleanup();
+
+  queryClient.clear();
+  stateFails = true;
+  const failed = draw(
+    <SidebarProvider>
+      <SidebarMenu>
+        <BrowserNavItem />
+      </SidebarMenu>
+    </SidebarProvider>,
+  );
+  await waitFor(
+    () =>
+      expect(queryClient.getQueryState(["browser", "state"])?.status).toBe(
+        "error",
+      ),
+    { timeout: 4000 },
+  );
+  expect(failed.queryByRole("link", { name: "Browser" })).toBeNull();
+});
+
+test("on OpenBot Desktop the page opens the browser once, says it is a window on the desktop, and brings it forward", async () => {
+  const view = draw(<BrowserPage />);
+  expect(await view.findByText("Google Chrome")).toBeTruthy();
+  expect(
+    view.getByText("Open in its own window on your desktop."),
+  ).toBeTruthy();
+  expect(view.getByText(/The Recorder hears your microphone/)).toBeTruthy();
+  // Strict mode runs the opening effect twice; the browser is still opened once.
+  expect(opens()).toBe(1);
+  // No live screen: the browser is its own window.
+  expect(QuietSocket.urls).toEqual([]);
+
+  const user = userEvent.setup({ document });
+  await user.click(view.getByRole("button", { name: "Bring to front" }));
+  await waitFor(() => expect(opens()).toBe(2));
+  expect(view.getByText("Google Chrome")).toBeTruthy();
+});
+
+test("on OpenBot Desktop Record starts a recording named for the task, which shows its time and actions until Stop", async () => {
+  const view = draw(<BrowserPage />);
+  const user = userEvent.setup({ document });
+  const name = await view.findByRole("textbox", { name: "Task name" });
+  const record = view.getByRole("button", { name: "Record" });
+  expect((record as HTMLButtonElement).disabled).toBe(true);
+  await user.type(name, "Submit an expense report");
+  await user.click(record);
+  await waitFor(() =>
+    expect(writes).toContainEqual({
+      path: "/api/browser/recording",
+      method: "POST",
+      body: {
+        action: "start",
+        title: "Submit an expense report",
+        language: navigator.language,
+      },
+    }),
+  );
+  expect(await view.findByText("Submit an expense report")).toBeTruthy();
+  expect(view.getByRole("timer").textContent).toMatch(/^0:4\d · 7 actions$/);
+
+  await user.click(view.getByRole("button", { name: "Stop" }));
+  await waitFor(() =>
+    expect(writes.at(-1)).toEqual({
+      path: "/api/browser/recording",
+      method: "POST",
+      body: { action: "stop" },
+    }),
+  );
+  expect(await view.findByRole("textbox", { name: "Task name" })).toBeTruthy();
+});
+
+test("Record waits for the Recorder in the browser to connect", async () => {
+  state = {
+    ...nativeState(),
+    recorder: { connected: false, phase: "idle", actions: 0, narration: "own" },
+  };
+  const view = draw(<BrowserPage />);
+  const user = userEvent.setup({ document });
+  await user.type(
+    await view.findByRole("textbox", { name: "Task name" }),
+    "Refund an order",
+  );
+  expect(view.getByText("The Recorder is still connecting.")).toBeTruthy();
+  expect(
+    (view.getByRole("button", { name: "Record" }) as HTMLButtonElement)
+      .disabled,
+  ).toBe(true);
+});
+
+test("on hosted OpenBot the page is the browser: its tabs, its address and its live screen, driven at once", async () => {
+  state = screenState();
+  openAnswer = answerFor("screen");
+  const view = draw(<BrowserPage />);
+  const screen = await view.findByLabelText(
+    "Your browser. Click and type here.",
+  );
+  expect(screen.tagName).toBe("CANVAS");
+  // Strict mode opens and closes one first; every socket is to the person's own browser.
+  expect(QuietSocket.urls.length).toBeGreaterThan(0);
+  for (const url of QuietSocket.urls)
+    expect(url).toEndWith(`/api/computers/${PERSON_BROWSER}/stream`);
+  expect(opens()).toBe(1);
+
+  const tabs = within(view.getByRole("tablist", { name: "Tabs" }));
+  const [first, second] = tabs.getAllByRole("tab");
+  expect(first?.textContent).toBe("Example Domain");
+  expect(first?.getAttribute("aria-selected")).toBe("true");
+  expect(second?.textContent).toBe("New tab");
+  const address = view.getByRole("textbox", { name: "Address" });
+  expect((address as HTMLInputElement).value).toBe("https://example.com/");
+
+  const user = userEvent.setup({ document });
+  if (second) await user.click(second);
+  await user.click(view.getByRole("button", { name: "New tab" }));
+  await user.click(view.getByRole("button", { name: "Close Example Domain" }));
+  await user.click(view.getByRole("button", { name: "Back" }));
+  await user.click(view.getByRole("button", { name: "Reload" }));
+  await user.clear(address);
+  await user.type(address, "openbot.ai{Enter}");
+  await user.type(address, "how to file an expense report{Enter}");
+  await waitFor(() =>
+    expect(
+      writes.filter((write) => write.path !== "/api/browser/open"),
+    ).toEqual([
+      {
+        path: "/api/browser/tabs",
+        method: "POST",
+        body: { action: "activate", tabId: "tab-2" },
+      },
+      { path: "/api/browser/tabs", method: "POST", body: { action: "new" } },
+      {
+        path: "/api/browser/tabs",
+        method: "POST",
+        body: { action: "close", tabId: "tab-1" },
+      },
+      {
+        path: "/api/browser/navigate",
+        method: "POST",
+        body: { action: "back" },
+      },
+      {
+        path: "/api/browser/navigate",
+        method: "POST",
+        body: { action: "reload" },
+      },
+      {
+        path: "/api/browser/navigate",
+        method: "POST",
+        body: { url: "https://openbot.ai" },
+      },
+      {
+        path: "/api/browser/navigate",
+        method: "POST",
+        body: {
+          url: "https://www.google.com/search?q=how%20to%20file%20an%20expense%20report",
+        },
+      },
+    ]),
+  );
+});
+
+test("on hosted OpenBot the page narrates a recording, and Stop sends the phrase being said before the recording ends", async () => {
+  state = screenState();
+  openAnswer = answerFor("screen");
+  const recognitions = installChrome();
+  const view = draw(<BrowserPage />);
+  const user = userEvent.setup({ document });
+  await user.type(
+    await view.findByRole("textbox", { name: "Task name" }),
+    "Submit an expense report",
+  );
+  await user.click(view.getByRole("button", { name: "Record" }));
+  // Listening starts with the recording, in the language the recording was started in.
+  await waitFor(() => expect(recognitions.at(-1)?.heard).toBe(true));
+  const listening = recognitions.at(-1);
+  expect(listening).toMatchObject({
+    lang: navigator.language,
+    continuous: true,
+    interimResults: true,
+  });
+  expect(view.getByRole("switch", { name: "Narration" })).toBeTruthy();
+
+  await user.click(view.getByRole("button", { name: "Stop" }));
+  await waitFor(() =>
+    expect(writes.at(-1)).toEqual({
+      path: "/api/browser/recording",
+      method: "POST",
+      body: { action: "stop" },
+    }),
+  );
+  const narration = writes.filter(
+    (write) => write.path === "/api/browser/narration",
+  );
+  expect(narration).toHaveLength(1);
+  const phrase = narration[0]?.body as {
+    text: string;
+    startedAt: number;
+    endedAt: number;
+  };
+  expect(phrase.text).toBe("I am opening the expenses page");
+  expect(phrase.startedAt).toBeLessThanOrEqual(phrase.endedAt);
+  // The phrase reached the server before the recording was stopped.
+  expect(writes.indexOf(narration[0] as Write)).toBeLessThan(
+    writes.findLastIndex((write) => write.path === "/api/browser/recording"),
+  );
+});
+
+test("on hosted OpenBot in a browser with no speech recognition, the page says narration is unavailable and Record still works", async () => {
+  state = screenState();
+  openAnswer = answerFor("screen");
+  const view = draw(<BrowserPage />);
+  expect(
+    await view.findByText(
+      "Narration isn't available in this browser, so what you say isn't recorded. Recording still works.",
+    ),
+  ).toBeTruthy();
+  expect(view.queryByRole("switch", { name: "Narration" })).toBeNull();
+  const user = userEvent.setup({ document });
+  await user.type(
+    view.getByRole("textbox", { name: "Task name" }),
+    "Refund an order",
+  );
+  await user.click(view.getByRole("button", { name: "Record" }));
+  await waitFor(() =>
+    expect(writes).toContainEqual(
+      expect.objectContaining({
+        path: "/api/browser/recording",
+        body: expect.objectContaining({ action: "start" }),
+      }),
+    ),
+  );
+});
+
+test("where OpenBot cannot run a browser for the person, the page says so and opens nothing", async () => {
+  state = { ...nativeState(), available: false, open: false };
+  const view = draw(<BrowserPage />);
+  expect(
+    await view.findByText(
+      "OpenBot isn't set up to run a browser for you. Ask an admin.",
+    ),
+  ).toBeTruthy();
+  expect(opens()).toBe(0);
+});
+
+/**
+ * Chrome's speech recognition, as `webkitSpeechRecognition`: once listening it sends what Chrome sent in the recorded
+ * run up to the moment Stop was pressed, and on stop() what it sent after, the final phrase then the end. One stopped
+ * before it heard anything (as strict mode's first, discarded effect is) just ends, as Chrome's does.
+ */
+function installChrome() {
+  const recognitions: ChromeRecognition[] = [];
+  const stopAt =
+    STOPPED_MID_PHRASE.find((event) => event.type === "stop")?.at ?? 0;
+  const before = STOPPED_MID_PHRASE.filter(isResult).filter(
+    (event) => event.at < stopAt,
+  );
+  const after = STOPPED_MID_PHRASE.filter(isResult).filter(
+    (event) => event.at > stopAt,
+  );
+  class ChromeRecognition implements Recognition {
+    lang = "";
+    continuous = false;
+    interimResults = false;
+    maxAlternatives = 0;
+    onstart: Recognition["onstart"] = null;
+    onresult: Recognition["onresult"] = null;
+    onerror: Recognition["onerror"] = null;
+    onend: Recognition["onend"] = null;
+    started = false;
+    heard = false;
+    #listening: ReturnType<typeof setTimeout> | undefined;
+    constructor() {
+      recognitions.push(this);
+    }
+    start() {
+      this.started = true;
+      this.#listening = setTimeout(() => {
+        this.onstart?.();
+        for (const event of before) this.onresult?.(speechEvent(event));
+        this.heard = true;
+      }, 0);
+    }
+    stop() {
+      clearTimeout(this.#listening);
+      queueMicrotask(() => {
+        if (this.heard)
+          for (const event of after) this.onresult?.(speechEvent(event));
+        this.onend?.();
+      });
+    }
+    abort() {
+      clearTimeout(this.#listening);
+      queueMicrotask(() => this.onend?.());
+    }
+  }
+  speechGlobals.webkitSpeechRecognition = ChromeRecognition;
+  return recognitions;
+}
