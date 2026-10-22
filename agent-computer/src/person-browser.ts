@@ -37,14 +37,16 @@ import type {
 } from "../../shared/openbot-browser";
 import type { BrowserRuntime } from "./browser-runtime";
 import type { Egress } from "./egress";
+import { launchNativeBrowser } from "./native-browser";
 import {
   copyNativeMessagingHosts,
   defaultNativeMessagingHosts,
   forgetRecorderPins,
-  installedBrowser,
+  installedBrowserAt,
   NO_INSTALLED_BROWSER,
   type PersonDisplay,
   personLaunchOptions,
+  personNativeLaunch,
   personWindow,
 } from "./person-launch";
 import { isRecorderPage, isRecorderSetupPage, type Recorder } from "./recorder";
@@ -331,21 +333,23 @@ export async function launchPersonBrowser(
 ): Promise<{ context: BrowserContext; person: PersonBrowser }> {
   const window = personWindow(input.runtime);
   let product: BrowserProduct = "chromium";
+  let executable: string | undefined;
   if (window === "native") {
     // Looking for Chrome or Edge fails only on a platform with no place to look, or a folder this computer cannot read.
     const installed = await step(
       "launch",
-      () => installedBrowser(process.env),
+      () => installedBrowserAt(process.env),
       true,
     );
     if (!installed) throw new NoInstalledBrowserError();
-    product = installed;
+    product = installed.browser;
+    executable = installed.executable;
     /*
      * The person's password manager and other desktop hookups, copied from their own profile of the
      * same browser into this profile's folder, which is where a browser on a dedicated user data
      * directory reads them. Manifests only, at every launch. Windows reads them from the registry.
      */
-    const from = defaultNativeMessagingHosts(installed, process.env);
+    const from = defaultNativeMessagingHosts(installed.browser, process.env);
     if (from) {
       const copied = await step("native-hosts", () =>
         copyNativeMessagingHosts(from, join(input.dir, "NativeMessagingHosts")),
@@ -361,28 +365,40 @@ export async function launchPersonBrowser(
   }
 
   await step("launch", () => forgetRecorderPins(input.dir, input.recorder.id));
-  const options = personLaunchOptions(
-    {
-      window,
-      recorderDir: input.recorder.dir,
-      headless: input.runtime.mode === "headless",
-      sandbox: input.sandbox,
-      botArgs: input.botArgs,
-      display: input.display,
-    },
-    input.viewport,
-  );
+  const headless = input.runtime.mode === "headless";
+  /*
+   * A native window is started here and attached to, with none of Playwright's test defaults and none
+   * of its focus emulation (`native-browser.ts`): its tabs behind the one in front are behind it, as
+   * in any browser. The hosted browser is Playwright's launch, as a Bot's is.
+   */
   const context = await step("launch", () =>
-    chromium.launchPersistentContext(input.dir, {
-      channel: product,
-      ...options,
-      // This process owns shutdown, as for a Bot's browser: Playwright's own handlers would kill the
-      // browser before its profile is written.
-      handleSIGTERM: false,
-      handleSIGINT: false,
-      handleSIGHUP: false,
-      ...(input.proxy ? { proxy: input.proxy } : {}),
-    }),
+    executable
+      ? launchNativeBrowser({
+          executable,
+          ...personNativeLaunch({
+            dir: input.dir,
+            headless,
+            display: input.display,
+          }),
+        })
+      : chromium.launchPersistentContext(input.dir, {
+          channel: product,
+          ...personLaunchOptions(
+            {
+              recorderDir: input.recorder.dir,
+              headless,
+              sandbox: input.sandbox,
+              botArgs: input.botArgs,
+            },
+            input.viewport,
+          ),
+          // This process owns shutdown, as for a Bot's browser: Playwright's own handlers would kill
+          // the browser before its profile is written.
+          handleSIGTERM: false,
+          handleSIGINT: false,
+          handleSIGHUP: false,
+          ...(input.proxy ? { proxy: input.proxy } : {}),
+        }),
   );
 
   try {
@@ -430,10 +446,12 @@ export async function launchPersonBrowser(
     );
     if (window === "native") {
       /*
-       * Downloads where the person's browser puts them. Playwright sends every download to a
-       * temporary folder of its own under a random name and deletes it when the browser closes,
-       * which is right for a test and loses a person's files. The browser's own behaviour is the
-       * Downloads folder its settings name.
+       * Downloads where the person's browser puts them. A browser Playwright launches sends every
+       * download to a temporary folder of its own under a random name and deletes it when the
+       * browser closes, which is right for a test and loses a person's files. Attached with
+       * `noDefaults`, Playwright leaves downloads alone; they are handed back here all the same, so
+       * no change in Playwright's defaults can take a person's files. The browser's own behaviour is
+       * the Downloads folder its settings name.
        */
       await step("downloads", () =>
         session.send("Browser.setDownloadBehavior", { behavior: "default" }),

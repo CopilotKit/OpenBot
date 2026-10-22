@@ -22,6 +22,7 @@ import {
   PLAYWRIGHT_DEFAULTS_A_PERSON_DOES_NOT_GET,
   personBrowserEnv,
   personLaunchOptions,
+  personNativeLaunch,
 } from "../src/person-launch";
 import {
   extensionIdFromKey,
@@ -137,59 +138,49 @@ describe("finding the built Recorder", () => {
 });
 
 describe("launching a person's browser", () => {
-  const native = personLaunchOptions(
-    {
-      window: "native",
-      recorderDir: FIXTURE,
-      headless: false,
-      sandbox: true,
-      botArgs: ["--disable-dev-shm-usage"],
-      display: {},
-    },
-    { width: 1280, height: 800 },
+  const native = personNativeLaunch(
+    { dir: "/profiles/person-1", headless: false, display: {} },
+    "darwin",
   );
 
-  test("a native window drops every test default that stops a person using it as their own", () => {
-    for (const keptOut of [
-      "--disable-extensions",
-      "--disable-sync",
-      "--use-mock-keychain",
-      "--password-store=basic",
-      "--disable-background-networking",
-      "--disable-component-update",
-      "--disable-component-extensions-with-background-pages",
-      "--disable-default-apps",
-      "--disable-popup-blocking",
-      "--enable-automation",
-    ])
-      expect(native.ignoreDefaultArgs).toContain(keptOut);
-    expect(native.ignoreDefaultArgs).toEqual([
-      ...PLAYWRIGHT_DEFAULTS_A_PERSON_DOES_NOT_GET,
-    ]);
-    // And keeps what OpenBot's control needs: the pipe and profile are not in the list at all.
-    expect(native.ignoreDefaultArgs).not.toContain("--remote-debugging-pipe");
-    expect(native.ignoreDefaultArgs).not.toContain("--no-first-run");
-    // And keeps the debugging bar: the person's own extensions are in it, and the bar is how they
-    // see that one attached.
+  test("a native window starts with exactly what OpenBot's control needs, and no test default that stops a person using it as their own", () => {
+    // Started without Playwright, so this is its whole command line: none of Playwright's defaults is under it.
     expect(native.args).toEqual([
+      "--remote-debugging-pipe",
+      "--user-data-dir=/profiles/person-1",
+      "--no-first-run",
+      "--no-default-browser-check",
+      "--enable-features=CDPScreenshotNewSurface",
+      "--edge-skip-compat-layer-relaunch",
       "--disable-blink-features=AutomationControlled",
       "--enable-unsafe-extension-debugging",
     ]);
-    expect(native.chromiumSandbox).toBe(true);
-    // A window the person resizes, in their own colour scheme.
-    expect(native.viewport).toBeNull();
-    expect(native.colorScheme).toBeNull();
+    for (const keptOut of [
+      ...PLAYWRIGHT_DEFAULTS_A_PERSON_DOES_NOT_GET,
+      // And the debugging bar stays: the person's own extensions are in it, and the bar is how they
+      // see that one attached.
+      "--silent-debugger-extension-api",
+      // Its own startup setting decides what the first window shows.
+      "about:blank",
+    ])
+      expect(native.args).not.toContain(keptOut);
+    expect(native.env).toBeUndefined();
+    // Headless only for the tests, which never open a window.
+    expect(
+      personNativeLaunch(
+        { dir: "/profiles/person-1", headless: true, display: {} },
+        "darwin",
+      ).args.at(-1),
+    ).toBe("--headless");
   });
 
   test("the hosted browser keeps a Bot's launch, with only the Recorder let in", () => {
     const screen = personLaunchOptions(
       {
-        window: "screen",
         recorderDir: FIXTURE,
         headless: true,
         sandbox: false,
         botArgs: ["--no-sandbox", "--password-store=basic"],
-        display: {},
       },
       { width: 1280, height: 800 },
     );
@@ -208,7 +199,6 @@ describe("launching a person's browser", () => {
       "--disable-extensions",
     ]);
     expect(screen.viewport).toEqual({ width: 1280, height: 800 });
-    expect(screen.env).toBeUndefined();
   });
 });
 
@@ -279,16 +269,12 @@ describe("the display a person's native window opens on", () => {
   });
 
   test("the launch carries it", () => {
-    const options = personLaunchOptions(
+    const options = personNativeLaunch(
       {
-        window: "native",
-        recorderDir: FIXTURE,
+        dir: "/profiles/person-1",
         headless: false,
-        sandbox: true,
-        botArgs: [],
         display: { DISPLAY: ":0" },
       },
-      { width: 1280, height: 800 },
       "linux",
     );
     expect(options.env?.DISPLAY).toBe(":0");

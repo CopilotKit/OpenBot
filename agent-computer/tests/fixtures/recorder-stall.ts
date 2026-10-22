@@ -29,12 +29,10 @@ const context = await chromium.launchPersistentContext(dir, {
   channel: "chromium",
   ...personLaunchOptions(
     {
-      window: "screen",
       recorderDir: found.recorder.dir,
       headless: true,
       sandbox: false,
       botArgs: [],
-      display: {},
     },
     { width: 1280, height: 800 },
   ),
