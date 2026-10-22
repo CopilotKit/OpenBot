@@ -19,6 +19,7 @@ export function Ask({
   onAsk,
   onOpen,
   onBack,
+  onViewIntelligence,
   auto = false,
   stepLabel = "Last step",
 }: {
@@ -26,6 +27,8 @@ export function Ask({
   onAsk: (question: string) => Promise<string>;
   onOpen: () => void;
   onBack: () => void;
+  /** Local mode with a recorded stack: opens its Intelligence dashboard, already signed in. */
+  onViewIntelligence?: () => Promise<void>;
   /** Asks `suggestion` on arrival, with no field to change it: the test is the screen. */
   auto?: boolean;
   stepLabel?: string;
@@ -42,6 +45,21 @@ export function Ask({
    * built to replace, on the screen built to replace it.
    */
   const [failure, setFailure] = useState<Problem | null>(null);
+  const [opening, setOpening] = useState(false);
+  const [viewFailure, setViewFailure] = useState<Problem | null>(null);
+
+  async function viewIntelligence() {
+    if (!onViewIntelligence) return;
+    setOpening(true);
+    setViewFailure(null);
+    try {
+      await onViewIntelligence();
+    } catch (error) {
+      setViewFailure(asProblem(error));
+    } finally {
+      setOpening(false);
+    }
+  }
 
   // Deferred a tick, so a development double mount asks once.
   // biome-ignore lint/correctness/useExhaustiveDependencies: once, on arrival.
@@ -84,6 +102,19 @@ export function Ask({
             <p className="answer-from">Your Bot said</p>
             <p className="answer-text">{answer}</p>
           </div>
+        )}
+        {answer !== null && onViewIntelligence && (
+          <>
+            <button
+              type="button"
+              className="text-link"
+              disabled={opening}
+              onClick={viewIntelligence}
+            >
+              View in Intelligence
+            </button>
+            {viewFailure && <p className="footnote">{viewFailure.said}</p>}
+          </>
         )}
         <div className="row">
           {answer !== null && (

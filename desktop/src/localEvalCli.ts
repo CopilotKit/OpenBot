@@ -48,6 +48,9 @@ export type LocalReason =
   | "local-command-busy"
   | "local-command-failed"
   | "confirmation-required"
+  // `local login` only; the window reads these as a fixed sentence from `open_local_intelligence`.
+  | "dashboard-unavailable"
+  | "browser-open-failed"
   | "unrecognized";
 
 /** `local_eval::Readiness`: the CLI's own end-to-end check. Running pods are not this. */
@@ -197,6 +200,38 @@ export function connectLocalEval(root: string): {
     throw failure(rejection);
   });
   return { attempt, connection };
+}
+
+/**
+ * Signs the browser in to the recorded local stack's Intelligence dashboard with no code to
+ * approve. The CLI opens the browser itself, so the window opens nothing. Rejects only with a
+ * `Problem` whose sentence is fixed on the native side.
+ */
+export function openLocalIntelligence(root: string): {
+  attempt: string;
+  opened: Promise<void>;
+} {
+  const attempt = crypto.randomUUID();
+  const opened = invoke<void>("open_local_intelligence", {
+    attempt,
+    root,
+  }).catch((rejection: unknown) => {
+    if (rejection && typeof rejection === "object" && "said" in rejection) {
+      throw rejection as Problem;
+    }
+    throw {
+      said: "OpenBot could not open the Intelligence dashboard. Try again.",
+    } satisfies Problem;
+  });
+  return { attempt, opened };
+}
+
+/** Whether the menus offer "Open Intelligence dashboard" for `root`. */
+export function offerLocalIntelligence(
+  root: string,
+  offered: boolean,
+): Promise<void> {
+  return invoke("offer_local_intelligence", { root, offered });
 }
 
 /** Stops one call; it then rejects with `cancelled`. */

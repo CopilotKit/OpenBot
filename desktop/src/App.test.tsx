@@ -734,6 +734,87 @@ test("Continue during setup shows Getting ready, which starts, tests and opens O
   ).toHaveLength(1);
 });
 
+function intelligenceCalls() {
+  return invokeCalls.filter((call) =>
+    ["offer_local_intelligence", "open_local_intelligence"].includes(
+      call.command,
+    ),
+  );
+}
+
+test("a local Test OpenBot screen links to the Intelligence dashboard through the native sign-in", async () => {
+  setupRootConfiguration("/tmp/local-eval-view", async () =>
+    emptyConfiguration(),
+  );
+  withLocalCli({
+    set_up_local_eval: localStatus("starting", "valid"),
+    connect_local_eval: localConnection,
+    run_local_eval: localStatus("ready", "valid"),
+    ask_the_bot: "I am working.",
+    offer_local_intelligence: null,
+    open_local_intelligence: null,
+  });
+  const view = await renderApp();
+  await userEvent.click(view.getByRole("button", { name: "Install" }));
+  await chooseOpenAi(view);
+  await view.findByText("I am working.");
+  // The menus offer the dashboard once local mode has a recorded stack.
+  expect(intelligenceCalls()).toEqual([
+    {
+      command: "offer_local_intelligence",
+      args: { root: "/tmp/local-eval-view", offered: true },
+    },
+  ]);
+  await userEvent.click(
+    view.getByRole("button", { name: "View in Intelligence" }),
+  );
+  const opened = intelligenceCalls().filter(
+    (call) => call.command === "open_local_intelligence",
+  );
+  expect(opened).toEqual([
+    {
+      command: "open_local_intelligence",
+      args: { attempt: expect.any(String), root: "/tmp/local-eval-view" },
+    },
+  ]);
+  // The sign-in opens the browser itself; the window stays on its screen.
+  expect(localSequence()).not.toContain("show_openbot");
+  expect(view.getByRole("heading", { name: "Test OpenBot" })).toBeTruthy();
+  expectPlain(view);
+});
+
+test("View in Intelligence says the native sentence when the dashboard does not open", async () => {
+  setupRootConfiguration("/tmp/local-eval-view-failed", async () =>
+    emptyConfiguration(),
+  );
+  withLocalCli({
+    set_up_local_eval: localStatus("starting", "valid"),
+    connect_local_eval: localConnection,
+    run_local_eval: localStatus("ready", "valid"),
+    ask_the_bot: "I am working.",
+    offer_local_intelligence: null,
+    open_local_intelligence: () =>
+      Promise.reject({
+        said: "Your browser did not open. Try again.",
+        detail: null,
+      }),
+  });
+  const view = await renderApp();
+  await userEvent.click(view.getByRole("button", { name: "Install" }));
+  await chooseOpenAi(view);
+  await view.findByText("I am working.");
+  await userEvent.click(
+    view.getByRole("button", { name: "View in Intelligence" }),
+  );
+  expect(
+    await view.findByText("Your browser did not open. Try again."),
+  ).toBeTruthy();
+  // The test result and its way forward are unchanged.
+  expect(view.getByText("I am working.")).toBeTruthy();
+  expect(view.getByRole("button", { name: "Open OpenBot" })).toBeTruthy();
+  expectPlain(view);
+});
+
 test("Continue after Intelligence is already ready starts OpenBot with the AI just chosen", async () => {
   setupRootConfiguration("/tmp/local-eval-ready-first", async () =>
     emptyConfiguration(),
@@ -795,7 +876,9 @@ test("a Claude plan signed in on the provider screen reaches Start with its toke
     await view.findByLabelText("Code from your browser"),
     "synthetic-code",
   );
-  await userEvent.click(view.getByRole("button", { name: "Finish signing in" }));
+  await userEvent.click(
+    view.getByRole("button", { name: "Finish signing in" }),
+  );
   await view.findByText(/Signed in to Anthropic/);
   await waitFor(() => expect(localSequence()).toContain("run_local_eval"));
   // Intelligence is ready and waiting minutes before Continue, as on a real machine.
@@ -803,7 +886,11 @@ test("a Claude plan signed in on the provider screen reaches Start with its toke
   await userEvent.click(view.getByRole("button", { name: "Continue" }));
   await view.findByRole("heading", { name: "Test OpenBot" });
   expect(getStartStackPayload()).toMatchObject({
-    model: { provider: "anthropic", login: "plan", token: "synthetic-plan-token" },
+    model: {
+      provider: "anthropic",
+      login: "plan",
+      token: "synthetic-plan-token",
+    },
   });
 });
 
@@ -4060,6 +4147,30 @@ test("Start credential failures do not expose a restore action", async () => {
   expect(
     invokeCalls.filter(
       (c) => c.command === ["cancel", "_credential", "_reco", "very"].join(""),
+    ),
+  ).toEqual([]);
+});
+
+test("a hosted Ask screen has no Intelligence dashboard link and leaves the menus alone", async () => {
+  useCompatibleEndpointSetup({});
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) => {
+    if (command === "ask_the_bot") return "42";
+    return previous(command, args);
+  };
+  const view = await enterCompatibleEndpoint("https://models.example/v1");
+  await userEvent.click(view.getByRole("button", { name: "Continue" }));
+  await userEvent.click(view.getByRole("button", { name: "Start OpenBot" }));
+  await userEvent.click(await view.findByRole("button", { name: "Ask" }));
+  await view.findByText("42");
+  expect(
+    view.queryByRole("button", { name: "View in Intelligence" }),
+  ).toBeNull();
+  expect(
+    invokeCalls.filter((call) =>
+      ["offer_local_intelligence", "open_local_intelligence"].includes(
+        call.command,
+      ),
     ),
   ).toEqual([]);
 });
