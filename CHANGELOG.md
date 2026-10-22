@@ -181,7 +181,10 @@ it sends.
 
 Wherever OpenBot can run a browser for you, the sidebar has a **Browser** button below Connections. It
 opens your own browser with the OpenBot Recorder already in it and connected as you: no install and no
-Connect step. Name a task and press Record; the page shows the recording's name, how long it has run and
+Connect step. On OpenBot Desktop one click opens your browser window, or brings it to the front, and
+you stay where you are in OpenBot; record with the Recorder's button in that window's toolbar. On
+hosted OpenBot the click takes you to the browser in the page. While a recording runs, the Browser
+button shows a red dot; hover it for the recording's name and how long it has run. Name a task and press Record; the page shows the recording's name, how long it has run and
 how many actions it holds, and after Stop it says what was saved to your Learning space (for example
 "7 actions and 1 narrated phrase"), or that nothing was recorded, and says the same after a reload. Only what you do is recorded. When
 your browser cannot open because of how OpenBot is set up, the page tells you to ask an admin, and the
