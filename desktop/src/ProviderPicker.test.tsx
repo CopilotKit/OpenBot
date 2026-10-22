@@ -174,10 +174,12 @@ test("a completed plan sign-in enables and submits only its issuing provider", a
     expect(view.getByText(/Signed in to OpenAI/)).toBeTruthy(),
   );
   // The finished sign-in moves on by itself, with its own provider's token.
-  await waitFor(() =>
-    expect(choices).toEqual([
-      { provider: "openai", login: "plan", token: "chatgpt-token" },
-    ]),
+  await waitFor(
+    () =>
+      expect(choices).toEqual([
+        { provider: "openai", login: "plan", token: "chatgpt-token" },
+      ]),
+    { timeout: 4000 },
   );
   await userEvent.click(view.getByRole("radio", { name: /Anthropic/ }));
 
@@ -187,6 +189,29 @@ test("a completed plan sign-in enables and submits only its issuing provider", a
 
   await userEvent.click(continueButton);
   expect(choices).toHaveLength(1);
+});
+
+test("a finished sign-in shows its tick for a second, and choosing another row then cancels the move", async () => {
+  const choices: unknown[] = [];
+  invokeHandler = async (command) => {
+    if (command === "providers") return providers;
+    if (command === "begin_chatgpt_sign_in") return "https://chatgpt.test";
+    if (command === "finish_chatgpt_sign_in") return "chatgpt-token";
+    throw new Error(`unexpected command ${command}`);
+  };
+  const view = await renderPicker((choice) => choices.push(choice));
+  await userEvent.click(await view.findByRole("radio", { name: /OpenAI/ }));
+  await userEvent.click(
+    view.getByRole("button", { name: "Sign in with OpenAI" }),
+  );
+  const tick = await view.findByText(/✓/);
+  expect(tick.closest("p")?.textContent).toContain("Signed in to OpenAI.");
+  expect(choices).toEqual([]);
+  // Another row inside the second: nothing moves on.
+  await userEvent.click(view.getByRole("radio", { name: /Anthropic/ }));
+  await act(async () => new Promise((resolve) => setTimeout(resolve, 1300)));
+  expect(choices).toEqual([]);
+  expect(view.queryByText(/✓/)).toBeNull();
 });
 
 test("a pending plan sign-in completion is ignored after switching provider rows", async () => {
@@ -324,7 +349,9 @@ for (const provider of providers) {
       if (session === "saved") {
         await userEvent.click(view.getByRole("button", { name: "Continue" }));
       } else {
-        await waitFor(() => expect(choices).toHaveLength(1));
+        await waitFor(() => expect(choices).toHaveLength(1), {
+          timeout: 4000,
+        });
       }
 
       expect(choices).toHaveLength(1);
@@ -897,7 +924,7 @@ for (const provider of cloudProviders) {
     );
     await view.findByText(`Signed in to ${provider.name}.`);
     // Signed in with a model already named: on by itself, no Continue.
-    await waitFor(() => expect(choices).toHaveLength(1));
+    await waitFor(() => expect(choices).toHaveLength(1), { timeout: 4000 });
     expect(choices).toEqual([
       {
         provider: provider.id,
