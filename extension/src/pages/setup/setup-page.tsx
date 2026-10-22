@@ -1,8 +1,4 @@
-import {
-  IconMicrophone,
-  IconMicrophoneOff,
-  IconShieldLock,
-} from "@tabler/icons-react";
+import { IconMicrophone, IconMicrophoneOff } from "@tabler/icons-react";
 import { useEffect, useRef, useState } from "react";
 import { PageRows, PageSection } from "@/components/layout/page-parts";
 import { Button } from "@/components/ui/button";
@@ -14,7 +10,6 @@ import {
   ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
-import { Separator } from "@/components/ui/separator";
 import { microphoneState } from "../popup/voice";
 import { DISCLOSURE, DISCLOSURE_TITLE } from "../ui/disclosure";
 import { Page } from "../ui/page";
@@ -87,12 +82,12 @@ function sentence(status: Status, browser: Browser): string {
 
 /**
  * The page a fresh install opens: it says first what the Recorder collects and where it goes (the store's prominent
- * disclosure, ui/disclosure.ts), before anything is recorded. It asks for the microphone on the extension's own origin
- * as soon as it loads, with a button to ask again, and says in plain words what the browser answered. The Recorder listens from its hidden
- * offscreen document, which cannot show a prompt and can use only a lasting grant (Chrome's "Allow while visiting the
- * site", Edge's "Allow"); a
- * one-time grant ends with this page and reads `prompt` afterwards, which is how the page tells the two apart. Website
- * access needs nothing here: the install granted it.
+ * disclosure, ui/disclosure.ts), as its heading, above the microphone and before anything is recorded. It asks for the
+ * microphone on the extension's own origin as soon as it loads, with a button to ask again, and says in plain words what
+ * the browser answered. The Recorder listens from its hidden offscreen document, which cannot show a prompt and can use
+ * only a lasting grant (Chrome's "Allow while visiting the site", Edge's "Allow"); a one-time grant ends with this page
+ * and reads `prompt` afterwards, which is how the page tells the two apart. Website access needs nothing here: the
+ * install granted it.
  */
 export function SetupPage({ deps }: { deps?: Partial<SetupPageDeps> }) {
   const [d] = useState(() => ({ ...defaults, ...deps }));
@@ -148,25 +143,14 @@ export function SetupPage({ deps }: { deps?: Partial<SetupPageDeps> }) {
     status === "no-microphone";
 
   return (
-    <Page
-      title="Allow the microphone"
-      description="Talk through what you do while you record. Your browser turns your words into text, and the Recorder sends only the text to Intelligence with your steps, so Learning knows why you did each one. The Recorder keeps no recording of your voice, and you can mute it in any recording. Without the microphone it still records, with no narration."
-      width="prose"
-    >
-      <PageSection>
+    // The store's disclosure is the page's own heading, so it is the first thing the person reads, before the
+    // microphone is asked for and before anything is recorded.
+    <Page title={DISCLOSURE_TITLE} description={DISCLOSURE} width="prose">
+      <PageSection
+        title="Allow the microphone"
+        description="Talk through what you do while you record. Your browser turns your words into text, and the Recorder sends only the text to Intelligence with your steps, so Learning knows why you did each one. The Recorder keeps no recording of your voice, and you can mute it in any recording. Without the microphone it still records, with no narration."
+      >
         <PageRows>
-          <Item size="sm">
-            <ItemMedia variant="icon">
-              <IconShieldLock />
-            </ItemMedia>
-            <ItemContent>
-              <ItemTitle>{DISCLOSURE_TITLE}</ItemTitle>
-              <ItemDescription className="line-clamp-none">
-                {DISCLOSURE}
-              </ItemDescription>
-            </ItemContent>
-          </Item>
-          <Separator />
           <Item size="sm">
             <ItemMedia variant="icon">
               {status === "granted" ? (
