@@ -100,6 +100,10 @@ let slowNextNavigation:
   | { ms: number; status: number; error: string }
   | { never: Promise<void> }
   | null = null;
+/** How the computer answers the next disconnect instead of telling the Recorder, when a test says so: with `status`, as
+ * a computer with no such route answers; or not until `never` settles. */
+let refuseNextDisconnect: { status: number } | { never: Promise<void> } | null =
+  null;
 
 const recorderOf = (opened: Opened): LauncherState =>
   opened.state.recorder as LauncherState;
@@ -137,7 +141,8 @@ const computer = Bun.serve<{ bot: string }>({
         { error: "Only a person's browser opens here." },
         { status: 400 },
       );
-    const body = request.method === "POST" ? await request.json() : undefined;
+    const sent = request.method === "POST" ? await request.text() : "";
+    const body = sent ? JSON.parse(sent) : undefined;
     const opened = browsers.get(id);
     const closed: BrowserState = { open: false, tabs: [] };
     switch (url.pathname) {
@@ -251,6 +256,33 @@ const computer = Bun.serve<{ bot: string }>({
             tab.active ? { ...tab, url } : tab,
           );
         }
+        return Response.json(opened.state);
+      }
+      case "/browser/disconnect": {
+        // A POST with no body. The Recorder forgets its connection as it does when OpenBot answers that its token is
+        // gone, and reports what it reports then (extension/src/background/launcher.ts): a recording under it stopped.
+        if (request.method !== "POST" || sent !== "")
+          return Response.json({ error: "Bad request." }, { status: 400 });
+        const refusal = refuseNextDisconnect;
+        refuseNextDisconnect = null;
+        if (refusal && "never" in refusal) await refusal.never;
+        else if (refusal)
+          return Response.json(
+            { error: "Not found." },
+            { status: refusal.status },
+          );
+        if (!opened)
+          return Response.json(
+            { error: "This browser is not open. Open it first." },
+            { status: 409 },
+          );
+        opened.state.recorder = {
+          connected: false,
+          phase: "idle",
+          actions: 0,
+          narration: "own",
+          voice: "off",
+        };
         return Response.json(opened.state);
       }
       case "/browser/close":
@@ -1149,13 +1181,247 @@ describe("Record after the OpenBot browser is disconnected", () => {
   const opens = () =>
     asked.filter((line) => line === `POST /browser/open ${computerId()}`)
       .length;
+  const disconnects = (id = computerId()) =>
+    asked.filter((line) => line === `POST /browser/disconnect ${id}`).length;
+  const state = async (on: OpenBot = openbot, as: "ada" | "ben" = "ada") =>
+    (await (await call(on, "/api/browser", { as })).json()) as BrowserApiState;
+
+  test("Disconnect in Settings, Browsers tells the person's open browser at once, and its Recorder and the state say it is signed out", async () => {
+    // The second end-to-end run: after Disconnect the Recorder went on saying it was connected for minutes (90 s on
+    // Desktop, 125 s hosted, before the run stopped looking), until its next call to OpenBot.
+    await open(openbot, "ada");
+    const revoked = handed(ada.id);
+    expect((await state()).recorder).toMatchObject({
+      connected: true,
+      userId: ada.id,
+    });
+    const before = disconnects();
+    await disconnect(revoked.connectionId);
+    expect(disconnects()).toBe(before + 1);
+    expect(browsers.get(computerId())?.state.recorder).toEqual({
+      connected: false,
+      phase: "idle",
+      actions: 0,
+      narration: "own",
+      voice: "off",
+    });
+    const after = await state();
+    expect(after).toMatchObject({
+      open: true,
+      recorder: { connected: false, phase: "idle" },
+      // A Recorder with no connection has been told nothing about narration: the window says who hears the person.
+      narration: "external",
+    });
+    expect(after.recorder?.userId).toBeUndefined();
+    // Record after Disconnect connects the browser again first.
+    const started = await record("After Disconnect");
+    expect(started.status).toBe(200);
+    expect((await state()).recorder).toMatchObject({
+      connected: true,
+      userId: ada.id,
+      phase: "recording",
+    });
+    expect(handed(ada.id).connectionId).not.toBe(revoked.connectionId);
+    expect((await stop()).status).toBe(200);
+  });
+
+  test("a Recorder the revoke did not reach is never reported connected, and Record connects it again first", async () => {
+    await open(openbot, "ada");
+    const revoked = handed(ada.id);
+    // An older computer, with no disconnect route: the revoke stands, and the Recorder has not heard.
+    refuseNextDisconnect = { status: 404 };
+    const { warned } = await logged(() => disconnect(revoked.connectionId));
+    expect(refuseNextDisconnect).toBeNull();
+    expect(typesOf(warned)).toContain("browser-disconnect-refused");
+    expect(browsers.get(computerId())?.state.recorder).toMatchObject({
+      connected: true,
+      userId: ada.id,
+    });
+    const reported = await state();
+    expect(reported.recorder).toMatchObject({ connected: false });
+    expect(reported.recorder?.userId).toBeUndefined();
+    // Every answer that carries the state says so, not only the state route's.
+    const tabs = await call(openbot, "/api/browser/tabs", {
+      method: "POST",
+      as: "ada",
+      json: { action: "new" },
+    });
+    expect(tabs.status).toBe(200);
+    expect(((await tabs.json()) as BrowserApiState).recorder?.connected).toBe(
+      false,
+    );
+
+    const before = opens();
+    expect((await record("Not heard")).status).toBe(200);
+    expect(opens()).toBe(before + 1);
+    expect((await state()).recorder).toMatchObject({
+      connected: true,
+      userId: ada.id,
+      phase: "recording",
+    });
+    expect((await stop()).status).toBe(200);
+  });
+
+  test("a closed, stopped, unreachable or slow browser never fails the revoke", async () => {
+    // Closed: the computer has nothing to tell, and says so.
+    await open(openbot, "ada");
+    const closedOne = handed(ada.id);
+    await call(openbot, "/api/browser/close", { method: "POST", as: "ada" });
+    const { warned: closedWarned } = await logged(() =>
+      disconnect(closedOne.connectionId),
+    );
+    expect(asked.at(-1)).toBe(`POST /browser/disconnect ${computerId()}`);
+    expect(typesOf(closedWarned)).toEqual([]);
+
+    // A computer that is not running is not started to be told: there is no browser on it.
+    const started: string[] = [];
+    const cold = build(
+      {},
+      {
+        provider: {
+          name: "docker",
+          isolation: "per-bot",
+          locate: async (botId: string) => {
+            started.push(botId);
+            return `http://127.0.0.1:${COMPUTER_PORT}`;
+          },
+          status: async (botId: string) => ({
+            botId,
+            state: "absent" as const,
+          }),
+          stop: async () => ({ wasRunning: false }),
+          reset: async () => ({ cleared: false }),
+          list: async () => [],
+        } satisfies ComputerProvider,
+      },
+    );
+    await open(openbot, "ada");
+    const before = disconnects();
+    expect(
+      (
+        await call(
+          cold,
+          `/api/recorder/connections/${handed(ada.id).connectionId}`,
+          { method: "DELETE", as: "ada" },
+        )
+      ).status,
+    ).toBe(204);
+    expect(started).toEqual([]);
+    expect(disconnects()).toBe(before);
+
+    // A computer nothing answers on.
+    const gone = build(
+      {},
+      {
+        provider: {
+          name: "shared",
+          isolation: "shared",
+          locate: async () => `http://127.0.0.1:${NOTHING_PORT}`,
+          status: async (botId: string) => ({
+            botId,
+            state: "ready" as const,
+          }),
+          stop: async () => ({ wasRunning: false }),
+          reset: async () => ({ cleared: false }),
+          list: async () => [],
+        } satisfies ComputerProvider,
+      },
+    );
+    await open(openbot, "ada");
+    const { result: unreachable, failed } = await logged(() =>
+      call(gone, `/api/recorder/connections/${handed(ada.id).connectionId}`, {
+        method: "DELETE",
+        as: "ada",
+      }),
+    );
+    expect(unreachable.status).toBe(204);
+    expect(typesOf(failed)).toEqual(["browser-computer-unreachable"]);
+
+    // A computer that takes the request and does not answer: the revoke answers once OpenBot stops waiting.
+    const impatient = build({}, { callTimeoutMs: 300 });
+    await open(openbot, "ada");
+    const slow = handed(ada.id);
+    let release = () => {};
+    refuseNextDisconnect = {
+      never: new Promise<void>((resolve) => {
+        release = resolve;
+      }),
+    };
+    try {
+      const startedAt = Date.now();
+      const { result } = await logged(() =>
+        call(impatient, `/api/recorder/connections/${slow.connectionId}`, {
+          method: "DELETE",
+          as: "ada",
+        }),
+      );
+      expect(result.status).toBe(204);
+      expect(Date.now() - startedAt).toBeLessThan(5_000);
+    } finally {
+      release();
+    }
+    // Each revoke stood.
+    for (const connection of [closedOne, slow])
+      expect(
+        (
+          await call(openbot, "/api/recorder/me", {
+            headers: bearer(connection.token),
+          })
+        ).status,
+      ).toBe(401);
+  });
+
+  test("only the OpenBot browser's own connection reaches it: not another browser's, and not the Recorder's own Disconnect", async () => {
+    await open(openbot, "ada");
+    const browser = handed(ada.id);
+    const before = disconnects();
+
+    // Ada's Chrome on her laptop, connected through the Recorder's own Connect, disconnected in Settings, Browsers.
+    const code = (await (
+      await call(openbot, "/api/recorder/connect-codes", {
+        method: "POST",
+        as: "ada",
+        json: { via: "web" },
+      })
+    ).json()) as { code: string };
+    const exchanged = await call(openbot, "/api/recorder/connections", {
+      method: "POST",
+      headers: { origin: `chrome-extension://${RECORDER_EXTENSION_ID}` },
+      json: {
+        code: code.code,
+        label: "Chrome on Ada's laptop",
+        installId: "0123456789abcdef0123456789abcdef",
+      },
+    });
+    expect(exchanged.status).toBe(201);
+    const laptop = ((await exchanged.json()) as { connection: { id: string } })
+      .connection;
+    await disconnect(laptop.id);
+    expect(disconnects()).toBe(before);
+    expect((await state()).recorder).toMatchObject({
+      connected: true,
+      userId: ada.id,
+    });
+
+    // The Recorder in the OpenBot browser disconnecting itself from its own popup: it forgets the connection itself, as
+    // the person's own Disconnect, so it is not told it was signed out.
+    expect(
+      (
+        await call(openbot, "/api/recorder/connections/current", {
+          method: "DELETE",
+          headers: bearer(browser.token),
+        })
+      ).status,
+    ).toBe(204);
+    expect(disconnects()).toBe(before);
+  });
 
   test("Disconnect in Settings, Browsers, then Record: the browser is connected again first, and records under a connection that stands", async () => {
     await open(openbot, "ada");
     const revoked = handed(ada.id);
     await disconnect(revoked.connectionId);
-    // The Recorder has not heard: it hears on its next call to OpenBot, hours away on a quiet browser.
-    expect(browsers.get(computerId())?.state.recorder?.connected).toBe(true);
+    // OpenBot told the Recorder at once, and it says it is signed out.
+    expect(browsers.get(computerId())?.state.recorder?.connected).toBe(false);
 
     const started = await record("Look up Charles Babbage");
     expect(started.status).toBe(200);

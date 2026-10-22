@@ -48,7 +48,11 @@ import {
   createAttachmentRoutes,
   createChannelAttachmentRoutes,
 } from "./channels/attachments";
-import { type BrowserRouteDeps, createBrowserRoutes } from "./browser/routes";
+import {
+  type BrowserRouteDeps,
+  browserConnectionRevoked,
+  createBrowserRoutes,
+} from "./browser/routes";
 import type { ChannelEventHub } from "./channels/events";
 import { createGroupRoutes, type GroupConversations } from "./channels/group";
 import { type ChannelStore, createChannelRoutes } from "./channels/routes";
@@ -1615,6 +1619,10 @@ export function createApp(
       "/api/recorder",
       createRecorderRoutes({
         ...coworker.recorder,
+        // A Disconnect in Settings, Browsers reaches the person's own OpenBot browser at once.
+        ...(coworker.browser
+          ? { onRevoked: browserConnectionRevoked(coworker.browser) }
+          : {}),
         requireUser,
         requireRecorder: createRequireRecorder(
           coworker.recorder.resolve,

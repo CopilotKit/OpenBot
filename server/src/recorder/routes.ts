@@ -3,6 +3,7 @@ import {
   type ExchangeResponse,
   exchangeRequestSchema,
   type LearningSpaceState,
+  type RecorderConnection,
   type RecorderConnectionsResponse,
   type RecorderMe,
   type RecorderUser,
@@ -25,6 +26,9 @@ export type RecorderRouteDeps = {
   learningSpace: (actor: AuthenticatedActor) => Promise<LearningSpaceState>;
   /** A browser connected as this person: make their Learning space in the background. Never throws or waits. */
   onConnected?: (userId: string) => void;
+  /** The person revoked one of their connections from OpenBot (Settings, Browsers): the browser holding it is told, where
+   * OpenBot can reach it (their own OpenBot browser, browser/routes.ts). Awaited, briefly; never throws. */
+  onRevoked?: (userId: string, connection: RecorderConnection) => Promise<void>;
   /** The name falls back to the email, never empty. */
   user: (userId: string) => Promise<RecorderUser | null>;
   /** Null outside organization mode. */
@@ -180,18 +184,25 @@ export function createRecorderRoutes(deps: RecorderRouteDeps) {
     },
   );
 
+  // The Recorder's own Disconnect above is not passed on: the browser that would be told is the one that asked, and it
+  // forgets its connection itself, as the person's Disconnect rather than a sign-out.
   routes.delete("/connections/:id", deps.requireUser, async (context) => {
+    const userId = context.var.actor.id;
     const connectionId = context.req.param("id");
-    if (!(await deps.connections.revoke(context.var.actor.id, connectionId))) {
+    const revoking = (await deps.connections.list(userId)).find(
+      (connection) => connection.id === connectionId,
+    );
+    if (!revoking || !(await deps.connections.revoke(userId, connectionId))) {
       return context.json({ error: "That connection was not found." }, 404);
     }
     await audit({
       eventType: "recorder.revoked",
       targetType: "recorder_connection",
       targetId: connectionId,
-      actorUserId: context.var.actor.id,
+      actorUserId: userId,
       payload: { connectionId, reason: "revoked" },
     });
+    await deps.onRevoked?.(userId, revoking);
     return context.body(null, 204);
   });
 

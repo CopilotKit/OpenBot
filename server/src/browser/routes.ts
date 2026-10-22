@@ -12,8 +12,10 @@ import {
   browserOpenRequestSchema,
   browserRecordingRequestSchema,
   browserTabsRequestSchema,
+  type LauncherState,
   type Narration,
 } from "@openbot/shared/openbot-browser";
+import type { RecorderConnection } from "@openbot/shared/recorder-api";
 import { RECORDER_EXTENSION_ID } from "@openbot/shared/recorder-extension";
 import { Hono, type MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
@@ -69,6 +71,11 @@ const OPEN_TIMEOUT_MS = 90_000;
  * deadline the Bots' computer transport gives a browser action (computer/client.ts).
  */
 export const CALL_TIMEOUT_MS = 45_000;
+/**
+ * How long a revoke waits for the person's browser to hear of it. The revoke has happened either way: a browser that
+ * did not hear in time hears on its next call to OpenBot, and the state route reports it signed out meanwhile.
+ */
+const DISCONNECT_TIMEOUT_MS = 5_000;
 
 /**
  * How far from its arrival a narration time may be once it is on this server's clock. A page sends a phrase as it ends,
@@ -154,58 +161,41 @@ function browserState(value: unknown): BrowserState | null {
 }
 
 /** Who hears the person: the Recorder says, and before it has, the window does (a native window has a microphone, a
- * screen does not). */
+ * screen does not). A Recorder that is signed out has been told nothing: it is handed narration with its connection. */
 function narrationOf(state: BrowserState): Narration | undefined {
-  if (state.recorder?.narration) return state.recorder.narration;
+  if (state.recorder?.connected && state.recorder.narration)
+    return state.recorder.narration;
   if (state.window === "native") return "own";
   if (state.window === "screen") return "external";
   return undefined;
 }
 
-/**
- * Whether an address the person typed may be opened: a web address, or one with no scheme for the browser to read as
- * one. Never `file:`, `chrome:`, `javascript:` or `data:`: on a computer in the cloud the first reads the computer's own
- * disk, where other people's browser profiles are kept. `example.com:8080` is a host and port, not a scheme.
- */
-export function isWebAddress(input: string): boolean {
-  const scheme = /^([a-z][a-z0-9+.-]*):(?!\d)/i.exec(input.trim())?.[1];
-  return (
-    scheme === undefined || ["http", "https"].includes(scheme.toLowerCase())
-  );
+/** The Recorder's report once its connection is gone: signed out, as it reports itself after OpenBot signs it out. */
+function signedOut(recorder: LauncherState): LauncherState {
+  const { userId: _revoked, ...rest } = recorder;
+  return { ...rest, connected: false };
 }
 
-/**
- * The person's own OpenBot browser: open it, see it, record in it, narrate, move between its tabs and close it. Every
- * route is the signed-in person's own browser, named from who is asking (browser/person.ts), so there is no id in the
- * path to ask for anybody else's.
- *
- * Opening it connects the Recorder in it as this person with no Connect step: OpenBot mints the connection itself, as
- * the exchange would (recorder/connections.ts), sealing the person's organization session from this request as the
- * connect-code route does, and hands it to the computer, which hands it to the Recorder over the DevTools pipe only the
- * launcher holds. It is one more connected browser, in Settings, Browsers like any other, and can be disconnected there.
- */
-export function createBrowserRoutes(deps: BrowserRouteDeps) {
-  const routes = new Hono<{ Variables: AppVariables }>();
-  const audit = recorderAudit(deps.auditStore);
+/** One computer route for a person's browser, under the computer token with the browser in `x-openbot-bot-id`: a GET,
+ * or a POST of `body` (a POST with no body when `method` says so). */
+function computerCaller(
+  deps: Pick<BrowserRouteDeps, "token" | "fetchImpl" | "callTimeoutMs">,
+) {
   const doFetch = deps.fetchImpl ?? fetch;
   const callTimeoutMs = deps.callTimeoutMs ?? CALL_TIMEOUT_MS;
-  /** When each narration request reached this server, read before signing the person in can take any time. */
-  const arrivals = new WeakMap<Request, number>();
-
-  /** One computer route for this person's browser, under the computer token with the browser in `x-openbot-bot-id`. */
-  async function ask(
+  return async function ask(
     base: string,
     computerId: string,
     path: string,
-    body?: unknown,
-    timeoutMs = callTimeoutMs,
+    options: { body?: unknown; method?: "POST"; timeoutMs?: number } = {},
   ): Promise<{ status: number; body: unknown }> {
+    const { body, timeoutMs = callTimeoutMs } = options;
     const checked = checkComputerAddress(base);
     if (!checked.allowed) throw new BrowserCallError(checked.reason);
     let response: Response;
     try {
       response = await doFetch(`${base.replace(/\/$/, "")}${path}`, {
-        method: body === undefined ? "GET" : "POST",
+        method: options.method ?? (body === undefined ? "GET" : "POST"),
         headers: {
           "x-openbot-bot-id": computerId,
           ...(deps.token ? { "x-openbot-computer-token": deps.token } : {}),
@@ -246,7 +236,117 @@ export function createBrowserRoutes(deps: BrowserRouteDeps) {
       status: response.status,
       body: await response.json().catch(() => null),
     };
-  }
+  };
+}
+
+/** Whether OpenBot holds a live Recorder connection for this person's OpenBot browser: the one stored under the
+ * browser's install id, which each open replaces. */
+async function holdsBrowserConnection(
+  connections: BrowserRouteDeps["recorder"]["connections"],
+  userId: string,
+): Promise<boolean> {
+  const installId = personBrowserInstallId(personBrowserId(userId));
+  return (await connections.list(userId)).some(
+    (connection) => connection.installId === installId,
+  );
+}
+
+/**
+ * Tells a person's own OpenBot browser that OpenBot revoked its Recorder connection: what a Disconnect in Settings,
+ * Browsers does next (recorder/routes.ts, wired in app.ts). On its own the Recorder hears of a revoke only on its next
+ * call to OpenBot, which on a quiet browser is its keep-alive, hours away, and says it is connected until then. So the
+ * browser's computer has it forget the connection now (`POST /browser/disconnect`), as it would on hearing OpenBot say
+ * its token is gone.
+ *
+ * Best effort, and never a reason the revoke fails: the token is revoked already. A browser that is closed, one whose
+ * computer is not running (never started for this), or one that cannot be reached or is slow to answer hears on its
+ * next call instead, and the state route reports it signed out meanwhile. Only the browser's own connection is its to
+ * forget: not another browser's, and not one a newer connection of this browser replaced meanwhile (an open, or a
+ * Record that connected it again).
+ */
+export function browserConnectionRevoked(
+  deps: Pick<
+    BrowserRouteDeps,
+    "computers" | "token" | "recorder" | "fetchImpl" | "callTimeoutMs"
+  >,
+): (userId: string, connection: RecorderConnection) => Promise<void> {
+  const ask = computerCaller(deps);
+  return async (userId, connection) => {
+    const computers = deps.computers;
+    const computerId = personBrowserId(userId);
+    if (
+      !computers ||
+      connection.via !== "openbot-browser" ||
+      connection.installId !== personBrowserInstallId(computerId)
+    )
+      return;
+    try {
+      if (await holdsBrowserConnection(deps.recorder.connections, userId))
+        return;
+      if (!(await computers.running(computerId))) return;
+      const base = await computers.locate(computerId);
+      const answer = await ask(
+        base,
+        computerId,
+        browserComputerPaths.disconnect,
+        {
+          method: "POST",
+          timeoutMs: deps.callTimeoutMs ?? DISCONNECT_TIMEOUT_MS,
+        },
+      );
+      // A browser that is not open has nothing to forget (409): it is handed a new connection when it opens.
+      if (
+        (answer.status >= 200 && answer.status < 300) ||
+        answer.status === 409
+      )
+        return;
+      console.warn(
+        JSON.stringify({
+          type: "browser-disconnect-refused",
+          status: answer.status,
+        }),
+      );
+    } catch (error) {
+      // An unreachable or slow computer is logged where it was asked.
+      if (!(error instanceof BrowserCallError))
+        console.error(
+          JSON.stringify({
+            type: "browser-disconnect-failed",
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        );
+    }
+  };
+}
+
+/**
+ * Whether an address the person typed may be opened: a web address, or one with no scheme for the browser to read as
+ * one. Never `file:`, `chrome:`, `javascript:` or `data:`: on a computer in the cloud the first reads the computer's own
+ * disk, where other people's browser profiles are kept. `example.com:8080` is a host and port, not a scheme.
+ */
+export function isWebAddress(input: string): boolean {
+  const scheme = /^([a-z][a-z0-9+.-]*):(?!\d)/i.exec(input.trim())?.[1];
+  return (
+    scheme === undefined || ["http", "https"].includes(scheme.toLowerCase())
+  );
+}
+
+/**
+ * The person's own OpenBot browser: open it, see it, record in it, narrate, move between its tabs and close it. Every
+ * route is the signed-in person's own browser, named from who is asking (browser/person.ts), so there is no id in the
+ * path to ask for anybody else's.
+ *
+ * Opening it connects the Recorder in it as this person with no Connect step: OpenBot mints the connection itself, as
+ * the exchange would (recorder/connections.ts), sealing the person's organization session from this request as the
+ * connect-code route does, and hands it to the computer, which hands it to the Recorder over the DevTools pipe only the
+ * launcher holds. It is one more connected browser, in Settings, Browsers like any other, and can be disconnected there.
+ */
+export function createBrowserRoutes(deps: BrowserRouteDeps) {
+  const routes = new Hono<{ Variables: AppVariables }>();
+  const audit = recorderAudit(deps.auditStore);
+  const ask = computerCaller(deps);
+  /** When each narration request reached this server, read before signing the person in can take any time. */
+  const arrivals = new WeakMap<Request, number>();
 
   /**
    * The computer's refusal, for the person. What is about their request keeps its status and the computer's sentence: a
@@ -285,53 +385,70 @@ export function createBrowserRoutes(deps: BrowserRouteDeps) {
     tabs: [],
   });
 
-  const view = (computerId: string, state: BrowserState): BrowserApiState => {
+  /**
+   * The person's browser as they see it. The Recorder's report is taken as it says, except that a Recorder holding a
+   * connection OpenBot revoked is signed out whatever it says: OpenBot tells it of a revoke at once
+   * (`browserConnectionRevoked`), and when that did not reach it, it hears only on its next call to OpenBot.
+   */
+  const view = async (
+    userId: string,
+    state: BrowserState,
+  ): Promise<BrowserApiState> => {
     const narration = narrationOf(state);
+    const recorder = state.recorder;
+    const revoked =
+      recorder?.connected === true &&
+      !(await holdsBrowserConnection(deps.recorder.connections, userId));
     return {
       ...state,
+      ...(recorder && revoked ? { recorder: signedOut(recorder) } : {}),
       available: true,
-      computerId,
+      computerId: personBrowserId(userId),
       ...(narration ? { narration } : {}),
     };
   };
 
   /** The browser as it is now, for the person to see. Never fails for the computer: a browser that cannot be asked is
    * one that is not open, and opening it says why. */
-  async function currentState(computerId: string): Promise<BrowserApiState> {
+  async function currentState(userId: string): Promise<BrowserApiState> {
+    const computerId = personBrowserId(userId);
     const computers = deps.computers;
     if (!computers) return closed(computerId, false);
+    let state: BrowserState | null;
     try {
       if (!(await computers.running(computerId)))
         return closed(computerId, true);
       const base = await computers.locate(computerId);
       const answer = await ask(base, computerId, browserComputerPaths.state);
-      const state = answer.status === 200 ? browserState(answer.body) : null;
-      return state ? view(computerId, state) : closed(computerId, true);
+      state = answer.status === 200 ? browserState(answer.body) : null;
     } catch {
       return closed(computerId, true);
     }
+    return state ? view(userId, state) : closed(computerId, true);
   }
 
   /** Forwards one request to the person's browser. `answer` is what the person is told when it was taken: the browser's
    * state after it, by default, as the contract's routes answer. */
   async function forward(
-    computerId: string,
+    userId: string,
     path: string,
     body: unknown,
     answer: (state: BrowserState | null) => Promise<unknown> = async (state) =>
-      state ? view(computerId, state) : currentState(computerId),
+      state ? view(userId, state) : currentState(userId),
   ): Promise<Response> {
+    const computerId = personBrowserId(userId);
     const computers = deps.computers;
     if (!computers)
       return Response.json({ error: SENTENCES.unavailable }, { status: 503 });
+    let taken: { status: number; body: unknown };
     try {
       const base = await computers.locate(computerId);
-      const taken = await ask(base, computerId, path, body);
-      if (taken.status < 200 || taken.status >= 300) return refused(taken);
-      return Response.json(await answer(browserState(taken.body)));
+      taken = await ask(base, computerId, path, { body });
     } catch (error) {
       return unreachable(error);
     }
+    if (taken.status < 200 || taken.status >= 300) return refused(taken);
+    return Response.json(await answer(browserState(taken.body)));
   }
 
   /** The body, read against the contract's schema; null when it does not match. */
@@ -419,13 +536,10 @@ export function createBrowserRoutes(deps: BrowserRouteDeps) {
 
     try {
       const base = await computers.locate(computerId);
-      const answer = await ask(
-        base,
-        computerId,
-        browserComputerPaths.open,
-        request.data,
-        OPEN_TIMEOUT_MS,
-      );
+      const answer = await ask(base, computerId, browserComputerPaths.open, {
+        body: request.data,
+        timeoutMs: OPEN_TIMEOUT_MS,
+      });
       if (answer.status < 200 || answer.status >= 300)
         return { ok: false, response: refused(answer) };
       const state = browserState(answer.body);
@@ -443,11 +557,12 @@ export function createBrowserRoutes(deps: BrowserRouteDeps) {
 
   /**
    * Before Record: when the Recorder in the person's open browser has lost its connection, it is connected again as Open
-   * does, so the recording starts under a connection that stands. Disconnect in Settings, Browsers revokes it at once,
-   * and the Recorder hears of that only on its next call to OpenBot, which on a quiet browser is its keep-alive, hours
-   * away: until then it starts a recording that its first capture pass ends, and the person is told nothing. So this asks
-   * OpenBot's own record of the connection as well as the Recorder. Null to go on and record; otherwise what the person
-   * is told instead. A browser that is not open is left to the computer, which refuses Record for it.
+   * does, so the recording starts under a connection that stands. Disconnect in Settings, Browsers revokes it at once and
+   * tells the Recorder (`browserConnectionRevoked`), but a Recorder that was not told (its computer could not be reached
+   * in time) hears only on its next call to OpenBot, which on a quiet browser is its keep-alive, hours away: until then
+   * it starts a recording that its first capture pass ends, and the person is told nothing. So this asks OpenBot's own
+   * record of the connection as well as the Recorder. Null to go on and record; otherwise what the person is told
+   * instead. A browser that is not open is left to the computer, which refuses Record for it.
    */
   async function connectedForRecording(asker: Asker): Promise<Response | null> {
     const computers = deps.computers;
@@ -462,10 +577,10 @@ export function createBrowserRoutes(deps: BrowserRouteDeps) {
       return unreachable(error);
     }
     if (!state?.open) return null;
-    const installId = personBrowserInstallId(computerId);
-    const standing = (
-      await deps.recorder.connections.list(asker.actor.id)
-    ).some((connection) => connection.installId === installId);
+    const standing = await holdsBrowserConnection(
+      deps.recorder.connections,
+      asker.actor.id,
+    );
     // A Recorder that has not answered yet is taken at OpenBot's word.
     const recorder = state.recorder;
     const holdsIt =
@@ -477,7 +592,7 @@ export function createBrowserRoutes(deps: BrowserRouteDeps) {
   }
 
   routes.get("/", deps.requireUser, async (context) =>
-    context.json(await currentState(personBrowserId(context.var.actor.id))),
+    context.json(await currentState(context.var.actor.id)),
   );
 
   routes.post("/open", deps.requireUser, async (context) => {
@@ -514,7 +629,7 @@ export function createBrowserRoutes(deps: BrowserRouteDeps) {
         if (instead) return instead;
       }
       return forward(
-        personBrowserId(context.var.actor.id),
+        context.var.actor.id,
         browserComputerPaths.recording,
         body,
       );
@@ -541,7 +656,7 @@ export function createBrowserRoutes(deps: BrowserRouteDeps) {
       if (!corrected)
         return context.json({ error: SENTENCES.phraseTimes }, 400);
       return forward(
-        personBrowserId(context.var.actor.id),
+        context.var.actor.id,
         browserComputerPaths.narration,
         corrected,
         async () => ({ ok: true }),
@@ -560,11 +675,7 @@ export function createBrowserRoutes(deps: BrowserRouteDeps) {
         return context.json({ error: "That tab could not be found." }, 400);
       if (body.action === "new" && body.url && !isWebAddress(body.url))
         return context.json({ error: SENTENCES.notWeb }, 400);
-      return forward(
-        personBrowserId(context.var.actor.id),
-        browserComputerPaths.tabs,
-        body,
-      );
+      return forward(context.var.actor.id, browserComputerPaths.tabs, body);
     },
   );
 
@@ -578,20 +689,12 @@ export function createBrowserRoutes(deps: BrowserRouteDeps) {
       if (!body) return context.json({ error: "Type an address." }, 400);
       if ("url" in body && !isWebAddress(body.url))
         return context.json({ error: SENTENCES.notWeb }, 400);
-      return forward(
-        personBrowserId(context.var.actor.id),
-        browserComputerPaths.navigate,
-        body,
-      );
+      return forward(context.var.actor.id, browserComputerPaths.navigate, body);
     },
   );
 
   routes.post("/close", deps.requireUser, async (context) =>
-    forward(
-      personBrowserId(context.var.actor.id),
-      browserComputerPaths.close,
-      {},
-    ),
+    forward(context.var.actor.id, browserComputerPaths.close, {}),
   );
 
   return routes;
