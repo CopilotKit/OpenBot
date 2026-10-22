@@ -40,9 +40,15 @@ import { useNarration } from "./use-narration";
 /** The shape of the computer's browser viewport, kept for the screen before its first frame says otherwise. */
 const SCREEN_ASPECT_RATIO = 1280 / 800;
 
-/** A tab's name as the strip shows it: its title, else its host, else what Chrome calls an empty tab. */
+/**
+ * A tab's name as the strip shows it: its title, else its host, else what Chrome calls an empty tab.
+ *
+ * A page with no title of its own is titled with its address by the browser, which is what the computer reports: an
+ * empty tab comes back as `about:blank`, titled `about:blank`. So a title that is only the tab's address is no title.
+ */
 export function tabName(tab: BrowserTab): string {
-  if (tab.title.trim()) return tab.title.trim();
+  const title = tab.title.trim();
+  if (title && title !== tab.url) return title;
   if (!tab.url || tab.url === "about:blank") return "New tab";
   try {
     return new URL(tab.url).host || tab.url;
