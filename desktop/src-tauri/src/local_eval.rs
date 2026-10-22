@@ -9,8 +9,8 @@
 //!
 //! - **Nothing unverified runs.** The CLI is pinned by SHA-256, like every other program this app
 //!   fetches (`install.rs`). There is no fallback to `PATH`, `npx` or a global install.
-//! - **Arguments are fixed.** Only `status`, `start` and `stop`, a validated stack id and `--json`,
-//!   plus the constant `list`, `setup` and `connect` lists, as separate arguments with no shell. The CLI's `resumeCommand` strings are text for a
+//! - **Arguments are fixed.** Only `status`, `start`, `stop` and `login`, a validated stack id and
+//!   `--json`, plus the constant `list`, `setup` and `connect` lists, as separate arguments with no shell. The CLI's `resumeCommand` strings are text for a
 //!   terminal user; they are dropped here and never executed.
 //! - **Only allowlisted facts leave.** Raw stdout, stderr, error messages and recovery text never
 //!   cross IPC or reach a log. Failures are static categories with no payload.
@@ -21,8 +21,8 @@
 //! unknown keeps chat closed.
 //!
 //! Source: Intelligence `apps/cli/src/commands/local.ts`, `services/local-manager.ts` and
-//! `services/local-errors.ts` at 3935afbfe3cda88dfeabfd0250db08ff0ad51000; `local connect` at
-//! 780313e4edf6fc5f038c3cf5e4612ac668446c45.
+//! `services/local-errors.ts` at 3935afbfe3cda88dfeabfd0250db08ff0ad51000; `local connect` and
+//! `local login` (`commands/local-login.ts`) at 780313e4edf6fc5f038c3cf5e4612ac668446c45.
 
 use std::io::{Read, Seek};
 use std::path::PathBuf;
@@ -162,6 +162,10 @@ pub enum Reason {
     LocalCommandFailed,
     /// `connect` asked for its approval flag. Desktop always sends it, so this is a contract gap.
     ConfirmationRequired,
+    /// `login`: the dashboard did not answer within the CLI's own wait.
+    DashboardUnavailable,
+    /// `login`: the CLI could not open the browser. Its fallback is a code approved in a terminal.
+    BrowserOpenFailed,
     /// A reason this build does not know. Treated as blocking, never as success.
     Unrecognized,
 }
@@ -184,6 +188,8 @@ impl Reason {
             "local_command_busy" => Reason::LocalCommandBusy,
             "local_command_failed" => Reason::LocalCommandFailed,
             "confirmation_required" => Reason::ConfirmationRequired,
+            "dashboard_unavailable" => Reason::DashboardUnavailable,
+            "browser_open_failed" => Reason::BrowserOpenFailed,
             _ => Reason::Unrecognized,
         }
     }
@@ -211,6 +217,15 @@ pub struct Connection {
     pub reason: Option<Reason>,
     /// The CLI found settings it wrote earlier changed since, and kept them.
     pub conflicted: bool,
+}
+
+/// What `local login` did. The single-use sign-in link it opens is a bearer credential, and the CLI
+/// never prints it; of the rest, only the outcome and the reason are kept.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SignIn {
+    pub outcome: Outcome,
+    pub reason: Option<Reason>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -281,6 +296,17 @@ its own (contract request 8).
 pub const CONNECT_ARGUMENTS: [&str; 4] = ["local", "connect", "--approve-connection", "--json"];
 
 /**
+`local login` signs the browser in to the stack's dashboard with no code to approve.
+
+The CLI waits for the dashboard, mints a single-use link and opens the browser itself, so the app
+opens nothing of its own. The browser lands on the dashboard's `/login?autoSignIn=1`; the command
+takes no return path.
+*/
+pub fn login_arguments(stack: &StackId) -> [&str; 5] {
+    ["local", "login", "--stack", stack.as_str(), "--json"]
+}
+
+/**
 Turn what the CLI printed, and how it exited, into the facts this app keeps.
 
 `local` exits 0 with `completed`, 2 with `blocked` and 1 with `failed`. Any other code means it
@@ -342,6 +368,26 @@ pub fn normalize_connect(exit_code: i32, stdout: &[u8]) -> Result<Connection, Fa
         stack: reported_stack(outcome, wire)?,
         reason: reason(outcome, wire)?,
         conflicted,
+    })
+}
+
+/**
+`local login`, held to the same rules. A completed login counts only when it says it opened the
+browser for the stack it was asked about; its summary, dashboard address and terminal commands are
+not kept.
+*/
+pub fn normalize_login(stack: &StackId, exit_code: i32, stdout: &[u8]) -> Result<SignIn, Failure> {
+    let wire = parse_envelope("local login", exit_code, stdout)?;
+    let (outcome, wire) = (wire.0, &wire.1);
+    if outcome == Outcome::Completed
+        && (wire.get("browserOpened") != Some(&Value::Bool(true))
+            || wire.get("stackId").and_then(Value::as_str) != Some(stack.as_str()))
+    {
+        return Err(Failure::InvalidStatus);
+    }
+    Ok(SignIn {
+        outcome,
+        reason: reason(outcome, wire)?,
     })
 }
 
@@ -962,6 +1008,17 @@ pub fn connect(
     normalize_connect(code, &bytes)
 }
 
+/// `local login` for `stack`.
+pub fn login(
+    cli: &PinnedCli,
+    stack: &StackId,
+    limits: Limits,
+    cancel: &Cancel,
+) -> Result<SignIn, Failure> {
+    let (code, bytes) = execute(cli, &login_arguments(stack), None, limits, cancel)?;
+    normalize_login(stack, code, &bytes)
+}
+
 /// `local list`, within the same limits as `status`.
 pub fn list(cli: &PinnedCli, limits: Limits, cancel: &Cancel) -> Result<Listing, Failure> {
     let (code, bytes) = execute(cli, &LIST_ARGUMENTS, None, limits, cancel)?;
@@ -969,8 +1026,8 @@ pub fn list(cli: &PinnedCli, limits: Limits, cancel: &Cancel) -> Result<Listing,
 }
 
 /// The exit code and stdout of one bounded CLI process. Arguments come only from `arguments`,
-/// `LIST_ARGUMENTS`, `SETUP_ARGUMENTS` and `CONNECT_ARGUMENTS`; only setup and connect run
-/// somewhere other than inherited.
+/// `login_arguments`, `LIST_ARGUMENTS`, `SETUP_ARGUMENTS` and `CONNECT_ARGUMENTS`; only setup and
+/// connect run somewhere other than inherited.
 fn execute(
     cli: &PinnedCli,
     arguments: &[&str],
@@ -1351,6 +1408,16 @@ pub fn connect_installed(
     one_at_a_time(&attempt.0, Limits::for_action(Action::Status), |limits| {
         let cli = installed()?;
         connect(&cli, installation, limits, &attempt.0)
+    })
+}
+
+/// `local login` against the installed CLI, within the limits of `status`: the CLI waits up to a
+/// minute for the dashboard before it opens anything.
+pub fn login_installed(attempt: &str, stack: &StackId) -> Result<SignIn, Failure> {
+    let attempt = Attempt::register(attempt);
+    one_at_a_time(&attempt.0, Limits::for_action(Action::Status), |limits| {
+        let cli = installed()?;
+        login(&cli, stack, limits, &attempt.0)
     })
 }
 
@@ -2053,6 +2120,168 @@ mod tests {
             Err(Failure::Cancelled)
         );
         std::fs::remove_dir_all(installation).unwrap();
+    }
+
+    // As `local login --json` prints it at Intelligence 780313e4 (`local-login.ts`), with the
+    // bearer-free fields it really has: no handoff link is ever in it.
+    fn logged_in(status: &str, next: Value) -> String {
+        let mut input = json!({
+            "version": 1,
+            "command": "local login",
+            "status": status,
+            "error": null,
+            "nextAction": next,
+            "diagnostics": []
+        });
+        if status == "completed" {
+            input["browserOpened"] = json!(true);
+            input["stackId"] = json!("local-abc123");
+        }
+        input.to_string()
+    }
+
+    fn login_blocked(reason: &str) -> Value {
+        json!({
+            "reason": reason,
+            "summary": format!("Open http://cpk.localhost:8080/login {SECRET}"),
+            "instructions": ["http://cpk.localhost:8080/login", "copilotkit local auth pending --stack local-abc123"],
+            "resumeCommand": "copilotkit local login --stack local-abc123",
+            "url": "http://cpk.localhost:8080/login",
+            "linkLabel": "Open dashboard"
+        })
+    }
+
+    #[test]
+    fn login_arguments_are_fixed() {
+        let stack = StackId::parse("local-abc123").unwrap();
+        assert_eq!(
+            login_arguments(&stack),
+            ["local", "login", "--stack", "local-abc123", "--json"]
+        );
+    }
+
+    #[test]
+    fn login_runs_the_fixed_arguments_and_keeps_only_that_it_opened() {
+        let fixture = Fixture::new(
+            "local-eval-login",
+            &format!("0\n{}", logged_in("completed", Value::Null)),
+        );
+        let stack = StackId::parse("local-abc123").unwrap();
+        let signed = login(
+            &fixture.cli(),
+            &stack,
+            Limits::for_action(Action::Status),
+            &Cancel::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            signed,
+            SignIn {
+                outcome: Outcome::Completed,
+                reason: None
+            }
+        );
+        assert_eq!(
+            fixture.argv().unwrap(),
+            "local\nlogin\n--stack\nlocal-abc123\n--json"
+        );
+    }
+
+    #[test]
+    fn login_answers_keep_only_their_reason() {
+        let stack = StackId::parse("local-abc123").unwrap();
+        for (wire, reason) in [
+            ("dashboard_unavailable", Reason::DashboardUnavailable),
+            ("browser_open_failed", Reason::BrowserOpenFailed),
+            ("local_command_busy", Reason::LocalCommandBusy),
+            ("docker_unavailable", Reason::DockerUnavailable),
+            ("something_new", Reason::Unrecognized),
+        ] {
+            let signed = normalize_login(
+                &stack,
+                2,
+                logged_in("blocked", login_blocked(wire)).as_bytes(),
+            )
+            .unwrap();
+            assert_eq!(
+                signed,
+                SignIn {
+                    outcome: Outcome::Blocked,
+                    reason: Some(reason)
+                }
+            );
+            let said = serde_json::to_string(&signed).unwrap();
+            for leaked in [SECRET, "cpk.localhost", "auth pending", "copilotkit"] {
+                assert!(!said.contains(leaked), "{said} carried {leaked}");
+            }
+        }
+        let failed = normalize_login(
+            &stack,
+            1,
+            logged_in("failed", login_blocked("local_command_failed")).as_bytes(),
+        )
+        .unwrap();
+        assert_eq!(failed.outcome, Outcome::Failed);
+        assert_eq!(failed.reason, Some(Reason::LocalCommandFailed));
+    }
+
+    #[test]
+    fn a_login_report_is_held_to_the_same_rules() {
+        let stack = StackId::parse("local-abc123").unwrap();
+        // Opened only when the CLI says it opened the browser, for this stack.
+        let mut unopened: Value =
+            serde_json::from_str(&logged_in("completed", Value::Null)).unwrap();
+        unopened["browserOpened"] = json!(false);
+        let mut other: Value = serde_json::from_str(&logged_in("completed", Value::Null)).unwrap();
+        other["stackId"] = json!("local-other");
+        let mut missing: Value =
+            serde_json::from_str(&logged_in("completed", Value::Null)).unwrap();
+        missing.as_object_mut().unwrap().remove("browserOpened");
+        for input in [unopened, other, missing] {
+            assert_eq!(
+                normalize_login(&stack, 0, input.to_string().as_bytes()),
+                Err(Failure::InvalidStatus)
+            );
+        }
+        // Another command's report, a status the exit code contradicts, and the CLI's text output.
+        assert_eq!(
+            normalize_login(&stack, 0, envelope().to_string().as_bytes()),
+            Err(Failure::UnexpectedCommand)
+        );
+        assert_eq!(
+            normalize_login(
+                &stack,
+                0,
+                logged_in("blocked", login_blocked("x")).as_bytes()
+            ),
+            Err(Failure::ContractMismatch)
+        );
+        assert_eq!(
+            normalize_login(
+                &stack,
+                0,
+                b"Opened local sign-in in your browser. No code approval is needed; if the dashboard shows Sign In, choose it.\n"
+            ),
+            Err(Failure::InvalidJson)
+        );
+        assert_eq!(
+            normalize_login(&stack, 9, b""),
+            Err(Failure::UnexpectedExit)
+        );
+    }
+
+    #[test]
+    fn login_waits_its_turn_and_is_refused_once_cancelled() {
+        let stack = StackId::parse("local-abc123").unwrap();
+        assert_eq!(
+            login_installed("login-no-cli", &stack),
+            Err(Failure::Unavailable)
+        );
+        cancel("login-cancelled");
+        assert_eq!(
+            login_installed("login-cancelled", &stack),
+            Err(Failure::Cancelled)
+        );
     }
 
     #[test]

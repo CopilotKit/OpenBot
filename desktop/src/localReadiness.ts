@@ -97,6 +97,12 @@ const reasonRows: Record<LocalReason, ReadinessRow> = {
   "confirmation-required": blocked(
     "Intelligence asked for a confirmation OpenBot cannot give.",
   ),
+  // Reasons only `local login` gives; a status that gave one is still blocked, never ready.
+  "dashboard-unavailable": blocked(
+    "The Intelligence dashboard is not responding yet.",
+    "retry",
+  ),
+  "browser-open-failed": blocked("Your browser did not open.", "retry"),
   unrecognized: couldNotStart,
 };
 

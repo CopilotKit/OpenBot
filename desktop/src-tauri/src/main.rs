@@ -93,6 +93,9 @@ struct Shell {
     /// The configured setup destination, resolved using Tauri's build mode and platform.
     /// WebView2's current URL can still be about:blank during startup; it is never a setup source.
     setup_url: Mutex<Option<String>>,
+    /// The installation whose Intelligence dashboard the menus open, while the window is in local
+    /// mode with a recorded stack. None hides the item.
+    intelligence_menu: Mutex<Option<PathBuf>>,
 }
 
 /// The deployment whose Compose up may have created containers, including a partial failure.
@@ -3834,6 +3837,110 @@ fn cancel_local_eval(attempt: String) {
     local_eval::cancel(&attempt);
 }
 
+/**
+Sign the browser in to the recorded local stack's Intelligence dashboard, with no code to approve.
+
+`local login` opens the browser itself, so nothing here opens a second tab. The window gets nothing
+back but success or a fixed sentence; `attempt` lets `cancel_local_eval` stop the call.
+*/
+#[tauri::command]
+async fn open_local_intelligence(attempt: String, root: String) -> Result<(), Problem> {
+    let root = stack::root_from(&root);
+    tauri::async_runtime::spawn_blocking(move || {
+        open_local_intelligence_at(&root, |stack| local_eval::login_installed(&attempt, stack))
+    })
+    .await
+    .map_err(|_| Problem::plain(OPEN_INTELLIGENCE_FAILED))?
+}
+
+const OPEN_INTELLIGENCE_FAILED: &str =
+    "OpenBot could not open the Intelligence dashboard. Try again.";
+
+/// `local login` for the stack recorded in `root`, and nothing for a root with no record.
+fn open_local_intelligence_at<L>(root: &Path, login: L) -> Result<(), Problem>
+where
+    L: FnOnce(&local_eval::StackId) -> Result<local_eval::SignIn, local_eval::Failure>,
+{
+    use local_eval::{Failure, Outcome, Reason};
+    let recorded = local_eval_state::read(root, None)
+        .ok_or_else(|| Problem::plain("Set up local Intelligence before opening its dashboard."))?;
+    let said = match login(&recorded.stack_id()) {
+        Ok(signed) if signed.outcome == Outcome::Completed => return Ok(()),
+        Ok(signed) => match signed.reason {
+            Some(Reason::DashboardUnavailable) => {
+                "The Intelligence dashboard is not responding yet. Try again when Intelligence is ready."
+            }
+            Some(Reason::BrowserOpenFailed) => "Your browser did not open. Try again.",
+            Some(Reason::LocalCommandBusy) => {
+                "Another Intelligence command is still running. Try again when it finishes."
+            }
+            Some(Reason::DockerUnavailable) => "The software Intelligence runs on is not running.",
+            _ => OPEN_INTELLIGENCE_FAILED,
+        },
+        Err(Failure::Unavailable) => {
+            "This version of OpenBot cannot open the Intelligence dashboard."
+        }
+        Err(Failure::Timeout) => "The Intelligence dashboard took too long to open. Try again.",
+        Err(Failure::Cancelled) => "Opening the Intelligence dashboard was stopped.",
+        Err(_) => OPEN_INTELLIGENCE_FAILED,
+    };
+    Err(Problem::plain(said))
+}
+
+/// The root whose dashboard the menu opens: only one in local mode with a recorded stack.
+fn intelligence_menu_root(root: &Path, offered: bool) -> Option<PathBuf> {
+    (offered && local_eval_state::read(root, None).is_some()).then(|| root.to_path_buf())
+}
+
+/**
+The window says whether it is in local mode for `root`, and the menus follow.
+
+The window decides local mode, as it does for its own link; the menus add "Open Intelligence
+dashboard" only while it says so and a stack is recorded there. Sync, so the menus are rebuilt on
+the main thread.
+*/
+#[tauri::command]
+fn offer_local_intelligence(app: tauri::AppHandle, root: String, offered: bool) {
+    let next = intelligence_menu_root(&stack::root_from(&root), offered);
+    let shell = app.state::<Shell>();
+    let mut current = shell.intelligence_menu.lock().unwrap();
+    if *current == next {
+        return;
+    }
+    let show = next.is_some();
+    *current = next;
+    drop(current);
+    if let Err(error) = install_menus(&app, show) {
+        eprintln!("[menu] could not update the menus: {error}");
+    }
+}
+
+/// The menu's "Open Intelligence dashboard": a failure is said in a dialog, since the window may
+/// be hidden.
+fn open_intelligence_from_menu(app: tauri::AppHandle) {
+    let Some(root) = app
+        .state::<Shell>()
+        .intelligence_menu
+        .lock()
+        .unwrap()
+        .clone()
+    else {
+        return;
+    };
+    std::thread::spawn(move || {
+        let attempt = format!("menu-open-intelligence-{:016x}", rand::random::<u64>());
+        if let Err(problem) =
+            open_local_intelligence_at(&root, |stack| local_eval::login_installed(&attempt, stack))
+        {
+            use tauri_plugin_dialog::DialogExt;
+            app.dialog()
+                .message(problem.said)
+                .title("Open Intelligence dashboard")
+                .show(|_| {});
+        }
+    });
+}
+
 /// `bun` from PATH, or the places an installer puts it when PATH has not been reloaded.
 fn which_bun() -> Option<PathBuf> {
     if quiet::command("bun")
@@ -4245,6 +4352,7 @@ fn chose(app: &tauri::AppHandle, item: &str) {
         // Stop without quitting: the stack is what costs something to leave running, and somebody
         // who wants it stopped does not necessarily want the application gone.
         "stop" => stop_from_menu(app.clone()),
+        "open-intelligence" => open_intelligence_from_menu(app.clone()),
         // Exit rather than hide: quitting is a decision to stop, and the exit handler is what stops
         // the processes with it.
         "quit" => {
@@ -4252,6 +4360,101 @@ fn chose(app: &tauri::AppHandle, item: &str) {
         }
         _ => {}
     }
+}
+
+/**
+The tray menu and the window's menu bar, with "Open Intelligence dashboard" when `intelligence`.
+
+Built again whenever that changes, because a menu item cannot be hidden, only removed.
+*/
+fn install_menus(app: &tauri::AppHandle, intelligence: bool) -> tauri::Result<()> {
+    use tauri::menu::{IsMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
+
+    let items = || -> tauri::Result<Vec<MenuItem<tauri::Wry>>> {
+        let mut items = vec![MenuItem::with_id(
+            app,
+            "open",
+            "Open OpenBot",
+            true,
+            None::<&str>,
+        )?];
+        if intelligence {
+            items.push(MenuItem::with_id(
+                app,
+                "open-intelligence",
+                "Open Intelligence dashboard",
+                true,
+                None::<&str>,
+            )?);
+        }
+        items.push(MenuItem::with_id(
+            app,
+            "stop",
+            "Stop OpenBot",
+            true,
+            None::<&str>,
+        )?);
+        items.push(MenuItem::with_id(
+            app,
+            "quit",
+            "Quit",
+            true,
+            quit_menu_accelerator(),
+        )?);
+        Ok(items)
+    };
+    fn refs(items: &[MenuItem<tauri::Wry>]) -> Vec<&dyn IsMenuItem<tauri::Wry>> {
+        items
+            .iter()
+            .map(|item| item as &dyn IsMenuItem<tauri::Wry>)
+            .collect()
+    }
+
+    let tray_items = items()?;
+    if let Some(tray) = app.tray_by_id("openbot") {
+        tray.set_menu(Some(Menu::with_items(app, &refs(&tray_items))?))?;
+    }
+
+    // The same items on the window itself, because the tray cannot be relied on and Stop lives
+    // nowhere else.
+    //
+    // Linux needs a tray host to draw the icon, and Windows can place it in overflow.
+    // The tray library restores the Windows icon after Explorer restarts, but the window
+    // menu still provides access when the tray is unavailable or hard to find.
+    // Its own items, not the tray's: a menu item belongs to one menu, and the two menus
+    // outlive each other. The ids match so both arrive at the same function.
+    let window_items = items()?;
+    // A submenu, because a top-level entry in a menu bar has to be one to open at all.
+    let openbot = Submenu::with_items(app, "OpenBot", true, &refs(&window_items))?;
+    /*
+     * AN EDIT MENU, WITHOUT WHICH COMMAND-V DOES NOTHING.
+     *
+     * MEASURED, on the screen that asks for a paste. macOS routes the clipboard shortcuts
+     * through the menu bar, so a window with no Edit menu has no Paste, and a webview text
+     * field silently ignores the keystroke. Typing worked and pasting did not, on the one
+     * screen whose own instruction is "paste the code it shows you". Every person signing
+     * in to a Claude plan would have reached that field, pressed the shortcut everybody
+     * knows, and had nothing happen.
+     *
+     * Predefined items rather than our own: these carry the standard shortcuts and the
+     * standard behaviour, which is the whole point of them being where a person expects.
+     */
+    let edit = Submenu::with_items(
+        app,
+        "Edit",
+        true,
+        &[
+            &PredefinedMenuItem::undo(app, None)?,
+            &PredefinedMenuItem::redo(app, None)?,
+            &PredefinedMenuItem::separator(app)?,
+            &PredefinedMenuItem::cut(app, None)?,
+            &PredefinedMenuItem::copy(app, None)?,
+            &PredefinedMenuItem::paste(app, None)?,
+            &PredefinedMenuItem::select_all(app, None)?,
+        ],
+    )?;
+    app.set_menu(Menu::with_items(app, &[&openbot, &edit])?)?;
+    Ok(())
 }
 
 fn quit_menu_accelerator() -> Option<&'static str> {
@@ -4309,6 +4512,8 @@ fn main() {
             run_local_eval,
             list_local_eval,
             cancel_local_eval,
+            open_local_intelligence,
+            offer_local_intelligence,
             set_up_local_eval,
             connect_local_eval,
             last_local_eval_stop_failure,
@@ -4353,70 +4558,12 @@ fn main() {
             remember_setup_url(app.handle())?;
 
             // The status menu lets somebody open the window, stop the stack, or quit the app.
-            use tauri::menu::{Menu, MenuItem};
-            use tauri::tray::TrayIconBuilder;
-
-            let open = MenuItem::with_id(app, "open", "Open OpenBot", true, None::<&str>)?;
-            let stop = MenuItem::with_id(app, "stop", "Stop OpenBot", true, None::<&str>)?;
-            let quit = MenuItem::with_id(app, "quit", "Quit", true, quit_menu_accelerator())?;
-            let menu = Menu::with_items(app, &[&open, &stop, &quit])?;
-
-            TrayIconBuilder::with_id("openbot")
+            tauri::tray::TrayIconBuilder::with_id("openbot")
                 .icon(tray::icon())
                 .icon_as_template(false)
                 .tooltip("OpenBot")
-                .menu(&menu)
                 .build(app)?;
-
-            // The same three items on the window itself, because the tray cannot be relied on and
-            // Stop lives nowhere else.
-            //
-            // Linux needs a tray host to draw the icon, and Windows can place it in overflow.
-            // The tray library restores the Windows icon after Explorer restarts, but the window
-            // menu still provides access when the tray is unavailable or hard to find.
-            // Its own items, not the tray's: a menu item belongs to one menu, and the two menus
-            // outlive each other. The ids match so both arrive at the same function.
-            use tauri::menu::Submenu;
-            let window_open = MenuItem::with_id(app, "open", "Open OpenBot", true, None::<&str>)?;
-            let window_stop = MenuItem::with_id(app, "stop", "Stop OpenBot", true, None::<&str>)?;
-            let window_quit =
-                MenuItem::with_id(app, "quit", "Quit", true, quit_menu_accelerator())?;
-            // A submenu, because a top-level entry in a menu bar has to be one to open at all.
-            let openbot = Submenu::with_items(
-                app,
-                "OpenBot",
-                true,
-                &[&window_open, &window_stop, &window_quit],
-            )?;
-            /*
-             * AN EDIT MENU, WITHOUT WHICH COMMAND-V DOES NOTHING.
-             *
-             * MEASURED, on the screen that asks for a paste. macOS routes the clipboard shortcuts
-             * through the menu bar, so a window with no Edit menu has no Paste, and a webview text
-             * field silently ignores the keystroke. Typing worked and pasting did not, on the one
-             * screen whose own instruction is "paste the code it shows you". Every person signing
-             * in to a Claude plan would have reached that field, pressed the shortcut everybody
-             * knows, and had nothing happen.
-             *
-             * Predefined items rather than our own: these carry the standard shortcuts and the
-             * standard behaviour, which is the whole point of them being where a person expects.
-             */
-            use tauri::menu::PredefinedMenuItem;
-            let edit = Submenu::with_items(
-                app,
-                "Edit",
-                true,
-                &[
-                    &PredefinedMenuItem::undo(app, None)?,
-                    &PredefinedMenuItem::redo(app, None)?,
-                    &PredefinedMenuItem::separator(app)?,
-                    &PredefinedMenuItem::cut(app, None)?,
-                    &PredefinedMenuItem::copy(app, None)?,
-                    &PredefinedMenuItem::paste(app, None)?,
-                    &PredefinedMenuItem::select_all(app, None)?,
-                ],
-            )?;
-            app.set_menu(Menu::with_items(app, &[&openbot, &edit])?)?;
+            install_menus(app.handle(), false)?;
             app.on_menu_event(|app, event| chose(app, event.id().as_ref()));
             Ok(())
         })
@@ -6682,6 +6829,109 @@ mod tests {
             licence: local_eval::Licence::Unknown,
             licence_expires_at: None,
         }
+    }
+
+    fn signed_in(
+        outcome: local_eval::Outcome,
+        reason: Option<local_eval::Reason>,
+    ) -> Result<local_eval::SignIn, local_eval::Failure> {
+        Ok(local_eval::SignIn { outcome, reason })
+    }
+
+    #[test]
+    fn opening_intelligence_needs_a_recorded_stack_and_never_asks_the_cli_without_one() {
+        let root = local_eval_root("openbot-open-intelligence-unrecorded", None);
+        let problem =
+            open_local_intelligence_at(&root, |_| panic!("login ran without a stack")).unwrap_err();
+        assert_eq!(
+            problem,
+            Problem::plain("Set up local Intelligence before opening its dashboard.")
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn opening_intelligence_signs_in_the_recorded_stack() {
+        let root = local_eval_root(
+            "openbot-open-intelligence-recorded",
+            Some(local_eval_state::Ownership::Shared),
+        );
+        let mut asked = None;
+        open_local_intelligence_at(&root, |stack| {
+            asked = Some(stack.as_str().to_owned());
+            signed_in(local_eval::Outcome::Completed, None)
+        })
+        .unwrap();
+        assert_eq!(asked.as_deref(), Some("local-abc123"));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn opening_intelligence_fails_with_fixed_sentences_only() {
+        use local_eval::{Failure, Outcome, Reason};
+        let root = local_eval_root(
+            "openbot-open-intelligence-failures",
+            Some(local_eval_state::Ownership::Created),
+        );
+        let retry = "OpenBot could not open the Intelligence dashboard. Try again.";
+        for (result, said) in [
+            (
+                signed_in(Outcome::Blocked, Some(Reason::DashboardUnavailable)),
+                "The Intelligence dashboard is not responding yet. Try again when Intelligence is ready.",
+            ),
+            (
+                signed_in(Outcome::Blocked, Some(Reason::BrowserOpenFailed)),
+                "Your browser did not open. Try again.",
+            ),
+            (
+                signed_in(Outcome::Blocked, Some(Reason::LocalCommandBusy)),
+                "Another Intelligence command is still running. Try again when it finishes.",
+            ),
+            (
+                signed_in(Outcome::Blocked, Some(Reason::DockerUnavailable)),
+                "The software Intelligence runs on is not running.",
+            ),
+            (signed_in(Outcome::Blocked, Some(Reason::Unrecognized)), retry),
+            (signed_in(Outcome::Blocked, None), retry),
+            (signed_in(Outcome::Failed, Some(Reason::LocalCommandFailed)), retry),
+            (
+                Err(Failure::Unavailable),
+                "This version of OpenBot cannot open the Intelligence dashboard.",
+            ),
+            (
+                Err(Failure::Timeout),
+                "The Intelligence dashboard took too long to open. Try again.",
+            ),
+            (
+                Err(Failure::Cancelled),
+                "Opening the Intelligence dashboard was stopped.",
+            ),
+            (Err(Failure::InvalidJson), retry),
+            (Err(Failure::Unverified), retry),
+        ] {
+            let problem = open_local_intelligence_at(&root, |_| result).unwrap_err();
+            // Nothing but the sentence: no detail, so no CLI text can ride along.
+            assert_eq!(problem, Problem::plain(said));
+        }
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn the_intelligence_menu_item_is_offered_only_for_a_recorded_local_stack() {
+        let recorded = local_eval_root(
+            "openbot-intelligence-menu-recorded",
+            Some(local_eval_state::Ownership::Created),
+        );
+        let unrecorded = local_eval_root("openbot-intelligence-menu-unrecorded", None);
+        assert_eq!(
+            intelligence_menu_root(&recorded, true),
+            Some(recorded.clone())
+        );
+        // Hosted mode, or local mode with nothing recorded: no item.
+        assert_eq!(intelligence_menu_root(&recorded, false), None);
+        assert_eq!(intelligence_menu_root(&unrecorded, true), None);
+        let _ = std::fs::remove_dir_all(recorded);
+        let _ = std::fs::remove_dir_all(unrecorded);
     }
 
     #[test]

@@ -19,6 +19,8 @@ import {
 import {
   intelligenceStopProblem,
   listLocalEval,
+  offerLocalIntelligence,
+  openLocalIntelligence,
   splitStopFailure,
 } from "./localEvalCli";
 import { OrganizationSignIn } from "./OrganizationSignIn";
@@ -382,6 +384,17 @@ export function App() {
       if (connected) setLocalConnected(true);
     },
   });
+  // Local mode with a recorded stack: the dashboard can be opened, from here and from the menus.
+  const intelligenceOffered = localFlow && localStack !== null;
+  // What the menus were last told. Starts hidden, so a hosted run never calls.
+  const offeredToMenus = useRef({ root: "", offered: false });
+  useEffect(() => {
+    const last = offeredToMenus.current;
+    if (last.offered === intelligenceOffered && last.root === root) return;
+    if (!last.offered && !intelligenceOffered) return;
+    offeredToMenus.current = { root, offered: intelligenceOffered };
+    offerLocalIntelligence(root, intelligenceOffered).catch(() => {});
+  }, [root, intelligenceOffered]);
   // Stop OpenBot was chosen in this window: nothing local starts again on its own.
   const stoppedByChoice = useRef(false);
   const credentialContext = useRef([
@@ -1122,6 +1135,11 @@ export function App() {
             invoke("show_openbot").catch((error) => recoverFromStart(error));
           }}
           onBack={changeModelAfterAskFailure}
+          onViewIntelligence={
+            intelligenceOffered
+              ? () => openLocalIntelligence(root).opened
+              : undefined
+          }
         />
         {displayedFailure && <Failure problem={displayedFailure} />}
       </main>

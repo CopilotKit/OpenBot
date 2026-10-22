@@ -25,6 +25,8 @@ const reasons: LocalReason[] = [
   "local-command-busy",
   "local-command-failed",
   "confirmation-required",
+  "dashboard-unavailable",
+  "browser-open-failed",
   "unrecognized",
 ];
 
@@ -81,7 +83,7 @@ test("every failure gives a plain, non-empty sentence without its own name", () 
 });
 
 test("the reason and failure lists in this test match the source", () => {
-  expect(new Set(reasons).size).toBe(16);
+  expect(new Set(reasons).size).toBe(18);
   expect(localFailures.length).toBe(15);
 });
 
