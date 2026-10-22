@@ -76,30 +76,35 @@ function build(
     },
     auditStore,
   });
-  const app = createApp(
-    config,
-    {
-      handler: () => new Response(null, { status: 204 }),
-      api: {
-        getSession: async ({ headers }: { headers: Headers }) => {
-          const cookie = headers.get("cookie") ?? "";
-          const id = cookie.includes("test-session=owner")
-            ? owner
-            : cookie.includes("test-session=busy")
-              ? busy
-              : null;
-          return id
-            ? { user: { id, email: `${id}@example.test`, name: "The Owner" } }
+  /*
+   * createApp is positional. Placed by index rather than after a spread of `undefined`s, whose
+   * length TypeScript cannot see, so each dependency is type-checked against the parameter it
+   * lands on: the audit store the Recorder's routes write to is `auditStore`.
+   */
+  const args = new Array(createApp.length) as unknown as Parameters<
+    typeof createApp
+  >;
+  args[0] = config;
+  args[1] = {
+    handler: () => new Response(null, { status: 204 }),
+    api: {
+      getSession: async ({ headers }: { headers: Headers }) => {
+        const cookie = headers.get("cookie") ?? "";
+        const id = cookie.includes("test-session=owner")
+          ? owner
+          : cookie.includes("test-session=busy")
+            ? busy
             : null;
-        },
+        return id
+          ? { user: { id, email: `${id}@example.test`, name: "The Owner" } }
+          : null;
       },
-    } as never,
-    roleRepository,
-    ...(Array.from({ length: 9 }) as never[]),
-    auditStore,
-    ...(Array.from({ length: 21 }) as never[]),
-    { recorder },
-  );
+    },
+  } as never;
+  args[2] = roleRepository;
+  args[12] = auditStore;
+  args[34] = { recorder };
+  const app = createApp(...args);
   return { app, audits, config, kicked };
 }
 

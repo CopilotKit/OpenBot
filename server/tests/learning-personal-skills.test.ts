@@ -161,14 +161,18 @@ describe("a person's run", () => {
   });
 
   test("Learning off, or the Bot excluded by an administrator, gets nothing and asks nothing", async () => {
-    for (const settings of [
+    // Annotated rather than `satisfies`: an array literal's element type is the union of its
+    // elements, normalised so the first one's `agents: {}` reads `{ bot?: undefined }`, which a
+    // `LearningSettings` does not accept.
+    const switchedOff: LearningSettings[] = [
       { enabled: false, defaultTarget: { containerId: "openbot" }, agents: {} },
       {
         enabled: true,
         defaultTarget: { containerId: "openbot" },
         agents: { bot: null },
       },
-    ] satisfies LearningSettings[]) {
+    ];
+    for (const settings of switchedOff) {
       const { learning, requests } = runtime({
         settings,
         published: { openbot: botSkills, [space(ADA)]: adaSkills },

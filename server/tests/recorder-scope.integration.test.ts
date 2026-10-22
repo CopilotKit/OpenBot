@@ -8,6 +8,7 @@ import { GATED_ROUTES, runtimeRun } from "../src/admin/gate";
 import { createActorAgentResolver } from "../src/agents/agent-resolver";
 import { createApp } from "../src/app";
 import type { AuditEventInput } from "../src/audit";
+import type { RoleRepository } from "../src/auth/guards";
 import { createStallGuard } from "../src/channels/stall-guard";
 import { loadConfig } from "../src/config";
 import { mountCopilotRuntime } from "../src/copilot";
@@ -37,7 +38,7 @@ const BOT = `${prefix}-bot`;
 const COOKIE = { cookie: "test-session=owner" };
 
 const config = loadConfig(testEnvironment());
-const roleRepository = { rolesForUser: async () => ["user" as const] };
+const roleRepository: RoleRepository = { rolesForUser: async () => ["user"] };
 const getSession = async ({ headers }: { headers: Headers }) =>
   headers.get("cookie")?.includes("test-session=owner")
     ? {
@@ -111,34 +112,38 @@ const runtime = mountCopilotRuntime(
   { learningSettings, trajectoryCapture: recorder.trajectoryCapture },
 );
 
-const app = createApp(
-  config,
-  {
-    handler: () => new Response(null, { status: 204 }),
-    api: { getSession },
-  } as never,
-  roleRepository,
-  ...(Array.from({ length: 3 }) as never[]),
-  runtime.handler,
-  ...(Array.from({ length: 2 }) as never[]),
-  agentProfileStore,
-  ...(Array.from({ length: 2 }) as never[]),
-  auditStore,
-  ...(Array.from({ length: 21 }) as never[]),
-  {
-    recorder,
-    personalLearning: {
-      store: createLearningSharingStore(database),
-      skillsOf: async () => ({ skills: [] }),
-      invalidate: () => {},
-    },
-    approvals: {} as never,
-    demonstrations: {
-      store: demonstrationStore,
-      recorder: demonstrationRecorder,
-    },
+/*
+ * createApp is positional. Placed by index rather than after a spread of `undefined`s, whose length
+ * TypeScript cannot see, so each dependency is type-checked against the parameter it lands on: the
+ * runtime a Recorder bearer is refused a run on is `copilotHandler`, and the Bots are
+ * `agentProfileStore`.
+ */
+const args = new Array(createApp.length) as unknown as Parameters<
+  typeof createApp
+>;
+args[0] = config;
+args[1] = {
+  handler: () => new Response(null, { status: 204 }),
+  api: { getSession },
+} as never;
+args[2] = roleRepository;
+args[6] = runtime.handler;
+args[9] = agentProfileStore;
+args[12] = auditStore;
+args[34] = {
+  recorder,
+  personalLearning: {
+    store: createLearningSharingStore(database),
+    skillsOf: async () => ({ skills: [] }),
+    invalidate: () => {},
   },
-);
+  approvals: {} as never,
+  demonstrations: {
+    store: demonstrationStore,
+    recorder: demonstrationRecorder,
+  },
+};
+const app = createApp(...args);
 
 const call = (path: string, init: RequestInit & { json?: unknown } = {}) => {
   const { json, headers, ...rest } = init;
@@ -191,10 +196,16 @@ beforeAll(async () => {
         throw error;
       },
     ),
-    spyOn(globalThis, "fetch").mockImplementation(async (input) => {
-      dialled.push(input instanceof Request ? input.url : String(input));
-      throw new Error("No network in this test.");
-    }),
+    // `typeof fetch` carries Bun's `preconnect` as well as the call, so the stand-in has one too.
+    spyOn(globalThis, "fetch").mockImplementation(
+      Object.assign(
+        async (input: Parameters<typeof fetch>[0]): Promise<Response> => {
+          dialled.push(input instanceof Request ? input.url : String(input));
+          throw new Error("No network in this test.");
+        },
+        { preconnect: () => {} },
+      ),
+    ),
   );
   await database
     .insert(users)
