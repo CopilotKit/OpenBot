@@ -6,6 +6,7 @@ import type { BrowserState } from "../../shared/openbot-browser";
 import type { BrowserRuntime } from "../src/browser-runtime";
 import {
   setEgressPolicy,
+  setEgressResolver,
   startEgressFilter,
   stopEgressFilter,
 } from "../src/egress";
@@ -91,6 +92,12 @@ describe.skipIf(!asked)("browsers sharing a computer's egress filter", () => {
   beforeAll(async () => {
     root = await mkdtemp(join(tmpdir(), "openbot-egress-browsers-"));
     await startEgressFilter({ env: {} });
+    /*
+     * Every name the filter is asked for answers 127.0.0.1, where nothing listens on a web port. A
+     * browser allowed everything really does go out, and Chromium asked www.google.com for something
+     * of its own, which a test must not reach: the pages here are all at 127.0.0.1 by address.
+     */
+    setEgressResolver(async () => ["127.0.0.1"]);
     setEgressPolicy(ALLOWED_BOT, { mode: "allow_all", rules: [] });
     setEgressPolicy(STRICT_BOT, { mode: "allowlist_only", rules: [] });
     setEgressPolicy(PERSON, {
@@ -126,6 +133,7 @@ describe.skipIf(!asked)("browsers sharing a computer's egress filter", () => {
   afterAll(async () => {
     routes?.stop(true);
     await profiles?.closeAll();
+    setEgressResolver(null);
     await stopEgressFilter();
     openbot?.stop(true);
     internal?.stop(true);
