@@ -104,6 +104,8 @@ let slowNextNavigation:
  * a computer with no such route answers; or not until `never` settles. */
 let refuseNextDisconnect: { status: number } | { never: Promise<void> } | null =
   null;
+/** The window an open shows its browser in: a screen (hosted OpenBot) unless a test opens a native one (Desktop). */
+let openAs: "screen" | "native" = "screen";
 
 const recorderOf = (opened: Opened): LauncherState =>
   opened.state.recorder as LauncherState;
@@ -157,19 +159,22 @@ const computer = Bun.serve<{ bot: string }>({
         const parsed = browserOpenRequestSchema.safeParse(body);
         if (!parsed.success)
           return Response.json({ error: "Bad request." }, { status: 400 });
+        const native = openAs === "native";
         const next: Opened = {
           connection: parsed.data.connection,
           narrated: [],
           state: {
             open: true,
-            browser: "chromium",
-            window: "screen",
+            browser: native ? "chrome" : "chromium",
+            window: openAs,
             recorder: {
               connected: true,
               userId: parsed.data.connection.user.id,
               phase: "idle",
               actions: 0,
-              narration: "external",
+              ...(native
+                ? { narration: "own" as const, voice: "off" as const }
+                : { narration: "external" as const }),
             },
             tabs: [
               { id: "t1", url: "about:blank", title: "New Tab", active: true },
@@ -1497,6 +1502,72 @@ describe("Record after the OpenBot browser is disconnected", () => {
     expect(recordings()).toBe(before);
     expect(browsers.get(computerId())?.state.recorder?.phase).toBe("idle");
   });
+});
+
+describe("who hears the person, as every answer says it", () => {
+  // The window decides (shared/openbot-browser.ts): a native window's Recorder hears the person itself and says whether
+  // it does (`voice`); a screen's browser has no microphone, the app hears the person, and there is no `voice`.
+  const expected = {
+    screen: { narration: "external" as const },
+    native: { narration: "own" as const, voice: "off" as const },
+  };
+  const state = async () =>
+    (await (
+      await call(openbot, "/api/browser", { as: "ada" })
+    ).json()) as BrowserApiState;
+  const newTab = async () =>
+    (await (
+      await call(openbot, "/api/browser/tabs", {
+        method: "POST",
+        as: "ada",
+        json: { action: "new" },
+      })
+    ).json()) as BrowserApiState;
+
+  for (const window of ["screen", "native"] as const)
+    test(`a ${window === "screen" ? "hosted" : "Desktop"} browser's Recorder is reported with the window's narration, signed in or out`, async () => {
+      openAs = window;
+      try {
+        const opened = await open(openbot, "ada");
+        expect(opened.narration).toBe(expected[window].narration);
+        const signedIn: LauncherState = {
+          connected: true,
+          userId: ada.id,
+          phase: "idle",
+          actions: 0,
+          ...expected[window],
+        };
+        for (const answer of [await state(), await newTab()]) {
+          expect(answer.narration).toBe(expected[window].narration);
+          expect(answer.recorder).toEqual(signedIn);
+        }
+
+        // Disconnected in Settings, Browsers: the Recorder reports what the real one reports once signed out, which is
+        // its own default narration, `own` with a voice, whatever window it is in (the third end-to-end run's hosted
+        // Disconnect).
+        const removed = await call(
+          openbot,
+          `/api/recorder/connections/${handed(ada.id).connectionId}`,
+          { method: "DELETE", as: "ada" },
+        );
+        expect(removed.status).toBe(204);
+        expect(
+          browsers.get(personBrowserId(ada.id))?.state.recorder,
+        ).toMatchObject({ connected: false, narration: "own", voice: "off" });
+        const signedOut: LauncherState = {
+          connected: false,
+          phase: "idle",
+          actions: 0,
+          ...expected[window],
+        };
+        for (const answer of [await state(), await newTab()]) {
+          expect(answer.narration).toBe(expected[window].narration);
+          expect(answer.recorder).toEqual(signedOut);
+        }
+      } finally {
+        openAs = "screen";
+      }
+    });
 });
 
 describe("a person's browser on the computer routes and the live screen", () => {

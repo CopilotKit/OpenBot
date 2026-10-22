@@ -160,14 +160,33 @@ function browserState(value: unknown): BrowserState | null {
     : null;
 }
 
-/** Who hears the person: the Recorder says, and before it has, the window does (a native window has a microphone, a
- * screen does not). A Recorder that is signed out has been told nothing: it is handed narration with its connection. */
+/** Who hears the person, which the window decides: a native window has a microphone, so the Recorder hears them
+ * itself, and a screen has none, so the app hears them. The computer connects the Recorder with exactly that. Only
+ * when no window is known is it what the Recorder says. */
 function narrationOf(state: BrowserState): Narration | undefined {
-  if (state.recorder?.connected && state.recorder.narration)
-    return state.recorder.narration;
   if (state.window === "native") return "own";
   if (state.window === "screen") return "external";
-  return undefined;
+  return state.recorder?.narration;
+}
+
+/**
+ * The Recorder's report as the contract has it for the browser's narration: `voice` only where the Recorder hears the
+ * person itself, and never where the app does. A Recorder that is signed out has forgotten the narration it was handed
+ * with its connection and reports its own default, `own` with a voice, in a screen's browser too (seen after a hosted
+ * Disconnect); the window, not that default, is who hears the person. A Recorder hearing them itself that said nothing
+ * of its voice is not hearing them: off while nothing is recorded, unavailable while something is.
+ */
+function asNarrated(
+  recorder: LauncherState,
+  narration: Narration,
+): LauncherState {
+  const { voice, ...rest } = recorder;
+  if (narration === "external") return { ...rest, narration };
+  return {
+    ...rest,
+    narration,
+    voice: voice ?? (recorder.phase === "idle" ? "off" : "unavailable"),
+  };
 }
 
 /** The Recorder's report once its connection is gone: signed out, as it reports itself after OpenBot signs it out. */
@@ -388,7 +407,8 @@ export function createBrowserRoutes(deps: BrowserRouteDeps) {
   /**
    * The person's browser as they see it. The Recorder's report is taken as it says, except that a Recorder holding a
    * connection OpenBot revoked is signed out whatever it says: OpenBot tells it of a revoke at once
-   * (`browserConnectionRevoked`), and when that did not reach it, it hears only on its next call to OpenBot.
+   * (`browserConnectionRevoked`), and when that did not reach it, it hears only on its next call to OpenBot. And its
+   * narration is the window's, signed in or out (`asNarrated`).
    */
   const view = async (
     userId: string,
@@ -399,9 +419,14 @@ export function createBrowserRoutes(deps: BrowserRouteDeps) {
     const revoked =
       recorder?.connected === true &&
       !(await holdsBrowserConnection(deps.recorder.connections, userId));
+    const reported = recorder && revoked ? signedOut(recorder) : recorder;
     return {
       ...state,
-      ...(recorder && revoked ? { recorder: signedOut(recorder) } : {}),
+      ...(reported
+        ? {
+            recorder: narration ? asNarrated(reported, narration) : reported,
+          }
+        : {}),
       available: true,
       computerId: personBrowserId(userId),
       ...(narration ? { narration } : {}),
