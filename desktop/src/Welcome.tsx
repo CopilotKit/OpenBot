@@ -1,6 +1,3 @@
-import { useState } from "react";
-import { IntelligenceChoice, type IntelligenceMode } from "./LocalIntelligence";
-
 /**
  * What OpenBot is, before it asks for anything.
  *
@@ -14,12 +11,11 @@ export function Welcome({
 }: {
   onStart: () => void;
   /**
-   * When this build can run Intelligence on this computer, this screen asks where it runs, with
-   * neither answer chosen for the person: local installs both here, hosted goes to the Bot screen.
+   * When this build can run Intelligence on this computer, Install sets up both here. Local is the
+   * default with nothing to choose: one fewer decision before anything is installed.
    */
-  local?: { onInstall: () => void; onHosted: () => void };
+  local?: { onInstall: () => void };
 }) {
-  const [where, setWhere] = useState<IntelligenceMode | null>(null);
   if (local) {
     return (
       <div className="sheet">
@@ -29,17 +25,12 @@ export function Welcome({
         </div>
         <h1>Set up OpenBot</h1>
         <p className="lede big">
-          OpenBot keeps your conversations in CopilotKit Intelligence. Where
-          should it run?
+          Installs OpenBot and CopilotKit Intelligence on this computer. The
+          first setup takes about 10 minutes.
         </p>
-        <IntelligenceChoice chosen={where} onChoose={setWhere} />
         <div className="row">
-          <button
-            type="button"
-            disabled={where === null}
-            onClick={where === "local" ? local.onInstall : local.onHosted}
-          >
-            Continue
+          <button type="button" onClick={local.onInstall}>
+            Install
           </button>
         </div>
       </div>
