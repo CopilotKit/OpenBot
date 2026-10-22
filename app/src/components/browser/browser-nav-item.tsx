@@ -1,4 +1,5 @@
-import type { LauncherState } from "@openbot/shared/openbot-browser";
+import type { RealBrowser } from "@openbot/shared/openbot-browser";
+import type { RecorderActivity } from "@openbot/shared/recorder-api";
 import { IconBrowser } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
@@ -18,9 +19,12 @@ const BUTTON_CLASS = "hover:bg-foreground/5 h-10";
  *
  * Where the browser is a window on the person's desktop (OpenBot Desktop, `shows: "native"`), the click opens it, or
  * brings it to the front, and leaves the person where they are in OpenBot: they record with the Recorder's own button in
- * that window's toolbar. Where it is a browser in the page (hosted OpenBot, `shows: "screen"`), the click takes them to
- * the Browser page, which is the browser. While a recording runs the button carries its red dot either way, named for
- * the recording.
+ * that window's toolbar. That window is the person's own everyday Chrome or Edge once the Recorder is in it, and until
+ * then, where the Recorder is published, the click opens its store page there for them to add it. Where it is a browser
+ * in the page (hosted OpenBot, `shows: "screen"`), the click takes them to the Browser page, which is the browser.
+ *
+ * While any of the person's Recorders records (`activity`: the OpenBot browser's, or one in their everyday browser),
+ * the button carries a red dot either way, named for the recording.
  *
  * Drawn only once the server has said OpenBot can run a browser for this person (`available`). While it is asked, and
  * when it cannot be asked, there is no button, rather than one that opens a page saying there is nothing there.
@@ -32,9 +36,9 @@ export function BrowserNavItem() {
     <SidebarMenuItem>
       {/* A server from before `shows` only had the Browser page, so it keeps leading there. */}
       {state.data.shows === "native" ? (
-        <OpenWindowButton recorder={state.data.recorder} />
+        <OpenWindowButton activity={state.data.activity} />
       ) : (
-        <BrowserPageLink recorder={state.data.recorder} />
+        <BrowserPageLink activity={state.data.activity} />
       )}
     </SidebarMenuItem>
   );
@@ -42,6 +46,22 @@ export function BrowserNavItem() {
 
 /** The one toast a refused open says itself in. */
 const REFUSED_TOAST = "browser-open-refused";
+/** The one toast that says the Recorder's store page opened. */
+const STORE_TOAST = "browser-store-opened";
+
+const REAL_BROWSER_NAMES: Record<RealBrowser, string> = {
+  chrome: "Google Chrome",
+  msedge: "Microsoft Edge",
+};
+
+/**
+ * What the person is told when the click opened the Recorder's page in the store of their own browser, rather than a
+ * browser with the Recorder in it: the page is there, in the browser named, and adding it is what lets them record in
+ * that browser. Once it is added and connected, the same click brings that browser forward.
+ */
+export function storeOpenedSentence(browser: RealBrowser): string {
+  return `The OpenBot Recorder's page is open in ${REAL_BROWSER_NAMES[browser]}. Add it there to record in your own browser.`;
+}
 
 /**
  * A button, not a link: it does something and goes nowhere. While the browser is opening it says so and takes no
@@ -53,11 +73,12 @@ const REFUSED_TOAST = "browser-open-refused";
  * run found "Opening…" too faint to read that way.
  *
  * The refusal stays until the person closes it, as every error toast does (components/ui/toast.tsx), and goes once an
- * open succeeds, because it is no longer true.
+ * open succeeds, because it is no longer true. A click that opened the Recorder's store page in the person's own
+ * browser says so in a short note of its own, because nothing else in OpenBot changes to show it.
  */
-function OpenWindowButton({ recorder }: { recorder?: LauncherState }) {
+function OpenWindowButton({ activity }: { activity?: RecorderActivity }) {
   const open = useMutation(openBrowserMutationOptions(queryClient));
-  const recording = useRecordingLabel(recorder);
+  const recording = useRecordingLabel(activity);
   const opening = open.isPending;
   return (
     <SidebarMenuButton
@@ -66,7 +87,16 @@ function OpenWindowButton({ recorder }: { recorder?: LauncherState }) {
       onClick={() => {
         if (open.isPending) return;
         open.mutate(undefined, {
-          onSuccess: () => toast.close(REFUSED_TOAST),
+          onSuccess: (answer) => {
+            toast.close(REFUSED_TOAST);
+            if ("opened" in answer && answer.opened === "store")
+              toast.add({
+                // One at a time: a second click replaces the note rather than stacking another under it.
+                id: STORE_TOAST,
+                title: storeOpenedSentence(answer.browser),
+                type: "info",
+              });
+          },
           onError: (error) =>
             toast.add({
               // One at a time: a second refusal replaces the first rather than stacking under it.
@@ -93,8 +123,8 @@ function OpenWindowButton({ recorder }: { recorder?: LauncherState }) {
 }
 
 /** A link, as it has always been: the Browser page is where a browser in the page is. */
-function BrowserPageLink({ recorder }: { recorder?: LauncherState }) {
-  const recording = useRecordingLabel(recorder);
+function BrowserPageLink({ activity }: { activity?: RecorderActivity }) {
+  const recording = useRecordingLabel(activity);
   return (
     <SidebarMenuButton
       className={BUTTON_CLASS}
@@ -130,25 +160,25 @@ function BrowserLabel({ children }: { children?: ReactNode }) {
 type RecordingLabel = { label: string; live: boolean };
 
 /**
- * What the recording running in the person's browser is called on the Browser button, from the Recorder's own report:
- * "Recording: Submit the receipt, 1:23", ticking while it runs. Null while nothing is being recorded. `live` while it
- * records, rather than starting or stopping, as the Browser page's own mark has it.
+ * What the recording running in one of the person's browsers is called on the Browser button, from its Recorder's own
+ * report as the server passes it on: "Recording: Submit the receipt, 1:23", ticking while it runs. Null while nothing is
+ * being recorded. `live` while it records, rather than starting or stopping, as the Browser page's own mark has it.
  */
 function useRecordingLabel(
-  recorder: LauncherState | undefined,
+  activity: RecorderActivity | undefined,
 ): RecordingLabel | null {
-  const phase = recorder?.phase ?? "idle";
+  const phase = activity?.phase ?? "idle";
   const seconds = useSecondsSince(
-    phase === "recording" ? recorder?.startedAt : undefined,
+    phase === "recording" ? activity?.startedAt : undefined,
   );
-  if (!recorder || phase === "idle") return null;
-  const named = recorder.title ? `Recording: ${recorder.title}` : "Recording";
+  if (!activity || phase === "idle") return null;
+  const named = activity.title ? `Recording: ${activity.title}` : "Recording";
   const progress =
     phase === "starting"
       ? "starting"
       : phase === "stopping"
         ? "stopping"
-        : recorder.startedAt === undefined
+        : activity.startedAt === undefined
           ? null
           : elapsed(seconds);
   return {

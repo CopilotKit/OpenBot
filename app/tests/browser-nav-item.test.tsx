@@ -13,7 +13,9 @@ import {
   type BrowserWindow,
   browserApiPaths,
   type LauncherState,
+  type RealBrowserOpenResponse,
 } from "@openbot/shared/openbot-browser";
+import type { RecorderActivity } from "@openbot/shared/recorder-api";
 import { environmentManager, QueryClientProvider } from "@tanstack/react-query";
 import {
   createMemoryHistory,
@@ -26,7 +28,10 @@ import {
 import { act, cleanup, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { StrictMode } from "react";
-import { BrowserNavItem } from "@/components/browser/browser-nav-item";
+import {
+  BrowserNavItem,
+  storeOpenedSentence,
+} from "@/components/browser/browser-nav-item";
 import { SidebarMenu, SidebarProvider } from "@/components/ui/sidebar";
 import { Toaster } from "@/components/ui/toast";
 import { browserKeys } from "@/lib/browser/queries";
@@ -37,7 +42,9 @@ import { settleReactWork } from "./settle-react-work";
  * The sidebar's Browser button, against the server's Browser routes as the contract in shared/openbot-browser.ts types
  * them: one click opens the person's browser. On OpenBot Desktop (`shows: "native"`) that is their own Chrome window,
  * opened or brought to the front while they stay where they are; on hosted OpenBot (`shows: "screen"`) it is the
- * Browser page. While a recording runs, in either, the button carries a red dot named for it.
+ * Browser page. On Desktop the click may instead bring the person's own everyday Chrome or Edge forward, or open the
+ * Recorder's store page there, which a short note says. While any of the person's Recorders records (the server's
+ * `activity`), in either, the button carries a red dot named for it.
  */
 
 let wasServer = true;
@@ -63,8 +70,13 @@ const NOT_SET_UP =
 const requests: string[] = [];
 let state: BrowserApiState;
 let stateFails = false;
-/** How the server answers the next open: a refusal with its sentence, or an answer held until `release` is called. */
-let nextOpen: { refuse: string } | { held: Promise<void> } | null = null;
+/** How the server answers the next open: a refusal with its sentence, an answer held until `release` is called, or what
+ * it did with the person's own browser on OpenBot Desktop. */
+let nextOpen:
+  | { refuse: string }
+  | { held: Promise<void> }
+  | { real: RealBrowserOpenResponse }
+  | null = null;
 
 const recorderIdle = (window: BrowserWindow): LauncherState => ({
   connected: true,
@@ -108,7 +120,18 @@ function openState(shows: BrowserWindow): BrowserApiState {
   };
 }
 
-/** The Recorder in the open browser at `phase`, recording "Submit the receipt" for the last 83 seconds. */
+/** A Recorder at `phase`, recording "Submit the receipt" for the last 83 seconds, as the server's `activity` has it. */
+function receipt(phase: LauncherState["phase"]): RecorderActivity {
+  return {
+    phase,
+    recordingId: "rec-1",
+    title: "Submit the receipt",
+    startedAt: Date.now() - 83_000,
+    actions: 4,
+  };
+}
+
+/** The Recorder in the open OpenBot browser at `phase`: its own report, and the `activity` the server makes of it. */
 function recording(
   phase: LauncherState["phase"],
   shows: BrowserWindow = "native",
@@ -118,13 +141,10 @@ function recording(
     ...open,
     recorder: {
       ...(open.recorder as LauncherState),
-      phase,
-      recordingId: "rec-1",
-      title: "Submit the receipt",
-      startedAt: Date.now() - 83_000,
-      actions: 4,
+      ...receipt(phase),
       ...(shows === "native" ? { voice: "listening" as const } : {}),
     },
+    activity: receipt(phase),
   };
 }
 
@@ -145,6 +165,7 @@ async function server(path: string, init?: RequestInit): Promise<Response> {
     nextOpen = null;
     if (answer && "refuse" in answer)
       return Response.json({ error: answer.refuse }, { status: 503 });
+    if (answer && "real" in answer) return Response.json(answer.real);
     if (answer) await answer.held;
     const shows = state.shows ?? "screen";
     // Brought to the front when it is open already, as it is.
@@ -522,3 +543,113 @@ test("the sidebar asks often while the browser is open and rarely while it is cl
   await act(() => Bun.sleep(2200));
   expect(reads()).toBe(closed);
 }, 15_000);
+
+for (const shows of ["native", "screen"] as const) {
+  test(`a recording in the person's everyday browser puts the red dot on the ${shows === "native" ? "Desktop" : "hosted"} Browser button with no OpenBot browser open, and Stop there takes it away`, async () => {
+    // Nothing of OpenBot's own is open: the server's `activity` is the one thing saying a Recorder records.
+    state = { ...closedState(shows), activity: receipt("recording") };
+    const { view } = draw();
+    const dot = await view.findByRole("img", {
+      name: /^Recording: Submit the receipt, 1:2\d$/,
+    });
+    expect(dot.querySelector(".bg-destructive")).not.toBeNull();
+    expect(state.recorder).toBeUndefined();
+    expect(
+      view.getByRole(shows === "native" ? "button" : "link", {
+        name: /^Browser Recording: Submit the receipt, 1:2\d$/,
+      }),
+    ).toBeTruthy();
+
+    // Stopped in that browser: gone at the sidebar's next ask, which is every second while something records.
+    state = closedState(shows);
+    await waitFor(() => expect(dots(view)).toEqual([]), { timeout: 2000 });
+  });
+}
+
+test("the dot is the server's activity, not the OpenBot browser's own report: one that records nothing lights nothing", async () => {
+  // The server folds the OpenBot browser's Recorder into `activity` itself (server/src/browser/routes.ts); the sidebar
+  // reads that alone, so one rule decides the dot wherever the person records.
+  const { activity: _folded, ...unfolded } = recording("recording");
+  state = unfolded;
+  const { view } = draw();
+  await view.findByRole("button", { name: "Browser" });
+  await waitFor(() => expect(reads()).toBe(1));
+  expect(dots(view)).toEqual([]);
+});
+
+test("on OpenBot Desktop, while a Recorder in the person's own browser is connected, a Record pressed there lights the dot within two seconds", async () => {
+  state = {
+    ...closedState("native"),
+    real: { connected: true, browsers: ["chrome", "msedge"] },
+  };
+  const { view } = draw();
+  await view.findByRole("button", { name: "Browser" });
+  await waitFor(() => expect(reads()).toBe(1));
+  // Record, pressed in the Recorder's toolbar button in their everyday Chrome: OpenBot hears of it only from the state.
+  state = { ...state, activity: receipt("starting") };
+  expect(
+    await view.findByRole(
+      "img",
+      { name: "Recording: Submit the receipt, starting" },
+      { timeout: 2000 },
+    ),
+  ).toBeTruthy();
+});
+
+test("on OpenBot Desktop a click that opened the Recorder's store page in the person's own browser says so in a short note, and they stay where they are", async () => {
+  nextOpen = { real: { ok: true, opened: "store", browser: "chrome" } };
+  const { view, router, visited } = draw();
+  const button = await view.findByRole("button", { name: "Browser" });
+  const user = userEvent.setup({ document });
+  await user.click(button);
+  const chrome =
+    "The OpenBot Recorder's page is open in Google Chrome. Add it there to record in your own browser.";
+  expect(storeOpenedSentence("chrome")).toBe(chrome);
+  await waitFor(() => expect(toasts()).toEqual([chrome]));
+  // A note, not an alarm: nothing went wrong.
+  expect(
+    [...document.querySelectorAll("[data-slot=toast-icon] svg")].map((icon) =>
+      icon.classList.contains("text-destructive"),
+    ),
+  ).toEqual([false]);
+  expect(router.state.location.pathname).toBe("/");
+  expect(visited).not.toContain("/browser");
+  await waitFor(() => expect(button.getAttribute("aria-busy")).toBeNull());
+
+  // Clicked again, in Edge this time: one note, saying the newer thing.
+  nextOpen = { real: { ok: true, opened: "store", browser: "msedge" } };
+  await user.click(button);
+  await waitFor(() =>
+    expect(toasts()).toEqual([
+      "The OpenBot Recorder's page is open in Microsoft Edge. Add it there to record in your own browser.",
+    ]),
+  );
+  await waitFor(() => expect(button.getAttribute("aria-busy")).toBeNull());
+
+  // It goes by itself, as a note does; only an error stays until it is closed.
+  await act(() => Bun.sleep(6000));
+  expect(toasts()).toEqual([]);
+
+  // Their browser brought forward, its Recorder connected: nothing to say.
+  nextOpen = { real: { ok: true, opened: "real", browser: "chrome" } };
+  await user.click(button);
+  await waitFor(() => expect(opens()).toBe(3));
+  await waitFor(() => expect(button.getAttribute("aria-busy")).toBeNull());
+  expect(toasts()).toEqual([]);
+  expect(router.state.location.pathname).toBe("/");
+}, 15_000);
+
+test("a store page opened after a refusal takes the refusal away and says where the page is instead", async () => {
+  nextOpen = { refuse: NOT_SET_UP };
+  const { view } = draw();
+  const button = await view.findByRole("button", { name: "Browser" });
+  const user = userEvent.setup({ document });
+  await user.click(button);
+  await waitFor(() => expect(toasts()).toEqual([NOT_SET_UP]));
+  await waitFor(() => expect(button.getAttribute("aria-busy")).toBeNull());
+  nextOpen = { real: { ok: true, opened: "store", browser: "chrome" } };
+  await user.click(button);
+  await waitFor(() =>
+    expect(toasts()).toEqual([storeOpenedSentence("chrome")]),
+  );
+});

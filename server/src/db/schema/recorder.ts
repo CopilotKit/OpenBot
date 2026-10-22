@@ -1,7 +1,11 @@
-import type { RecorderConnectVia } from "@openbot/shared/recorder-api";
+import type {
+  RecorderActivity,
+  RecorderConnectVia,
+} from "@openbot/shared/recorder-api";
 import { sql } from "drizzle-orm";
 import {
   index,
+  jsonb,
   pgTable,
   text,
   timestamp,
@@ -49,6 +53,13 @@ export const recorderConnections = pgTable(
       .defaultNow(),
     lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    /**
+     * What this connection's Recorder last said it was doing (`POST /api/recorder/activity`), and when that arrived on
+     * this server: the Browser button's red dot, wherever the person records. Only the latest is kept, here rather than
+     * in one server's memory, so every replica answers the same. Null until the Recorder first says.
+     */
+    activity: jsonb("activity").$type<RecorderActivity>(),
+    activityAt: timestamp("activity_at", { withTimezone: true }),
   },
   (table) => [
     index("recorder_connections_user_idx").on(table.userId, table.createdAt),

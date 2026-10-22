@@ -4,6 +4,7 @@ import {
   RECORDER_CODE_PREFIX,
   RECORDER_CONNECT_CODE_TTL_MS,
   RECORDER_TOKEN_PREFIX,
+  type RecorderActivity,
   type RecorderConnection,
   type RecorderConnectVia,
 } from "@openbot/shared/recorder-api";
@@ -22,6 +23,12 @@ const LIVE_CODES_PER_PERSON = 10;
 export type RecorderConnectionStore = ReturnType<
   typeof createRecorderConnectionStore
 >;
+
+/** A live connection with what its Recorder last said it was doing, and when that arrived; both null until it has said. */
+export type ReportingConnection = RecorderConnection & {
+  activity: RecorderActivity | null;
+  activityAt: Date | null;
+};
 
 const digest = (secret: string) =>
   createHash("sha256").update(secret).digest("hex");
@@ -148,6 +155,51 @@ export function createRecorderConnectionStore(
         )
         .orderBy(asc(recorderConnections.createdAt));
       return rows.map(connectionView);
+    },
+
+    /**
+     * This person's live connections, oldest first, each with what its Recorder last said it was doing: in one query, for
+     * the Browser button, which asks every few seconds.
+     */
+    async reporting(userId: string): Promise<ReportingConnection[]> {
+      const rows = await database
+        .select()
+        .from(recorderConnections)
+        .where(
+          and(
+            eq(recorderConnections.userId, userId),
+            isNull(recorderConnections.revokedAt),
+          ),
+        )
+        .orderBy(asc(recorderConnections.createdAt));
+      return rows.map((row) => ({
+        ...connectionView(row),
+        activity: row.activity,
+        activityAt: row.activityAt,
+      }));
+    },
+
+    /**
+     * Keeps what a live connection's Recorder says it is doing now, in place of what it said before, with when it
+     * arrived. False when the connection is not this person's live one: revoked since its token was read, say.
+     */
+    async reportActivity(
+      userId: string,
+      connectionId: string,
+      activity: RecorderActivity,
+    ): Promise<boolean> {
+      const reported = await database
+        .update(recorderConnections)
+        .set({ activity, activityAt: now() })
+        .where(
+          and(
+            eq(recorderConnections.id, connectionId),
+            eq(recorderConnections.userId, userId),
+            isNull(recorderConnections.revokedAt),
+          ),
+        )
+        .returning({ id: recorderConnections.id });
+      return reported.length > 0;
     },
 
     /** A revoked connection keeps no organization session: nothing may ask the organization for it again. */
