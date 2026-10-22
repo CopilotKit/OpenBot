@@ -154,6 +154,19 @@ async function commandLine(page: Page): Promise<string[]> {
   return line.split(/\s+/);
 }
 
+/** A port nothing listens on, so a page there is refused. */
+async function closedPort(): Promise<number> {
+  const probe = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch: () => new Response(),
+  });
+  const { port } = probe;
+  await probe.stop(true);
+  if (port === undefined) throw new Error("The port probe did not listen.");
+  return port;
+}
+
 /** Every browser the tests start, closed at the end whatever happened. */
 const opened: Profiles[] = [];
 
@@ -424,6 +437,24 @@ for (const variant of VARIANTS) {
         (await api("/browser/navigate", { url: ORIGIN, action: "back" }))
           .status,
       ).toBe(400);
+
+      // A page that does not open is said in a sentence about its address, not Playwright's error
+      // and call log. In a tab of its own, which then closes, so the person's tab stays as it was.
+      const before = activeTab(await state());
+      const blank = activeTab(
+        (await api("/browser/tabs", { action: "new" })).json as BrowserState,
+      );
+      if (!before || !blank) throw new Error("Both tabs should be listed.");
+      const port = await closedPort();
+      expect(
+        await api("/browser/navigate", { url: `http://127.0.0.1:${port}/` }),
+      ).toEqual({
+        status: 502,
+        json: { error: `127.0.0.1:${port} refused the connection.` },
+      });
+      await api("/browser/tabs", { action: "close", tabId: blank.id });
+      await api("/browser/tabs", { action: "activate", tabId: before.id });
+      expect(activeTab(await state())?.url).toBe(`${ORIGIN}/page/three`);
     }, 60_000);
 
     test("records and narrates through the Recorder", async () => {
