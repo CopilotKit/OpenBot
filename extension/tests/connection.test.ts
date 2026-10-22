@@ -610,6 +610,96 @@ test("Desktop's code connects this browser at once, with no Connect page, as an 
   });
 });
 
+/** The browser's own navigator for the length of `work`: its client hints, or none, and its user agent. */
+async function asBrowser(
+  browser: {
+    userAgentData?: { brands: { brand: string }[]; platform: string };
+    userAgent?: string;
+  },
+  work: () => Promise<void>,
+): Promise<void> {
+  const keys = ["userAgentData", "userAgent", "platform"] as const;
+  const own = new Map(
+    keys.map((key) => [key, Object.getOwnPropertyDescriptor(navigator, key)]),
+  );
+  Object.defineProperty(navigator, "userAgentData", {
+    value: browser.userAgentData,
+    configurable: true,
+  });
+  Object.defineProperty(navigator, "platform", {
+    value: "MacIntel",
+    configurable: true,
+  });
+  if (browser.userAgent)
+    Object.defineProperty(navigator, "userAgent", {
+      value: browser.userAgent,
+      configurable: true,
+    });
+  try {
+    await work();
+  } finally {
+    for (const [key, descriptor] of own)
+      if (descriptor) Object.defineProperty(navigator, key, descriptor);
+      else Reflect.deleteProperty(navigator, key);
+  }
+}
+
+test("a connection OpenBot Desktop makes is named for the browser it is in, Edge as Edge and Chrome as Chrome, as OpenBot tells them apart", async () => {
+  const desktopConnect = () =>
+    connectThroughDesktop({
+      askDesktop: async () => ({ openbotUrl: origin, code: "obc_d" }),
+      openTab,
+      readPolicy: async () => policy,
+    });
+  // Microsoft Edge's client hints, as its service worker has them.
+  await asBrowser(
+    {
+      userAgentData: {
+        brands: [
+          { brand: "Microsoft Edge" },
+          { brand: "Chromium" },
+          { brand: "Not=A?Brand" },
+        ],
+        platform: "macOS",
+      },
+    },
+    async () => {
+      expect(await desktopConnect()).toEqual({ connected: true });
+    },
+  );
+  // Google Chrome's.
+  await asBrowser(
+    {
+      userAgentData: {
+        brands: [
+          { brand: "Not_A Brand" },
+          { brand: "Chromium" },
+          { brand: "Google Chrome" },
+        ],
+        platform: "Windows",
+      },
+    },
+    async () => {
+      expect(await desktopConnect()).toEqual({ connected: true });
+    },
+  );
+  // An Edge that gives no client hints is still named Edge, from its user agent.
+  await asBrowser(
+    {
+      userAgent:
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36 Edg/156.0.0.0",
+    },
+    async () => {
+      expect(await desktopConnect()).toEqual({ connected: true });
+    },
+  );
+  expect(exchanges.map((exchange) => exchange.label)).toEqual([
+    "Microsoft Edge on macOS",
+    "Google Chrome on Windows",
+    "Microsoft Edge on MacIntel",
+  ]);
+});
+
 test("Desktop's connect closes an open web Connect tab, so approving that page cannot replace Desktop's connection", async () => {
   await connect("obc_w", "https://a.example.test");
   await connectThroughDesktop({
