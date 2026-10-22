@@ -2,6 +2,7 @@ import type {
   BrowserApiState,
   BrowserOpenResponse,
   BrowserProduct,
+  RealBrowserOpenResponse,
 } from "@openbot/shared/openbot-browser";
 import { IconBrowser } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
@@ -85,7 +86,8 @@ function OpenedBrowser({ state }: { state: BrowserApiState }) {
     mutate();
   }, [mutate]);
 
-  const opened: BrowserOpenResponse | undefined = reopen.data ?? open.data;
+  const opened: BrowserOpenResponse | RealBrowserOpenResponse | undefined =
+    reopen.data ?? open.data;
   if (!opened) {
     return (
       <PageShell title={TITLE} description={DESCRIPTION}>
@@ -105,7 +107,8 @@ function OpenedBrowser({ state }: { state: BrowserApiState }) {
       </PageShell>
     );
   }
-  if (opened.window === "screen") {
+  // The person's own everyday browser (OpenBot Desktop) has no screen here: it is a window on their desktop.
+  if ("window" in opened && opened.window === "screen") {
     return (
       <ScreenBrowser
         computerId={opened.computerId}

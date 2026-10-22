@@ -5,6 +5,7 @@ import {
   type BrowserOpenResponse,
   type BrowserTabsRequest,
   browserApiPaths,
+  type RealBrowserOpenResponse,
 } from "@openbot/shared/openbot-browser";
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
 import { client, tryClient } from "@/lib/client";
@@ -18,10 +19,15 @@ function invalidateBrowser(queryClient: QueryClient) {
  * Opens the person's browser, or brings it forward when it is already open: on OpenBot Desktop a window on their
  * desktop, on hosted OpenBot a browser the page shows. The answer says which, and names the computer the live screen
  * streams.
+ *
+ * On OpenBot Desktop it may instead be the person's own everyday Chrome or Edge (`opened`): brought forward when the
+ * Recorder in it is connected, or showing the Recorder's store page for them to add it.
  */
 export function openBrowserMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
-    mutationFn: async (): Promise<BrowserOpenResponse> =>
+    mutationFn: async (): Promise<
+      BrowserOpenResponse | RealBrowserOpenResponse
+    > =>
       (
         await client(browserApiPaths.open, {
           method: "POST",
