@@ -124,17 +124,43 @@ export function channelHistoryNotice({
  * A shorter read can still contain missing turns after unreadable rows are filtered out. Without a
  * following shared anchor, append the missing tail: the store cannot place it among local-only rows.
  * Return the original array when nothing was added so refreshes can wait for the store to catch up.
+ *
+ * Exported for its tests.
  */
-function mergeStoredMessages(local: Message[], stored: Message[]): Message[] {
+export function mergeStoredMessages(
+  local: Message[],
+  stored: Message[],
+): Message[] {
   const localIds = new Set(local.map((message) => message.id));
+  /*
+   * The store can name a tool call's message differently from the live turn — `assistant-call_1`
+   * where the stream said `call_1` — so a stored message whose every call the live turn already
+   * holds is that live message, not a missing one. Added as missing, its card was drawn twice.
+   */
+  const localByCall = new Map<string, string>();
+  for (const message of local) {
+    if (message.role !== "assistant") continue;
+    for (const call of message.toolCalls ?? [])
+      localByCall.set(call.id, message.id);
+  }
+  const heldAs = (message: Message): string | undefined => {
+    if (localIds.has(message.id)) return message.id;
+    if (message.role !== "assistant" || !message.toolCalls?.length) return;
+    const holders = new Set(
+      message.toolCalls.map((call) => localByCall.get(call.id)),
+    );
+    const [holder] = holders;
+    return holders.size === 1 ? holder : undefined;
+  };
   const seenStored = new Set<string>();
   const before = new Map<string, Message[]>();
   let pending: Message[] = [];
   for (const message of stored) {
     if (seenStored.has(message.id)) continue;
     seenStored.add(message.id);
-    if (localIds.has(message.id)) {
-      if (pending.length > 0) before.set(message.id, pending);
+    const held = heldAs(message);
+    if (held !== undefined) {
+      if (pending.length > 0) before.set(held, pending);
       pending = [];
     } else {
       pending.push(message);
