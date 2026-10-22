@@ -64,6 +64,7 @@ import { Button } from "../ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty";
 import { Channel } from "./channel";
 import { ChannelPagination } from "./channel-pagination";
+import { IntelligenceRow } from "./intelligence-row";
 
 const appLinkOptions = { to: "/" } satisfies LinkOptions;
 const adminLinkOptions = { to: "/admin" } satisfies LinkOptions;
@@ -410,6 +411,8 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
               <span className="text-sm trackint-tight">Connections</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
+          {/* Inside OpenBot Desktop with a local Intelligence stack only; nothing otherwise. */}
+          <IntelligenceRow />
           <SidebarMenuItem>
             <DropdownMenu>
               <DropdownMenuTrigger
