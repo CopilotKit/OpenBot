@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/item";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
+import { defaultBrowserName } from "../../shared/browser-name";
 import { Page } from "../ui/page";
 import { ask } from "../ui/runtime";
 
@@ -38,20 +39,6 @@ const SOURCE = {
   web: "You asked from OpenBot in this browser.",
   desktop: "OpenBot Desktop on this computer asked.",
 } as const;
-
-type BrandedNavigator = Navigator & {
-  userAgentData?: { brands?: { brand: string }[]; platform?: string };
-};
-
-/** "<browser> on <platform>", from the user agent's client hints when the browser gives them. */
-function defaultBrowserName(): string {
-  const data = (navigator as BrandedNavigator).userAgentData;
-  const brand = data?.brands
-    ?.map((entry) => entry.brand)
-    .find((name) => name !== "Chromium" && !name.startsWith("Not"));
-  const platform = data?.platform || navigator.platform || "this computer";
-  return `${brand ?? "Chrome"} on ${platform}`;
-}
 
 /**
  * The page that asks the person to confirm the OpenBot address before this browser signs in to it.

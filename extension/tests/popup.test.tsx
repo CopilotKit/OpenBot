@@ -15,6 +15,7 @@ import { voiceSentence } from "../src/offscreen/voice";
 import { desktopSentence } from "../src/pages/popup/desktop-sentence";
 import { Popup } from "../src/pages/popup/popup";
 import { stripCaptureStatus } from "../src/pages/ui/capture-rows";
+import { DISCLOSURE } from "../src/pages/ui/disclosure";
 import {
   IDLE_STATE,
   type PageResponse,
@@ -186,13 +187,37 @@ test("Connect with OpenBot Desktop is hidden unless Desktop answers available", 
   );
 });
 
+test("Connect with OpenBot Desktop connects this browser at once: no page opens, and the popup shows the Record form", async () => {
+  const response = stateResponse(NOT_CONNECTED);
+  const view = setup(response, {
+    desktop: true,
+    answers: { "page.connect.desktop": { ok: true, connected: true } },
+    onAsk: (message) => {
+      // The service worker stored the connection OpenBot Desktop made: page.state shows it from now on.
+      if (message.type === "page.connect.desktop")
+        Object.assign(response, {
+          connection: {
+            openbotUrl: "http://127.0.0.1:7470",
+            user: { name: "Ada Lovelace", email: "ada@example.test" },
+            via: "desktop",
+          },
+        });
+    },
+  });
+  fireEvent.click(await view.findByText("Connect with OpenBot Desktop"));
+  await view.findByLabelText("What are you about to do?");
+  expect(view.getByText("Ada Lovelace")).toBeTruthy();
+  expect(fake.opened).toEqual([]);
+  expect(view.queryByRole("alert")).toBeNull();
+});
+
 test("a Desktop connect that fails after a good ping shows a plain sentence for the host's code", async () => {
   const { findByText, findByRole } = setup(stateResponse(NOT_CONNECTED), {
     desktop: true,
     answers: {
       "page.connect.desktop": {
         ok: true,
-        offered: false,
+        connected: false,
         reason: "not-signed-in",
       },
     },
@@ -219,6 +244,8 @@ test("every code OpenBot Desktop or the Recorder can give has a sentence of its 
     "policy-invalid",
     "pinned-elsewhere",
     "invalid-address",
+    "exchange-refused",
+    "openbot-unreachable",
   ];
   const sentences = codes.map(desktopSentence);
   for (const sentence of sentences) expect(sentence).not.toBe(general);
@@ -232,7 +259,7 @@ test("a Desktop code the Recorder does not know gets the general sentence", asyn
     answers: {
       "page.connect.desktop": {
         ok: true,
-        offered: false,
+        connected: false,
         reason: "something-new",
       },
     },
@@ -254,14 +281,40 @@ test("connected and idle shows the person, the host, the form copy and Record di
   const { findByText, getByText, getByRole } = setup(stateResponse());
   await findByText("Ada Lovelace");
   expect(getByText("openbot.example.test")).toBeTruthy();
-  expect(
-    getByText(
-      "Records each step you take in every tab you use until you stop (your clicks, typing and the pages you open) with what it saves, and what you say as you go. Passwords and secrets stay in your browser.",
-    ),
-  ).toBeTruthy();
+  expect(getByText(DISCLOSURE)).toBeTruthy();
   expect(
     (getByRole("button", { name: "Record" }) as HTMLButtonElement).disabled,
   ).toBe(true);
+});
+
+test("the Record form says what the Recorder collects and where it goes, before Record is pressed", async () => {
+  // The Chrome Web Store's prominent disclosure: in the Recorder's own interface, seen before anything is collected.
+  const { findByLabelText, getByRole, getByText, sent } = setup(
+    stateResponse(),
+  );
+  const title = await findByLabelText("What are you about to do?");
+  const disclosure = getByText(DISCLOSURE);
+  for (const said of [
+    "every tab you use",
+    "the pages you open and what is on them",
+    "your clicks and typing",
+    "what each step saves",
+    "what you say",
+    "Passwords and secrets are masked in your browser first",
+    "your organization's own Intelligence through your OpenBot, never to CopilotKit",
+  ])
+    expect(disclosure.textContent).toContain(said);
+  // It sits with the title, above Record, in the order a person reads them.
+  const record = getByRole("button", { name: "Record" });
+  expect(
+    title.compareDocumentPosition(disclosure) &
+      Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+  expect(
+    disclosure.compareDocumentPosition(record) &
+      Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+  expect(sent.some((message) => message.type === "page.record")).toBe(false);
 });
 
 test("the popup has no Bot picker: only the title and Record, and Record needs just a title", async () => {

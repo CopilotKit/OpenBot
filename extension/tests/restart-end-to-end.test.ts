@@ -57,7 +57,8 @@ let gateway: FakeGateway;
 let passes: Pass[] = [];
 /** The answer OpenBot gives a pass while set; a grant when null. */
 let passAnswer: (() => Response) | null = null;
-/** Every request to OpenBot's recorder routes. */
+/** Every request to OpenBot's recorder routes, but the reports of what the Recorder is doing (activity.ts), which hold
+ * nothing recorded. */
 let recorderRequests: string[] = [];
 
 /** Only an operator can fix it: the events are parked in the outbox. */
@@ -73,7 +74,8 @@ const parked = () =>
 function route(request: Request): Response | null {
   const path = new URL(request.url).pathname;
   if (path.startsWith("/api/recorder/")) {
-    recorderRequests.push(`${request.method} ${path}`);
+    if (path !== "/api/recorder/activity")
+      recorderRequests.push(`${request.method} ${path}`);
     return Response.json({ error: "Not found." }, { status: 404 });
   }
   const pass = /^\/api\/copilotkit\/trajectory\/([^/]+)\/connect$/.exec(path);

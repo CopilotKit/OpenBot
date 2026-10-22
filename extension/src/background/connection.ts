@@ -9,6 +9,7 @@ import type {
   PageResponse,
   PageToBackground,
 } from "../protocol/messages";
+import { defaultBrowserName } from "../shared/browser-name";
 import { OpenBotError, openbotJson } from "../shared/openbot-client";
 import { normaliseOpenBotOrigin } from "../shared/origin";
 import {
@@ -51,6 +52,10 @@ type ConnectionDeps = {
   /** Stops what the lost connection still has running: the live recording and whatever the document sends with its
    * token. Without the recording controller (a test of this module alone), a sign-out only forgets the connection. */
   connectionLost: (loss: ConnectionLoss) => Promise<void>;
+  /** What an approved Connect does next, for the connection OpenBot Desktop made at install (index.ts wires in the
+   * recording controller's): a recording of this person goes on under the new token, and their kept recordings are
+   * sent. The popup's own Desktop connect reaches it through the router, as an approved Connect does. */
+  connected: () => Promise<void>;
 };
 
 const PENDING_MAX_AGE_MS = 5 * 60 * 1000;
@@ -65,6 +70,9 @@ const CONNECT_LIMIT = 10;
 const KEEP_ALIVE_ALARM = "recorder-session-keepalive";
 const KEEP_ALIVE_PERIOD_MINUTES = 720;
 const KEEP_ALIVE_PERIOD_MS = KEEP_ALIVE_PERIOD_MINUTES * 60 * 1000;
+/** How long OpenBot Desktop's code waits on its exchange. It runs in the connect queue (see `serially`), so a local OpenBot
+ * that never answers must not hold every connect behind it. */
+const DESKTOP_EXCHANGE_WAIT_MS = 10_000;
 
 const defaultDeps: ConnectionDeps = {
   askDesktop: askDesktopForHandoff,
@@ -75,6 +83,7 @@ const defaultDeps: ConnectionDeps = {
     if (loss.kind === "signed-out")
       await forgetConnection(loss.reason, loss.connection.token);
   },
+  connected: async () => {},
 };
 
 const withDefaults = (deps?: Partial<ConnectionDeps>): ConnectionDeps => ({
@@ -84,13 +93,13 @@ const withDefaults = (deps?: Partial<ConnectionDeps>): ConnectionDeps => ({
 
 const connectUrl = () => chrome.runtime.getURL("connect.html");
 
-/** A web connect, Desktop's handoff and a decision's clear (`clearPendingConnect`) each read, then write, the pending
+/** A web connect, Desktop's connect and a decision's clear (`clearPendingConnect`) each read, then write, the pending
  * connect (and a web connect the request count) across storage awaits, so they run one at a time: run side by side,
  * ten connects in one tick would each find the slot empty and open a tab, and the limit would count one of them. A
- * forget told which token asked (`forgetConnection` with `askedWith`) and approve's store of the connection queue here
- * too. A job that throws rejects its own caller and the next job still runs. */
+ * forget told which token asked (`forgetConnection` with `askedWith`), approve's store of the connection and the
+ * launcher's queue here too. A job that throws rejects its own caller and the next job still runs. */
 let queue: Promise<unknown> = Promise.resolve();
-/** Launcher connections waiting in the queue: an install's own Desktop offer, ahead of one there, opens no page. */
+/** Launcher connections waiting in the queue: an install's own Desktop connect, ahead of one there, stores nothing. */
 let launcherConnecting = 0;
 function serially<T>(work: () => Promise<T>): Promise<T> {
   const run = queue.then(work, work);
@@ -103,7 +112,14 @@ export function installConnection(deps?: Partial<ConnectionDeps>): void {
   chrome.runtime.onInstalled.addListener(async (details) => {
     if (details.reason !== "install") return;
     await installSecret();
-    await offerDesktopConnection(resolved, { install: true });
+    // A Recorder OpenBot Desktop put in this browser connects as it installs, with nothing to click.
+    const answer = await connectThroughDesktop(resolved, { install: true });
+    if (answer.connected)
+      await resolved
+        .connected()
+        .catch((error) =>
+          console.error("Recorder: reconnect follow-up failed", error),
+        );
   });
   chrome.alarms.onAlarm.addListener((alarm) => {
     if (alarm.name === KEEP_ALIVE_ALARM) void keepAlive(resolved);
@@ -220,7 +236,7 @@ export async function handleConnectionMessage(
     case "page.desktop.available":
       return { ok: true, available: await resolved.desktopAvailable() };
     case "page.connect.desktop":
-      return { ok: true, ...(await offerDesktopConnection(resolved)) };
+      return { ok: true, ...(await connectThroughDesktop(resolved)) };
     default:
       return undefined;
   }
@@ -291,6 +307,10 @@ async function approve(
  * against the policy in the same queued job that writes it, the signed-out notice gone with it. Nothing pending is
  * asked about, so nothing is shown: the Recorder's own setup tab and a Connect page its install opened on its own are
  * closed, since a browser OpenBot opened needs neither. Resolves false when the policy keeps it out.
+ *
+ * OpenBot Desktop's native host answers in an OpenBot browser's profile too, so on its first launch the install's own
+ * Desktop connect can land just before the launcher's connection. The one it replaces is revoked: this browser needs
+ * none, and OpenBot would otherwise go on counting it as a browser of the person's own that OpenBot Desktop connected.
  */
 export async function connectFromLauncher(
   connection: ConnectionRecord,
@@ -298,18 +318,22 @@ export async function connectFromLauncher(
 ): Promise<boolean> {
   const resolved = withDefaults(deps);
   launcherConnecting += 1;
-  let stored: boolean;
+  let stored: { replaced: ConnectionRecord | null } | null;
   try {
     stored = await serially(async () => {
       if (!allowsOpenBot(await resolved.readPolicy(), connection.openbotUrl))
-        return false;
+        return null;
+      const replaced = await currentConnection();
       await writeLocal("connection", connection);
-      return true;
+      return { replaced };
     });
   } finally {
     launcherConnecting -= 1;
   }
   if (!stored) return false;
+  const { replaced } = stored;
+  if (replaced?.via === "desktop" && replaced.token !== connection.token)
+    await revoke(replaced);
   if ((await readLocal("notice"))?.kind === "signed-out")
     await removeLocal("notice");
   const setupTab = await readSession("setupTabId");
@@ -327,7 +351,7 @@ export async function connectFromLauncher(
 
 /** A decision clears only the pending connect it read when it arrived. Approve's exchange runs outside the queue, so
  * a connect never waits on OpenBot's answer, and a decision can wait in the queue behind a connect or Desktop's
- * handoff: either way another origin may have replaced the pending connect by now, and that newer one, with its open
+ * connect: either way another origin may have replaced the pending connect by now, and that newer one, with its open
  * tab, is left alone. The check and the clear are one queued job, so no connect lands between them. */
 function clearPendingConnect(decided: PendingConnect): Promise<void> {
   return serially(async () => {
@@ -498,18 +522,29 @@ async function reconcilePolicy(deps: ConnectionDeps): Promise<void> {
   await revoke(connection);
 }
 
-/** Whether Desktop's connect page opened, or why not, as a code the popup turns into a sentence: OpenBot Desktop's own
- * error code (see DesktopRefusal), or `policy-invalid`, `pinned-elsewhere` or `invalid-address` from the checks here. */
-export type DesktopOffer =
-  | { offered: true }
-  | { offered: false; reason: string };
+/** Whether OpenBot Desktop connected this browser, or why not, as a code the popup turns into a sentence: OpenBot
+ * Desktop's own error code (see DesktopRefusal); `policy-invalid`, `pinned-elsewhere` or `invalid-address` from the
+ * checks here; `exchange-refused` or `openbot-unreachable` when OpenBot did not take Desktop's code; or `launched` when
+ * the Recorder's launcher connects this browser instead (an install's own connect only). */
+export type DesktopConnect =
+  | { connected: true }
+  | { connected: false; reason: string };
 
-/** A managed browser connects only where its policy points, on the Desktop path too. Desktop's local stack is always
- * a loopback http address, so a policy naming any other kind of address can never match and Desktop is not asked. */
-export function offerDesktopConnection(
+/**
+ * Connects this browser through OpenBot Desktop's native host, with no Connect page: the code comes from OpenBot Desktop
+ * on this computer, which only the Recorder can ask (the host answers only the Recorder's own extension origin), so
+ * there is no web page's request to confirm. The checks are a web connect's (OpenBot's address rule and the
+ * organization's policy), and the rest is what an approved Connect does: the code is exchanged at that OpenBot under
+ * this copy's install id, the connection is stored in a queued job that checks the policy again (a token it keeps out
+ * is revoked), and the signed-out notice goes. The caller then does an approved Connect's follow-up (`connected`).
+ *
+ * A managed browser connects only where its policy points, on the Desktop path too. Desktop's local stack is always a
+ * loopback http address, so a policy naming any other kind of address can never match and Desktop is not asked.
+ */
+export function connectThroughDesktop(
   deps?: Partial<ConnectionDeps>,
   options: { install?: boolean } = {},
-): Promise<DesktopOffer> {
+): Promise<DesktopConnect> {
   const resolved = withDefaults(deps);
   return serially(() => desktopConnect(resolved, options.install === true));
 }
@@ -517,15 +552,15 @@ export function offerDesktopConnection(
 async function desktopConnect(
   deps: ConnectionDeps,
   install: boolean,
-): Promise<DesktopOffer> {
-  const refused = (reason: string): DesktopOffer => ({
-    offered: false,
+): Promise<DesktopConnect> {
+  const refused = (reason: string): DesktopConnect => ({
+    connected: false,
     reason,
   });
-  // An OpenBot browser's launcher connected it, or is connecting it (`connectFromLauncher`): the offer an install makes
-  // on its own would put a Connect page in front of a browser that needs none. Asked before Desktop is asked, and again
-  // before the page opens, since on a first launch the launcher's connection arrives while Desktop answers. The
-  // person's own choice from the popup is left alone.
+  // An OpenBot browser's launcher connected it, or is connecting it (`connectFromLauncher`): the connect an install
+  // makes on its own would put a second connection in a browser that needs none. Asked before Desktop is asked, and
+  // again before the connection is stored, since on a first launch the launcher's connection arrives while Desktop
+  // answers. The person's own choice from the popup is left alone.
   const launched = async () =>
     install &&
     (launcherConnecting > 0 ||
@@ -543,16 +578,54 @@ async function desktopConnect(
   if (!allowsOpenBot(policy, checked.origin))
     return refused("pinned-elsewhere");
   if (await launched()) return refused("launched");
-  await closeConnectTab((await readSession("pendingConnect"))?.tabId);
-  const pending: PendingConnect = {
-    origin: checked.origin,
-    code: handoff.code,
+  let exchanged: ExchangeResponse;
+  try {
+    exchanged = await openbotJson<ExchangeResponse>(
+      { openbotUrl: checked.origin },
+      recorderPaths.connections,
+      {
+        body: {
+          code: handoff.code,
+          label: defaultBrowserName(),
+          installId: await installIdFor(checked.origin),
+        },
+        signal: AbortSignal.timeout(DESKTOP_EXCHANGE_WAIT_MS),
+      },
+    );
+  } catch (error) {
+    return refused(
+      error instanceof OpenBotError
+        ? "exchange-refused"
+        : "openbot-unreachable",
+    );
+  }
+  const connection: ConnectionRecord = {
+    openbotUrl: checked.origin,
+    token: exchanged.token,
+    connectionId: exchanged.connection.id,
+    user: exchanged.user,
     via: "desktop",
-    requestedAt: Date.now(),
+    connectedAt: Date.now(),
   };
-  await writeSession("pendingConnect", pending);
-  const tabId = await deps.openTab(connectUrl());
-  if (tabId !== undefined)
-    await writeSession("pendingConnect", { ...pending, tabId });
-  return { offered: true };
+  // This job is the queued one that stores it: the launcher's connection, or a pin elsewhere, that came while OpenBot
+  // answered keeps it out, and the token OpenBot just made is revoked.
+  const keptOut = (await launched())
+    ? "launched"
+    : !allowsOpenBot(await deps.readPolicy(), checked.origin)
+      ? "pinned-elsewhere"
+      : null;
+  if (keptOut) {
+    await revoke(connection);
+    return refused(keptOut);
+  }
+  await writeLocal("connection", connection);
+  // A Connect page still open would replace this connection if the person approved it: it closes, and nothing is pending.
+  const pending = await readSession("pendingConnect");
+  if (pending) {
+    await closeConnectTab(pending.tabId);
+    await removeSession("pendingConnect");
+  }
+  if ((await readLocal("notice"))?.kind === "signed-out")
+    await removeLocal("notice");
+  return { connected: true };
 }

@@ -35,6 +35,7 @@ import {
   type StreamerSession,
   type StreamerStatus,
 } from "../src/offscreen/streamer";
+import { installChromeFake } from "./support/chrome-fake";
 import { type FakeGateway, startFakeGateway } from "./support/fake-gateway";
 
 // The table's sentences, pinned here as the person reads them.
@@ -51,7 +52,10 @@ const NOT_ENABLED =
   "Learning capture is paused: Intelligence says this organization's licence does not include Product Trajectories, or that its billing is blocked.";
 const MESSAGES_REFUSED =
   "Learning capture is off: Intelligence refused the recorder's messages.";
-const CHECK_ORIGIN = `Intelligence refused the connection. If it sets CHECK_ORIGIN, that list must include chrome-extension://${RECORDER_EXTENSION_ID}.`;
+const checkOrigin = (id: string) =>
+  `Intelligence refused the connection. If it sets CHECK_ORIGIN, that list must include chrome-extension://${id}.`;
+/** An id Edge Add-ons could assign the Recorder: published there, it runs under that one, not the fixed one. */
+const EDGE_ADDONS_ID = "jdnkfgmofbmnjdbcpjgbgmmlhoiopnkp";
 
 const MINUTE = 60_000;
 
@@ -774,7 +778,27 @@ describe("streamer", () => {
     expect(h.kept).toHaveLength(1);
   });
 
-  test("a refused socket is retired and retried with a fresh pass, and the third refusal names CHECK_ORIGIN", async () => {
+  for (const [store, id] of [
+    [
+      "unpacked, under policy or from the Chrome Web Store",
+      RECORDER_EXTENSION_ID,
+    ],
+    ["from Edge Add-ons", EDGE_ADDONS_ID],
+  ] as const)
+    test(`a refused socket is retired and retried with a fresh pass, and the third refusal names CHECK_ORIGIN with the id the Recorder runs under, ${store}`, async () => {
+      // The offscreen document's own chrome.runtime, under that id.
+      const fake = installChromeFake({
+        extensionId: id,
+        context: "offscreen-document",
+      });
+      try {
+        await refusedThreeTimes(checkOrigin(id));
+      } finally {
+        fake.uninstall();
+      }
+    });
+
+  async function refusedThreeTimes(CHECK_ORIGIN: string): Promise<void> {
     const h = await setup();
     let refusals = 3;
     h.beforeSocket = () => {
@@ -801,7 +825,7 @@ describe("streamer", () => {
       h.socketUrls.map((url) => new URL(url).searchParams.get("join_token")),
     ).toEqual(h.tokens);
     expect(await h.pending(h.trajectoryId)).toBe(3);
-  });
+  }
 
   describe("join rows", () => {
     test("entitlement_unavailable retries with its sentence (row 30)", async () => {

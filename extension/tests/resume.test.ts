@@ -60,9 +60,12 @@ const capturedEvent = (name: string, value: unknown): CapturedEvent => ({
 
 // ---- The fake OpenBot -------------------------------------------------------------------------
 //
-// Nothing a restart finishes asks OpenBot anything: every request is recorded so the tests can say so.
+// Nothing a restart finishes asks OpenBot anything: every request is recorded so the tests can say so. A restarted worker
+// tells OpenBot what it is doing again (activity.ts), which holds nothing recorded, so `asked` leaves those reports out.
 
 const openbot = { calls: [] as string[] };
+const asked = () =>
+  openbot.calls.filter((call) => call !== "POST /api/recorder/activity");
 
 let server: ReturnType<typeof Bun.serve>;
 let origin = "";
@@ -413,7 +416,7 @@ test("a service-worker restart during Stop finishes the stop with the document a
   ]);
   port.postMessage({ type: "offscreen.done", recordingId: id });
   await until(() => drains().length === 0, "the drain forgotten");
-  expect(openbot.calls).toEqual([]);
+  expect(asked()).toEqual([]);
 });
 
 test("the document asked to report on a resumed stop is held to the organization's pinned Intelligence addresses", async () => {
@@ -463,7 +466,7 @@ test("a service-worker restart during Stop with no document reopens it on the st
   ]);
   expect((await state()).phase).toBe("idle");
   expect(drains().map((drain) => drain.recordingId)).toEqual([id]);
-  expect(openbot.calls).toEqual([]);
+  expect(asked()).toEqual([]);
 });
 
 test("a stop whose persisted start is over 120 s old skips the wait", async () => {
@@ -604,7 +607,7 @@ test("a service-worker restart in the middle of Record discards what the documen
 
   await startRecording(7);
   expect((await state()).phase).toBe("recording");
-  expect(openbot.calls).toEqual([]);
+  expect(asked()).toEqual([]);
 });
 
 // ---- A restart while recording ---------------------------------------------------------------
@@ -673,7 +676,7 @@ test("a service-worker restart mid-recording goes on checking the connection wit
   openDocumentPort();
   await recoverInterruptedRecording();
   expect((await state()).phase).toBe("recording");
-  expect(openbot.calls).toEqual([]);
+  expect(asked()).toEqual([]);
   await advance(30_000);
   await until(
     () => openbot.calls.includes("GET /api/recorder/me"),
@@ -848,5 +851,5 @@ test("a service-worker restart whose recording lost its connection stops it and 
       kept: expect.objectContaining({ waitingForReconnect: true }),
     }),
   ]);
-  expect(openbot.calls).toEqual([]);
+  expect(asked()).toEqual([]);
 });

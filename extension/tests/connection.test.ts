@@ -13,8 +13,8 @@ import {
   forgetConnection,
   handleConnectionMessage,
   handleExternalConnect,
+  connectThroughDesktop,
   installConnection,
-  offerDesktopConnection,
 } from "../src/background/connection";
 import type { RecorderPolicy } from "../src/shared/policy";
 import {
@@ -50,47 +50,46 @@ let meAnswer: { status: number; body: object } = {
   body: { user, connectionId: "c1" },
 };
 
-beforeAll(() => {
-  server = Bun.serve({
-    hostname: "127.0.0.1",
-    port: 0,
-    async fetch(request) {
-      const url = new URL(request.url);
-      hits.push(
-        `${request.method} ${url.pathname} ${request.headers.get("authorization") ?? ""}`,
+/** The fake OpenBot, on 127.0.0.1 for every test and on [::1] for the one that needs it. */
+async function openbot(request: Request): Promise<Response> {
+  const url = new URL(request.url);
+  hits.push(
+    `${request.method} ${url.pathname} ${request.headers.get("authorization") ?? ""}`,
+  );
+  if (
+    request.method === "POST" &&
+    url.pathname === "/api/recorder/connections"
+  ) {
+    const body = (await request.json()) as Exchange;
+    exchanges.push(body);
+    await holdIfAsked(url.pathname);
+    if (body.code === "obc_expired")
+      return Response.json(
+        { error: "That code has expired. Connect again from OpenBot." },
+        { status: 400 },
       );
-      if (
-        request.method === "POST" &&
-        url.pathname === "/api/recorder/connections"
-      ) {
-        const body = (await request.json()) as Exchange;
-        exchanges.push(body);
-        await holdIfAsked(url.pathname);
-        if (body.code === "obc_expired")
-          return Response.json(
-            { error: "That code has expired. Connect again from OpenBot." },
-            { status: 400 },
-          );
-        return Response.json({
-          token: "obr_fixture",
-          connection: { id: "c1" },
-          user,
-        });
-      }
-      if (
-        request.method === "DELETE" &&
-        url.pathname === "/api/recorder/connections/current"
-      ) {
-        await holdIfAsked(url.pathname);
-        return new Response(null, { status: 204 });
-      }
-      if (url.pathname === "/api/recorder/me") {
-        await holdIfAsked(url.pathname);
-        return Response.json(meAnswer.body, { status: meAnswer.status });
-      }
-      return new Response("nope", { status: 404 });
-    },
-  });
+    return Response.json({
+      token: "obr_fixture",
+      connection: { id: "c1" },
+      user,
+    });
+  }
+  if (
+    request.method === "DELETE" &&
+    url.pathname === "/api/recorder/connections/current"
+  ) {
+    await holdIfAsked(url.pathname);
+    return new Response(null, { status: 204 });
+  }
+  if (url.pathname === "/api/recorder/me") {
+    await holdIfAsked(url.pathname);
+    return Response.json(meAnswer.body, { status: meAnswer.status });
+  }
+  return new Response("nope", { status: 404 });
+}
+
+beforeAll(() => {
+  server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: openbot });
   origin = server.url.origin;
 });
 afterAll(() => server.stop(true));
@@ -539,10 +538,10 @@ test("an approve still exchanging when another origin replaces the stale pending
   expect(fake.tabs.has(42)).toBe(true);
 });
 
-test("a cancel that arrives while Desktop's handoff is being asked never clears Desktop's newer pending connect", async () => {
+test("a web Connect's cancel that waited behind Desktop's connect leaves the connection Desktop made alone", async () => {
   await connect("obc_w", "https://a.example.test");
   const handoff = Promise.withResolvers<{ openbotUrl: string; code: string }>();
-  const offering = offerDesktopConnection({
+  const connecting = connectThroughDesktop({
     askDesktop: () => handoff.promise,
     openTab,
     readPolicy: async () => policy,
@@ -554,21 +553,17 @@ test("a cancel that arrives while Desktop's handoff is being asked never clears 
     origin: "https://a.example.test",
   });
   await settle();
-  handoff.resolve({ openbotUrl: "http://127.0.0.1:7470", code: "obc_d" });
-  expect(await offering).toEqual({ offered: true });
+  handoff.resolve({ openbotUrl: origin, code: "obc_d" });
+  expect(await connecting).toEqual({ connected: true });
   expect(await cancelling).toEqual({ ok: true });
-  // The cancel was for the web connect: Desktop's handoff replaced it (closing its tab), and the cancel leaves
-  // Desktop's own pending connect and tab alone.
+  // Desktop connected this browser and closed the web Connect tab; the cancel, for the web connect, changes nothing.
   expect(fake.removed).toEqual([41]);
-  expect(closedWhile).toEqual([
-    { pendingOrigin: "https://a.example.test", opened: 1 },
-  ]);
-  expect(await readSession("pendingConnect")).toMatchObject({
-    origin: "http://127.0.0.1:7470",
+  expect(await readSession("pendingConnect")).toBeUndefined();
+  expect(await currentConnection()).toMatchObject({
+    openbotUrl: origin,
+    token: "obr_fixture",
     via: "desktop",
-    tabId: 42,
   });
-  expect(fake.tabs.has(42)).toBe(true);
 });
 
 test("Desktop availability is a ping that mints nothing", async () => {
@@ -587,44 +582,194 @@ test("Desktop availability is a ping that mints nothing", async () => {
   expect(askDesktopCalls).toBe(0);
 });
 
-test("Desktop's handoff opens the same confirm page with the Desktop wording", async () => {
-  await offerDesktopConnection({
-    askDesktop: async () => ({
-      openbotUrl: "http://127.0.0.1:7470",
-      code: "obc_d",
-    }),
+test("Desktop's code connects this browser at once, with no Connect page, as an approved Connect connects it", async () => {
+  // The Recorder the person's own Chrome installed from the store connects through OpenBot Desktop with nothing to click.
+  const answer = await connectThroughDesktop({
+    askDesktop: async () => ({ openbotUrl: origin, code: "obc_d" }),
     openTab,
     readPolicy: async () => policy,
   });
-  expect(
-    await handleConnectionMessage({ type: "page.connect.pending" }),
-  ).toEqual({
-    ok: true,
-    pending: { origin: "http://127.0.0.1:7470", via: "desktop" },
+  expect(answer).toEqual({ connected: true });
+  expect(opened).toEqual([]);
+  expect(await readSession("pendingConnect")).toBeUndefined();
+  // Exchanged at OpenBot Desktop's OpenBot, under this copy's install id for it and the browser's own name.
+  expect(exchanges).toEqual([
+    {
+      code: "obc_d",
+      label: expect.stringContaining(" on "),
+      installId: await installIdFor(origin),
+    },
+  ]);
+  expect(await currentConnection()).toEqual({
+    openbotUrl: origin,
+    token: "obr_fixture",
+    connectionId: "c1",
+    user,
+    via: "desktop",
+    connectedAt: clock,
   });
-  expect(opened).toHaveLength(1);
 });
 
-test("Desktop's handoff closes an open web connect tab before storing its own pending connect", async () => {
+/** The browser's own navigator for the length of `work`: its client hints, or none, and its user agent. */
+async function asBrowser(
+  browser: {
+    userAgentData?: { brands: { brand: string }[]; platform: string };
+    userAgent?: string;
+  },
+  work: () => Promise<void>,
+): Promise<void> {
+  const keys = ["userAgentData", "userAgent", "platform"] as const;
+  const own = new Map(
+    keys.map((key) => [key, Object.getOwnPropertyDescriptor(navigator, key)]),
+  );
+  Object.defineProperty(navigator, "userAgentData", {
+    value: browser.userAgentData,
+    configurable: true,
+  });
+  Object.defineProperty(navigator, "platform", {
+    value: "MacIntel",
+    configurable: true,
+  });
+  if (browser.userAgent)
+    Object.defineProperty(navigator, "userAgent", {
+      value: browser.userAgent,
+      configurable: true,
+    });
+  try {
+    await work();
+  } finally {
+    for (const [key, descriptor] of own)
+      if (descriptor) Object.defineProperty(navigator, key, descriptor);
+      else Reflect.deleteProperty(navigator, key);
+  }
+}
+
+test("a connection OpenBot Desktop makes is named for the browser it is in, Edge as Edge and Chrome as Chrome, as OpenBot tells them apart", async () => {
+  const desktopConnect = () =>
+    connectThroughDesktop({
+      askDesktop: async () => ({ openbotUrl: origin, code: "obc_d" }),
+      openTab,
+      readPolicy: async () => policy,
+    });
+  // Microsoft Edge's client hints, as its service worker has them.
+  await asBrowser(
+    {
+      userAgentData: {
+        brands: [
+          { brand: "Microsoft Edge" },
+          { brand: "Chromium" },
+          { brand: "Not=A?Brand" },
+        ],
+        platform: "macOS",
+      },
+    },
+    async () => {
+      expect(await desktopConnect()).toEqual({ connected: true });
+    },
+  );
+  // Google Chrome's.
+  await asBrowser(
+    {
+      userAgentData: {
+        brands: [
+          { brand: "Not_A Brand" },
+          { brand: "Chromium" },
+          { brand: "Google Chrome" },
+        ],
+        platform: "Windows",
+      },
+    },
+    async () => {
+      expect(await desktopConnect()).toEqual({ connected: true });
+    },
+  );
+  // An Edge that gives no client hints is still named Edge, from its user agent.
+  await asBrowser(
+    {
+      userAgent:
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36 Edg/156.0.0.0",
+    },
+    async () => {
+      expect(await desktopConnect()).toEqual({ connected: true });
+    },
+  );
+  expect(exchanges.map((exchange) => exchange.label)).toEqual([
+    "Microsoft Edge on macOS",
+    "Google Chrome on Windows",
+    "Microsoft Edge on MacIntel",
+  ]);
+});
+
+test("Desktop's connect closes an open web Connect tab, so approving that page cannot replace Desktop's connection", async () => {
   await connect("obc_w", "https://a.example.test");
-  await offerDesktopConnection({
-    askDesktop: async () => ({
-      openbotUrl: "http://127.0.0.1:7470",
-      code: "obc_d",
-    }),
+  await connectThroughDesktop({
+    askDesktop: async () => ({ openbotUrl: origin, code: "obc_d" }),
     openTab,
     readPolicy: async () => policy,
   });
   expect(fake.removed).toEqual([41]);
-  expect(closedWhile).toEqual([
-    { pendingOrigin: "https://a.example.test", opened: 1 },
-  ]);
   expect(fake.tabs.has(41)).toBe(false);
-  expect(await readSession("pendingConnect")).toMatchObject({
-    origin: "http://127.0.0.1:7470",
-    via: "desktop",
-    tabId: 42,
+  expect(await readSession("pendingConnect")).toBeUndefined();
+  expect((await currentConnection())?.via).toBe("desktop");
+  expect(opened).toHaveLength(1);
+});
+
+test("a connection Desktop makes clears the signed-out notice, as an approved Connect does", async () => {
+  await writeLocal("notice", {
+    kind: "signed-out",
+    at: clock,
+    reason: "revoked",
   });
+  await connectThroughDesktop({
+    askDesktop: async () => ({ openbotUrl: origin, code: "obc_d" }),
+    openTab,
+    readPolicy: async () => policy,
+  });
+  expect(await readLocal("notice")).toBeUndefined();
+});
+
+test("a code OpenBot refuses, or an OpenBot that does not answer, stores nothing and says why", async () => {
+  expect(
+    await connectThroughDesktop({
+      askDesktop: async () => ({ openbotUrl: origin, code: "obc_expired" }),
+      openTab,
+      readPolicy: async () => policy,
+    }),
+  ).toEqual({ connected: false, reason: "exchange-refused" });
+  // Nothing listens on this port: OpenBot Desktop named an OpenBot that is not running.
+  const closed = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: openbot });
+  const gone = closed.url.origin;
+  await closed.stop(true);
+  expect(
+    await connectThroughDesktop({
+      askDesktop: async () => ({ openbotUrl: gone, code: "obc_d" }),
+      openTab,
+      readPolicy: async () => policy,
+    }),
+  ).toEqual({ connected: false, reason: "openbot-unreachable" });
+  expect(await currentConnection()).toBeNull();
+  expect(opened).toEqual([]);
+  expect(await readSession("pendingConnect")).toBeUndefined();
+});
+
+test("a pin elsewhere that lands while Desktop's code is exchanged keeps the connection out and revokes its new token", async () => {
+  const exchange = holdAnswer("/api/recorder/connections");
+  const connecting = connectThroughDesktop({
+    askDesktop: async () => ({ openbotUrl: origin, code: "obc_d" }),
+    openTab,
+    readPolicy: async () => policy,
+  });
+  await exchange.arrived;
+  policy = { ...policy, openbotUrl: "https://moved.example.test" };
+  exchange.release();
+  expect(await connecting).toEqual({
+    connected: false,
+    reason: "pinned-elsewhere",
+  });
+  expect(await currentConnection()).toBeNull();
+  expect(hits).toContain(
+    "DELETE /api/recorder/connections/current Bearer obr_fixture",
+  );
 });
 
 test("installing registers onInstalled and no message listener (the router owns those)", async () => {
@@ -640,19 +785,41 @@ test("installing registers onInstalled and no message listener (the router owns 
     expect(added).not.toContain(owned);
 });
 
-test("a fresh install creates its secret and offers the Desktop connection", async () => {
+test("a fresh install creates its secret and connects through OpenBot Desktop with nothing to click, followed up as an approved Connect is", async () => {
+  const followedUp: string[] = [];
   installConnection({
-    askDesktop: async () => ({
-      openbotUrl: "http://127.0.0.1:7470",
-      code: "obc_d",
-    }),
+    askDesktop: async () => ({ openbotUrl: origin, code: "obc_d" }),
     openTab,
     readPolicy: async () => policy,
+    connected: async () => {
+      followedUp.push((await currentConnection())?.token ?? "none");
+    },
   });
   fake.fireInstalled("install");
   await settle();
   expect(await readLocal("installSecret")).toBeTruthy();
-  expect((await readSession("pendingConnect"))?.via).toBe("desktop");
+  expect(await currentConnection()).toMatchObject({ via: "desktop" });
+  expect(opened).toEqual([]);
+  expect(await readSession("pendingConnect")).toBeUndefined();
+  // The recording controller hears of it once it is stored, as it hears of an approved Connect.
+  expect(followedUp).toEqual(["obr_fixture"]);
+});
+
+test("an install with no OpenBot Desktop to answer connects nothing and opens nothing", async () => {
+  const followedUp: string[] = [];
+  installConnection({
+    askDesktop: async () => ({ error: "no-answer" }),
+    openTab,
+    readPolicy: async () => policy,
+    connected: async () => {
+      followedUp.push("connected");
+    },
+  });
+  fake.fireInstalled("install");
+  await settle();
+  expect(await currentConnection()).toBeNull();
+  expect(opened).toEqual([]);
+  expect(followedUp).toEqual([]);
 });
 
 test("the connect answer, the connected origin's ping and the exchange carry this copy's install id for that origin", async () => {
@@ -783,30 +950,23 @@ test("connects from two origins in one tick open one tab and answer the second b
   });
 });
 
-test("a web connect and Desktop's handoff at once leave one pending connect, shown in the only open connect tab", async () => {
+test("a web connect and Desktop's connect at once leave Desktop's connection, and a Connect tab only while a web connect is pending", async () => {
   await Promise.all([
     connect("obc_w", "https://a.example.test"),
-    offerDesktopConnection({
-      askDesktop: async () => ({
-        openbotUrl: "http://127.0.0.1:7470",
-        code: "obc_d",
-      }),
+    connectThroughDesktop({
+      askDesktop: async () => ({ openbotUrl: origin, code: "obc_d" }),
       openTab,
       readPolicy: async () => policy,
     }),
   ]);
+  expect((await currentConnection())?.via).toBe("desktop");
   const pending = await readSession("pendingConnect");
-  expect(pending).toMatchObject(
-    pending?.via === "desktop"
-      ? { origin: "http://127.0.0.1:7470", code: "obc_d" }
-      : { origin: "https://a.example.test", code: "obc_w" },
-  );
   const openConnectTabs = [...fake.tabs.values()]
     .filter((tab) => tab.url?.endsWith("/connect.html"))
     .map((tab) => tab.id);
-  expect(openConnectTabs).toEqual([pending?.tabId]);
-  // Any connect tab opened and then replaced was closed.
-  expect(opened.length - fake.removed.length).toBe(1);
+  // A web connect asked after Desktop connected waits on its page; one asked before was closed by Desktop's.
+  expect(openConnectTabs).toEqual(pending ? [pending.tabId] : []);
+  if (pending) expect(pending.origin).toBe("https://a.example.test");
 });
 
 test("a connect whose storage read fails rejects its caller, and the connect queued behind it still runs", async () => {
@@ -840,32 +1000,33 @@ test("the Desktop handoff respects a policy pinned elsewhere", async () => {
     openTab,
   };
   expect(
-    await offerDesktopConnection({
+    await connectThroughDesktop({
       ...asking,
       readPolicy: async () => ({
         ...policy,
         openbotUrl: "https://openbot.example.test",
       }),
     }),
-  ).toEqual({ offered: false, reason: "pinned-elsewhere" });
+  ).toEqual({ connected: false, reason: "pinned-elsewhere" });
   expect(
-    await offerDesktopConnection({
+    await connectThroughDesktop({
       ...asking,
       readPolicy: async () => ({ ...policy, openbotUrlInvalid: true }),
     }),
-  ).toEqual({ offered: false, reason: "policy-invalid" });
+  ).toEqual({ connected: false, reason: "policy-invalid" });
   expect(
-    await offerDesktopConnection({
+    await connectThroughDesktop({
       ...asking,
       readPolicy: async () => ({
         ...policy,
         openbotUrl: "http://127.0.0.1:7999",
       }),
     }),
-  ).toEqual({ offered: false, reason: "pinned-elsewhere" });
+  ).toEqual({ connected: false, reason: "pinned-elsewhere" });
   expect(askDesktopCalls).toBe(1);
   expect(opened).toEqual([]);
-  expect(await readSession("pendingConnect")).toBeUndefined();
+  expect(exchanges).toEqual([]);
+  expect(await currentConnection()).toBeNull();
 });
 
 test("Desktop's refusal reaches the popup as its code, after a good ping too, and opens nothing", async () => {
@@ -884,34 +1045,35 @@ test("Desktop's refusal reaches the popup as its code, after a good ping too, an
           readPolicy: async () => policy,
         },
       ),
-    ).toEqual({ ok: true, offered: false, reason });
+    ).toEqual({ ok: true, connected: false, reason });
   }
   expect(
-    await offerDesktopConnection({
+    await connectThroughDesktop({
       askDesktop: async () => ({ openbotUrl: "not a url", code: "obc_d" }),
       openTab,
       readPolicy: async () => policy,
     }),
-  ).toEqual({ offered: false, reason: "invalid-address" });
+  ).toEqual({ connected: false, reason: "invalid-address" });
   expect(opened).toEqual([]);
-  expect(await readSession("pendingConnect")).toBeUndefined();
+  expect(exchanges).toEqual([]);
+  expect(await currentConnection()).toBeNull();
 });
 
 test("Desktop's IPv6 loopback address is accepted", async () => {
-  await offerDesktopConnection({
-    askDesktop: async () => ({
-      openbotUrl: "http://[::1]:7470",
-      code: "obc_d",
-    }),
-    openTab,
-    readPolicy: async () => policy,
-  });
-  expect(
-    await handleConnectionMessage({ type: "page.connect.pending" }),
-  ).toEqual({
-    ok: true,
-    pending: { origin: "http://[::1]:7470", via: "desktop" },
-  });
+  const ipv6 = Bun.serve({ hostname: "::1", port: 0, fetch: openbot });
+  try {
+    const address = `http://[::1]:${ipv6.port}`;
+    expect(
+      await connectThroughDesktop({
+        askDesktop: async () => ({ openbotUrl: address, code: "obc_d" }),
+        openTab,
+        readPolicy: async () => policy,
+      }),
+    ).toEqual({ connected: true });
+    expect((await currentConnection())?.openbotUrl).toBe(address);
+  } finally {
+    await ipv6.stop(true);
+  }
 });
 
 async function connected(token = "obr_fixture") {

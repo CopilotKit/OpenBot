@@ -131,6 +131,26 @@ test("an ok page.connect.decide calls connected() after the connection answered"
   expect(seen.order).toEqual(["connection", "connected"]);
 });
 
+test("OpenBot Desktop's connect calls connected() once it connected this browser, as an approved Connect does, and not when it did not", async () => {
+  stubConnection({ ok: true, connected: true });
+  installRouter(handlers);
+  expect(await fake.sendFromPage({ type: "page.connect.desktop" })).toEqual({
+    ok: true,
+    connected: true,
+  });
+  expect(seen.order).toEqual(["connection", "connected"]);
+
+  restore.pop()?.();
+  seen.order = [];
+  stubConnection({ ok: true, connected: false, reason: "not-signed-in" });
+  expect(await fake.sendFromPage({ type: "page.connect.desktop" })).toEqual({
+    ok: true,
+    connected: false,
+    reason: "not-signed-in",
+  });
+  expect(seen.order).toEqual(["connection"]);
+});
+
 test("a refused page.connect.decide does not call connected()", async () => {
   stubConnection({ ok: false, error: "no" });
   installRouter(handlers);

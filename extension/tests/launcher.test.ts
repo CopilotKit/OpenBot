@@ -76,12 +76,36 @@ let meAsked: string[] = [];
 let openbotAsked: string[] = [];
 /** The person's own Learning space, as OpenBot answers the Recorder's popup; none until a test sets one. */
 let learning: LearningSpaceState | null = null;
-function route(request: Request): Response | null {
+/** The token OpenBot mints for OpenBot Desktop's code, and the tokens the Recorder asked OpenBot to revoke. */
+const DESKTOP_TOKEN = "obr_desktop-made";
+let revokedTokens: string[] = [];
+/** While set, OpenBot answers the exchange of OpenBot Desktop's code only once it resolves. */
+let exchangeHeld: Promise<void> | null = null;
+let exchangeArrived = () => {};
+/** OpenBot taking OpenBot Desktop's code, when it is asked to and once `exchangeHeld` lets it. */
+async function exchange(): Promise<Response> {
+  exchangeArrived();
+  if (exchangeHeld) await exchangeHeld;
+  liveTokens.add(DESKTOP_TOKEN);
+  return Response.json({
+    token: DESKTOP_TOKEN,
+    connection: { id: "c-desktop" },
+    user: ada,
+  });
+}
+function route(request: Request): Response | Promise<Response> | null {
   const path = new URL(request.url).pathname;
   const token =
     request.headers.get("authorization")?.replace(/^Bearer /, "") ?? "";
   if (path.startsWith("/api/recorder/"))
     openbotAsked.push(`${request.method} ${path}`);
+  if (path === recorderPaths.connections && request.method === "POST")
+    return exchange();
+  if (path === recorderPaths.currentConnection && request.method === "DELETE") {
+    revokedTokens.push(token);
+    liveTokens.delete(token);
+    return new Response(null, { status: 204 });
+  }
   if (path === "/api/recorder/me") {
     meAsked.push(token);
     if (!liveTokens.has(token))
@@ -279,6 +303,9 @@ beforeEach(async () => {
   meAsked = [];
   openbotAsked = [];
   learning = null;
+  revokedTokens = [];
+  exchangeHeld = null;
+  exchangeArrived = () => {};
   gateway = await startFakeGateway({ extraRoutes: route });
   fake = installChromeFake({
     extensionId: EXTENSION_ID,
@@ -561,21 +588,28 @@ test("a recording disconnect finds running stops as a sign-out stops one, kept f
 }, 15_000);
 
 test("an OpenBot browser shows no setup tab and no Connect page: none on a later launch, and the first launch's are closed", async () => {
-  // OpenBot Desktop's native host answers in this profile too, and would hand over a code.
+  // OpenBot Desktop's native host answers in this profile too, and hands over a code its OpenBot takes.
   fake.native.reply = (message) =>
     (message as { type: string }).type === "ping"
       ? { ok: true }
       : { ok: true, openbotUrl: gateway.httpUrl, code: "obc_fixture" };
 
-  // The first launch: the install opens its setup tab, and Desktop's Connect page, before the launcher connects.
+  // The first launch: the install opens its setup tab, and connects through OpenBot Desktop, before the launcher does.
   fake.fireInstalled("install");
-  await until(() => fake.opened.length === 2, "the install's own tabs");
+  await until(
+    () => fake.opened.length === 1 && stored()?.via === "desktop",
+    "the install's own tab and connection",
+  );
   const opened = [...fake.tabs.keys()];
   expect(
     await launcher().connect({ connection: connection(), narration: "own" }),
   ).toEqual({ ok: true });
   expect([...fake.removed].sort()).toEqual(opened.sort());
   expect(fake.storage.session.get("pendingConnect")).toBeUndefined();
+  expect(stored()).toMatchObject({ via: "openbot-browser", token: TOKEN });
+  // The connection the install made on its own is revoked: OpenBot would otherwise count this browser as one of the
+  // person's own that OpenBot Desktop connected.
+  expect(revokedTokens).toEqual([DESKTOP_TOKEN]);
 
   // The next launch: the Recorder is loaded afresh (an install again) with its storage, the connection in it.
   fake.restartServiceWorker();
@@ -591,6 +625,34 @@ test("an OpenBot browser shows no setup tab and no Connect page: none on a later
       (message) => (message as { type: string }).type === "handoff",
     ),
   ).toHaveLength(1);
+  expect(stored()).toMatchObject({ via: "openbot-browser", token: TOKEN });
+});
+
+test("the launcher's connection that comes while the install's OpenBot Desktop code is exchanged keeps that one out, revoked", async () => {
+  fake.native.reply = (message) =>
+    (message as { type: string }).type === "ping"
+      ? { ok: true }
+      : { ok: true, openbotUrl: gateway.httpUrl, code: "obc_fixture" };
+  const release = Promise.withResolvers<void>();
+  const arrived = Promise.withResolvers<void>();
+  exchangeHeld = release.promise;
+  exchangeArrived = arrived.resolve;
+
+  fake.fireInstalled("install");
+  await arrived.promise;
+  const connecting = launcher().connect({
+    connection: connection(),
+    narration: "own",
+  });
+  await settle();
+  release.resolve();
+  expect(await connecting).toEqual({ ok: true });
+  await until(
+    () => revokedTokens.includes(DESKTOP_TOKEN),
+    "the install's own connection revoked",
+  );
+  expect(stored()).toMatchObject({ via: "openbot-browser", token: TOKEN });
+  expect(fake.storage.local.get("notice")).toBeUndefined();
 });
 
 test("Record starts on the tab the person is on and Stop ends it, through the popup's own paths", async () => {

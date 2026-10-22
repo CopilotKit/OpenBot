@@ -85,8 +85,14 @@ async function routePage(
   if (CONNECTION_TYPES.has(type)) {
     const answer = await handleConnectionMessage(message);
     if (answer === undefined) return UNKNOWN;
-    // The follow-up runs after the connection changed: never fail the page on it.
-    if (answer.ok && message.type === "page.connect.decide" && message.approve)
+    // The follow-up runs after the connection changed: never fail the page on it. OpenBot Desktop's connect, with no
+    // Connect page, is an approved Connect too.
+    const connected =
+      (message.type === "page.connect.decide" && message.approve) ||
+      (message.type === "page.connect.desktop" &&
+        "connected" in answer &&
+        answer.connected);
+    if (answer.ok && connected)
       await deps
         .connected()
         .catch((error) =>

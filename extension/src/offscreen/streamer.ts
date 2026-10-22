@@ -1,5 +1,4 @@
 import type { TrajectoryGrant } from "@openbot/shared/recorder-api";
-import { RECORDER_EXTENSION_ID } from "@openbot/shared/recorder-extension";
 import {
   type CapturedEvent,
   EVENT_BUDGET_BYTES,
@@ -157,13 +156,10 @@ const messagesRefusedSentence = (reason: string) =>
   `Learning capture is paused: Intelligence refused the recorder's messages (${reason}).`;
 const sessionEndedSentence = (reason: string) =>
   `Learning capture is paused: Intelligence ended the capture session (${reason}).`;
-const checkOriginSentence = () => {
-  const id =
-    typeof chrome !== "undefined" && chrome.runtime?.id
-      ? chrome.runtime.id
-      : RECORDER_EXTENSION_ID;
-  return `Intelligence refused the connection. If it sets CHECK_ORIGIN, that list must include chrome-extension://${id}.`;
-};
+/** Names the origin Intelligence saw, the id this copy runs under: the Recorder's fixed id unpacked, under policy or
+ * from the Chrome Web Store, and the id Edge Add-ons assigned it in Edge, never the fixed one in its place. */
+const checkOriginSentence = () =>
+  `Intelligence refused the connection. If it sets CHECK_ORIGIN, that list must include chrome-extension://${chrome.runtime.id}.`;
 
 type WireEvent = CapturedEvent & { value: Record<string, JsonValue> };
 
