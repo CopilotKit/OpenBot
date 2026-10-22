@@ -1,5 +1,6 @@
 import type {
   LearningSpaceState,
+  RecorderConnectVia,
   RecorderMe,
 } from "@openbot/shared/recorder-api";
 import type { CapturedEvent } from "@openbot/shared/recorder-masking";
@@ -136,6 +137,9 @@ export type StreamSession = {
   version: string;
   /** The narration's language (BCP 47) and whether the person muted it. Absent: this recording has no voice. */
   voice?: { language: string; muted: boolean };
+  /** Narration the Recorder's launcher passes in (`external`, launcher.ts): no voice here, and each phrase it is handed
+   * is placed as the document's own recogniser's are, in this language. The document never reads it. */
+  narration?: { language: string };
   /** e2e variant only: the service worker copies storage.local.RECORDER_E2E_HOLD_RETRY_MS here (an offscreen document can use
    * no extension API but runtime, so it cannot read storage itself); the offscreen document reads it only inside its e2e branch. */
   e2eHoldRetryMs?: number;
@@ -263,7 +267,7 @@ export type PageStateResponse = {
   connection: {
     openbotUrl: string;
     user: { name: string; email: string };
-    via: "web" | "desktop";
+    via: RecorderConnectVia;
   } | null;
   me: RecorderMe | null;
   policy: { openbotUrl: string | null; invalid: boolean };

@@ -15,6 +15,7 @@ import {
 import {
   type CapturedEvent,
   scrubText,
+  scrubTranscript,
   scrubUrl,
 } from "@openbot/shared/recorder-masking";
 import type {
@@ -125,6 +126,19 @@ type ConnectionEvents = {
   connectionLost(loss: ConnectionLoss): Promise<void>;
 };
 
+/** What the Recorder's launcher asks of the controller (launcher.ts), beyond what the popup asks through its messages. */
+export type LauncherSide = {
+  /** One phrase the launcher heard, with when the person started and stopped saying it (epoch ms): with narration
+   * `external`, placed among the steps as a phrase of the document's own recogniser is, masked the same way. */
+  narrate(phrase: {
+    text: string;
+    startedAt: number;
+    endedAt: number;
+  }): Promise<PageResponse>;
+  /** The recorder's state as it is now. */
+  current(): Promise<RecorderState>;
+};
+
 /** What recovery.ts drives after a browser or service-worker restart (Task 9's Recovery), on the controller installed last. */
 export type RecordingRecovery = {
   /** The phase this service worker found in storage.session when it started: idle after a browser restart. */
@@ -218,6 +232,7 @@ const SENTENCES = {
   busy: "A recording is already running.",
   notRecording: "Nothing is being recorded.",
   noVoice: "This recording has no voice.",
+  ownVoice: "This browser hears your voice itself.",
   tabClosed:
     "That tab is closed. Open the Recorder on the tab you want to record.",
   startFailed: "The recording could not start. Try again.",
@@ -516,7 +531,7 @@ function liveFrom(record: DrainRecord, token: string): Live {
 /** The page/content/offscreen handlers the router calls. Defaults are the real modules; tests pass doubles. */
 export function installRecording(
   overrides: Partial<RecordingDeps> = {},
-): RouterHandlers & ConnectionEvents {
+): RouterHandlers & ConnectionEvents & LauncherSide {
   const deps: RecordingDeps = { ...defaultDeps, ...overrides };
   forgetContentPorts();
 
@@ -531,6 +546,9 @@ export function installRecording(
   const typedSecrets = new Map<number, string[]>();
   /** The person's own Learning space as OpenBot last described it: a recording starts with it, for its popup line. */
   let learningSpace: LearningSpaceState | undefined;
+  /** The live recording's narration when its launcher passes it in (`external`): the language its phrases are in, and
+   * the last phrase as said, so the next one is masked knowing what came before it, as the document's recogniser does. */
+  let external: { language: string; before: string } | null = null;
   /** Each followed tab's last recorded top-frame address: the same one again is not recorded twice. */
   const recordedNavigations = new Map<number, string>();
   const forgetAddresses = () => {
@@ -670,6 +688,8 @@ export function installRecording(
     const held = record ? await readLocal("heldSteps") : undefined;
     if (held && held.recordingId === record?.recordingId) restoredSteps = held;
     if (state.phase !== "recording") return;
+    const narration = (await readSession("stream"))?.narration;
+    if (narration) external = { language: narration.language, before: "" };
     const connection = await currentConnection();
     if (!record || !connection || !ownedBy(record, connection)) return;
     live = liveFrom(record, connection.token);
@@ -1255,6 +1275,43 @@ export function installRecording(
     else forwardEvent(placed);
   }
 
+  /** A phrase the launcher passes in (`external`), as the document's recogniser emits one of its own: one `transcript`
+   * event stamped with the phrase's start, masked with every sensitive value of the recording and knowing the phrase
+   * before it (a number read out after "my card number is" can come as a phrase of its own), then placed among the held
+   * steps. Taken until the steps are sent at Stop, so a phrase the person finished as they pressed Stop is not lost.
+   * Its start is never later than now: the clock it was timed on is the person's, and a phrase stamped ahead of what is
+   * happening would be placed after steps taken while it was said. */
+  function narrate(phrase: {
+    text: string;
+    startedAt: number;
+    endedAt: number;
+  }): PageResponse {
+    const said = external;
+    if (state.phase !== "recording" && state.phase !== "stopping")
+      return { ok: false, error: SENTENCES.notRecording };
+    if (!steps) return { ok: false, error: SENTENCES.notRecording };
+    if (!said) return { ok: false, error: SENTENCES.ownVoice };
+    const text = phrase.text.trim();
+    if (!text) return { ok: true };
+    const now = deps.now();
+    const startedAt = Math.min(phrase.startedAt, now);
+    const endedAt = Math.max(startedAt, Math.min(phrase.endedAt, now));
+    const masked = scrubTranscript(text, { digests, before: said.before });
+    said.before = text;
+    placeTranscript({
+      type: "CUSTOM",
+      name: "transcript",
+      timestamp: startedAt,
+      value: {
+        text: masked,
+        startedAt: new Date(startedAt).toISOString(),
+        endedAt: new Date(endedAt).toISOString(),
+        language: said.language,
+      },
+    });
+    return { ok: true };
+  }
+
   /** Before Stop sends the held steps: the document hands over the phrase being spoken, placed among them, and lets go
    * of the microphone. Only while a phrase is being spoken, and never longer than VOICE_END_MS. */
   function endVoiceFirst(recordingId: string): Promise<void> {
@@ -1372,6 +1429,7 @@ export function installRecording(
     const url = tab.url;
     const recordingId = crypto.randomUUID();
     const trajectoryId = crypto.randomUUID();
+    const language = narrationLanguage(message.language, navigator.language);
     let saved = false;
     let documentStarted = false;
     let injected = false;
@@ -1401,11 +1459,11 @@ export function installRecording(
         startedAt,
         allowedIntelligenceUrls: policy.allowedIntelligenceUrls,
         version: chrome.runtime.getManifest().version,
-        // Every recording narrates: the person mutes it in the popup if they want to.
-        voice: {
-          language: narrationLanguage(message.language, navigator.language),
-          muted: false,
-        },
+        // Every recording narrates: the person mutes it in the popup if they want to. A browser with no microphone of
+        // its own is narrated from outside instead (`external`), and the document listens to nothing.
+        ...(connection.narration === "external"
+          ? { narration: { language } }
+          : { voice: { language, muted: false } }),
       };
       if (import.meta.env.RECORDER_VARIANT === "e2e") {
         const items = await chrome.storage.local.get(
@@ -1438,6 +1496,9 @@ export function installRecording(
         userId: connection.user.id,
       };
       watchConnection();
+      external = session.narration
+        ? { language: session.narration.language, before: "" }
+        : null;
       // Recording from here on, before the script is injected: a content script that says hello is told to capture.
       recordedNavigations.set(tabId, url ?? "");
       dispatch({
@@ -1449,7 +1510,8 @@ export function installRecording(
         capture: {
           intelligence: "connecting",
           network: "off",
-          voice: { state: "starting" },
+          // Narration from outside has no row of the Recorder's own: whoever passes it in shows it.
+          ...(session.voice ? { voice: { state: "starting" as const } } : {}),
         },
       });
       injected = true;
@@ -1473,6 +1535,7 @@ export function installRecording(
     } catch (error) {
       // Roll back in reverse.
       live = null;
+      external = null;
       unwatchConnection();
       network = null;
       networkMode = "off";
@@ -1585,8 +1648,10 @@ export function installRecording(
     if (mode.kind !== "disconnect") await endVoiceFirst(recordingId);
     // The steps still held go before the outcome, with the saves they have; storage forgets them at once.
     closeSteps();
-    // The recording's voice has ended with it: a phrase it was hearing holds nothing of the next recording.
+    // The recording's voice has ended with it: a phrase it was hearing holds nothing of the next recording, and a phrase
+    // passed in from now on belongs to none.
     speechHold = null;
+    external = null;
     await writeHeld();
     // Only the person's Stop succeeds. A Disconnect or a sign-out ends the recording midway: what it streamed live is in
     // Intelligence already, and its outcome says why it ended.
@@ -2660,6 +2725,16 @@ export function installRecording(
       const waiters = connectWaiters;
       connectWaiters = [];
       for (const waiter of waiters) waiter(port);
+    },
+
+    async narrate(phrase) {
+      await ready;
+      return narrate(phrase);
+    },
+
+    async current() {
+      await ready;
+      return state;
     },
 
     async connected() {

@@ -1,4 +1,6 @@
-type OriginCheck = { ok: true; origin: string } | { ok: false; reason: string };
+// The OpenBot address rule lives beside the Recorder's API in shared/, so OpenBot itself checks an address with the same
+// rule before it hands one to the Recorder (the OpenBot browser's connection).
+export { normaliseOpenBotOrigin } from "@openbot/shared/recorder-api";
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "[::1]"]);
 
@@ -8,34 +10,6 @@ function parse(raw: string): URL | null {
   } catch {
     return null;
   }
-}
-
-/** https:// any host; http:// only for a loopback address with a port, 127.0.0.1 or [::1] (OpenBot Desktop's local stack,
- * Decision 21; never a name such as localhost); no userinfo, path other than "/", query or fragment. */
-export function normaliseOpenBotOrigin(raw: string): OriginCheck {
-  const url = parse(raw);
-  if (!url) return { ok: false, reason: "That is not a web address." };
-  if (url.protocol !== "https:" && url.protocol !== "http:") {
-    return { ok: false, reason: "OpenBot's address must start with https://." };
-  }
-  if (url.username || url.password)
-    return {
-      ok: false,
-      reason: "The address must not contain a user name or password.",
-    };
-  if (url.pathname !== "/" || url.search || url.hash) {
-    return {
-      ok: false,
-      reason: "Use only the address, such as https://openbot.example.com.",
-    };
-  }
-  if (
-    url.protocol === "http:" &&
-    !(LOOPBACK_HOSTS.has(url.hostname) && url.port)
-  ) {
-    return { ok: false, reason: "OpenBot's address must use HTTPS." };
-  }
-  return { ok: true, origin: url.origin };
 }
 
 /** wss:// required; ws:// only when the gateway host is 127.0.0.1 or [::1]; when `allowed` is not null the

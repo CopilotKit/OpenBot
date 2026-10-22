@@ -1,3 +1,4 @@
+import type { RecorderConnectVia } from "@openbot/shared/recorder-api";
 import { sql } from "drizzle-orm";
 import {
   index,
@@ -16,7 +17,7 @@ export const recorderConnectCodes = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    via: text("via").$type<"web" | "desktop">().notNull(),
+    via: text("via").$type<RecorderConnectVia>().notNull(),
     /** Organization mode only: the minting request's organization session cookie, sealed with KEY_ENCRYPTION_KEY. The
      * code is deleted when it is used and once it has expired, and this copy with it. */
     organizationSession: text("organization_session"),
@@ -37,7 +38,7 @@ export const recorderConnections = pgTable(
       .references(() => users.id, { onDelete: "cascade" }),
     tokenHash: text("token_hash").notNull().unique(),
     label: text("label").notNull(),
-    via: text("via").$type<"web" | "desktop">().notNull(),
+    via: text("via").$type<RecorderConnectVia>().notNull(),
     extensionId: text("extension_id").notNull(),
     /** The connecting copy's install id for this OpenBot. */
     installId: text("install_id").notNull(),

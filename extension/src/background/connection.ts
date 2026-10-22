@@ -90,6 +90,8 @@ const connectUrl = () => chrome.runtime.getURL("connect.html");
  * forget told which token asked (`forgetConnection` with `askedWith`) and approve's store of the connection queue here
  * too. A job that throws rejects its own caller and the next job still runs. */
 let queue: Promise<unknown> = Promise.resolve();
+/** Launcher connections waiting in the queue: an install's own Desktop offer, ahead of one there, opens no page. */
+let launcherConnecting = 0;
 function serially<T>(work: () => Promise<T>): Promise<T> {
   const run = queue.then(work, work);
   queue = run.catch(() => undefined);
@@ -101,7 +103,7 @@ export function installConnection(deps?: Partial<ConnectionDeps>): void {
   chrome.runtime.onInstalled.addListener(async (details) => {
     if (details.reason !== "install") return;
     await installSecret();
-    await offerDesktopConnection(resolved);
+    await offerDesktopConnection(resolved, { install: true });
   });
   chrome.alarms.onAlarm.addListener((alarm) => {
     if (alarm.name === KEEP_ALIVE_ALARM) void keepAlive(resolved);
@@ -282,6 +284,45 @@ async function approve(
   if ((await readLocal("notice"))?.kind === "signed-out")
     await removeLocal("notice");
   return { ok: true };
+}
+
+/**
+ * The connection the Recorder's launcher hands it (launcher.ts), stored as an approved Connect stores one: checked
+ * against the policy in the same queued job that writes it, the signed-out notice gone with it. Nothing pending is
+ * asked about, so nothing is shown: the Recorder's own setup tab and a Connect page its install opened on its own are
+ * closed, since a browser OpenBot opened needs neither. Resolves false when the policy keeps it out.
+ */
+export async function connectFromLauncher(
+  connection: ConnectionRecord,
+  deps?: Partial<ConnectionDeps>,
+): Promise<boolean> {
+  const resolved = withDefaults(deps);
+  launcherConnecting += 1;
+  let stored: boolean;
+  try {
+    stored = await serially(async () => {
+      if (!allowsOpenBot(await resolved.readPolicy(), connection.openbotUrl))
+        return false;
+      await writeLocal("connection", connection);
+      return true;
+    });
+  } finally {
+    launcherConnecting -= 1;
+  }
+  if (!stored) return false;
+  if ((await readLocal("notice"))?.kind === "signed-out")
+    await removeLocal("notice");
+  const setupTab = await readSession("setupTabId");
+  if (setupTab !== undefined) {
+    await closeConnectTab(setupTab);
+    await removeSession("setupTabId");
+  }
+  const pending = await readSession("pendingConnect");
+  if (pending?.via === "desktop") {
+    await closeConnectTab(pending.tabId);
+    await clearPendingConnect(pending);
+  }
+  return true;
 }
 
 /** A decision clears only the pending connect it read when it arrived. Approve's exchange runs outside the queue, so
@@ -467,16 +508,29 @@ export type DesktopOffer =
  * a loopback http address, so a policy naming any other kind of address can never match and Desktop is not asked. */
 export function offerDesktopConnection(
   deps?: Partial<ConnectionDeps>,
+  options: { install?: boolean } = {},
 ): Promise<DesktopOffer> {
   const resolved = withDefaults(deps);
-  return serially(() => desktopConnect(resolved));
+  return serially(() => desktopConnect(resolved, options.install === true));
 }
 
-async function desktopConnect(deps: ConnectionDeps): Promise<DesktopOffer> {
+async function desktopConnect(
+  deps: ConnectionDeps,
+  install: boolean,
+): Promise<DesktopOffer> {
   const refused = (reason: string): DesktopOffer => ({
     offered: false,
     reason,
   });
+  // An OpenBot browser's launcher connected it, or is connecting it (`connectFromLauncher`): the offer an install makes
+  // on its own would put a Connect page in front of a browser that needs none. Asked before Desktop is asked, and again
+  // before the page opens, since on a first launch the launcher's connection arrives while Desktop answers. The
+  // person's own choice from the popup is left alone.
+  const launched = async () =>
+    install &&
+    (launcherConnecting > 0 ||
+      (await currentConnection())?.via === "openbot-browser");
+  if (await launched()) return refused("launched");
   const policy = await deps.readPolicy();
   if (policy.openbotUrlInvalid) return refused("policy-invalid");
   if (policy.openbotUrl && !policy.openbotUrl.startsWith("http:"))
@@ -488,6 +542,7 @@ async function desktopConnect(deps: ConnectionDeps): Promise<DesktopOffer> {
   if (!checked.ok) return refused("invalid-address");
   if (!allowsOpenBot(policy, checked.origin))
     return refused("pinned-elsewhere");
+  if (await launched()) return refused("launched");
   await closeConnectTab((await readSession("pendingConnect"))?.tabId);
   const pending: PendingConnect = {
     origin: checked.origin,

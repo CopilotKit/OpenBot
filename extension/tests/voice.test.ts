@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   type CapturedEvent,
   REDACTED,
@@ -21,6 +23,21 @@ import {
 } from "./support/fake-speech";
 
 const START = 1_800_000_000_000;
+
+/** What Chrome 156's speech recognition really sent for two phrases with a pause between (the file says how). */
+const chromeTwoPhrases = JSON.parse(
+  readFileSync(
+    join(import.meta.dir, "fixtures", "chrome-156-two-phrases.json"),
+    "utf8",
+  ),
+) as {
+  events: {
+    type: string;
+    at: number;
+    resultIndex?: number;
+    results?: [transcript: string, isFinal: boolean, confidence: number][];
+  }[];
+};
 
 /** Timers that run only when the test advances the clock. */
 function virtualClock() {
@@ -206,8 +223,12 @@ describe("voice", () => {
       ["I am opening", false],
       [" the", false],
     ]);
+    // The first phrase is final while the next one's words already show at the index after it, which stays.
     await s.clock.advance(2_000);
-    recognition.say([["I am opening the order page", true]]);
+    recognition.say([
+      ["I am opening the order page", true],
+      ["the customer", false],
+    ]);
     await s.clock.advance(3_000);
     recognition.say(
       [
@@ -224,6 +245,44 @@ describe("voice", () => {
       startedAt: new Date(START + 3_000).toISOString(),
       endedAt: new Date(START + 6_000).toISOString(),
     });
+  });
+
+  test("Chrome 156's own events: the second phrase starts at its first word, not when the first phrase's folded tail was shown", async () => {
+    // Recorded from real Chrome (fixtures/chrome-156-two-phrases.json): while a phrase is said Chrome splits it into a
+    // settled head and a changing tail at the next index, folds the tail back in when the phrase is final (the list
+    // gets shorter), and the next phrase reuses that index 2.2 s later.
+    const s = setup();
+    await s.clock.advance(0);
+    const recognition = s.recognition();
+    for (const event of chromeTwoPhrases.events) {
+      await s.clock.advance(START + event.at - s.clock.now());
+      if (event.type === "start") recognition.begin();
+      if (event.type === "soundstart") recognition.hearSpeech();
+      if (event.type === "result" && event.results)
+        recognition.say(
+          event.results.map(([transcript, isFinal]) => [transcript, isFinal]),
+          event.resultIndex,
+        );
+    }
+    expect(
+      s.events.map((event) => ({
+        text: (event.value as { text: string }).text,
+        startedAt: event.timestamp - START,
+        endedAt:
+          Date.parse((event.value as { endedAt: string }).endedAt) - START,
+      })),
+    ).toEqual([
+      {
+        text: "I am opening the expenses page",
+        startedAt: 1161,
+        endedAt: 3177,
+      },
+      {
+        text: "now I add the receipt from the taxi ride",
+        startedAt: 5379,
+        endedAt: 7919,
+      },
+    ]);
   });
 
   test("a spoken card number or typed secret is masked in the event and in the words the popup shows", async () => {

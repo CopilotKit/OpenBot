@@ -54,7 +54,7 @@ const learning = (state: LearningSpaceState["state"]): LearningSpaceState => ({
 const UNASSIGNED_SENTENCE =
   "Learning will not see this recording: Automatic Learning is off in this OpenBot. It still goes to Intelligence.";
 const MISSING_SENTENCE =
-  "Learning will not see this recording: your Learning space could not be made in Intelligence. Ask an administrator to check Admin, Automatic Learning. It still goes to Intelligence.";
+  "Learning will not see this recording: your Learning space could not be made in Intelligence. Ask an admin to check Admin, Automatic Learning. It still goes to Intelligence.";
 const UNREACHED_SENTENCE =
   "Learning may not see this recording: OpenBot could not reach your Learning space just now. It still goes to Intelligence.";
 const INTO_YOUR_SPACE =

@@ -4,6 +4,7 @@ import {
   IntelligenceAgentRunner,
 } from "@copilotkit/runtime/v2";
 import { COMPUTER_GUIDANCE } from "@openbot/shared/bot-prompt";
+import { isPersonBrowserId } from "@openbot/shared/openbot-browser";
 import { workOwner } from "@openbot/shared/work-owner";
 import { createTurnRunner } from "@openbot/toolkit/run-turn";
 import { and, eq, isNull, ne, sql } from "drizzle-orm";
@@ -99,6 +100,13 @@ import { createChannelTitler } from "./channels/titler";
 import { headlessComponentCatalog } from "./components/headless";
 import { createSandboxedStore } from "./components/sandboxed";
 import { createComponentStore } from "./components/store";
+import { openbotAddress } from "./browser/address";
+import { personBrowserEgressPolicy } from "./browser/egress";
+import {
+  directBrowserComputers,
+  gatewayBrowserComputers,
+  withPersonBrowsers,
+} from "./browser/host";
 import { createComputerGateway } from "./computer/gateway";
 import { createHeadlessComputerTools } from "./computer/headless-tools";
 import { createPageFrameStore } from "./computer/page-frames";
@@ -507,14 +515,32 @@ const { resolveRequestActor, identifyUser, identifyActor } = createRequestActor(
     rolesForUser: (id) => roleRepository.rolesForUser(id),
   },
 );
+// Where a person's own OpenBot browser may go: not where Bots may, but where their browser on their own laptop would
+// (browser/egress.ts). On OpenBot Desktop's host-side computer that is their own desktop, so everywhere.
+const personBrowserPolicy = personBrowserEgressPolicy({
+  native: config.browser !== undefined,
+  allowPrivateHosts: config.computer?.allowPrivateHosts ?? false,
+  openbotUrls: [config.publicUrl, config.appUrl],
+  gatewayUrl: config.runtime.intelligence.gatewayWsUrl,
+});
 // Each computer is pushed its network policy on the way to the action that woke it, because a
-// computer refuses every connection until one arrives (see `withPolicyPushOnWake`).
+// computer refuses every connection until one arrives (see `withPolicyPushOnWake`). A person's own
+// browser is found where it runs (OPENBOT_BROWSER_URL, else the same provider) and pushed theirs.
 const computerProvider = config.computer
-  ? withPolicyPushOnWake(createComputerProvider(config.computer), {
-      policyForBot: (botId) => enterpriseControls()?.policyForBot(botId),
-      ...(config.computer.token ? { token: config.computer.token } : {}),
-      ...(config.webBotAuth ? { webBotAuth: config.webBotAuth } : {}),
-    })
+  ? withPolicyPushOnWake(
+      withPersonBrowsers(
+        createComputerProvider(config.computer),
+        config.browser?.url,
+      ),
+      {
+        policyForBot: (botId) =>
+          isPersonBrowserId(botId)
+            ? Promise.resolve(personBrowserPolicy)
+            : enterpriseControls()?.policyForBot(botId),
+        ...(config.computer.token ? { token: config.computer.token } : {}),
+        ...(config.webBotAuth ? { webBotAuth: config.webBotAuth } : {}),
+      },
+    )
   : undefined;
 
 if (computerProvider?.warm) {
@@ -2349,6 +2375,7 @@ await installEnterpriseControls({
   database,
   databaseUrl: config.databaseUrl,
   auditStore: bootAuditStore,
+  personBrowserPolicy,
   ...(computerProvider ? { provider: computerProvider } : {}),
   ...(config.computer?.token ? { computerToken: config.computer.token } : {}),
   ...(config.webBotAuth ? { webBotAuth: config.webBotAuth } : {}),
@@ -2531,6 +2558,27 @@ const app = createApp(
       recorder: demonstrationRecorder,
     },
     recorder: recorderExtension,
+    // Only where a person's browser can run: OpenBot Desktop's host-side computer, or the computers Bots run on.
+    ...(computerGateway || config.browser
+      ? {
+          browser: {
+            computers: computerGateway
+              ? gatewayBrowserComputers(computerGateway)
+              : directBrowserComputers({
+                  browserUrl: (config.browser as { url: string }).url,
+                  policy: personBrowserPolicy,
+                  ...(config.browser?.token
+                    ? { token: config.browser.token }
+                    : {}),
+                }),
+            ...((config.computer?.token ?? config.browser?.token)
+              ? { token: config.computer?.token ?? config.browser?.token }
+              : {}),
+            recorder: recorderExtension,
+            openbotUrl: openbotAddress(config),
+          },
+        }
+      : {}),
     personalLearning: {
       store: learningSharingStore,
       skillsOf: (userId) =>

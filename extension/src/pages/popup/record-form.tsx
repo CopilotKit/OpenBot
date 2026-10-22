@@ -19,7 +19,7 @@ const LEARNING_SENTENCES: Partial<Record<LearningSpaceState["state"], string>> =
     unassigned:
       "Learning will not see this recording: Automatic Learning is off in this OpenBot. It still goes to Intelligence.",
     missing:
-      "Learning will not see this recording: your Learning space could not be made in Intelligence. Ask an administrator to check Admin, Automatic Learning. It still goes to Intelligence.",
+      "Learning will not see this recording: your Learning space could not be made in Intelligence. Ask an admin to check Admin, Automatic Learning. It still goes to Intelligence.",
     // OpenBot could not read its Learning settings, or your space was still being made, so it named none.
     unverified:
       "Learning may not see this recording: OpenBot could not reach your Learning space just now. It still goes to Intelligence.",

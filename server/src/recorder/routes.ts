@@ -10,12 +10,9 @@ import {
 import { extensionIdFromOrigin } from "@openbot/shared/recorder-extension";
 import { Hono, type MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
-import {
-  type AuditStore,
-  DEPLOYMENT_INITIATOR,
-  recordAuditEvent,
-} from "../audit";
+import { type AuditStore, DEPLOYMENT_INITIATOR } from "../audit";
 import type { AppVariables, AuthenticatedActor } from "../auth/guards";
+import { recorderAudit, recorderConnected } from "./connected";
 import type { RecorderConnectionStore } from "./connections";
 import type { RecorderVariables } from "./variables";
 
@@ -55,18 +52,7 @@ const smallBody = bodyLimit({
 
 export function createRecorderRoutes(deps: RecorderRouteDeps) {
   const routes = new Hono<{ Variables: RecorderVariables }>();
-  const audit = (event: Parameters<typeof recordAuditEvent>[1]) =>
-    deps.auditStore
-      ? recordAuditEvent(deps.auditStore, event).catch((error: unknown) => {
-          console.error(
-            JSON.stringify({
-              type: "recorder-audit-write-failed",
-              eventType: event.eventType,
-              error: String(error),
-            }),
-          );
-        })
-      : Promise.resolve();
+  const audit = recorderAudit(deps.auditStore);
 
   routes.post(
     "/connect-codes",
@@ -147,39 +133,7 @@ export function createRecorderRoutes(deps: RecorderRouteDeps) {
         400,
       );
     }
-    await audit({
-      eventType: "recorder.connected",
-      targetType: "recorder_connection",
-      targetId: made.connection.id,
-      actorUserId: made.userId,
-      payload: {
-        connectionId: made.connection.id,
-        via: made.connection.via,
-        extensionId,
-        installId: made.connection.installId,
-        label: made.connection.label,
-      },
-    });
-    try {
-      deps.onConnected?.(made.userId);
-    } catch (error) {
-      // Making the person's Learning space is a nicety here: the capture pass makes it too. Never fatal to connecting.
-      console.error(
-        JSON.stringify({
-          type: "recorder-learning-space-kick-failed",
-          error: String(error),
-        }),
-      );
-    }
-    if (made.replaced) {
-      await audit({
-        eventType: "recorder.revoked",
-        targetType: "recorder_connection",
-        targetId: made.replaced,
-        actorUserId: made.userId,
-        payload: { connectionId: made.replaced, reason: "replaced" },
-      });
-    }
+    await recorderConnected({ made, audit, onConnected: deps.onConnected });
     const user = await deps.user(made.userId);
     if (!user) {
       return context.json(

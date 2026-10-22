@@ -17,7 +17,13 @@ import type { LearningContainerSpec } from "./ensure-container";
  * every replica, with nothing to look up, and two people never share one.
  */
 export function personalLearningContainerId(userId: string): string {
-  return `user-${createHash("sha256").update(userId).digest("hex").slice(0, 32)}`;
+  return `user-${personDigest(userId)}`;
+}
+
+/** The first 32 hex digits of the SHA-256 of an OpenBot user id: what every id derived from a person is built on (their
+ * Learning space here, and their OpenBot browser, browser/person.ts). */
+export function personDigest(userId: string): string {
+  return createHash("sha256").update(userId).digest("hex").slice(0, 32);
 }
 
 /** One branch per LearnedSkillsError code (or success): the existence question only. */

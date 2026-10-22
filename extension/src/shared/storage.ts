@@ -1,3 +1,4 @@
+import type { Narration } from "@openbot/shared/openbot-browser";
 import type {
   RecorderConnectVia,
   RecorderMe,
@@ -14,6 +15,9 @@ export type ConnectionRecord = {
   user: RecorderUser;
   via: RecorderConnectVia;
   connectedAt: number;
+  /** Who hears the person, for a connection the Recorder's launcher made (launcher.ts): `external` when the browser has
+   * no microphone and OpenBot passes each phrase in. Absent: the Recorder hears the microphone itself, as always. */
+  narration?: Narration;
 };
 /** What a stopped recording's streamer reported when it stopped with events kept (Decision 19, Task 11's offscreen.kept),
  * or, with `waitingForReconnect`, that the connection was signed out and the recording waits for its person to connect again. */
@@ -82,7 +86,8 @@ type LocalState = {
 export type PendingConnect = {
   origin: string;
   code: string;
-  via: RecorderConnectVia;
+  /** Only a page or OpenBot Desktop asks to connect; the launcher's connection is never pending. */
+  via: "web" | "desktop";
   requestedAt: number;
   tabId?: number;
 };
@@ -100,6 +105,9 @@ type SessionState = {
   typedSecrets?: [number, string[]][];
   /** openbot.connect requests per origin in the last 10 minutes (timestamps), for Decision 22's limit (Task 8). */
   connectRequests?: Record<string, number[]>;
+  /** The setup tab the install opened (setup.ts), so the launcher's connection can close it: a browser OpenBot opened
+   * has its microphone granted already and is never shown a setup step. */
+  setupTabId?: number;
 };
 const isString = (value: unknown): value is string => typeof value === "string";
 
