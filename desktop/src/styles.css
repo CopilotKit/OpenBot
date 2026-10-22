@@ -35,7 +35,9 @@
   font-family:
     Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, ui-sans-serif,
     system-ui, sans-serif;
-  font-size: 14px;
+  /* 16px rather than 14px since the window grew to 1000x800: everything below is in rem, so the
+     type, the column and the spacing grow together and the room does not read as empty. */
+  font-size: 16px;
   line-height: 1.5;
   color: var(--ink);
   background: var(--ground);
@@ -781,16 +783,16 @@ details > summary:hover {
  * wizard that was produced rather than written, and it is the proof the install actually worked.
  */
 .answer {
-  margin: 20px 0 4px;
-  padding: 16px 18px;
-  border-radius: 14px;
+  margin: 1.4rem 0 0.3rem;
+  padding: 1.15rem 1.3rem;
+  border-radius: 1rem;
   background: var(--raised);
   border: 1px solid var(--hair);
 }
 
 .answer-from {
-  margin: 0 0 6px;
-  font-size: 12px;
+  margin: 0 0 0.45rem;
+  font-size: 0.85rem;
   font-weight: 600;
   letter-spacing: 0.02em;
   color: var(--ink-faint);
@@ -798,7 +800,7 @@ details > summary:hover {
 
 .answer-text {
   margin: 0;
-  font-size: 17px;
+  font-size: 1.2rem;
   line-height: 1.45;
   color: var(--ink);
   white-space: pre-wrap;
