@@ -194,7 +194,7 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
   const named = name.trim() !== "";
   const endpointIssue =
     endpoint.trim() === ""
-      ? "An address is required for an agent you run."
+      ? "Enter your agent's address."
       : agentFormSchema.shape.endpoint.safeParse(endpoint).error?.issues[0]
           ?.message;
   const busy = checking || createAgent.isPending;
@@ -486,13 +486,13 @@ const VISIBILITY_OPTIONS: Array<{
   {
     value: "private",
     title: "Private",
-    description: "Only you can see it and start channels with it.",
+    description: "Only you can see it and talk to it.",
     icon: IconLock,
   },
   {
     value: "public",
     title: "Public",
-    description: "Everyone in the deployment can find and use it.",
+    description: "Everyone in your OpenBot can find and use it.",
     icon: IconUsers,
   },
 ];
@@ -562,9 +562,7 @@ function AboutStep({
           placeholder={runsHere ? "Finance Operations" : defaultTitle(runtime)}
           value={title}
         />
-        <FieldDescription>
-          A few words, shown beneath its name in lists.
-        </FieldDescription>
+        <FieldDescription>A few words shown under its name.</FieldDescription>
       </Field>
       <Field>
         <FieldLabel htmlFor="new-bot-instructions">
@@ -582,8 +580,8 @@ function AboutStep({
         />
         <FieldDescription>
           {runsHere
-            ? "How it behaves in every conversation. Left blank, it helps with whatever it is asked."
-            : "Added to the agent's own instructions, in every conversation it joins."}
+            ? "How it should work. Leave it blank and it helps with anything."
+            : "Added to your agent's own instructions."}
         </FieldDescription>
       </Field>
       <FieldSet>
@@ -686,8 +684,8 @@ function RuntimeStep({
           <span className="block font-semibold text-base">Run it here</span>
           <span className="mt-1 block text-pretty text-muted-foreground text-sm">
             {builtInAvailable
-              ? "OpenBot runs it for you. Nothing to set up — it can start work as soon as it is made."
-              : "Not available yet. Whoever set OpenBot up has to switch this on first."}
+              ? "OpenBot runs it for you. Nothing to set up, and it can start right away."
+              : "Not available yet. An admin has to turn this on first."}
           </span>
         </span>
       </button>
@@ -787,8 +785,8 @@ function EndpointStep({
             />
           ) : (
             <FieldDescription>
-              Anything that speaks AG-UI works. This server dials your agent, so
-              an agent on your own machine has to be reachable from here.
+              Any agent that speaks AG-UI works. OpenBot connects to it, so it
+              has to be reachable from OpenBot's server.
             </FieldDescription>
           )}
         </Field>
@@ -806,8 +804,8 @@ function EndpointStep({
             value={secret}
           />
           <FieldDescription>
-            Sent as an <code>Authorization</code> header on every run, and kept
-            in the credential vault.
+            Sent as an <code>Authorization</code> header with every request, and
+            stored encrypted.
           </FieldDescription>
         </Field>
       </FieldGroup>

@@ -17,13 +17,20 @@ import { tryClient } from "@/lib/client";
 import { useActiveBot } from "@/lib/copilot/active-bot";
 import { useBotThread } from "@/lib/copilot/bot-thread";
 import { useStoppedTurn } from "@/lib/copilot/stopped-turn";
+import { searchTextEntry } from "@/lib/search-text";
 
 export const Route = createFileRoute("/_authed/_app/bot")({
   component: RouteComponent,
+  /*
+   * `?agent=` is read as text whatever the router parsed it into (`searchText`), because search
+   * values are JSON-parsed and a Bot id made of digits would otherwise arrive as a number and open
+   * this deployment's default Bot rather than the named one. `?watch=` is a flag and is read as the
+   * boolean it is parsed into: anything else is not the flag being set.
+   */
   validateSearch: (
     search: Record<string, unknown>,
   ): { agent?: string; watch?: boolean } => ({
-    ...(typeof search.agent === "string" ? { agent: search.agent } : {}),
+    ...searchTextEntry("agent", search.agent),
     ...(search.watch === true ? { watch: true } : {}),
   }),
 });
@@ -60,10 +67,10 @@ async function loadExplicitBot(agentId: string): Promise<BotDetailLookup> {
     `/api/agents/${encodeURIComponent(agentId)}`,
   );
   if (response.status === 404) return { status: "missing" };
-  if (!response.ok) throw new Error("Bot couldn't be loaded.");
+  if (!response.ok) throw new Error("Couldn't load this Bot.");
 
   const body: unknown = await response.json().catch(() => null);
-  if (!isAgentEnvelope(body)) throw new Error("Bot couldn't be loaded.");
+  if (!isAgentEnvelope(body)) throw new Error("Couldn't load this Bot.");
   return { bot: body.agent, status: "found" };
 }
 
@@ -99,7 +106,7 @@ function RouteComponent() {
     return (
       <div className="flex h-screen items-center justify-center p-6">
         <p className="text-destructive text-sm" role="alert">
-          Bots couldn't be loaded.
+          Couldn't load your Bots. Reload the page.
         </p>
       </div>
     );
@@ -108,7 +115,7 @@ function RouteComponent() {
     return (
       <div className="flex h-screen items-center justify-center p-6">
         <p className="text-destructive text-sm" role="alert">
-          Bot couldn't be loaded.
+          Couldn't load this Bot. Reload the page.
         </p>
       </div>
     );
@@ -118,8 +125,8 @@ function RouteComponent() {
       <div className="flex h-screen items-center justify-center p-6">
         <p className="text-muted-foreground text-sm">
           {agent
-            ? `This deployment has no Bot called "${agent}".`
-            : "This deployment has no Bots yet."}
+            ? `There's no Bot called "${agent}".`
+            : "There are no Bots yet."}
         </p>
       </div>
     );
@@ -209,8 +216,7 @@ function BotChat({ agentId, name }: { agentId: string; name: string }) {
             data-testid="bot-chat-history-unavailable"
             role="alert"
           >
-            Earlier messages in this conversation could not be loaded, and the
-            Bot is answering without them.
+            Couldn't load earlier messages. The Bot is answering without them.
           </p>
         ) : null}
         {/*

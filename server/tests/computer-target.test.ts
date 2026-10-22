@@ -30,7 +30,7 @@ describe("navigation targets", () => {
 
     expect(verdict.allowed).toBe(false);
     expect(verdict.allowed === false && verdict.reason).toContain(
-      "inside this deployment's own network",
+      "inside OpenBot's own network",
     );
   });
 
@@ -45,7 +45,7 @@ describe("navigation targets", () => {
 
       expect(verdict.allowed).toBe(false);
       expect(verdict.allowed === false && verdict.reason).toContain(
-        "cloud credentials",
+        "cloud keys",
       );
     }
   });
@@ -74,7 +74,7 @@ describe("navigation targets", () => {
 
       expect(verdict.allowed).toBe(false);
       expect(verdict.allowed === false && verdict.reason).toContain(
-        "cloud credentials",
+        "cloud keys",
       );
     }
   });
@@ -90,7 +90,7 @@ describe("navigation targets", () => {
 
     expect(verdict.allowed).toBe(false);
     expect(verdict.allowed === false && verdict.reason).toContain(
-      "inside this deployment's own network",
+      "inside OpenBot's own network",
     );
   });
 

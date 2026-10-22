@@ -1,3 +1,4 @@
+import { and, eq, sql } from "drizzle-orm";
 import type { ApprovalGate } from "../../approvals/types";
 import type { AuditStore } from "../../audit";
 import type { ActionPolicy } from "../../computer/policy";
@@ -7,8 +8,14 @@ import type {
 } from "../../credentials";
 import type { Database } from "../../db/client";
 import { isQueryFailure, withoutStatement } from "../../db/query-failure";
+import { pendingAuthorizations } from "../../db/schema";
 import type { CheckPrivateShare } from "../../proactive/private-share";
-import { type ServerAccess, ServerUnresolvableError } from "../access";
+import {
+  BROKERED_PROFILE,
+  type BrokerProvider,
+  type ServerAccess,
+  ServerUnresolvableError,
+} from "../access";
 import type {
   BrokerConnection,
   ComposioBroker,
@@ -116,6 +123,8 @@ export type ServerRecord = {
   hasCredential: boolean;
   toolsRefreshedAt: string | null;
   lastError: string | null;
+  /** What the last stored listing left out for its names; a warning, never a failure. */
+  skippedTools: string[];
   addedBy: string | null;
   /**
    * Whether the catalogue entry registers its own OAuth client (RFC 7591) rather than waiting on
@@ -600,27 +609,50 @@ export function storableSchema(
  *
  * FIRST OCCURRENCE WINS, and the order is the vendor's own. Anything else needs a rule for which
  * of two identical names is the real one, and there is no such rule.
+ *
+ * CRITERION FOUR. No row carries a name a model cannot be offered, and every name left out for that
+ * reason comes back in `skipped`, once, spelled as the vendor listed it — so the caller can say
+ * which actions were not recorded rather than leave their absence for somebody to notice.
  */
-export function storableTools(serverId: string, listed: ListedTool[]) {
-  const byName = new Map<
-    string,
-    {
-      serverId: string;
-      name: string;
-      description: string;
-      inputSchema: Record<string, unknown>;
-      effect: "read" | "write" | null;
-      destructive: boolean;
-      version: string | null;
-    }
-  >();
+export function storableTools(
+  serverId: string,
+  listed: ListedTool[],
+): { rows: StorableTool[]; skipped: string[] } {
+  const byName = new Map<string, StorableTool>();
+  const skipped = new Set<string>();
 
   for (const tool of listed) {
     const name = tool.name.replaceAll(NUL, "");
+    /*
+     * THE GUARD THAT MAKES THE OFFERED NAME OFFERABLE, placed at the one seam every transport's
+     * listing passes through on its way into the database.
+     *
+     * A model tool name may only match `^[a-zA-Z0-9_-]+$`, and `name` is spliced into one by
+     * {@link toolNameFor}. Nothing used to check: Arcade's dotted `qualified_name` was recorded
+     * whole and the refusal arrived much later and somewhere else entirely — as a 400 on the model
+     * request naming `tools[47]`, with no mention of the app, the action or the refresh that
+     * recorded it. A person reading that has nothing to act on.
+     *
+     * SKIPPED AND NAMED, NOT REFUSED. This used to throw, which cost the whole listing for one
+     * name: the MCP spec allows a dot in a tool name, so a custom server with a single dotted
+     * action stored none of its others on an add and froze its list on every refresh after. The
+     * guarantee that matters — the name never reaches a model — holds either way; what skipping
+     * changes is that the rest of the app keeps working. The name comes back to the caller, which
+     * says on the app's own page what was left out.
+     */
+    if (!OFFERABLE_TOOL_NAME.test(name)) {
+      skipped.add(name);
+      continue;
+    }
     if (byName.has(name)) continue;
     byName.set(name, {
       serverId,
       name,
+      /*
+       * The vendor's spelling where the transport drew a distinction, and the same string where it
+       * did not — which is the whole of what absence means here. See {@link ListedTool.vendorName}.
+       */
+      vendorName: (tool.vendorName ?? name).replaceAll(NUL, ""),
       /*
        * Defaulted where the COLUMN has a default, because that is what the previous mapping leaned
        * on: it passed these two straight through, so a transport handing back undefined got the
@@ -651,8 +683,20 @@ export function storableTools(serverId: string, listed: ListedTool[]) {
     });
   }
 
-  return [...byName.values()];
+  return { rows: [...byName.values()], skipped: [...skipped] };
 }
+
+/** One row {@link storableTools} hands to the `mcp_tools` insert. */
+export type StorableTool = {
+  serverId: string;
+  name: string;
+  vendorName: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+  effect: "read" | "write" | null;
+  destructive: boolean;
+  version: string | null;
+};
 
 export function isDeploymentFault(error: unknown): error is Error {
   return (
@@ -706,6 +750,14 @@ export class TokenRefusedError extends McpServerError {
 export const INVALID_CLIENT = "invalid_client";
 
 /**
+ * The OAuth error code for a refresh token the vendor will no longer honour (RFC 6749 §5.2): it was
+ * revoked, it expired, or the person withdrew the grant. Nothing this deployment can do brings it
+ * back — only the person consenting again — so the connection is recorded as withdrawn, the state
+ * every screen already reads as Reconnect.
+ */
+export const INVALID_GRANT = "invalid_grant";
+
+/**
  * A transaction, as the writes in this module hand one to each other.
  *
  * Named because two writes here are one decision — a secret in the vault, and the pointer that says
@@ -714,6 +766,17 @@ export const INVALID_CLIENT = "invalid_client";
  * the advisory lock that serialises the client path.
  */
 export type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
+
+/**
+ * THE ONLY SHAPE A MODEL TOOL NAME MAY TAKE, as the model API enforces it: `^[a-zA-Z0-9_-]+$`.
+ *
+ * Declared here beside {@link toolNameFor}, which is the function that has to satisfy it, and
+ * applied in {@link storableTools}, which is the one door every transport's listing goes through and
+ * which leaves out — and reports — any name that fails it. The prefix and separator this module
+ * splices in are themselves made of these characters, so a `name` that passes is an offered name
+ * that passes.
+ */
+export const OFFERABLE_TOOL_NAME = /^[a-zA-Z0-9_-]+$/;
 
 /**
  * A tool name the model can actually call.
@@ -1046,6 +1109,23 @@ export const CLIENT_REREGISTRATION_BACKOFF_MS = 5 * 60_000;
 export const IDENTITY_ACTION =
   /(_GET_ME|_PROFILE|_CURRENT_USER|_USER_INFO|_WHOAMI)$/;
 
+/**
+ * Every broker's id namespace, reserved together. See {@link BROKERED_PROFILE} in `./access` for
+ * what a profile holds and why it lives there; this is only the list this file reserves off it.
+ */
+export const BROKERED_ID_PREFIXES = Object.values(BROKERED_PROFILE);
+
+/**
+ * Every broker's screen name, reserved together, for the reason {@link BROKERED_ID_PREFIXES} is.
+ *
+ * THE KEYS, NOT A SECOND LITERAL LIST. `/admin/plugins/composio` is the app directory's own page and
+ * `/admin/plugins/arcade` is the Arcade one, and a static route is matched ahead of
+ * `/admin/plugins/$key` on both — so a server sitting at either id would be listed and then open
+ * somebody else's page instead of its own. Spelled as its own list, this reservation would be the
+ * one somebody adds a broker to {@link BROKERED_PROFILE} without adding to.
+ */
+export const BROKERED_SCREEN_NAMES = Object.entries(BROKERED_PROFILE);
+
 /** What a vendor's token endpoint gave back for a refresh token. */
 export type AccessToken = {
   accessToken: string;
@@ -1104,7 +1184,8 @@ export type PluginStoreOptions = {
     },
     toolName: string,
     args: Record<string, unknown>,
-  ) => Promise<{ text: string; isError: boolean }>;
+    /** `accountGone` as `McpCallResult` carries it: the vendor lost the account this call ran in. */
+  ) => Promise<{ text: string; isError: boolean; accountGone?: true }>;
   /** Trading a refresh token for a short-lived access token. Defaults to a real HTTP exchange. */
   exchangeRefreshToken?: (input: {
     tokenUrl: string;
@@ -1128,6 +1209,34 @@ export type PluginStoreOptions = {
    * above — invent a broker to get a store.
    */
   broker?: ComposioBroker;
+  /**
+   * Which broker this deployment runs, which is the slice of `brokered_connections` this store
+   * reads and the word its connection writer stamps on every row it mints.
+   *
+   * THE ONE PLACE THE VENDOR IS NAMED. Every read of `brokered_connections` below and the insert in
+   * {@link createPluginStore}'s `recordBrokeredConnection` used to spell `composio` for themselves —
+   * eleven comparisons that were each correct while there was one broker and each silently wrong on
+   * the day there were two. They now all read this. A deployment running Arcade whose store was
+   * still filtering on `composio` would not fail: it would read an empty slice, write rows nobody
+   * reads back, and leave the "the other provider holds rows" refusal permanently unfired while the
+   * offboarding sweep swept the wrong table slice. That is the failure this field exists to make
+   * impossible to reach by accident.
+   *
+   * REQUIRED, UNLIKE `broker` ABOVE, BECAUSE FORGETTING IT HAS NO SYMPTOM. An absent `broker` says
+   * one true thing — this deployment has not configured one — and every path that needs it raises.
+   * An absent provider would have had to be guessed, and the only guess available was `composio`:
+   * an Arcade deployment built by forgetting this field would then read and write the COMPOSIO slice
+   * of `brokered_connections`, hand its own rows back through a composio filter, and APPEAR TO WORK.
+   * Spec D3's "the other provider holds rows" refusal would never fire, because nothing would ever
+   * be filed under the other name, and the offboarding sweep would sweep a slice that is not this
+   * deployment's. Nothing goes red. There is no error to raise later, so the compiler asks now.
+   *
+   * SO THERE IS NO DEFAULT ANYWHERE — not here, not in {@link createPluginStore}, not in a test
+   * helper. A function that cannot reach the provider takes it as a parameter; a second answer to
+   * "which provider" is a second thing that can be wrong while agreeing with nothing. `activeProvider`
+   * in `./broker` decides it from configuration at the one deployment boundary that knows.
+   */
+  brokerProvider: BrokerProvider;
   /** Where the vendor sends people back; needed to (re)register a dynamic client. */
   redirectUri?: string;
   /**
@@ -1136,6 +1245,157 @@ export type PluginStoreOptions = {
    */
   deploymentId?: string;
 };
+
+/** One in-flight Arcade authorization attempt, as the table stores it. */
+export type PendingAuthorization = typeof pendingAuthorizations.$inferSelect;
+
+/**
+ * WHY A BROKERED ACCOUNT'S ROW WENT, as the trail spells it, and a closed set rather than free
+ * text for the reason {@link PluginStore.disconnectBrokered} gives: a reader asking the trail
+ * WHICH of these happened can be answered only if it is the same word every time.
+ *
+ * ONE SET ACROSS EVERY WRITER OF `mcp.account_disconnected`, so that `clearEndedSiblings` — which
+ * writes for all of them — takes the word rather than re-deciding it. Each writer still narrows
+ * this to the words IT may use; nothing takes the whole union as its own input.
+ */
+export type BrokeredDisconnectReason =
+  /** The person disconnected their own account. */
+  | "self"
+  /** The person was removed from the People screen; {@link PluginStore.retireConnectionsFor}. */
+  | "person_removed"
+  /** An administrator disconnected the deployment's account for a Shared app. */
+  | "admin"
+  /** The app was switched between Personal and Shared, retiring the old mode's accounts. */
+  | "mode_switched"
+  /** A consent's context moved on and the verifier withdrew the retired identity's app. */
+  | "context_changed"
+  /** The app itself was removed; {@link PluginStore.removeServer}. */
+  | "mcp_server_removed";
+
+/** One app's connection, as far as sibling-finding needs to know it. */
+export type ConnectionFootprint = {
+  /** The toolkit, spelled as the vendor spells it. Compared exactly, never case-folded. */
+  app: string;
+  /** The identity the connection is held under at the vendor. */
+  vendorUserId: string;
+  /**
+   * The vendor's own AUTH PROVIDER the connection is held under (`google`), not the broker's name.
+   *
+   * NAMED `authProvider` AND NEVER `providerId`, because `provider` in this file means the BROKER —
+   * `brokered_connections.provider` is read a few lines below this one — and that collision has
+   * already been paid for once in an audit payload. See {@link ConnectedAppBroker.authProviderOf},
+   * which is where this value comes from and which is likewise not the toolkit name.
+   */
+  authProvider: string;
+};
+
+/**
+ * The apps that share `of`'s connection, which are the apps sharing BOTH its vendor identity AND
+ * its AUTH PROVIDER. NEVER THE PROVIDER ALONE (spec D26).
+ *
+ * REASON. An Arcade connection is keyed `(user_id, provider_id)`, and this deployment holds MANY
+ * vendor identities: each person's own, PLUS ONE RANDOM IDENTITY PER SHARED APP, minted by
+ * `mintDeploymentVendorUserId`. So shared Gmail and shared Slack, both using Google, do NOT share
+ * a connection: their `user_id`s differ. A computation keyed on `provider_id` alone would warn
+ * about apps that WILL NOT BE TOUCHED, which trains people to dismiss the warning that matters.
+ * Silently ending two connections when somebody asked to end one is the failure to avoid.
+ *
+ * The auth provider is compared case-insensitively, as the adapter's `connectionsFor` does; the app
+ * name is not, because Arcade toolkit case is never normalised. The answer never contains `of`
+ * itself, and is sorted so two callers see the same list. This function ACTS ON NOTHING.
+ */
+export function connectionSiblings(
+  of: ConnectionFootprint,
+  among: readonly ConnectionFootprint[],
+): string[] {
+  const provider = of.authProvider.toLowerCase();
+  const found = new Set<string>();
+  for (const other of among) {
+    if (other.app === of.app) continue;
+    if (other.vendorUserId !== of.vendorUserId) continue;
+    if (other.authProvider.toLowerCase() !== provider) continue;
+    found.add(other.app);
+  }
+  return [...found].sort();
+}
+
+/** Raw `execute` rows are snake_case and carry timestamps as whatever the driver decoded. */
+export function pendingAuthorizationFromRow(
+  row: Record<string, unknown>,
+): PendingAuthorization {
+  const when = (v: unknown) =>
+    v === null || v === undefined ? null : new Date(v as string | Date);
+  return {
+    actorId: row.actor_id as string,
+    serverId: row.server_id as string,
+    action: row.action as string,
+    holder: row.holder as PendingAuthorization["holder"],
+    userId: (row.user_id as string | null) ?? null,
+    vendorUserId: row.vendor_user_id as string,
+    authId: (row.auth_id as string | null) ?? null,
+    createdAt: when(row.created_at) as Date,
+    completedAt: when(row.completed_at),
+    outcome: (row.outcome as PendingAuthorization["outcome"]) ?? null,
+  };
+}
+
+/**
+ * The instant a caller names an authorization attempt by, as a `Date`, or a refusal naming the
+ * field.
+ *
+ * THE DECLARED TYPE IS `Date` AND THE VALUE IS NOT ALWAYS ONE. `PendingAuthorization.createdAt` is
+ * typed `Date` and is one while it stays in this process, but an attempt that has been through
+ * JSON — serialised into a job, a cache or a cross-process hop and parsed back — carries an ISO
+ * STRING under a `Date` annotation. Handed to drizzle, that string reaches
+ * `PgTimestamp.mapToDriverValue`, which calls `.toISOString()` on it and raises
+ * `TypeError: value.toISOString is not a function` from inside the driver: a failure that names
+ * neither the field nor the caller. An ISO string names the same instant perfectly well, so it is
+ * accepted; anything that names NO instant is refused HERE, where the message can say what was
+ * wrong, rather than running as a query that silently matches nothing.
+ */
+function attemptInstant(createdAt: Date | string): Date {
+  const instant =
+    createdAt instanceof Date
+      ? createdAt
+      : typeof createdAt === "string"
+        ? new Date(createdAt)
+        : new Date(Number.NaN);
+  if (Number.isNaN(instant.getTime())) {
+    throw new Error(
+      `An authorization attempt's created_at must be a Date or an ISO timestamp, not ${JSON.stringify(createdAt) ?? String(createdAt)}.`,
+    );
+  }
+  return instant;
+}
+
+/**
+ * The condition that names ONE actor's attempt by the `created_at` a caller holds.
+ *
+ * MATCHED AT MILLISECOND PRECISION ON BOTH SIDES, BECAUSE THE TWO SIDES DO NOT CARRY THE SAME ONE.
+ * `created_at` is a `timestamptz`, which PostgreSQL keeps to the MICROSECOND, and the `Date` the
+ * driver hands back carries MILLISECONDS. A row stored at `…13.407577` is read back as
+ * `…13.407Z`, and an exact `=` against that `Date` matches NOTHING — so the mint writes no
+ * `auth_id`, and per {@link pendingAuthorizations}, "an attempt holding null can never complete":
+ * a silently dead attempt that waits out its fifteen minutes.
+ *
+ * {@link createPluginStore}'s `claimAuthorizationAttempt` writes `date_trunc('milliseconds', now())`
+ * for exactly this reason, but THAT ONLY HOLDS FOR THE ONE WRITER THAT REMEMBERS. The column's
+ * default is `now()` at full precision, which is what drizzle's inferred insert type invites any
+ * other writer — a fixture, a backfill, a future route — to take. Truncating the COLUMN in the
+ * comparison holds whatever wrote the row, which is why the invariant lives here rather than in
+ * the schema: it needs no migration and no writer's cooperation.
+ *
+ * TRUNCATING CAN NEVER MATCH A DIFFERENT ROW: `actor_id` is the table's PRIMARY KEY, so there is at
+ * most one attempt per actor and `created_at` is the staleness guard on that one row, never a
+ * selector among several. It still refuses a value naming an OLDER attempt, which is what stops a
+ * late discard from deleting the replacement that took the key.
+ */
+export function attemptNamed(actorId: string, createdAt: Date | string) {
+  return and(
+    eq(pendingAuthorizations.actorId, actorId),
+    sql`date_trunc('milliseconds', ${pendingAuthorizations.createdAt}) = ${attemptInstant(createdAt).toISOString()}::timestamptz`,
+  );
+}
 
 /**
  * The literal recorded on the row, which is the scheme a later call must keep using.

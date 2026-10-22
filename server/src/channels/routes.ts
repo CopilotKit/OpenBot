@@ -1229,7 +1229,7 @@ export function createChannelRoutes(
         context.req.param("channelId"),
       );
       if (!channel) {
-        return context.json({ error: "Channel not found." }, 404);
+        return context.json({ error: "Couldn't find that conversation." }, 404);
       }
       return context.json({ channel: channelDto(channel) });
     } catch (error) {
@@ -1272,16 +1272,15 @@ function channelSummaryDto(channel: ChannelSummary) {
 
 function mapStoreError(context: Context, error: unknown): Response {
   if (error instanceof AgentNotFoundError) {
-    return context.json({ error: "Agent not found." }, 404);
+    return context.json({ error: "Couldn't find that Bot." }, 404);
   }
   if (error instanceof ChannelNotFoundError) {
-    return context.json({ error: "Channel not found." }, 404);
+    return context.json({ error: "Couldn't find that conversation." }, 404);
   }
   if (error instanceof ChannelPackageOwnedError) {
     return context.json(
       {
-        error:
-          "This channel is defined by the deployment package, so it cannot be deleted here.",
+        error: "This conversation is built in and can't be deleted.",
       },
       409,
     );

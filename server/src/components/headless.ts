@@ -217,11 +217,15 @@ const ActivityReportProps = z.object({
     ),
 });
 
-/** Which server-side function each activity report reads. The same map `activity.tsx` holds. */
-const ACTIVITY_FUNCTION_FOR: Record<string, string> = {
-  activity: "botActivity",
-  refusals: "recentRefusals",
-};
+/**
+ * Which server-side function each activity report reads. The same map `activity.tsx` holds, and a
+ * Map there for the same reason: the key is a string somebody else chose, and an object lookup
+ * answers a borrowed `Object.prototype` member with something truthy that is no function name.
+ */
+const ACTIVITY_FUNCTION_FOR: ReadonlyMap<string, string> = new Map([
+  ["activity", "botActivity"],
+  ["refusals", "recentRefusals"],
+]);
 
 export type HeadlessComponentSpec = {
   /** The tool name, the catalogue key, and the renderer's key in the app. */
@@ -315,7 +319,7 @@ export const HEADLESS_COMPONENTS: readonly HeadlessComponentSpec[] = [
     reads: (args) => {
       const functionName =
         typeof args.report === "string"
-          ? ACTIVITY_FUNCTION_FOR[args.report]
+          ? ACTIVITY_FUNCTION_FOR.get(args.report)
           : undefined;
       return functionName ? [functionName] : [];
     },
@@ -423,7 +427,7 @@ export async function createHeadlessComponentTools(options: {
           if (await store.mayCall(spec.name, functionName)) continue;
           return refuse(
             spec,
-            `${spec.name} has not been granted the function ${functionName}. An administrator grants each function to each component.`,
+            `${spec.name} can't use the function ${functionName}. An admin has to give it to this component.`,
             { function: functionName },
           );
         }

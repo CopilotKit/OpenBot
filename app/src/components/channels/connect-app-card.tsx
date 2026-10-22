@@ -1,8 +1,8 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
+import { useConnectInNewTab } from "@/components/plugins/connect-in-new-tab";
 import { Button } from "@/components/ui/button";
-import { connectAccountMutationOptions } from "@/lib/plugins/mutations";
 import {
   connectionsQueryOptions,
   personalConnections,
@@ -21,6 +21,11 @@ import { queryClient } from "@/query-client";
  * WATCHING, NOT TRUSTING. The return trip proves nothing — it is an ordinary redirect in a tab this
  * one cannot read — so nothing here treats "they came back" as "it worked". The card polls this
  * person's own connections while it waits and only says connected when the server lists one.
+ *
+ * NOW THE FALLBACK RATHER THAN THE CARD. A refusal names the Bot it came from and `AppAccessCard`
+ * draws it from the app's live state for this person on that Bot. This one is drawn only where no
+ * Bot can be named — a refusal written before refusals carried one, on a surface that declared none
+ * — and it can only offer Connect, which is all such a refusal ever meant.
  */
 export function ConnectAppCard({
   serverId,
@@ -31,12 +36,15 @@ export function ConnectAppCard({
   title: string;
   message: string;
 }) {
-  const [waiting, setWaiting] = useState(false);
-  /** This app takes a key somebody types, so there is no page to send them to. */
-  const [needsKey, setNeedsKey] = useState(false);
-  /** The authorization url, when the browser refused to open the tab holding it. */
-  const [blockedUrl, setBlockedUrl] = useState<string | null>(null);
-  const connect = useMutation(connectAccountMutationOptions());
+  const {
+    open: openTab,
+    waiting,
+    stopWaiting,
+    needsKey,
+    blockedUrl,
+    pending,
+    error,
+  } = useConnectInNewTab();
   const connections = useQuery({
     ...connectionsQueryOptions(),
     // Only while a consent is open in the other tab; otherwise this is an ordinary cached read.
@@ -59,53 +67,13 @@ export function ConnectAppCard({
   const was = useRef(connected);
   useEffect(() => {
     if (connected && !was.current) {
-      setWaiting(false);
+      stopWaiting();
       void queryClient.invalidateQueries();
     }
     was.current = connected;
-  }, [connected]);
+  }, [connected, stopWaiting]);
 
-  /**
-   * The tab, opened on the click itself rather than on the answer to it.
-   *
-   * A BROWSER ONLY LETS A PAGE OPEN A TAB WHILE A CLICK IS STILL RECENT. Chrome's transient
-   * activation lasts about five seconds, and the request that mints the authorization url has to
-   * finish first — so on a slow deployment `window.open` was called with the activation already
-   * expired, the tab was blocked, and the card cheerfully said to finish in a tab that did not
-   * exist. The blank tab is claimed first and navigated once the url arrives.
-   *
-   * `noopener` CANNOT BE PASSED HERE: it makes `window.open` answer null, and null is a handle
-   * nothing can navigate later. The opener is severed on the handle instead, which is the same
-   * guarantee by a different route.
-   */
-  const claimTab = (): Window | null => {
-    const tab = window.open("", "_blank");
-    if (tab) tab.opener = null;
-    return tab;
-  };
-
-  const open = () => {
-    const tab = claimTab();
-    connect.mutate(serverId, {
-      onSuccess: (authorizationUrl) => {
-        /*
-         * No url means this app is connected by typing a key rather than by visiting a page — the
-         * route answers `{ fields }` and the mutation unwraps nothing. Saying so, with the page
-         * that has the form, beats a button that silently does nothing.
-         */
-        if (!authorizationUrl) {
-          tab?.close();
-          setNeedsKey(true);
-          return;
-        }
-        setWaiting(true);
-        if (tab) tab.location.replace(authorizationUrl);
-        // The tab was blocked. The url is still good, so offer it as something to click.
-        else setBlockedUrl(authorizationUrl);
-      },
-      onError: () => tab?.close(),
-    });
-  };
+  const open = () => openTab(serverId);
 
   return (
     <div
@@ -122,12 +90,11 @@ export function ConnectAppCard({
         </p>
       ) : needsKey ? (
         <p className="text-sm" role="status">
-          {title} is connected with a key you hold rather than by visiting a
-          page.{" "}
+          {title} needs a key from you.{" "}
           <Link
             className="underline underline-offset-2"
             params={{ key: serverId }}
-            to="/settings/connected-accounts/$key"
+            to="/connections/$key"
           >
             Enter it on {title}'s page
           </Link>
@@ -136,7 +103,7 @@ export function ConnectAppCard({
       ) : (
         <div className="flex flex-wrap items-center gap-3">
           {/* The heading above already names the app; the button says what pressing it does. */}
-          <Button disabled={connect.isPending} onClick={open} size="sm">
+          <Button disabled={pending} onClick={open} size="sm">
             {waiting ? `Waiting for ${title}…` : "Connect"}
           </Button>
           {waiting ? (
@@ -158,11 +125,9 @@ export function ConnectAppCard({
               .
             </p>
           ) : null}
-          {connect.isError ? (
+          {error ? (
             <p className="text-destructive text-sm" role="status">
-              {connect.error instanceof Error
-                ? connect.error.message
-                : `${title} could not be connected.`}
+              {error}
             </p>
           ) : null}
         </div>

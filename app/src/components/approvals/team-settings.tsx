@@ -128,7 +128,7 @@ export function TeamApprovalSettings() {
         </PageSection>
       ) : null}
       <PageSection
-        description="These apply to every member's Bots, and members cannot change them."
+        description="These apply to every member's Bots. Members can't change them."
         title="Team rules"
       >
         {teamRules.length === 0 ? <PageEmpty>No team rules.</PageEmpty> : null}

@@ -382,7 +382,7 @@ describe("where the callback sends somebody afterwards", () => {
       connectedAccountsUrlFor("http://localhost:3010", {
         serverId: "google-drive",
       }),
-    ).toBe("http://localhost:3010/settings/connected-accounts/google-drive");
+    ).toBe("http://localhost:3010/connections/google-drive");
   });
 
   test("success carries no outcome, because the account already says it", () => {
@@ -399,7 +399,7 @@ describe("where the callback sends somebody afterwards", () => {
       connectedAccountsUrlFor("http://localhost:3010", {
         serverId: "../../admin",
       }),
-    ).toBe("http://localhost:3010/settings/connected-accounts/..%2F..%2Fadmin");
+    ).toBe("http://localhost:3010/connections/..%2F..%2Fadmin");
   });
 
   test("failure goes to the list, which is the screen that says so", () => {
@@ -411,9 +411,7 @@ describe("where the callback sends somebody afterwards", () => {
      */
     expect(
       connectedAccountsUrlFor("http://localhost:3010", { failed: true }),
-    ).toBe(
-      "http://localhost:3010/settings/connected-accounts?connected=failed",
-    );
+    ).toBe("http://localhost:3010/connections?connected=failed");
   });
 
   test("still points somewhere when no app URL is configured", () => {
@@ -421,7 +419,7 @@ describe("where the callback sends somebody afterwards", () => {
     // only case where `appUrl` can be absent and the deployment still works.
     expect(
       connectedAccountsUrlFor(undefined, { serverId: "google-drive" }),
-    ).toBe("/settings/connected-accounts/google-drive");
+    ).toBe("/connections/google-drive");
   });
 
   test("a connect started on the admin page returns to the admin page", () => {
@@ -448,9 +446,7 @@ describe("where the callback sends somebody afterwards", () => {
         { failed: true },
         "admin",
       ),
-    ).toBe(
-      "http://localhost:3010/settings/connected-accounts?connected=failed",
-    );
+    ).toBe("http://localhost:3010/connections?connected=failed");
   });
 });
 

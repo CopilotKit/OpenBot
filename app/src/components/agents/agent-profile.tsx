@@ -57,7 +57,7 @@ export function AgentProfile({ agentId }: { agentId: string }) {
   if (agent.error || !agent.data) {
     return (
       <p className="p-8 text-sm text-destructive" role="alert">
-        Could not load this coworker.
+        Couldn't load this Bot.
       </p>
     );
   }
@@ -103,7 +103,7 @@ export function AgentProfile({ agentId }: { agentId: string }) {
             void navigate({ search: { agent: agentId }, to: "/channel/new" })
           }
         >
-          Start new channel
+          New conversation
         </Button>
         <Button
           className="w-full text-sm!"

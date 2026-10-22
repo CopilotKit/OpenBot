@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { BrokerRefusalError } from "../src/plugins/broker";
+import {
+  BrokerAccountGoneError,
+  BrokerRefusalError,
+} from "../src/plugins/broker";
 import {
   askAction,
   type ComposioAction,
@@ -2314,7 +2317,7 @@ describe("calling one action", () => {
     expect(result.text).not.toContain("must-not-appear");
     expect(result.text).not.toContain("unrecognised");
     expect(result.text).not.toContain("{");
-    expect(result.text).toMatch(/Plugins page/);
+    expect(result.text).toMatch(/connected on Connections/);
     expect(result.text).toContain("GMAIL_FETCH_EMAILS");
   });
 
@@ -2519,7 +2522,7 @@ describe("calling one action", () => {
 
     expect(result.isError).toBe(true);
     expect(result.text).toContain("GMAIL_FETCH_EMAILS");
-    expect(result.text).toMatch(/Plugins page/);
+    expect(result.text).toMatch(/connected on Connections/);
   });
 
   test("a failure carrying only the vendor's placeholder says something actionable", async () => {
@@ -2545,7 +2548,7 @@ describe("calling one action", () => {
     // sentence — "GMAIL_FETCH_EMAILS failed: Error executing the tool GMAIL_FETCH_EMAILS" — is the
     // same useless words in a model's context and in the audit row, and passed.
     expect(result.text).not.toMatch(/error executing the tool/i);
-    expect(result.text).toMatch(/Plugins page/);
+    expect(result.text).toMatch(/connected on Connections/);
   });
 
   test("a failure that carries no message at all still says something actionable", async () => {
@@ -2577,7 +2580,7 @@ describe("calling one action", () => {
       expect(result.isError).toBe(true);
       expect(result.text.trim()).not.toBe("");
       expect(result.text).toContain("GMAIL_FETCH_EMAILS");
-      expect(result.text).toMatch(/Plugins page/);
+      expect(result.text).toMatch(/connected on Connections/);
     }
   });
 
@@ -2911,7 +2914,7 @@ describe("calling one action", () => {
     );
 
     expect(reported.isError).toBe(true);
-    expect(reported.text).toContain("Plugins page");
+    expect(reported.text).toContain("connected on Connections");
   });
 
   test("a reported error that is a response dump is refused like the placeholder", async () => {
@@ -2955,7 +2958,7 @@ describe("calling one action", () => {
       // And what is said instead names the action and the one thing the reader can do about it,
       // which is what every sibling on this path answers an unreadable report with.
       expect(result.text).toContain("GMAIL_FETCH_EMAILS");
-      expect(result.text).toMatch(/Plugins page/);
+      expect(result.text).toMatch(/connected on Connections/);
       // The data must not be handed over as content beside a reported failure either.
       expect(result.text).not.toContain("m1");
     }
@@ -3174,7 +3177,7 @@ describe("calling one action", () => {
     // refusal CARRIES it. A start-anchored question of the answer lets it through anywhere but the
     // first character.
     expect(result.text).not.toMatch(/error executing the tool/i);
-    expect(result.text).toMatch(/Plugins page/);
+    expect(result.text).toMatch(/connected on Connections/);
   });
 
   test("a refusal this deployment authored beats whatever the vendor said", async () => {
@@ -3221,6 +3224,50 @@ describe("calling one action", () => {
     // been joined to the vendor's or cut short of the remedy.
     expect(result.text).toBe(authored);
     expect(result.text).not.toContain("Invalid request");
+  });
+
+  test("an account the vendor lost travels as a fact on the result, beside its sentence", async () => {
+    /*
+     * The one authored condition the store acts on: it turns this result into a refusal that
+     * offers Reconnect. Read off a field rather than off the wording, so rephrasing the sentence
+     * cannot quietly stop the card being drawn — and set on nothing else.
+     */
+    const authored =
+      "Composio holds no connected account for this person and gmail, so GMAIL_FETCH_EMAILS was not run.";
+    useComposioClient(
+      recording({
+        execute: async () => {
+          throw new BrokerAccountGoneError(authored);
+        },
+      }).client,
+    );
+
+    const gone = await askAction(
+      { url: "composio://gmail", actorId: "user_asker" },
+      "GMAIL_FETCH_EMAILS",
+      { __version: "20260903_00" },
+    );
+    expect(gone.result).toMatchObject({
+      isError: true,
+      text: authored,
+      accountGone: true,
+    });
+    // Not a verdict on the key: a probe meeting this keeps its "could not find out".
+    expect(gone.answered).toBe(false);
+
+    useComposioClient(
+      recording({
+        execute: async () => {
+          throw new BrokerRefusalError("Some other authored refusal.");
+        },
+      }).client,
+    );
+    const other = await callTool(
+      { url: "composio://gmail", actorId: "user_asker" },
+      "GMAIL_FETCH_EMAILS",
+      { __version: "20260903_00" },
+    );
+    expect(other.accountGone).toBeUndefined();
   });
 
   test("a failure this deployment cannot explain still reaches for the vendor's words", async () => {

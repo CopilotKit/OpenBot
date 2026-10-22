@@ -368,7 +368,7 @@ export function createComputerRoutes(
         actor,
         typeof body?.reason === "string" && body.reason.trim()
           ? body.reason.trim()
-          : "The assistant needs a person to continue.",
+          : "It can't continue without you.",
         typeof body?.toolCallId === "string" ? body.toolCallId : undefined,
       ),
     ),
@@ -732,7 +732,7 @@ export function createComputerRoutes(
       return context.json(
         {
           error:
-            "That rule could not be saved, so it has not been applied. The previous boundary is still in force.",
+            "Couldn't save that rule. The previous boundary still applies.",
         },
         503,
       );

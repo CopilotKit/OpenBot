@@ -1,7 +1,11 @@
 import { IconBrandGithub, IconBrandSlack, IconLink } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { PageRows, PageSection } from "@/components/layout/page-shell";
+import {
+  PageEmpty,
+  PageRows,
+  PageSection,
+} from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -63,11 +67,21 @@ const linkableProviders = [
   { provider: "github", title: "GitHub" },
 ] as const;
 
+export type LinkableProvider = (typeof linkableProviders)[number]["provider"];
+
+/** The name a linkable provider is shown under. */
+export function linkableProviderTitle(provider: LinkableProvider): string {
+  return (
+    linkableProviders.find((entry) => entry.provider === provider)?.title ??
+    provider
+  );
+}
+
 export type LinkedAccountsEntry =
   | { kind: "linked"; account: LinkedAccount }
   | {
       kind: "available";
-      provider: (typeof linkableProviders)[number]["provider"];
+      provider: LinkableProvider;
       title: string;
     };
 
@@ -85,11 +99,14 @@ export type LinkedAccountsEntry =
 export function linkedAccountsSectionState({
   data,
   error,
+  only,
   providers,
   providersError = null,
 }: {
   data: LinkedAccount[] | undefined;
   error: Error | null;
+  /** One provider's page draws only that provider's links and offer. */
+  only?: LinkableProvider;
   providers?: IdentityProviders;
   providersError?: Error | null;
 }): {
@@ -100,13 +117,14 @@ export function linkedAccountsSectionState({
   const links = data ?? [];
   const entries: LinkedAccountsEntry[] = [];
   for (const { provider, title } of linkableProviders) {
+    if (only && provider !== only) continue;
     const linked = links.filter((account) => account.provider === provider);
     for (const account of linked) entries.push({ kind: "linked", account });
     if (linked.length === 0 && data !== undefined && providers?.[provider]) {
       entries.push({ kind: "available", provider, title });
     }
   }
-  for (const account of links) {
+  for (const account of only ? [] : links) {
     if (
       !linkableProviders.some(({ provider }) => provider === account.provider)
     )
@@ -139,7 +157,15 @@ export function connectGithubPending(mutation: {
  * Separate from the connector rows above it: those are services a Bot reads as you, these are how
  * this deployment recognises you when a message or an event arrives from somewhere else.
  */
-export function LinkedAccountsSection() {
+/**
+ * The person's own account at one provider, on that provider's Connections page: the link with a
+ * Disconnect button, or Connect where this deployment can link it.
+ */
+export function LinkedAccountSection({
+  provider,
+}: {
+  provider: LinkableProvider;
+}) {
   const links = useQuery(linkedAccountsQueryOptions());
   const providers = useQuery(identityProvidersQueryOptions());
   const issueCode = useMutation(issueSlackCodeMutationOptions());
@@ -169,10 +195,20 @@ export function LinkedAccountsSection() {
   const state = linkedAccountsSectionState({
     data: links.data,
     error: links.error,
+    only: provider,
     providers: providers.data,
     providersError: providers.error,
   });
-  if (!state) return null;
+  if (!state) {
+    return (
+      <PageSection title="Your account">
+        <PageEmpty>
+          You can't link a {linkableProviderTitle(provider)} account yet. An
+          admin has to set it up first.
+        </PageEmpty>
+      </PageSection>
+    );
+  }
   const connect = {
     slack: {
       pending: issueCode.isPending,
@@ -188,7 +224,7 @@ export function LinkedAccountsSection() {
     },
   };
   return (
-    <PageSection title="Linked accounts">
+    <PageSection title="Your account">
       {state.entries.length > 0 ? (
         <PageRows>
           {state.entries.map((entry, index) => (
@@ -212,22 +248,23 @@ export function LinkedAccountsSection() {
       ) : null}
       {state.error ? (
         <p className="mt-2 text-destructive text-sm" role="alert">
-          Your linked accounts could not be loaded: {state.error}
+          Couldn't load your account: {state.error}
         </p>
       ) : null}
       {state.providersError ? (
         <p className="mt-2 text-destructive text-sm" role="alert">
-          Could not check which accounts can be linked: {state.providersError}
+          Couldn't check whether you can link this account:{" "}
+          {state.providersError}
         </p>
       ) : null}
       {issueCode.error ? (
         <p className="mt-2 text-destructive text-sm" role="alert">
-          Could not create a Slack link code: {issueCode.error.message}
+          Couldn't create a Slack code: {issueCode.error.message}
         </p>
       ) : null}
       {connectGithub.error ? (
         <p className="mt-2 text-destructive text-sm" role="alert">
-          Could not connect GitHub: {connectGithub.error.message}
+          Couldn't connect GitHub: {connectGithub.error.message}
         </p>
       ) : null}
       <Dialog
@@ -353,7 +390,7 @@ function LinkedAccountRow({ account }: { account: LinkedAccount }) {
       </Item>
       {unlink.error ? (
         <p className="px-3 pb-2 text-destructive text-sm" role="alert">
-          Could not disconnect {account.title}: {unlink.error.message}
+          Couldn't disconnect {account.title}: {unlink.error.message}
         </p>
       ) : null}
     </>

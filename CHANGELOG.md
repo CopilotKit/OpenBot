@@ -8,7 +8,7 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-**Before upgrading.** Seven things change for an existing deployment:
+**Before upgrading.** Eight things change for an existing deployment:
 - A hosted computer's browser is now headed by default. It uses a little more memory than headless
   did; set `COMPUTER_BROWSER_MODE=headless` (Helm: `computers.browserMode: headless`) to keep the old
   behaviour.
@@ -31,7 +31,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - Migration `0056_sign_in_code_step` widens the check on `sign_in_requests.status` to allow
   `code_required` (below). A server and a computer must be upgraded together: an older computer has
   no `/sign-in/code`.
-- Migration `0057_recorder_extension` adds six tables for the OpenBot Recorder and each person's own
+- Migration `0060_app_access_requests` adds one table, `app_access_requests`, where a person's
+  request for an administrator to switch on a work app, grant it to a Bot, or connect a Shared app's
+  team account is kept, with who answered it and when. It starts empty and nothing is backfilled.
+- Migration `0061_recorder_extension` adds six tables for the OpenBot Recorder and each person's own
   Learning space (below): `recorder_connect_codes`, `recorder_connections`,
   `recorder_trajectory_bindings`, `learning_person_spaces`, `learning_skill_sharing` and
   `learning_open_skills`. Nothing existing changes, and the tables stay empty until somebody
@@ -43,6 +46,72 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   the Responses API loses Responses-only features, such as reasoning summaries, without an error.
   `COPILOTKIT_OPENAI_API=responses` keeps the Responses API (`chat` forces Chat Completions); any
   other value is an error when a built-in Bot runs. Deployments on OpenAI or Azure are unchanged.
+
+### Plainer words, and one word for each thing
+
+OpenBot now says **Bot** everywhere a person reads it, where screens used to mix Bot, agent, coworker
+and assistant; "agent" is kept only for an outside program you connect. It says **admin** rather
+than administrator, **conversation** rather than channel, and **OpenBot** rather than "this
+deployment" on pages anybody can open. Headings, descriptions, empty states, errors and the
+messages the server shows are shorter and say what happened and what to do next, across the home
+page, a Bot's pages, Capabilities, Connections, Settings, conversations and Admin. Admin keeps the
+exact setting names an admin needs, such as `COMPOSIO_API_KEY`. Text written for the model, such
+as tool descriptions and instructions, is unchanged.
+
+### Every settings screen is the same, slightly wider column
+
+Settings, Admin, Connections, Capabilities and each Bot's pages share one column width, now 720px instead of 630px, so
+no screen is wider than another and a row has room for its label beside its control. Sentences keep
+their comfortable reading width inside it. The audit log stays wider, because it is a table.
+
+### Capabilities and Connections sit beside Bots in the sidebar
+
+The sidebar's Skills entry becomes two, below Bots: **Capabilities** (`/capabilities`), with Skills
+(`/capabilities/skills`) and Memory (`/capabilities/memory`) as tabs under its title, Memory leaving
+Settings; and **Connections** (`/connections`), the apps your Bots use as you, which leaves Settings
+too. On the home page, Explore agents shows each Bot as a white card with its avatar on top, the same
+card as elsewhere. The old
+addresses — `/skills`, `/settings/connected-accounts` with any account beneath it, and
+`/settings/memory` — redirect to the new ones, keeping `?connected=`, `?linked=` and a skill being
+written or edited, so a consent begun before upgrading still lands on its page. OAuth, GitHub linking
+and the Slack link confirmation now send people to `/connections`.
+
+Connections is one searchable list. Apps you connect, apps on your organisation's account (marked
+"Team account") and your GitHub and Slack links are rows of the same kind, with those already in use
+first, and each opens its own page. GitHub's page holds your link, the repositories whose events can
+start a responsibility (formerly "GitHub events"), and a way to a Composio GitHub app where one is
+enabled, so GitHub is listed once; linking GitHub now comes back to that page. The reset for what
+you let shared Bots use moves to Settings → Approvals, as **Shared Bots**.
+
+### Each app on a Bot says whether you can use it, and you can ask an administrator for the rest
+
+A Bot's page now says, for every work app the Bot holds, what that app is for the person looking:
+ready, not connected yet, needing reconnecting, waiting on your organisation's shared account or on
+an administrator's approval of who the Bot reaches, not switched on or not finished setting up, or not
+given to this Bot. On somebody else's Team Bot it says whose account the app runs on: the owner's,
+which only the owner can reconnect, or your own, which the Bot asks to use the first time. Each comes with the one thing you can do about it —
+Connect or Reconnect your own account, or Request access where only an administrator can help — and
+apps are named by their own name ("Gmail", not "Composio Gmail"). In a conversation, a Bot that needs
+an app it cannot use now puts the same card in front of you instead of a sentence: an account you have
+not connected, a Shared app with no team account, an account the vendor no longer holds, and — through
+a new `show_app_access` tool every Bot holds — an app that is switched off or not granted to it. The
+card reads the app's current state when it is drawn, so it never offers a step already taken.
+Administrators see waiting requests at the top of Plugins, a count on each app's row, and a Requests
+section on the app's own page, where Approve switches the app on and grants the Bot the app's
+read-only actions in one press (or says what has to be done first; other actions are chosen on the
+Bot's page for the app) and Dismiss closes the request. Requests name who asked; nobody's connection
+status is shown to administrators. A person may have 20 requests waiting at once.
+
+A connection the vendor turns out to have lost now reads as lost everywhere once a call finds out: a
+Composio account the vendor no longer holds is removed so it can be connected again, and a Google
+Drive or Notion connection whose refresh token the vendor refuses is marked withdrawn, with Reconnect
+on the card instead of a tool error. A Memory source that fails for the same reasons says so in words
+rather than showing the card's marker.
+
+On a deployment with no `COMPOSIO_API_KEY`, Settings → Connected accounts no longer lists Composio
+apps, which nobody could connect there. An app's own page, reached from an older link, says it is not
+available yet and that an administrator has to finish setting it up, instead of naming the setting.
+The administrator's page for the app still names `COMPOSIO_API_KEY`.
 
 ### Teach a Bot by doing the task in your own browser: the OpenBot Recorder
 

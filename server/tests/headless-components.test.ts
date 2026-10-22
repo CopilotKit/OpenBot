@@ -91,6 +91,33 @@ describe("headless components mirror the compiled gallery", () => {
     }
   });
 
+  /**
+   * The report name arrives from a model, so it is as much somebody else's string as a query
+   * parameter is, and the map it looks up must answer with what was put in it and nothing a plain
+   * object inherits. An object lookup answers `report: "toString"` with `Object.prototype.toString`
+   * — truthy, so it passes the `functionName ?` guard — and that function is then handed to the
+   * grant check as the data function this component reads, and to `callComponentFunction` as a
+   * function name. Both copies of the map, the app's and the server's mirror, are asserted here.
+   */
+  test("a borrowed Object.prototype member is not a report and reads nothing", () => {
+    const activity = ACTIVITY.find(
+      (entry) => entry.name === "showActivityReport",
+    );
+    const mirror = HEADLESS_COMPONENTS.find(
+      (spec) => spec.name === "showActivityReport",
+    );
+    for (const report of [
+      "toString",
+      "constructor",
+      "__proto__",
+      "valueOf",
+      "hasOwnProperty",
+    ]) {
+      expect(activity?.reads?.({ report })).toEqual([]);
+      expect(mirror?.reads?.({ report })).toEqual([]);
+    }
+  });
+
   test("the table's cross-field rule is enforced headlessly too", () => {
     const table = HEADLESS_COMPONENTS.find((spec) => spec.name === "showTable");
     expect(
@@ -111,10 +138,15 @@ describe("headless components mirror the compiled gallery", () => {
 
   test("arguments a headless turn accepts draw the real chart with the app's renderer", async () => {
     const appRequire = createRequire(join(import.meta.dir, "../../app/"));
-    const { createElement } = appRequire("react") as typeof import("react");
+    // The TYPES come from the app's install for the same reason the values do: `server` has no
+    // React. A bare `typeof import("react")` does not resolve from here, and an unresolved type
+    // import is not an error bun can see — it silently makes both casts `any`.
+    const { createElement } = appRequire(
+      "react",
+    ) as typeof import("../../app/node_modules/@types/react");
     const { renderToStaticMarkup } = appRequire(
       "react-dom/server",
-    ) as typeof import("react-dom/server");
+    ) as typeof import("../../app/node_modules/@types/react-dom/server");
     const args = {
       title: "Open issues by team",
       points: [
@@ -245,7 +277,7 @@ describe("headless component tools", () => {
         signal: new AbortController().signal,
       }),
     );
-    expect(result).toContain("has not been granted the function auditSummary");
+    expect(result).toContain("can't use the function auditSummary");
     expect(result.startsWith(NOT_SHOWN)).toBeTrue();
   });
 });

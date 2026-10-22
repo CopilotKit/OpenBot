@@ -347,3 +347,30 @@ test("the GitHub Connect button stays disabled from the request until the page l
     true,
   );
 });
+
+test("one provider's page draws only that provider's link and offer", () => {
+  expect(
+    linkedAccountsSectionState({
+      data: [row, slackRow],
+      error: null,
+      only: "slack",
+      providers: { slack: true, github: true },
+    })?.entries,
+  ).toEqual([{ kind: "linked", account: slackRow }]);
+  expect(
+    linkedAccountsSectionState({
+      data: [slackRow],
+      error: null,
+      only: "github",
+      providers: { slack: true, github: true },
+    })?.entries,
+  ).toEqual([{ kind: "available", provider: "github", title: "GitHub" }]);
+  expect(
+    linkedAccountsSectionState({
+      data: [slackRow],
+      error: null,
+      only: "github",
+      providers: { slack: true, github: false },
+    }),
+  ).toBe(null);
+});

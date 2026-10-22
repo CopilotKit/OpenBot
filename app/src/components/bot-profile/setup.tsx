@@ -125,8 +125,7 @@ export function SetupSections({ agent }: { agent: AgentProfile }) {
                 <ItemContent>
                   <ItemTitle>System owned</ItemTitle>
                   <ItemDescription>
-                    Ships with this deployment rather than belonging to a
-                    person.
+                    Comes with OpenBot. It doesn't belong to a person.
                   </ItemDescription>
                 </ItemContent>
               </Item>
@@ -170,7 +169,7 @@ function VisibilityRow({
           {error ??
             (agent.visibility === "private"
               ? "Only you can see it and start conversations with it."
-              : "Everyone in the deployment can find and use it.")}
+              : "Everyone on OpenBot can find and use it.")}
         </ItemDescription>
       </ItemContent>
       <ItemActions>
@@ -189,7 +188,7 @@ function VisibilityRow({
                 setError(
                   failure instanceof Error
                     ? failure.message
-                    : "Could not save.",
+                    : "Couldn't save. Try again.",
                 );
               } finally {
                 setSaving(false);
@@ -241,7 +240,9 @@ function EditTextDialog({
   const submit = async () => {
     const parsed = schema.safeParse(draft);
     if (!parsed.success) {
-      setError(parsed.error.issues[0]?.message ?? "That value does not fit.");
+      setError(
+        parsed.error.issues[0]?.message ?? "Check this field and try again.",
+      );
       return;
     }
     setSaving(true);
@@ -249,7 +250,11 @@ function EditTextDialog({
       await onSave(parsed.data);
       onClose();
     } catch (failure) {
-      setError(failure instanceof Error ? failure.message : "Could not save.");
+      setError(
+        failure instanceof Error
+          ? failure.message
+          : "Couldn't save. Try again.",
+      );
     } finally {
       setSaving(false);
     }
@@ -321,14 +326,14 @@ function ConnectionSection({ agent }: { agent: AgentProfile }) {
             <IconPlugConnected />
           </ItemMedia>
           <ItemContent>
-            <ItemTitle>{builtIn ? "Built in" : "Endpoint"}</ItemTitle>
+            <ItemTitle>{builtIn ? "Built in" : "Agent URL"}</ItemTitle>
             <ItemDescription
               className={
                 builtIn ? undefined : "line-clamp-none break-all font-mono"
               }
             >
               {builtIn
-                ? "Runs on this deployment's own Bot. Nothing to connect and nothing to authenticate."
+                ? "Runs inside OpenBot. There's nothing to connect."
                 : agent.endpoint}
             </ItemDescription>
           </ItemContent>

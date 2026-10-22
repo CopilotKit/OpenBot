@@ -375,9 +375,7 @@ export function createTeamBots(options: {
 
     async assign(actor: AgentActor, botId: string, groupName: string) {
       if (actor.role !== "admin")
-        throw new TeamBotRefusedError(
-          "Only an administrator can assign Team Bots.",
-        );
+        throw new TeamBotRefusedError("Only an admin can assign Team Bots.");
       if (!(await publication(botId)))
         throw new TeamBotRefusedError("Publish this Bot before assigning it.");
       const group = groupName.trim();
@@ -390,9 +388,7 @@ export function createTeamBots(options: {
 
     async unassign(actor: AgentActor, botId: string, groupName: string) {
       if (actor.role !== "admin")
-        throw new TeamBotRefusedError(
-          "Only an administrator can assign Team Bots.",
-        );
+        throw new TeamBotRefusedError("Only an admin can assign Team Bots.");
       await database
         .delete(teamBotAssignments)
         .where(

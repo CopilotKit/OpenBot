@@ -337,12 +337,24 @@ describe("channel routes", () => {
     const response = await appFor(store).request("http://openbot.test/missing");
 
     expect(response.status).toBe(404);
-    expect(await json(response)).toEqual({ error: "Channel not found." });
+    expect(await json(response)).toEqual({
+      error: "Couldn't find that conversation.",
+    });
   });
 
   test.each([
-    ["create", new AgentNotFoundError("agent-1"), 404, "Agent not found."],
-    ["get", new ChannelNotFoundError("channel-1"), 404, "Channel not found."],
+    [
+      "create",
+      new AgentNotFoundError("agent-1"),
+      404,
+      "Couldn't find that Bot.",
+    ],
+    [
+      "get",
+      new ChannelNotFoundError("channel-1"),
+      404,
+      "Couldn't find that conversation.",
+    ],
   ] as const)(
     "maps known store errors from %s",
     async (method, error, status, message) => {
@@ -470,7 +482,9 @@ describe("channel routes", () => {
     );
 
     expect(response.status).toBe(404);
-    expect(await json(response)).toEqual({ error: "Channel not found." });
+    expect(await json(response)).toEqual({
+      error: "Couldn't find that conversation.",
+    });
   });
 
   test("keeps authentication in front of marking read", async () => {
@@ -510,8 +524,7 @@ describe("channel routes", () => {
 
     expect(response.status).toBe(409);
     expect(await json(response)).toEqual({
-      error:
-        "This channel is defined by the deployment package, so it cannot be deleted here.",
+      error: "This conversation is built in and can't be deleted.",
     });
   });
 
@@ -925,7 +938,9 @@ describe("channel store integration", () => {
       `http://openbot.test/${created.id}`,
     );
     expect(response.status).toBe(404);
-    expect(await json(response)).toEqual({ error: "Channel not found." });
+    expect(await json(response)).toEqual({
+      error: "Couldn't find that conversation.",
+    });
   });
 
   test("reads linked agent IDs in lexicographic order", async () => {

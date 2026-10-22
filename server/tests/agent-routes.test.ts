@@ -517,20 +517,16 @@ describe("agent lifecycle routes", () => {
     const response = await appFor(store).request("http://openbot.test/missing");
 
     expect(response.status).toBe(404);
-    expect(await json(response)).toEqual({ error: "Agent not found." });
+    expect(await json(response)).toEqual({ error: "Couldn't find that Bot." });
   });
 
   test.each([
-    [new AgentNotFoundError("agent-1"), 404, "Agent not found."],
-    [
-      new AgentNotManageableError("agent-1"),
-      403,
-      "You do not have permission to manage this agent.",
-    ],
+    [new AgentNotFoundError("agent-1"), 404, "Couldn't find that Bot."],
+    [new AgentNotManageableError("agent-1"), 403, "You can't manage this Bot."],
     [
       new ProtectedAgentError("agent-1"),
       403,
-      "System-owned agents are protected.",
+      "This Bot is built in and can't be changed.",
     ],
   ])("maps known store errors", async (error, status, message) => {
     const store = fakeStore({

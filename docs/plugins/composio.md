@@ -15,8 +15,10 @@ Setting it up takes three hands, and none of them can do another's:
 | Whoever deploys  | Sets `COMPOSIO_API_KEY`                                                    | The deployment's environment, or `secrets.composioApiKey` in the Helm chart. There is no screen for it |
 | An administrator | Enables an app                                                             | `/admin/plugins/composio`                                         |
 | An administrator | Grants its actions to a Bot                                                | `/admin/plugins/composio-<slug>`, then that page's per-Bot screen |
-| Each person      | Connects their own account to that app                                     | `/settings/connected-accounts`                                    |
+| Each person      | Connects their own account to that app                                     | `/connections`                                    |
 | An administrator | Chooses Personal or Shared for an app, and connects a Shared app's account | `/admin/plugins/composio-<slug>`                                  |
+| Each person      | Asks for access to an app a Bot needs and only an administrator can fix    | The Bot's page, or the card in a conversation                     |
+| An administrator | Approves or dismisses that request — approving does the change            | `/admin/plugins/composio-<slug>`                                  |
 
 The key is the row that is easiest to misread, so it is stated twice: it is an environment variable
 and nothing else. No administrator, however permissioned, can turn Composio on from a page, and
@@ -442,7 +444,7 @@ the deployment's account.
 
 ## What each person does
 
-At `/settings/connected-accounts`, a brokered app appears beside the OAuth connectors once an
+At `/connections`, a brokered app appears beside the OAuth connectors once an
 administrator has enabled it. Open it and press **Connect**. On a consent app — and on one whose
 OAuth client registers itself, which is the same trip from here — that leaves OpenBot for Composio's
 consent screen and returns to the same page, or, for an administrator who started from the app's own
@@ -494,6 +496,85 @@ and the page says so rather than letting *disconnected* be read as *revoked*. Re
 the ordering everywhere in this connector, so a failure between the two leaves access dead rather
 than live and unreachable; pressing Disconnect again is the whole recovery. Audited as
 `mcp.account_disconnected`.
+
+## What an app is for one person on one Bot
+
+Every app a Bot holds is in one of six states for the person looking, and the server decides which
+— from the app's row, the grants, the person's own connection and the team account — so the Bot's
+page and a card in a conversation say the same thing a call would find:
+
+| State                  | Means                                                                      | Next step                         |
+| ---------------------- | -------------------------------------------------------------------------- | --------------------------------- |
+| `ready`                | Usable now: their own account, a connected team account, or no account     | None                              |
+| `not_connected`        | Enabled and granted; used under each person's account, and theirs is not connected | **Connect**, the Settings flow |
+| `reconnect`            | Connected once; the credential was withdrawn, or the vendor refused the key at the last check | **Reconnect** |
+| `shared_not_connected` | A Shared app whose team account is not connected, or whose key was refused | **Request access**                |
+| `disabled`             | Switched off: no row, no `COMPOSIO_API_KEY`, or something only an administrator can supply is missing | **Request access** |
+| `not_granted`          | Enabled, and this Bot holds none of its actions                            | **Request access**                |
+
+"Connected" is what this deployment last recorded — the same `verified` and probe columns the
+Connected accounts page reads. Nothing asks the vendor per page load, so an account ended in
+Composio's dashboard reads as `ready` until the next call or re-check finds out — and the call that
+finds out is refused with a card offering **Reconnect** (below).
+
+On the Bot's page, Connect opens the app's consent screen in a new tab through the same connect route
+Settings uses, and the row turns ready once the connection is recorded. An app connected with a typed
+key, and Reconnect on a Composio app (whose row has to be disconnected before a new account can be
+attached), go to the app's own page under `/connections` instead.
+
+### In a conversation
+
+A Bot that needs an app it cannot use puts a card in the transcript naming the app, its state and the
+next step, drawn from the same state as the Bot's page:
+
+- a call refused because the person has not connected the app;
+- a call refused because a Shared app's team account is not connected — **Request access** rather
+  than the sentence "Ask an administrator to connect it.";
+- a call Composio answered with "no connected account" — **Reconnect**, or for a Shared app a line
+  saying an administrator has to connect it again;
+- the `show_app_access` tool, which every Bot holds and is told to call for an app it holds nothing
+  for, switched off or not granted — **Request access**.
+
+The card asks `GET /api/plugins/for/:agentId/apps/:app` for the Bot that made the call when it is
+drawn, so a card scrolled back to later shows what is true now. The one case it takes the refusal's
+word over the live state is the lost account, which the server cannot see; a connection made after
+the refusal ends that. The card is drawn in the transcript, never folded into the "Used N tools" line.
+
+`GET /api/plugins/for/:agentId/apps` lists every app the Bot holds, including a grant whose app is
+gone; `GET /api/plugins/for/:agentId/apps/:app` answers for one app by key or by name, held or not.
+Both answer only for a Bot the person may use. Settings still lists only enabled apps, and the
+directory is never listed to anybody but an administrator: an app nobody enabled appears only where
+a Bot needs it.
+
+### Requesting access
+
+Where only an administrator can fix it, **Request access** files a request. The person names the Bot
+and the app; what is asked for comes from the state — `enable` for `disabled`, `grant` for
+`not_granted`, `connect_shared` for `shared_not_connected` — so a request cannot ask for something
+the app does not need. Asking twice answers with the request already waiting: one pending request
+per person, app, Bot and kind, held by a unique index rather than a check, so two replicas cannot
+both file one. A person can withdraw their own.
+
+Requests wait on the app's own page under `/admin/plugins`, and all of them at the top of the
+Plugins list, with a count on each app's row — an app nobody has switched on has no page of its own. They
+show who asked and for which Bot — they asked — and nothing about anybody's connections.
+**Approve** does what was asked in the same press:
+
+- **enable** switches the app on through the same path as the directory's Add, then grants it to
+  the Bot;
+- **grant** grants the Bot every action the app advertises — or the ones the administrator picked —
+  with the Shared approval a grant from the app's page would record;
+- **connect_shared** is approved once the team account is connected, which only the consent screen
+  on the app's page can do.
+
+What only an administrator can type — a missing `COMPOSIO_API_KEY`, a curated connector's OAuth
+client or token — is refused with the step to take, and the request stays pending. **Dismiss**
+changes nothing but the request. Filing, withdrawing, approving, dismissing and every refusal are
+audited as `app_access.*`.
+
+This is a different thing from the Shared account requests above: those ask an administrator to
+approve who may use a team account that is already connected; these ask for the app, the grant or
+the account itself.
 
 ## The two paths that end somebody else's access
 

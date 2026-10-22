@@ -28,5 +28,30 @@
   // type-checked and turning it on surfaces a few hundred years of accumulated `any`. It is what let
   // a test pass an options object where a connection string belongs and hear nothing back. Its own
   // change, because it is a sweep and not a fix.
-  "include": ["src", "scripts", "../scripts/composio-smoke.ts"]
+  //
+  // `tests/store-provider-required.test.ts` IS NAMED HERE, ONE FILE AND NOT THE DIRECTORY, for the
+  // same reason `composio-smoke.ts` is: it is the only test in the tree whose subject is a TYPE.
+  // `createPluginStore` without `brokerProvider` must not compile, and the `@ts-expect-error` that
+  // says so is checked by `tsc` or by nothing at all — inside an unchecked `server/tests` it would
+  // read as an assertion while asserting nothing, which is precisely the silence this pin exists to
+  // close. Naming the directory is still the sweep described above and still not this change.
+  "include": [
+    "src",
+    "scripts",
+    "../scripts/composio-smoke.ts",
+    "tests/store-provider-required.test.ts",
+    // `tests/composio-grants-for.test.ts` FOR THE SAME REASON, one seam member along: its last
+    // describe is a TYPE test. A broker literal omitting `authorizations` must not compile, and the
+    // `@ts-expect-error` that says so is checked by `tsc` or by nothing at all.
+    "tests/composio-grants-for.test.ts",
+    "tests/arcade-transport-registry.test.ts",
+    "tests/db-client-address.test.ts",
+    // `tests/stub-broker.test.ts` FOR THE SAME REASON, and it is the reason `stubBroker` exists:
+    // the factory's promise is that a broker built through it carries NO cast, so a member added to
+    // `ConnectedAppBroker` breaks the stub here instead of silently becoming `any`. Three
+    // `@ts-expect-error`s state that promise — a stub missing `grantIsLocal`, one missing
+    // `authorizations`, and one whose `revokeAccount` answers the wrong type must each fail to
+    // compile. Checked by `tsc` or by nothing at all.
+    "tests/stub-broker.test.ts"
+  ]
 }

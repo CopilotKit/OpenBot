@@ -7,6 +7,7 @@ import {
   mutationOptions,
   QueryClient,
 } from "@tanstack/react-query";
+import { authorizeActionMutationOptions } from "../src/lib/plugins/grants";
 import * as pluginMutations from "../src/lib/plugins/mutations";
 import {
   accountModePreview,
@@ -641,4 +642,28 @@ test("every id these writes interpolate into a URL goes through encodeURICompone
   );
 
   expect(raw).toEqual([]);
+});
+
+/**
+ * Where the vendor's callback puts somebody down is the caller's to say, and only the default was
+ * ever pinned.
+ *
+ * The roster above drives both consent starts with no argument, so `?returnTo=settings` is all any
+ * assertion in this file has ever seen. A body that ignored its parameter and wrote `settings`
+ * itself would pass every one of them — and the defect that hides is an administrator who presses
+ * Connect on the connector's admin page, finishes consent at the vendor, and is put down in their
+ * own personal settings: the round trip the inline row exists to remove. One call each, with the
+ * value the default cannot be confused with.
+ */
+test("the consent starts carry the screen they were started from", async () => {
+  expect(
+    await requestedBy(() => connectAccountMutationOptions("admin"), HOSTILE_ID),
+  ).toEqual([`/api/plugins/servers/${ENCODED_ID}/connect?returnTo=admin`]);
+
+  expect(
+    await requestedBy(() => authorizeActionMutationOptions("admin"), {
+      serverId: HOSTILE_ID,
+      action: "GMAIL_SEND_EMAIL",
+    }),
+  ).toEqual([`/api/plugins/servers/${ENCODED_ID}/authorize?returnTo=admin`]);
 });

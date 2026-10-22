@@ -6,7 +6,7 @@ import {
 import { COMPUTER_GUIDANCE } from "@openbot/shared/bot-prompt";
 import { workOwner } from "@openbot/shared/work-owner";
 import { createTurnRunner } from "@openbot/toolkit/run-turn";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import { createActivityStore } from "./activity/activity";
 import {
@@ -127,6 +127,7 @@ import {
 } from "./credentials";
 import { createDatabase } from "./db/client";
 import {
+  brokeredConnections,
   channelAgents,
   channelMemberships,
   channels,
@@ -188,21 +189,31 @@ import { createIntelligenceMemory } from "./memory/intelligence";
 import { createMemoryStore } from "./memory/store";
 import { memoryTools } from "./memory/tools";
 import { reportModelAvailability } from "./model-availability-check";
+import { appAccessTools } from "./plugins/app-access-tool";
 import { createSignInNotifier, createSignInResumer } from "./passwords/resume";
 import { createSignInService } from "./passwords/service";
 import { createPasswordStore } from "./passwords/store";
 import { createOnboardingStore } from "./people/onboarding";
 import { createPeopleStore } from "./people/store";
 import { createAccountModeSwitch } from "./plugins/account-mode";
+import { assertActivatable, providerDecision } from "./plugins/broker";
+import { BROKERED_PROFILE } from "./plugins/access";
 import { useRoutineTools } from "./plugins/builtin-routines";
+import { useArcadeClient } from "./plugins/arcade";
+import { createArcadeClient } from "./plugins/arcade-adapter";
 import { useComposioClient } from "./plugins/composio";
 import { createComposioClient } from "./plugins/composio-adapter";
-import { backfillComposioLogos } from "./plugins/logos";
+import { backfillBrokeredLogos } from "./plugins/logos";
 import { redirectUriFor } from "./plugins/oauth";
 import {
   createSharedUseGate,
   createSharedUseStore,
 } from "./plugins/shared-use-store";
+import {
+  arcadeVerifierNotice,
+  selectProviderWiring,
+  storedProvider,
+} from "./plugins/provider-wiring";
 import { createPluginStore } from "./plugins/store";
 import {
   grantedSkills,
@@ -767,10 +778,42 @@ const sandboxedStore = createSandboxedStore(database, bootAuditStore);
  * Installing a client built from an absent key would turn all of that into a vendor error at first
  * use, which sends an operator looking for a broken Composio instead of at their own configuration.
  */
-const composio = config.composioApiKey
-  ? createComposioClient(config.composioApiKey)
-  : null;
-if (composio) useComposioClient(composio.actions);
+/*
+ * EXACTLY ONE PROVIDER, DECIDED ONCE. `selectProviderWiring` answers which transport client is
+ * installed and which broker goes on to the store and the routes; the other client is installed as
+ * an explicit `null`, so a deployment holding both keys (legal, and needed to end accounts at the
+ * old vendor) never has two seams live. It refuses, rather than wiring nothing, both configurations
+ * it cannot decide: a named provider whose key is unset, and both keys set with nothing named.
+ */
+const providerWiring = selectProviderWiring(config, {
+  composio: createComposioClient,
+  arcade: createArcadeClient,
+});
+useComposioClient(providerWiring.install.composio);
+useArcadeClient(providerWiring.install.arcade);
+const wiredProvider = providerWiring.provider;
+const composio =
+  wiredProvider && providerWiring.broker
+    ? { broker: providerWiring.broker, provider: wiredProvider }
+    : null;
+/*
+ * Activation is refused while the OTHER provider still holds connection rows. Keyed on rows, never
+ * on keys: having both keys set is the expected state while the old provider's connections are ended.
+ */
+if (wiredProvider) {
+  const [{ count: otherProviderRows }] = await database
+    .select({ count: sql<number>`count(*)::int` })
+    .from(brokeredConnections)
+    .where(ne(brokeredConnections.provider, wiredProvider));
+  assertActivatable(wiredProvider, otherProviderRows);
+}
+/*
+ * Arcade's verifier is set by hand in Arcade's dashboard and cannot be read back, so an Arcade
+ * deployment says once, at startup, which address it must be set to. See `arcadeVerifierNotice`.
+ */
+if (wiredProvider === "arcade") {
+  console.warn(arcadeVerifierNotice(config.publicUrl));
+}
 
 /**
  * The private sign-in form and the Passwords vault. A Bot asks to be signed in; the person answers
@@ -833,7 +876,41 @@ const signInService = computerGateway
  * module scope because the publication, assignment and grant routes below also need to reapprove
  * or refile against it when a Bot's exposure changes.
  */
-const sharedUseStore = createSharedUseStore(database);
+/*
+ * WHICH SLICE of `brokered_connections` this deployment reads, decided ONCE, at the one boundary
+ * that can see both the configuration and the rows.
+ *
+ * THERE IS NO `?? "composio"` HERE ANY MORE, AND THAT WAS A BUG RATHER THAN A SHORTHAND.
+ * Configuration names no provider for three different reasons, and the one that matters is "both
+ * keys set, OPENBOT_BROKER_PROVIDER unset" — legal, documented, and exactly what a deployment
+ * migrating off Composio sits in while it ends its old accounts. Defaulting it to `composio` gave
+ * the plugin store and the shared-use store a filter that excludes every Arcade row this deployment
+ * holds, so live Arcade connections read as absent and the accounts behind them could not be
+ * revoked. `storedProvider` takes the three causes apart and, where configuration is silent, lets
+ * the rows name themselves. The shared-use store and the plugin store are both given this one
+ * value, so the gate and the approvals it reads agree.
+ */
+const providerConfiguration = providerDecision(config);
+const brokerProvider = storedProvider(
+  providerConfiguration,
+  (
+    await database
+      .selectDistinct({ provider: brokeredConnections.provider })
+      .from(brokeredConnections)
+  ).map((row) => row.provider),
+);
+if (providerConfiguration.kind === "ambiguous") {
+  /*
+   * Said out loud, once, at startup: this deployment has two keys and no answer, so nothing is
+   * active and nothing can be connected or revoked until one is named. The rows it already holds
+   * are read as their own provider's (above), which is why this is a warning and not a refusal —
+   * the screens stay honest, the vendor calls stay impossible.
+   */
+  console.warn(
+    `${providerConfiguration.configured.map((provider) => BROKERED_PROFILE[provider].envVar).join(" and ")} are both set and OPENBOT_BROKER_PROVIDER names neither, so no broker is active: connected apps can be neither connected nor revoked until it is set. Existing connections are read as ${BROKERED_PROFILE[brokerProvider].vendor}'s.`,
+  );
+}
+const sharedUseStore = createSharedUseStore(database, brokerProvider);
 
 const pluginStore = createPluginStore({
   database,
@@ -865,6 +942,7 @@ const pluginStore = createPluginStore({
    * attempted.
    */
   broker: composio?.broker,
+  brokerProvider,
 });
 
 /*
@@ -882,9 +960,13 @@ const accountModes = createAccountModeSwitch({
 
 // Logo metadata is optional; a vendor outage must not prevent the API from starting.
 if (composio) {
-  void backfillComposioLogos(database, composio.broker).catch(() => {
+  void backfillBrokeredLogos(
+    database,
+    composio.provider,
+    composio.broker,
+  ).catch(() => {
     console.warn(
-      "Composio app logos could not be updated. Existing icons remain available; missing logos will be retried on the next restart.",
+      `${BROKERED_PROFILE[composio.provider].vendor} app logos could not be updated. Existing icons remain available; missing logos will be retried on the next restart.`,
     );
   });
 }
@@ -1289,6 +1371,18 @@ const loadToolsForActor =
       ingestion: memoryIngestion,
       ownerUserId: actorId,
       agentId: botId,
+    }),
+    /*
+     * Held by every Bot, granted or not: how a Bot puts an app it cannot reach in front of the
+     * person with the step that fixes it, instead of naming an administrator. A read; see the file.
+     */
+    ...appAccessTools({
+      store: pluginStore,
+      botId,
+      actorId,
+      composioConfigured: Boolean(composio),
+      ...(composio ? { directory: () => composio.broker.listApps() } : {}),
+      sharedAudience: sharedUseStore.admitsPerson,
     }),
     ...(await grantedTools({
       store: pluginStore,
@@ -2409,7 +2503,7 @@ const app = createApp(
   // The app directory, behind the same client the plugin store and the transport already share.
   // Absent without a key, which leaves the routes reporting no broker rather than listing apps
   // nobody could connect.
-  composio ? { broker: composio.broker } : undefined,
+  composio ?? undefined,
   process.env.OPENBOT_MODEL_OAUTH_FILE?.trim()
     ? createProviderOAuthProxy(process.env.OPENBOT_MODEL_OAUTH_FILE.trim())
     : undefined,

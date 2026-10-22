@@ -102,7 +102,7 @@ export function BotProfile({
         ) : null}
         {lifecycle.isPending ? null : lifecycle.error ? (
           <p className="mt-4 text-destructive text-sm" role="alert">
-            Could not load this Bot's state.
+            Couldn't load this Bot's settings. Reload the page.
           </p>
         ) : (
           <PageRows>
@@ -116,7 +116,7 @@ export function BotProfile({
                 <ItemTitle>Active</ItemTitle>
                 <ItemDescription>
                   {lifecycle.data.paused
-                    ? "Paused. No routine, responsibility, hand-off or follow-up starts for you, and what was running has stopped."
+                    ? "Paused. Nothing runs for you until you turn it back on."
                     : "Runs its routines, responsibilities, hand-offs and follow-ups for you."}
                 </ItemDescription>
               </ItemContent>

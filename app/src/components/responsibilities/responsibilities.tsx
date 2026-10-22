@@ -64,8 +64,8 @@ export function BotResponsibilities({ agentId }: { agentId?: string }) {
       ) : shown.length === 0 ? (
         <PageEmpty>
           {agentId
-            ? "No responsibilities for this Bot yet."
-            : "You have no responsibilities yet."}
+            ? "No responsibilities for this Bot yet. Add one with New responsibility."
+            : "No responsibilities yet. Add one with New responsibility."}
         </PageEmpty>
       ) : (
         <PageRows>

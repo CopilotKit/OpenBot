@@ -89,7 +89,7 @@ test("shows loading and read errors without enabling a save", async () => {
   expect((await view.findByRole("alert")).textContent).toBe(
     "Storage unavailable",
   );
-  expect(view.getByRole("button", { name: "Retry" })).toBeTruthy();
+  expect(view.getByRole("button", { name: "Try again" })).toBeTruthy();
 });
 
 test("successful writes update only the current account cache; failures preserve saved values", async () => {

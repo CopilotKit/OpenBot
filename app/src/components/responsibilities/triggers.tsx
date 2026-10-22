@@ -80,7 +80,7 @@ const KIND_ICON: Record<TriggerKind, typeof IconWebhook> = {
 };
 const KIND_HELP: Record<TriggerKind, string> = {
   webhook:
-    "POST JSON to the URL with the authorization header (or Standard Webhooks signature headers). 200 means accepted and queued, not finished.",
+    "POST JSON to this URL with the Authorization header, or with Standard Webhooks signature headers. A 200 means it was received, not that the run finished.",
   github:
     "In the repository's Settings → Webhooks, set the payload URL to this URL, content type application/json, and the secret to the key.",
   linear:
@@ -91,7 +91,7 @@ const KIND_HELP: Record<TriggerKind, string> = {
     "In PagerDuty, Integrations → Generic Webhooks (v3): set the URL, then paste the secret shown on creation here.",
   email: "Send or forward mail to this address to start a run.",
   slack:
-    "Fires from Slack events delivered through this Bot's Slack pairing. Messages from before the trigger existed are ignored.",
+    "Starts on Slack events this Bot receives. Messages sent before you added the trigger are ignored.",
 };
 const VENDOR_SECRET: ReadonlySet<TriggerKind> = new Set([
   "linear",
@@ -197,8 +197,7 @@ export function Triggers({ goal }: { goal: ResponsibilityRecord }) {
       </div>
       {goal.status !== "active" && (
         <p className="text-muted-foreground text-xs">
-          This responsibility is {goal.status}, so its triggers are acknowledged
-          but never run it.
+          This responsibility is {goal.status}. Its triggers won't start it.
         </p>
       )}
       {triggers.error && (
@@ -208,8 +207,7 @@ export function Triggers({ goal }: { goal: ResponsibilityRecord }) {
       )}
       {triggers.data?.length === 0 && (
         <p className="text-muted-foreground text-xs">
-          No triggers. It runs when you press Run now, or on the event
-          subscriptions above.
+          No triggers. It runs when you press Run now, or on the events above.
         </p>
       )}
       {triggers.data?.length ? (
@@ -359,10 +357,8 @@ function TriggerRow({
             </div>
           ) : (
             <p className="text-amber-600 text-xs dark:text-amber-500">
-              Inbound email is not configured on this deployment
-              (OPENBOT_INBOUND_EMAIL_DOMAIN and
-              OPENBOT_INBOUND_EMAIL_SNS_TOPIC_ARNS), so this address cannot
-              receive mail yet.
+              Email isn't set up on OpenBot yet, so this address can't receive
+              mail. An admin has to turn it on.
             </p>
           ))}
         {generated && (
@@ -397,7 +393,7 @@ function TriggerRow({
               disabled={rotate.isPending}
               onClick={rotateSecret}
             >
-              Rotate key
+              Replace key
             </Button>
           </div>
         )}
@@ -420,7 +416,7 @@ function TriggerRow({
               }
             >
               {trigger.hasSecret
-                ? "Signing secret stored"
+                ? "Signing secret saved"
                 : "Waiting for the signing secret"}
             </span>
             <div className="flex items-center gap-2">
@@ -430,7 +426,7 @@ function TriggerRow({
                 autoComplete="new-password"
                 placeholder={
                   trigger.hasSecret
-                    ? "Paste a new secret to rotate"
+                    ? "Paste a new secret to replace it"
                     : "Paste the signing secret"
                 }
                 value={pasted}

@@ -359,6 +359,7 @@ describe("calling a tool as a Bot", () => {
   function app(actorId: string) {
     const called: string[] = [];
     const store = {
+      brokerProvider: "composio" as const,
       callTool: async (input: { ref: string; botId: string }) => {
         called.push(`${input.ref}@${input.botId}`);
         return { ok: true };

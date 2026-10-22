@@ -59,7 +59,10 @@ import {
   toolResultFailed,
 } from "@/lib/plugins/tool-result";
 import { readTeamBotConsent } from "@/lib/team-bots";
-import { readConnectPrompt } from "@openbot/shared/connect-prompt";
+import {
+  readConnectPrompt,
+  SHOW_APP_ACCESS_TOOL,
+} from "@openbot/shared/connect-prompt";
 import { cn } from "@/lib/utils";
 import { VOICE_CHAT_ACTIVITY, type VoiceChatEntry } from "@/lib/voice/archive";
 import {
@@ -74,7 +77,7 @@ import {
   toVisibleChatItems,
 } from "./chat-messages";
 import type { QueuedMessage } from "./composer";
-import { ConnectAppCard } from "./connect-app-card";
+import { AppAccessCard } from "./app-access-card";
 import { TeamBotConsentCard } from "./team-bot-consent";
 import { ToolRenderBoundary } from "./tool-boundary";
 import { ToolLine } from "./tool-line";
@@ -1351,9 +1354,18 @@ const TranscriptToolCall = memo(function TranscriptToolCall({
  *
  * Named from the reader's side: what was done, against which server, with the server's own words
  * behind a disclosure. The identifier the model was offered never reaches the screen.
+ *
+ * Exported for its tests, which draw it without the CopilotKit provider `TranscriptToolCall` needs.
  */
-function ServerToolLine({ name, result }: { name: string; result?: string }) {
-  const { label, detail } = readToolName(name);
+export function ServerToolLine({
+  name,
+  result,
+}: {
+  name: string;
+  result?: string;
+}) {
+  const running = result === undefined;
+  const { label, detail } = readToolName(name, running);
   /*
    * A refusal is not a result, and must not read like one.
    *
@@ -1374,20 +1386,36 @@ function ServerToolLine({ name, result }: { name: string; result?: string }) {
   // A Team Bot asking to use this person's own account draws its consent card, not the sentence.
   const consent = refused ? readTeamBotConsent(body) : null;
   if (consent) return <TeamBotConsentCard {...consent} />;
-  // An app this person has not connected draws the connect button, not the name of a screen.
-  const connect = refused ? readConnectPrompt(body) : null;
-  if (connect) return <ConnectAppCard {...connect} />;
+  /*
+   * An app this call could not use draws a card with the step that fixes it, not the name of a
+   * screen: a refusal carrying the marker, or the answer of the one tool whose whole job is to put
+   * that card on screen. Only that tool's ordinary answer is read for a marker — any other result
+   * is somebody else's text, and a card must not be conjured out of it.
+   */
+  const card = refused
+    ? readConnectPrompt(body)
+    : name === SHOW_APP_ACCESS_TOOL
+      ? readConnectPrompt(answer)
+      : null;
+  if (card) return <AppAccessCard prompt={card} />;
+  /*
+   * THAT TOOL'S OTHER ANSWERS ARE FOR THE MODEL. An app nobody can name comes back as plain text
+   * telling the Bot to say so plainly and not to browse to it — an instruction, which read by the
+   * person looks like the Bot being told off in front of them. The line still says the check
+   * happened; the Bot's own reply says what it found.
+   */
+  const shown = name === SHOW_APP_ACCESS_TOOL ? undefined : body;
   return (
     <ToolLine
       {...(detail ? { detail } : {})}
       label={label}
       refused={refused}
       failed={failed}
-      running={result === undefined}
+      running={running}
     >
-      {body ? (
+      {shown ? (
         <Streamdown components={markdownComponents}>
-          {forDisplay(body)}
+          {forDisplay(shown)}
         </Streamdown>
       ) : null}
     </ToolLine>

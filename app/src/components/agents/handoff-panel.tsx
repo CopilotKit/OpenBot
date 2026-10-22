@@ -76,22 +76,21 @@ export function HandoffPanel({ agentId }: { agentId: string }) {
           </span>
         ) : null
       }
-      description="Who this Bot may ask, not who may ask it. What the asked Bot says comes back into the conversation that asked, relayed and attributed."
-      title="Bots it may ask"
+      description="The Bots this one can ask for help. This doesn't change who can ask it. Their answers come back into the same conversation, under their name."
+      title="Bots it can ask"
     >
       {/* Facts about the deployment rather than rows to act on, so said as sentences. */}
       {enabled ? null : (
         <PageEmpty>
-          Switched off for this deployment. These grants are kept but none takes
-          effect until handing work between Bots is switched back on.
+          Handing work between Bots is turned off. These settings are kept, and
+          they apply again once an admin turns it back on.
         </PageEmpty>
       )}
 
       {grantable ? null : (
         <PageEmpty>
-          This coworker cannot hand work on. This deployment has nowhere to
-          record which Bots it may hand work to, so there is nothing to grant
-          it. It can still be asked by Bots that can.
+          This Bot can't hand work to other Bots. Other Bots can still hand work
+          to it.
         </PageEmpty>
       )}
 
@@ -103,8 +102,8 @@ export function HandoffPanel({ agentId }: { agentId: string }) {
 
       {grantable && total === 0 ? (
         <PageEmpty>
-          No other Bot here yet. When this deployment has more Bots, this is
-          where this one is allowed to ask them.
+          No other Bots yet. When there are more, you can let this Bot ask them
+          here.
         </PageEmpty>
       ) : null}
       {candidates.length > 0 ? (
@@ -129,7 +128,7 @@ export function HandoffPanel({ agentId }: { agentId: string }) {
                    */}
                   <ItemDescription>
                     {candidate.hidden
-                      ? `${candidate.title} · hidden from your roster`
+                      ? `${candidate.title} · hidden from your Bots list`
                       : candidate.title}
                   </ItemDescription>
                 </ItemContent>
@@ -154,7 +153,7 @@ export function HandoffPanel({ agentId }: { agentId: string }) {
       ) : null}
 
       {canGrant ? null : (
-        <PageEmpty>An administrator decides which Bots may be asked.</PageEmpty>
+        <PageEmpty>An admin decides which Bots this one can ask.</PageEmpty>
       )}
     </PageSection>
   );

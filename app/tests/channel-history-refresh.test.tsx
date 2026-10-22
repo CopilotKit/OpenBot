@@ -51,9 +51,9 @@ const local: Message = {
 };
 const broken = { id: "broken", role: "user", content: null };
 const unavailable =
-  "Earlier messages are temporarily unavailable. You can keep using this conversation.";
+  "Couldn't load earlier messages. You can keep using this conversation.";
 const oneHole =
-  "One earlier message could not be read and is not shown. The rest of this conversation is complete.";
+  "One earlier message couldn't be read, so it isn't shown. Everything else is here.";
 let originalFetch: typeof fetch;
 let history: (threadId: string) => Promise<Response>;
 let historyReads: string[];

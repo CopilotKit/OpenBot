@@ -54,9 +54,9 @@ function matches(query: string, ...fields: (string | undefined)[]): boolean {
 export function agentTrigger(agents: readonly AgentOption[]): TriggerConfig {
   return mentionTrigger({
     char: AGENT_TRIGGER,
-    accessibilityLabel: "agent",
+    accessibilityLabel: "Bot",
     reopenOnChipClick: true,
-    emptyMessage: "No agents in this channel",
+    emptyMessage: "No Bots in this conversation",
     onSearch: (query): TriggerSuggestion[] =>
       agents
         .filter((agent) => matches(query, agent.name, agent.description))
@@ -80,8 +80,8 @@ export function slashCommandTrigger(
   return commandTrigger({
     char: COMMAND_TRIGGER,
     position: "start",
-    accessibilityLabel: "command",
-    emptyMessage: "No matching commands",
+    accessibilityLabel: "skill",
+    emptyMessage: "No matching skills",
     onSearch: (query): TriggerSuggestion[] =>
       commands
         .filter((command) => matches(query, command.name, command.description))

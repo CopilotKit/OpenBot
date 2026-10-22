@@ -77,7 +77,7 @@ export function channelListQueryOptions() {
         ? `?cursor=${encodeURIComponent(pageParam as string)}`
         : "";
       const response = await client(`/api/channels${suffix}`, {
-        fallback: "Could not load channels",
+        fallback: "Couldn't load your conversations.",
       });
       return (await response.json()) as ChannelPage;
     },
@@ -92,7 +92,7 @@ export function channelQueryOptions(channelId: string) {
     queryKey: channelKeys.detail(channelId),
     queryFn: async (): Promise<AgentChannel> => {
       return client(`/api/channels/${channelId}`, "channel", {
-        fallback: "Could not load this channel",
+        fallback: "Couldn't load this conversation.",
       });
     },
   });

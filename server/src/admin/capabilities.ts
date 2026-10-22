@@ -171,5 +171,5 @@ export function resolveAllCapabilities(
 
 /** The sentence a refused person reads. */
 export function capabilityRefusal(capability: Capability): string {
-  return `An administrator has turned off "${CAPABILITY_LABELS[capability].title}" for you, so that was not done.`;
+  return `An admin has turned off "${CAPABILITY_LABELS[capability].title}" for you, so that wasn't done.`;
 }

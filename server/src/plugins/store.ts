@@ -1,3 +1,4 @@
+import { appAccessMethods } from "./plugin-store/app-access";
 import { callMethods } from "./plugin-store/calls";
 import { connectionMethods } from "./plugin-store/connections";
 import { createStoreContext } from "./plugin-store/context";
@@ -9,9 +10,12 @@ import { skillMethods } from "./plugin-store/skills";
 export type { CatalogueEntry } from "./catalogue";
 export type {
   AccessToken,
+  BrokeredDisconnectReason,
   BrokeredProbe,
+  ConnectionFootprint,
   GrantedPlugins,
   OAuthClient,
+  PendingAuthorization,
   PluginDecision,
   PluginKind,
   PluginStoreOptions,
@@ -25,6 +29,7 @@ export type {
 export {
   BROKERED_PROBE_OUTCOMES,
   CatalogueEntryUnknownError,
+  connectionSiblings,
   CustomServerRefusedError,
   deploymentFaultSentence,
   exchangeRefreshTokenOverHttp,
@@ -48,6 +53,7 @@ export function createPluginStore(options: PluginStoreOptions) {
     ...grantMethods(context),
     ...connectionMethods(context),
     ...callMethods(context),
+    ...appAccessMethods(context),
   };
 }
 

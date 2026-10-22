@@ -1,6 +1,6 @@
 import { IconPlus, IconRobot, IconUser } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Fragment, useId, useState } from "react";
+import { Fragment, type ReactNode, useId, useState } from "react";
 import {
   PageEmpty,
   PageRows,
@@ -69,9 +69,7 @@ export function RememberFact() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Remember a fact</DialogTitle>
-            <DialogDescription>
-              It reaches every one of your Bots.
-            </DialogDescription>
+            <DialogDescription>All your Bots will know it.</DialogDescription>
           </DialogHeader>
           <DialogBody className="mt-4">
             {/* The submit button is in the footer and reaches this form by id, so DialogBody stays a
@@ -127,14 +125,27 @@ export function RememberFact() {
   );
 }
 
-/** Everything the person's Bots remember about them, with who formed each memory. */
-export function MemoryList() {
+/**
+ * Everything the person's Bots remember about them, with who formed each memory. `action` and
+ * `description` belong to the section, since the page heading above it is the whole Plugins screen.
+ */
+export function MemoryList({
+  action,
+  description,
+}: {
+  action?: ReactNode;
+  description?: ReactNode;
+} = {}) {
   const memories = useQuery(memoriesQueryOptions());
   const agents = useQuery(agentListQueryOptions());
   const botName = (id: string | null) =>
     agents.data?.find((agent) => agent.id === id)?.name ?? "your Bot";
   return (
-    <PageSection title="Your memories">
+    <PageSection
+      action={action}
+      description={description}
+      title="Your memories"
+    >
       {memories.isPending ? null : memories.error ? (
         <p role="alert" className="mt-4 text-destructive text-sm">
           {memories.error.message}
@@ -152,7 +163,7 @@ export function MemoryList() {
           ))}
         </PageRows>
       ) : (
-        <PageEmpty>You have no memories yet.</PageEmpty>
+        <PageEmpty>No memories yet. Add one with Remember a fact.</PageEmpty>
       )}
     </PageSection>
   );
@@ -183,11 +194,11 @@ function MemoryRow({
   const status = heldByIntelligence
     ? "Kept in Intelligence"
     : !memory.enabled
-      ? "Disabled"
+      ? "Turned off"
       : memory.formedBy === "bot"
-        ? `Formed by ${botName}${memory.reviewState === "unreviewed" ? " · awaiting review" : ""}`
+        ? `Formed by ${botName}${memory.reviewState === "unreviewed" ? " · needs review" : ""}`
         : memory.reviewState === "unreviewed"
-          ? "Imported · awaiting review"
+          ? "Imported · needs review"
           : "Reviewed";
   return (
     <Item size="sm">

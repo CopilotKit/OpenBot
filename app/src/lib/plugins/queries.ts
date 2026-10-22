@@ -1,5 +1,19 @@
 import { queryOptions } from "@tanstack/react-query";
 import { client } from "@/lib/client";
+// This import closes a cycle: `./provider-vocabulary` imports `pluginsProvider` from this file.
+// It is safe for one reason, and the reason is the rule. Both live bindings that cross it —
+// `directoryReadFailure` here, `pluginsProvider` there — are `export function` declarations,
+// which are fully initialised during module instantiation, so neither can be caught in the
+// temporal dead zone whichever module evaluates first; and both are only ever called from inside
+// a function body (a `queryFn`, `directoryRouteDecision`), long after both modules have finished
+// evaluating. Nothing may call across this import at module scope. A
+// `const X = directoryReadFailure("...")` at the top level of this file would reach `VOCABULARY`,
+// a lexical `const` in the other module, mid-evaluation: it throws under one evaluation order and
+// not the other, so it can pass every test and still fail in a production bundle.
+import {
+  directoryReadFailure,
+  type PluginsProvider,
+} from "./provider-vocabulary";
 
 /**
  * Re-exported, not re-declared.
@@ -59,6 +73,11 @@ export type PluginServer = {
   hasCredential: boolean;
   toolsRefreshedAt: string | null;
   lastError: string | null;
+  /**
+   * What the last refresh left out for its names. A warning: the rest were stored. Optional because
+   * a server replica older than this field does not send it, mid-rollout.
+   */
+  skippedTools?: string[];
   addedBy: string | null;
   /**
    * Whether this server registers its own OAuth client (RFC 7591) rather than waiting on an
@@ -151,6 +170,23 @@ export type ComposioApp = {
   categories: string[];
   /** The size of the decision, shown before enabling. */
   actionCount: number;
+  /**
+   * How many of those actions the provider classified, how many distinct non-empty scope sets they
+   * ask for, and how many carry a scope at all — three more facts of the size-of-the-decision kind.
+   *
+   * REQUIRED AND NULLABLE, NEVER OPTIONAL, AND NOTHING HERE WRITES `?? 0`. `0` means measured and
+   * none, so the coverage warning fires; `null` means the provider does not publish it, so the page
+   * says nothing. An optional field makes those the same shape at the call site, and the natural
+   * `?? 0` fires a coverage warning on a Composio deployment — a false alarm at exactly the moment
+   * somebody is deciding whether to trust an app.
+   *
+   * An action with no scopes is not its own permission: it is covered by any approval at all, so it
+   * joins no group. `scopedActionCount` is what keeps `permissionCount: 1` over two actions from
+   * reading as one permission covering both.
+   */
+  classifiedCount: number | null;
+  permissionCount: number | null;
+  scopedActionCount: number | null;
   enabled: boolean;
 };
 
@@ -183,7 +219,47 @@ export type PluginsPage = {
    * server.
    */
   composioConfigured: boolean;
+  /**
+   * Whether this deployment's broker authorizes ONE ACTION AT A TIME.
+   *
+   * A DECLARED CAPABILITY, read with a presence test and never a vendor name. The server computes
+   * it from the very expression `/servers/:id/authorize` and the `/arcade/verify` return leg gate
+   * on, so a screen that draws the per-action grant list and the routes that serve its buttons
+   * cannot key on different facts. Gating on `provider === "arcade"` instead left a broker named
+   * arcade whose flow is absent drawing a list whose every Authorize press 503s.
+   *
+   * Required, like `composioConfigured` and unlike `provider`: a capability is a value the server
+   * declares, so the type does not offer "did not say" as a third answer. False on Composio, whose
+   * auth config fixes one state for a whole toolkit, so a Composio deployment is unchanged.
+   */
+  authorizesPerAction: boolean;
+  /**
+   * Which vendor brokers this deployment's apps, as a NAME. Read it through {@link pluginsProvider}.
+   *
+   * A screen that FILTERS by brokered-ness needs no provider name: one provider holds rows at a
+   * time (spec D3), which is why `brokeredAccountsListedOn` is a predicate over `provenance`. A
+   * screen that NAMES a vendor ("Browse Composio", the `/admin/plugins/composio` route,
+   * `COMPOSIO_API_KEY`, "Reached through Composio") cannot derive that name from a row, and this
+   * field is the only thing that answers it. Separate from `composioConfigured`, which asks whether
+   * the directory can be browsed at all.
+   *
+   * A name, never a key and never a capability: nothing about the vendor key travels with it.
+   * Optional because a payload from an older server does not carry it.
+   */
+  provider?: "composio" | "arcade";
 };
+
+/**
+ * The provider a payload names, `"composio"` when the server did not say.
+ *
+ * So a Composio deployment renders byte-identically and a page served by an older server does not
+ * blank. Also `"composio"` before the page has loaded.
+ */
+export function pluginsProvider(
+  page: PluginsPage | undefined,
+): "composio" | "arcade" {
+  return page?.provider ?? "composio";
+}
 
 /** What one Bot holds, which is all the runtime needs to offer it. */
 export type GrantedPlugins = {
@@ -206,6 +282,7 @@ export const pluginKeys = {
   page: () => ["plugins", "page"] as const,
   forAgent: (agentId: string) => ["plugins", "for-agent", agentId] as const,
   connections: () => ["plugins", "connections"] as const,
+  siblings: (serverId: string) => ["plugins", "siblings", serverId] as const,
   composioApps: (query: string) =>
     ["plugins", "composio", "apps", query] as const,
 };
@@ -365,9 +442,44 @@ export function connectionsQueryOptions() {
     queryKey: pluginKeys.connections(),
     queryFn: async (): Promise<PluginConnections> => {
       const response = await client("/api/plugins/connections", {
-        fallback: "Your connected accounts could not be loaded.",
+        fallback: "Couldn't load your connections.",
       });
       return response.json();
+    },
+  });
+}
+
+/**
+ * What disconnecting this app would also end, as the server computed it.
+ *
+ * `siblings` are other apps' toolkit names (never this one) and `unanswered` is a COUNT of apps that
+ * could not be asked about. A deployment whose broker holds one account per app always answers
+ * empty.
+ */
+export type ConnectionSiblings = { siblings: string[]; unanswered: number };
+
+export function connectionSiblingsQueryOptions(serverId: string) {
+  return queryOptions({
+    queryKey: pluginKeys.siblings(serverId),
+    queryFn: async (): Promise<ConnectionSiblings> => {
+      const response = await client(
+        `/api/plugins/servers/${encodeURIComponent(serverId)}/connection/siblings`,
+        {
+          fallback: "Couldn't read which other apps share this connection.",
+        },
+      );
+      const body: Partial<ConnectionSiblings> = await response.json();
+      /*
+       * NARROWED RATHER THAN TRUSTED: an answer that is not this shape is read as "nothing to say",
+       * which draws no warning, rather than a throw that takes the whole page down for a sentence.
+       */
+      return {
+        siblings: Array.isArray(body.siblings) ? body.siblings : [],
+        unanswered:
+          typeof body.unanswered === "number" && body.unanswered > 0
+            ? body.unanswered
+            : 0,
+      };
     },
   });
 }
@@ -385,18 +497,21 @@ export function pluginsPageQueryOptions() {
 }
 
 /**
- * Composio's app directory, narrowed by a search term.
+ * The active broker's app directory, narrowed by a search term.
  *
  * The term goes to our own endpoint because the vendor's client drops a search parameter and
  * answers with an unfiltered page, so filtering has to happen somewhere that admits to doing it.
  */
-export function composioAppsQueryOptions(query: string) {
+export function composioAppsQueryOptions(
+  query: string,
+  provider: PluginsProvider,
+) {
   return queryOptions({
     queryKey: pluginKeys.composioApps(query),
     queryFn: async (): Promise<{ apps: ComposioApp[] }> => {
       const response = await client(
         `/api/plugins/composio/apps?q=${encodeURIComponent(query)}`,
-        { fallback: "Composio's app directory could not be read." },
+        { fallback: directoryReadFailure(provider) },
       );
       return response.json();
     },
@@ -414,7 +529,7 @@ export function agentPluginsQueryOptions(agentId: string) {
     queryFn: async (): Promise<GrantedPlugins> => {
       const response = await client(
         `/api/plugins/for/${encodeURIComponent(agentId)}`,
-        { fallback: "This Bot's plugins could not be read." },
+        { fallback: "Couldn't load this Bot's apps." },
       );
       return response.json();
     },

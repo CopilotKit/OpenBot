@@ -12,12 +12,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render } from "@testing-library/react";
 import { useBrokeredAccount } from "../src/components/plugins/brokered-account-row";
 import type { PluginServer } from "../src/lib/plugins/queries";
-import { brokeredFor } from "../src/routes/_authed/settings/connected-accounts/$key";
+import { brokeredFor } from "../src/routes/_authed/_app/connections.$key";
 import {
   brokeredAccountsListedOn,
-  connectedAccountSections,
   sharedAccountsListedOn,
-} from "../src/routes/_authed/settings/connected-accounts/index";
+} from "../src/routes/_authed/_app/connections.index";
 
 beforeAll(() => GlobalRegistrator.register());
 afterEach(cleanup);
@@ -45,24 +44,6 @@ describe("Settings for a Shared app", () => {
     ]);
   });
 
-  test("a deployment whose apps are all Shared still shows the Shared section", () => {
-    const servers = [server("shared")];
-    expect(connectedAccountSections(0, servers)).toEqual(["empty", "shared"]);
-  });
-
-  test("a personal account list and a Shared section can both draw", () => {
-    const servers = [server("personal"), server("shared")];
-    expect(connectedAccountSections(1, servers)).toEqual([
-      "personal",
-      "shared",
-    ]);
-  });
-
-  test("no Shared apps means no Shared section", () => {
-    const servers = [server("personal")];
-    expect(connectedAccountSections(1, servers)).toEqual(["personal"]);
-  });
-
   test("the account page does not treat a Shared app as the reader's to confirm", () => {
     expect(brokeredFor(server("shared"))).toBe(false);
     expect(brokeredFor(server("personal"))).toBe(true);
@@ -88,6 +69,7 @@ describe("Settings for a Shared app", () => {
         verifiedAt: null,
         probe: null,
         checkable: false,
+        authorizesPerAction: false,
         authScheme: "OAUTH2",
         returnTo: "settings",
         report: () => {},

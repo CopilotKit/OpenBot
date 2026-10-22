@@ -51,8 +51,9 @@ PageShell        the page: header (title, description, action, backButton) then 
     PageEmpty    what a section says when it has nothing to list
 ```
 
-`PageShell` takes a `width`: `prose` (`max-w-2xl`) is the default because configuration is mostly
-reading, and a row of label-and-control has no business being wider than the sentence explaining it.
+`PageShell` takes a `width`: `prose` (`max-w-3xl`, 720px here) is the default, and every
+configuration screen uses it so no screen is wider than another. Sentences inside it are held to
+`max-w-prose`, so the column has room for a label beside its control without stretching the text.
 `wide` (`max-w-5xl`) exists for one screen — `admin/audit.tsx`, because an audit log is a table to be
 scanned and prose width would wrap every row. It is not a licence for anything else to be wide.
 

@@ -95,7 +95,7 @@ function CredentialsPage() {
           Add credential
         </Button>
       }
-      description="Credentials are write-only. OpenBot never displays their secret values."
+      description="Keys and tokens for this deployment. OpenBot never shows a secret after it is saved."
       title="Credentials"
     >
       {/*
@@ -108,7 +108,7 @@ function CredentialsPage() {
           <DialogHeader>
             <DialogTitle>Add credential</DialogTitle>
             <DialogDescription>
-              Held for this deployment and never shown again once saved.
+              Saved for this deployment. You won't see the secret again.
             </DialogDescription>
           </DialogHeader>
           <DialogBody className="mt-4">
@@ -255,15 +255,15 @@ function CredentialsPage() {
               {([kind, provider, keyId]) =>
                 liveCredentialFor(credentials.data, kind, provider, keyId) ? (
                   <p className="text-amber-600 text-sm dark:text-amber-500">
-                    This key already holds a live credential. Saving replaces
-                    it, and the one it replaces is revoked.
+                    This key already has an active credential. Saving replaces
+                    it and revokes the old one.
                   </p>
                 ) : null
               }
             </form.Subscribe>
             {createCredential.error ? (
               <p className="text-destructive text-sm" role="alert">
-                Could not save the credential. Try again.
+                Couldn't save the credential. Try again.
               </p>
             ) : null}
           </DialogBody>
@@ -298,13 +298,15 @@ function CredentialsPage() {
         </DialogContent>
       </Dialog>
 
-      <PageSection title="Configured credentials">
+      <PageSection title="Saved credentials">
         {credentials.isPending ? null : credentials.error ? (
           <p className="mt-4 text-destructive text-sm" role="alert">
-            Could not load credentials.
+            Couldn't load credentials. Reload the page.
           </p>
         ) : credentials.data?.length === 0 ? (
-          <PageEmpty>No credentials are configured.</PageEmpty>
+          <PageEmpty>
+            No credentials yet. Add one with Add credential.
+          </PageEmpty>
         ) : (
           <PageRows>
             {credentials.data?.map((credential, index) => (

@@ -2,6 +2,7 @@ import {
   IconBolt,
   IconBox,
   IconLogout,
+  IconPlug,
   IconPlus,
   IconSearch,
   IconSettings,
@@ -256,6 +257,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
               )}
             />
             <Button
+              aria-label="New conversation"
               size="icon"
               variant="ghost"
               render={(props) => (
@@ -279,9 +281,9 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             <SidebarMenuItem>
               <InputGroup className="bg-background text-sm rounded-lg h-9">
                 <InputGroupInput
-                  aria-label="Search channels"
+                  aria-label="Search conversations"
                   onChange={(event) => setSearch(event.target.value)}
-                  placeholder="Search..."
+                  placeholder="Search…"
                   value={search}
                 />
                 <InputGroupAddon>
@@ -302,13 +304,13 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                   <EmptyHeader>
                     <EmptyTitle>
                       {channels.hasNextPage
-                        ? "No loaded channels match your search"
-                        : "No channels match your search"}
+                        ? "No loaded conversations match your search"
+                        : "No conversations match your search"}
                     </EmptyTitle>
                     <EmptyDescription className="text-pretty">
                       {channels.hasNextPage
                         ? "Load older conversations to search more of your history."
-                        : `Nothing here is named “${search.trim()}”, and nobody has said it recently either.`}
+                        : `No conversation has “${search.trim()}” in its name or latest message.`}
                     </EmptyDescription>
                   </EmptyHeader>
                 </Empty>
@@ -318,10 +320,9 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
               <div className="py-4">
                 <Empty className="border border-dashed min-h-[40dvh]">
                   <EmptyHeader>
-                    <EmptyTitle>You don't have channels yet</EmptyTitle>
+                    <EmptyTitle>No conversations yet</EmptyTitle>
                     <EmptyDescription className="text-pretty">
-                      Start talking to agents and your channels will appear
-                      here.
+                      Start a conversation with a Bot and it shows up here.
                     </EmptyDescription>
                   </EmptyHeader>
                 </Empty>
@@ -366,14 +367,18 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
               <BotsNavBadge />
             </SidebarMenuButton>
           </SidebarMenuItem>
+          {/*
+           * Beside Bots rather than inside Admin: each is somebody's own. Capabilities are your skills
+           * and what your Bots remember about you; Connections are the apps a Bot reaches as you.
+           * Capabilities links to `/capabilities` rather than a tab, so it stays lit on both tabs.
+           */}
           <SidebarMenuItem>
-            {/* Beside Bots rather than inside Admin: writing a skill is something anybody does. */}
             <SidebarMenuButton
               className="hover:bg-foreground/5 h-10"
               render={(props) => (
                 <Link
                   {...props}
-                  to="/skills"
+                  to="/capabilities"
                   activeProps={{
                     className: "bg-foreground/5",
                   }}
@@ -383,7 +388,26 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
               <div className="size-[28px] flex items-center justify-center">
                 <IconBox />
               </div>
-              <span className="text-sm trackint-tight">Skills</span>
+              <span className="text-sm trackint-tight">Capabilities</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              className="hover:bg-foreground/5 h-10"
+              render={(props) => (
+                <Link
+                  {...props}
+                  to="/connections"
+                  activeProps={{
+                    className: "bg-foreground/5",
+                  }}
+                />
+              )}
+            >
+              <div className="size-[28px] flex items-center justify-center">
+                <IconPlug />
+              </div>
+              <span className="text-sm trackint-tight">Connections</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
           <SidebarMenuItem>
@@ -428,7 +452,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                   variant="destructive"
                 >
                   <IconLogout />
-                  Log out
+                  Sign out
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>

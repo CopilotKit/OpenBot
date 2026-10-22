@@ -313,9 +313,11 @@ A catalogue entry says whose credential a Bot reaches it with, which is a differ
 
 Every MCP call checks the grant first, then evaluates the same action policy engine with MCP context, then audits the result.
 
+Whether a person can use an app through a Bot is answered once, on the server, from those same facts — the app's row, the Bot's grants, the person's own connection, a Shared app's team account — as one of six states: `ready`, `not_connected`, `reconnect`, `shared_not_connected`, `disabled` or `not_granted` (`server/src/plugins/app-access.ts`). The last three are an administrator's to fix, so a person can file a request (`app_access_requests`) for exactly what the state is missing, and approving one performs it — switching the app on, granting it to the Bot — through the same code paths the admin screens use. See [Composio](plugins/composio.md#what-an-app-is-for-one-person-on-one-bot).
+
 ### Writing a skill in a conversation
 
-A skill can be written from the composer as well as from `/skills`. The deployment ships a skill called `skill-creator` whose instruction is how to interview somebody about the skill they want; a Bot holding it is also offered four tools the app registers — `list_skills`, `read_skill`, `list_skill_tools`, and `save_skill`, which suspends the run on a card showing the command, the title and the whole instruction. Nothing is written until the person presses the button.
+A skill can be written from the composer as well as from `/capabilities/skills`. The deployment ships a skill called `skill-creator` whose instruction is how to interview somebody about the skill they want; a Bot holding it is also offered four tools the app registers — `list_skills`, `read_skill`, `list_skill_tools`, and `save_skill`, which suspends the run on a card showing the command, the title and the whole instruction. Nothing is written until the person presses the button.
 
 The grant is the gate. Those four tools are offered only while the Bot holds `skill-creator`, because four extra tools on every run costs the narrowing above what it exists to buy, and a Bot for looking up transactions has no business drafting skills.
 

@@ -93,7 +93,7 @@ export type OpenTagAgentDeps = {
   /** Slack trigger ingest; defaults to the responsibilities lane's `ingestSlackEvent`. */
   ingestSlack?: (event: SlackTriggerEvent) => Promise<unknown>;
   /**
-   * OpenBot linked-account codes (Settings → Connected accounts) from a Slack sender. Reachability
+   * OpenBot linked-account codes (Connections) from a Slack sender. Reachability
    * codes are checked first; this is used for any code that is not a live one (an expired or used
    * Reachability code falls through too, matches no account code, and gets the usual expired reply).
    * An account code is redeemed only in a direct message. One posted in a shared conversation is
@@ -428,7 +428,7 @@ async function link(
     });
     if (outcome === "linked")
       return {
-        text: "Linked your Slack account to OpenBot. You can see it under Settings → Connected accounts.",
+        text: "Linked your Slack account to OpenBot. You can see it under Connections.",
       };
     if (outcome === "conflict")
       return {

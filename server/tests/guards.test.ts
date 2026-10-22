@@ -51,7 +51,7 @@ describe("server authorization", () => {
 
     expect(response.status).toBe(403);
     await expect(response.json()).resolves.toEqual({
-      error: "Administrator access required.",
+      error: "Only an admin can do this.",
     });
   });
 

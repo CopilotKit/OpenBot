@@ -73,6 +73,9 @@ function serving() {
       grants.push(`${init?.method ?? "GET"} ${url} ${init?.body ?? ""}`);
       return Response.json({ ok: true });
     }
+    if (url.includes("/api/plugins/for/") && url.endsWith("/apps")) {
+      return Response.json({ apps: [] });
+    }
     if (url.includes("/api/plugins/for/")) {
       return Response.json({ tools: [], skills: [] });
     }
@@ -147,7 +150,9 @@ test("switching a skill on grants it to this Bot", async () => {
 test("on a Bot that is not yours there are no skill switches", async () => {
   serving();
   const view = draw({ ...BOT, mine: false, canManage: false });
-  expect(await view.findByText(/^Nothing granted yet\./)).toBeTruthy();
+  expect(
+    await view.findByText(/^No apps yet\. An admin has to add them\./),
+  ).toBeTruthy();
   expect(view.queryByRole("switch")).toBeNull();
 });
 
@@ -159,6 +164,8 @@ test("your skills failing to load says so, not that you have none", async () => 
       ? new Response(null, { status: 500 })
       : served(input, init)) as unknown as typeof fetch;
   const view = draw(BOT);
-  expect(await view.findByText("Could not load your skills.")).toBeTruthy();
-  expect(view.queryByText(/You have not written a skill yet/)).toBeNull();
+  expect(
+    await view.findByText("Couldn't load your skills. Reload the page."),
+  ).toBeTruthy();
+  expect(view.queryByText(/No skills yet/)).toBeNull();
 });

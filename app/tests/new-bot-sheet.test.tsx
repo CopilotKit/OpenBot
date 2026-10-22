@@ -161,7 +161,7 @@ test("chooses nothing where the deployment has no Bot of its own", async () => {
   const runHere = view.getByRole("button", { name: /Run it here/ });
   expect(runHere.hasAttribute("disabled")).toBe(true);
   expect(runHere.getAttribute("aria-pressed")).toBe("false");
-  expect(runHere.textContent).toContain("has to switch this on");
+  expect(runHere.textContent).toContain("An admin has to turn this on");
   expect(
     view.getByRole("button", { name: "Continue" }).hasAttribute("disabled"),
   ).toBe(true);
@@ -217,9 +217,7 @@ test("a framework asks for its address, and refuses an empty one without diallin
   await view.findByText("Where can it be reached?");
 
   await user.click(view.getByRole("button", { name: "Continue" }));
-  expect(
-    await view.findByText("An address is required for an agent you run."),
-  ).toBeTruthy();
+  expect(await view.findByText("Enter your agent's address.")).toBeTruthy();
   expect(dialled).toEqual([]);
 });
 
@@ -289,5 +287,5 @@ test("going back keeps what was answered, and Run it here leaves a typed address
   await user.click(view.getByRole("button", { name: "Create" }));
   await view.findByText("Expense Review is ready");
   expect(creates[0]).toMatchObject({ endpoint: "", visibility: "public" });
-  expect(creates[0]?.auth).toBeUndefined();
+  expect(creates[0]).not.toHaveProperty("auth");
 });

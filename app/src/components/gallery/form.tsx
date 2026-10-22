@@ -80,7 +80,7 @@ export function FormCard(props: Record<string, unknown>) {
     return (
       <GalleryFrame title="Preparing your form…">
         <p className="text-sm text-muted-foreground">
-          The assistant is putting the questions together.
+          The Bot is putting the questions together.
         </p>
       </GalleryFrame>
     );
@@ -138,7 +138,7 @@ function InvalidForm({
       <p role="alert" className="text-sm text-muted-foreground">
         {returned
           ? "The form had invalid questions. The Bot can send a corrected form."
-          : "The form has invalid questions and could not be displayed."}
+          : "The form has invalid questions, so it can't be shown."}
       </p>
       {failed && (
         <Button className="mt-3" size="sm" onClick={() => void returnToBot()}>
@@ -365,7 +365,7 @@ function FormEntry({
           })}
           {failure && (
             <p role="alert" className="text-sm text-destructive">
-              Your answers could not be sent. Try again.
+              Couldn't send your answers. Try again.
             </p>
           )}
           <div className="flex justify-end border-t border-border pt-3">

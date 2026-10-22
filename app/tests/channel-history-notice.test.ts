@@ -72,7 +72,7 @@ describe("channel history notice", () => {
       unreadable: 0,
     });
 
-    expect(notice).toContain("temporarily unavailable");
+    expect(notice).toContain("Couldn't load earlier messages");
     expect(notice).not.toContain("different CopilotKit project");
     expect(notice).not.toContain("fresh history");
   });
@@ -86,7 +86,7 @@ describe("channel history notice", () => {
       unreadable: 1,
     });
 
-    expect(notice).toContain("One earlier message could not be read");
+    expect(notice).toContain("One earlier message couldn't be read");
     expect(notice).not.toContain("different CopilotKit project");
   });
 
@@ -101,7 +101,7 @@ describe("channel history notice", () => {
         );
 
         expect((await view.findByRole("status")).textContent).toContain(
-          "Earlier messages are temporarily unavailable",
+          "Couldn't load earlier messages",
         );
         expect(view.queryByText(/different CopilotKit project/)).toBeNull();
       },
@@ -134,7 +134,7 @@ describe("channel history notice", () => {
       unreadable: 0,
     });
 
-    expect(notice).toContain("temporarily unavailable");
+    expect(notice).toContain("Couldn't load earlier messages");
     expect(notice).not.toContain("different CopilotKit project");
   });
 
@@ -159,6 +159,6 @@ describe("channel history notice", () => {
         unreadable: 1,
         historyReadFailed: true,
       }),
-    ).toContain("temporarily unavailable");
+    ).toContain("Couldn't load earlier messages");
   });
 });

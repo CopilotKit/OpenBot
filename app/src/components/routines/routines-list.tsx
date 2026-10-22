@@ -66,7 +66,7 @@ function lastRunLabel(lastRun: RoutineRecord["lastRun"]): {
 } {
   if (lastRun === null) {
     return {
-      text: "Never run yet",
+      text: "Hasn't run yet",
       className: "text-muted-foreground",
       dot: "bg-muted-foreground/40",
     };
@@ -201,7 +201,7 @@ function RoutineRuns({ routine }: { routine: RoutineRecord }) {
                 params={{ channelId: routine.channel.id }}
                 to="/channel/$channelId"
               >
-                Open thread
+                Open conversation
               </Link>
             )}
             {run.error ? (
@@ -259,24 +259,24 @@ export function RoutinesList({
       {noWorker ? (
         <p className="mt-4 text-muted-foreground text-sm" role="alert">
           <span className="font-medium text-amber-600 dark:text-amber-500">
-            Nothing is running these.
+            Routines aren't running.
           </span>{" "}
           {sweep?.lastSweptAt
-            ? `The routines worker last checked ${relativeTime(sweep.lastSweptAt)}. Until it is running again, none of these will fire.`
-            : "No routines worker has ever checked in, so none of these will fire. A deployment needs one running to carry them out."}
+            ? `OpenBot last checked them ${relativeTime(sweep.lastSweptAt)}. None will run until it starts again. Ask an admin if this keeps happening.`
+            : "OpenBot hasn't started running routines yet, so none of these will run. Ask an admin to set this up."}
         </p>
       ) : null}
 
       {/* Pending renders nothing: the empty-state sentence would otherwise flash for the fetch. */}
       {routines.isPending ? null : routines.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Your routines could not be loaded.
+          Couldn't load your routines. Reload the page.
         </p>
       ) : rows.length === 0 ? (
         <PageEmpty>
           {agentId
-            ? 'Nothing scheduled for this coworker. Ask it in a channel — "every weekday at 9, …" — and it will appear here.'
-            : 'Nothing scheduled. Ask a Bot — "every weekday at 9, …" — and it will appear here.'}
+            ? 'No routines for this Bot yet. Ask it something like "every weekday at 9, send me…" and it shows up here.'
+            : 'No routines yet. Ask a Bot something like "every weekday at 9, send me…" and it shows up here.'}
         </PageEmpty>
       ) : (
         <PageRows>
@@ -329,7 +329,7 @@ export function RoutinesList({
                     >
                       {routine.channel.gone ? (
                         <Chip className="border-destructive/40 text-destructive">
-                          This channel is gone
+                          Conversation deleted
                         </Chip>
                       ) : (
                         // Where it posts is a place, so the chip goes there.
@@ -338,7 +338,7 @@ export function RoutinesList({
                           to="/channel/$channelId"
                         >
                           <Chip className="text-muted-foreground transition-colors hover:text-foreground">
-                            {routine.channel.name ?? "Unnamed channel"}
+                            {routine.channel.name ?? "Untitled conversation"}
                           </Chip>
                         </Link>
                       )}
@@ -392,8 +392,8 @@ export function RoutinesList({
                         size="sm"
                         title={
                           routine.enabled
-                            ? "Runs it for real, now: the Bot does the work and posts in the channel."
-                            : "Paused routines never run. Switch it on first."
+                            ? "Runs it now, for real. The Bot does the work and posts in the conversation."
+                            : "This routine is paused. Turn it on first."
                         }
                         type="button"
                         variant="outline"
@@ -461,8 +461,7 @@ export function RoutinesList({
           <DialogHeader>
             <DialogTitle>Delete "{confirming?.schedule}"?</DialogTitle>
             <DialogDescription>
-              This standing instruction stops for good. Nothing further runs on
-              this schedule, and there is no undo.
+              This routine stops for good. You can't undo this.
             </DialogDescription>
           </DialogHeader>
           {deleteRoutine.error ? (

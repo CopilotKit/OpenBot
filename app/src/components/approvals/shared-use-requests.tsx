@@ -22,10 +22,10 @@ import {
 
 const WHY: Record<SharedUseRequestReason, string> = {
   refused_call:
-    "A call was refused because this Bot reaches more people than approved.",
+    "An action was blocked. This Bot reaches more people than approved.",
   publish: "Its owner widened who can reach it.",
-  trigger: "Its owner added a trigger that lets outside input steer it.",
-  grant: "It was granted the app's actions.",
+  trigger: "Its owner added a trigger that lets outside messages steer it.",
+  grant: "It was given the app's actions.",
 };
 
 /**

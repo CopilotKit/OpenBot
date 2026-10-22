@@ -28,7 +28,10 @@ export function createVoiceSessionRoutes(services?: VoiceSessionServices) {
   });
   app.get("/", async (context) => {
     if (!services)
-      return context.json({ error: "Voice history is not configured." }, 503);
+      return context.json(
+        { error: "Saving voice chats isn't set up yet." },
+        503,
+      );
     const channelId = context.req.query("channelId");
     const cursor = context.req.query("cursor");
     if (!channelId || channelId.length > 256 || (cursor?.length ?? 0) > 2048)
@@ -52,7 +55,10 @@ export function createVoiceSessionRoutes(services?: VoiceSessionServices) {
       if (context.req.header("x-openbot-voice") !== "1")
         return context.json({ error: "Invalid voice request." }, 403);
       if (!services)
-        return context.json({ error: "Voice history is not configured." }, 503);
+        return context.json(
+          { error: "Saving voice chats isn't set up yet." },
+          503,
+        );
       if (
         context.req.header("content-type")?.split(";")[0]?.trim() !==
         "application/json"
@@ -76,7 +82,7 @@ export function createVoiceSessionRoutes(services?: VoiceSessionServices) {
             return context.json(
               {
                 error:
-                  "Voice transcript saved; summary service is busy. Retry shortly.",
+                  "Transcript saved. The summary isn't ready yet. Try again in a moment.",
                 session: saved,
               },
               429,
@@ -141,7 +147,7 @@ function respondError(
     return context.json({ error: error.message }, error.status);
   console.error(JSON.stringify({ type: "voice-history-failed" }));
   return context.json(
-    { error: "Voice history could not be saved or loaded. Please retry." },
+    { error: "Couldn't save or load voice chats. Try again." },
     503,
   );
 }

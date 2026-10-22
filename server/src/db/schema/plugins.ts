@@ -137,6 +137,14 @@ export const mcpServers = pgTable(
     toolsRefreshedAt: timestamp("tools_refreshed_at", { withTimezone: true }),
     /** The last failure, kept so the Plugins page can say why a server has no tools. */
     lastError: text("last_error"),
+    /**
+     * The names the last stored listing left out because no model could be offered them, as the
+     * vendor spelled them. A warning about a refresh that succeeded, not a failure, which is why it
+     * is not `lastError`: a server that keeps listing a dotted name would otherwise read as broken
+     * on the Plugins list forever. Null and empty both mean none; a replica that predates the column
+     * writes nothing here.
+     */
+    skippedTools: text("skipped_tools").array(),
     addedBy: text("added_by"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -166,6 +174,40 @@ export const mcpTools = pgTable(
       .notNull()
       .references(() => mcpServers.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
+    /**
+     * THE VENDOR'S OWN SPELLING OF THIS ACTION, which is not always a name a model may be offered.
+     *
+     * `name` is this deployment's identifier for the action: half of the `<serverId>/<name>` ref a
+     * grant is written against, and the half of `mcp__<serverId>__<name>` a model is offered. A
+     * model tool name must match `^[a-zA-Z0-9_-]+$`, so `name` must too.
+     *
+     * THE TWO USED TO BE ONE COLUMN, AND ARCADE IS WHERE THAT BROKE. Its listing answers
+     * `qualified_name` — `Gmail.ListEmails` — and the dot is legal at the vendor and illegal in a
+     * tool name, so every Arcade action this deployment recorded produced an offered name the model
+     * API rejects outright. Not the one tool: the request carries every tool together, so a single
+     * granted Arcade action failed the whole call with `Invalid 'tools[47].name'`, and no Arcade
+     * tool had ever been callable by any model.
+     *
+     * STORED RATHER THAN RECONSTRUCTED. `Gmail.ListEmails` is `<toolkit>.<action>` and the toolkit
+     * is already the server id, so the vendor's spelling LOOKS derivable from `name` — but that is a
+     * rule about the shape of today's listing, not a promise the vendor makes, and the one thing
+     * that must never be guessed is the string an action is executed by. It is also what the
+     * per-action authorization flow speaks end to end (`grantsFor`, the Authorize button, the
+     * attempt row, `?action=`, the vendor's own `authorize({ action })`) and what this deployment's
+     * refusal sentences quote back, so it is a fact the row has to hold.
+     *
+     * EQUAL TO `name` FOR EVERY OTHER TRANSPORT, and that is not a placeholder. Composio's
+     * `GMAIL_FETCH_EMAILS` and an MCP server's names are already offerable as they stand, so there
+     * are no two spellings to keep apart and the column says so. The `arcade_provider_backfill`
+     * migration filled the rows that predate the column that way for the same reason.
+     *
+     * NULLABLE, AND NULL MEANS "THE SAME AS `name`". Every writer in this build sets it, but a
+     * rolling deploy serves from the previous build's replicas after the migration has run, and
+     * those insert rows without this column; under `NOT NULL` every listing they refreshed would
+     * fail. So the column ships nullable (see `docs/development.md`, Migrations), every reader
+     * resolves it through {@link vendorNameOf}, and tightening it belongs to a later release.
+     */
+    vendorName: text("vendor_name"),
     description: text("description").notNull().default(""),
     /** The tool's own JSON Schema, passed to the model unchanged. */
     inputSchema: jsonb("input_schema").notNull().default({}),
@@ -220,6 +262,14 @@ export const mcpTools = pgTable(
   },
   (table) => [primaryKey({ columns: [table.serverId, table.name] })],
 );
+
+/**
+ * The name an `mcp_tools` row's action is executed by: `vendor_name`, or `name` where a replica of
+ * the previous build wrote the row without one. The one way a query reads that column, so a null
+ * never reaches a vendor or fails a comparison. See {@link mcpTools.vendorName}.
+ */
+export const vendorNameOf = () =>
+  sql<string>`coalesce(${mcpTools.vendorName}, ${mcpTools.name})`;
 
 /**
  * One person's Composio connection to one app.
@@ -410,7 +460,7 @@ export const composioConnections = pgTable(
 export const brokeredConnections = pgTable(
   "brokered_connections",
   {
-    provider: text("provider").$type<"composio">().notNull(),
+    provider: text("provider").$type<"composio" | "arcade">().notNull(),
     app: text("app").notNull(),
     holder: text("holder").$type<"person" | "deployment">().notNull(),
     userId: text("user_id"),
@@ -431,7 +481,7 @@ export const brokeredConnections = pgTable(
     ),
     check(
       "brokered_connections_provider_check",
-      sql`${table.provider} IN ('composio')`,
+      sql`${table.provider} IN ('composio', 'arcade')`,
     ),
     uniqueIndex("brokered_connections_person_idx")
       .on(table.provider, table.app, table.userId)
@@ -440,6 +490,138 @@ export const brokeredConnections = pgTable(
       .on(table.provider, table.app)
       .where(sql`${table.holder} = 'deployment'`),
     index("brokered_connections_user_idx").on(table.userId),
+  ],
+);
+
+/**
+ * One in-flight Arcade authorization: what the returning browser is verified against.
+ *
+ * `actor_id` IS THE SIGNED-IN PERSON'S `users.id` — the session subject — AND NEVER
+ * `credentialActorId`. `store.ts` reads `input.credentialActorId ?? input.actorId`, and on a Team
+ * Bot those differ, and neither is the person holding the browser. The verifier finds this attempt
+ * from the returning browser's session, so any other key writes attempts a browser can never match.
+ *
+ * The key is the actor alone, so a person has at most one attempt at a time. A PRIMARY KEY with
+ * "expired is treated as absent" would be a permanent 409, because the expired row still occupies
+ * the key. Starting an attempt is therefore one `INSERT ... ON CONFLICT (actor_id) DO UPDATE ...
+ * WHERE created_at < now() - interval '15 minutes' OR completed_at IS NOT NULL`: a live attempt is
+ * refused, an expired or completed one is taken over, and nobody is ever locked out.
+ *
+ * `completed_at` is what makes completion happen exactly once: the verifier claims the row by
+ * setting it, and a second return finds it set. `auth_id` is what binds a callback to this attempt;
+ * an attempt holding null can never complete.
+ *
+ * THE ROW IS THE ACTOR'S, AND ONLY `actor_id` CARRIES THE KEY TO `users`. `actor_id` is `users.id`,
+ * and a column that names a table without a key is a column the database will let drift: a deleted
+ * person left attempt rows pointing at nobody, and the verifier's "find the attempt for this
+ * session" would then be matching a key no session can ever present.
+ *
+ * `user_id` IS NOT A SECOND PERSON. It is whose account the attempt is for, and for a `person`
+ * attempt that is the actor and nobody else — `accountRefFor` answers a Personal app with
+ * `{ userId: actorId }`, and nothing lets one person consent into another's account. So the database
+ * holds `user_id IS NULL OR user_id = actor_id` (`pending_authorizations_user_is_actor_check`), and
+ * through that CHECK `user_id` names a person exactly when `actor_id` does. It carried a cascading
+ * key of its own in an earlier draft of this table, and with nothing making the two columns equal that key let a
+ * row name two people and die with EITHER: deleting one person took an attempt a DIFFERENT person
+ * had started. An attempt is evidence of somebody's consent in progress, and the one person whose
+ * deletion may end it is the one who started it.
+ *
+ * CASCADE RATHER THAN RESTRICT, AND THIS ROW IS NOT THE AUDIT TRAIL. An attempt is in-flight
+ * working state with a fifteen-minute life and at most one row per actor, holding no grant and no
+ * secret; what a person authorized is recorded in `audit_events`, which deliberately carries
+ * NO key to `users` for exactly the reason the trail must outlive them. `RESTRICT` here would make
+ * a person undeletable for fifteen minutes because they happened to have a browser mid-redirect,
+ * which is a legitimate deletion blocked by ephemeral state. Note the contrast with
+ * {@link brokeredConnections}, whose `user_id` is keyless ON PURPOSE: that row IS the record of
+ * which apps somebody held, and `retireConnectionsFor` reads it AFTER the `users` row is gone.
+ * Nothing reads an attempt after its person is gone.
+ *
+ * `server_id`'s key gets an index of its own. A foreign key is not indexed by postgres on the
+ * referencing side, so deleting one `mcp_servers` row made the cascade scan this table, and so did
+ * every lookup by server. `actor_id` is the primary key and indexed by it; `user_id`, no longer a
+ * key and read by nothing, has none.
+ */
+export const pendingAuthorizations = pgTable(
+  "pending_authorizations",
+  {
+    actorId: text("actor_id")
+      .primaryKey()
+      .references(() => users.id, { onDelete: "cascade" }),
+    serverId: text("server_id")
+      .notNull()
+      .references(() => mcpServers.id, { onDelete: "cascade" }),
+    action: text("action").notNull(),
+    /**
+     * Whose account this attempt is for, with the same meaning and the same two values as
+     * {@link brokeredConnections.holder} — and held by the same CHECK, because `$type<>` is erased
+     * at runtime and the row this attempt is reconciled into is held to that pair.
+     */
+    holder: text("holder").$type<"person" | "deployment">().notNull(),
+    /** Always the actor or `null`; see `pending_authorizations_user_is_actor_check` below. */
+    userId: text("user_id"),
+    vendorUserId: text("vendor_user_id").notNull(),
+    authId: text("auth_id"),
+    createdAt: createdAt(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    /**
+     * How the attempt ended, `null` while it is still in flight.
+     *
+     * The four names are a ROSTER the database holds, not a comment: every reader switches on them,
+     * and a fifth value written by hand — or by a caller that cast past the declared union — would
+     * reach a `switch` the compiler has already been told is exhaustive.
+     */
+    outcome: text("outcome").$type<
+      "completed" | "failed" | "unreconciled" | "withdrawn"
+    >(),
+  },
+  (table) => [
+    check(
+      "pending_authorizations_holder_check",
+      sql`(${table.holder} = 'person' AND ${table.userId} IS NOT NULL) OR (${table.holder} = 'deployment' AND ${table.userId} IS NULL)`,
+    ),
+    check(
+      "pending_authorizations_outcome_check",
+      sql`${table.outcome} IS NULL OR ${table.outcome} IN ('completed', 'failed', 'unreconciled', 'withdrawn')`,
+    ),
+    /**
+     * An attempt has ended, or it has not: `completed_at` and `outcome` are set together or
+     * neither is.
+     *
+     * A ROW CARRYING AN `outcome` WITH `completed_at` STILL NULL IS A FINISHED ATTEMPT THAT EVERY
+     * READER READS AS A LIVE ONE. `claimAuthorizationAttempt` frees a held key only
+     * `WHERE created_at < now() - interval '15 minutes' OR completed_at IS NOT NULL`, and
+     * `authorizationAttemptFor` answers on `completed_at IS NULL` alone; neither consults
+     * `outcome`. So one such row locks its actor out of authorizing anything for the rest of the
+     * 15-minute TTL, with a verdict already recorded against it. The mirror shape — a
+     * `completed_at` with no `outcome` — is an attempt that ended with nothing saying how, and
+     * `outcome` is what every operator-facing reading of this table is of.
+     *
+     * HERE AND NOT IN THE APPLICATION, although both writers already set the pair in one
+     * statement. That those two agree today is precisely what makes the invariant invisible to the
+     * next writer, to a hand-run UPDATE and to a partial restore, and none of those three passes
+     * through the two functions that currently get it right. Written as a boolean equality rather
+     * than two `OR`-ed clauses because `(x IS NULL) = (y IS NULL)` is never itself NULL, so the
+     * CHECK can only pass or refuse — it has no third, silently-accepting verdict.
+     */
+    check(
+      "pending_authorizations_completion_check",
+      sql`(${table.completedAt} IS NULL) = (${table.outcome} IS NULL)`,
+    ),
+    /**
+     * A `person` attempt is for the actor's own account, so the row names one person, not two.
+     *
+     * HERE AND NOT ONLY IN `accountRefFor`, because this is what keeps a cascade on `users` from
+     * reaching a row somebody else started — the guarantee is the database's or it is nobody's: a
+     * hand-run INSERT, a restore, or the next writer does not pass through `accountRefFor`. The
+     * `IS NULL` arm is the `deployment` attempt, whose shape `pending_authorizations_holder_check`
+     * already decides; spelled out so this CHECK says what it admits rather than leaning on a NULL
+     * comparison passing.
+     */
+    check(
+      "pending_authorizations_user_is_actor_check",
+      sql`${table.userId} IS NULL OR ${table.userId} = ${table.actorId}`,
+    ),
+    index("pending_authorizations_server_idx").on(table.serverId),
   ],
 );
 
@@ -688,3 +870,73 @@ export const sandboxedComponents = pgTable("sandboxed_components", {
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
+
+/**
+ * A person asking an administrator to make one work app usable through one Bot.
+ *
+ * WHAT IS ASKED FOR IS THE SERVER'S, NEVER THE BROWSER'S. `kind` is derived from the app's state for
+ * the person and the Bot at the moment of asking — switched off is `enable`, held by no grant is
+ * `grant`, a Shared app with no team account is `connect_shared` — so a request cannot be worded as
+ * something the deployment does not actually need, and approving it does exactly the one thing
+ * that state was missing.
+ *
+ * `app_key` IS THE SERVER ID THE APP HAS OR WOULD HAVE, and is not a foreign key. A request to
+ * switch an app on names an app with no `mcp_servers` row yet — `composio-<slug>` for a Composio app,
+ * the catalogue key for one this deployment ships — and is the row's id the moment it is enabled,
+ * so one key follows the app across the change being asked for. `app_title` is the app's name as
+ * the server resolved it when the request was filed, so an administrator's list can name an app
+ * that has no row to read the name from.
+ *
+ * `agent_id` IS NULLABLE FOR A REQUEST ABOUT THE APP ALONE. Every path that files one today names
+ * the Bot, so approving a request to switch an app on can grant it to that Bot in the same step;
+ * the column admits none because "switch this on" is a complete question without one.
+ *
+ * ONE PENDING REQUEST PER (PERSON, APP, BOT, KIND), held by the partial unique index rather than by
+ * a read-then-write, so two replicas filing the same request at once cannot both insert. The Bot is
+ * read through `coalesce` because Postgres treats two NULLs as distinct, and an index on the bare
+ * column would let the same app-only request pile up.
+ *
+ * NO ROW IS DELETED WHEN IT IS ANSWERED. Approved, dismissed and cancelled requests stay, with who
+ * resolved them and when; the trail says the same thing in its own rows.
+ */
+export const appAccessRequests = pgTable(
+  "app_access_requests",
+  {
+    id: text("id").primaryKey(),
+    requestedBy: text("requested_by")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    agentId: text("agent_id").references(() => agents.id, {
+      onDelete: "cascade",
+    }),
+    appKey: text("app_key").notNull(),
+    appTitle: text("app_title").notNull(),
+    kind: text("kind").$type<"enable" | "grant" | "connect_shared">().notNull(),
+    status: text("status")
+      .$type<"pending" | "approved" | "dismissed" | "cancelled">()
+      .notNull()
+      .default("pending"),
+    createdAt: createdAt(),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    resolvedBy: text("resolved_by"),
+  },
+  (table) => [
+    uniqueIndex("app_access_requests_pending_idx")
+      .on(
+        table.requestedBy,
+        table.appKey,
+        sql`coalesce(${table.agentId}, '')`,
+        table.kind,
+      )
+      .where(sql`${table.status} = 'pending'`),
+    index("app_access_requests_status_idx").on(table.status, table.appKey),
+    check(
+      "app_access_requests_kind_check",
+      sql`${table.kind} IN ('enable', 'grant', 'connect_shared')`,
+    ),
+    check(
+      "app_access_requests_status_check",
+      sql`${table.status} IN ('pending', 'approved', 'dismissed', 'cancelled')`,
+    ),
+  ],
+);

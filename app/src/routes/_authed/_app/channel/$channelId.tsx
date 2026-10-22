@@ -141,7 +141,7 @@ function RouteComponent() {
               onOpenChange={(open) => show(open ? "watch" : null)}
             />
             <Button
-              aria-label="Channel coworker"
+              aria-label="This conversation's Bot"
               aria-pressed={isSettingsOpen}
               className={isSettingsOpen ? "bg-foreground/5" : undefined}
               disabled={agentId === undefined}
@@ -184,7 +184,7 @@ function ChannelBody({
   if (hasError || !channel) {
     return (
       <p className="p-8 text-sm text-destructive" role="alert">
-        Could not load this channel.
+        Couldn't load this conversation. Reload the page.
       </p>
     );
   }

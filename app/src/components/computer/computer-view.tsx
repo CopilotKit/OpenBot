@@ -150,19 +150,17 @@ function NothingToSee({
         </>
       ) : problem ? (
         <>
-          <span className="font-medium">
-            You cannot see the screen right now
-          </span>
+          <span className="font-medium">Can't show the screen right now</span>
           <span>{problem}</span>
           <span>
-            The assistant may still be working. An administrator can check
-            whether its computer is running.
+            The Bot may still be working. If this keeps happening, ask an admin
+            to check its Computer.
           </span>
         </>
       ) : blankBrowser ? (
-        <span>The assistant has not opened a page yet.</span>
+        <span>The Bot hasn't opened a page yet.</span>
       ) : (
-        <span>Waiting for the assistant's screen…</span>
+        <span>Waiting for the Bot's screen…</span>
       )}
     </span>
   );
@@ -345,7 +343,7 @@ export function ComputerView({
         if (generation.current !== mine) return;
 
         if (!frame) {
-          setProblem(error ?? "The screen is not available right now.");
+          setProblem(error ?? "The screen isn't available right now.");
         } else {
           // Exact byte comparison is the settling signal.
           unchanged = frame.base64 === lastFrame ? unchanged + 1 : 0;
@@ -430,7 +428,7 @@ export function ComputerView({
   const polledScreen = showScreen ? (
     <img
       src={`data:image/png;base64,${drawn.base64}`}
-      alt="What the assistant is looking at"
+      alt="What the Bot is looking at"
       // Keep unexpected screenshot dimensions inside the reserved frame.
       className="absolute inset-0 h-full w-full object-contain opacity-100 transition-opacity duration-300 starting:opacity-0"
     />
@@ -452,7 +450,7 @@ export function ComputerView({
            */
           className="relative block w-full cursor-pointer bg-muted"
           style={frameStyle}
-          aria-label="Open the assistant's screen full size"
+          aria-label="Open the Bot's screen full size"
         >
           {polledScreen}
 
@@ -487,7 +485,7 @@ export function ComputerView({
         {!driving && !settled && control?.requested ? (
           <div className="flex items-start justify-between gap-3 border-t bg-amber-500/10 px-3 py-2 text-sm">
             <span>
-              <strong className="font-medium">The assistant needs you.</strong>{" "}
+              <strong className="font-medium">The Bot needs you.</strong>{" "}
               {control.reason}
             </span>
           </div>
@@ -507,7 +505,7 @@ export function ComputerView({
         ) : null}
         {!settled && control?.transitioning ? (
           <p className="px-3 py-2 text-sm">
-            Finishing the assistant's current action before giving you control…
+            Finishing the Bot's current action before giving you control…
           </p>
         ) : null}
         {/*
@@ -516,14 +514,13 @@ export function ComputerView({
         */}
         {!settled && control?.recoveryRequired ? (
           <p className="px-3 py-2 text-sm">
-            The Computer stopped while you had control, so the assistant can't
-            use the browser yet. Take control to check the page, then hand it
-            back.
+            The Computer stopped while you had control. Take control to check
+            the page, then hand it back to the Bot.
           </p>
         ) : !settled && control?.request?.status === "interrupted" ? (
           <p className="px-3 py-2 text-sm text-muted-foreground">
-            The Computer stopped before anyone took control. The assistant will
-            ask again if it still needs you.
+            The Computer stopped before anyone took control. The Bot will ask
+            again if it still needs you.
           </p>
         ) : null}
         {/*
@@ -547,7 +544,7 @@ export function ComputerView({
             }}
           >
             <label className="block" htmlFor="openbot-secret">
-              <span className="font-medium">The assistant needs </span>
+              <span className="font-medium">The Bot needs </span>
               <span>{control.secretWanted}</span>
             </label>
             <div className="mt-1.5 flex gap-2">
@@ -559,7 +556,7 @@ export function ComputerView({
                 autoComplete="off"
                 autoCorrect="off"
                 spellCheck={false}
-                placeholder="Typed here, never shown to the assistant"
+                placeholder="Never shown to the Bot"
                 className="min-w-0 flex-1 rounded-md border bg-background px-2 py-1 text-sm"
               />
               <button
@@ -571,8 +568,8 @@ export function ComputerView({
               </button>
             </div>
             <p className="mt-1 text-xs text-muted-foreground">
-              This goes straight to the page. It is not shown in the
-              conversation and the assistant never receives it.
+              This goes straight to the page. It isn't shown in the
+              conversation, and the Bot never sees it.
             </p>
             {secretProblem ? (
               <p className="mt-1 text-xs text-destructive">{secretProblem}</p>
@@ -589,7 +586,7 @@ export function ComputerView({
                   ? "Finishing the current action…"
                   : driving
                     ? "You have control. Open the screen to click and type."
-                    : "The assistant has control."}
+                    : "The Bot has control."}
             </span>
             <ComputerControlButton
               computerId={computerId}
@@ -607,7 +604,7 @@ export function ComputerView({
             <div
               role="dialog"
               aria-modal="true"
-              aria-label="The assistant's screen"
+              aria-label="The Bot's screen"
               className="fixed inset-0 z-50 flex flex-col items-center justify-center p-4 sm:p-8"
             >
               {/*
@@ -617,7 +614,7 @@ export function ComputerView({
               <button
                 type="button"
                 onClick={() => !wheelHere && setExpanded(false)}
-                aria-label="Close the assistant's screen"
+                aria-label="Close the Bot's screen"
                 aria-hidden={wheelHere}
                 tabIndex={wheelHere ? -1 : 0}
                 className={`absolute inset-0 bg-black/80 ${wheelHere ? "cursor-default" : "cursor-zoom-out"}`}
@@ -714,13 +711,13 @@ export function ComputerView({
                       ) : null}
                       {driving ? (
                         <span className="truncate text-muted-foreground">
-                          You have control — click and type on the page.
+                          You have control. Click and type on the page.
                           {control?.reason ? ` ${control.reason}` : null}
                         </span>
                       ) : control?.requested ? (
                         <span className="truncate text-muted-foreground">
                           <strong className="font-medium text-foreground">
-                            The assistant needs you.
+                            The Bot needs you.
                           </strong>{" "}
                           {control.reason}
                         </span>

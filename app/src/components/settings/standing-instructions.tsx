@@ -57,7 +57,7 @@ export function StandingInstructions() {
 
   return (
     <PageSection
-      description="Applies to every coworker in every channel. Your role text on a coworker says what it does; this says how you want things done, for example writing style or how to describe your company."
+      description="Applies to every Bot in every conversation. A Bot's role says what it does. This says how you want it done, like your writing style."
       title="Standing instructions"
     >
       {stored.isPending ? null : stored.error ? (

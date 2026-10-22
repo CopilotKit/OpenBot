@@ -169,6 +169,55 @@ test("a request to connect an app at all is never folded away either", () => {
   expect(grouped.map((item) => item.id)).toContain("connect");
 });
 
+test("a refusal that needs an administrator, or a lost account, is never folded away either", () => {
+  for (const reason of ["shared", "reconnect"]) {
+    const prompt = call(
+      reason,
+      "mcp__composio-gmail__GMAIL_FETCH_EMAILS",
+      {},
+      JSON.stringify(
+        `Refused. [connect-app]{"serverId":"composio-gmail","title":"Gmail","agentId":"expenses","reason":"${reason}"} Gmail needs an account.`,
+      ),
+    );
+    const grouped = groupToolSteps([search("a"), prompt, search("b")], drawn);
+    expect(grouped.map((item) => item.id)).toContain(reason);
+  }
+});
+
+test("the app-access card stays out of a group, even before its answer arrives", () => {
+  /*
+   * A server tool, so no renderer registers it and the registry cannot say it is drawn. Folded
+   * while it ran, the card would land inside "Used N tools" and then jump out once answered.
+   */
+  for (const result of [
+    undefined,
+    JSON.stringify(
+      '[connect-app]{"serverId":"composio-gmail","title":"Gmail","agentId":"expenses","reason":"access"} Gmail is switched off on this deployment.',
+    ),
+  ]) {
+    const card = call("card", "show_app_access", { app: "gmail" }, result);
+    const grouped = groupToolSteps([search("a"), card, search("b")], drawn);
+    expect(grouped.map((item) => item.id)).toEqual(["a", "card", "b"]);
+  }
+});
+
+test("show_app_access is named in words in a step's details too, and keeps its words to the model out", () => {
+  const running = stepDetails(call("card", "show_app_access", { app: "x" }));
+  expect(running.label).toBe("Checking app access");
+  const done = stepDetails(
+    call(
+      "card",
+      "show_app_access",
+      { app: "x" },
+      JSON.stringify(
+        "This deployment has no app called x, so there is nothing to show. Say so plainly; do not browse to it instead.",
+      ),
+    ),
+  );
+  expect(done.label).toBe("Checked app access");
+  expect(done.output).toBeUndefined();
+});
+
 test("the summary says what was done, never which provider searched", () => {
   const steps = [
     search(),

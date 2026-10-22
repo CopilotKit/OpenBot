@@ -13,6 +13,46 @@ import {
 } from "../store";
 import type { PluginRouteContext } from "./context";
 
+/**
+ * What a grant of one MCP tool must record beside it: the approval for who may use a Shared app's
+ * one account through this Bot.
+ *
+ * Without an approval the gate refuses every call the grant just allowed, so a grant with none sent
+ * approves the Bot's exposure as it stands now — unless an approval is already recorded, which is
+ * an administrator's earlier decision and not this grant's to widen. "Is Shared" is the app's
+ * answer (its answering row), never the granted row's own column. Null `approval` is nothing to
+ * record; `unreadable` is an approval sent that this deployment cannot read, which the caller
+ * refuses.
+ *
+ * A FUNCTION RATHER THAN LINES IN THE ROUTE because approving an access request grants through the
+ * same rule, and a Shared app granted from the request inbox must land with the same approval it
+ * would have had from the grant switch.
+ */
+export async function sharedGrantApproval(
+  { store, shared }: Pick<PluginRouteContext, "store" | "shared">,
+  ref: string,
+  agentId: string,
+  sent: unknown,
+): Promise<
+  { appId: string; approval: SharedUseApproval | null } | "unreadable"
+> {
+  if (!shared) return { appId: "", approval: null };
+  const [serverId] = ref.split("/");
+  const appId = await shared.use.appIdOf(serverId ?? "");
+  if ((await store.serverAddress(appId))?.accountMode !== "shared")
+    return { appId, approval: null };
+  if (sent !== undefined) {
+    const approval = asSharedUseApproval(sent);
+    return approval ? { appId, approval } : "unreadable";
+  }
+  if (await shared.use.approvalFor(agentId, appId))
+    return { appId, approval: null };
+  return {
+    appId,
+    approval: exposureOf(await shared.use.botFacts(agentId)),
+  };
+}
+
 /** Granting and revoking a server, skill or Bot, and a Bot's tool calls back. */
 export function mountGrantRoutes({
   routes,
@@ -71,7 +111,7 @@ export function mountGrantRoutes({
 
     if (kind === "mcp") {
       if (!actor.isAdmin) {
-        return "An administrator decides which Bots may reach a tool.";
+        return "Only an admin can choose which Bots use a tool.";
       }
       // Taking something away is always allowed: see the note on `intent`. It matters more here
       // than anywhere else, because the rows this check exists to prevent are the same shape as the
@@ -98,7 +138,7 @@ export function mountGrantRoutes({
        */
       const [serverId] = ref.split("/");
       if (!(await store.serverExists(serverId ?? ""))) {
-        return `${serverId} is not an app this deployment has added, so there is nothing for a Bot to reach. Add it first, and its tools can be granted then.`;
+        return `${serverId} hasn't been added yet. Add it first, then give its tools to a Bot.`;
       }
       /*
        * The Bot has to exist as well, which the `bot` branch below already says in the same words.
@@ -124,7 +164,7 @@ export function mountGrantRoutes({
        * this, deliberately, and this had it backwards.
        */
       if (!actor.isAdmin) {
-        return "An administrator decides which Bots may hand work to another Bot.";
+        return "Only an admin can choose which Bots hand work to another Bot.";
       }
       // Taking something away is always allowed: see the note on `intent`.
       if (intent === "revoke") return null;
@@ -179,7 +219,7 @@ export function mountGrantRoutes({
     if (owner === undefined) return `There is no skill called ${ref}.`;
     if (owner !== actor.id) {
       return owner === null
-        ? `${ref} belongs to this deployment. An administrator decides which Bots use it.`
+        ? `${ref} belongs to everyone. Only an admin can choose which Bots use it.`
         : `${ref} is somebody else's skill.`;
     }
 
@@ -235,37 +275,30 @@ export function mountGrantRoutes({
     if (refusal) return context.json({ error: refusal }, 403);
 
     /*
-     * A SHARED APP'S ACTION IS GRANTED WITH WHO MAY USE IT, in the one request. Without an approval
-     * the gate refuses every call the grant just allowed, so a grant with none sent approves the
-     * Bot's exposure as it stands now — unless an approval is already recorded, which is an
-     * administrator's earlier decision and not this request's to widen. "Is Shared" is the app's
-     * answer (its answering row), never the granted row's own column.
+     * A SHARED APP'S ACTION IS GRANTED WITH WHO MAY USE IT, in the one request. See
+     * {@link sharedGrantApproval} for what is recorded when none is sent.
      */
-    let approval: SharedUseApproval | null = null;
-    let appId = "";
-    if (kind === "mcp" && shared) {
-      const [serverId] = grantRef.split("/");
-      appId = await shared.use.appIdOf(serverId ?? "");
-      if ((await store.serverAddress(appId))?.accountMode === "shared") {
-        if (body?.approval !== undefined) {
-          approval = asSharedUseApproval(body.approval);
-          if (!approval) {
-            return context.json(
-              { error: "That approval is not one this deployment can read." },
-              400,
-            );
-          }
-        } else if (!(await shared.use.approvalFor(grantAgentId, appId))) {
-          approval = exposureOf(await shared.use.botFacts(grantAgentId));
-        }
-      }
+    const decided =
+      kind === "mcp"
+        ? await sharedGrantApproval(
+            { store, shared },
+            grantRef,
+            grantAgentId,
+            body?.approval,
+          )
+        : null;
+    if (decided === "unreadable") {
+      return context.json(
+        { error: "That approval is not one this deployment can read." },
+        400,
+      );
     }
     await store.grant(kind, grantRef, grantAgentId, actorEmail(context));
-    if (approval && shared) {
+    if (decided?.approval && shared) {
       await shared.use.setApproval({
         botId: grantAgentId,
-        serverId: appId,
-        approval,
+        serverId: decided.appId,
+        approval: decided.approval,
         by: context.var.actor.id,
       });
     }
@@ -415,7 +448,7 @@ export function mountGrantRoutes({
         return context.json(
           {
             error:
-              "That tool is not configured in a way this deployment can act on. An administrator has to look at the server it belongs to.",
+              "That tool isn't set up correctly. Ask an admin to check the server it belongs to.",
           },
           500,
         );

@@ -121,9 +121,7 @@ export class ProtectedAgentError extends Error {
 
 export class ManagedAgentUnavailableError extends Error {
   constructor() {
-    super(
-      "This deployment has no managed Bot. Give the coworker its own AG-UI endpoint.",
-    );
+    super("OpenBot has no managed Bot. Give this Bot its own AG-UI endpoint.");
     this.name = "ManagedAgentUnavailableError";
   }
 }
@@ -395,10 +393,8 @@ async function findByTokenHash(
 
 /** Hiding a Team Bot an administrator assigned to this person, which they cannot do. */
 export class AgentAssignedError extends Error {
-  constructor(id: string) {
-    super(
-      `Agent ${id} was assigned to you by an administrator and cannot be hidden.`,
-    );
+  constructor(_id: string) {
+    super("This Bot was assigned to you by an admin and can't be hidden.");
     this.name = "AgentAssignedError";
   }
 }

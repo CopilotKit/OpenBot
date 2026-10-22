@@ -148,6 +148,7 @@ function pluginsPage(overrides: Partial<PluginsPage> = {}): PluginsPage {
     botsMayCallBack: true,
     redirectUri: null,
     composioConfigured: false,
+    authorizesPerAction: false,
     ...overrides,
   };
 }
@@ -259,20 +260,20 @@ function renderScreen(queryClient: QueryClient) {
 test("a failed plugin read reports the failure instead of claiming the app is not enabled", async () => {
   const view = renderScreen(failingQueryClient());
 
-  expect(await view.findByText("Plugins could not be loaded.")).toBeTruthy();
+  expect(
+    await view.findByText("Couldn't load plugins. Reload the page."),
+  ).toBeTruthy();
 
   // The whole point: an app that may be enabled, with grants on it right now, must never be
   // reported as absent on the evidence of a request that never came back.
-  expect(
-    view.queryByText("This deployment has not enabled an app by that name."),
-  ).toBeNull();
-  expect(view.queryByText("There is nothing here to grant.")).toBeNull();
+  expect(view.queryByText("No app with that name is turned on.")).toBeNull();
+  expect(view.queryByText("Nothing to give a Bot here.")).toBeNull();
 });
 
 test("a failed plugin read draws no switches, so nothing reads as a Bot holding nothing", async () => {
   const view = renderScreen(failingQueryClient());
 
-  await view.findByText("Plugins could not be loaded.");
+  await view.findByText("Couldn't load plugins. Reload the page.");
 
   expect(view.container.querySelectorAll('[role="switch"]').length).toBe(0);
   expect(view.queryByText("Turn on every read-only action")).toBeNull();
@@ -291,11 +292,11 @@ test("an answer that genuinely lacks the app still says the app is not enabled",
   await waitForFailedRefetch(queryClient);
 
   expect(
-    await view.findByText(
-      "This deployment has not enabled an app by that name.",
-    ),
+    await view.findByText("No app with that name is turned on."),
   ).toBeTruthy();
-  expect(view.queryByText("Plugins could not be loaded.")).toBeNull();
+  expect(
+    view.queryByText("Couldn't load plugins. Reload the page."),
+  ).toBeNull();
 });
 
 test("a failed REFETCH keeps the grant list it already had, not the error", async () => {
@@ -314,10 +315,10 @@ test("a failed REFETCH keeps the grant list it already had, not the error", asyn
   await waitForFailedRefetch(queryClient);
 
   expect(await view.findByText("list_channels")).toBeTruthy();
-  expect(view.queryByText("Plugins could not be loaded.")).toBeNull();
   expect(
-    view.queryByText("This deployment has not enabled an app by that name."),
+    view.queryByText("Couldn't load plugins. Reload the page."),
   ).toBeNull();
+  expect(view.queryByText("No app with that name is turned on.")).toBeNull();
 });
 
 /*

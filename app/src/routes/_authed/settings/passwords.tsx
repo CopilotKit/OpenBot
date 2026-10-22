@@ -37,17 +37,17 @@ function PasswordsPage() {
   return (
     <PageShell
       title="Passwords"
-      description="Logins you saved when signing a Bot in to a website. A Bot never sees them, and each use needs your confirmation."
+      description="Logins you saved when signing a Bot in to a website. Bots never see them, and you confirm each use."
     >
       <PageSection title="Saved logins">
         {logins.isPending ? null : logins.error ? (
           <p className="text-destructive text-sm" role="alert">
-            Could not load your passwords.
+            Couldn't load your passwords. Reload the page.
           </p>
         ) : !logins.data.passwordManager ? (
           <PageEmpty>
-            Saved passwords are turned off for this workspace. Existing logins
-            are kept but not offered.
+            An admin has turned off saved passwords. Your logins are kept but
+            won't be offered.
           </PageEmpty>
         ) : logins.data.logins.length === 0 ? (
           <PageEmpty>
@@ -74,7 +74,7 @@ function PasswordsPage() {
                   </ItemContent>
                   <ItemActions>
                     <Button
-                      aria-label={`Delete the login for ${login.origin}`}
+                      aria-label={`Delete login for ${login.origin}`}
                       size="sm"
                       variant="ghost"
                       disabled={remove.isPending}

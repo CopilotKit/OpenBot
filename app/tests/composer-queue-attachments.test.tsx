@@ -400,7 +400,7 @@ test("taking a queued message back releases the rows it was carrying", async () 
    * both sentences are live — so declining now leaves the wiring between them unpinned, and
    * swapping the two arms of that ternary passed the whole suite.
    */
-  expect(alert.textContent).toContain("removed along with the queued message");
+  expect(alert.textContent).toContain("removed with its queued message");
   expect(alert.textContent).not.toContain("merged");
   expect(alert.textContent).not.toContain("at most");
 });

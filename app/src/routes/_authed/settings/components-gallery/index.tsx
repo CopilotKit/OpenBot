@@ -29,24 +29,24 @@ function RouteComponent() {
 
   return (
     <PageShell
-      description="The pieces a Bot can draw in a conversation instead of describing something in prose. Which of them any one Bot may use is an administrator's decision."
+      description="What a Bot can draw in a conversation. An admin chooses which ones each Bot can use."
       title="Components gallery"
     >
       {components.isPending ? null : components.error ? (
         <p className="mt-12 text-destructive text-sm" role="alert">
-          Could not load components.
+          Couldn't load components. Reload the page.
         </p>
       ) : published?.length === 0 ? (
         <Empty className="mt-12 min-h-[30dvh] border border-dashed">
           <EmptyHeader>
             <EmptyTitle>Nothing published yet</EmptyTitle>
             <EmptyDescription className="text-pretty">
-              When an administrator publishes a component, it will show up here.
+              When an admin publishes a component, it will show up here.
             </EmptyDescription>
           </EmptyHeader>
         </Empty>
       ) : (
-        <div className="mx-auto mt-12 grid w-full max-w-2xl grid-cols-1 gap-4 md:grid-cols-2">
+        <div className="mt-12 grid w-full grid-cols-1 gap-4 md:grid-cols-2">
           {published?.map((component) => (
             /*
              * No status dot, unlike the Admin tiles. Everything listed here is published by

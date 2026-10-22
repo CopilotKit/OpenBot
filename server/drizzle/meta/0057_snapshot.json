@@ -1,5 +1,5 @@
 {
-  "id": "bb895955-21ba-467f-87b0-898afef9a3e4",
+  "id": "a7a9a0f5-afc2-442d-928f-fe15c2e5202a",
   "prevId": "1e95338a-aa54-4146-9f37-32111c369e75",
   "version": "7",
   "dialect": "postgresql",
@@ -2669,7 +2669,7 @@
         },
         "brokered_connections_provider_check": {
           "name": "brokered_connections_provider_check",
-          "value": "\"brokered_connections\".\"provider\" IN ('composio')"
+          "value": "\"brokered_connections\".\"provider\" IN ('composio', 'arcade')"
         }
       },
       "isRLSEnabled": false
@@ -2897,6 +2897,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "vendor_name": {
+          "name": "vendor_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "description": {
           "name": "description",
           "type": "text",
@@ -3081,6 +3087,140 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.pending_authorizations": {
+      "name": "pending_authorizations",
+      "schema": "",
+      "columns": {
+        "actor_id": {
+          "name": "actor_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "server_id": {
+          "name": "server_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "action": {
+          "name": "action",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "holder": {
+          "name": "holder",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "vendor_user_id": {
+          "name": "vendor_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "auth_id": {
+          "name": "auth_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "completed_at": {
+          "name": "completed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "outcome": {
+          "name": "outcome",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "pending_authorizations_server_idx": {
+          "name": "pending_authorizations_server_idx",
+          "columns": [
+            {
+              "expression": "server_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "pending_authorizations_actor_id_users_id_fk": {
+          "name": "pending_authorizations_actor_id_users_id_fk",
+          "tableFrom": "pending_authorizations",
+          "tableTo": "users",
+          "columnsFrom": [
+            "actor_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "pending_authorizations_server_id_mcp_servers_id_fk": {
+          "name": "pending_authorizations_server_id_mcp_servers_id_fk",
+          "tableFrom": "pending_authorizations",
+          "tableTo": "mcp_servers",
+          "columnsFrom": [
+            "server_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "pending_authorizations_holder_check": {
+          "name": "pending_authorizations_holder_check",
+          "value": "(\"pending_authorizations\".\"holder\" = 'person' AND \"pending_authorizations\".\"user_id\" IS NOT NULL) OR (\"pending_authorizations\".\"holder\" = 'deployment' AND \"pending_authorizations\".\"user_id\" IS NULL)"
+        },
+        "pending_authorizations_outcome_check": {
+          "name": "pending_authorizations_outcome_check",
+          "value": "\"pending_authorizations\".\"outcome\" IS NULL OR \"pending_authorizations\".\"outcome\" IN ('completed', 'failed', 'unreconciled', 'withdrawn')"
+        },
+        "pending_authorizations_completion_check": {
+          "name": "pending_authorizations_completion_check",
+          "value": "(\"pending_authorizations\".\"completed_at\" IS NULL) = (\"pending_authorizations\".\"outcome\" IS NULL)"
+        },
+        "pending_authorizations_user_is_actor_check": {
+          "name": "pending_authorizations_user_is_actor_check",
+          "value": "\"pending_authorizations\".\"user_id\" IS NULL OR \"pending_authorizations\".\"user_id\" = \"pending_authorizations\".\"actor_id\""
+        }
+      },
       "isRLSEnabled": false
     },
     "public.plugin_grants": {
@@ -3759,114 +3899,6 @@
       },
       "isRLSEnabled": false
     },
-    "public.learning_open_skills": {
-      "name": "learning_open_skills",
-      "schema": "",
-      "columns": {
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "skill_name": {
-          "name": "skill_name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "learning_open_skills_user_id_users_id_fk": {
-          "name": "learning_open_skills_user_id_users_id_fk",
-          "tableFrom": "learning_open_skills",
-          "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "learning_open_skills_user_id_skill_name_pk": {
-          "name": "learning_open_skills_user_id_skill_name_pk",
-          "columns": [
-            "user_id",
-            "skill_name"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.learning_person_spaces": {
-      "name": "learning_person_spaces",
-      "schema": "",
-      "columns": {
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "container_id": {
-          "name": "container_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "learning_person_spaces_user_id_users_id_fk": {
-          "name": "learning_person_spaces_user_id_users_id_fk",
-          "tableFrom": "learning_person_spaces",
-          "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "learning_person_spaces_container_id_unique": {
-          "name": "learning_person_spaces_container_id_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "container_id"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.learning_settings": {
       "name": "learning_settings",
       "schema": "",
@@ -3897,75 +3929,6 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.learning_skill_sharing": {
-      "name": "learning_skill_sharing",
-      "schema": "",
-      "columns": {
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "mode": {
-          "name": "mode",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'closed'"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "learning_skill_sharing_open_idx": {
-          "name": "learning_skill_sharing_open_idx",
-          "columns": [
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "\"learning_skill_sharing\".\"mode\" <> 'closed'",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "learning_skill_sharing_user_id_users_id_fk": {
-          "name": "learning_skill_sharing_user_id_users_id_fk",
-          "tableFrom": "learning_skill_sharing",
-          "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "learning_skill_sharing_mode_check": {
-          "name": "learning_skill_sharing_mode_check",
-          "value": "\"learning_skill_sharing\".\"mode\" IN ('closed', 'open', 'choose')"
-        }
-      },
       "isRLSEnabled": false
     },
     "public.learning_thread_bindings": {
@@ -9954,294 +9917,6 @@
           "value": "\"identity_links\".\"status\" IN ('active', 'needs_reconnect')"
         }
       },
-      "isRLSEnabled": false
-    },
-    "public.recorder_connect_codes": {
-      "name": "recorder_connect_codes",
-      "schema": "",
-      "columns": {
-        "code_hash": {
-          "name": "code_hash",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "via": {
-          "name": "via",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "organization_session": {
-          "name": "organization_session",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "expires_at": {
-          "name": "expires_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        }
-      },
-      "indexes": {
-        "recorder_connect_codes_user_idx": {
-          "name": "recorder_connect_codes_user_idx",
-          "columns": [
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "recorder_connect_codes_user_id_users_id_fk": {
-          "name": "recorder_connect_codes_user_id_users_id_fk",
-          "tableFrom": "recorder_connect_codes",
-          "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.recorder_connections": {
-      "name": "recorder_connections",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "token_hash": {
-          "name": "token_hash",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "label": {
-          "name": "label",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "via": {
-          "name": "via",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "extension_id": {
-          "name": "extension_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "install_id": {
-          "name": "install_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "organization_session": {
-          "name": "organization_session",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "last_used_at": {
-          "name": "last_used_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "revoked_at": {
-          "name": "revoked_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {
-        "recorder_connections_user_idx": {
-          "name": "recorder_connections_user_idx",
-          "columns": [
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "recorder_connections_live_install_idx": {
-          "name": "recorder_connections_live_install_idx",
-          "columns": [
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "install_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"recorder_connections\".\"revoked_at\" IS NULL",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "recorder_connections_user_id_users_id_fk": {
-          "name": "recorder_connections_user_id_users_id_fk",
-          "tableFrom": "recorder_connections",
-          "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "recorder_connections_token_hash_unique": {
-          "name": "recorder_connections_token_hash_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "token_hash"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.recorder_trajectory_bindings": {
-      "name": "recorder_trajectory_bindings",
-      "schema": "",
-      "columns": {
-        "trajectory_id": {
-          "name": "trajectory_id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "recorder_trajectory_bindings_user_idx": {
-          "name": "recorder_trajectory_bindings_user_idx",
-          "columns": [
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "recorder_trajectory_bindings_user_id_users_id_fk": {
-          "name": "recorder_trajectory_bindings_user_id_users_id_fk",
-          "tableFrom": "recorder_trajectory_bindings",
-          "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
       "isRLSEnabled": false
     }
   },
