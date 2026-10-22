@@ -117,18 +117,23 @@ export function useRecording(
 
 export type Recording = ReturnType<typeof useRecording>;
 
-/** The red dot a recording carries, as a recording mark rather than a warning. */
+/** The red dot a recording carries, as a recording mark rather than a warning, in an icon's box so it lines up with
+ * the icons of the rows around it. */
 function RecordingMark({ live }: { live: boolean }) {
   return (
     <span
       aria-hidden="true"
-      className={cn(
-        "size-2.5 shrink-0 rounded-full",
-        live
-          ? "bg-destructive motion-safe:animate-pulse"
-          : "bg-muted-foreground",
-      )}
-    />
+      className="flex size-4 shrink-0 items-center justify-center"
+    >
+      <span
+        className={cn(
+          "size-2.5 rounded-full",
+          live
+            ? "bg-destructive motion-safe:animate-pulse"
+            : "bg-muted-foreground",
+        )}
+      />
+    </span>
   );
 }
 

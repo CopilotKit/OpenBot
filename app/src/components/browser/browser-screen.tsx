@@ -300,7 +300,7 @@ function Screen({
   const [retryKey, setRetryKey] = useState(0);
   return (
     <div
-      className="flex min-h-0 flex-1 items-center justify-center bg-muted/40 p-3"
+      className="flex min-h-0 flex-1 items-start justify-center bg-muted/40 p-3"
       style={{ containerType: "size" }}
     >
       <div
