@@ -60,6 +60,8 @@ export type BrowserRouteDeps = {
   callTimeoutMs?: number;
 };
 
+/** How much of the computer's sentence a failure's log line keeps: every sentence it says, and never a page of text. */
+const ERROR_LOG_CHARS = 500;
 /** Narration is the largest body here: 4,000 characters of one phrase, as UTF-8, with room for the rest. */
 const BODY_LIMIT_BYTES = 16 * 1024;
 /** Launching a browser, loading the Recorder and handing it its connection takes seconds; a cold computer more. */
@@ -242,19 +244,24 @@ function computerCaller(
       );
       throw new BrowserCallError(SENTENCES.unreachable);
     }
+    const answered: unknown = await response.json().catch(() => null);
     // The computer answered and said what went wrong, to the person: a page that did not load, a Recorder that failed.
-    if (response.status >= 500)
+    // Its sentence is logged with the status, because it is the only place the reason is said: an open that failed
+    // used to leave a status here and nothing in either log about why.
+    if (response.status >= 500) {
+      const said = (answered as { error?: unknown } | null)?.error;
       console.warn(
         JSON.stringify({
           type: "browser-computer-failed",
           path,
           status: response.status,
+          ...(typeof said === "string" && said
+            ? { error: said.slice(0, ERROR_LOG_CHARS) }
+            : {}),
         }),
       );
-    return {
-      status: response.status,
-      body: await response.json().catch(() => null),
-    };
+    }
+    return { status: response.status, body: answered };
   };
 }
 

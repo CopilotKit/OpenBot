@@ -61,6 +61,56 @@ export class NoInstalledBrowserError extends Error {
   }
 }
 
+/**
+ * The steps of opening a person's browser, in the order they run. A failed open names the one it
+ * stopped at, because the same sentence ("the Recorder did not answer in time") can come from waking
+ * its worker, reloading it or connecting it, and each has a different cause.
+ */
+export type PersonOpenStep =
+  /** The built Recorder this computer is configured with. */
+  | "recorder-files"
+  /** Copying the person's native messaging hosts into the profile (`copyNativeMessagingHosts`). */
+  | "native-hosts"
+  /** Finding and starting the browser, and opening its first tab. */
+  | "launch"
+  /** Installing the Recorder over DevTools, which a native window needs at every launch. */
+  | "recorder-load"
+  /** Reaching the Recorder's service worker, waking it when it is asleep. */
+  | "worker"
+  /** Loading the Recorder again because its worker ran an earlier build (`keepRecorderCurrent`). */
+  | "recorder-reload"
+  /** Granting the Recorder the microphone. */
+  | "microphone"
+  /** Handing downloads back to the browser's own setting. */
+  | "downloads"
+  /** Handing the Recorder its connection through the launcher API. */
+  | "connect"
+  /** Reading the open browser's tabs and the Recorder's report, which the open answers with. */
+  | "state";
+
+/** Opening a person's browser failed at `step`, for the reason its message gives. */
+export class PersonOpenError extends Error {
+  readonly step: PersonOpenStep;
+  constructor(step: PersonOpenStep, cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause), { cause });
+    this.name = "PersonOpenError";
+    this.step = step;
+  }
+}
+
+/** Run one step of an open, so a failure says which step it was. A failure already named keeps its name. */
+async function step<T>(
+  name: PersonOpenStep,
+  work: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await work();
+  } catch (error) {
+    if (error instanceof PersonOpenError) throw error;
+    throw new PersonOpenError(name, error);
+  }
+}
+
 /** What a person's running browser is, beyond what any browser here is. */
 export type PersonBrowser = {
   product: BrowserProduct;
@@ -215,9 +265,13 @@ async function keepRecorderCurrent(input: {
   botId: string;
 }): Promise<void> {
   const { recorder, launcher } = input;
-  const built = await readFile(join(recorder.dir, recorder.worker), "utf8");
+  const built = await step("recorder-files", () =>
+    readFile(join(recorder.dir, recorder.worker), "utf8"),
+  );
   const url = `chrome-extension://${input.recorderId}/${recorder.worker}`;
-  if ((await launcher.workerSource(url)) === built) return;
+  // The first call to the worker since the launch: it finds it, and wakes it if it has not started.
+  if ((await step("worker", () => launcher.workerSource(url))) === built)
+    return;
   console.info(
     JSON.stringify({
       type: "computer-recorder-reloaded",
@@ -226,11 +280,13 @@ async function keepRecorderCurrent(input: {
         "Its service worker ran an earlier build than the Recorder on disk.",
     }),
   );
-  await input.session.send("Extensions.loadUnpacked", { path: recorder.dir });
-  if ((await launcher.workerSource(url)) !== built)
-    throw new Error(
-      "The Recorder in this browser runs an earlier build, and loading the current one did not replace it.",
-    );
+  await step("recorder-reload", async () => {
+    await input.session.send("Extensions.loadUnpacked", { path: recorder.dir });
+    if ((await launcher.workerSource(url)) !== built)
+      throw new Error(
+        "The Recorder in this browser runs an earlier build, and loading the current one did not replace it.",
+      );
+  });
 }
 
 /**
@@ -238,6 +294,9 @@ async function keepRecorderCurrent(input: {
  *
  * All or nothing: a browser whose Recorder could not be put in is closed again rather than handed
  * back, because a person's browser without the Recorder is the one thing this must never open.
+ *
+ * A failure is a `PersonOpenError` naming the step it stopped at, except that no installed browser
+ * is a `NoInstalledBrowserError`, which the routes answer differently.
  */
 export async function launchPersonBrowser(
   input: PersonLaunch,
@@ -255,9 +314,8 @@ export async function launchPersonBrowser(
      */
     const from = defaultNativeMessagingHosts(installed, process.env);
     if (from) {
-      const copied = await copyNativeMessagingHosts(
-        from,
-        join(input.dir, "NativeMessagingHosts"),
+      const copied = await step("native-hosts", () =>
+        copyNativeMessagingHosts(from, join(input.dir, "NativeMessagingHosts")),
       );
       console.info(
         JSON.stringify({
@@ -269,7 +327,7 @@ export async function launchPersonBrowser(
     }
   }
 
-  await forgetRecorderPins(input.dir, input.recorder.id);
+  await step("launch", () => forgetRecorderPins(input.dir, input.recorder.id));
   const options = personLaunchOptions(
     {
       window,
@@ -281,26 +339,30 @@ export async function launchPersonBrowser(
     },
     input.viewport,
   );
-  const context = await chromium.launchPersistentContext(input.dir, {
-    channel: product,
-    ...options,
-    // This process owns shutdown, as for a Bot's browser: Playwright's own handlers would kill the
-    // browser before its profile is written.
-    handleSIGTERM: false,
-    handleSIGINT: false,
-    handleSIGHUP: false,
-    ...(input.proxy ? { proxy: input.proxy } : {}),
-  });
+  const context = await step("launch", () =>
+    chromium.launchPersistentContext(input.dir, {
+      channel: product,
+      ...options,
+      // This process owns shutdown, as for a Bot's browser: Playwright's own handlers would kill the
+      // browser before its profile is written.
+      handleSIGTERM: false,
+      handleSIGINT: false,
+      handleSIGHUP: false,
+      ...(input.proxy ? { proxy: input.proxy } : {}),
+    }),
+  );
 
   try {
-    const browser = context.browser();
-    if (!browser) throw new Error("The browser did not start.");
-    const session = await browser.newBrowserCDPSession();
+    const session = await step("launch", async () => {
+      const browser = context.browser();
+      if (!browser) throw new Error("The browser did not start.");
+      return browser.newBrowserCDPSession();
+    });
     let recorderId = input.recorder.id;
     if (window === "native") {
-      const { id } = await session.send("Extensions.loadUnpacked", {
-        path: input.recorder.dir,
-      });
+      const { id } = await step("recorder-load", () =>
+        session.send("Extensions.loadUnpacked", { path: input.recorder.dir }),
+      );
       if (id !== recorderId) {
         // The browser's answer is the truth about which pages and worker are the Recorder's. The
         // manifest key decides it in every Chromium, so a difference is worth saying out loud.
@@ -327,10 +389,12 @@ export async function launchPersonBrowser(
       fitWindowsToViewport(context, input.viewport, input.botId);
     // Narration in a native window is the Recorder hearing the person, and it asks nobody first.
     // The hosted browser has no microphone; the grant costs nothing there and keeps one launch.
-    await session.send("Browser.grantPermissions", {
-      origin: `chrome-extension://${recorderId}`,
-      permissions: ["audioCapture"],
-    });
+    await step("microphone", () =>
+      session.send("Browser.grantPermissions", {
+        origin: `chrome-extension://${recorderId}`,
+        permissions: ["audioCapture"],
+      }),
+    );
     if (window === "native") {
       /*
        * Downloads where the person's browser puts them. Playwright sends every download to a
@@ -338,9 +402,9 @@ export async function launchPersonBrowser(
        * which is right for a test and loses a person's files. The browser's own behaviour is the
        * Downloads folder its settings name.
        */
-      await session.send("Browser.setDownloadBehavior", {
-        behavior: "default",
-      });
+      await step("downloads", () =>
+        session.send("Browser.setDownloadBehavior", { behavior: "default" }),
+      );
     }
     return {
       context,

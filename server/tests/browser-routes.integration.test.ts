@@ -895,6 +895,29 @@ describe("opening a person's own browser", () => {
     });
   });
 
+  test("an open the computer could not make is logged with the computer's own sentence", async () => {
+    // The third end-to-end run: two opens failed with 502, and the server's log said only that, so nobody could say why.
+    const sentence =
+      "The Recorder could not be connected: The Recorder did not answer in time.";
+    refuseNextOpen = { status: 502, error: sentence };
+    const { result, warned } = await logged(() =>
+      call(openbot, "/api/browser/open", { method: "POST", as: "ada" }),
+    );
+    expect(result.status).toBe(502);
+    expect(
+      warned
+        .map((line) => JSON.parse(line) as Record<string, unknown>)
+        .filter((line) => line.type === "browser-computer-failed"),
+    ).toEqual([
+      {
+        type: "browser-computer-failed",
+        path: "/browser/open",
+        status: 502,
+        error: sentence,
+      },
+    ]);
+  });
+
   test("each person reaches only their own browser", async () => {
     await open(openbot, "ada");
     const benOpened = await open(openbot, "ben");

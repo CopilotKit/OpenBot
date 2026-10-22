@@ -17,6 +17,7 @@ import type {
   BrowserState,
   LauncherConnection,
 } from "../../shared/openbot-browser";
+import { RECORDER_SIGNED_OUT } from "../../shared/recorder-api";
 import { RECORDER_EXTENSION_ID } from "../../shared/recorder-extension";
 import type { BrowserHost } from "../src/browser-host";
 import type { BrowserRuntime } from "../src/browser-runtime";
@@ -68,6 +69,8 @@ type FixtureCall = {
 };
 
 const calls: FixtureCall[] = [];
+/** Recorder tokens OpenBot has revoked, which it answers are signed out. */
+const revoked = new Set<string>();
 
 /** The OpenBot the fixture reports to, and the pages the tests browse. */
 const openbot = asked
@@ -79,6 +82,24 @@ const openbot = asked
         if (url.pathname === "/fixture/calls") {
           calls.push((await request.json()) as FixtureCall);
           return new Response("");
+        }
+        // Who a Recorder connection is for, as OpenBot answers it: signed out once it was revoked.
+        if (url.pathname === "/api/recorder/me") {
+          const token = (request.headers.get("authorization") ?? "").replace(
+            /^Bearer /,
+            "",
+          );
+          return revoked.has(token)
+            ? Response.json(
+                {
+                  error:
+                    "This browser is no longer connected to OpenBot. Connect it again.",
+                  code: RECORDER_SIGNED_OUT,
+                  reason: "revoked",
+                },
+                { status: 401 },
+              )
+            : Response.json({ user: CONNECTION.user });
         }
         // What a browser sent, for comparing what two browsers say about themselves.
         if (url.pathname === "/headers")
@@ -1090,6 +1111,126 @@ for (const variant of VARIANTS) {
           said.mockRestore();
         }
       }, 120_000);
+    },
+  );
+}
+
+/**
+ * Opens that fail say why. The third end-to-end run: two opens answered 502, and neither the
+ * computer's log nor the server's said why.
+ */
+for (const variant of VARIANTS) {
+  describe.skipIf(!asked || !variant.available)(
+    `${variant.name}: opens that fail`,
+    () => {
+      let root = "";
+      let profiles: Profiles;
+      let server: ReturnType<typeof Bun.serve>;
+      let said: ReturnType<typeof spyOn<Console, "info">>;
+
+      const openWith = (connection: LauncherConnection) =>
+        fetch(`http://127.0.0.1:${server.port}/browser/open`, {
+          method: "POST",
+          headers: { "x-openbot-bot-id": PERSON },
+          body: JSON.stringify({ connection }),
+        });
+      /** What the computer logged of `type` since the spy was last cleared. */
+      const logged = (type: string) =>
+        said.mock.calls.flatMap(([line]) => {
+          try {
+            const parsed = JSON.parse(String(line)) as Record<string, unknown>;
+            return parsed.type === type ? [parsed] : [];
+          } catch {
+            return [];
+          }
+        });
+      const connection = (name: string): LauncherConnection => ({
+        ...CONNECTION,
+        token: `obr_${name}-${variant.window}`,
+        connectionId: `connection-${name}`,
+      });
+
+      beforeAll(async () => {
+        root = await mkdtemp(join(tmpdir(), "openbot-person-failing-"));
+        const built = await harness(
+          variant.runtime,
+          root,
+          `failing-${variant.window}`,
+        );
+        profiles = built.profiles;
+        server = serve(built.host);
+        said = spyOn(console, "info");
+      }, 30_000);
+
+      afterAll(async () => {
+        said?.mockRestore();
+        server?.stop(true);
+        await profiles?.closeAll();
+        if (root) await rm(root, { recursive: true, force: true });
+      }, 60_000);
+
+      test("an open whose connection OpenBot revoked says why and at which step, and closes the browser it launched", async () => {
+        said.mockClear();
+        const refused = connection("revoked");
+        revoked.add(refused.token);
+        const answer = await openWith(refused);
+        const sentence =
+          "The Recorder could not be connected: OpenBot did not accept this browser's connection. Open the browser from OpenBot again.";
+        expect(answer.status).toBe(502);
+        expect(await answer.json()).toEqual({ error: sentence });
+        expect(logged("computer-browser-open-failed")).toEqual([
+          {
+            type: "computer-browser-open-failed",
+            botId: PERSON,
+            step: "connect",
+            status: 502,
+            error: sentence,
+            ms: expect.any(Number),
+          },
+        ]);
+        expect(logged("computer-browser-closed")).toEqual([
+          {
+            type: "computer-browser-closed",
+            botId: PERSON,
+            reason: "its Recorder could not be connected",
+          },
+        ]);
+        expect(profiles.isLive(PERSON)).toBe(false);
+      }, 60_000);
+
+      test.skipIf(variant.window !== "native")(
+        "an open that cannot start the browser says so, at the launch",
+        async () => {
+          // Another browser holds the profile, as one of the person's own might after a crash: Chrome
+          // refuses a second process on one profile.
+          const { chromium } = await import("playwright");
+          const holder = await chromium.launchPersistentContext(
+            join(root, PERSON),
+            { channel: variant.product, headless: true },
+          );
+          said.mockClear();
+          try {
+            const answer = await openWith(connection("held"));
+            expect(answer.status).toBe(502);
+            const { error } = (await answer.json()) as { error: string };
+            expect(error).toStartWith("The browser could not be opened: ");
+            expect(logged("computer-browser-open-failed")).toEqual([
+              {
+                type: "computer-browser-open-failed",
+                botId: PERSON,
+                step: "launch",
+                status: 502,
+                error,
+                ms: expect.any(Number),
+              },
+            ]);
+            expect(profiles.isLive(PERSON)).toBe(false);
+          } finally {
+            await holder.close();
+          }
+        },
+        60_000,
+      );
     },
   );
 }
