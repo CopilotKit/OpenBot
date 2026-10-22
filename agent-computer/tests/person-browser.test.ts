@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
+import { generateKeyPairSync } from "node:crypto";
 import {
   cp,
   mkdir,
@@ -17,8 +18,8 @@ import type {
   LauncherConnection,
 } from "../../shared/openbot-browser";
 import { RECORDER_EXTENSION_ID } from "../../shared/recorder-extension";
-import type { BrowserRuntime } from "../src/browser-runtime";
 import type { BrowserHost } from "../src/browser-host";
+import type { BrowserRuntime } from "../src/browser-runtime";
 import {
   defaultNativeMessagingHosts,
   type InstalledBrowser,
@@ -28,6 +29,7 @@ import {
 } from "../src/person-launch";
 import type { Profiles } from "../src/profiles";
 import { startScreencast } from "../src/screencast";
+import { setWebBotAuth } from "../src/web-bot-auth";
 
 /**
  * A person's browser, launched for real and driven through the real browser routes.
@@ -863,6 +865,44 @@ for (const variant of VARIANTS) {
           expect(persons.script.brands ?? []).not.toContain("HeadlessChrome");
         } finally {
           await profiles.stop("bot-identity");
+          if (tab)
+            await api("/browser/tabs", { action: "close", tabId: tab.id });
+        }
+      },
+      60_000,
+    );
+
+    test.skipIf(variant.window !== "screen")(
+      "never signs a person's requests as the deployment's Bot, though a Bot's browser beside it does",
+      async () => {
+        // Web Bot Auth tells a site the request comes from this deployment's automated agent. A
+        // person browsing in their own browser is not that agent, whatever the computer does for Bots.
+        const person = profiles.person(PERSON);
+        if (!person) throw new Error("The browser should be open.");
+        const jwk = generateKeyPairSync("ed25519").privateKey.export({
+          format: "jwk",
+        });
+        const headersAt = async (page: Page) => {
+          await page.goto(`${ORIGIN}/headers`);
+          return JSON.parse(
+            await page.evaluate(() => document.body.innerText),
+          ) as Record<string, string>;
+        };
+        const tab = activeTab(
+          (await api("/browser/tabs", { action: "new" })).json as BrowserState,
+        );
+        await setWebBotAuth({ agent: "https://openbot.example.com", jwk });
+        try {
+          const bots = await headersAt(await profiles.page("bot-signed"));
+          const persons = await headersAt(person.active());
+          expect(bots["signature-agent"]).toBeTruthy();
+          expect(bots.signature).toBeTruthy();
+          expect(persons["signature-agent"]).toBeUndefined();
+          expect(persons.signature).toBeUndefined();
+          expect(persons["signature-input"]).toBeUndefined();
+        } finally {
+          await setWebBotAuth(null);
+          await profiles.stop("bot-signed");
           if (tab)
             await api("/browser/tabs", { action: "close", tabId: tab.id });
         }

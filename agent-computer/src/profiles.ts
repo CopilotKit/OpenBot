@@ -52,8 +52,8 @@ import {
   windowPages,
 } from "./person-browser";
 import {
-  PLAYWRIGHT_DISABLED_FEATURES,
   type PersonDisplay,
+  PLAYWRIGHT_DISABLED_FEATURES,
   personWindow,
 } from "./person-launch";
 import { botIdsIn } from "./profile-listing";
@@ -592,12 +592,14 @@ export function createProfiles(
        * fine. Before the person's first page loads, and for every tab as it opens. Read from one of
        * the person's own tabs first, because what the browser says is read once per browser from
        * a page, and the Recorder's setup page may be the other one there, closing. A native window
-       * is the person's own browser, which says who it is already, as a local Bot's does.
+       * is the person's own browser, which says who it is already, as a local Bot's does. Never the
+       * Web Bot Auth signature: that says the deployment's automated agent sent the request, and a
+       * person browsing is not it.
        */
       if (window === "screen") {
         const network = { headless: runtime.mode === "headless" };
         await attachPageNetwork(context, page, network);
-        await attachBrowserNetwork(context, network);
+        await attachBrowserNetwork(context, { ...network, signs: false });
         for (const opened of context.pages())
           void attachPageNetwork(context, opened, network);
         context.on("page", (opened) => {
