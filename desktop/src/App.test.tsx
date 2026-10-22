@@ -985,11 +985,14 @@ test("a Claude plan signed in on the provider screen reaches Start with its toke
     await view.findByLabelText("Code from your browser"),
     "synthetic-code",
   );
+  // Intelligence is ready and waiting before the sign-in finishes, as on a real machine. The
+  // finished sign-in then moves on by itself, from an effect rather than a click, and Start must
+  // still get the model it chose (it once got null: Start ran before the choice had rendered).
+  await waitFor(() => expect(localSequence()).toContain("run_local_eval"));
+  await act(async () => new Promise((resolve) => setTimeout(resolve, 100)));
   await userEvent.click(
     view.getByRole("button", { name: "Finish signing in" }),
   );
-  // Signed in, so on by itself: no Continue after "Signed in".
-  await waitFor(() => expect(localSequence()).toContain("run_local_eval"));
   await view.findByRole("heading", { name: "Test OpenBot" });
   expect(getStartStackPayload()).toMatchObject({
     model: {
