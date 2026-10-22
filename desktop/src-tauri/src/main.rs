@@ -4932,6 +4932,65 @@ fn chose(app: &tauri::AppHandle, item: &str) {
 }
 
 /**
+What About OpenBot says: the version, and which build this is.
+
+The build is the commit it was built from, marked `-dirty` when the tree had uncommitted changes,
+and when; see `build_identity` in build.rs. macOS shows the version and the build on one line and
+the credits under them; Windows and Linux show the comments.
+*/
+fn about_openbot() -> tauri::menu::AboutMetadata<'static> {
+    let built = build_description(
+        env!("OPENBOT_BUILD_COMMIT"),
+        env!("OPENBOT_BUILD_BRANCH"),
+        env!("OPENBOT_BUILD_TIME").parse().unwrap_or_default(),
+    );
+    tauri::menu::AboutMetadata {
+        name: Some("OpenBot".into()),
+        short_version: Some(env!("CARGO_PKG_VERSION").into()),
+        version: Some(env!("OPENBOT_BUILD_COMMIT").into()),
+        credits: Some(built.clone()),
+        comments: Some(built),
+        ..Default::default()
+    }
+}
+
+/// "Built 2026-10-22 06:40 UTC from 397d98a on dustywusty/local-eval-test-question".
+fn build_description(commit: &str, branch: &str, built: u64) -> String {
+    let on = if branch.is_empty() {
+        String::new()
+    } else {
+        format!(" on {branch}")
+    };
+    format!("Built {} from {commit}{on}", utc_minute(built))
+}
+
+/// Seconds since 1970 as "YYYY-MM-DD HH:MM UTC", with no date library for one line.
+fn utc_minute(seconds: u64) -> String {
+    let days = (seconds / 86_400) as i64;
+    let minute_of_day = seconds % 86_400 / 60;
+    // Howard Hinnant's days_from_civil, inverted.
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let day_of_era = z - era * 146_097;
+    let year_of_era =
+        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let month_index = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * month_index + 2) / 5 + 1;
+    let month = if month_index < 10 {
+        month_index + 3
+    } else {
+        month_index - 9
+    };
+    let year = year_of_era + era * 400 + i64::from(month <= 2);
+    format!(
+        "{year:04}-{month:02}-{day:02} {:02}:{:02} UTC",
+        minute_of_day / 60,
+        minute_of_day % 60
+    )
+}
+
+/**
 The tray menu and the window's menu bar, with "Open Intelligence dashboard" when `intelligence`.
 
 Built again whenever that changes, because a menu item cannot be hidden, only removed.
@@ -4987,9 +5046,31 @@ fn install_menus<R: tauri::Runtime>(
             .collect()
     }
 
+    // About first, as every Mac app has it, in both menus: a predefined item belongs to one menu.
+    let about = || -> tauri::Result<[PredefinedMenuItem<R>; 2]> {
+        Ok([
+            PredefinedMenuItem::about(app, Some("About OpenBot"), Some(about_openbot()))?,
+            PredefinedMenuItem::separator(app)?,
+        ])
+    };
+    fn with_about<'a, R: tauri::Runtime>(
+        about: &'a [PredefinedMenuItem<R>; 2],
+        items: &'a [MenuItem<R>],
+    ) -> Vec<&'a dyn IsMenuItem<R>> {
+        about
+            .iter()
+            .map(|item| item as &dyn IsMenuItem<R>)
+            .chain(refs(items))
+            .collect()
+    }
+
     let tray_items = items()?;
+    let tray_about = about()?;
     if let Some(tray) = app.tray_by_id("openbot") {
-        tray.set_menu(Some(Menu::with_items(app, &refs(&tray_items))?))?;
+        tray.set_menu(Some(Menu::with_items(
+            app,
+            &with_about(&tray_about, &tray_items),
+        )?))?;
     }
 
     // The same items on the window itself, because the tray cannot be relied on and Stop lives
@@ -5001,8 +5082,14 @@ fn install_menus<R: tauri::Runtime>(
     // Its own items, not the tray's: a menu item belongs to one menu, and the two menus
     // outlive each other. The ids match so both arrive at the same function.
     let window_items = items()?;
+    let window_about = about()?;
     // A submenu, because a top-level entry in a menu bar has to be one to open at all.
-    let openbot = Submenu::with_items(app, "OpenBot", true, &refs(&window_items))?;
+    let openbot = Submenu::with_items(
+        app,
+        "OpenBot",
+        true,
+        &with_about(&window_about, &window_items),
+    )?;
     /*
      * AN EDIT MENU, WITHOUT WHICH COMMAND-V DOES NOTHING.
      *
@@ -7777,6 +7864,28 @@ mod tests {
             intelligence_bridge::Offer::after(&IntelligenceOpening::Failed(DashboardFailure::Busy)),
             intelligence_bridge::Offer::Failed(DashboardFailure::Busy)
         );
+    }
+
+    #[test]
+    fn about_openbot_names_the_commit_branch_and_build_time() {
+        assert_eq!(utc_minute(0), "1970-01-01 00:00 UTC");
+        assert_eq!(utc_minute(951_782_400), "2000-02-29 00:00 UTC");
+        assert_eq!(utc_minute(1_792_647_660), "2026-10-22 05:41 UTC");
+        assert_eq!(
+            build_description("397d98a-dirty", "dustywusty/x", 1_792_647_660),
+            "Built 2026-10-22 05:41 UTC from 397d98a-dirty on dustywusty/x"
+        );
+        assert_eq!(
+            build_description("397d98a", "", 0),
+            "Built 1970-01-01 00:00 UTC from 397d98a"
+        );
+        let about = about_openbot();
+        assert_eq!(
+            about.short_version.as_deref(),
+            Some(env!("CARGO_PKG_VERSION"))
+        );
+        assert_eq!(about.version.as_deref(), Some(env!("OPENBOT_BUILD_COMMIT")));
+        assert!(about.credits.unwrap().starts_with("Built "));
     }
 
     #[test]
