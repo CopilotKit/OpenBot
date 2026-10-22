@@ -214,6 +214,10 @@ what you do is recorded.
   earlier one, and keeps it pinned to the toolbar once.
 - A Recorder that is slow to answer is refused instead of taking down the computer and every browser
   on it. Typing on a live screen that records a demonstration reaches the page in the order typed.
+- Opening the Browser page twice in quick succession (reloading it while your browser is still
+  opening, for one) opens your browser once, connected; before, both opens could be refused, most
+  often the first after the Recorder was updated. When a browser cannot be opened, the server's and
+  the computer's logs say why and at which step.
 - **Google loads in Bots' browsers again.** Behind the computer's network filter, Google's pages never
   finished loading (Chromium restarts the request for client hints and the restart was lost); the
   computer now launches every filtered browser with that restart switched off.
