@@ -15,6 +15,7 @@ import { eq, inArray } from "drizzle-orm";
 import { createActorAgentResolver } from "../src/agents/agent-resolver";
 import { createApp } from "../src/app";
 import type { AuditEventInput } from "../src/audit";
+import type { RoleRepository } from "../src/auth/guards";
 import { createStallGuard } from "../src/channels/stall-guard";
 import { loadConfig } from "../src/config";
 import { mountCopilotRuntime } from "../src/copilot";
@@ -56,7 +57,7 @@ const config = loadConfig(
   }),
 );
 const intelligenceApi = config.runtime.intelligence.apiUrl.replace(/\/$/, "");
-const roleRepository = { rolesForUser: async () => ["user" as const] };
+const roleRepository: RoleRepository = { rolesForUser: async () => ["user"] };
 const getSession = async ({ headers }: { headers: Headers }) => {
   const cookie = headers.get("cookie") ?? "";
   const id = cookie.includes("test-session=owner")
@@ -139,20 +140,24 @@ const runtime = mountCopilotRuntime(
     trajectoryCapture: recorder.trajectoryCapture,
   },
 );
-const app = createApp(
-  config,
-  {
-    handler: () => new Response(null, { status: 204 }),
-    api: { getSession },
-  } as never,
-  roleRepository,
-  ...(Array.from({ length: 3 }) as never[]),
-  runtime.handler,
-  ...(Array.from({ length: 5 }) as never[]),
-  auditStore,
-  ...(Array.from({ length: 21 }) as never[]),
-  { recorder },
-);
+/*
+ * createApp is positional. Placed by index rather than after a spread of `undefined`s, whose length
+ * TypeScript cannot see, so each dependency is type-checked against the parameter it lands on: the
+ * runtime every capture pass goes through is `copilotHandler`, and the audit store `auditStore`.
+ */
+const args = new Array(createApp.length) as unknown as Parameters<
+  typeof createApp
+>;
+args[0] = config;
+args[1] = {
+  handler: () => new Response(null, { status: 204 }),
+  api: { getSession },
+} as never;
+args[2] = roleRepository;
+args[6] = runtime.handler;
+args[12] = auditStore;
+args[34] = { recorder };
+const app = createApp(...args);
 
 const call = (path: string, init: RequestInit & { json?: unknown } = {}) => {
   const { json, headers, ...rest } = init;
@@ -216,18 +221,26 @@ async function bindingOf(trajectoryId: string) {
 
 beforeAll(async () => {
   spies.push(
-    spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
-      const url = input instanceof Request ? input.url : String(input);
-      if (url === `${intelligenceApi}/api/trajectories/join`) {
-        const body = JSON.parse(String(init?.body)) as (typeof joins)[number];
-        joins.push(body);
-        return Response.json({
-          joinToken: `join-${joins.length}`,
-          trajectoryId: body.trajectoryId,
-        });
-      }
-      throw new Error(`No network in this test: ${url}`);
-    }),
+    // `typeof fetch` carries Bun's `preconnect` as well as the call, so the stand-in has one too.
+    spyOn(globalThis, "fetch").mockImplementation(
+      Object.assign(
+        async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+          const url = input instanceof Request ? input.url : String(input);
+          if (url === `${intelligenceApi}/api/trajectories/join`) {
+            const body = JSON.parse(
+              String(init?.body),
+            ) as (typeof joins)[number];
+            joins.push(body);
+            return Response.json({
+              joinToken: `join-${joins.length}`,
+              trajectoryId: body.trajectoryId,
+            });
+          }
+          throw new Error(`No network in this test: ${url}`);
+        },
+        { preconnect: () => {} },
+      ),
+    ),
     // Nothing here may open a thread: a pass is not a run.
     spyOn(
       CopilotKitIntelligence.prototype,

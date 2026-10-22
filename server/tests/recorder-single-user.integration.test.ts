@@ -46,15 +46,18 @@ const recorder = createRecorderExtension({
   },
   auditStore,
 });
-const app = createApp(
-  config,
-  undefined,
-  roleRepository,
-  ...(Array.from({ length: 9 }) as never[]),
-  auditStore,
-  ...(Array.from({ length: 21 }) as never[]),
-  { recorder },
-);
+/*
+ * createApp is positional. Placed by index rather than after a spread of `undefined`s, whose length
+ * TypeScript cannot see, so each dependency is type-checked against the parameter it lands on.
+ */
+const args = new Array(createApp.length) as unknown as Parameters<
+  typeof createApp
+>;
+args[0] = config;
+args[2] = roleRepository;
+args[12] = auditStore;
+args[34] = { recorder };
+const app = createApp(...args);
 
 const call = (path: string, init: RequestInit & { json?: unknown } = {}) => {
   const { json, headers, ...rest } = init;

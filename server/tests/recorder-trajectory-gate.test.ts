@@ -284,7 +284,7 @@ describe("createTrajectoryRefusalAudit", () => {
   }
   const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
   const refusal = (overrides: Partial<Refusal> = {}): Refusal => ({
-    reason: "not-open",
+    reason: "bound-elsewhere",
     trajectoryId: TRAJECTORY,
     userId: PERSON,
     ...overrides,
@@ -303,7 +303,7 @@ describe("createTrajectoryRefusalAudit", () => {
       eventType: "recorder.trajectory_refused",
       targetId: TRAJECTORY,
       actorUserId: PERSON,
-      payload: { reason: "not-open" },
+      payload: { reason: "bound-elsewhere" },
     });
   });
 
@@ -346,13 +346,13 @@ describe("createTrajectoryRefusalAudit", () => {
       }
     };
 
-    invent("not-open");
+    invent("unavailable");
     invent("signed-out");
     await settle();
     expect(rows).toHaveLength(2);
 
     clock.now += 60_000;
-    invent("not-open");
+    invent("unavailable");
     await settle();
     expect(rows).toHaveLength(3);
   });

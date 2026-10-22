@@ -161,17 +161,21 @@ beforeAll(() => {
     },
     auditStore,
   });
-  app = createApp(
-    config,
-    organizationAuth,
-    roleRepository,
-    ...(Array.from({ length: 9 }) as never[]),
-    auditStore,
-    ...(Array.from({ length: 14 }) as never[]),
-    HOST_TOKEN,
-    ...(Array.from({ length: 6 }) as never[]),
-    { recorder },
-  );
+  /*
+   * createApp is positional. Placed by index rather than after a spread of `undefined`s, whose
+   * length TypeScript cannot see, so each dependency is type-checked against the parameter it
+   * lands on.
+   */
+  const args = new Array(createApp.length) as unknown as Parameters<
+    typeof createApp
+  >;
+  args[0] = config;
+  args[1] = organizationAuth;
+  args[2] = roleRepository;
+  args[12] = auditStore;
+  args[27] = HOST_TOKEN;
+  args[34] = { recorder };
+  app = createApp(...args);
 });
 afterAll(async () => {
   Date.now = realNow;

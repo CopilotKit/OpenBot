@@ -90,39 +90,44 @@ const runtimeFor = (index: typeof thisReplica) =>
 const learning = runtimeFor(thisReplica);
 const learningElsewhere = runtimeFor(otherReplica);
 
-const app = createApp(
-  config,
-  {
-    handler: () => new Response(null, { status: 204 }),
-    api: {
-      getSession: async ({ headers }: { headers: Headers }) => {
-        const cookie = headers.get("cookie") ?? "";
-        const id = cookie.includes("person=ada")
-          ? ada
-          : cookie.includes("person=grace")
-            ? grace
-            : null;
-        return id
-          ? { user: { id, email: `${id}@example.test`, name: id } }
+/*
+ * createApp is positional. Placed by index rather than after a spread of `undefined`s, whose length
+ * TypeScript cannot see, so each dependency is type-checked against the parameter it lands on: the
+ * audit store this file's audit-row tests read is `auditStore`, not `credentialService`.
+ */
+const args = new Array(createApp.length) as unknown as Parameters<
+  typeof createApp
+>;
+args[0] = config;
+args[1] = {
+  handler: () => new Response(null, { status: 204 }),
+  api: {
+    getSession: async ({ headers }: { headers: Headers }) => {
+      const cookie = headers.get("cookie") ?? "";
+      const id = cookie.includes("person=ada")
+        ? ada
+        : cookie.includes("person=grace")
+          ? grace
           : null;
-      },
-    },
-  } as never,
-  roleRepository,
-  ...(Array.from({ length: 9 }) as never[]),
-  auditStore,
-  ...(Array.from({ length: 21 }) as never[]),
-  {
-    personalLearning: {
-      store,
-      skillsOf: (userId: string) => learning.personalSkills(userId),
-      invalidate: () => {
-        invalidations++;
-        thisReplica.invalidate();
-      },
+      return id
+        ? { user: { id, email: `${id}@example.test`, name: id } }
+        : null;
     },
   },
-);
+} as never;
+args[2] = roleRepository;
+args[12] = auditStore;
+args[34] = {
+  personalLearning: {
+    store,
+    skillsOf: (userId: string) => learning.personalSkills(userId),
+    invalidate: () => {
+      invalidations++;
+      thisReplica.invalidate();
+    },
+  },
+};
+const app = createApp(...args);
 
 const as = (person: "ada" | "grace") => ({ cookie: `person=${person}` });
 const call = (
