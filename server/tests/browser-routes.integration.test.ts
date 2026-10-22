@@ -91,7 +91,7 @@ const NOT_SET_UP =
   "Your browser can't open right now. Ask an admin to check OpenBot's setup.";
 /** The same, on a single-user OpenBot (OpenBot Desktop), where the person is the admin. */
 const NOT_SET_UP_SINGLE_USER =
-  "Your browser can't open right now. OpenBot's setup needs checking, and its logs say why.";
+  "Your browser can't open right now. Quit OpenBot, open it again, and try once more.";
 
 // ---- The stand-in computer --------------------------------------------------------------------
 

@@ -100,9 +100,11 @@ const SENTENCES = {
   unavailable: "This OpenBot cannot open a browser for you.",
   notSetUp:
     "Your browser can't open right now. Ask an admin to check OpenBot's setup.",
-  /** `notSetUp` where the person is the admin: nobody else to ask. */
+  /** `notSetUp` where the person is the admin: nobody else to ask, and something they can do (OpenBot Desktop checks
+   * its setup again as it starts, the Recorder's build included). Never "read the logs": every sentence is for the
+   * person, as Desktop's own are. */
   notSetUpSingleUser:
-    "Your browser can't open right now. OpenBot's setup needs checking, and its logs say why.",
+    "Your browser can't open right now. Quit OpenBot, open it again, and try once more.",
   tooMany:
     "Too many connection codes were asked for at once. Wait a few minutes and try again.",
   notConnected: "Your browser could not be connected. Try again.",

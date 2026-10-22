@@ -187,8 +187,9 @@ hosted OpenBot the click takes you to the browser in the page. While a recording
 button shows a red dot; hover it for the recording's name and how long it has run. Name a task and press Record; the page shows the recording's name, how long it has run and
 how many actions it holds, and after Stop it says what was saved to your Learning space (for example
 "7 actions and 1 narrated phrase"), or that nothing was recorded, and says the same after a reload. Only what you do is recorded. When
-your browser cannot open because of how OpenBot is set up, the page tells you to ask an admin, and the
-reason is in the server's and the computer's logs.
+your browser cannot open because of how OpenBot is set up, OpenBot tells you to ask an admin (on
+single-user OpenBot, such as OpenBot Desktop, to quit and reopen OpenBot), the message stays until you
+close it, and the reason is in the server's and the computer's logs.
 
 - **On OpenBot Desktop** it is your installed Google Chrome, or Microsoft Edge where Chrome is missing,
   in a separate OpenBot profile, as its own window; opening it again brings that window to the front.
