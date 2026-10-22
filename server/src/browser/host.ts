@@ -1,4 +1,7 @@
-import { isPersonBrowserId } from "@openbot/shared/openbot-browser";
+import {
+  type BrowserWindow,
+  isPersonBrowserId,
+} from "@openbot/shared/openbot-browser";
 import type { ComputerGateway } from "../computer/gateway";
 import {
   type EgressPolicy,
@@ -38,12 +41,27 @@ export function withPersonBrowsers(
   });
 }
 
-/** People's browsers reached through the computer gateway, whose provider carries them (`withPersonBrowsers`): every
- * address checked as a computer's, and the person's network policy pushed on the way (`withPolicyPushOnWake`). */
+/**
+ * Where a person's browser shows here, from where it runs, by the rule `withPersonBrowsers` finds it by: on OpenBot
+ * Desktop's host-side local Chrome computer (`browserUrl`, which Desktop sets for nothing else) it is the person's own
+ * Chrome or Edge, a native window on their desktop; on the computers Bots run on it is a cloud browser the app shows as
+ * a screen. Known before the browser is opened, so the sidebar's Browser button knows what one click does.
+ */
+export function personBrowserShows(
+  browserUrl: string | undefined,
+): BrowserWindow {
+  return browserUrl ? "native" : "screen";
+}
+
+/** People's browsers reached through the computer gateway, whose provider carries them (`withPersonBrowsers`, given the
+ * same `browserUrl`): every address checked as a computer's, and the person's network policy pushed on the way
+ * (`withPolicyPushOnWake`). */
 export function gatewayBrowserComputers(
   gateway: Pick<ComputerGateway, "locate" | "status">,
+  browserUrl: string | undefined,
 ): BrowserComputers {
   return {
+    shows: personBrowserShows(browserUrl),
     locate: (computerId) => gateway.locate(computerId),
     running: async (computerId) =>
       (await gateway.status(computerId)).state === "ready",
@@ -68,6 +86,7 @@ export function directBrowserComputers(input: {
 }): BrowserComputers {
   const pushed = new Map<string, number>();
   return {
+    shows: personBrowserShows(input.browserUrl),
     locate: async (computerId) => {
       const last = pushed.get(computerId);
       if (last === undefined || Date.now() - last >= REPUSH_MS) {

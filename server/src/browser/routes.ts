@@ -32,6 +32,11 @@ export const OPENBOT_BROWSER_LABEL = "OpenBot browser";
 
 /** Where people's browsers run here: the computers carry them as they carry Bots' (browser/host.ts). */
 export type BrowserComputers = {
+  /**
+   * Where the browsers these computers run show (`BrowserApiState.shows`), known without asking any of them: the
+   * sidebar's Browser button reads it on every load, before the person's browser has ever been opened.
+   */
+  shows: BrowserWindow;
   /** The browser's computer, started when it must be. Throws when it cannot be reached. */
   locate(computerId: string): Promise<string>;
   /** Whether its computer is up, never starting it: the Browser page asks every few seconds, and asking must not start
@@ -420,8 +425,15 @@ export function createBrowserRoutes(deps: BrowserRouteDeps) {
       : Response.json({ error: SENTENCES.unreachable }, { status: 502 });
   }
 
-  const closed = (computerId: string, available: boolean): BrowserApiState => ({
-    available,
+  /** Whether this OpenBot can run the person's browser, and where it shows when it can: the same answer open or
+   * closed, decided by where people's browsers run here rather than by asking the browser. */
+  const where = (): Pick<BrowserApiState, "available" | "shows"> =>
+    deps.computers
+      ? { available: true, shows: deps.computers.shows }
+      : { available: false };
+
+  const closed = (computerId: string): BrowserApiState => ({
+    ...where(),
     computerId,
     open: false,
     tabs: [],
@@ -450,7 +462,7 @@ export function createBrowserRoutes(deps: BrowserRouteDeps) {
             recorder: narration ? asNarrated(reported, narration) : reported,
           }
         : {}),
-      available: true,
+      ...where(),
       computerId: personBrowserId(userId),
       ...(narration ? { narration } : {}),
     };
@@ -461,18 +473,17 @@ export function createBrowserRoutes(deps: BrowserRouteDeps) {
   async function currentState(userId: string): Promise<BrowserApiState> {
     const computerId = personBrowserId(userId);
     const computers = deps.computers;
-    if (!computers) return closed(computerId, false);
+    if (!computers) return closed(computerId);
     let state: BrowserState | null;
     try {
-      if (!(await computers.running(computerId)))
-        return closed(computerId, true);
+      if (!(await computers.running(computerId))) return closed(computerId);
       const base = await computers.locate(computerId);
       const answer = await ask(base, computerId, browserComputerPaths.state);
       state = answer.status === 200 ? browserState(answer.body) : null;
     } catch {
-      return closed(computerId, true);
+      return closed(computerId);
     }
-    return state ? view(userId, state) : closed(computerId, true);
+    return state ? view(userId, state) : closed(computerId);
   }
 
   /** Forwards one request to the person's browser. `answer` is what the person is told when it was taken: the browser's

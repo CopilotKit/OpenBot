@@ -451,7 +451,9 @@ function build(
     browser: {
       ...(options.computers === false
         ? {}
-        : { computers: gatewayBrowserComputers(gateway) }),
+        : {
+            computers: gatewayBrowserComputers(gateway, config.browser?.url),
+          }),
       token: options.token ?? COMPUTER_TOKEN,
       recorder,
       openbotUrl: openbotAddress(config),
@@ -530,6 +532,7 @@ describe("opening a person's own browser", () => {
     expect(state.status).toBe(200);
     expect(await state.json()).toEqual({
       available: true,
+      shows: "screen",
       computerId,
       open: false,
       tabs: [],
@@ -574,12 +577,78 @@ describe("opening a person's own browser", () => {
         await (await call(cold, "/api/browser", { as: "ben" })).json(),
       ).toEqual({
         available: true,
+        shows: "screen",
         computerId: personBrowserId(ben.id),
         open: false,
         tabs: [],
       });
     expect(started).toEqual([]);
     expect(asked.slice(before)).toEqual([]);
+  });
+
+  test("the state says where the browser shows before it is opened: a window on the desktop on OpenBot Desktop, a screen elsewhere", async () => {
+    // The sidebar's Browser button reads this on every load to know what one click does, so it is said with no browser
+    // open, from where people's browsers run here, and asking it starts nothing.
+    const started: string[] = [];
+    const bots = {
+      name: "docker",
+      isolation: "per-bot",
+      locate: async (botId: string) => {
+        started.push(botId);
+        return `http://127.0.0.1:${COMPUTER_PORT}`;
+      },
+      status: async (botId: string) => ({ botId, state: "absent" as const }),
+      stop: async () => ({ wasRunning: false }),
+      reset: async () => ({ cleared: false }),
+      list: async () => [],
+    } satisfies ComputerProvider;
+    // OpenBot Desktop: people's browsers run on its host-side local Chrome computer, here one that is not answering
+    // (Chrome closed, the computer restarting), and Bots' computers stay where they are.
+    const desktop = build(
+      { OPENBOT_BROWSER_URL: `http://127.0.0.1:${NOTHING_PORT}` },
+      { provider: bots },
+    );
+    const before = asked.length;
+    const { result: answered } = await logged(async () =>
+      (await call(desktop, "/api/browser", { as: "ben" })).json(),
+    );
+    expect(answered).toEqual({
+      available: true,
+      shows: "native",
+      computerId: personBrowserId(ben.id),
+      open: false,
+      tabs: [],
+    });
+    expect(started).toEqual([]);
+    expect(asked.slice(before)).toEqual([]);
+
+    // Hosted: the computers Bots run on run people's browsers too, and the app shows them as a screen.
+    const hosted = build({}, { provider: bots });
+    expect(
+      await (await call(hosted, "/api/browser", { as: "ben" })).json(),
+    ).toMatchObject({ available: true, shows: "screen", open: false });
+    expect(started).toEqual([]);
+
+    // Once it is open the state still says where it shows, beside the window the browser reports.
+    openAs = "native";
+    try {
+      const native = build({
+        OPENBOT_BROWSER_URL: `http://127.0.0.1:${COMPUTER_PORT}`,
+      });
+      const opened = await open(native, "ben");
+      expect(opened.window).toBe("native");
+      expect(
+        await (await call(native, "/api/browser", { as: "ben" })).json(),
+      ).toMatchObject({
+        available: true,
+        shows: "native",
+        open: true,
+        window: "native",
+      });
+      await call(native, "/api/browser/close", { method: "POST", as: "ben" });
+    } finally {
+      openAs = "screen";
+    }
   });
 
   test("OpenBot Desktop's host-side computer carries people's browsers, while Bots' computers stay where they are", async () => {
