@@ -60,6 +60,14 @@ export type LauncherState = {
   /** The person's actions so far in this recording, as the Recorder's badge counts them. */
   actions: number;
   narration: Narration;
+  /**
+   * Whether the Recorder is hearing the person itself, for narration `own`: `listening` while a recording runs and the
+   * microphone is live, `muted` when the person muted it, `unavailable` when it cannot hear (no permission, no device,
+   * the recogniser failed), `off` when nothing is being recorded. Absent for narration `external`.
+   */
+  voice?: "off" | "listening" | "muted" | "unavailable";
+  /** The recording Stop ended last, so OpenBot can confirm it went to the person's Learning space. */
+  lastStopped?: { recordingId: string; title: string; stoppedAt: number };
 };
 
 export type LauncherResult<T = Record<never, never>> =
@@ -84,6 +92,12 @@ export type LauncherApi = {
     startedAt: number;
     endedAt: number;
   }): Promise<LauncherResult>;
+  /**
+   * The app heard the person start a phrase at `since` (epoch ms), or stop speaking (`null`). While a phrase is being
+   * spoken the Recorder holds the steps taken from `since` on until that phrase's `narrate` arrives (at most 15 s), as
+   * it does for its own recogniser, so a phrase is placed before the steps it was spoken over.
+   */
+  speaking(input: { since: number | null }): Promise<LauncherResult>;
   state(): Promise<LauncherState>;
 };
 
@@ -149,13 +163,27 @@ export type BrowserRecordingRequest = z.infer<
   typeof browserRecordingRequestSchema
 >;
 
-export const browserNarrationRequestSchema = z
-  .object({
-    text: z.string().trim().min(1).max(4000),
-    startedAt: z.number().int().positive(),
-    endedAt: z.number().int().positive(),
-  })
-  .strict();
+/**
+ * A final phrase, or the person starting (`speaking: true`) or stopping (`speaking: false`) a phrase. `sentAt` is the
+ * sender's clock when it sent this: the page's times come from the person's computer, so the server shifts every time by
+ * (its own clock on arrival minus `sentAt`) before forwarding, and the Recorder sees them on the server's clock, which is
+ * the clock its steps are on. The computer receives the corrected times and a `sentAt` of the server's own clock.
+ */
+const epochMs = z.number().int().positive();
+export const browserNarrationRequestSchema = z.union([
+  z
+    .object({
+      text: z.string().trim().min(1).max(4000),
+      startedAt: epochMs,
+      endedAt: epochMs,
+      sentAt: epochMs,
+    })
+    .strict(),
+  z
+    .object({ speaking: z.literal(true), since: epochMs, sentAt: epochMs })
+    .strict(),
+  z.object({ speaking: z.literal(false), sentAt: epochMs }).strict(),
+]);
 export type BrowserNarrationRequest = z.infer<
   typeof browserNarrationRequestSchema
 >;
