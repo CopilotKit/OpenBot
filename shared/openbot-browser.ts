@@ -98,6 +98,12 @@ export type LauncherApi = {
    * it does for its own recogniser, so a phrase is placed before the steps it was spoken over.
    */
   speaking(input: { since: number | null }): Promise<LauncherResult>;
+  /**
+   * OpenBot revoked this browser's connection (the person disconnected it in Settings, Browsers): forget it now and
+   * report signed out, as the Recorder does when OpenBot answers that its token is gone. A recording in progress ends
+   * the way a sign-out ends one. Idempotent.
+   */
+  disconnect(): Promise<LauncherResult>;
   state(): Promise<LauncherState>;
 };
 
@@ -108,6 +114,8 @@ export const browserComputerPaths = {
   state: "/browser/state",
   recording: "/browser/recording",
   narration: "/browser/narration",
+  /** POST, no body: the Recorder forgets its connection now (`LauncherApi.disconnect`). Answers `BrowserState`. */
+  disconnect: "/browser/disconnect",
   tabs: "/browser/tabs",
   navigate: "/browser/navigate",
   close: "/browser/close",
