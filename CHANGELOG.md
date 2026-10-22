@@ -48,6 +48,13 @@ When a Bot reached for an app the person had not connected, such as Airtable, th
 the Connect card twice, and still did after a reload. The conversation's stored copy of a tool call
 now counts as the same call it already shows, so each call draws one card.
 
+### An app's steps are named for the app, never for the service behind it
+
+A conversation named a Composio app's work after the broker and the vendor's own prefix: "Used
+Composio Airtable", then "Airtable list bases". It now says "Used Airtable", and each step reads as
+the action, "List bases", with the app beside it. An Arcade app is named the same way, as the app
+rather than `arcade-Gmail`.
+
 ### Plainer words, and one word for each thing
 
 OpenBot now says **Bot** everywhere a person reads it, where screens used to mix Bot, agent, coworker
