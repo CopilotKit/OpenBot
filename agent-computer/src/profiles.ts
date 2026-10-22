@@ -49,8 +49,13 @@ import {
   launchPersonBrowser,
   type PersonBrowser,
   personPages,
+  windowPages,
 } from "./person-browser";
-import { type PersonDisplay, personWindow } from "./person-launch";
+import {
+  PLAYWRIGHT_DISABLED_FEATURES,
+  type PersonDisplay,
+  personWindow,
+} from "./person-launch";
 import { botIdsIn } from "./profile-listing";
 import { isRecorderPage, type Recorder } from "./recorder";
 import {
@@ -111,6 +116,35 @@ const sandboxFor = (runtime: BrowserRuntime) =>
   runtime.backend === "local-chrome" || process.env.COMPUTER_SANDBOX === "on";
 const SANDBOX_ENABLED = sandboxFor(BROWSER_RUNTIME);
 
+/**
+ * Playwright's own disabled features, and AcceptCHFrame, for every browser that reaches the network
+ * through the egress filter: a Bot's, and a person's on the live screen.
+ *
+ * WHY. Such a browser is given the filter with the Bot in its proxy credentials, and a Playwright
+ * browser given proxy credentials answers the proxy's challenge itself, through DevTools request
+ * interception, so every request it makes is intercepted. Google (www.google.com and
+ * accounts.google.com) sends an HTTP/2 ACCEPT_CH frame while the connection is set up, asking for
+ * client hints; Chromium then aborts the page's request and restarts it with those hints, and under
+ * Playwright's interception the restarted request is never sent. Measured on this filter with
+ * Playwright 1.62.1's Chromium: the main-frame request for https://www.google.com/ ends ERR_ABORTED
+ * at "connected" and no second one follows, so the page waited until the navigation timed out,
+ * while Bing and Wikipedia (no ACCEPT_CH frame) loaded. The same browser loaded Google in about 330
+ * ms with this feature off, or with no proxy credentials.
+ *
+ * With it off, Chromium learns which hints a site wants from its Accept-CH response header, as it
+ * did before the frame existed, and sends them from the next request on. Playwright itself launched
+ * with it off from 2021 (microsoft/playwright#10380, for the same restart under interception) until
+ * 1.58 (#38472); #40194 is this hang reported against later versions.
+ *
+ * Playwright's own list is repeated because Chromium keeps only the last `--disable-features` on a
+ * command line (base/command_line.cc), and this one comes after Playwright's. Both lists are checked
+ * against the launched browser's own command line in `person-browser.test.ts`.
+ */
+const BEHIND_THE_FILTER_FEATURES = `--disable-features=${[
+  ...PLAYWRIGHT_DISABLED_FEATURES,
+  "AcceptCHFrame",
+].join(",")}`;
+
 const launchArgsFor = (local: boolean, sandbox: boolean): string[] => [
   ...(sandbox ? [] : ["--no-sandbox"]),
   "--disable-dev-shm-usage",
@@ -122,6 +156,7 @@ const launchArgsFor = (local: boolean, sandbox: boolean): string[] => [
   // may do; the governed path is unchanged. Full Chromium is selected explicitly in both modes;
   // headed mode also provides a window a person can use on the native desktop or virtual display.
   "--disable-blink-features=AutomationControlled",
+  BEHIND_THE_FILTER_FEATURES,
 ];
 
 /**
@@ -516,6 +551,12 @@ export function createProfiles(
    * It is closed when the person closes it. Quitting the browser ends the context, and closing the
    * last window ends it too: on macOS Chrome keeps running with no window, and a browser nobody can
    * see is one the person closed. It is not closed by the idle sweep, and goes last at the cap.
+   *
+   * A window is a window whatever it shows. One left on one of the Recorder's own pages (its
+   * options, say) is still the person's browser on the screen: it is open, it is not closed under
+   * them, and opening it again brings it forward rather than relaunching it. The Recorder's pages are
+   * never put in front over a tab of the person's, but when they are all there is, the one in front
+   * is one of them.
    */
   const launchPerson = async (
     botId: string,
@@ -576,15 +617,16 @@ export function createProfiles(
         !isRecorderPage(record.page.url(), recorderId)
       )
         return;
-      const next = personPages(context, recorderId).at(-1);
+      // The person's newest tab; failing that, while the one in front has closed, whatever window
+      // is left.
+      const next =
+        personPages(context, recorderId).at(-1) ??
+        (record.page.isClosed() ? windowPages(context).at(-1) : undefined);
       if (next) bringForward(next);
     };
     const closed = () => {
       record.retarget();
-      if (
-        live.get(botId) === record &&
-        personPages(context, recorderId).length === 0
-      )
+      if (live.get(botId) === record && windowPages(context).length === 0)
         void evict(botId, "its last window was closed");
     };
     const follow = (opened: Page) => {
@@ -634,13 +676,11 @@ export function createProfiles(
       // Asked before the page is judged, so a close that has not been delivered yet does not read as
       // a browser that has gone.
       existing?.retarget();
+      // A person's browser whose one window shows a Recorder page is open like any other (see
+      // `launchPerson`), so the page in front is judged only by whether it is still there.
       if (
         existing?.context.browser()?.isConnected() &&
-        !existing.page.isClosed() &&
-        !(
-          existing.person &&
-          isRecorderPage(existing.page.url(), existing.person.recorderId)
-        )
+        !existing.page.isClosed()
       ) {
         // Touched on every use, which is what makes "least recently used" mean anything.
         existing.usedAt = Date.now();
@@ -856,7 +896,9 @@ export function createProfiles(
 
     /**
      * A person's browser when it is open, touched like any page request so the cap sees it in use.
-     * Undefined when it is closed, still starting, or has no window left.
+     * Undefined when it is closed, still starting, or has no window left. A window showing only one
+     * of the Recorder's own pages is open: its tab list is then empty, and the page in front is that
+     * Recorder page.
      */
     person(botId: string): OpenPersonBrowser | undefined {
       const running = live.get(botId);
@@ -865,7 +907,8 @@ export function createProfiles(
       if (!running.context.browser()?.isConnected()) return undefined;
       running.retarget();
       const pages = () => personPages(running.context, person.recorderId);
-      if (!pages().includes(running.page)) return undefined;
+      if (!windowPages(running.context).includes(running.page))
+        return undefined;
       running.usedAt = Date.now();
       return {
         ...person,

@@ -27,6 +27,7 @@ import {
   findRecorder,
   isRecorderSetupPage,
 } from "../src/recorder";
+import { navigationFailure } from "../src/navigation";
 import { addressFrom } from "../src/request-validation";
 
 /**
@@ -162,6 +163,8 @@ describe("launching a person's browser", () => {
     // And keeps what OpenBot's control needs: the pipe and profile are not in the list at all.
     expect(native.ignoreDefaultArgs).not.toContain("--remote-debugging-pipe");
     expect(native.ignoreDefaultArgs).not.toContain("--no-first-run");
+    // And keeps the debugging bar: the person's own extensions are in it, and the bar is how they
+    // see that one attached.
     expect(native.args).toEqual([
       "--disable-blink-features=AutomationControlled",
       "--enable-unsafe-extension-debugging",
@@ -189,6 +192,8 @@ describe("launching a person's browser", () => {
       "--password-store=basic",
       `--disable-extensions-except=${FIXTURE}`,
       `--load-extension=${FIXTURE}`,
+      // No debugging bar to take the page's height from the live screen while the Recorder records.
+      "--silent-debugger-extension-api",
     ]);
     expect(screen.ignoreDefaultArgs).toEqual([
       "--enable-automation",
@@ -399,5 +404,74 @@ describe("an address a person types", () => {
     // A search, which the app turns into an address of its own choosing.
     expect(addressFrom("openbot recorder")).toBeNull();
     expect(addressFrom("intranet")).toBeNull();
+  });
+});
+
+describe("a page that did not open, said to the person", () => {
+  // Playwright 1.62.1's own messages, captured from real navigations, with the call log it appends.
+  const callLog = (url: string) =>
+    `\nCall log:\n\u001b[2m  - navigating to "${url}", waiting until "domcontentloaded"\u001b[22m\n`;
+  const failed = (message: string, name = "Error") =>
+    Object.assign(new Error(message), { name });
+
+  test("names the address and says it did not load or was refused, never the call log", () => {
+    const cases: [string, Error, string][] = [
+      [
+        "https://www.google.com/",
+        failed(
+          `goto: net::ERR_ABORTED at https://www.google.com/${callLog("https://www.google.com/")}`,
+        ),
+        "www.google.com did not load.",
+      ],
+      [
+        "http://127.0.0.1:7759/",
+        failed(
+          `goto: net::ERR_CONNECTION_REFUSED at http://127.0.0.1:7759/${callLog("http://127.0.0.1:7759/")}`,
+        ),
+        "127.0.0.1:7759 refused the connection.",
+      ],
+      [
+        "http://nothing-here.invalid/",
+        failed(
+          `goto: net::ERR_NAME_NOT_RESOLVED at http://nothing-here.invalid/${callLog("http://nothing-here.invalid/")}`,
+        ),
+        "nothing-here.invalid did not load.",
+      ],
+      [
+        "https://www.bing.com/",
+        failed(
+          `goto: net::ERR_TUNNEL_CONNECTION_FAILED at https://www.bing.com/${callLog("https://www.bing.com/")}`,
+        ),
+        "www.bing.com did not load.",
+      ],
+      [
+        "https://slow.example.com/report?id=7",
+        failed(
+          `goto: Timeout 30000ms exceeded.${callLog("https://slow.example.com/report?id=7")}`,
+          "TimeoutError",
+        ),
+        "slow.example.com did not load in time.",
+      ],
+      [
+        "http://127.0.0.1:7753/file",
+        failed(
+          `goto: Download is starting${callLog("http://127.0.0.1:7753/file")}`,
+        ),
+        "127.0.0.1:7753 started a download rather than opening a page.",
+      ],
+      [
+        "https://intranet.example.com/",
+        failed(
+          `goto: net::ERR_BLOCKED_BY_ADMINISTRATOR at https://intranet.example.com/${callLog("https://intranet.example.com/")}`,
+        ),
+        "intranet.example.com was refused.",
+      ],
+    ];
+    for (const [address, error, said] of cases) {
+      const sentence = navigationFailure(address, error);
+      expect(sentence).toBe(said);
+      expect(sentence).not.toContain("Call log");
+      expect(sentence).not.toContain("net::");
+    }
   });
 });

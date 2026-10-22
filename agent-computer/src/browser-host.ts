@@ -27,6 +27,7 @@ import {
   type LauncherState,
   type Narration,
 } from "../../shared/openbot-browser";
+import { navigationFailure } from "./navigation";
 import { BROWSER_NOT_OPEN, BrowserNotOpenError } from "./person-access";
 import { NoInstalledBrowserError } from "./person-browser";
 import type { OpenPersonBrowser, Profiles } from "./profiles";
@@ -185,13 +186,8 @@ export function createBrowserHost(options: BrowserHostOptions) {
     await page.bringToFront().catch(() => undefined);
   };
 
-  const navigation = (error: unknown) =>
-    json(
-      {
-        error: error instanceof Error ? error.message : "Navigation failed.",
-      },
-      502,
-    );
+  const navigation = (address: string, error: unknown) =>
+    json({ error: navigationFailure(address, error) }, 502);
 
   async function open(botId: string, body: unknown): Promise<Response> {
     const parsed = parseBody(browserOpenRequestSchema, body);
@@ -318,7 +314,22 @@ export function createBrowserHost(options: BrowserHostOptions) {
       }
 
       if (narration?.ok) {
-        const result = await browser.launcher.narrate(narration.value);
+        /*
+         * A phrase, or the person starting or stopping one. The times are already on the server's
+         * clock, which corrected them by `sentAt` on the way (see the contract); `sentAt` itself is
+         * the server's own and goes no further.
+         */
+        const said = narration.value;
+        const result =
+          "text" in said
+            ? await browser.launcher.narrate({
+                text: said.text,
+                startedAt: said.startedAt,
+                endedAt: said.endedAt,
+              })
+            : await browser.launcher.speaking({
+                since: said.speaking ? said.since : null,
+              });
         if (!result.ok) return json({ error: result.error }, 409);
         return json({ ok: true });
       }
@@ -339,7 +350,7 @@ export function createBrowserHost(options: BrowserHostOptions) {
                 timeout: options.navigationTimeoutMs,
               });
             } catch (error) {
-              return navigation(error);
+              return navigation(address, error);
             }
           }
           return json(await stateOf(browser));
@@ -367,12 +378,15 @@ export function createBrowserHost(options: BrowserHostOptions) {
           waitUntil: "domcontentloaded" as const,
           timeout: options.navigationTimeoutMs,
         };
+        // The address the person asked for, or for back, forward and reload the page they were on.
+        let address = page.url();
         try {
           if ("url" in go) {
-            const address = addressFrom(go.url);
-            if (!address)
+            const asked = addressFrom(go.url);
+            if (!asked)
               return json({ error: "That is not a web address." }, 400);
-            await page.goto(address, waiting);
+            address = asked;
+            await page.goto(asked, waiting);
           } else if (go.action === "reload") await page.reload(waiting);
           else {
             /*
@@ -385,7 +399,7 @@ export function createBrowserHost(options: BrowserHostOptions) {
             else await page.goForward(history);
           }
         } catch (error) {
-          return navigation(error);
+          return navigation(address, error);
         }
         return json(await stateOf(browser));
       }

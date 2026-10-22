@@ -17,8 +17,14 @@ import type {
  * control first.
  *
  *   OPENBOT_COMPUTER_BROWSER=1 bun test tests/person-browser-computer.test.ts
+ *
+ * One case reaches the public internet (Google, through the computer's own egress filter), so it
+ * runs only when that is asked for as well:
+ *
+ *   OPENBOT_COMPUTER_BROWSER=1 OPENBOT_LIVE_NETWORK=1 bun test tests/person-browser-computer.test.ts
  */
 const asked = process.env.OPENBOT_COMPUTER_BROWSER === "1";
+const online = asked && process.env.OPENBOT_LIVE_NETWORK === "1";
 const TOKEN = "person-browser-computer-token";
 const PERSON = "person-fedcba9876543210fedcba9876543210";
 const FIXTURE = join(import.meta.dir, "fixtures", "recorder");
@@ -294,3 +300,47 @@ describe.skipIf(!asked)("a person's browser on the computer", () => {
     expect(((await state.json()) as BrowserState).open).toBe(false);
   }, 30_000);
 });
+
+describe.skipIf(!online)(
+  "the open internet through the computer's egress filter",
+  () => {
+    /*
+     * Google answers with an HTTP/2 ACCEPT_CH frame, which makes Chromium restart the page's request,
+     * and Playwright, answering the filter's proxy credentials through request interception, never
+     * sent the restarted one: every browser on a computer timed out on Google while Bing loaded.
+     */
+    const loads = async (response: Response) => {
+      expect(response.status).toBe(200);
+      return (await response.json()) as BrowserState & { url?: string };
+    };
+
+    test("a person's browser loads Google", async () => {
+      await loads(
+        await call("/browser/open", { body: { connection: connection() } }),
+      );
+      for (const url of [
+        "https://www.google.com/",
+        "https://accounts.google.com/",
+      ]) {
+        const state = await loads(
+          await call("/browser/navigate", { body: { url } }),
+        );
+        expect(state.tabs.find((tab) => tab.active)?.url).toStartWith(
+          new URL(url).origin,
+        );
+      }
+      await call("/browser/close", { body: {} });
+    }, 90_000);
+
+    test("a Bot's browser loads Google", async () => {
+      const answer = await loads(
+        await call("/navigate", {
+          body: { url: "https://www.google.com/" },
+          botId: "live-network-bot",
+        }),
+      );
+      expect(answer.url).toStartWith("https://www.google.com");
+      await call("/computers/stop", { body: {}, botId: "live-network-bot" });
+    }, 90_000);
+  },
+);

@@ -42,6 +42,46 @@ describe("the network policy rules", () => {
     expect(egressDecision(policy, "corp.test", 443).allowed).toBe(false);
   });
 
+  test("a domain rule with ports allows its name only on them, and one without keeps every port", () => {
+    const policy = {
+      mode: "allowlist_only" as const,
+      rules: [
+        { type: "domain" as const, value: "openbot.example.com", ports: "443" },
+        { type: "domain" as const, value: "gateway.example.com" },
+      ],
+    };
+    expect(egressDecision(policy, "openbot.example.com", 443).allowed).toBe(
+      true,
+    );
+    expect(egressDecision(policy, "openbot.example.com", 8443).allowed).toBe(
+      false,
+    );
+    // The ports go with the rule's names, the names under it included.
+    expect(
+      egressDecision(policy, "api.openbot.example.com", 8443).allowed,
+    ).toBe(false);
+    expect(egressDecision(policy, "gateway.example.com", 8443).allowed).toBe(
+      true,
+    );
+    expect(
+      parseEgressRules([
+        { type: "domain", value: "OpenBot.Example.com", ports: "443, 8443" },
+        { type: "domain", value: "gateway.example.com", ports: "" },
+      ]),
+    ).toEqual({
+      ok: true,
+      rules: [
+        { type: "domain", value: "openbot.example.com", ports: "443,8443" },
+        { type: "domain", value: "gateway.example.com" },
+      ],
+    });
+    expect(
+      parseEgressRules([
+        { type: "domain", value: "openbot.example.com", ports: "443;80" },
+      ]).ok,
+    ).toBe(false);
+  });
+
   test("defaults are only added by defaults_plus_allowlist", () => {
     expect(
       egressDecision(
@@ -506,6 +546,104 @@ describe("the filter proxy", () => {
     expect(process.env.HTTP_PROXY).toBe(before);
     await stopEgressFilter();
     expect(egressShellEnvironment()).toEqual({});
+  });
+
+  test("a named host a policy allows on one port is refused on another", async () => {
+    const target = await origin();
+    const filter = await startEgressFilter({ env: {} });
+    const secret = egressFor("sales", {})?.password;
+    // As the server pushes it for a person's hosted browser: OpenBot by name, on its own port.
+    const pushed = await handleEgressPolicyRequest(
+      "sales",
+      new Request("http://computer/egress-policy", {
+        method: "PUT",
+        body: JSON.stringify({
+          policy: {
+            mode: "allowlist_only",
+            rules: [
+              {
+                type: "domain",
+                value: "openbot.example.test",
+                ports: String(target.port),
+              },
+            ],
+          },
+        }),
+      }),
+    );
+    expect(pushed.status).toBe(200);
+    setEgressResolver(async (host) =>
+      host === "openbot.example.test" ? ["127.0.0.1"] : [],
+    );
+    expect(
+      await connectThrough(
+        filter.port,
+        `openbot.example.test:${target.port}`,
+        "sales",
+        secret,
+      ),
+    ).toContain("200");
+    expect(
+      await connectThrough(
+        filter.port,
+        "openbot.example.test:8443",
+        "sales",
+        secret,
+      ),
+    ).toContain("403");
+    await target.close();
+  });
+
+  /**
+   * The page a browser shows for one plain-HTTP request through the filter, sent exactly as
+   * Chromium first sends it: with no credentials.
+   */
+  async function asABrowser(filterPort: number, url: string) {
+    const { host } = new URL(url);
+    const seen = await new Promise<string>((resolve, reject) => {
+      const socket = connect(filterPort, "127.0.0.1", () => {
+        socket.write(
+          `GET ${url} HTTP/1.1\r\nHost: ${host}\r\nProxy-Connection: keep-alive\r\nConnection: close\r\n\r\n`,
+        );
+      });
+      let answer = "";
+      socket.setTimeout(5_000, () => socket.destroy(new Error("timed out")));
+      socket.on("data", (chunk) => {
+        answer += chunk.toString();
+      });
+      socket.on("end", () => resolve(answer));
+      socket.on("error", reject);
+    });
+    expect(seen.split("\r\n")[0]).toContain("403");
+    return seen;
+  }
+
+  test("a refusal a person's browser shows is worded for a person", async () => {
+    const PERSON = "person-0123456789abcdef0123456789abcdef";
+    const METADATA = "http://169.254.169.254/latest/meta-data/";
+    const filter = await startEgressFilter({ env: {} });
+    // A computer running one person's browser: their policy is the one judging it.
+    setEgressPolicy(PERSON, { mode: "allowlist_only", rules: [] });
+    expect(await asABrowser(filter.port, METADATA)).toContain(
+      "This browser never opens 169.254.169.254: it is a cloud metadata or link-local address, not a website.",
+    );
+    expect(await asABrowser(filter.port, "http://10.0.0.1/")).toContain(
+      "This browser may not open 10.0.0.1:80.",
+    );
+
+    // Shared with a Bot, the connection could be either, and is said without naming a Bot.
+    setEgressPolicy("sales", { mode: "allow_all", rules: [] });
+    const shared = await asABrowser(filter.port, METADATA);
+    expect(shared).toContain(
+      "169.254.169.254 is a cloud metadata or link-local address, which OpenBot never opens.",
+    );
+    expect(shared).not.toMatch(/\bBot\b/);
+
+    // A Bot's own computer is told as it always was.
+    setEgressPolicy(PERSON, null);
+    expect(await asABrowser(filter.port, METADATA)).toContain(
+      "169.254.169.254 is a cloud metadata or link-local address, which no Bot may reach.",
+    );
   });
 
   test("an anonymous connection is judged by every policy on the computer", async () => {

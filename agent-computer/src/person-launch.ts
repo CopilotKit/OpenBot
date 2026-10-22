@@ -153,7 +153,7 @@ export const NO_INSTALLED_BROWSER = `Neither ${NAMES.chrome} nor ${NAMES.msedge}
  *   - `--enable-features=CDPScreenshotNewSurface`: how frames are captured for the live screen.
  *   - `--edge-skip-compat-layer-relaunch`: Edge on Windows can relaunch itself and drop the pipe.
  */
-const PLAYWRIGHT_DISABLED_FEATURES = [
+export const PLAYWRIGHT_DISABLED_FEATURES: readonly string[] = [
   "AvoidUnnecessaryBeforeUnloadCheckSync",
   "BoundaryEventDispatchTracksNodeRemoval",
   "DestroyProfileOnBrowserClose",
@@ -330,6 +330,22 @@ export function personLaunchOptions(
       // Only the Recorder: the hosted browser takes no other extension.
       `--disable-extensions-except=${input.recorderDir}`,
       `--load-extension=${input.recorderDir}`,
+      /*
+       * No "started debugging this browser" bar when the Recorder attaches `chrome.debugger` to
+       * record a tab. The bar takes its height from the window, so while it showed, the live screen
+       * lost the bottom 143 pixels of the page (frames went from 800 to 657 high at Record, and 713
+       * after Stop) though the page's own viewport stayed 800. Measured on bundled Chromium with the
+       * built Recorder recording, and gone with this switch.
+       *
+       * The switch does nothing else: Chromium reads it in one place, `debugger_api.cc`, to skip
+       * that warning, which it also skips for an extension installed by policy. The warning is
+       * there to tell a person that an extension is reading their tabs; here the only extension
+       * there can be is the Recorder (`--disable-extensions-except`), and the person pressed Record
+       * in OpenBot, which says it is recording. A native window keeps the bar: the person installs
+       * their own extensions there, and it is the one signal that one of them attached.
+       * https://chromium.googlesource.com/chromium/src/+/main/chrome/browser/extensions/api/debugger/debugger_api.cc
+       */
+      "--silent-debugger-extension-api",
     ],
     ignoreDefaultArgs: ["--enable-automation", "--disable-extensions"],
     chromiumSandbox: input.sandbox,

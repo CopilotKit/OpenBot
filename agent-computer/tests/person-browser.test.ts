@@ -14,8 +14,10 @@ import {
   type InstalledBrowser,
   installedBrowser,
   PLAYWRIGHT_DEFAULTS_A_PERSON_DOES_NOT_GET,
+  PLAYWRIGHT_DISABLED_FEATURES,
 } from "../src/person-launch";
 import type { Profiles } from "../src/profiles";
+import { startScreencast } from "../src/screencast";
 
 /**
  * A person's browser, launched for real and driven through the real browser routes.
@@ -152,6 +154,30 @@ async function commandLine(page: Page): Promise<string[]> {
     .find((candidate) => candidate.includes("--remote-debugging-pipe"));
   if (!line) throw new Error("chrome://version showed no command line.");
   return line.split(/\s+/);
+}
+
+/**
+ * The features a browser runs without, from its own command line: Chromium keeps only the last
+ * `--disable-features` it is given, so that one is the one that counts.
+ */
+function disabledFeatures(switches: string[]): string[] {
+  const last = switches
+    .filter((value) => value.startsWith("--disable-features="))
+    .at(-1);
+  return last ? last.slice("--disable-features=".length).split(",") : [];
+}
+
+/** A port nothing listens on, so a page there is refused. */
+async function closedPort(): Promise<number> {
+  const probe = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch: () => new Response(),
+  });
+  const { port } = probe;
+  await probe.stop(true);
+  if (port === undefined) throw new Error("The port probe did not listen.");
+  return port;
 }
 
 /** Every browser the tests start, closed at the end whatever happened. */
@@ -424,6 +450,24 @@ for (const variant of VARIANTS) {
         (await api("/browser/navigate", { url: ORIGIN, action: "back" }))
           .status,
       ).toBe(400);
+
+      // A page that does not open is said in a sentence about its address, not Playwright's error
+      // and call log. In a tab of its own, which then closes, so the person's tab stays as it was.
+      const before = activeTab(await state());
+      const blank = activeTab(
+        (await api("/browser/tabs", { action: "new" })).json as BrowserState,
+      );
+      if (!before || !blank) throw new Error("Both tabs should be listed.");
+      const port = await closedPort();
+      expect(
+        await api("/browser/navigate", { url: `http://127.0.0.1:${port}/` }),
+      ).toEqual({
+        status: 502,
+        json: { error: `127.0.0.1:${port} refused the connection.` },
+      });
+      await api("/browser/tabs", { action: "close", tabId: blank.id });
+      await api("/browser/tabs", { action: "activate", tabId: before.id });
+      expect(activeTab(await state())?.url).toBe(`${ORIGIN}/page/three`);
     }, 60_000);
 
     test("records and narrates through the Recorder", async () => {
@@ -449,25 +493,124 @@ for (const variant of VARIANTS) {
         expect.stringContaining("setup.html"),
       );
 
+      // Hearing the person itself only in a native window, where narration is its own.
+      expect((started.json as BrowserState).recorder?.voice).toBe(
+        variant.window === "native" ? "listening" : undefined,
+      );
+
+      // The server's clock on every time, and `sentAt` its own, which goes no further.
+      const sentAt = 1_760_000_003_000;
       const phrase = {
         text: "This is where the receipts go",
         startedAt: 1_760_000_000_000,
         endedAt: 1_760_000_002_500,
       };
-      const narrated = await api("/browser/narration", phrase);
-      expect(narrated).toEqual({ status: 200, json: { ok: true } });
-      expect(callsFor("narrate")[0]?.input).toEqual(phrase);
+      const ok = { status: 200, json: { ok: true } };
+      expect(await api("/browser/narration", { ...phrase, sentAt })).toEqual(
+        ok,
+      );
+      expect(callsFor("narrate").map((call) => call.input)).toEqual([phrase]);
+
+      // The person starting a phrase, then stopping speaking.
+      const since = 1_760_000_004_000;
       expect(
-        (await api("/browser/narration", { ...phrase, endedAt: -1 })).status,
-      ).toBe(400);
+        await api("/browser/narration", { speaking: true, since, sentAt }),
+      ).toEqual(ok);
+      expect(
+        await api("/browser/narration", { speaking: false, sentAt }),
+      ).toEqual(ok);
+      expect(callsFor("speaking").map((call) => call.input)).toEqual([
+        { since },
+        { since: null },
+      ]);
+
+      // Anything else is not the contract's and never reaches the Recorder.
+      for (const body of [
+        { ...phrase, endedAt: -1, sentAt },
+        phrase,
+        { speaking: true, sentAt },
+        { speaking: false, since, sentAt },
+      ])
+        expect((await api("/browser/narration", body)).status).toBe(400);
+      expect(callsFor("narrate")).toHaveLength(1);
+      expect(callsFor("speaking")).toHaveLength(2);
 
       const stopped = await api("/browser/recording", { action: "stop" });
       expect((stopped.json as BrowserState).recorder?.phase).toBe("idle");
+      // The recording Stop ended, so OpenBot can say where it went.
+      const recordingId = (started.json as BrowserState).recorder?.recordingId;
+      expect(
+        (stopped.json as BrowserState).recorder?.lastStopped,
+      ).toMatchObject({ recordingId, title: "File an expense report" });
+      expect((stopped.json as BrowserState).recorder?.voice).toBe(
+        variant.window === "native" ? "off" : undefined,
+      );
       // The Recorder's own refusal comes back as one.
       const again = await api("/browser/recording", { action: "stop" });
       expect(again.status).toBe(409);
       expect(again.json.error).toBe("Nothing is being recorded.");
     }, 60_000);
+
+    test.skipIf(variant.window !== "screen")(
+      "the live screen keeps the whole page while the Recorder records",
+      async () => {
+        const person = profiles.person(PERSON);
+        if (!person) throw new Error("The browser should be open.");
+        const page = person.active();
+        // Away to another tab and back first, which lays the page out again in its window.
+        const front = activeTab(await state());
+        const other = activeTab(
+          (await api("/browser/tabs", { action: "new" })).json as BrowserState,
+        );
+        if (!front || !other) throw new Error("Both tabs should be listed.");
+        await api("/browser/tabs", { action: "activate", tabId: front.id });
+        await api("/browser/tabs", { action: "close", tabId: other.id });
+        const height = page.viewportSize()?.height;
+        if (!height) throw new Error("The hosted page should have a viewport.");
+        const heights: number[] = [];
+        const cast = await startScreencast(page, (frame) =>
+          heights.push(frame.height),
+        );
+        // The screen sends a frame when the page changes, so it is changed for as long as is asked.
+        const repaint = async (ms: number) => {
+          const until = Date.now() + ms;
+          for (let turn = 0; Date.now() < until; turn += 1) {
+            await page.evaluate(
+              (odd) => {
+                document.body.style.background = odd ? "#fefefe" : "#ffffff";
+              },
+              turn % 2 === 1,
+            );
+            await wait(100);
+          }
+        };
+        try {
+          await repaint(500);
+          expect(heights.at(-1)).toBe(height);
+          // The Recorder attaches its debugger to the tab here, which is when a browser shows its
+          // "started debugging this browser" bar.
+          const started = await api("/browser/recording", {
+            action: "start",
+            title: "Keep the whole page",
+          });
+          expect(started.status).toBe(200);
+          const from = heights.length;
+          await repaint(2_500);
+          const recording = heights.slice(from);
+          expect(recording.length).toBeGreaterThan(0);
+          expect(new Set(recording)).toEqual(new Set([height]));
+          expect(
+            (await api("/browser/recording", { action: "stop" })).status,
+          ).toBe(200);
+          const after = heights.length;
+          await repaint(1_000);
+          expect(new Set(heights.slice(after))).toEqual(new Set([height]));
+        } finally {
+          await cast.stop();
+        }
+      },
+      60_000,
+    );
 
     test("wakes a Recorder whose worker has stopped", async () => {
       const person = profiles.person(PERSON);
@@ -509,10 +652,18 @@ for (const variant of VARIANTS) {
           expect(
             switches.filter((value) => value.startsWith("--disable-features=")),
           ).toEqual([]);
+          // The person's own extensions are in it: the bar that says one attached stays.
+          expect(switches).not.toContain("--silent-debugger-extension-api");
         } else {
           expect(switches).toContain(`--load-extension=${FIXTURE}`);
           expect(switches).toContain(`--disable-extensions-except=${FIXTURE}`);
           expect(switches).not.toContain("--disable-extensions");
+          expect(switches).toContain("--silent-debugger-extension-api");
+          // Through the egress filter: Playwright's own features off, and the ACCEPT_CH restart.
+          expect(disabledFeatures(switches)).toEqual([
+            ...PLAYWRIGHT_DISABLED_FEATURES,
+            "AcceptCHFrame",
+          ]);
         }
       } finally {
         await page.close();
@@ -575,7 +726,12 @@ for (const variant of VARIANTS) {
               target.url.startsWith("chrome-extension://"),
             ),
           ).toEqual([]);
-          expect(await commandLine(page)).toContain("--disable-extensions");
+          const switches = await commandLine(page);
+          expect(switches).toContain("--disable-extensions");
+          expect(disabledFeatures(switches)).toEqual([
+            ...PLAYWRIGHT_DISABLED_FEATURES,
+            "AcceptCHFrame",
+          ]);
         } finally {
           if (previous === undefined) delete process.env.OPENBOT_RECORDER_DIR;
           else process.env.OPENBOT_RECORDER_DIR = previous;
@@ -602,6 +758,41 @@ for (const variant of VARIANTS) {
       const reopened = await api("/browser/open", { connection: CONNECTION });
       expect(reopened.status).toBe(200);
       expect((reopened.json as BrowserState).recorder?.connected).toBe(true);
+    }, 60_000);
+
+    test("stays open while its one window shows a page of the Recorder's own, and opening it again relaunches nothing", async () => {
+      const person = profiles.person(PERSON);
+      if (!person) throw new Error("The browser should be open.");
+      const { context } = person;
+      const own = await context.newPage();
+      await own.goto(`chrome-extension://${person.recorderId}/options.html`);
+      for (const page of person.pages()) await page.close();
+      await wait(500);
+
+      // A window on the screen is an open browser, whatever it shows.
+      const now = await state();
+      expect(now.open).toBe(true);
+      expect(now.tabs).toEqual([]);
+      expect(own.isClosed()).toBe(false);
+
+      // Opening it again is the same browser, connected again: nothing closed and nothing relaunched.
+      const connects = callsFor("connect").length;
+      const again = await api("/browser/open", { connection: CONNECTION });
+      expect(again.status).toBe(200);
+      expect((again.json as BrowserState).open).toBe(true);
+      expect(callsFor("connect")).toHaveLength(connects + 1);
+      expect(own.isClosed()).toBe(false);
+      expect(profiles.person(PERSON)?.context).toBe(context);
+
+      // A tab of the person's goes in front of it, and the browser stays open when it closes.
+      const tab = await api("/browser/tabs", {
+        action: "new",
+        url: `${ORIGIN}/page/back`,
+      });
+      expect(activeTab(tab.json as BrowserState)?.title).toBe("back");
+      await own.close();
+      await wait(300);
+      expect(activeTab(await state())?.title).toBe("back");
     }, 60_000);
 
     test("is closed when the person closes its last window", async () => {
