@@ -13,8 +13,9 @@
  * Its own module, taking the browsers it acts on, so a test can serve these exact routes over a
  * person's browser launched headless, which the computer's own environment refuses for a native one.
  */
-import type { Page } from "playwright";
+import type { BrowserContext, Page } from "playwright";
 import {
+  type BrowserOpenRequest,
   type BrowserState,
   type BrowserTab,
   browserComputerPaths,
@@ -29,7 +30,11 @@ import {
 } from "../../shared/openbot-browser";
 import { navigationFailure } from "./navigation";
 import { BROWSER_NOT_OPEN, BrowserNotOpenError } from "./person-access";
-import { NoInstalledBrowserError } from "./person-browser";
+import {
+  NoInstalledBrowserError,
+  PersonOpenError,
+  type PersonOpenStep,
+} from "./person-browser";
 import type { OpenPersonBrowser, Profiles } from "./profiles";
 import { findRecorder } from "./recorder";
 import { RecorderUnavailableError } from "./recorder-launcher";
@@ -77,21 +82,27 @@ type Schema<T> = {
 function parseBody<T>(
   schema: Schema<T>,
   body: unknown,
-): { ok: true; value: T } | { ok: false; response: Response } {
+): { ok: true; value: T } | { ok: false; error: string; response: Response } {
   const parsed = schema.safeParse(body);
   if (parsed.success) return { ok: true, value: parsed.data };
   const issue = parsed.error.issues[0];
   const where = issue?.path.length
     ? `${issue.path.map(String).join(".")}: `
     : "";
-  return {
-    ok: false,
-    response: json(
-      { error: `${where}${issue?.message ?? "That request is not valid."}` },
-      400,
-    ),
-  };
+  const error = `${where}${issue?.message ?? "That request is not valid."}`;
+  return { ok: false, error, response: json({ error }, 400) };
 }
+
+const messageOf = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
+
+/** A person's browser's opens: how many have arrived and not finished, and the newest connection any brought. */
+type Opening = {
+  /** Settles when the last open to arrive has finished, so the next waits for it. */
+  turn: Promise<unknown>;
+  pending: number;
+  newest: BrowserOpenRequest["connection"];
+};
 
 export function createBrowserHost(options: BrowserHostOptions) {
   const { profiles } = options;
@@ -264,11 +275,81 @@ export function createBrowserHost(options: BrowserHostOptions) {
     return json({ error: navigationFailure(address, error) }, 502);
   };
 
+  /*
+   * OPENS OF ONE BROWSER TAKE TURNS, AND EACH HANDS THE RECORDER THE NEWEST CONNECTION.
+   *
+   * Every open carries a connection OpenBot minted for it, and minting one revokes the one before:
+   * the browser holds one connection, by its install id. Two opens close together, which is what the
+   * Browser page sends when it is loaded again while it is still opening, used to run side by side.
+   * The first handed the Recorder a connection the second had revoked already, the Recorder refused
+   * it as signed out, and the first closed the browser it had just launched, under the second, whose
+   * own connect then failed with "The browser is shutting down". Both answered 502 and the browser
+   * stayed closed. Measured on Google Chrome 156 with the built Recorder and the real server, after a
+   * restart with a newer Recorder, whose reload makes the first open take 2.7 s: two opens 1 s or
+   * 2.5 s apart failed both, every time; 3.5 s apart, the first had finished and both opened.
+   *
+   * So an open waits for the one before it, and connects the Recorder with the newest connection any
+   * open has brought, which is the one OpenBot holds: an open that had waited finds the Recorder
+   * holding it already, which connects at once. And a browser no open has connected since it
+   * launched is closed after a failed connect only when no other open is waiting to connect it.
+   */
+  const openings = new Map<string, Opening>();
+  /** The browsers an open has connected since they launched, by their context, which is theirs alone. */
+  const connectedOnce = new WeakSet<BrowserContext>();
+
   async function open(botId: string, body: unknown): Promise<Response> {
+    const arrived = Date.now();
+    /*
+     * Every open that fails says why in the log, with the step it stopped at: which part of opening
+     * (the launch, the Recorder's load or reload, its worker, the microphone, the connect) gave the
+     * sentence the caller is answered with. Without it a failed open said only that the browser was
+     * then stopped.
+     */
+    const failed = (
+      step: PersonOpenStep | "request",
+      status: number,
+      error: string,
+    ): Response => {
+      console.info(
+        JSON.stringify({
+          type: "computer-browser-open-failed",
+          botId,
+          step,
+          status,
+          error,
+          ms: Date.now() - arrived,
+        }),
+      );
+      return json({ error }, status);
+    };
     const parsed = parseBody(browserOpenRequestSchema, body);
-    if (!parsed.ok) return parsed.response;
+    if (!parsed.ok) return failed("request", 400, parsed.error);
+
+    const opening = openings.get(botId) ?? {
+      turn: Promise.resolve(),
+      pending: 0,
+      newest: parsed.value.connection,
+    };
+    openings.set(botId, opening);
+    opening.newest = parsed.value.connection;
+    opening.pending += 1;
+    const done = () => {
+      opening.pending -= 1;
+      if (opening.pending === 0 && openings.get(botId) === opening)
+        openings.delete(botId);
+    };
+    const run = opening.turn.then(() => openNow(botId, opening, failed));
+    opening.turn = run.then(done, done);
+    return run;
+  }
+
+  async function openNow(
+    botId: string,
+    opening: Opening,
+    failed: (step: PersonOpenStep, status: number, error: string) => Response,
+  ): Promise<Response> {
     const found = await findRecorder(options.recorderDir());
-    if (!found.ok) return json({ error: found.error }, 503);
+    if (!found.ok) return failed("recorder-files", 503, found.error);
 
     const wasOpen = profiles.person(botId) !== undefined;
     let page: Page;
@@ -276,16 +357,15 @@ export function createBrowserHost(options: BrowserHostOptions) {
       page = await profiles.page(botId, { open: { recorder: found.recorder } });
     } catch (error) {
       if (error instanceof NoInstalledBrowserError)
-        return json({ error: error.message }, 503);
-      return json(
-        {
-          error: `The browser could not be opened: ${error instanceof Error ? error.message : String(error)}`,
-        },
+        return failed("launch", 503, error.message);
+      return failed(
+        error instanceof PersonOpenError ? error.step : "launch",
         502,
+        `The browser could not be opened: ${messageOf(error)}`,
       );
     }
     const browser = profiles.person(botId);
-    if (!browser) return json({ error: BROWSER_NOT_OPEN }, 409);
+    if (!browser) return failed("launch", 409, BROWSER_NOT_OPEN);
     // Already open: the window comes to the front and nothing new opens.
     if (wasOpen && browser.window === "native") await putInFront(browser, page);
 
@@ -294,10 +374,10 @@ export function createBrowserHost(options: BrowserHostOptions) {
       browser.window === "native" ? "own" : "external";
     let connected: Awaited<ReturnType<typeof browser.launcher.connect>>;
     try {
-      // Every open, not only the first: idempotent, and the connection the server sends is the one
-      // the Recorder should hold.
+      // Every open, not only the first: idempotent, and the connection the server sent last is the
+      // one the Recorder should hold.
       connected = await browser.launcher.connect({
-        connection: parsed.value.connection,
+        connection: opening.newest,
         narration,
       });
     } catch (error) {
@@ -310,15 +390,29 @@ export function createBrowserHost(options: BrowserHostOptions) {
       };
     }
     if (!connected.ok) {
-      // A browser that has just opened and cannot be connected is closed again: the person was
-      // promised one that is connected. One that was already open stays, with the person's tabs.
-      if (!wasOpen) await profiles.stop(botId);
-      return json(
-        { error: `The Recorder could not be connected: ${connected.error}` },
+      // A browser no open has connected since it launched is closed again: the person was promised
+      // one that is connected. Not while another open waits to connect it, with a connection as new
+      // as this one or newer: closing it would fail that open too. One that was connected stays,
+      // with the person's tabs.
+      if (!connectedOnce.has(browser.context) && opening.pending <= 1)
+        await profiles.stop(botId, "its Recorder could not be connected");
+      return failed(
+        "connect",
         502,
+        `The Recorder could not be connected: ${connected.error}`,
       );
     }
-    return json(await stateOf(browser));
+    connectedOnce.add(browser.context);
+    try {
+      return json(await stateOf(browser));
+    } catch (error) {
+      // The browser went away between the connect and its state: closed by the person, or crashed.
+      return failed(
+        "state",
+        502,
+        `The browser could not be opened: ${messageOf(error)}`,
+      );
+    }
   }
 
   async function handle(

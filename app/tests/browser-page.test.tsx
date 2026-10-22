@@ -94,7 +94,9 @@ function screenState(): BrowserApiState {
         title: "Example Domain",
         active: true,
       },
-      { id: "tab-2", url: "about:blank", title: "", active: false },
+      // An empty tab exactly as the computer reports one: the browser titles a page that has no title with its
+      // address. The strip showed "about:blank" for it in the third end-to-end run.
+      { id: "tab-2", url: "about:blank", title: "about:blank", active: false },
     ],
   };
 }

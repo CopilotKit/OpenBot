@@ -60,6 +60,8 @@ export type BrowserRouteDeps = {
   callTimeoutMs?: number;
 };
 
+/** How much of the computer's sentence a failure's log line keeps: every sentence it says, and never a page of text. */
+const ERROR_LOG_CHARS = 500;
 /** Narration is the largest body here: 4,000 characters of one phrase, as UTF-8, with room for the rest. */
 const BODY_LIMIT_BYTES = 16 * 1024;
 /** Launching a browser, loading the Recorder and handing it its connection takes seconds; a cold computer more. */
@@ -160,14 +162,33 @@ function browserState(value: unknown): BrowserState | null {
     : null;
 }
 
-/** Who hears the person: the Recorder says, and before it has, the window does (a native window has a microphone, a
- * screen does not). A Recorder that is signed out has been told nothing: it is handed narration with its connection. */
+/** Who hears the person, which the window decides: a native window has a microphone, so the Recorder hears them
+ * itself, and a screen has none, so the app hears them. The computer connects the Recorder with exactly that. Only
+ * when no window is known is it what the Recorder says. */
 function narrationOf(state: BrowserState): Narration | undefined {
-  if (state.recorder?.connected && state.recorder.narration)
-    return state.recorder.narration;
   if (state.window === "native") return "own";
   if (state.window === "screen") return "external";
-  return undefined;
+  return state.recorder?.narration;
+}
+
+/**
+ * The Recorder's report as the contract has it for the browser's narration: `voice` only where the Recorder hears the
+ * person itself, and never where the app does. A Recorder that is signed out has forgotten the narration it was handed
+ * with its connection and reports its own default, `own` with a voice, in a screen's browser too (seen after a hosted
+ * Disconnect); the window, not that default, is who hears the person. A Recorder hearing them itself that said nothing
+ * of its voice is not hearing them: off while nothing is recorded, unavailable while something is.
+ */
+function asNarrated(
+  recorder: LauncherState,
+  narration: Narration,
+): LauncherState {
+  const { voice, ...rest } = recorder;
+  if (narration === "external") return { ...rest, narration };
+  return {
+    ...rest,
+    narration,
+    voice: voice ?? (recorder.phase === "idle" ? "off" : "unavailable"),
+  };
 }
 
 /** The Recorder's report once its connection is gone: signed out, as it reports itself after OpenBot signs it out. */
@@ -223,19 +244,24 @@ function computerCaller(
       );
       throw new BrowserCallError(SENTENCES.unreachable);
     }
+    const answered: unknown = await response.json().catch(() => null);
     // The computer answered and said what went wrong, to the person: a page that did not load, a Recorder that failed.
-    if (response.status >= 500)
+    // Its sentence is logged with the status, because it is the only place the reason is said: an open that failed
+    // used to leave a status here and nothing in either log about why.
+    if (response.status >= 500) {
+      const said = (answered as { error?: unknown } | null)?.error;
       console.warn(
         JSON.stringify({
           type: "browser-computer-failed",
           path,
           status: response.status,
+          ...(typeof said === "string" && said
+            ? { error: said.slice(0, ERROR_LOG_CHARS) }
+            : {}),
         }),
       );
-    return {
-      status: response.status,
-      body: await response.json().catch(() => null),
-    };
+    }
+    return { status: response.status, body: answered };
   };
 }
 
@@ -388,7 +414,8 @@ export function createBrowserRoutes(deps: BrowserRouteDeps) {
   /**
    * The person's browser as they see it. The Recorder's report is taken as it says, except that a Recorder holding a
    * connection OpenBot revoked is signed out whatever it says: OpenBot tells it of a revoke at once
-   * (`browserConnectionRevoked`), and when that did not reach it, it hears only on its next call to OpenBot.
+   * (`browserConnectionRevoked`), and when that did not reach it, it hears only on its next call to OpenBot. And its
+   * narration is the window's, signed in or out (`asNarrated`).
    */
   const view = async (
     userId: string,
@@ -399,9 +426,14 @@ export function createBrowserRoutes(deps: BrowserRouteDeps) {
     const revoked =
       recorder?.connected === true &&
       !(await holdsBrowserConnection(deps.recorder.connections, userId));
+    const reported = recorder && revoked ? signedOut(recorder) : recorder;
     return {
       ...state,
-      ...(recorder && revoked ? { recorder: signedOut(recorder) } : {}),
+      ...(reported
+        ? {
+            recorder: narration ? asNarrated(reported, narration) : reported,
+          }
+        : {}),
       available: true,
       computerId: personBrowserId(userId),
       ...(narration ? { narration } : {}),
@@ -475,15 +507,46 @@ export function createBrowserRoutes(deps: BrowserRouteDeps) {
     cookie: context.req.header("cookie"),
   });
 
+  /** Each person's open in progress, which the next one waits for. */
+  const connecting = new Map<string, Promise<void>>();
+
   /**
    * Opens the person's browser, or brings it forward, with its Recorder connected as them: what Open does, and what
    * Record does first when the Recorder's connection has gone. Answers the browser's state, or what the person is told.
    *
-   * The connection is minted here and exchanged at once, as the Recorder's own exchange would: the same store, the same
-   * checks, the sealed organization session carried from this request. Its install id is the browser's, so this revokes
-   * the token the last one made, in the same transaction, rather than adding another.
+   * One at a time for each person. Each mints the browser a connection, which revokes the one the open before it minted,
+   * and the Recorder asks OpenBot whether its connection stands before it takes it. Two opens side by side (the Browser
+   * page loaded again while it was opening) handed the Recorder a connection the second had revoked already: it refused
+   * it, the computer closed the browser it had just launched, and both opens failed (agent-computer's browser-host.ts
+   * has the measurement). Waiting here, a connection is never revoked before the open that minted it has its answer. The
+   * computer takes turns as well, for opens that reach it through another of OpenBot's servers.
    */
   async function connect(
+    asker: Asker,
+  ): Promise<
+    { ok: true; state: BrowserState | null } | { ok: false; response: Response }
+  > {
+    const key = asker.actor.id;
+    const run = (connecting.get(key) ?? Promise.resolve()).then(() =>
+      connectNow(asker),
+    );
+    const settled = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    connecting.set(key, settled);
+    void settled.then(() => {
+      if (connecting.get(key) === settled) connecting.delete(key);
+    });
+    return run;
+  }
+
+  /**
+   * One open, `connect`'s turn. The connection is minted here and exchanged at once, as the Recorder's own exchange
+   * would: the same store, the same checks, the sealed organization session carried from this request. Its install id
+   * is the browser's, so this revokes the token the last one made, in the same transaction, rather than adding another.
+   */
+  async function connectNow(
     asker: Asker,
   ): Promise<
     { ok: true; state: BrowserState | null } | { ok: false; response: Response }

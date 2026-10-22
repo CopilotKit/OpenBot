@@ -104,6 +104,18 @@ let slowNextNavigation:
  * a computer with no such route answers; or not until `never` settles. */
 let refuseNextDisconnect: { status: number } | { never: Promise<void> } | null =
   null;
+/** The window an open shows its browser in: a screen (hosted OpenBot) unless a test opens a native one (Desktop). */
+let openAs: "screen" | "native" = "screen";
+/**
+ * When a test says so, the Recorder takes a connection as the real one does (extension/src/background/launcher.ts): it
+ * asks OpenBot who the connection is for, `askMs` after it was handed it, and refuses one OpenBot answers is signed out,
+ * with its own sentence, which the computer answers as a Recorder that could not be connected.
+ */
+let confirmOpens: {
+  askMs: number;
+  /** OpenBot's status for `/api/recorder/me` with this token. */
+  me: (token: string) => Promise<number>;
+} | null = null;
 
 const recorderOf = (opened: Opened): LauncherState =>
   opened.state.recorder as LauncherState;
@@ -157,19 +169,33 @@ const computer = Bun.serve<{ bot: string }>({
         const parsed = browserOpenRequestSchema.safeParse(body);
         if (!parsed.success)
           return Response.json({ error: "Bad request." }, { status: 400 });
+        if (confirmOpens) {
+          await Bun.sleep(confirmOpens.askMs);
+          if ((await confirmOpens.me(parsed.data.connection.token)) === 401)
+            return Response.json(
+              {
+                error:
+                  "The Recorder could not be connected: OpenBot did not accept this browser's connection. Open the browser from OpenBot again.",
+              },
+              { status: 502 },
+            );
+        }
+        const native = openAs === "native";
         const next: Opened = {
           connection: parsed.data.connection,
           narrated: [],
           state: {
             open: true,
-            browser: "chromium",
-            window: "screen",
+            browser: native ? "chrome" : "chromium",
+            window: openAs,
             recorder: {
               connected: true,
               userId: parsed.data.connection.user.id,
               phase: "idle",
               actions: 0,
-              narration: "external",
+              ...(native
+                ? { narration: "own" as const, voice: "off" as const }
+                : { narration: "external" as const }),
             },
             tabs: [
               { id: "t1", url: "about:blank", title: "New Tab", active: true },
@@ -890,6 +916,73 @@ describe("opening a person's own browser", () => {
     });
   });
 
+  test("an open the computer could not make is logged with the computer's own sentence", async () => {
+    // The third end-to-end run: two opens failed with 502, and the server's log said only that, so nobody could say why.
+    const sentence =
+      "The Recorder could not be connected: The Recorder did not answer in time.";
+    refuseNextOpen = { status: 502, error: sentence };
+    const { result, warned } = await logged(() =>
+      call(openbot, "/api/browser/open", { method: "POST", as: "ada" }),
+    );
+    expect(result.status).toBe(502);
+    expect(
+      warned
+        .map((line) => JSON.parse(line) as Record<string, unknown>)
+        .filter((line) => line.type === "browser-computer-failed"),
+    ).toEqual([
+      {
+        type: "browser-computer-failed",
+        path: "/browser/open",
+        status: 502,
+        error: sentence,
+      },
+    ]);
+  });
+
+  test("two opens at once both open the browser, and the Recorder is never handed a connection the other revoked", async () => {
+    // The third end-to-end run: the Browser page, loaded again while it was opening, sent a second open, whose connection
+    // revoked the first's before the Recorder took it. The Recorder refused it as signed out, and both opens failed.
+    confirmOpens = {
+      askMs: 200,
+      me: async (token) =>
+        (await call(openbot, "/api/recorder/me", { headers: bearer(token) }))
+          .status,
+    };
+    try {
+      const first = call(openbot, "/api/browser/open", {
+        method: "POST",
+        as: "ada",
+      });
+      await Bun.sleep(50);
+      const second = call(openbot, "/api/browser/open", {
+        method: "POST",
+        as: "ada",
+      });
+      const answers = await Promise.all([first, second]);
+      expect(
+        await Promise.all(
+          answers.map(async (answer) => ({
+            status: answer.status,
+            body: await answer.json(),
+          })),
+        ),
+      ).toEqual([
+        { status: 200, body: expect.objectContaining({ ok: true }) },
+        { status: 200, body: expect.objectContaining({ ok: true }) },
+      ]);
+    } finally {
+      confirmOpens = null;
+    }
+    // The connection the Recorder holds is the one that stands.
+    expect(
+      (
+        await call(openbot, "/api/recorder/me", {
+          headers: bearer(handed(ada.id).token),
+        })
+      ).status,
+    ).toBe(200);
+  });
+
   test("each person reaches only their own browser", async () => {
     await open(openbot, "ada");
     const benOpened = await open(openbot, "ben");
@@ -1497,6 +1590,72 @@ describe("Record after the OpenBot browser is disconnected", () => {
     expect(recordings()).toBe(before);
     expect(browsers.get(computerId())?.state.recorder?.phase).toBe("idle");
   });
+});
+
+describe("who hears the person, as every answer says it", () => {
+  // The window decides (shared/openbot-browser.ts): a native window's Recorder hears the person itself and says whether
+  // it does (`voice`); a screen's browser has no microphone, the app hears the person, and there is no `voice`.
+  const expected = {
+    screen: { narration: "external" as const },
+    native: { narration: "own" as const, voice: "off" as const },
+  };
+  const state = async () =>
+    (await (
+      await call(openbot, "/api/browser", { as: "ada" })
+    ).json()) as BrowserApiState;
+  const newTab = async () =>
+    (await (
+      await call(openbot, "/api/browser/tabs", {
+        method: "POST",
+        as: "ada",
+        json: { action: "new" },
+      })
+    ).json()) as BrowserApiState;
+
+  for (const window of ["screen", "native"] as const)
+    test(`a ${window === "screen" ? "hosted" : "Desktop"} browser's Recorder is reported with the window's narration, signed in or out`, async () => {
+      openAs = window;
+      try {
+        const opened = await open(openbot, "ada");
+        expect(opened.narration).toBe(expected[window].narration);
+        const signedIn: LauncherState = {
+          connected: true,
+          userId: ada.id,
+          phase: "idle",
+          actions: 0,
+          ...expected[window],
+        };
+        for (const answer of [await state(), await newTab()]) {
+          expect(answer.narration).toBe(expected[window].narration);
+          expect(answer.recorder).toEqual(signedIn);
+        }
+
+        // Disconnected in Settings, Browsers: the Recorder reports what the real one reports once signed out, which is
+        // its own default narration, `own` with a voice, whatever window it is in (the third end-to-end run's hosted
+        // Disconnect).
+        const removed = await call(
+          openbot,
+          `/api/recorder/connections/${handed(ada.id).connectionId}`,
+          { method: "DELETE", as: "ada" },
+        );
+        expect(removed.status).toBe(204);
+        expect(
+          browsers.get(personBrowserId(ada.id))?.state.recorder,
+        ).toMatchObject({ connected: false, narration: "own", voice: "off" });
+        const signedOut: LauncherState = {
+          connected: false,
+          phase: "idle",
+          actions: 0,
+          ...expected[window],
+        };
+        for (const answer of [await state(), await newTab()]) {
+          expect(answer.narration).toBe(expected[window].narration);
+          expect(answer.recorder).toEqual(signedOut);
+        }
+      } finally {
+        openAs = "screen";
+      }
+    });
 });
 
 describe("a person's browser on the computer routes and the live screen", () => {

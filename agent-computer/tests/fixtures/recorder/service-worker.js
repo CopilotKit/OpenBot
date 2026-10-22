@@ -12,6 +12,9 @@
  * can see from inside the browser at that moment (its tabs, the one in front, its microphone
  * permission, whether it opened its setup page), so a test reads the Recorder's side of each call
  * rather than taking the computer's word for it.
+ *
+ * Like the Recorder, it asks OpenBot whether a connection stands before it takes it, and refuses one
+ * OpenBot says is signed out.
  */
 const LAUNCHER_GLOBAL = "openbotLauncher";
 /**
@@ -93,8 +96,39 @@ async function report(method, input) {
   });
 }
 
+/**
+ * Whether OpenBot says this connection is signed out, which the Recorder asks before it takes one
+ * (`confirm` in extension/src/background/launcher.ts). Only that answer refuses it: an OpenBot that
+ * cannot be reached leaves the connection taken, as the Recorder's does.
+ */
+async function signedOut(connection) {
+  const me = await fetch(new URL("/api/recorder/me", connection.openbotUrl), {
+    headers: { authorization: `Bearer ${connection.token}` },
+  }).catch(() => undefined);
+  return me?.status === 401;
+}
+
 globalThis[LAUNCHER_GLOBAL] = {
   async connect(input) {
+    // The connection it holds already, handed again, is taken at once: the Recorder asks only of a new one.
+    const now = await held();
+    const holding =
+      JSON.stringify(now.connection) === JSON.stringify(input.connection) &&
+      now.narration === input.narration;
+    if (!holding && (await signedOut(input.connection))) {
+      // As the Recorder ends after OpenBot says its connection is gone: signed out, and a recording
+      // under it stopped.
+      if (now.recording)
+        await chrome.debugger
+          .detach({ tabId: now.recording.tabId })
+          .catch(() => undefined);
+      await chrome.storage.local.set({ connection: null, recording: null });
+      return {
+        ok: false,
+        error:
+          "OpenBot did not accept this browser's connection. Open the browser from OpenBot again.",
+      };
+    }
     await chrome.storage.local.set({
       connection: input.connection,
       narration: input.narration,

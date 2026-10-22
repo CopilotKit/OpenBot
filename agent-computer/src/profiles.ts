@@ -829,10 +829,11 @@ export function createProfiles(
      *
      * The same close the cap and the idle sweep make, so it goes through the same path rather than
      * repeating it: a request is one more reason a browser closes, not a different kind of closing,
-     * and anything watching has to come down either way.
+     * and anything watching has to come down either way. `reason` is what the close is logged with,
+     * when the caller knows better than "it was stopped".
      */
-    async stop(botId: string): Promise<boolean> {
-      return closeOnRequest(botId, "it was stopped");
+    async stop(botId: string, reason = "it was stopped"): Promise<boolean> {
+      return closeOnRequest(botId, reason);
     },
 
     /**
