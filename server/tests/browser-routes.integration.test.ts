@@ -623,6 +623,8 @@ describe("opening a person's own browser", () => {
       computerId: personBrowserId(ben.id),
       open: false,
       tabs: [],
+      // The person's own browsers, which a computer that is not answering cannot list.
+      real: { connected: false, browsers: [] },
     });
     expect(started).toEqual([]);
     expect(asked.slice(before)).toEqual([]);

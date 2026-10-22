@@ -435,6 +435,13 @@
       "when": 1792638309832,
       "tag": "0061_recorder_extension",
       "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1792700692988,
+      "tag": "0062_recorder_activity",
+      "breakpoints": true
     }
   ]
 }

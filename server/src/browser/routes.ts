@@ -14,9 +14,20 @@ import {
   browserTabsRequestSchema,
   type LauncherState,
   type Narration,
+  type RealBrowser,
+  type RealBrowserOpenResponse,
+  type RealBrowserRequest,
+  realBrowserComputerPaths,
 } from "@openbot/shared/openbot-browser";
-import type { RecorderConnection } from "@openbot/shared/recorder-api";
-import { RECORDER_EXTENSION_ID } from "@openbot/shared/recorder-extension";
+import type {
+  RecorderActivity,
+  RecorderConnection,
+} from "@openbot/shared/recorder-api";
+import {
+  RECORDER_EXTENSION_ID,
+  RECORDER_STORE_IDS,
+  recorderStorePage,
+} from "@openbot/shared/recorder-extension";
 import { Hono, type MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import type { z } from "zod";
@@ -24,6 +35,7 @@ import type { AuditStore } from "../audit";
 import type { AppVariables, AuthenticatedActor } from "../auth/guards";
 import { checkComputerAddress } from "../computer/target";
 import { recorderAudit, recorderConnected } from "../recorder/connected";
+import type { ReportingConnection } from "../recorder/connections";
 import type { RecorderExtensionDeps } from "../recorder/wiring";
 import { personBrowserId, personBrowserInstallId } from "./person";
 
@@ -66,6 +78,24 @@ export type BrowserRouteDeps = {
   /** A single-user OpenBot (`config.singleUser`, OpenBot Desktop among them): the one person is its admin, so a setup
    * failure is told to them as theirs to see to, not as something to ask an admin about. */
   singleUser?: boolean;
+  /** The Recorder's ids in the browsers' stores, where a person adds it to their own browser: `RECORDER_STORE_IDS`
+   * unless a test gives its own. Empty until it is published, and an empty one is never acted on. */
+  storeIds?: { chrome?: string; edge?: string };
+};
+
+/**
+ * How long a Recorder's report of what it is doing stands without another. A Recorder says it whenever its recording
+ * phase changes and every 30 s while one runs (shared/recorder-api.ts), so three missed reports in a row: a browser that
+ * quit or lost its network mid-recording stops showing the red dot after this, rather than forever.
+ */
+export const ACTIVITY_STALE_MS = 90_000;
+
+/** The person's own browsers in the order the Browser button tries them: Chrome first, then Edge. */
+const REAL_BROWSERS: readonly RealBrowser[] = ["chrome", "msedge"];
+/** Which store each of them installs the Recorder from. */
+const STORE_OF: Record<RealBrowser, "chrome" | "edge"> = {
+  chrome: "chrome",
+  msedge: "edge",
 };
 
 /** How much of the computer's sentence a failure's log line keeps: every sentence it says, and never a page of text. */
@@ -286,16 +316,89 @@ function computerCaller(
   };
 }
 
-/** Whether OpenBot holds a live Recorder connection for this person's OpenBot browser: the one stored under the
- * browser's install id, which each open replaces. */
+/** Whether these, a person's live connections, hold one for their OpenBot browser: the one stored under the browser's
+ * install id, which each open replaces. */
+function holdsBrowserConnectionIn(
+  live: readonly RecorderConnection[],
+  userId: string,
+): boolean {
+  const installId = personBrowserInstallId(personBrowserId(userId));
+  return live.some((connection) => connection.installId === installId);
+}
+
+/** Whether OpenBot holds a live Recorder connection for this person's OpenBot browser. */
 async function holdsBrowserConnection(
   connections: BrowserRouteDeps["recorder"]["connections"],
   userId: string,
 ): Promise<boolean> {
-  const installId = personBrowserInstallId(personBrowserId(userId));
-  return (await connections.list(userId)).some(
-    (connection) => connection.installId === installId,
-  );
+  return holdsBrowserConnectionIn(await connections.list(userId), userId);
+}
+
+/** A Recorder's own report as the red dot reads it: what it is recording, and nothing of how it hears the person. */
+function activityOf(recorder: LauncherState): RecorderActivity {
+  return {
+    phase: recorder.phase,
+    ...(recorder.recordingId ? { recordingId: recorder.recordingId } : {}),
+    ...(recorder.title !== undefined ? { title: recorder.title } : {}),
+    ...(recorder.startedAt ? { startedAt: recorder.startedAt } : {}),
+    actions: recorder.actions,
+  };
+}
+
+/**
+ * What the person's Recorders are doing, for the Browser button's red dot (`BrowserApiState.activity`): the newest
+ * report from any of their live connections, whatever way it was connected, that is no older than
+ * {@link ACTIVITY_STALE_MS} and is of a recording (a Recorder that last said it was idle is not recording); or the
+ * OpenBot browser's own Recorder, as its computer reported it just now, whichever is newer. Undefined while nothing
+ * records.
+ *
+ * What the OpenBot browser's computer says now is newer than anything its Recorder reported, so when the computer was
+ * asked (`browser`), that Recorder's last report gives way to it: a Stop whose report did not arrive does not keep the
+ * dot on for a minute and a half.
+ */
+export function newestActivity(input: {
+  reports: readonly ReportingConnection[];
+  /** The OpenBot browser's install id, and its Recorder as its computer reported it just now (none: it is closed). */
+  browser?: { installId: string; recorder?: LauncherState };
+  now: number;
+}): RecorderActivity | undefined {
+  const live = input.browser?.recorder;
+  if (live && live.phase !== "idle") return activityOf(live);
+  let newest: { activity: RecorderActivity; at: number } | undefined;
+  for (const report of input.reports) {
+    const { activity, activityAt } = report;
+    if (!activity || !activityAt || activity.phase === "idle") continue;
+    if (input.browser && report.installId === input.browser.installId) continue;
+    const at = activityAt.getTime();
+    if (input.now - at > ACTIVITY_STALE_MS) continue;
+    if (!newest || at > newest.at) newest = { activity, at };
+  }
+  return newest?.activity;
+}
+
+/**
+ * Which of the person's own browsers a Recorder connected through OpenBot Desktop is in, from the name it connected
+ * under. The Recorder names itself for its browser's brand and the computer ("Microsoft Edge on macOS", "Google Chrome
+ * on Windows": extension/src/pages/connect/connect-page.tsx), so a name that says Edge is Edge. Anything else is
+ * Chrome, which a name that does not say is far more likely to be, and which Desktop tries first besides.
+ */
+export function realBrowserOf(label: string): RealBrowser {
+  return /\bedge\b/i.test(label) ? "msedge" : "chrome";
+}
+
+/** The connection the person was last heard from on: its last report, else its last use, else its connecting. */
+function lastHeardFrom<T extends ReportingConnection>(
+  connections: readonly T[],
+): T | undefined {
+  const heard = (connection: T) =>
+    Math.max(
+      connection.activityAt?.getTime() ?? 0,
+      Date.parse(connection.lastUsedAt ?? connection.createdAt),
+    );
+  let latest: T | undefined;
+  for (const connection of connections)
+    if (!latest || heard(connection) > heard(latest)) latest = connection;
+  return latest;
 }
 
 /**
@@ -455,17 +558,21 @@ export function createBrowserRoutes(deps: BrowserRouteDeps) {
    * The person's browser as they see it. The Recorder's report is taken as it says, except that a Recorder holding a
    * connection OpenBot revoked is signed out whatever it says: OpenBot tells it of a revoke at once
    * (`browserConnectionRevoked`), and when that did not reach it, it hears only on its next call to OpenBot. And its
-   * narration is the window's, signed in or out (`asNarrated`).
+   * narration is the window's, signed in or out (`asNarrated`). `live` is the person's live connections, when they were
+   * read already.
    */
   const view = async (
     userId: string,
     state: BrowserState,
+    live?: readonly RecorderConnection[],
   ): Promise<BrowserApiState> => {
     const narration = narrationOf(state);
     const recorder = state.recorder;
     const revoked =
       recorder?.connected === true &&
-      !(await holdsBrowserConnection(deps.recorder.connections, userId));
+      !(live
+        ? holdsBrowserConnectionIn(live, userId)
+        : await holdsBrowserConnection(deps.recorder.connections, userId));
     const reported = recorder && revoked ? signedOut(recorder) : recorder;
     return {
       ...state,
@@ -480,22 +587,192 @@ export function createBrowserRoutes(deps: BrowserRouteDeps) {
     };
   };
 
+  /**
+   * The person's own browsers installed on OpenBot Desktop's computer, as it lists them (`GET /browser/real`), which
+   * launches nothing. Never fails: a computer that cannot be asked, or an answer of another shape, has none.
+   */
+  async function installedBrowsers(
+    base: string,
+    computerId: string,
+  ): Promise<RealBrowser[]> {
+    try {
+      const answer = await ask(
+        base,
+        computerId,
+        realBrowserComputerPaths.installed,
+      );
+      const listed = (answer.body as { browsers?: unknown } | null)?.browsers;
+      if (answer.status !== 200 || !Array.isArray(listed)) return [];
+      return REAL_BROWSERS.filter((browser) => listed.includes(browser));
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * What the computer the person's browser runs on says, when it is running: asking never starts one. The OpenBot
+   * browser's state (null: it could not be asked, which reads as closed), and, when `real` asks for them (OpenBot
+   * Desktop), the person's own browsers installed there. Never fails for the computer.
+   */
+  async function askComputer(
+    computerId: string,
+    real: boolean,
+  ): Promise<{ state: BrowserState | null; browsers: RealBrowser[] }> {
+    const computers = deps.computers;
+    const none = { state: null, browsers: [] };
+    if (!computers) return none;
+    let base: string;
+    try {
+      if (!(await computers.running(computerId))) return none;
+      base = await computers.locate(computerId);
+    } catch {
+      return none;
+    }
+    const [state, browsers] = await Promise.all([
+      ask(base, computerId, browserComputerPaths.state).then(
+        (answer) => (answer.status === 200 ? browserState(answer.body) : null),
+        () => null,
+      ),
+      real ? installedBrowsers(base, computerId) : [],
+    ]);
+    return { state, browsers };
+  }
+
   /** The browser as it is now, for the person to see. Never fails for the computer: a browser that cannot be asked is
    * one that is not open, and opening it says why. */
   async function currentState(userId: string): Promise<BrowserApiState> {
     const computerId = personBrowserId(userId);
-    const computers = deps.computers;
-    if (!computers) return closed(computerId);
-    let state: BrowserState | null;
-    try {
-      if (!(await computers.running(computerId))) return closed(computerId);
-      const base = await computers.locate(computerId);
-      const answer = await ask(base, computerId, browserComputerPaths.state);
-      state = answer.status === 200 ? browserState(answer.body) : null;
-    } catch {
-      return closed(computerId);
-    }
+    const { state } = await askComputer(computerId, false);
     return state ? view(userId, state) : closed(computerId);
+  }
+
+  /**
+   * The state the app reads (`GET /api/browser`): the browser as it is now, what any of the person's Recorders is
+   * recording (`activity`, the Browser button's red dot), and on OpenBot Desktop the person's own browsers and whether
+   * a Recorder in one is connected through Desktop (`real`). One query for every Recorder connection the person has,
+   * beside the computer it already asked; nothing is started or reached that the state did not reach before.
+   */
+  async function apiState(userId: string): Promise<BrowserApiState> {
+    const computerId = personBrowserId(userId);
+    if (!deps.computers) return closed(computerId);
+    const native = deps.computers.shows === "native";
+    const [reports, asked] = await Promise.all([
+      deps.recorder.connections.reporting(userId),
+      askComputer(computerId, native),
+    ]);
+    const state = asked.state
+      ? await view(userId, asked.state, reports)
+      : closed(computerId);
+    const activity = newestActivity({
+      reports,
+      now: Date.now(),
+      ...(asked.state
+        ? {
+            browser: {
+              installId: personBrowserInstallId(computerId),
+              ...(asked.state.recorder
+                ? { recorder: asked.state.recorder }
+                : {}),
+            },
+          }
+        : {}),
+    });
+    return {
+      ...state,
+      ...(native
+        ? {
+            real: {
+              connected: reports.some(
+                (connection) => connection.via === "desktop",
+              ),
+              browsers: asked.browsers,
+            },
+          }
+        : {}),
+      ...(activity ? { activity } : {}),
+    };
+  }
+
+  /**
+   * On OpenBot Desktop, the Browser button works with the person's own everyday Chrome or Edge rather than the OpenBot
+   * browser, once the Recorder can be in it. Answers what it did, or null to open the OpenBot browser as before.
+   *
+   * - A Recorder connected through Desktop (`via: "desktop"`): its browser is brought forward. Which browser is read
+   *   from the name the connection was made under (`realBrowserOf`), on the connection the person was heard from last.
+   * - None, and the Recorder is published for one of the person's installed browsers: its store page opens in that
+   *   browser, Chrome first, for the person to add it.
+   * - Neither: null, and the OpenBot browser opens, so the button keeps working until the Recorder is published. Before
+   *   then the computer is not even asked which browsers are installed.
+   */
+  async function openReal(userId: string): Promise<Response | null> {
+    const computers = deps.computers;
+    if (!computers) return null;
+    const computerId = personBrowserId(userId);
+    const connected = lastHeardFrom(
+      (await deps.recorder.connections.reporting(userId)).filter(
+        (connection) => connection.via === "desktop",
+      ),
+    );
+    if (connected) {
+      const browser = realBrowserOf(connected.label);
+      try {
+        const base = await computers.locate(computerId);
+        const answer = await ask(
+          base,
+          computerId,
+          realBrowserComputerPaths.front,
+          {
+            body: { browser } satisfies RealBrowserRequest,
+          },
+        );
+        if (answer.status < 200 || answer.status >= 300) return refused(answer);
+      } catch (error) {
+        return unreachable(error);
+      }
+      return Response.json({
+        ok: true,
+        opened: "real",
+        browser,
+      } satisfies RealBrowserOpenResponse);
+    }
+
+    const storeIds = deps.storeIds ?? RECORDER_STORE_IDS;
+    const published = REAL_BROWSERS.filter(
+      (browser) => storeIds[STORE_OF[browser]],
+    );
+    if (published.length === 0) return null;
+    let base: string;
+    try {
+      base = await computers.locate(computerId);
+    } catch {
+      // The OpenBot browser's open locates the same computer, and says why it could not.
+      return null;
+    }
+    const installed = await installedBrowsers(base, computerId);
+    const browser = published.find((each) => installed.includes(each));
+    const id = browser ? storeIds[STORE_OF[browser]] : undefined;
+    if (!browser || !id) return null;
+    try {
+      const answer = await ask(
+        base,
+        computerId,
+        realBrowserComputerPaths.store,
+        {
+          body: {
+            browser,
+            url: recorderStorePage(STORE_OF[browser], id),
+          } satisfies RealBrowserRequest,
+        },
+      );
+      if (answer.status < 200 || answer.status >= 300) return refused(answer);
+    } catch (error) {
+      return unreachable(error);
+    }
+    return Response.json({
+      ok: true,
+      opened: "store",
+      browser,
+    } satisfies RealBrowserOpenResponse);
   }
 
   /** Forwards one request to the person's browser. `answer` is what the person is told when it was taken: the browser's
@@ -699,10 +976,15 @@ export function createBrowserRoutes(deps: BrowserRouteDeps) {
   }
 
   routes.get("/", deps.requireUser, async (context) =>
-    context.json(await currentState(context.var.actor.id)),
+    context.json(await apiState(context.var.actor.id)),
   );
 
   routes.post("/open", deps.requireUser, async (context) => {
+    // Hosted OpenBot shows the person a cloud browser, and there is no everyday browser of theirs to bring forward.
+    if (deps.computers?.shows === "native") {
+      const real = await openReal(context.var.actor.id);
+      if (real) return real;
+    }
     const computerId = personBrowserId(context.var.actor.id);
     const connected = await connect(askerOf(context));
     if (!connected.ok) return connected.response;

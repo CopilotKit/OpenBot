@@ -3,10 +3,12 @@ import {
   type ExchangeResponse,
   exchangeRequestSchema,
   type LearningSpaceState,
+  RECORDER_SIGNED_OUT,
   type RecorderConnection,
   type RecorderConnectionsResponse,
   type RecorderMe,
   type RecorderUser,
+  recorderActivitySchema,
 } from "@openbot/shared/recorder-api";
 import { extensionIdFromOrigin } from "@openbot/shared/recorder-extension";
 import { Hono, type MiddlewareHandler } from "hono";
@@ -222,6 +224,49 @@ export function createRecorderRoutes(deps: RecorderRouteDeps) {
 
   routes.get("/learning", deps.requireRecorder, async (context) =>
     context.json({ learning: await deps.learningSpace(context.var.actor) }),
+  );
+
+  // What this browser's Recorder is doing now, which it says whenever its recording phase changes and every 30 s while
+  // one runs: the Browser button's red dot reads it (browser/routes.ts), so the dot follows a recording in the person's
+  // everyday browser as well as in the OpenBot browser. Kept against the connection, in place of the last report, and
+  // never audited: it is a heartbeat, not a decision.
+  routes.post(
+    "/activity",
+    deps.requireRecorder,
+    jsonOnly,
+    smallBody,
+    async (context) => {
+      const body = recorderActivitySchema.safeParse(
+        await context.req.json().catch(() => null),
+      );
+      if (!body.success) {
+        return context.json(
+          { error: "That report of what is being recorded was not complete." },
+          400,
+        );
+      }
+      const connectionId = context.var.recorderConnectionId;
+      // Revoked after the guard read its token: signed out, in the guard's own words, as the next request would be.
+      if (
+        !connectionId ||
+        !(await deps.connections.reportActivity(
+          context.var.actor.id,
+          connectionId,
+          body.data,
+        ))
+      ) {
+        return context.json(
+          {
+            error:
+              "This browser is no longer connected to OpenBot. Connect it again.",
+            code: RECORDER_SIGNED_OUT,
+            reason: "revoked",
+          },
+          401,
+        );
+      }
+      return context.body(null, 204);
+    },
   );
 
   return routes;
