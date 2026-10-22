@@ -581,15 +581,34 @@ export function createProfiles(
     const sessionCookies = await keepSessionCookiesFrom(botId, dir, context);
     const { recorderId } = person;
     let page = personPages(context, recorderId).at(-1);
-    if (!page) {
-      try {
-        page = await context.newPage();
-      } catch (error) {
-        // Not left running unrecorded: a browser that never made it into the map is closed here.
-        await sessionCookies?.stop();
-        await context.close().catch(() => undefined);
-        throw error;
+    try {
+      page ??= await context.newPage();
+      /*
+       * What a hosted Bot's browser says about itself, said by the hosted person's browser too:
+       * both are this computer's Chromium on its network, and a person's search or sign-in is
+       * judged by the same signals. Without it a headless one sent `HeadlessChrome` in its user
+       * agent and its client hints, and Google answered searches with its "unusual traffic" check
+       * and refused sign-in as a browser that "may not be secure", from an address where Chrome was
+       * fine. Before the person's first page loads, and for every tab as it opens. Read from one of
+       * the person's own tabs first, because what the browser says is read once per browser from
+       * a page, and the Recorder's setup page may be the other one there, closing. A native window
+       * is the person's own browser, which says who it is already, as a local Bot's does.
+       */
+      if (window === "screen") {
+        const network = { headless: runtime.mode === "headless" };
+        await attachPageNetwork(context, page, network);
+        await attachBrowserNetwork(context, network);
+        for (const opened of context.pages())
+          void attachPageNetwork(context, opened, network);
+        context.on("page", (opened) => {
+          void attachPageNetwork(context, opened, network);
+        });
       }
+    } catch (error) {
+      // Not left running unrecorded: a browser that never made it into the map is closed here.
+      await sessionCookies?.stop();
+      await context.close().catch(() => undefined);
+      throw error;
     }
     const record: LiveBrowser = {
       context,

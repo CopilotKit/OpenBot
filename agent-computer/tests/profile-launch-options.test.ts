@@ -111,4 +111,53 @@ describe.skipIf(
       }
     },
   );
+
+  test("a hosted person's browser is headed or headless exactly as a Bot's is beside it", async () => {
+    // Headless on a developer's machine and headed on the virtual display where hosted computers
+    // run (Linux), for the person as for the Bot: a headless browser names itself HeadlessChrome,
+    // which is what the person's must never be where a Bot's is not.
+    const { chromium } = await import("playwright");
+    process.env.COMPUTER_BROWSER_BACKEND = "managed";
+    delete process.env.COMPUTER_BROWSER_MODE;
+    delete process.env.COMPUTER_SANDBOX;
+    const launch = spyOn(
+      chromium,
+      "launchPersistentContext",
+    ).mockImplementation(async () => {
+      throw new Error("launch inspected without starting a browser");
+    });
+    const { createProfiles } = await import(
+      "../src/profiles?launch-options=person"
+    );
+    const { findRecorder } = await import("../src/recorder");
+    const found = await findRecorder(
+      join(import.meta.dir, "fixtures", "recorder"),
+    );
+    if (!found.ok) throw new Error(found.error);
+    const root = await mkdtemp(join(tmpdir(), "openbot-launch-options-"));
+    const profiles = createProfiles(root);
+    try {
+      await expect(profiles.page("bot-one")).rejects.toThrow(
+        "launch inspected",
+      );
+      await expect(
+        profiles.page("person-0123456789abcdef0123456789abcdef", {
+          open: { recorder: found.recorder },
+        }),
+      ).rejects.toThrow("launch inspected");
+      const [[, bot], [, person]] = launch.mock.calls as [
+        unknown,
+        { headless?: boolean; channel?: string; args?: string[] },
+      ][];
+      expect(person?.headless).toBe(bot?.headless);
+      expect(person?.headless).toBe(process.platform !== "linux");
+      expect(person?.channel).toBe(bot?.channel);
+      // Every switch a Bot's browser launches with, and then the Recorder's own.
+      expect(person?.args?.slice(0, bot?.args?.length)).toEqual(bot?.args);
+    } finally {
+      await profiles.closeAll();
+      launch.mockRestore();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 });

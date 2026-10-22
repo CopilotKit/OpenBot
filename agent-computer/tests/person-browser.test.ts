@@ -65,6 +65,9 @@ const openbot = asked
           calls.push((await request.json()) as FixtureCall);
           return new Response("");
         }
+        // What a browser sent, for comparing what two browsers say about themselves.
+        if (url.pathname === "/headers")
+          return Response.json(Object.fromEntries(request.headers));
         if (url.pathname === "/report.txt")
           return new Response("the person's file", {
             headers: {
@@ -736,6 +739,60 @@ for (const variant of VARIANTS) {
           if (previous === undefined) delete process.env.OPENBOT_RECORDER_DIR;
           else process.env.OPENBOT_RECORDER_DIR = previous;
           await profiles.stop("bot-beside");
+        }
+      },
+      60_000,
+    );
+
+    test.skipIf(variant.window !== "screen")(
+      "says exactly what a hosted Bot's browser says about itself",
+      async () => {
+        // The run that found it: Google showed the hosted person's browser its "unusual traffic"
+        // check and refused it sign-in, from an address where Chrome was fine, and it had sent
+        // HeadlessChrome/151 in its user agent where a Bot's browser beside it sent Chrome/151.
+        const person = profiles.person(PERSON);
+        if (!person) throw new Error("The browser should be open.");
+        const said = async (page: Page) => {
+          await page.goto(`${ORIGIN}/headers`);
+          const headers = JSON.parse(
+            await page.evaluate(() => document.body.innerText),
+          ) as Record<string, string>;
+          const script = await page.evaluate(() => ({
+            userAgent: navigator.userAgent,
+            brands: (
+              navigator as Navigator & {
+                userAgentData?: { brands: { brand: string }[] };
+              }
+            ).userAgentData?.brands.map((brand) => brand.brand),
+          }));
+          return {
+            wire: {
+              "user-agent": headers["user-agent"],
+              "sec-ch-ua": headers["sec-ch-ua"],
+              "sec-ch-ua-mobile": headers["sec-ch-ua-mobile"],
+              "sec-ch-ua-platform": headers["sec-ch-ua-platform"],
+            },
+            script,
+          };
+        };
+        const tab = activeTab(
+          (await api("/browser/tabs", { action: "new" })).json as BrowserState,
+        );
+        const persons = await said(person.active());
+        const bots = await said(await profiles.page("bot-identity"));
+        try {
+          expect(persons).toEqual(bots);
+          expect(persons.wire["user-agent"]).toContain("Chrome/");
+          expect(persons.wire["user-agent"]).not.toContain("HeadlessChrome");
+          expect(persons.wire["sec-ch-ua"] ?? "").not.toContain(
+            "HeadlessChrome",
+          );
+          expect(persons.script.userAgent).not.toContain("HeadlessChrome");
+          expect(persons.script.brands ?? []).not.toContain("HeadlessChrome");
+        } finally {
+          await profiles.stop("bot-identity");
+          if (tab)
+            await api("/browser/tabs", { action: "close", tabId: tab.id });
         }
       },
       60_000,
