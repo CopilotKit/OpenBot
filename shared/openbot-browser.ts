@@ -1,0 +1,222 @@
+import { z } from "zod";
+
+/**
+ * THE OPENBOT BROWSER: a real browser a person opens from OpenBot and uses as their own, with the OpenBot Recorder
+ * already in it and already connected. This file is the contract between the four places that build it: the computer
+ * that launches the browser (`agent-computer`), the server that opens it for a signed-in person, the Recorder that
+ * records in it, and the app's Browser page. Design: Notion "OpenBot Browser: BUILD (2026-10-21)".
+ *
+ * One browser per person. It is a computer named for that person, so every existing way of reaching a computer
+ * (the shared computer, a supervisor container, a Kubernetes Sandbox, or the host-side local Chrome computer on
+ * OpenBot Desktop) carries it unchanged: the id goes in `x-openbot-bot-id` as a Bot's does.
+ */
+export const PERSON_BROWSER_PREFIX = "person-";
+
+/** A person's browser id: the prefix and 32 lowercase hex digits the server derives from the OpenBot user id. */
+const PERSON_BROWSER_ID = /^person-[0-9a-f]{32}$/;
+
+export function isPersonBrowserId(id: string): boolean {
+  return PERSON_BROWSER_ID.test(id);
+}
+
+/**
+ * Where the browser shows. `native`: a window on the person's own desktop (OpenBot Desktop, the person's installed
+ * Chrome or Edge). `screen`: a cloud browser the app shows through the live screen (hosted OpenBot, bundled Chromium).
+ */
+export type BrowserWindow = "native" | "screen";
+export type BrowserProduct = "chrome" | "msedge" | "chromium";
+
+/**
+ * Who hears the person. `own`: the Recorder transcribes the person's microphone itself, as it does in any browser
+ * (native). `external`: the browser has no microphone (screen), so the app transcribes the person in their own browser
+ * and each final phrase reaches the Recorder through `narrate`.
+ */
+export type Narration = "own" | "external";
+
+/* THE RECORDER'S LAUNCHER API.
+ *
+ * What the process that launched the browser, and alone holds its DevTools pipe, calls inside the Recorder's service
+ * worker as `globalThis[LAUNCHER_GLOBAL]`. No web page and no other extension can reach it: there is no message route
+ * to it from outside the Recorder. Every method resolves; a refusal is `{ ok: false, error }`, never a throw. */
+export const LAUNCHER_GLOBAL = "openbotLauncher";
+
+export type LauncherConnection = {
+  /** The OpenBot this browser belongs to: an https origin, or http on a loopback IP with a port (OpenBot Desktop). */
+  openbotUrl: string;
+  /** A Recorder bearer (`obr_…`) the server minted for this person and this browser. */
+  token: string;
+  connectionId: string;
+  user: { id: string; name: string; email: string };
+};
+
+export type LauncherState = {
+  connected: boolean;
+  /** The connected person, when there is one. */
+  userId?: string;
+  phase: "idle" | "starting" | "recording" | "stopping";
+  recordingId?: string;
+  title?: string;
+  startedAt?: number;
+  /** The person's actions so far in this recording, as the Recorder's badge counts them. */
+  actions: number;
+  narration: Narration;
+};
+
+export type LauncherResult<T = Record<never, never>> =
+  | ({ ok: true } & T)
+  | { ok: false; error: string };
+
+export type LauncherApi = {
+  /** Store this connection (replacing any other) and take narration from `narration`. Idempotent. */
+  connect(input: {
+    connection: LauncherConnection;
+    narration: Narration;
+  }): Promise<LauncherResult>;
+  /** Start recording the tab the person is on (or `tabId`), named `title`; or stop the live recording. */
+  record(
+    input:
+      | { action: "start"; title: string; tabId?: number; language?: string }
+      | { action: "stop" },
+  ): Promise<LauncherResult<{ state: LauncherState }>>;
+  /** One final phrase the app heard, with when the person started and stopped saying it (epoch ms). */
+  narrate(input: {
+    text: string;
+    startedAt: number;
+    endedAt: number;
+  }): Promise<LauncherResult>;
+  state(): Promise<LauncherState>;
+};
+
+/* THE COMPUTER'S ROUTES (agent-computer), under the computer token like every other route, with the person's browser
+ * id in `x-openbot-bot-id`. A non-person id is refused with 400. */
+export const browserComputerPaths = {
+  open: "/browser/open",
+  state: "/browser/state",
+  recording: "/browser/recording",
+  narration: "/browser/narration",
+  tabs: "/browser/tabs",
+  navigate: "/browser/navigate",
+  close: "/browser/close",
+} as const;
+
+export const browserOpenRequestSchema = z
+  .object({
+    connection: z
+      .object({
+        openbotUrl: z.string().url().max(2000),
+        token: z.string().min(1).max(200),
+        connectionId: z.string().min(1).max(200),
+        user: z
+          .object({
+            id: z.string().min(1).max(200),
+            name: z.string().max(200),
+            email: z.string().max(320),
+          })
+          .strict(),
+      })
+      .strict(),
+  })
+  .strict();
+export type BrowserOpenRequest = z.infer<typeof browserOpenRequestSchema>;
+
+export type BrowserTab = {
+  id: string;
+  url: string;
+  title: string;
+  active: boolean;
+};
+
+export type BrowserState = {
+  open: boolean;
+  browser?: BrowserProduct;
+  window?: BrowserWindow;
+  /** The Recorder's own report; absent while the browser is closed or the Recorder has not answered yet. */
+  recorder?: LauncherState;
+  tabs: BrowserTab[];
+};
+
+export const browserRecordingRequestSchema = z.discriminatedUnion("action", [
+  z
+    .object({
+      action: z.literal("start"),
+      title: z.string().trim().min(1).max(200),
+      language: z.string().max(35).optional(),
+    })
+    .strict(),
+  z.object({ action: z.literal("stop") }).strict(),
+]);
+export type BrowserRecordingRequest = z.infer<
+  typeof browserRecordingRequestSchema
+>;
+
+export const browserNarrationRequestSchema = z
+  .object({
+    text: z.string().trim().min(1).max(4000),
+    startedAt: z.number().int().positive(),
+    endedAt: z.number().int().positive(),
+  })
+  .strict();
+export type BrowserNarrationRequest = z.infer<
+  typeof browserNarrationRequestSchema
+>;
+
+export const browserTabsRequestSchema = z.discriminatedUnion("action", [
+  z
+    .object({ action: z.literal("new"), url: z.string().max(2000).optional() })
+    .strict(),
+  z
+    .object({ action: z.literal("activate"), tabId: z.string().min(1) })
+    .strict(),
+  z.object({ action: z.literal("close"), tabId: z.string().min(1) }).strict(),
+]);
+export type BrowserTabsRequest = z.infer<typeof browserTabsRequestSchema>;
+
+export const browserNavigateRequestSchema = z.union([
+  z.object({ url: z.string().trim().min(1).max(2000) }).strict(),
+  z.object({ action: z.enum(["back", "forward", "reload"]) }).strict(),
+]);
+export type BrowserNavigateRequest = z.infer<
+  typeof browserNavigateRequestSchema
+>;
+
+/* THE SERVER'S ROUTES, for the signed-in person's own browser only. The app calls these; the server finds the person's
+ * browser, mints its Recorder connection, and forwards to the computer routes above. */
+export const browserApiPaths = {
+  /** POST: open (or bring forward) the person's browser. Answers `BrowserOpenResponse`. */
+  open: "/api/browser/open",
+  /** GET: `BrowserApiState`. */
+  state: "/api/browser",
+  /** POST `BrowserRecordingRequest`: answers `BrowserApiState`. */
+  recording: "/api/browser/recording",
+  /** POST `BrowserNarrationRequest`. */
+  narration: "/api/browser/narration",
+  /** POST `BrowserTabsRequest`: answers `BrowserApiState`. */
+  tabs: "/api/browser/tabs",
+  /** POST `BrowserNavigateRequest`: answers `BrowserApiState`. */
+  navigate: "/api/browser/navigate",
+  /** POST: close the person's browser. */
+  close: "/api/browser/close",
+} as const;
+
+export type BrowserOpenResponse = {
+  ok: true;
+  /** The computer id of the person's browser: the live screen streams `/api/computers/<computerId>/stream`. */
+  computerId: string;
+  browser: BrowserProduct;
+  window: BrowserWindow;
+  narration: Narration;
+};
+
+export type BrowserApiState = BrowserState & {
+  /** False when this OpenBot has no way to run a person's browser; the app then hides the Browser button. */
+  available: boolean;
+  computerId: string;
+  narration?: Narration;
+};
+
+/* CONFIGURATION, by name. */
+/** On the computer: the built Recorder (`extension/dist`), absolute. Without it `/browser/open` refuses. */
+export const RECORDER_DIR_ENV = "OPENBOT_RECORDER_DIR";
+/** On the server: the computer that runs people's browsers here, when it is not the Bots' computer (OpenBot Desktop's
+ * host-side local Chrome computer, `http://127.0.0.1:4101`). Unset: the normal computer provider locates it. */
+export const BROWSER_URL_ENV = "OPENBOT_BROWSER_URL";
