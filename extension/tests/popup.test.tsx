@@ -301,7 +301,8 @@ test("the Record form says what the Recorder collects and where it goes, before 
     "what each step saves",
     "what you say",
     "Passwords and secrets are masked in your browser first",
-    "your organization's own Intelligence through your OpenBot, never to CopilotKit",
+    "your organization's own Intelligence through your organization's OpenBot",
+    "only while you record",
   ])
     expect(disclosure.textContent).toContain(said);
   // It sits with the title, above Record, in the order a person reads them.

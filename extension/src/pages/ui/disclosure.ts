@@ -12,4 +12,4 @@
 export const DISCLOSURE_TITLE = "What the Recorder collects";
 
 export const DISCLOSURE =
-  "When you press Record, the Recorder records each step you take in every tab you use until you stop: the pages you open and what is on them, your clicks and typing, what each step saves, and what you say as you go. Passwords and secrets are masked in your browser first. It all goes to your organization's own Intelligence through your OpenBot, never to CopilotKit.";
+  "When you press Record, the Recorder records each step you take in every tab you use until you stop: the pages you open and what is on them, your clicks and typing, what each step saves, and what you say as you go. Passwords and secrets are masked in your browser first. It all goes to your organization's own Intelligence through your organization's OpenBot, only while you record, and is used only for your organization's Skills, evaluations and insights.";

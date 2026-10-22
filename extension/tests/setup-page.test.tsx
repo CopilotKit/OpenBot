@@ -76,7 +76,7 @@ test("says what the Recorder collects and where it goes, first, whatever the bro
       "Passwords and secrets are masked in your browser first.",
     );
     expect(disclosure.textContent).toContain(
-      "It all goes to your organization's own Intelligence through your OpenBot, never to CopilotKit.",
+      "It all goes to your organization's own Intelligence through your organization's OpenBot, only while you record, and is used only for your organization's Skills, evaluations and insights.",
     );
     // Above the microphone, the first row on the page.
     const microphone = getByText("Microphone");
