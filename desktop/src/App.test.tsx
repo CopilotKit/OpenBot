@@ -564,6 +564,15 @@ function choice(view: Awaited<ReturnType<typeof renderApp>>, name: string) {
   return view.getByRole("radio", { name: new RegExp(name) });
 }
 
+/** The first screen's answer to where Intelligence runs, then Continue. */
+async function chooseWhere(
+  view: Awaited<ReturnType<typeof renderApp>>,
+  name: string,
+) {
+  await userEvent.click(choice(view, name));
+  await userEvent.click(view.getByRole("button", { name: "Continue" }));
+}
+
 /** Words about the software underneath, which no local screen says. */
 const JARGON = [
   /\bCLI\b/,
@@ -596,19 +605,23 @@ async function chooseOpenAi(view: Awaited<ReturnType<typeof renderApp>>) {
   await userEvent.click(view.getByRole("button", { name: "Continue" }));
 }
 
-test("with a CLI, the first screen is the one choice, and without one it is unchanged", async () => {
+test("with a CLI, the first screen asks where Intelligence runs, assuming neither, and without one it is unchanged", async () => {
   setupRootConfiguration("/tmp/local-eval-welcome", async () =>
     emptyConfiguration(),
   );
   withLocalCli({});
   let view = await renderApp();
   expect(view.getByRole("heading", { name: "Set up OpenBot" })).toBeTruthy();
+  expect(choice(view, LOCAL_CHOICE)).toHaveProperty("checked", false);
+  expect(choice(view, HOSTED_CHOICE)).toHaveProperty("checked", false);
+  expect(buttons(view)).toEqual(["Continue"]);
   expect(
-    view.getByText(
-      "Installs OpenBot and CopilotKit Intelligence on this computer. The first setup takes about 10 minutes.",
-    ),
-  ).toBeTruthy();
-  expect(buttons(view)).toEqual(["Install", HOSTED_LINK]);
+    view.getByRole("button", { name: "Continue" }).hasAttribute("disabled"),
+  ).toBe(true);
+  await userEvent.click(choice(view, HOSTED_CHOICE));
+  expect(
+    view.getByRole("button", { name: "Continue" }).hasAttribute("disabled"),
+  ).toBe(false);
   expectPlain(view);
   expect(localCliCalls()).toEqual([]);
   cleanup();
@@ -635,7 +648,7 @@ test("Install prepares the default Bot in the default folder, with no Bot or fol
   const preparation = deferred<void>();
   withLocalCli({ prepare_installation: () => preparation.promise });
   const view = await renderApp();
-  await userEvent.click(view.getByRole("button", { name: "Install" }));
+  await chooseWhere(view, LOCAL_CHOICE);
   expect(installationCalls()).toEqual([
     {
       command: "prepare_installation",
@@ -689,13 +702,13 @@ test("Install prepares the default Bot in the default folder, with no Bot or fol
   expect(localCliCalls()).toEqual([]);
 });
 
-test("the hosted link reaches today's hosted flow and never sets up local Intelligence", async () => {
+test("choosing hosted first reaches today's hosted flow and never sets up local Intelligence", async () => {
   setupRootConfiguration("/tmp/local-eval-hosted-link", async () =>
     emptyConfiguration(),
   );
   withLocalCli({});
   const view = await renderApp();
-  await userEvent.click(view.getByRole("button", { name: HOSTED_LINK }));
+  await chooseWhere(view, HOSTED_CHOICE);
   expect(stepLabel(view)).toBe("Step 1 of 4");
   await userEvent.click(view.getByRole("button", { name: "Continue" }));
   expect(view.getByLabelText("Where OpenBot lives")).toBeTruthy();
@@ -724,7 +737,7 @@ test("the local sequence starts when installation completes and survives the pro
     connect_local_eval: () => new Promise(() => {}),
   });
   const view = await renderApp();
-  await userEvent.click(view.getByRole("button", { name: "Install" }));
+  await chooseWhere(view, LOCAL_CHOICE);
   await new Promise((resolve) => setTimeout(resolve, 20));
   expect(localCliCalls()).toEqual([]);
   await act(async () => preparation.resolve());
@@ -765,7 +778,7 @@ test("Continue during setup shows Getting ready, which starts, tests and opens O
     ask_the_bot: "I am working.",
   });
   const view = await renderApp();
-  await userEvent.click(view.getByRole("button", { name: "Install" }));
+  await chooseWhere(view, LOCAL_CHOICE);
   await chooseOpenAi(view);
   await view.findByRole("heading", { name: "Getting ready" });
   expect(stepLabel(view)).toBe("Step 3 of 3");
@@ -854,7 +867,7 @@ test("a local Test OpenBot screen links to the Intelligence dashboard through th
   });
   const opening = deferred<null>();
   const view = await renderApp();
-  await userEvent.click(view.getByRole("button", { name: "Install" }));
+  await chooseWhere(view, LOCAL_CHOICE);
   await chooseOpenAi(view);
   await askTheTest(view);
   // The menus offer the dashboard once local mode has a recorded stack.
@@ -900,7 +913,7 @@ test("a local Test OpenBot step says it is asking, with a spinner, until the ans
     offer_local_intelligence: null,
   });
   const view = await renderApp();
-  await userEvent.click(view.getByRole("button", { name: "Install" }));
+  await chooseWhere(view, LOCAL_CHOICE);
   await chooseOpenAi(view);
   await view.findByRole("heading", { name: "Test OpenBot" });
   await userEvent.click(view.getByRole("button", { name: "Ask" }));
@@ -926,7 +939,7 @@ test("View in Intelligence says the native sentence when the dashboard does not 
       }),
   });
   const view = await renderApp();
-  await userEvent.click(view.getByRole("button", { name: "Install" }));
+  await chooseWhere(view, LOCAL_CHOICE);
   await chooseOpenAi(view);
   await askTheTest(view);
   await userEvent.click(
@@ -952,7 +965,7 @@ test("Continue after Intelligence is already ready starts OpenBot with the AI ju
     ask_the_bot: "I am working.",
   });
   const view = await renderApp();
-  await userEvent.click(view.getByRole("button", { name: "Install" }));
+  await chooseWhere(view, LOCAL_CHOICE);
   await view.findByRole("heading", { name: "Connect your AI" });
   // Intelligence finishes while the person is still choosing.
   await waitFor(() =>
@@ -993,7 +1006,7 @@ test("a Claude plan signed in on the provider screen reaches Start with its toke
     ask_the_bot: "I am working.",
   });
   const view = await renderApp();
-  await userEvent.click(view.getByRole("button", { name: "Install" }));
+  await chooseWhere(view, LOCAL_CHOICE);
   await userEvent.click(await view.findByRole("radio", { name: /Anthropic/ }));
   await userEvent.click(
     await view.findByRole("button", { name: "Sign in with Anthropic" }),
@@ -1031,7 +1044,7 @@ test("a development double mount runs each local step and asks the question once
     ask_the_bot: "I am working.",
   });
   const view = await renderApp(true);
-  await userEvent.click(view.getByRole("button", { name: "Install" }));
+  await chooseWhere(view, LOCAL_CHOICE);
   await chooseOpenAi(view);
   await askTheTest(view);
   expect(localSequence()).toEqual([
@@ -1056,7 +1069,7 @@ test("Continue after Intelligence is ready starts OpenBot with the chosen model"
     ask_the_bot: "I am working.",
   });
   const view = await renderApp();
-  await userEvent.click(view.getByRole("button", { name: "Install" }));
+  await chooseWhere(view, LOCAL_CHOICE);
   await view.findByRole("heading", { name: "Connect your AI" });
   await waitFor(() =>
     expect(view.getByRole("status").textContent).toBe("Intelligence is ready."),
@@ -1084,7 +1097,7 @@ test("while a CLI step runs only Cancel is offered, and Cancel stops the call an
     finish_intelligence_sign_in: () => new Promise(() => {}),
   });
   const view = await renderApp();
-  await userEvent.click(view.getByRole("button", { name: "Install" }));
+  await chooseWhere(view, LOCAL_CHOICE);
   await chooseOpenAi(view);
   await view.findByRole("heading", { name: "Getting ready" });
   expect(buttons(view)).toEqual(["Cancel"]);
@@ -1127,7 +1140,7 @@ test("a first local run whose model cannot answer offers Change the model, as ho
     },
   });
   const view = await renderApp();
-  await userEvent.click(view.getByRole("button", { name: "Install" }));
+  await chooseWhere(view, LOCAL_CHOICE);
   await chooseOpenAi(view);
   await userEvent.click(await view.findByRole("button", { name: "Ask" }));
   await view.findByText("The model could not answer.");
@@ -1165,7 +1178,7 @@ test("a blocked setup stops at its row in plain words and Retry resumes there", 
     ask_the_bot: "I am working.",
   });
   const view = await renderApp();
-  await userEvent.click(view.getByRole("button", { name: "Install" }));
+  await chooseWhere(view, LOCAL_CHOICE);
   await view.findByRole("heading", { name: "Connect your AI" });
   await waitFor(() =>
     expect(view.getByRole("status").textContent).toBe(
