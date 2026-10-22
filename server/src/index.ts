@@ -2563,7 +2563,7 @@ const app = createApp(
       ? {
           browser: {
             computers: computerGateway
-              ? gatewayBrowserComputers(computerGateway)
+              ? gatewayBrowserComputers(computerGateway, config.browser?.url)
               : directBrowserComputers({
                   browserUrl: (config.browser as { url: string }).url,
                   policy: personBrowserPolicy,

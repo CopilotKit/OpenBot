@@ -32,7 +32,7 @@ export function narrationLanguage(): string {
 }
 
 /** Seconds since `startedAt`, ticking once a second while there is one. */
-function useSecondsSince(startedAt: number | undefined) {
+export function useSecondsSince(startedAt: number | undefined) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (startedAt === undefined) return;
@@ -232,8 +232,8 @@ export function StoppedNotice({ stopped }: { stopped: Stopped }) {
 }
 
 /** The red dot a recording carries, as a recording mark rather than a warning, in an icon's box so it lines up with
- * the icons of the rows around it. */
-function RecordingMark({ live }: { live: boolean }) {
+ * the icons of the rows around it. The sidebar's Browser button carries the same one. */
+export function RecordingMark({ live }: { live: boolean }) {
   return (
     <span
       aria-hidden="true"
