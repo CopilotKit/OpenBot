@@ -4496,6 +4496,111 @@ fn show_intelligence_opening<R: tauri::Runtime>(
     });
 }
 
+/// Room left between a grown or clamped window and the edge of its monitor's work area.
+const SCREEN_MARGIN: f64 = 24.0;
+
+/**
+How tall the window's content area should become, in logical pixels, or None to leave it.
+
+Grows to `wanted` and never shrinks: a window that jumped smaller under somebody's pointer when a
+row collapsed would be worse than one with a little room to spare. `tallest` is the most the content
+area may have on this monitor; past it the page scrolls, as it always could.
+*/
+fn grown_height(current: f64, wanted: f64, tallest: f64) -> Option<f64> {
+    let target = wanted.ceil().min(tallest.floor());
+    (target > current.ceil()).then_some(target)
+}
+
+/// The window's monitor work area in logical pixels, and the height of its title bar and frame.
+fn screen_room<R: tauri::Runtime>(
+    window: &tauri::WebviewWindow<R>,
+) -> Option<(tauri::LogicalRect<f64, f64>, f64)> {
+    let scale = window.scale_factor().ok()?;
+    let monitor = window.current_monitor().ok().flatten()?;
+    let area = monitor.work_area();
+    let frame = window.outer_size().ok()?.height as f64 - window.inner_size().ok()?.height as f64;
+    Some((
+        tauri::LogicalRect {
+            position: area.position.to_logical(scale),
+            size: area.size.to_logical(scale),
+        },
+        frame / scale,
+    ))
+}
+
+/// Resize the content area to `height` logical pixels, moving the window up if its bottom would
+/// leave the work area.
+fn set_window_height<R: tauri::Runtime>(
+    window: &tauri::WebviewWindow<R>,
+    area: &tauri::LogicalRect<f64, f64>,
+    frame: f64,
+    height: f64,
+) {
+    let Ok(scale) = window.scale_factor() else {
+        return;
+    };
+    let Ok(inner) = window.inner_size() else {
+        return;
+    };
+    let width = inner.to_logical::<f64>(scale).width;
+    let _ = window.set_size(tauri::LogicalSize::new(width, height));
+    if let Ok(position) = window.outer_position() {
+        let position = position.to_logical::<f64>(scale);
+        let bottom = area.position.y + area.size.height - SCREEN_MARGIN;
+        if position.y + frame + height > bottom {
+            let top = (bottom - frame - height).max(area.position.y);
+            let _ = window.set_position(tauri::LogicalPosition::new(position.x, top));
+        }
+    }
+}
+
+/**
+Make the setup window tall enough for the screen it is showing, within its monitor.
+
+The setup page measures its own content and asks; it is not granted any `core:window` permission,
+so this is the only way it can change the window, and only ever larger. A maximized or full-screen
+window is left as the person made it.
+*/
+#[tauri::command]
+fn fit_setup_window<R: tauri::Runtime>(window: tauri::WebviewWindow<R>, content_height: f64) {
+    if !content_height.is_finite()
+        || window.is_maximized().unwrap_or(true)
+        || window.is_fullscreen().unwrap_or(true)
+    {
+        return;
+    }
+    let (Some((area, frame)), Ok(scale), Ok(inner)) = (
+        screen_room(&window),
+        window.scale_factor(),
+        window.inner_size(),
+    ) else {
+        return;
+    };
+    let current = inner.to_logical::<f64>(scale).height;
+    let tallest = area.size.height - frame - 2.0 * SCREEN_MARGIN;
+    if let Some(height) = grown_height(current, content_height, tallest) {
+        set_window_height(&window, &area, frame, height);
+    }
+}
+
+/// On launch: a window taller than its monitor's work area is brought within it.
+fn fit_main_window_to_screen<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+    let (Some((area, frame)), Ok(scale), Ok(inner)) = (
+        screen_room(&window),
+        window.scale_factor(),
+        window.inner_size(),
+    ) else {
+        return;
+    };
+    let tallest = area.size.height - frame - 2.0 * SCREEN_MARGIN;
+    if inner.to_logical::<f64>(scale).height > tallest {
+        set_window_height(&window, &area, frame, tallest.floor());
+    }
+}
+
 /// Whether the main window shows the setup page, whose own overlay says the menu's outcome.
 fn showing_setup<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> bool {
     let Some(window) = app.get_webview_window("main") else {
@@ -5140,6 +5245,7 @@ fn main() {
         .manage(Shell::default())
         .invoke_handler(tauri::generate_handler![
             record_setup_event,
+            fit_setup_window,
             detect_engine,
             windows_blocker,
             windows_blocker_instruction,
@@ -5222,6 +5328,7 @@ fn main() {
             )));
 
             remember_setup_url(app.handle())?;
+            fit_main_window_to_screen(app.handle());
             // Built by `generate_context!`, so the bridge plugin's permissions are compiled in.
             intelligence_bridge::enable(app.handle());
 
@@ -7864,6 +7971,18 @@ mod tests {
             intelligence_bridge::Offer::after(&IntelligenceOpening::Failed(DashboardFailure::Busy)),
             intelligence_bridge::Offer::Failed(DashboardFailure::Busy)
         );
+    }
+
+    #[test]
+    fn the_setup_window_only_grows_and_never_past_its_screen() {
+        // Content taller than the window: grown to fit.
+        assert_eq!(grown_height(640.0, 812.4, 900.0), Some(813.0));
+        // Taller than the screen allows: grown to the most it may have, and the page scrolls.
+        assert_eq!(grown_height(640.0, 1400.0, 900.5), Some(900.0));
+        // Content that fits, or a window already as tall as it can be: left alone, never shrunk.
+        assert_eq!(grown_height(800.0, 620.0, 900.0), None);
+        assert_eq!(grown_height(900.0, 1400.0, 900.0), None);
+        assert_eq!(grown_height(799.6, 800.0, 900.0), None);
     }
 
     #[test]

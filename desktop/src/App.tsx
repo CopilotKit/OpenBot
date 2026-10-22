@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Ask } from "./Ask";
 import { DatabaseReset } from "./DatabaseReset";
+import { useWindowFitsContent } from "./fitWindow";
 import {
   DEFAULT_HARNESS,
   type HarnessChoice,
@@ -90,6 +91,7 @@ const MANAGED_INTELLIGENCE_GATEWAY_WS_URL =
   "wss://realtime.intelligence.copilotkit.ai";
 
 export function App() {
+  useWindowFitsContent();
   return (
     <>
       <Setup />
