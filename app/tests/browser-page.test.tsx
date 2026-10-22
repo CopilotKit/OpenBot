@@ -59,6 +59,8 @@ let openAnswer: BrowserOpenResponse;
 let stateFails = false;
 /** Requests the server refuses, by path, with the sentence it answers: as it passes on the Recorder's own (409). */
 let refusals: Partial<Record<string, string>> = {};
+/** The person's actions the Recorder counts by the read after Record. */
+let actionsAfterStart = 7;
 
 function nativeState(): BrowserApiState {
   return {
@@ -145,7 +147,7 @@ async function server(path: string, init?: RequestInit): Promise<Response> {
               recordingId: "rec-1",
               // As if the person had been at it for 42 seconds and seven actions by the next read.
               startedAt: Date.now() - 42_000,
-              actions: 7,
+              actions: actionsAfterStart,
             }
           : {
               ...state.recorder,
@@ -207,6 +209,7 @@ beforeEach(() => {
   writes.length = 0;
   stateFails = false;
   refusals = {};
+  actionsAfterStart = 7;
   state = nativeState();
   openAnswer = answerFor("native");
   QuietSocket.urls = [];
@@ -347,6 +350,92 @@ test("on OpenBot Desktop Record starts a recording named for the task, which sho
   expect(saved.textContent).toBe(
     "Submit an expense reportSaved to your Learning space.",
   );
+});
+
+/** What the page says Stop did with the recording: the status that names it saved, or that nothing was recorded. */
+async function stopSays(view: ReturnType<typeof draw>): Promise<string> {
+  let said = "";
+  await waitFor(async () => {
+    const statuses = await view.findAllByRole("status");
+    said =
+      statuses
+        .map((status) => status.textContent ?? "")
+        .find((text) => /Saved|Nothing was recorded/.test(text)) ?? "";
+    expect(said).not.toBe("");
+  });
+  return said;
+}
+
+/** Records a task named `title` on the page and stops it, once the page has read the recording running. */
+async function recordAndStop(
+  view: ReturnType<typeof draw>,
+  title: string,
+  beforeStop: () => void = () => {},
+) {
+  const user = userEvent.setup({ document });
+  await user.type(
+    await view.findByRole("textbox", { name: "Task name" }),
+    title,
+  );
+  await user.click(view.getByRole("button", { name: "Record" }));
+  await view.findByRole("timer");
+  beforeStop();
+  await user.click(view.getByRole("button", { name: "Stop" }));
+  await waitFor(() =>
+    expect(writes.at(-1)).toEqual({
+      path: "/api/browser/recording",
+      method: "POST",
+      body: { action: "stop" },
+    }),
+  );
+}
+
+test("Stop on a recording that held no actions says nothing was recorded and why, never that it was saved, on both shapes", async () => {
+  // The fourth end-to-end run: the person worked in a tab the recording did not follow, the trajectory reached
+  // Intelligence with no steps, and the page said it was saved to their Learning space.
+  for (const shape of ["native", "screen"] as const) {
+    cleanup();
+    queryClient.clear();
+    writes.length = 0;
+    state = shape === "native" ? nativeState() : screenState();
+    openAnswer = answerFor(shape);
+    actionsAfterStart = 0;
+    const view = draw(<BrowserPage />);
+    await recordAndStop(view, "Look up Ada Lovelace");
+    expect(await stopSays(view)).toBe(
+      shape === "native"
+        ? "Look up Ada LovelaceNothing was recorded. The Recorder follows the tab you started recording in, and tabs opened from it."
+        : "Nothing was recorded in “Look up Ada Lovelace”. The Recorder follows the tab you started recording in, and tabs opened from it.",
+    );
+    expect(view.queryByText(/Saved/)).toBeNull();
+  }
+});
+
+test("an action the page has not read yet when Stop is pressed still counts: the recording is said to be saved", async () => {
+  for (const shape of ["native", "screen"] as const) {
+    cleanup();
+    queryClient.clear();
+    writes.length = 0;
+    state = shape === "native" ? nativeState() : screenState();
+    openAnswer = answerFor(shape);
+    actionsAfterStart = 0;
+    const view = draw(<BrowserPage />);
+    // The person acts in their browser a moment before Stop, after the page's last read.
+    await recordAndStop(view, "Refund an order", () => {
+      state = {
+        ...state,
+        recorder: {
+          ...(state.recorder as NonNullable<BrowserApiState["recorder"]>),
+          actions: 1,
+        },
+      };
+    });
+    expect(await stopSays(view)).toBe(
+      shape === "native"
+        ? "Refund an orderSaved to your Learning space."
+        : "Saved “Refund an order” to your Learning space.",
+    );
+  }
 });
 
 test("Record is offered while the Recorder is disconnected: the server connects it first", async () => {
@@ -539,6 +628,80 @@ test("on hosted OpenBot a narration the Recorder refused says why, beside the na
       "Some of what you said didn't reach the Recorder. This browser hears your voice itself.",
     ),
   ).toBeTruthy();
+});
+
+test("on hosted OpenBot narration that cannot hear the person shows its switch off, and turning it on tries again", async () => {
+  // The fourth end-to-end run: in a browser with no microphone the page said narration was off while its switch read on.
+  for (const [error, sentence] of [
+    [
+      "not-allowed",
+      "OpenBot can't use your microphone, so narration is off. Allow the microphone for this site, then turn narration on again. Recording still works.",
+    ],
+    [
+      "audio-capture",
+      "No microphone was found, or another app is using it. Recording still works.",
+    ],
+  ] as const) {
+    cleanup();
+    queryClient.clear();
+    writes.length = 0;
+    state = screenState();
+    openAnswer = answerFor("screen");
+    const chrome = installRefusingChrome();
+    chrome.error = error;
+    const view = draw(<BrowserPage />);
+    const user = userEvent.setup({ document });
+    const toggle = await view.findByRole("switch", { name: "Narration" });
+    // Before a recording narration is on, as nothing has failed yet.
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+    await user.type(
+      view.getByRole("textbox", { name: "Task name" }),
+      "Submit an expense report",
+    );
+    await user.click(view.getByRole("button", { name: "Record" }));
+    expect(await view.findByText(sentence)).toBeTruthy();
+    expect(
+      view
+        .getByRole("switch", { name: "Narration" })
+        .getAttribute("aria-checked"),
+    ).toBe("false");
+
+    // The person allows the microphone, or plugs one in, and turns narration on: it listens again.
+    chrome.error = null;
+    const listened = chrome.listening;
+    await user.click(view.getByRole("switch", { name: "Narration" }));
+    await waitFor(() => expect(chrome.listening).toBe(listened + 1));
+    expect(
+      view
+        .getByRole("switch", { name: "Narration" })
+        .getAttribute("aria-checked"),
+    ).toBe("true");
+    expect(view.queryByText(sentence)).toBeNull();
+  }
+});
+
+test("on hosted OpenBot narration whose speech service cannot be reached stays on: it tries again by itself", async () => {
+  state = screenState();
+  openAnswer = answerFor("screen");
+  const chrome = installRefusingChrome();
+  chrome.error = "network";
+  const view = draw(<BrowserPage />);
+  const user = userEvent.setup({ document });
+  await user.type(
+    await view.findByRole("textbox", { name: "Task name" }),
+    "Submit an expense report",
+  );
+  await user.click(view.getByRole("button", { name: "Record" }));
+  expect(
+    await view.findByText(
+      "Can't reach this browser's speech service. Narration tries again in a moment.",
+    ),
+  ).toBeTruthy();
+  expect(
+    view
+      .getByRole("switch", { name: "Narration" })
+      .getAttribute("aria-checked"),
+  ).toBe("true");
 });
 
 test("Record and Stop the server refused say the server's sentence where the person pressed them, on both shapes", async () => {
@@ -745,4 +908,50 @@ function installChrome() {
   }
   speechGlobals.webkitSpeechRecognition = ChromeRecognition;
   return recognitions;
+}
+
+/**
+ * Chrome's speech recognition where it cannot hear the person: each recognition started while `error` is set fails
+ * with it and then ends, as Chrome does for a microphone it may not use (`not-allowed`), none at all
+ * (`audio-capture`), or a speech service it cannot reach (`network`). With no `error` it listens, and `listening`
+ * counts the recognitions that did.
+ */
+function installRefusingChrome() {
+  const chrome: { error: string | null; listening: number } = {
+    error: null,
+    listening: 0,
+  };
+  class RefusingRecognition implements Recognition {
+    lang = "";
+    continuous = false;
+    interimResults = false;
+    maxAlternatives = 0;
+    onstart: Recognition["onstart"] = null;
+    onresult: Recognition["onresult"] = null;
+    onerror: Recognition["onerror"] = null;
+    onend: Recognition["onend"] = null;
+    #starting: ReturnType<typeof setTimeout> | undefined;
+    start() {
+      const error = chrome.error;
+      this.#starting = setTimeout(() => {
+        if (error) {
+          this.onerror?.({ error });
+          this.onend?.();
+          return;
+        }
+        chrome.listening += 1;
+        this.onstart?.();
+      }, 0);
+    }
+    stop() {
+      clearTimeout(this.#starting);
+      queueMicrotask(() => this.onend?.());
+    }
+    abort() {
+      clearTimeout(this.#starting);
+      queueMicrotask(() => this.onend?.());
+    }
+  }
+  speechGlobals.webkitSpeechRecognition = RefusingRecognition;
+  return chrome;
 }

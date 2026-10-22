@@ -90,6 +90,8 @@ const NARRATION_BEHIND_MS = 10 * 60_000;
 
 const SENTENCES = {
   unavailable: "This OpenBot cannot open a browser for you.",
+  notSetUp:
+    "Your browser can't open right now. Ask an admin to check OpenBot's setup.",
   noAddress:
     "This OpenBot has no address your browser can reach it at. An admin sets OPENBOT_PUBLIC_URL to its https address.",
   tooMany:
@@ -376,15 +378,23 @@ export function createBrowserRoutes(deps: BrowserRouteDeps) {
 
   /**
    * The computer's refusal, for the person. What is about their request keeps its status and the computer's sentence: a
-   * bad request (400), a browser that is not open or a Recorder that refused (409), a browser this computer cannot run
-   * (503: no Chrome or Edge, or no Recorder in it). What is about how OpenBot reaches its computer (the token, a route an
-   * older computer lacks) is never passed on as the person's own 401 or 404: it is the computer failing, 502, as a
-   * Recorder or a page that failed is, with the computer's sentence where it said one for the person.
+   * bad request (400), a browser that is not open or a Recorder that refused (409). What is about how OpenBot reaches
+   * its computer (the token, a route an older computer lacks) is never passed on as the person's own 401 or 404: it is
+   * the computer failing, 502, as a Recorder or a page that failed is, with the computer's sentence where it said one
+   * for the person.
+   *
+   * A browser this computer cannot run at all (503: no built Recorder on it, or no Chrome or Edge) is OpenBot's setup,
+   * not anything the person did or can do. The computer's sentence for it is written for whoever runs OpenBot: it names
+   * `OPENBOT_RECORDER_DIR` and a build command, and the fourth end-to-end run showed it on the Browser page. So the
+   * person is told their browser cannot open and who can see to it, and the computer's own sentence stays in both logs
+   * (`browser-computer-failed` here, `computer-browser-open-failed` on the computer).
    */
   function refused(answer: { status: number; body: unknown }): Response {
     const said = (answer.body as { error?: unknown } | null)?.error;
     const sentence = typeof said === "string" && said ? said : null;
-    if (answer.status === 400 || answer.status === 409 || answer.status === 503)
+    if (answer.status === 503)
+      return Response.json({ error: SENTENCES.notSetUp }, { status: 503 });
+    if (answer.status === 400 || answer.status === 409)
       return Response.json(
         { error: sentence ?? SENTENCES.unreachable },
         { status: answer.status },

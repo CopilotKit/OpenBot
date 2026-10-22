@@ -5,6 +5,10 @@
 // (shared/openbot-browser.ts): slice 1 builds the real ones.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   type BrowserApiState,
   type BrowserOpenResponse,
@@ -23,6 +27,7 @@ import {
 } from "@openbot/shared/recorder-api";
 import { RECORDER_EXTENSION_ID } from "@openbot/shared/recorder-extension";
 import { eq, inArray } from "drizzle-orm";
+import { NO_INSTALLED_BROWSER } from "../../agent-computer/src/person-launch";
 import { createApp } from "../src/app";
 import type { AuditEventInput } from "../src/audit";
 import { createOrganizationAuth } from "../src/auth/organization";
@@ -78,6 +83,11 @@ const COMPUTER_PORT = 7761;
 const SERVER_PORT = 7762;
 const AUTHORITY_PORT = 7763;
 const NOTHING_PORT = 7764;
+/** The real computer one test runs, on a port of its own. */
+const REAL_COMPUTER_PORT = 7815;
+/** What the person is told when their browser cannot open for OpenBot's own setup. */
+const NOT_SET_UP =
+  "Your browser can't open right now. Ask an admin to check OpenBot's setup.";
 
 // ---- The stand-in computer --------------------------------------------------------------------
 
@@ -867,19 +877,27 @@ describe("opening a person's own browser", () => {
   });
 
   test("the computer's refusals reach the person as theirs, and its own failings never read as the person's", async () => {
-    // No Chrome or Edge here, or no Recorder in the computer: the computer's sentence, as unavailable.
-    refuseNextOpen = {
-      status: 503,
-      error: "Install Google Chrome or Microsoft Edge to open your browser.",
-    };
-    const unavailable = await call(openbot, "/api/browser/open", {
-      method: "POST",
-      as: "ada",
-    });
+    // No Chrome or Edge here, in the computer's own words (agent-computer's browser-host.ts answers it 503): OpenBot's
+    // setup, which the person is told is why their browser cannot open, and who can see to it.
+    refuseNextOpen = { status: 503, error: NO_INSTALLED_BROWSER };
+    const { result: unavailable, warned } = await logged(() =>
+      call(openbot, "/api/browser/open", { method: "POST", as: "ada" }),
+    );
     expect(unavailable.status).toBe(503);
-    expect(await unavailable.json()).toEqual({
-      error: "Install Google Chrome or Microsoft Edge to open your browser.",
-    });
+    expect(await unavailable.json()).toEqual({ error: NOT_SET_UP });
+    // The computer's sentence is in the server's log, for whoever runs OpenBot.
+    expect(
+      warned
+        .map((line) => JSON.parse(line) as Record<string, unknown>)
+        .filter((line) => line.type === "browser-computer-failed"),
+    ).toEqual([
+      {
+        type: "browser-computer-failed",
+        path: "/browser/open",
+        status: 503,
+        error: NO_INSTALLED_BROWSER,
+      },
+    ]);
     // The Recorder refused: its sentence, as a conflict.
     refuseNextOpen = {
       status: 409,
@@ -914,6 +932,103 @@ describe("opening a person's own browser", () => {
     expect(await wrong.json()).toEqual({
       error: "Your browser could not be reached. Try again.",
     });
+  });
+
+  test("a computer with no built Recorder: the person is told their browser cannot open, and the setup sentence stays in both logs", async () => {
+    // The fourth end-to-end run: with the Recorder missing on the computer, the Browser page showed the computer's
+    // sentence naming OPENBOT_RECORDER_DIR and a build command. The real computer, its Recorder directory empty.
+    const dir = await mkdtemp(join(tmpdir(), "openbot-no-recorder-"));
+    await Promise.all(
+      ["recorder", "profiles", "workspace"].map((name) =>
+        mkdir(join(dir, name)),
+      ),
+    );
+    const realComputer = Bun.spawn(
+      [process.execPath, "--no-env-file", "src/index.ts"],
+      {
+        cwd: fileURLToPath(new URL("../../agent-computer", import.meta.url)),
+        env: {
+          HOME: process.env.HOME,
+          PATH: process.env.PATH,
+          TMPDIR: tmpdir(),
+          COMPUTER_TOKEN,
+          PORT: String(REAL_COMPUTER_PORT),
+          PROFILES_DIR: join(dir, "profiles"),
+          WORKSPACE_DIR: join(dir, "workspace"),
+          OPENBOT_RECORDER_DIR: join(dir, "recorder"),
+        },
+        stdout: "pipe",
+        stderr: "pipe",
+      },
+    );
+    try {
+      const base = `http://127.0.0.1:${REAL_COMPUTER_PORT}`;
+      const deadline = Date.now() + 20_000;
+      while (
+        !(await fetch(`${base}/health`).then(
+          (response) => response.ok,
+          () => false,
+        ))
+      ) {
+        if (Date.now() > deadline || realComputer.exitCode !== null)
+          throw new Error("The computer did not start.");
+        await Bun.sleep(100);
+      }
+      const onRealComputer = build(
+        {},
+        {
+          provider: createSharedComputerProvider({
+            baseUrl: base,
+            token: COMPUTER_TOKEN,
+          }),
+        },
+      );
+      const { result, warned } = await logged(() =>
+        call(onRealComputer, "/api/browser/open", {
+          method: "POST",
+          as: "ada",
+        }),
+      );
+      expect(result.status).toBe(503);
+      expect(await result.json()).toEqual({ error: NOT_SET_UP });
+
+      // The computer's own sentence, for whoever runs OpenBot, in the server's log and in the computer's.
+      const failures = warned
+        .map((line) => JSON.parse(line) as Record<string, unknown>)
+        .filter((line) => line.type === "browser-computer-failed");
+      expect(failures).toEqual([
+        {
+          type: "browser-computer-failed",
+          path: "/browser/open",
+          status: 503,
+          error: expect.stringContaining("OPENBOT_RECORDER_DIR"),
+        },
+      ]);
+      realComputer.kill();
+      await realComputer.exited;
+      const computerLog = await new Response(realComputer.stdout).text();
+      const opened = computerLog
+        .split("\n")
+        .flatMap((line) => {
+          try {
+            return [JSON.parse(line) as Record<string, unknown>];
+          } catch {
+            return [];
+          }
+        })
+        .filter((line) => line.type === "computer-browser-open-failed");
+      expect(opened).toEqual([
+        expect.objectContaining({
+          step: "recorder-files",
+          status: 503,
+          error: failures[0]?.error,
+        }),
+      ]);
+    } finally {
+      realComputer.kill();
+      await realComputer.exited;
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   test("an open the computer could not make is logged with the computer's own sentence", async () => {
