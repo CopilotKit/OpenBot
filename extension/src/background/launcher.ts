@@ -225,9 +225,17 @@ export function createLauncher(
     };
   }
 
-  /** OpenBot says who the connection is for, as the popup would ask when it opens: a connection it signed out already
-   * is forgotten at once, and one it cannot answer for now stays, for the keep-alive to ask again. */
-  async function confirm(connection: ConnectionRecord): Promise<boolean> {
+  /** Who OpenBot says a connection is for, as the popup would ask when it opens, asked BEFORE the connection is taken:
+   * `signed-out` when OpenBot revoked it already, `unknown` when OpenBot cannot answer for now (the connection is taken,
+   * and the keep-alive asks again). */
+  async function ask(connection: ConnectionRecord): Promise<
+    | { kind: "ok"; value: RecorderMe }
+    | {
+        kind: "signed-out";
+        reason: Extract<ConnectionLoss, { kind: "signed-out" }>["reason"];
+      }
+    | { kind: "unknown" }
+  > {
     try {
       const value = await openbotJson<RecorderMe>(
         connection,
@@ -236,19 +244,11 @@ export function createLauncher(
           signal: AbortSignal.timeout(ME_WAIT_MS),
         },
       );
-      await writeSession("me", { value, fetchedAt: deps.now() });
-      await writeLocal("lastKeepAliveAt", deps.now());
-      return true;
+      return { kind: "ok", value };
     } catch (error) {
-      if (error instanceof OpenBotError && error.signedOut) {
-        await controls.connectionLost({
-          kind: "signed-out",
-          reason: error.body?.reason ?? "revoked",
-          connection,
-        });
-        return false;
-      }
-      return true;
+      if (error instanceof OpenBotError && error.signedOut)
+        return { kind: "signed-out", reason: error.body?.reason ?? "revoked" };
+      return { kind: "unknown" };
     }
   }
 
@@ -298,13 +298,38 @@ export function createLauncher(
           connectedAt: deps.now(),
           narration: narration as Narration,
         };
-        if (sameConnection(await currentConnection(), record))
-          return { ok: true };
+        const current = await currentConnection();
+        if (sameConnection(current, record)) return { ok: true };
+        /*
+         * Asked before it is taken. Two opens of one browser can cross, and the older one's connection, revoked by the
+         * newer one's, can arrive last: taking it first would sign out the connection that stands and stop its
+         * recording. A revoked connection is refused and the one held stays; with none held (or this one), it ends as
+         * OpenBot's own signed-out answer does, with the notice.
+         */
+        const asked = await ask(record);
+        if (asked.kind === "signed-out") {
+          if (current && current.token !== record.token)
+            return refuse(SENTENCES.refused);
+          // Taken and lost at once, so the popup says why this browser is not connected.
+          await connectFromLauncher(record, { readPolicy: deps.readPolicy });
+          await controls.connectionLost({
+            kind: "signed-out",
+            reason: asked.reason,
+            connection: record,
+          });
+          return refuse(SENTENCES.refused);
+        }
         if (
           !(await connectFromLauncher(record, { readPolicy: deps.readPolicy }))
         )
           return refuse(SENTENCES.pinnedElsewhere);
-        if (!(await confirm(record))) return refuse(SENTENCES.refused);
+        if (asked.kind === "ok") {
+          await writeSession("me", {
+            value: asked.value,
+            fetchedAt: deps.now(),
+          });
+          await writeLocal("lastKeepAliveAt", deps.now());
+        }
         // What an approved Connect does next: a recording of this person goes on under the new token, and their kept
         // recordings are sent.
         await controls.connected();

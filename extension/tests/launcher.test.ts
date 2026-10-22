@@ -424,6 +424,27 @@ test("a connection OpenBot already signed out is refused and forgotten, with the
   expect((await launcher().state()).connected).toBe(false);
 });
 
+test("a revoked connection handed to a Recorder holding a good one is refused and leaves the good one, recording or not", async () => {
+  // Two opens of one browser that cross: the older one's connection was revoked by the newer one's, and it reaches the
+  // Recorder last. The Recorder asks OpenBot before it takes a connection, so the one that stands keeps it.
+  expect(
+    await launcher().connect({ connection: connection(), narration: "own" }),
+  ).toEqual({ ok: true });
+  const STALE = "obr_revoked-by-a-newer-open";
+  expect(
+    await launcher().connect({
+      connection: connection({ token: STALE, connectionId: `c-${STALE}` }),
+      narration: "own",
+    }),
+  ).toMatchObject({ ok: false });
+  expect(stored()).toMatchObject({ token: TOKEN });
+  expect(fake.storage.local.get("notice")).toBeUndefined();
+  expect(await launcher().state()).toMatchObject({
+    connected: true,
+    userId: ada.id,
+  });
+});
+
 test("disconnect forgets the connection OpenBot revoked at once and reports signed out, as OpenBot's own signed-out answer does", async () => {
   // The second end-to-end run: Disconnect in Settings, Browsers, and the Recorder went on reporting itself connected
   // until its next call to OpenBot, which on a quiet browser is the keep-alive, twelve hours away.
