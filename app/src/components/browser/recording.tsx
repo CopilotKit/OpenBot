@@ -73,12 +73,14 @@ export function useRecording(
   const seconds = useSecondsSince(
     phase === "recording" ? recorder?.startedAt : undefined,
   );
-  /** Why Record cannot be pressed yet, in a sentence, or null when it can. */
+  /**
+   * Why Record cannot be pressed yet, in a sentence, or null when it can. A Recorder that reports itself disconnected
+   * does not hold Record back: the server connects the person's own browser again before it starts (a Disconnect in
+   * Settings, Browsers leaves it signed out until then).
+   */
   const waiting = !state.open
     ? "Your browser is closed. Open it to record."
-    : !recorder?.connected
-      ? "The Recorder is still connecting."
-      : null;
+    : null;
 
   return {
     phase,

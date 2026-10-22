@@ -347,7 +347,9 @@ test("on OpenBot Desktop Record starts a recording named for the task, which sho
   );
 });
 
-test("Record waits for the Recorder in the browser to connect", async () => {
+test("Record is offered while the Recorder is disconnected: the server connects it first", async () => {
+  // Disconnecting the OpenBot browser in Settings leaves the Recorder signed out until something asks again; Record is
+  // that ask, and the server reconnects the browser before it starts.
   state = {
     ...nativeState(),
     recorder: { connected: false, phase: "idle", actions: 0, narration: "own" },
@@ -358,11 +360,16 @@ test("Record waits for the Recorder in the browser to connect", async () => {
     await view.findByRole("textbox", { name: "Task name" }),
     "Refund an order",
   );
-  expect(view.getByText("The Recorder is still connecting.")).toBeTruthy();
-  expect(
-    (view.getByRole("button", { name: "Record" }) as HTMLButtonElement)
-      .disabled,
-  ).toBe(true);
+  expect(view.queryByText("The Recorder is still connecting.")).toBeNull();
+  await user.click(view.getByRole("button", { name: "Record" }));
+  await waitFor(() =>
+    expect(writes).toContainEqual(
+      expect.objectContaining({
+        path: "/api/browser/recording",
+        body: expect.objectContaining({ action: "start" }),
+      }),
+    ),
+  );
 });
 
 test("on hosted OpenBot the page is the browser: its tabs, its address and its live screen, driven at once", async () => {
