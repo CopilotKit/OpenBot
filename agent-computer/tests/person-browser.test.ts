@@ -1253,16 +1253,19 @@ for (const variant of VARIANTS) {
           said.mockClear();
           try {
             const answer = await openWith(connection("held"));
+            // Not the computer's setup: the person is told in a sentence of their own, and Playwright's
+            // own text, which named the profile and the browser's logs, stays in the log.
             expect(answer.status).toBe(502);
-            const { error } = (await answer.json()) as { error: string };
-            expect(error).toStartWith("The browser could not be opened: ");
+            expect(await answer.json()).toEqual({
+              error: "Your browser could not be opened. Try again.",
+            });
             expect(logged("computer-browser-open-failed")).toEqual([
               {
                 type: "computer-browser-open-failed",
                 botId: PERSON,
                 step: "launch",
                 status: 502,
-                error,
+                error: expect.stringContaining("launchPersistentContext"),
                 ms: expect.any(Number),
               },
             ]);

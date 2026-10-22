@@ -301,6 +301,99 @@ describe.skipIf(!asked)("a person's browser on the computer", () => {
   }, 30_000);
 });
 
+/**
+ * A computer whose image lacks Playwright's Chromium: the person's browser cannot start, which is OpenBot's setup and
+ * nothing the person did or can do. Run 4 saw a launch failure reach the person as a 502 reading "The browser could
+ * not be opened:" and Playwright's own text, its install box included. No browser starts, so this runs everywhere.
+ */
+describe("a person's browser on a computer whose browser is not installed", () => {
+  test("is a 503 the server turns into its sentence for the person, and Playwright's text stays in the computer's log", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openbot-no-chromium-"));
+    const port = await freePort();
+    const base = `http://127.0.0.1:${port}`;
+    const child = Bun.spawn([process.execPath, "src/index.ts"], {
+      cwd: join(import.meta.dir, ".."),
+      env: {
+        ...process.env,
+        COMPUTER_TOKEN: TOKEN,
+        PORT: String(port),
+        COMPUTER_BROWSER_BACKEND: "managed",
+        COMPUTER_BROWSER_MODE: "headless",
+        EGRESS_POLICY_REQUIRED: "0",
+        PROFILES_DIR: join(dir, "profiles"),
+        WORKSPACE_DIR: join(dir, "workspace"),
+        OPENBOT_RECORDER_DIR: FIXTURE,
+        // Where Playwright looks for its browsers: an empty folder, as an image built without them is.
+        PLAYWRIGHT_BROWSERS_PATH: join(dir, "browsers"),
+      },
+      stdout: "pipe",
+      stderr: "inherit",
+    });
+    try {
+      const deadline = Date.now() + 15_000;
+      while (
+        !(await fetch(`${base}/health`).then(
+          (response) => response.ok,
+          () => false,
+        ))
+      ) {
+        if (Date.now() > deadline || child.exitCode !== null)
+          throw new Error("The computer did not start.");
+        await Bun.sleep(50);
+      }
+      const response = await fetch(`${base}/browser/open`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-openbot-computer-token": TOKEN,
+          "x-openbot-bot-id": PERSON,
+        },
+        body: JSON.stringify({
+          connection: {
+            openbotUrl: "http://127.0.0.1:7829",
+            token: "obr_fixture-token",
+            connectionId: "connection-1",
+            user: {
+              id: "user-1",
+              name: "Pat Example",
+              email: "pat@example.com",
+            },
+          },
+        }),
+      });
+      expect(response.status).toBe(503);
+      const { error } = (await response.json()) as { error: string };
+      expect(error).toContain("Executable doesn't exist at");
+      child.kill();
+      await child.exited;
+      const logged = (await new Response(child.stdout).text())
+        .split("\n")
+        .flatMap((line) => {
+          try {
+            return [JSON.parse(line) as Record<string, unknown>];
+          } catch {
+            return [];
+          }
+        })
+        .filter((line) => line.type === "computer-browser-open-failed");
+      expect(logged).toEqual([
+        {
+          type: "computer-browser-open-failed",
+          botId: PERSON,
+          step: "launch",
+          status: 503,
+          error,
+          ms: expect.any(Number),
+        },
+      ]);
+    } finally {
+      child.kill();
+      await child.exited;
+      await rm(dir, { recursive: true, force: true });
+    }
+  }, 30_000);
+});
+
 describe.skipIf(!online)(
   "the open internet through the computer's egress filter",
   () => {

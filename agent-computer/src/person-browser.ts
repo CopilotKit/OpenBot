@@ -88,13 +88,39 @@ export type PersonOpenStep =
   /** Reading the open browser's tabs and the Recorder's report, which the open answers with. */
   | "state";
 
-/** Opening a person's browser failed at `step`, for the reason its message gives. */
+/**
+ * Playwright's own words for a browser this computer cannot start at all: the browser it bundles is not installed
+ * (`playwright install`), the system libraries it needs are missing (`playwright install-deps`), or the installed browser
+ * a launch named is not there. These are the computer's setup, which only whoever runs OpenBot can see to, never anything
+ * the person did. Matched on playwright-core 1.62.1's messages (its browser registry and its dependency check), which
+ * `person-browser-rules.test.ts` pins against the real text, so a Playwright that words them differently fails there.
+ */
+const BROWSER_NOT_INSTALLED = [
+  /Executable doesn't exist at /,
+  /Host system is missing dependencies/,
+  /Chromium distribution '[^']+' is not found at /,
+];
+
+/** Whether a launch failed because this computer's browser is not installed, by Playwright's message. */
+export function isBrowserNotInstalled(message: string): boolean {
+  return BROWSER_NOT_INSTALLED.some((pattern) => pattern.test(message));
+}
+
+/**
+ * Opening a person's browser failed at `step`, for the reason its message gives. `setup` when the reason is this
+ * computer's setup rather than anything about this open: the built Recorder's files unreadable, or a browser that is not
+ * installed or cannot run here. The routes answer those 503, which the server tells the person is for an admin.
+ */
 export class PersonOpenError extends Error {
   readonly step: PersonOpenStep;
-  constructor(step: PersonOpenStep, cause: unknown) {
-    super(cause instanceof Error ? cause.message : String(cause), { cause });
+  readonly setup: boolean;
+  constructor(step: PersonOpenStep, cause: unknown, setup?: boolean) {
+    const message = cause instanceof Error ? cause.message : String(cause);
+    super(message, { cause });
     this.name = "PersonOpenError";
     this.step = step;
+    this.setup =
+      setup ?? (step === "recorder-files" || isBrowserNotInstalled(message));
   }
 }
 
@@ -102,12 +128,13 @@ export class PersonOpenError extends Error {
 async function step<T>(
   name: PersonOpenStep,
   work: () => Promise<T>,
+  setup?: boolean,
 ): Promise<T> {
   try {
     return await work();
   } catch (error) {
     if (error instanceof PersonOpenError) throw error;
-    throw new PersonOpenError(name, error);
+    throw new PersonOpenError(name, error, setup);
   }
 }
 
@@ -295,8 +322,9 @@ async function keepRecorderCurrent(input: {
  * All or nothing: a browser whose Recorder could not be put in is closed again rather than handed
  * back, because a person's browser without the Recorder is the one thing this must never open.
  *
- * A failure is a `PersonOpenError` naming the step it stopped at, except that no installed browser
- * is a `NoInstalledBrowserError`, which the routes answer differently.
+ * A failure is a `PersonOpenError` naming the step it stopped at, and whether it is this computer's
+ * setup, except that no installed browser is a `NoInstalledBrowserError`, which the routes answer
+ * differently.
  */
 export async function launchPersonBrowser(
   input: PersonLaunch,
@@ -304,7 +332,12 @@ export async function launchPersonBrowser(
   const window = personWindow(input.runtime);
   let product: BrowserProduct = "chromium";
   if (window === "native") {
-    const installed = await installedBrowser(process.env);
+    // Looking for Chrome or Edge fails only on a platform with no place to look, or a folder this computer cannot read.
+    const installed = await step(
+      "launch",
+      () => installedBrowser(process.env),
+      true,
+    );
     if (!installed) throw new NoInstalledBrowserError();
     product = installed;
     /*
