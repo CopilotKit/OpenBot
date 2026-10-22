@@ -13,6 +13,7 @@ import {
   FieldLabel,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { DISCLOSURE } from "../ui/disclosure";
 
 const LEARNING_SENTENCES: Partial<Record<LearningSpaceState["state"], string>> =
   {
@@ -87,12 +88,8 @@ export function RecordForm({
               required
               onChange={(event) => setTitle(event.target.value)}
             />
-            <FieldDescription>
-              Records each step you take in every tab you use until you stop
-              (your clicks, typing and the pages you open) with what it saves,
-              and what you say as you go. Passwords and secrets stay in your
-              browser.
-            </FieldDescription>
+            {/* The store's prominent disclosure, read before Record collects anything (ui/disclosure.ts). */}
+            <FieldDescription>{DISCLOSURE}</FieldDescription>
             {sentence ? (
               <FieldDescription role="status">{sentence}</FieldDescription>
             ) : null}

@@ -1,4 +1,8 @@
-import { IconMicrophone, IconMicrophoneOff } from "@tabler/icons-react";
+import {
+  IconMicrophone,
+  IconMicrophoneOff,
+  IconShieldLock,
+} from "@tabler/icons-react";
 import { useEffect, useRef, useState } from "react";
 import { PageRows, PageSection } from "@/components/layout/page-parts";
 import { Button } from "@/components/ui/button";
@@ -10,7 +14,9 @@ import {
   ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
+import { Separator } from "@/components/ui/separator";
 import { microphoneState } from "../popup/voice";
+import { DISCLOSURE, DISCLOSURE_TITLE } from "../ui/disclosure";
 import { Page } from "../ui/page";
 
 type Status =
@@ -80,8 +86,9 @@ function sentence(status: Status, browser: Browser): string {
 }
 
 /**
- * The page a fresh install opens: it asks for the microphone on the extension's own origin as soon as it loads, with a
- * button to ask again, and says in plain words what the browser answered. The Recorder listens from its hidden
+ * The page a fresh install opens: it says first what the Recorder collects and where it goes (the store's prominent
+ * disclosure, ui/disclosure.ts), before anything is recorded. It asks for the microphone on the extension's own origin
+ * as soon as it loads, with a button to ask again, and says in plain words what the browser answered. The Recorder listens from its hidden
  * offscreen document, which cannot show a prompt and can use only a lasting grant (Chrome's "Allow while visiting the
  * site", Edge's "Allow"); a
  * one-time grant ends with this page and reads `prompt` afterwards, which is how the page tells the two apart. Website
@@ -148,6 +155,18 @@ export function SetupPage({ deps }: { deps?: Partial<SetupPageDeps> }) {
     >
       <PageSection>
         <PageRows>
+          <Item size="sm">
+            <ItemMedia variant="icon">
+              <IconShieldLock />
+            </ItemMedia>
+            <ItemContent>
+              <ItemTitle>{DISCLOSURE_TITLE}</ItemTitle>
+              <ItemDescription className="line-clamp-none">
+                {DISCLOSURE}
+              </ItemDescription>
+            </ItemContent>
+          </Item>
+          <Separator />
           <Item size="sm">
             <ItemMedia variant="icon">
               {status === "granted" ? (

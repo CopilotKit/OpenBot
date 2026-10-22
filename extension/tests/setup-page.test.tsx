@@ -9,6 +9,7 @@ import {
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { SetupPage, type SetupPageDeps } from "../src/pages/setup/setup-page";
+import { DISCLOSURE } from "../src/pages/ui/disclosure";
 
 beforeAll(() => GlobalRegistrator.register());
 afterEach(cleanup);
@@ -59,6 +60,35 @@ function setup(options: Options = {}) {
     ...render(<SetupPage deps={deps} />),
   };
 }
+
+test("says what the Recorder collects and where it goes, first, whatever the browser answers about the microphone", async () => {
+  // The Chrome Web Store's prominent disclosure: the page a fresh install opens, read before anything is recorded.
+  for (const states of [
+    ["prompt", "granted"],
+    ["granted"],
+    ["denied"],
+  ] as PermissionState[][]) {
+    const { getByText, findByText, container } = setup({ states });
+    const title = getByText("What the Recorder collects");
+    const disclosure = getByText(DISCLOSURE);
+    expect(disclosure.textContent).toContain("When you press Record");
+    expect(disclosure.textContent).toContain(
+      "Passwords and secrets are masked in your browser first.",
+    );
+    expect(disclosure.textContent).toContain(
+      "It all goes to your organization's own Intelligence through your OpenBot, never to CopilotKit.",
+    );
+    // Above the microphone, the first row on the page.
+    const microphone = getByText("Microphone");
+    expect(
+      title.compareDocumentPosition(microphone) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(container.textContent).toContain("What the Recorder collects");
+    await findByText(states.at(-1) === "denied" ? /^Blocked\./ : /^Allowed\./);
+    cleanup();
+  }
+});
 
 test("says what happens to the words and how to answer the prompt", async () => {
   const { getByText, findByText } = setup();
