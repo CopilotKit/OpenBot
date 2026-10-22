@@ -251,6 +251,8 @@ export const browserApiPaths = {
  * computer brings that browser forward, or opens the Recorder's store page in it while the Recorder is not there yet.
  * These computer routes act on the person's desktop and exist only on the local Chrome backend. */
 export const realBrowserComputerPaths = {
+  /** GET: `{ browsers: RealBrowser[] }`, the person's own browsers installed on this computer. Never launches one. */
+  installed: "/browser/real",
   /** POST `{ browser }`: bring the person's own browser forward (launching it if it is not running). */
   front: "/browser/real/front",
   /** POST `{ browser, url }`: open `url` (the Recorder's store page) in the person's own browser, not the default one. */
