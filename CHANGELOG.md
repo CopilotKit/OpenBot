@@ -182,14 +182,15 @@ it sends.
 Wherever OpenBot can run a browser for you, the sidebar has a **Browser** button below Connections. It
 opens your own browser with the OpenBot Recorder already in it and connected as you: no install and no
 Connect step. Name a task and press Record; the page shows the recording's name, how long it has run and
-how many actions it holds, and after Stop it says the recording was saved to your Learning space (or,
-when it captured none of your actions, that nothing was recorded). Only what you do is recorded. When
+how many actions it holds, and after Stop it says what was saved to your Learning space (for example
+"7 actions and 1 narrated phrase"), or that nothing was recorded, and says the same after a reload. Only what you do is recorded. When
 your browser cannot open because of how OpenBot is set up, the page tells you to ask an admin, and the
 reason is in the server's and the computer's logs.
 
 - **On OpenBot Desktop** it is your installed Google Chrome, or Microsoft Edge where Chrome is missing,
-  in a separate OpenBot profile, as its own window; opening it again brings that window to the front. It
-  is an everyday browser: install your password manager from the Chrome Web Store (a password manager's
+  in a separate OpenBot profile, as its own window; opening it again brings that window to the front.
+  OpenBot starts it itself rather than through Playwright, so tabs behind the one in front behave as
+  background tabs, and OpenBot follows the tab you are on. It is an everyday browser: install your password manager from the Chrome Web Store (a password manager's
   link to its desktop app works, such as 1Password's), or sign in to Chrome and sync brings your
   extensions, bookmarks and passwords; saved passwords use the system keychain. The Recorder hears your
   microphone itself, with no prompt, and the page shows whether it is listening, muted or cannot hear.
