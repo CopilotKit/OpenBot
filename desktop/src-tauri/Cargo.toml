@@ -40,3 +40,8 @@ libc = "0.2"
 
 [dev-dependencies]
 tauri = { version = "2", features = ["test"] }
+
+# Every local evaluation CLI call checks the pinned runtime and script against their digests,
+# about 150 MB. Unoptimized, that hash alone took 4.9 s per call in a debug build; optimized, 0.3 s.
+[profile.dev.package.sha2]
+opt-level = 3

@@ -2637,6 +2637,30 @@
           "markdownDescription": "Denies the save command without any pre-configured scope."
         },
         {
+          "description": "Enables the open command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-intelligence:allow-open",
+          "markdownDescription": "Enables the open command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the watch command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-intelligence:allow-watch",
+          "markdownDescription": "Enables the watch command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the open command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-intelligence:deny-open",
+          "markdownDescription": "Denies the open command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the watch command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-intelligence:deny-watch",
+          "markdownDescription": "Denies the watch command without any pre-configured scope."
+        },
+        {
           "description": "This permission set allows opening `mailto:`, `tel:`, `https://` and `http://` urls using their default application\nas well as reveal file in directories using default file explorer\n#### This default permission set includes:\n\n- `allow-open-url`\n- `allow-reveal-item-in-dir`\n- `allow-default-urls`",
           "type": "string",
           "const": "opener:default",

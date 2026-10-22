@@ -7,6 +7,7 @@ use std::sync::Mutex;
 mod desktop_connection;
 mod desktop_host_access;
 mod desktop_telemetry;
+mod intelligence_bridge;
 
 #[cfg(test)]
 mod test_support;
@@ -98,6 +99,10 @@ struct Shell {
     intelligence_menu: Mutex<Option<PathBuf>>,
     /// The menu's "Open Intelligence dashboard" is running; its item is disabled until it ends.
     intelligence_opening: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// Dashboard addresses and this session's sign-ins, so a later opening needs no CLI call.
+    dashboards: Dashboards,
+    /// The OpenBot app page's sidebar row, and the app origins allowed to reach it.
+    intelligence_bridge: intelligence_bridge::Bridge,
 }
 
 /// The deployment whose Compose up may have created containers, including a partial failure.
@@ -2917,6 +2922,8 @@ fn show_openbot_on<R: tauri::Runtime>(
             )
             .connection(openbot_desktop_lib::problem::Connection::Organization));
         }
+        // Only the owned app itself; an organization's OpenBot is not this machine's page.
+        intelligence_bridge::allow(&app, &url);
         url
     } else {
         openbot_desktop_lib::organization_auth::session_destination(&root, &authority, &url)?
@@ -3798,16 +3805,30 @@ fn cancel_model_oauth(attempt_id: String) {
 /// call so `cancel_local_eval` can stop it, including before it has started.
 #[tauri::command]
 async fn run_local_eval(
+    app: tauri::AppHandle,
     attempt: String,
     action: local_eval::Action,
     stack: String,
 ) -> Result<local_eval::Report, local_eval::Failure> {
     let stack = local_eval::StackId::parse(&stack)?;
-    tauri::async_runtime::spawn_blocking(move || {
+    let report = tauri::async_runtime::spawn_blocking(move || {
         local_eval::run_installed(&attempt, action, &stack)
     })
     .await
-    .map_err(|_| local_eval::Failure::Spawn)?
+    .map_err(|_| local_eval::Failure::Spawn)??;
+    learn_dashboards(&app, report.stack.iter());
+    Ok(report)
+}
+
+/// Keep the dashboard address of every stack a CLI report described, for `Dashboards`.
+fn learn_dashboards<'a>(
+    app: &tauri::AppHandle,
+    stacks: impl Iterator<Item = &'a local_eval::Stack>,
+) {
+    let shell = app.state::<Shell>();
+    for stack in stacks {
+        shell.dashboards.learn(stack);
+    }
 }
 
 /// The stacks the CLI has recorded, so a stack id comes from the CLI rather than being typed.
@@ -3830,17 +3851,20 @@ recorded, and only then does Stop or Quit stop that stack.
 */
 #[tauri::command]
 async fn set_up_local_eval(
+    app: tauri::AppHandle,
     attempt: String,
     root: String,
 ) -> Result<local_eval::Report, SetupError> {
     let root = stack::root_from(&root);
-    tauri::async_runtime::spawn_blocking(move || {
+    let report = tauri::async_runtime::spawn_blocking(move || {
         set_up_local_eval_at(&root, |folder| {
             local_eval::setup_installed(&attempt, folder)
         })
     })
     .await
-    .map_err(|_| SetupError::Failure(local_eval::Failure::Spawn))?
+    .map_err(|_| SetupError::Failure(local_eval::Failure::Spawn))??;
+    learn_dashboards(&app, report.stack.iter());
+    Ok(report)
 }
 
 /**
@@ -3891,11 +3915,12 @@ as they are, with nothing taken.
 */
 #[tauri::command]
 async fn connect_local_eval(
+    app: tauri::AppHandle,
     attempt: String,
     root: String,
 ) -> Result<local_eval::Connection, ConnectError> {
     let root = stack::root_from(&root);
-    tauri::async_runtime::spawn_blocking(move || {
+    let connection = tauri::async_runtime::spawn_blocking(move || {
         connect_local_eval_at(
             &root,
             |folder| local_eval::connect_installed(&attempt, folder),
@@ -3904,7 +3929,9 @@ async fn connect_local_eval(
         )
     })
     .await
-    .map_err(|_| ConnectError::Failure(local_eval::Failure::Spawn))?
+    .map_err(|_| ConnectError::Failure(local_eval::Failure::Spawn))??;
+    learn_dashboards(&app, connection.stack.iter());
+    Ok(connection)
 }
 
 /// Where `local connect` puts the key for an app's runtime. OpenBot's server reads it as
@@ -4011,10 +4038,16 @@ where
 }
 
 #[tauri::command]
-async fn list_local_eval(attempt: String) -> Result<local_eval::Listing, local_eval::Failure> {
-    tauri::async_runtime::spawn_blocking(move || local_eval::list_installed(&attempt))
-        .await
-        .map_err(|_| local_eval::Failure::Spawn)?
+async fn list_local_eval(
+    app: tauri::AppHandle,
+    attempt: String,
+) -> Result<local_eval::Listing, local_eval::Failure> {
+    let listing =
+        tauri::async_runtime::spawn_blocking(move || local_eval::list_installed(&attempt))
+            .await
+            .map_err(|_| local_eval::Failure::Spawn)??;
+    learn_dashboards(&app, listing.stacks.iter());
+    Ok(listing)
 }
 
 #[tauri::command]
@@ -4023,53 +4056,212 @@ fn cancel_local_eval(attempt: String) {
 }
 
 /**
-Sign the browser in to the recorded local stack's Intelligence dashboard, with no code to approve.
+Open the recorded local stack's Intelligence dashboard, signed in, with no code to approve.
 
-`local login` opens the browser itself, so nothing here opens a second tab. The window gets nothing
-back but success or a fixed sentence; `attempt` lets `cancel_local_eval` stop the call.
+`local login` opens the browser itself, so nothing here opens a second tab; once it has signed this
+stack in during this session the dashboard's address is opened directly (see `Dashboards`). The
+window gets nothing back but success or a fixed sentence; `attempt` lets `cancel_local_eval` stop
+the call.
 */
 #[tauri::command]
-async fn open_local_intelligence(attempt: String, root: String) -> Result<(), Problem> {
+async fn open_local_intelligence(
+    app: tauri::AppHandle,
+    attempt: String,
+    root: String,
+) -> Result<(), Problem> {
     let root = stack::root_from(&root);
     tauri::async_runtime::spawn_blocking(move || {
-        open_local_intelligence_at(&root, |stack| local_eval::login_installed(&attempt, stack))
+        open_dashboard_from(&app, &root, &attempt).map_err(|failure| failure.problem())
     })
     .await
-    .map_err(|_| Problem::plain(OPEN_INTELLIGENCE_FAILED))?
+    .map_err(|_| DashboardFailure::Failed.problem())?
 }
 
-const OPEN_INTELLIGENCE_FAILED: &str =
-    "OpenBot could not open the Intelligence dashboard. Try again.";
+/// Why the dashboard did not open: a fixed category, which is all the OpenBot app's page is told,
+/// and one fixed sentence for each, which is all the setup window and the menu say.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum DashboardFailure {
+    NotSetUp,
+    NotResponding,
+    BrowserFailed,
+    Busy,
+    EngineStopped,
+    Unsupported,
+    TimedOut,
+    Stopped,
+    Failed,
+}
 
-/// `local login` for the stack recorded in `root`, and nothing for a root with no record.
+impl DashboardFailure {
+    fn said(self) -> &'static str {
+        match self {
+            DashboardFailure::NotSetUp => "Set up local Intelligence before opening its dashboard.",
+            DashboardFailure::NotResponding => {
+                "The Intelligence dashboard is not responding yet. Try again when Intelligence is ready."
+            }
+            DashboardFailure::BrowserFailed => "Your browser did not open. Try again.",
+            DashboardFailure::Busy => {
+                "Another Intelligence command is still running. Try again when it finishes."
+            }
+            DashboardFailure::EngineStopped => "The software Intelligence runs on is not running.",
+            DashboardFailure::Unsupported => {
+                "This version of OpenBot cannot open the Intelligence dashboard."
+            }
+            DashboardFailure::TimedOut => {
+                "The Intelligence dashboard took too long to open. Try again."
+            }
+            DashboardFailure::Stopped => "Opening the Intelligence dashboard was stopped.",
+            DashboardFailure::Failed => "OpenBot could not open the Intelligence dashboard. Try again.",
+        }
+    }
+
+    fn problem(self) -> Problem {
+        Problem::plain(self.said())
+    }
+}
+
+/// `open_dashboard_at` with its sentence, as the setup window is told.
+#[cfg(test)]
 fn open_local_intelligence_at<L>(root: &Path, login: L) -> Result<(), Problem>
 where
     L: FnOnce(&local_eval::StackId) -> Result<local_eval::SignIn, local_eval::Failure>,
 {
+    open_dashboard_at(root, login).map_err(DashboardFailure::problem)
+}
+
+/// `sign_in` for the stack recorded in `root`, and nothing for a root with no record.
+fn open_dashboard_at<L>(root: &Path, sign_in: L) -> Result<(), DashboardFailure>
+where
+    L: FnOnce(&local_eval::StackId) -> Result<local_eval::SignIn, local_eval::Failure>,
+{
     use local_eval::{Failure, Outcome, Reason};
-    let recorded = local_eval_state::read(root, None)
-        .ok_or_else(|| Problem::plain("Set up local Intelligence before opening its dashboard."))?;
-    let said = match login(&recorded.stack_id()) {
+    let recorded = local_eval_state::read(root, None).ok_or(DashboardFailure::NotSetUp)?;
+    Err(match sign_in(&recorded.stack_id()) {
         Ok(signed) if signed.outcome == Outcome::Completed => return Ok(()),
         Ok(signed) => match signed.reason {
-            Some(Reason::DashboardUnavailable) => {
-                "The Intelligence dashboard is not responding yet. Try again when Intelligence is ready."
-            }
-            Some(Reason::BrowserOpenFailed) => "Your browser did not open. Try again.",
-            Some(Reason::LocalCommandBusy) => {
-                "Another Intelligence command is still running. Try again when it finishes."
-            }
-            Some(Reason::DockerUnavailable) => "The software Intelligence runs on is not running.",
-            _ => OPEN_INTELLIGENCE_FAILED,
+            Some(Reason::DashboardUnavailable) => DashboardFailure::NotResponding,
+            Some(Reason::BrowserOpenFailed) => DashboardFailure::BrowserFailed,
+            Some(Reason::LocalCommandBusy) => DashboardFailure::Busy,
+            Some(Reason::DockerUnavailable) => DashboardFailure::EngineStopped,
+            _ => DashboardFailure::Failed,
         },
-        Err(Failure::Unavailable) => {
-            "This version of OpenBot cannot open the Intelligence dashboard."
+        Err(Failure::Unavailable) => DashboardFailure::Unsupported,
+        Err(Failure::Timeout) => DashboardFailure::TimedOut,
+        Err(Failure::Cancelled) => DashboardFailure::Stopped,
+        Err(_) => DashboardFailure::Failed,
+    })
+}
+
+/**
+The dashboard addresses the CLI has reported this session, and which stacks `local login` has
+signed in since OpenBot started.
+
+`local login` costs a CLI call: about 0.3 s to check the pinned CLI's digests and 0.25 s for it to
+start, before it waits for the dashboard, mints a single-use link and hands that to the browser.
+The browser keeps the session it was given, so once a stack has been signed in during this session,
+"Open Intelligence dashboard" opens its address directly and at once. OpenBot does not read the
+CLI's credential files or the browser to decide; the first opening in each session signs in again,
+and a dashboard whose session ended shows its own Sign In.
+
+Addresses come only from CLI reports, whose dashboard address was checked to be a loopback one when
+the report was read. A stack whose address changes is signed in again: the browser's session
+belongs to the old address.
+*/
+#[derive(Default)]
+struct Dashboards {
+    known: Mutex<std::collections::HashMap<String, KnownDashboard>>,
+}
+
+#[derive(Default)]
+struct KnownDashboard {
+    address: Option<String>,
+    signed_in: bool,
+}
+
+impl Dashboards {
+    fn learn(&self, stack: &local_eval::Stack) {
+        let mut known = self.known.lock().unwrap();
+        let entry = known.entry(stack.id.clone()).or_default();
+        if entry
+            .address
+            .as_ref()
+            .is_some_and(|address| *address != stack.urls.dashboard)
+        {
+            entry.signed_in = false;
         }
-        Err(Failure::Timeout) => "The Intelligence dashboard took too long to open. Try again.",
-        Err(Failure::Cancelled) => "Opening the Intelligence dashboard was stopped.",
-        Err(_) => OPEN_INTELLIGENCE_FAILED,
-    };
-    Err(Problem::plain(said))
+        entry.address = Some(stack.urls.dashboard.clone());
+    }
+
+    fn signed_in(&self, stack: &local_eval::StackId) -> Option<String> {
+        let known = self.known.lock().unwrap();
+        let entry = known.get(stack.as_str())?;
+        entry.signed_in.then(|| entry.address.clone()).flatten()
+    }
+
+    fn mark_signed_in(&self, stack: &local_eval::StackId) {
+        self.known
+            .lock()
+            .unwrap()
+            .entry(stack.as_str().to_owned())
+            .or_default()
+            .signed_in = true;
+    }
+}
+
+/**
+Open `stack`'s dashboard: straight to its address once this session has signed it in, otherwise
+through `login`, remembering a completed sign-in.
+
+`open` hands an address to the browser. Its failure is the CLI's own category for the same thing.
+*/
+fn open_or_sign_in<L, O>(
+    dashboards: &Dashboards,
+    stack: &local_eval::StackId,
+    login: L,
+    open: O,
+) -> Result<local_eval::SignIn, local_eval::Failure>
+where
+    L: FnOnce(&local_eval::StackId) -> Result<local_eval::SignIn, local_eval::Failure>,
+    O: FnOnce(&str) -> Result<(), ()>,
+{
+    use local_eval::{Outcome, Reason, SignIn};
+    if let Some(address) = dashboards.signed_in(stack) {
+        return Ok(match open(&address) {
+            Ok(()) => SignIn {
+                outcome: Outcome::Completed,
+                reason: None,
+            },
+            Err(()) => SignIn {
+                outcome: Outcome::Failed,
+                reason: Some(Reason::BrowserOpenFailed),
+            },
+        });
+    }
+    let signed = login(stack)?;
+    if signed.outcome == Outcome::Completed {
+        dashboards.mark_signed_in(stack);
+    }
+    Ok(signed)
+}
+
+/// The real `open_dashboard_at`: the installed CLI, and the browser through the opener plugin.
+fn open_dashboard_from<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    root: &Path,
+    attempt: &str,
+) -> Result<(), DashboardFailure> {
+    open_dashboard_at(root, |stack| {
+        open_or_sign_in(
+            &app.state::<Shell>().dashboards,
+            stack,
+            |stack| local_eval::login_installed(attempt, stack),
+            |address| {
+                use tauri_plugin_opener::OpenerExt;
+                app.opener().open_url(address, None::<&str>).map_err(|_| ())
+            },
+        )
+    })
 }
 
 /// The root whose dashboard the menu opens: only one in local mode with a recorded stack.
@@ -4098,42 +4290,43 @@ fn offer_local_intelligence(app: tauri::AppHandle, root: String, offered: bool) 
     if let Err(error) = install_menus(&app, show) {
         eprintln!("[menu] could not update the menus: {error}");
     }
+    intelligence_bridge::tell(&app, intelligence_bridge::current(&app));
 }
 
-/// The menu's "Open Intelligence dashboard": a failure is said in a dialog, since the window may
-/// be hidden.
-///
-/// The CLI can take many seconds, so the click is answered at once: the window comes forward
-/// without leaving what it shows, the menu bar and the tray's tooltip say the dashboard is
-/// opening, the item is disabled, and a setup page shows the same words with a spinner.
-fn open_intelligence_from_menu(app: tauri::AppHandle) {
-    let shell = app.state::<Shell>();
-    let Some(root) = shell.intelligence_menu.lock().unwrap().clone() else {
-        return;
-    };
-    let opening = std::sync::Arc::clone(&shell.intelligence_opening);
+/// The menu's "Open Intelligence dashboard". The CLI can take many seconds the first time, so the
+/// window comes forward without leaving what it shows, where the setup page or the app's sidebar
+/// says the dashboard is opening.
+fn open_intelligence_from_menu<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
         let _ = window.unminimize();
         let _ = window.set_focus();
     }
+    start_intelligence_opening(app);
+}
+
+/**
+Open the dashboard of the stack the menus offer, from the menu or the app's sidebar alike.
+
+Answered at once, before any CLI call: the menu item is disabled, a setup page shows the words
+with a spinner, and the app's sidebar row spins (`intelligence_bridge`). How it went is said in the
+same places. A failure that has none of them on screen is said in a dialog.
+*/
+fn start_intelligence_opening<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
+    let shell = app.state::<Shell>();
+    let Some(root) = shell.intelligence_menu.lock().unwrap().clone() else {
+        // Nothing to open any more: a row that thought otherwise is told, so it does not spin.
+        intelligence_bridge::tell(&app, intelligence_bridge::current(&app));
+        return;
+    };
+    let opening = std::sync::Arc::clone(&shell.intelligence_opening);
     let status_app = app.clone();
     open_intelligence_reporting(
         opening,
         move |status| show_intelligence_opening(&status_app, status),
         move || {
             let attempt = format!("menu-open-intelligence-{:016x}", rand::random::<u64>());
-            let opened = open_local_intelligence_at(&root, |stack| {
-                local_eval::login_installed(&attempt, stack)
-            });
-            if let Err(problem) = &opened {
-                use tauri_plugin_dialog::DialogExt;
-                app.dialog()
-                    .message(problem.said.clone())
-                    .title("Open Intelligence dashboard")
-                    .show(|_| {});
-            }
-            opened
+            open_dashboard_from(&app, &root, &attempt)
         },
         |job| {
             std::thread::Builder::new()
@@ -4150,8 +4343,7 @@ fn open_intelligence_from_menu(app: tauri::AppHandle) {
 enum IntelligenceOpening {
     Opening,
     Opened,
-    /// One of `open_local_intelligence_at`'s fixed sentences.
-    Failed(String),
+    Failed(DashboardFailure),
 }
 
 /// `{"state": "opening" | "opened" | "failed", "said": …}`, the words always included.
@@ -4177,7 +4369,7 @@ impl IntelligenceOpening {
         match self {
             IntelligenceOpening::Opening => "Opening the Intelligence dashboard…",
             IntelligenceOpening::Opened => "Opened in your browser.",
-            IntelligenceOpening::Failed(said) => said,
+            IntelligenceOpening::Failed(failure) => failure.said(),
         }
     }
 }
@@ -4198,7 +4390,7 @@ fn open_intelligence_reporting<S, O, W>(
     spawn: W,
 ) where
     S: Fn(IntelligenceOpening) + Clone + Send + 'static,
-    O: FnOnce() -> Result<(), Problem> + Send + 'static,
+    O: FnOnce() -> Result<(), DashboardFailure> + Send + 'static,
     W: FnOnce(Box<dyn FnOnce() + Send + 'static>) -> std::io::Result<()>,
 {
     use std::sync::atomic::Ordering;
@@ -4211,46 +4403,47 @@ fn open_intelligence_reporting<S, O, W>(
     let job = Box::new(move || {
         let outcome = match open() {
             Ok(()) => IntelligenceOpening::Opened,
-            Err(problem) => IntelligenceOpening::Failed(problem.said),
+            Err(failure) => IntelligenceOpening::Failed(failure),
         };
         finishing.store(false, Ordering::SeqCst);
         finished(outcome);
     });
     if spawn(job).is_err() {
         opening.store(false, Ordering::SeqCst);
-        status(IntelligenceOpening::Failed(OPEN_INTELLIGENCE_FAILED.into()));
+        status(IntelligenceOpening::Failed(DashboardFailure::Failed));
     }
 }
 
-const OPENING_INTELLIGENCE_TRAY: &str = "Opening Intelligence dashboard…";
-
-/// A menu action that takes a while, said beside the tray icon: the title on macOS, the tooltip
-/// everywhere. None puts both back. The tray belongs to the main thread.
-fn tray_status<R: tauri::Runtime>(app: &tauri::AppHandle<R>, said: Option<&'static str>) {
-    let tray_app = app.clone();
-    let _ = app.run_on_main_thread(move || {
-        if let Some(tray) = tray_app.tray_by_id("openbot") {
-            let _ = tray.set_title(said);
-            let _ = tray.set_tooltip(Some(said.unwrap_or("OpenBot")));
-        }
-    });
-}
+const OPENING_INTELLIGENCE_ITEM: &str = "Opening Intelligence dashboard…";
 
 /// The menu's "Open Intelligence dashboard" item: its words, and whether it can be chosen.
 fn intelligence_menu_item(opening: bool) -> (&'static str, bool) {
     if opening {
-        (OPENING_INTELLIGENCE_TRAY, false)
+        (OPENING_INTELLIGENCE_ITEM, false)
     } else {
         ("Open Intelligence dashboard", true)
     }
 }
 
-/// Tell the window, then put the menu bar's title, the tray's tooltip and the menus in step.
-/// Menus and the tray belong to the main thread.
-fn show_intelligence_opening(app: &tauri::AppHandle, status: IntelligenceOpening) {
+/// Tell the setup page and the app's sidebar, then put the menus in step. Nothing is written in
+/// the menu bar: a status title there widened the item behind the camera notch and, on macOS,
+/// clearing the title never took it away. A failure with no page on screen to say it gets a dialog.
+/// Menus belong to the main thread.
+fn show_intelligence_opening<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    status: IntelligenceOpening,
+) {
     let _ = app.emit(INTELLIGENCE_OPENING_EVENT, &status);
-    let opening = status == IntelligenceOpening::Opening;
-    tray_status(app, opening.then_some(OPENING_INTELLIGENCE_TRAY));
+    let told = intelligence_bridge::tell(app, intelligence_bridge::Offer::after(&status));
+    if let IntelligenceOpening::Failed(failure) = &status {
+        if !told && !showing_setup(app) {
+            use tauri_plugin_dialog::DialogExt;
+            app.dialog()
+                .message(failure.said())
+                .title("Open Intelligence dashboard")
+                .show(|_| {});
+        }
+    }
     let tray_app = app.clone();
     let _ = app.run_on_main_thread(move || {
         let offered = tray_app
@@ -4263,6 +4456,19 @@ fn show_intelligence_opening(app: &tauri::AppHandle, status: IntelligenceOpening
             eprintln!("[menu] could not update the menus: {error}");
         }
     });
+}
+
+/// Whether the main window shows the setup page, whose own overlay says the menu's outcome.
+fn showing_setup<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> bool {
+    let Some(window) = app.get_webview_window("main") else {
+        return false;
+    };
+    let Ok(setup) = setup_destination(app) else {
+        return false;
+    };
+    window
+        .url()
+        .is_ok_and(|current| same_window_app(&current, &setup))
 }
 
 /// `bun` from PATH, or the places an installer puts it when PATH has not been reloaded.
@@ -4557,6 +4763,7 @@ fn restore_window_on<R: tauri::Runtime>(app: &tauri::AppHandle<R>, ports: &openb
         .then(|| owned_app_url(&root, ports))
         .flatten()
     {
+        intelligence_bridge::allow(app, &url);
         url.parse().ok()
     } else {
         setup_destination(app).ok()
@@ -4617,9 +4824,6 @@ fn publish_quit_notice_failure<R: tauri::Runtime>(app: tauri::AppHandle<R>, erro
 }
 
 fn stop_from_menu<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
-    // Stop can take minutes and the window may be showing OpenBot or nothing: said at once beside
-    // the tray icon, and put back once it is over either way.
-    tray_status(&app, Some("Stopping OpenBot…"));
     std::thread::spawn(move || {
         let root = default_root();
         let root_path = PathBuf::from(&root);
@@ -4640,7 +4844,6 @@ fn stop_from_menu<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
                 report(&app, "stopped", false, problem.said);
             }
         }
-        tray_status(&app, None);
         let _ = show_setup(app.clone());
     });
 }
@@ -4695,10 +4898,13 @@ The tray menu and the window's menu bar, with "Open Intelligence dashboard" when
 
 Built again whenever that changes, because a menu item cannot be hidden, only removed.
 */
-fn install_menus(app: &tauri::AppHandle, intelligence: bool) -> tauri::Result<()> {
+fn install_menus<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    intelligence: bool,
+) -> tauri::Result<()> {
     use tauri::menu::{IsMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
 
-    let items = || -> tauri::Result<Vec<MenuItem<tauri::Wry>>> {
+    let items = || -> tauri::Result<Vec<MenuItem<R>>> {
         let mut items = vec![MenuItem::with_id(
             app,
             "open",
@@ -4736,10 +4942,10 @@ fn install_menus(app: &tauri::AppHandle, intelligence: bool) -> tauri::Result<()
         )?);
         Ok(items)
     };
-    fn refs(items: &[MenuItem<tauri::Wry>]) -> Vec<&dyn IsMenuItem<tauri::Wry>> {
+    fn refs<R: tauri::Runtime>(items: &[MenuItem<R>]) -> Vec<&dyn IsMenuItem<R>> {
         items
             .iter()
-            .map(|item| item as &dyn IsMenuItem<tauri::Wry>)
+            .map(|item| item as &dyn IsMenuItem<R>)
             .collect()
     }
 
@@ -4805,6 +5011,7 @@ fn main() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(intelligence_bridge::plugin())
         .manage(Shell::default())
         .invoke_handler(tauri::generate_handler![
             record_setup_event,
@@ -4890,6 +5097,8 @@ fn main() {
             )));
 
             remember_setup_url(app.handle())?;
+            // Built by `generate_context!`, so the bridge plugin's permissions are compiled in.
+            intelligence_bridge::enable(app.handle());
 
             // The status menu lets somebody open the window, stop the stack, or quit the app.
             tauri::tray::TrayIconBuilder::with_id("openbot")
@@ -7283,8 +7492,8 @@ mod tests {
         for (result, last) in [
             (Ok(()), IntelligenceOpening::Opened),
             (
-                Err(Problem::plain("Your browser did not open. Try again.")),
-                IntelligenceOpening::Failed("Your browser did not open. Try again.".into()),
+                Err(DashboardFailure::BrowserFailed),
+                IntelligenceOpening::Failed(DashboardFailure::BrowserFailed),
             ),
         ] {
             let opening = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -7335,8 +7544,9 @@ mod tests {
             serde_json::json!({"state": "opened", "said": "Opened in your browser."})
         );
         assert_eq!(
-            serde_json::to_value(IntelligenceOpening::Failed("Fixed.".into())).unwrap(),
-            serde_json::json!({"state": "failed", "said": "Fixed."})
+            serde_json::to_value(IntelligenceOpening::Failed(DashboardFailure::BrowserFailed))
+                .unwrap(),
+            serde_json::json!({"state": "failed", "said": "Your browser did not open. Try again."})
         );
     }
 
@@ -7359,10 +7569,185 @@ mod tests {
             *said.lock().unwrap(),
             [
                 IntelligenceOpening::Opening,
-                IntelligenceOpening::Failed(OPEN_INTELLIGENCE_FAILED.into())
+                IntelligenceOpening::Failed(DashboardFailure::Failed)
             ]
         );
         assert!(!opening.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
+    fn reported_stack(id: &str, dashboard: &str) -> local_eval::Stack {
+        local_eval::Stack {
+            id: id.into(),
+            installed_release: "0.13.14".into(),
+            step: "ready".into(),
+            urls: local_eval::Urls {
+                api: "http://127.0.0.1:4201".into(),
+                dashboard: dashboard.into(),
+                gateway: "ws://127.0.0.1:4401".into(),
+            },
+            has_failed_step: false,
+            update_in_progress: false,
+            observed: None,
+        }
+    }
+
+    #[test]
+    fn the_dashboard_signs_in_once_per_session_then_opens_its_address_with_no_cli_call() {
+        use local_eval::{Outcome, Reason};
+        use std::cell::RefCell;
+        let dashboards = Dashboards::default();
+        let stack = local_eval::StackId::parse("local-abc123").unwrap();
+        let opened = RefCell::new(Vec::new());
+        let open = |address: &str| {
+            opened.borrow_mut().push(address.to_owned());
+            Ok(())
+        };
+        dashboards.learn(&reported_stack(
+            "local-abc123",
+            "http://intelligence.localhost:8080",
+        ));
+
+        // A sign-in that did not complete is not remembered.
+        let signed = open_or_sign_in(
+            &dashboards,
+            &stack,
+            |_| signed_in(Outcome::Blocked, Some(Reason::DashboardUnavailable)),
+            open,
+        )
+        .unwrap();
+        assert_eq!(signed.outcome, Outcome::Blocked);
+        // The first completed opening in this session goes through `local login`.
+        let logins = RefCell::new(0);
+        let login = |_: &local_eval::StackId| {
+            *logins.borrow_mut() += 1;
+            signed_in(Outcome::Completed, None)
+        };
+        open_or_sign_in(&dashboards, &stack, login, open).unwrap();
+        assert_eq!(*logins.borrow(), 1);
+        assert!(
+            opened.borrow().is_empty(),
+            "local login opens the browser itself"
+        );
+        // After that: the address, at once, and the CLI is never asked.
+        for _ in 0..2 {
+            let signed = open_or_sign_in(
+                &dashboards,
+                &stack,
+                |_| panic!("the CLI was asked again"),
+                open,
+            )
+            .unwrap();
+            assert_eq!(signed.outcome, Outcome::Completed);
+        }
+        assert_eq!(
+            *opened.borrow(),
+            [
+                "http://intelligence.localhost:8080",
+                "http://intelligence.localhost:8080"
+            ]
+        );
+        // A browser that would not open is the CLI's own category for it.
+        let failed =
+            open_or_sign_in(&dashboards, &stack, |_| panic!("no CLI"), |_| Err(())).unwrap();
+        assert_eq!(
+            (failed.outcome, failed.reason),
+            (Outcome::Failed, Some(Reason::BrowserOpenFailed))
+        );
+        // A new address is a new origin with no session: signed in again.
+        dashboards.learn(&reported_stack(
+            "local-abc123",
+            "http://intelligence.localhost:8081",
+        ));
+        open_or_sign_in(&dashboards, &stack, login, open).unwrap();
+        assert_eq!(*logins.borrow(), 2);
+        open_or_sign_in(&dashboards, &stack, |_| panic!("no CLI"), open).unwrap();
+        assert_eq!(
+            opened.borrow().last().map(String::as_str),
+            Some("http://intelligence.localhost:8081")
+        );
+    }
+
+    #[test]
+    fn a_signed_in_stack_with_no_reported_address_signs_in_again() {
+        let dashboards = Dashboards::default();
+        let stack = local_eval::StackId::parse("local-abc123").unwrap();
+        let logins = std::cell::Cell::new(0);
+        for _ in 0..2 {
+            open_or_sign_in(
+                &dashboards,
+                &stack,
+                |_| {
+                    logins.set(logins.get() + 1);
+                    signed_in(local_eval::Outcome::Completed, None)
+                },
+                |_| panic!("no address was ever reported"),
+            )
+            .unwrap();
+        }
+        assert_eq!(logins.get(), 2);
+        // Learning the address keeps the sign-in: the browser holds the session for it.
+        dashboards.learn(&reported_stack(
+            "local-abc123",
+            "http://intelligence.localhost:8080",
+        ));
+        assert_eq!(
+            dashboards.signed_in(&stack).as_deref(),
+            Some("http://intelligence.localhost:8080")
+        );
+        // Another stack's sign-in is its own.
+        let other = local_eval::StackId::parse("local-def456").unwrap();
+        assert_eq!(dashboards.signed_in(&other), None);
+    }
+
+    #[test]
+    fn dashboard_failures_reach_the_app_page_as_categories_only() {
+        for (failure, category) in [
+            (DashboardFailure::NotSetUp, "not_set_up"),
+            (DashboardFailure::NotResponding, "not_responding"),
+            (DashboardFailure::BrowserFailed, "browser_failed"),
+            (DashboardFailure::Busy, "busy"),
+            (DashboardFailure::EngineStopped, "engine_stopped"),
+            (DashboardFailure::Unsupported, "unsupported"),
+            (DashboardFailure::TimedOut, "timed_out"),
+            (DashboardFailure::Stopped, "stopped"),
+            (DashboardFailure::Failed, "failed"),
+        ] {
+            assert_eq!(
+                serde_json::to_value(intelligence_bridge::Offer::Failed(failure)).unwrap(),
+                serde_json::json!({"state": "failed", "reason": category})
+            );
+        }
+        for (offer, state) in [
+            (intelligence_bridge::Offer::Unavailable, "unavailable"),
+            (intelligence_bridge::Offer::Ready, "ready"),
+            (intelligence_bridge::Offer::Opening, "opening"),
+        ] {
+            assert_eq!(
+                serde_json::to_value(offer).unwrap(),
+                serde_json::json!({ "state": state })
+            );
+        }
+        assert_eq!(
+            intelligence_bridge::Offer::after(&IntelligenceOpening::Opening),
+            intelligence_bridge::Offer::Opening
+        );
+        assert_eq!(
+            intelligence_bridge::Offer::after(&IntelligenceOpening::Opened),
+            intelligence_bridge::Offer::Ready
+        );
+        assert_eq!(
+            intelligence_bridge::Offer::after(&IntelligenceOpening::Failed(DashboardFailure::Busy)),
+            intelligence_bridge::Offer::Failed(DashboardFailure::Busy)
+        );
+    }
+
+    #[test]
+    fn nothing_is_ever_written_in_the_menu_bar() {
+        // The status title widened the tray item behind the camera notch, and on macOS
+        // clearing the title never took it away. The tray keeps its icon, tooltip and menu only.
+        let source = include_str!("main.rs");
+        let call = ["set_", "title("].concat();
+        assert!(!source.contains(&call), "the tray title is set again");
     }
 
     #[test]

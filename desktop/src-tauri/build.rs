@@ -30,5 +30,12 @@ fn main() {
     );
     println!("cargo:rerun-if-env-changed=RUSTC");
     println!("cargo:rerun-if-env-changed=PATH");
-    tauri_build::build()
+    // The one way the OpenBot app's own page reaches the shell: an inline plugin whose commands get
+    // permissions of their own, granted at runtime to the exact owned app origin. App commands stay
+    // out of a remote page's reach.
+    tauri_build::try_build(tauri_build::Attributes::new().plugin(
+        "openbot-intelligence",
+        tauri_build::InlinedPlugin::new().commands(&["watch", "open"]),
+    ))
+    .expect("the Tauri build failed")
 }
