@@ -21,6 +21,10 @@ mock.module("@tauri-apps/api/core", () => ({
 const {
   cancelLocalEval,
   chatGate,
+  connectLocalEval,
+  licenceExpiresSoon,
+  localLicences,
+  localReadinesses,
   intelligenceStopFailed,
   intelligenceStopProblem,
   listLocalEval,
@@ -57,6 +61,7 @@ function report(overrides: Partial<LocalReport> = {}): LocalReport {
     reason: null,
     readiness: "unknown",
     licence: "unknown",
+    licenceExpiresAt: null,
     ...overrides,
   };
 }
@@ -128,6 +133,69 @@ test("cancels the attempt it names", async () => {
   ]);
 });
 
+test("connects this installation as its own cancellable attempt", async () => {
+  invokeHandler = async () => ({
+    outcome: "completed",
+    stack: report().stack,
+    reason: null,
+    conflicted: false,
+  });
+  const { attempt, connection } = connectLocalEval("/tmp/openbot");
+  expect((await connection).outcome).toBe("completed");
+  expect(invokeCalls).toEqual([
+    {
+      command: "connect_local_eval",
+      args: { attempt, root: "/tmp/openbot" },
+    },
+  ]);
+});
+
+test("a connection OpenBot would not take up arrives as a Problem; CLI failures as categories", async () => {
+  invokeHandler = async () => {
+    throw { said: "The Intelligence CLI connected a different stack." };
+  };
+  const problem = await connectLocalEval("/tmp/openbot").connection.catch(
+    (e) => e,
+  );
+  expect(problem).toEqual({
+    said: "The Intelligence CLI connected a different stack.",
+  });
+  invokeHandler = async () => {
+    throw "timeout";
+  };
+  const error = await connectLocalEval("/tmp/openbot").connection.catch(
+    (e) => e,
+  );
+  expect(error).toBeInstanceOf(LocalEvalError);
+  expect(error.category).toBe("timeout");
+});
+
+test("a licence warns within five days of its expiry, and not before", () => {
+  const now = Date.parse("2026-10-21T18:00:00Z");
+  const expiring = (at: string | null) => report({ licenceExpiresAt: at });
+  expect(licenceExpiresSoon(expiring("2026-10-25T18:00:00Z"), now)).toBe(true);
+  expect(licenceExpiresSoon(expiring("2026-10-26T18:00:00Z"), now)).toBe(true);
+  expect(licenceExpiresSoon(expiring("2026-10-26T18:00:01Z"), now)).toBe(false);
+  expect(licenceExpiresSoon(expiring(null), now)).toBe(false);
+  expect(licenceExpiresSoon(expiring("not a date"), now)).toBe(false);
+});
+
+test("the readiness and licence lists match the native enums", async () => {
+  const native = await Bun.file(
+    new URL("../src-tauri/src/local_eval.rs", import.meta.url),
+  ).text();
+  const variants = (name: string) =>
+    [
+      ...(native
+        .match(new RegExp(`pub enum ${name} \\{([^}]*)\\}`))?.[1]
+        .matchAll(/^\s{4}([A-Z][A-Za-z]*),/gm) ?? []),
+    ].map(([, variant]) =>
+      variant.replace(/[A-Z]/g, (c, i) => (i ? "-" : "") + c.toLowerCase()),
+    );
+  expect<string[]>([...localReadinesses]).toEqual(variants("Readiness"));
+  expect<string[]>([...localLicences]).toEqual(variants("Licence"));
+});
+
 const good: ChatGateInput = {
   intelligence: report(),
   openBot: "connected",
@@ -150,6 +218,28 @@ test("unknown, failed and missing Intelligence states all block", () => {
       "intelligence",
     );
   }
+});
+
+test("of every readiness and licence pair, only ready and valid open chat", () => {
+  for (const readiness of localReadinesses)
+    for (const licence of localLicences) {
+      const open = chatGate({
+        ...good,
+        intelligence: report({ readiness, licence }),
+      }).open;
+      expect(open).toBe(readiness === "ready" && licence === "valid");
+    }
+  // Not on a report that did not complete.
+  expect(
+    chatGate({
+      ...good,
+      intelligence: report({
+        outcome: "blocked",
+        readiness: "ready",
+        licence: "valid",
+      }),
+    }).open,
+  ).toBe(false);
 });
 
 test("future readiness and licence values open chat only when exactly good", () => {

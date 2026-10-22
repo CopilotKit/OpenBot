@@ -3675,6 +3675,144 @@ where
     Ok(report)
 }
 
+/// Why connecting OpenBot to local Intelligence produced nothing to show: the CLI's own static
+/// category, or a connection OpenBot would not take up. Told apart by shape, like `SetupError`.
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+enum ConnectError {
+    Failure(local_eval::Failure),
+    Unconnected(Problem),
+}
+
+/**
+`local connect` for this installation, after the person chose to connect OpenBot to it.
+
+Interim, until the CLI issues OpenBot a credential of its own: the key `connect` writes into the
+installation's `.env` is moved into the credential store as OpenBot's Intelligence key, the same
+place a pasted key goes, and Start takes it from there. Blocked and conflicted answers are returned
+as they are, with nothing taken.
+*/
+#[tauri::command]
+async fn connect_local_eval(
+    attempt: String,
+    root: String,
+) -> Result<local_eval::Connection, ConnectError> {
+    let root = stack::root_from(&root);
+    tauri::async_runtime::spawn_blocking(move || {
+        connect_local_eval_at(
+            &root,
+            |folder| local_eval::connect_installed(&attempt, folder),
+            openbot_desktop_lib::vault::remember,
+            openbot_desktop_lib::vault::recall,
+        )
+    })
+    .await
+    .map_err(|_| ConnectError::Failure(local_eval::Failure::Spawn))?
+}
+
+/// Where `local connect` puts the key for an app's runtime. OpenBot's server reads it as
+/// `INTELLIGENCE_API_KEY`.
+const LOCAL_EVAL_CONNECTED_KEY: &str = "CPK_INTELLIGENCE_API_KEY";
+
+/**
+Connect the recorded stack in `root`, and take up what the CLI wrote.
+
+Only the stack this installation recorded is connected, and only its own addresses are believed:
+the `.env` must hold exactly the API and gateway addresses the CLI reported for it. The key then
+goes to the credential store and leaves the file, which keeps only settings (see `vault`). The
+CLI connects a folder once, so connecting again finds no key in the file; that is the key already
+kept, provided this stack was the one connected.
+*/
+fn connect_local_eval_at<C, R, K>(
+    root: &Path,
+    connect: C,
+    mut remember: R,
+    mut recall: K,
+) -> Result<local_eval::Connection, ConnectError>
+where
+    C: FnOnce(&Path) -> Result<local_eval::Connection, local_eval::Failure>,
+    R: FnMut(&Path, &str, &str) -> Result<(), Problem>,
+    K: FnMut(&Path, &str) -> Result<Option<String>, Problem>,
+{
+    let unconnected = |said: &str| ConnectError::Unconnected(Problem::plain(said));
+    let recorded = local_eval_state::read(root, None)
+        .ok_or_else(|| unconnected("Set up local Intelligence before connecting OpenBot to it."))?;
+    let connection = connect(root).map_err(ConnectError::Failure)?;
+    if connection.outcome != local_eval::Outcome::Completed || connection.conflicted {
+        return Ok(connection);
+    }
+    let Some(stack) = connection
+        .stack
+        .as_ref()
+        .filter(|stack| stack.id == recorded.stack)
+    else {
+        return Err(unconnected(
+            "The Intelligence CLI connected a different stack. OpenBot did not use it.",
+        ));
+    };
+    let env_file = root.join(".env");
+    let written = openbot_env::read_already_set(
+        &env_file,
+        &[
+            "INTELLIGENCE_API_URL",
+            "INTELLIGENCE_GATEWAY_WS_URL",
+            LOCAL_EVAL_CONNECTED_KEY,
+        ],
+    )
+    .map_err(|error| {
+        ConnectError::Unconnected(Problem::with(
+            "OpenBot could not read the connection the Intelligence CLI wrote.",
+            format!("{}: {}", env_file.display(), error.kind()),
+        ))
+    })?;
+    let addresses = [
+        ("INTELLIGENCE_API_URL", &stack.urls.api),
+        ("INTELLIGENCE_GATEWAY_WS_URL", &stack.urls.gateway),
+    ];
+    if addresses
+        .iter()
+        .any(|(name, reported)| written.get(*name) != Some(*reported))
+    {
+        return Err(unconnected(
+            "The Intelligence CLI's connection settings do not match its stack. OpenBot did not use them.",
+        ));
+    }
+    match written
+        .get(LOCAL_EVAL_CONNECTED_KEY)
+        .map(|key| key.trim())
+        .filter(|key| !key.is_empty())
+    {
+        Some(key) => {
+            remember(root, "INTELLIGENCE_API_KEY", key).map_err(ConnectError::Unconnected)?;
+            let settings = addresses
+                .iter()
+                .map(|(name, value)| ((*name).to_owned(), (*value).clone()))
+                .collect();
+            let purge = [(LOCAL_EVAL_CONNECTED_KEY.to_owned(), String::new())].into();
+            openbot_env::write(&env_file, &settings, &purge).map_err(|error| {
+                ConnectError::Unconnected(Problem::with(
+                    "OpenBot kept the local Intelligence key but could not remove it from its settings file.",
+                    format!("{}: {}", env_file.display(), error.kind()),
+                ))
+            })?;
+        }
+        None => {
+            let kept = recorded.connected
+                && recall(root, "INTELLIGENCE_API_KEY")
+                    .map_err(ConnectError::Unconnected)?
+                    .is_some_and(|key| !key.trim().is_empty());
+            if !kept {
+                return Err(unconnected(
+                    "The Intelligence CLI connected, but OpenBot has no key for this stack.",
+                ));
+            }
+        }
+    }
+    let stack_id = local_eval::StackId::parse(&stack.id).map_err(ConnectError::Failure)?;
+    local_eval_state::mark_connected(root, &stack_id).map_err(ConnectError::Unconnected)?;
+    Ok(connection)
+}
+
 #[tauri::command]
 async fn list_local_eval(attempt: String) -> Result<local_eval::Listing, local_eval::Failure> {
     tauri::async_runtime::spawn_blocking(move || local_eval::list_installed(&attempt))
@@ -4163,6 +4301,7 @@ fn main() {
             list_local_eval,
             cancel_local_eval,
             set_up_local_eval,
+            connect_local_eval,
             last_local_eval_stop_failure,
             ask_the_bot,
         ])
@@ -6530,8 +6669,9 @@ mod tests {
             outcome,
             stack: None,
             reason,
-            readiness: local_eval::Canonical::Unknown,
-            licence: local_eval::Canonical::Unknown,
+            readiness: local_eval::Readiness::Unknown,
+            licence: local_eval::Licence::Unknown,
+            licence_expires_at: None,
         }
     }
 
@@ -7158,6 +7298,321 @@ mod tests {
         let _ = std::fs::remove_dir_all(parent);
     }
 
+    const LOCAL_KEY: &str = "cpk-synthetic-local-key";
+
+    /// What `local connect` leaves in an installation folder, after a line OpenBot wrote earlier.
+    fn local_eval_connected_env(root: &Path) {
+        std::fs::write(
+            root.join(".env"),
+            format!(
+                "SERVER_PORT=3001\nINTELLIGENCE_API_URL=http://localhost:64770\nINTELLIGENCE_GATEWAY_WS_URL=ws://localhost:64772\nCPK_INTELLIGENCE_API_KEY={LOCAL_KEY}\nSL_ENABLED=true\n"
+            ),
+        )
+        .unwrap();
+    }
+
+    fn local_eval_connection(
+        outcome: local_eval::Outcome,
+        stack: &str,
+        reason: Option<local_eval::Reason>,
+        conflicted: bool,
+    ) -> local_eval::Connection {
+        local_eval::Connection {
+            outcome,
+            stack: local_eval_completed(stack).stack,
+            reason,
+            conflicted,
+        }
+    }
+
+    type FakeVault = std::cell::RefCell<std::collections::BTreeMap<String, String>>;
+
+    fn connect_with_vault(
+        root: &Path,
+        vault: &FakeVault,
+        connection: Result<local_eval::Connection, local_eval::Failure>,
+    ) -> Result<local_eval::Connection, ConnectError> {
+        connect_local_eval_at(
+            root,
+            |folder| {
+                assert_eq!(folder, root, "connect runs in the installation");
+                connection
+            },
+            |_, name, value| {
+                vault.borrow_mut().insert(name.into(), value.into());
+                Ok(())
+            },
+            |_, name| Ok(vault.borrow().get(name).cloned()),
+        )
+    }
+
+    #[test]
+    fn a_completed_connection_moves_its_key_into_the_vault_and_out_of_the_file() {
+        let root = local_eval_root(
+            "openbot-local-eval-connect-vault",
+            Some(local_eval_state::Ownership::Created),
+        );
+        local_eval_connected_env(&root);
+        let vault = FakeVault::default();
+        let connection = connect_with_vault(
+            &root,
+            &vault,
+            Ok(local_eval_connection(
+                local_eval::Outcome::Completed,
+                "local-abc123",
+                None,
+                false,
+            )),
+        )
+        .unwrap();
+        assert_eq!(connection.outcome, local_eval::Outcome::Completed);
+        // OpenBot's server reads INTELLIGENCE_API_KEY; the CLI names it for an app's runtime.
+        assert_eq!(
+            vault
+                .borrow()
+                .get("INTELLIGENCE_API_KEY")
+                .map(String::as_str),
+            Some(LOCAL_KEY)
+        );
+        assert_eq!(vault.borrow().len(), 1);
+        let env = std::fs::read_to_string(root.join(".env")).unwrap();
+        assert!(!env.contains(LOCAL_KEY), "{env}");
+        assert!(!env.contains("CPK_INTELLIGENCE_API_KEY"), "{env}");
+        for line in [
+            "INTELLIGENCE_API_URL=http://localhost:64770",
+            "INTELLIGENCE_GATEWAY_WS_URL=ws://localhost:64772",
+            "SL_ENABLED=true",
+            "SERVER_PORT=3001",
+        ] {
+            assert_eq!(
+                env.lines().filter(|found| *found == line).count(),
+                1,
+                "{env}"
+            );
+        }
+        assert!(local_eval_state::read(&root, None).unwrap().connected);
+        assert!(!serde_json::to_string(&connection)
+            .unwrap()
+            .contains(LOCAL_KEY));
+
+        // Start then takes it from the vault exactly like a key pasted earlier.
+        let key = intelligence_key_for_start(&root, String::new(), |_, name| {
+            Ok(vault.borrow().get(name).cloned().unwrap_or_default())
+        })
+        .unwrap();
+        assert_eq!(key, LOCAL_KEY);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn starting_after_a_connection_neither_clobbers_nor_duplicates_it() {
+        let root = local_eval_root(
+            "openbot-local-eval-connect-start-env",
+            Some(local_eval_state::Ownership::Created),
+        );
+        local_eval_connected_env(&root);
+        let vault = FakeVault::default();
+        connect_with_vault(
+            &root,
+            &vault,
+            Ok(local_eval_connection(
+                local_eval::Outcome::Completed,
+                "local-abc123",
+                None,
+                false,
+            )),
+        )
+        .unwrap();
+        // Start's own write: the same addresses as settings, its credentials purged to the vault.
+        let (settings, secrets) = openbot_desktop_lib::vault::split(
+            [
+                ("INTELLIGENCE_API_URL", "http://localhost:64770"),
+                ("INTELLIGENCE_GATEWAY_WS_URL", "ws://localhost:64772"),
+                ("INTELLIGENCE_API_KEY", LOCAL_KEY),
+                ("SERVER_PORT", "3001"),
+            ]
+            .into_iter()
+            .map(|(key, value)| (key.to_owned(), value.to_owned()))
+            .collect(),
+        );
+        openbot_env::write(&root.join(".env"), &settings, &secrets).unwrap();
+        let env = std::fs::read_to_string(root.join(".env")).unwrap();
+        for key in [
+            "INTELLIGENCE_API_URL=",
+            "INTELLIGENCE_GATEWAY_WS_URL=",
+            "SL_ENABLED=",
+            "SERVER_PORT=",
+        ] {
+            assert_eq!(
+                env.lines().filter(|line| line.starts_with(key)).count(),
+                1,
+                "{env}"
+            );
+        }
+        assert!(!env.contains(LOCAL_KEY), "{env}");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_connection_that_is_not_complete_takes_nothing() {
+        for (connection, label) in [
+            (
+                local_eval_connection(
+                    local_eval::Outcome::Blocked,
+                    "local-abc123",
+                    Some(local_eval::Reason::ConfirmationRequired),
+                    false,
+                ),
+                "confirmation",
+            ),
+            (
+                local_eval_connection(local_eval::Outcome::Blocked, "local-abc123", None, true),
+                "conflict",
+            ),
+            (
+                local_eval::Connection {
+                    stack: None,
+                    ..local_eval_connection(
+                        local_eval::Outcome::Failed,
+                        "local-abc123",
+                        Some(local_eval::Reason::LocalCommandFailed),
+                        false,
+                    )
+                },
+                "failed",
+            ),
+        ] {
+            let root = local_eval_root(
+                &format!("openbot-local-eval-connect-{label}"),
+                Some(local_eval_state::Ownership::Created),
+            );
+            local_eval_connected_env(&root);
+            let before = std::fs::read_to_string(root.join(".env")).unwrap();
+            let vault = FakeVault::default();
+            let answer = connect_with_vault(&root, &vault, Ok(connection.clone())).unwrap();
+            assert_eq!(answer, connection, "{label}");
+            assert!(vault.borrow().is_empty(), "{label}");
+            assert_eq!(std::fs::read_to_string(root.join(".env")).unwrap(), before);
+            assert!(!local_eval_state::read(&root, None).unwrap().connected);
+            let _ = std::fs::remove_dir_all(root);
+        }
+    }
+
+    #[test]
+    fn a_connection_is_taken_only_for_the_recorded_stack_and_its_own_addresses() {
+        let completed = |stack: &str| {
+            Ok(local_eval_connection(
+                local_eval::Outcome::Completed,
+                stack,
+                None,
+                false,
+            ))
+        };
+        // No recorded stack: the CLI is not asked at all.
+        let root = local_eval_root("openbot-local-eval-connect-unrecorded", None);
+        let vault = FakeVault::default();
+        let error = connect_local_eval_at(
+            &root,
+            |_| panic!("connect ran without a recorded stack"),
+            |_, _, _| panic!("stored a key"),
+            |_, _| Ok(None),
+        )
+        .unwrap_err();
+        assert!(matches!(error, ConnectError::Unconnected(_)), "{error:?}");
+        let _ = std::fs::remove_dir_all(root);
+
+        // Another stack, or addresses that are not the stack's own: nothing is stored.
+        for (label, stack, env) in [
+            ("other-stack", "local-other", None),
+            (
+                "other-address",
+                "local-abc123",
+                Some(format!("INTELLIGENCE_API_URL=http://localhost:9999\nINTELLIGENCE_GATEWAY_WS_URL=ws://localhost:64772\nCPK_INTELLIGENCE_API_KEY={LOCAL_KEY}\n")),
+            ),
+            (
+                "no-address",
+                "local-abc123",
+                Some(format!("CPK_INTELLIGENCE_API_KEY={LOCAL_KEY}\n")),
+            ),
+        ] {
+            let root = local_eval_root(
+                &format!("openbot-local-eval-connect-{label}"),
+                Some(local_eval_state::Ownership::Created),
+            );
+            match env {
+                Some(env) => std::fs::write(root.join(".env"), env).unwrap(),
+                None => local_eval_connected_env(&root),
+            }
+            let error = connect_with_vault(&root, &vault, completed(stack)).unwrap_err();
+            let ConnectError::Unconnected(problem) = error else {
+                panic!("{label}: {error:?}");
+            };
+            assert!(!format!("{problem:?}").contains(LOCAL_KEY), "{label}");
+            assert!(vault.borrow().is_empty(), "{label}");
+            assert!(!local_eval_state::read(&root, None).unwrap().connected);
+            let _ = std::fs::remove_dir_all(root);
+        }
+
+        // A CLI failure is its own static category.
+        let root = local_eval_root(
+            "openbot-local-eval-connect-timeout",
+            Some(local_eval_state::Ownership::Created),
+        );
+        assert!(matches!(
+            connect_with_vault(&root, &vault, Err(local_eval::Failure::Timeout)),
+            Err(ConnectError::Failure(local_eval::Failure::Timeout))
+        ));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn connecting_again_uses_the_key_already_kept() {
+        let root = local_eval_root(
+            "openbot-local-eval-connect-again",
+            Some(local_eval_state::Ownership::Created),
+        );
+        // The CLI's second connect changes nothing, and the file no longer holds the key.
+        std::fs::write(
+            root.join(".env"),
+            "INTELLIGENCE_API_URL=http://localhost:64770\nINTELLIGENCE_GATEWAY_WS_URL=ws://localhost:64772\n",
+        )
+        .unwrap();
+        let completed = || {
+            Ok(local_eval_connection(
+                local_eval::Outcome::Completed,
+                "local-abc123",
+                None,
+                false,
+            ))
+        };
+        let vault = FakeVault::default();
+        // Never connected: a key from somewhere else is not this stack's.
+        vault
+            .borrow_mut()
+            .insert("INTELLIGENCE_API_KEY".into(), "hosted-key".into());
+        assert!(matches!(
+            connect_with_vault(&root, &vault, completed()),
+            Err(ConnectError::Unconnected(_))
+        ));
+        let stack = local_eval::StackId::parse("local-abc123").unwrap();
+        local_eval_state::mark_connected(&root, &stack).unwrap();
+        vault.borrow_mut().clear();
+        assert!(matches!(
+            connect_with_vault(&root, &vault, completed()),
+            Err(ConnectError::Unconnected(_))
+        ));
+        vault
+            .borrow_mut()
+            .insert("INTELLIGENCE_API_KEY".into(), LOCAL_KEY.into());
+        assert_eq!(
+            connect_with_vault(&root, &vault, completed())
+                .unwrap()
+                .outcome,
+            local_eval::Outcome::Completed
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     #[test]
     fn already_configured_shows_the_local_evaluation_only_when_there_is_one() {
         let root = local_eval_root("openbot-already-configured-local-eval", None);
@@ -7180,7 +7635,8 @@ mod tests {
             serde_json::json!({
                 "stack": "local-abc123",
                 "ownership": "created",
-                "phase": "installed"
+                "phase": "installed",
+                "connected": false
             })
         );
         let _ = std::fs::remove_dir_all(root);
