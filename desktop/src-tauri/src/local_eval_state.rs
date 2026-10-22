@@ -1,7 +1,7 @@
 //! Where the local evaluation has got to, kept beside the installation.
 //!
 //! A checkpoint, not a credential: the stack id, who created the stack, the CLI digest it was
-//! recorded with, and the furthest phase reached. Nothing here proves the stack is running or the
+//! recorded with, the furthest phase reached, and whether OpenBot holds a key for the stack. Nothing here proves the stack is running or the
 //! person is signed in; the CLI is asked for that every time. A missing, unreadable or unknown
 //! record reads as no record, exactly like the installation's own checkpoints.
 //!
@@ -57,6 +57,10 @@ struct Record {
     ownership: Ownership,
     cli_sha256: String,
     phase: Phase,
+    /// `local connect` ran and its key went into OpenBot's credential store. Absent until then, so
+    /// a record that was never connected keeps the fields it always had.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    connected: bool,
 }
 
 /// What the window and the stop path may know.
@@ -66,6 +70,7 @@ pub struct State {
     pub stack: String,
     pub ownership: Ownership,
     pub phase: Phase,
+    pub connected: bool,
 }
 
 impl State {
@@ -112,6 +117,7 @@ pub fn read(root: &Path, cli_sha256: Option<&str>) -> Option<State> {
         stack: record.stack,
         ownership: record.ownership,
         phase,
+        connected: record.connected,
     })
 }
 
@@ -127,7 +133,8 @@ fn write(root: &Path, record: &Record) -> Result<(), Problem> {
     crate::preparation::write_checkpoint(root, FILE, record).map_err(problem)
 }
 
-/// Record a stack at `installed`, replacing any earlier record.
+/// Record a stack at `installed`, replacing any earlier record. Setting the same stack up again
+/// resumes it, so its connection is kept; any other stack starts unconnected.
 pub fn begin(
     root: &Path,
     stack: &StackId,
@@ -143,6 +150,8 @@ pub fn begin(
         ownership,
         cli_sha256: cli_sha256.to_owned(),
         phase: Phase::Installed,
+        connected: load(root)
+            .is_some_and(|earlier| earlier.stack == stack.as_str() && earlier.connected),
     };
     write(root, &record)?;
     Ok(read(root, Some(cli_sha256)).expect("the record just written reads back"))
@@ -162,6 +171,16 @@ pub fn advance(root: &Path, cli_sha256: &str, to: Phase) -> Result<State, Proble
     record.cli_sha256 = cli_sha256.to_owned();
     write(root, &record)?;
     Ok(read(root, Some(cli_sha256)).expect("the record just written reads back"))
+}
+
+/// Record that OpenBot now holds the key `local connect` gave it for `stack`, the recorded one.
+pub fn mark_connected(root: &Path, stack: &StackId) -> Result<State, Problem> {
+    let mut record = load(root)
+        .filter(|record| record.stack == stack.as_str())
+        .ok_or_else(|| Problem::plain("OpenBot has no record of that local Intelligence stack."))?;
+    record.connected = true;
+    write(root, &record)?;
+    Ok(read(root, None).expect("the record just written reads back"))
 }
 
 pub fn clear(root: &Path) -> Result<(), Problem> {
@@ -255,6 +274,35 @@ mod tests {
         assert!(!begin(&root, &stack(), Ownership::Shared, PIN)
             .unwrap()
             .tied_to_openbot());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_connection_is_kept_for_its_own_stack_only() {
+        let root = root("local-eval-state-connected");
+        assert!(mark_connected(&root, &stack()).is_err(), "nothing recorded");
+        assert!(
+            !begin(&root, &stack(), Ownership::Created, PIN)
+                .unwrap()
+                .connected
+        );
+        let other = StackId::parse("local-other").unwrap();
+        assert!(mark_connected(&root, &other).is_err(), "another stack");
+        assert!(mark_connected(&root, &stack()).unwrap().connected);
+        assert!(read(&root, None).unwrap().connected);
+        // Setting the same stack up again resumes it, and its connection with it.
+        assert!(
+            begin(&root, &stack(), Ownership::Created, PIN)
+                .unwrap()
+                .connected
+        );
+        assert!(advance(&root, PIN, Phase::AppOpened).unwrap().connected);
+        // A different stack starts unconnected.
+        assert!(
+            !begin(&root, &other, Ownership::Created, PIN)
+                .unwrap()
+                .connected
+        );
         std::fs::remove_dir_all(root).unwrap();
     }
 

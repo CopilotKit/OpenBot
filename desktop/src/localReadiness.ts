@@ -5,19 +5,22 @@
  * to it, and the AI provider key. Every sentence here is static. Nothing from the CLI is shown,
  * because the native boundary passes on only enumerated categories.
  *
- * Unknown is never shown as ready. CLI v1 cannot state readiness or licence, so today the
- * Intelligence row is never "ready".
+ * Unknown is never shown as ready. The Intelligence row is ready only when the CLI itself reports
+ * readiness "ready" and licence "valid"; a CLI that reports neither leaves it unknown.
  */
 import {
   type ChatGateInput,
   chatGate,
   type LocalFailure,
+  type LocalLicence,
   type LocalReason,
+  licenceExpiresSoon,
 } from "./localEvalCli";
 
 export type ReadinessState = "ready" | "blocked" | "unknown";
 export type ReadinessAction =
   | "retry"
+  | "start-intelligence"
   | "restart-intelligence"
   | "restart-openbot"
   | "sign-in"
@@ -36,6 +39,8 @@ export type ReadinessInput = {
   intelligence: ChatGateInput["intelligence"];
   openBot: ChatGateInput["openBot"];
   provider: ChatGateInput["provider"];
+  /** The clock the licence expiry warning is measured against. */
+  now?: number;
 };
 
 export type Readiness = {
@@ -88,7 +93,24 @@ const reasonRows: Record<LocalReason, ReadinessRow> = {
   "port-unavailable": blocked("A port Intelligence needs is in use.", "retry"),
   "local-command-busy": busy,
   "local-command-failed": couldNotStart,
+  // OpenBot always approves the connection it asks for, so this is the CLI asking for more.
+  "confirmation-required": blocked(
+    "The Intelligence CLI asked for a confirmation OpenBot cannot give.",
+  ),
   unrecognized: couldNotStart,
+};
+
+// A licence the CLI verified as anything but valid blocks, however ready Intelligence is.
+const licenceRows: Record<
+  Exclude<LocalLicence, "valid" | "unknown">,
+  ReadinessRow
+> = {
+  expired: blocked("The Intelligence evaluation licence has expired."),
+  missing: blocked("Intelligence has no evaluation licence."),
+  invalid: blocked("The Intelligence evaluation licence is not valid."),
+  "organization-mismatch": blocked(
+    "The Intelligence licence belongs to a different organization.",
+  ),
 };
 
 const failureRows: Record<LocalFailure, ReadinessRow> = {
@@ -118,6 +140,7 @@ const failureRows: Record<LocalFailure, ReadinessRow> = {
 
 function intelligenceRow(
   intelligence: ReadinessInput["intelligence"],
+  now: number,
 ): ReadinessRow {
   if (intelligence === null) {
     return {
@@ -132,9 +155,30 @@ function intelligenceRow(
     openBot: "connected",
     provider: "validated",
   }).open;
-  if (good) return { state: "ready", said: "Intelligence is ready." };
+  if (good) {
+    return {
+      state: "ready",
+      said: licenceExpiresSoon(intelligence, now)
+        ? "Intelligence is ready. Its evaluation licence expires within 5 days."
+        : "Intelligence is ready.",
+    };
+  }
   if (intelligence.reason !== null) return reasonRows[intelligence.reason];
   if (intelligence.outcome !== "completed") return couldNotStart;
+  const licence = intelligence.licence;
+  if (licence !== "valid" && licence !== "unknown") return licenceRows[licence];
+  if (intelligence.readiness === "starting") {
+    return { state: "unknown", said: "Intelligence is starting." };
+  }
+  if (intelligence.readiness === "stopped") {
+    return blocked("Intelligence is stopped.", "start-intelligence");
+  }
+  if (intelligence.readiness === "degraded") {
+    return blocked(
+      "Intelligence is running but not healthy.",
+      "restart-intelligence",
+    );
+  }
   return {
     state: "unknown",
     said: "Intelligence started. Its licence and readiness are not reported yet.",
@@ -168,7 +212,7 @@ function runtimeRow(
 export function localReadiness(input: ReadinessInput): Readiness {
   return {
     runtime: runtimeRow(input.runtime, input.intelligence),
-    intelligence: intelligenceRow(input.intelligence),
+    intelligence: intelligenceRow(input.intelligence, input.now ?? Date.now()),
     openBot:
       input.openBot === "connected"
         ? { state: "ready", said: "OpenBot is connected to Intelligence." }

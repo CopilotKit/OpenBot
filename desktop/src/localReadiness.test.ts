@@ -24,6 +24,7 @@ const reasons: LocalReason[] = [
   "incompatible-release",
   "local-command-busy",
   "local-command-failed",
+  "confirmation-required",
   "unrecognized",
 ];
 
@@ -34,6 +35,7 @@ function report(overrides: Partial<LocalReport> = {}): LocalReport {
     reason: null,
     readiness: "unknown",
     licence: "unknown",
+    licenceExpiresAt: null,
     ...overrides,
   };
 }
@@ -79,7 +81,7 @@ test("every failure gives a plain, non-empty sentence without its own name", () 
 });
 
 test("the reason and failure lists in this test match the source", () => {
-  expect(new Set(reasons).size).toBe(15);
+  expect(new Set(reasons).size).toBe(16);
   expect(localFailures.length).toBe(15);
 });
 
@@ -331,4 +333,81 @@ test("types: the failure and reason inputs are the upstream ones", () => {
   expect(
     localReadiness({ ...base, intelligence: failure }).intelligence.said,
   ).toBe("Intelligence could not start.");
+});
+
+test("each readiness state of a valid licence has its own row", () => {
+  const row = (readiness: LocalReport["readiness"]) =>
+    localReadiness({
+      ...base,
+      intelligence: report({ readiness, licence: "valid" }),
+    }).intelligence;
+  expect(row("ready")).toEqual({
+    state: "ready",
+    said: "Intelligence is ready.",
+  });
+  expect(row("starting")).toEqual({
+    state: "unknown",
+    said: "Intelligence is starting.",
+  });
+  expect(row("stopped")).toEqual({
+    state: "blocked",
+    said: "Intelligence is stopped.",
+    action: "start-intelligence",
+  });
+  expect(row("degraded")).toEqual({
+    state: "blocked",
+    said: "Intelligence is running but not healthy.",
+    action: "restart-intelligence",
+  });
+  expect(row("unknown")).toEqual({
+    state: "unknown",
+    said: "Intelligence started. Its licence and readiness are not reported yet.",
+  });
+});
+
+test("a licence that is not valid blocks a ready Intelligence", () => {
+  const row = (licence: LocalReport["licence"]) =>
+    localReadiness({
+      ...base,
+      intelligence: report({ readiness: "ready", licence }),
+    }).intelligence;
+  expect(row("expired")).toEqual({
+    state: "blocked",
+    said: "The Intelligence evaluation licence has expired.",
+  });
+  expect(row("missing")).toEqual({
+    state: "blocked",
+    said: "Intelligence has no evaluation licence.",
+  });
+  expect(row("invalid")).toEqual({
+    state: "blocked",
+    said: "The Intelligence evaluation licence is not valid.",
+  });
+  expect(row("organization-mismatch")).toEqual({
+    state: "blocked",
+    said: "The Intelligence licence belongs to a different organization.",
+  });
+  expect(row("unknown").state).toBe("unknown");
+});
+
+test("a licence expiring in four days is ready with a warning", () => {
+  const now = Date.parse("2026-10-21T18:00:00Z");
+  const expiring = (licenceExpiresAt: string) =>
+    localReadiness({
+      ...base,
+      now,
+      intelligence: report({
+        readiness: "ready",
+        licence: "valid",
+        licenceExpiresAt,
+      }),
+    }).intelligence;
+  expect(expiring("2026-10-25T18:00:00.000Z")).toEqual({
+    state: "ready",
+    said: "Intelligence is ready. Its evaluation licence expires within 5 days.",
+  });
+  expect(expiring("2026-10-27T18:00:00.000Z")).toEqual({
+    state: "ready",
+    said: "Intelligence is ready.",
+  });
 });

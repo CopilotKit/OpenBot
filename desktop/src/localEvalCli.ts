@@ -3,7 +3,7 @@
  *
  * The native layer runs the pinned CLI, normalizes its version-1 JSON and returns only allowlisted
  * facts or a static failure category. Raw CLI output never reaches the window. Runtime and licence
- * decisions stay in the CLI.
+ * decisions stay in the CLI: readiness and licence are its own states, read by exact value.
  */
 import { invoke } from "@tauri-apps/api/core";
 import type { Problem } from "./Problem";
@@ -47,7 +47,29 @@ export type LocalReason =
   | "incompatible-release"
   | "local-command-busy"
   | "local-command-failed"
+  | "confirmation-required"
   | "unrecognized";
+
+/** `local_eval::Readiness`: the CLI's own end-to-end check. Running pods are not this. */
+export const localReadinesses = [
+  "ready",
+  "starting",
+  "stopped",
+  "degraded",
+  "unknown",
+] as const;
+export type LocalReadiness = (typeof localReadinesses)[number];
+
+/** `local_eval::Licence`, as the CLI verified it. */
+export const localLicences = [
+  "valid",
+  "expired",
+  "missing",
+  "invalid",
+  "organization-mismatch",
+  "unknown",
+] as const;
+export type LocalLicence = (typeof localLicences)[number];
 
 export type LocalReport = {
   outcome: LocalOutcome;
@@ -64,9 +86,20 @@ export type LocalReport = {
     };
   };
   reason: LocalReason | null;
-  // CLI v1 cannot state either fact. The native layer has no other value to send yet.
-  readiness: "unknown";
-  licence: "unknown";
+  // Unknown when the CLI does not publish the fact, or publishes something this build cannot read.
+  readiness: LocalReadiness;
+  licence: LocalLicence;
+  /** A strict ISO-8601 instant, or null. */
+  licenceExpiresAt: string | null;
+};
+
+/** What `local connect` answered. The key it wrote went to the credential store, not here. */
+export type LocalConnection = {
+  outcome: LocalOutcome;
+  stack: LocalReport["stack"];
+  reason: LocalReason | null;
+  /** Settings the CLI wrote earlier were changed since, and it kept them. */
+  conflicted: boolean;
 };
 
 /** The stacks the CLI has recorded. App folders are not included. */
@@ -144,6 +177,28 @@ export function setUpLocalEval(root: string): {
   return { attempt, report };
 }
 
+/**
+ * `local connect` for this installation, after the person chose to connect OpenBot. The native
+ * side keeps the key the CLI wrote as OpenBot's Intelligence key. A connection it would not take
+ * up rejects with a `Problem`.
+ */
+export function connectLocalEval(root: string): {
+  attempt: string;
+  connection: Promise<LocalConnection>;
+} {
+  const attempt = crypto.randomUUID();
+  const connection = invoke<LocalConnection>("connect_local_eval", {
+    attempt,
+    root,
+  }).catch((rejection: unknown) => {
+    if (rejection && typeof rejection === "object" && "said" in rejection) {
+      throw rejection as Problem;
+    }
+    throw failure(rejection);
+  });
+  return { attempt, connection };
+}
+
 /** Stops one call; it then rejects with `cancelled`. */
 export function cancelLocalEval(attempt: string): Promise<void> {
   return invoke("cancel_local_eval", { attempt });
@@ -160,7 +215,7 @@ export type ChatGateInput = {
 
 /**
  * Chat opens only when all three independent facts are known good. Unknown is blocked, never
- * guessed ready. No v1 report can open it, because v1 states neither readiness nor licence.
+ * guessed ready: a CLI that does not report readiness and licence cannot open it.
  */
 export function chatGate(state: ChatGateInput): {
   open: boolean;
@@ -185,6 +240,18 @@ function intelligenceReady(report: ChatGateInput["intelligence"]): boolean {
 // Positive match only: a future value that is not exactly the good one still blocks.
 function canonical(value: string, good: string): boolean {
   return value === good;
+}
+
+const WARN_BEFORE_EXPIRY_MS = 5 * 24 * 60 * 60 * 1000;
+
+/** The licence expires within five days of `now`. Desktop warns; it never renews on its own. */
+export function licenceExpiresSoon(
+  report: LocalReport,
+  now: number = Date.now(),
+): boolean {
+  if (report.licenceExpiresAt === null) return false;
+  const expires = Date.parse(report.licenceExpiresAt);
+  return !Number.isNaN(expires) && expires - now <= WARN_BEFORE_EXPIRY_MS;
 }
 
 /** How main.rs starts an Intelligence stop failure (`INTELLIGENCE_STOP_FAILED`). */

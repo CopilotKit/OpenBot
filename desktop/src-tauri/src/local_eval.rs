@@ -10,17 +10,19 @@
 //! - **Nothing unverified runs.** The CLI is pinned by SHA-256, like every other program this app
 //!   fetches (`install.rs`). There is no fallback to `PATH`, `npx` or a global install.
 //! - **Arguments are fixed.** Only `status`, `start` and `stop`, a validated stack id and `--json`,
-//!   as separate arguments with no shell. The CLI's `resumeCommand` strings are text for a
+//!   plus the constant `list`, `setup` and `connect` lists, as separate arguments with no shell. The CLI's `resumeCommand` strings are text for a
 //!   terminal user; they are dropped here and never executed.
 //! - **Only allowlisted facts leave.** Raw stdout, stderr, error messages and recovery text never
 //!   cross IPC or reach a log. Failures are static categories with no payload.
 //!
-//! Version 1 of the CLI's JSON reports that a command *completed*, not that Intelligence is ready
-//! or licensed. So readiness and licence are always `unknown` here until the CLI publishes those
-//! facts, and unknown keeps chat closed.
+//! A command that *completed* is not Intelligence that is ready or licensed. Those two facts come
+//! only from the additive v1 `readiness` and `license` fields of `local status`, read by exact
+//! value. A CLI that does not publish them, or publishes something else, reads as `unknown`, and
+//! unknown keeps chat closed.
 //!
 //! Source: Intelligence `apps/cli/src/commands/local.ts`, `services/local-manager.ts` and
-//! `services/local-errors.ts` at 3935afbfe3cda88dfeabfd0250db08ff0ad51000.
+//! `services/local-errors.ts` at 3935afbfe3cda88dfeabfd0250db08ff0ad51000; `local connect` at
+//! 780313e4edf6fc5f038c3cf5e4612ac668446c45.
 
 use std::io::{Read, Seek};
 use std::path::PathBuf;
@@ -114,10 +116,28 @@ pub enum Outcome {
     Failed,
 }
 
-/// A fact version 1 of the CLI cannot state. There is deliberately no other value yet.
+/// Whether Intelligence answers, by the CLI's own end-to-end check. Running pods are not this.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
-pub enum Canonical {
+pub enum Readiness {
+    Ready,
+    Starting,
+    Stopped,
+    Degraded,
+    /// Not reported, not understood, or reported as unknown. Never treated as ready.
+    Unknown,
+}
+
+/// The evaluation licence, as the CLI verified it. Never the licence itself.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Licence {
+    Valid,
+    Expired,
+    Missing,
+    Invalid,
+    OrganizationMismatch,
+    /// Not reported or not understood. Never treated as valid.
     Unknown,
 }
 
@@ -140,6 +160,8 @@ pub enum Reason {
     IncompatibleRelease,
     LocalCommandBusy,
     LocalCommandFailed,
+    /// `connect` asked for its approval flag. Desktop always sends it, so this is a contract gap.
+    ConfirmationRequired,
     /// A reason this build does not know. Treated as blocking, never as success.
     Unrecognized,
 }
@@ -161,6 +183,7 @@ impl Reason {
             "incompatible_release" => Reason::IncompatibleRelease,
             "local_command_busy" => Reason::LocalCommandBusy,
             "local_command_failed" => Reason::LocalCommandFailed,
+            "confirmation_required" => Reason::ConfirmationRequired,
             _ => Reason::Unrecognized,
         }
     }
@@ -172,8 +195,22 @@ pub struct Report {
     pub outcome: Outcome,
     pub stack: Option<Stack>,
     pub reason: Option<Reason>,
-    pub readiness: Canonical,
-    pub licence: Canonical,
+    pub readiness: Readiness,
+    pub licence: Licence,
+    /// When the licence expires, as a strict ISO-8601 instant, so the window can warn ahead of it.
+    pub licence_expires_at: Option<String>,
+}
+
+/// What `local connect` answered. The settings it wrote stay in the installation's `.env`; their
+/// names and values are not part of this.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Connection {
+    pub outcome: Outcome,
+    pub stack: Option<Stack>,
+    pub reason: Option<Reason>,
+    /// The CLI found settings it wrote earlier changed since, and kept them.
+    pub conflicted: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -232,6 +269,18 @@ the evaluation agreement themselves; the CLI refuses an agent that tries, and so
 pub const SETUP_ARGUMENTS: [&str; 4] = ["local", "setup", "--defer-model", "--json"];
 
 /**
+`local connect` connects the folder it runs in, the installation `local setup` was run in, to that
+folder's stack.
+
+Approved in the arguments because the person approved it in the window: the CLI's own
+confirmation step only prints which settings it will write. It writes `INTELLIGENCE_API_URL`,
+`INTELLIGENCE_GATEWAY_WS_URL`, `CPK_INTELLIGENCE_API_KEY`, `SL_ENABLED` and
+`.copilotkit/project.json` into the folder. Interim, until the CLI issues OpenBot a credential of
+its own (contract request 8).
+*/
+pub const CONNECT_ARGUMENTS: [&str; 4] = ["local", "connect", "--approve-connection", "--json"];
+
+/**
 Turn what the CLI printed, and how it exited, into the facts this app keeps.
 
 `local` exits 0 with `completed`, 2 with `blocked` and 1 with `failed`. Any other code means it
@@ -250,20 +299,163 @@ pub fn normalize_setup(exit_code: i32, stdout: &[u8]) -> Result<Report, Failure>
 fn report(command: &str, exit_code: i32, stdout: &[u8]) -> Result<Report, Failure> {
     let wire = parse_envelope(command, exit_code, stdout)?;
     let (outcome, wire) = (wire.0, &wire.1);
-    let stack = match wire.get("stack") {
-        None | Some(Value::Null) if outcome == Outcome::Completed => {
-            return Err(Failure::MissingStack)
-        }
-        None | Some(Value::Null) => None,
-        Some(saved) => Some(stack(saved)?),
+    // Only a completed report states how things are now; a refusal's leftovers are not believed.
+    let (readiness, (licence, licence_expires_at)) = if outcome == Outcome::Completed {
+        (
+            readiness(wire.get("readiness")),
+            licence(wire.get("license")),
+        )
+    } else {
+        (Readiness::Unknown, (Licence::Unknown, None))
     };
     Ok(Report {
         outcome,
-        stack,
+        stack: reported_stack(outcome, wire)?,
         reason: reason(outcome, wire)?,
-        readiness: Canonical::Unknown,
-        licence: Canonical::Unknown,
+        readiness,
+        licence,
+        licence_expires_at,
     })
+}
+
+/// The stack a report names. A completed command always names one.
+fn reported_stack(outcome: Outcome, wire: &Map<String, Value>) -> Result<Option<Stack>, Failure> {
+    match wire.get("stack") {
+        None | Some(Value::Null) if outcome == Outcome::Completed => Err(Failure::MissingStack),
+        None | Some(Value::Null) => Ok(None),
+        Some(saved) => Ok(Some(stack(saved)?)),
+    }
+}
+
+/// `local connect`, held to the same rules. Its `conflicts` are setting names; only whether there
+/// were any is kept.
+pub fn normalize_connect(exit_code: i32, stdout: &[u8]) -> Result<Connection, Failure> {
+    let wire = parse_envelope("local connect", exit_code, stdout)?;
+    let (outcome, wire) = (wire.0, &wire.1);
+    let conflicted = match wire.get("conflicts") {
+        None | Some(Value::Null) => false,
+        Some(Value::Array(conflicts)) => !conflicts.is_empty(),
+        Some(_) => return Err(Failure::InvalidStatus),
+    };
+    Ok(Connection {
+        outcome,
+        stack: reported_stack(outcome, wire)?,
+        reason: reason(outcome, wire)?,
+        conflicted,
+    })
+}
+
+/**
+`readiness.state`, believed only as one of its exact wire values and with a strict `checkedAt`.
+
+Anything else, including a missing or malformed field, is `Unknown`. That is how a CLI that
+predates the field reads, and it is not an error: the rest of the report still stands. The check
+names in `checks` are not kept.
+*/
+fn readiness(value: Option<&Value>) -> Readiness {
+    let Some(Value::Object(readiness)) = value else {
+        return Readiness::Unknown;
+    };
+    if !readiness
+        .get("checkedAt")
+        .and_then(Value::as_str)
+        .is_some_and(instant)
+    {
+        return Readiness::Unknown;
+    }
+    match readiness.get("state").and_then(Value::as_str) {
+        Some("ready") => Readiness::Ready,
+        Some("starting") => Readiness::Starting,
+        Some("stopped") => Readiness::Stopped,
+        Some("degraded") => Readiness::Degraded,
+        _ => Readiness::Unknown,
+    }
+}
+
+/**
+`license.state` and `license.expiresAt`, by the same rule. `expiresAt` must be present, as `null`
+or a strict instant; anything else makes the whole licence `Unknown`, so a valid state never
+travels with an expiry nobody could read. The organization and renewal fields are not kept.
+*/
+fn licence(value: Option<&Value>) -> (Licence, Option<String>) {
+    const UNKNOWN: (Licence, Option<String>) = (Licence::Unknown, None);
+    let Some(Value::Object(licence)) = value else {
+        return UNKNOWN;
+    };
+    let expires_at = match licence.get("expiresAt") {
+        Some(Value::Null) => None,
+        Some(Value::String(at)) if instant(at) => Some(at.clone()),
+        _ => return UNKNOWN,
+    };
+    let state = match licence.get("state").and_then(Value::as_str) {
+        Some("valid") => Licence::Valid,
+        Some("expired") => Licence::Expired,
+        Some("missing") => Licence::Missing,
+        Some("invalid") => Licence::Invalid,
+        Some("organization_mismatch") => Licence::OrganizationMismatch,
+        _ => return UNKNOWN,
+    };
+    (state, expires_at)
+}
+
+/**
+An ISO-8601 instant in the one form a JavaScript CLI prints: `YYYY-MM-DDTHH:MM:SS`, an optional
+fraction of one to nine digits, then `Z` or `±HH:MM`. Every field is range-checked against the
+calendar. Nothing else is copied, so no prose or token can ride through as a date.
+*/
+fn instant(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    let digits = |from: usize, to: usize| -> Option<u32> {
+        let part = bytes.get(from..to)?;
+        part.iter().all(u8::is_ascii_digit).then(|| {
+            part.iter()
+                .fold(0, |sum, byte| sum * 10 + u32::from(byte - b'0'))
+        })
+    };
+    let at = |index: usize, byte: u8| bytes.get(index) == Some(&byte);
+    let (Some(year), Some(month), Some(day), Some(hour), Some(minute), Some(second)) = (
+        digits(0, 4),
+        digits(5, 7),
+        digits(8, 10),
+        digits(11, 13),
+        digits(14, 16),
+        digits(17, 19),
+    ) else {
+        return false;
+    };
+    if !(at(4, b'-') && at(7, b'-') && at(10, b'T') && at(13, b':') && at(16, b':')) {
+        return false;
+    }
+    let leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
+    let days = match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if leap => 29,
+        2 => 28,
+        _ => return false,
+    };
+    if !((1..=days).contains(&day) && hour < 24 && minute < 60 && second < 60) {
+        return false;
+    }
+    let mut rest = 19;
+    if at(rest, b'.') {
+        let fraction = bytes[rest + 1..]
+            .iter()
+            .take_while(|byte| byte.is_ascii_digit())
+            .count();
+        if !(1..=9).contains(&fraction) {
+            return false;
+        }
+        rest += 1 + fraction;
+    }
+    match &bytes[rest..] {
+        b"Z" => true,
+        [b'+' | b'-', ..] if bytes.len() == rest + 6 && at(rest + 3, b':') => {
+            digits(rest + 1, rest + 3).is_some_and(|hours| hours < 24)
+                && digits(rest + 4, rest + 6).is_some_and(|minutes| minutes < 60)
+        }
+        _ => false,
+    }
 }
 
 /// The stacks the CLI has recorded on this machine, from `local list`.
@@ -759,6 +951,17 @@ pub fn setup(
     normalize_setup(code, &bytes)
 }
 
+/// `local connect` in `installation`, the folder `local setup` created the stack for.
+pub fn connect(
+    cli: &PinnedCli,
+    installation: &std::path::Path,
+    limits: Limits,
+    cancel: &Cancel,
+) -> Result<Connection, Failure> {
+    let (code, bytes) = execute(cli, &CONNECT_ARGUMENTS, Some(installation), limits, cancel)?;
+    normalize_connect(code, &bytes)
+}
+
 /// `local list`, within the same limits as `status`.
 pub fn list(cli: &PinnedCli, limits: Limits, cancel: &Cancel) -> Result<Listing, Failure> {
     let (code, bytes) = execute(cli, &LIST_ARGUMENTS, None, limits, cancel)?;
@@ -766,7 +969,8 @@ pub fn list(cli: &PinnedCli, limits: Limits, cancel: &Cancel) -> Result<Listing,
 }
 
 /// The exit code and stdout of one bounded CLI process. Arguments come only from `arguments`,
-/// `LIST_ARGUMENTS` and `SETUP_ARGUMENTS`; only setup runs somewhere other than inherited.
+/// `LIST_ARGUMENTS`, `SETUP_ARGUMENTS` and `CONNECT_ARGUMENTS`; only setup and connect run
+/// somewhere other than inherited.
 fn execute(
     cli: &PinnedCli,
     arguments: &[&str],
@@ -1138,6 +1342,18 @@ pub fn setup_installed(
     })
 }
 
+/// `local connect` in `installation` against the installed CLI, within the limits of `status`.
+pub fn connect_installed(
+    attempt: &str,
+    installation: &std::path::Path,
+) -> Result<Connection, Failure> {
+    let attempt = Attempt::register(attempt);
+    one_at_a_time(&attempt.0, Limits::for_action(Action::Status), |limits| {
+        let cli = installed()?;
+        connect(&cli, installation, limits, &attempt.0)
+    })
+}
+
 /// `local list` against the installed CLI.
 pub fn list_installed(attempt: &str) -> Result<Listing, Failure> {
     let attempt = Attempt::register(attempt);
@@ -1241,8 +1457,8 @@ mod tests {
     fn a_completed_command_with_ready_pods_is_not_licensed_readiness() {
         let report = status(&envelope()).unwrap();
         assert_eq!(report.outcome, Outcome::Completed);
-        assert_eq!(report.readiness, Canonical::Unknown);
-        assert_eq!(report.licence, Canonical::Unknown);
+        assert_eq!(report.readiness, Readiness::Unknown);
+        assert_eq!(report.licence, Licence::Unknown);
         let stack = report.stack.unwrap();
         assert_eq!(stack.id, "local-abc123");
         assert!(stack.observed.unwrap().services[0].ready);
@@ -1265,7 +1481,7 @@ mod tests {
             let observed = stack.observed.unwrap();
             assert_eq!(observed.running, running);
             assert!(!observed.services[0].ready);
-            assert_eq!(report.readiness, Canonical::Unknown);
+            assert_eq!(report.readiness, Readiness::Unknown);
             assert!(!exposes_secret(&report));
         }
     }
@@ -1274,7 +1490,7 @@ mod tests {
     fn empty_or_missing_observations_never_imply_readiness() {
         let mut input = envelope();
         input["stack"]["observed"] = json!({ "running": true, "services": [] });
-        assert_eq!(status(&input).unwrap().readiness, Canonical::Unknown);
+        assert_eq!(status(&input).unwrap().readiness, Readiness::Unknown);
         input["stack"].as_object_mut().unwrap().remove("observed");
         assert_eq!(status(&input).unwrap().stack.unwrap().observed, None);
     }
@@ -1323,9 +1539,195 @@ mod tests {
         input["stack"]["readiness"] = json!("ready");
         input["readiness"] = json!("ready");
         let report = status(&input).unwrap();
-        assert_eq!(report.licence, Canonical::Unknown);
-        assert_eq!(report.readiness, Canonical::Unknown);
+        assert_eq!(report.licence, Licence::Unknown);
+        assert_eq!(report.readiness, Readiness::Unknown);
         assert!(!exposes_secret(&report));
+    }
+
+    // The additive v1 fields the CLI publishes on `local status`, with synthetic organization data.
+    fn canonical(readiness: &str, licence: &str, expires_at: Value) -> Value {
+        let mut input = envelope();
+        input["readiness"] = json!({
+            "state": readiness,
+            "checkedAt": "2026-10-21T18:04:05.123Z",
+            "checks": ["api", SECRET]
+        });
+        input["license"] = json!({
+            "state": licence,
+            "expiresAt": expires_at,
+            "organizationId": SECRET,
+            "organizationName": SECRET,
+            "renewal": "none"
+        });
+        input
+    }
+
+    #[test]
+    fn each_readiness_state_is_read() {
+        for (wire, expected) in [
+            ("ready", Readiness::Ready),
+            ("starting", Readiness::Starting),
+            ("stopped", Readiness::Stopped),
+            ("degraded", Readiness::Degraded),
+            ("unknown", Readiness::Unknown),
+        ] {
+            let report = status(&canonical(wire, "valid", Value::Null)).unwrap();
+            assert_eq!(report.readiness, expected, "{wire}");
+            assert!(!exposes_secret(&report));
+        }
+    }
+
+    #[test]
+    fn each_licence_state_is_read() {
+        for (wire, expected) in [
+            ("valid", Licence::Valid),
+            ("expired", Licence::Expired),
+            ("missing", Licence::Missing),
+            ("invalid", Licence::Invalid),
+            ("organization_mismatch", Licence::OrganizationMismatch),
+        ] {
+            let report = status(&canonical("ready", wire, Value::Null)).unwrap();
+            assert_eq!(report.licence, expected, "{wire}");
+            assert_eq!(report.licence_expires_at, None);
+            assert!(!exposes_secret(&report));
+        }
+    }
+
+    #[test]
+    fn a_licence_expiring_in_four_days_keeps_only_its_instant() {
+        let report = status(&canonical(
+            "ready",
+            "valid",
+            json!("2026-10-25T18:04:05.000Z"),
+        ))
+        .unwrap();
+        assert_eq!(report.readiness, Readiness::Ready);
+        assert_eq!(report.licence, Licence::Valid);
+        assert_eq!(
+            report.licence_expires_at.as_deref(),
+            Some("2026-10-25T18:04:05.000Z")
+        );
+        // Organization, renewal and check names are not kept.
+        let serialized = serde_json::to_value(&report).unwrap();
+        assert_eq!(serialized["readiness"], "ready");
+        assert_eq!(serialized["licence"], "valid");
+        assert_eq!(serialized["licenceExpiresAt"], "2026-10-25T18:04:05.000Z");
+        assert!(!exposes_secret(&report));
+    }
+
+    #[test]
+    fn ready_pods_with_an_api_that_is_not_ready_are_not_ready() {
+        // Every observed service is ready; the CLI's own end-to-end check is what says it is not.
+        let report = status(&canonical("starting", "valid", Value::Null)).unwrap();
+        assert!(report.stack.unwrap().observed.unwrap().services[0].ready);
+        assert_eq!(report.readiness, Readiness::Starting);
+    }
+
+    #[test]
+    fn unknown_canonical_values_are_unknown() {
+        let report = status(&canonical("green", "revoked", Value::Null)).unwrap();
+        assert_eq!(report.readiness, Readiness::Unknown);
+        assert_eq!(report.licence, Licence::Unknown);
+        // Wire spellings only: the window's own spelling is not a CLI value.
+        let report = status(&canonical("Ready", "organization-mismatch", Value::Null)).unwrap();
+        assert_eq!(report.readiness, Readiness::Unknown);
+        assert_eq!(report.licence, Licence::Unknown);
+    }
+
+    #[test]
+    fn malformed_readiness_is_unknown_and_never_fails_the_report() {
+        let good = canonical("ready", "valid", Value::Null);
+        for broken in [
+            json!(null),
+            json!("ready"),
+            json!(["ready"]),
+            json!({ "checkedAt": "2026-10-21T18:04:05Z" }),
+            json!({ "state": true, "checkedAt": "2026-10-21T18:04:05Z" }),
+            json!({ "state": "ready" }),
+            json!({ "state": "ready", "checkedAt": null }),
+            json!({ "state": "ready", "checkedAt": "yesterday" }),
+        ] {
+            let mut input = good.clone();
+            input["readiness"] = broken.clone();
+            let report = status(&input).unwrap();
+            assert_eq!(report.readiness, Readiness::Unknown, "{broken}");
+            assert_eq!(report.licence, Licence::Valid, "{broken}");
+        }
+        let mut input = good;
+        input.as_object_mut().unwrap().remove("readiness");
+        assert_eq!(status(&input).unwrap().readiness, Readiness::Unknown);
+    }
+
+    #[test]
+    fn malformed_licence_is_unknown_with_no_expiry() {
+        let good = canonical("ready", "valid", json!("2026-10-25T18:04:05Z"));
+        let mut cases = vec![
+            json!(null),
+            json!("valid"),
+            json!({ "expiresAt": null }),
+            json!({ "state": 1, "expiresAt": null }),
+            // `expiresAt` is ISO-8601 or null, and present.
+            json!({ "state": "valid" }),
+            json!({ "state": "valid", "expiresAt": 1792000000 }),
+        ];
+        for expires in [
+            SECRET,
+            "2026-10-25",
+            "2026-10-25 18:04:05Z",
+            "2026-10-25t18:04:05z",
+            "2026-13-25T18:04:05Z",
+            "2026-02-30T18:04:05Z",
+            "2026-10-25T24:00:00Z",
+            "2026-10-25T18:60:05Z",
+            "2026-10-25T18:04:05",
+            "2026-10-25T18:04:05.Z",
+            "2026-10-25T18:04:05.1234567890Z",
+            "2026-10-25T18:04:05+2400",
+            "+02026-10-25T18:04:05Z",
+            " 2026-10-25T18:04:05Z",
+        ] {
+            cases.push(json!({ "state": "valid", "expiresAt": expires }));
+        }
+        for broken in cases {
+            let mut input = good.clone();
+            input["license"] = broken.clone();
+            let report = status(&input).unwrap();
+            assert_eq!(report.licence, Licence::Unknown, "{broken}");
+            assert_eq!(report.licence_expires_at, None, "{broken}");
+            assert_eq!(report.readiness, Readiness::Ready, "{broken}");
+            assert!(!exposes_secret(&report));
+        }
+        let mut input = good;
+        input.as_object_mut().unwrap().remove("license");
+        assert_eq!(status(&input).unwrap().licence, Licence::Unknown);
+    }
+
+    #[test]
+    fn strict_instants_with_offsets_and_fractions_are_kept() {
+        for instant in [
+            "2026-10-25T18:04:05Z",
+            "2026-10-25T18:04:05.1Z",
+            "2026-10-25T18:04:05.123456789Z",
+            "2026-10-25T18:04:05+02:00",
+            "2026-10-25T18:04:05.5-07:30",
+            "2028-02-29T00:00:00Z",
+        ] {
+            let report = status(&canonical("ready", "valid", json!(instant))).unwrap();
+            assert_eq!(report.licence_expires_at.as_deref(), Some(instant));
+        }
+        // Not a leap year.
+        let report = status(&canonical("ready", "valid", json!("2026-02-29T00:00:00Z"))).unwrap();
+        assert_eq!(report.licence, Licence::Unknown);
+    }
+
+    #[test]
+    fn readiness_and_licence_are_read_only_from_a_completed_report() {
+        let mut input = canonical("ready", "valid", Value::Null);
+        input["status"] = json!("blocked");
+        input["nextAction"] = json!({ "reason": "docker_unavailable" });
+        let report = normalize(Action::Status, 2, input.to_string().as_bytes()).unwrap();
+        assert_eq!(report.readiness, Readiness::Unknown);
+        assert_eq!(report.licence, Licence::Unknown);
     }
 
     #[test]
@@ -1491,6 +1893,166 @@ mod tests {
             std::fs::read_to_string(fixture.root.join("cwd")).unwrap(),
             installation.canonicalize().unwrap().display().to_string()
         );
+    }
+
+    // As `local connect` prints it at Intelligence 780313e4: no key, only the stack it connected.
+    fn connected(status: &str, conflicts: Value, next: Value) -> String {
+        let mut input = envelope();
+        input["command"] = json!("local connect");
+        input["status"] = json!(status);
+        input["conflicts"] = conflicts;
+        input["nextAction"] = next;
+        input.as_object_mut().unwrap().remove("auth");
+        input.to_string()
+    }
+
+    #[test]
+    fn connect_approves_only_the_documented_connection() {
+        assert_eq!(
+            CONNECT_ARGUMENTS,
+            ["local", "connect", "--approve-connection", "--json"]
+        );
+        assert!(!CONNECT_ARGUMENTS
+            .iter()
+            .any(|argument| argument.contains("eula") || argument.contains("terms")));
+    }
+
+    #[test]
+    fn connect_runs_in_the_installation_folder() {
+        let fixture = Fixture::new(
+            "local-eval-connect",
+            &format!("0\n{}", connected("completed", json!([]), Value::Null)),
+        );
+        let installation = fixture.root.join("installation");
+        std::fs::create_dir_all(&installation).unwrap();
+        let connection = connect(
+            &fixture.cli(),
+            &installation,
+            Limits::for_action(Action::Status),
+            &Cancel::default(),
+        )
+        .unwrap();
+        assert_eq!(connection.outcome, Outcome::Completed);
+        assert!(!connection.conflicted);
+        assert_eq!(connection.stack.unwrap().id, "local-abc123");
+        assert_eq!(
+            fixture.argv().unwrap(),
+            "local\nconnect\n--approve-connection\n--json"
+        );
+        assert_eq!(
+            std::fs::read_to_string(fixture.root.join("cwd")).unwrap(),
+            installation.canonicalize().unwrap().display().to_string()
+        );
+    }
+
+    #[test]
+    fn connect_answers_keep_only_their_reason_and_whether_settings_conflicted() {
+        let confirmation = normalize_connect(
+            2,
+            connected(
+                "blocked",
+                Value::Null,
+                json!({
+                    "reason": "confirmation_required",
+                    "summary": SECRET,
+                    "instructions": [SECRET],
+                    "resumeCommand": "copilotkit local connect --approve-connection"
+                }),
+            )
+            .as_bytes(),
+        )
+        .unwrap();
+        assert_eq!(confirmation.outcome, Outcome::Blocked);
+        assert_eq!(confirmation.reason, Some(Reason::ConfirmationRequired));
+        assert!(!confirmation.conflicted);
+
+        let conflict = normalize_connect(
+            2,
+            connected(
+                "blocked",
+                json!(["CPK_INTELLIGENCE_API_KEY", SECRET]),
+                Value::Null,
+            )
+            .as_bytes(),
+        )
+        .unwrap();
+        assert_eq!(conflict.outcome, Outcome::Blocked);
+        assert_eq!(conflict.reason, None);
+        assert!(conflict.conflicted);
+
+        let failed = normalize_connect(
+            1,
+            json!({
+                "version": 1,
+                "command": "local connect",
+                "status": "failed",
+                "error": { "code": "LOCAL_COMMAND_FAILED", "message": SECRET },
+                "nextAction": { "reason": "local_command_failed", "resumeCommand": SECRET }
+            })
+            .to_string()
+            .as_bytes(),
+        )
+        .unwrap();
+        assert_eq!(failed.reason, Some(Reason::LocalCommandFailed));
+        assert_eq!(failed.stack, None);
+
+        for answer in [confirmation, conflict, failed] {
+            assert!(!serde_json::to_string(&answer).unwrap().contains(SECRET));
+        }
+    }
+
+    #[test]
+    fn a_connect_report_is_held_to_the_same_rules() {
+        // A completed connection names the stack it connected.
+        let mut input: Value =
+            serde_json::from_str(&connected("completed", json!([]), Value::Null)).unwrap();
+        input.as_object_mut().unwrap().remove("stack");
+        assert_eq!(
+            normalize_connect(0, input.to_string().as_bytes()),
+            Err(Failure::MissingStack)
+        );
+        // Conflicts are a list of setting names, or absent.
+        assert_eq!(
+            normalize_connect(
+                2,
+                connected("blocked", json!(SECRET), Value::Null).as_bytes()
+            ),
+            Err(Failure::InvalidStatus)
+        );
+        // Another command's report, or a completion that exits as blocked, is not a connection.
+        assert_eq!(
+            normalize_connect(0, envelope().to_string().as_bytes()),
+            Err(Failure::UnexpectedCommand)
+        );
+        assert_eq!(
+            normalize_connect(2, connected("completed", json!([]), Value::Null).as_bytes()),
+            Err(Failure::ContractMismatch)
+        );
+        assert_eq!(
+            normalize_connect(0, connected("completed", json!([]), Value::Null).as_bytes())
+                .unwrap()
+                .stack
+                .unwrap()
+                .urls
+                .api,
+            "http://localhost:8082"
+        );
+    }
+
+    #[test]
+    fn connect_waits_its_turn_and_is_refused_once_cancelled() {
+        let installation = temp_root("local-eval-connect-installed");
+        std::fs::create_dir_all(&installation).unwrap();
+        assert_eq!(
+            connect_installed("connect-no-cli", &installation),
+            Err(Failure::Unavailable)
+        );
+        cancel("connect-cancelled");
+        assert_eq!(
+            connect_installed("connect-cancelled", &installation),
+            Err(Failure::Cancelled)
+        );
+        std::fs::remove_dir_all(installation).unwrap();
     }
 
     #[test]
@@ -1947,6 +2509,54 @@ mod tests {
             }
             let name = serde_json::to_string(&failure).unwrap();
             assert!(window.contains(&name), "localEvalCli.ts is missing {name}");
+        }
+    }
+
+    #[test]
+    fn every_reason_readiness_and_licence_is_known_to_the_window() {
+        let window = include_str!("../../src/localEvalCli.ts");
+        let reasons = [
+            "authentication_required",
+            "eula_acceptance_required",
+            "eula_unavailable",
+            "eula_declined",
+            "release_unavailable",
+            "feature_disabled",
+            "unsupported_platform",
+            "unsupported_engine",
+            "port_unavailable",
+            "docker_unavailable",
+            "update_recovery_required",
+            "incompatible_release",
+            "local_command_busy",
+            "local_command_failed",
+            "confirmation_required",
+            "something_new",
+        ]
+        .map(Reason::from_wire)
+        .map(|reason| serde_json::to_string(&reason).unwrap());
+        let readiness = [
+            Readiness::Ready,
+            Readiness::Starting,
+            Readiness::Stopped,
+            Readiness::Degraded,
+            Readiness::Unknown,
+        ]
+        .map(|state| serde_json::to_string(&state).unwrap());
+        let licence = [
+            Licence::Valid,
+            Licence::Expired,
+            Licence::Missing,
+            Licence::Invalid,
+            Licence::OrganizationMismatch,
+            Licence::Unknown,
+        ]
+        .map(|state| serde_json::to_string(&state).unwrap());
+        for name in reasons.iter().chain(&readiness).chain(&licence) {
+            assert!(
+                window.contains(name.as_str()),
+                "localEvalCli.ts is missing {name}"
+            );
         }
     }
 
