@@ -23,6 +23,7 @@
  * https://chromedevtools.github.io/devtools-protocol/tot/Extensions/#method-loadUnpacked
  * https://chromedevtools.github.io/devtools-protocol/tot/Browser/#method-grantPermissions
  */
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   type BrowserContext,
@@ -39,6 +40,7 @@ import type { Egress } from "./egress";
 import {
   copyNativeMessagingHosts,
   defaultNativeMessagingHosts,
+  forgetRecorderPins,
   installedBrowser,
   NO_INSTALLED_BROWSER,
   type PersonDisplay,
@@ -183,6 +185,55 @@ function fitWindowsToViewport(
 }
 
 /**
+ * Make the Recorder's worker run the Recorder on disk, loading it again when it runs an earlier one.
+ *
+ * WHY. A browser keeps an extension's service worker registered in the profile, its scripts cached
+ * in `Service Worker/ScriptCache`, from one run to the next: closing the browser unloads nothing.
+ * Loaded at the next start, by `--load-extension` or DevTools `Extensions.loadUnpacked`, the Recorder
+ * is installed as if new rather than updated, so nothing unregisters that worker; registering the
+ * same script again is, by the service worker rules, the registration already there; and the
+ * browser's own update check never runs for an extension's worker. So a profile kept running the
+ * Recorder it first cached, whatever had been built since: every Recorder fix was invisible in a
+ * browser that had run an earlier one, and an update of OpenBot would never have updated it.
+ * Measured on Google Chrome 156 and Playwright's Chromium, for a changed script and for a changed
+ * manifest version alike, which makes no difference. Loading the Recorder again while it is loaded
+ * is an update, and an update unregisters the worker and registers the one on disk: measured the
+ * same way, the new script then runs, and keeps running at later launches.
+ *
+ * Compared byte for byte, as a service worker's own update check compares, so a browser already
+ * running the Recorder on disk is left alone and its worker is not restarted.
+ * https://chromium.googlesource.com/chromium/src/+/main/extensions/browser/service_worker/service_worker_task_queue.cc
+ * https://chromium.googlesource.com/chromium/src/+/main/content/browser/service_worker/service_worker_register_job.cc
+ * https://w3c.github.io/ServiceWorker/#register-algorithm
+ * https://chromedevtools.github.io/devtools-protocol/tot/Extensions/#method-loadUnpacked
+ */
+async function keepRecorderCurrent(input: {
+  session: CDPSession;
+  launcher: RecorderLauncher;
+  recorder: Recorder;
+  recorderId: string;
+  botId: string;
+}): Promise<void> {
+  const { recorder, launcher } = input;
+  const built = await readFile(join(recorder.dir, recorder.worker), "utf8");
+  const url = `chrome-extension://${input.recorderId}/${recorder.worker}`;
+  if ((await launcher.workerSource(url)) === built) return;
+  console.info(
+    JSON.stringify({
+      type: "computer-recorder-reloaded",
+      botId: input.botId,
+      reason:
+        "Its service worker ran an earlier build than the Recorder on disk.",
+    }),
+  );
+  await input.session.send("Extensions.loadUnpacked", { path: recorder.dir });
+  if ((await launcher.workerSource(url)) !== built)
+    throw new Error(
+      "The Recorder in this browser runs an earlier build, and loading the current one did not replace it.",
+    );
+}
+
+/**
  * Start a person's browser, with the Recorder loaded and its microphone granted.
  *
  * All or nothing: a browser whose Recorder could not be put in is closed again rather than handed
@@ -218,6 +269,7 @@ export async function launchPersonBrowser(
     }
   }
 
+  await forgetRecorderPins(input.dir, input.recorder.id);
   const options = personLaunchOptions(
     {
       window,
@@ -263,6 +315,14 @@ export async function launchPersonBrowser(
       }
     }
     closeRecorderSetupPages(context, recorderId);
+    const launcher = createRecorderLauncher({ session, context, recorderId });
+    await keepRecorderCurrent({
+      session,
+      launcher,
+      recorder: input.recorder,
+      recorderId,
+      botId: input.botId,
+    });
     if (window === "screen")
       fitWindowsToViewport(context, input.viewport, input.botId);
     // Narration in a native window is the Recorder hearing the person, and it asks nobody first.
@@ -282,7 +342,6 @@ export async function launchPersonBrowser(
         behavior: "default",
       });
     }
-    const launcher = createRecorderLauncher({ session, context, recorderId });
     return {
       context,
       person: { product, window, recorderId, launcher, session },

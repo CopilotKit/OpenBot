@@ -21,6 +21,8 @@ export type Recorder = {
   dir: string;
   /** Its extension id, which its manifest key fixes in Chrome, Edge and Chromium alike. */
   id: string;
+  /** Its service worker's script, as its manifest names it, relative to `dir`. */
+  worker: string;
 };
 
 export type RecorderLookup =
@@ -101,7 +103,10 @@ export async function findRecorder(
       dir,
       "its manifest has no key, so its id is not fixed.",
     );
-  return { ok: true, recorder: { dir, id: extensionIdFromKey(fields.key) } };
+  return {
+    ok: true,
+    recorder: { dir, id: extensionIdFromKey(fields.key), worker },
+  };
 }
 
 /** Any of the Recorder's own pages: never one of the person's tabs. */

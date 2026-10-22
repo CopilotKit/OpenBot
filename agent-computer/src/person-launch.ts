@@ -330,6 +330,9 @@ export function personLaunchOptions(
       // Only the Recorder: the hosted browser takes no other extension.
       `--disable-extensions-except=${input.recorderDir}`,
       `--load-extension=${input.recorderDir}`,
+      // So the Recorder can be loaded again over DevTools when this profile's worker runs an earlier
+      // build of it (see `keepRecorderCurrent` in `person-browser.ts`). Only OpenBot holds the pipe.
+      "--enable-unsafe-extension-debugging",
       /*
        * No "started debugging this browser" bar when the Recorder attaches `chrome.debugger` to
        * record a tab. The bar takes its height from the window, so while it showed, the live screen
@@ -387,6 +390,44 @@ export function defaultNativeMessagingHosts(
       "NativeMessagingHosts",
     );
   return null;
+}
+
+/**
+ * Take the Recorder out of the profile's pinned extensions before it is loaded, so it is pinned once.
+ *
+ * WHY. Chrome pins a newly installed extension to the toolbar ("pin new extensions by default",
+ * `ToolbarActionsModel`), and the Recorder is newly installed at every launch: an extension loaded
+ * over DevTools or by `--load-extension` does not outlive the browser, so each load is a first
+ * install. Each launch therefore added it to `extensions.pinned_extensions` once more, while the
+ * entries from earlier launches stayed: three after three launches in the end-to-end run, and
+ * measured growing by one per launch on Chrome 156. With the Recorder taken out first, the launch
+ * leaves the one entry its install adds; left in once, the launch still ended with two. Chrome does
+ * not guard this preference against edits (it is not among its tracked preferences), and nothing
+ * else in the file is touched. A profile with no preferences yet, or ones Chrome never finished
+ * writing, is left alone.
+ * https://chromium.googlesource.com/chromium/src/+/main/chrome/browser/ui/toolbar/toolbar_actions_model.cc
+ * https://chromium.googlesource.com/chromium/src/+/main/chrome/browser/prefs/chrome_pref_service_factory.cc
+ */
+export async function forgetRecorderPins(
+  profileDir: string,
+  recorderId: string,
+): Promise<void> {
+  const file = join(profileDir, "Default", "Preferences");
+  let preferences: unknown;
+  try {
+    preferences = JSON.parse(await readFile(file, "utf8"));
+  } catch {
+    return;
+  }
+  if (!preferences || typeof preferences !== "object") return;
+  const extensions = (preferences as { extensions?: unknown }).extensions;
+  if (!extensions || typeof extensions !== "object") return;
+  const pinned = (extensions as { pinned_extensions?: unknown })
+    .pinned_extensions;
+  if (!Array.isArray(pinned) || !pinned.includes(recorderId)) return;
+  (extensions as { pinned_extensions: unknown[] }).pinned_extensions =
+    pinned.filter((id) => id !== recorderId);
+  await writeFile(file, JSON.stringify(preferences));
 }
 
 /** A host manifest is a few hundred bytes; anything far larger is not one. */

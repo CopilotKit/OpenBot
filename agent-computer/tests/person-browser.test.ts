@@ -1,5 +1,14 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
+import {
+  cp,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Page } from "playwright";
@@ -7,6 +16,7 @@ import type {
   BrowserState,
   LauncherConnection,
 } from "../../shared/openbot-browser";
+import { RECORDER_EXTENSION_ID } from "../../shared/recorder-extension";
 import type { BrowserRuntime } from "../src/browser-runtime";
 import type { BrowserHost } from "../src/browser-host";
 import {
@@ -41,6 +51,7 @@ const asked = process.env.OPENBOT_COMPUTER_BROWSER === "1";
 
 const FIXTURE = join(import.meta.dir, "fixtures", "recorder");
 const REPO = join(import.meta.dir, "..", "..");
+const OTHER_PINNED = "ghbmnnjooekpmoecnnnilnnbdlolhkhi";
 const PERSON = "person-0123456789abcdef0123456789abcdef";
 
 type FixtureCall = {
@@ -50,6 +61,8 @@ type FixtureCall = {
   front: string;
   microphone: string;
   setupOpened: boolean;
+  /** Which build of the fixture's worker script answered. */
+  build: string;
 };
 
 const calls: FixtureCall[] = [];
@@ -264,6 +277,16 @@ for (const variant of VARIANTS) {
           download: {
             default_directory: downloads,
             prompt_for_download: false,
+          },
+          // Pinned once per earlier launch, as the end-to-end run's desktop profile was, beside
+          // another extension's pin.
+          extensions: {
+            pinned_extensions: [
+              RECORDER_EXTENSION_ID,
+              OTHER_PINNED,
+              RECORDER_EXTENSION_ID,
+              RECORDER_EXTENSION_ID,
+            ],
           },
         }),
       );
@@ -917,7 +940,118 @@ for (const variant of VARIANTS) {
       );
       expect(profiles.isLive(PERSON)).toBe(false);
     }, 30_000);
+
+    test("after several launches the Recorder is pinned once at most, and other pins stay", async () => {
+      // Written by the browser as it closed, so read once it has finished writing.
+      const pinned = await until(async () => {
+        const preferences = JSON.parse(
+          await readFile(join(root, PERSON, "Default", "Preferences"), "utf8"),
+        ) as { extensions?: { pinned_extensions?: string[] } };
+        return preferences.extensions?.pinned_extensions;
+      }, "the profile's pins");
+      expect(
+        pinned.filter((id) => id === RECORDER_EXTENSION_ID).length,
+      ).toBeLessThanOrEqual(1);
+      expect(pinned).toContain(OTHER_PINNED);
+    }, 30_000);
   });
+}
+
+/**
+ * A Recorder rebuilt since the profile last ran one. The browser kept the worker it registered first,
+ * with its script cached in the profile, and ran it at every later launch, so no Recorder fix reached
+ * a browser that had run an earlier Recorder. Build A runs, the browser closes, build B (one line
+ * different) is put where A was, and the same profile opens again: B is what answers, and a third
+ * launch of an unchanged B reloads nothing.
+ */
+for (const variant of VARIANTS) {
+  describe.skipIf(!asked || !variant.available)(
+    `${variant.name}: a Recorder rebuilt since the profile last ran it`,
+    () => {
+      let root = "";
+      let profiles: Profiles | undefined;
+      let server: ReturnType<typeof Bun.serve> | undefined;
+
+      afterAll(async () => {
+        server?.stop(true);
+        await profiles?.closeAll();
+        if (root) await rm(root, { recursive: true, force: true });
+      }, 60_000);
+
+      test("runs at the next launch of the same profile", async () => {
+        root = await mkdtemp(join(tmpdir(), "openbot-person-rebuilt-"));
+        const recorder = join(root, "recorder");
+        await cp(FIXTURE, recorder, { recursive: true });
+        const worker = join(recorder, "service-worker.js");
+        const fixture = await readFile(worker, "utf8");
+        const build = (name: string) =>
+          writeFile(
+            worker,
+            fixture.replace(
+              'const BUILD = "fixture";',
+              `const BUILD = "${name}";`,
+            ),
+          );
+
+        const { createProfiles } = (await import(
+          `../src/profiles?rebuilt=${variant.window}`
+        )) as typeof import("../src/profiles");
+        const { createBrowserHost } = await import("../src/browser-host");
+        profiles = createProfiles(join(root, "profiles"), () => undefined, {
+          runtime: variant.runtime,
+        });
+        opened.push(profiles);
+        const routes = serve(
+          createBrowserHost({
+            profiles,
+            recorderDir: () => recorder,
+            navigationTimeoutMs: 15_000,
+          }),
+        );
+        server = routes;
+        const said = spyOn(console, "info");
+        const reloads = () =>
+          said.mock.calls.filter(([line]) =>
+            String(line).includes("computer-recorder-reloaded"),
+          ).length;
+        const openAndClose = async () => {
+          const from = calls.length;
+          const opening = await fetch(
+            `http://127.0.0.1:${routes.port}/browser/open`,
+            {
+              method: "POST",
+              headers: { "x-openbot-bot-id": PERSON },
+              body: JSON.stringify({ connection: CONNECTION }),
+            },
+          );
+          expect(opening.status).toBe(200);
+          const connect = calls
+            .slice(from)
+            .find((call) => call.method === "connect");
+          await fetch(`http://127.0.0.1:${routes.port}/browser/close`, {
+            method: "POST",
+            headers: { "x-openbot-bot-id": PERSON },
+          });
+          return connect?.build;
+        };
+        try {
+          await build("A");
+          expect(await openAndClose()).toBe("A");
+          expect(reloads()).toBe(0);
+
+          await build("B");
+          expect(await openAndClose()).toBe("B");
+          expect(reloads()).toBe(1);
+
+          // Current now, so the next launch leaves its worker alone.
+          expect(await openAndClose()).toBe("B");
+          expect(reloads()).toBe(1);
+        } finally {
+          said.mockRestore();
+        }
+      }, 120_000);
+    },
+  );
 }
 
 describe.skipIf(!asked)("among Bots' browsers on one computer", () => {

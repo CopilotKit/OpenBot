@@ -56,11 +56,21 @@ type Pending = {
 
 type TargetInfo = { targetId: string; type: string; url: string };
 
+/** A DevTools event from inside the worker. */
+type WorkerEvent = { method?: string; params?: unknown };
+
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const WORKER_STOPPED = "The Recorder's worker stopped mid-call.";
 
-export type RecorderLauncher = LauncherApi;
+export type RecorderLauncher = LauncherApi & {
+  /**
+   * The source of the script the Recorder's worker is running now, as its JavaScript engine parsed
+   * it, or undefined when the worker reports no script at `url`. See `keepRecorderCurrent` in
+   * `person-browser.ts` for why it is asked.
+   */
+  workerSource(url: string): Promise<string | undefined>;
+};
 
 export function createRecorderLauncher(input: {
   /** A browser-level session (`browser.newBrowserCDPSession()`), which alone can reach the worker. */
@@ -74,11 +84,14 @@ export function createRecorderLauncher(input: {
   let attaching: Promise<string> | undefined;
   let nextId = 0;
   const pending = new Map<number, Pending>();
+  const listeners = new Set<(event: WorkerEvent) => void>();
 
   session.on("Target.receivedMessageFromTarget", (event) => {
     if (event.sessionId !== attached?.sessionId) return;
     let message: {
       id?: number;
+      method?: string;
+      params?: unknown;
       result?: unknown;
       error?: { message?: string };
     };
@@ -87,7 +100,11 @@ export function createRecorderLauncher(input: {
     } catch {
       return;
     }
-    if (message.id === undefined) return;
+    if (message.id === undefined) {
+      // An event, which only a caller that asked for one listens to.
+      for (const listener of listeners) listener(message);
+      return;
+    }
     const waiting = pending.get(message.id);
     if (!waiting) return;
     pending.delete(message.id);
@@ -354,6 +371,36 @@ export function createRecorderLauncher(input: {
     },
     async disconnect() {
       return result(await call("disconnect"));
+    },
+    /*
+     * Read through the worker's own debugger: enabling it reports every script the worker has parsed,
+     * each before the answer to the enable, and the source of the one asked for is then read by its
+     * id. After `ready`, so the worker's script has run and is among them.
+     */
+    async workerSource(url) {
+      await ready();
+      const parsed = new Map<string, string>();
+      const listener = (event: WorkerEvent) => {
+        if (event.method !== "Debugger.scriptParsed") return;
+        const script = event.params as { scriptId?: string; url?: string };
+        if (script.url && script.scriptId)
+          parsed.set(script.url, script.scriptId);
+      };
+      listeners.add(listener);
+      try {
+        await send("Debugger.enable", {}, CALL_MS);
+        const scriptId = parsed.get(url);
+        if (!scriptId) return undefined;
+        const { scriptSource } = (await send(
+          "Debugger.getScriptSource",
+          { scriptId },
+          CALL_MS,
+        )) as { scriptSource?: string };
+        return scriptSource;
+      } finally {
+        listeners.delete(listener);
+        await send("Debugger.disable", {}, CALL_MS).catch(() => undefined);
+      }
     },
     async state() {
       const value = await call("state", undefined, 5_000);

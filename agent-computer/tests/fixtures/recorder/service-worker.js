@@ -14,6 +14,11 @@
  * rather than taking the computer's word for it.
  */
 const LAUNCHER_GLOBAL = "openbotLauncher";
+/**
+ * Which build of this script is running, sent with every call. A test copies the fixture, changes this
+ * line, and reads back which build answered, as a person's browser would run a Recorder rebuilt since.
+ */
+const BUILD = "fixture";
 
 async function held() {
   const stored = await chrome.storage.local.get([
@@ -83,6 +88,7 @@ async function report(method, input) {
       front: front?.url ?? "",
       microphone,
       setupOpened: now.setupOpened,
+      build: BUILD,
     }),
   });
 }
