@@ -13,8 +13,8 @@ mod test_support;
 
 use openbot_desktop_lib::{
     acquire, deployment, deployment_release, engine, env as openbot_env, harness, host_access,
-    install, preparation, problem::Problem, provider, pull_metrics, quiet, recorder_host,
-    recorder_install, stack, supervise, telemetry, tray, windows as win,
+    install, local_browser, preparation, problem::Problem, provider, pull_metrics, quiet,
+    recorder_host, recorder_install, stack, supervise, telemetry, tray, windows as win,
 };
 
 const QUIT_CLEANUP_NOTICE_FILE: &str = ".openbot-quit-cleanup-notice";
@@ -492,7 +492,7 @@ async fn prepare_installation(
             "Preparing the app's dependencies.",
             None,
         );
-        preparation::install_dependencies_if_needed(&root, || {
+        let bun = preparation::install_dependencies_if_needed(&root, || {
             report_running(
                 &handle,
                 "dependencies",
@@ -514,6 +514,17 @@ async fn prepare_installation(
             true,
             "The app's dependencies are installed.",
         );
+        if local_browser::in_release(&root) {
+            attempt.require_current()?;
+            report_running(
+                &handle,
+                "recorder",
+                "Building the Recorder for OpenBot's browser.",
+                None,
+            );
+            preparation::build_recorder(&root, &bun)?;
+            report(&handle, "recorder", true, "The Recorder is built.");
+        }
         report_running(
             &handle,
             "images",
@@ -1371,7 +1382,7 @@ async fn start_stack_inner<R: tauri::Runtime>(
         )
     })?;
 
-    let (logs, bun, mut secrets, ports) = {
+    let (logs, bun, mut secrets, ports, local_browser) = {
         let _startup = attempt.lock_current()?;
 
         // Belt and braces: a fetch that reported success and left something out is still not a
@@ -1441,16 +1452,36 @@ async fn start_stack_inner<R: tauri::Runtime>(
         })?;
         let reclaimed = cleanup_before_start(&app, &attempt, &root, stack::stop_processes_under)?;
         if reclaimed > 0 {
-            stack::wait_for_ports_to_clear(
-                &[previous_ports.server, previous_ports.app],
-                std::time::Duration::from_secs(5),
-            );
+            let mut held = vec![previous_ports.server, previous_ports.app];
+            held.extend(previous_ports.browser);
+            stack::wait_for_ports_to_clear(&held, std::time::Duration::from_secs(5));
         }
+        /*
+         * The person's own browser, where this machine can run one. Decided at every start from
+         * what is installed now, so a Chrome installed since the last start is found and one
+         * removed is no longer pointed at. Its absence is not a failure: OpenBot runs without it
+         * and the app hides its Browser button.
+         */
+        let local_browser = match local_browser::for_this_person(&root) {
+            Ok(browser) => {
+                eprintln!(
+                    "[browser] {} at {}",
+                    browser.product.name(),
+                    browser.executable.display()
+                );
+                Some(browser)
+            }
+            Err(absent) => {
+                eprintln!("[browser] none: {}", absent.said());
+                None
+            }
+        };
         let ours = stack::ports_we_already_publish(&found, &root);
         let ports = previous_ports
             .available(
                 &ours,
                 picked.as_ref().and_then(|picked| picked.installed_port()),
+                local_browser.is_some(),
             )
             .map_err(|error| {
                 Problem::with(
@@ -1503,7 +1534,7 @@ async fn start_stack_inner<R: tauri::Runtime>(
          * had given. Anything the writer owns and did not produce this time is taken out.
          */
         let mut purge = secrets.clone();
-        for key in ["BOT_PROVIDER", "BOT_MODEL", "AGENT_BOT_MODEL"] {
+        for key in openbot_env::REMOVED_WHEN_UNSET {
             if !settings.contains_key(key) {
                 purge.insert(key.into(), String::new());
             }
@@ -1565,15 +1596,17 @@ async fn start_stack_inner<R: tauri::Runtime>(
         })?;
 
         // Before spawning: if these are still held, whatever answers later is not ours.
-        if let Some(problem) =
-            stack::port_already_taken(&[("API server", ports.server), ("app", ports.app)])
-        {
+        let mut hosts = vec![("API server", ports.server), ("app", ports.app)];
+        if let Some(port) = ports.browser {
+            hosts.push(("browser", port));
+        }
+        if let Some(problem) = stack::port_already_taken(&hosts) {
             report(&app, "ports", false, problem.clone());
             return Err(problem.into());
         }
 
         let logs = root.join(".logs");
-        (logs, bun, secrets, ports)
+        (logs, bun, secrets, ports, local_browser)
     };
 
     // Never persisted or passed to Compose. Only the server process receives this credential;
@@ -1590,6 +1623,7 @@ async fn start_stack_inner<R: tauri::Runtime>(
         &logs,
         &bun,
         &secrets,
+        local_browser.as_ref(),
         |name| report(&app, name, true, "started"),
         move |started| {
             stack::wait_until_answering(
@@ -1636,7 +1670,16 @@ async fn start_stack_inner<R: tauri::Runtime>(
         )
     })?;
     preparation::save_selected_root(&config, &root)?;
-    supervise_host_processes(app.clone(), root, logs, bun, secrets, generation, ports);
+    supervise_host_processes(
+        app.clone(),
+        root,
+        logs,
+        bun,
+        secrets,
+        generation,
+        ports,
+        local_browser,
+    );
 
     report(&app, "answering", true, "the API and the app are answering");
     Ok(())
@@ -1909,12 +1952,17 @@ where
 }
 
 /// The initial host launch, including ownership handoff on every outcome.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "The launch carries what every host process needs and what this start decided about the person's browser."
+)]
 async fn start_host_processes<R, W>(
     attempt: &StartAttempt<'_>,
     root: &Path,
     logs: &Path,
     bun: &Path,
     secrets: &stack::Secrets,
+    local_browser: Option<&local_browser::LocalBrowser>,
     mut report_started: R,
     wait: W,
 ) -> Result<u64, Problem>
@@ -1925,21 +1973,22 @@ where
     let started = {
         let _startup = attempt.lock_current()?;
         let mut started = Vec::new();
-        for process in stack::HOST_PROCESSES.iter() {
+        for process in stack::host_processes(local_browser.is_some()) {
             if attempt.require_current().is_err() {
                 return finish_host_start_locked(attempt, root, started, Ok(()));
             }
-            let child = match stack::spawn_host_process(process, root, logs, bun, secrets) {
-                Ok(child) => child,
-                Err(error) => {
-                    return finish_host_start_locked(
-                        attempt,
-                        root,
-                        started,
-                        Err(format!("could not start {}: {error}", process.name)),
-                    );
-                }
-            };
+            let child =
+                match stack::spawn_host_process(process, root, logs, bun, secrets, local_browser) {
+                    Ok(child) => child,
+                    Err(error) => {
+                        return finish_host_start_locked(
+                            attempt,
+                            root,
+                            started,
+                            Err(format!("could not start {}: {error}", process.name)),
+                        );
+                    }
+                };
             started.push((process.name, child));
             report_started(process.name);
         }
@@ -3526,11 +3575,13 @@ fn supervise_host_processes<R: tauri::Runtime>(
     secrets: stack::Secrets,
     generation: u64,
     ports: openbot_env::Ports,
+    // The person's browser this start runs, carried so a restart starts the same one.
+    local_browser: Option<local_browser::LocalBrowser>,
 ) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
         eprintln!(
             "[watch] supervising {} host processes",
-            stack::HOST_PROCESSES.len()
+            stack::host_processes(local_browser.is_some()).count()
         );
         let mut watches: Vec<supervise::Watch> = stack::HOST_PROCESSES
             .iter()
@@ -3664,7 +3715,14 @@ fn supervise_host_processes<R: tauri::Runtime>(
                     continue;
                 };
                 match restart_host_process_with(&shell, &root, name, generation, || {
-                    stack::spawn_host_process(process, &root, &logs, &bun, &secrets)
+                    stack::spawn_host_process(
+                        process,
+                        &root,
+                        &logs,
+                        &bun,
+                        &secrets,
+                        local_browser.as_ref(),
+                    )
                 }) {
                     Ok(true) => report(&app, name, true, "started again"),
                     Ok(false) => return,
@@ -8686,7 +8744,7 @@ fn main() {
             let base = temp_root("initial-host-launch");
             let root = base.join("deployment");
             std::fs::create_dir_all(&root).unwrap();
-            for process in stack::HOST_PROCESSES {
+            for process in stack::host_processes(false) {
                 if mode == "first-fails"
                     || ((mode == "second-fails" || mode == "cleanup-refuses")
                         && process.name != "server")
@@ -8824,6 +8882,7 @@ fn main() {
             &fixture.host.root.join(".logs"),
             &fixture.host.bun,
             &stack::Secrets::new(),
+            None,
             |name| fixture.host.observe(name),
             |_| Ok(()),
         ))
@@ -8837,6 +8896,7 @@ fn main() {
             stack::Secrets::new(),
             generation,
             openbot_env::Ports::default(),
+            None,
         ));
         // The actual watcher exhausts its actual budget and backoffs after this role fails.
         std::fs::write(fixture.host.root.join(failed_role).join("fail"), "").unwrap();
@@ -9013,6 +9073,7 @@ fn main() {
             &logs,
             &fixture.host.bun,
             &stack::Secrets::new(),
+            None,
             |name| fixture.host.observe(name),
             move |children| {
                 stack::wait_until_answering(
@@ -9036,6 +9097,7 @@ fn main() {
             stack::Secrets::new(),
             generation,
             openbot_env::Ports::default(),
+            None,
         ));
         std::fs::write(fixture.host.root.join("worker/fail"), "").unwrap();
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(70);
@@ -9147,6 +9209,7 @@ fn main() {
             &fixture.host.root.join(".logs"),
             &fixture.host.bun,
             &stack::Secrets::new(),
+            None,
             |name| fixture.host.observe(name),
             |_| Ok(()),
         ))
@@ -9160,6 +9223,7 @@ fn main() {
             stack::Secrets::new(),
             generation,
             openbot_env::Ports::default(),
+            None,
         ));
         let original = {
             let mut children = shell.children.lock().unwrap();
@@ -9212,6 +9276,7 @@ fn main() {
             &host.root.join(".logs"),
             &host.bun,
             &stack::Secrets::new(),
+            None,
             |name| host.observe(name),
             |_| Ok(()),
         ))
@@ -9445,6 +9510,7 @@ fn main() {
             &fixture.root.join(".logs"),
             &fixture.bun,
             &stack::Secrets::new(),
+            None,
             |name| {
                 fixture.observe(name);
                 if mode == "cleanup-refuses" {
@@ -9552,6 +9618,7 @@ fn main() {
                     &root.join(".logs"),
                     &bun,
                     &stack::Secrets::new(),
+                    None,
                     |_| {},
                     move |_| {
                         entered.wait();
@@ -9562,12 +9629,12 @@ fn main() {
             })
         };
         entered.wait();
-        for process in stack::HOST_PROCESSES {
+        for process in stack::host_processes(false) {
             fixture.observe(process.cwd);
         }
         assert_eq!(
             stack::recorded_host_pids(&fixture.root).unwrap().len(),
-            stack::HOST_PROCESSES.len()
+            stack::host_processes(false).count()
         );
         stop_everything_with(&shell, &fixture.root, stack::stop_processes_under, |_| {
             Ok(())
@@ -9619,6 +9686,7 @@ fn main() {
             Path::new("unused-logs"),
             Path::new("must-not-be-launched"),
             &stack::Secrets::new(),
+            None,
             |_| panic!("cancelled preparation launched a host"),
             |_| panic!("cancelled preparation reached readiness"),
         ))
