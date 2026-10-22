@@ -131,6 +131,94 @@ describe("when a phrase was said", () => {
   });
 });
 
+describe("when a phrase is being said", () => {
+  test("is the phrase's start as its first words come back, and nothing once it came back final, in a real run", () => {
+    const s = setup();
+    s.replay(TWO_PHRASES);
+    // The Recorder holds the person's steps from the moment each phrase began until the phrase arrives: the moment it is
+    // told is the start the phrase is stamped with, so a click made as they began to speak waits for the phrase.
+    expect(s.told).toEqual([
+      { speaking: START + 1_161 },
+      { phrase: "I am opening the expenses page" },
+      { speaking: null },
+      { speaking: START + 5_379 },
+      { phrase: "now I add the receipt from the taxi ride" },
+      { speaking: null },
+    ]);
+    expect(s.phrases.map((phrase) => phrase.startedAt)).toEqual([
+      START + 1_161,
+      START + 5_379,
+    ]);
+  });
+
+  test("is told the moment the first words come back, long before the phrase is final", () => {
+    const s = setup();
+    const first = TWO_PHRASES.filter(isResult)[0];
+    if (!first) throw new Error("The fixture has no result.");
+    s.replay(TWO_PHRASES.filter((event) => event.at <= first.at));
+    expect(s.told).toEqual([{ speaking: START + first.at }]);
+    expect(s.phrases).toEqual([]);
+  });
+
+  test("Stop hands over the phrase being said, then says nothing more is", async () => {
+    const s = setup();
+    const stopAt =
+      STOPPED_MID_PHRASE.find((event) => event.type === "stop")?.at ?? 0;
+    s.replay(STOPPED_MID_PHRASE.filter((event) => event.at < stopAt));
+    expect(s.told).toEqual([{ speaking: START + 1_089 }]);
+    const stopping = s.narration.stop();
+    s.replay(
+      STOPPED_MID_PHRASE.filter(
+        (event) => event.type !== "stop" && event.at > stopAt,
+      ),
+    );
+    await stopping;
+    expect(s.told).toEqual([
+      { speaking: START + 1_089 },
+      { phrase: "I am opening the expenses page" },
+      { speaking: null },
+    ]);
+  });
+
+  test("ends with no phrase when Chrome returns no words for it, ends listening, or the person mutes", () => {
+    const s = setup();
+    s.at(1_000);
+    s.current().onresult?.(speechEvent(result(0, [["", false]])));
+    s.at(1_400);
+    s.current().onresult?.(speechEvent(result(0, [["", true]])));
+    expect(s.told).toEqual([{ speaking: START + 1_000 }, { speaking: null }]);
+
+    // Chrome ends the recognition with a phrase still unfinished: it never comes.
+    s.at(2_000);
+    s.current().onresult?.(
+      speechEvent(
+        result(1, [
+          ["", true],
+          ["um", false],
+        ]),
+      ),
+    );
+    s.current().onend?.();
+    expect(s.told.slice(2)).toEqual([
+      { speaking: START + 2_000 },
+      { speaking: null },
+    ]);
+
+    // Muted mid-phrase: the phrase is handed over if it comes, and nothing is being said after.
+    s.advance(0);
+    s.at(70_000);
+    s.current().onresult?.(speechEvent(result(0, [["and then", false]])));
+    s.narration.mute(true);
+    expect(s.told.at(-1)).toEqual({ speaking: START + 70_000 });
+    s.current().onend?.();
+    expect(s.told.slice(4)).toEqual([
+      { speaking: START + 70_000 },
+      { speaking: null },
+    ]);
+    expect(s.phrases).toEqual([]);
+  });
+});
+
 describe("the browser's speech recognition", () => {
   test("is the standard one, else the webkit one Chrome and Safari answer to, else none (Firefox)", () => {
     class Standard {}
@@ -365,11 +453,17 @@ function setup() {
   const recognitions: FakeRecognition[] = [];
   const phrases: Phrase[] = [];
   const statuses: NarrationStatus[] = [];
+  /** What the Recorder is told, in order: each phrase, and each change in when the phrase being said began. */
+  const told: ({ phrase: string } | { speaking: number | null })[] = [];
   const narration = startNarration(
     {
       language: "en-GB",
       muted: false,
-      phrase: (phrase) => phrases.push(phrase),
+      phrase: (phrase) => {
+        phrases.push(phrase);
+        told.push({ phrase: phrase.text });
+      },
+      speaking: (since) => told.push({ speaking: since }),
       status: (status) => statuses.push(status),
     },
     {
@@ -393,6 +487,7 @@ function setup() {
     recognitions,
     phrases,
     statuses,
+    told,
     current,
     at: (ms: number) => time.setNow(START + ms),
     advance: time.advance,

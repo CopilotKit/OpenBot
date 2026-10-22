@@ -1,13 +1,14 @@
 /*
  * NARRATION FROM THE PAGE. On hosted OpenBot the person's browser runs on a computer with no microphone, so this page
  * listens to them instead, in their own browser, with the Web Speech API, and hands each final phrase to the Recorder
- * with when they started and stopped saying it. On OpenBot Desktop none of this runs: the Recorder hears the
- * microphone itself.
+ * with when they started and stopped saying it. It also says when a phrase began, as soon as its first words come
+ * back, so the Recorder holds the steps taken while it is said until it arrives. On OpenBot Desktop none of this runs:
+ * the Recorder hears the microphone itself.
  *
  * It is the browser's own speech recognition (`SpeechRecognition`, or the `webkitSpeechRecognition` Chrome and Safari
  * still answer to), continuous and with interim results, which is what lets a phrase be timed from its first words
  * rather than from when it was finished. Chrome sends the audio to its speech service; nothing here keeps any audio,
- * and only the words of each final phrase leave the page. Firefox has no speech recognition, and the page says so.
+ * and only the words of each final phrase, and when a phrase began, leave the page. Firefox has no speech recognition, and the page says so.
  */
 
 type RecognitionAlternative = { readonly transcript: string };
@@ -102,6 +103,21 @@ export class PhraseClock {
     return phrases;
   }
 
+  /**
+   * When the phrase being said began, stamped as it will be once it is final, or null when none is: the earliest result
+   * heard and not yet sent. A final result with no words ends its phrase too, and a result the list no longer holds is
+   * forgotten by the next event, as `heard` forgets it.
+   */
+  speakingSince(): number | null {
+    let since: number | null = null;
+    for (const [index, heardAt] of this.#firstHeard) {
+      if (this.#sent.has(index)) continue;
+      const start = Math.max(heardAt, this.#lastEndedAt);
+      since = since === null ? start : Math.min(since, start);
+    }
+    return since;
+  }
+
   /** A new recognition numbers its results from 0 again; the last phrase's end still holds. */
   restart(): void {
     this.#firstHeard.clear();
@@ -143,6 +159,13 @@ export type NarrationOptions = {
   language: string;
   muted: boolean;
   phrase(phrase: Phrase): void;
+  /**
+   * When the phrase being said began (its first words came back), stamped as the phrase will be, or null once none
+   * is: called on each change, after the phrase when one comes back final. A recognition that ends, a mute or a Stop
+   * sends no more phrases, so it says null then. The Recorder holds the steps the person takes from that moment until
+   * the phrase arrives, as it does for the phrases it hears itself (extension/src/offscreen/voice.ts, `speaking`).
+   */
+  speaking?(since: number | null): void;
   status(status: NarrationStatus): void;
 };
 
@@ -181,6 +204,17 @@ export function startNarration(
   /** A stop or mute waiting for the phrase in progress: called when the recognition ends. */
   let ending: (() => void) | null = null;
   const clock = new PhraseClock();
+  /** When the phrase being said began, as last told (`speaking`). */
+  let speakingSince: number | null = null;
+
+  /** Tells when the phrase being said began, when that changed. Only the recognition listening now can still send one;
+   * one that ended, or was let go, never will. Told after a Stop too, so the last phrase's hold is let go. */
+  function reportSpeaking() {
+    const since = current ? clock.speakingSince() : null;
+    if (since === speakingSince) return;
+    speakingSince = since;
+    options.speaking?.(since);
+  }
 
   const status = (next: NarrationStatus) => {
     if (!closed) options.status(next);
@@ -197,6 +231,7 @@ export function startNarration(
     const recognition = current;
     current = null;
     recognition?.abort();
+    reportSpeaking();
     status({ state: "failed", problem });
   }
 
@@ -230,6 +265,7 @@ export function startNarration(
         networkFailures = 0;
         options.phrase(phrase);
       }
+      reportSpeaking();
     };
     recognition.onerror = (event) => {
       if (recognition !== current || ending) return;
@@ -258,6 +294,7 @@ export function startNarration(
     recognition.onend = () => {
       if (recognition !== current) return;
       current = null;
+      reportSpeaking();
       const waiting = ending;
       ending = null;
       if (waiting) {
@@ -303,6 +340,7 @@ export function startNarration(
         ending = null;
         if (current === recognition) current = null;
         recognition.abort();
+        reportSpeaking();
         resolve();
       }, FLUSH_MS);
       const done = () => {
@@ -316,6 +354,7 @@ export function startNarration(
         ending = null;
         current = null;
         deps.timers.clear(timer);
+        reportSpeaking();
         resolve();
       }
     });
@@ -348,6 +387,7 @@ export function startNarration(
         current = null;
         ending = null;
         recognition.abort();
+        reportSpeaking();
       }
       listen();
     },

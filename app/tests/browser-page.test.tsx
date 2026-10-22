@@ -57,6 +57,8 @@ const writes: Write[] = [];
 let state: BrowserApiState;
 let openAnswer: BrowserOpenResponse;
 let stateFails = false;
+/** Requests the server refuses, by path, with the sentence it answers: as it passes on the Recorder's own (409). */
+let refusals: Partial<Record<string, string>> = {};
 
 function nativeState(): BrowserApiState {
   return {
@@ -114,6 +116,9 @@ async function server(path: string, init?: RequestInit): Promise<Response> {
   if (method !== "GET") writes.push({ path, method, body });
   const refuse = () =>
     Response.json({ error: "Invalid request" }, { status: 400 });
+  const refusal = refusals[path];
+  if (refusal && method === "POST")
+    return Response.json({ error: refusal }, { status: 409 });
   if (path === browserApiPaths.state && method === "GET") {
     if (stateFails)
       return Response.json({ error: "Unavailable" }, { status: 500 });
@@ -140,7 +145,17 @@ async function server(path: string, init?: RequestInit): Promise<Response> {
               startedAt: Date.now() - 42_000,
               actions: 7,
             }
-          : { ...state.recorder, phase: "idle", actions: 0 },
+          : {
+              ...state.recorder,
+              phase: "idle",
+              actions: 0,
+              // The Recorder names the recording Stop ended, once it went to Intelligence.
+              lastStopped: {
+                recordingId: state.recorder.recordingId ?? "rec-1",
+                title: state.recorder.title ?? "",
+                stoppedAt: Date.now(),
+              },
+            },
     };
     return Response.json(state);
   }
@@ -189,6 +204,7 @@ beforeEach(() => {
   queryClient.clear();
   writes.length = 0;
   stateFails = false;
+  refusals = {};
   state = nativeState();
   openAnswer = answerFor("native");
   QuietSocket.urls = [];
@@ -324,6 +340,11 @@ test("on OpenBot Desktop Record starts a recording named for the task, which sho
     }),
   );
   expect(await view.findByRole("textbox", { name: "Task name" })).toBeTruthy();
+  // Stop says where the recording went, by its name, until the next one starts.
+  const saved = await view.findByRole("status");
+  expect(saved.textContent).toBe(
+    "Submit an expense reportSaved to your Learning space.",
+  );
 });
 
 test("Record waits for the Recorder in the browser to connect", async () => {
@@ -448,18 +469,181 @@ test("on hosted OpenBot the page narrates a recording, and Stop sends the phrase
   const narration = writes.filter(
     (write) => write.path === "/api/browser/narration",
   );
-  expect(narration).toHaveLength(1);
-  const phrase = narration[0]?.body as {
-    text: string;
-    startedAt: number;
-    endedAt: number;
-  };
-  expect(phrase.text).toBe("I am opening the expenses page");
-  expect(phrase.startedAt).toBeLessThanOrEqual(phrase.endedAt);
-  // The phrase reached the server before the recording was stopped.
-  expect(writes.indexOf(narration[0] as Write)).toBeLessThan(
+  // The Recorder is told the phrase began as its first words came back, then the phrase, then that nothing more is
+  // being said, in that order and one at a time, each stamped with this computer's clock as it left.
+  expect(
+    narration.map(({ body }) => {
+      const { sentAt: _sent, ...rest } = body as { sentAt: number };
+      return "text" in rest ? { text: (rest as { text: string }).text } : rest;
+    }),
+  ).toEqual([
+    { speaking: true, since: expect.any(Number) },
+    { text: "I am opening the expenses page" },
+    { speaking: false },
+  ]);
+  const [began, phrase] = narration.map(
+    (write) =>
+      write.body as {
+        since?: number;
+        startedAt?: number;
+        endedAt?: number;
+        sentAt: number;
+      },
+  );
+  // The phrase began when the Recorder was told it did: it holds the steps from then until the phrase arrives.
+  expect(phrase?.startedAt).toBe(began?.since);
+  expect(phrase?.startedAt ?? 0).toBeLessThanOrEqual(phrase?.endedAt ?? 0);
+  for (const write of narration) {
+    const sentAt = (write.body as { sentAt: number }).sentAt;
+    expect(Math.abs(Date.now() - sentAt)).toBeLessThan(10_000);
+  }
+  expect(began?.sentAt ?? 0).toBeLessThanOrEqual(phrase?.sentAt ?? 0);
+  // Everything reached the server before the recording was stopped.
+  expect(writes.indexOf(narration.at(-1) as Write)).toBeLessThan(
     writes.findLastIndex((write) => write.path === "/api/browser/recording"),
   );
+  // Then the page says where the recording went.
+  expect(
+    await view.findByText(
+      "Saved “Submit an expense report” to your Learning space.",
+    ),
+  ).toBeTruthy();
+});
+
+test("on hosted OpenBot a narration the Recorder refused says why, beside the narration switch", async () => {
+  state = screenState();
+  openAnswer = answerFor("screen");
+  refusals = {
+    [browserApiPaths.narration]: "This browser hears your voice itself.",
+  };
+  const recognitions = installChrome();
+  const view = draw(<BrowserPage />);
+  const user = userEvent.setup({ document });
+  await user.type(
+    await view.findByRole("textbox", { name: "Task name" }),
+    "Submit an expense report",
+  );
+  await user.click(view.getByRole("button", { name: "Record" }));
+  await waitFor(() => expect(recognitions.at(-1)?.heard).toBe(true));
+  expect(
+    await view.findByText(
+      "Some of what you said didn't reach the Recorder. This browser hears your voice itself.",
+    ),
+  ).toBeTruthy();
+});
+
+test("Record and Stop the server refused say the server's sentence where the person pressed them, on both shapes", async () => {
+  for (const shape of ["native", "screen"] as const) {
+    cleanup();
+    queryClient.clear();
+    writes.length = 0;
+    state = shape === "native" ? nativeState() : screenState();
+    openAnswer = answerFor(shape);
+    refusals = {
+      [browserApiPaths.recording]:
+        "This browser is no longer connected to OpenBot. Open it from OpenBot again.",
+    };
+    const view = draw(<BrowserPage />);
+    const user = userEvent.setup({ document });
+    await user.type(
+      await view.findByRole("textbox", { name: "Task name" }),
+      "Refund an order",
+    );
+    await user.click(view.getByRole("button", { name: "Record" }));
+    expect((await view.findByRole("alert")).textContent).toBe(
+      "This browser is no longer connected to OpenBot. Open it from OpenBot again.",
+    );
+
+    // A recording the Recorder will not stop.
+    refusals = {
+      [browserApiPaths.recording]: "The Recorder could not do that. Try again.",
+    };
+    state = {
+      ...state,
+      recorder: {
+        ...(state.recorder as NonNullable<BrowserApiState["recorder"]>),
+        phase: "recording",
+        title: "Refund an order",
+        recordingId: "rec-2",
+        startedAt: Date.now() - 5_000,
+        actions: 2,
+      },
+    };
+    await queryClient.invalidateQueries();
+    await user.click(await view.findByRole("button", { name: "Stop" }));
+    await waitFor(() =>
+      expect(view.getByRole("alert").textContent).toBe(
+        "The Recorder could not do that. Try again.",
+      ),
+    );
+  }
+});
+
+test("on hosted OpenBot a refused Record is shown even after a tab that would not close", async () => {
+  state = screenState();
+  openAnswer = answerFor("screen");
+  refusals = { [browserApiPaths.tabs]: "There is no such tab." };
+  const view = draw(<BrowserPage />);
+  const user = userEvent.setup({ document });
+  await user.click(
+    await view.findByRole("button", { name: "Close Example Domain" }),
+  );
+  expect((await view.findByRole("alert")).textContent).toBe(
+    "There is no such tab.",
+  );
+  refusals = {
+    [browserApiPaths.recording]: "A recording is already running.",
+  };
+  await user.type(
+    view.getByRole("textbox", { name: "Task name" }),
+    "Refund an order",
+  );
+  await user.click(view.getByRole("button", { name: "Record" }));
+  await waitFor(() =>
+    expect(view.getByRole("alert").textContent).toBe(
+      "A recording is already running.",
+    ),
+  );
+});
+
+test("on OpenBot Desktop the narration row says what the Recorder hears, as it reports it", async () => {
+  const recorder = (voice: NonNullable<BrowserApiState["recorder"]>["voice"]) =>
+    ({
+      connected: true,
+      phase: voice === "off" ? "idle" : "recording",
+      actions: 0,
+      narration: "own",
+      voice,
+      ...(voice === "off"
+        ? {}
+        : {
+            title: "Submit an expense report",
+            recordingId: "rec-1",
+            startedAt: Date.now(),
+          }),
+    }) satisfies BrowserApiState["recorder"];
+  state = { ...nativeState(), recorder: recorder("off") };
+  const view = draw(<BrowserPage />);
+  expect(
+    await view.findByText(
+      "On. The Recorder hears your microphone while you record, so say what you're doing as you go.",
+    ),
+  ).toBeTruthy();
+  for (const [voice, sentence] of [
+    ["listening", "Listening. Say what you're doing as you go."],
+    [
+      "muted",
+      "Muted in the Recorder, so what you say isn't recorded. Turn it on again from the Recorder's button in your browser's toolbar.",
+    ],
+    [
+      "unavailable",
+      "The Recorder can't hear your microphone, so what you say isn't recorded. The Recorder's button in your browser's toolbar says why. Recording still works.",
+    ],
+  ] as const) {
+    state = { ...nativeState(), recorder: recorder(voice) };
+    await queryClient.invalidateQueries();
+    expect(await view.findByText(sentence)).toBeTruthy();
+  }
 });
 
 test("on hosted OpenBot in a browser with no speech recognition, the page says narration is unavailable and Record still works", async () => {

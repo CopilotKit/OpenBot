@@ -29,7 +29,12 @@ import {
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
 import { NarrationNotice, NarrationSwitch } from "./narration";
-import { narrationLanguage, RecordingBar, useRecording } from "./recording";
+import {
+  narrationLanguage,
+  RecordingBar,
+  SavedNotice,
+  useRecording,
+} from "./recording";
 import { useNarration } from "./use-narration";
 
 /** The shape of the computer's browser viewport, kept for the screen before its first frame says otherwise. */
@@ -44,6 +49,14 @@ export function tabName(tab: BrowserTab): string {
   } catch {
     return tab.url;
   }
+}
+
+/** The error of the request asked last among those that failed, or null when none did. */
+function latest(asked: { error: Error | null; at: number }[]): Error | null {
+  let last: { error: Error; at: number } | null = null;
+  for (const { error, at } of asked)
+    if (error && (!last || at >= last.at)) last = { error, at };
+  return last?.error ?? null;
 }
 
 /** What the address bar shows for a tab: nothing for an empty one, so the placeholder says what to do. */
@@ -80,7 +93,13 @@ export function ScreenBrowser({
   const tabs = useMutation(browserTabsMutationOptions(queryClient));
   const navigate = useMutation(navigateBrowserMutationOptions(queryClient));
   const active = state.tabs.find((tab) => tab.active);
-  const failure = tabs.error ?? navigate.error ?? recording.error;
+  // The refusal of whatever the person asked last: an older one (a tab that would not close) never hides a newer one
+  // (Record refused) in the one line there is for them.
+  const failure = latest([
+    { error: tabs.error, at: tabs.submittedAt },
+    { error: navigate.error, at: navigate.submittedAt },
+    { error: recording.error, at: recording.failedAt },
+  ]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -98,6 +117,7 @@ export function ScreenBrowser({
         </RecordingBar>
       </div>
       <NarrationNotice narration={narration} language={language} />
+      {recording.saved ? <SavedNotice saved={recording.saved} /> : null}
       {failure ? (
         <p
           className="border-b border-border px-3 py-2 text-destructive text-sm"

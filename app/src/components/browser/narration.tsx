@@ -1,3 +1,4 @@
+import type { LauncherState } from "@openbot/shared/openbot-browser";
 import { IconMicrophone, IconMicrophoneOff } from "@tabler/icons-react";
 import { useId } from "react";
 import {
@@ -24,6 +25,14 @@ function languageName(language: string): string {
   }
 }
 
+/** What the person is told when narration did not reach the Recorder: the server's own sentence for why, when it said
+ * one, since that is what they can act on. */
+function lostNarrationSentence(error: string | null): string {
+  return error
+    ? `Some of what you said didn't reach the Recorder. ${error}`
+    : `Some of what you said didn't reach the Recorder. ${GOES_ON}`;
+}
+
 /** Why narration is off, and what the person can do about it, in one or two short sentences. */
 export function narrationProblemSentence(
   problem: NarrationProblem,
@@ -45,21 +54,52 @@ export function narrationProblemSentence(
   }
 }
 
+/** What the Desktop narration row says, from the Recorder's own report of whether it hears the person. */
+function nativeNarrationSentence(voice: LauncherState["voice"]): string {
+  switch (voice) {
+    case "listening":
+      return "Listening. Say what you're doing as you go.";
+    case "muted":
+      return "Muted in the Recorder, so what you say isn't recorded. Turn it on again from the Recorder's button in your browser's toolbar.";
+    case "unavailable":
+      return `The Recorder can't hear your microphone, so what you say isn't recorded. The Recorder's button in your browser's toolbar says why. ${GOES_ON}`;
+    // Nothing is being recorded yet, or the Recorder has not said.
+    default:
+      return "On. The Recorder hears your microphone while you record, so say what you're doing as you go.";
+  }
+}
+
 /**
  * The narration row on OpenBot Desktop. The Recorder in the person's own browser hears their microphone itself, so
- * there is nothing to switch here: the row only says so.
+ * there is nothing to switch here: the row says what the Recorder reports, read every second with the rest of the
+ * browser's state, so a microphone that is muted or cannot be heard shows here while the person records.
  */
-export function NativeNarrationRow() {
+export function NativeNarrationRow({
+  voice,
+}: {
+  voice: LauncherState["voice"];
+}) {
+  const hearing = voice !== "muted" && voice !== "unavailable";
   return (
     <Item size="sm">
       <ItemMedia variant="icon">
-        <IconMicrophone />
+        {hearing ? <IconMicrophone /> : <IconMicrophoneOff />}
       </ItemMedia>
       <ItemContent>
         <ItemTitle>Narration</ItemTitle>
         <ItemDescription className="line-clamp-none">
-          On. The Recorder hears your microphone while you record, so say what
-          you're doing as you go.
+          {voice === "listening" ? (
+            <span className="inline-flex items-center gap-1.5">
+              {/* Decorative: the word beside it says it is live. */}
+              <span
+                aria-hidden="true"
+                className="size-1.5 shrink-0 rounded-full bg-emerald-500 motion-safe:animate-pulse"
+              />
+              {nativeNarrationSentence(voice)}
+            </span>
+          ) : (
+            nativeNarrationSentence(voice)
+          )}
         </ItemDescription>
       </ItemContent>
     </Item>
@@ -76,16 +116,19 @@ export function NarrationSwitch({
   narration: NarrationControls;
 }) {
   const id = useId();
+  const labelId = useId();
   if (!narration.supported) return null;
   const on = !narration.muted;
   const Icon = on ? IconMicrophone : IconMicrophoneOff;
   return (
     <span className="flex shrink-0 items-center gap-2 text-sm">
       <Icon aria-hidden="true" className="size-4 text-muted-foreground" />
-      <label htmlFor={id} className="text-muted-foreground">
+      <label htmlFor={id} id={labelId} className="text-muted-foreground">
         Narration
       </label>
+      {/* Named by the label's id as well: the switch is a span with role="switch", which `htmlFor` cannot name. */}
       <Switch
+        aria-labelledby={labelId}
         id={id}
         checked={on}
         onCheckedChange={(checked) => narration.setMuted(!checked)}
@@ -110,8 +153,8 @@ export function NarrationNotice({
     ? narrationProblemSentence("unsupported", language)
     : narration.status?.state === "failed"
       ? narrationProblemSentence(narration.status.problem, language)
-      : narration.lostPhrase
-        ? "Some of what you said didn't reach the Recorder. Recording still works."
+      : narration.lost
+        ? lostNarrationSentence(narration.lost.error)
         : null;
   if (!sentence) return null;
   return (
