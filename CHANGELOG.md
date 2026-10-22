@@ -173,8 +173,10 @@ hands out each capture pass; it receives nothing that is recorded.
 Wherever OpenBot can run a browser for you, the sidebar has a **Browser** button below Connections. It
 opens your own browser with the OpenBot Recorder already in it and connected as you: no install and no
 Connect step. Name a task and press Record; the page shows the recording's name, how long it has run and
-how many actions it holds, and after Stop it says the recording was saved to your Learning space. Only
-what you do is recorded.
+how many actions it holds, and after Stop it says the recording was saved to your Learning space (or,
+when it captured none of your actions, that nothing was recorded). Only what you do is recorded. When
+your browser cannot open because of how OpenBot is set up, the page tells you to ask an admin, and the
+reason is in the server's and the computer's logs.
 
 - **On OpenBot Desktop** it is your installed Google Chrome, or Microsoft Edge where Chrome is missing,
   in a separate OpenBot profile, as its own window; opening it again brings that window to the front. It
@@ -190,8 +192,8 @@ what you do is recorded.
 - **On hosted OpenBot** the browser is the computer's Chromium, shown in the page with tabs, an address
   bar, back, forward and reload, and you click and type in it straight away. Only the Recorder is
   allowed in it. While you record, the page transcribes your narration with your own browser's speech
-  recognition (Firefox has none, and the page says so), and each phrase is placed before the steps you
-  took while saying it. It reaches the open web, and OpenBot and the Intelligence gateway on their own
+  recognition (Firefox has none, and the page says so; the narration switch reads off whenever it
+  cannot hear you), and each phrase is placed before the steps you took while saying it. It reaches the open web, and OpenBot and the Intelligence gateway on their own
   ports, never anything else inside the deployment.
 - **Only you** can see or use your browser, admins included. It appears in Settings → Browsers as your
   OpenBot browser and can be disconnected there, which signs out the Recorder in it at once (a recording
