@@ -734,6 +734,79 @@ test("Continue during setup shows Getting ready, which starts, tests and opens O
   ).toHaveLength(1);
 });
 
+test("Continue after Intelligence is already ready starts OpenBot with the AI just chosen", async () => {
+  setupRootConfiguration("/tmp/local-eval-ready-first", async () =>
+    emptyConfiguration(),
+  );
+  withLocalCli({
+    set_up_local_eval: localStatus("starting", "valid"),
+    connect_local_eval: localConnection,
+    run_local_eval: localStatus("ready", "valid"),
+    ask_the_bot: "I am working.",
+  });
+  const view = await renderApp();
+  await userEvent.click(view.getByRole("button", { name: "Install" }));
+  await view.findByRole("heading", { name: "Connect your AI" });
+  // Intelligence finishes while the person is still choosing.
+  await waitFor(() =>
+    expect(localSequence()).toEqual([
+      "set_up_local_eval",
+      "connect_local_eval",
+      "run_local_eval",
+    ]),
+  );
+  await act(async () => new Promise((resolve) => setTimeout(resolve, 100)));
+  await chooseOpenAi(view);
+  await view.findByRole("heading", { name: "Test OpenBot" });
+  expect(getStartStackPayload()).toMatchObject({
+    model: { provider: "openai", login: "api-key", apiKey: "model-test-key" },
+  });
+});
+
+test("a Claude plan signed in on the provider screen reaches Start with its token", async () => {
+  setupRootConfiguration("/tmp/local-eval-plan", async () =>
+    emptyConfiguration(),
+  );
+  withLocalCli({
+    providers: [
+      {
+        id: "anthropic",
+        name: "Anthropic",
+        summary: "Sign in with a Claude plan.",
+        logins: ["plan", "api-key"],
+        mark: null,
+        caution: null,
+      },
+    ],
+    begin_claude_sign_in: "https://claude.example/authorize",
+    finish_claude_sign_in: "synthetic-plan-token",
+    set_up_local_eval: localStatus("starting", "valid"),
+    connect_local_eval: localConnection,
+    run_local_eval: localStatus("ready", "valid"),
+    ask_the_bot: "I am working.",
+  });
+  const view = await renderApp();
+  await userEvent.click(view.getByRole("button", { name: "Install" }));
+  await userEvent.click(await view.findByRole("radio", { name: /Anthropic/ }));
+  await userEvent.click(
+    await view.findByRole("button", { name: "Sign in with Anthropic" }),
+  );
+  await userEvent.type(
+    await view.findByLabelText("Code from your browser"),
+    "synthetic-code",
+  );
+  await userEvent.click(view.getByRole("button", { name: "Finish signing in" }));
+  await view.findByText(/Signed in to Anthropic/);
+  await waitFor(() => expect(localSequence()).toContain("run_local_eval"));
+  // Intelligence is ready and waiting minutes before Continue, as on a real machine.
+  await act(async () => new Promise((resolve) => setTimeout(resolve, 100)));
+  await userEvent.click(view.getByRole("button", { name: "Continue" }));
+  await view.findByRole("heading", { name: "Test OpenBot" });
+  expect(getStartStackPayload()).toMatchObject({
+    model: { provider: "anthropic", login: "plan", token: "synthetic-plan-token" },
+  });
+});
+
 test("a development double mount runs each local step and asks the question once", async () => {
   setupRootConfiguration("/tmp/local-eval-strict", async () =>
     emptyConfiguration(),
