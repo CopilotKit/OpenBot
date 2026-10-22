@@ -158,6 +158,25 @@ export const recorderPaths = {
   currentConnection: "/api/recorder/connections/current",
   me: "/api/recorder/me",
   learning: "/api/recorder/learning",
+  /** POST `RecorderActivity`, with the Recorder's bearer: what this browser's Recorder is doing now (the red dot). */
+  activity: "/api/recorder/activity",
   trajectoryConnect: (t: string) =>
     `/api/copilotkit/trajectory/${id(t)}/connect`,
 } as const;
+
+/**
+ * What a connected Recorder is doing, as it tells OpenBot whenever its recording phase changes and every 30 s while a
+ * recording runs, so OpenBot can show it (the Browser button's red dot) wherever the person recorded: their own
+ * everyday browser or the OpenBot browser. Best effort on the Recorder's side; OpenBot treats one older than 90 s as
+ * stale.
+ */
+export const recorderActivitySchema = z
+  .object({
+    phase: z.enum(["idle", "starting", "recording", "stopping"]),
+    recordingId: z.string().min(1).max(200).optional(),
+    title: z.string().max(200).optional(),
+    startedAt: z.number().int().positive().optional(),
+    actions: z.number().int().nonnegative(),
+  })
+  .strict();
+export type RecorderActivity = z.infer<typeof recorderActivitySchema>;

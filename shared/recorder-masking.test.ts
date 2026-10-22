@@ -2,8 +2,8 @@ import { expect, test } from "bun:test";
 import {
   holdsTypedSecret,
   isCredentialKey,
-  type JsonValue,
   isSensitiveTarget,
+  type JsonValue,
   luhnValid,
   maskBody,
   maskCollectorEvent,

@@ -24,6 +24,8 @@ export function isPersonBrowserId(id: string): boolean {
  * Chrome or Edge). `screen`: a cloud browser the app shows through the live screen (hosted OpenBot, bundled Chromium).
  */
 export type BrowserWindow = "native" | "screen";
+/** The person's own everyday browsers OpenBot Desktop can put the Recorder in and bring forward. */
+export type RealBrowser = "chrome" | "msedge";
 export type BrowserProduct = "chrome" | "msedge" | "chromium";
 
 /**
@@ -243,6 +245,34 @@ export const browserApiPaths = {
   close: "/api/browser/close",
 } as const;
 
+/* THE PERSON'S REAL BROWSER (OpenBot Desktop). Where the person's own everyday Chrome or Edge can hold the Recorder,
+ * the Browser button works with that browser instead of a separate one: OpenBot Desktop registers the Recorder with it
+ * (from the store), the Recorder connects through OpenBot Desktop's native host with no Connect page, and the host-side
+ * computer brings that browser forward, or opens the Recorder's store page in it while the Recorder is not there yet.
+ * These computer routes act on the person's desktop and exist only on the local Chrome backend. */
+export const realBrowserComputerPaths = {
+  /** POST `{ browser }`: bring the person's own browser forward (launching it if it is not running). */
+  front: "/browser/real/front",
+  /** POST `{ browser, url }`: open `url` (the Recorder's store page) in the person's own browser, not the default one. */
+  store: "/browser/real/store",
+} as const;
+
+export const realBrowserRequestSchema = z
+  .object({
+    browser: z.enum(["chrome", "msedge"]),
+    url: z.string().url().max(2000).optional(),
+  })
+  .strict();
+export type RealBrowserRequest = z.infer<typeof realBrowserRequestSchema>;
+
+/** What `POST /api/browser/open` did on OpenBot Desktop when the person's own browser is the Browser button's. */
+export type RealBrowserOpenResponse = {
+  ok: true;
+  /** `real`: brought their browser forward, its Recorder connected. `store`: opened the Recorder's store page in it. */
+  opened: "real" | "store";
+  browser: RealBrowser;
+};
+
 export type BrowserOpenResponse = {
   ok: true;
   /** The computer id of the person's browser: the live screen streams `/api/computers/<computerId>/stream`. */
@@ -253,6 +283,13 @@ export type BrowserOpenResponse = {
 };
 
 export type BrowserApiState = BrowserState & {
+  /**
+   * On OpenBot Desktop: the person's own browsers installed on this computer, and whether a Recorder in one of them is
+   * connected to this OpenBot as this person (a live connection made through OpenBot Desktop). Absent elsewhere.
+   */
+  real?: { connected: boolean; browsers: RealBrowser[] };
+  /** What the person's own Recorders are doing, wherever they record (the newest live report): the red dot. */
+  activity?: import("./recorder-api").RecorderActivity;
   /** False when this OpenBot has no way to run a person's browser; the app then hides the Browser button. */
   available: boolean;
   /**

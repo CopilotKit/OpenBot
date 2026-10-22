@@ -1,7 +1,5 @@
 import { describe, expect, test } from "bun:test";
 import {
-  MODEL_PROVIDERS,
-  PROVIDER_IDS,
   apiKeyOrPlaceholder,
   baseUrlVariableFor,
   botSettings,
@@ -9,6 +7,8 @@ import {
   defaultModelFor,
   keyIsRequired,
   keyVariableFor,
+  MODEL_PROVIDERS,
+  PROVIDER_IDS,
   providerSpec,
   requiresResponsesApi,
 } from "./model-providers";
