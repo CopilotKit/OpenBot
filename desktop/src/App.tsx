@@ -1567,7 +1567,8 @@ function Setup() {
                       </button>
                     )}
                 </div>
-                {signingIn && (
+                {/* Managed sign-in only: the self-hosted one says its own line below. */}
+                {signingIn && intelligenceSignInKind === "managed" && (
                   <StatusLine>
                     Opening CopilotKit sign-in in your browser…
                   </StatusLine>
