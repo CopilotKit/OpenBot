@@ -4,8 +4,9 @@ import { createServer } from "node:net";
 import {
   localChromeConfiguration,
   requireAvailablePort,
-  requireInstalledChrome,
+  requireInstalledBrowser,
 } from "../../scripts/start-local-chrome-computer";
+import { browserExecutableCandidates } from "../src/person-launch";
 
 describe("starting the local computer", () => {
   test("requires the existing API token and never includes it in an error", () => {
@@ -100,10 +101,28 @@ describe("starting the local computer", () => {
     expect(stderr).toContain("COMPUTER_TOKEN is required");
   });
 
-  test("missing installed Chrome fails clearly without launching a fallback", async () => {
-    await expect(requireInstalledChrome({}, "win32")).rejects.toThrow(
-      "Google Chrome was not found",
+  test("missing Chrome and Edge fails clearly without launching a bundled browser", async () => {
+    await expect(requireInstalledBrowser({}, "win32")).rejects.toThrow(
+      "Neither Google Chrome nor Microsoft Edge was found",
     );
+  });
+
+  test("looks for Edge where Playwright's msedge channel launches it", () => {
+    expect(browserExecutableCandidates("msedge", {}, "darwin")).toEqual([
+      "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+    ]);
+    expect(browserExecutableCandidates("msedge", {}, "linux")).toEqual([
+      "/opt/microsoft/msedge/msedge",
+    ]);
+    expect(
+      browserExecutableCandidates(
+        "msedge",
+        { "PROGRAMFILES(X86)": "C:\\Program Files (x86)" },
+        "win32",
+      ),
+    ).toEqual([
+      "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+    ]);
   });
 
   test("occupied loopback port fails instead of choosing another port", async () => {

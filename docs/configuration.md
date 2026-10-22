@@ -628,8 +628,9 @@ is still the record.
 | ------------------------------------ | ----------------------------------------------------------------------------------------- |
 | `AGENT_COMPUTER_URL`                 | Shared computer URL. If absent, computer routes are not mounted.                          |
 | `COMPUTER_TOKEN`                     | Secret every computer request must present. The computer refuses to start without it.     |
-| `COMPUTER_MAX_BROWSERS`              | How many Bots may hold a running browser at once. `8` by default; the least recently used is closed past it. |
-| `COMPUTER_BROWSER_IDLE_MS`           | How long an untouched browser is kept. 30 minutes by default; `0` keeps them resident.    |
+| `COMPUTER_MAX_BROWSERS`              | How many Bots may hold a running browser at once. `8` by default; the least recently used is closed past it. A person's browser counts toward it and is closed only when no Bot's browser is left to close. |
+| `COMPUTER_BROWSER_IDLE_MS`           | How long an untouched browser is kept. 30 minutes by default; `0` keeps them resident. A person's browser is never closed for being idle. |
+| `OPENBOT_RECORDER_DIR`               | The built OpenBot Recorder (`extension/dist` after `bun run build`), absolute. Every person's browser the computer opens has it loaded and connected; without it, or pointed at anything that is not a built Recorder, the computer still serves Bots and refuses to open a person's browser, saying why. The computer image sets it to the Recorder it carries. |
 | `COMPUTER_BROWSER_BACKEND`           | `managed` by default (full bundled Chromium); `local-chrome` opts into installed Chrome with dedicated profiles and a loopback API. |
 | `COMPUTER_BROWSER_MODE`              | Managed defaults to `headed` on Linux, which is every hosted computer (a container, a pod, the desktop app's engine): full Chromium on the computer's own Xvfb display. A computer run directly on macOS or Windows defaults to `headless`, where headed would open windows on the desktop. `headless` is full Chromium's new headless mode. Local Chrome requires `headed`. See [Getting past bot checks](#getting-past-bot-checks). |
 | `WEB_BOT_AUTH`                       | `on` or `off`. Unset means off. `on` needs an https public URL. See [Web Bot Auth](#web-bot-auth). |
@@ -727,8 +728,10 @@ bun scripts/start-local-chrome-computer.ts
 Restart the API with the configuration above. Open a Bot's computer and navigate to a website; its
 dedicated Chrome window starts on first use. Use **Take control** in the app before interacting and
 **Hand back** when finished. Closing a viewer does not close the Bot's browser or erase its logins.
-The helper exits with an error for a missing token, missing Chrome, or occupied port instead of
-silently selecting another browser or port. Ctrl-C shuts down its computer process and browsers.
+The helper exits with an error for a missing token, a missing browser (neither Chrome nor Microsoft
+Edge installed), or an occupied port instead of silently selecting another browser or port. With
+only Edge installed it starts, and a person's own browser opens in Edge; a Bot's browser still
+needs Chrome. Ctrl-C shuts down its computer process and browsers.
 
 The helper ignores inherited `PROFILES_DIR` and `WORKSPACE_DIR`. Its defaults are:
 
