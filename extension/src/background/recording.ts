@@ -584,7 +584,8 @@ export function installRecording(
    * most): a save whose body held one carries what they entered, though it reads [redacted] (network/index.ts). Kept as
    * `digests` are. */
   const typedSecrets = new Map<number, string[]>();
-  /** The person's own Learning space as OpenBot last described it: a recording starts with it, for its popup line. */
+  /** The person's own Learning space as OpenBot last described it: a recording starts with it, for its popup line. Kept
+   * in storage.session too (`learning`), so a service worker that started after the popup asked still has it. */
   let learningSpace: LearningSpaceState | undefined;
   /** The live recording's narration when its launcher passes it in (`external`): the language its phrases are in, and
    * the last phrase as said, so the next one is masked knowing what came before it, as the document's recogniser does. */
@@ -747,6 +748,14 @@ export function installRecording(
       digests.add(digest);
     for (const [tabId, typed] of (await readSession("typedSecrets")) ?? [])
       typedSecrets.set(tabId, typed);
+    // The popup asks when it opens, and Chrome may stop this worker before the person presses Record: the next one takes
+    // up what OpenBot said, while the connection that asked is still the one connected.
+    const space = await readSession("learning");
+    if (
+      space &&
+      space.connectionId === (await currentConnection())?.connectionId
+    )
+      learningSpace = space.value;
     if (state.phase === "idle") return;
     const record = await readLocal("activeRecording");
     if (record)
@@ -2512,6 +2521,10 @@ export function installRecording(
         recorderPaths.learning,
       );
       learningSpace = answer.learning;
+      await writeSession("learning", {
+        value: answer.learning,
+        connectionId: connection.connectionId,
+      }).catch(report("keeping the Learning space"));
       return { ok: true, learning: answer.learning };
     } catch (error) {
       const reason = signedOutReason(error);

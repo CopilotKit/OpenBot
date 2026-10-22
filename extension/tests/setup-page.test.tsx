@@ -68,7 +68,7 @@ test("says what the Recorder collects and where it goes, first, whatever the bro
     ["granted"],
     ["denied"],
   ] as PermissionState[][]) {
-    const { getByText, findByText, container } = setup({ states });
+    const { getByText, getByRole, findByText, container } = setup({ states });
     const title = getByText("What the Recorder collects");
     const disclosure = getByText(DISCLOSURE);
     expect(disclosure.textContent).toContain("When you press Record");
@@ -78,13 +78,23 @@ test("says what the Recorder collects and where it goes, first, whatever the bro
     expect(disclosure.textContent).toContain(
       "It all goes to your organization's own Intelligence through your organization's OpenBot, only while you record, and is used only for your organization's Skills, evaluations and insights.",
     );
-    // Above the microphone, the first row on the page.
-    const microphone = getByText("Microphone");
-    expect(
-      title.compareDocumentPosition(microphone) &
-        Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
-    expect(container.textContent).toContain("What the Recorder collects");
+    // The first thing on the page, as its heading, above everything about the microphone: end-to-end run 8 found it
+    // under "Allow the microphone" and its explanation.
+    expect(getByRole("heading", { level: 1 }).textContent).toBe(
+      "What the Recorder collects",
+    );
+    expect(container.textContent).toStartWith(
+      `What the Recorder collects${DISCLOSURE}`,
+    );
+    for (const microphone of [
+      getByText("Allow the microphone"),
+      getByText(/^Talk through what you do while you record\./),
+      getByText("Microphone"),
+    ])
+      expect(
+        title.compareDocumentPosition(microphone) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
     await findByText(states.at(-1) === "denied" ? /^Blocked\./ : /^Allowed\./);
     cleanup();
   }
