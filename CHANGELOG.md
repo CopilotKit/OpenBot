@@ -45,8 +45,9 @@ Bot that holds none. Routines and other unattended turns are unchanged.
 ### An app a Bot could not use asks to be connected once
 
 When a Bot reached for an app the person had not connected, such as Airtable, the conversation drew
-the Connect card twice, and still did after a reload. The conversation's stored copy of a tool call
-now counts as the same call it already shows, so each call draws one card.
+the Connect card twice, and still did after a reload. The built-in LangGraph Bot now names the message
+its tool calls belong to the way the conversation store does, so a conversation no longer keeps a
+second copy of every tool call, and a conversation that already has one draws each call once.
 
 ### An app's steps are named for the app, never for the service behind it
 
