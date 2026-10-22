@@ -1,0 +1,657 @@
+// The Recorder's launcher API, end to end through the Recorder's own code: the real service worker (connection,
+// recording, router, setup) and the real offscreen document side by side over a fake OpenBot and Intelligence, driven
+// through `globalThis[LAUNCHER_GLOBAL]` as the process that launched the browser drives it over its DevTools pipe. The
+// steps are rows of the full end-to-end run (fixtures/e2e-held-steps.json).
+import { afterEach, beforeEach, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import {
+  LAUNCHER_GLOBAL,
+  type LauncherApi,
+  type LauncherConnection,
+} from "@openbot/shared/openbot-browser";
+import { RECORDER_SIGNED_OUT } from "@openbot/shared/recorder-api";
+import {
+  type CapturedEvent,
+  sha256HexSync,
+} from "@openbot/shared/recorder-masking";
+import { IDBKeyRange as FakeIDBKeyRange, IDBFactory } from "fake-indexeddb";
+import { installConnection } from "../src/background/connection";
+import { installLauncher } from "../src/background/launcher";
+import {
+  installRecording,
+  type RecordingDeps,
+} from "../src/background/recording";
+import { installRouter } from "../src/background/router";
+import { installSetup } from "../src/background/setup";
+import { createOffscreenController } from "../src/offscreen/index";
+import { openOutbox } from "../src/offscreen/outbox";
+import { PORT_CONTENT, PORT_OFFSCREEN } from "../src/protocol/messages";
+import type { ConnectionRecord, DrainRecord } from "../src/shared/storage";
+import {
+  type ChromeFake,
+  type FakePort,
+  installChromeFake,
+} from "./support/chrome-fake";
+import { type FakeGateway, startFakeGateway } from "./support/fake-gateway";
+import { fakeMicrophone, fakeSpeech } from "./support/fake-speech";
+
+const EXTENSION_ID = "test";
+const ada = { id: "p1", name: "Ada", email: "ada@example.test" };
+const ORDER = "http://127.0.0.1:7420/orders/1043";
+const TOKEN = "obr_openbot-browser-token";
+
+const rows = JSON.parse(
+  readFileSync(
+    join(import.meta.dir, "fixtures", "e2e-held-steps.json"),
+    "utf8",
+  ),
+) as { archiveClick: CapturedEvent; reasonClick: CapturedEvent };
+
+type Globals = { indexedDB?: IDBFactory; IDBKeyRange?: unknown };
+const globals = globalThis as unknown as Globals;
+let saved: Globals = {};
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const settle = () => sleep(20);
+async function until(check: () => boolean | Promise<boolean>, label: string) {
+  const deadline = Date.now() + 8_000;
+  while (!(await check())) {
+    if (Date.now() > deadline) throw new Error(`Timed out waiting: ${label}`);
+    await sleep(5);
+  }
+}
+
+// ---- The fake OpenBot and Intelligence --------------------------------------------------------
+
+let gateway: FakeGateway;
+/** The tokens OpenBot still knows, and how often each asked who it is for. */
+let liveTokens = new Set<string>();
+let meAsked: string[] = [];
+function route(request: Request): Response | null {
+  const path = new URL(request.url).pathname;
+  const token =
+    request.headers.get("authorization")?.replace(/^Bearer /, "") ?? "";
+  if (path === "/api/recorder/me") {
+    meAsked.push(token);
+    if (!liveTokens.has(token))
+      return Response.json(
+        {
+          error: "This browser is no longer connected to OpenBot.",
+          code: RECORDER_SIGNED_OUT,
+          reason: "revoked",
+        },
+        { status: 401 },
+      );
+    return Response.json({ user: ada, connectionId: `c-${token}` });
+  }
+  if (path.startsWith("/api/recorder/"))
+    return Response.json({ error: "Not found." }, { status: 404 });
+  const pass = /^\/api\/copilotkit\/trajectory\/([^/]+)\/connect$/.exec(path);
+  if (!pass || request.method !== "POST") return null;
+  const trajectoryId = decodeURIComponent(pass[1] ?? "");
+  return Response.json({
+    joinToken: gateway.mintToken(trajectoryId),
+    realtime: {
+      clientUrl: `${gateway.url}/client`,
+      topic: `trajectory:${trajectoryId}`,
+    },
+  });
+}
+const sent = (trajectoryId: string) =>
+  gateway.events(trajectoryId).map((entry) => entry.raw as CapturedEvent);
+const names = (trajectoryId: string) =>
+  sent(trajectoryId).map((event) => event.name);
+
+// ---- Time, and the two contexts ---------------------------------------------------------------
+
+let clock = 0;
+type Due = { id: number; at: number; fn: () => void };
+let due: Due[] = [];
+let nextTimer = 0;
+const workerTimers = {
+  set(fn: () => void, ms: number) {
+    nextTimer += 1;
+    due.push({ id: nextTimer, at: clock + Math.max(0, ms), fn });
+    return nextTimer;
+  },
+  clear(handle: unknown) {
+    due = due.filter((timer) => timer.id !== handle);
+  },
+};
+/** Moves the clock to `to`, firing the service worker's held-step timers that fall due on the way, in order. */
+async function advanceTo(to: number) {
+  for (;;) {
+    const next = due
+      .filter((timer) => timer.at <= to)
+      .sort((a, b) => a.at - b.at)[0];
+    if (!next) break;
+    due = due.filter((timer) => timer !== next);
+    clock = Math.max(clock, next.at);
+    next.fn();
+    await settle();
+  }
+  clock = Math.max(clock, to);
+  await settle();
+}
+
+let fake: ChromeFake;
+let databaseName = "";
+let databaseCounter = 0;
+let documentTimers: ReturnType<typeof setTimeout>[] = [];
+let speech = fakeSpeech();
+let microphone = fakeMicrophone();
+
+function runDocument(): void {
+  fake.runAs("offscreen-document", () =>
+    createOffscreenController({
+      openOutbox: () => openOutbox(databaseName),
+      connectPort: () => chrome.runtime.connect({ name: PORT_OFFSCREEN }),
+      now: () => clock,
+      timers: {
+        set: (fn, ms) => {
+          const handle = setTimeout(fn, ms);
+          documentTimers.push(handle);
+          return handle;
+        },
+        clear: (handle) =>
+          clearTimeout(handle as ReturnType<typeof setTimeout>),
+      },
+      voice: {
+        Recognition: speech.Recognition,
+        getUserMedia: microphone.getUserMedia,
+      },
+    }),
+  );
+}
+
+/** The service worker as background/index.ts starts it, on the test's clock. */
+function startWorker(): void {
+  const deps: Partial<RecordingDeps> = {
+    createNetworkCapture: () => ({
+      start: async () => "debugger",
+      addTab: async () => {},
+      onCommitted: async () => {},
+      resume: async () => "debugger",
+      recordPageEvent: async () => {},
+      recordPageAgent: () => {},
+      stop: async () => {},
+    }),
+    createPageFallback: () => ({
+      start: async () => false,
+      addTab: async () => {},
+      onCommitted: async () => {},
+      stop: async () => {},
+      active: () => false,
+    }),
+    acceptPageNetworkEvent: () => null,
+    hasHostPermission: async () => true,
+    now: () => clock,
+    timers: { set: () => 0, clear: () => {} },
+    stepTimers: workerTimers,
+  };
+  const recording = installRecording(deps);
+  installRouter(recording);
+  installConnection({ connectionLost: recording.connectionLost });
+  installSetup();
+  installLauncher(recording, { now: () => clock });
+}
+
+/** What the launcher reaches over the DevTools pipe: the API on the service worker's own global scope. */
+const launcher = () =>
+  (globalThis as unknown as Record<string, LauncherApi>)[
+    LAUNCHER_GLOBAL
+  ] as LauncherApi;
+
+const connection = (
+  overrides: Partial<LauncherConnection> = {},
+): LauncherConnection => ({
+  openbotUrl: gateway.httpUrl,
+  token: TOKEN,
+  connectionId: `c-${TOKEN}`,
+  user: ada,
+  ...overrides,
+});
+const stored = () =>
+  fake.storage.local.get("connection") as ConnectionRecord | undefined;
+
+function contentPort(): FakePort {
+  return fake.connectFrom(PORT_CONTENT, {
+    id: EXTENSION_ID,
+    tab: { id: 7 } as chrome.tabs.Tab,
+    frameId: 0,
+    url: ORDER,
+  });
+}
+
+/** Opens the order in tab 7, the tab the person is on. */
+function openOrder(): void {
+  fake.tabs.set(7, {
+    id: 7,
+    url: ORDER,
+    title: "Order 1043 - Corner Shop admin",
+    active: true,
+    windowId: 1,
+  } as chrome.tabs.Tab);
+}
+
+/** Starts a recording through the launcher at `at` and resolves with its trajectory once its start reached
+ * Intelligence. */
+async function record(at: number, title: string): Promise<string> {
+  clock = at;
+  openOrder();
+  const started = await launcher().record({ action: "start", title });
+  expect(started).toMatchObject({
+    ok: true,
+    state: { phase: "recording", title, actions: 0 },
+  });
+  const active = fake.storage.local.get("activeRecording") as DrainRecord;
+  const trajectoryId = active.trajectoryIds[0] ?? "";
+  await until(
+    () => names(trajectoryId).includes("outcome"),
+    "the recording's start in Intelligence",
+  );
+  return trajectoryId;
+}
+
+beforeEach(async () => {
+  saved = { indexedDB: globals.indexedDB, IDBKeyRange: globals.IDBKeyRange };
+  globals.indexedDB = new IDBFactory();
+  globals.IDBKeyRange = FakeIDBKeyRange;
+  databaseName = `launcher-${Date.now()}-${databaseCounter++}`;
+  due = [];
+  documentTimers = [];
+  speech = fakeSpeech();
+  microphone = fakeMicrophone();
+  liveTokens = new Set([TOKEN]);
+  meAsked = [];
+  gateway = await startFakeGateway({ extraRoutes: route });
+  fake = installChromeFake({
+    extensionId: EXTENSION_ID,
+    manifestVersion: "0.3.0",
+  });
+  fake.offscreen.onDocumentCreated.addListener(() => {
+    setTimeout(runDocument, 0);
+  });
+  clock = 1_760_000_000_000;
+  startWorker();
+  await settle();
+}, 15_000);
+
+afterEach(async () => {
+  await settle();
+  for (const handle of documentTimers) clearTimeout(handle);
+  await gateway.stop();
+  fake.uninstall();
+  Reflect.deleteProperty(globalThis, LAUNCHER_GLOBAL);
+  for (const key of ["indexedDB", "IDBKeyRange"] as const) {
+    if (saved[key] === undefined) Reflect.deleteProperty(globals, key);
+    else Object.assign(globals, { [key]: saved[key] });
+  }
+}, 15_000);
+
+test("connect stores the connection as an approved Connect does, with no Connect page, and again changes nothing", async () => {
+  expect(await launcher().state()).toEqual({
+    connected: false,
+    phase: "idle",
+    actions: 0,
+    narration: "own",
+  });
+  expect(
+    await launcher().connect({
+      connection: connection(),
+      narration: "external",
+    }),
+  ).toEqual({ ok: true });
+
+  expect(stored()).toMatchObject({
+    openbotUrl: gateway.httpUrl,
+    token: TOKEN,
+    connectionId: `c-${TOKEN}`,
+    user: ada,
+    via: "openbot-browser",
+    narration: "external",
+  });
+  // OpenBot said who the connection is for, as the popup asks when it opens, and the keep-alive is satisfied.
+  expect(meAsked).toEqual([TOKEN]);
+  expect(fake.storage.session.get("me")).toMatchObject({
+    value: { user: ada, connectionId: `c-${TOKEN}` },
+  });
+  expect(fake.storage.local.get("lastKeepAliveAt")).toBe(clock);
+  expect(fake.opened).toEqual([]);
+  // The popup and the options page see an ordinary connected browser.
+  expect(
+    await fake.sendFromPage(
+      { type: "page.state" },
+      { url: "chrome-extension://test/popup.html" },
+    ),
+  ).toMatchObject({
+    ok: true,
+    connection: {
+      openbotUrl: gateway.httpUrl,
+      user: { name: "Ada", email: ada.email },
+      via: "openbot-browser",
+    },
+  });
+  expect(await launcher().state()).toEqual({
+    connected: true,
+    userId: ada.id,
+    phase: "idle",
+    actions: 0,
+    narration: "external",
+  });
+
+  // The launcher hands the same connection again (a launch it retried): nothing is asked or written again.
+  const connectedAt = stored()?.connectedAt;
+  clock += 60_000;
+  expect(
+    await launcher().connect({
+      connection: connection(),
+      narration: "external",
+    }),
+  ).toEqual({ ok: true });
+  expect(meAsked).toEqual([TOKEN]);
+  expect(stored()?.connectedAt).toBe(connectedAt);
+});
+
+test("connect refuses an address the Recorder would not connect to, a malformed request and a policy that pins another OpenBot", async () => {
+  for (const openbotUrl of [
+    "http://openbot.example.com",
+    "http://localhost:3010",
+    "https://openbot.example.com/app",
+    "javascript:alert(1)",
+  ]) {
+    const answer = await launcher().connect({
+      connection: connection({ openbotUrl }),
+      narration: "own",
+    });
+    expect(answer.ok).toBe(false);
+  }
+  expect(
+    await launcher().connect({
+      connection: { ...connection(), token: "not-a-recorder-token" },
+      narration: "own",
+    }),
+  ).toMatchObject({ ok: false });
+  expect(
+    await launcher().connect({
+      connection: connection(),
+      narration: "loud" as never,
+    }),
+  ).toMatchObject({ ok: false });
+  expect(
+    await (launcher().connect as (input: unknown) => Promise<unknown>)(null),
+  ).toMatchObject({ ok: false });
+
+  fake.storage.setManaged({ OpenBotUrl: "https://openbot.example.com" });
+  await settle();
+  expect(
+    await launcher().connect({ connection: connection(), narration: "own" }),
+  ).toEqual({
+    ok: false,
+    error:
+      "Your organization's Recorder policy does not allow this OpenBot. Ask your IT team.",
+  });
+  expect(stored()).toBeUndefined();
+  expect(meAsked).toEqual([]);
+});
+
+test("a connection OpenBot already signed out is refused and forgotten, with the signed-out notice", async () => {
+  liveTokens.clear();
+  expect(
+    await launcher().connect({ connection: connection(), narration: "own" }),
+  ).toMatchObject({ ok: false });
+  expect(stored()).toBeUndefined();
+  expect(fake.storage.local.get("notice")).toMatchObject({
+    kind: "signed-out",
+    reason: "revoked",
+  });
+  expect((await launcher().state()).connected).toBe(false);
+});
+
+test("an OpenBot browser shows no setup tab and no Connect page: none on a later launch, and the first launch's are closed", async () => {
+  // OpenBot Desktop's native host answers in this profile too, and would hand over a code.
+  fake.native.reply = (message) =>
+    (message as { type: string }).type === "ping"
+      ? { ok: true }
+      : { ok: true, openbotUrl: gateway.httpUrl, code: "obc_fixture" };
+
+  // The first launch: the install opens its setup tab, and Desktop's Connect page, before the launcher connects.
+  fake.fireInstalled("install");
+  await until(() => fake.opened.length === 2, "the install's own tabs");
+  const opened = [...fake.tabs.keys()];
+  expect(
+    await launcher().connect({ connection: connection(), narration: "own" }),
+  ).toEqual({ ok: true });
+  expect([...fake.removed].sort()).toEqual(opened.sort());
+  expect(fake.storage.session.get("pendingConnect")).toBeUndefined();
+
+  // The next launch: the Recorder is loaded afresh (an install again) with its storage, the connection in it.
+  fake.restartServiceWorker();
+  startWorker();
+  const before = fake.opened.length;
+  fake.fireInstalled("install");
+  await settle();
+  await settle();
+  expect(fake.opened.length).toBe(before);
+  // Desktop was not even asked for a code it would mint for nothing.
+  expect(
+    fake.native.sent.filter(
+      (message) => (message as { type: string }).type === "handoff",
+    ),
+  ).toHaveLength(1);
+});
+
+test("Record starts on the tab the person is on and Stop ends it, through the popup's own paths", async () => {
+  await launcher().connect({ connection: connection(), narration: "own" });
+  const click = rows.archiveClick;
+  const trajectoryId = await record(
+    click.timestamp - 7_000,
+    "Archive order 1043",
+  );
+  const port = contentPort();
+  clock = click.timestamp;
+  port.postMessage({ type: "content.event", event: click });
+  await settle();
+  expect(await launcher().state()).toMatchObject({
+    connected: true,
+    phase: "recording",
+    title: "Archive order 1043",
+    startedAt: click.timestamp - 7_000,
+    actions: 1,
+  });
+  expect(fake.badge.text).toBe("1");
+
+  await advanceTo(click.timestamp + 5_000);
+  const stopped = await launcher().record({ action: "stop" });
+  expect(stopped).toMatchObject({
+    ok: true,
+    state: { phase: "idle", actions: 0 },
+  });
+  await until(
+    () => names(trajectoryId).filter((name) => name === "outcome").length === 2,
+    "the recording stopped",
+  );
+  expect(names(trajectoryId)).toEqual([
+    "recording.started",
+    "outcome",
+    "navigation",
+    "click",
+    "outcome",
+  ]);
+  expect(sent(trajectoryId).at(-1)?.value).toMatchObject({
+    phase: "succeeded",
+  });
+  // A second Record while one runs is refused as the popup's is, and a Record with no connection says so.
+  await record(click.timestamp + 10_000, "Again");
+  expect(
+    await launcher().record({ action: "start", title: "A third" }),
+  ).toEqual({ ok: false, error: "A recording is already running." });
+}, 15_000);
+
+test("with narration external the Recorder hears nothing itself, and each phrase passed in is a transcript placed by its start among the steps", async () => {
+  await launcher().connect({ connection: connection(), narration: "external" });
+  const click = rows.archiveClick;
+  const trajectoryId = await record(
+    click.timestamp - 7_000,
+    "Archive order 1043",
+  );
+  // No speech recognition and no microphone: this browser has none.
+  expect(speech.instances).toHaveLength(0);
+  expect(microphone.constraints).toHaveLength(0);
+
+  const port = contentPort();
+  clock = click.timestamp;
+  port.postMessage({ type: "content.event", event: click });
+  await settle();
+  // The person started saying it 1.5 s before the click, and their own browser handed the phrase over once they
+  // stopped, while the click was still held for its save.
+  clock = click.timestamp + 600;
+  expect(
+    await launcher().narrate({
+      text: "  archiving the order now  ",
+      startedAt: click.timestamp - 1_500,
+      endedAt: click.timestamp + 400,
+    }),
+  ).toEqual({ ok: true });
+  await advanceTo(click.timestamp + 5_000);
+  await until(
+    () => names(trajectoryId).includes("click"),
+    "the click in Intelligence",
+  );
+  expect(names(trajectoryId)).toEqual([
+    "recording.started",
+    "outcome",
+    "navigation",
+    "transcript",
+    "click",
+  ]);
+  const transcript = sent(trajectoryId)[3];
+  // The shape the Recorder's own recogniser emits (offscreen/voice.ts), numbered on its way to Intelligence as every
+  // event is.
+  expect(transcript).toMatchObject({
+    type: "CUSTOM",
+    name: "transcript",
+    timestamp: click.timestamp - 1_500,
+    value: {
+      text: "archiving the order now",
+      startedAt: new Date(click.timestamp - 1_500).toISOString(),
+      endedAt: new Date(click.timestamp + 400).toISOString(),
+      language: "en-US",
+    },
+  });
+}, 15_000);
+
+test("a phrase passed in is masked as the Recorder's own are: a value typed into a sensitive field, and a number after the phrase that named a PIN", async () => {
+  await launcher().connect({ connection: connection(), narration: "external" });
+  const click = rows.reasonClick;
+  const trajectoryId = await record(
+    click.timestamp - 5_000,
+    "Refund order 1043",
+  );
+  const port = contentPort();
+  clock = click.timestamp - 4_000;
+  port.postMessage({
+    type: "content.sensitive",
+    digest: sha256HexSync("Kestrel99"),
+  });
+  await settle();
+  const say = (text: string, at: number) =>
+    launcher().narrate({ text, startedAt: at, endedAt: at + 800 });
+  expect(await say("now I type Kestrel99 into the box", clock - 2_000)).toEqual(
+    {
+      ok: true,
+    },
+  );
+  expect(await say("my pin is", clock - 1_000)).toEqual({ ok: true });
+  expect(await say("4815", clock - 100)).toEqual({ ok: true });
+  await advanceTo(click.timestamp);
+  await until(
+    () =>
+      names(trajectoryId).filter((name) => name === "transcript").length === 3,
+    "the phrases in Intelligence",
+  );
+  const spoken = sent(trajectoryId)
+    .filter((event) => event.name === "transcript")
+    .map((event) => (event.value as { text: string }).text);
+  expect(spoken).toEqual([
+    "now I type [redacted] into the box",
+    "my pin is",
+    "[redacted]",
+  ]);
+  expect(JSON.stringify(sent(trajectoryId))).not.toContain("Kestrel99");
+  expect(JSON.stringify(sent(trajectoryId))).not.toContain("4815");
+}, 15_000);
+
+test("narrate is refused while nothing records, in a browser that hears its own voice, and for a phrase that is not one", async () => {
+  await launcher().connect({ connection: connection(), narration: "own" });
+  const phrase = { text: "hello", startedAt: clock - 500, endedAt: clock };
+  expect(await launcher().narrate(phrase)).toEqual({
+    ok: false,
+    error: "Nothing is being recorded.",
+  });
+  await record(clock, "Own voice");
+  // The Recorder hears this browser's microphone itself, as in any browser.
+  await until(() => speech.instances.length === 1, "the speech recognition");
+  expect(await launcher().narrate(phrase)).toEqual({
+    ok: false,
+    error: "This browser hears your voice itself.",
+  });
+  for (const bad of [
+    { ...phrase, text: "" },
+    { ...phrase, startedAt: -1 },
+    { ...phrase, endedAt: phrase.startedAt - 1 },
+    { ...phrase, text: "x".repeat(4_001) },
+  ])
+    expect((await launcher().narrate(bad)).ok).toBe(false);
+}, 15_000);
+
+test("no runtime message reaches the launcher API: not from a page, a content script, the Recorder's own pages or another extension", async () => {
+  const before = fake.calls.filter((call) => call.includes("addListener"));
+  // The launcher adds no listener of any kind: it is reached only on the service worker's global scope.
+  fake.restartServiceWorker();
+  const recording = installRecording({
+    hasHostPermission: async () => true,
+    now: () => clock,
+  });
+  installRouter(recording);
+  installConnection({ connectionLost: recording.connectionLost });
+  installSetup();
+  const listening = fake.calls.filter((call) => call.includes("addListener"));
+  installLauncher(recording);
+  expect(fake.calls.filter((call) => call.includes("addListener")).length).toBe(
+    listening.length,
+  );
+  expect(before.length).toBeGreaterThan(0);
+  expect(typeof launcher().connect).toBe("function");
+
+  const asks = [
+    { type: "connect", connection: connection(), narration: "own" },
+    {
+      type: "launcher.connect",
+      connection: connection(),
+      narration: "own",
+    },
+    { type: LAUNCHER_GLOBAL, method: "connect", args: [connection()] },
+    { type: "openbotLauncher.connect", connection: connection() },
+    { type: "launcher.record", action: "start", title: "x" },
+  ];
+  for (const message of asks) {
+    expect(
+      await fake.sendFromPage(message, {
+        url: "chrome-extension://test/popup.html",
+      }),
+    ).toEqual({ ok: false, error: "Unknown request." });
+    expect(
+      await fake.sendExternal(message, {
+        origin: "https://evil.example",
+        url: "https://evil.example/",
+      }),
+    ).toEqual({ ok: false, error: "invalid" });
+    contentPort().postMessage(message);
+  }
+  await settle();
+  expect(stored()).toBeUndefined();
+  expect(meAsked).toEqual([]);
+  expect(fake.storage.local.get("activeRecording")).toBeUndefined();
+});

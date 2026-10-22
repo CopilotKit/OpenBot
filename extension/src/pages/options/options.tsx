@@ -1,3 +1,4 @@
+import type { RecorderConnectVia } from "@openbot/shared/recorder-api";
 import {
   IconBuildingSkyscraper,
   IconLink,
@@ -34,10 +35,11 @@ import { ask as askBackground } from "../ui/runtime";
 
 type OptionsDeps = { ask: typeof askBackground };
 
-const VIA = {
+const VIA: Record<RecorderConnectVia, string> = {
   web: "Connected from OpenBot in your browser",
   desktop: "Connected from OpenBot Desktop",
-} as const;
+  "openbot-browser": "Connected by OpenBot when it opened this browser",
+};
 
 function plural(count: number, one: string, many: string) {
   return `${count} ${count === 1 ? one : many}`;

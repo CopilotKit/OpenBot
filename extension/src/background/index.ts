@@ -1,5 +1,6 @@
 import { restrictStorageToTrustedContexts } from "../shared/storage";
 import { installConnection } from "./connection";
+import { installLauncher } from "./launcher";
 import { installRecording } from "./recording";
 import { recoverInterruptedRecording } from "./recovery";
 import { installRouter } from "./router";
@@ -14,6 +15,9 @@ installRouter(recording);
 installConnection({ connectionLost: recording.connectionLost });
 // A fresh install opens the page that asks for the microphone; website access came with the install itself.
 installSetup();
+// What the process that launched this browser calls, over its DevTools pipe, when OpenBot opened the browser itself:
+// the connection, Record and Stop, and narration from outside. In this worker's own scope, with no message route to it.
+installLauncher(recording);
 chrome.runtime.onStartup.addListener(recoverInterruptedRecording);
 void restrictStorageToTrustedContexts();
 void recoverInterruptedRecording();
