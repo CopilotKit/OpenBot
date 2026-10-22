@@ -130,6 +130,32 @@ describe("the network policy rules", () => {
     expect(egressDecision(policy, "2001:db8::1", 443).allowed).toBe(false);
   });
 
+  test("an IPv6 address is bracketed where a refusal names its port", () => {
+    // The run that found it: a person's hosted browser asked for http://[::1]:7555/ and read "This
+    // browser may not open ::1:7555.", which names no port anybody could tell apart.
+    const policy = { mode: "allowlist_only" as const, rules: [] };
+    expect(egressDecision(policy, "[::1]", 7555, [], "person").reason).toBe(
+      "This browser may not open [::1]:7555.",
+    );
+    expect(egressDecision(policy, "::1", 7555).reason).toBe(
+      "[::1]:7555 is not on this deployment's network allowlist.",
+    );
+    expect(
+      egressDecision(
+        { mode: "allowlist_only", rules: [{ type: "cidr", value: "fd00::/8" }] },
+        "fd00::1",
+        443,
+      ).reason,
+    ).toBe("[fd00::1]:443 is inside an allowed range.");
+    // A name and an IPv4 address read as they always did.
+    expect(egressDecision(policy, "10.0.0.1", 80, [], "person").reason).toBe(
+      "This browser may not open 10.0.0.1:80.",
+    );
+    expect(egressDecision(policy, "db.internal", 5432, []).reason).toBe(
+      "db.internal:5432 is not on this deployment's network allowlist.",
+    );
+  });
+
   test("malformed rules are refused with a sentence, not stored", () => {
     expect(
       parseEgressRules([{ type: "domain", value: "not a domain" }]).ok,

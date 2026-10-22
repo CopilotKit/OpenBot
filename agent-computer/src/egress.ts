@@ -472,6 +472,14 @@ const REFUSALS = {
 } as const;
 
 /**
+ * A host and port as a person reads them: an IPv6 address in brackets, as in a URL, since `::1:7555`
+ * cannot be told apart from an address that ends in `7555`.
+ */
+function hostPort(host: string, port: number): string {
+  return `${isIP(host) === 6 ? `[${host}]` : host}:${port}`;
+}
+
+/**
  * May this connection go out?
  *
  * `resolved` is what the host name resolved to, when the caller resolved it. A domain rule matches a
@@ -529,12 +537,12 @@ export function egressDecision(
   ) {
     return {
       allowed: true,
-      reason: `${host}:${port} is inside an allowed range.`,
+      reason: `${hostPort(host, port)} is inside an allowed range.`,
     };
   }
   return {
     allowed: false,
-    reason: REFUSALS.notAllowed[audience](`${host}:${port}`),
+    reason: REFUSALS.notAllowed[audience](hostPort(host, port)),
   };
 }
 
