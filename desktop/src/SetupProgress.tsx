@@ -7,6 +7,8 @@ export type Progress = {
   detail: string;
   running?: boolean;
   downloadBytes?: number;
+  /** When a running row began, if earlier than the row appeared on this screen. */
+  startedAt?: number;
 };
 
 export function SetupProgress({ steps }: { steps: Progress[] }) {
@@ -20,19 +22,75 @@ export function SetupProgress({ steps }: { steps: Progress[] }) {
   );
 }
 
-function SetupProgressRow({ step }: { step: Progress }) {
+/** Whole seconds since `since`, or since `running` turned on, while it is on. */
+export function useElapsed(running: boolean, since?: number | null): number {
   const [elapsed, setElapsed] = useState(0);
-  const running = step.running ?? false;
   useEffect(() => {
     if (!running) return;
-    const started = Date.now();
-    setElapsed(0);
-    const timer = setInterval(
-      () => setElapsed(Math.floor((Date.now() - started) / 1000)),
-      1000,
-    );
+    const started = since ?? Date.now();
+    const tick = () =>
+      setElapsed(Math.max(0, Math.floor((Date.now() - started) / 1000)));
+    tick();
+    const timer = setInterval(tick, 1000);
     return () => clearInterval(timer);
-  }, [running]);
+  }, [running, since]);
+  return elapsed;
+}
+
+export function formatElapsed(elapsed: number): string {
+  return elapsed < 60
+    ? `${elapsed}s`
+    : `${Math.floor(elapsed / 60)}m ${elapsed % 60}s`;
+}
+
+// The native steps that make this computer ready to run anything, before OpenBot's own software.
+const PREPARING = new Set([
+  "engine",
+  "install-engine",
+  "create-machine",
+  "start-machine",
+  "health-gate",
+]);
+
+/**
+ * An installation's native rows as two plain ones, for local mode: "Preparing this computer" and
+ * "Installing OpenBot". Native details name the engine, so only download sizes are kept; a
+ * failure is shown in full under the rows.
+ */
+export function plainInstallSteps(
+  steps: Progress[],
+  installing: boolean,
+): Progress[] {
+  const preparing = steps.filter((step) => PREPARING.has(step.step));
+  const rest = steps.filter((step) => !PREPARING.has(step.step));
+  const preparingFailed = preparing.some((step) => !step.ok);
+  const stillPreparing =
+    installing && preparing.some((step) => step.running) && !preparingFailed;
+  const installingFailed = rest.some((step) => !step.ok);
+  const rows: Progress[] = [];
+  if (preparing.length > 0) {
+    rows.push({
+      step: "Preparing this computer",
+      ok: !preparingFailed,
+      running: stillPreparing,
+      detail: "",
+    });
+  }
+  if (rest.length > 0 || (installing && !stillPreparing && !preparingFailed)) {
+    rows.push({
+      step: "Installing OpenBot",
+      ok: !installingFailed,
+      running: installing && !stillPreparing && !installingFailed,
+      detail: "",
+      downloadBytes: rest.find((step) => step.running)?.downloadBytes,
+    });
+  }
+  return rows;
+}
+
+function SetupProgressRow({ step }: { step: Progress }) {
+  const running = step.running ?? false;
+  const elapsed = useElapsed(running, step.startedAt);
   return (
     <li className="step" aria-label={label(step.step)}>
       <span
@@ -47,10 +105,7 @@ function SetupProgressRow({ step }: { step: Progress }) {
         {running && (
           <span className="step-elapsed" aria-hidden="true" aria-live="off">
             {" · "}
-            {elapsed < 60
-              ? `${elapsed}s`
-              : `${Math.floor(elapsed / 60)}m ${elapsed % 60}s`}{" "}
-            elapsed
+            {formatElapsed(elapsed)} elapsed
           </span>
         )}
       </span>

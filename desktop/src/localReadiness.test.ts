@@ -147,7 +147,7 @@ test("specific wording and actions", () => {
   });
   expect(said("cancelled").action).toBe("retry");
   expect(said("cancelled").said).toBe(
-    "The Intelligence command was stopped before it finished.",
+    "Stopped at your request before it finished.",
   );
   expect(
     said(report({ outcome: "blocked", reason: "local-command-busy" })).said,
@@ -161,7 +161,7 @@ test("specific wording and actions", () => {
   expect(said("unverified").action).toBe("repair");
   expect(said("invalid-json")).toEqual({
     state: "blocked",
-    said: "OpenBot does not understand this CLI's reply.",
+    said: "OpenBot did not understand Intelligence's reply.",
   });
 });
 

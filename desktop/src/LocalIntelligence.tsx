@@ -13,7 +13,12 @@ import {
 } from "./localEvalCli";
 import { localReadiness } from "./localReadiness";
 import { asProblem, Failure, type Problem } from "./Problem";
-import { type Progress, SetupProgress } from "./SetupProgress";
+import {
+  formatElapsed,
+  type Progress,
+  SetupProgress,
+  useElapsed,
+} from "./SetupProgress";
 
 type Call<T> = { attempt: string; answer: Promise<T> };
 
@@ -27,13 +32,13 @@ export type LocalStartable = { apiUrl: string; gatewayWsUrl: string };
 const POLL_DELAYS: number[] = [2_000, 4_000, 8_000, ...Array(12).fill(15_000)];
 
 const unreadable: Problem = {
-  said: "OpenBot did not understand the Intelligence CLI's answer.",
+  said: "OpenBot did not understand Intelligence's answer.",
 };
 
 type Phase = "setup" | "connect" | "wait" | "start";
 
 const PHASES: [Phase, string][] = [
-  ["setup", "Setting up Intelligence on this computer"],
+  ["setup", "Setting up Intelligence"],
   ["connect", "Connecting OpenBot"],
   ["wait", "Waiting for Intelligence"],
   ["start", "Starting OpenBot"],
@@ -52,7 +57,7 @@ function said(intelligence: LocalReport | LocalFailure): string {
 function connectionSaid(answered: LocalConnection): string {
   // A conflict has no reason of its own, so it is said in this window's words.
   if (answered.conflicted) {
-    return "Settings the Intelligence CLI wrote for OpenBot were changed since. OpenBot did not connect.";
+    return "Settings Intelligence wrote for OpenBot were changed since. OpenBot did not connect.";
   }
   return said({
     outcome: answered.outcome,
@@ -72,65 +77,98 @@ function isReady(report: LocalReport): boolean {
   }).open;
 }
 
+type State = {
+  at: Phase | null;
+  running: boolean;
+  /** When the current row began, so its elapsed time survives a change of screen. */
+  since: number | null;
+  blocked: { said: string; reason: LocalReason | null } | null;
+  problem: Problem | null;
+};
+
+const idle: State = {
+  at: null,
+  running: false,
+  since: null,
+  blocked: null,
+  problem: null,
+};
+
+export type LocalSequence = State & {
+  /** Set up, connected and reported ready and valid, and waiting for the go-ahead to start. */
+  ready: boolean;
+  /** Stopped at its row with a reason; Retry resumes there. */
+  stopped: boolean;
+  steps: Progress[];
+  /** Runs set up, connect and wait, and stops before Start. */
+  prepare: () => void;
+  /** The go-ahead: runs what is left and starts OpenBot once Intelligence is ready. */
+  start: () => void;
+  retry: () => void;
+  /** Stops the running CLI call and says so. */
+  cancel: () => void;
+  /** Forgets the rows, as after Stop OpenBot. */
+  reset: () => void;
+};
+
 /**
  * Intelligence on this computer, run by the Intelligence CLI, then OpenBot started against it.
  *
- * Shown only when this build has a CLI to run, and only once the person has chosen it. Four
- * steps, each idempotent, run in order without a button: set up, connect (the choice is the
+ * Held by the window rather than by a screen, so moving between screens never cancels it. Four
+ * steps, each idempotent, run in order without a button: set up, connect (the installation is the
  * consent, and the native side keeps the key the CLI wrote), wait until the CLI itself reports
- * readiness "ready" and licence "valid", then start OpenBot. A recorded, connected stack starts at
- * waiting. A step that is blocked or fails stops there with its reason, and Retry resumes at that
- * step. A CLI that does not report ready and valid never reaches Start.
+ * readiness "ready" and licence "valid", then start OpenBot. `prepare` runs the first three while
+ * the person chooses an AI provider; Start waits for `start`. A recorded, connected stack starts
+ * at waiting. A step that is blocked or fails stops there with its reason, and Retry resumes at
+ * that step. A CLI that does not report ready and valid never reaches Start.
  */
-export function LocalIntelligence({
+export function useLocalSequence({
   root,
-  stack: recorded,
-  connected: recordedConnection = false,
-  auto,
-  developer = import.meta.env.DEV,
-  onCancel,
+  stack,
+  connected = false,
   onStart,
-  onConnected = () => {},
+  onRecorded = () => {},
   pollDelays = POLL_DELAYS,
 }: {
   root: string;
   stack: string | null;
   /** OpenBot already holds the key `local connect` gave it for this stack. */
   connected?: boolean;
-  /** Run the steps as soon as this is shown. Otherwise they wait for Start OpenBot. */
-  auto: boolean;
-  developer?: boolean;
-  /** Cancel also leaves, back to the choice. Without it, Cancel stops at its row with Retry. */
-  onCancel?: () => void;
   /** Starts OpenBot against the stack; true when it started. */
   onStart: (startable: LocalStartable) => Promise<boolean>;
-  onConnected?: (stack: string) => void;
+  /** A stack was set up, or connected. */
+  onRecorded?: (stack: string, connected: boolean) => void;
   pollDelays?: number[];
-}) {
-  const [stack, setStack] = useState<string | null>(recorded);
-  const [connected, setConnected] = useState(recordedConnection);
-  const [at, setAt] = useState<Phase | null>(null);
-  const [running, setRunning] = useState(false);
-  const [blocked, setBlocked] = useState<{
-    said: string;
-    reason: LocalReason | null;
-  } | null>(null);
-  const [problem, setProblem] = useState<Problem | null>(null);
+}): LocalSequence {
+  const [state, setState] = useState<State>(idle);
+  const now = useRef(state);
+  const latest = useRef({ root, stack, connected, onStart, onRecorded });
+  latest.current = { root, stack, connected, onStart, onRecorded };
   // Bumped to stop a run: by Cancel, by leaving, and by any newer run.
   const generation = useRef(0);
   const attempt = useRef<string | null>(null);
   const wake = useRef<(() => void) | null>(null);
+  const queued = useRef<ReturnType<typeof setTimeout> | null>(null);
   const startable = useRef<LocalStartable | null>(null);
+  // Start OpenBot once Intelligence is ready. Spent when it starts.
+  const go = useRef(false);
+
+  function update(patch: Partial<State>) {
+    now.current = { ...now.current, ...patch };
+    setState(now.current);
+  }
 
   function halt() {
     generation.current += 1;
     wake.current?.();
+    if (queued.current !== null) clearTimeout(queued.current);
+    queued.current = null;
     const inFlight = attempt.current;
     attempt.current = null;
     if (inFlight) void cancelLocalEval(inFlight);
   }
 
-  // Leaving stops whatever is running, the CLI call included.
+  // Closing the window stops whatever is running, the CLI call included.
   // biome-ignore lint/correctness/useExhaustiveDependencies: once, on leaving.
   useEffect(() => halt, []);
 
@@ -143,10 +181,10 @@ export function LocalIntelligence({
     } catch (error) {
       if (generation.current !== token) return null;
       if (error instanceof LocalEvalError) {
-        if (error.category === "unrecognized") setProblem(unreadable);
-        else setBlocked({ said: said(error.category), reason: null });
+        if (error.category === "unrecognized") update({ problem: unreadable });
+        else update({ blocked: { said: said(error.category), reason: null } });
       } else {
-        setProblem(asProblem(error));
+        update({ problem: asProblem(error) });
       }
       return null;
     } finally {
@@ -183,7 +221,7 @@ export function LocalIntelligence({
     };
     const stuck = (found: LocalReport) => {
       if (generation.current === token) {
-        setBlocked({ said: said(found), reason: found.reason });
+        update({ blocked: { said: said(found), reason: found.reason } });
       }
       return null;
     };
@@ -193,7 +231,7 @@ export function LocalIntelligence({
       if (!found) return null;
       if (isReady(found)) {
         if (!found.stack) {
-          setBlocked({ said: said("missing-stack"), reason: null });
+          update({ blocked: { said: said("missing-stack"), reason: null } });
           return null;
         }
         return {
@@ -218,9 +256,11 @@ export function LocalIntelligence({
         return stuck(found);
       }
       if (tries >= pollDelays.length) {
-        setBlocked({
-          said: "Intelligence did not report ready in time.",
-          reason: null,
+        update({
+          blocked: {
+            said: "Intelligence did not report ready in time.",
+            reason: null,
+          },
         });
         return null;
       }
@@ -231,20 +271,23 @@ export function LocalIntelligence({
   async function run(from: Phase): Promise<void> {
     halt();
     const token = generation.current;
-    setBlocked(null);
-    setProblem(null);
-    let id = stack;
+    update({ blocked: null, problem: null });
+    const { root } = latest.current;
+    let id = latest.current.stack;
     const stop = (reason?: { said: string; reason?: LocalReason | null }) => {
       if (generation.current !== token) return;
-      if (reason) {
-        setBlocked({ said: reason.said, reason: reason.reason ?? null });
-      }
-      setRunning(false);
+      update({
+        running: false,
+        ...(reason
+          ? { blocked: { said: reason.said, reason: reason.reason ?? null } }
+          : {}),
+      });
     };
     for (const [phase] of PHASES.slice(PHASES.findIndex(([p]) => p === from))) {
       if (generation.current !== token) return;
-      setAt(phase);
-      setRunning(true);
+      // Ready, and waiting for the go-ahead.
+      if (phase === "start" && !go.current) return stop();
+      update({ at: phase, running: true, since: Date.now() });
       if (phase === "setup") {
         const started = setUpLocalEval(root);
         const report = await call(
@@ -257,7 +300,7 @@ export function LocalIntelligence({
         }
         if (!report.stack) return stop({ said: said("missing-stack") });
         id = report.stack.id;
-        setStack(id);
+        latest.current.onRecorded(id, false);
       }
       if (phase === "connect") {
         const started = connectLocalEval(root);
@@ -274,9 +317,7 @@ export function LocalIntelligence({
         }
         id = answered.stack?.id ?? id;
         if (!id) return stop({ said: said("missing-stack") });
-        setStack(id);
-        setConnected(true);
-        onConnected(id);
+        latest.current.onRecorded(id, true);
       }
       if (phase === "wait") {
         if (!id) return stop({ said: said("missing-stack") });
@@ -287,47 +328,120 @@ export function LocalIntelligence({
       if (phase === "start") {
         const target = startable.current;
         if (!target) return run("wait");
-        if (!(await onStart(target))) {
+        if (!(await latest.current.onStart(target))) {
           return stop({ said: "OpenBot did not start." });
         }
+        go.current = false;
       }
     }
     stop();
   }
 
-  function cancel() {
-    halt();
-    setRunning(false);
-    if (onCancel) return onCancel();
-    setBlocked({ said: said("cancelled"), reason: null });
+  const first = (): Phase =>
+    latest.current.stack && latest.current.connected ? "wait" : "setup";
+  const stopped =
+    !state.running &&
+    state.at !== null &&
+    (state.blocked !== null || state.problem !== null);
+  const ready = !state.running && state.at === "wait" && !stopped;
+
+  function prepare() {
+    if (now.current.running) return;
+    void run(first());
   }
 
-  const from: Phase = stack && connected ? "wait" : "setup";
-  // Deferred a tick, so a development double mount runs the CLI once.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: runs when auto is turned on.
-  useEffect(() => {
-    if (!auto || at !== null) return;
-    const timer = setTimeout(() => void run(from), 0);
-    return () => clearTimeout(timer);
-  }, [auto]);
+  function start() {
+    go.current = true;
+    const { at, running, blocked, problem } = now.current;
+    // A running sequence starts OpenBot when it gets there; a stopped one waits for Retry.
+    if (running || blocked || problem) return;
+    const from: Phase = at === "wait" ? "start" : first();
+    // Deferred a tick: the screen that gave the go-ahead has rendered what it chose by then, and a
+    // development double mount runs the CLI once.
+    update({ running: true });
+    queued.current = setTimeout(() => {
+      queued.current = null;
+      void run(from);
+    }, 0);
+  }
 
-  const reached = at ? PHASES.findIndex(([phase]) => phase === at) : -1;
+  function retry() {
+    const { at } = now.current;
+    if (at) void run(at);
+  }
+
+  function cancel() {
+    halt();
+    // Before its first row, nothing ran: there is nothing to retry.
+    update(
+      now.current.at === null
+        ? { running: false }
+        : {
+            running: false,
+            blocked: { said: said("cancelled"), reason: null },
+          },
+    );
+  }
+
+  function reset() {
+    halt();
+    go.current = false;
+    startable.current = null;
+    update(idle);
+  }
+
+  const reached = state.at
+    ? PHASES.findIndex(([phase]) => phase === state.at)
+    : -1;
   const steps: Progress[] = PHASES.slice(0, reached + 1).map(
-    ([phase, label], index) =>
+    ([, label], index) =>
       index < reached
         ? { step: label, ok: true, detail: "" }
-        : running
-          ? { step: label, ok: true, running: true, detail: "" }
-          : blocked || problem
-            ? { step: label, ok: false, detail: blocked?.said ?? "" }
-            : { step: label, ok: phase === "start", detail: "" },
+        : state.running
+          ? {
+              step: label,
+              ok: true,
+              running: true,
+              detail: "",
+              startedAt: state.since ?? undefined,
+            }
+          : stopped
+            ? { step: label, ok: false, detail: state.blocked?.said ?? "" }
+            : { step: label, ok: true, detail: "" },
   );
-  const stopped = !running && at !== null && (blocked || problem);
+
+  return {
+    ...state,
+    ready,
+    stopped,
+    steps,
+    prepare,
+    start,
+    retry,
+    cancel,
+    reset,
+  };
+}
+
+/**
+ * The local sequence's rows and its one control at a time: Cancel while a CLI call runs, Retry
+ * once it stopped, and Start OpenBot when nothing has run yet and `offerStart` is set.
+ */
+export function LocalIntelligence({
+  sequence,
+  developer = import.meta.env.DEV,
+  offerStart = false,
+}: {
+  sequence: LocalSequence;
+  developer?: boolean;
+  offerStart?: boolean;
+}) {
+  const { at, running, stopped, blocked, problem } = sequence;
   const reason = stopped ? blocked?.reason : null;
 
   return (
     <section aria-label="Intelligence on this computer">
-      <SetupProgress steps={steps} />
+      <SetupProgress steps={sequence.steps} />
       {reason === "eula-acceptance-required" &&
         (developer ? (
           <p className="footnote">
@@ -348,22 +462,40 @@ export function LocalIntelligence({
       {stopped && problem && <Failure problem={problem} />}
       <div className="row">
         {running && at !== "start" && (
-          <button type="button" className="quiet" onClick={cancel}>
+          <button type="button" className="quiet" onClick={sequence.cancel}>
             Cancel
           </button>
         )}
-        {stopped && at && (
-          <button type="button" onClick={() => run(at)}>
+        {stopped && (
+          <button type="button" onClick={sequence.retry}>
             Retry
           </button>
         )}
-        {!running && at === null && !auto && (
-          <button type="button" onClick={() => run(from)}>
+        {offerStart && !running && at === null && (
+          <button type="button" onClick={sequence.start}>
             Start OpenBot
           </button>
         )}
       </div>
     </section>
+  );
+}
+
+/** One line for the screen in front: the current row and how long it has taken. */
+export function LocalStatus({ sequence }: { sequence: LocalSequence }) {
+  const current = sequence.steps.at(-1);
+  const elapsed = useElapsed(sequence.running, sequence.since);
+  if (!current) return null;
+  return (
+    <p className="local-status" role="status">
+      {sequence.running
+        ? `${current.step} · ${formatElapsed(elapsed)} elapsed`
+        : sequence.ready
+          ? "Intelligence is ready."
+          : sequence.stopped
+            ? (sequence.blocked?.said ?? sequence.problem?.said)
+            : `${current.step}: complete.`}
+    </p>
   );
 }
 
@@ -386,7 +518,7 @@ export function IntelligenceChoice({
     [
       "local",
       "Run Intelligence on this computer",
-      "For evaluation. Uses Docker Desktop; the first setup takes a few minutes.",
+      "For evaluation. The first setup takes about 10 minutes.",
     ],
     [
       "hosted",

@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeAll, expect, mock, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { cleanup, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useEffect } from "react";
 import type { LocalConnection, LocalReport } from "./localEvalCli";
 
 type Invoke = (command: string, args?: unknown) => Promise<unknown>;
@@ -18,7 +19,9 @@ mock.module("@tauri-apps/api/core", () => ({
   },
 }));
 
-const { LocalIntelligence } = await import("./LocalIntelligence");
+const { LocalIntelligence, LocalStatus, useLocalSequence } = await import(
+  "./LocalIntelligence"
+);
 
 beforeAll(() => GlobalRegistrator.register());
 afterEach(() => {
@@ -88,29 +91,46 @@ function deferred<T>() {
 
 type Startable = { apiUrl: string; gatewayWsUrl: string };
 
-function view(
-  props: {
-    stack?: string | null;
-    developer?: boolean;
-    connected?: boolean;
-    auto?: boolean;
-    onStart?: (startable: Startable) => Promise<boolean>;
-    onCancel?: () => void;
-    pollDelays?: number[];
-  } = {},
-) {
-  return render(
-    <LocalIntelligence
-      root="/tmp/openbot"
-      stack={props.stack ?? null}
-      connected={props.connected ?? false}
-      developer={props.developer ?? false}
-      auto={props.auto ?? true}
-      onCancel={props.onCancel}
-      onStart={props.onStart ?? (async () => true)}
-      pollDelays={props.pollDelays ?? [0, 0, 0]}
-    />,
+type Props = {
+  stack?: string | null;
+  developer?: boolean;
+  connected?: boolean;
+  /** Gives the go-ahead on arrival. Without it, Start OpenBot does. */
+  auto?: boolean;
+  /** Runs up to ready on arrival, without the go-ahead, under its status line. */
+  prepare?: boolean;
+  onStart?: (startable: Startable) => Promise<boolean>;
+  pollDelays?: number[];
+};
+
+/** The window's part: it holds the sequence, and a screen shows it. */
+function Holder(props: Props) {
+  const sequence = useLocalSequence({
+    root: "/tmp/openbot",
+    stack: props.stack ?? null,
+    connected: props.connected ?? false,
+    onStart: props.onStart ?? (async () => true),
+    pollDelays: props.pollDelays ?? [0, 0, 0],
+  });
+  // biome-ignore lint/correctness/useExhaustiveDependencies: once, on arrival.
+  useEffect(() => {
+    if (props.prepare) sequence.prepare();
+    else if (props.auto ?? true) sequence.start();
+  }, []);
+  return (
+    <>
+      {props.prepare && <LocalStatus sequence={sequence} />}
+      <LocalIntelligence
+        sequence={sequence}
+        developer={props.developer ?? false}
+        offerStart
+      />
+    </>
   );
+}
+
+function view(props: Props = {}) {
+  return render(<Holder {...props} />);
 }
 
 /** Answers each command from its own queue; the last answer repeats. */
@@ -144,7 +164,7 @@ function row(screen: ReturnType<typeof view>, name: string) {
   return screen.getByRole("listitem", { name });
 }
 
-const SETUP = "Setting up Intelligence on this computer";
+const SETUP = "Setting up Intelligence";
 const CONNECT = "Connecting OpenBot";
 const WAIT = "Waiting for Intelligence";
 const START = "Starting OpenBot";
@@ -254,11 +274,11 @@ test("a blocked or conflicted connection stops at its row, and Retry resumes at 
   for (const [answer, said] of [
     [
       connection({ outcome: "blocked", reason: "confirmation-required" }),
-      "The Intelligence CLI asked for a confirmation OpenBot cannot give.",
+      "Intelligence asked for a confirmation OpenBot cannot give.",
     ],
     [
       connection({ outcome: "blocked", conflicted: true }),
-      "Settings the Intelligence CLI wrote for OpenBot were changed since. OpenBot did not connect.",
+      "Settings Intelligence wrote for OpenBot were changed since. OpenBot did not connect.",
     ],
   ] as const) {
     invokeHandler = answers({
@@ -364,7 +384,7 @@ test("Cancel stops the running CLI call by its own attempt, and Retry resumes th
   });
   await waitFor(() =>
     expect(row(screen, SETUP).textContent).toContain(
-      "The Intelligence command was stopped before it finished.",
+      "Stopped at your request before it finished.",
     ),
   );
   invokeHandler = answers({ set_up_local_eval: [blockedOnTerms] });
@@ -456,22 +476,41 @@ test("without auto, nothing runs until Start OpenBot is chosen", async () => {
   await waitFor(() => expect(started).toEqual([startableUrls]));
 });
 
-test("with onCancel, Cancel stops the CLI call and hands back to the choice", async () => {
-  const pending = deferred<LocalReport>();
-  invokeHandler = async (command) => {
-    if (command === "set_up_local_eval") return pending.promise;
-    if (command === "cancel_local_eval") {
-      pending.reject("cancelled");
-      return null;
-    }
-    throw new Error(`unexpected ${command}`);
-  };
-  let cancelled = 0;
-  const screen = view({ onCancel: () => cancelled++ });
-  await userEvent.click(await screen.findByRole("button", { name: "Cancel" }));
-  expect(cancelled).toBe(1);
-  expect(commands()).toEqual(["set_up_local_eval", "cancel_local_eval"]);
-  expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+test("prepare runs to ready and waits for the go-ahead, which starts at once", async () => {
+  invokeHandler = answers({
+    set_up_local_eval: [report()],
+    connect_local_eval: [connection()],
+    run_local_eval: [ready],
+  });
+  const started: Startable[] = [];
+  const screen = view({
+    prepare: true,
+    onStart: async (startable) => {
+      started.push(startable);
+      return true;
+    },
+  });
+  await screen.findByText("Intelligence is ready.");
+  expect(row(screen, WAIT).textContent).toContain("Complete");
+  expect(screen.queryByRole("listitem", { name: START })).toBeNull();
+  expect(started).toEqual([]);
+  // No Start OpenBot once it has run: the go-ahead comes from the screen in front.
+  expect(screen.queryByRole("button")).toBeNull();
+  cleanup();
+  invokeCalls = [];
+});
+
+test("the status line names the running row and its elapsed time", async () => {
+  invokeHandler = answers({
+    set_up_local_eval: [new Promise(() => {})],
+    cancel_local_eval: [null],
+  });
+  const screen = view({ prepare: true });
+  await waitFor(() =>
+    expect(screen.getByRole("status").textContent).toBe(
+      "Setting up Intelligence · 0s elapsed",
+    ),
+  );
 });
 
 test("the running screen offers no way to the hosted service", async () => {
