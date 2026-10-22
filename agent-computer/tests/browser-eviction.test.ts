@@ -154,3 +154,52 @@ describe("reading the limits an operator set", () => {
     }
   });
 });
+
+/**
+ * A person's browser, which counts toward the cap and is closed last.
+ *
+ * Browsing in a native window sends the computer nothing, so a person's browser always looks like
+ * the one used longest ago. Ordered by use alone it was the first the cap closed, out from under
+ * the person, whenever a Bot started, and the idle sweep closed it half an hour into their reading.
+ */
+describe("a person's browser among Bots' browsers", () => {
+  const PERSON = "person-0123456789abcdef0123456789abcdef";
+  const isPerson = (botId: string) => botId.startsWith("person-");
+  const withPerson = (personUsedAt: number, ...botsUsedAt: number[]) =>
+    new Map([[PERSON, { usedAt: personUsedAt }], ...running(...botsUsedAt)]);
+
+  test("the cap closes every Bot's browser before the person's", () => {
+    // The person's is the least recently used by a long way, and still not the one closed.
+    expect(chooseEvictions(withPerson(1, 500, 300, 900), 3, isPerson)).toEqual([
+      "bot-1",
+    ]);
+    expect(
+      chooseEvictions(withPerson(1, 500, 300, 900), 2, isPerson).sort(),
+    ).toEqual(["bot-0", "bot-1"]);
+  });
+
+  test("it still counts, so it goes when nothing else is left to close", () => {
+    // A cap of one with the person's browser open and a Bot just started: the Bot that just asked
+    // stays, as it always has, and the person's browser is what the cap takes.
+    expect(chooseEvictions(withPerson(1, 900), 1, isPerson)).toEqual([PERSON]);
+  });
+
+  test("a person's browser that just opened is never the one closed", () => {
+    const opened = new Map([
+      ["bot-0", { usedAt: 100 }],
+      ["bot-1", { usedAt: 200 }],
+      [PERSON, { usedAt: 300 }],
+    ]);
+    expect(chooseEvictions(opened, 1, isPerson).sort()).toEqual([
+      "bot-0",
+      "bot-1",
+    ]);
+  });
+
+  test("the idle sweep never closes it", () => {
+    const NOW = 1_000_000;
+    expect(
+      chooseIdle(withPerson(NOW - 60_000, NOW - 60_000), 30_000, NOW, isPerson),
+    ).toEqual(["bot-0"]);
+  });
+});

@@ -10,6 +10,7 @@ afterEach(() => {
     "COMPUTER_BROWSER_BACKEND",
     "COMPUTER_BROWSER_MODE",
     "COMPUTER_SANDBOX",
+    "OPENBOT_RECORDER_DIR",
   ]) {
     if (original[name] === undefined) delete process.env[name];
     else process.env[name] = original[name];
@@ -27,6 +28,12 @@ describe.skipIf(
       process.env.COMPUTER_BROWSER_BACKEND = backend;
       delete process.env.COMPUTER_BROWSER_MODE;
       delete process.env.COMPUTER_SANDBOX;
+      // A built Recorder on this computer changes nothing about a Bot's browser.
+      process.env.OPENBOT_RECORDER_DIR = join(
+        import.meta.dir,
+        "fixtures",
+        "recorder",
+      );
       const launch = spyOn(
         chromium,
         "launchPersistentContext",
@@ -60,6 +67,34 @@ describe.skipIf(
           expect(options?.args).not.toContain("--password-store=basic");
           expect(options?.args).not.toContain("--no-sandbox");
         }
+        /*
+         * The whole launch, pinned. A person's browser launches differently (the Recorder in it, an
+         * everyday browser rather than a test one), and that is a person-only change: a Bot's browser
+         * keeps exactly these options, with no extension allowed in and every Playwright default it
+         * had before, even when the computer carries a built Recorder.
+         */
+        expect(options).toEqual({
+          channel: backend === "managed" ? "chromium" : "chrome",
+          headless: backend === "managed" && process.platform !== "linux",
+          args:
+            backend === "managed"
+              ? [
+                  "--no-sandbox",
+                  "--disable-dev-shm-usage",
+                  "--password-store=basic",
+                  "--disable-blink-features=AutomationControlled",
+                ]
+              : [
+                  "--disable-dev-shm-usage",
+                  "--disable-blink-features=AutomationControlled",
+                ],
+          ignoreDefaultArgs: ["--enable-automation"],
+          chromiumSandbox: backend === "local-chrome",
+          viewport: { width: 1280, height: 800 },
+          handleSIGTERM: false,
+          handleSIGINT: false,
+          handleSIGHUP: false,
+        });
       } finally {
         await profiles.closeAll();
         launch.mockRestore();
