@@ -194,8 +194,9 @@ what you do is recorded.
   took while saying it. It reaches the open web, and OpenBot and the Intelligence gateway on their own
   ports, never anything else inside the deployment.
 - **Only you** can see or use your browser, admins included. It appears in Settings → Browsers as your
-  OpenBot browser and can be disconnected there; each open replaces its previous connection, and Record
-  after a Disconnect connects it again first.
+  OpenBot browser and can be disconnected there, which signs out the Recorder in it at once (a recording
+  in progress stops and is kept, and goes to Intelligence when you next record). Each open replaces its
+  previous connection, and Record after a Disconnect connects it again first.
 - A person's browser is never closed for being idle, and is the last to close when the computer's
   browser cap is reached.
 - `OPENBOT_RECORDER_DIR` on a computer is the built Recorder it puts in a person's browser; the computer
