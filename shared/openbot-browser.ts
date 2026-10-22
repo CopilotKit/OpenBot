@@ -255,6 +255,12 @@ export type BrowserOpenResponse = {
 export type BrowserApiState = BrowserState & {
   /** False when this OpenBot has no way to run a person's browser; the app then hides the Browser button. */
   available: boolean;
+  /**
+   * Where this OpenBot shows the person's browser, known before it is opened, so the sidebar's Browser button knows
+   * what one click does: `native` opens (or brings forward) a window on the person's desktop and leaves them where
+   * they are; `screen` takes them to the browser in the page. Present whenever `available` is.
+   */
+  shows?: BrowserWindow;
   computerId: string;
   narration?: Narration;
 };
