@@ -168,6 +168,52 @@ hands out each capture pass; it receives nothing that is recorded.
   Settings → Learning as `learning.sharing_changed`, `learning.skill_opened` and
   `learning.skill_closed`.
 
+### Your own browser, opened from OpenBot, with the Recorder already in it
+
+Wherever OpenBot can run a browser for you, the sidebar has a **Browser** button below Connections. It
+opens your own browser with the OpenBot Recorder already in it and connected as you: no install and no
+Connect step. Name a task and press Record; the page shows the recording's name, how long it has run and
+how many actions it holds, and after Stop it says the recording was saved to your Learning space. Only
+what you do is recorded.
+
+- **On OpenBot Desktop** it is your installed Google Chrome, or Microsoft Edge where Chrome is missing,
+  in a separate OpenBot profile, as its own window; opening it again brings that window to the front. It
+  is an everyday browser: install your password manager from the Chrome Web Store (a password manager's
+  link to its desktop app works, such as 1Password's), or sign in to Chrome and sync brings your
+  extensions, bookmarks and passwords; saved passwords use the system keychain. The Recorder hears your
+  microphone itself, with no prompt, and the page shows whether it is listening, muted or cannot hear.
+  Desktop runs this browser as a fourth process beside the server, app and worker, only where Chrome or
+  Edge is installed. Installation builds the Recorder into your OpenBot folder (a new Recorder step of a
+  few seconds), existing installations download their OpenBot files once more after updating, and Stop
+  and Quit let the browser close cleanly first. Chrome's extensions page lists the Recorder as an
+  extension it cannot verify, because it is not installed from the Chrome Web Store.
+- **On hosted OpenBot** the browser is the computer's Chromium, shown in the page with tabs, an address
+  bar, back, forward and reload, and you click and type in it straight away. Only the Recorder is
+  allowed in it. While you record, the page transcribes your narration with your own browser's speech
+  recognition (Firefox has none, and the page says so), and each phrase is placed before the steps you
+  took while saying it. It reaches the open web, and OpenBot and the Intelligence gateway on their own
+  ports, never anything else inside the deployment.
+- **Only you** can see or use your browser, admins included. It appears in Settings → Browsers as your
+  OpenBot browser and can be disconnected there; each open replaces its previous connection, and Record
+  after a Disconnect connects it again first.
+- A person's browser is never closed for being idle, and is the last to close when the computer's
+  browser cap is reached.
+- `OPENBOT_RECORDER_DIR` on a computer is the built Recorder it puts in a person's browser; the computer
+  image sets it, and without it the computer still serves Bots and refuses to open a person's browser,
+  saying why. `OPENBOT_BROWSER_URL` on the server runs people's browsers on a separate computer
+  (OpenBot Desktop sets it). The local Chrome helper (`scripts/start-local-chrome-computer.ts`) now also
+  starts when only Edge is installed.
+- A computer's network rules can allow a site by name on given ports only (`ports` on a domain rule).
+- **Google loads in Bots' browsers again.** Behind the computer's network filter, Google's pages never
+  finished loading (Chromium restarts the request for client hints and the restart was lost); the
+  computer now launches every filtered browser with that restart switched off.
+- When a page does not open, OpenBot names the site and says it did not load or was refused, instead of
+  showing a browser error, and a slow page says it is slow rather than that the browser could not be
+  reached.
+- A package can no longer give a Bot an id shaped like `person-` and 32 hex digits.
+- The Recorder times a narrated phrase from its first word when Chrome reuses a result slot; it was
+  stamped up to seconds early.
+
 ### A new desktop install starts its server again
 
 A desktop install of v0.2.0 stopped at start with `server stopped straight away (exit status: 1)` and
