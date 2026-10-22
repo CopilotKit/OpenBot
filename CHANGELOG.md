@@ -56,6 +56,12 @@ Composio Airtable", then "Airtable list bases". It now says "Used Airtable", and
 the action, "List bases", with the app beside it. An Arcade app is named the same way, as the app
 rather than `arcade-Gmail`.
 
+### An app a Bot cannot use yet asks once per turn
+
+When a Bot's call to an unconnected app was refused, the Bot often also asked to show that app's
+card, and the conversation drew the same Connect card twice. Each app's card is now drawn once per
+turn; asking again in a new message can draw it again.
+
 ### The Computer panel shows the Bot's screen when it opens
 
 Opening the Computer panel beside a conversation could leave it on "Waiting for the Bot's screen…"
