@@ -200,9 +200,16 @@ export async function launchNativeBrowser(
     })();
     return closing;
   };
+  const [, , , toBrowser, fromBrowser] = child.stdio;
+  if (!toBrowser || !fromBrowser) {
+    kill();
+    throw new Error(
+      `The browser at ${launch.executable} was started without its DevTools pipe.`,
+    );
+  }
   const transport = pipeTransport(
-    child.stdio[3] as Writable,
-    child.stdio[4] as Readable,
+    toBrowser as Writable,
+    fromBrowser as Readable,
     close,
   );
 
