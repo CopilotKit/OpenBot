@@ -26,9 +26,7 @@ import {
 import { cleanup, render, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { type ReactNode, StrictMode } from "react";
-import { BrowserNavItem } from "@/components/browser/browser-nav-item";
 import { BrowserPage } from "@/components/browser/browser-page";
-import { SidebarMenu, SidebarProvider } from "@/components/ui/sidebar";
 import type { Recognition } from "@/lib/browser/narration";
 import { queryClient } from "@/query-client";
 import {
@@ -39,9 +37,10 @@ import {
 import { settleReactWork } from "./settle-react-work";
 
 /**
- * The Browser button and the Browser page, against the server's Browser routes as the contract in
- * shared/openbot-browser.ts defines them. Those routes are another slice's work, so they are stood in for here: every
- * body this page sends is parsed with the contract's own schemas, and every answer is a contract type.
+ * The Browser page, against the server's Browser routes as the contract in shared/openbot-browser.ts defines them.
+ * Those routes are another slice's work, so they are stood in for here: every body this page sends is parsed with the
+ * contract's own schemas, and every answer is a contract type. The sidebar's Browser button has its own file
+ * (browser-nav-item.test.tsx).
  */
 
 beforeAll(() => GlobalRegistrator.register());
@@ -69,6 +68,7 @@ let phrasesPassed = 0;
 function nativeState(): BrowserApiState {
   return {
     available: true,
+    shows: "native",
     computerId: PERSON_BROWSER,
     open: true,
     browser: "chrome",
@@ -82,6 +82,7 @@ function nativeState(): BrowserApiState {
 function screenState(): BrowserApiState {
   return {
     available: true,
+    shows: "screen",
     computerId: PERSON_BROWSER,
     open: true,
     browser: "chromium",
@@ -258,54 +259,6 @@ function draw(ui: ReactNode) {
 
 const opens = () =>
   writes.filter((write) => write.path === browserApiPaths.open).length;
-
-test("the sidebar shows Browser when OpenBot can run a browser for the person, linking to the Browser page", async () => {
-  const view = draw(
-    <SidebarProvider>
-      <SidebarMenu>
-        <BrowserNavItem />
-      </SidebarMenu>
-    </SidebarProvider>,
-  );
-  const link = await view.findByRole("link", { name: "Browser" });
-  expect(link.getAttribute("href")).toBe("/browser");
-});
-
-test("the sidebar has no Browser button where OpenBot cannot run one, or cannot say", async () => {
-  state = { ...nativeState(), available: false, open: false };
-  const view = draw(
-    <SidebarProvider>
-      <SidebarMenu>
-        <BrowserNavItem />
-      </SidebarMenu>
-    </SidebarProvider>,
-  );
-  await waitFor(() =>
-    expect(queryClient.getQueryState(["browser", "state"])?.status).toBe(
-      "success",
-    ),
-  );
-  expect(view.queryByRole("link", { name: "Browser" })).toBeNull();
-  cleanup();
-
-  queryClient.clear();
-  stateFails = true;
-  const failed = draw(
-    <SidebarProvider>
-      <SidebarMenu>
-        <BrowserNavItem />
-      </SidebarMenu>
-    </SidebarProvider>,
-  );
-  await waitFor(
-    () =>
-      expect(queryClient.getQueryState(["browser", "state"])?.status).toBe(
-        "error",
-      ),
-    { timeout: 4000 },
-  );
-  expect(failed.queryByRole("link", { name: "Browser" })).toBeNull();
-});
 
 test("on OpenBot Desktop the page opens the browser once, says it is a window on the desktop, and brings it forward", async () => {
   const view = draw(<BrowserPage />);
