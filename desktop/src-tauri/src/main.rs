@@ -14,7 +14,8 @@ mod test_support;
 use openbot_desktop_lib::{
     acquire, deployment, deployment_release, engine, env as openbot_env, harness, host_access,
     install, local_browser, preparation, problem::Problem, provider, pull_metrics, quiet,
-    recorder_host, recorder_install, stack, supervise, telemetry, tray, windows as win,
+    recorder_external, recorder_host, recorder_install, stack, supervise, telemetry, tray,
+    windows as win,
 };
 
 const QUIT_CLEANUP_NOTICE_FILE: &str = ".openbot-quit-cleanup-notice";
@@ -1310,6 +1311,7 @@ async fn start_stack_inner<R: tauri::Runtime>(
     }
     let shell = app.state::<Shell>();
     let attempt = StartAttempt::begin(&shell)?;
+    install_recorder_host_at_start();
     {
         let _startup = attempt.lock_current()?;
         if shell
@@ -3932,6 +3934,13 @@ impl recorder_install::InstallWriter for RecorderInstallWriter {
         std::fs::read_to_string(path).ok()
     }
 
+    fn remove_file(&mut self, path: &Path) -> std::io::Result<()> {
+        match std::fs::remove_file(path) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            done => done,
+        }
+    }
+
     // Output is captured, never inherited: `reg.exe` prints a success line, and the install command's
     // own output is only the manifest paths.
     fn run(&mut self, argv: &[String]) -> std::io::Result<()> {
@@ -3988,13 +3997,22 @@ fn non_empty_var(name: &str) -> Option<std::ffi::OsString> {
     std::env::var_os(name).filter(|value| !value.is_empty())
 }
 
-/// Lets each browser's Recorder find this app: one host manifest per browser present for this user.
+/// Lets each browser's Recorder find this app (one host manifest per browser present for this user), and registers the
+/// Recorder from its stores with this person's Chrome and Edge once it is published there (`recorder_external`).
+/// Returns the files in place.
 ///
 /// A release build writes into this person's own browser folders. A debug build is a developer's binary, rebuilt on
 /// every change, and must never be registered as the host in the developer's own browsers, so it writes only under
 /// the folder `OPENBOT_RECORDER_HOST_TEST_HOME` names (a test's), takes every other folder from there too, never
 /// writes the Windows registry, and without the variable writes nothing.
+///
+/// One round at a time: the launch's rounds and a Start's may overlap, and both read and write Desktop's note of what
+/// it registered.
 fn install_recorder_host_for_this_user() -> Result<Vec<PathBuf>, Problem> {
+    static ONE_ROUND: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _round = ONE_ROUND
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let current_exe = std::env::current_exe().map_err(|error| {
         Problem::with(
             "OpenBot Desktop could not set up the Recorder.",
@@ -4006,7 +4024,7 @@ fn install_recorder_host_for_this_user() -> Result<Vec<PathBuf>, Problem> {
         &current_exe,
         std::env::var_os("APPIMAGE").as_deref().map(Path::new),
     )?;
-    if cfg!(debug_assertions) {
+    let (home, xdg_config_home, chrome_config_home, local_app_data) = if cfg!(debug_assertions) {
         let home = non_empty_var(RECORDER_HOST_TEST_HOME)
             .map(PathBuf::from)
             .ok_or_else(|| {
@@ -4014,29 +4032,35 @@ fn install_recorder_host_for_this_user() -> Result<Vec<PathBuf>, Problem> {
                     "A debug build sets up the Recorder only under {RECORDER_HOST_TEST_HOME}, never in your own browsers."
                 ))
             })?;
-        return recorder_install::install(
-            &stable,
-            recorder_install::UserDirs::at(&home),
-            recorder_os(),
-            &mut RecorderInstallWriter,
-        );
-    }
-    let home = recorder_home()
-        .ok_or_else(|| Problem::plain("OpenBot Desktop could not find your home folder."))?;
-    let xdg_config_home = non_empty_var("XDG_CONFIG_HOME").map(PathBuf::from);
-    let chrome_config_home = non_empty_var("CHROME_CONFIG_HOME").map(PathBuf::from);
-    let local_app_data = non_empty_var("LOCALAPPDATA").map(PathBuf::from);
-    recorder_install::install(
-        &stable,
-        recorder_install::UserDirs {
-            home: &home,
-            xdg_config_home: xdg_config_home.as_deref(),
-            chrome_config_home: chrome_config_home.as_deref(),
-            local_app_data: local_app_data.as_deref(),
-        },
+        (home, None, None, None)
+    } else {
+        let home = recorder_home()
+            .ok_or_else(|| Problem::plain("OpenBot Desktop could not find your home folder."))?;
+        (
+            home,
+            non_empty_var("XDG_CONFIG_HOME").map(PathBuf::from),
+            non_empty_var("CHROME_CONFIG_HOME").map(PathBuf::from),
+            non_empty_var("LOCALAPPDATA").map(PathBuf::from),
+        )
+    };
+    let dirs = recorder_install::UserDirs {
+        home: &home,
+        xdg_config_home: xdg_config_home.as_deref(),
+        chrome_config_home: chrome_config_home.as_deref(),
+        local_app_data: local_app_data.as_deref(),
+    };
+    // Both run, whatever became of the other: a browser that cannot take the Recorder's entry still gets its host,
+    // and the other way round.
+    let hosts = recorder_install::install(&stable, dirs, recorder_os(), &mut RecorderInstallWriter);
+    let entries = recorder_external::register(
+        dirs,
         recorder_os(),
+        recorder_install::store_ids(),
         &mut RecorderInstallWriter,
-    )
+    );
+    let mut in_place = hosts?;
+    in_place.extend(entries?);
+    Ok(in_place)
 }
 
 /// The install at launch, on its own thread so setup never waits on it, and again every minute where a browser
@@ -4051,6 +4075,22 @@ fn keep_recorder_host_installed() -> Option<std::thread::JoinHandle<()>> {
 
 #[cfg(debug_assertions)]
 fn keep_recorder_host_installed() -> Option<std::thread::JoinHandle<()>> {
+    None
+}
+
+/// The same install once more at every Start, on its own thread so the Start never waits on it: a version that brought
+/// a store id registers the Recorder then, on Windows too, where the launch's round is the only other. Never in a debug
+/// build.
+#[cfg(not(debug_assertions))]
+fn install_recorder_host_at_start() -> Option<std::thread::JoinHandle<()>> {
+    Some(recorder_install::keep_recorder_host_installed(
+        install_recorder_host_for_this_user,
+        None,
+    ))
+}
+
+#[cfg(debug_assertions)]
+fn install_recorder_host_at_start() -> Option<std::thread::JoinHandle<()>> {
     None
 }
 
@@ -4314,6 +4354,78 @@ mod tests {
     #[test]
     fn a_debug_build_never_starts_the_recorder_host_install_at_launch() {
         assert!(keep_recorder_host_installed().is_none());
+        assert!(install_recorder_host_at_start().is_none());
+    }
+
+    // The registration's real side effects, in a folder standing in for a person's home: the entries written once
+    // published, left alone while unchanged, and taken back out, note and all, when the ids empty. Windows writes the
+    // registry, which a debug build refuses, so this is proved where the entries are files.
+    #[cfg(unix)]
+    #[test]
+    fn the_store_registration_writes_and_takes_out_real_files() {
+        let home = temp_root("recorder-store-registration");
+        let os = recorder_os();
+        let dirs = recorder_install::UserDirs::at(&home);
+        let edge = recorder_install::data_directory(os, recorder_install::Browser::Edge, dirs);
+        std::fs::create_dir_all(&edge).unwrap();
+        let edge_id = "ponmlkjihgfedcbaponmlkjihgfedcba";
+        let published = recorder_install::StoreIds {
+            chrome: Some("abcdefghijklmnopabcdefghijklmnop".into()),
+            edge: Some(edge_id.into()),
+        };
+        // Another application's entry beside the Recorder's.
+        let folder = edge.join("External Extensions");
+        std::fs::create_dir_all(&folder).unwrap();
+        let theirs = folder.join("hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh.json");
+        std::fs::write(
+            &theirs,
+            recorder_external::entry_contents(recorder_install::Browser::Edge),
+        )
+        .unwrap();
+
+        let placed =
+            recorder_external::register(dirs, os, &published, &mut RecorderInstallWriter).unwrap();
+        let ours = folder.join(format!("{edge_id}.json"));
+        assert_eq!(placed, vec![ours.clone()]);
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&std::fs::read_to_string(&ours).unwrap())
+                .unwrap(),
+            serde_json::json!({
+                "external_update_url": "https://edge.microsoft.com/extensionwebstorebase/v1/crx"
+            })
+        );
+        // Chrome is not installed in this home: nothing of Chrome's was made.
+        assert!(
+            !recorder_install::data_directory(os, recorder_install::Browser::Chrome, dirs).exists()
+        );
+        let note = recorder_external::record_location(os, dirs);
+        assert!(note.is_file());
+        let modified = std::fs::metadata(&ours).unwrap().modified().unwrap();
+        recorder_external::register(dirs, os, &published, &mut RecorderInstallWriter).unwrap();
+        assert_eq!(
+            std::fs::metadata(&ours).unwrap().modified().unwrap(),
+            modified
+        );
+
+        recorder_external::register(
+            dirs,
+            os,
+            &recorder_install::StoreIds::default(),
+            &mut RecorderInstallWriter,
+        )
+        .unwrap();
+        assert!(!ours.exists());
+        assert!(!note.exists());
+        assert!(theirs.is_file());
+        // Taking out what is already gone is not a failure.
+        recorder_external::register(
+            dirs,
+            os,
+            &recorder_install::StoreIds::default(),
+            &mut RecorderInstallWriter,
+        )
+        .unwrap();
+        let _ = std::fs::remove_dir_all(&home);
     }
 
     #[test]

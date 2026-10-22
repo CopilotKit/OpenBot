@@ -18,6 +18,7 @@ pub mod provider;
 pub mod provider_oauth;
 pub mod pull_metrics;
 pub mod quiet;
+pub mod recorder_external;
 pub mod recorder_host;
 pub mod recorder_install;
 pub mod saved_intent;

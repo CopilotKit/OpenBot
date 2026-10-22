@@ -19,7 +19,7 @@
 //!
 //! Every reply carries `ok`. `ok: false` comes with `error`, one of the stable codes of [`Refusal`]. Neither a code nor
 //! any cookie is ever written to a log.
-use crate::recorder_install::{extension_origin, linux_config_dir, Os};
+use crate::recorder_install::{allowed_origins, linux_config_dir, Os};
 use reqwest::blocking::Client;
 use serde_json::{json, Value};
 use std::ffi::OsString;
@@ -40,7 +40,7 @@ const MESSAGE_LIMIT: usize = 1024 * 1024;
 /// so a code never changes its meaning.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Refusal {
-    /// `origin-not-allowed`: the caller is not the Recorder's own extension.
+    /// `origin-not-allowed`: the caller is not the Recorder's own extension, under its fixed id or a store's.
     OriginNotAllowed,
     /// `not-installed`: OpenBot Desktop has not set up an OpenBot on this computer.
     NotInstalled,
@@ -122,9 +122,18 @@ pub const DEADLINES: Deadlines = Deadlines {
 /// refused at once; this bounds a port held by something that accepts and never answers, twice within the deadline.
 pub const PING_PROBE_PATIENCE: Duration = Duration::from_millis(750);
 
-/// Only the Recorder's own fixed id may ask, in debug and release builds alike.
+/// Only the Recorder may ask, under its own fixed id or an id a store gave it, in debug and release builds alike: the
+/// origins the manifests allow (`recorder_install::allowed_origins`), so the browser and the host agree.
 fn origin_allowed(origin: &str) -> bool {
-    origin == extension_origin()
+    allowed_origins().iter().any(|allowed| allowed == origin)
+}
+
+/// [`origin_allowed`] for the store ids given.
+#[cfg(test)]
+fn origin_allowed_with(origin: &str, store: &crate::recorder_install::StoreIds) -> bool {
+    crate::recorder_install::allowed_origins_with(store)
+        .iter()
+        .any(|allowed| allowed == origin)
 }
 
 /// An extension origin as Chrome passes it: `chrome-extension://` and an id of 32 letters a to p.
@@ -381,7 +390,8 @@ fn serve(
 }
 
 /// Runs the host until stdin closes. Returns the process exit code. `origin_allowed` is true only for
-/// "chrome-extension://<RECORDER_EXTENSION_ID>/" (the id from shared/recorder-extension.json), in every build.
+/// "chrome-extension://<id>/" with the Recorder's fixed id or one of its store ids (shared/recorder-extension.json), in
+/// every build.
 pub fn run(origin: &str, env: HostEnvironment) -> i32 {
     let client = match client() {
         Ok(client) => client,
@@ -431,7 +441,7 @@ mod tests {
 
     #[test]
     fn only_the_shared_files_origin_is_allowed() {
-        assert_eq!(extension_origin(), fixed_origin());
+        assert_eq!(crate::recorder_install::extension_origin(), fixed_origin());
         assert!(origin_allowed(&fixed_origin()));
         assert!(!origin_allowed(&format!(
             "chrome-extension://{}/",
@@ -439,6 +449,37 @@ mod tests {
         )));
         assert!(!origin_allowed(&format!("chrome-extension://{ID}")));
         assert!(!origin_allowed(""));
+    }
+
+    #[test]
+    fn a_recorder_added_from_a_store_is_let_in_under_the_id_the_store_gave_it() {
+        use crate::recorder_install::StoreIds;
+        let edge = "ponmlkjihgfedcbaponmlkjihgfedcba";
+        let chrome = "abcdefghijklmnopabcdefghijklmnop";
+        let store = StoreIds {
+            chrome: Some(chrome.into()),
+            edge: Some(edge.into()),
+        };
+        for id in [ID, chrome, edge] {
+            assert!(
+                origin_allowed_with(&format!("chrome-extension://{id}/"), &store),
+                "{id}"
+            );
+        }
+        assert!(!origin_allowed_with(
+            &format!("chrome-extension://{}/", "p".repeat(32)),
+            &store
+        ));
+        assert!(!origin_allowed_with(
+            &format!("chrome-extension://{edge}"),
+            &store
+        ));
+        // Before publication the store ids are empty, and only the fixed id is let in.
+        assert!(!origin_allowed_with(
+            &format!("chrome-extension://{edge}/"),
+            &StoreIds::default()
+        ));
+        assert!(origin_allowed_with(&fixed_origin(), &StoreIds::default()));
     }
 
     #[test]

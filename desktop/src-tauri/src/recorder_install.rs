@@ -21,18 +21,64 @@
 //! and Linux a manifest goes inside the browser's own folder, which is not made for a browser that is not there, so the
 //! app checks again every minute and writes only what is missing or different.
 //!
-//! `allowed_origins` never holds a wildcard, and holds only the Recorder's one extension id, in debug and release builds alike.
+//! `allowed_origins` never holds a wildcard, and holds only the Recorder's own ids, exactly, in debug and release builds
+//! alike: its one fixed id, and each id the browsers' stores gave it once it is published there (`storeIds`, empty
+//! until then). The Chrome Web Store keeps the fixed id when the first upload carries the key; Edge Add-ons always
+//! gives its own, so a Recorder added from Edge Add-ons asks the host under that id.
 use crate::problem::Problem;
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::time::Duration;
 
-/// The native host's name and the Recorder's one extension id, read once from shared/recorder-extension.json, the file the
-/// extension and the server read too.
+/// The native host's name and the Recorder's ids, read once from shared/recorder-extension.json, the file the extension
+/// and the server read too.
 struct RecorderExtension {
     native_host: String,
     extension_id: String,
+    store_ids: StoreIds,
+}
+
+/// The Recorder's ids in the browsers' own stores: None until it is published there.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct StoreIds {
+    /// The Chrome Web Store's.
+    pub chrome: Option<String>,
+    /// Edge Add-ons'.
+    pub edge: Option<String>,
+}
+
+impl StoreIds {
+    /// `storeIds` from the shared file. An empty id is none, and so is one that is not an extension id: a store id
+    /// names a file and a registry key, so nothing else may stand in for one.
+    fn from_shared(shared: &Value) -> Self {
+        let id = |store: &str| {
+            shared
+                .get("storeIds")
+                .and_then(|ids| ids.get(store))
+                .and_then(Value::as_str)
+                .filter(|id| is_extension_id(id))
+                .map(str::to_string)
+        };
+        StoreIds {
+            chrome: id("chrome"),
+            edge: id("edge"),
+        }
+    }
+
+    /// The id the store `browser` installs from gave the Recorder. Chromium has no store of its own.
+    pub fn for_browser(&self, browser: Browser) -> Option<&str> {
+        match browser {
+            Browser::Chrome => self.chrome.as_deref(),
+            Browser::Edge => self.edge.as_deref(),
+            Browser::Chromium => None,
+        }
+    }
+}
+
+/// An extension id as Chrome makes one: 32 letters from a to p.
+pub fn is_extension_id(id: &str) -> bool {
+    id.len() == 32 && id.bytes().all(|byte| (b'a'..=b'p').contains(&byte))
 }
 
 fn recorder_extension() -> &'static RecorderExtension {
@@ -51,6 +97,7 @@ fn recorder_extension() -> &'static RecorderExtension {
         RecorderExtension {
             native_host: field("nativeHost"),
             extension_id: field("extensionId"),
+            store_ids: StoreIds::from_shared(&shared),
         }
     })
 }
@@ -60,9 +107,34 @@ pub fn host_name() -> &'static str {
     &recorder_extension().native_host
 }
 
-/// `chrome-extension://<the Recorder's id>/`: the only origin a manifest allows and the host answers.
+/// `chrome-extension://<the Recorder's fixed id>/`.
 pub fn extension_origin() -> String {
     format!("chrome-extension://{}/", recorder_extension().extension_id)
+}
+
+/// The Recorder's ids in the stores, from the shared file.
+pub fn store_ids() -> &'static StoreIds {
+    &recorder_extension().store_ids
+}
+
+/// Every origin a manifest allows and the host answers: the fixed id's, then each store id's that differs from it.
+pub fn allowed_origins() -> Vec<String> {
+    allowed_origins_with(store_ids())
+}
+
+/// [`allowed_origins`] for the store ids given.
+pub fn allowed_origins_with(store: &StoreIds) -> Vec<String> {
+    let mut origins = vec![extension_origin()];
+    for id in [store.chrome.as_deref(), store.edge.as_deref()]
+        .into_iter()
+        .flatten()
+    {
+        let origin = format!("chrome-extension://{id}/");
+        if !origins.contains(&origin) {
+            origins.push(origin);
+        }
+    }
+    origins
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -136,6 +208,8 @@ pub trait InstallWriter {
     fn write_file(&mut self, path: &Path, contents: &str) -> std::io::Result<()>;
     /// The file's contents, None when it cannot be read.
     fn read_file(&self, path: &Path) -> Option<String>;
+    /// Removes the file. One that is already gone is not an error.
+    fn remove_file(&mut self, path: &Path) -> std::io::Result<()>;
     fn run(&mut self, argv: &[String]) -> std::io::Result<()>;
     fn exists(&self, path: &Path) -> bool;
 }
@@ -148,12 +222,17 @@ fn manifest_file_name() -> String {
 
 /// The host manifest Chrome, Edge and Chromium read.
 pub fn host_manifest(path_to_exe: &Path) -> Value {
+    host_manifest_with(path_to_exe, store_ids())
+}
+
+/// [`host_manifest`] for the store ids given.
+pub fn host_manifest_with(path_to_exe: &Path, store: &StoreIds) -> Value {
     json!({
         "name": host_name(),
         "description": "OpenBot Desktop: lets the Recorder find this computer's OpenBot",
         "path": path_to_exe.to_string_lossy(),
         "type": "stdio",
-        "allowed_origins": [extension_origin()],
+        "allowed_origins": allowed_origins_with(store),
     })
 }
 
@@ -164,7 +243,7 @@ fn windows_local_app_data(dirs: UserDirs) -> PathBuf {
 }
 
 /// The per-user data directory each browser keeps on each OS.
-fn data_directory(os: Os, browser: Browser, dirs: UserDirs) -> PathBuf {
+pub fn data_directory(os: Os, browser: Browser, dirs: UserDirs) -> PathBuf {
     match os {
         Os::Mac => dirs
             .home
@@ -396,6 +475,10 @@ mod tests {
         fn read_file(&self, path: &Path) -> Option<String> {
             self.on_disk.get(path).cloned()
         }
+        fn remove_file(&mut self, path: &Path) -> std::io::Result<()> {
+            self.on_disk.remove(path);
+            Ok(())
+        }
         fn run(&mut self, argv: &[String]) -> std::io::Result<()> {
             self.commands.push(argv.to_vec());
             Ok(())
@@ -407,6 +490,22 @@ mod tests {
 
     fn home() -> PathBuf {
         PathBuf::from("/home/a")
+    }
+
+    /// The origins a manifest must allow, read from the shared file here rather than through the code under test: the
+    /// fixed id's, then each store id's that is set and differs.
+    fn shared_origins() -> Value {
+        let shared: Value =
+            serde_json::from_str(include_str!("../../../shared/recorder-extension.json")).unwrap();
+        let mut origins = vec![format!("chrome-extension://{ID}/")];
+        for store in ["chrome", "edge"] {
+            let id = shared["storeIds"][store].as_str().unwrap_or_default();
+            let origin = format!("chrome-extension://{id}/");
+            if !id.is_empty() && !origins.contains(&origin) {
+                origins.push(origin);
+            }
+        }
+        serde_json::json!(origins)
     }
 
     #[test]
@@ -426,7 +525,7 @@ mod tests {
     }
 
     #[test]
-    fn manifest_names_the_host_the_path_and_only_the_fixed_origin() {
+    fn manifest_names_the_host_the_path_and_only_the_recorders_own_origins() {
         let manifest = host_manifest(Path::new(
             "/Applications/OpenBot.app/Contents/MacOS/openbot",
         ));
@@ -437,11 +536,105 @@ mod tests {
                 "description": "OpenBot Desktop: lets the Recorder find this computer's OpenBot",
                 "path": "/Applications/OpenBot.app/Contents/MacOS/openbot",
                 "type": "stdio",
-                "allowed_origins": [format!("chrome-extension://{ID}/")],
+                "allowed_origins": shared_origins(),
             })
         );
         let text = manifest.to_string();
         assert!(!text.contains('*'));
+    }
+
+    const CHROME_STORE: &str = "abcdefghijklmnopabcdefghijklmnop";
+    const EDGE_STORE: &str = "ponmlkjihgfedcbaponmlkjihgfedcba";
+
+    #[test]
+    fn the_shared_files_store_ids_are_each_empty_or_an_extension_id() {
+        let shared: Value =
+            serde_json::from_str(include_str!("../../../shared/recorder-extension.json")).unwrap();
+        for store in ["chrome", "edge"] {
+            let id = shared["storeIds"][store]
+                .as_str()
+                .unwrap_or_else(|| panic!("storeIds.{store} is not a string"));
+            assert!(
+                id.is_empty() || is_extension_id(id),
+                "storeIds.{store}: {id:?}"
+            );
+            assert_eq!(
+                StoreIds::from_shared(&shared).for_browser(if store == "chrome" {
+                    Browser::Chrome
+                } else {
+                    Browser::Edge
+                }),
+                (!id.is_empty()).then_some(id)
+            );
+        }
+    }
+
+    #[test]
+    fn a_store_id_is_read_only_when_it_is_an_extension_id() {
+        let read = |chrome: &str, edge: &str| {
+            StoreIds::from_shared(
+                &serde_json::json!({ "storeIds": { "chrome": chrome, "edge": edge } }),
+            )
+        };
+        assert_eq!(read("", ""), StoreIds::default());
+        assert_eq!(
+            read(CHROME_STORE, EDGE_STORE),
+            StoreIds {
+                chrome: Some(CHROME_STORE.into()),
+                edge: Some(EDGE_STORE.into()),
+            }
+        );
+        // An id names a file and a registry key: nothing but an extension id stands in for one.
+        for bad in [
+            "../../../../.ssh/authorized_keys",
+            "ABCDEFGHIJKLMNOPABCDEFGHIJKLMNOP",
+            "abcdefghijklmnopabcdefghijklmnoq",
+            "abcdefghijklmnop",
+            "abcdefghijklmnopabcdefghijklmnopa",
+        ] {
+            assert_eq!(read(bad, bad), StoreIds::default(), "{bad}");
+        }
+        assert_eq!(
+            StoreIds::from_shared(&serde_json::json!({})),
+            StoreIds::default()
+        );
+        assert_eq!(read(CHROME_STORE, "").for_browser(Browser::Chromium), None);
+    }
+
+    #[test]
+    fn the_manifest_allows_each_store_id_exactly_and_the_fixed_one_once() {
+        let exe = Path::new("/Applications/OpenBot.app/Contents/MacOS/openbot");
+        let both = StoreIds {
+            chrome: Some(CHROME_STORE.into()),
+            edge: Some(EDGE_STORE.into()),
+        };
+        assert_eq!(
+            host_manifest_with(exe, &both)["allowed_origins"],
+            serde_json::json!([
+                format!("chrome-extension://{ID}/"),
+                format!("chrome-extension://{CHROME_STORE}/"),
+                format!("chrome-extension://{EDGE_STORE}/"),
+            ])
+        );
+        // The Chrome Web Store kept the fixed id, as it does when the first upload carries the key.
+        let kept = StoreIds {
+            chrome: Some(ID.into()),
+            edge: Some(EDGE_STORE.into()),
+        };
+        assert_eq!(
+            allowed_origins_with(&kept),
+            vec![
+                format!("chrome-extension://{ID}/"),
+                format!("chrome-extension://{EDGE_STORE}/"),
+            ]
+        );
+        assert_eq!(
+            allowed_origins_with(&StoreIds::default()),
+            vec![format!("chrome-extension://{ID}/")]
+        );
+        assert!(!host_manifest_with(exe, &both).to_string().contains('*'));
+        // What is installed is what the shared file says.
+        assert_eq!(host_manifest(exe), host_manifest_with(exe, store_ids()));
     }
 
     #[test]
@@ -744,10 +937,7 @@ mod tests {
             assert!(written.contains(path));
             let json: serde_json::Value = serde_json::from_str(contents).unwrap();
             assert_eq!(json["path"], exe.to_string_lossy().as_ref());
-            assert_eq!(
-                json["allowed_origins"],
-                serde_json::json!([format!("chrome-extension://{ID}/")])
-            );
+            assert_eq!(json["allowed_origins"], shared_origins());
         }
     }
 
