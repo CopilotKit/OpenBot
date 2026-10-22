@@ -9,6 +9,7 @@ import {
   HarnessPicker,
 } from "./HarnessPicker";
 import { isHttpEndpointUrl } from "./http-endpoint-url";
+import { IntelligenceOpening } from "./IntelligenceOpening";
 import {
   IntelligenceChoice,
   type IntelligenceMode,
@@ -35,7 +36,9 @@ import {
   type Progress,
   plainInstallSteps,
   SetupProgress,
+  StatusLine,
 } from "./SetupProgress";
+import { ShuttingDown, useQuitStatus } from "./ShuttingDown";
 import {
   harnessChoiceEvent,
   modelChoiceEvent,
@@ -100,6 +103,15 @@ const LOCAL_TEST_QUESTION =
   "Reply with one short sentence to confirm you are working.";
 
 export function App() {
+  return (
+    <>
+      <Setup />
+      <IntelligenceOpening />
+    </>
+  );
+}
+
+function Setup() {
   const [engine, setEngine] = useState<EngineStatus | null>(null);
   const [blocker, setBlocker] = useState<Blocker | null>(null);
   const [blockerFailure, setBlockerFailure] = useState<Problem | null>(null);
@@ -215,6 +227,13 @@ export function App() {
    * out at all.
    */
   const [signInUrl, setSignInUrl] = useState<string | null>(null);
+  // The project whose key is being made, named while it is.
+  const [connectingProject, setConnectingProject] = useState<string | null>(
+    null,
+  );
+  // Running-screen actions that wait on the native side, said while they do.
+  const [stopping, setStopping] = useState(false);
+  const [showing, setShowing] = useState(false);
 
   async function signInToCopilotKit() {
     await cancelSelfHostedSignIn();
@@ -239,6 +258,9 @@ export function App() {
 
   async function pickProject(id: string) {
     setSigningIn(true);
+    setConnectingProject(
+      projects?.find((project) => project.id === id)?.name ?? null,
+    );
     setFailure(null);
     const selfHosted = intelligenceSignInKind === "self-hosted";
     const attempt = selfHostedAttempt.current;
@@ -260,6 +282,7 @@ export function App() {
     } finally {
       if (!selfHosted || selfHostedAttempt.current === attempt) {
         setSigningIn(false);
+        setConnectingProject(null);
         if (selfHosted) {
           selfHostedActiveRef.current = false;
           setSelfHostedActive(false);
@@ -828,6 +851,7 @@ export function App() {
 
   async function stop() {
     setBusy(true);
+    setStopping(true);
     // Stopped by choice: nothing starts again on its own in this session.
     setLocalAutoStart(false);
     stoppedByChoice.current = true;
@@ -841,6 +865,18 @@ export function App() {
       }
     } finally {
       setBusy(false);
+      setStopping(false);
+    }
+  }
+
+  async function showOpenBot() {
+    setShowing(true);
+    try {
+      await invoke("show_openbot");
+    } catch (error) {
+      recoverFromStart(error);
+    } finally {
+      setShowing(false);
     }
   }
 
@@ -880,6 +916,10 @@ export function App() {
     if (localAuto) local.start();
   }, [localAuto]);
 
+  // Quit outranks every screen: the app is closing, whatever was on it.
+  const quitting = useQuitStatus(false);
+  if (quitting) return <ShuttingDown status={quitting} />;
+
   // Nothing else on this screen can be done until the machine allows it, so nothing else is shown.
   if (blockerFailure) {
     return (
@@ -909,13 +949,15 @@ export function App() {
   ) {
     return (
       <main>
-        <h1>{resuming ? "Starting OpenBot" : "Opening OpenBot"}</h1>
-        <p role="status">
-          {resuming
-            ? "Opening your saved setup…"
-            : "Checking your saved setup…"}
-        </p>
-        <SetupProgress steps={steps} />
+        <div className="sheet connection-sheet">
+          <h1>{resuming ? "Starting OpenBot" : "Opening OpenBot"}</h1>
+          <p className="lede" role="status">
+            {resuming
+              ? "Opening your saved setup…"
+              : "Checking your saved setup…"}
+          </p>
+          <SetupProgress steps={steps} />
+        </div>
       </main>
     );
   }
@@ -1132,7 +1174,9 @@ export function App() {
           }
           onOpen={() => {
             savedLaunch.current = installationKey;
-            invoke("show_openbot").catch((error) => recoverFromStart(error));
+            return invoke<void>("show_openbot").catch((error) =>
+              recoverFromStart(error),
+            );
           }}
           onBack={changeModelAfterAskFailure}
           onViewIntelligence={
@@ -1188,61 +1232,69 @@ export function App() {
   if (!running && returningToInstallation && !refreshIntelligence) {
     return (
       <main>
-        <h1>{localStarting ? "Starting OpenBot" : "OpenBot is stopped"}</h1>
-        <p className="lede">
-          {localStarting
-            ? "Starting Intelligence and OpenBot on this computer."
-            : "Your installation and saved connections are ready to reopen."}
-        </p>
-        {intelligenceMode === "local" && (
-          <LocalIntelligence sequence={local} offerStart />
-        )}
-        {intelligenceMode !== "local" && <SetupProgress steps={steps} />}
-        {displayedFailure && <Failure problem={displayedFailure} />}
-        {intelligenceMode === "hosted" && (
-          <button
-            type="button"
-            disabled={busy || !installationReady || !modelCanStart()}
-            onClick={() => start()}
-          >
-            {busy ? "Starting…" : "Start OpenBot"}
-          </button>
-        )}
-        {/* While a local step runs, its Cancel is the only control. */}
-        {!localStarting && (
-          <>
-            <button
-              type="button"
-              className="quiet"
-              disabled={busy}
-              onClick={() => setStep("model")}
-            >
-              Change AI connection
-            </button>
-            {intelligenceMode !== "local" && (
-              <button
-                type="button"
-                className="quiet"
-                disabled={busy}
-                onClick={() => {
-                  // Changing it asks again where Intelligence runs.
-                  chooseIntelligence(null);
-                  setRefreshIntelligence(true);
-                }}
-              >
-                Change CopilotKit connection
-              </button>
-            )}
-            {displayedFailure && (
-              <button
-                type="button"
-                className="quiet"
-                disabled={busy}
-                onClick={() => install()}
-              >
-                Repair installation
-              </button>
-            )}
+        <div className="sheet connection-sheet">
+          <h1>{localStarting ? "Starting OpenBot" : "OpenBot is stopped"}</h1>
+          <p className="lede">
+            {localStarting
+              ? "Starting Intelligence and OpenBot on this computer."
+              : "Your installation and saved connections are ready to reopen."}
+          </p>
+          {intelligenceMode === "local" && (
+            <LocalIntelligence sequence={local} offerStart />
+          )}
+          {intelligenceMode !== "local" && <SetupProgress steps={steps} />}
+          {displayedFailure && <Failure problem={displayedFailure} />}
+          {/* While a local step runs, its Cancel is the only control. */}
+          {(intelligenceMode === "hosted" || !localStarting) && (
+            <div className="row">
+              {intelligenceMode === "hosted" && (
+                <button
+                  type="button"
+                  disabled={busy || !installationReady || !modelCanStart()}
+                  onClick={() => start()}
+                >
+                  {busy ? "Starting…" : "Start OpenBot"}
+                </button>
+              )}
+              {!localStarting && (
+                <>
+                  <button
+                    type="button"
+                    className="quiet"
+                    disabled={busy}
+                    onClick={() => setStep("model")}
+                  >
+                    Change AI connection
+                  </button>
+                  {intelligenceMode !== "local" && (
+                    <button
+                      type="button"
+                      className="quiet"
+                      disabled={busy}
+                      onClick={() => {
+                        // Changing it asks again where Intelligence runs.
+                        chooseIntelligence(null);
+                        setRefreshIntelligence(true);
+                      }}
+                    >
+                      Change CopilotKit connection
+                    </button>
+                  )}
+                  {displayedFailure && (
+                    <button
+                      type="button"
+                      className="quiet"
+                      disabled={busy}
+                      onClick={() => install()}
+                    >
+                      Repair installation
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+          {!localStarting && (
             <details>
               <summary>Installation options</summary>
               <button
@@ -1258,8 +1310,8 @@ export function App() {
                 Change installation
               </button>
             </details>
-          </>
-        )}
+          )}
+        </div>
       </main>
     );
   }
@@ -1423,7 +1475,7 @@ export function App() {
                 <p className="footnote" style={{ userSelect: "text" }}>
                   {signInUrl}
                 </p>
-                <p className="footnote">Waiting for you to approve it…</p>
+                <StatusLine>Waiting for you to approve it…</StatusLine>
               </>
             ) : projects ? (
               <>
@@ -1442,6 +1494,11 @@ export function App() {
                     </button>
                   ))}
                 </fieldset>
+                {connectingProject && (
+                  <StatusLine>
+                    Connecting OpenBot to {connectingProject}…
+                  </StatusLine>
+                )}
                 {projects.length === 0 && (
                   <>
                     <p className="footnote">
@@ -1522,6 +1579,11 @@ export function App() {
                       </button>
                     )}
                 </div>
+                {signingIn && (
+                  <StatusLine>
+                    Opening CopilotKit sign-in in your browser…
+                  </StatusLine>
+                )}
               </>
             )}
             {/*
@@ -1649,6 +1711,8 @@ export function App() {
             </button>
           </details>
         )}
+        {stopping && <StatusLine>Stopping OpenBot…</StatusLine>}
+        {showing && <StatusLine>Opening OpenBot…</StatusLine>}
         <div className="row">
           {!running && (
             <button
@@ -1677,11 +1741,8 @@ export function App() {
                  * is running", which is the worst of both: a true sentence was available and the
                  * window threw it away. The Ask screen's copy of this call always showed it.
                  */
-                onClick={() =>
-                  invoke("show_openbot").catch((error) =>
-                    recoverFromStart(error),
-                  )
-                }
+                onClick={showOpenBot}
+                disabled={busy || showing}
               >
                 Show OpenBot
               </button>
@@ -1689,7 +1750,7 @@ export function App() {
                 type="button"
                 className="quiet"
                 onClick={stop}
-                disabled={busy}
+                disabled={busy || showing}
               >
                 Stop OpenBot
               </button>

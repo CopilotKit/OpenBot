@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { asProblem, Failure, type Problem } from "./Problem";
+import { StatusLine } from "./SetupProgress";
 
 /**
  * The last screen: a question, an answer, and only then the handover.
@@ -25,8 +26,10 @@ export function Ask({
 }: {
   suggestion: string;
   onAsk: (question: string) => Promise<string>;
-  onOpen: () => void;
-  onBack: () => void;
+  /** Shows OpenBot in the window; settles once it has, or has failed to. */
+  onOpen: () => void | Promise<void>;
+  /** Stops OpenBot and returns to the model screen; settles once it has. */
+  onBack: () => void | Promise<void>;
   /** Local mode with a recorded stack: opens its Intelligence dashboard, already signed in. */
   onViewIntelligence?: () => Promise<void>;
   /** Asks `suggestion` on arrival, with no field to change it: the test is the screen. */
@@ -46,20 +49,41 @@ export function Ask({
    */
   const [failure, setFailure] = useState<Problem | null>(null);
   const [opening, setOpening] = useState(false);
+  const [opened, setOpened] = useState(false);
   const [viewFailure, setViewFailure] = useState<Problem | null>(null);
+  // Leaving takes a while: Change the model stops OpenBot first, and showing it can wait on it.
+  const [leaving, setLeaving] = useState<"stopping" | "showing" | null>(null);
 
   async function viewIntelligence() {
     if (!onViewIntelligence) return;
     setOpening(true);
+    setOpened(false);
     setViewFailure(null);
     try {
       await onViewIntelligence();
+      setOpened(true);
     } catch (error) {
       setViewFailure(asProblem(error));
     } finally {
       setOpening(false);
     }
   }
+
+  async function leave(how: "stopping" | "showing", go: () => unknown) {
+    setLeaving(how);
+    try {
+      await go();
+    } finally {
+      setLeaving(null);
+    }
+  }
+  const back = () => leave("stopping", onBack);
+  const open = () => leave("showing", onOpen);
+  const leavingSaid = leaving && (
+    <StatusLine>
+      {leaving === "stopping" ? "Stopping OpenBot…" : "Opening OpenBot…"}
+    </StatusLine>
+  );
 
   // Deferred a tick, so a development double mount asks once.
   // biome-ignore lint/correctness/useExhaustiveDependencies: once, on arrival.
@@ -95,7 +119,7 @@ export function Ask({
           <p className="answer-from">Question</p>
           <p className="answer-text">{question}</p>
         </div>
-        {asking && <p role="status">Asking…</p>}
+        {asking && <StatusLine>Asking…</StatusLine>}
         {failure && <Failure problem={failure} />}
         {answer !== null && (
           <div className="answer">
@@ -113,25 +137,36 @@ export function Ask({
             >
               View in Intelligence
             </button>
+            {opening && (
+              <StatusLine>Opening the Intelligence dashboard…</StatusLine>
+            )}
+            {opened && (
+              <StatusLine working={false}>Opened in your browser.</StatusLine>
+            )}
             {viewFailure && <p className="footnote">{viewFailure.said}</p>}
           </>
         )}
+        {leavingSaid}
         <div className="row">
           {answer !== null && (
-            <button type="button" onClick={onOpen}>
+            <button type="button" disabled={leaving !== null} onClick={open}>
               Open OpenBot
             </button>
           )}
           {failure && (
             <>
-              <button type="button" disabled={asking} onClick={ask}>
+              <button
+                type="button"
+                disabled={asking || leaving !== null}
+                onClick={ask}
+              >
                 Ask again
               </button>
               <button
                 type="button"
                 className="quiet"
-                disabled={asking}
-                onClick={onBack}
+                disabled={asking || leaving !== null}
+                onClick={back}
               >
                 Change the model
               </button>
@@ -185,13 +220,14 @@ export function Ask({
         </div>
       )}
 
+      {leavingSaid}
       <div className="row">
         {answer === null ? (
           <button type="button" onClick={ask} disabled={asking}>
             {asking ? "Asking…" : "Ask"}
           </button>
         ) : (
-          <button type="button" onClick={onOpen}>
+          <button type="button" disabled={leaving !== null} onClick={open}>
             Start using OpenBot
           </button>
         )}
@@ -204,10 +240,8 @@ export function Ask({
           <button
             type="button"
             className="quiet"
-            disabled={asking}
-            onClick={() => {
-              onBack();
-            }}
+            disabled={asking || leaving !== null}
+            onClick={back}
           >
             Change the model
           </button>

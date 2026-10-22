@@ -206,6 +206,10 @@ test("a pending plan sign-in completion is ignored after switching provider rows
       invokeCalls.some((call) => call.command === "finish_chatgpt_sign_in"),
     ).toBe(true),
   );
+  // The wait for the browser is said with a spinner, as every setup row is.
+  const waiting = view.getByRole("status");
+  expect(waiting.textContent).toBe("Waiting for you to approve it…");
+  expect(waiting.querySelector(".step-spinner")).not.toBeNull();
   await userEvent.click(view.getByRole("radio", { name: /Anthropic/ }));
 
   await act(async () => {

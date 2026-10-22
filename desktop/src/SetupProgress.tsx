@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 
 /** One setup step, as the native side reports it or the window runs it. */
 export type Progress = {
@@ -11,14 +11,41 @@ export type Progress = {
   startedAt?: number;
 };
 
-export function SetupProgress({ steps }: { steps: Progress[] }) {
+export function SetupProgress({
+  steps,
+  label = "Setup progress",
+}: {
+  steps: Progress[];
+  label?: string;
+}) {
   if (steps.length === 0) return null;
   return (
-    <ol className="steps" aria-label="Setup progress" aria-live="polite">
+    <ol className="steps" aria-label={label} aria-live="polite">
       {steps.map((step) => (
         <SetupProgressRow key={step.step} step={step} />
       ))}
     </ol>
+  );
+}
+
+/**
+ * One sentence about something that is happening now, with the rows' spinner while `working`.
+ *
+ * For any action that takes longer than a moment: said on the click, before the call it waits for
+ * has answered, so pressing a button never looks like nothing happened.
+ */
+export function StatusLine({
+  working = true,
+  children,
+}: {
+  working?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <p className="status-line" role="status">
+      {working && <span className="step-spinner" aria-hidden="true" />}
+      <span>{children}</span>
+    </p>
   );
 }
 
@@ -154,6 +181,10 @@ function label(step: string): string {
       return "Containers";
     case "migrate":
       return "Database";
+    case "stop-openbot":
+      return "Stopping OpenBot";
+    case "stop-intelligence":
+      return "Stopping Intelligence";
     default:
       return step;
   }
