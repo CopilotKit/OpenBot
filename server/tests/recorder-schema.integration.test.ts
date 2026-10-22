@@ -63,7 +63,7 @@ afterAll(async () => {
 
 test("no name in the migration is longer than PostgreSQL keeps", async () => {
   const migration = await Bun.file(
-    new URL("../drizzle/0057_recorder_extension.sql", import.meta.url),
+    new URL("../drizzle/0061_recorder_extension.sql", import.meta.url),
   ).text();
   const quoted = [...migration.matchAll(/"([a-z0-9_]+)"/g)].map(
     (match) => match[1] as string,
@@ -238,7 +238,7 @@ test("one Learning space per person, and no two people share one", async () => {
 
 test("the migration holds only the Recorder's connections and trajectory bindings, and each person's Learning space and sharing", async () => {
   const migration = await Bun.file(
-    new URL("../drizzle/0057_recorder_extension.sql", import.meta.url),
+    new URL("../drizzle/0061_recorder_extension.sql", import.meta.url),
   ).text();
   const created = [...migration.matchAll(/CREATE TABLE "([a-z0-9_]+)"/g)].map(
     (match) => match[1],

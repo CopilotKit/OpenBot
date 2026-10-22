@@ -73,11 +73,8 @@ const config = loadConfig({
   COPILOTKIT_LICENSE_TOKEN: "license-token",
   OPENBOT_ORGANIZATION_AUTH_URL: `http://127.0.0.1:${authorityPort}`,
 });
-const audits: AuditEventInput[] = [];
 const auditStore = {
-  insert: async (event: AuditEventInput) => {
-    audits.push(event);
-  },
+  insert: async (_event: AuditEventInput) => {},
 };
 const roleRepository = { rolesForUser: async () => ["user" as const] };
 

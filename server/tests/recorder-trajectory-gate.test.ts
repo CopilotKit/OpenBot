@@ -326,8 +326,10 @@ describe("createTrajectoryRefusalAudit", () => {
     sink(refusal({ userId: null }));
     await settle();
 
-    expect(rows[0]?.actorUserId).toBeUndefined();
-    expect(rows[0]?.initiator).toEqual({ kind: "deployment" });
+    expect(rows).toHaveLength(1);
+    const row = rows[0] as { actorUserId?: string; initiator?: unknown };
+    expect(row.actorUserId).toBeUndefined();
+    expect(row.initiator).toEqual({ kind: "deployment" });
   });
 
   test("anonymous callers write one row per reason a minute however many trajectory ids they invent", async () => {

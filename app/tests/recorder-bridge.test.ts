@@ -51,8 +51,7 @@ describe("detectRecorder", () => {
   test("an answer of only ok: true is detected with no installId", async () => {
     installChrome((_id, _message, reply) => reply({ ok: true }));
     const found = await detectRecorder(["aaa"], 200);
-    expect(found).toEqual({ id: "aaa" });
-    expect(found?.installId).toBeUndefined();
+    expect(found).toStrictEqual({ id: "aaa" });
   });
 
   test("an id that fails with lastError is skipped for one that answers", async () => {

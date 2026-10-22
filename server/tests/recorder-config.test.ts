@@ -60,7 +60,7 @@ test("the example environment and the changelog name the variable and that a bad
     .split("## Unreleased")[1]
     ?.split(/^## /m) ?? [""];
   for (const term of [
-    "0057_recorder_extension",
+    "0061_recorder_extension",
     "OPENBOT_RECORDER_EXTRA_EXTENSION_IDS",
     "stops the server at boot",
     "Settings → Browsers",
