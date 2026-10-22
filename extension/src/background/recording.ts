@@ -37,6 +37,7 @@ import { IDLE_STATE, parseOffscreenSignedOut } from "../protocol/messages";
 import { hasHostPermission } from "../shared/host-access";
 import { RECORDER_ACTION_NOTICE_AT } from "../shared/limits";
 import { OpenBotError, openbotJson } from "../shared/openbot-client";
+import { isRecordablePage } from "../shared/origin";
 import {
   allowsOpenBot,
   onPolicyChanged,
@@ -237,7 +238,7 @@ const SENTENCES = {
   noVoice: "This recording has no voice.",
   ownVoice: "This browser hears your voice itself.",
   tabClosed:
-    "That tab is closed. Open the Recorder on the tab you want to record.",
+    "That tab is closed. Open the Recorder on the tab you want to start recording in.",
   startFailed: "The recording could not start. Try again.",
   documentFailed: "The Recorder could not start recording. Try again.",
   restartUnreachable:
@@ -306,6 +307,7 @@ type RecorderEvent =
   | { type: "notice" }
   | { type: "notice-answered" }
   | { type: "follow"; tabId: number; url: string }
+  | { type: "use"; tabId: number }
   | { type: "page"; tabId: number; url: string }
   | { type: "capture"; capture: Partial<CaptureStatus> }
   | { type: "stop"; since: number }
@@ -369,12 +371,25 @@ export function reduceRecorder(
       };
     case "notice-answered":
       return { ...state, noticeOpen: false };
-    case "follow":
+    case "follow": {
       if (state.tabIds.includes(event.tabId)) return state;
-      return {
+      const used = state.usedTabIds?.filter((id) => id !== event.tabId);
+      return defined({
         ...state,
         tabIds: [...state.tabIds, event.tabId],
         topUrls: { ...state.topUrls, [event.tabId]: event.url },
+        usedTabIds: used?.length ? used : undefined,
+      });
+    }
+    case "use":
+      if (
+        state.tabIds.includes(event.tabId) ||
+        state.usedTabIds?.includes(event.tabId)
+      )
+        return state;
+      return {
+        ...state,
+        usedTabIds: [...(state.usedTabIds ?? []), event.tabId],
       };
     case "page":
       return {
@@ -2595,7 +2610,18 @@ export function installRecording(
   ): void {
     if (state.phase !== "recording" || !live) return;
     const { tabId, frameId, url } = details;
-    if (!state.tabIds.includes(tabId)) return;
+    if (!state.tabIds.includes(tabId)) {
+      // A tab the person used while it showed no website joins at its first one: that page change is its first step,
+      // and the commit below gives it the content script and its network capture, as it gives any followed tab's.
+      if (
+        kind !== "commit" ||
+        frameId !== 0 ||
+        !state.usedTabIds?.includes(tabId) ||
+        !isRecordablePage(url)
+      )
+        return;
+      joinTab(tabId, null);
+    }
     if (frameId === 0) recordTopNavigation(details, kind);
     if (kind !== "commit") return;
     // A new document in the top frame: the page's Threads went with the old one.
@@ -2625,6 +2651,100 @@ export function installRecording(
       .catch(report("following a new tab"));
   }
 
+  // ---- The tabs the person uses -------------------------------------------------------------
+  //
+  // A recording follows every tab the person uses while it runs (David, 2026-10-22), in any window: the tab Record
+  // started in, a tab a followed tab opened (onCreatedTarget above), any tab they switch to and any tab they open. A tab
+  // is used when it becomes the active tab of its window (tabs.onActivated: a click on it, a keyboard switch, OpenBot's
+  // own tab strip), when its window comes to the front (windows.onFocusChanged: the active tab of the window the person
+  // moved to is the one they now use), and when it is opened (tabs.onCreated: the new-tab button, a bookmark opened in
+  // the background). A tab that was open before Record and that the person never goes to is never followed.
+  //
+  // It joins only on a website. A tab on a page no extension may reach (the new tab page, the browser's settings), on
+  // the Recorder's own pages or on the Web Store records nothing there, so it waits in `usedTabIds` and joins at its
+  // first website, whose page change is its first step: a tab that never reaches one never takes a number. A tab on a
+  // website joins at once, with the page it shows as its first step, and from there it is captured as the Record tab
+  // is: the content script in every frame, its network and AG-UI capture, the 50-action notice, the masking.
+
+  /** The person used a tab: it joins now if it shows a website, else it waits for its first one. */
+  function usedTab(tabId: number): void {
+    if (state.phase !== "recording" || !live || tabId < 0) return;
+    if (state.tabIds.includes(tabId)) return;
+    if (!state.usedTabIds?.includes(tabId)) dispatch({ type: "use", tabId });
+    // The tab's address, which webNavigation does not say for a page already loaded. A commit that comes first joins
+    // the tab itself; this then finds it followed.
+    void chrome.tabs
+      .get(tabId)
+      .catch(() => null)
+      .then((tab) => {
+        if (
+          state.phase !== "recording" ||
+          !live ||
+          !state.usedTabIds?.includes(tabId) ||
+          !isRecordablePage(tab?.url)
+        )
+          return;
+        joinTab(tabId, tab?.url ?? "");
+      })
+      .catch(report("following a tab the person used"));
+  }
+
+  /** A used tab joins the recording: with `url`, the website it shows, which is its first step; with null, at a page
+   * change the commit records. */
+  function joinTab(tabId: number, url: string | null): void {
+    if (!live) return;
+    const { recordingId } = live;
+    dispatch({ type: "follow", tabId, url: url ?? "" });
+    if (url !== null) {
+      recordedNavigations.set(tabId, url);
+      startStep(tabId, url);
+      void injectRecordingScripts(tabId, recordingId).catch(() => undefined);
+    }
+    void network
+      ?.addTab(tabId, url ?? "")
+      .catch(report("following a tab the person used"));
+    // A script still in the tab from an earlier recording is not injected again: it is told to capture, and shown the
+    // 50-action notice if it is open, as a new script is when it says hello.
+    postToContentPorts([tabId], {
+      type: "background.capture",
+      active: true,
+      recordingId,
+    });
+    if (state.noticeOpen)
+      postToContentPorts(
+        [tabId],
+        {
+          type: "background.notice",
+          show: true,
+          actions: state.noticeAt ?? state.actions,
+        },
+        { topFrameOnly: true },
+      );
+  }
+
+  chrome.tabs.onActivated.addListener(({ tabId }) => {
+    void ready
+      .then(() => usedTab(tabId))
+      .catch(report("following a tab the person used"));
+  });
+  chrome.tabs.onCreated.addListener((tab) => {
+    const { id } = tab;
+    if (id === undefined) return;
+    void ready
+      .then(() => usedTab(id))
+      .catch(report("following a tab the person opened"));
+  });
+  chrome.windows.onFocusChanged.addListener((windowId) => {
+    // Focus left the browser: no tab is used by that.
+    if (windowId === chrome.windows.WINDOW_ID_NONE) return;
+    void ready
+      .then(async () => {
+        if (state.phase !== "recording") return;
+        const [tab] = await chrome.tabs.query({ active: true, windowId });
+        if (tab?.id !== undefined) usedTab(tab.id);
+      })
+      .catch(report("following the window the person moved to"));
+  });
   chrome.webNavigation.onCommitted.addListener((details) => {
     void ready
       .then(() => onNavigation(details, "commit"))

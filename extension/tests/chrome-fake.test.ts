@@ -376,6 +376,54 @@ test("offscreen, native, badge, tabs and webNavigation behave as the plan's APIs
   });
 });
 
+test("tabs and windows the person uses are reported in the order Chrome reports them", async () => {
+  // Measured on Playwright's Chromium 151, headless, with an extension logging each event: a new tab is created and
+  // then activated, a tab switched to is activated, and a window brought to the front reports its focus and no tab.
+  const seen: string[] = [];
+  chrome.tabs.onCreated.addListener((tab) =>
+    seen.push(`created ${tab.id} active=${tab.active} url=${tab.url}`),
+  );
+  chrome.tabs.onActivated.addListener(({ tabId, windowId }) =>
+    seen.push(`activated ${tabId} window ${windowId}`),
+  );
+  chrome.windows.onFocusChanged.addListener((windowId) =>
+    seen.push(`focus ${windowId}`),
+  );
+  fake.tabs.set(1, {
+    id: 1,
+    windowId: 1,
+    active: true,
+    url: "https://a.example.test/",
+  } as chrome.tabs.Tab);
+  const opened = fake.person.openTab();
+  fake.person.switchTo(1);
+  fake.person.focusWindow(2);
+  fake.person.focusWindow(chrome.windows.WINDOW_ID_NONE);
+  const created = await chrome.tabs.create({ url: "https://b.example.test/" });
+  expect(seen).toEqual([
+    `created ${opened.id} active=true url=undefined`,
+    `activated ${opened.id} window 1`,
+    "activated 1 window 1",
+    "focus 2",
+    "focus -1",
+    `created ${created.id} active=true url=https://b.example.test/`,
+    `activated ${created.id} window 1`,
+  ]);
+  // One active tab per window, as in Chrome.
+  expect(
+    (await chrome.tabs.query({ active: true, windowId: 1 })).map(
+      (tab) => tab.id,
+    ),
+  ).toEqual([created.id]);
+  await chrome.tabs.update(1, { active: true });
+  expect(seen.at(-1)).toBe("activated 1 window 1");
+  expect(
+    (await chrome.tabs.query({ active: true, windowId: 1 })).map(
+      (tab) => tab.id,
+    ),
+  ).toEqual([1]);
+});
+
 test("runtime.connect with no onConnect listener fires its onDisconnect", async () => {
   const port = chrome.runtime.connect({ name: "p" });
   let disconnected = false;

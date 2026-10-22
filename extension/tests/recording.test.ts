@@ -2913,6 +2913,352 @@ test("a tab the recorded tab opened is followed", async () => {
   expect((await state()).tabIds).toEqual([7, 8]);
 });
 
+// ---- Every tab the person uses (David, 2026-10-22) ---------------------------------------------
+//
+// Run 4's hosted recordings 55fe2cac and b60e9c34 held nothing after the person switched tabs: the Recorder followed
+// only the tab Record started in and tabs opened from it.
+
+const REPORT = "https://crm.example.test/reports/q3";
+/** What reached the document, as events. */
+const forwardedEvents = () =>
+  sentToDocument("offscreen.event").flatMap((message) =>
+    message.type === "offscreen.event" ? [message.event] : [],
+  );
+const injectedInto = (tabId: number) =>
+  fake.scripting.executed.filter(
+    (injection) => (injection.target as { tabId: number }).tabId === tabId,
+  );
+
+test("a tab the person switches to mid-recording is followed from then: its page is its first step, and its steps arrive", async () => {
+  // Open before Record, in the same window.
+  fake.tabs.set(9, {
+    id: 9,
+    windowId: 1,
+    active: false,
+    url: REPORT,
+    title: "Q3 report",
+  } as chrome.tabs.Tab);
+  const id = await record();
+  expect((await state()).tabIds).toEqual([7]);
+
+  fake.person.switchTo(9);
+  await until(async () => (await state()).tabIds.length === 2, "tab 9");
+  expect(await state()).toMatchObject({
+    tabIds: [7, 9],
+    topUrls: { "7": DEAL, "9": REPORT },
+  });
+  expect((await state()).usedTabIds).toBeUndefined();
+  // Captured as the Record tab is: the content script in every frame, flagged for this recording, and its network.
+  await until(() => injectedInto(9).length === 2, "tab 9's content script");
+  expect(injectedInto(9)[0]).toMatchObject({
+    target: { tabId: 9, allFrames: true },
+    args: [id],
+  });
+  expect(injectedInto(9)[1]).toMatchObject({
+    target: { tabId: 9, allFrames: true },
+    files: ["content.js"],
+  });
+  await until(() => network.calls.includes(`addTab 9 ${REPORT}`), "addTab");
+
+  // Its script says hello and is told to capture; what the person does there arrives, as tab 2.
+  const port = contentPort(9);
+  port.postMessage({ type: "content.hello", top: true, url: REPORT });
+  await until(() => port.messages.length > 0, "the answer to hello");
+  expect(port.messages[0]).toEqual({
+    type: "background.capture",
+    active: true,
+    recordingId: id,
+  });
+  port.postMessage({
+    type: "content.event",
+    event: contentEvent({ step: "click", from: 9 }),
+  });
+  await until(
+    () =>
+      forwardedEvents().some(
+        (recorded) => (recorded.value as { from?: number }).from === 9,
+      ),
+    "tab 9's click",
+  );
+  const inTab9 = forwardedEvents().filter(
+    (recorded) => (recorded.value as { tab?: number }).tab === 2,
+  );
+  expect(inTab9.map((recorded) => recorded.name)).toEqual([
+    "navigation",
+    "click",
+  ]);
+  // The page it was on when the person switched to it is its first step, as the Record tab's is.
+  expect(inTab9[0]?.value).toMatchObject({
+    step: "navigate",
+    from: "",
+    to: REPORT,
+    navigationType: "start",
+    tab: 2,
+    page: { url: REPORT, title: "Q3 report" },
+  });
+  // Moving to the tab is no action of its own; the click is.
+  expect((await state()).actions).toBe(1);
+  // Back to the first tab and over again: each tab keeps its number.
+  fake.person.switchTo(7);
+  fake.person.switchTo(9);
+  await settle();
+  expect((await state()).tabIds).toEqual([7, 9]);
+  expect(
+    forwardedEvents().filter(
+      (recorded) =>
+        (recorded.value as { navigationType?: string }).navigationType ===
+        "start",
+    ),
+  ).toHaveLength(2);
+});
+
+test("a tab opened with the new-tab button is followed from its first website, whose page change is its first step", async () => {
+  await record();
+  const opened = fake.person.openTab();
+  const tabId = opened.id as number;
+  await until(
+    async () => (await state()).usedTabIds?.includes(tabId) === true,
+    "the new tab used",
+  );
+  await settle();
+  // The new tab page is the browser's own: nothing of it is recorded, and the tab takes no number yet.
+  fake.webNavigation.commit({
+    tabId,
+    frameId: 0,
+    url: "chrome://new-tab-page/",
+  });
+  await settle();
+  expect(await state()).toMatchObject({
+    tabIds: [7],
+    usedTabIds: [tabId],
+  });
+  expect(injectedInto(tabId)).toEqual([]);
+  expect(network.calls.some((call) => call.includes(` ${tabId} `))).toBe(false);
+
+  // The person types an address.
+  fake.webNavigation.commit({
+    tabId,
+    frameId: 0,
+    url: REPORT,
+    transitionType: "typed",
+  });
+  await until(
+    async () => (await state()).tabIds.includes(tabId),
+    "the new tab followed",
+  );
+  expect((await state()).usedTabIds).toBeUndefined();
+  await until(() => injectedInto(tabId).length === 2, "its content script");
+  expect(injectedInto(tabId)[1]).toMatchObject({
+    target: { tabId, frameIds: [0] },
+    files: ["content.js"],
+  });
+  await until(
+    () => network.calls.includes(`onCommitted ${tabId} 0 ${REPORT}`),
+    "its network",
+  );
+  expect(network.calls).toContain(`addTab ${tabId} `);
+  contentPort(tabId).postMessage({
+    type: "content.event",
+    event: contentEvent({ step: "click", from: tabId }),
+  });
+  await until(
+    () =>
+      forwardedEvents().some(
+        (recorded) => (recorded.value as { from?: number }).from === tabId,
+      ),
+    "the new tab's click",
+  );
+  const inNewTab = forwardedEvents().filter(
+    (recorded) => (recorded.value as { tab?: number }).tab === 2,
+  );
+  expect(inNewTab.map((recorded) => recorded.name)).toEqual([
+    "navigation",
+    "click",
+  ]);
+  expect(inNewTab[0]?.value).toMatchObject({
+    step: "navigate",
+    from: "",
+    to: REPORT,
+    navigationType: "push",
+    transitionType: "typed",
+    tab: 2,
+  });
+  // The page the person reached and the click are their actions.
+  expect((await state()).actions).toBe(2);
+});
+
+test("a tab open before Record that the person never goes to is never followed, whatever it does", async () => {
+  fake.tabs.set(9, {
+    id: 9,
+    windowId: 1,
+    active: false,
+    url: REPORT,
+  } as chrome.tabs.Tab);
+  // Another window, in front of nothing: the person never moves to it.
+  fake.tabs.set(10, {
+    id: 10,
+    windowId: 2,
+    active: true,
+    url: "https://mail.example.test/inbox",
+  } as chrome.tabs.Tab);
+  await record();
+  // The page reloads itself, changes its own address and runs its scripts.
+  fake.webNavigation.commit({
+    tabId: 9,
+    frameId: 0,
+    url: REPORT,
+    transitionType: "reload",
+  });
+  fake.webNavigation.historyUpdate({
+    tabId: 10,
+    frameId: 0,
+    url: "https://mail.example.test/inbox/2",
+  });
+  const port = contentPort(10);
+  port.postMessage({ type: "content.event", event: contentEvent({}) });
+  await until(() => port.messages.length > 0, "tab 10 told to stop");
+  await settle();
+  expect(await state()).toMatchObject({ tabIds: [7], actions: 0 });
+  expect((await state()).usedTabIds).toBeUndefined();
+  expect([...injectedInto(9), ...injectedInto(10)]).toEqual([]);
+  expect(
+    network.calls.filter((call) => /^(addTab|onCommitted) (9|10) /.test(call)),
+  ).toEqual([]);
+  expect(
+    forwardedEvents().filter(
+      (recorded) => (recorded.value as { tab?: number }).tab !== 1,
+    ),
+  ).toEqual([]);
+});
+
+test("a tab in another window is followed once the person brings that window to the front", async () => {
+  fake.tabs.set(10, {
+    id: 10,
+    windowId: 2,
+    active: true,
+    url: "https://mail.example.test/inbox",
+  } as chrome.tabs.Tab);
+  fake.tabs.set(11, {
+    id: 11,
+    windowId: 2,
+    active: false,
+    url: REPORT,
+  } as chrome.tabs.Tab);
+  await record();
+  // Focus leaving the browser is no tab.
+  fake.person.focusWindow(chrome.windows.WINDOW_ID_NONE);
+  await settle();
+  expect((await state()).tabIds).toEqual([7]);
+  fake.person.focusWindow(2);
+  await until(async () => (await state()).tabIds.length === 2, "tab 10");
+  expect((await state()).tabIds).toEqual([7, 10]);
+  expect(network.calls).toContain("addTab 10 https://mail.example.test/inbox");
+  // Its window's other tab, never shown, is not followed.
+  expect((await state()).tabIds).not.toContain(11);
+});
+
+test("a tab on one of the Recorder's own pages or the Web Store is not followed until it reaches a website", async () => {
+  fake.tabs.set(9, {
+    id: 9,
+    windowId: 1,
+    active: false,
+    url: `chrome-extension://${EXTENSION_ID}/options.html`,
+  } as chrome.tabs.Tab);
+  fake.tabs.set(10, {
+    id: 10,
+    windowId: 1,
+    active: false,
+    url: "https://chromewebstore.google.com/detail/x",
+  } as chrome.tabs.Tab);
+  await record();
+  fake.person.switchTo(9);
+  fake.person.switchTo(10);
+  await until(
+    async () => (await state()).usedTabIds?.length === 2,
+    "both used",
+  );
+  await settle();
+  expect((await state()).tabIds).toEqual([7]);
+  expect([...injectedInto(9), ...injectedInto(10)]).toEqual([]);
+  // From its options page the person goes to a website: the tab joins there.
+  fake.webNavigation.commit({ tabId: 9, frameId: 0, url: REPORT });
+  await until(async () => (await state()).tabIds.length === 2, "tab 9");
+  expect(await state()).toMatchObject({ tabIds: [7, 9], usedTabIds: [10] });
+});
+
+test("a tab the Record tab opens is followed as before, from the opener's page, though Chrome says it is active before it says who opened it", async () => {
+  // Measured on Chromium 151: a link with target=_blank fires tabs.onCreated and tabs.onActivated for the new tab, then
+  // webNavigation.onCreatedNavigationTarget, then the new tab's commit.
+  await record();
+  const opened = fake.person.openTab();
+  const tabId = opened.id as number;
+  fake.webNavigation.createdTarget({ sourceTabId: 7, tabId, url: REPORT });
+  await until(async () => (await state()).tabIds.length === 2, "followed");
+  fake.tabs.set(tabId, { ...opened, url: REPORT });
+  fake.webNavigation.commit({ tabId, frameId: 0, url: REPORT });
+  await until(
+    () =>
+      forwardedEvents().some(
+        (recorded) => (recorded.value as { tab?: number }).tab === 2,
+      ),
+    "its page change",
+  );
+  await settle();
+  expect(await state()).toMatchObject({ tabIds: [7, tabId] });
+  expect((await state()).usedTabIds).toBeUndefined();
+  expect(network.calls).toContain(`addTab ${tabId} ${REPORT}`);
+  // Its first step is the page change from the page that opened it, never a start of its own.
+  expect(
+    forwardedEvents()
+      .filter((recorded) => (recorded.value as { tab?: number }).tab === 2)
+      .map((recorded) => recorded.value),
+  ).toEqual([
+    expect.objectContaining({
+      step: "navigate",
+      from: DEAL,
+      to: REPORT,
+      navigationType: "push",
+    }),
+  ]);
+});
+
+test("a tab the person used stays waiting for its first website through a service-worker restart", async () => {
+  await record();
+  const opened = fake.person.openTab();
+  const tabId = opened.id as number;
+  await until(
+    async () => (await state()).usedTabIds?.includes(tabId) === true,
+    "the new tab used",
+  );
+  fake.restartServiceWorker();
+  handlers = installRecording(doubles());
+  installRouter(handlers);
+  fake.webNavigation.commit({ tabId, frameId: 0, url: REPORT });
+  await until(async () => (await state()).tabIds.includes(tabId), "followed");
+  expect((await state()).usedTabIds).toBeUndefined();
+});
+
+test("nothing is followed while nothing records, and a recording that stopped forgets the tabs it waited for", async () => {
+  fake.person.openTab();
+  await settle();
+  expect((await state()).usedTabIds).toBeUndefined();
+  await record();
+  const opened = fake.person.openTab();
+  await until(
+    async () => (await state()).usedTabIds?.length === 1,
+    "the new tab used",
+  );
+  expect(await page({ type: "page.stop" })).toEqual({ ok: true });
+  expect((await state()).usedTabIds).toBeUndefined();
+  fake.webNavigation.commit({
+    tabId: opened.id as number,
+    frameId: 0,
+    url: REPORT,
+  });
+  await settle();
+  expect(await state()).toMatchObject({ phase: "idle", tabIds: [] });
+});
+
 test("a tab the recorded tab opened begins at the opener's page, and every step and page change names its tab", async () => {
   // The final run's run 1 (trajectory 764dddf8): on /support the person opened the account in a new tab, saved the memo
   // there, then went Home in the first tab. The new tab's first page change read from=/account to=/account, and nothing

@@ -47,6 +47,10 @@ export type BrowserHostOptions = {
   navigationTimeoutMs: number;
 };
 
+/** What the person is told when their browser did not open for a reason that is not the computer's setup: the reason
+ * itself (often a page of Playwright's own text) goes to the computer's log. */
+const NOT_OPENED = "Your browser could not be opened. Try again.";
+
 /** How long one tab may take to say whether it is showing, before it is left out of the question. */
 const VISIBILITY_MS = 1_000;
 
@@ -301,14 +305,16 @@ export function createBrowserHost(options: BrowserHostOptions) {
     const arrived = Date.now();
     /*
      * Every open that fails says why in the log, with the step it stopped at: which part of opening
-     * (the launch, the Recorder's load or reload, its worker, the microphone, the connect) gave the
-     * sentence the caller is answered with. Without it a failed open said only that the browser was
-     * then stopped.
+     * (the launch, the Recorder's load or reload, its worker, the microphone, the connect) failed,
+     * and how. Without it a failed open said only that the browser was then stopped. The log keeps
+     * `reason`, what went wrong in its own words, where the caller is answered with a sentence for
+     * the person instead.
      */
     const failed = (
       step: PersonOpenStep | "request",
       status: number,
       error: string,
+      reason: string = error,
     ): Response => {
       console.info(
         JSON.stringify({
@@ -316,7 +322,7 @@ export function createBrowserHost(options: BrowserHostOptions) {
           botId,
           step,
           status,
-          error,
+          error: reason,
           ms: Date.now() - arrived,
         }),
       );
@@ -346,7 +352,12 @@ export function createBrowserHost(options: BrowserHostOptions) {
   async function openNow(
     botId: string,
     opening: Opening,
-    failed: (step: PersonOpenStep, status: number, error: string) => Response,
+    failed: (
+      step: PersonOpenStep,
+      status: number,
+      error: string,
+      reason?: string,
+    ) => Response,
   ): Promise<Response> {
     const found = await findRecorder(options.recorderDir());
     if (!found.ok) return failed("recorder-files", 503, found.error);
@@ -358,11 +369,16 @@ export function createBrowserHost(options: BrowserHostOptions) {
     } catch (error) {
       if (error instanceof NoInstalledBrowserError)
         return failed("launch", 503, error.message);
-      return failed(
-        error instanceof PersonOpenError ? error.step : "launch",
-        502,
-        `The browser could not be opened: ${messageOf(error)}`,
-      );
+      const at = error instanceof PersonOpenError ? error.step : "launch";
+      /*
+       * A browser this computer cannot run at all (Playwright's Chromium missing from a hosted image,
+       * say) is OpenBot's setup: 503, in the computer's own words for whoever runs OpenBot, which the
+       * server keeps in its log and never shows the person, as for a missing Recorder. Run 4 saw such
+       * a failure reach the person as a 502 with Playwright's text, its install box included.
+       */
+      if (error instanceof PersonOpenError && error.setup)
+        return failed(at, 503, error.message);
+      return failed(at, 502, NOT_OPENED, messageOf(error));
     }
     const browser = profiles.person(botId);
     if (!browser) return failed("launch", 409, BROWSER_NOT_OPEN);
@@ -407,11 +423,7 @@ export function createBrowserHost(options: BrowserHostOptions) {
       return json(await stateOf(browser));
     } catch (error) {
       // The browser went away between the connect and its state: closed by the person, or crashed.
-      return failed(
-        "state",
-        502,
-        `The browser could not be opened: ${messageOf(error)}`,
-      );
+      return failed("state", 502, NOT_OPENED, messageOf(error));
     }
   }
 

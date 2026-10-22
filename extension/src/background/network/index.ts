@@ -418,8 +418,23 @@ export function createNetworkCapture(
     return "waiting";
   }
 
+  /** Tabs being attached by `attachLater`. A tab that joins at the page it shows can commit a page while its attach is
+   * under way (a discarded tab loads again when it is switched to): a second attach would be refused by Chrome, as the
+   * tab has a debugger already, and that refusal would mark the attached tab refused. */
+  const attaching = new Set<number>();
+
   /** A tab that becomes recordable while the mode is not `page`: attach it, or fall back when nothing else is. */
   async function attachLater(tabId: number): Promise<void> {
+    if (attaching.has(tabId)) return;
+    attaching.add(tabId);
+    try {
+      await attachNow(tabId);
+    } finally {
+      attaching.delete(tabId);
+    }
+  }
+
+  async function attachNow(tabId: number): Promise<void> {
     const refused = await attach(tabId);
     if (!refused) {
       if (tabs.get(tabId) === "attached" && mode !== "debugger")

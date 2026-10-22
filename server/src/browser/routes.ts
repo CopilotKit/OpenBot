@@ -92,8 +92,6 @@ const SENTENCES = {
   unavailable: "This OpenBot cannot open a browser for you.",
   notSetUp:
     "Your browser can't open right now. Ask an admin to check OpenBot's setup.",
-  noAddress:
-    "This OpenBot has no address your browser can reach it at. An admin sets OPENBOT_PUBLIC_URL to its https address.",
   tooMany:
     "Too many connection codes were asked for at once. Wait a few minutes and try again.",
   notConnected: "Your browser could not be connected. Try again.",
@@ -105,6 +103,14 @@ const SENTENCES = {
   phraseTimes:
     "That phrase's times do not fit the recording, so it was not added.",
 } as const;
+
+/**
+ * Why a person's browser cannot be connected when this OpenBot has no address the Recorder would take, for whoever runs
+ * OpenBot: it goes to the log, and the person is told their browser cannot open and who can see to it (`notSetUp`), as
+ * for the computer's own setup failures. The fourth end-to-end run showed sentences like this one on the Browser page.
+ */
+const NO_ADDRESS =
+  "This OpenBot has no address a person's browser can reach it at, so the Recorder in it cannot be connected. Set OPENBOT_PUBLIC_URL to this OpenBot's https address.";
 
 /** OpenBot did not get the computer's answer: 502 when nothing answered, 504 when it took too long to. */
 class BrowserCallError extends Error {
@@ -570,7 +576,12 @@ export function createBrowserRoutes(deps: BrowserRouteDeps) {
     const computers = deps.computers;
     if (!computers) return refuse(SENTENCES.unavailable, 503);
     const openbotUrl = deps.openbotUrl(asker.origin);
-    if (!openbotUrl) return refuse(SENTENCES.noAddress, 503);
+    if (!openbotUrl) {
+      console.warn(
+        JSON.stringify({ type: "browser-open-no-address", error: NO_ADDRESS }),
+      );
+      return refuse(SENTENCES.notSetUp, 503);
+    }
 
     const minted = await deps.recorder.connections.mintCode(
       actor.id,

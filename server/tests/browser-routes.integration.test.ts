@@ -1897,21 +1897,32 @@ describe("where the browser reaches this OpenBot", () => {
     ).toBeNull();
   });
 
-  test("open says so when there is no address the Recorder would connect to", async () => {
+  test("with no address the Recorder would connect to, the person is told their browser cannot open, and the setting to fix is in the log", async () => {
+    // The person used to be told to set OPENBOT_PUBLIC_URL, which only whoever runs OpenBot can do.
     const nowhere = build({
       OPENBOT_PUBLIC_URL: "http://openbot.internal:3001",
       BETTER_AUTH_URL: "http://openbot.internal:3001",
       TRUSTED_ORIGINS: "http://openbot.internal:3010",
     });
-    const refused = await call(nowhere, "/api/browser/open", {
-      method: "POST",
-      as: "ada",
-    });
+    const { result: refused, warned } = await logged(() =>
+      call(nowhere, "/api/browser/open", {
+        method: "POST",
+        as: "ada",
+      }),
+    );
     expect(refused.status).toBe(503);
-    expect(await refused.json()).toEqual({
-      error:
-        "This OpenBot has no address your browser can reach it at. An admin sets OPENBOT_PUBLIC_URL to its https address.",
-    });
+    expect(await refused.json()).toEqual({ error: NOT_SET_UP });
+    expect(
+      warned
+        .map((line) => JSON.parse(line) as Record<string, unknown>)
+        .filter((line) => line.type === "browser-open-no-address"),
+    ).toEqual([
+      {
+        type: "browser-open-no-address",
+        error:
+          "This OpenBot has no address a person's browser can reach it at, so the Recorder in it cannot be connected. Set OPENBOT_PUBLIC_URL to this OpenBot's https address.",
+      },
+    ]);
   });
 });
 

@@ -173,11 +173,11 @@ function useActionsAtStop(recorder: LauncherState | undefined) {
 
 /**
  * The recording Stop ended last, while nothing else is being recorded, and whether it held nothing: the page read it
- * running and it never counted an action. A recording follows the tab Record started in and tabs opened from it, so
- * one where the person worked in another tab held nothing, and the Recorder still names it as sent (the fourth
- * end-to-end run: two such recordings reached Intelligence with no steps, and the page said both were saved). One the
- * page never saw running (stopped from the Recorder's own button while the page was closed) is taken as the Recorder
- * reports it.
+ * running and it never counted an action. The Recorder names such a recording as sent all the same (the fourth
+ * end-to-end run: two recordings that followed only the tab Record started in reached Intelligence with no steps after
+ * the person switched tabs, and the page said both were saved). A recording now follows every tab the person uses, so
+ * one holds nothing when nothing was done on a website while it ran. One the page never saw running (stopped from the
+ * Recorder's own button while the page was closed) is taken as the Recorder reports it.
  */
 function stoppedRecording(
   phase: LauncherState["phase"],
@@ -194,14 +194,15 @@ function stoppedRecording(
 
 type Stopped = NonNullable<ReturnType<typeof stoppedRecording>>;
 
-/** Why a recording can hold nothing, which the person can do something about next time. */
-const FOLLOWS_ITS_TAB =
-  "The Recorder follows the tab you started recording in, and tabs opened from it.";
+/** What a recording holds, which the person can go by next time: the browser's own pages (a new tab, its settings)
+ * are never recorded. */
+const WHAT_IT_RECORDS =
+  "The Recorder records your clicks, typing and the pages you open on websites, in every tab you use while it records.";
 
 /** What the page says once Stop ended a recording, naming it. */
 function stoppedSentence(stopped: Stopped): string {
   return stopped.empty
-    ? `Nothing was recorded in “${stopped.title}”. ${FOLLOWS_ITS_TAB}`
+    ? `Nothing was recorded in “${stopped.title}”. ${WHAT_IT_RECORDS}`
     : `Saved “${stopped.title}” to your Learning space.`;
 }
 
@@ -239,7 +240,7 @@ export function StoppedRow({ stopped }: { stopped: Stopped }) {
         <ItemTitle>{stopped.title}</ItemTitle>
         <ItemDescription className="line-clamp-none">
           {stopped.empty
-            ? `Nothing was recorded. ${FOLLOWS_ITS_TAB}`
+            ? `Nothing was recorded. ${WHAT_IT_RECORDS}`
             : "Saved to your Learning space."}
         </ItemDescription>
       </ItemContent>

@@ -29,6 +29,7 @@ import {
   isRecorderSetupPage,
 } from "../src/recorder";
 import { navigationFailure } from "../src/navigation";
+import { isBrowserNotInstalled, PersonOpenError } from "../src/person-browser";
 import { addressFrom } from "../src/request-validation";
 
 /**
@@ -526,6 +527,54 @@ describe("a page that did not open, said to the person", () => {
       expect(sentence).toBe(said);
       expect(sentence).not.toContain("Call log");
       expect(sentence).not.toContain("net::");
+    }
+  });
+});
+
+describe("a browser that cannot start here, said to whoever runs OpenBot", () => {
+  /*
+   * Playwright 1.62.1's own messages. The first two were captured from real launches on this Mac
+   * (PLAYWRIGHT_BROWSERS_PATH pointing at an empty folder, and a channel whose browser is not
+   * installed); the third is its Linux dependency check's, from playwright-core's own source, with the
+   * box it draws around it.
+   */
+  const NO_CHROMIUM =
+    "launchPersistentContext: Executable doesn't exist at /tmp/browsers/chromium-1234/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing\n╔════════════════════════════════════════════════════════════╗\n║ Looks like Playwright was just installed or updated.       ║\n║ Please run the following command to download new browsers: ║\n║                                                            ║\n║     npx playwright install                                 ║\n║                                                            ║\n║ <3 Playwright Team                                         ║\n╚════════════════════════════════════════════════════════════╝";
+  const NO_CHANNEL =
+    "Chromium distribution 'msedge-canary' is not found at /Applications/Microsoft Edge Canary.app/Contents/MacOS/Microsoft Edge Canary";
+  const NO_LIBRARIES =
+    "launchPersistentContext: \n╔══════════════════════════════════════════════════════╗\n║ Host system is missing dependencies to run browsers. ║\n║ Missing libraries:                                   ║\n║     libnss3.so                                       ║\n╚══════════════════════════════════════════════════════╝";
+
+  test("a browser not installed, or missing what it needs to run, is the computer's setup", () => {
+    for (const message of [NO_CHROMIUM, NO_CHANNEL, NO_LIBRARIES]) {
+      expect(isBrowserNotInstalled(message)).toBe(true);
+      expect(new PersonOpenError("launch", new Error(message)).setup).toBe(
+        true,
+      );
+    }
+    // The built Recorder's files unreadable is the computer's setup too, whatever the error says.
+    expect(
+      new PersonOpenError(
+        "recorder-files",
+        new Error(
+          "ENOENT: no such file or directory, open '/recorder/service-worker.js'",
+        ),
+      ).setup,
+    ).toBe(true);
+  });
+
+  test("a browser that is installed and failed this once is not", () => {
+    for (const message of [
+      // Another browser holds the profile, as one of the person's own might after a crash: Google
+      // Chrome 156's refusal, captured by person-browser.test.ts (its call log cut short here).
+      "launchPersistentContext: Failed to create a ProcessSingleton for your profile directory. This usually means that the profile is already in use by another instance of Chromium.\nCall log:\n  - <launching> /Applications/Google Chrome.app/Contents/MacOS/Google Chrome --headless --remote-debugging-pipe",
+      "launchPersistentContext: Timeout 180000ms exceeded.",
+      "The Recorder in this browser did not start.",
+    ]) {
+      expect(isBrowserNotInstalled(message)).toBe(false);
+      expect(new PersonOpenError("launch", new Error(message)).setup).toBe(
+        false,
+      );
     }
   });
 });
