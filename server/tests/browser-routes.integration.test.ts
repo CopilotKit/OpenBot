@@ -1212,7 +1212,7 @@ describe("Record after the OpenBot browser is disconnected", () => {
       // A Recorder with no connection has been told nothing about narration: the window says who hears the person.
       narration: "external",
     });
-    expect(after.recorder?.userId).toBeUndefined();
+    expect(after.recorder).not.toHaveProperty("userId");
     // Record after Disconnect connects the browser again first.
     const started = await record("After Disconnect");
     expect(started.status).toBe(200);
@@ -1239,7 +1239,7 @@ describe("Record after the OpenBot browser is disconnected", () => {
     });
     const reported = await state();
     expect(reported.recorder).toMatchObject({ connected: false });
-    expect(reported.recorder?.userId).toBeUndefined();
+    expect(reported.recorder).not.toHaveProperty("userId");
     // Every answer that carries the state says so, not only the state route's.
     const tabs = await call(openbot, "/api/browser/tabs", {
       method: "POST",
