@@ -201,26 +201,42 @@ export function createRecorderLauncher(input: {
     return attaching;
   };
 
+  /*
+   * One message to the worker and its answer, within `timeoutMs` from start to finish: finding and
+   * attaching to the worker, handing the message over, and the answer.
+   *
+   * NOTHING HERE MAY REJECT WITH NOBODY LISTENING. The timer used to start before the message was
+   * handed over and was raced only after, so a browser slow to take the message fired it with
+   * nothing awaiting it: an unhandled rejection, which ends a Bun process, and with it every
+   * browser on this computer. Seen on a hosted computer while the Recorder recorded a burst of
+   * input, when handing over a 2 s readiness check took longer than 2 s. So the whole exchange is
+   * raced against the timer from the start, and the answer, which a stopped worker can reject while
+   * the message is still being handed over, is marked as handled the moment it exists. Neither can
+   * reject unheard, and the call ends in an answer or a refusal, never in the process ending.
+   */
   const send = async (
     method: string,
     params: Record<string, unknown>,
     timeoutMs: number,
   ): Promise<unknown> => {
-    const target = await sessionId();
     const id = ++nextId;
-    const answer = new Promise<unknown>((resolve, reject) => {
-      pending.set(id, { resolve, reject });
-    });
+    let over = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const late = new Promise<never>((_, reject) => {
       timer = setTimeout(() => {
-        pending.delete(id);
         reject(
           new RecorderUnavailableError("The Recorder did not answer in time."),
         );
       }, timeoutMs);
     });
-    try {
+    const exchange = async (): Promise<unknown> => {
+      const target = await sessionId();
+      // A call that has already been refused sends nothing: its answer would have nowhere to go.
+      if (over) throw new RecorderUnavailableError(WORKER_STOPPED);
+      const answer = new Promise<unknown>((resolve, reject) => {
+        pending.set(id, { resolve, reject });
+      });
+      answer.catch(() => undefined);
       try {
         await session.send("Target.sendMessageToTarget", {
           sessionId: target,
@@ -231,8 +247,12 @@ export function createRecorderLauncher(input: {
         if (attached?.sessionId === target) drop();
         throw new RecorderUnavailableError(WORKER_STOPPED);
       }
-      return await Promise.race([answer, late]);
+      return answer;
+    };
+    try {
+      return await Promise.race([exchange(), late]);
     } finally {
+      over = true;
       clearTimeout(timer);
       pending.delete(id);
     }
