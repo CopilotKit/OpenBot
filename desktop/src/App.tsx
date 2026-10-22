@@ -999,10 +999,6 @@ function Setup() {
                     recordSetupEvent(harnessChoiceEvent(DEFAULT_HARNESS));
                     void installLocally();
                   },
-                  onHosted: () => {
-                    chooseIntelligence("hosted");
-                    setStep("harness");
-                  },
                 }
               : undefined
           }
