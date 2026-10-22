@@ -30,6 +30,7 @@
     "clsx": "^2.1.1",
     "eventsource-parser": "3.1.1",
     "fake-indexeddb": "6.2.5",
+    "fflate": "0.8.3",
     "happy-dom": "^20.11.2",
     "phoenix": "1.8.15",
     "prompt-area": "^0.6.3",
