@@ -993,7 +993,11 @@ test("a Claude plan signed in on the provider screen reaches Start with its toke
   await userEvent.click(
     view.getByRole("button", { name: "Finish signing in" }),
   );
-  await view.findByRole("heading", { name: "Test OpenBot" });
+  // A tick for a second, then on by itself.
+  expect((await view.findByText(/✓/)).closest("p")?.textContent).toContain(
+    "Signed in to Anthropic.",
+  );
+  await view.findByRole("heading", { name: "Test OpenBot" }, { timeout: 4000 });
   expect(getStartStackPayload()).toMatchObject({
     model: {
       provider: "anthropic",
@@ -1816,8 +1820,12 @@ test("provider sign-in retries and Back reuse the completed local installation",
   await userEvent.click(
     view.getByRole("button", { name: "Sign in with OpenAI" }),
   );
-  // Signed in, so on to the next step by itself.
-  await view.findByRole("heading", { name: "Connect to CopilotKit" });
+  // Signed in, so on to the next step by itself, after a second showing the tick.
+  await view.findByRole(
+    "heading",
+    { name: "Connect to CopilotKit" },
+    { timeout: 4000 },
+  );
   expect(signIns).toBe(2);
   expect(installationCalls()).toHaveLength(1);
 });
@@ -4253,7 +4261,12 @@ for (const provider of [
         await userEvent.click(view.getByRole("button", { name: "Continue" }));
       }
       await userEvent.click(
-        await view.findByRole("button", { name: "Start OpenBot" }),
+        await view.findByRole(
+          "button",
+          { name: "Start OpenBot" },
+          // A fresh sign-in shows its tick for a second before it moves on.
+          { timeout: 4000 },
+        ),
       );
 
       const payload = getStartStackPayload();

@@ -9,6 +9,9 @@ import { StatusLine } from "./SetupProgress";
 
 export type Login = "plan" | "api-key" | "endpoint" | "oauth";
 
+/** How long "✓ Signed in" shows before the screen moves on by itself. */
+export const CONFIRMED_FOR_MS = 1000;
+
 export type Provider = {
   id: string;
   name: string;
@@ -486,15 +489,33 @@ export function ProviderPicker({
    * Signed in, so on to the next step: the sign-in was the thing this screen was waiting for, and
    * a Continue after "Signed in" is a click that only confirms what just happened. A sign-in that
    * leaves something else to fill in (an OAuth row's model) waits for Continue as before.
+   *
+   * Not at once, though: a tick beside "Signed in" for a second first, so the screen says it worked
+   * before it changes. Choosing another row in that second cancels the move.
    */
+  const [confirmed, setConfirmed] = useState<string | null>(null);
+  const continueLatest = useRef(continueWithChoice);
+  continueLatest.current = continueWithChoice;
   // biome-ignore lint/correctness/useExhaustiveDependencies: runs when readiness or a sign-in changes.
   useEffect(() => {
     if (!continueAfterSignIn.current || busy) return;
     // Used up on the first look after the sign-in either way, so a field filled in later never
     // moves the screen on from under somebody still typing.
     continueAfterSignIn.current = false;
-    if (ready && !starting) continueWithChoice();
+    if (ready && !starting && row) setConfirmed(row.id);
   }, [ready, busy, starting, tokens, oauthSignedIn]);
+  useEffect(() => {
+    if (!confirmed) return;
+    if (confirmed !== open) {
+      setConfirmed(null);
+      return;
+    }
+    const timer = setTimeout(() => {
+      setConfirmed(null);
+      continueLatest.current();
+    }, CONFIRMED_FOR_MS);
+    return () => clearTimeout(timer);
+  }, [confirmed, open]);
 
   return (
     <div className="sheet">
@@ -887,6 +908,11 @@ export function ProviderPicker({
         </div>
       )}
 
+      {confirmed && row && confirmed === row.id && (
+        <p className="confirmed" role="status">
+          <span aria-hidden="true">✓</span> Signed in to {row.name}.
+        </p>
+      )}
       <div className="row">
         {onBack && (
           <button
