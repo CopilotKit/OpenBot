@@ -30,6 +30,7 @@ import { eq, inArray } from "drizzle-orm";
 import { NO_INSTALLED_BROWSER } from "../../agent-computer/src/person-launch";
 import { createApp } from "../src/app";
 import type { AuditEventInput } from "../src/audit";
+import { DEV_ACTOR, initializeDevActorUser } from "../src/auth/dev-actor";
 import { createOrganizationAuth } from "../src/auth/organization";
 import { organizationUserStore } from "../src/auth/organization-store";
 import { openbotAddress } from "../src/browser/address";
@@ -88,6 +89,9 @@ const REAL_COMPUTER_PORT = 7815;
 /** What the person is told when their browser cannot open for OpenBot's own setup. */
 const NOT_SET_UP =
   "Your browser can't open right now. Ask an admin to check OpenBot's setup.";
+/** The same, on a single-user OpenBot (OpenBot Desktop), where the person is the admin. */
+const NOT_SET_UP_SINGLE_USER =
+  "Your browser can't open right now. OpenBot's setup needs checking, and its logs say why.";
 
 // ---- The stand-in computer --------------------------------------------------------------------
 
@@ -457,6 +461,7 @@ function build(
       token: options.token ?? COMPUTER_TOKEN,
       recorder,
       openbotUrl: openbotAddress(config),
+      singleUser: config.singleUser,
       ...(options.callTimeoutMs
         ? { callTimeoutMs: options.callTimeoutMs }
         : {}),
@@ -1992,6 +1997,81 @@ describe("where the browser reaches this OpenBot", () => {
           "This OpenBot has no address a person's browser can reach it at, so the Recorder in it cannot be connected. Set OPENBOT_PUBLIC_URL to this OpenBot's https address.",
       },
     ]);
+  });
+});
+
+describe("a single-user OpenBot, where the person is its admin", () => {
+  /**
+   * OpenBot Desktop's server: one person and no sign-in, no address anybody else reaches, and people's browsers on the
+   * host-side computer (here the stand-in), so they show as windows on the person's desktop.
+   */
+  const desktop = () =>
+    build({
+      OPENBOT_SINGLE_USER: "true",
+      OPENBOT_PUBLIC_URL: undefined,
+      BETTER_AUTH_URL: undefined,
+      BETTER_AUTH_SECRET: undefined,
+      GOOGLE_OAUTH_CLIENT_ID: undefined,
+      GOOGLE_OAUTH_CLIENT_SECRET: undefined,
+      INITIAL_ADMIN_EMAILS: undefined,
+      OPENBOT_BROWSER_URL: `http://127.0.0.1:${COMPUTER_PORT}`,
+    });
+  /** The address OpenBot Desktop's window uses, which the Recorder is handed. */
+  const WINDOW = { origin: "http://127.0.0.1:3010" };
+
+  beforeAll(async () => {
+    await initializeDevActorUser(database, true);
+  });
+  afterAll(async () => {
+    await database
+      .delete(recorderConnections)
+      .where(eq(recorderConnections.userId, DEV_ACTOR.id));
+  });
+
+  test("a browser the computer cannot run is OpenBot's setup, which the person is told to check themselves, not to ask an admin about", async () => {
+    // Run 7, on OpenBot Desktop: the person was told to ask an admin, and on Desktop there is nobody else.
+    const single = desktop();
+    expect(single.config.singleUser).toBe(true);
+    expect(
+      await (await call(single, "/api/browser", { headers: WINDOW })).json(),
+    ).toMatchObject({ available: true, shows: "native" });
+    refuseNextOpen = { status: 503, error: NO_INSTALLED_BROWSER };
+    const { result: refused, warned } = await logged(() =>
+      call(single, "/api/browser/open", { method: "POST", headers: WINDOW }),
+    );
+    expect(refused.status).toBe(503);
+    expect(await refused.json()).toEqual({ error: NOT_SET_UP_SINGLE_USER });
+    // The computer's own sentence, the reason, is in the log the person is pointed at.
+    expect(
+      warned
+        .map((line) => JSON.parse(line) as Record<string, unknown>)
+        .filter((line) => line.type === "browser-computer-failed"),
+    ).toEqual([
+      {
+        type: "browser-computer-failed",
+        path: "/browser/open",
+        status: 503,
+        error: NO_INSTALLED_BROWSER,
+      },
+    ]);
+
+    // On an OpenBot with sign-in, the same refusal still sends the person to an admin.
+    refuseNextOpen = { status: 503, error: NO_INSTALLED_BROWSER };
+    const { result: multi } = await logged(() =>
+      call(openbot, "/api/browser/open", { method: "POST", as: "ada" }),
+    );
+    expect(multi.status).toBe(503);
+    expect(await multi.json()).toEqual({ error: NOT_SET_UP });
+  });
+
+  test("with no address the Recorder would connect to, the single person is told the same, and the setting is in the log", async () => {
+    // A request with no Origin, and nothing configured: OpenBot has no address to hand the Recorder.
+    const { result: refused, warned } = await logged(() =>
+      call(desktop(), "/api/browser/open", { method: "POST" }),
+    );
+    expect(refused.status).toBe(503);
+    expect(await refused.json()).toEqual({ error: NOT_SET_UP_SINGLE_USER });
+    expect(typesOf(warned)).toContain("browser-open-no-address");
   });
 });
 

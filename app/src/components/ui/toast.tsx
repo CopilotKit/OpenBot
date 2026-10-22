@@ -1,6 +1,9 @@
 "use client";
 
-import { Toast as ToastPrimitive } from "@base-ui/react/toast";
+import {
+  Toast as ToastPrimitive,
+  type ToastManager,
+} from "@base-ui/react/toast";
 import {
   IconAlertOctagon,
   IconAlertTriangle,
@@ -20,8 +23,42 @@ import { cn } from "@/lib/utils";
  *
  * `toast` is one manager for the whole app, so a toast can be raised from anywhere, a mutation's callback included,
  * and `<Toaster />` in the root route draws them all in one place.
+ *
+ * An error stays until the person closes it, and a confirmation still goes by itself after Base UI's 5 seconds. A
+ * confirmation repeats what the screen already shows, but an error is often the only place the person learns why
+ * something did not happen, and somebody who looked away, or reads slowly, missed it (WCAG 2.2.1, Timing Adjustable).
+ * So every error this manager raises, or turns a toast into, has no timeout (Base UI's `timeout: 0`) unless its caller
+ * gives it one.
  */
-const toast = ToastPrimitive.createToastManager();
+const manager = ToastPrimitive.createToastManager();
+
+/** An error with no timeout of its own is given none. */
+function lasting<T extends { type?: string; timeout?: number }>(options: T): T {
+  return options.type === "error" && options.timeout === undefined
+    ? { ...options, timeout: 0 }
+    : options;
+}
+
+const toast: ToastManager = {
+  ...manager,
+  add: (options) => manager.add(lasting(options)),
+  update: (id, updates) => manager.update(id, lasting(updates)),
+  promise: (promiseValue, options) =>
+    manager.promise(promiseValue, {
+      ...options,
+      // A sentence on its own is the toast's description, as Base UI reads one.
+      error: (error) => {
+        const said =
+          typeof options.error === "function"
+            ? options.error(error)
+            : options.error;
+        return lasting({
+          ...(typeof said === "string" ? { description: said } : said),
+          type: "error",
+        });
+      },
+    }),
+};
 
 function ToastProvider({ ...props }: ToastPrimitive.Provider.Props) {
   return <ToastPrimitive.Provider {...props} />;
