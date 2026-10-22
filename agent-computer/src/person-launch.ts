@@ -31,6 +31,7 @@ import type {
   BrowserProduct,
   BrowserWindow,
 } from "../../shared/openbot-browser";
+import { RECORDER_NATIVE_HOST } from "../../shared/recorder-extension";
 import type { BrowserRuntime } from "./browser-runtime";
 
 type Environment = Record<string, string | undefined>;
@@ -382,6 +383,10 @@ const MAX_HOST_MANIFEST_BYTES = 64 * 1024;
  * Manifests only: regular `.json` files of a manifest's size, read and written rather than linked, so
  * nothing else from the person's profile is ever copied or reachable from the OpenBot one. A folder
  * that is not there (no app installed a host) leaves the OpenBot one empty.
+ *
+ * Except OpenBot Desktop's own Recorder host. Its only job is to hand a newly installed Recorder a
+ * connect code, and in this browser the launcher connects the Recorder itself: copied, the host would
+ * be asked first, and `connect` would wait behind it.
  */
 export async function copyNativeMessagingHosts(
   from: string,
@@ -391,6 +396,7 @@ export async function copyNativeMessagingHosts(
   const entries = await readdir(from, { withFileTypes: true }).catch(() => []);
   for (const entry of entries) {
     if (!entry.name.endsWith(".json")) continue;
+    if (entry.name === `${RECORDER_NATIVE_HOST}.json`) continue;
     const source = join(from, entry.name);
     // `stat` follows a link, because an installer may link its manifest in, and judges what it
     // points at: a regular file of a manifest's size, and nothing else.

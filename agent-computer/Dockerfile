@@ -60,6 +60,7 @@ COPY shared/demonstration-rules.ts /shared/demonstration-rules.ts
 # and a module resolves its imports from its own directory upward, which from /shared never reaches
 # /app/node_modules: so /shared is given that tree to resolve from, rather than a second install.
 COPY shared/openbot-browser.ts /shared/openbot-browser.ts
+COPY shared/recorder-extension.ts shared/recorder-extension.json /shared/
 RUN ln -s /app/node_modules /shared/node_modules
 
 # The built Recorder, put into every person's browser this computer opens. Without it the computer

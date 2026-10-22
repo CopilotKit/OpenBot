@@ -10,7 +10,10 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { RECORDER_EXTENSION_ID } from "../../shared/recorder-extension";
+import {
+  RECORDER_EXTENSION_ID,
+  RECORDER_NATIVE_HOST,
+} from "../../shared/recorder-extension";
 import { personMayUse } from "../src/person-access";
 import {
   copyNativeMessagingHosts,
@@ -302,6 +305,27 @@ describe("the person's password manager hookups", () => {
     expect(
       await readFile(join(ours, "com.1password.1password.json"), "utf8"),
     ).toBe(onePassword);
+  });
+
+  test("OpenBot Desktop's own Recorder host is not copied: the launcher connects the Recorder itself", async () => {
+    const theirs = await tempDir();
+    const ours = join(await tempDir(), "NativeMessagingHosts");
+    await writeFile(
+      join(theirs, `${RECORDER_NATIVE_HOST}.json`),
+      JSON.stringify({ name: RECORDER_NATIVE_HOST }),
+    );
+    await writeFile(
+      join(theirs, "com.1password.1password.json"),
+      '{"name":"com.1password.1password"}',
+    );
+    // Left by a launch before this rule: removed like any host that is no longer copied.
+    await mkdir(ours, { recursive: true });
+    await writeFile(join(ours, `${RECORDER_NATIVE_HOST}.json`), "{}");
+
+    expect(await copyNativeMessagingHosts(theirs, ours)).toEqual([
+      "com.1password.1password.json",
+    ]);
+    expect(await readdir(ours)).toEqual(["com.1password.1password.json"]);
   });
 
   test("no folder of theirs leaves ours empty", async () => {
