@@ -2,6 +2,7 @@ import type { AppVariables } from "../../auth/guards";
 import { reasonWithoutStatement } from "../../db/query-failure";
 import { normalizeArcadeError } from "../arcade-adapter";
 import {
+  BrokerAccountHeldError,
   type BrokerField,
   BrokerUnconfiguredError,
   brokerReturnUrl,
@@ -129,6 +130,10 @@ export function mountConnectionRoutes({
    * Answers with a URL rather than redirecting, so the browser decides when to leave the page. The
    * state is minted here, from the session and the row's mode, and never from anything the request
    * carries.
+   *
+   * A brokered app can answer two other ways: `{ fields }` for an app whose key somebody types, and
+   * `{ connected: true }` where the vendor already holds this account and this deployment had no
+   * row for it, which is recorded here exactly as the confirm route records it.
    */
   routes.post("/servers/:id/connect", requireUser, async (context) => {
     const serverId = context.req.param("id");
@@ -757,6 +762,65 @@ export function mountConnectionRoutes({
           }),
         ));
       } catch (error) {
+        /*
+         * THE VENDOR ALREADY HOLDS THIS ACCOUNT, AND THIS DEPLOYMENT HAS NO ROW FOR IT: RECORD IT,
+         * DON'T REFUSE IT.
+         *
+         * The one-account guard above already refused wherever a row stands here, so this can
+         * only be the other half of that rule: an account the vendor holds that this deployment
+         * lost track of. A fresh or upgraded install meets it, and so does every local install in
+         * single-user mode, because they all sign in as the same person against one vendor key.
+         * Refused, the person read a sentence telling them to disconnect an account on a page
+         * that drew the app as not connected and offered no Disconnect. Nothing they could press
+         * would ever end it.
+         *
+         * WHAT IS DONE INSTEAD IS EXACTLY WHAT CONFIRM DOES, THROUGH THE SAME STORE CALL. The
+         * vendor is asked whether this account is connected, and a yes writes the row and files
+         * `mcp.account_connected` for it, once, as a confirm on page load would have. The account
+         * is the one `brokeredAccountFor` resolved at the top of this branch and the actor is the
+         * session's, so a Shared app's account is still only ever adopted by an administrator,
+         * and nothing the request carries can name whose account is recorded.
+         *
+         * `{ connected: true }` IS THE STORE'S ANSWER, PASSED BACK WHOLE, which is the shape
+         * confirm answers with and the one the browser already reads as connected. No link was
+         * minted, so there is no url to hand back and nothing for the person to finish anywhere.
+         *
+         * A NO IS STILL A REFUSAL, AND IT SAYS WHAT HAPPENED. The vendor refused a second link
+         * and then answered that it holds no active account, which is a race with somebody
+         * ending it or a vendor that disagrees with itself. The row confirm deletes on a no was
+         * never here, so the person is not sent to disconnect anything; asking again is the step
+         * that settles it. 409, the status of the one-account guard above, because it is that
+         * guard's conflict seen from the vendor's side.
+         *
+         * A CONFIRM THAT THROWS IS ANSWERED AS CONFIRM ANSWERS IT, with the vendor's or this
+         * deployment's sentence and never with a guess about the account in either direction.
+         *
+         * ARCADE NEVER RAISES THIS CLASS, so this is a no-op there. Only Composio's adapter
+         * translates a held account into it.
+         */
+        if (error instanceof BrokerAccountHeldError) {
+          let confirmed: { connected: boolean };
+          try {
+            confirmed = await store.confirmBrokeredConnection({
+              toolkit,
+              account,
+              by: context.var.actor.id,
+            });
+          } catch (confirmFailure) {
+            const refusal = brokerRefusal(
+              confirmFailure,
+              `Couldn't check whether ${row.title} is already connected. Try again, or ask an admin if it keeps happening.`,
+            );
+            return context.json({ error: refusal.error }, refusal.status);
+          }
+          if (confirmed.connected) return context.json(confirmed);
+          return context.json(
+            {
+              error: `OpenBot was told an account for ${row.title} is already connected, but found none when it checked. Nothing was connected. Press Connect again, or ask an admin if it keeps happening.`,
+            },
+            409,
+          );
+        }
         logReturnUrlRefusal(error, serverId);
         const refusal = brokerRefusal(
           error,
@@ -1040,6 +1104,11 @@ export function mountConnectionRoutes({
    * calling this heals it in whichever direction it went: written where the vendor says yes,
    * deleted where it says no. Repeating it files no trail rows and moves no timestamps; the store
    * is where that is settled.
+   *
+   * THE CONNECT ROUTE MAKES THE SAME CALL, for one case: the vendor refusing a new link because it
+   * already holds this account. That is a drift this route would heal on the next page load, met
+   * at the moment somebody pressed Connect, so it is healed there by the same store method rather
+   * than by a second writer of the row.
    *
    * BEHIND `requireUser` AND NOT ADMIN-GATED AT THE ROUTE — `brokeredAccountFor` is where that
    * happens instead. A Personal app's confirm is not an administrative act, so the route itself

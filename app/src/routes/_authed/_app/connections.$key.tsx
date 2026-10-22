@@ -182,14 +182,21 @@ function AppConnectionPage() {
      * A full page navigation, not a fetch. The consent screen is the vendor's own and has to be shown
      * to you in your own browser; there is deliberately nothing here that could complete it for you.
      */
-    onSuccess: (authorizationUrl) => {
+    onSuccess: (start) => {
       /*
        * A 200 with no url on it is not a url to follow. Every press that reaches here is on a
        * `user-oauth` catalogue entry, whose half of that route always mints one or refuses — so
        * this is the server having answered something this page does not understand, and saying so
        * is the only honest thing left. Assigning it navigated to a page called `undefined` on this
        * deployment's own origin. See `connectAccountMutationOptions`.
+       *
+       * `{ connected: true }` is a brokered app's answer and never this half's, so it is the same
+       * not-understood answer here.
        */
+      const authorizationUrl =
+        start !== null && "authorizationUrl" in start
+          ? start.authorizationUrl
+          : null;
       if (authorizationUrl === null) {
         setNotice(
           "Couldn't start connecting, so nothing was connected. Try again, or ask an admin if it keeps happening.",

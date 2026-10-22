@@ -312,13 +312,20 @@ function RouteComponent() {
      * shown to this person in their own browser; there is deliberately nothing here that could
      * complete it for them, and nothing about being an administrator changes that.
      */
-    onSuccess: (authorizationUrl) => {
+    onSuccess: (start) => {
       /*
        * A 200 with no url on it is not a url to follow. This press is on a `user-oauth` catalogue
        * entry, whose half of that route always mints one or refuses, so this is the server having
        * answered something this page does not understand. Assigning it navigated to a page called
        * `undefined` on this deployment's own origin. See `connectAccountMutationOptions`.
+       *
+       * `{ connected: true }` is a brokered app's answer and never this half's, so it is the same
+       * not-understood answer here.
        */
+      const authorizationUrl =
+        start !== null && "authorizationUrl" in start
+          ? start.authorizationUrl
+          : null;
       if (authorizationUrl === null) {
         setError(
           "OpenBot got no consent link back, so nothing was connected. Try again, or check this connector's setup if it keeps happening.",

@@ -931,6 +931,28 @@ export class BrokerAccountGoneError extends BrokerRefusalError {
 }
 
 /**
+ * An account the vendor ALREADY HOLDS for this person and this app, met while beginning another.
+ *
+ * {@link BrokerAccountGoneError} TURNED AROUND, AND ITS OWN CLASS FOR THE SAME REASON. That one is
+ * a row this deployment still has over an account the vendor no longer holds; this one is an
+ * account the vendor holds under a row this deployment does not have. A fresh install, an upgrade
+ * that lost the table, or a second install signing in as the same person against the same vendor
+ * key all arrive here, and the person sees an app drawn as not connected that the vendor refuses to
+ * connect a second time. Telling it apart by type is what lets the connect route ask the vendor
+ * once more and RECORD the account it already holds, which is the confirm route's own act, instead
+ * of handing the person a refusal that names a Disconnect button their page does not show.
+ *
+ * A {@link BrokerRefusalError} because it keeps that class's promise about the message, so a
+ * reader that never learned this class still passes on a sentence this deployment wrote.
+ */
+export class BrokerAccountHeldError extends BrokerRefusalError {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = "BrokerAccountHeldError";
+  }
+}
+
+/**
  * A return address that could not bring anybody back, refused before a consent is spent on it.
  *
  * ITS OWN CLASS BECAUSE ITS REMEDY IS ITS OWN. Every other refusal in this file is about the broker
