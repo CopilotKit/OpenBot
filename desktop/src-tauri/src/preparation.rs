@@ -12,6 +12,17 @@ pub const FILE: &str = ".openbot-prepared.json";
 const DEPENDENCIES: &str = ".openbot-dependencies.json";
 const LAUNCH: &str = ".openbot-launched.json";
 const PACKAGES: [&str; 6] = ["", "server", "app", "worker", "shared", "toolkit"];
+/// Packages a release has only since #784. v0.2.0, still the latest release when this desktop was
+/// built, has `shared` as plain source and no `toolkit`; requiring their manifests failed every new
+/// install with "shared/package.json: No such file or directory".
+const LATER_PACKAGES: [&str; 2] = ["shared", "toolkit"];
+
+/// The packages this release actually has: every one in `PACKAGES`, less a later one it predates.
+fn packages(root: &Path) -> impl Iterator<Item = &'static str> + '_ {
+    PACKAGES.into_iter().filter(move |package| {
+        !LATER_PACKAGES.contains(package) || root.join(package).join("package.json").is_file()
+    })
+}
 
 #[derive(Serialize, Deserialize)]
 struct Dependencies {
@@ -124,7 +135,7 @@ fn dependency_fingerprint(root: &Path) -> Result<String, Problem> {
     hash_files(
         root,
         std::iter::once(PathBuf::from("bun.lock"))
-            .chain(PACKAGES.map(|path| Path::new(path).join("package.json"))),
+            .chain(packages(root).map(|path| Path::new(path).join("package.json"))),
     )
 }
 
@@ -175,7 +186,7 @@ pub fn invalidate(root: &Path) -> Result<(), Problem> {
 /// Record resolved package manifests, not just the existence of a partial node_modules directory.
 fn package_files(root: &Path) -> Result<Vec<PathBuf>, Problem> {
     let mut files = BTreeSet::new();
-    for package in PACKAGES {
+    for package in packages(root) {
         let directory = root.join(package);
         let manifest: serde_json::Value = serde_json::from_slice(
             &std::fs::read(directory.join("package.json")).map_err(|e| required(e.to_string()))?,
@@ -363,6 +374,33 @@ pub fn image_settings(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_release_from_before_the_toolkit_needs_no_shared_or_toolkit_manifest() {
+        let root = crate::test_support::temp_root("preparation-v020-layout");
+        for package in ["", "server", "app", "worker"] {
+            std::fs::create_dir_all(root.join(package)).unwrap();
+            std::fs::write(root.join(package).join("package.json"), "{}").unwrap();
+        }
+        // v0.2.0: `shared` is source with no manifest, and there is no `toolkit`.
+        std::fs::create_dir_all(root.join("shared")).unwrap();
+        assert_eq!(
+            packages(&root).collect::<Vec<_>>(),
+            ["", "server", "app", "worker"]
+        );
+        std::fs::write(root.join("bun.lock"), "lock").unwrap();
+        assert!(dependency_fingerprint(&root).is_ok());
+        assert!(package_files(&root).is_ok());
+        // A release that has them is held to them.
+        for package in ["shared", "toolkit"] {
+            std::fs::create_dir_all(root.join(package)).unwrap();
+            std::fs::write(root.join(package).join("package.json"), "{}").unwrap();
+        }
+        assert_eq!(packages(&root).count(), PACKAGES.len());
+        // The packages every release has stay required.
+        std::fs::remove_file(root.join("server").join("package.json")).unwrap();
+        assert!(dependency_fingerprint(&root).is_err());
+    }
 
     struct Fixture {
         root: PathBuf,
