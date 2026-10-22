@@ -40,11 +40,20 @@ export function BrowserNavItem() {
   );
 }
 
+/** The one toast a refused open says itself in. */
+const REFUSED_TOAST = "browser-open-refused";
+
 /**
  * A button, not a link: it does something and goes nowhere. While the browser is opening it says so and takes no
- * further click (`aria-disabled` rather than `disabled`, so it keeps the keyboard's focus), and when the server refuses,
- * its sentence is a toast, because the person stays wherever they were in OpenBot and the button has no page of its own
- * to say it on.
+ * further click, and when the server refuses, its sentence is a toast, because the person stays wherever they were in
+ * OpenBot and the button has no page of its own to say it on.
+ *
+ * Opening is busy (`aria-busy`), not disabled: the click handler ignores a click while it opens, and the row keeps its
+ * full contrast and the keyboard's focus. The sidebar draws `aria-disabled` at half opacity, and the seventh end-to-end
+ * run found "Opening…" too faint to read that way.
+ *
+ * The refusal stays until the person closes it, as every error toast does (components/ui/toast.tsx), and goes once an
+ * open succeeds, because it is no longer true.
  */
 function OpenWindowButton({ recorder }: { recorder?: LauncherState }) {
   const open = useMutation(openBrowserMutationOptions(queryClient));
@@ -53,15 +62,15 @@ function OpenWindowButton({ recorder }: { recorder?: LauncherState }) {
   return (
     <SidebarMenuButton
       aria-busy={opening || undefined}
-      aria-disabled={opening || undefined}
       className={BUTTON_CLASS}
       onClick={() => {
         if (open.isPending) return;
         open.mutate(undefined, {
+          onSuccess: () => toast.close(REFUSED_TOAST),
           onError: (error) =>
             toast.add({
               // One at a time: a second refusal replaces the first rather than stacking under it.
-              id: "browser-open-refused",
+              id: REFUSED_TOAST,
               title: error.message,
               type: "error",
               priority: "high",

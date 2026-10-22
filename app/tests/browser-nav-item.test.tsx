@@ -281,7 +281,12 @@ test("on OpenBot Desktop the keyboard opens the window as a button does: Tab to 
   expect(visited).not.toContain("/browser");
 });
 
-test("while the window is opening the button says so and takes no further click, then is itself again", async () => {
+/** Whether the sidebar draws this row as disabled: its menu buttons are half opacity, and take no pointer, exactly when
+ * they are `:disabled` or `aria-disabled="true"` (components/ui/sidebar.tsx). */
+const drawnDisabled = (element: Element) =>
+  element.matches(":disabled, [aria-disabled='true']");
+
+test("while the window is opening the button says so, at full contrast, and takes no further click, then is itself again", async () => {
   let release = () => {};
   nextOpen = {
     held: new Promise<void>((resolve) => {
@@ -293,8 +298,9 @@ test("while the window is opening the button says so and takes no further click,
   const user = userEvent.setup({ document });
   await user.click(button);
   await waitFor(() => expect(button.getAttribute("aria-busy")).toBe("true"));
-  expect(button.getAttribute("aria-disabled")).toBe("true");
   expect(button.textContent).toBe("BrowserOpening…");
+  // Busy, not disabled: run 7 found "Opening…" too faint to read at the half opacity the sidebar gives a disabled row.
+  expect(drawnDisabled(button)).toBe(false);
   // Clicked again, and pressed from the keyboard, while it opens: still the one open.
   await user.click(button);
   button.focus();
@@ -305,12 +311,12 @@ test("while the window is opening the button says so and takes no further click,
 
   release();
   await waitFor(() => expect(button.getAttribute("aria-busy")).toBeNull());
-  expect(button.getAttribute("aria-disabled")).toBeNull();
+  expect(drawnDisabled(button)).toBe(false);
   expect(button.textContent).toBe("Browser");
   expect(opens()).toBe(1);
 });
 
-test("a refused open shows the server's own sentence in a toast, and the button can be pressed again", async () => {
+test("a refused open shows the server's own sentence in a toast that stays until the person closes it, and the button can be pressed again", async () => {
   nextOpen = { refuse: NOT_SET_UP };
   const { view, router } = draw();
   const button = await view.findByRole("button", { name: "Browser" });
@@ -325,6 +331,11 @@ test("a refused open shows the server's own sentence in a toast, and the button 
   expect(router.state.location.pathname).toBe("/");
   await waitFor(() => expect(button.getAttribute("aria-busy")).toBeNull());
 
+  // Still there well after the 5 seconds a toast lasts on its own: run 7 found it gone by itself, and somebody who
+  // looked away never learned why their browser did not open.
+  await act(() => Bun.sleep(6000));
+  expect(toasts()).toEqual([NOT_SET_UP]);
+
   // Refused twice: one toast saying it, not two.
   nextOpen = { refuse: NOT_SET_UP };
   await user.click(button);
@@ -332,11 +343,22 @@ test("a refused open shows the server's own sentence in a toast, and the button 
   await waitFor(() => expect(button.getAttribute("aria-busy")).toBeNull());
   expect(toasts()).toEqual([NOT_SET_UP]);
 
-  // A third try that opens says nothing more.
+  // A third try that opens says nothing more, and takes the refusal away, which is no longer true.
   await user.click(button);
   await waitFor(() => expect(state.open).toBe(true));
   expect(opens()).toBe(3);
-});
+  await waitFor(() => expect(toasts()).toEqual([]));
+
+  // And a refusal the person has read goes when they close it.
+  nextOpen = { refuse: NOT_SET_UP };
+  await user.click(button);
+  await waitFor(() => expect(toasts()).toEqual([NOT_SET_UP]));
+  const close = document.querySelector("[data-slot=toast-close]");
+  expect(close?.getAttribute("aria-label")).toBe("Close");
+  await user.click(close as HTMLElement);
+  await waitFor(() => expect(toasts()).toEqual([]));
+  expect(opens()).toBe(4);
+}, 15_000);
 
 test("on hosted OpenBot the Browser button is a link to the browser in the page, and the click opens nothing itself", async () => {
   state = closedState("screen");
