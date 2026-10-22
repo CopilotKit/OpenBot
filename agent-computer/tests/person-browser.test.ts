@@ -1116,12 +1116,17 @@ for (const variant of VARIANTS) {
 }
 
 /**
- * Opens that fail say why. The third end-to-end run: two opens answered 502, and neither the
- * computer's log nor the server's said why.
+ * Opens that arrive together, and opens that fail.
+ *
+ * Every open carries the connection OpenBot minted for it, and minting one revokes the one before:
+ * OpenBot holds one connection per browser. The third end-to-end run: the Browser page, loaded again
+ * while it was opening, sent a second open; the first open's connection, revoked by then, was handed
+ * to the Recorder, which refused it; the computer closed the browser it had just launched, under the
+ * second open too, and both answered 502. Neither the computer's log nor the server's said why.
  */
 for (const variant of VARIANTS) {
   describe.skipIf(!asked || !variant.available)(
-    `${variant.name}: opens that fail`,
+    `${variant.name}: opens that arrive together, and opens that fail`,
     () => {
       let root = "";
       let profiles: Profiles;
@@ -1133,6 +1138,11 @@ for (const variant of VARIANTS) {
           method: "POST",
           headers: { "x-openbot-bot-id": PERSON },
           body: JSON.stringify({ connection }),
+        });
+      const close = () =>
+        fetch(`http://127.0.0.1:${server.port}/browser/close`, {
+          method: "POST",
+          headers: { "x-openbot-bot-id": PERSON },
         });
       /** What the computer logged of `type` since the spy was last cleared. */
       const logged = (type: string) =>
@@ -1151,11 +1161,11 @@ for (const variant of VARIANTS) {
       });
 
       beforeAll(async () => {
-        root = await mkdtemp(join(tmpdir(), "openbot-person-failing-"));
+        root = await mkdtemp(join(tmpdir(), "openbot-person-together-"));
         const built = await harness(
           variant.runtime,
           root,
-          `failing-${variant.window}`,
+          `together-${variant.window}`,
         );
         profiles = built.profiles;
         server = serve(built.host);
@@ -1167,6 +1177,38 @@ for (const variant of VARIANTS) {
         server?.stop(true);
         await profiles?.closeAll();
         if (root) await rm(root, { recursive: true, force: true });
+      }, 60_000);
+
+      test("two opens at once both open the browser, and its Recorder holds the newer connection", async () => {
+        const first = connection("first");
+        const second = connection("second");
+        const from = calls.length;
+        const opening = openWith(first);
+        // The second open's connection is minted while the first is opening, which revokes the first's.
+        await wait(50);
+        revoked.add(first.token);
+        const answers = await Promise.all([opening, openWith(second)]);
+        expect(answers.map((answer) => answer.status)).toEqual([200, 200]);
+        const opened = (await answers[1]?.json()) as BrowserState;
+        expect(opened.open).toBe(true);
+        expect(opened.recorder).toMatchObject({
+          connected: true,
+          userId: "user-1",
+        });
+        // The Recorder was handed the newer connection, and never the revoked one.
+        const taken = calls
+          .slice(from)
+          .filter((call) => call.method === "connect")
+          .map(
+            (call) =>
+              (call.input as { connection: LauncherConnection }).connection
+                .token,
+          );
+        expect(taken.length).toBeGreaterThan(0);
+        expect(new Set(taken)).toEqual(new Set([second.token]));
+        expect(profiles.isLive(PERSON)).toBe(true);
+        expect(logged("computer-browser-open-failed")).toEqual([]);
+        await close();
       }, 60_000);
 
       test("an open whose connection OpenBot revoked says why and at which step, and closes the browser it launched", async () => {

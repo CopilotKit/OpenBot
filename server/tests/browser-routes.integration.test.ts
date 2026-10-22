@@ -106,6 +106,16 @@ let refuseNextDisconnect: { status: number } | { never: Promise<void> } | null =
   null;
 /** The window an open shows its browser in: a screen (hosted OpenBot) unless a test opens a native one (Desktop). */
 let openAs: "screen" | "native" = "screen";
+/**
+ * When a test says so, the Recorder takes a connection as the real one does (extension/src/background/launcher.ts): it
+ * asks OpenBot who the connection is for, `askMs` after it was handed it, and refuses one OpenBot answers is signed out,
+ * with its own sentence, which the computer answers as a Recorder that could not be connected.
+ */
+let confirmOpens: {
+  askMs: number;
+  /** OpenBot's status for `/api/recorder/me` with this token. */
+  me: (token: string) => Promise<number>;
+} | null = null;
 
 const recorderOf = (opened: Opened): LauncherState =>
   opened.state.recorder as LauncherState;
@@ -159,6 +169,17 @@ const computer = Bun.serve<{ bot: string }>({
         const parsed = browserOpenRequestSchema.safeParse(body);
         if (!parsed.success)
           return Response.json({ error: "Bad request." }, { status: 400 });
+        if (confirmOpens) {
+          await Bun.sleep(confirmOpens.askMs);
+          if ((await confirmOpens.me(parsed.data.connection.token)) === 401)
+            return Response.json(
+              {
+                error:
+                  "The Recorder could not be connected: OpenBot did not accept this browser's connection. Open the browser from OpenBot again.",
+              },
+              { status: 502 },
+            );
+        }
         const native = openAs === "native";
         const next: Opened = {
           connection: parsed.data.connection,
@@ -916,6 +937,50 @@ describe("opening a person's own browser", () => {
         error: sentence,
       },
     ]);
+  });
+
+  test("two opens at once both open the browser, and the Recorder is never handed a connection the other revoked", async () => {
+    // The third end-to-end run: the Browser page, loaded again while it was opening, sent a second open, whose connection
+    // revoked the first's before the Recorder took it. The Recorder refused it as signed out, and both opens failed.
+    confirmOpens = {
+      askMs: 200,
+      me: async (token) =>
+        (await call(openbot, "/api/recorder/me", { headers: bearer(token) }))
+          .status,
+    };
+    try {
+      const first = call(openbot, "/api/browser/open", {
+        method: "POST",
+        as: "ada",
+      });
+      await Bun.sleep(50);
+      const second = call(openbot, "/api/browser/open", {
+        method: "POST",
+        as: "ada",
+      });
+      const answers = await Promise.all([first, second]);
+      expect(
+        await Promise.all(
+          answers.map(async (answer) => ({
+            status: answer.status,
+            body: await answer.json(),
+          })),
+        ),
+      ).toEqual([
+        { status: 200, body: expect.objectContaining({ ok: true }) },
+        { status: 200, body: expect.objectContaining({ ok: true }) },
+      ]);
+    } finally {
+      confirmOpens = null;
+    }
+    // The connection the Recorder holds is the one that stands.
+    expect(
+      (
+        await call(openbot, "/api/recorder/me", {
+          headers: bearer(handed(ada.id).token),
+        })
+      ).status,
+    ).toBe(200);
   });
 
   test("each person reaches only their own browser", async () => {

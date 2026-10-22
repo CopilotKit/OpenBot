@@ -507,15 +507,46 @@ export function createBrowserRoutes(deps: BrowserRouteDeps) {
     cookie: context.req.header("cookie"),
   });
 
+  /** Each person's open in progress, which the next one waits for. */
+  const connecting = new Map<string, Promise<void>>();
+
   /**
    * Opens the person's browser, or brings it forward, with its Recorder connected as them: what Open does, and what
    * Record does first when the Recorder's connection has gone. Answers the browser's state, or what the person is told.
    *
-   * The connection is minted here and exchanged at once, as the Recorder's own exchange would: the same store, the same
-   * checks, the sealed organization session carried from this request. Its install id is the browser's, so this revokes
-   * the token the last one made, in the same transaction, rather than adding another.
+   * One at a time for each person. Each mints the browser a connection, which revokes the one the open before it minted,
+   * and the Recorder asks OpenBot whether its connection stands before it takes it. Two opens side by side (the Browser
+   * page loaded again while it was opening) handed the Recorder a connection the second had revoked already: it refused
+   * it, the computer closed the browser it had just launched, and both opens failed (agent-computer's browser-host.ts
+   * has the measurement). Waiting here, a connection is never revoked before the open that minted it has its answer. The
+   * computer takes turns as well, for opens that reach it through another of OpenBot's servers.
    */
   async function connect(
+    asker: Asker,
+  ): Promise<
+    { ok: true; state: BrowserState | null } | { ok: false; response: Response }
+  > {
+    const key = asker.actor.id;
+    const run = (connecting.get(key) ?? Promise.resolve()).then(() =>
+      connectNow(asker),
+    );
+    const settled = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    connecting.set(key, settled);
+    void settled.then(() => {
+      if (connecting.get(key) === settled) connecting.delete(key);
+    });
+    return run;
+  }
+
+  /**
+   * One open, `connect`'s turn. The connection is minted here and exchanged at once, as the Recorder's own exchange
+   * would: the same store, the same checks, the sealed organization session carried from this request. Its install id
+   * is the browser's, so this revokes the token the last one made, in the same transaction, rather than adding another.
+   */
+  async function connectNow(
     asker: Asker,
   ): Promise<
     { ok: true; state: BrowserState | null } | { ok: false; response: Response }
