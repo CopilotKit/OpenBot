@@ -130,6 +130,35 @@ describe("the network policy rules", () => {
     expect(egressDecision(policy, "2001:db8::1", 443).allowed).toBe(false);
   });
 
+  test("an IPv6 address is bracketed where a refusal names its port", () => {
+    // The run that found it: a person's hosted browser asked for http://[::1]:7555/ and read "This
+    // browser may not open ::1:7555.", which names no port anybody could tell apart.
+    const policy = { mode: "allowlist_only" as const, rules: [] };
+    expect(egressDecision(policy, "[::1]", 7555, [], "person").reason).toBe(
+      "This browser may not open [::1]:7555.",
+    );
+    expect(egressDecision(policy, "::1", 7555).reason).toBe(
+      "[::1]:7555 is not on this deployment's network allowlist.",
+    );
+    expect(
+      egressDecision(
+        {
+          mode: "allowlist_only",
+          rules: [{ type: "cidr", value: "fd00::/8" }],
+        },
+        "fd00::1",
+        443,
+      ).reason,
+    ).toBe("[fd00::1]:443 is inside an allowed range.");
+    // A name and an IPv4 address read as they always did.
+    expect(egressDecision(policy, "10.0.0.1", 80, [], "person").reason).toBe(
+      "This browser may not open 10.0.0.1:80.",
+    );
+    expect(egressDecision(policy, "db.internal", 5432, []).reason).toBe(
+      "db.internal:5432 is not on this deployment's network allowlist.",
+    );
+  });
+
   test("malformed rules are refused with a sentence, not stored", () => {
     expect(
       parseEgressRules([{ type: "domain", value: "not a domain" }]).ok,
@@ -221,12 +250,57 @@ describe("the filter proxy", () => {
     });
   }
 
-  test("the browser is pointed at the filter with the Bot in its credentials", async () => {
+  test("the browser is pointed at the filter's browser listener with the Bot in its credentials", async () => {
     const filter = await startEgressFilter({ env: {} });
     const proxy = egressFor("sales", {});
-    expect(proxy?.server).toBe(`http://127.0.0.1:${filter.port}`);
+    expect(proxy?.server).toBe(`http://127.0.0.1:${filter.browserPort}`);
+    expect(filter.browserPort).not.toBe(filter.port);
     expect(proxy?.username).toBe("sales");
     expect(proxy?.password?.length).toBeGreaterThan(10);
+  });
+
+  test("the browser listener asks for credentials, and judges each browser by its own policy alone", async () => {
+    // What makes a browser say whose it is: Chromium sends the proxy credentials it was launched with
+    // only when a 407 asks for them. The shell's listener asks nothing, as before.
+    const target = await origin();
+    const filter = await startEgressFilter({ env: {} });
+    const secret = egressFor("sales", {})?.password;
+    setEgressPolicy("sales", { mode: "allow_all", rules: [] });
+    setEgressPolicy("research", { mode: "deny_all", rules: [] });
+    const where = `127.0.0.1:${target.port}`;
+
+    expect(await connectThrough(filter.browserPort, where)).toContain("407");
+    expect(
+      await connectThrough(filter.browserPort, where, "sales", "wrong"),
+    ).toContain("407");
+    const plain = await new Promise<string>((resolve, reject) => {
+      const socket = connect(filter.browserPort, "127.0.0.1", () =>
+        socket.write(
+          `GET http://${where}/ HTTP/1.1\r\nHost: ${where}\r\nConnection: close\r\n\r\n`,
+        ),
+      );
+      let answer = "";
+      socket.on("data", (chunk) => {
+        answer += String(chunk);
+      });
+      socket.on("end", () => resolve(answer));
+      socket.on("error", reject);
+    });
+    expect(plain).toStartWith("HTTP/1.1 407");
+    expect(plain.toLowerCase()).toContain(
+      'proxy-authenticate: basic realm="openbot"',
+    );
+
+    // With them, a Bot allowed everything is not held to the other Bot's deny_all.
+    expect(
+      await connectThrough(filter.browserPort, where, "sales", secret),
+    ).toContain("200");
+    expect(
+      await connectThrough(filter.browserPort, where, "research", secret),
+    ).toContain("403");
+    // The shell's anonymous connection is still judged by every policy, strictest first.
+    expect(await connectThrough(filter.port, where)).toContain("403");
+    await target.close();
   });
 
   test("a pushed policy applies to the next connection, live", async () => {

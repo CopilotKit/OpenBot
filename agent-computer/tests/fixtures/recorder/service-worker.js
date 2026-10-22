@@ -14,6 +14,11 @@
  * rather than taking the computer's word for it.
  */
 const LAUNCHER_GLOBAL = "openbotLauncher";
+/**
+ * Which build of this script is running, sent with every call. A test copies the fixture, changes this
+ * line, and reads back which build answered, as a person's browser would run a Recorder rebuilt since.
+ */
+const BUILD = "fixture";
 
 async function held() {
   const stored = await chrome.storage.local.get([
@@ -83,6 +88,7 @@ async function report(method, input) {
       front: front?.url ?? "",
       microphone,
       setupOpened: now.setupOpened,
+      build: BUILD,
     }),
   });
 }
@@ -143,6 +149,18 @@ globalThis[LAUNCHER_GLOBAL] = {
     if (!now.recording)
       return { ok: false, error: "Nothing is being recorded." };
     await report("speaking", input);
+    return { ok: true };
+  },
+  async disconnect() {
+    const now = await held();
+    // Said while it still knows where to say it, then forgotten. A recording ends as a sign-out ends
+    // one: stopped, with nothing kept as the last one Stop ended.
+    await report("disconnect", undefined);
+    if (now.recording)
+      await chrome.debugger
+        .detach({ tabId: now.recording.tabId })
+        .catch(() => undefined);
+    await chrome.storage.local.set({ connection: null, recording: null });
     return { ok: true };
   },
   async state() {

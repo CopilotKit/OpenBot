@@ -1,5 +1,14 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
+import {
+  cp,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Page } from "playwright";
@@ -7,6 +16,7 @@ import type {
   BrowserState,
   LauncherConnection,
 } from "../../shared/openbot-browser";
+import { RECORDER_EXTENSION_ID } from "../../shared/recorder-extension";
 import type { BrowserRuntime } from "../src/browser-runtime";
 import type { BrowserHost } from "../src/browser-host";
 import {
@@ -41,6 +51,7 @@ const asked = process.env.OPENBOT_COMPUTER_BROWSER === "1";
 
 const FIXTURE = join(import.meta.dir, "fixtures", "recorder");
 const REPO = join(import.meta.dir, "..", "..");
+const OTHER_PINNED = "ghbmnnjooekpmoecnnnilnnbdlolhkhi";
 const PERSON = "person-0123456789abcdef0123456789abcdef";
 
 type FixtureCall = {
@@ -50,6 +61,8 @@ type FixtureCall = {
   front: string;
   microphone: string;
   setupOpened: boolean;
+  /** Which build of the fixture's worker script answered. */
+  build: string;
 };
 
 const calls: FixtureCall[] = [];
@@ -65,6 +78,9 @@ const openbot = asked
           calls.push((await request.json()) as FixtureCall);
           return new Response("");
         }
+        // What a browser sent, for comparing what two browsers say about themselves.
+        if (url.pathname === "/headers")
+          return Response.json(Object.fromEntries(request.headers));
         if (url.pathname === "/report.txt")
           return new Response("the person's file", {
             headers: {
@@ -261,6 +277,16 @@ for (const variant of VARIANTS) {
           download: {
             default_directory: downloads,
             prompt_for_download: false,
+          },
+          // Pinned once per earlier launch, as the end-to-end run's desktop profile was, beside
+          // another extension's pin.
+          extensions: {
+            pinned_extensions: [
+              RECORDER_EXTENSION_ID,
+              OTHER_PINNED,
+              RECORDER_EXTENSION_ID,
+              RECORDER_EXTENSION_ID,
+            ],
           },
         }),
       );
@@ -470,6 +496,31 @@ for (const variant of VARIANTS) {
       expect(activeTab(await state())?.url).toBe(`${ORIGIN}/page/three`);
     }, 60_000);
 
+    test("a tab whose page did not load names the address that failed", async () => {
+      // The run that found it: the hosted address bar showed chrome-error://chromewebdata/, the error
+      // page's own address, rather than what the person typed.
+      const before = activeTab(await state());
+      const blank = activeTab(
+        (await api("/browser/tabs", { action: "new" })).json as BrowserState,
+      );
+      if (!before || !blank) throw new Error("Both tabs should be listed.");
+      const port = await closedPort();
+      const failed = `http://127.0.0.1:${port}/`;
+      expect((await api("/browser/navigate", { url: failed })).status).toBe(
+        502,
+      );
+      // Asked straight after the failure, as the app asks.
+      expect(activeTab(await state())?.url).toBe(failed);
+      // Reloading it is said about that address too.
+      expect(await api("/browser/navigate", { action: "reload" })).toEqual({
+        status: 502,
+        json: { error: `127.0.0.1:${port} refused the connection.` },
+      });
+      expect(activeTab(await state())?.url).toBe(failed);
+      await api("/browser/tabs", { action: "close", tabId: blank.id });
+      await api("/browser/tabs", { action: "activate", tabId: before.id });
+    }, 60_000);
+
     test("records and narrates through the Recorder", async () => {
       const started = await api("/browser/recording", {
         action: "start",
@@ -549,6 +600,30 @@ for (const variant of VARIANTS) {
       const again = await api("/browser/recording", { action: "stop" });
       expect(again.status).toBe(409);
       expect(again.json.error).toBe("Nothing is being recorded.");
+    }, 60_000);
+
+    test("disconnecting makes the Recorder forget its connection now, recording or not", async () => {
+      const started = await api("/browser/recording", {
+        action: "start",
+        title: "Disconnected part way",
+      });
+      expect(started.status).toBe(200);
+      const disconnected = await api("/browser/disconnect", {});
+      expect(disconnected.status).toBe(200);
+      const after = disconnected.json as BrowserState;
+      expect(after.open).toBe(true);
+      expect(after.tabs.length).toBeGreaterThan(0);
+      // The Recorder's own report: signed out, and the recording ended with it.
+      expect(after.recorder).toMatchObject({ connected: false, phase: "idle" });
+      expect(after.recorder?.userId).toBeUndefined();
+      expect(callsFor("disconnect")).toHaveLength(1);
+      // Asked again it is still signed out, and saying so twice is no error.
+      expect((await api("/browser/disconnect", {})).status).toBe(200);
+      expect((await state()).recorder?.connected).toBe(false);
+
+      // The next open connects it again with what OpenBot hands it then.
+      const reopened = await api("/browser/open", { connection: CONNECTION });
+      expect((reopened.json as BrowserState).recorder?.connected).toBe(true);
     }, 60_000);
 
     test.skipIf(variant.window !== "screen")(
@@ -741,6 +816,60 @@ for (const variant of VARIANTS) {
       60_000,
     );
 
+    test.skipIf(variant.window !== "screen")(
+      "says exactly what a hosted Bot's browser says about itself",
+      async () => {
+        // The run that found it: Google showed the hosted person's browser its "unusual traffic"
+        // check and refused it sign-in, from an address where Chrome was fine, and it had sent
+        // HeadlessChrome/151 in its user agent where a Bot's browser beside it sent Chrome/151.
+        const person = profiles.person(PERSON);
+        if (!person) throw new Error("The browser should be open.");
+        const said = async (page: Page) => {
+          await page.goto(`${ORIGIN}/headers`);
+          const headers = JSON.parse(
+            await page.evaluate(() => document.body.innerText),
+          ) as Record<string, string>;
+          const script = await page.evaluate(() => ({
+            userAgent: navigator.userAgent,
+            brands: (
+              navigator as Navigator & {
+                userAgentData?: { brands: { brand: string }[] };
+              }
+            ).userAgentData?.brands.map((brand) => brand.brand),
+          }));
+          return {
+            wire: {
+              "user-agent": headers["user-agent"],
+              "sec-ch-ua": headers["sec-ch-ua"],
+              "sec-ch-ua-mobile": headers["sec-ch-ua-mobile"],
+              "sec-ch-ua-platform": headers["sec-ch-ua-platform"],
+            },
+            script,
+          };
+        };
+        const tab = activeTab(
+          (await api("/browser/tabs", { action: "new" })).json as BrowserState,
+        );
+        const persons = await said(person.active());
+        const bots = await said(await profiles.page("bot-identity"));
+        try {
+          expect(persons).toEqual(bots);
+          expect(persons.wire["user-agent"]).toContain("Chrome/");
+          expect(persons.wire["user-agent"]).not.toContain("HeadlessChrome");
+          expect(persons.wire["sec-ch-ua"] ?? "").not.toContain(
+            "HeadlessChrome",
+          );
+          expect(persons.script.userAgent).not.toContain("HeadlessChrome");
+          expect(persons.script.brands ?? []).not.toContain("HeadlessChrome");
+        } finally {
+          await profiles.stop("bot-identity");
+          if (tab)
+            await api("/browser/tabs", { action: "close", tabId: tab.id });
+        }
+      },
+      60_000,
+    );
+
     test("closes, opens nothing until asked, and opens again with the Recorder", async () => {
       expect(await api("/browser/close", {})).toEqual({
         status: 200,
@@ -752,6 +881,12 @@ for (const variant of VARIANTS) {
       );
       // Nothing but an open starts it: the live screen asking for its page finds it closed.
       await expect(profiles.page(PERSON)).rejects.toThrow("not open");
+      expect(profiles.isLive(PERSON)).toBe(false);
+      // Nor does a disconnect: a closed browser answers that it is closed and stays closed.
+      expect(await api("/browser/disconnect", {})).toEqual({
+        status: 200,
+        json: { open: false, tabs: [] },
+      });
       expect(profiles.isLive(PERSON)).toBe(false);
 
       // Loaded again at the next launch, which a DevTools load needs, and still connected.
@@ -805,7 +940,118 @@ for (const variant of VARIANTS) {
       );
       expect(profiles.isLive(PERSON)).toBe(false);
     }, 30_000);
+
+    test("after several launches the Recorder is pinned once at most, and other pins stay", async () => {
+      // Written by the browser as it closed, so read once it has finished writing.
+      const pinned = await until(async () => {
+        const preferences = JSON.parse(
+          await readFile(join(root, PERSON, "Default", "Preferences"), "utf8"),
+        ) as { extensions?: { pinned_extensions?: string[] } };
+        return preferences.extensions?.pinned_extensions;
+      }, "the profile's pins");
+      expect(
+        pinned.filter((id) => id === RECORDER_EXTENSION_ID).length,
+      ).toBeLessThanOrEqual(1);
+      expect(pinned).toContain(OTHER_PINNED);
+    }, 30_000);
   });
+}
+
+/**
+ * A Recorder rebuilt since the profile last ran one. The browser kept the worker it registered first,
+ * with its script cached in the profile, and ran it at every later launch, so no Recorder fix reached
+ * a browser that had run an earlier Recorder. Build A runs, the browser closes, build B (one line
+ * different) is put where A was, and the same profile opens again: B is what answers, and a third
+ * launch of an unchanged B reloads nothing.
+ */
+for (const variant of VARIANTS) {
+  describe.skipIf(!asked || !variant.available)(
+    `${variant.name}: a Recorder rebuilt since the profile last ran it`,
+    () => {
+      let root = "";
+      let profiles: Profiles | undefined;
+      let server: ReturnType<typeof Bun.serve> | undefined;
+
+      afterAll(async () => {
+        server?.stop(true);
+        await profiles?.closeAll();
+        if (root) await rm(root, { recursive: true, force: true });
+      }, 60_000);
+
+      test("runs at the next launch of the same profile", async () => {
+        root = await mkdtemp(join(tmpdir(), "openbot-person-rebuilt-"));
+        const recorder = join(root, "recorder");
+        await cp(FIXTURE, recorder, { recursive: true });
+        const worker = join(recorder, "service-worker.js");
+        const fixture = await readFile(worker, "utf8");
+        const build = (name: string) =>
+          writeFile(
+            worker,
+            fixture.replace(
+              'const BUILD = "fixture";',
+              `const BUILD = "${name}";`,
+            ),
+          );
+
+        const { createProfiles } = (await import(
+          `../src/profiles?rebuilt=${variant.window}`
+        )) as typeof import("../src/profiles");
+        const { createBrowserHost } = await import("../src/browser-host");
+        profiles = createProfiles(join(root, "profiles"), () => undefined, {
+          runtime: variant.runtime,
+        });
+        opened.push(profiles);
+        const routes = serve(
+          createBrowserHost({
+            profiles,
+            recorderDir: () => recorder,
+            navigationTimeoutMs: 15_000,
+          }),
+        );
+        server = routes;
+        const said = spyOn(console, "info");
+        const reloads = () =>
+          said.mock.calls.filter(([line]) =>
+            String(line).includes("computer-recorder-reloaded"),
+          ).length;
+        const openAndClose = async () => {
+          const from = calls.length;
+          const opening = await fetch(
+            `http://127.0.0.1:${routes.port}/browser/open`,
+            {
+              method: "POST",
+              headers: { "x-openbot-bot-id": PERSON },
+              body: JSON.stringify({ connection: CONNECTION }),
+            },
+          );
+          expect(opening.status).toBe(200);
+          const connect = calls
+            .slice(from)
+            .find((call) => call.method === "connect");
+          await fetch(`http://127.0.0.1:${routes.port}/browser/close`, {
+            method: "POST",
+            headers: { "x-openbot-bot-id": PERSON },
+          });
+          return connect?.build;
+        };
+        try {
+          await build("A");
+          expect(await openAndClose()).toBe("A");
+          expect(reloads()).toBe(0);
+
+          await build("B");
+          expect(await openAndClose()).toBe("B");
+          expect(reloads()).toBe(1);
+
+          // Current now, so the next launch leaves its worker alone.
+          expect(await openAndClose()).toBe("B");
+          expect(reloads()).toBe(1);
+        } finally {
+          said.mockRestore();
+        }
+      }, 120_000);
+    },
+  );
 }
 
 describe.skipIf(!asked)("among Bots' browsers on one computer", () => {

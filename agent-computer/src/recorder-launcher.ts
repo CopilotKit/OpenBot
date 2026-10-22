@@ -56,11 +56,21 @@ type Pending = {
 
 type TargetInfo = { targetId: string; type: string; url: string };
 
+/** A DevTools event from inside the worker. */
+type WorkerEvent = { method?: string; params?: unknown };
+
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const WORKER_STOPPED = "The Recorder's worker stopped mid-call.";
 
-export type RecorderLauncher = LauncherApi;
+export type RecorderLauncher = LauncherApi & {
+  /**
+   * The source of the script the Recorder's worker is running now, as its JavaScript engine parsed
+   * it, or undefined when the worker reports no script at `url`. See `keepRecorderCurrent` in
+   * `person-browser.ts` for why it is asked.
+   */
+  workerSource(url: string): Promise<string | undefined>;
+};
 
 export function createRecorderLauncher(input: {
   /** A browser-level session (`browser.newBrowserCDPSession()`), which alone can reach the worker. */
@@ -74,11 +84,14 @@ export function createRecorderLauncher(input: {
   let attaching: Promise<string> | undefined;
   let nextId = 0;
   const pending = new Map<number, Pending>();
+  const listeners = new Set<(event: WorkerEvent) => void>();
 
   session.on("Target.receivedMessageFromTarget", (event) => {
     if (event.sessionId !== attached?.sessionId) return;
     let message: {
       id?: number;
+      method?: string;
+      params?: unknown;
       result?: unknown;
       error?: { message?: string };
     };
@@ -87,7 +100,11 @@ export function createRecorderLauncher(input: {
     } catch {
       return;
     }
-    if (message.id === undefined) return;
+    if (message.id === undefined) {
+      // An event, which only a caller that asked for one listens to.
+      for (const listener of listeners) listener(message);
+      return;
+    }
     const waiting = pending.get(message.id);
     if (!waiting) return;
     pending.delete(message.id);
@@ -201,26 +218,42 @@ export function createRecorderLauncher(input: {
     return attaching;
   };
 
+  /*
+   * One message to the worker and its answer, within `timeoutMs` from start to finish: finding and
+   * attaching to the worker, handing the message over, and the answer.
+   *
+   * NOTHING HERE MAY REJECT WITH NOBODY LISTENING. The timer used to start before the message was
+   * handed over and was raced only after, so a browser slow to take the message fired it with
+   * nothing awaiting it: an unhandled rejection, which ends a Bun process, and with it every
+   * browser on this computer. Seen on a hosted computer while the Recorder recorded a burst of
+   * input, when handing over a 2 s readiness check took longer than 2 s. So the whole exchange is
+   * raced against the timer from the start, and the answer, which a stopped worker can reject while
+   * the message is still being handed over, is marked as handled the moment it exists. Neither can
+   * reject unheard, and the call ends in an answer or a refusal, never in the process ending.
+   */
   const send = async (
     method: string,
     params: Record<string, unknown>,
     timeoutMs: number,
   ): Promise<unknown> => {
-    const target = await sessionId();
     const id = ++nextId;
-    const answer = new Promise<unknown>((resolve, reject) => {
-      pending.set(id, { resolve, reject });
-    });
+    let over = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const late = new Promise<never>((_, reject) => {
       timer = setTimeout(() => {
-        pending.delete(id);
         reject(
           new RecorderUnavailableError("The Recorder did not answer in time."),
         );
       }, timeoutMs);
     });
-    try {
+    const exchange = async (): Promise<unknown> => {
+      const target = await sessionId();
+      // A call that has already been refused sends nothing: its answer would have nowhere to go.
+      if (over) throw new RecorderUnavailableError(WORKER_STOPPED);
+      const answer = new Promise<unknown>((resolve, reject) => {
+        pending.set(id, { resolve, reject });
+      });
+      answer.catch(() => undefined);
       try {
         await session.send("Target.sendMessageToTarget", {
           sessionId: target,
@@ -231,8 +264,12 @@ export function createRecorderLauncher(input: {
         if (attached?.sessionId === target) drop();
         throw new RecorderUnavailableError(WORKER_STOPPED);
       }
-      return await Promise.race([answer, late]);
+      return answer;
+    };
+    try {
+      return await Promise.race([exchange(), late]);
     } finally {
+      over = true;
       clearTimeout(timer);
       pending.delete(id);
     }
@@ -331,6 +368,39 @@ export function createRecorderLauncher(input: {
     },
     async speaking(argument) {
       return result(await call("speaking", argument));
+    },
+    async disconnect() {
+      return result(await call("disconnect"));
+    },
+    /*
+     * Read through the worker's own debugger: enabling it reports every script the worker has parsed,
+     * each before the answer to the enable, and the source of the one asked for is then read by its
+     * id. After `ready`, so the worker's script has run and is among them.
+     */
+    async workerSource(url) {
+      await ready();
+      const parsed = new Map<string, string>();
+      const listener = (event: WorkerEvent) => {
+        if (event.method !== "Debugger.scriptParsed") return;
+        const script = event.params as { scriptId?: string; url?: string };
+        if (script.url && script.scriptId)
+          parsed.set(script.url, script.scriptId);
+      };
+      listeners.add(listener);
+      try {
+        await send("Debugger.enable", {}, CALL_MS);
+        const scriptId = parsed.get(url);
+        if (!scriptId) return undefined;
+        const { scriptSource } = (await send(
+          "Debugger.getScriptSource",
+          { scriptId },
+          CALL_MS,
+        )) as { scriptSource?: string };
+        return scriptSource;
+      } finally {
+        listeners.delete(listener);
+        await send("Debugger.disable", {}, CALL_MS).catch(() => undefined);
+      }
     },
     async state() {
       const value = await call("state", undefined, 5_000);

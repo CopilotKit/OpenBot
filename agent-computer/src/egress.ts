@@ -53,11 +53,13 @@ export function egressFor(
   /*
    * While the network-policy filter runs, every Bot's browser goes through it, and it carries the
    * Bot in the proxy credentials so one filter can hold a policy per Bot. The filter chains to the
-   * configured upstream itself, so the per-Bot address the far side sees is unchanged.
+   * configured upstream itself, so the per-Bot address the far side sees is unchanged. A browser is
+   * pointed at the filter's browser listener, which asks for those credentials (see
+   * `startEgressFilter`), so every connection it makes says whose browser it is.
    */
   if (filter) {
     return {
-      server: `http://127.0.0.1:${filter.port}`,
+      server: `http://127.0.0.1:${filter.browserPort}`,
       username: botId,
       password: filter.secret,
     };
@@ -472,6 +474,14 @@ const REFUSALS = {
 } as const;
 
 /**
+ * A host and port as a person reads them: an IPv6 address in brackets, as in a URL, since `::1:7555`
+ * cannot be told apart from an address that ends in `7555`.
+ */
+function hostPort(host: string, port: number): string {
+  return `${isIP(host) === 6 ? `[${host}]` : host}:${port}`;
+}
+
+/**
  * May this connection go out?
  *
  * `resolved` is what the host name resolved to, when the caller resolved it. A domain rule matches a
@@ -529,12 +539,12 @@ export function egressDecision(
   ) {
     return {
       allowed: true,
-      reason: `${host}:${port} is inside an allowed range.`,
+      reason: `${hostPort(host, port)} is inside an allowed range.`,
     };
   }
   return {
     allowed: false,
-    reason: REFUSALS.notAllowed[audience](`${host}:${port}`),
+    reason: REFUSALS.notAllowed[audience](hostPort(host, port)),
   };
 }
 
@@ -550,7 +560,14 @@ export function needsResolution(policy: EgressPolicy, host: string): boolean {
 
 /* --------------------------------- the filter on the computer --------------------------------- */
 
-type RunningFilter = { port: number; secret: string; server: Server };
+type RunningFilter = {
+  /** The shell's listener, which takes a connection without credentials. */
+  port: number;
+  /** The browsers' listener, which takes none without them. */
+  browserPort: number;
+  secret: string;
+  servers: Server[];
+};
 let filter: RunningFilter | null = null;
 const policies = new Map<string, EgressPolicy>();
 let policyRequired = true;
@@ -578,12 +595,13 @@ export function egressPolicyFor(botId: string): EgressPolicy | undefined {
 /**
  * Which policies judge a connection.
  *
- * A connection carrying a Bot in its proxy credentials is judged by that Bot's policy. One without
- * (a shell command, whose proxy variable has no credentials in it) is judged by the only policy on
- * this computer when there is one, and otherwise by every policy at once, so the most restrictive
- * wins. Nothing pushed yet refuses: the API server pushes a computer its policy before it acts and
- * whenever the computer wakes, so a refusal here is only ever the gap before that push.
- * EGRESS_POLICY_REQUIRED=0 lets a computer run with no API server pushing to it at all.
+ * A connection carrying a Bot in its proxy credentials is judged by that Bot's policy alone, and
+ * every browser's does: its listener asks for them. One without (a shell command, whose proxy
+ * variable has no credentials in it) is judged by the only policy on this computer when there is
+ * one, and otherwise by every policy at once, so the most restrictive wins. Nothing pushed yet
+ * refuses: the API server pushes a computer its policy before it acts and whenever the computer
+ * wakes, so a refusal here is only ever the gap before that push. EGRESS_POLICY_REQUIRED=0 lets a
+ * computer run with no API server pushing to it at all.
  */
 function policiesFor(
   botId: string | undefined,
@@ -601,11 +619,9 @@ function policiesFor(
  * Who a refusal is worded for: the credentials' owner when there are some, else the owners of the
  * policies judging the connection when they are all people's browsers or all Bots, else anyone.
  *
- * Mostly the second. Chromium sends a proxy its credentials only after the proxy asks for them with
- * a 407, and this filter never asks, so a browser's connections arrive here without the Bot in them
- * (measured with Playwright 1.62.1's Chromium) and are judged by every policy on the computer, as a
- * shell command's are. On a computer that runs one person's browser, that is the person's policy
- * alone; on one shared with Bots it could be anybody, and is said so.
+ * A browser's connection has its owner in it (see `startEgressFilter`), so the rest is for one
+ * without: a shell command's, judged by every policy on the computer, which on one shared by Bots
+ * and a person could be anybody's, and is said so.
  */
 function audienceFor(
   botId: string | undefined,
@@ -816,6 +832,17 @@ function refuse(socket: Socket, reason: string) {
   );
 }
 
+/**
+ * The answer a browser's listener gives a connection without its credentials: a 407, the one thing
+ * that makes Chromium send the proxy credentials it was launched with. It sends them only when asked,
+ * never first (`HttpAuthController`, which then keeps them for this proxy and sends them up front on
+ * every later connection from the same profile, WebSockets included). Closed rather than kept, so
+ * the browser asks again on a fresh connection, which it does.
+ * https://www.rfc-editor.org/rfc/rfc9110#name-407-proxy-authentication-re
+ */
+const PROXY_CHALLENGE =
+  'HTTP/1.1 407 Proxy Authentication Required\r\nproxy-authenticate: Basic realm="OpenBot"\r\ncontent-type: text/plain\r\nconnection: close\r\ncontent-length: 0\r\n\r\n';
+
 /** Open a tunnel to host:port, through the upstream proxy when there is one. */
 function tunnel(
   target: { host: string; port: number; addresses?: readonly string[] },
@@ -894,7 +921,14 @@ export function egressShellEnvironment(): Record<string, string> {
  */
 export async function startEgressFilter(
   options: EgressFilterOptions = {},
-): Promise<{ port: number; url: string; stop: () => Promise<void> }> {
+): Promise<{
+  /** The shell's listener. */
+  port: number;
+  /** The browsers' listener, which `egressFor` points a browser at. */
+  browserPort: number;
+  url: string;
+  stop: () => Promise<void>;
+}> {
   const env = options.env ?? process.env;
   policyRequired = !(
     env.EGRESS_POLICY_REQUIRED === "0" || env.EGRESS_POLICY_REQUIRED === "false"
@@ -902,13 +936,41 @@ export async function startEgressFilter(
   if (filter) {
     return {
       port: filter.port,
+      browserPort: filter.browserPort,
       url: `http://127.0.0.1:${filter.port}`,
       stop: stopEgressFilter,
     };
   }
   const secret = randomBytes(24).toString("base64url");
 
-  const server = createServer(async (request, response) => {
+  /*
+   * TWO LISTENERS, ONE FOR BROWSERS. A browser's connection carries its owner only if the proxy asks
+   * for it, and this filter used to ask nobody, so every browser's connections arrived anonymous and
+   * were judged by every policy on the computer, strictest first: on a computer shared by Bots, or by
+   * a Bot and a person's browser, a Bot allowed to reach an internal service was refused because
+   * another browser on the computer was not. The browsers' listener therefore asks every connection
+   * for its credentials, and each browser's connections are judged by its own policy alone. The
+   * shell's commands keep a listener of their own that asks for nothing, judged as before: their
+   * proxy variable has no credentials in it, and must not, since any command could read them.
+   */
+  const listener = (asks: boolean) => {
+    const server = createServer(async (request, response) => {
+      await handlePlain(request, response, asks);
+    });
+    server.on(
+      "connect",
+      async (request: IncomingMessage, client: Socket, head: Buffer) => {
+        await handleConnect(request, client, head, asks);
+      },
+    );
+    return server;
+  };
+
+  const handlePlain = async (
+    request: IncomingMessage,
+    response: import("node:http").ServerResponse,
+    asks: boolean,
+  ) => {
     // A plain-HTTP request through a proxy names the absolute URL.
     let target: URL;
     try {
@@ -921,6 +983,16 @@ export async function startEgressFilter(
       request.headers["proxy-authorization"] as string | undefined,
       secret,
     );
+    if (asks && !botId) {
+      response
+        .writeHead(407, {
+          "proxy-authenticate": 'Basic realm="OpenBot"',
+          "content-type": "text/plain",
+          connection: "close",
+        })
+        .end();
+      return;
+    }
     const port = Number(
       target.port || (target.protocol === "https:" ? 443 : 80),
     );
@@ -936,60 +1008,75 @@ export async function startEgressFilter(
       return;
     }
     forwardPlain(request, response, target, upstream, decision.addresses);
-  });
+  };
 
-  server.on(
-    "connect",
-    async (request: IncomingMessage, client: Socket, head: Buffer) => {
-      const [host = "", portText = "443"] = splitHostPort(request.url ?? "");
-      const port = Number(portText);
-      const botId = botFromProxyAuthorization(
-        request.headers["proxy-authorization"] as string | undefined,
-        secret,
-      );
-      client.on("error", () => undefined);
-      if (!host || !Number.isInteger(port) || port < 1 || port > 65535) {
-        refuse(client, "A CONNECT names host:port.");
-        return;
-      }
-      const upstream = upstreamFor(botId ?? "", env);
-      const decision = await decide(botId, host, port, !upstream);
-      if (!decision.allowed) {
-        refuse(client, decision.reason);
-        return;
-      }
-      tunnel(
-        {
-          host,
-          port,
-          ...(upstream ? {} : { addresses: decision.addresses }),
-        },
-        upstream,
-        (remote) => {
-          client.write("HTTP/1.1 200 Connection Established\r\n\r\n");
-          if (head.length > 0) remote.write(head);
-          remote.pipe(client);
-          client.pipe(remote);
-          remote.on("error", () => client.destroy());
-        },
-        () => {
-          client.end("HTTP/1.1 502 Bad Gateway\r\n\r\n");
-        },
-      );
-    },
-  );
+  const handleConnect = async (
+    request: IncomingMessage,
+    client: Socket,
+    head: Buffer,
+    asks: boolean,
+  ) => {
+    const [host = "", portText = "443"] = splitHostPort(request.url ?? "");
+    const port = Number(portText);
+    const botId = botFromProxyAuthorization(
+      request.headers["proxy-authorization"] as string | undefined,
+      secret,
+    );
+    client.on("error", () => undefined);
+    if (asks && !botId) {
+      client.end(PROXY_CHALLENGE);
+      return;
+    }
+    if (!host || !Number.isInteger(port) || port < 1 || port > 65535) {
+      refuse(client, "A CONNECT names host:port.");
+      return;
+    }
+    const upstream = upstreamFor(botId ?? "", env);
+    const decision = await decide(botId, host, port, !upstream);
+    if (!decision.allowed) {
+      refuse(client, decision.reason);
+      return;
+    }
+    tunnel(
+      {
+        host,
+        port,
+        ...(upstream ? {} : { addresses: decision.addresses }),
+      },
+      upstream,
+      (remote) => {
+        client.write("HTTP/1.1 200 Connection Established\r\n\r\n");
+        if (head.length > 0) remote.write(head);
+        remote.pipe(client);
+        client.pipe(remote);
+        remote.on("error", () => client.destroy());
+      },
+      () => {
+        client.end("HTTP/1.1 502 Bad Gateway\r\n\r\n");
+      },
+    );
+  };
 
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(options.port ?? 0, "127.0.0.1", () => resolve());
+  const listen = async (server: Server, port: number): Promise<number> => {
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(port, "127.0.0.1", () => resolve());
+    });
+    const address = server.address();
+    return typeof address === "object" && address ? address.port : 0;
+  };
+  const shell = listener(false);
+  const browsers = listener(true);
+  const port = await listen(shell, options.port ?? 0);
+  const browserPort = await listen(browsers, 0).catch(async (error) => {
+    await new Promise<void>((resolve) => shell.close(() => resolve()));
+    throw error;
   });
-  const address = server.address();
-  const port = typeof address === "object" && address ? address.port : 0;
-  filter = { port, secret, server };
+  filter = { port, browserPort, secret, servers: [shell, browsers] };
 
   const url = `http://127.0.0.1:${port}`;
   if (options.forShell) shellProxy = url;
-  return { port, url, stop: stopEgressFilter };
+  return { port, browserPort, url, stop: stopEgressFilter };
 }
 
 export async function stopEgressFilter(): Promise<void> {
@@ -998,7 +1085,12 @@ export async function stopEgressFilter(): Promise<void> {
   shellProxy = null;
   policies.clear();
   if (running) {
-    await new Promise<void>((resolve) => running.server.close(() => resolve()));
+    await Promise.all(
+      running.servers.map(
+        (server) =>
+          new Promise<void>((resolve) => server.close(() => resolve())),
+      ),
+    );
   }
 }
 

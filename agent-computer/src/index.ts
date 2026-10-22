@@ -1,7 +1,7 @@
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { setDefaultAutoSelectFamily } from "node:net";
 import { join } from "node:path";
-import { serve } from "bun";
+import { type ServerWebSocket, serve } from "bun";
 import type { Page } from "playwright";
 import { downloadHeaders } from "../../shared/file-download";
 import {
@@ -581,7 +581,109 @@ const SCREEN_NO_LONGER_LIVE =
 const FOLLOW_INTERVAL_MS = 1_000;
 
 /** What a live-screen socket carries: the Bot whose screen it is showing. */
-type StreamData = { botId: string; recordingId?: string };
+type StreamData = {
+  botId: string;
+  recordingId?: string;
+  /** The person's input so far, applied one message after another. */
+  inputs?: Promise<void>;
+};
+
+/**
+ * Apply one thing the person did on the live screen, after asking whether the screen is theirs and
+ * whether they may drive. See the socket's `message` below for why one at a time.
+ */
+async function applyInput(
+  ws: ServerWebSocket<StreamData>,
+  raw: string | Buffer,
+): Promise<void> {
+  const session = sessions.for(ws.data.botId);
+  /*
+   * Whose screen this is, asked before anything is done with the input.
+   *
+   * A superseded socket used to dispatch through whatever the session held, so a replaced
+   * window's typing landed in the page the current viewer was watching. It heard nothing about
+   * it either, because the old missing-viewer check returned before reaching anything that could
+   * report, which is why this answers the sender rather than returning quietly.
+   *
+   * Starting and gone are told apart deliberately. Both own no cast, and answering them the same
+   * way tells somebody whose screen is still opening that their session ended.
+   */
+  const standing = session.viewer.standingOf(ws);
+  if (standing.state !== "casting") {
+    ws.send(
+      JSON.stringify({
+        type: "error",
+        error:
+          standing.state === "starting"
+            ? SCREEN_STILL_STARTING
+            : SCREEN_NO_LONGER_LIVE,
+      }),
+    );
+    return;
+  }
+  let message: InputMessage;
+  try {
+    const parsed: unknown = JSON.parse(String(raw));
+    const validated = parseInputMessage(parsed);
+    if (!validated.ok) {
+      ws.send(JSON.stringify({ type: "error", error: validated.error }));
+      return;
+    }
+    message = validated.message;
+  } catch {
+    // The validated-but-wrong branch above sends an error frame; unparseable input used to
+    // be dropped silently, so a buggy surface saw input "ignored" with no diagnostic.
+    ws.send(JSON.stringify({ type: "error", error: "Input is not JSON." }));
+    return;
+  }
+  // A person's input is accepted only while they hold the wheel. The socket being open is not permission:
+  // without this check, anything that could reach this port could drive the browser while a Bot
+  // was working, which is the one thing the control state exists to prevent.
+  //
+  // Owning the screen is not permission either, which is why this stands after the ownership
+  // question above and not instead of it: the two refuse different things, and the one asked
+  // first only decides whether the input has anywhere to land.
+  //
+  // Refuse with an error so the surface can explain why input is ignored.
+  //
+  // A person's own browser needs no handover: nobody else works in it, so it starts, and stays,
+  // with the person holding the wheel.
+  if (!isPersonBrowserId(ws.data.botId) && !session.control.humanMayDrive()) {
+    ws.send(JSON.stringify({ type: "error", error: TAKE_CONTROL_FIRST }));
+    return;
+  }
+  session.humanInputs += 1;
+  try {
+    const recorded = ws.data.recordingId
+      ? await describeHumanGesture(await currentPage(ws.data.botId), message)
+      : null;
+    await standing.cast.send(message);
+    if (recorded)
+      ws.send(
+        JSON.stringify({
+          type: "demonstration.action",
+          recordingId: ws.data.recordingId,
+          action: recorded,
+        }),
+      );
+  } catch (error) {
+    // Reported rather than swallowed. A dispatch that fails means the person's input did nothing,
+    // and they must not be left believing it landed.
+    console.error(
+      JSON.stringify({
+        type: "screencast-input-error",
+        message: message.type,
+        error: String(error),
+      }),
+    );
+    ws.send(
+      JSON.stringify({
+        type: "error",
+        error: describe(error, "That input could not be applied."),
+      }),
+    );
+  }
+}
 
 serve<StreamData>({
   port: PORT,
@@ -662,100 +764,25 @@ serve<StreamData>({
       }
     },
 
-    async message(ws, raw) {
-      const session = sessions.for(ws.data.botId);
-      /*
-       * Whose screen this is, asked before anything is done with the input.
-       *
-       * A superseded socket used to dispatch through whatever the session held, so a replaced
-       * window's typing landed in the page the current viewer was watching. It heard nothing about
-       * it either, because the old missing-viewer check returned before reaching anything that could
-       * report, which is why this answers the sender rather than returning quietly.
-       *
-       * Starting and gone are told apart deliberately. Both own no cast, and answering them the same
-       * way tells somebody whose screen is still opening that their session ended.
-       */
-      const standing = session.viewer.standingOf(ws);
-      if (standing.state !== "casting") {
-        ws.send(
-          JSON.stringify({
-            type: "error",
-            error:
-              standing.state === "starting"
-                ? SCREEN_STILL_STARTING
-                : SCREEN_NO_LONGER_LIVE,
-          }),
-        );
-        return;
-      }
-      let message: InputMessage;
-      try {
-        const parsed: unknown = JSON.parse(String(raw));
-        const validated = parseInputMessage(parsed);
-        if (!validated.ok) {
-          ws.send(JSON.stringify({ type: "error", error: validated.error }));
-          return;
-        }
-        message = validated.message;
-      } catch {
-        // The validated-but-wrong branch above sends an error frame; unparseable input used to
-        // be dropped silently, so a buggy surface saw input "ignored" with no diagnostic.
-        ws.send(JSON.stringify({ type: "error", error: "Input is not JSON." }));
-        return;
-      }
-      // A person's input is accepted only while they hold the wheel. The socket being open is not permission:
-      // without this check, anything that could reach this port could drive the browser while a Bot
-      // was working, which is the one thing the control state exists to prevent.
-      //
-      // Owning the screen is not permission either, which is why this stands after the ownership
-      // question above and not instead of it: the two refuse different things, and the one asked
-      // first only decides whether the input has anywhere to land.
-      //
-      // Refuse with an error so the surface can explain why input is ignored.
-      //
-      // A person's own browser needs no handover: nobody else works in it, so it starts, and stays,
-      // with the person holding the wheel.
-      if (
-        !isPersonBrowserId(ws.data.botId) &&
-        !session.control.humanMayDrive()
-      ) {
-        ws.send(JSON.stringify({ type: "error", error: TAKE_CONTROL_FIRST }));
-        return;
-      }
-      session.humanInputs += 1;
-      try {
-        const recorded = ws.data.recordingId
-          ? await describeHumanGesture(
-              await currentPage(ws.data.botId),
-              message,
-            )
-          : null;
-        await standing.cast.send(message);
-        if (recorded)
-          ws.send(
+    /*
+     * One message at a time, in the order the person sent them. A message is described before it is
+     * applied when the screen is recording a demonstration (a step needs the element it lands on),
+     * and that takes a trip to the page for some kinds of message and not for others: applied as each
+     * was ready, a key came up before it went down (every key up of a word before any of its key
+     * downs, measured with a page busy 20 ms per key down). Nothing else here holds a message, and a
+     * message refused or failed says so and lets the next one through.
+     */
+    message(ws, raw) {
+      ws.data.inputs = (ws.data.inputs ?? Promise.resolve())
+        .then(() => applyInput(ws, raw))
+        .catch((error: unknown) => {
+          console.error(
             JSON.stringify({
-              type: "demonstration.action",
-              recordingId: ws.data.recordingId,
-              action: recorded,
+              type: "screencast-input-error",
+              error: String(error),
             }),
           );
-      } catch (error) {
-        // Reported rather than swallowed. A dispatch that fails means the person's input did nothing,
-        // and they must not be left believing it landed.
-        console.error(
-          JSON.stringify({
-            type: "screencast-input-error",
-            message: message.type,
-            error: String(error),
-          }),
-        );
-        ws.send(
-          JSON.stringify({
-            type: "error",
-            error: describe(error, "That input could not be applied."),
-          }),
-        );
-      }
+        });
     },
 
     async close(ws) {

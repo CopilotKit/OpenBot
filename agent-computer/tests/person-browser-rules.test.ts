@@ -18,6 +18,7 @@ import { personMayUse } from "../src/person-access";
 import {
   copyNativeMessagingHosts,
   defaultNativeMessagingHosts,
+  forgetRecorderPins,
   PLAYWRIGHT_DEFAULTS_A_PERSON_DOES_NOT_GET,
   personBrowserEnv,
   personLaunchOptions,
@@ -66,7 +67,11 @@ describe("finding the built Recorder", () => {
     const found = await findRecorder(FIXTURE);
     expect(found).toEqual({
       ok: true,
-      recorder: { dir: FIXTURE, id: RECORDER_EXTENSION_ID },
+      recorder: {
+        dir: FIXTURE,
+        id: RECORDER_EXTENSION_ID,
+        worker: "service-worker.js",
+      },
     });
   });
 
@@ -192,6 +197,8 @@ describe("launching a person's browser", () => {
       "--password-store=basic",
       `--disable-extensions-except=${FIXTURE}`,
       `--load-extension=${FIXTURE}`,
+      // So an earlier build of the Recorder's worker can be replaced over DevTools.
+      "--enable-unsafe-extension-debugging",
       // No debugging bar to take the page's height from the live screen while the Recorder records.
       "--silent-debugger-extension-api",
     ]);
@@ -201,6 +208,53 @@ describe("launching a person's browser", () => {
     ]);
     expect(screen.viewport).toEqual({ width: 1280, height: 800 });
     expect(screen.env).toBeUndefined();
+  });
+});
+
+describe("the Recorder's toolbar pin", () => {
+  test("is taken out of the profile before a launch, so the launch pins it once", async () => {
+    // The desktop profile from the end-to-end run: one pin per launch, beside another extension's.
+    const OTHER = "ghbmnnjooekpmoecnnnilnnbdlolhkhi";
+    const profile = await tempDir();
+    await mkdir(join(profile, "Default"));
+    const file = join(profile, "Default", "Preferences");
+    await writeFile(
+      file,
+      JSON.stringify({
+        download: { default_directory: "/Users/pat/Downloads" },
+        extensions: {
+          pinned_extensions: [
+            RECORDER_EXTENSION_ID,
+            OTHER,
+            RECORDER_EXTENSION_ID,
+            RECORDER_EXTENSION_ID,
+          ],
+          last_chrome_version: "156.0.8078.47",
+        },
+      }),
+    );
+    await forgetRecorderPins(profile, RECORDER_EXTENSION_ID);
+    expect(JSON.parse(await readFile(file, "utf8"))).toEqual({
+      download: { default_directory: "/Users/pat/Downloads" },
+      extensions: {
+        pinned_extensions: [OTHER],
+        last_chrome_version: "156.0.8078.47",
+      },
+    });
+  });
+
+  test("a profile with nothing pinned, no preferences yet, or unreadable ones is left as it is", async () => {
+    const fresh = await tempDir();
+    await forgetRecorderPins(fresh, RECORDER_EXTENSION_ID);
+    expect(await readdir(fresh)).toEqual([]);
+
+    const halfWritten = await tempDir();
+    await mkdir(join(halfWritten, "Default"));
+    await writeFile(join(halfWritten, "Default", "Preferences"), '{"exten');
+    await forgetRecorderPins(halfWritten, RECORDER_EXTENSION_ID);
+    expect(
+      await readFile(join(halfWritten, "Default", "Preferences"), "utf8"),
+    ).toBe('{"exten');
   });
 });
 
