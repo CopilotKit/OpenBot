@@ -5,6 +5,10 @@ import { serve } from "bun";
 import type { Page } from "playwright";
 import { downloadHeaders } from "../../shared/file-download";
 import {
+  isPersonBrowserId,
+  RECORDER_DIR_ENV,
+} from "../../shared/openbot-browser";
+import {
   cutAtCodeUnits,
   parseAriaSnapshot,
   type SnapshotElement,
@@ -17,6 +21,7 @@ import {
   offeredToken,
 } from "./authorisation";
 import { isPlainBotId } from "./bot-id";
+import { createBrowserHost, isBrowserPath } from "./browser-host";
 import { browserRuntimeFromEnv } from "./browser-runtime";
 import { detectChallenge } from "./challenge";
 import {
@@ -34,6 +39,11 @@ import {
   navigateWebPage,
   type PagePurpose,
 } from "./navigation";
+import {
+  PERSONS_OWN_BROWSER,
+  personHoldsTheWheel,
+  personMayUse,
+} from "./person-access";
 import { createProfiles, numberFromEnv, VIEWPORT } from "./profiles";
 import {
   parseExecTimeout,
@@ -123,6 +133,15 @@ setDefaultAutoSelectFamily(false);
 
 const RUNTIME = browserRuntimeFromEnv(process.env);
 const BROWSER_MODE = RUNTIME.mode;
+/*
+ * The display this process was started on, kept before the virtual one replaces it. A person's
+ * native browser on OpenBot Desktop opens on the person's own desktop, never on the Xvfb display that
+ * a Bot's headed browser uses on Linux. See `personBrowserEnv`.
+ */
+const PERSON_DISPLAY = {
+  DISPLAY: process.env.DISPLAY,
+  WAYLAND_DISPLAY: process.env.WAYLAND_DISPLAY,
+};
 const VIRTUAL_DISPLAY = await startVirtualDisplay(
   RUNTIME.useVirtualDisplay ? "headed" : "headless",
 );
@@ -284,10 +303,21 @@ const profiles = createProfiles(
     if (sessions.get(botId)) sessions.renewRun(botId);
     await sessions.get(botId)?.viewer.releaseAll(COMPUTER_STOPPED);
   },
+  { personDisplay: PERSON_DISPLAY },
 );
 // Rooted in the same workspace the file tools use, so a command and a written file see one
 // directory rather than two.
 const shell = createShell(process.env.WORKSPACE_DIR?.trim() || "/workspace");
+
+/**
+ * The OpenBot Browser: a person's own browser with the Recorder in it, opened for them by the
+ * server. See browser-host.ts, and person-access.ts for what a person's browser id may do here.
+ */
+const browserHost = createBrowserHost({
+  profiles,
+  recorderDir: () => process.env[RECORDER_DIR_ENV],
+  navigationTimeoutMs: NAVIGATION_TIMEOUT_MS,
+});
 
 /**
  * The id normally arrives as a header on every request. This is the fallback for a caller that has no
@@ -313,7 +343,9 @@ async function currentPage(
   const session = sessions.for(botId);
   const page = await profiles.page(botId);
   sessions.observeBrowser(botId, page.context());
-  assertPageAccess(RUNTIME.backend, page.url(), purpose);
+  // A Bot's tools read web pages only. A person's browser is theirs, on whatever page they are on.
+  if (!isPersonBrowserId(botId))
+    assertPageAccess(RUNTIME.backend, page.url(), purpose);
   // A ref names an element on the page it was taken from, so moving to a window the site opened has
   // to retire the outstanding ones exactly as a navigation does, or a click lands on the wrong document.
   if (session.livePage && session.livePage !== page) session.snapshotId += 1;
@@ -530,6 +562,9 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
+/** Since when a person's browser has been theirs, which is always, so since this process started. */
+const PROCESS_STARTED_AT = new Date().toISOString();
+
 /** What a person watching is told when the browser they were watching went away. */
 const COMPUTER_STOPPED =
   "This computer stopped, so the screen ended. Start it again to carry on watching.";
@@ -677,7 +712,13 @@ serve<StreamData>({
       // first only decides whether the input has anywhere to land.
       //
       // Refuse with an error so the surface can explain why input is ignored.
-      if (!session.control.humanMayDrive()) {
+      //
+      // A person's own browser needs no handover: nobody else works in it, so it starts, and stays,
+      // with the person holding the wheel.
+      if (
+        !isPersonBrowserId(ws.data.botId) &&
+        !session.control.humanMayDrive()
+      ) {
         ws.send(JSON.stringify({ type: "error", error: TAKE_CONTROL_FIRST }));
         return;
       }
@@ -772,6 +813,12 @@ serve<StreamData>({
       if (applied.ok) await applyWebBotAuthPush(body?.webBotAuth);
       return applied;
     }
+    // A person's browser id reaches the person's browser routes, the live screen and the computer's
+    // housekeeping, and nothing a Bot acts or reads through. See person-access.ts.
+    if (isPersonBrowserId(botId) && !personMayUse(url.pathname))
+      return json({ error: PERSONS_OWN_BROWSER }, 403);
+    if (isBrowserPath(url.pathname))
+      return browserHost.handle(request, url.pathname, botId);
     const session = sessions.for(botId);
 
     /*
@@ -824,6 +871,8 @@ serve<StreamData>({
       // Who has the wheel. Polled by the surface alongside the screen, so the person sees the Bot ask
       // for help without having to reload anything.
       if (url.pathname === "/control" && request.method === "GET") {
+        if (isPersonBrowserId(botId))
+          return json(personHoldsTheWheel(PROCESS_STARTED_AT));
         return json(
           session.control.get(url.searchParams.get("requestId") ?? undefined),
         );
@@ -1005,7 +1054,7 @@ serve<StreamData>({
       // person addresses them by pointing, because they are looking at a picture. Different problem,
       // different endpoint, and only usable while they hold the wheel.
       if (HUMAN_INPUT.has(url.pathname) && request.method === "POST") {
-        if (!session.control.humanMayDrive()) {
+        if (!isPersonBrowserId(botId) && !session.control.humanMayDrive()) {
           return json({ error: TAKE_CONTROL_FIRST }, 409);
         }
         session.humanInputs += 1;

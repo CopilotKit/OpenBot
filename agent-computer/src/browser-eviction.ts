@@ -25,16 +25,35 @@ export type Evictable = { usedAt: number };
  *
  * Least recently used first: the Bot that has been quiet longest. Applied after a launch, so the Bot
  * that just asked is the most recently used and is therefore never the one closed.
+ *
+ * A person's browser counts toward the cap like any other and goes last. It is in use whenever the
+ * person is in front of it, which this process cannot see: browsing in a native window sends it
+ * nothing, so its last use would read as long ago and it would be the first closed, out from under
+ * the person, to make room for a Bot. So every Bot's browser is closed before any person's, and a
+ * person's goes only when nothing else is left to close. The browser that just launched stays
+ * either way, whoever it belongs to.
  */
 export function chooseEvictions(
   running: Iterable<[string, Evictable]>,
   max: number,
+  goesLast: (botId: string) => boolean = () => false,
 ): string[] {
   const entries = [...running];
   if (entries.length <= max) return [];
+  // A cap of zero keeps nothing, the newest included; that is the mistake reading the setting guards.
+  const newest =
+    max > 0
+      ? entries.reduce((latest, entry) =>
+          entry[1].usedAt >= latest[1].usedAt ? entry : latest,
+        )
+      : undefined;
 
   return entries
-    .sort(([, a], [, b]) => a.usedAt - b.usedAt)
+    .filter((entry) => entry !== newest)
+    .sort(
+      ([aId, a], [bId, b]) =>
+        Number(goesLast(aId)) - Number(goesLast(bId)) || a.usedAt - b.usedAt,
+    )
     .slice(0, entries.length - max)
     .map(([botId]) => botId);
 }
@@ -45,16 +64,21 @@ export function chooseEvictions(
  * The other half of the answer: a deployment under the cap still holds a browser for a Bot used once
  * last Tuesday, and that memory is doing nothing for anybody. A timeout of zero or less switches this
  * off, so a deployment can keep browsers resident if it would rather.
+ *
+ * Never a browser `stays` names, which is a person's. A person using their browser in a native
+ * window sends this process nothing, so nothing here can tell that from a person who walked away,
+ * and closing it would close the window they are typing in. It stays open until they close it.
  */
 export function chooseIdle(
   running: Iterable<[string, Evictable]>,
   idleTimeoutMs: number,
   now: number,
+  stays: (botId: string) => boolean = () => false,
 ): string[] {
   if (idleTimeoutMs <= 0) return [];
   const cutoff = now - idleTimeoutMs;
 
   return [...running]
-    .filter(([, entry]) => entry.usedAt <= cutoff)
+    .filter(([botId, entry]) => entry.usedAt <= cutoff && !stays(botId))
     .map(([botId]) => botId);
 }
