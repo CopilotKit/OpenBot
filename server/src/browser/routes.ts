@@ -63,6 +63,9 @@ export type BrowserRouteDeps = {
   /** How long a call to the computer may take before OpenBot stops waiting, other than open's. A test's own, shorter;
    * otherwise {@link CALL_TIMEOUT_MS}. */
   callTimeoutMs?: number;
+  /** A single-user OpenBot (`config.singleUser`, OpenBot Desktop among them): the one person is its admin, so a setup
+   * failure is told to them as theirs to see to, not as something to ask an admin about. */
+  singleUser?: boolean;
 };
 
 /** How much of the computer's sentence a failure's log line keeps: every sentence it says, and never a page of text. */
@@ -97,6 +100,9 @@ const SENTENCES = {
   unavailable: "This OpenBot cannot open a browser for you.",
   notSetUp:
     "Your browser can't open right now. Ask an admin to check OpenBot's setup.",
+  /** `notSetUp` where the person is the admin: nobody else to ask. */
+  notSetUpSingleUser:
+    "Your browser can't open right now. OpenBot's setup needs checking, and its logs say why.",
   tooMany:
     "Too many connection codes were asked for at once. Wait a few minutes and try again.",
   notConnected: "Your browser could not be connected. Try again.",
@@ -386,6 +392,10 @@ export function createBrowserRoutes(deps: BrowserRouteDeps) {
   const ask = computerCaller(deps);
   /** When each narration request reached this server, read before signing the person in can take any time. */
   const arrivals = new WeakMap<Request, number>();
+  /** What the person is told when OpenBot's own setup stops their browser opening: ask an admin, unless they are it. */
+  const notSetUp = deps.singleUser
+    ? SENTENCES.notSetUpSingleUser
+    : SENTENCES.notSetUp;
 
   /**
    * The computer's refusal, for the person. What is about their request keeps its status and the computer's sentence: a
@@ -404,7 +414,7 @@ export function createBrowserRoutes(deps: BrowserRouteDeps) {
     const said = (answer.body as { error?: unknown } | null)?.error;
     const sentence = typeof said === "string" && said ? said : null;
     if (answer.status === 503)
-      return Response.json({ error: SENTENCES.notSetUp }, { status: 503 });
+      return Response.json({ error: notSetUp }, { status: 503 });
     if (answer.status === 400 || answer.status === 409)
       return Response.json(
         { error: sentence ?? SENTENCES.unreachable },
@@ -591,7 +601,7 @@ export function createBrowserRoutes(deps: BrowserRouteDeps) {
       console.warn(
         JSON.stringify({ type: "browser-open-no-address", error: NO_ADDRESS }),
       );
-      return refuse(SENTENCES.notSetUp, 503);
+      return refuse(notSetUp, 503);
     }
 
     const minted = await deps.recorder.connections.mintCode(

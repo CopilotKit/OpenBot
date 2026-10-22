@@ -2576,6 +2576,8 @@ const app = createApp(
               : {}),
             recorder: recorderExtension,
             openbotUrl: openbotAddress(config),
+            // On a single-user OpenBot the person is its admin: a setup failure is theirs to see to.
+            singleUser: config.singleUser,
           },
         }
       : {}),
