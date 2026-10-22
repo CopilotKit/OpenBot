@@ -34,8 +34,10 @@ export function useElementVisible<T extends Element>(): [
       setVisible(true);
       return;
     }
-    const observer = new IntersectionObserver(([entry]) => {
-      setVisible(Boolean(entry?.isIntersecting));
+    // The newest entry is the element as it is now. A panel sliding open delivers the frame it began
+    // off-screen and the frame it arrived in together, and reading the first left it "hidden".
+    const observer = new IntersectionObserver((entries) => {
+      setVisible(Boolean(entries.at(-1)?.isIntersecting));
     });
     observer.observe(node);
     return () => observer.disconnect();
