@@ -42,6 +42,12 @@ type in a conversation: every browser and computer step came back as unavailable
 fetched the page some other way instead. Its browser now works beside those tools, as it does for a
 Bot that holds none. Routines and other unattended turns are unchanged.
 
+### An app a Bot could not use asks to be connected once
+
+When a Bot reached for an app the person had not connected, such as Airtable, the conversation drew
+the Connect card twice, and still did after a reload. The conversation's stored copy of a tool call
+now counts as the same call it already shows, so each call draws one card.
+
 ### Plainer words, and one word for each thing
 
 OpenBot now says **Bot** everywhere a person reads it, where screens used to mix Bot, agent, coworker
