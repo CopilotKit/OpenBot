@@ -81,7 +81,7 @@ describe("a person's browser on a computer in the cloud", () => {
     expect(allowed("openbot.example.com", ["169.254.169.254"])).toBe(false);
   });
 
-  test("an address given for OpenBot is allowed as that address alone", () => {
+  test("an address given for OpenBot is allowed as that address alone, on its own port", () => {
     const literal = personBrowserEgressPolicy({
       native: false,
       allowPrivateHosts: false,
@@ -91,6 +91,54 @@ describe("a person's browser on a computer in the cloud", () => {
     expect(egressDecision(literal, "10.0.0.9", 3001).allowed).toBe(true);
     expect(egressDecision(literal, "fd00::9", 7103).allowed).toBe(true);
     expect(egressDecision(literal, "10.0.0.10", 3001).allowed).toBe(false);
+    expect(egressDecision(literal, "10.0.0.9", 5432).allowed).toBe(false);
+    expect(egressDecision(literal, "fd00::9", 3001).allowed).toBe(false);
+  });
+
+  // The end-to-end run's hosted OpenBot: it and the gateway both on 127.0.0.1, and the person's browser loaded the
+  // Intelligence UI on 7555 and a probe on 7498 because the address was allowed on every port.
+  test("OpenBot and the gateway on one address let the browser reach those two ports, never the address's others", () => {
+    const shared = personBrowserEgressPolicy({
+      native: false,
+      allowPrivateHosts: false,
+      openbotUrls: [undefined, "http://127.0.0.1:7460"],
+      gatewayUrl: "ws://127.0.0.1:7053/socket",
+    });
+    const reach = (host: string, port: number, resolved: string[] = []) =>
+      egressDecision(shared, host, port, resolved).allowed;
+    expect(reach("127.0.0.1", 7460)).toBe(true);
+    expect(reach("127.0.0.1", 7053)).toBe(true);
+    for (const port of [7555, 7498, 7050, 80, 443, 5432])
+      expect([port, reach("127.0.0.1", port)]).toEqual([port, false]);
+    // Nor by a name that resolves there, nor by its neighbours.
+    expect(reach("intelligence.test", 7555, ["127.0.0.1"])).toBe(false);
+    expect(reach("127.0.0.2", 7460)).toBe(false);
+    expect(reach("::1", 7460)).toBe(false);
+    expect(parseEgressRules(shared.rules)).toEqual({
+      ok: true,
+      rules: shared.rules,
+    });
+  });
+
+  test("an origin with no port is allowed on its scheme's own, and localhost on the loopback addresses", () => {
+    const defaults = personBrowserEgressPolicy({
+      native: false,
+      allowPrivateHosts: false,
+      openbotUrls: ["https://10.0.0.9", "http://localhost:3010"],
+      gatewayUrl: "wss://[fd00::9]/socket",
+    });
+    const reach = (host: string, port: number, resolved: string[] = []) =>
+      egressDecision(defaults, host, port, resolved).allowed;
+    expect(reach("10.0.0.9", 443)).toBe(true);
+    expect(reach("10.0.0.9", 80)).toBe(false);
+    expect(reach("fd00::9", 443)).toBe(true);
+    expect(reach("fd00::9", 80)).toBe(false);
+    // The browser dialling localhost resolves it, and each address it resolves to must be allowed on that port.
+    expect(reach("127.0.0.1", 3010)).toBe(true);
+    expect(reach("::1", 3010)).toBe(true);
+    expect(reach("localhost", 3010, ["127.0.0.1", "::1"])).toBe(true);
+    expect(reach("localhost", 7555, ["127.0.0.1", "::1"])).toBe(false);
+    expect(reach("127.0.0.1", 7555)).toBe(false);
   });
 
   test("is a policy the computer accepts, and the public ranges cover the address space without overlap", () => {
