@@ -673,6 +673,41 @@ for (const variant of VARIANTS) {
       expect((reopened.json as BrowserState).recorder?.connected).toBe(true);
     }, 60_000);
 
+    test("stays open while its one window shows a page of the Recorder's own, and opening it again relaunches nothing", async () => {
+      const person = profiles.person(PERSON);
+      if (!person) throw new Error("The browser should be open.");
+      const { context } = person;
+      const own = await context.newPage();
+      await own.goto(`chrome-extension://${person.recorderId}/options.html`);
+      for (const page of person.pages()) await page.close();
+      await wait(500);
+
+      // A window on the screen is an open browser, whatever it shows.
+      const now = await state();
+      expect(now.open).toBe(true);
+      expect(now.tabs).toEqual([]);
+      expect(own.isClosed()).toBe(false);
+
+      // Opening it again is the same browser, connected again: nothing closed and nothing relaunched.
+      const connects = callsFor("connect").length;
+      const again = await api("/browser/open", { connection: CONNECTION });
+      expect(again.status).toBe(200);
+      expect((again.json as BrowserState).open).toBe(true);
+      expect(callsFor("connect")).toHaveLength(connects + 1);
+      expect(own.isClosed()).toBe(false);
+      expect(profiles.person(PERSON)?.context).toBe(context);
+
+      // A tab of the person's goes in front of it, and the browser stays open when it closes.
+      const tab = await api("/browser/tabs", {
+        action: "new",
+        url: `${ORIGIN}/page/back`,
+      });
+      expect(activeTab(tab.json as BrowserState)?.title).toBe("back");
+      await own.close();
+      await wait(300);
+      expect(activeTab(await state())?.title).toBe("back");
+    }, 60_000);
+
     test("is closed when the person closes its last window", async () => {
       const person = profiles.person(PERSON);
       if (!person) throw new Error("The browser should be open.");

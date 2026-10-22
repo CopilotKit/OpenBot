@@ -85,6 +85,22 @@ export type PersonLaunch = {
   display: PersonDisplay;
 };
 
+/**
+ * Every page in the browser's windows: the person's tabs and any of the Recorder's own pages a tab
+ * shows (its options, say), but not DevTools. The Recorder's offscreen document is not one: Chromium
+ * reports it as a background page, which Playwright does not count among the context's pages.
+ *
+ * A person's browser is open while there is any: a window on the screen is an open browser, whatever
+ * it shows.
+ */
+export function windowPages(context: BrowserContext): Page[] {
+  return context
+    .pages()
+    .filter(
+      (page) => !page.isClosed() && !page.url().startsWith("devtools://"),
+    );
+}
+
 /** The person's pages: page targets that are not the Recorder's own and not DevTools. */
 export function personPages(
   context: BrowserContext,
