@@ -219,6 +219,8 @@ export function ProviderPicker({
   const [failure, setFailure] = useState<Problem | null>(null);
   const openRef = useRef(open);
   const signInRunRef = useRef(0);
+  // A sign-in that just finished on this screen moves on by itself once the screen is ready.
+  const continueAfterSignIn = useRef(false);
   const oauthAttempt = useRef<string | null>(null);
   const [oauthCode, setOauthCode] = useState<string | null>(null);
   const [oauthSignedIn, setOauthSignedIn] = useState<string | null>(
@@ -276,6 +278,7 @@ export function ProviderPicker({
         attemptId: authorization.attemptId,
       });
       if (current()) {
+        continueAfterSignIn.current = true;
         setOauthSignedIn(providerId);
         setSignInUrl(null);
         setOauthCode(null);
@@ -344,6 +347,7 @@ export function ProviderPicker({
       if (providerId !== "anthropic") {
         const nextToken = await invoke<string>("finish_chatgpt_sign_in");
         if (stillCurrent()) {
+          continueAfterSignIn.current = true;
           setTokens((previous) => ({ ...previous, [providerId]: nextToken }));
           setSignInUrl(null);
         }
@@ -374,6 +378,7 @@ export function ProviderPicker({
       // Held, not shown. It goes on to `start_stack` the same way a typed key does.
       const nextToken = await invoke<string>("finish_claude_sign_in", { code });
       if (stillCurrent()) {
+        continueAfterSignIn.current = true;
         setTokens((previous) => ({ ...previous, [providerId]: nextToken }));
         setSignInUrl(null);
         setCode("");
@@ -477,6 +482,19 @@ export function ProviderPicker({
       ...(trimmedModel ? { model: trimmedModel } : {}),
     });
   }
+  /*
+   * Signed in, so on to the next step: the sign-in was the thing this screen was waiting for, and
+   * a Continue after "Signed in" is a click that only confirms what just happened. A sign-in that
+   * leaves something else to fill in (an OAuth row's model) waits for Continue as before.
+   */
+  // biome-ignore lint/correctness/useExhaustiveDependencies: runs when readiness or a sign-in changes.
+  useEffect(() => {
+    if (!continueAfterSignIn.current || busy) return;
+    // Used up on the first look after the sign-in either way, so a field filled in later never
+    // moves the screen on from under somebody still typing.
+    continueAfterSignIn.current = false;
+    if (ready && !starting) continueWithChoice();
+  }, [ready, busy, starting, tokens, oauthSignedIn]);
 
   return (
     <div className="sheet">

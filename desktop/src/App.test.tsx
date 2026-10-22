@@ -988,11 +988,8 @@ test("a Claude plan signed in on the provider screen reaches Start with its toke
   await userEvent.click(
     view.getByRole("button", { name: "Finish signing in" }),
   );
-  await view.findByText(/Signed in to Anthropic/);
+  // Signed in, so on by itself: no Continue after "Signed in".
   await waitFor(() => expect(localSequence()).toContain("run_local_eval"));
-  // Intelligence is ready and waiting minutes before Continue, as on a real machine.
-  await act(async () => new Promise((resolve) => setTimeout(resolve, 100)));
-  await userEvent.click(view.getByRole("button", { name: "Continue" }));
   await view.findByRole("heading", { name: "Test OpenBot" });
   expect(getStartStackPayload()).toMatchObject({
     model: {
@@ -1816,7 +1813,8 @@ test("provider sign-in retries and Back reuse the completed local installation",
   await userEvent.click(
     view.getByRole("button", { name: "Sign in with OpenAI" }),
   );
-  await view.findByText(/Signed in to OpenAI/);
+  // Signed in, so on to the next step by itself.
+  await view.findByRole("heading", { name: "Connect to CopilotKit" });
   expect(signIns).toBe(2);
   expect(installationCalls()).toHaveLength(1);
 });
@@ -4244,14 +4242,13 @@ for (const provider of [
           );
         }
       }
-      await view.findByText(
-        new RegExp(
-          session === "saved"
-            ? `A saved ${provider.name} sign-in will be checked`
-            : `Signed in to ${provider.name}`,
-        ),
-      );
-      await userEvent.click(view.getByRole("button", { name: "Continue" }));
+      // A fresh sign-in moves on by itself; a saved one is only offered, so it waits for Continue.
+      if (session === "saved") {
+        await view.findByText(
+          new RegExp(`A saved ${provider.name} sign-in will be checked`),
+        );
+        await userEvent.click(view.getByRole("button", { name: "Continue" }));
+      }
       await userEvent.click(
         await view.findByRole("button", { name: "Start OpenBot" }),
       );

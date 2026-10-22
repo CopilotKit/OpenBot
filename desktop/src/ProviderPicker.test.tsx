@@ -173,6 +173,12 @@ test("a completed plan sign-in enables and submits only its issuing provider", a
   await waitFor(() =>
     expect(view.getByText(/Signed in to OpenAI/)).toBeTruthy(),
   );
+  // The finished sign-in moves on by itself, with its own provider's token.
+  await waitFor(() =>
+    expect(choices).toEqual([
+      { provider: "openai", login: "plan", token: "chatgpt-token" },
+    ]),
+  );
   await userEvent.click(view.getByRole("radio", { name: /Anthropic/ }));
 
   expect(view.queryByText(/Signed in to Anthropic/)).toBeNull();
@@ -180,7 +186,7 @@ test("a completed plan sign-in enables and submits only its issuing provider", a
   expect(continueButton).toHaveProperty("disabled", true);
 
   await userEvent.click(continueButton);
-  expect(choices).toEqual([]);
+  expect(choices).toHaveLength(1);
 });
 
 test("a pending plan sign-in completion is ignored after switching provider rows", async () => {
@@ -314,7 +320,12 @@ for (const provider of providers) {
         ),
       );
       expect(view.queryByLabelText(`${provider.name} API key`)).toBeNull();
-      await userEvent.click(view.getByRole("button", { name: "Continue" }));
+      // A fresh sign-in moves on by itself; a saved one is only offered, so it waits for Continue.
+      if (session === "saved") {
+        await userEvent.click(view.getByRole("button", { name: "Continue" }));
+      } else {
+        await waitFor(() => expect(choices).toHaveLength(1));
+      }
 
       expect(choices).toHaveLength(1);
       expect(choices[0]).not.toHaveProperty("apiKey");
@@ -885,7 +896,8 @@ for (const provider of cloudProviders) {
       view.getByRole("button", { name: `Sign in with ${provider.name}` }),
     );
     await view.findByText(`Signed in to ${provider.name}.`);
-    await user.click(view.getByRole("button", { name: "Continue" }));
+    // Signed in with a model already named: on by itself, no Continue.
+    await waitFor(() => expect(choices).toHaveLength(1));
     expect(choices).toEqual([
       {
         provider: provider.id,
