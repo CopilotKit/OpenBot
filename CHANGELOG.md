@@ -187,8 +187,8 @@ extensions, password manager and logins, not a separate copy.
 - **The red dot follows a recording in any of your browsers**, your everyday one included, on Desktop and
   hosted: the Recorder tells OpenBot when it starts and stops recording, and every 30 seconds while it
   records, and the dot goes out 90 seconds after a browser stops reporting.
-- **The Recorder says what it collects** on its setup page and its Record form, before anything is
-  recorded: every step in every tab you use until you stop, what is on those pages, your clicks and
+- **The Recorder says what it collects** first on its setup page (above its request for your microphone)
+  and on its Record form, before anything is recorded: every step in every tab you use until you stop, what is on those pages, your clicks and
   typing (secrets masked in your browser first), what each step saves and what you say, all going to
   your organization's own Intelligence through your organization's OpenBot.
 - Migration `0062_recorder_activity` adds two nullable columns to `recorder_connections` (each
