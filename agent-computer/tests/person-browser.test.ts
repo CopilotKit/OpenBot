@@ -473,6 +473,31 @@ for (const variant of VARIANTS) {
       expect(activeTab(await state())?.url).toBe(`${ORIGIN}/page/three`);
     }, 60_000);
 
+    test("a tab whose page did not load names the address that failed", async () => {
+      // The run that found it: the hosted address bar showed chrome-error://chromewebdata/, the error
+      // page's own address, rather than what the person typed.
+      const before = activeTab(await state());
+      const blank = activeTab(
+        (await api("/browser/tabs", { action: "new" })).json as BrowserState,
+      );
+      if (!before || !blank) throw new Error("Both tabs should be listed.");
+      const port = await closedPort();
+      const failed = `http://127.0.0.1:${port}/`;
+      expect((await api("/browser/navigate", { url: failed })).status).toBe(
+        502,
+      );
+      // Asked straight after the failure, as the app asks.
+      expect(activeTab(await state())?.url).toBe(failed);
+      // Reloading it is said about that address too.
+      expect(await api("/browser/navigate", { action: "reload" })).toEqual({
+        status: 502,
+        json: { error: `127.0.0.1:${port} refused the connection.` },
+      });
+      expect(activeTab(await state())?.url).toBe(failed);
+      await api("/browser/tabs", { action: "close", tabId: blank.id });
+      await api("/browser/tabs", { action: "activate", tabId: before.id });
+    }, 60_000);
+
     test("records and narrates through the Recorder", async () => {
       const started = await api("/browser/recording", {
         action: "start",

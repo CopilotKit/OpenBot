@@ -45,6 +45,17 @@ export type BrowserHostOptions = {
 /** How long one tab may take to say whether it is showing, before it is left out of the question. */
 const VISIBILITY_MS = 1_000;
 
+/**
+ * Where Chromium's error page lives. A tab whose page did not load shows it, and Playwright reports
+ * the error page's own address, `chrome-error://chromewebdata/`, as the tab's. The tab itself still
+ * names the address that failed, as a browser's address bar does: DevTools' target for the tab says
+ * so. Measured on Playwright 1.62.1's Chromium for a name that does not resolve and a port that
+ * refuses.
+ */
+const ERROR_PAGE = "chrome-error://";
+/** How long a failed navigation waits for the tab to show its error page. */
+const ERROR_PAGE_MS = 2_000;
+
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -86,6 +97,21 @@ export function createBrowserHost(options: BrowserHostOptions) {
   const { profiles } = options;
   /** Each tab's DevTools target id, which stays the same for the life of the tab. */
   const tabIds = new WeakMap<Page, string>();
+  /** How many documents each tab's main frame has committed, counted from when it was first asked. */
+  const commits = new WeakMap<Page, { count: number }>();
+
+  const commitsOf = (page: Page): number => {
+    let counted = commits.get(page);
+    if (!counted) {
+      const counter = { count: 0 };
+      page.on("framenavigated", (frame) => {
+        if (frame === page.mainFrame()) counter.count += 1;
+      });
+      commits.set(page, counter);
+      counted = counter;
+    }
+    return counted.count;
+  };
 
   const tabIdOf = async (
     browser: OpenPersonBrowser,
@@ -141,10 +167,14 @@ export function createBrowserHost(options: BrowserHostOptions) {
     if (front) browser.activate(front);
   };
 
+  /** The address a tab shows: its page's, or on an error page the address that failed. */
+  const shownUrl = (page: Page, target: { url: string } | undefined): string =>
+    page.url().startsWith(ERROR_PAGE) && target?.url ? target.url : page.url();
+
   const tabsOf = async (browser: OpenPersonBrowser): Promise<BrowserTab[]> => {
     const { targetInfos } = await browser.session.send("Target.getTargets");
-    const titles = new Map(
-      targetInfos.map((target) => [target.targetId, target.title]),
+    const targets = new Map(
+      targetInfos.map((target) => [target.targetId, target]),
     );
     const active = browser.active();
     const tabs: BrowserTab[] = [];
@@ -153,12 +183,28 @@ export function createBrowserHost(options: BrowserHostOptions) {
       if (!id) continue;
       tabs.push({
         id,
-        url: page.url(),
-        title: titles.get(id) ?? "",
+        url: shownUrl(page, targets.get(id)),
+        title: targets.get(id)?.title ?? "",
         active: page === active,
       });
     }
     return tabs;
+  };
+
+  /** One tab's shown address, for a sentence about a page that did not open. */
+  const addressOf = async (
+    browser: OpenPersonBrowser,
+    page: Page,
+  ): Promise<string> => {
+    if (!page.url().startsWith(ERROR_PAGE)) return page.url();
+    const id = await tabIdOf(browser, page).catch(() => undefined);
+    const { targetInfos } = await browser.session
+      .send("Target.getTargets")
+      .catch(() => ({ targetInfos: [] }));
+    return shownUrl(
+      page,
+      targetInfos.find((target) => target.targetId === id),
+    );
   };
 
   const stateOf = async (
@@ -186,8 +232,37 @@ export function createBrowserHost(options: BrowserHostOptions) {
     await page.bringToFront().catch(() => undefined);
   };
 
-  const navigation = (address: string, error: unknown) =>
-    json({ error: navigationFailure(address, error) }, 502);
+  /**
+   * A page that did not open, said in a sentence once the tab shows that it did not.
+   *
+   * Chromium commits its error page a moment after the navigation fails: when `goto` threw, the tab
+   * still reported the address it had before (or none, for a new tab), and the error page with the
+   * failed address about 100 ms later, measured on Playwright 1.62.1's Chromium and on Chrome. The
+   * app asks for the tabs as soon as this answers, and showed the earlier address beside the error
+   * page, so this waits for that commit first, briefly, and answers either way. Only for a network
+   * error: a navigation that timed out is still loading, and one that became a download or was
+   * aborted shows no error page.
+   */
+  const navigation = async (
+    page: Page,
+    since: number,
+    address: string,
+    error: unknown,
+  ) => {
+    const message = error instanceof Error ? error.message : String(error);
+    if (/net::ERR_/.test(message) && !/net::ERR_ABORTED/.test(message)) {
+      // A document committed since the navigation began, and it is the error page: a reload of a
+      // page that had already failed is on one before its own commits.
+      const deadline = Date.now() + ERROR_PAGE_MS;
+      while (
+        Date.now() < deadline &&
+        !page.isClosed() &&
+        !(commitsOf(page) > since && page.url().startsWith(ERROR_PAGE))
+      )
+        await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    return json({ error: navigationFailure(address, error) }, 502);
+  };
 
   async function open(botId: string, body: unknown): Promise<Response> {
     const parsed = parseBody(browserOpenRequestSchema, body);
@@ -344,13 +419,14 @@ export function createBrowserHost(options: BrowserHostOptions) {
           const page = await browser.context.newPage();
           await putInFront(browser, page);
           if (address) {
+            const since = commitsOf(page);
             try {
               await page.goto(address, {
                 waitUntil: "domcontentloaded",
                 timeout: options.navigationTimeoutMs,
               });
             } catch (error) {
-              return navigation(address, error);
+              return navigation(page, since, address, error);
             }
           }
           return json(await stateOf(browser));
@@ -379,7 +455,8 @@ export function createBrowserHost(options: BrowserHostOptions) {
           timeout: options.navigationTimeoutMs,
         };
         // The address the person asked for, or for back, forward and reload the page they were on.
-        let address = page.url();
+        let address = await addressOf(browser, page);
+        const since = commitsOf(page);
         try {
           if ("url" in go) {
             const asked = addressFrom(go.url);
@@ -399,7 +476,7 @@ export function createBrowserHost(options: BrowserHostOptions) {
             else await page.goForward(history);
           }
         } catch (error) {
-          return navigation(address, error);
+          return navigation(page, since, address, error);
         }
         return json(await stateOf(browser));
       }
