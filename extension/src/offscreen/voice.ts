@@ -183,7 +183,7 @@ type Listening = {
   startedAt: number;
   /** Result indexes of the current recognition already emitted, when each was first heard, and when the last one
    * ended: Chrome can show a phrase's index while the one before is still being spoken, so a phrase starts no earlier
-   * than the end of the one before it. */
+   * than the end of the one before it. An index the results no longer reach is forgotten (`results`). */
   emitted: Set<number>;
   firstHeard: Map<number, number>;
   lastFinalAt: number;
@@ -323,6 +323,14 @@ export function startVoice(options: VoiceOptions, deps: VoiceDeps): Voice {
   function results(listening: Listening, event: RecognitionResultEvent): void {
     const at = deps.now();
     speechHeard();
+    // While a phrase is said Chrome splits it into a settled head and a changing tail at the next index, and folds the
+    // tail back in when the phrase is final, so the results get shorter; the next phrase reuses that index seconds
+    // later. An index the results no longer reach is forgotten, or the next phrase would start when the last one's
+    // tail was first shown: 2.2 s early in a real Chrome 156 run (tests/fixtures/chrome-156-two-phrases.json). The
+    // app's own recogniser times the phrases it passes in by the same rule (app/src/lib/browser/narration.ts).
+    for (const index of listening.firstHeard.keys())
+      if (index >= event.results.length && !listening.emitted.has(index))
+        listening.firstHeard.delete(index);
     let interim = "";
     for (let index = event.resultIndex; index < event.results.length; index++) {
       const result = event.results[index];
