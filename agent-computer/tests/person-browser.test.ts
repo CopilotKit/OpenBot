@@ -480,20 +480,58 @@ for (const variant of VARIANTS) {
         expect.stringContaining("setup.html"),
       );
 
+      // Hearing the person itself only in a native window, where narration is its own.
+      expect((started.json as BrowserState).recorder?.voice).toBe(
+        variant.window === "native" ? "listening" : undefined,
+      );
+
+      // The server's clock on every time, and `sentAt` its own, which goes no further.
+      const sentAt = 1_760_000_003_000;
       const phrase = {
         text: "This is where the receipts go",
         startedAt: 1_760_000_000_000,
         endedAt: 1_760_000_002_500,
       };
-      const narrated = await api("/browser/narration", phrase);
-      expect(narrated).toEqual({ status: 200, json: { ok: true } });
-      expect(callsFor("narrate")[0]?.input).toEqual(phrase);
+      const ok = { status: 200, json: { ok: true } };
+      expect(await api("/browser/narration", { ...phrase, sentAt })).toEqual(
+        ok,
+      );
+      expect(callsFor("narrate").map((call) => call.input)).toEqual([phrase]);
+
+      // The person starting a phrase, then stopping speaking.
+      const since = 1_760_000_004_000;
       expect(
-        (await api("/browser/narration", { ...phrase, endedAt: -1 })).status,
-      ).toBe(400);
+        await api("/browser/narration", { speaking: true, since, sentAt }),
+      ).toEqual(ok);
+      expect(
+        await api("/browser/narration", { speaking: false, sentAt }),
+      ).toEqual(ok);
+      expect(callsFor("speaking").map((call) => call.input)).toEqual([
+        { since },
+        { since: null },
+      ]);
+
+      // Anything else is not the contract's and never reaches the Recorder.
+      for (const body of [
+        { ...phrase, endedAt: -1, sentAt },
+        phrase,
+        { speaking: true, sentAt },
+        { speaking: false, since, sentAt },
+      ])
+        expect((await api("/browser/narration", body)).status).toBe(400);
+      expect(callsFor("narrate")).toHaveLength(1);
+      expect(callsFor("speaking")).toHaveLength(2);
 
       const stopped = await api("/browser/recording", { action: "stop" });
       expect((stopped.json as BrowserState).recorder?.phase).toBe("idle");
+      // The recording Stop ended, so OpenBot can say where it went.
+      const recordingId = (started.json as BrowserState).recorder?.recordingId;
+      expect(
+        (stopped.json as BrowserState).recorder?.lastStopped,
+      ).toMatchObject({ recordingId, title: "File an expense report" });
+      expect((stopped.json as BrowserState).recorder?.voice).toBe(
+        variant.window === "native" ? "off" : undefined,
+      );
       // The Recorder's own refusal comes back as one.
       const again = await api("/browser/recording", { action: "stop" });
       expect(again.status).toBe(409);

@@ -314,7 +314,22 @@ export function createBrowserHost(options: BrowserHostOptions) {
       }
 
       if (narration?.ok) {
-        const result = await browser.launcher.narrate(narration.value);
+        /*
+         * A phrase, or the person starting or stopping one. The times are already on the server's
+         * clock, which corrected them by `sentAt` on the way (see the contract); `sentAt` itself is
+         * the server's own and goes no further.
+         */
+        const said = narration.value;
+        const result =
+          "text" in said
+            ? await browser.launcher.narrate({
+                text: said.text,
+                startedAt: said.startedAt,
+                endedAt: said.endedAt,
+              })
+            : await browser.launcher.speaking({
+                since: said.speaking ? said.since : null,
+              });
         if (!result.ok) return json({ error: result.error }, 409);
         return json({ ok: true });
       }

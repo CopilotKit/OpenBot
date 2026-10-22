@@ -4,6 +4,10 @@
  * shared/openbot-browser.ts types it, and keeps what it holds in `chrome.storage.local` as the
  * Recorder does, so it survives its worker being stopped and started again.
  *
+ * Like the Recorder, it attaches `chrome.debugger` to the tab it records for as long as it records:
+ * that is what makes a browser show its "started debugging this browser" bar, which the live screen
+ * must not lose the page to.
+ *
  * What it was called with goes to the OpenBot it was connected to, at `/fixture/calls`, with what it
  * can see from inside the browser at that moment (its tabs, the one in front, its microphone
  * permission, whether it opened its setup page), so a test reads the Recorder's side of each call
@@ -16,25 +20,47 @@ async function held() {
     "connection",
     "narration",
     "recording",
+    "lastStopped",
     "setupOpened",
   ]);
   return {
     connection: stored.connection,
     narration: stored.narration ?? "own",
     recording: stored.recording,
+    lastStopped: stored.lastStopped,
     setupOpened: stored.setupOpened === true,
   };
 }
 
 function stateOf(now) {
+  const { tabId: _recorded, ...recording } = now.recording ?? {};
   return {
     connected: Boolean(now.connection),
     ...(now.connection ? { userId: now.connection.user.id } : {}),
     phase: now.recording ? "recording" : "idle",
-    ...(now.recording ?? {}),
+    ...recording,
     actions: 0,
     narration: now.narration,
+    // Hearing the person itself only for `own`: while it records, and not at all otherwise.
+    ...(now.narration === "own"
+      ? { voice: now.recording ? "listening" : "off" }
+      : {}),
+    ...(now.lastStopped ? { lastStopped: now.lastStopped } : {}),
   };
+}
+
+/**
+ * The tab the person is on, as the Recorder finds it: in the window they used last, or, in a browser
+ * on a screen that never had a window in focus, any window's.
+ */
+async function frontTab() {
+  const [focused] = await chrome.tabs.query({
+    active: true,
+    lastFocusedWindow: true,
+  });
+  if (focused) return focused;
+  const [shown] = await chrome.tabs.query({ active: true });
+  return shown;
 }
 
 async function report(method, input) {
@@ -75,17 +101,33 @@ globalThis[LAUNCHER_GLOBAL] = {
     if (!now.connection) return { ok: false, error: "Not connected." };
     if (input.action === "start") {
       if (now.recording) return { ok: false, error: "Already recording." };
+      const front = await frontTab();
+      if (front?.id === undefined)
+        return { ok: false, error: "There is no tab to record." };
+      await chrome.debugger.attach({ tabId: front.id }, "1.3");
       now.recording = {
         recordingId: crypto.randomUUID(),
         title: input.title,
         startedAt: Date.now(),
+        tabId: front.id,
       };
     } else {
       if (!now.recording)
         return { ok: false, error: "Nothing is being recorded." };
+      await chrome.debugger
+        .detach({ tabId: now.recording.tabId })
+        .catch(() => undefined);
+      now.lastStopped = {
+        recordingId: now.recording.recordingId,
+        title: now.recording.title,
+        stoppedAt: Date.now(),
+      };
       now.recording = undefined;
     }
-    await chrome.storage.local.set({ recording: now.recording ?? null });
+    await chrome.storage.local.set({
+      recording: now.recording ?? null,
+      lastStopped: now.lastStopped ?? null,
+    });
     await report("record", input);
     return { ok: true, state: stateOf(now) };
   },
@@ -94,6 +136,13 @@ globalThis[LAUNCHER_GLOBAL] = {
     if (!now.recording)
       return { ok: false, error: "Nothing is being recorded." };
     await report("narrate", input);
+    return { ok: true };
+  },
+  async speaking(input) {
+    const now = await held();
+    if (!now.recording)
+      return { ok: false, error: "Nothing is being recorded." };
+    await report("speaking", input);
     return { ok: true };
   },
   async state() {

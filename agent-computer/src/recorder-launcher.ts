@@ -329,6 +329,9 @@ export function createRecorderLauncher(input: {
     async narrate(argument) {
       return result(await call("narrate", argument));
     },
+    async speaking(argument) {
+      return result(await call("speaking", argument));
+    },
     async state() {
       const value = await call("state", undefined, 5_000);
       if (!value || typeof value !== "object" || !("phase" in value))
