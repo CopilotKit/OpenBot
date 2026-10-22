@@ -27,7 +27,9 @@ export const TRAJECTORY_GATE_REFUSALS = {
   },
 } as const;
 
-export type RecorderConnectVia = "web" | "desktop";
+/** How a browser was connected: Connect this browser in OpenBot (`web`), OpenBot Desktop's handoff (`desktop`), or OpenBot
+ * itself when it opened the person's own OpenBot browser, with no Connect step (`openbot-browser`). */
+export type RecorderConnectVia = "web" | "desktop" | "openbot-browser";
 export type RecorderUser = { id: string; name: string; email: string };
 export type RecorderConnection = {
   id: string;
@@ -97,6 +99,8 @@ export type RecorderErrorBody = {
   reason?: "revoked" | "removed" | "organization";
 };
 
+/** Only `web` and `desktop` are asked for: OpenBot mints an OpenBot browser's connection itself, with no code anybody
+ * could ask for. */
 export const connectCodeRequestSchema = z
   .object({ via: z.enum(["web", "desktop"]) })
   .strict();
@@ -107,6 +111,43 @@ export const exchangeRequestSchema = z
     installId: z.string().regex(RECORDER_INSTALL_ID),
   })
   .strict();
+
+type OriginCheck = { ok: true; origin: string } | { ok: false; reason: string };
+
+const LOOPBACK_HOSTS = new Set(["127.0.0.1", "[::1]"]);
+
+/** https:// any host; http:// only for a loopback address with a port, 127.0.0.1 or [::1] (OpenBot Desktop's local stack,
+ * Decision 21; never a name such as localhost); no userinfo, path other than "/", query or fragment. The Recorder's rule
+ * for every OpenBot it connects to, here so the server never hands the Recorder an address it would refuse. */
+export function normaliseOpenBotOrigin(raw: string): OriginCheck {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return { ok: false, reason: "That is not a web address." };
+  }
+  if (url.protocol !== "https:" && url.protocol !== "http:") {
+    return { ok: false, reason: "OpenBot's address must start with https://." };
+  }
+  if (url.username || url.password)
+    return {
+      ok: false,
+      reason: "The address must not contain a user name or password.",
+    };
+  if (url.pathname !== "/" || url.search || url.hash) {
+    return {
+      ok: false,
+      reason: "Use only the address, such as https://openbot.example.com.",
+    };
+  }
+  if (
+    url.protocol === "http:" &&
+    !(LOOPBACK_HOSTS.has(url.hostname) && url.port)
+  ) {
+    return { ok: false, reason: "OpenBot's address must use HTTPS." };
+  }
+  return { ok: true, origin: url.origin };
+}
 
 const id = (value: string) => encodeURIComponent(value);
 export const recorderPaths = {

@@ -18,6 +18,7 @@
  * never loaded refuses everything it is asked about. Every async check reads the database fresh.
  */
 
+import { isPersonBrowserId } from "@openbot/shared/openbot-browser";
 import { and, eq, inArray, like, sql } from "drizzle-orm";
 import postgres from "postgres";
 import {
@@ -78,6 +79,9 @@ export type EnterpriseDeps = {
   auditStore: AuditStore;
   provider?: ComputerProvider;
   computerToken?: string;
+  /** Where a person's own OpenBot browser may go (browser/egress.ts): pushed to it instead of a Bot's policy, which says
+   * where Bots may go. Absent, a person's browser is pushed `deny_all`, the answer for a computer with no policy. */
+  personBrowserPolicy?: EgressPolicy;
   /** Pushed to every computer with its policy; see `computer/policy-network.ts`. */
   webBotAuth?: WebBotAuth;
   /** `provider/model` the built-in Bot runs on, for the model allowlist and usage view. */
@@ -353,6 +357,9 @@ export async function installEnterpriseControls(
     );
 
   const policyForBot = async (botId: string): Promise<EgressPolicy> => {
+    // A person's own browser has no Bot and no owner to read a policy for, and the organization's is for Bots.
+    if (isPersonBrowserId(botId))
+      return deps.personBrowserPolicy ?? { mode: "deny_all", rules: [] };
     const current = snapshot;
     if (!current) return { mode: "deny_all", rules: [] };
     const [profile] = await deps.database

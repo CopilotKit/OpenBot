@@ -48,6 +48,7 @@ import {
   createAttachmentRoutes,
   createChannelAttachmentRoutes,
 } from "./channels/attachments";
+import { type BrowserRouteDeps, createBrowserRoutes } from "./browser/routes";
 import type { ChannelEventHub } from "./channels/events";
 import { createGroupRoutes, type GroupConversations } from "./channels/group";
 import { type ChannelStore, createChannelRoutes } from "./channels/routes";
@@ -408,6 +409,9 @@ export function createApp(
     approvals?: ApprovalService;
     /** The Recorder extension's routes and guards (recorder/wiring.ts). Absent, nothing about it is mounted. */
     recorder?: RecorderExtensionDeps;
+    /** A person's own OpenBot browser, with the Recorder in it already connected (browser/routes.ts). Absent, nothing
+     * about it is mounted and the app shows no Browser button. */
+    browser?: Omit<BrowserRouteDeps, "requireUser" | "auditStore">;
     /** Settings, Learning: who else's Bots use a person's own learned Skills. Absent, the screen has nothing to read. */
     personalLearning?: PersonalLearningRouteDeps;
     /**
@@ -1620,6 +1624,11 @@ export function createApp(
       }),
     );
   }
+  if (coworker?.browser)
+    app.route(
+      "/api/browser",
+      createBrowserRoutes({ ...coworker.browser, requireUser, auditStore }),
+    );
   if (coworker?.personalLearning)
     app.route(
       "/api/settings/learning",

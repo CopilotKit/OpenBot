@@ -7,6 +7,7 @@ import {
   isLearningContainerId,
   type LearningTarget,
 } from "@openbot/shared/learning";
+import { BROWSER_URL_ENV } from "@openbot/shared/openbot-browser";
 import { singleUserEnabled } from "./auth/dev-actor";
 import { normalizeDomain } from "./auth/email-domain";
 import { organizationAuthority } from "./auth/organization";
@@ -375,6 +376,13 @@ export type DeploymentConfig = {
    * mounted and failing: a capability that is not configured should be missing, not broken.
    */
   computer?: ComputerConfig;
+  /**
+   * The computer that runs people's own OpenBot browsers here when it is not the Bots' (`OPENBOT_BROWSER_URL`): OpenBot
+   * Desktop's host-side local Chrome computer, so a person's browser is a window on their own desktop while Bots'
+   * computers stay where they are. Called with the same COMPUTER_TOKEN as every computer. Absent, the Bots' computer
+   * provider runs people's browsers too.
+   */
+  browser?: { url: string; token?: string };
   /** How far one Bot handing work to another may go. */
   handoff: HandoffCaps;
   /**
@@ -1130,6 +1138,15 @@ export function durationMs(value: string): number {
   }
 }
 
+function browserConfig(
+  environment: Environment,
+): Pick<DeploymentConfig, "browser"> {
+  const address = url(environment, BROWSER_URL_ENV);
+  if (!address) return {};
+  const token = optional(environment, "COMPUTER_TOKEN");
+  return { browser: { url: address, ...(token ? { token } : {}) } };
+}
+
 function computerConfig(environment: Environment): ComputerConfig | undefined {
   const supervisorAddress = optional(environment, "COMPUTER_SUPERVISOR_URL");
   const sharedAddress = optional(environment, "AGENT_COMPUTER_URL");
@@ -1421,6 +1438,7 @@ export function loadConfig(
       ? { appDistDir: optional(environment, "APP_DIST_DIR") as string }
       : {}),
     computer: computerConfig(environment),
+    ...browserConfig(environment),
     handoff: handoffCaps(environment),
     ...(optional(environment, "AGENT_TOOL_TOKEN")
       ? { agentToolToken: optional(environment, "AGENT_TOOL_TOKEN") as string }
