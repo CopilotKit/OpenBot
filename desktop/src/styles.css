@@ -65,9 +65,9 @@ body {
 }
 
 /*
- * The window is 900x640 and cannot be resized into something else, so it is composed as a room
- * rather than a page: one centred column, vertically settled, with the same optical centre on every
- * step. A wizard whose content jumps position between steps reads as four different screens.
+ * The window opens at 1000x800 and grows to fit a taller step (see fitWindow.ts), so it is composed
+ * as a room rather than a page: one centred column, vertically settled, with the same optical centre
+ * on every step. A wizard whose content jumps position between steps reads as four different screens.
  */
 main {
   min-height: 100vh;
