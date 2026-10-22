@@ -26,9 +26,10 @@ import { AppSidebar } from "@/components/app-sidebar/app-sidebar";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { agentKeys } from "@/lib/agents/queries";
 import { authKeys } from "@/lib/auth/queries";
+import { botLifecycleKeys } from "@/lib/bot-lifecycle/queries";
+import { browserKeys } from "@/lib/browser/queries";
 import { type ChannelSummary, channelKeys } from "@/lib/channels/queries";
 import { userPreferencesQueryOptions } from "@/lib/settings/message-list";
-import { botLifecycleKeys } from "@/lib/bot-lifecycle/queries";
 
 // Keep the sidebar's live-update socket offline; these tests exercise HTTP pagination.
 class OfflineWebSocket extends EventTarget implements WebSocket {
@@ -181,6 +182,13 @@ function renderSidebar() {
     refetchInterval: false,
   });
   queryClient.setQueryData(botLifecycleKeys.attention, []);
+  // The Browser button reads whether there is a browser once; answered here so only channel requests are counted.
+  queryClient.setQueryData(browserKeys.state, {
+    available: false,
+    computerId: "",
+    open: false,
+    tabs: [],
+  });
   queryClient.setQueryData(channelKeys.list(), {
     pages: [
       { channels: [channel("Recent conversation")], nextCursor: "older/page" },
