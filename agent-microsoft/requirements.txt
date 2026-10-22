@@ -1,4 +1,8 @@
-agent-framework-ag-ui
+# agent-framework-ag-ui 1.7.0, released 2026-10-22, refuses to build an AG-UI endpoint unless its
+# authorization mode is declared (authorization_scope_resolver, snapshot_scope_resolver or
+# single_user=True), so every run in this harness fails at startup. 1.6.0 works. Lift this once
+# the harness declares how it authorizes.
+agent-framework-ag-ui<1.7
 agent-framework-anthropic
 agent-framework-openai
 fastapi
