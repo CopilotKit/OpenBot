@@ -75,12 +75,12 @@ function isReady(report: LocalReport): boolean {
 /**
  * Intelligence on this computer, run by the Intelligence CLI, then OpenBot started against it.
  *
- * Shown only when this build has a CLI to run. Four steps, each idempotent, run in order without
- * a button: set up, connect (choosing this installation is the consent, and the native side keeps
- * the key the CLI wrote), wait until the CLI itself reports readiness "ready" and licence
- * "valid", then start OpenBot. A recorded, connected stack starts at waiting. A step that is
- * blocked or fails stops there with its reason, and Retry resumes at that step. A CLI that does
- * not report ready and valid never reaches Start.
+ * Shown only when this build has a CLI to run, and only once the person has chosen it. Four
+ * steps, each idempotent, run in order without a button: set up, connect (the choice is the
+ * consent, and the native side keeps the key the CLI wrote), wait until the CLI itself reports
+ * readiness "ready" and licence "valid", then start OpenBot. A recorded, connected stack starts at
+ * waiting. A step that is blocked or fails stops there with its reason, and Retry resumes at that
+ * step. A CLI that does not report ready and valid never reaches Start.
  */
 export function LocalIntelligence({
   root,
@@ -88,7 +88,7 @@ export function LocalIntelligence({
   connected: recordedConnection = false,
   auto,
   developer = import.meta.env.DEV,
-  onLeave,
+  onCancel,
   onStart,
   onConnected = () => {},
   pollDelays = POLL_DELAYS,
@@ -100,7 +100,8 @@ export function LocalIntelligence({
   /** Run the steps as soon as this is shown. Otherwise they wait for Start OpenBot. */
   auto: boolean;
   developer?: boolean;
-  onLeave: () => void;
+  /** Cancel also leaves, back to the choice. Without it, Cancel stops at its row with Retry. */
+  onCancel?: () => void;
   /** Starts OpenBot against the stack; true when it started. */
   onStart: (startable: LocalStartable) => Promise<boolean>;
   onConnected?: (stack: string) => void;
@@ -297,6 +298,7 @@ export function LocalIntelligence({
   function cancel() {
     halt();
     setRunning(false);
+    if (onCancel) return onCancel();
     setBlocked({ said: said("cancelled"), reason: null });
   }
 
@@ -360,12 +362,58 @@ export function LocalIntelligence({
             Start OpenBot
           </button>
         )}
-        {!(running && at === "start") && (
-          <button type="button" className="quiet" onClick={onLeave}>
-            Use CopilotKit's hosted service instead
-          </button>
-        )}
       </div>
     </section>
+  );
+}
+
+export type IntelligenceMode = "local" | "hosted";
+
+/**
+ * Where Intelligence runs, asked before anything is set up.
+ *
+ * Local setup downloads several gigabytes, so it waits for this answer rather than starting on
+ * arrival and offering hosted as an interruption. Continue, which belongs to the screen, commits it.
+ */
+export function IntelligenceChoice({
+  chosen,
+  onChoose,
+}: {
+  chosen: IntelligenceMode;
+  onChoose: (mode: IntelligenceMode) => void;
+}) {
+  const rows: [IntelligenceMode, string, string][] = [
+    [
+      "local",
+      "Run Intelligence on this computer",
+      "For evaluation. Uses Docker Desktop; the first setup takes a few minutes.",
+    ],
+    [
+      "hosted",
+      "Use CopilotKit's hosted Intelligence",
+      "Signs in to your CopilotKit account.",
+    ],
+  ];
+  return (
+    <fieldset className="picker">
+      <legend className="sr-only">Where Intelligence runs</legend>
+      {rows.map(([mode, name, summary]) => (
+        <label
+          key={mode}
+          className={`tile intelligence-choice${chosen === mode ? " chosen" : ""}`}
+        >
+          <input
+            type="radio"
+            name="intelligence"
+            className="tile-input"
+            value={mode}
+            checked={chosen === mode}
+            onChange={() => onChoose(mode)}
+          />
+          <span className="tile-name">{name}</span>
+          <span className="tile-summary">{summary}</span>
+        </label>
+      ))}
+    </fieldset>
   );
 }

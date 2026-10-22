@@ -176,6 +176,14 @@ h2 {
   overflow-wrap: anywhere;
 }
 
+/* Where Intelligence runs: two rows with no mark. */
+.tile.intelligence-choice {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas:
+    "name"
+    "summary";
+}
+
 button {
   font: inherit;
   font-weight: 500;
