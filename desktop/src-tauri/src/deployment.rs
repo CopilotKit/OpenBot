@@ -195,7 +195,7 @@ fn layout() -> Vec<String> {
 pub const REQUIRED: [&str; 4] = ["docker-compose.yml", "server", "app", "worker"];
 
 /// The rest of what a deployment needs, which is not what it is checked for.
-pub const ALSO_COPIED: [&str; 10] = [
+pub const ALSO_COPIED: [&str; 11] = [
     "shared",
     // The dependency patches `package.json` names in `patchedDependencies`. Without them `bun install
     // --frozen-lockfile` stops with `Couldn't find patch file`.
@@ -215,15 +215,16 @@ pub const ALSO_COPIED: [&str; 10] = [
     // stack trace that names the parser and not the missing file.
     "tsconfig.base.json",
     "bunfig.toml",
+    // The Recorder, whole. Installation builds it into `extension/dist` (see
+    // `preparation::build_recorder`), and the person's browser loads that build. Its build reads
+    // its source, its public assets and its public key, and `bun install --frozen-lockfile` needs
+    // its manifest as a workspace.
+    "extension",
 ];
 
-/// Single files copied from a directory that is otherwise left behind.
-pub const ALSO_COPIED_FILES: [&str; 1] = [
-    // The Recorder extension's workspace manifest, and nothing else of it. Desktop does not build
-    // or run the extension, but `bun install --frozen-lockfile` stops with `Workspace not found
-    // "extension"` without its manifest. Its source, tests and assets stay out of a deployment.
-    "extension/package.json",
-];
+/// Single files copied from a directory that is otherwise left behind. None now: the Recorder's
+/// manifest was the one, before Desktop built the Recorder.
+pub const ALSO_COPIED_FILES: [&str; 0] = [];
 
 /// Fetch the tagged tarball and lay the deployment out under `root`.
 ///
@@ -676,41 +677,62 @@ mod tests {
         );
     }
 
+    /// Installation builds the Recorder in the deployment, so everything its build reads is laid
+    /// out: its source, its public assets, its public key and its build script, as well as the
+    /// manifest the frozen install needs. `tests/desktop-release-tree.test.ts` runs that build in a
+    /// tree laid out from these lists.
     #[test]
-    fn only_the_recorder_extensions_manifest_is_copied() {
+    fn the_recorder_is_copied_whole_so_installation_can_build_it() {
         let dir = scratch("extension");
 
-        let archive = tarball(&[
-            ("OpenBot-0.0.8/extension/package.json", b"{}"),
-            (
-                "OpenBot-0.0.8/extension/src/background/index.ts",
-                b"export {}",
-            ),
-            (
-                "OpenBot-0.0.8/extension/tests/recording.test.ts",
-                b"export {}",
-            ),
-            ("OpenBot-0.0.8/extension/public/manifest.json", b"{}"),
-            ("OpenBot-0.0.8/extension/package.json.bak", b"{}"),
-        ]);
+        let files = [
+            "extension/package.json",
+            "extension/src/background/index.ts",
+            "extension/public/icons/16.png",
+            "extension/keys/public-key.txt",
+            "extension/scripts/build.ts",
+            "shared/openbot-browser.ts",
+        ];
+        let entries: Vec<(String, &[u8])> = files
+            .iter()
+            .map(|file| (format!("OpenBot-0.0.8/{file}"), b"x".as_slice()))
+            .collect();
+        let archive = tarball(
+            &entries
+                .iter()
+                .map(|(name, body)| (name.as_str(), *body))
+                .collect::<Vec<_>>(),
+        );
         unpack(&dir, &archive).expect("the download is laid out");
 
-        let manifest = std::fs::read_to_string(dir.join("extension/package.json")).ok();
-        let mut copied: Vec<String> = Vec::new();
-        let mut pending = vec![dir.join("extension")];
-        while let Some(next) = pending.pop() {
-            for entry in std::fs::read_dir(&next).into_iter().flatten().flatten() {
-                if entry.path().is_dir() {
-                    pending.push(entry.path());
-                } else {
-                    copied.push(entry.file_name().to_string_lossy().into_owned());
-                }
-            }
-        }
+        let missing: Vec<&str> = files
+            .iter()
+            .copied()
+            .filter(|file| !dir.join(file).is_file())
+            .collect();
         let _ = std::fs::remove_dir_all(&dir);
+        assert!(missing.is_empty(), "not laid out: {missing:?}");
+    }
 
-        assert_eq!(manifest.as_deref(), Some("{}"));
-        assert_eq!(copied, ["package.json"]);
+    /// An app that copied only the Recorder's manifest laid out a deployment that cannot build it,
+    /// and its stamp still matches its version. It is fetched again once, like any deployment laid
+    /// out by an app that copied less.
+    #[test]
+    fn a_deployment_without_the_recorders_source_is_fetched_again() {
+        let dir = std::env::temp_dir().join(format!("openbot-dep-recorder-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(images_path(&dir), "{}").unwrap();
+        let before: Vec<String> = layout()
+            .into_iter()
+            .filter(|entry| entry != "extension")
+            .collect();
+        std::fs::write(
+            stamp_path(&dir),
+            serde_json::json!({ "version": "v0.2.0", "layout": before }).to_string(),
+        )
+        .unwrap();
+        assert!(needs_fetch(&dir, "v0.2.0"));
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

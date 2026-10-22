@@ -5,7 +5,9 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::{deployment, engine::Address, harness::HarnessChoice, problem::Problem, stack};
+use crate::{
+    deployment, engine::Address, harness::HarnessChoice, local_browser, problem::Problem, stack,
+};
 
 pub const REQUIRED: &str = "Finish installing OpenBot's local software before signing in or starting. Return to Install and try again.";
 pub const FILE: &str = ".openbot-prepared.json";
@@ -128,24 +130,47 @@ fn hash_files(root: &Path, files: impl IntoIterator<Item = PathBuf>) -> Result<S
     Ok(format!("{:x}", hash.finalize()))
 }
 
+/// Packages installed apart from the root workspace, each from its own lockfile.
+fn separate_packages(root: &Path) -> Vec<&'static str> {
+    stack::dependency_directories(root)
+        .into_iter()
+        .filter(|directory| !directory.is_empty())
+        .collect()
+}
+
 fn dependency_fingerprint(root: &Path) -> Result<String, Problem> {
     hash_files(
         root,
         std::iter::once(PathBuf::from("bun.lock"))
-            .chain(PACKAGES.map(|path| Path::new(path).join("package.json"))),
+            .chain(PACKAGES.map(|path| Path::new(path).join("package.json")))
+            .chain(separate_packages(root).into_iter().flat_map(|package| {
+                [
+                    Path::new(package).join("bun.lock"),
+                    Path::new(package).join("package.json"),
+                ]
+            })),
     )
 }
 
+/// The built Recorder's manifest, in a release whose person's browser loads it.
+fn recorder_manifest() -> PathBuf {
+    Path::new(local_browser::RECORDER_DIST).join("manifest.json")
+}
+
 fn fingerprint(root: &Path) -> Result<String, Problem> {
-    hash_files(
-        root,
-        [
-            PathBuf::from(".openbot-deployment"),
-            PathBuf::from("container-images.json"),
-            PathBuf::from("docker-compose.yml"),
-            PathBuf::from(DEPENDENCIES),
-        ],
-    )
+    let mut files = vec![
+        PathBuf::from(".openbot-deployment"),
+        PathBuf::from("container-images.json"),
+        PathBuf::from("docker-compose.yml"),
+        PathBuf::from(DEPENDENCIES),
+    ];
+    // A release with the person's browser is installed only with its Recorder built, so a build
+    // that has gone missing sends Start back to Installation rather than starting a browser with no
+    // Recorder to load.
+    if local_browser::in_release(root) {
+        files.push(recorder_manifest());
+    }
+    hash_files(root, files)
 }
 
 fn write_record(root: &Path, name: &str, value: &impl Serialize) -> Result<(), Problem> {
@@ -173,7 +198,7 @@ pub fn invalidate(root: &Path) -> Result<(), Problem> {
 /// Record resolved package manifests, not just the existence of a partial node_modules directory.
 fn package_files(root: &Path) -> Result<Vec<PathBuf>, Problem> {
     let mut files = BTreeSet::new();
-    for package in PACKAGES {
+    for package in PACKAGES.into_iter().chain(separate_packages(root)) {
         let directory = root.join(package);
         let manifest: serde_json::Value = serde_json::from_slice(
             &std::fs::read(directory.join("package.json")).map_err(|e| required(e.to_string()))?,
@@ -222,6 +247,50 @@ pub fn install_dependencies_if_needed(
     stack::install_dependencies(root, &bun)?;
     record_dependencies(root, &bun)?;
     Ok(bun)
+}
+
+/// Build the Recorder into the deployment, for the person's browser to load.
+///
+/// Built here, from the release's own source, rather than shipped beside it. That is what the
+/// deployment already does with the one other thing it builds for a host process: the app builds
+/// `app/dist` from the tagged source on first serve (`app/scripts/serve-or-build.ts`). The release
+/// publishes nothing else beside its tarball but the image manifest, the tarball is source by
+/// design, and the Recorder is three Vite builds from packages the install has already fetched, a
+/// few seconds in all. Built from the same tag, it cannot disagree with the server it connects to.
+///
+/// Every installation builds it again, since an upgrade lays new source over the old build.
+pub fn build_recorder(root: &Path, bun: &Path) -> Result<(), Problem> {
+    if !local_browser::in_release(root) {
+        return Ok(());
+    }
+    let failed = |detail: String| {
+        Problem::with(
+            "OpenBot could not build the Recorder for its browser. Try again.",
+            detail,
+        )
+    };
+    let output = crate::quiet::command(bun)
+        .current_dir(root.join("extension"))
+        .args(["run", "build"])
+        // The release build, whatever the environment says. The end-to-end variant is for tests.
+        .env_remove("RECORDER_BUILD_VARIANT")
+        .output()
+        .map_err(|error| failed(format!("could not run the Recorder's build: {error}")))?;
+    if !output.status.success() {
+        let said = if output.stderr.is_empty() {
+            &output.stdout
+        } else {
+            &output.stderr
+        };
+        return Err(failed(crate::quiet::said(said)));
+    }
+    if !root.join(recorder_manifest()).is_file() {
+        return Err(failed(format!(
+            "the build finished without writing {}",
+            recorder_manifest().display()
+        )));
+    }
+    Ok(())
 }
 
 pub fn dependencies_ready(root: &Path) -> Result<PathBuf, Problem> {
@@ -398,11 +467,18 @@ fn main() {
         println!("{}", std::fs::read_to_string(version).unwrap_or_else(|_| "1.4.3".into()));
         return;
     }
+    if args == ["run", "build"] {
+        assert_eq!(std::env::var_os("RECORDER_BUILD_VARIANT"), None);
+        std::fs::create_dir_all("dist").unwrap();
+        std::fs::write("dist/manifest.json", "{}").unwrap();
+        return;
+    }
     assert_eq!(args, ["install", "--frozen-lockfile", "--ignore-scripts"]);
     let previous = std::fs::read_to_string("installs").unwrap_or_default();
     writeln!(std::fs::OpenOptions::new().create(true).append(true).open("installs").unwrap(), "install").unwrap();
     std::fs::create_dir_all("node_modules/synthetic-package").unwrap();
-    if previous.is_empty() { std::process::exit(71); }
+    let separate = std::env::current_dir().unwrap().ends_with("agent-computer");
+    if previous.is_empty() && !separate { std::process::exit(71); }
     std::fs::write("node_modules/synthetic-package/package.json", "{}").unwrap();
 }
 "#).unwrap();
@@ -559,6 +635,60 @@ fn main() {
             Some(f.root.clone()),
             "repair must not forget the last successful folder"
         );
+    }
+
+    /// A release with the person's browser: its computer's packages are installed from their own
+    /// lockfile, and it is not installed until its Recorder is built. A build that goes missing
+    /// afterwards sends Start back to Installation, which builds it again.
+    #[test]
+    fn a_release_with_the_browser_is_installed_only_with_its_recorder_built() {
+        let f = Fixture::new();
+        std::fs::create_dir_all(f.root.join("shared")).unwrap();
+        std::fs::write(f.root.join(local_browser::CONTRACT), "export {};\n").unwrap();
+        std::fs::create_dir_all(f.root.join("agent-computer")).unwrap();
+        std::fs::write(
+            f.root.join("agent-computer/package.json"),
+            r#"{"dependencies":{"synthetic-package":"1"}}"#,
+        )
+        .unwrap();
+        std::fs::write(f.root.join("agent-computer/bun.lock"), "synthetic-lock").unwrap();
+
+        let install = || install_dependencies_if_needed(&f.root, || Ok(f.bun.clone()));
+        assert!(install().is_err(), "the fixture's first root install fails");
+        install().unwrap();
+        assert!(f
+            .root
+            .join("agent-computer/node_modules/synthetic-package/package.json")
+            .is_file());
+
+        let images = || vec!["synthetic-image".to_string()];
+        let unbuilt = complete_with(&f.root, None, images(), |_| Ok(()))
+            .expect_err("no Recorder, no installation");
+        assert!(unbuilt.said.contains("Finish installing"), "{unbuilt:?}");
+
+        build_recorder(&f.root, &f.bun).unwrap();
+        complete_with(&f.root, None, images(), |_| Ok(())).unwrap();
+        require_with(&f.root, None, |_| Ok(())).unwrap();
+
+        std::fs::remove_dir_all(f.root.join(local_browser::RECORDER_DIST)).unwrap();
+        let gone = require_with(&f.root, None, |_| Ok(()))
+            .expect_err("Start must not run a browser with no Recorder to load");
+        assert!(gone.said.contains("Finish installing"), "{gone:?}");
+
+        // A changed lockfile for the computer is a changed installation, as the root's is.
+        build_recorder(&f.root, &f.bun).unwrap();
+        complete_with(&f.root, None, images(), |_| Ok(())).unwrap();
+        std::fs::write(f.root.join("agent-computer/bun.lock"), "changed-lock").unwrap();
+        assert!(require_with(&f.root, None, |_| Ok(())).is_err());
+    }
+
+    /// Releases before the browser have nothing to build and no computer to install for.
+    #[test]
+    fn an_older_release_builds_nothing_and_installs_only_its_workspace() {
+        let f = Fixture::new();
+        build_recorder(&f.root, &f.bun).unwrap();
+        assert!(!f.root.join(local_browser::RECORDER_DIST).exists());
+        assert_eq!(stack::dependency_directories(&f.root), [""]);
     }
 
     #[test]

@@ -79,6 +79,19 @@ pub enum Os {
     Windows,
 }
 
+impl Os {
+    /// The OS this binary was built for.
+    pub fn current() -> Self {
+        if cfg!(windows) {
+            Os::Windows
+        } else if cfg!(target_os = "macos") {
+            Os::Mac
+        } else {
+            Os::Linux
+        }
+    }
+}
+
 /// This person's folders, as the environment names them.
 #[derive(Clone, Copy, Debug)]
 pub struct UserDirs<'a> {

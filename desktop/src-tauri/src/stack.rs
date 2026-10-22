@@ -6,6 +6,10 @@
 //! `migrate`, and three host processes for the rest. `scripts/start.sh` does exactly this for a
 //! developer. This does it for somebody who double-clicked.
 //!
+//! A fourth host process runs where this machine can run it: the person's own browser, the local
+//! Chrome computer `scripts/start-local-chrome-computer.ts` starts for a developer. See
+//! `local_browser` for when, and why it is not a container.
+//!
 //! The shell also becomes the restart policy those three do not have. `worker/src/index.ts` names
 //! the gap itself: "this process has no restart policy watching it; it is somebody's laptop, left
 //! running".
@@ -95,12 +99,15 @@ pub fn selected_services(harness: bool, bots: BundledBots) -> Vec<&'static str> 
     services
 }
 
-/// The three that are not containers, in the order they are started.
+/// The processes that are not containers, in the order they are started.
 ///
 /// The server first, because the app serves a page that talks to it and the worker claims routines
 /// it owns. Nothing here waits on the others: each is supervised on its own and reports its own
 /// state, so a worker that dies does not take the window with it.
-pub const HOST_PROCESSES: [HostProcess; 3] = [
+///
+/// The person's browser last, and only where [`host_processes`] includes it. The server reaches it
+/// only when the person opens their browser, so it is not on the way to the window answering.
+pub const HOST_PROCESSES: [HostProcess; 4] = [
     HostProcess {
         name: "server",
         cwd: "server",
@@ -123,10 +130,27 @@ pub const HOST_PROCESSES: [HostProcess; 3] = [
         script: "src/index.ts",
         package_script: "",
     },
+    HostProcess {
+        name: LOCAL_BROWSER,
+        cwd: "agent-computer",
+        script: "src/index.ts",
+        package_script: "",
+    },
 ];
 
+/// The host process that runs the person's own browser.
+pub const LOCAL_BROWSER: &str = "browser";
+
+/// The host processes one start runs, in order: the server, the app and the worker always, and the
+/// person's browser where this machine runs one.
+pub fn host_processes(local_browser: bool) -> impl Iterator<Item = &'static HostProcess> {
+    HOST_PROCESSES
+        .iter()
+        .filter(move |process| local_browser || process.name != LOCAL_BROWSER)
+}
+
 #[derive(Clone, Copy, Debug)]
-/// One of the three processes Compose does not run.
+/// One of the processes Compose does not run.
 ///
 /// The app is started through the package's own `dev` script, which runs Vite through bun rather
 /// than through its shebang. `node_modules/.bin/vite` begins `#!/usr/bin/env node`, so a machine
@@ -855,19 +879,34 @@ pub fn install_dependencies(root: &Path, bun: &Path) -> Result<(), String> {
     // ask for. And they are not all portable: `@scarf/scarf` shells out to `node`, which a machine
     // that has bun need not have, so the install fails at "node: command not found" after the
     // containers are already up. Found on a Linux machine with bun and no node.
-    let output = command(bun)
-        .current_dir(root)
-        .args(["install", "--frozen-lockfile", "--ignore-scripts"])
-        .output()
-        .map_err(|error| format!("could not run bun install: {error}"))?;
-
-    if output.status.success() {
-        return Ok(());
+    for directory in dependency_directories(root) {
+        let output = command(bun)
+            .current_dir(root.join(directory))
+            .args(["install", "--frozen-lockfile", "--ignore-scripts"])
+            .output()
+            .map_err(|error| format!("could not run bun install: {error}"))?;
+        if !output.status.success() {
+            return Err(format!(
+                "installing the deployment's dependencies failed: {}",
+                command_said(&output.stderr)
+            ));
+        }
     }
-    Err(format!(
-        "installing the deployment's dependencies failed: {}",
-        command_said(&output.stderr)
-    ))
+    Ok(())
+}
+
+/// Where the deployment's packages are installed: the root workspace, and `agent-computer` where the
+/// release runs the person's browser from it.
+///
+/// `agent-computer` is not a workspace. It has its own lockfile, as its image installs it, so the
+/// root install leaves it without Playwright and the browser process stops at its first import.
+/// Older releases have no browser to run, so they are not made to download one's dependencies.
+pub fn dependency_directories(root: &Path) -> Vec<&'static str> {
+    let mut directories = vec![""];
+    if crate::local_browser::in_release(root) {
+        directories.push("agent-computer");
+    }
+    directories
 }
 
 /// Start one host process, with its output on disk rather than nowhere.
@@ -1135,6 +1174,9 @@ pub fn spawn_host_process(
     logs: &Path,
     bun: &Path,
     secrets: &Secrets,
+    // What this start decided about the person's browser. Required to start that process, and
+    // ignored by the others.
+    local_browser: Option<&crate::local_browser::LocalBrowser>,
 ) -> std::io::Result<std::process::Child> {
     std::fs::create_dir_all(logs)?;
     let out = std::fs::File::create(logs.join(format!("{}.log", process.name)))?;
@@ -1142,6 +1184,15 @@ pub fn spawn_host_process(
 
     let mut command = command(bun);
     command.current_dir(root.join(process.cwd));
+    let ports = crate::env::Ports::read(root)?;
+    if process.name == LOCAL_BROWSER {
+        configure_local_browser(&mut command, process, root, &ports, secrets, local_browser)?;
+        command
+            .stdout(Stdio::from(out))
+            .stderr(Stdio::from(err))
+            .stdin(Stdio::null());
+        return command.spawn();
+    }
     /*
      * The credentials, alongside the `--env-file` that carries the settings.
      *
@@ -1150,7 +1201,6 @@ pub fn spawn_host_process(
      * fought with.
      */
     configure_host_process_env(&mut command, process.name, secrets);
-    let ports = crate::env::Ports::read(root)?;
     command.envs(ports.settings());
     if process.name == "server" {
         command.env("PORT", ports.server.to_string());
@@ -1165,6 +1215,55 @@ pub fn spawn_host_process(
         .stderr(Stdio::from(err))
         .stdin(Stdio::null());
     command.spawn()
+}
+
+/// The person's browser is started the way `scripts/start-local-chrome-computer.ts` starts it, and
+/// is handed only what it needs (see `local_browser::environment`).
+///
+/// `--no-env-file` because nothing in a settings file is the computer's: Bun would otherwise read
+/// a `.env` beside it, and the deployment's own `.env` is the server's.
+fn configure_local_browser(
+    command: &mut Command,
+    process: &HostProcess,
+    root: &Path,
+    ports: &crate::env::Ports,
+    secrets: &Secrets,
+    local_browser: Option<&crate::local_browser::LocalBrowser>,
+) -> std::io::Result<()> {
+    let missing = |what: &str| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("the person's browser cannot start without {what}"),
+        )
+    };
+    let browser = local_browser.ok_or_else(|| missing("a browser to open"))?;
+    let port = ports.browser.ok_or_else(|| missing("BROWSER_PORT"))?;
+    let token = secrets
+        .get("COMPUTER_TOKEN")
+        .filter(|token| !token.trim().is_empty())
+        .ok_or_else(|| missing("COMPUTER_TOKEN"))?;
+    // The contract says absolute. A deployment folder typed as a relative path is relative to
+    // wherever this window runs from, which the computer does not share.
+    let root = if root.is_absolute() {
+        root.to_path_buf()
+    } else {
+        std::env::current_dir()?.join(root)
+    };
+    crate::local_browser::prepare_data(browser)?;
+    // Taken out as well as not given: a Desktop started from a developer's shell inherits whatever
+    // that shell exported, and none of the deployment's other credentials are this process's.
+    for key in secrets
+        .keys()
+        .filter(|key| key.as_str() != "COMPUTER_TOKEN")
+    {
+        command.env_remove(key);
+    }
+    command
+        .envs(crate::local_browser::environment(
+            &root, browser, port, token,
+        ))
+        .args(["--no-env-file", process.script]);
+    Ok(())
 }
 
 /// Keep a replacement handle even if refreshing durable ownership fails. The caller must
@@ -1468,6 +1567,7 @@ pub fn stop_host_children(
     root: &Path,
     children: &mut [(&str, std::process::Child)],
 ) -> Result<usize, Problem> {
+    close_local_browser_first(children, BROWSER_CLOSE_PATIENCE);
     let mut live = Vec::new();
     for (name, child) in children {
         if child
@@ -1484,6 +1584,46 @@ pub fn stop_host_children(
         return Ok(0);
     }
     stop_unix_records(root, &unix_host_records(root, &live)?)
+}
+
+/// How long the person's browser is given to close before the rest of the stack is taken down.
+/// Playwright closes it over its own pipe in about a second; the rest is for a busy machine, kept
+/// short because the person is waiting on Stop or Quit.
+#[cfg(unix)]
+const BROWSER_CLOSE_PATIENCE: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Ask the person's browser to close before anything is killed.
+///
+/// Every other host process is stopped by freezing its process tree and killing it, which is right
+/// for a server and wrong for a browser holding somebody's logins: Chrome killed mid-write says it
+/// did not shut down correctly the next time it opens, and offers back pages the person had closed.
+/// The computer closes its browsers and exits on SIGTERM (`agent-computer/src/index.ts`, the path
+/// `docker stop` takes), so it is sent that first. Whatever still runs after `patience` is stopped
+/// the ordinary way, so this never weakens the guarantee below it.
+///
+/// Only a held child is signalled. Its pid cannot belong to anybody else while this process has
+/// not reaped it, which is not true of a pid read back from the pidfile.
+#[cfg(unix)]
+fn close_local_browser_first(
+    children: &mut [(&str, std::process::Child)],
+    patience: std::time::Duration,
+) {
+    let deadline = std::time::Instant::now() + patience;
+    for (name, child) in children.iter_mut() {
+        if *name != LOCAL_BROWSER || !matches!(child.try_wait(), Ok(None)) {
+            continue;
+        }
+        let Ok(pid) = i32::try_from(child.id()) else {
+            continue;
+        };
+        // SAFETY: kill(2) on a child this process spawned and still holds unreaped.
+        if unsafe { libc::kill(pid, libc::SIGTERM) } != 0 {
+            continue;
+        }
+        while matches!(child.try_wait(), Ok(None)) && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+    }
 }
 
 /// Windows replacements may not be in the initial pidfile. A live Child plus its current direct
@@ -3420,12 +3560,13 @@ fn main() {
             ("PORT".into(), "3001".into()),
         ]);
         for _ in 0..2 {
-            for process in HOST_PROCESSES {
+            for process in host_processes(false) {
                 std::fs::create_dir_all(root.join(process.cwd)).unwrap();
-                let status = spawn_host_process(&process, &root, &root.join(".logs"), &bun, &stale)
-                    .unwrap()
-                    .wait()
-                    .unwrap();
+                let status =
+                    spawn_host_process(process, &root, &root.join(".logs"), &bun, &stale, None)
+                        .unwrap()
+                        .wait()
+                        .unwrap();
                 assert!(
                     status.success(),
                     "{} did not receive selected ports",
@@ -7673,9 +7814,332 @@ fn main() {
     }
 
     #[test]
-    fn the_three_host_processes_are_the_three_that_are_not_containers() {
+    fn the_host_processes_are_the_ones_that_are_not_containers() {
         let names: Vec<_> = HOST_PROCESSES.iter().map(|p| p.name).collect();
-        assert_eq!(names, vec!["server", "app", "worker"]);
+        assert_eq!(names, vec!["server", "app", "worker", "browser"]);
+    }
+
+    /// The person's browser starts last, after everything the window waits on, and not at all on a
+    /// machine that cannot run one.
+    #[test]
+    fn the_persons_browser_starts_last_and_only_where_it_runs() {
+        let without: Vec<_> = host_processes(false).map(|p| p.name).collect();
+        assert_eq!(without, ["server", "app", "worker"]);
+        let with: Vec<_> = host_processes(true).map(|p| p.name).collect();
+        assert_eq!(with, ["server", "app", "worker", "browser"]);
+        let browser = HOST_PROCESSES
+            .iter()
+            .find(|process| process.name == LOCAL_BROWSER)
+            .unwrap();
+        assert_eq!(
+            (browser.cwd, browser.script),
+            ("agent-computer", "src/index.ts")
+        );
+    }
+
+    /// The browser process through the real spawn path, with a stand-in for Bun that writes down
+    /// what it was given: the arguments and environment `scripts/start-local-chrome-computer.ts`
+    /// gives the computer, this start's port, the computer token, and the built Recorder, and none
+    /// of the credentials the server and the worker hold.
+    #[test]
+    fn the_persons_browser_is_started_with_its_own_environment_and_no_other_credentials() {
+        let root = temp_root("local-browser-spawn");
+        std::fs::create_dir_all(root.join("agent-computer")).unwrap();
+        let root = std::fs::canonicalize(&root).unwrap();
+        let source = root.join("said.rs");
+        let bun = root.join(format!("said{}", std::env::consts::EXE_SUFFIX));
+        std::fs::write(
+            &source,
+            r#"
+fn main() {
+    let mut said: Vec<String> = std::env::args().skip(1).collect();
+    for name in ["COMPUTER_TOKEN", "COMPUTER_BROWSER_BACKEND", "COMPUTER_BROWSER_MODE", "PORT",
+        "PROFILES_DIR", "WORKSPACE_DIR", "OPENBOT_RECORDER_DIR", "COMPUTER_BROWSER_IDLE_MS",
+        "INTELLIGENCE_API_KEY", "OPENBOT_DESKTOP_HOST_TOKEN", "KEY_ENCRYPTION_KEY"] {
+        said.push(format!("{name}={}", std::env::var(name).unwrap_or_else(|_| "<unset>".into())));
+    }
+    std::fs::write("said.txt", said.join("\n")).unwrap();
+}
+"#,
+        )
+        .unwrap();
+        crate::test_support::compile_fixture(&source, &bun);
+        crate::env::write(
+            &root.join(".env"),
+            &crate::env::Ports {
+                browser: Some(52131),
+                ..Default::default()
+            }
+            .settings(),
+            &std::collections::BTreeMap::new(),
+        )
+        .unwrap();
+        let secrets = Secrets::from([
+            ("COMPUTER_TOKEN".into(), "synthetic-computer-token".into()),
+            (
+                "INTELLIGENCE_API_KEY".into(),
+                "synthetic-intelligence".into(),
+            ),
+            ("KEY_ENCRYPTION_KEY".into(), "synthetic-key".into()),
+            ("OPENBOT_DESKTOP_HOST_TOKEN".into(), "synthetic-host".into()),
+        ]);
+        let browser = crate::local_browser::LocalBrowser {
+            product: crate::local_browser::Product::Chrome,
+            executable: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome".into(),
+            data: root.join("data").join("local-computer"),
+        };
+        let process = host_processes(true)
+            .find(|process| process.name == LOCAL_BROWSER)
+            .unwrap();
+
+        let refused = spawn_host_process(process, &root, &root.join(".logs"), &bun, &secrets, None)
+            .expect_err("the browser cannot start without this start's decision about it");
+        assert_eq!(refused.kind(), std::io::ErrorKind::InvalidInput);
+
+        let status = spawn_host_process(
+            process,
+            &root,
+            &root.join(".logs"),
+            &bun,
+            &secrets,
+            Some(&browser),
+        )
+        .unwrap()
+        .wait()
+        .unwrap();
+        assert!(status.success());
+        let said = std::fs::read_to_string(root.join("agent-computer/said.txt")).unwrap();
+        let data = root.join("data").join("local-computer");
+        assert_eq!(
+            said.lines().collect::<Vec<_>>(),
+            [
+                "--no-env-file".to_string(),
+                "src/index.ts".into(),
+                "COMPUTER_TOKEN=synthetic-computer-token".into(),
+                "COMPUTER_BROWSER_BACKEND=local-chrome".into(),
+                "COMPUTER_BROWSER_MODE=headed".into(),
+                "PORT=52131".into(),
+                format!("PROFILES_DIR={}", data.join("profiles").display()),
+                format!("WORKSPACE_DIR={}", data.join("workspace").display()),
+                format!(
+                    "OPENBOT_RECORDER_DIR={}",
+                    root.join("extension").join("dist").display()
+                ),
+                "COMPUTER_BROWSER_IDLE_MS=0".into(),
+                "INTELLIGENCE_API_KEY=<unset>".into(),
+                "OPENBOT_DESKTOP_HOST_TOKEN=<unset>".into(),
+                "KEY_ENCRYPTION_KEY=<unset>".into(),
+            ]
+        );
+        assert!(data.join("profiles").is_dir() && data.join("workspace").is_dir());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// Stop asks the person's browser to close and waits for it, and only then freezes and kills
+    /// the rest. The stand-in does what `agent-computer` does on SIGTERM: closes, and exits 0.
+    #[cfg(unix)]
+    #[test]
+    fn stop_lets_the_persons_browser_close_before_the_rest_is_killed() {
+        use std::os::unix::process::ExitStatusExt;
+        let root = temp_root("local-browser-stop");
+        std::fs::create_dir_all(&root).unwrap();
+        let mut children = vec![
+            ("server", stand_in(&root, ":")),
+            (LOCAL_BROWSER, stand_in(&root, "trap 'exit 0' TERM")),
+        ];
+        let started = std::time::Instant::now();
+        stop_host_children(&root, &mut children).unwrap();
+        assert!(started.elapsed() < BROWSER_CLOSE_PATIENCE);
+        let browser = children[1].1.wait().unwrap();
+        assert_eq!(
+            browser.code(),
+            Some(0),
+            "the browser closed itself: {browser:?}"
+        );
+        let server = children[0].1.wait().unwrap();
+        assert_eq!(server.signal(), Some(libc::SIGKILL), "{server:?}");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// A browser that does not close in time is stopped the ordinary way, so Stop never waits on it
+    /// for longer than its patience and never leaves it running.
+    #[cfg(unix)]
+    #[test]
+    fn a_browser_that_will_not_close_is_waited_for_only_so_long() {
+        let root = temp_root("local-browser-stubborn");
+        std::fs::create_dir_all(&root).unwrap();
+        let mut children = vec![(LOCAL_BROWSER, stand_in(&root, "trap '' TERM"))];
+        let started = std::time::Instant::now();
+        close_local_browser_first(&mut children, std::time::Duration::from_millis(300));
+        let waited = started.elapsed();
+        assert!(
+            waited >= std::time::Duration::from_millis(300),
+            "{waited:?}"
+        );
+        assert!(waited < std::time::Duration::from_secs(3), "{waited:?}");
+        assert!(children[0].1.try_wait().unwrap().is_none());
+        children[0].1.kill().unwrap();
+        children[0].1.wait().unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// The person's browser exactly as Desktop gets it there: this commit's tree as GitHub's tag
+    /// tarball carries it, laid out by `deployment::unpack`, installed by `install_dependencies`,
+    /// its Recorder built by `preparation::build_recorder`, the browser decided by
+    /// `local_browser::find` against this machine's real Chrome and Edge, spawned by
+    /// `spawn_host_process`, asked for `/health` with the computer token, and stopped by
+    /// `stop_host_children`. No browser is opened. Only the home folder is a scratch one, so the
+    /// profile folders it makes are not the person's.
+    ///
+    /// ```sh
+    /// OPENBOT_LIVE_BROWSER_BUN=<bun> OPENBOT_LIVE_BROWSER_PORT=<port> \
+    /// cargo test --lib live_the_persons_browser -- --ignored --nocapture
+    /// ```
+    #[cfg(unix)]
+    #[test]
+    #[ignore = "starts agent-computer from a prepared deployment on this machine"]
+    fn live_the_persons_browser_answers_health_with_the_computer_token() {
+        let setting = |name: &str| {
+            std::env::var(name).unwrap_or_else(|_| panic!("{name} names the live run's input"))
+        };
+        let bun = PathBuf::from(setting("OPENBOT_LIVE_BROWSER_BUN"));
+        let port: u16 = setting("OPENBOT_LIVE_BROWSER_PORT").parse().unwrap();
+        let scratch = temp_root("live-browser");
+        let root = scratch.join("deployment");
+        let home = scratch.join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        let tarball = Command::new("git")
+            .current_dir(env!("CARGO_MANIFEST_DIR"))
+            .args([
+                "archive",
+                "--format=tar.gz",
+                "--prefix=OpenBot-live/",
+                "HEAD",
+            ])
+            .output()
+            .unwrap();
+        assert!(tarball.status.success());
+        crate::deployment::unpack(&root, &tarball.stdout).unwrap();
+        install_dependencies(&root, &bun).unwrap();
+        crate::preparation::build_recorder(&root, &bun).unwrap();
+        crate::env::write(
+            &root.join(".env"),
+            &crate::env::Ports {
+                browser: Some(port),
+                ..Default::default()
+            }
+            .settings(),
+            &std::collections::BTreeMap::new(),
+        )
+        .unwrap();
+        let var = |name: &str| std::env::var_os(name).filter(|value| !value.is_empty());
+        let browser = crate::local_browser::find(
+            &root,
+            crate::recorder_install::Os::current(),
+            Some(&home),
+            &var,
+            &|path: &Path| path.is_file(),
+        )
+        .expect("this machine runs the person's browser");
+        let token = format!("{:032x}", rand::random::<u128>());
+        let secrets = Secrets::from([
+            ("COMPUTER_TOKEN".into(), token.clone()),
+            (
+                "INTELLIGENCE_API_KEY".into(),
+                "synthetic-not-for-the-browser".into(),
+            ),
+        ]);
+        let process = host_processes(true)
+            .find(|process| process.name == LOCAL_BROWSER)
+            .unwrap();
+        let child = spawn_host_process(
+            process,
+            &root,
+            &root.join(".logs"),
+            &bun,
+            &secrets,
+            Some(&browser),
+        )
+        .unwrap();
+        let mut children = vec![(LOCAL_BROWSER, child)];
+
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(5))
+            .build()
+            .unwrap();
+        let at = |path: &str| format!("http://127.0.0.1:{port}{path}");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        let health: serde_json::Value = loop {
+            if let Ok(response) = client.get(at("/health")).bearer_auth(&token).send() {
+                if response.status().is_success() {
+                    break response.json().unwrap();
+                }
+            }
+            assert!(
+                children[0].1.try_wait().unwrap().is_none(),
+                "the browser process exited: {}",
+                tail_of(&root.join(".logs"), LOCAL_BROWSER)
+            );
+            assert!(std::time::Instant::now() < deadline, "no /health answer");
+            std::thread::sleep(std::time::Duration::from_millis(250));
+        };
+        let without_token = client.get(at("/computers")).send().unwrap().status();
+        let with_token = client
+            .get(at("/computers"))
+            .bearer_auth(&token)
+            .send()
+            .unwrap()
+            .status();
+        let on_ipv6 = std::net::TcpStream::connect(("::1", port)).is_ok();
+
+        stop_host_children(&root, &mut children).unwrap();
+        let exit = children[0].1.wait().unwrap();
+        eprintln!(
+            "{}",
+            serde_json::json!({
+                "browser": browser.product.name(),
+                "executable": browser.executable,
+                "health": health,
+                "computersWithoutToken": without_token.as_u16(),
+                "computersWithToken": with_token.as_u16(),
+                "listeningOnIpv6Loopback": on_ipv6,
+                "exitAfterStop": exit.code(),
+            })
+        );
+        std::fs::remove_dir_all(scratch).unwrap();
+
+        assert_eq!(health["status"], "ok");
+        assert_eq!(health["browserBackend"], "local-chrome");
+        assert_eq!(health["browserMode"], "headed");
+        assert_eq!(health["browser"], false, "nothing opened a browser");
+        assert_eq!(without_token, reqwest::StatusCode::UNAUTHORIZED);
+        assert_eq!(with_token, reqwest::StatusCode::OK);
+        assert!(!on_ipv6, "the computer listens on 127.0.0.1 alone");
+        assert_eq!(exit.code(), Some(0), "Stop let it close on its own");
+    }
+
+    /// A shell that runs `setup`, says it is ready, and idles. Waited on until ready, because a
+    /// signal that lands before its `trap` is set kills it the default way.
+    #[cfg(unix)]
+    fn stand_in(dir: &Path, setup: &str) -> std::process::Child {
+        let ready = dir.join(format!("ready-{}", rand::random::<u64>()));
+        let child = Command::new("/bin/sh")
+            .arg("-c")
+            .arg(format!(
+                "{setup}; : > '{}'; while :; do sleep 0.05; done",
+                ready.display()
+            ))
+            .spawn()
+            .unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !ready.exists() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the stand-in never started"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        child
     }
 
     #[test]

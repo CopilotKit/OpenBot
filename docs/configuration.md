@@ -351,7 +351,9 @@ policies apply. See [OpenAI WebRTC](https://developers.openai.com/api/docs/guide
 
 **Some variables belong to the desktop app, not to you.** A desktop installation writes these into
 its own deployment's `.env` and owns their values: `OPENBOT_MODEL_OAUTH_FILE`, `CHATGPT_AUTH_FILE`,
-`CLAUDE_CODE_OAUTH_TOKEN`, and the `PICKED_HARNESS_*` names that describe the Bot picked during setup
+`CLAUDE_CODE_OAUTH_TOKEN`, `OPENBOT_BROWSER_URL` and `BROWSER_PORT` (the person's own browser, see
+[OpenBot Desktop runs it for the person](#openbot-desktop-runs-it-for-the-person)), and the
+`PICKED_HARNESS_*` names that describe the Bot picked during setup
 (`PICKED_HARNESS_IMAGE`, `PICKED_HARNESS_URL`, `PICKED_HARNESS_PORT` and the rest). The server reads
 `PICKED_HARNESS_IMAGE` and `PICKED_HARNESS_URL` to hand that Bot `MANAGED_AGENT_TOKEN`, and refuses to
 start when they are set without it. When a model provider is connected by OAuth rather than by key, the
@@ -749,6 +751,27 @@ To switch back, stop the helper, restore your prior `AGENT_COMPUTER_URL` and sup
 selectors, and restart the API. Unset `COMPUTER_BROWSER_BACKEND` (or set `managed`) on the managed
 computer process; choose `headless` or `headed` as before. Local Chrome profiles remain in the local
 data root, separate from managed computer volumes.
+
+#### OpenBot Desktop runs it for the person
+
+OpenBot Desktop starts this computer itself, as a fourth process beside the server, the app and the
+worker, to run the person's own browser: their installed Google Chrome, or Microsoft Edge where
+Chrome is missing, as a window on their desktop with the OpenBot Recorder already in it. Nothing
+above needs doing. Desktop gives it a loopback port of its own (`BROWSER_PORT`, 4101 when free), the
+computer token the stack already shares, the default data root above, and `OPENBOT_RECORDER_DIR`
+pointing at the Recorder that installation builds into the deployment (`extension/dist`). It points
+the server at it with `OPENBOT_BROWSER_URL=http://127.0.0.1:<port>`. Bots' own computers stay with
+the supervisor; only the person's browser runs here. It starts and stops with the rest of OpenBot,
+is restarted the way the other processes are, and on macOS and Linux is asked to close its browser
+before Stop or Quit takes the rest down.
+
+It runs only when Chrome or Edge is installed in its standard location (the paths Playwright
+launches: `/Applications` on macOS, `/opt/google/chrome` or `/opt/microsoft/msedge` on Linux,
+`Program Files` or the user's `AppData\Local` on Windows) and the deployment's release includes the
+OpenBot Browser. Otherwise `OPENBOT_BROWSER_URL` is not set and the app hides its Browser button.
+Desktop checks again at every Start, so a browser installed later is found. The helper above and
+Desktop use the same data root, so stop one before starting the other: Chrome lets one browser at a
+time use a profile.
 
 `agent-computer` also reads:
 
