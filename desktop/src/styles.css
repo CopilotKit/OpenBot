@@ -237,6 +237,34 @@ button.text-link:hover:not(:disabled) {
   opacity: 1;
 }
 
+/* Questions to try on the last screen: small pills that fill the box, not answers of their own. */
+ul.presets {
+  list-style: none;
+  margin: 0 0 0.5rem;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+button.preset {
+  background: var(--raised);
+  color: var(--ink-soft);
+  border: 1px solid var(--hair);
+  border-radius: 999px;
+  padding: 0.3rem 0.75rem;
+  font-size: 0.8rem;
+  font-weight: 400;
+  text-align: left;
+}
+
+button.preset:hover:not(:disabled),
+button.preset[aria-pressed="true"] {
+  color: var(--ink);
+  border-color: var(--ink-faint);
+  opacity: 1;
+}
+
 /* Local Intelligence setting up behind the screen in front: one line. */
 .local-status {
   font-size: 0.8rem;

@@ -3180,7 +3180,23 @@ async fn ask_the_bot_inner(root: PathBuf, question: String) -> Result<String, Pr
     // The addresses come from the file and the token from the credential store, which is where
     // this run put it. Asked for together, because one without the other cannot ask anything.
     let settings = ask_saved_settings(&root)?;
-    ask_the_bot_with_settings(root, question, settings).await
+    // The server's own address, so a picked Bot is asked through the runtime and the question is
+    // a thread in Intelligence. See `ask::ask_through_server`. Only a server this root's stack
+    // runs: whatever else answers on that port is not this deployment's. Checking asks the port,
+    // which blocks.
+    let checked = root.clone();
+    let server = tauri::async_runtime::spawn_blocking(move || {
+        openbot_env::Ports::read(&checked)
+            .ok()
+            .filter(|ports| {
+                already_running_on(&checked, ports.server, stack::recorded_server_owns_port)
+            })
+            .map(|ports| format!("http://127.0.0.1:{}", ports.server))
+    })
+    .await
+    .ok()
+    .flatten();
+    ask_the_bot_via(root, question, settings, server).await
 }
 
 fn ask_saved_settings(root: &Path) -> Result<std::collections::BTreeMap<String, String>, Problem> {
@@ -3198,10 +3214,21 @@ fn ask_saved_settings(root: &Path) -> Result<std::collections::BTreeMap<String, 
     )
 }
 
+/// `ask_the_bot_via` straight to the harness, with no server to record a thread.
+#[cfg(test)]
 async fn ask_the_bot_with_settings(
     root: PathBuf,
     question: String,
     settings: std::collections::BTreeMap<String, String>,
+) -> Result<String, openbot_desktop_lib::problem::Problem> {
+    ask_the_bot_via(root, question, settings, None).await
+}
+
+async fn ask_the_bot_via(
+    root: PathBuf,
+    question: String,
+    settings: std::collections::BTreeMap<String, String>,
+    server: Option<String>,
 ) -> Result<String, openbot_desktop_lib::problem::Problem> {
     // The picked harness if there is one, and the Bot that ships with OpenBot if there is not.
     // Both speak AG-UI at the same address shape, so this screen does not care which it got.
@@ -3244,14 +3271,25 @@ async fn ask_the_bot_with_settings(
         question
     };
 
+    // A picked Bot is the server's `picked-harness`, asked through the runtime so the question and
+    // its answer are a thread in Intelligence. The Bot that ships with OpenBot is asked directly.
+    let through = server.filter(|_| picked_endpoint.is_some());
     let asked = tauri::async_runtime::spawn_blocking(move || {
-        match openbot_desktop_lib::ask::ask_harness(
-            &endpoint,
-            &token,
-            &question,
-            kind.as_deref(),
-            agent_id.as_deref(),
-        ) {
+        let answered = match &through {
+            Some(server) => openbot_desktop_lib::ask::ask_through_server(
+                server,
+                openbot_desktop_lib::ask::PICKED_HARNESS_AGENT,
+                &question,
+            ),
+            None => openbot_desktop_lib::ask::ask_harness(
+                &endpoint,
+                &token,
+                &question,
+                kind.as_deref(),
+                agent_id.as_deref(),
+            ),
+        };
+        match answered {
             Ok(answer) => Ok(answer),
             // An empty sentence carries no cause. Local logs can explain an installed Bot;
             // they cannot explain a BYO endpoint, even when an old local harness still has logs.

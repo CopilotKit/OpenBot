@@ -1,6 +1,21 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { asProblem, Failure, type Problem } from "./Problem";
 import { StatusLine } from "./SetupProgress";
+
+/**
+ * Questions a person can put in the box with one click. The first is the one already in it.
+ *
+ * Each has an answer somebody can check, or at least an opinion worth reading: "Tell me about
+ * yourself" is answered convincingly by a Bot whose model credential is fine and whose everything
+ * else is broken, and this screen exists to prove rather than to reassure. The silly ones are on
+ * purpose: this is the first thing somebody says to their Bot, and it may as well be fun.
+ */
+export const PRESET_QUESTIONS = [
+  "How many r's are in strawberry?",
+  "How many Die Hard movies are there?",
+  "Why are frosted strawberry Pop-Tarts better than brown sugar cinnamon?",
+  "What is 17 times 23?",
+] as const;
 
 /**
  * The last screen: a question, an answer, and only then the handover.
@@ -11,9 +26,8 @@ import { StatusLine } from "./SetupProgress";
  * find that out later, inside the product, with no idea which answer was the wrong one. So the
  * wizard ends by asking, and the answer on this screen is the proof.
  *
- * One suggested question, already filled in, with one right answer. "Tell me about yourself" is
- * answered convincingly by a Bot whose model credential is fine and whose everything else is
- * broken, and this screen exists to prove rather than to reassure.
+ * A question already in the box, a few more one click away, and room to type your own. Asking
+ * again with another question is always open, so trying the Bot does not end at the first answer.
  */
 export function Ask({
   suggestion,
@@ -21,7 +35,7 @@ export function Ask({
   onOpen,
   onBack,
   onViewIntelligence,
-  auto = false,
+  local = false,
   stepLabel = "Last step",
 }: {
   suggestion: string;
@@ -32,8 +46,8 @@ export function Ask({
   onBack: () => void | Promise<void>;
   /** Local mode with a recorded stack: opens its Intelligence dashboard, already signed in. */
   onViewIntelligence?: () => Promise<void>;
-  /** Asks `suggestion` on arrival, with no field to change it: the test is the screen. */
-  auto?: boolean;
+  /** The local first run's wording: "Test OpenBot", then "Open OpenBot". */
+  local?: boolean;
   stepLabel?: string;
 }) {
   const [question, setQuestion] = useState(suggestion);
@@ -85,14 +99,6 @@ export function Ask({
     </StatusLine>
   );
 
-  // Deferred a tick, so a development double mount asks once.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: once, on arrival.
-  useEffect(() => {
-    if (!auto) return;
-    const timer = setTimeout(() => void ask(), 0);
-    return () => clearTimeout(timer);
-  }, []);
-
   async function ask() {
     setAsking(true);
     setFailure(null);
@@ -107,82 +113,15 @@ export function Ask({
     }
   }
 
-  if (auto) {
-    return (
-      <div className="sheet">
-        <p className="steps-of">{stepLabel}</p>
-        <h1>Test OpenBot</h1>
-        <p className="lede">
-          OpenBot asks your AI provider one question to check that it answers.
-        </p>
-        <div className="answer">
-          <p className="answer-from">Question</p>
-          <p className="answer-text">{question}</p>
-        </div>
-        {asking && <StatusLine>Asking…</StatusLine>}
-        {failure && <Failure problem={failure} />}
-        {answer !== null && (
-          <div className="answer">
-            <p className="answer-from">Your Bot said</p>
-            <p className="answer-text">{answer}</p>
-          </div>
-        )}
-        {answer !== null && onViewIntelligence && (
-          <>
-            <button
-              type="button"
-              className="text-link"
-              disabled={opening}
-              onClick={viewIntelligence}
-            >
-              View in Intelligence
-            </button>
-            {opening && (
-              <StatusLine>Opening the Intelligence dashboard…</StatusLine>
-            )}
-            {opened && (
-              <StatusLine working={false}>Opened in your browser.</StatusLine>
-            )}
-            {viewFailure && <p className="footnote">{viewFailure.said}</p>}
-          </>
-        )}
-        {leavingSaid}
-        <div className="row">
-          {answer !== null && (
-            <button type="button" disabled={leaving !== null} onClick={open}>
-              Open OpenBot
-            </button>
-          )}
-          {failure && (
-            <>
-              <button
-                type="button"
-                disabled={asking || leaving !== null}
-                onClick={ask}
-              >
-                Ask again
-              </button>
-              <button
-                type="button"
-                className="quiet"
-                disabled={asking || leaving !== null}
-                onClick={back}
-              >
-                Change the model
-              </button>
-            </>
-          )}
-        </div>
-      </div>
-    );
-  }
-
+  const asked = answer !== null;
   return (
     <div className="sheet">
       <p className="steps-of">{stepLabel}</p>
-      <h1>Ask it something.</h1>
+      <h1>{local ? "Test OpenBot" : "Ask it something."}</h1>
       <p className="lede">
-        Your Bot is set up. This proves it can answer before you start using it.
+        {local
+          ? "Ask your Bot a question to check that it answers. Pick one, or type your own."
+          : "Your Bot is set up. This proves it can answer before you start using it."}
       </p>
 
       <div className="field">
@@ -210,25 +149,60 @@ export function Ask({
           }}
         />
       </div>
+      <ul className="presets" aria-label="Questions to try">
+        {PRESET_QUESTIONS.map((preset) => (
+          <li key={preset}>
+            <button
+              type="button"
+              className="preset"
+              aria-pressed={question === preset}
+              disabled={asking}
+              onClick={() => setQuestion(preset)}
+            >
+              {preset}
+            </button>
+          </li>
+        ))}
+      </ul>
 
+      {asking && <StatusLine>Asking…</StatusLine>}
       {failure && <Failure problem={failure} />}
 
-      {answer !== null && (
+      {asked && (
         <div className="answer">
           <p className="answer-from">Your Bot said</p>
           <p className="answer-text">{answer}</p>
         </div>
       )}
+      {asked && onViewIntelligence && (
+        <>
+          <button
+            type="button"
+            className="text-link"
+            disabled={opening}
+            onClick={viewIntelligence}
+          >
+            View in Intelligence
+          </button>
+          {opening && (
+            <StatusLine>Opening the Intelligence dashboard…</StatusLine>
+          )}
+          {opened && (
+            <StatusLine working={false}>Opened in your browser.</StatusLine>
+          )}
+          {viewFailure && <p className="footnote">{viewFailure.said}</p>}
+        </>
+      )}
 
       {leavingSaid}
       <div className="row">
-        {answer === null ? (
-          <button type="button" onClick={ask} disabled={asking}>
-            {asking ? "Asking…" : "Ask"}
+        {asked ? (
+          <button type="button" disabled={leaving !== null} onClick={open}>
+            {local ? "Open OpenBot" : "Start using OpenBot"}
           </button>
         ) : (
-          <button type="button" disabled={leaving !== null} onClick={open}>
-            Start using OpenBot
+          <button type="button" onClick={ask} disabled={asking}>
+            Ask
           </button>
         )}
         {/*
@@ -246,7 +220,7 @@ export function Ask({
             Change the model
           </button>
         )}
-        {answer !== null && (
+        {asked && (
           <button
             type="button"
             className="quiet"
