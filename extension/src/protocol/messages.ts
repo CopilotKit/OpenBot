@@ -68,6 +68,9 @@ export type RecorderState = {
   draining: number; // stopped recordings still sending
   learning?: LearningSpaceState; // the person's own Learning space at Record (Decision 10)
   topUrls: Record<string, string>; // followed tab id -> its top frame's current URL
+  /** Tabs the person used during the recording (switched to or opened) while they showed no website: a new tab page,
+   * one of the browser's own pages or the Recorder's. Each joins `tabIds` at its first website (recording.ts). */
+  usedTabIds?: number[];
   /** While phase is "stopping": persisted so a restarted service worker finishes the stop (Task 9). */
   stopping?: { since: number };
   /** Stopped recordings whose events are kept (summed over drains with `kept`), for the popup's Discard offer;

@@ -1,5 +1,6 @@
-// The content script runs only in the tabs a recording follows (Decision 4): it is injected at Record and on each
-// committed frame of a followed tab, never registered for every site, so an unrelated tab never runs it.
+// The content script runs only in the tabs a recording follows (Decision 4): it is injected at Record, when a tab the
+// person uses joins the recording, and on each committed frame of a followed tab, never registered for every site, so
+// an unrelated tab never runs it.
 import type { BackgroundToContent } from "../protocol/messages";
 
 /** Runs in the page's ISOLATED world before content.js, so the script starts capturing the moment it loads, before its

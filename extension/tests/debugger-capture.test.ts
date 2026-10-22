@@ -636,6 +636,23 @@ test("a tab the recorded tab opened is attached the same way, and one not yet on
   ]);
 });
 
+test("a tab whose page commits while it is being attached is attached once, and captures", async () => {
+  // A tab the person switched to joins at the page it shows while that page is still committing (a tab the browser
+  // discarded loads again when it is switched to): the commit came while the attach was under way, attached a second
+  // time, and Chrome's refusal of the second marked the tab refused, so none of its calls were recorded.
+  await capture.start(7, "https://crm.example.test/");
+  const joining = capture.addTab(8, "https://crm.example.test/report");
+  const committing = capture.onCommitted(
+    8,
+    0,
+    "https://crm.example.test/report",
+  );
+  await Promise.all([joining, committing]);
+  expect(fake.debugger.attached).toEqual([{ tabId: 7 }, { tabId: 8 }]);
+  request(8, { id: "1", url: "https://crm.example.test/api", body: "{}" });
+  await until(() => emitted.length === 1, "tab 8's call");
+});
+
 test("a recording started on the New Tab page attaches once the tab opens a website", async () => {
   expect(await capture.start(7, "chrome://newtab/")).toBe("waiting");
   expect(statuses).toEqual([

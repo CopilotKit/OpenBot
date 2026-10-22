@@ -392,7 +392,8 @@ async function recordAndStop(
 
 test("Stop on a recording that held no actions says nothing was recorded and why, never that it was saved, on both shapes", async () => {
   // The fourth end-to-end run: the person worked in a tab the recording did not follow, the trajectory reached
-  // Intelligence with no steps, and the page said it was saved to their Learning space.
+  // Intelligence with no steps, and the page said it was saved to their Learning space. A recording now follows every
+  // tab the person uses, so the page says what a recording holds rather than which tab it followed.
   for (const shape of ["native", "screen"] as const) {
     cleanup();
     queryClient.clear();
@@ -404,8 +405,8 @@ test("Stop on a recording that held no actions says nothing was recorded and why
     await recordAndStop(view, "Look up Ada Lovelace");
     expect(await stopSays(view)).toBe(
       shape === "native"
-        ? "Look up Ada LovelaceNothing was recorded. The Recorder follows the tab you started recording in, and tabs opened from it."
-        : "Nothing was recorded in “Look up Ada Lovelace”. The Recorder follows the tab you started recording in, and tabs opened from it.",
+        ? "Look up Ada LovelaceNothing was recorded. The Recorder records your clicks, typing and the pages you open on websites, in every tab you use while it records."
+        : "Nothing was recorded in “Look up Ada Lovelace”. The Recorder records your clicks, typing and the pages you open on websites, in every tab you use while it records.",
     );
     expect(view.queryByText(/Saved/)).toBeNull();
   }

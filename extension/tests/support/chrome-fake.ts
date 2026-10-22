@@ -123,6 +123,19 @@ export type ChromeFake = {
     fire(name: string): void;
   };
   tabs: Map<number, chrome.tabs.Tab>;
+  /**
+   * What the person does with tabs and windows, as Chrome reports it to the extension (measured on Playwright's
+   * Chromium 151, headless, 2026-10-22): a tab they open fires tabs.onCreated and then tabs.onActivated; a tab they
+   * switch to fires tabs.onActivated; a window they bring to the front fires windows.onFocusChanged, and no tab event,
+   * since its active tab was active already.
+   */
+  person: {
+    /** The new-tab button: a tab on the new tab page (whose address Chrome withholds), active in its window. */
+    openTab(tab?: Partial<chrome.tabs.Tab>): chrome.tabs.Tab;
+    /** A tab clicked in the tab strip: it becomes its window's active tab. */
+    switchTo(tabId: number): void;
+    focusWindow(windowId: number): void;
+  };
   opened: string[];
   updated: { tabId: number; props: chrome.tabs.UpdateProperties }[];
   /** The tab ids chrome.tabs.remove closed, in order. */
@@ -456,6 +469,33 @@ export function installChromeFake(
       },
     },
     tabs: new Map(),
+    person: {
+      openTab(tab = {}) {
+        const opened = {
+          id: nextTabId++,
+          index: fake.tabs.size,
+          windowId: 1,
+          active: true,
+          pinned: false,
+          highlighted: false,
+          incognito: false,
+          discarded: false,
+          autoDiscardable: true,
+          groupId: -1,
+          ...tab,
+        } as chrome.tabs.Tab;
+        created(opened);
+        return opened;
+      },
+      switchTo(tabId) {
+        const tab = fake.tabs.get(tabId);
+        if (!tab) throw new Error(`No tab with id: ${tabId}.`);
+        activate(tab);
+      },
+      focusWindow(windowId) {
+        windowEvents.onFocusChanged.dispatch(windowId);
+      },
+    },
     opened: [],
     updated: [],
     removed: [],
@@ -483,7 +523,26 @@ export function installChromeFake(
     onCreatedNavigationTarget: event("webNavigation.onCreatedNavigationTarget"),
   };
   const alarmEvents = { onAlarm: event("alarms.onAlarm") };
-  const tabEvents = { onRemoved: event("tabs.onRemoved") };
+  const tabEvents = {
+    onRemoved: event("tabs.onRemoved"),
+    onCreated: event("tabs.onCreated"),
+    onActivated: event("tabs.onActivated"),
+  };
+  const windowEvents = { onFocusChanged: event("windows.onFocusChanged") };
+  /** As Chrome makes a tab active: the one active before it in its window no longer is, and onActivated says so. */
+  const activate = (tab: chrome.tabs.Tab) => {
+    for (const other of fake.tabs.values())
+      if (other.windowId === tab.windowId && other !== tab)
+        other.active = false;
+    tab.active = true;
+    tabEvents.onActivated.dispatch({ tabId: tab.id, windowId: tab.windowId });
+  };
+  /** As Chrome reports a new tab: created, then activated when it opened in front. */
+  const created = (tab: chrome.tabs.Tab) => {
+    fake.tabs.set(tab.id as number, tab);
+    tabEvents.onCreated.dispatch({ ...tab, active: tab.active });
+    if (tab.active) activate(tab);
+  };
   const storageChanged = event("storage.onChanged");
   let nextTabId = 1000;
 
@@ -827,7 +886,7 @@ export function installChromeFake(
           autoDiscardable: true,
           groupId: -1,
         } as chrome.tabs.Tab;
-        fake.tabs.set(tab.id as number, tab);
+        created(tab);
         return tab;
       },
       async update(tabId: number, props: chrome.tabs.UpdateProperties) {
@@ -835,7 +894,9 @@ export function installChromeFake(
         const tab = fake.tabs.get(tabId);
         if (!tab) throw new Error(`No tab with id: ${tabId}.`);
         fake.updated.push({ tabId, props });
-        if (props.active !== undefined) tab.active = props.active;
+        if (props.active === true) {
+          if (!tab.active) activate(tab);
+        } else if (props.active === false) tab.active = false;
         if (props.url !== undefined) tab.url = props.url;
         return tab;
       },
@@ -855,6 +916,7 @@ export function installChromeFake(
       },
       ...tabEvents,
     },
+    windows: { WINDOW_ID_NONE: -1, ...windowEvents },
     action: {
       async setBadgeText(details: { text: string }) {
         calls.push("action.setBadgeText");
