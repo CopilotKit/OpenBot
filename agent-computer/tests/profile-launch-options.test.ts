@@ -126,8 +126,9 @@ describe.skipIf(
     ).mockImplementation(async () => {
       throw new Error("launch inspected without starting a browser");
     });
+    const copy = "person";
     const { createProfiles } = await import(
-      "../src/profiles?launch-options=person"
+      `../src/profiles?launch-options=${copy}`
     );
     const { findRecorder } = await import("../src/recorder");
     const found = await findRecorder(

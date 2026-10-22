@@ -99,8 +99,10 @@ describe.skipIf(!asked)("browsers sharing a computer's egress filter", () => {
         { type: "cidr", value: "127.0.0.1/32", ports: String(openbot?.port) },
       ],
     });
+    // A fresh copy of the module, as the other real-browser tests load it.
+    const copy = "egress-browsers";
     const { createProfiles } = (await import(
-      "../src/profiles?egress-browsers"
+      `../src/profiles?${copy}`
     )) as typeof import("../src/profiles");
     const { createBrowserHost } = await import("../src/browser-host");
     profiles = createProfiles(root, () => undefined, { runtime: RUNTIME });

@@ -39,7 +39,7 @@ async function stalled(stallMs?: number): Promise<Stalled> {
     ],
     { cwd: join(import.meta.dir, ".."), stdout: "pipe", stderr: "pipe" },
   );
-  const reader = child.stdout.getReader();
+  const reader = (child.stdout as ReadableStream<Uint8Array>).getReader();
   let text = "";
   const deadline = Date.now() + 30_000;
   while (!text.includes("\n")) {
@@ -56,15 +56,17 @@ async function stalled(stallMs?: number): Promise<Stalled> {
 }
 
 /** What the call ended in, or that the process ended under it. */
-async function call(process: Stalled): Promise<string> {
+async function call(stalledProcess: Stalled): Promise<string> {
+  const { base, child } = stalledProcess;
   try {
-    const answer = (await (await fetch(`${process.base}/state`)).json()) as {
+    const answer = (await (await fetch(`${base}/state`)).json()) as {
       outcome: string;
     };
     return answer.outcome;
   } catch {
-    await process.child.exited;
-    return `the process ended with ${process.child.exitCode}: ${await new Response(process.child.stderr).text()}`;
+    await child.exited;
+    const said = await new Response(child.stderr as ReadableStream).text();
+    return `the process ended with ${child.exitCode}: ${said}`;
   }
 }
 
@@ -79,18 +81,18 @@ afterEach(async () => {
 
 describe.skipIf(!asked)("a Recorder call the browser does not answer", () => {
   test("in time is answered once the browser takes it, and the process carries on", async () => {
-    const process = await stalled(3_000);
-    expect(await call(process)).toBe("answered: idle");
-    expect(process.child.exitCode).toBeNull();
-    expect((await fetch(`${process.base}/alive`)).ok).toBe(true);
+    const computer = await stalled(3_000);
+    expect(await call(computer)).toBe("answered: idle");
+    expect(computer.child.exitCode).toBeNull();
+    expect((await fetch(`${computer.base}/alive`)).ok).toBe(true);
   }, 60_000);
 
   test("at all is refused, and the process carries on", async () => {
-    const process = await stalled();
-    expect(await call(process)).toBe(
+    const computer = await stalled();
+    expect(await call(computer)).toBe(
       "refused: The Recorder did not answer in time.",
     );
-    expect(process.child.exitCode).toBeNull();
-    expect((await fetch(`${process.base}/alive`)).ok).toBe(true);
+    expect(computer.child.exitCode).toBeNull();
+    expect((await fetch(`${computer.base}/alive`)).ok).toBe(true);
   }, 60_000);
 });
