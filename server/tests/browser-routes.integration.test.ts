@@ -36,7 +36,10 @@ import {
 import { personBrowserId } from "../src/browser/person";
 import { createComputerGateway } from "../src/computer/gateway";
 import { withPolicyPushOnWake } from "../src/computer/policy-network";
-import { createSharedComputerProvider } from "../src/computer/provider";
+import {
+  type ComputerProvider,
+  createSharedComputerProvider,
+} from "../src/computer/provider";
 import { loadConfig } from "../src/config";
 import { decryptSecret } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
@@ -271,6 +274,8 @@ function build(
     auth?: typeof better | ReturnType<typeof createOrganizationAuth>;
     organizationAuth?: ReturnType<typeof createOrganizationAuth>;
     computers?: false;
+    /** The Bots' computer provider, in place of the shared stand-in computer. */
+    provider?: ComputerProvider;
   } = {},
 ) {
   const base = {
@@ -301,10 +306,11 @@ function build(
   });
   const provider = withPolicyPushOnWake(
     withPersonBrowsers(
-      createSharedComputerProvider({
-        baseUrl: `http://127.0.0.1:${COMPUTER_PORT}`,
-        token: COMPUTER_TOKEN,
-      }),
+      options.provider ??
+        createSharedComputerProvider({
+          baseUrl: `http://127.0.0.1:${COMPUTER_PORT}`,
+          token: COMPUTER_TOKEN,
+        }),
       config.browser?.url,
     ),
     {
@@ -435,6 +441,73 @@ describe("opening a person's own browser", () => {
       as: "ada",
     });
     expect(refused.status).toBe(503);
+  });
+
+  test("asking the state never starts a computer or opens a browser: the app asks on every load", async () => {
+    // A supervisor that has never started this person's computer: starting one is what `locate` does.
+    const started: string[] = [];
+    const supervisor = {
+      name: "docker",
+      isolation: "per-bot",
+      locate: async (botId: string) => {
+        started.push(botId);
+        return `http://127.0.0.1:${COMPUTER_PORT}`;
+      },
+      status: async (botId: string) => ({ botId, state: "absent" as const }),
+      stop: async () => ({ wasRunning: false }),
+      reset: async () => ({ cleared: false }),
+      list: async () => [],
+    } satisfies ComputerProvider;
+    const cold = build({}, { provider: supervisor });
+    const before = asked.length;
+    for (let index = 0; index < 3; index += 1)
+      expect(
+        await (await call(cold, "/api/browser", { as: "ben" })).json(),
+      ).toEqual({
+        available: true,
+        computerId: personBrowserId(ben.id),
+        open: false,
+        tabs: [],
+      });
+    expect(started).toEqual([]);
+    expect(asked.slice(before)).toEqual([]);
+  });
+
+  test("OpenBot Desktop's host-side computer carries people's browsers, while Bots' computers stay where they are", async () => {
+    const bots = {
+      name: "docker",
+      isolation: "per-bot",
+      locate: async () => "http://127.0.0.1:4300/bot-computer",
+      status: async (botId: string) => ({ botId, state: "absent" as const }),
+      stop: async () => ({ wasRunning: false }),
+      reset: async () => ({ cleared: false }),
+      list: async () => [],
+    } satisfies ComputerProvider;
+    const desktop = withPersonBrowsers(bots, "http://127.0.0.1:4101");
+    expect(await desktop.locate(personBrowserId(ada.id))).toBe(
+      "http://127.0.0.1:4101",
+    );
+    expect(await desktop.status(personBrowserId(ada.id))).toMatchObject({
+      state: "ready",
+    });
+    expect(await desktop.locate("agent_7")).toBe(
+      "http://127.0.0.1:4300/bot-computer",
+    );
+    expect(await desktop.status("agent_7")).toMatchObject({ state: "absent" });
+    // Without OPENBOT_BROWSER_URL the same provider carries both.
+    expect(withPersonBrowsers(bots, undefined)).toBe(bots);
+    // There, a person's own desktop browser goes everywhere their own browser would.
+    expect(
+      personBrowserEgressPolicy({
+        native:
+          loadConfig(
+            testEnvironment({ OPENBOT_BROWSER_URL: "http://127.0.0.1:4101" }),
+          ).browser !== undefined,
+        allowPrivateHosts: false,
+        openbotUrls: [],
+        gatewayUrl: GATEWAY,
+      }),
+    ).toEqual({ mode: "allow_all", rules: [] });
   });
 
   test("open mints the person's Recorder connection, which resolves through the Recorder guard as them and shows in Settings, Browsers", async () => {
