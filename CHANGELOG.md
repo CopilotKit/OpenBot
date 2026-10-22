@@ -168,6 +168,15 @@ hands out each capture pass; it receives nothing that is recorded.
   Settings → Learning as `learning.sharing_changed`, `learning.skill_opened` and
   `learning.skill_closed`.
 
+### A recording follows every tab you use
+
+While a recording runs, the OpenBot Recorder now records in every tab you use: any tab you switch to or
+open, in any window, in the OpenBot browser and in your everyday Chrome. Before, it recorded only the
+tab you started in and tabs opened from it, so steps in a tab you switched to were lost. Tabs you do
+not visit during a recording are never recorded, and nothing on the browser's own pages (a new tab,
+settings) or the Recorder's own is. A tab that reloaded as you switched to it no longer loses the saves
+it sends.
+
 ### Your own browser, opened from OpenBot, with the Recorder already in it
 
 Wherever OpenBot can run a browser for you, the sidebar has a **Browser** button below Connections. It
