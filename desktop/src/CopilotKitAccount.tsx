@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import copilotKitLogo from "./assets/copilotkit-logo.svg";
 import { ExternalLink } from "./ExternalLink";
 import {
   cancelLocalEval,
@@ -111,6 +112,7 @@ export function CopilotKitAccount({
   const agreement = seen.at === "agreement" ? seen.terms : null;
   return (
     <div className="sheet">
+      <img className="copilotkit-logo" src={copilotKitLogo} alt="CopilotKit" />
       <p className="steps-of">{stepLabel}</p>
       <h1>
         {agreement
