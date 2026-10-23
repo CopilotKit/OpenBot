@@ -5,6 +5,7 @@ import { ExternalLink } from "./ExternalLink";
 import { isHttpEndpointUrl } from "./http-endpoint-url";
 import { Mark } from "./Mark";
 import { asProblem, InlineFailure, type Problem } from "./Problem";
+import { Sections } from "./Sections";
 import { StatusLine } from "./SetupProgress";
 
 export type Login = "plan" | "api-key" | "endpoint" | "oauth";
@@ -148,7 +149,7 @@ export function ProviderPicker({
   onBack,
   returning = false,
   busy: starting = false,
-  stepLabel = "Step 3 of 4",
+  local = false,
   status,
 }: {
   chosen: ModelChoice | null;
@@ -165,7 +166,8 @@ export function ProviderPicker({
   onBack?: () => void;
   returning?: boolean;
   busy?: boolean;
-  stepLabel?: string;
+  /** A local first run: its sections are Account, Install, AI and Start. */
+  local?: boolean;
   /** One line about work running behind this screen. */
   status?: ReactNode;
 }) {
@@ -547,7 +549,7 @@ export function ProviderPicker({
 
   return (
     <div className="sheet">
-      {!returning && <p className="steps-of">{stepLabel}</p>}
+      {!returning && <Sections local={local} at="AI" />}
       <h1>{returning ? "Refresh your AI connection" : "Connect your AI"}</h1>
       <p className="lede">
         Connect your provider with a supported plan or an API key.

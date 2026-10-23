@@ -596,8 +596,9 @@ function expectPlain(view: Awaited<ReturnType<typeof renderApp>>) {
   for (const word of JARGON) expect(text).not.toMatch(word);
 }
 
+/** The section the screen is in, as the section list marks it. */
 function stepLabel(view: Awaited<ReturnType<typeof renderApp>>) {
-  return view.container.querySelector(".steps-of")?.textContent;
+  return view.container.querySelector('[aria-current="step"]')?.textContent;
 }
 
 function buttons(view: Awaited<ReturnType<typeof renderApp>>) {
@@ -643,7 +644,7 @@ test("with a CLI, the first screen is Install, local by default with nothing to 
   ).toBeTruthy();
   expect(buttons(view)).toEqual(["Set up OpenBot"]);
   await userEvent.click(view.getByRole("button", { name: "Set up OpenBot" }));
-  expect(stepLabel(view)).toBe("Step 1 of 4");
+  expect(stepLabel(view)).toBe("Bot");
 });
 
 test("Install prepares the default Bot in the default folder, with no Bot or folder screen", async () => {
@@ -663,7 +664,7 @@ test("Install prepares the default Bot in the default folder, with no Bot or fol
   expect(
     view.getByRole("heading", { name: "Installing OpenBot" }),
   ).toBeTruthy();
-  expect(stepLabel(view)).toBe("Step 2 of 4");
+  expect(stepLabel(view)).toBe("Install");
   expect(view.queryByLabelText("Where OpenBot lives")).toBeNull();
   expect(view.queryByText(/Pick a Bot|Which Bot/i)).toBeNull();
   expect(invokeCalls.some((call) => call.command === "harnesses")).toBe(false);
@@ -741,7 +742,7 @@ test("a signed-out first run signs in to CopilotKit and accepts the agreement as
   // The first step. OpenBot needs no account, so it installs behind it, exactly once; nothing
   // of Intelligence's runs before the agreement.
   await view.findByRole("heading", { name: "Sign in to CopilotKit" });
-  expect(stepLabel(view)).toBe("Step 1 of 4");
+  expect(stepLabel(view)).toBe("Account");
   await waitFor(() =>
     expect(installationCalls().map((call) => call.command)).toEqual([
       "prepare_installation",
@@ -762,7 +763,7 @@ test("a signed-out first run signs in to CopilotKit and accepts the agreement as
   expect(localSequence()).toEqual([]);
   await userEvent.click(view.getByRole("button", { name: "Accept" }));
   await view.findByRole("heading", { name: "Connect your AI" });
-  expect(stepLabel(view)).toBe("Step 3 of 4");
+  expect(stepLabel(view)).toBe("AI");
   expect(view.queryByText(/needs your CopilotKit account/)).toBeNull();
   // Leaving the account step does not install a second time.
   expect(
@@ -818,7 +819,7 @@ test("the local sequence starts when installation completes and survives the pro
   expect(localCliCalls()).toEqual([]);
   await act(async () => preparation.resolve());
   await view.findByRole("heading", { name: "Connect your AI" });
-  expect(stepLabel(view)).toBe("Step 3 of 4");
+  expect(stepLabel(view)).toBe("AI");
   await waitFor(() => expect(localSequence()).toEqual(["set_up_local_eval"]));
   expect(
     invokeCalls.find((call) => call.command === "set_up_local_eval")?.args,
@@ -858,13 +859,13 @@ test("Continue during setup shows Getting ready, which starts, tests and opens O
   await installLocal(view);
   await chooseOpenAi(view);
   await view.findByRole("heading", { name: "Getting ready" });
-  expect(stepLabel(view)).toBe("Step 4 of 4");
+  expect(stepLabel(view)).toBe("Start");
   const row = view.getByRole("listitem", { name: "Setting up Intelligence" });
   expect(row.textContent).toContain("In progress");
   expectPlain(view);
   await act(async () => setUp.resolve(localStatus("starting", "valid")));
   await view.findByRole("heading", { name: "Test OpenBot" });
-  expect(stepLabel(view)).toBe("Step 4 of 4");
+  expect(stepLabel(view)).toBe("Start");
   expect(localSequence()).toEqual([
     "set_up_local_eval",
     "connect_local_eval",

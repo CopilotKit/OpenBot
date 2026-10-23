@@ -208,6 +208,31 @@ main {
   margin: 0 0 24px;
 }
 
+/* Every section by name: the current one in full ink, those done softer, those ahead fainter. */
+.sections {
+  list-style: none;
+  padding: 0;
+}
+
+.sections li {
+  color: var(--text-disabled);
+  white-space: nowrap;
+}
+
+.sections li.done {
+  color: var(--text-secondary);
+}
+
+.sections li.current {
+  color: var(--text-primary);
+}
+
+.sections li + li::before {
+  content: "·";
+  margin-right: 8px;
+  color: var(--text-disabled);
+}
+
 .steps-of::after {
   content: "";
   flex: 1;
