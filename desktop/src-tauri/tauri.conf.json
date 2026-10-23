@@ -18,9 +18,7 @@
         "minWidth": 720,
         "minHeight": 560,
         "resizable": true,
-        "titleBarStyle": "Transparent",
-        "theme": "Dark",
-        "backgroundColor": "#010507"
+        "titleBarStyle": "Transparent"
       }
     ],
     "security": { "csp": null }
