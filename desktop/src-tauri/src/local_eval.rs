@@ -106,6 +106,8 @@ pub enum Failure {
     ContractMismatch,
     /// An exit code `local` does not use: the CLI failed before it could report.
     UnexpectedExit,
+    /// An accepted agreement version that is not one `terms` could have reported.
+    InvalidAcceptance,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -278,10 +280,56 @@ pub const LIST_ARGUMENTS: [&str; 3] = ["local", "list", "--json"];
 `local setup` creates the stack for the folder it runs in, or resumes one it left unfinished.
 
 The model is deferred: OpenBot's own setup chooses the model, and asking twice would be two answers
-to keep in step. There is deliberately no way to pass `--accept-eula-version`. The person accepts
-the evaluation agreement themselves; the CLI refuses an agent that tries, and so does this.
+to keep in step.
+
+`--accept-eula-version` is passed only with a version the person accepted in the window, after
+reading the agreement `terms` reported (`EulaVersion`). Their click in OpenBot is their acceptance:
+a product decision of 2026-10-22, recorded in the local evaluation policy. The CLI still refuses
+an acceptance from a coding agent, and OpenBot's Bots never reach the CLI.
 */
 pub const SETUP_ARGUMENTS: [&str; 4] = ["local", "setup", "--defer-model", "--json"];
+
+/// `SETUP_ARGUMENTS`, with the version the person accepted when they accepted one.
+pub fn setup_arguments(accepted: Option<&EulaVersion>) -> Vec<&str> {
+    match accepted {
+        None => SETUP_ARGUMENTS.to_vec(),
+        Some(version) => vec![
+            "local",
+            "setup",
+            "--defer-model",
+            "--accept-eula-version",
+            version.as_str(),
+            "--json",
+        ],
+    }
+}
+
+/// The evaluation agreement version a person accepted, as `terms` reported it: an identifier such
+/// as `developer-edition-2026-10-01-web`, never prose and never anything that reads as a flag.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EulaVersion(String);
+
+impl EulaVersion {
+    pub fn parse(value: &str) -> Result<Self, Failure> {
+        let version =
+            text(Some(&Value::String(value.to_owned()))).map_err(|_| Failure::InvalidAcceptance)?;
+        if version.starts_with('-') {
+            return Err(Failure::InvalidAcceptance);
+        }
+        Ok(Self(version))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// `copilotkit login --json`: the CopilotKit account sign-in local evaluation needs for its
+/// licence. A device authorization grant; the CLI opens the approval page itself.
+pub const ACCOUNT_SIGN_IN_ARGUMENTS: [&str; 2] = ["login", "--json"];
+
+/// The evaluation agreement, read only: `onboard local-terms --json`.
+pub const TERMS_ARGUMENTS: [&str; 3] = ["onboard", "local-terms", "--json"];
 
 /**
 `local connect` connects the folder it runs in, the installation `local setup` was run in, to that
@@ -389,6 +437,111 @@ pub fn normalize_login(stack: &StackId, exit_code: i32, stdout: &[u8]) -> Result
         outcome,
         reason: reason(outcome, wire)?,
     })
+}
+
+/// Whether the CopilotKit account sign-in finished. The approval page address and its code stay
+/// in the CLI and the browser; only the outcome is kept.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountSignIn {
+    pub signed_in: bool,
+}
+
+/**
+`login --json`'s JSON Lines, ending `completed` or `failed`.
+
+The last `completed` or `failed` line decides, and it has to agree with the exit code. Lines before
+it (`action_required`, with the approval page and code) are not kept.
+*/
+pub fn normalize_account_sign_in(exit_code: i32, stdout: &[u8]) -> Result<AccountSignIn, Failure> {
+    if stdout.len() > MAX_OUTPUT {
+        return Err(Failure::OutputLimit);
+    }
+    let text = std::str::from_utf8(stdout).map_err(|_| Failure::InvalidJson)?;
+    let last = text
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| serde_json::from_str::<Value>(line).map_err(|_| Failure::InvalidJson))
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .filter_map(|event| event.get("type").and_then(Value::as_str).map(str::to_owned))
+        .rfind(|kind| kind == "completed" || kind == "failed")
+        .ok_or(Failure::InvalidStatus)?;
+    let signed_in = last == "completed";
+    if signed_in != (exit_code == 0) {
+        return Err(Failure::ContractMismatch);
+    }
+    Ok(AccountSignIn { signed_in })
+}
+
+/// The evaluation agreement the licence needs, as the window shows it. No CLI prose is kept.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase", tag = "status")]
+pub enum Terms {
+    Required {
+        accepted: bool,
+        version: String,
+        url: String,
+        organization_name: String,
+    },
+    NotRequired,
+    Unavailable,
+    SignedOut,
+}
+
+/// `onboard local-terms --json`: one object, exit 0. The address must be https; the organization
+/// name is shown as text, so it is bounded and has no control characters.
+pub fn normalize_terms(exit_code: i32, stdout: &[u8]) -> Result<Terms, Failure> {
+    if exit_code != 0 {
+        return Err(Failure::UnexpectedExit);
+    }
+    if stdout.len() > MAX_OUTPUT {
+        return Err(Failure::OutputLimit);
+    }
+    let text_out = std::str::from_utf8(stdout).map_err(|_| Failure::InvalidJson)?;
+    let wire: Value = serde_json::from_str(text_out.trim()).map_err(|_| Failure::InvalidJson)?;
+    let wire = object(&wire)?;
+    if wire.get("command").and_then(Value::as_str) != Some("onboard local-terms") {
+        return Err(Failure::UnexpectedCommand);
+    }
+    match wire.get("status").and_then(Value::as_str) {
+        Some("not-required") => Ok(Terms::NotRequired),
+        Some("unavailable") => Ok(Terms::Unavailable),
+        Some("signed-out") => Ok(Terms::SignedOut),
+        Some("required") => {
+            let url = wire
+                .get("url")
+                .and_then(Value::as_str)
+                .filter(|url| {
+                    url.len() <= 2048
+                        && reqwest::Url::parse(url).is_ok_and(|parsed| parsed.scheme() == "https")
+                })
+                .ok_or(Failure::InvalidStatus)?;
+            let organization_name = wire
+                .get("organizationName")
+                .and_then(Value::as_str)
+                .filter(|name| {
+                    !name.is_empty()
+                        && name.chars().count() <= 200
+                        && !name.chars().any(char::is_control)
+                })
+                .ok_or(Failure::InvalidStatus)?;
+            Ok(Terms::Required {
+                accepted: wire
+                    .get("accepted")
+                    .and_then(Value::as_bool)
+                    .ok_or(Failure::InvalidStatus)?,
+                version: EulaVersion::parse(
+                    wire.get("version").and_then(Value::as_str).unwrap_or(""),
+                )
+                .map_err(|_| Failure::InvalidStatus)?
+                .0,
+                url: url.to_owned(),
+                organization_name: organization_name.to_owned(),
+            })
+        }
+        _ => Err(Failure::InvalidStatus),
+    }
 }
 
 /**
@@ -847,6 +1000,14 @@ impl Limits {
         }
     }
 
+    /// The CopilotKit account sign-in waits on a person approving it in their browser.
+    pub fn for_account_sign_in() -> Self {
+        Self {
+            timeout: Duration::from_secs(15 * 60),
+            ..Self::for_action(Action::Status)
+        }
+    }
+
     /// `stop` while OpenBot quits. Somebody is waiting for the app to close, so the stop gets two
     /// minutes rather than ten; a stack that has not stopped by then is reported, not waited on.
     pub fn for_quit() -> Self {
@@ -883,7 +1044,48 @@ pub fn installed() -> Result<PinnedCli, Failure> {
     if let Some(cli) = developer_cli() {
         return cli;
     }
+    if let Some(cli) = bundled_cli() {
+        return cli;
+    }
     Err(Failure::Unavailable)
+}
+
+/**
+A CLI this build carries inside the app: a pinned Node runtime and the CLI it runs, in the app's
+resources, with the digests `build.rs` recorded when the app was built.
+
+Present only in a build made with `OPENBOT_BUNDLED_CLI=1` (see `build.rs`); every other build has
+none and answers as before. The files are checked against those digests on every call, like any
+pin, so an app whose resources were changed after it was built runs nothing.
+*/
+fn bundled_cli() -> Option<Result<PinnedCli, Failure>> {
+    let program_sha256 = option_env!("OPENBOT_BUNDLED_CLI_PROGRAM_SHA256")?;
+    let entry_sha256 = option_env!("OPENBOT_BUNDLED_CLI_ENTRY_SHA256")?;
+    let root = bundled_cli_root()?;
+    Some(PinnedCli::verify(
+        &Pin {
+            path: root
+                .join("runtime")
+                .join(format!("node{}", std::env::consts::EXE_SUFFIX)),
+            sha256: program_sha256.to_owned(),
+        },
+        Some(&Pin {
+            path: root.join("cli").join("index.js"),
+            sha256: entry_sha256.to_owned(),
+        }),
+    ))
+}
+
+/// Where the bundled CLI is: `Contents/Resources/cli-bundle` in a Mac app, beside the program
+/// elsewhere.
+fn bundled_cli_root() -> Option<PathBuf> {
+    let program = std::env::current_exe().ok()?;
+    let directory = program.parent()?;
+    if cfg!(target_os = "macos") {
+        Some(directory.parent()?.join("Resources").join("cli-bundle"))
+    } else {
+        Some(directory.join("cli-bundle"))
+    }
 }
 
 /// The program a developer pinned: a native CLI, or the runtime that runs `DEVELOPER_ENTRY`.
@@ -990,11 +1192,34 @@ pub fn run(
 pub fn setup(
     cli: &PinnedCli,
     installation: &std::path::Path,
+    accepted: Option<&EulaVersion>,
     limits: Limits,
     cancel: &Cancel,
 ) -> Result<Report, Failure> {
-    let (code, bytes) = execute(cli, &SETUP_ARGUMENTS, Some(installation), limits, cancel)?;
+    let (code, bytes) = execute(
+        cli,
+        &setup_arguments(accepted),
+        Some(installation),
+        limits,
+        cancel,
+    )?;
     normalize_setup(code, &bytes)
+}
+
+/// `login --json`: the CopilotKit account sign-in.
+pub fn account_sign_in(
+    cli: &PinnedCli,
+    limits: Limits,
+    cancel: &Cancel,
+) -> Result<AccountSignIn, Failure> {
+    let (code, bytes) = execute(cli, &ACCOUNT_SIGN_IN_ARGUMENTS, None, limits, cancel)?;
+    normalize_account_sign_in(code, &bytes)
+}
+
+/// `onboard local-terms --json`, within the limits of `status`.
+pub fn terms(cli: &PinnedCli, limits: Limits, cancel: &Cancel) -> Result<Terms, Failure> {
+    let (code, bytes) = execute(cli, &TERMS_ARGUMENTS, None, limits, cancel)?;
+    normalize_terms(code, &bytes)
 }
 
 /// `local connect` in `installation`, the folder `local setup` created the stack for.
@@ -1026,8 +1251,9 @@ pub fn list(cli: &PinnedCli, limits: Limits, cancel: &Cancel) -> Result<Listing,
 }
 
 /// The exit code and stdout of one bounded CLI process. Arguments come only from `arguments`,
-/// `login_arguments`, `LIST_ARGUMENTS`, `SETUP_ARGUMENTS` and `CONNECT_ARGUMENTS`; only setup and
-/// connect run somewhere other than inherited.
+/// `login_arguments`, `LIST_ARGUMENTS`, `setup_arguments`, `CONNECT_ARGUMENTS`,
+/// `ACCOUNT_SIGN_IN_ARGUMENTS` and `TERMS_ARGUMENTS`; only setup and connect run somewhere other
+/// than inherited.
 fn execute(
     cli: &PinnedCli,
     arguments: &[&str],
@@ -1045,6 +1271,12 @@ fn execute(
         if let Some(value) = std::env::var_os(name) {
             command.env(name, value);
         }
+    }
+    // The CLI looks `docker` up by name. Opened from Finder, this app has the system's minimal
+    // PATH, which does not reach Docker Desktop's `/usr/local/bin`; the CLI gets Docker's own
+    // directory added.
+    if let Some(path) = crate::engine::path_with_docker() {
+        command.env("PATH", path);
     }
     if let Some(folder) = folder {
         command.current_dir(folder);
@@ -1390,12 +1622,31 @@ fn run_attempt(
 pub fn setup_installed(
     attempt: &str,
     installation: &std::path::Path,
+    accepted: Option<&EulaVersion>,
 ) -> Result<(Report, String), Failure> {
     let attempt = Attempt::register(attempt);
     one_at_a_time(&attempt.0, Limits::for_setup(), |limits| {
         let cli = installed()?;
-        let report = setup(&cli, installation, limits, &attempt.0)?;
+        let report = setup(&cli, installation, accepted, limits, &attempt.0)?;
         Ok((report, cli.sha256().to_owned()))
+    })
+}
+
+/// The CopilotKit account sign-in against the installed CLI.
+pub fn account_sign_in_installed(attempt: &str) -> Result<AccountSignIn, Failure> {
+    let attempt = Attempt::register(attempt);
+    one_at_a_time(&attempt.0, Limits::for_account_sign_in(), |limits| {
+        let cli = installed()?;
+        account_sign_in(&cli, limits, &attempt.0)
+    })
+}
+
+/// The evaluation agreement against the installed CLI.
+pub fn terms_installed(attempt: &str) -> Result<Terms, Failure> {
+    let attempt = Attempt::register(attempt);
+    one_at_a_time(&attempt.0, Limits::for_action(Action::Status), |limits| {
+        let cli = installed()?;
+        terms(&cli, limits, &attempt.0)
     })
 }
 
@@ -1946,6 +2197,7 @@ mod tests {
         let report = setup(
             &fixture.cli(),
             &installation,
+            None,
             Limits::for_setup(),
             &Cancel::default(),
         )
@@ -2304,12 +2556,12 @@ mod tests {
         let installation = temp_root("local-eval-setup-installed");
         std::fs::create_dir_all(&installation).unwrap();
         assert_eq!(
-            setup_installed("setup-no-cli", &installation).map(|(report, _)| report),
+            setup_installed("setup-no-cli", &installation, None).map(|(report, _)| report),
             Err(Failure::Unavailable)
         );
         cancel("setup-cancelled");
         assert_eq!(
-            setup_installed("setup-cancelled", &installation).map(|(report, _)| report),
+            setup_installed("setup-cancelled", &installation, None).map(|(report, _)| report),
             Err(Failure::Cancelled)
         );
         std::fs::remove_dir_all(installation).unwrap();
@@ -2716,6 +2968,7 @@ mod tests {
             Failure::UnsafeEndpoint,
             Failure::ContractMismatch,
             Failure::UnexpectedExit,
+            Failure::InvalidAcceptance,
         ];
         // Adding a variant without listing it above stops compiling here.
         for failure in all {
@@ -2734,7 +2987,8 @@ mod tests {
                 | Failure::MissingStack
                 | Failure::UnsafeEndpoint
                 | Failure::ContractMismatch
-                | Failure::UnexpectedExit => {}
+                | Failure::UnexpectedExit
+                | Failure::InvalidAcceptance => {}
             }
             let name = serde_json::to_string(&failure).unwrap();
             assert!(window.contains(&name), "localEvalCli.ts is missing {name}");
@@ -3284,5 +3538,121 @@ fn main() {
         assert_eq!(listed.stacks[0].id, "local-one");
         assert_eq!(fixture.argv().unwrap(), "local\nlist\n--json");
         assert_eq!(list_installed("list-no-cli"), Err(Failure::Unavailable));
+    }
+
+    #[test]
+    fn an_accepted_agreement_version_is_an_identifier_and_reaches_setup_only_when_given() {
+        assert_eq!(setup_arguments(None), SETUP_ARGUMENTS.to_vec());
+        let version = EulaVersion::parse("developer-edition-2026-10-01-web").unwrap();
+        assert_eq!(
+            setup_arguments(Some(&version)),
+            [
+                "local",
+                "setup",
+                "--defer-model",
+                "--accept-eula-version",
+                "developer-edition-2026-10-01-web",
+                "--json"
+            ]
+        );
+        for refused in [
+            "",
+            "--json",
+            "-x",
+            "v1 --stack other",
+            "v1\n",
+            "a/b",
+            &"v".repeat(129),
+        ] {
+            assert_eq!(
+                EulaVersion::parse(refused),
+                Err(Failure::InvalidAcceptance),
+                "{refused:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn account_sign_in_believes_the_last_outcome_line_and_its_exit_code() {
+        let completed = concat!(
+            "{\"type\":\"action_required\",\"authentication_url\":\"https://x\",\"user_code\":\"ABCD\",\"browser_opened\":true}\n",
+            "{\"type\":\"completed\"}\n"
+        );
+        assert_eq!(
+            normalize_account_sign_in(0, completed.as_bytes()),
+            Ok(AccountSignIn { signed_in: true })
+        );
+        assert_eq!(
+            normalize_account_sign_in(
+                0,
+                b"{\"already_authenticated\":true,\"type\":\"completed\"}\n"
+            ),
+            Ok(AccountSignIn { signed_in: true })
+        );
+        assert_eq!(
+            normalize_account_sign_in(1, b"{\"type\":\"failed\",\"error\":\"denied\"}\n"),
+            Ok(AccountSignIn { signed_in: false })
+        );
+        // An outcome that disagrees with how it exited is not believed.
+        assert_eq!(
+            normalize_account_sign_in(1, b"{\"type\":\"completed\"}\n"),
+            Err(Failure::ContractMismatch)
+        );
+        assert_eq!(
+            normalize_account_sign_in(0, b"{\"type\":\"action_required\"}\n"),
+            Err(Failure::InvalidStatus)
+        );
+        assert_eq!(
+            normalize_account_sign_in(0, b"not json\n"),
+            Err(Failure::InvalidJson)
+        );
+    }
+
+    #[test]
+    fn terms_keep_the_agreement_and_nothing_the_cli_says_around_it() {
+        let required = r#"{"command":"onboard local-terms","status":"required","accepted":false,"version":"developer-edition-2026-10-01-web","url":"https://copilotkit.ai/legal/developer-edition","organizationId":"org_1","organizationName":"CopilotKit🪁","next":"Ask the developer to accept."}"#
+            .as_bytes();
+        assert_eq!(
+            normalize_terms(0, required),
+            Ok(Terms::Required {
+                accepted: false,
+                version: "developer-edition-2026-10-01-web".into(),
+                url: "https://copilotkit.ai/legal/developer-edition".into(),
+                organization_name: "CopilotKit🪁".into(),
+            })
+        );
+        for status in ["not-required", "unavailable", "signed-out"] {
+            let wire = format!(r#"{{"command":"onboard local-terms","status":"{status}"}}"#);
+            assert!(normalize_terms(0, wire.as_bytes()).is_ok(), "{status}");
+        }
+        for (wire, failure) in [
+            (
+                r#"{"command":"onboard local-terms","status":"required","accepted":false,"version":"v1","url":"http://copilotkit.ai/x","organizationName":"o"}"#,
+                Failure::InvalidStatus,
+            ),
+            (
+                r#"{"command":"onboard local-terms","status":"required","accepted":false,"version":"--json","url":"https://copilotkit.ai/x","organizationName":"o"}"#,
+                Failure::InvalidStatus,
+            ),
+            (
+                r#"{"command":"onboard local-terms","status":"required","accepted":false,"version":"v1","url":"https://copilotkit.ai/x","organizationName":"a\nb"}"#,
+                Failure::InvalidStatus,
+            ),
+            (
+                r#"{"command":"local setup","status":"required"}"#,
+                Failure::UnexpectedCommand,
+            ),
+        ] {
+            assert_eq!(normalize_terms(0, wire.as_bytes()), Err(failure), "{wire}");
+        }
+        assert_eq!(normalize_terms(1, b"{}"), Err(Failure::UnexpectedExit));
+    }
+
+    #[test]
+    fn a_build_without_a_bundled_cli_finds_none() {
+        // This test build was not made with OPENBOT_BUNDLED_CLI=1.
+        assert!(option_env!("OPENBOT_BUNDLED_CLI_PROGRAM_SHA256").is_none());
+        assert!(bundled_cli().is_none());
+        assert!(bundled_cli_root().is_some());
     }
 }

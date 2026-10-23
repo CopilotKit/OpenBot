@@ -141,6 +141,10 @@ const failureRows: Record<LocalFailure, ReadinessRow> = {
   "missing-stack": blocked(contract),
   "unsafe-endpoint": blocked(contract),
   "contract-mismatch": blocked(contract),
+  "invalid-acceptance": blocked(
+    "The evaluation agreement could not be accepted.",
+    "retry",
+  ),
 };
 
 function intelligenceRow(

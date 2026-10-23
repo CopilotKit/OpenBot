@@ -372,6 +372,31 @@ fn command_at(engine: Engine, binary: &Path) -> Command {
     built
 }
 
+/**
+This process's PATH with Docker's own directories appended, for a program that looks `docker` up by
+name, or None when there is no Docker here.
+
+Opened from Finder, the app has the system's minimal PATH (`/usr/bin:/bin:/usr/sbin:/sbin`), which
+does not reach Docker Desktop's `/usr/local/bin`. Appended, so a `docker` the person put first on
+their PATH stays first; both the link and the directory it resolves to, as `command_at` does.
+*/
+pub fn path_with_docker() -> Option<OsString> {
+    let binary = program(Engine::Docker)?;
+    let mut entries: Vec<PathBuf> = std::env::var_os("PATH")
+        .map(|path| std::env::split_paths(&path).collect())
+        .unwrap_or_default();
+    let resolved = std::fs::canonicalize(&binary).ok();
+    for directory in [binary.parent(), resolved.as_deref().and_then(Path::parent)]
+        .into_iter()
+        .flatten()
+    {
+        if !entries.iter().any(|entry| entry == directory) {
+            entries.push(directory.to_path_buf());
+        }
+    }
+    std::env::join_paths(entries).ok()
+}
+
 /// This process's PATH with `first` in front of it.
 ///
 /// In front, so the provider OpenBot placed is the one found; appended, a broken `docker-compose`

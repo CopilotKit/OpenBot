@@ -31,6 +31,7 @@ fn main() {
     println!("cargo:rerun-if-env-changed=RUSTC");
     println!("cargo:rerun-if-env-changed=PATH");
     build_identity();
+    bundled_cli();
     // The one way the OpenBot app's own page reaches the shell: an inline plugin whose commands get
     // permissions of their own, granted at runtime to the exact owned app origin. App commands stay
     // out of a remote page's reach.
@@ -88,4 +89,40 @@ fn build_identity() {
     }
     println!("cargo:rerun-if-changed=src");
     println!("cargo:rerun-if-changed=../src");
+}
+
+/**
+The Intelligence CLI a build carries inside the app, pinned to the bytes it was built with.
+
+Only with `OPENBOT_BUNDLED_CLI=1`, from `cli-bundle/` beside this file: `runtime/node` and
+`cli/index.js` (and the CLI's `node_modules`), which `tauri.bundled-cli.conf.json` copies into the
+app's resources. Their digests are compiled in, so the app runs exactly these files and nothing put
+there afterwards. Every other build has no bundled CLI. See `local_eval::bundled_cli`.
+*/
+fn bundled_cli() {
+    println!("cargo:rerun-if-env-changed=OPENBOT_BUNDLED_CLI");
+    if std::env::var("OPENBOT_BUNDLED_CLI").as_deref() != Ok("1") {
+        return;
+    }
+    let root = std::path::Path::new("cli-bundle");
+    let node = format!("node{}", if cfg!(windows) { ".exe" } else { "" });
+    for (variable, path) in [
+        (
+            "OPENBOT_BUNDLED_CLI_PROGRAM_SHA256",
+            root.join("runtime").join(node),
+        ),
+        (
+            "OPENBOT_BUNDLED_CLI_ENTRY_SHA256",
+            root.join("cli").join("index.js"),
+        ),
+    ] {
+        use sha2::Digest;
+        let mut file = std::fs::File::open(&path).unwrap_or_else(|error| {
+            panic!("OPENBOT_BUNDLED_CLI=1 needs {}: {error}", path.display())
+        });
+        let mut hasher = sha2::Sha256::new();
+        std::io::copy(&mut file, &mut hasher).expect("the bundled CLI could not be read");
+        println!("cargo:rustc-env={variable}={:x}", hasher.finalize());
+        println!("cargo:rerun-if-changed={}", path.display());
+    }
 }

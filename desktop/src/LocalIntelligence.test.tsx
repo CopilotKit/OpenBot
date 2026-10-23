@@ -93,7 +93,6 @@ type Startable = { apiUrl: string; gatewayWsUrl: string };
 
 type Props = {
   stack?: string | null;
-  developer?: boolean;
   connected?: boolean;
   /** Gives the go-ahead on arrival. Without it, Start OpenBot does. */
   auto?: boolean;
@@ -120,11 +119,7 @@ function Holder(props: Props) {
   return (
     <>
       {props.prepare && <LocalStatus sequence={sequence} />}
-      <LocalIntelligence
-        sequence={sequence}
-        developer={props.developer ?? false}
-        offerStart
-      />
+      <LocalIntelligence sequence={sequence} offerStart />
     </>
   );
 }
@@ -219,55 +214,115 @@ test("a recorded, connected stack skips straight to waiting", async () => {
   expect(statusCalls()[0]?.args).toMatchObject({ stack: "local-abc123" });
 });
 
-test("a development build says how to accept the terms, and Retry resumes at setup", async () => {
-  invokeHandler = answers({ set_up_local_eval: [blockedOnTerms] });
-  const screen = view({ developer: true });
-  await screen.findByText(/local accept-terms/);
-  expect(row(screen, SETUP).textContent).toContain(
-    "The Intelligence terms have not been accepted.",
-  );
-  expect(screen.queryByRole("listitem", { name: CONNECT })).toBeNull();
+const blockedOnSignIn = report({
+  outcome: "blocked",
+  stack: null,
+  reason: "authentication-required",
+});
+
+const requiredTerms = {
+  status: "required",
+  accepted: false,
+  version: "developer-edition-2026-10-01-web",
+  url: "https://copilotkit.ai/legal/developer-edition",
+  organizationName: "Acme",
+};
+
+test("setup that needs a CopilotKit sign-in offers it in the window, then carries on by itself", async () => {
   invokeHandler = answers({
-    set_up_local_eval: [report()],
+    // Blocked on the sign-in, then set up once it is done.
+    set_up_local_eval: [blockedOnSignIn, report()],
+    sign_in_to_copilotkit: [{ signedIn: true }],
     connect_local_eval: [connection()],
     run_local_eval: [ready],
+    cancel_local_eval: [null],
   });
-  await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+  const screen = view();
+  await userEvent.click(
+    await screen.findByRole("button", { name: "Sign in to CopilotKit" }),
+  );
   await waitFor(() =>
     expect(row(screen, START).textContent).toContain("Complete"),
+  );
+  expect(commands().filter((c) => c === "sign_in_to_copilotkit")).toHaveLength(
+    1,
   );
   expect(commands().filter((c) => c === "set_up_local_eval")).toHaveLength(2);
 });
 
-test("other builds never send the person to a terminal", async () => {
-  for (const reason of [
-    "eula-acceptance-required",
-    "authentication-required",
+test("a CopilotKit sign-in that does not finish says so and can be tried again", async () => {
+  invokeHandler = answers({
+    set_up_local_eval: [blockedOnSignIn],
+    sign_in_to_copilotkit: [{ signedIn: false }],
+    cancel_local_eval: [null],
+  });
+  const screen = view();
+  await userEvent.click(
+    await screen.findByRole("button", { name: "Sign in to CopilotKit" }),
+  );
+  await screen.findByText("Sign-in did not finish. Try again.");
+  expect(
+    screen.getByRole("button", { name: "Sign in to CopilotKit" }),
+  ).toBeTruthy();
+  expect(commands().filter((c) => c === "set_up_local_eval")).toHaveLength(1);
+});
+
+test("setup that needs the agreement shows it, and only Accept sets up again with that version", async () => {
+  invokeHandler = answers({
+    set_up_local_eval: [blockedOnTerms, report()],
+    local_eval_terms: [requiredTerms],
+    connect_local_eval: [connection()],
+    run_local_eval: [ready],
+    cancel_local_eval: [null],
+  });
+  const screen = view();
+  await screen.findByText(
+    "To run Intelligence on this computer, accept the CopilotKit Intelligence evaluation agreement for Acme.",
+  );
+  expect(screen.getByRole("link", { name: "Read the agreement" })).toBeTruthy();
+  // Nothing is accepted until the person clicks Accept.
+  expect(
+    invokeCalls.filter((call) => call.command === "set_up_local_eval"),
+  ).toEqual([
+    {
+      command: "set_up_local_eval",
+      args: expect.objectContaining({ acceptedEulaVersion: null }),
+    },
+  ]);
+  await userEvent.click(screen.getByRole("button", { name: "Accept" }));
+  await waitFor(() =>
+    expect(row(screen, START).textContent).toContain("Complete"),
+  );
+  const setups = invokeCalls.filter(
+    (call) => call.command === "set_up_local_eval",
+  );
+  expect(
+    setups.map(
+      (call) =>
+        (call.args as { acceptedEulaVersion: string | null })
+          .acceptedEulaVersion,
+    ),
+  ).toEqual([null, "developer-edition-2026-10-01-web"]);
+});
+
+test("no build sends the person to a terminal", async () => {
+  for (const [blocked, terms] of [
+    [blockedOnTerms, requiredTerms],
+    [blockedOnSignIn, requiredTerms],
   ] as const) {
     invokeHandler = answers({
-      set_up_local_eval: [report({ outcome: "blocked", stack: null, reason })],
+      set_up_local_eval: [blocked],
+      local_eval_terms: [terms],
+      cancel_local_eval: [null],
     });
-    const screen = view({ developer: false });
-    await screen.findByRole("button", { name: "Retry" });
+    const screen = view();
+    await screen.findByRole("button", {
+      name: blocked === blockedOnTerms ? "Accept" : "Sign in to CopilotKit",
+    });
     expect(screen.queryByText(/copilotkit |Terminal/)).toBeNull();
     cleanup();
     invokeCalls = [];
   }
-});
-
-test("a development build that needs a sign-in says to run copilotkit login", async () => {
-  invokeHandler = answers({
-    set_up_local_eval: [
-      report({
-        outcome: "blocked",
-        stack: null,
-        reason: "authentication-required",
-      }),
-    ],
-  });
-  const screen = view({ developer: true });
-  await screen.findByText(/copilotkit login/);
-  expect(row(screen, SETUP).textContent).toContain("Sign in to CopilotKit.");
 });
 
 test("a blocked or conflicted connection stops at its row, and Retry resumes at Connect", async () => {

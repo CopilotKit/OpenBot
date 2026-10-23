@@ -28,6 +28,7 @@ export const localFailures = [
   "unsafe-endpoint",
   "contract-mismatch",
   "unexpected-exit",
+  "invalid-acceptance",
 ] as const;
 export type LocalFailure = (typeof localFailures)[number];
 
@@ -163,7 +164,11 @@ export function listLocalEval(): {
  * starts and stops with OpenBot. Blocked is an answer, not an error: the first is usually the
  * evaluation terms. A stack that was set up but could not be recorded rejects with a `Problem`.
  */
-export function setUpLocalEval(root: string): {
+export function setUpLocalEval(
+  root: string,
+  /** The agreement version the person accepted in this window, once they have. */
+  acceptedEulaVersion: string | null = null,
+): {
   attempt: string;
   report: Promise<LocalReport>;
 } {
@@ -171,6 +176,7 @@ export function setUpLocalEval(root: string): {
   const report = invoke<LocalReport>("set_up_local_eval", {
     attempt,
     root,
+    acceptedEulaVersion,
   }).catch((rejection: unknown) => {
     if (rejection && typeof rejection === "object" && "said" in rejection) {
       throw rejection as Problem;
@@ -178,6 +184,51 @@ export function setUpLocalEval(root: string): {
     throw failure(rejection);
   });
   return { attempt, report };
+}
+
+/**
+ * Signs in to CopilotKit, which local Intelligence needs for its evaluation licence. The CLI opens
+ * the approval page in the browser; this settles once the person approved it there (true) or it
+ * did not finish (false).
+ */
+export function signInToCopilotKit(): {
+  attempt: string;
+  signedIn: Promise<boolean>;
+} {
+  const attempt = crypto.randomUUID();
+  const signedIn = invoke<{ signedIn: boolean }>("sign_in_to_copilotkit", {
+    attempt,
+  }).then(
+    (answer) => answer.signedIn,
+    (rejection: unknown) => {
+      throw failure(rejection);
+    },
+  );
+  return { attempt, signedIn };
+}
+
+/** The evaluation agreement, as the CLI reports it: what the person reads before Accept. */
+export type LocalTerms =
+  | {
+      status: "required";
+      accepted: boolean;
+      version: string;
+      url: string;
+      organizationName: string;
+    }
+  | { status: "not-required" | "unavailable" | "signed-out" };
+
+export function localEvalTerms(): {
+  attempt: string;
+  terms: Promise<LocalTerms>;
+} {
+  const attempt = crypto.randomUUID();
+  const terms = invoke<LocalTerms>("local_eval_terms", { attempt }).catch(
+    (rejection: unknown) => {
+      throw failure(rejection);
+    },
+  );
+  return { attempt, terms };
 }
 
 /**

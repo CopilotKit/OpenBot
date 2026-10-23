@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { ExternalLink } from "./ExternalLink";
 import {
   cancelLocalEval,
   chatGate,
@@ -8,8 +9,11 @@ import {
   type LocalFailure,
   type LocalReason,
   type LocalReport,
+  type LocalTerms,
+  localEvalTerms,
   runLocalEval,
   setUpLocalEval,
+  signInToCopilotKit,
 } from "./localEvalCli";
 import { localReadiness } from "./localReadiness";
 import { asProblem, Failure, type Problem } from "./Problem";
@@ -17,6 +21,7 @@ import {
   formatElapsed,
   type Progress,
   SetupProgress,
+  StatusLine,
   useElapsed,
 } from "./SetupProgress";
 
@@ -105,6 +110,8 @@ export type LocalSequence = State & {
   /** The go-ahead: runs what is left and starts OpenBot once Intelligence is ready. */
   start: () => void;
   retry: () => void;
+  /** The person accepted this agreement version in the window: set up again with it. */
+  acceptTerms: (version: string) => void;
   /** Stops the running CLI call and says so. */
   cancel: () => void;
   /** Forgets the rows, as after Stop OpenBot. */
@@ -152,6 +159,8 @@ export function useLocalSequence({
   const startable = useRef<LocalStartable | null>(null);
   // Start OpenBot once Intelligence is ready. Spent when it starts.
   const go = useRef(false);
+  // The agreement version the person accepted, carried to the next setup and spent once it works.
+  const accepted = useRef<string | null>(null);
 
   function update(patch: Partial<State>) {
     now.current = { ...now.current, ...patch };
@@ -289,7 +298,7 @@ export function useLocalSequence({
       if (phase === "start" && !go.current) return stop();
       update({ at: phase, running: true, since: Date.now() });
       if (phase === "setup") {
-        const started = setUpLocalEval(root);
+        const started = setUpLocalEval(root, accepted.current);
         const report = await call(
           { attempt: started.attempt, answer: started.report },
           token,
@@ -299,6 +308,7 @@ export function useLocalSequence({
           return stop({ said: said(report), reason: report.reason });
         }
         if (!report.stack) return stop({ said: said("missing-stack") });
+        accepted.current = null;
         id = report.stack.id;
         latest.current.onRecorded(id, false);
       }
@@ -370,6 +380,11 @@ export function useLocalSequence({
     if (at) void run(at);
   }
 
+  function acceptTerms(version: string) {
+    accepted.current = version;
+    retry();
+  }
+
   function cancel() {
     halt();
     // Before its first row, nothing ran: there is nothing to retry.
@@ -418,6 +433,7 @@ export function useLocalSequence({
     prepare,
     start,
     retry,
+    acceptTerms,
     cancel,
     reset,
   };
@@ -429,36 +445,17 @@ export function useLocalSequence({
  */
 export function LocalIntelligence({
   sequence,
-  developer = import.meta.env.DEV,
   offerStart = false,
 }: {
   sequence: LocalSequence;
-  developer?: boolean;
   offerStart?: boolean;
 }) {
-  const { at, running, stopped, blocked, problem } = sequence;
-  const reason = stopped ? blocked?.reason : null;
+  const { at, running, stopped, problem } = sequence;
 
   return (
     <section aria-label="Intelligence on this computer">
       <SetupProgress steps={sequence.steps} />
-      {reason === "eula-acceptance-required" &&
-        (developer ? (
-          <p className="footnote">
-            Development build: run <code>copilotkit local accept-terms</code> in
-            Terminal, then choose Retry.
-          </p>
-        ) : (
-          <p className="footnote">
-            Accepting the evaluation terms in OpenBot is not available yet.
-          </p>
-        ))}
-      {reason === "authentication-required" && developer && (
-        <p className="footnote">
-          Development build: run <code>copilotkit login</code> in Terminal, then
-          choose Retry.
-        </p>
-      )}
+      <LocalNeeds sequence={sequence} />
       {stopped && problem && <Failure problem={problem} />}
       <div className="row">
         {running && at !== "start" && (
@@ -487,15 +484,142 @@ export function LocalStatus({ sequence }: { sequence: LocalSequence }) {
   const elapsed = useElapsed(sequence.running, sequence.since);
   if (!current) return null;
   return (
-    <p className="local-status" role="status">
-      {sequence.running
-        ? `${current.step} · ${formatElapsed(elapsed)} elapsed`
-        : sequence.ready
-          ? "Intelligence is ready."
-          : sequence.stopped
-            ? (sequence.blocked?.said ?? sequence.problem?.said)
-            : `${current.step}: complete.`}
-    </p>
+    <>
+      <p className="local-status" role="status">
+        {sequence.running
+          ? `${current.step} · ${formatElapsed(elapsed)} elapsed`
+          : sequence.ready
+            ? "Intelligence is ready."
+            : sequence.stopped
+              ? (sequence.blocked?.said ?? sequence.problem?.said)
+              : `${current.step}: complete.`}
+      </p>
+      <LocalNeeds sequence={sequence} />
+    </>
+  );
+}
+
+/**
+ * What the person does when local setup stops for them, in the window where it stopped: sign in to
+ * CopilotKit, or read and accept the evaluation agreement. Setup then carries on by itself.
+ *
+ * The agreement is the person's to accept. They read it at its own address and click Accept here;
+ * that click is passed to the CLI as the version they accepted (a product decision of 2026-10-22).
+ * Nothing accepts it without the click.
+ */
+export function LocalNeeds({ sequence }: { sequence: LocalSequence }) {
+  const reason = sequence.stopped ? sequence.blocked?.reason : null;
+  if (reason === "authentication-required")
+    return <SignInToCopilotKit onSignedIn={sequence.retry} />;
+  if (reason === "eula-acceptance-required")
+    return (
+      <AcceptTerms onAccept={sequence.acceptTerms} onRetry={sequence.retry} />
+    );
+  return null;
+}
+
+function SignInToCopilotKit({ onSignedIn }: { onSignedIn: () => void }) {
+  const [waiting, setWaiting] = useState(false);
+  const [failed, setFailed] = useState<string | null>(null);
+  const attempt = useRef<string | null>(null);
+  // Leaving stops the wait for the browser.
+  useEffect(
+    () => () => {
+      if (attempt.current) cancelLocalEval(attempt.current).catch(() => {});
+    },
+    [],
+  );
+
+  async function signIn() {
+    setWaiting(true);
+    setFailed(null);
+    const started = signInToCopilotKit();
+    attempt.current = started.attempt;
+    try {
+      if (await started.signedIn) onSignedIn();
+      else setFailed("Sign-in did not finish. Try again.");
+    } catch (error) {
+      setFailed(
+        error instanceof LocalEvalError && error.category !== "unrecognized"
+          ? said(error.category)
+          : "Sign-in did not finish. Try again.",
+      );
+    } finally {
+      attempt.current = null;
+      setWaiting(false);
+    }
+  }
+
+  return (
+    <div className="local-needs">
+      <p>Intelligence on this computer needs your CopilotKit account.</p>
+      {waiting ? (
+        <StatusLine>Finish signing in in your browser…</StatusLine>
+      ) : (
+        <div className="row">
+          <button type="button" onClick={signIn}>
+            Sign in to CopilotKit
+          </button>
+        </div>
+      )}
+      {failed && <p className="footnote">{failed}</p>}
+    </div>
+  );
+}
+
+function AcceptTerms({
+  onAccept,
+  onRetry,
+}: {
+  onAccept: (version: string) => void;
+  onRetry: () => void;
+}) {
+  const [terms, setTerms] = useState<LocalTerms | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let current = true;
+    const started = localEvalTerms();
+    started.terms.then(
+      (read) => current && setTerms(read),
+      () => current && setFailed(true),
+    );
+    return () => {
+      current = false;
+      cancelLocalEval(started.attempt).catch(() => {});
+    };
+  }, []);
+
+  if (failed || (terms && terms.status !== "required"))
+    return (
+      <div className="local-needs">
+        <p className="footnote">
+          The evaluation agreement could not be shown. Try again.
+        </p>
+        <div className="row">
+          <button type="button" onClick={onRetry}>
+            Try again
+          </button>
+        </div>
+      </div>
+    );
+  if (terms?.status !== "required")
+    return <StatusLine>Getting the evaluation agreement…</StatusLine>;
+  return (
+    <div className="local-needs">
+      <p>
+        To run Intelligence on this computer, accept the CopilotKit Intelligence
+        evaluation agreement for {terms.organizationName}.
+      </p>
+      <p className="footnote">
+        <ExternalLink href={terms.url}>Read the agreement</ExternalLink> (
+        {terms.version})
+      </p>
+      <div className="row">
+        <button type="button" onClick={() => onAccept(terms.version)}>
+          Accept
+        </button>
+      </div>
+    </div>
   );
 }
 
