@@ -12,38 +12,18 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import {
+  CONFIRM_WINDOW_MS,
+  connectRefusalSentence,
   type DetectedRecorder,
   detectRecorder,
   sendConnectCode,
 } from "@/lib/recorder/bridge";
 import { mintRecorderConnectCode } from "@/lib/recorder/mutations";
-import { recorderConnectionsQueryOptions } from "@/lib/recorder/queries";
-
-/** How long a connect request waits for the person to confirm it in the Recorder's tab. */
-const CONFIRM_WINDOW_MS = 5 * 60_000;
-
-const REFUSALS: Record<string, string> = {
-  "not-https": "The Recorder only connects to OpenBot over HTTPS.",
-  "pinned-elsewhere": "Your organization set the Recorder to another OpenBot.",
-  "policy-invalid":
-    "Your organization's Recorder policy names an OpenBot address the Recorder can't use. Ask your IT team.",
-  busy: "The Recorder is finishing another connect request. Try again in a moment.",
-};
-/** The Recorder can also answer `unreachable` or `invalid`, which have no sentence of their own. */
-const REFUSAL_FALLBACK = "The Recorder didn't accept the request. Try again.";
-
-/** The Recorder takes only so many connects from one OpenBot in ten minutes; its refusal says how long is left. */
-function throttledSentence(retryAfterMs: number | undefined): string {
-  const lead = "Too many connect requests in a short time.";
-  if (retryAfterMs === undefined) return `${lead} Try again in a few minutes.`;
-  const minutes = Math.max(1, Math.ceil(retryAfterMs / 60_000));
-  return `${lead} Try again in ${minutes} ${minutes === 1 ? "minute" : "minutes"}.`;
-}
-
-function refusalSentence(error: string, retryAfterMs?: number): string {
-  if (error === "throttled") return throttledSentence(retryAfterMs);
-  return REFUSALS[error] ?? REFUSAL_FALLBACK;
-}
+import {
+  recorderConnectionsQueryOptions,
+  recorderKeys,
+} from "@/lib/recorder/queries";
+import { queryClient } from "@/query-client";
 
 type Attempt =
   | { state: "idle" }
@@ -117,11 +97,18 @@ export function ThisBrowser({
       if (!answer.ok) {
         setAttempt({
           state: "failed",
-          message: refusalSentence(answer.error, answer.retryAfterMs),
+          message: connectRefusalSentence(answer.error, answer.retryAfterMs),
         });
         return;
       }
       setConnectedAs(answer.installId);
+      if (answer.connected) {
+        // A trusted OpenBot: connected already, with no Connect page to wait on. The new connection is read before the
+        // row stops saying it is connecting, so it goes straight to Connected.
+        await queryClient.invalidateQueries({ queryKey: recorderKeys.all });
+        setAttempt({ state: "idle" });
+        return;
+      }
       setAttempt({ state: "awaiting" });
     } catch (error) {
       setAttempt({
