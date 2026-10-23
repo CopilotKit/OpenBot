@@ -352,6 +352,23 @@ function Setup() {
   const installationKey = installationKeyFor(root, harness);
   const installationReady =
     preparation?.key === installationKey && preparation.status === "complete";
+  /*
+   * A local first run sets Intelligence up alongside the OpenBot install, not after it: from the
+   * moment the install reports the container engine ready (Intelligence runs on the same Docker,
+   * and the install is what starts or installs it), or at once when the install is already done.
+   * Queued by the CopilotKit account step, which runs first.
+   */
+  const intelligenceQueued = useRef(false);
+  const engineReady = steps.some(
+    (row) => row.step === "engine" && row.ok && !row.running,
+  );
+  // biome-ignore lint/correctness/useExhaustiveDependencies: runs when the engine or install changes.
+  useEffect(() => {
+    if (!intelligenceQueued.current) return;
+    if (!engineReady && !installationReady) return;
+    intelligenceQueued.current = false;
+    local.prepare();
+  }, [engineReady, installationReady]);
   const returningToInstallation = savedLaunch.current === installationKey;
   const [running, setRunning] = useState(false);
   const visibleSetupStep =
@@ -720,8 +737,7 @@ function Setup() {
     setStep("install");
     if (await install(choice)) {
       setSteps([]);
-      // The licensed part waits for the CopilotKit account and its agreement: see `account`.
-      setStep("account");
+      setStep("model");
     }
   }
 
@@ -1010,7 +1026,8 @@ function Setup() {
                     chooseIntelligence("local");
                     // The default Bot, recorded as its Continue would.
                     recordSetupEvent(harnessChoiceEvent(DEFAULT_HARNESS));
-                    void installLocally();
+                    // The account comes first: it needs nothing installed.
+                    setStep("account");
                   },
                 }
               : undefined
@@ -1057,9 +1074,7 @@ function Setup() {
     return (
       <main>
         <div className="sheet">
-          <p className="steps-of">
-            {localFlow ? "Step 1 of 4" : "Step 2 of 4"}
-          </p>
+          <p className="steps-of">Step 2 of 4</p>
           <h1>
             {installationReady
               ? "Installation complete"
@@ -1103,6 +1118,8 @@ function Setup() {
           <SetupProgress
             steps={localFlow ? plainInstallSteps(steps, busy) : steps}
           />
+          {/* Intelligence sets itself up alongside, once the install has Docker answering. */}
+          {localFlow && <LocalStatus sequence={local} />}
           {displayedFailure && <Failure problem={displayedFailure} />}
           {busy && !localFlow && (
             <p role="status">Installing local software…</p>
@@ -1196,11 +1213,12 @@ function Setup() {
     return (
       <main>
         <CopilotKitAccount
-          stepLabel="Step 2 of 4"
+          stepLabel="Step 1 of 4"
           onDone={(acceptedVersion) => {
             if (acceptedVersion) local.acceptTerms(acceptedVersion);
-            setStep("model");
-            local.prepare();
+            // Intelligence sets itself up once the install has Docker answering; see below.
+            intelligenceQueued.current = true;
+            void installLocally();
           }}
         />
         {displayedFailure && <Failure problem={displayedFailure} />}
