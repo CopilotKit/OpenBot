@@ -3062,13 +3062,22 @@ fn on_setup_page<R: tauri::Runtime>(app: &tauri::AppHandle<R>, url: &tauri::Url)
 }
 
 /**
-The title bar is the setup screen's own colour on setup, and the system's on OpenBot.
+The appearance the setup screens use: dark for now, as a product choice (2026-10-23). Both themes
+exist; the page follows the window's appearance through `prefers-color-scheme`, so `None` here
+makes setup follow the system instead, and `Some(Light)` pins light.
+*/
+const SETUP_THEME: Option<tauri::Theme> = Some(tauri::Theme::Dark);
 
-The window starts transparent-titled over the setup background (`tauri.conf.json`), so the first
-paint already matches. The same window then navigates to OpenBot, which keeps its own light and
-dark, and a lavender title bar over it would be a seam; it gets the system's bar back.
+/**
+The setup screens' appearance and title bar on setup, and the system's on OpenBot.
+
+The window starts dark and transparent-titled over the setup background (`tauri.conf.json`), so
+the first paint already matches. The same window then navigates to OpenBot, which keeps its own
+light and dark: it gets the system's appearance and title bar back, since a setup-coloured bar
+over it would be a seam.
 */
 fn match_title_bar<R: tauri::Runtime>(window: &tauri::Window<R>, on_setup: bool) {
+    let _ = window.set_theme(if on_setup { SETUP_THEME } else { None });
     #[cfg(target_os = "macos")]
     {
         let _ = window.set_title_bar_style(if on_setup {
@@ -3076,14 +3085,12 @@ fn match_title_bar<R: tauri::Runtime>(window: &tauri::Window<R>, on_setup: bool)
         } else {
             tauri::TitleBarStyle::Visible
         });
-        let ground = match window.theme() {
-            Ok(tauri::Theme::Dark) => SETUP_BACKGROUND_DARK,
+        let ground = match SETUP_THEME.map_or_else(|| window.theme().ok(), Some) {
+            Some(tauri::Theme::Dark) => SETUP_BACKGROUND_DARK,
             _ => SETUP_BACKGROUND,
         };
         let _ = window.set_background_color(on_setup.then_some(ground));
     }
-    #[cfg(not(target_os = "macos"))]
-    let _ = (window, on_setup);
 }
 
 /// Both pages are single-page apps. Keep their route and in-memory state on restore.
