@@ -5083,6 +5083,74 @@ fn chose(app: &tauri::AppHandle, item: &str) {
 }
 
 /**
+A quit macOS starts, not OpenBot: Dock > Quit, an AppleScript `quit`, logging out or shutting down.
+
+Tauri on macOS answers those only in `applicationWillTerminate:`, which ends the event loop at once:
+`RunEvent::ExitRequested`, where OpenBot's own Quit stops its CLI calls, its containers and the
+Intelligence stack it made, never runs. A local setup quit that way kept running with nobody to
+stop it, and the next setup was refused as busy.
+
+So the app delegate also answers `applicationShouldTerminate:`: it cancels macOS's termination
+and asks for OpenBot's own Quit (`app.exit`), whose cleanup then exits. Tauri ends the loop with
+`stop:` and `process::exit`, never `terminate:`, so this is not asked again on the way out. A
+logout waits for nothing here: macOS reports that OpenBot cancelled it, and logging out again
+after OpenBot has closed goes through.
+*/
+#[cfg(target_os = "macos")]
+mod macos_quit {
+    use objc2::runtime::{AnyClass, AnyObject, Imp, Sel};
+    use std::sync::OnceLock;
+
+    static APP: OnceLock<tauri::AppHandle> = OnceLock::new();
+
+    /// `NSApplicationTerminateReply`.
+    const TERMINATE_CANCEL: usize = 0;
+    const TERMINATE_NOW: usize = 1;
+
+    extern "C-unwind" fn should_terminate(_: *mut AnyObject, _: Sel, _: *mut AnyObject) -> usize {
+        match APP.get() {
+            Some(app) => {
+                app.exit(0);
+                TERMINATE_CANCEL
+            }
+            None => TERMINATE_NOW,
+        }
+    }
+
+    /// Adds `applicationShouldTerminate:` to the delegate Tauri installed. Called once, in setup.
+    pub fn install(app: &tauri::AppHandle) {
+        if APP.set(app.clone()).is_err() {
+            return;
+        }
+        // SAFETY: on the main thread during setup, after Tauri set the application's delegate. The
+        // method is added to the delegate's own class, with the signature AppKit calls it with:
+        // NSUInteger (Q) on self (@), _cmd (:), sender (@).
+        unsafe {
+            let application: *mut AnyObject =
+                objc2::msg_send![objc2::class!(NSApplication), sharedApplication];
+            if application.is_null() {
+                return;
+            }
+            let delegate: *mut AnyObject = objc2::msg_send![application, delegate];
+            if delegate.is_null() {
+                return;
+            }
+            let class = objc2::ffi::object_getClass(delegate) as *mut AnyClass;
+            let imp: Imp = std::mem::transmute::<
+                extern "C-unwind" fn(*mut AnyObject, Sel, *mut AnyObject) -> usize,
+                Imp,
+            >(should_terminate);
+            objc2::ffi::class_addMethod(
+                class,
+                objc2::sel!(applicationShouldTerminate:),
+                imp,
+                c"Q@:@".as_ptr(),
+            );
+        }
+    }
+}
+
+/**
 What About OpenBot says: the version, and which build this is.
 
 The build is the commit it was built from, marked `-dirty` when the tree had uncommitted changes,
@@ -5388,6 +5456,8 @@ fn main() {
                 .build(app)?;
             install_menus(app.handle(), false)?;
             app.on_menu_event(|app, event| chose(app, event.id().as_ref()));
+            #[cfg(target_os = "macos")]
+            macos_quit::install(app.handle());
             Ok(())
         })
         .build(tauri::generate_context!())

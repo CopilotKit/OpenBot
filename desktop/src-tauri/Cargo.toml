@@ -40,6 +40,11 @@ tauri-plugin-dialog = "2"
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
+# The macOS quit OpenBot did not start (Dock, AppleScript, log out) routed through its own Quit.
+# The version Tauri already uses. See `macos_quit` in main.rs.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+
 [dev-dependencies]
 tauri = { version = "2", features = ["test"] }
 

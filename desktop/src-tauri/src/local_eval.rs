@@ -1293,6 +1293,8 @@ fn execute(
         command.process_group(0);
     }
     let mut child = command.spawn().map_err(|_| Failure::Spawn)?;
+    // Until this call has reaped the tree, by its own end or by `stop_tree`.
+    let _running = Running::start();
     // Only the child holds the file for writing now.
     drop(command);
 
@@ -1497,6 +1499,41 @@ pub fn closing_for_stop() -> Closing {
 pub fn close_for_quit() {
     QUITTING.store(true, Ordering::SeqCst);
     cancel_all();
+    // Cancelling only asks: each call stops its CLI's process tree on its own thread, and the CLI
+    // forwards SIGTERM to its children rather than exiting, so the tree goes at SIGKILL, after the
+    // grace. An app that exits before then leaves it running with nobody to stop it.
+    wait_until_stopped(Duration::from_secs(10));
+}
+
+/// CLI process trees started and not yet stopped or finished, across every call.
+static RUNNING: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// Counts one CLI process tree as running for as long as it is held.
+struct Running;
+
+impl Running {
+    fn start() -> Self {
+        RUNNING.fetch_add(1, Ordering::SeqCst);
+        Self
+    }
+}
+
+impl Drop for Running {
+    fn drop(&mut self) {
+        RUNNING.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// Waits, at most `patience`, until no CLI process tree is running. True when none is.
+fn wait_until_stopped(patience: Duration) -> bool {
+    let until = Instant::now() + patience;
+    while RUNNING.load(Ordering::SeqCst) > 0 {
+        if Instant::now() >= until {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    true
 }
 
 /// An attempt's place in `IN_FLIGHT`, removed however the call ends.
@@ -2917,6 +2954,59 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
+    fn quitting_waits_until_a_cli_that_ignores_sigterm_is_gone() {
+        // Quit used to only ask: the app could exit before the CLI's SIGKILL, and the CLI then ran
+        // on with nobody to stop it, holding its stack's lock.
+        if crate::test_support::isolated_process(
+            "local_eval::tests::quitting_waits_until_a_cli_that_ignores_sigterm_is_gone",
+        ) {
+            return;
+        }
+        let fixture = Fixture::new("local-eval-quit-stubborn", "stubborn");
+        let cli = fixture.cli();
+        let attempt = Attempt::register("stubborn-call");
+        let cancel = attempt.0.clone();
+        let call = std::thread::spawn(move || {
+            run(
+                &cli,
+                Action::Status,
+                &StackId::parse("local-abc123").unwrap(),
+                Limits {
+                    timeout: Duration::from_secs(60),
+                    grace: Duration::from_secs(1),
+                    output: MAX_OUTPUT,
+                },
+                &cancel,
+            )
+        });
+        Fixture::wait_for_grandchild(&fixture.root);
+        let pid: libc::pid_t = std::fs::read_to_string(fixture.root.join("pid"))
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        let alive = |pid: libc::pid_t| unsafe { libc::kill(pid, 0) } == 0;
+        assert!(alive(pid));
+
+        close_for_quit();
+
+        // Gone when Quit goes on, not some time after.
+        assert!(!alive(pid), "the CLI outlived close_for_quit");
+        let grandchild = fixture.grandchild();
+        let until = Instant::now() + Duration::from_secs(2);
+        while alive(grandchild) && Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(
+            !alive(grandchild),
+            "the CLI's child outlived close_for_quit"
+        );
+        assert_eq!(call.join().unwrap(), Err(Failure::Cancelled));
+        drop(attempt);
+    }
+
+    #[test]
     fn remembered_cancels_are_bounded() {
         // Evicting the oldest remembered cancel would race with tests that rely on one.
         if crate::test_support::isolated_process(
@@ -3078,6 +3168,23 @@ fn main() {
                 std::io::stdout().flush().unwrap();
                 return;
             }
+            std::thread::sleep(std::time::Duration::from_secs(60));
+        }
+        // Like the real CLI, which forwards SIGTERM to its children instead of exiting: only
+        // SIGKILL stops it.
+        "stubborn" => {
+            #[cfg(unix)]
+            {
+                extern "C" {
+                    fn signal(signum: i32, handler: usize) -> usize;
+                }
+                // SAFETY: SIGTERM (15) set to SIG_IGN (1) before any other thread exists.
+                unsafe { signal(15, 1) };
+            }
+            std::fs::write(dir.join("pid"), std::process::id().to_string()).unwrap();
+            let grandchild = std::process::Command::new(&exe).arg("--grandchild").spawn().unwrap();
+            std::fs::write(dir.join("grandchild.tmp"), grandchild.id().to_string()).unwrap();
+            std::fs::rename(dir.join("grandchild.tmp"), dir.join("grandchild")).unwrap();
             std::thread::sleep(std::time::Duration::from_secs(60));
         }
         "flood" => {
