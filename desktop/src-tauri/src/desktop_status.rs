@@ -121,6 +121,20 @@ mod tests {
     }
 
     #[test]
+    fn the_quick_listing_names_containers_without_measuring_them() {
+        let listing = "openbot-postgres-1\t\nk3d-local-abc-server-0\t\n";
+        let (openbot, intelligence) = containers(listing, Some("local-abc"));
+        assert_eq!(
+            openbot,
+            vec![Part {
+                name: "openbot-postgres-1".into(),
+                memory_bytes: None
+            }]
+        );
+        assert_eq!(intelligence[0].memory_bytes, None);
+    }
+
+    #[test]
     fn resident_sizes_are_kibibytes_per_pid() {
         assert_eq!(
             resident("  123  2048\n 456 10\nnonsense\n"),

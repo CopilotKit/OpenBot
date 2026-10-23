@@ -81,31 +81,46 @@ function ComputerPage() {
 }
 
 function ComputerSections() {
-  const status = useQuery(desktopStatusQueryOptions());
+  // The quick read draws the page at once; the measured one fills the memory figures in after.
+  const listed = useQuery(desktopStatusQueryOptions({ memory: false }));
+  const measured = useQuery(desktopStatusQueryOptions({ memory: true }));
+  const data = measured.data ?? listed.data;
   const readiness = useQuery({
     ...intelligenceReadinessQueryOptions(),
-    enabled: Boolean(status.data?.intelligenceStack),
+    enabled: Boolean(data?.intelligenceStack),
   });
 
-  if (status.isPending) return null;
-  if (status.error)
+  if (!data && (listed.isPending || measured.isPending)) return null;
+  if (!data)
     return (
       <p className="text-destructive text-sm" role="alert">
         Could not read what OpenBot runs on this computer.
       </p>
     );
+  const isMeasured = measured.data !== undefined;
   return (
     <>
-      <OpenBotSection status={status.data} />
-      {status.data.intelligenceStack && (
-        <IntelligenceSection readiness={readiness.data} status={status.data} />
+      <OpenBotSection measured={isMeasured} status={data} />
+      {data.intelligenceStack && (
+        <IntelligenceSection
+          measured={isMeasured}
+          readiness={readiness.data}
+          status={data}
+        />
       )}
-      <MachineSection readiness={readiness.data} status={status.data} />
+      <MachineSection readiness={readiness.data} status={data} />
     </>
   );
 }
 
-function OpenBotSection({ status }: { status: DesktopStatus }) {
+function OpenBotSection({
+  measured,
+  status,
+}: {
+  /** Container memory has been read; before that a total would count the processes alone. */
+  measured: boolean;
+  status: DesktopStatus;
+}) {
   const restart = useMutation(restartOpenBotMutationOptions(queryClient));
   const stop = useMutation(stopOpenBotMutationOptions());
   const memory = totalMemory([...status.processes, ...status.containers]);
@@ -127,9 +142,13 @@ function OpenBotSection({ status }: { status: DesktopStatus }) {
                 : stop.isPending
                   ? "Stopping…"
                   : [
-                      memory !== null
-                        ? `${formatBytes(memory)} in use`
-                        : "Memory could not be measured.",
+                      // Nothing until the containers are measured: a total of the processes alone
+                      // would be a smaller number that then jumps.
+                      !measured
+                        ? null
+                        : memory !== null
+                          ? `${formatBytes(memory)} in use`
+                          : "Memory could not be measured.",
                       // Restart is the desktop app's supervisor bringing its own processes back.
                       status.openbotRunning && !status.openbotHeld
                         ? "Started before the desktop app last opened; Stop it and start again to restart."
@@ -174,9 +193,12 @@ function OpenBotSection({ status }: { status: DesktopStatus }) {
 }
 
 function IntelligenceSection({
+  measured,
   readiness,
   status,
 }: {
+  /** Container memory has been read. */
+  measured: boolean;
   readiness: IntelligenceReadiness | undefined;
   status: DesktopStatus;
 }) {
@@ -205,9 +227,13 @@ function IntelligenceSection({
                   : "Stopping…"
                 : intelligence.error
                   ? intelligence.error.message
-                  : running && memory !== null
-                    ? `${formatBytes(memory)} in use`
-                    : "Not using memory while stopped."}
+                  : !running
+                    ? "Not using memory while stopped."
+                    : !measured
+                      ? null
+                      : memory !== null
+                        ? `${formatBytes(memory)} in use`
+                        : "Memory could not be measured."}
             </ItemDescription>
           </ItemContent>
           <ItemActions>

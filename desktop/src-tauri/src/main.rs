@@ -3358,13 +3358,23 @@ pub(crate) struct DesktopStatus {
 #[tauri::command]
 async fn desktop_status<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
+    memory: Option<bool>,
 ) -> Result<DesktopStatus, String> {
-    tauri::async_runtime::spawn_blocking(move || read_desktop_status(&app))
+    let memory = memory.unwrap_or(true);
+    tauri::async_runtime::spawn_blocking(move || read_desktop_status(&app, memory))
         .await
         .map_err(|error| format!("the status could not be read: {error}"))
 }
 
-fn read_desktop_status<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> DesktopStatus {
+/**
+`memory` false lists the containers without measuring them, in milliseconds: `docker stats` waits
+about two seconds to sample, which left the page blank that long. The page asks without it first, so
+its rows appear at once, and with it after, filling the figures in.
+*/
+fn read_desktop_status<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    memory: bool,
+) -> DesktopStatus {
     let shell = app.state::<Shell>();
     let root = cleanup_root(&shell, &stack::default_root());
     let pids: Vec<(&'static str, u32)> = shell
@@ -3384,12 +3394,17 @@ fn read_desktop_status<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> DesktopS
             let mut stats = quiet::command(
                 engine::program(running).unwrap_or_else(|| PathBuf::from(running.binary())),
             );
-            stats.args([
-                "stats",
-                "--no-stream",
-                "--format",
-                "{{.Name}}\t{{.MemUsage}}",
-            ]);
+            if memory {
+                stats.args([
+                    "stats",
+                    "--no-stream",
+                    "--format",
+                    "{{.Name}}\t{{.MemUsage}}",
+                ]);
+            } else {
+                // The same two columns, the second empty, so one parser reads both.
+                stats.args(["ps", "--format", "{{.Names}}\t"]);
+            }
             if let Some(path) = engine::path_with_docker() {
                 stats.env("PATH", path);
             }
