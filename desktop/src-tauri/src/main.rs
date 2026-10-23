@@ -1300,7 +1300,8 @@ async fn start_stack<R: tauri::Runtime>(
     // converts to the plain half, so a path without its own sentence reads as it always did.
 ) -> Result<(), openbot_desktop_lib::problem::Problem> {
     let root = stack::root_from(&root);
-    start_stack_inner(
+    let menus = app.clone();
+    let started = start_stack_inner(
         app,
         root,
         api_url,
@@ -1310,7 +1311,10 @@ async fn start_stack<R: tauri::Runtime>(
         harness,
         organization_auth_url,
     )
-    .await
+    .await;
+    // The menu bar says whether OpenBot is running.
+    refresh_menus(&menus);
+    started
 }
 
 #[allow(
@@ -4848,18 +4852,7 @@ fn show_intelligence_opening<R: tauri::Runtime>(
                 .show(|_| {});
         }
     }
-    let tray_app = app.clone();
-    let _ = app.run_on_main_thread(move || {
-        let offered = tray_app
-            .state::<Shell>()
-            .intelligence_menu
-            .lock()
-            .unwrap()
-            .is_some();
-        if let Err(error) = install_menus(&tray_app, offered) {
-            eprintln!("[menu] could not update the menus: {error}");
-        }
-    });
+    refresh_menus(app);
 }
 
 /// Room left between a grown or clamped window and the edge of its monitor's work area.
@@ -5338,6 +5331,7 @@ fn stop_from_menu<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
         let root_path = PathBuf::from(&root);
         eprintln!("[menu] stopping the stack under {root}");
         let stopped = stop_everything(&app, &root_path);
+        refresh_menus(&app);
         match settle_menu_stop(&app.state::<Shell>(), &root_path, stopped) {
             None => {
                 eprintln!("[menu] stopped");
@@ -5539,98 +5533,154 @@ fn install_menus<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     intelligence: bool,
 ) -> tauri::Result<()> {
-    use tauri::menu::{IsMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
+    use tauri::menu::{IconMenuItem, Menu, MenuItem, NativeIcon, PredefinedMenuItem, Submenu};
 
-    let items = || -> tauri::Result<Vec<MenuItem<R>>> {
-        let mut items = vec![MenuItem::with_id(
-            app,
-            "open",
-            "Open OpenBot",
-            true,
-            None::<&str>,
-        )?];
+    // The menu bar menu follows the system's appearance; its icons are drawn for each.
+    let dark = app
+        .get_webview_window("main")
+        .and_then(|window| window.theme().ok())
+        == Some(tauri::Theme::Dark);
+    let running = !app.state::<Shell>().children.lock().unwrap().is_empty();
+    let dashboard = || {
+        intelligence_menu_item(
+            app.state::<Shell>()
+                .intelligence_opening
+                .load(std::sync::atomic::Ordering::SeqCst),
+        )
+    };
+
+    /*
+     * The menu bar's menu, laid out as Mac menu bar apps have theirs: what is running, with a
+     * status dot, then the things to do, each with an icon, then About, then Quit.
+     */
+    let tray_entries = || -> tauri::Result<Vec<MenuEntry<R>>> {
+        let icon = |name: &str| menu_icon(name, dark);
+        let mut entries = vec![
+            MenuEntry::Icon(IconMenuItem::with_id_and_native_icon(
+                app,
+                "state",
+                if running {
+                    "OpenBot is running"
+                } else {
+                    "OpenBot is not running"
+                },
+                false,
+                Some(if running {
+                    NativeIcon::StatusAvailable
+                } else {
+                    NativeIcon::StatusNone
+                }),
+                None::<&str>,
+            )?),
+            MenuEntry::Native(PredefinedMenuItem::separator(app)?),
+            MenuEntry::Icon(IconMenuItem::with_id(
+                app,
+                "open",
+                "Open OpenBot",
+                true,
+                icon("open"),
+                None::<&str>,
+            )?),
+        ];
         if intelligence {
-            let (label, enabled) = intelligence_menu_item(
-                app.state::<Shell>()
-                    .intelligence_opening
-                    .load(std::sync::atomic::Ordering::SeqCst),
-            );
-            items.push(MenuItem::with_id(
+            let (label, enabled) = dashboard();
+            entries.push(MenuEntry::Icon(IconMenuItem::with_id(
+                app,
+                "open-intelligence",
+                label,
+                enabled,
+                icon("dashboard"),
+                None::<&str>,
+            )?));
+        }
+        entries.push(MenuEntry::Icon(IconMenuItem::with_id(
+            app,
+            "status",
+            "OpenBot Status…",
+            true,
+            icon("status"),
+            None::<&str>,
+        )?));
+        entries.push(MenuEntry::Native(PredefinedMenuItem::separator(app)?));
+        entries.push(MenuEntry::Native(PredefinedMenuItem::about(
+            app,
+            Some("About OpenBot"),
+            Some(about_openbot()),
+        )?));
+        entries.push(MenuEntry::Native(PredefinedMenuItem::separator(app)?));
+        entries.push(MenuEntry::Icon(IconMenuItem::with_id(
+            app,
+            "quit",
+            "Quit OpenBot",
+            true,
+            icon("quit"),
+            quit_menu_accelerator(),
+        )?));
+        Ok(entries)
+    };
+
+    /*
+     * The application menu keeps the plain Mac order, About first and no icons, which is how every
+     * app's own menu reads. The same ids, so both arrive at the same function.
+     */
+    let window_entries = || -> tauri::Result<Vec<MenuEntry<R>>> {
+        let mut entries = vec![
+            MenuEntry::Native(PredefinedMenuItem::about(
+                app,
+                Some("About OpenBot"),
+                Some(about_openbot()),
+            )?),
+            MenuEntry::Native(PredefinedMenuItem::separator(app)?),
+            MenuEntry::Plain(MenuItem::with_id(
+                app,
+                "open",
+                "Open OpenBot",
+                true,
+                None::<&str>,
+            )?),
+        ];
+        if intelligence {
+            let (label, enabled) = dashboard();
+            entries.push(MenuEntry::Plain(MenuItem::with_id(
                 app,
                 "open-intelligence",
                 label,
                 enabled,
                 None::<&str>,
-            )?);
+            )?));
         }
-        // Stop, restart and what everything costs live on the Status window, with their context.
-        items.push(MenuItem::with_id(
+        entries.push(MenuEntry::Plain(MenuItem::with_id(
             app,
             "status",
             "OpenBot Status…",
             true,
             None::<&str>,
-        )?);
-        items.push(MenuItem::with_id(
+        )?));
+        entries.push(MenuEntry::Plain(MenuItem::with_id(
             app,
             "quit",
             "Quit",
             true,
             quit_menu_accelerator(),
-        )?);
-        Ok(items)
+        )?));
+        Ok(entries)
     };
-    fn refs<R: tauri::Runtime>(items: &[MenuItem<R>]) -> Vec<&dyn IsMenuItem<R>> {
-        items
-            .iter()
-            .map(|item| item as &dyn IsMenuItem<R>)
-            .collect()
+
+    let tray = tray_entries()?;
+    if let Some(icon) = app.tray_by_id("openbot") {
+        icon.set_menu(Some(Menu::with_items(app, &menu_refs(&tray))?))?;
     }
 
-    // About first, as every Mac app has it, in both menus: a predefined item belongs to one menu.
-    let about = || -> tauri::Result<[PredefinedMenuItem<R>; 2]> {
-        Ok([
-            PredefinedMenuItem::about(app, Some("About OpenBot"), Some(about_openbot()))?,
-            PredefinedMenuItem::separator(app)?,
-        ])
-    };
-    fn with_about<'a, R: tauri::Runtime>(
-        about: &'a [PredefinedMenuItem<R>; 2],
-        items: &'a [MenuItem<R>],
-    ) -> Vec<&'a dyn IsMenuItem<R>> {
-        about
-            .iter()
-            .map(|item| item as &dyn IsMenuItem<R>)
-            .chain(refs(items))
-            .collect()
-    }
-
-    let tray_items = items()?;
-    let tray_about = about()?;
-    if let Some(tray) = app.tray_by_id("openbot") {
-        tray.set_menu(Some(Menu::with_items(
-            app,
-            &with_about(&tray_about, &tray_items),
-        )?))?;
-    }
-
-    // The same items on the window itself, because the tray cannot be relied on and Stop lives
-    // nowhere else.
+    // The same items on the window itself, because the tray cannot be relied on.
     //
     // Linux needs a tray host to draw the icon, and Windows can place it in overflow.
     // The tray library restores the Windows icon after Explorer restarts, but the window
     // menu still provides access when the tray is unavailable or hard to find.
     // Its own items, not the tray's: a menu item belongs to one menu, and the two menus
-    // outlive each other. The ids match so both arrive at the same function.
-    let window_items = items()?;
-    let window_about = about()?;
+    // outlive each other.
+    let window = window_entries()?;
     // A submenu, because a top-level entry in a menu bar has to be one to open at all.
-    let openbot = Submenu::with_items(
-        app,
-        "OpenBot",
-        true,
-        &with_about(&window_about, &window_items),
-    )?;
+    let openbot = Submenu::with_items(app, "OpenBot", true, &menu_refs(&window))?;
     /*
      * AN EDIT MENU, WITHOUT WHICH COMMAND-V DOES NOTHING.
      *
@@ -5660,6 +5710,66 @@ fn install_menus<R: tauri::Runtime>(
     )?;
     app.set_menu(Menu::with_items(app, &[&openbot, &edit])?)?;
     Ok(())
+}
+
+/// One item of a menu: ours with an icon, ours without, or one of the system's own.
+enum MenuEntry<R: tauri::Runtime> {
+    Icon(tauri::menu::IconMenuItem<R>),
+    Plain(tauri::menu::MenuItem<R>),
+    Native(tauri::menu::PredefinedMenuItem<R>),
+}
+
+fn menu_refs<R: tauri::Runtime>(entries: &[MenuEntry<R>]) -> Vec<&dyn tauri::menu::IsMenuItem<R>> {
+    entries
+        .iter()
+        .map(|entry| match entry {
+            MenuEntry::Icon(item) => item as &dyn tauri::menu::IsMenuItem<R>,
+            MenuEntry::Plain(item) => item,
+            MenuEntry::Native(item) => item,
+        })
+        .collect()
+}
+
+/**
+A menu bar icon, in the ink of the menu it is drawn on.
+
+macOS does not treat these as template images, so a black icon would vanish in a dark menu. Each is
+drawn twice by `icons/menu/draw.py`, and the menus are rebuilt when the appearance changes.
+*/
+fn menu_icon(name: &str, dark: bool) -> Option<tauri::image::Image<'static>> {
+    let bytes: &'static [u8] = match (name, dark) {
+        ("open", false) => include_bytes!("../icons/menu/open-light.png"),
+        ("open", true) => include_bytes!("../icons/menu/open-dark.png"),
+        ("dashboard", false) => include_bytes!("../icons/menu/dashboard-light.png"),
+        ("dashboard", true) => include_bytes!("../icons/menu/dashboard-dark.png"),
+        ("status", false) => include_bytes!("../icons/menu/status-light.png"),
+        ("status", true) => include_bytes!("../icons/menu/status-dark.png"),
+        ("quit", false) => include_bytes!("../icons/menu/quit-light.png"),
+        ("quit", true) => include_bytes!("../icons/menu/quit-dark.png"),
+        _ => return None,
+    };
+    tauri::image::Image::from_bytes(bytes).ok()
+}
+
+/// Rebuild both menus on the main thread, for a new state, appearance or dashboard offer.
+fn refresh_menus<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    // The mock runtime runs "main thread" work on a worker, where AppKit menus panic. The menus
+    // are not what the tests that start and stop a stack are about.
+    if cfg!(test) {
+        return;
+    }
+    let menus_app = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        let offered = menus_app
+            .state::<Shell>()
+            .intelligence_menu
+            .lock()
+            .unwrap()
+            .is_some();
+        if let Err(error) = install_menus(&menus_app, offered) {
+            eprintln!("[menu] could not update the menus: {error}");
+        }
+    });
 }
 
 fn quit_menu_accelerator() -> Option<&'static str> {
@@ -5763,6 +5873,10 @@ fn main() {
             // The setup screens follow the system's light and dark, and so does their title bar.
             tauri::WindowEvent::ThemeChanged(_) => {
                 let app = window.app_handle();
+                // The menu bar's icons are drawn for each appearance.
+                if window.label() == "main" {
+                    refresh_menus(app);
+                }
                 if let Some(url) = app
                     .get_webview_window(window.label())
                     .and_then(|own| own.url().ok())
