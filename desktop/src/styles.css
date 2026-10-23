@@ -806,17 +806,8 @@ details > summary:hover {
   white-space: pre-wrap;
 }
 
-/* A sign-in that just worked, said for a moment before the screen moves on. */
-.confirmed {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin: 1rem 0 0;
-  font-size: 0.95rem;
-  color: var(--ink);
-}
-
-.confirmed span {
+/* The tick beside "Signed in", for the moment before the screen moves on by itself. */
+.signed-in-mark {
   color: var(--good);
   font-weight: 600;
 }

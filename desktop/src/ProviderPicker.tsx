@@ -623,7 +623,10 @@ export function ProviderPicker({
                   : "Authorize OpenBot to use models available to your xAI account."}
               </p>
               {oauthSignedIn === row.id ? (
-                <p className="lede">Signed in to {row.name}.</p>
+                <p className="lede">
+                  {confirmed === row.id && <SignedInMark />}
+                  Signed in to {row.name}.
+                </p>
               ) : signInUrl ? (
                 <>
                   <StatusLine>
@@ -667,6 +670,7 @@ export function ProviderPicker({
             (token || (savedPlan && !signInUrl && !busy) ? (
               <>
                 <p className="lede">
+                  {token && confirmed === row.id && <SignedInMark />}
                   {token
                     ? `Signed in to ${row.name}.`
                     : `A saved ${row.name} sign-in will be checked when you start.`}{" "}
@@ -908,11 +912,6 @@ export function ProviderPicker({
         </div>
       )}
 
-      {confirmed && row && confirmed === row.id && (
-        <p className="confirmed" role="status">
-          <span aria-hidden="true">✓</span> Signed in to {row.name}.
-        </p>
-      )}
       <div className="row">
         {onBack && (
           <button
@@ -933,5 +932,14 @@ export function ProviderPicker({
         </button>
       </div>
     </div>
+  );
+}
+
+/** The tick beside "Signed in" for the second before the screen moves on by itself. */
+function SignedInMark() {
+  return (
+    <span className="signed-in-mark" aria-hidden="true">
+      ✓{" "}
+    </span>
   );
 }
