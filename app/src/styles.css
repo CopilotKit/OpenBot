@@ -180,7 +180,9 @@ body::before {
  * the top-left corner and the sidebar runs to the top edge, as in Mac apps with a sidebar. The
  * desktop marks the page (`data-desktop-titlebar`) and makes the sidebar's header the drag handle;
  * here the header makes room for the buttons above its own row. With the sidebar collapsed the
- * buttons are over the main column instead, so that moves down. Outside the desktop nothing changes.
+ * buttons are over the main column instead, so that moves down. The main column is the shell's own
+ * `<main>`; the primitive's `SidebarInset`, which an earlier rule aimed at, is used by no shell.
+ * Outside the desktop nothing changes.
  */
 :root[data-desktop-titlebar="overlay"] [data-slot="sidebar-header"] {
   height: auto;
@@ -189,10 +191,16 @@ body::before {
 
 :root[data-desktop-titlebar="overlay"]
   [data-slot="sidebar-wrapper"]:has(
-    [data-slot="sidebar"][data-state="collapsed"]
+    > [data-slot="sidebar"][data-state="collapsed"]
   )
-  [data-slot="sidebar-inset"] {
+  > main {
   padding-top: 28px;
+}
+
+/* While the sidebar's edge is dragged, it follows the pointer rather than easing after it. */
+[data-slot="sidebar-wrapper"][data-resizing] [data-slot="sidebar-container"],
+[data-slot="sidebar-wrapper"][data-resizing] [data-slot="sidebar-gap"] {
+  transition: none;
 }
 
 * {

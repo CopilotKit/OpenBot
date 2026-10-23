@@ -3170,14 +3170,26 @@ fn show_window_title<R: tauri::Runtime>(window: &tauri::Window<R>, shown: bool) 
 
 /**
 Marks OpenBot's page for the overlay title bar: its styles pad the sidebar's header for the window
-buttons, and the header becomes the drag handle. The sidebar renders after the page loads and again
+buttons, and the header becomes the drag handle, as does the strip the main column keeps above
+itself while the sidebar is hidden. The sidebar renders after the page loads and again
 on navigation, so new headers are marked as they appear, at most once a frame.
 */
 const OVERLAY_TITLE_BAR_PAGE: &str = r#"(() => {
   document.documentElement.dataset.desktopTitlebar = "overlay";
+  const DRAG = "data-tauri-drag-region";
   const mark = () => {
-    for (const header of document.querySelectorAll('[data-slot="sidebar-header"]:not([data-tauri-drag-region])')) {
-      header.setAttribute("data-tauri-drag-region", "");
+    // Bare attributes: only a press on the element itself drags, never on its contents.
+    for (const header of document.querySelectorAll(`[data-slot="sidebar-header"]:not([${DRAG}])`)) {
+      header.setAttribute(DRAG, "");
+    }
+    // The main column only while the sidebar is hidden, when its top strip is the one handle left.
+    // With the sidebar showing, a press in its empty margins must not move the window.
+    for (const main of document.querySelectorAll('[data-slot="sidebar-wrapper"] > main')) {
+      const hidden = main.parentElement.querySelector(
+        ':scope > [data-slot="sidebar"][data-state="collapsed"]',
+      );
+      if (hidden) main.setAttribute(DRAG, "");
+      else main.removeAttribute(DRAG);
     }
   };
   let queued = false;
@@ -3185,7 +3197,12 @@ const OVERLAY_TITLE_BAR_PAGE: &str = r#"(() => {
     if (queued) return;
     queued = true;
     requestAnimationFrame(() => { queued = false; mark(); });
-  }).observe(document.documentElement, { childList: true, subtree: true });
+  }).observe(document.documentElement, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ["data-state"],
+  });
   mark();
 })();"#;
 
