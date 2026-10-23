@@ -67,7 +67,10 @@ export function CopilotKitAccount({
             said: "The evaluation agreement is not available right now. Try again later.",
           });
         // Accepted already, or none needed: nothing to do here.
-        else finish(null);
+        else if (terms.status === "required" || terms.status === "not-required")
+          finish(null);
+        // A status this window does not know is never taken as nothing to do.
+        else setSeen({ at: "failed", said: COULD_NOT_CHECK });
       },
       () => {
         if (attempt.current !== started.attempt) return;

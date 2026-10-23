@@ -475,8 +475,16 @@ pub fn normalize_account_sign_in(exit_code: i32, stdout: &[u8]) -> Result<Accoun
 }
 
 /// The evaluation agreement the licence needs, as the window shows it. No CLI prose is kept.
+///
+/// The window reads the CLI's own status words (`signed-out`) and camelCase fields
+/// (`organizationName`). A variant named in camelCase reaches it as `signedOut`, which it does not
+/// know, and an unknown status is taken as nothing to accept.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase", tag = "status")]
+#[serde(
+    rename_all = "kebab-case",
+    rename_all_fields = "camelCase",
+    tag = "status"
+)]
 pub enum Terms {
     Required {
         accepted: bool,
@@ -3753,6 +3761,36 @@ fn main() {
             assert_eq!(normalize_terms(0, wire.as_bytes()), Err(failure), "{wire}");
         }
         assert_eq!(normalize_terms(1, b"{}"), Err(Failure::UnexpectedExit));
+    }
+
+    #[test]
+    fn the_window_reads_terms_in_the_clis_own_words() {
+        for (terms, status) in [
+            (Terms::SignedOut, "signed-out"),
+            (Terms::NotRequired, "not-required"),
+            (Terms::Unavailable, "unavailable"),
+        ] {
+            assert_eq!(
+                serde_json::to_value(terms).unwrap(),
+                serde_json::json!({ "status": status })
+            );
+        }
+        assert_eq!(
+            serde_json::to_value(Terms::Required {
+                accepted: false,
+                version: "v1".into(),
+                url: "https://copilotkit.ai/x".into(),
+                organization_name: "o".into(),
+            })
+            .unwrap(),
+            serde_json::json!({
+                "status": "required",
+                "accepted": false,
+                "version": "v1",
+                "url": "https://copilotkit.ai/x",
+                "organizationName": "o",
+            })
+        );
     }
 
     #[test]

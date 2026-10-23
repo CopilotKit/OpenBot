@@ -478,11 +478,15 @@ export function LocalIntelligence({
   );
 }
 
-/** One line for the screen in front: the current row and how long it has taken. */
+/**
+ * One line for the screen in front: the current row and how long it has taken. A stop the person
+ * clears themselves (signing in, accepting the agreement) shows what to do instead of the line.
+ */
 export function LocalStatus({ sequence }: { sequence: LocalSequence }) {
   const current = sequence.steps.at(-1);
   const elapsed = useElapsed(sequence.running, sequence.since);
   if (!current) return null;
+  if (needsPerson(sequence)) return <LocalNeeds sequence={sequence} />;
   return (
     <>
       <p className="local-status" role="status">
@@ -507,7 +511,8 @@ export function LocalStatus({ sequence }: { sequence: LocalSequence }) {
  * Nothing accepts it without the click.
  */
 export function LocalNeeds({ sequence }: { sequence: LocalSequence }) {
-  const reason = sequence.stopped ? sequence.blocked?.reason : null;
+  if (!needsPerson(sequence)) return null;
+  const reason = sequence.blocked?.reason;
   if (reason === "authentication-required")
     return <SignInToCopilotKit onSignedIn={sequence.retry} />;
   if (reason === "eula-acceptance-required")
@@ -515,6 +520,14 @@ export function LocalNeeds({ sequence }: { sequence: LocalSequence }) {
       <AcceptTerms onAccept={sequence.acceptTerms} onRetry={sequence.retry} />
     );
   return null;
+}
+
+function needsPerson(sequence: LocalSequence): boolean {
+  const reason = sequence.stopped ? sequence.blocked?.reason : null;
+  return (
+    reason === "authentication-required" ||
+    reason === "eula-acceptance-required"
+  );
 }
 
 function SignInToCopilotKit({ onSignedIn }: { onSignedIn: () => void }) {

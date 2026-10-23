@@ -274,7 +274,7 @@ button.another-question:hover:not(:disabled) {
   font-size: 0.8rem;
   color: var(--ink-soft);
   font-variant-numeric: tabular-nums;
-  margin: -0.75rem 0 1.25rem;
+  margin: 0 0 1.25rem;
 }
 
 :focus-visible {
@@ -324,6 +324,15 @@ fieldset.picker {
   gap: 0.4rem;
   max-height: 17rem;
   overflow-y: auto;
+}
+
+/*
+ * Every provider shows without scrolling the list: the window grows to fit (see `fitWindow.ts`),
+ * and past what the screen allows the page scrolls instead.
+ */
+fieldset.picker.providers {
+  max-height: none;
+  overflow-y: visible;
 }
 
 /*
