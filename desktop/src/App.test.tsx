@@ -738,10 +738,15 @@ test("a signed-out first run signs in to CopilotKit and accepts the agreement as
   });
   const view = await renderApp();
   await installLocal(view);
-  // The first step: it needs nothing installed, and nothing is installed before it.
+  // The first step. OpenBot needs no account, so it installs behind it, exactly once; nothing
+  // of Intelligence's runs before the agreement.
   await view.findByRole("heading", { name: "Sign in to CopilotKit" });
   expect(stepLabel(view)).toBe("Step 1 of 4");
-  expect(installationCalls()).toEqual([]);
+  await waitFor(() =>
+    expect(installationCalls().map((call) => call.command)).toEqual([
+      "prepare_installation",
+    ]),
+  );
   expect(localSequence()).toEqual([]);
   await userEvent.click(
     view.getByRole("button", { name: "Sign in to CopilotKit" }),
@@ -759,6 +764,12 @@ test("a signed-out first run signs in to CopilotKit and accepts the agreement as
   await view.findByRole("heading", { name: "Connect your AI" });
   expect(stepLabel(view)).toBe("Step 3 of 4");
   expect(view.queryByText(/needs your CopilotKit account/)).toBeNull();
+  // Leaving the account step does not install a second time.
+  expect(
+    installationCalls().filter(
+      (call) => call.command === "prepare_installation",
+    ),
+  ).toHaveLength(1);
   await waitFor(() => expect(localSequence()).toContain("set_up_local_eval"));
   expect(
     invokeCalls.find((call) => call.command === "set_up_local_eval")?.args,

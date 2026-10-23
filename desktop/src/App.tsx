@@ -728,14 +728,28 @@ function Setup() {
 
   /*
    * Local mode installs on the first screen's click, with the default Bot in the default folder:
-   * one installation per computer. Once it completes, Intelligence sets up behind the AI provider
-   * screen rather than after it.
+   * one installation per computer. It needs no CopilotKit account, so it runs while the person
+   * signs in; only Intelligence waits for the agreement. Once it completes, Intelligence sets up
+   * behind the AI provider screen rather than after it.
    */
-  async function installLocally() {
+  const localInstall = useRef<Promise<boolean> | null>(null);
+  function beginLocalInstall(): Promise<boolean> {
+    if (localInstall.current) return localInstall.current;
     const choice = { id: DEFAULT_HARNESS };
     setHarness(choice);
+    const started = install(choice).then((ok) => {
+      // A failed install is started again by the next Install, not remembered.
+      if (!ok) localInstall.current = null;
+      return ok;
+    });
+    localInstall.current = started;
+    return started;
+  }
+
+  /** Shows the install until it completes, then the AI provider screen. */
+  async function installLocally() {
     setStep("install");
-    if (await install(choice)) {
+    if (await beginLocalInstall()) {
       setSteps([]);
       setStep("model");
     }
@@ -1026,8 +1040,9 @@ function Setup() {
                     chooseIntelligence("local");
                     // The default Bot, recorded as its Continue would.
                     recordSetupEvent(harnessChoiceEvent(DEFAULT_HARNESS));
-                    // The account comes first: it needs nothing installed.
+                    // The account is the first screen; OpenBot installs behind it meanwhile.
                     setStep("account");
+                    void beginLocalInstall();
                   },
                 }
               : undefined
@@ -1216,9 +1231,14 @@ function Setup() {
           stepLabel="Step 1 of 4"
           onDone={(acceptedVersion) => {
             if (acceptedVersion) local.acceptTerms(acceptedVersion);
-            // Intelligence sets itself up once the install has Docker answering; see below.
-            intelligenceQueued.current = true;
-            void installLocally();
+            // Intelligence sets itself up once the install has Docker answering; see below. The
+            // install may have got there during sign-in, and that change has already been seen.
+            if (engineReady || installationReady) local.prepare();
+            else intelligenceQueued.current = true;
+            if (installationReady) {
+              setSteps([]);
+              setStep("model");
+            } else void installLocally();
           }}
         />
         {displayedFailure && <Failure problem={displayedFailure} />}
