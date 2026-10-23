@@ -1149,6 +1149,93 @@ a {
   flex: none;
 }
 
+/* The Status window: one white card per part, each with its memory and its actions. */
+.status-part {
+  border: 1px solid var(--border-default);
+  border-radius: var(--r-card);
+  background: var(--surface-container);
+  box-shadow: var(--elevation-sm);
+  padding: 16px 20px;
+  margin-top: 12px;
+}
+
+.status-part .row {
+  margin-top: 12px;
+}
+
+.status-part .footnote {
+  margin-top: 12px;
+}
+
+.status-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.status-head h2 {
+  margin: 0;
+}
+
+.status-state {
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 12px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.status-list {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.status-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 14px;
+  line-height: 22px;
+  color: var(--text-secondary);
+}
+
+.status-list li span:first-child {
+  overflow-wrap: anywhere;
+}
+
+.status-list li span:last-child {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.status-details {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 4px 16px;
+  margin: 24px 0 0;
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.status-details dt {
+  color: var(--text-disabled);
+}
+
+.status-details dd {
+  margin: 0;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
 /* The menu's status on whichever setup screen is showing, without moving that screen. */
 .window-status {
   position: fixed;

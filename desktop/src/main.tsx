@@ -2,6 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { isShuttingDownPage, ShuttingDownWindow } from "./ShuttingDown";
+import { isStatusPage, StatusWindow } from "./StatusWindow";
 import "@fontsource-variable/plus-jakarta-sans";
 import "@fontsource-variable/spline-sans-mono";
 import "./styles.css";
@@ -17,6 +18,8 @@ createRoot(root).render(
     <div className="backdrop" aria-hidden="true" />
     {isShuttingDownPage(window.location.hash) ? (
       <ShuttingDownWindow />
+    ) : isStatusPage(window.location.hash) ? (
+      <StatusWindow />
     ) : (
       <App />
     )}
