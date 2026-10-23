@@ -29,6 +29,7 @@ afterEach(() => {
 
 const running = {
   openbotRunning: true,
+  openbotHeld: true,
   processes: [
     { name: "server", memoryBytes: 200_000_000 },
     { name: "app", memoryBytes: 50_000_000 },

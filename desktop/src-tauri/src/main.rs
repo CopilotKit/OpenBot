@@ -3329,8 +3329,11 @@ fn show_status_in_app(app: &tauri::AppHandle) -> bool {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct DesktopStatus {
-    /// OpenBot's host processes are up.
+    /// OpenBot answers on its own address, whoever started it.
     openbot_running: bool,
+    /// This session of the desktop app holds OpenBot's processes, so its supervisor can restart
+    /// them. False for an OpenBot left running by an earlier session that ended without its Quit.
+    openbot_held: bool,
     processes: Vec<desktop_status::Part>,
     containers: Vec<desktop_status::Part>,
     /// The local Intelligence stack recorded for this installation, if any.
@@ -3392,15 +3395,20 @@ fn read_desktop_status<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> DesktopS
         }
         None => (Vec::new(), Vec::new()),
     };
+    let ports = ports_for_shell(app).ok();
+    let answering = ports
+        .as_ref()
+        .is_some_and(|ports| owned_app_url(&root, ports).is_some());
     DesktopStatus {
-        openbot_running: !pids.is_empty(),
+        openbot_running: !pids.is_empty() || answering,
+        openbot_held: !pids.is_empty(),
         processes,
         containers,
         intelligence_stack: stack_id,
         intelligence_containers,
         engine: running.map(|engine| engine.binary()),
         root: root.display().to_string(),
-        app_port: ports_for_shell(app).ok().map(|ports| ports.app),
+        app_port: ports.map(|ports| ports.app),
         version: env!("CARGO_PKG_VERSION"),
         build: build_description(
             env!("OPENBOT_BUILD_COMMIT"),

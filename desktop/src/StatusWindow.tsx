@@ -15,6 +15,7 @@ type Part = { name: string; memoryBytes: number | null };
 /** `DesktopStatus` from the native side. */
 export type DesktopStatus = {
   openbotRunning: boolean;
+  openbotHeld: boolean;
   processes: Part[];
   containers: Part[];
   intelligenceStack: string | null;
@@ -210,22 +211,25 @@ export function StatusWindow({ readEveryMs = 5000 }: { readEveryMs?: number }) {
               <PartList parts={[...status.processes, ...status.containers]} />
               {status.openbotRunning && (
                 <div className="row">
-                  <button
-                    type="button"
-                    className="quiet"
-                    disabled={busy !== null}
-                    onClick={() =>
-                      act("openbot-restart", async () => {
-                        await invoke("restart_openbot");
-                        // The supervisor brings each process back after a short backoff.
-                        await new Promise((resolve) =>
-                          setTimeout(resolve, 3000),
-                        );
-                      })
-                    }
-                  >
-                    Restart
-                  </button>
+                  {/* Restart is the supervisor bringing back processes this session holds. */}
+                  {status.openbotHeld && (
+                    <button
+                      type="button"
+                      className="quiet"
+                      disabled={busy !== null}
+                      onClick={() =>
+                        act("openbot-restart", async () => {
+                          await invoke("restart_openbot");
+                          // The supervisor brings each process back after a short backoff.
+                          await new Promise((resolve) =>
+                            setTimeout(resolve, 3000),
+                          );
+                        })
+                      }
+                    >
+                      Restart
+                    </button>
+                  )}
                   <button
                     type="button"
                     className="quiet"
