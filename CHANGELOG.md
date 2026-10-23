@@ -35,14 +35,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   request for an administrator to switch on a work app, grant it to a Bot, or connect a Shared app's
   team account is kept, with who answered it and when. It starts empty and nothing is backfilled.
 
-### The computer image is about 110 MB smaller to download
+### The computer image is about a fifth smaller to download
 
 The `openbot-agent-computer` image carried two copies of Chromium: the full browser it runs, and
 Playwright's separate headless shell, which it never starts. Every launch names a Chromium channel,
 and Playwright runs the full browser for a named channel even with `COMPUTER_BROWSER_MODE=headless`.
 The image now installs only the full browser and drops the package cache left from installing it.
-The download is about 110 MB smaller (about 540 MB before) and the unpacked image about 375 MB
-smaller. The all-in-one `openbot` image installs the same browser the same way and shrinks by about
+The download falls from 537 MB to about 423 MB on arm64 and from 520 MB to about 411 MB on amd64.
+Unpacked, the image is about 375 MB smaller on arm64 and 296 MB smaller on amd64. The all-in-one `openbot` image installs the same browser the same way and shrinks by about
 as much. The browser and its behaviour are unchanged. On a desktop install the computer is the
 largest image, so a first install and each upgrade download less.
 
