@@ -5552,6 +5552,11 @@ fn install_menus<R: tauri::Runtime>(
     /*
      * The menu bar's menu, laid out as Mac menu bar apps have theirs: what is running, with a
      * status dot, then the things to do, each with an icon, then About, then Quit.
+     *
+     * No line carries the app's name. The icon it opens from already says whose menu it is, the
+     * name is a brand that builds change (OpenBot, Soar, a company's own), and a verb in front of
+     * a product name reads badly for some of them: never "Open Soar" (a product decision of
+     * 2026-10-23).
      */
     let tray_entries = || -> tauri::Result<Vec<MenuEntry<R>>> {
         let icon = |name: &str| menu_icon(name, dark);
@@ -5559,11 +5564,7 @@ fn install_menus<R: tauri::Runtime>(
             MenuEntry::Icon(IconMenuItem::with_id_and_native_icon(
                 app,
                 "state",
-                if running {
-                    "OpenBot is running"
-                } else {
-                    "OpenBot is not running"
-                },
+                if running { "Running" } else { "Not running" },
                 false,
                 Some(if running {
                     NativeIcon::StatusAvailable
@@ -5576,7 +5577,7 @@ fn install_menus<R: tauri::Runtime>(
             MenuEntry::Icon(IconMenuItem::with_id(
                 app,
                 "open",
-                "Open OpenBot",
+                "Show Window",
                 true,
                 icon("open"),
                 None::<&str>,
@@ -5596,7 +5597,7 @@ fn install_menus<R: tauri::Runtime>(
         entries.push(MenuEntry::Icon(IconMenuItem::with_id(
             app,
             "status",
-            "OpenBot Status…",
+            "Status…",
             true,
             icon("status"),
             None::<&str>,
@@ -5604,14 +5605,14 @@ fn install_menus<R: tauri::Runtime>(
         entries.push(MenuEntry::Native(PredefinedMenuItem::separator(app)?));
         entries.push(MenuEntry::Native(PredefinedMenuItem::about(
             app,
-            Some("About OpenBot"),
+            Some("About"),
             Some(about_openbot()),
         )?));
         entries.push(MenuEntry::Native(PredefinedMenuItem::separator(app)?));
         entries.push(MenuEntry::Icon(IconMenuItem::with_id(
             app,
             "quit",
-            "Quit OpenBot",
+            "Quit",
             true,
             icon("quit"),
             quit_menu_accelerator(),
@@ -5634,7 +5635,7 @@ fn install_menus<R: tauri::Runtime>(
             MenuEntry::Plain(MenuItem::with_id(
                 app,
                 "open",
-                "Open OpenBot",
+                "Show Window",
                 true,
                 None::<&str>,
             )?),
@@ -5652,7 +5653,7 @@ fn install_menus<R: tauri::Runtime>(
         entries.push(MenuEntry::Plain(MenuItem::with_id(
             app,
             "status",
-            "OpenBot Status…",
+            "Status…",
             true,
             None::<&str>,
         )?));
