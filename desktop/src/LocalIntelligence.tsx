@@ -89,6 +89,12 @@ type State = {
   since: number | null;
   blocked: { said: string; reason: LocalReason | null } | null;
   problem: Problem | null;
+  /**
+   * The agreement version setup was given and still answered "acceptance required" to. The CLI
+   * refuses an acceptance it believes a coding agent passed on, so offering the same Accept again
+   * would only loop.
+   */
+  refused: string | null;
 };
 
 const idle: State = {
@@ -97,6 +103,7 @@ const idle: State = {
   since: null,
   blocked: null,
   problem: null,
+  refused: null,
 };
 
 export type LocalSequence = State & {
@@ -298,12 +305,17 @@ export function useLocalSequence({
       if (phase === "start" && !go.current) return stop();
       update({ at: phase, running: true, since: Date.now() });
       if (phase === "setup") {
-        const started = setUpLocalEval(root, accepted.current);
+        const carried = accepted.current;
+        const started = setUpLocalEval(root, carried);
         const report = await call(
           { attempt: started.attempt, answer: started.report },
           token,
         );
         if (!report) return stop();
+        update({
+          refused:
+            report.reason === "eula-acceptance-required" ? carried : null,
+        });
         if (report.outcome !== "completed") {
           return stop({ said: said(report), reason: report.reason });
         }
@@ -517,7 +529,11 @@ export function LocalNeeds({ sequence }: { sequence: LocalSequence }) {
     return <SignInToCopilotKit onSignedIn={sequence.retry} />;
   if (reason === "eula-acceptance-required")
     return (
-      <AcceptTerms onAccept={sequence.acceptTerms} onRetry={sequence.retry} />
+      <AcceptTerms
+        refused={sequence.refused}
+        onAccept={sequence.acceptTerms}
+        onRetry={sequence.retry}
+      />
     );
   return null;
 }
@@ -580,9 +596,12 @@ function SignInToCopilotKit({ onSignedIn }: { onSignedIn: () => void }) {
 }
 
 function AcceptTerms({
+  refused,
   onAccept,
   onRetry,
 }: {
+  /** The version setup was already given and did not take. */
+  refused: string | null;
   onAccept: (version: string) => void;
   onRetry: () => void;
 }) {
@@ -616,6 +635,21 @@ function AcceptTerms({
     );
   if (terms?.status !== "required")
     return <StatusLine>Getting the evaluation agreement…</StatusLine>;
+  if (terms.version === refused)
+    return (
+      <div className="local-needs">
+        <p className="footnote">
+          Intelligence did not take the acceptance from OpenBot. If a coding
+          agent or a script opened OpenBot, quit it, open it yourself, and
+          accept again.
+        </p>
+        <div className="row">
+          <button type="button" onClick={onRetry}>
+            Try again
+          </button>
+        </div>
+      </div>
+    );
   return (
     <div className="local-needs">
       <p>
