@@ -563,7 +563,7 @@ const LOCAL_CHOICE = "Run Intelligence on this computer";
 const HOSTED_CHOICE = "Use CopilotKit's hosted Intelligence";
 const HOSTED_LINK = "Use CopilotKit's hosted service instead";
 
-/** Ask the question already in the Test OpenBot box, and wait for the answer. */
+/** Ask the question already in the Try OpenBot box, and wait for the answer. */
 async function askTheTest(
   view: Awaited<ReturnType<typeof renderApp>>,
   answer = "I am working.",
@@ -864,7 +864,7 @@ test("Continue during setup shows Getting ready, which starts, tests and opens O
   expect(row.textContent).toContain("In progress");
   expectPlain(view);
   await act(async () => setUp.resolve(localStatus("starting", "valid")));
-  await view.findByRole("heading", { name: "Test OpenBot" });
+  await view.findByRole("heading", { name: "Try OpenBot" });
   expect(stepLabel(view)).toBe("Start");
   expect(localSequence()).toEqual([
     "set_up_local_eval",
@@ -931,7 +931,7 @@ function intelligenceCalls() {
   );
 }
 
-test("a local Test OpenBot screen links to the Intelligence dashboard through the native sign-in", async () => {
+test("a local Try OpenBot screen links to the Intelligence dashboard through the native sign-in", async () => {
   setupRootConfiguration("/tmp/local-eval-view", async () =>
     emptyConfiguration(),
   );
@@ -974,11 +974,11 @@ test("a local Test OpenBot screen links to the Intelligence dashboard through th
   ]);
   // The sign-in opens the browser itself; the window stays on its screen.
   expect(localSequence()).not.toContain("show_openbot");
-  expect(view.getByRole("heading", { name: "Test OpenBot" })).toBeTruthy();
+  expect(view.getByRole("heading", { name: "Try OpenBot" })).toBeTruthy();
   expectPlain(view);
 });
 
-test("a local Test OpenBot step says it is asking, with a spinner, until the answer arrives", async () => {
+test("a local Try OpenBot step says it is asking, with a spinner, until the answer arrives", async () => {
   setupRootConfiguration("/tmp/local-eval-asking", async () =>
     emptyConfiguration(),
   );
@@ -993,7 +993,7 @@ test("a local Test OpenBot step says it is asking, with a spinner, until the ans
   const view = await renderApp();
   await installLocal(view);
   await chooseOpenAi(view);
-  await view.findByRole("heading", { name: "Test OpenBot" });
+  await view.findByRole("heading", { name: "Try OpenBot" });
   await userEvent.click(view.getByRole("button", { name: "Ask" }));
   await waitFor(() => expectWorking(view, "Asking…"));
   await act(async () => answer.resolve("I am working."));
@@ -1055,7 +1055,7 @@ test("Continue after Intelligence is already ready starts OpenBot with the AI ju
   );
   await act(async () => new Promise((resolve) => setTimeout(resolve, 100)));
   await chooseOpenAi(view);
-  await view.findByRole("heading", { name: "Test OpenBot" });
+  await view.findByRole("heading", { name: "Try OpenBot" });
   expect(getStartStackPayload()).toMatchObject({
     model: { provider: "openai", login: "api-key", apiKey: "model-test-key" },
   });
@@ -1105,7 +1105,7 @@ test("a Claude plan signed in on the provider screen reaches Start with its toke
   expect((await view.findByText(/✓/)).closest("p")?.textContent).toContain(
     "Signed in to Anthropic.",
   );
-  await view.findByRole("heading", { name: "Test OpenBot" }, { timeout: 4000 });
+  await view.findByRole("heading", { name: "Try OpenBot" }, { timeout: 4000 });
   expect(getStartStackPayload()).toMatchObject({
     model: {
       provider: "anthropic",

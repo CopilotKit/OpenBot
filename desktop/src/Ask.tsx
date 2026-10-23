@@ -47,7 +47,7 @@ export function Ask({
   onBack: () => void | Promise<void>;
   /** Local mode with a recorded stack: opens its Intelligence dashboard, already signed in. */
   onViewIntelligence?: () => Promise<void>;
-  /** The local first run's wording: "Test OpenBot", then "Open OpenBot". */
+  /** The local first run's wording: "Try OpenBot", then "Open OpenBot". */
   local?: boolean;
 }) {
   const [preset, setPreset] = useState(firstQuestion % PRESET_QUESTIONS.length);
@@ -123,10 +123,10 @@ export function Ask({
   return (
     <div className="sheet">
       <Sections local={local} at="Start" />
-      <h1>{local ? "Test OpenBot" : "Ask it something."}</h1>
+      <h1>{local ? "Try OpenBot" : "Ask it something."}</h1>
       <p className="lede">
         {local
-          ? "Ask your Bot a question to check that it answers. Use this one, try another, or type your own."
+          ? "OpenBot is up. Ask your Bot something: use this question, try another, or type your own."
           : "Your Bot is set up. This proves it can answer before you start using it."}
       </p>
 
