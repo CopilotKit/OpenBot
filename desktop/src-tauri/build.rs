@@ -35,10 +35,24 @@ fn main() {
     // The one way the OpenBot app's own page reaches the shell: an inline plugin whose commands get
     // permissions of their own, granted at runtime to the exact owned app origin. App commands stay
     // out of a remote page's reach.
-    tauri_build::try_build(tauri_build::Attributes::new().plugin(
-        "openbot-intelligence",
-        tauri_build::InlinedPlugin::new().commands(&["watch", "open"]),
-    ))
+    tauri_build::try_build(
+        tauri_build::Attributes::new()
+            .plugin(
+                "openbot-intelligence",
+                tauri_build::InlinedPlugin::new().commands(&["watch", "open"]),
+            )
+            // Settings → This computer: the Status window's facts and actions, from the app.
+            .plugin(
+                "openbot-desktop",
+                tauri_build::InlinedPlugin::new().commands(&[
+                    "appearance",
+                    "status",
+                    "restart",
+                    "stop",
+                    "intelligence",
+                ]),
+            ),
+    )
     .expect("the Tauri build failed")
 }
 
