@@ -14,14 +14,7 @@ if (!root)
 createRoot(root).render(
   <StrictMode>
     {/* The six blurred colour fields every screen sits on; see `.backdrop` in styles.css. */}
-    <div className="backdrop" aria-hidden="true">
-      <span />
-      <span />
-      <span />
-      <span />
-      <span />
-      <span />
-    </div>
+    <div className="backdrop" aria-hidden="true" />
     {isShuttingDownPage(window.location.hash) ? (
       <ShuttingDownWindow />
     ) : (
