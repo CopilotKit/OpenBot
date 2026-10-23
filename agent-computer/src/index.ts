@@ -27,6 +27,7 @@ import {
   TAKE_CONTROL_FIRST,
 } from "./control";
 import { describeHumanGesture } from "./demonstration";
+import { enterText, FieldValueError } from "./enter-text";
 import { handleEgressPolicyRequest, startEgressFilter } from "./egress";
 import { identity } from "./identity";
 import {
@@ -1423,6 +1424,10 @@ serve<StreamData>({
           if (error instanceof StaleSnapshotError) {
             return json({ error: error.message, stale: true }, 409);
           }
+          // The same reasoning: the computer is fine, and the Bot fixes it by sending another value.
+          if (error instanceof FieldValueError) {
+            return json({ error: error.message }, 400);
+          }
           return json({ error: describe(error, "The action failed.") }, 502);
         }
       }
@@ -1585,8 +1590,8 @@ async function performAction(
     const field = await resolveRef(session, target, ref, expected);
     // `fill` rather than keystrokes: it clears the field first, which is what "put this value in
     // this box" means. Typing into a field a previous attempt half-filled otherwise appends, and the
-    // form ends up with "AlicAlice" in it.
-    await field.fill(body.text, acting);
+    // form ends up with "AlicAlice" in it. A dropdown is chosen from instead (see enterText).
+    await enterText(field, body.text, acting);
     if (body.submit === true) {
       await field.press("Enter", acting);
     }
