@@ -6,6 +6,7 @@ use std::sync::Mutex;
 
 mod desktop_connection;
 mod desktop_host_access;
+mod desktop_status;
 mod desktop_telemetry;
 mod intelligence_bridge;
 
@@ -3184,6 +3185,185 @@ fn allow_window_drag<R: tauri::Runtime>(app: &tauri::AppHandle<R>, url: &tauri::
     }
 }
 
+/// Where the Status window's page is: the setup page, at `#status`.
+const STATUS_FRAGMENT: &str = "status";
+
+/**
+The Status window: what OpenBot is running, what it costs, and Restart and Stop for each part.
+
+Its own window rather than a page of the main one, so looking at it never takes OpenBot off the
+screen. Closing it hides it, as the main window does; it reads everything again when shown.
+*/
+fn show_status_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("status") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+        return;
+    }
+    let Ok(mut url) = setup_destination(app) else {
+        return;
+    };
+    url.set_fragment(Some(STATUS_FRAGMENT));
+    let page = if matches!(url.scheme(), "http" | "https") {
+        tauri::WebviewUrl::External(url)
+    } else {
+        tauri::WebviewUrl::CustomProtocol(url)
+    };
+    let built = tauri::WebviewWindowBuilder::new(app, "status", page)
+        .title("OpenBot Status")
+        .inner_size(640.0, 720.0)
+        .min_inner_size(520.0, 480.0)
+        .build();
+    if let Err(error) = built {
+        eprintln!("[status] could not open the Status window: {error}");
+    }
+}
+
+/// What the Status window shows. Read fresh each time; nothing here is kept.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopStatus {
+    /// OpenBot's host processes are up.
+    openbot_running: bool,
+    processes: Vec<desktop_status::Part>,
+    containers: Vec<desktop_status::Part>,
+    /// The local Intelligence stack recorded for this installation, if any.
+    intelligence_stack: Option<String>,
+    intelligence_containers: Vec<desktop_status::Part>,
+    /// "docker" or "podman", answering now; None when nothing answers.
+    engine: Option<&'static str>,
+    root: String,
+    app_port: Option<u16>,
+    version: &'static str,
+    build: String,
+}
+
+#[tauri::command]
+async fn desktop_status<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<DesktopStatus, String> {
+    tauri::async_runtime::spawn_blocking(move || read_desktop_status(&app))
+        .await
+        .map_err(|error| format!("the status could not be read: {error}"))
+}
+
+fn read_desktop_status<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> DesktopStatus {
+    let shell = app.state::<Shell>();
+    let root = cleanup_root(&shell, &stack::default_root());
+    let pids: Vec<(&'static str, u32)> = shell
+        .children
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|(name, child)| (*name, child.id()))
+        .collect();
+    let processes = resident_parts(&pids);
+    let stack_id =
+        local_eval_state::read(&root, None).map(|state| state.stack_id().as_str().to_owned());
+    let found = engine::detect();
+    let running = found.engine.filter(|_| found.responding);
+    let (containers, intelligence_containers) = match running {
+        Some(running) => {
+            let mut stats = quiet::command(
+                engine::program(running).unwrap_or_else(|| PathBuf::from(running.binary())),
+            );
+            stats.args([
+                "stats",
+                "--no-stream",
+                "--format",
+                "{{.Name}}\t{{.MemUsage}}",
+            ]);
+            if let Some(path) = engine::path_with_docker() {
+                stats.env("PATH", path);
+            }
+            let stats = stats
+                .output()
+                .ok()
+                .filter(|output| output.status.success())
+                .map(|output| String::from_utf8_lossy(&output.stdout).into_owned())
+                .unwrap_or_default();
+            desktop_status::containers(&stats, stack_id.as_deref())
+        }
+        None => (Vec::new(), Vec::new()),
+    };
+    DesktopStatus {
+        openbot_running: !pids.is_empty(),
+        processes,
+        containers,
+        intelligence_stack: stack_id,
+        intelligence_containers,
+        engine: running.map(|engine| engine.binary()),
+        root: root.display().to_string(),
+        app_port: ports_for_shell(app).ok().map(|ports| ports.app),
+        version: env!("CARGO_PKG_VERSION"),
+        build: build_description(
+            env!("OPENBOT_BUILD_COMMIT"),
+            env!("OPENBOT_BUILD_BRANCH"),
+            env!("OPENBOT_BUILD_TIME").parse().unwrap_or_default(),
+        ),
+    }
+}
+
+/// Each host process by name, with its resident memory where `ps` could read it.
+fn resident_parts(pids: &[(&'static str, u32)]) -> Vec<desktop_status::Part> {
+    let sizes = if pids.is_empty() {
+        Vec::new()
+    } else {
+        let list = pids
+            .iter()
+            .map(|(_, pid)| pid.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        quiet::command("ps")
+            .args(["-o", "pid=,rss=", "-p", &list])
+            .output()
+            .ok()
+            .map(|output| desktop_status::resident(&String::from_utf8_lossy(&output.stdout)))
+            .unwrap_or_default()
+    };
+    pids.iter()
+        .map(|(name, pid)| desktop_status::Part {
+            name: (*name).to_owned(),
+            memory_bytes: sizes
+                .iter()
+                .find(|(found, _)| found == pid)
+                .map(|(_, bytes)| *bytes),
+        })
+        .collect()
+}
+
+/**
+Restart OpenBot's host processes: each is ended, and the supervisor that keeps them alive starts it
+again, as it would after a crash. The containers, its database among them, keep running, so nothing
+is lost and the restart takes seconds.
+*/
+#[tauri::command]
+fn restart_openbot<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), String> {
+    let shell = app.state::<Shell>();
+    let mut children = shell.children.lock().unwrap();
+    if children.is_empty() {
+        return Err("OpenBot is not running.".into());
+    }
+    for (name, child) in children.iter_mut() {
+        // SAFETY: the pid is this app's own child, held and not yet reaped, so it cannot be reused.
+        #[cfg(unix)]
+        let ended = unsafe { libc::kill(child.id() as i32, libc::SIGTERM) } == 0;
+        #[cfg(not(unix))]
+        let ended = child.kill().is_ok();
+        if !ended {
+            eprintln!("[status] could not restart {name}");
+        }
+    }
+    Ok(())
+}
+
+/// Stop, as the menu used to offer it: everything, Intelligence included if OpenBot started it.
+#[tauri::command]
+fn stop_openbot_from_status(app: tauri::AppHandle) {
+    stop_from_menu(app);
+}
+
 /// Both pages are single-page apps. Keep their route and in-memory state on restore.
 /// Compare the authority explicitly: tauri:// has an opaque URL origin.
 fn same_window_app(current: &tauri::Url, destination: &tauri::Url) -> bool {
@@ -5212,6 +5392,7 @@ fn chose(app: &tauri::AppHandle, item: &str) {
         // Stop without quitting: the stack is what costs something to leave running, and somebody
         // who wants it stopped does not necessarily want the application gone.
         "stop" => stop_from_menu(app.clone()),
+        "status" => show_status_window(app),
         "open-intelligence" => open_intelligence_from_menu(app.clone()),
         // Exit rather than hide: quitting is a decision to stop, and the exit handler is what stops
         // the processes with it.
@@ -5382,10 +5563,11 @@ fn install_menus<R: tauri::Runtime>(
                 None::<&str>,
             )?);
         }
+        // Stop, restart and what everything costs live on the Status window, with their context.
         items.push(MenuItem::with_id(
             app,
-            "stop",
-            "Stop OpenBot",
+            "status",
+            "OpenBot Status…",
             true,
             None::<&str>,
         )?);
@@ -5546,6 +5728,9 @@ fn main() {
             last_local_eval_stop_failure,
             ask_the_bot,
             quit_status,
+            desktop_status,
+            restart_openbot,
+            stop_openbot_from_status,
         ])
         // A packaged application is not a browser tab. Left alone, WebView2 answers a right-click
         // with Back, Refresh, Save as and Print: Back walks the window out of OpenBot with nothing
@@ -5579,8 +5764,8 @@ fn main() {
             tauri::WindowEvent::ThemeChanged(_) => {
                 let app = window.app_handle();
                 if let Some(url) = app
-                    .get_webview_window("main")
-                    .and_then(|main| main.url().ok())
+                    .get_webview_window(window.label())
+                    .and_then(|own| own.url().ok())
                 {
                     match_title_bar(window, window_page(app, &url));
                 }
