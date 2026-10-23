@@ -687,6 +687,8 @@ pub enum Step {
     Welcome,
     Harness,
     Install,
+    /// The CopilotKit sign-in and evaluation agreement of a local first run.
+    Account,
     Model,
     Connect,
     Ask,

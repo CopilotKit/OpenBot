@@ -507,12 +507,24 @@ const localConnection = {
 };
 
 /** This build has a CLI; each local command answers from `local`. */
+/** The agreement as the CLI reports it for a person who has already accepted it. */
+const ACCEPTED_TERMS = {
+  status: "required",
+  accepted: true,
+  version: "developer-edition-2026-10-01-web",
+  url: "https://copilotkit.ai/legal/developer-edition",
+  organizationName: "Acme",
+};
+
 function withLocalCli(local: Record<string, unknown>) {
   const previous = invokeHandler;
   invokeHandler = async (command, args) => {
     if (command === "list_local_eval") return localListing;
     if (command === "cancel_local_eval") return null;
     if (command === "show_openbot") return null;
+    // Signed in and agreed already, unless a test says otherwise: the account step passes.
+    if (command === "local_eval_terms" && !("local_eval_terms" in local))
+      return ACCEPTED_TERMS;
     if (command in local) {
       const answer = local[command];
       return typeof answer === "function" ? answer(args) : answer;
@@ -651,7 +663,7 @@ test("Install prepares the default Bot in the default folder, with no Bot or fol
   expect(
     view.getByRole("heading", { name: "Installing OpenBot" }),
   ).toBeTruthy();
-  expect(stepLabel(view)).toBe("Step 1 of 3");
+  expect(stepLabel(view)).toBe("Step 1 of 4");
   expect(view.queryByLabelText("Where OpenBot lives")).toBeNull();
   expect(view.queryByText(/Pick a Bot|Which Bot/i)).toBeNull();
   expect(invokeCalls.some((call) => call.command === "harnesses")).toBe(false);
@@ -695,6 +707,77 @@ test("Install prepares the default Bot in the default folder, with no Bot or fol
   expect(localCliCalls()).toEqual([]);
 });
 
+test("a signed-out first run signs in to CopilotKit and accepts the agreement as its own step, before choosing an AI", async () => {
+  setupRootConfiguration("/tmp/local-eval-account", async () =>
+    emptyConfiguration(),
+  );
+  let signedIn = false;
+  withLocalCli({
+    local_eval_terms: () =>
+      signedIn
+        ? { ...ACCEPTED_TERMS, accepted: false }
+        : { status: "signed-out" },
+    sign_in_to_copilotkit: () => {
+      signedIn = true;
+      return { signedIn: true };
+    },
+    set_up_local_eval: localStatus("starting", "valid"),
+    connect_local_eval: localConnection,
+    run_local_eval: localStatus("ready", "valid"),
+  });
+  const view = await renderApp();
+  await installLocal(view);
+  // Its own step, after the software and before the AI provider.
+  await view.findByRole("heading", { name: "Sign in to CopilotKit" });
+  expect(stepLabel(view)).toBe("Step 2 of 4");
+  expect(localSequence()).toEqual([]);
+  await userEvent.click(
+    view.getByRole("button", { name: "Sign in to CopilotKit" }),
+  );
+  await view.findByRole("heading", { name: "Accept the evaluation agreement" });
+  expect(
+    view.getByText(
+      "To run Intelligence on this computer, accept the CopilotKit Intelligence evaluation agreement for Acme.",
+    ),
+  ).toBeTruthy();
+  expect(view.getByRole("link", { name: "Read the agreement" })).toBeTruthy();
+  // Nothing licensed runs before Accept.
+  expect(localSequence()).toEqual([]);
+  await userEvent.click(view.getByRole("button", { name: "Accept" }));
+  await view.findByRole("heading", { name: "Connect your AI" });
+  expect(stepLabel(view)).toBe("Step 3 of 4");
+  expect(view.queryByText(/needs your CopilotKit account/)).toBeNull();
+  await waitFor(() => expect(localSequence()).toContain("set_up_local_eval"));
+  expect(
+    invokeCalls.find((call) => call.command === "set_up_local_eval")?.args,
+  ).toMatchObject({
+    root: "/tmp/local-eval-account",
+    acceptedEulaVersion: "developer-edition-2026-10-01-web",
+  });
+  expectPlain(view);
+});
+
+test("a first run already signed in with the agreement accepted passes the account step by itself", async () => {
+  setupRootConfiguration("/tmp/local-eval-account-done", async () =>
+    emptyConfiguration(),
+  );
+  withLocalCli({
+    set_up_local_eval: localStatus("starting", "valid"),
+    connect_local_eval: localConnection,
+    run_local_eval: localStatus("ready", "valid"),
+  });
+  const view = await renderApp();
+  await installLocal(view);
+  await view.findByRole("heading", { name: "Connect your AI" });
+  expect(
+    invokeCalls.some((call) => call.command === "sign_in_to_copilotkit"),
+  ).toBe(false);
+  await waitFor(() => expect(localSequence()).toContain("set_up_local_eval"));
+  expect(
+    invokeCalls.find((call) => call.command === "set_up_local_eval")?.args,
+  ).toMatchObject({ acceptedEulaVersion: null });
+});
+
 test("the local sequence starts when installation completes and survives the provider screen", async () => {
   setupRootConfiguration("/tmp/local-eval-overlap", async () =>
     emptyConfiguration(),
@@ -712,7 +795,7 @@ test("the local sequence starts when installation completes and survives the pro
   expect(localCliCalls()).toEqual([]);
   await act(async () => preparation.resolve());
   await view.findByRole("heading", { name: "Connect your AI" });
-  expect(stepLabel(view)).toBe("Step 2 of 3");
+  expect(stepLabel(view)).toBe("Step 3 of 4");
   await waitFor(() => expect(localSequence()).toEqual(["set_up_local_eval"]));
   expect(
     invokeCalls.find((call) => call.command === "set_up_local_eval")?.args,
@@ -751,13 +834,13 @@ test("Continue during setup shows Getting ready, which starts, tests and opens O
   await installLocal(view);
   await chooseOpenAi(view);
   await view.findByRole("heading", { name: "Getting ready" });
-  expect(stepLabel(view)).toBe("Step 3 of 3");
+  expect(stepLabel(view)).toBe("Step 4 of 4");
   const row = view.getByRole("listitem", { name: "Setting up Intelligence" });
   expect(row.textContent).toContain("In progress");
   expectPlain(view);
   await act(async () => setUp.resolve(localStatus("starting", "valid")));
   await view.findByRole("heading", { name: "Test OpenBot" });
-  expect(stepLabel(view)).toBe("Step 3 of 3");
+  expect(stepLabel(view)).toBe("Step 4 of 4");
   expect(localSequence()).toEqual([
     "set_up_local_eval",
     "connect_local_eval",

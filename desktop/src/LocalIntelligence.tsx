@@ -494,7 +494,6 @@ export function LocalStatus({ sequence }: { sequence: LocalSequence }) {
               ? (sequence.blocked?.said ?? sequence.problem?.said)
               : `${current.step}: complete.`}
       </p>
-      <LocalNeeds sequence={sequence} />
     </>
   );
 }
