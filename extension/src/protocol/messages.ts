@@ -5,6 +5,11 @@ import type {
 } from "@openbot/shared/recorder-api";
 import type { CapturedEvent } from "@openbot/shared/recorder-masking";
 import { MAX_TIMESTAMP_MS } from "@openbot/shared/recorder-masking";
+import {
+  type RecorderPageResult,
+  type RecorderPageState,
+  recorderPageMessageSchema,
+} from "@openbot/shared/recorder-page";
 import { z } from "zod";
 import { normaliseOpenBotOrigin } from "../shared/origin";
 import type { DrainRecord, RecorderNotice } from "../shared/storage";
@@ -362,6 +367,9 @@ const externalToBackgroundSchema = z.discriminatedUnion("type", [
       observation: pageAgentObservation,
     })
     .strict(),
+  // What OpenBot's own page asks the Recorder in the same browser (shared/recorder-page.ts): openbot.state,
+  // openbot.record and openbot.stop, answered only for the OpenBot this copy is connected to (openbot-page.ts).
+  ...recorderPageMessageSchema.options,
 ]);
 export type ExternalToBackground = z.infer<typeof externalToBackgroundSchema>;
 export type ExternalResponse =
@@ -371,6 +379,8 @@ export type ExternalResponse =
       version: string;
       installId: string;
       awaitingConfirmation?: boolean;
+      /** A trusted OpenBot's connect (connection.ts `trustedConnectRule`): connected now, with no Connect page. */
+      connected?: true;
     } // the connected origin's ping, a pending connect's origin, and the connect answer; installId = installIdFor(sender.origin)
   | {
       ok: false;
@@ -380,9 +390,18 @@ export type ExternalResponse =
         | "policy-invalid"
         | "busy"
         | "invalid"
-        | "not-recording";
+        | "not-recording"
+        // A trusted OpenBot's code that OpenBot refused, or an OpenBot that did not answer its exchange.
+        | "exchange-refused"
+        | "openbot-unreachable";
     }
   | { ok: false; error: "throttled"; retryAfterMs: number }; // too many connects from this origin lately, and how long until it may ask again
+/** Every answer onMessageExternal gives: openbot.state's is a RecorderPageState, openbot.record's and openbot.stop's a
+ * RecorderPageResult. */
+export type ExternalAnswer =
+  | ExternalResponse
+  | RecorderPageState
+  | RecorderPageResult;
 
 const MAX_MESSAGE_BYTES = 64 * 1024;
 /** An AG-UI observation is not cut in the page: a run's input carries its whole Thread, a snapshot the agent's state. */
