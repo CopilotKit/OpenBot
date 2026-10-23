@@ -45,6 +45,9 @@ let recorder:
   | {
       ping: Record<string, unknown>;
       connect: Record<string, unknown>;
+      /** What the Recorder does with OpenBot as it connects with no Connect page: exchanges the code, which makes the
+       * connection on the server. */
+      exchange?: () => void;
     }
   | undefined;
 const messages: { id: string; message: unknown }[] = [];
@@ -92,6 +95,7 @@ beforeEach(() => {
           return;
         }
         const type = (message as { type: string }).type;
+        if (type === "openbot.connect") recorder.exchange?.();
         reply(type === "openbot.ping" ? recorder.ping : recorder.connect);
       },
     },
@@ -183,6 +187,38 @@ test("a new connection with the install id the connect answer carried switches t
   await view.findByText("Confirm in the OpenBot Recorder tab that opened.");
   connections = [connection()];
   await view.findByText("Connected", {}, { timeout: 4000 });
+  expect(view.queryByRole("button")).toBeNull();
+});
+
+test("a trusted OpenBot's connect, answered connected with no Connect page, reads Connected at once and never asks the person to confirm", async () => {
+  recorder = {
+    ping: { ok: true },
+    connect: { ok: true, version: "1", installId: THIS_COPY, connected: true },
+    exchange: () => {
+      connections = [connection()];
+    },
+  };
+  const view = draw();
+  const said: string[] = [];
+  const watch = new MutationObserver(() => {
+    said.push(document.body.textContent ?? "");
+  });
+  watch.observe(document.body, {
+    childList: true,
+    subtree: true,
+    characterData: true,
+  });
+  fireEvent.click(
+    await view.findByRole("button", { name: "Connect this browser" }),
+  );
+  // Well inside the 2 s the row asks in while it waits on a Connect page: it was never waiting on one.
+  await view.findByText("Connected", {}, { timeout: 1000 });
+  watch.disconnect();
+  expect(
+    said.some((text) =>
+      text.includes("Confirm in the OpenBot Recorder tab that opened."),
+    ),
+  ).toBe(false);
   expect(view.queryByRole("button")).toBeNull();
 });
 
