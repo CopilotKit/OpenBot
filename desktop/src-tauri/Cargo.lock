@@ -2513,6 +2513,7 @@ dependencies = [
  "base64 0.22.1",
  "flate2",
  "libc",
+ "objc2",
  "portable-pty",
  "rand 0.9.5",
  "reqwest 0.12.28",
