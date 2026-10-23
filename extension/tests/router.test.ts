@@ -9,6 +9,7 @@ import { installRouter, type RouterHandlers } from "../src/background/router";
 import type {
   ExternalToBackground,
   PageToBackground,
+  RecorderState,
   StreamSession,
 } from "../src/protocol/messages";
 import {
@@ -27,6 +28,7 @@ let seen: {
   order: string[];
 };
 let handlers: RouterHandlers & {
+  current(): Promise<RecorderState>;
   connected(): Promise<void>;
   disconnected(): Promise<void>;
 };
@@ -49,6 +51,7 @@ beforeEach(() => {
     },
     contentPort: (port) => seen.content.push(port),
     offscreenPort: (port) => seen.offscreen.push(port),
+    current: async () => IDLE_STATE,
     connected: async () => {
       seen.order.push("connected");
     },
@@ -340,6 +343,81 @@ test("openbot.ping and openbot.connect from a web page go to the external connec
     { type: "openbot.ping" },
     { type: "openbot.connect", code: "obc_abc" },
   ]);
+});
+
+test("a trusted OpenBot's connect, made with no Connect page, is followed up as an approved Connect is, and one waiting on its page is not", async () => {
+  const answers = [
+    {
+      ok: true as const,
+      version: "0.3.0",
+      installId: "i",
+      connected: true as const,
+    },
+    {
+      ok: true as const,
+      version: "0.3.0",
+      installId: "i",
+      awaitingConfirmation: true,
+    },
+  ];
+  const spy = spyOn(connection, "handleExternalConnect").mockImplementation(
+    async () => {
+      seen.order.push("connection");
+      return answers.shift() ?? { ok: false, error: "invalid" };
+    },
+  );
+  restore.push(() => spy.mockRestore());
+  installRouter(handlers);
+  const sender = {
+    url: "http://127.0.0.1:3010/",
+    origin: "http://127.0.0.1:3010",
+  };
+  expect(
+    await fake.sendExternal({ type: "openbot.connect", code: "obc_a" }, sender),
+  ).toMatchObject({ ok: true, connected: true });
+  expect(seen.order).toEqual(["connection", "connected"]);
+  expect(
+    await fake.sendExternal({ type: "openbot.connect", code: "obc_b" }, sender),
+  ).toMatchObject({ ok: true, awaitingConfirmation: true });
+  expect(seen.order).toEqual(["connection", "connected", "connection"]);
+});
+
+test("openbot.state, openbot.record and openbot.stop are answered for OpenBot's page and never reach the connect handler or the page-network entry", async () => {
+  const spy = spyOn(connection, "handleExternalConnect");
+  restore.push(() => spy.mockRestore());
+  installRouter(handlers);
+  const sender = {
+    url: "https://openbot.example.test/",
+    origin: "https://openbot.example.test",
+    tab: { id: 7 } as chrome.tabs.Tab,
+    frameId: 0,
+  };
+  // Nothing is connected: the page is told so, and nothing records.
+  expect(await fake.sendExternal({ type: "openbot.state" }, sender)).toEqual({
+    connected: false,
+  });
+  for (const message of [
+    { type: "openbot.record", title: "Archive order 1043" },
+    { type: "openbot.stop" },
+  ])
+    expect(await fake.sendExternal(message, sender)).toEqual({
+      ok: false,
+      error: "Connect this browser to OpenBot first.",
+    });
+  // Malformed: answered invalid before anything reads it.
+  for (const message of [
+    { type: "openbot.record", title: "   " },
+    { type: "openbot.record", title: "x".repeat(201) },
+    { type: "openbot.record", title: "x", tabId: 9 },
+    { type: "openbot.state", origin: "https://openbot.example.test" },
+  ])
+    expect(await fake.sendExternal(message, sender)).toEqual({
+      ok: false,
+      error: "invalid",
+    });
+  expect(spy).not.toHaveBeenCalled();
+  expect(seen.external).toEqual([]);
+  expect(seen.page).toEqual([]);
 });
 
 test("recorder.page-network goes to the recording handler's external entry", async () => {

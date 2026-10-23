@@ -3,6 +3,7 @@ import {
   type RecorderMe,
   recorderPaths,
 } from "@openbot/shared/recorder-api";
+import type { TrustedConnectRule } from "@openbot/shared/recorder-page";
 import type {
   ExternalResponse,
   ExternalToBackground,
@@ -71,7 +72,7 @@ const KEEP_ALIVE_ALARM = "recorder-session-keepalive";
 const KEEP_ALIVE_PERIOD_MINUTES = 720;
 const KEEP_ALIVE_PERIOD_MS = KEEP_ALIVE_PERIOD_MINUTES * 60 * 1000;
 /** How long OpenBot Desktop's code waits on its exchange. It runs in the connect queue (see `serially`), so a local OpenBot
- * that never answers must not hold every connect behind it. */
+ * that never answers must not hold every connect behind it. A trusted OpenBot's page waits as long for its own. */
 const DESKTOP_EXCHANGE_WAIT_MS = 10_000;
 
 const defaultDeps: ConnectionDeps = {
@@ -403,16 +404,38 @@ export async function handleExternalConnect(
   if (policy.openbotUrl && !sameOrigin(policy.openbotUrl, checked.origin))
     return { ok: false, error: "pinned-elsewhere" };
 
+  // A trusted OpenBot connects with no Connect page; every other site keeps the one Connect click.
+  if (trustedConnectRule(policy, checked.origin) !== null)
+    return trustedConnect(checked.origin, message.code, resolved);
   return serially(() => webConnect(checked.origin, message.code, resolved));
 }
 
-/** Everything from the request count through the connect tab, in one queued job (see `serially`). */
-async function webConnect(
+/**
+ * Which `openbot.connect` the Recorder takes with no Connect page (shared/recorder-page.ts, David 2026-10-22: "only for
+ * trusted OpenBots"): one from the OpenBot the organization's policy pins (`policy-pinned`), or from OpenBot Desktop's
+ * own address on this computer (`loopback-desktop`). The Recorder takes http only on a loopback IP with a port (the
+ * address rule, normaliseOpenBotOrigin), so an http origin that passes the rule is an OpenBot running on this computer,
+ * as OpenBot Desktop's local stack is; https on a loopback IP is not that, and keeps the click. Null for every other
+ * origin, and for one the policy does not allow.
+ */
+export function trustedConnectRule(
+  policy: RecorderPolicy,
   origin: string,
-  code: string,
-  deps: ConnectionDeps,
-): Promise<ExternalResponse> {
-  const now = Date.now();
+): TrustedConnectRule | null {
+  const checked = normaliseOpenBotOrigin(origin);
+  if (!checked.ok || !allowsOpenBot(policy, checked.origin)) return null;
+  if (policy.openbotUrl === checked.origin) return "policy-pinned";
+  return new URL(checked.origin).protocol === "http:"
+    ? "loopback-desktop"
+    : null;
+}
+
+/** Counts a web connect from `origin` against its limit, in the caller's queued job: the refusal when it is over it,
+ * else null. */
+async function countConnect(
+  origin: string,
+  now: number,
+): Promise<ExternalResponse | null> {
   const requests = await readSession("connectRequests");
   const recent = (requests?.[origin] ?? []).filter(
     (at) => now - at < CONNECT_WINDOW_MS,
@@ -428,6 +451,88 @@ async function webConnect(
     ...requests,
     [origin]: [...recent, now],
   });
+  return null;
+}
+
+/**
+ * A trusted OpenBot's connect (`trustedConnectRule`), with no Connect page: the person is already in that OpenBot,
+ * signed in, asking. Otherwise it is what an approved Connect is, as OpenBot Desktop's connect is: counted against the
+ * same limit; its code exchanged at the origin Chrome reported, under this copy's install id for it and the browser's own
+ * name; the connection stored in a queued job that checks the policy again (a token it keeps out is revoked); a Connect
+ * page still open closed, since approving it would replace this connection; and the signed-out notice gone. The router
+ * then does an approved Connect's follow-up, as the answer says it connected.
+ */
+async function trustedConnect(
+  origin: string,
+  code: string,
+  deps: ConnectionDeps,
+): Promise<ExternalResponse> {
+  const throttled = await serially(() => countConnect(origin, Date.now()));
+  if (throttled) return throttled;
+  let exchanged: ExchangeResponse;
+  try {
+    exchanged = await openbotJson<ExchangeResponse>(
+      { openbotUrl: origin },
+      recorderPaths.connections,
+      {
+        body: {
+          code,
+          label: defaultBrowserName(),
+          installId: await installIdFor(origin),
+        },
+        signal: AbortSignal.timeout(DESKTOP_EXCHANGE_WAIT_MS),
+      },
+    );
+  } catch (error) {
+    return {
+      ok: false,
+      error:
+        error instanceof OpenBotError
+          ? "exchange-refused"
+          : "openbot-unreachable",
+    };
+  }
+  const connection: ConnectionRecord = {
+    openbotUrl: origin,
+    token: exchanged.token,
+    connectionId: exchanged.connection.id,
+    user: exchanged.user,
+    via: "web",
+    connectedAt: Date.now(),
+  };
+  const stored = await serially(async () => {
+    if (!allowsOpenBot(await deps.readPolicy(), origin)) return false;
+    await writeLocal("connection", connection);
+    const pending = await readSession("pendingConnect");
+    if (pending) {
+      await closeConnectTab(pending.tabId);
+      await removeSession("pendingConnect");
+    }
+    return true;
+  });
+  if (!stored) {
+    await revoke(connection);
+    return { ok: false, error: "pinned-elsewhere" };
+  }
+  if ((await readLocal("notice"))?.kind === "signed-out")
+    await removeLocal("notice");
+  return {
+    ok: true,
+    version: chrome.runtime.getManifest().version,
+    installId: await installIdFor(origin),
+    connected: true,
+  };
+}
+
+/** Everything from the request count through the connect tab, in one queued job (see `serially`). */
+async function webConnect(
+  origin: string,
+  code: string,
+  deps: ConnectionDeps,
+): Promise<ExternalResponse> {
+  const now = Date.now();
+  const throttled = await countConnect(origin, now);
+  if (throttled) return throttled;
 
   const pending = await readSession("pendingConnect");
   if (pending && (await tabIsOpen(pending.tabId))) {

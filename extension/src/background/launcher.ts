@@ -188,8 +188,10 @@ function voiceOf(state: RecorderState): NonNullable<LauncherState["voice"]> {
 /** The recording Stop ended last, by name and with what it held, once it went to Intelligence (a Disconnect or a
  * failed send leaves none), and not when the person's own Learning space is known not to take it: OpenBot confirms it
  * went there, or says it held nothing. One stopped by an earlier build, which did not count, is not reported: OpenBot
- * would say it held nothing. */
-function lastStopped(state: RecorderState): LauncherState["lastStopped"] {
+ * would say it held nothing. OpenBot's own page reads it the same way (openbot-page.ts). */
+export function lastStopped(
+  state: RecorderState,
+): LauncherState["lastStopped"] {
   const stopped = state.lastStopped;
   if (
     stopped?.title === undefined ||

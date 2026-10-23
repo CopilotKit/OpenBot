@@ -1,6 +1,7 @@
 // The ONLY listeners of runtime.onMessage, onMessageExternal and onConnect in the whole extension (MV3 needs them
 // registered synchronously at top level, and one place keeps the trust checks in one place).
 import {
+  type ExternalAnswer,
   type ExternalResponse,
   type ExternalToBackground,
   type PageResponse,
@@ -12,6 +13,11 @@ import {
   parsePageConnectDecide,
 } from "../protocol/messages";
 import { handleConnectionMessage, handleExternalConnect } from "./connection";
+import {
+  answerOpenBotPage,
+  isOpenBotPageMessage,
+  type OpenBotPageControls,
+} from "./openbot-page";
 
 export type RouterHandlers = {
   page(
@@ -26,10 +32,11 @@ export type RouterHandlers = {
   offscreenPort(port: chrome.runtime.Port): void;
 };
 
-type RouterDeps = RouterHandlers & {
-  connected(): Promise<void>;
-  disconnected(): Promise<void>;
-};
+type RouterDeps = RouterHandlers &
+  OpenBotPageControls & {
+    connected(): Promise<void>;
+    disconnected(): Promise<void>;
+  };
 
 const CONNECTION_TYPES = new Set<string>([
   "page.connect.pending",
@@ -115,6 +122,23 @@ async function routePage(
   return UNKNOWN;
 }
 
+/** openbot.ping and openbot.connect from a web page. A trusted OpenBot's connect, made with no Connect page, is an
+ * approved Connect, and followed up as one; its answer says so (`connected`). */
+async function routeConnect(
+  message: ExternalToBackground,
+  sender: chrome.runtime.MessageSender,
+  deps: RouterDeps,
+): Promise<ExternalResponse> {
+  const answer = await handleExternalConnect(message, sender);
+  if (answer.ok && "connected" in answer && answer.connected)
+    await deps
+      .connected()
+      .catch((error) =>
+        console.error("Recorder: reconnect follow-up failed", error),
+      );
+  return answer;
+}
+
 /** A port whose onMessage listeners only ever see messages that passed parseContentMessage. */
 function filteredContentPort(port: chrome.runtime.Port): chrome.runtime.Port {
   const wrapped = new Map<unknown, (message: unknown) => void>();
@@ -179,11 +203,13 @@ export function installRouter(deps: RouterDeps): void {
       sendResponse({ ok: false, error: "invalid" } satisfies ExternalResponse);
       return false;
     }
-    const answer =
+    const answer: Promise<ExternalAnswer> =
       message.type === "recorder.page-network" ||
       message.type === "recorder.page-agent"
         ? deps.external(message, sender)
-        : handleExternalConnect(message, sender);
+        : isOpenBotPageMessage(message)
+          ? answerOpenBotPage(message, sender, deps)
+          : routeConnect(message, sender, deps);
     answer.then(
       (response) => sendResponse(response),
       () => sendResponse({ ok: false, error: "invalid" }),
