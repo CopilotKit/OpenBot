@@ -517,6 +517,34 @@ export function ProviderPicker({
     return () => clearTimeout(timer);
   }, [confirmed, open]);
 
+  /** Back to every provider: the chosen one's sign-in, if any, stops. */
+  function chooseAnother() {
+    if (oauthAttempt.current) void cancelOAuth();
+    signInRunRef.current += 1;
+    setOpen(null);
+    setFailure(null);
+    setSignInUrl(null);
+    setCode("");
+    setBusy(false);
+    setProgress(null);
+    setLogin(null);
+  }
+  const chooseAnotherLatest = useRef(chooseAnother);
+  chooseAnotherLatest.current = chooseAnother;
+  // Escape goes back too, except while typing, where it would throw away a half-typed key.
+  const anyChosen = row !== null;
+  useEffect(() => {
+    if (!anyChosen) return;
+    const onKey = (event: KeyboardEvent) => {
+      const typing =
+        event.target instanceof HTMLInputElement ||
+        event.target instanceof HTMLTextAreaElement;
+      if (event.key === "Escape" && !typing) chooseAnotherLatest.current();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [anyChosen]);
+
   return (
     <div className="sheet">
       {!returning && <p className="steps-of">{stepLabel}</p>}
@@ -528,7 +556,8 @@ export function ProviderPicker({
 
       <fieldset className="picker providers">
         <legend className="sr-only">Model provider</legend>
-        {rows.map((r) => (
+        {/* Once one is chosen it stands alone, with Change to see them all again. */}
+        {(row ? [row] : rows).map((r) => (
           <label
             key={r.id}
             className={`tile wide${open === r.id ? " chosen" : ""}`}
@@ -586,6 +615,16 @@ export function ProviderPicker({
             <span className="tile-summary">{r.summary}</span>
           </label>
         ))}
+        {row && (
+          <button
+            type="button"
+            className="text-link change-provider"
+            aria-label="Choose a different provider"
+            onClick={chooseAnother}
+          >
+            Change
+          </button>
+        )}
       </fieldset>
 
       {row && (

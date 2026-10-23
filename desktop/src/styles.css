@@ -333,6 +333,16 @@ fieldset.picker {
 fieldset.picker.providers {
   max-height: none;
   overflow-y: visible;
+  position: relative;
+}
+
+/* Sits on the one chosen row, so going back is where the eye already is. */
+button.text-link.change-provider {
+  position: absolute;
+  top: 50%;
+  right: 1rem;
+  transform: translateY(-50%);
+  margin: 0;
 }
 
 /*
