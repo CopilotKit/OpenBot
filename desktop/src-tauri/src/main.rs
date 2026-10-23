@@ -3048,8 +3048,18 @@ fn show_setup<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), String>
         .map_err(|error| format!("could not go back to setup: {error}"))
 }
 
-/// The setup screens' background, which the macOS title bar takes while they show.
+/// The setup screens' background in light and in dark, which the macOS title bar takes while they
+/// show. The same values as `--surface-main` in styles.css.
 const SETUP_BACKGROUND: tauri::window::Color = tauri::window::Color(0xde, 0xde, 0xe9, 0xff);
+const SETUP_BACKGROUND_DARK: tauri::window::Color = tauri::window::Color(0x01, 0x05, 0x07, 0xff);
+
+/// Whether `url` is the setup page rather than OpenBot.
+fn on_setup_page<R: tauri::Runtime>(app: &tauri::AppHandle<R>, url: &tauri::Url) -> bool {
+    let setup = app.state::<Shell>().setup_url.lock().unwrap().clone();
+    setup
+        .and_then(|setup| setup.parse::<tauri::Url>().ok())
+        .is_some_and(|setup| same_window_app(&setup, url))
+}
 
 /**
 The title bar is the setup screen's own colour on setup, and the system's on OpenBot.
@@ -3066,7 +3076,11 @@ fn match_title_bar<R: tauri::Runtime>(window: &tauri::Window<R>, on_setup: bool)
         } else {
             tauri::TitleBarStyle::Visible
         });
-        let _ = window.set_background_color(on_setup.then_some(SETUP_BACKGROUND));
+        let ground = match window.theme() {
+            Ok(tauri::Theme::Dark) => SETUP_BACKGROUND_DARK,
+            _ => SETUP_BACKGROUND,
+        };
+        let _ = window.set_background_color(on_setup.then_some(ground));
     }
     #[cfg(not(target_os = "macos"))]
     let _ = (window, on_setup);
@@ -5444,21 +5458,28 @@ fn main() {
         .on_page_load(|window, payload| {
             let _ = window
                 .eval("document.addEventListener('contextmenu', e => e.preventDefault(), true)");
-            let setup = window.app_handle().state::<Shell>().setup_url.lock().unwrap().clone();
-            let on_setup = setup
-                .and_then(|setup| setup.parse::<tauri::Url>().ok())
-                .is_some_and(|setup| same_window_app(&setup, payload.url()));
+            let on_setup = on_setup_page(window.app_handle(), payload.url());
             match_title_bar(&window.window(), on_setup);
         })
         // Closing the window hides it. A tray application whose window is destroyed on close has a
         // menu item that points at nothing: `get_webview_window` returns None from then on, and the
         // only way back is to quit and start again, with a stack still running that nothing on
         // screen can reach.
-        .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+        .on_window_event(|window, event| match event {
+            tauri::WindowEvent::CloseRequested { api, .. } => {
                 api.prevent_close();
                 let _ = window.hide();
             }
+            // The setup screens follow the system's light and dark, and so does their title bar.
+            tauri::WindowEvent::ThemeChanged(_) => {
+                let app = window.app_handle();
+                let on_setup = app
+                    .get_webview_window("main")
+                    .and_then(|main| main.url().ok())
+                    .is_some_and(|url| on_setup_page(app, &url));
+                match_title_bar(window, on_setup);
+            }
+            _ => {}
         })
         .setup(|app| {
             desktop_telemetry::initialize(app.handle());

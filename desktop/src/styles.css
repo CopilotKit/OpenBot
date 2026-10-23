@@ -40,6 +40,19 @@
   --grey-900: #2b2b2b;
   --ink-5: #0105070d;
 
+  /* Actions: the filled button and its states. */
+  --action: var(--text-primary);
+  --action-ink: var(--text-invert);
+  --action-hover: #2b2b2b;
+  --action-disabled: #afafb7;
+  --action-disabled-ink: #ffffff;
+
+  /* Brand marks are drawn for a white ground, in either theme. */
+  --mark-ground: #ffffff;
+  --mark-ink: #010507;
+
+  --color-scheme: light;
+
   /* State */
   --good: #189370;
   --bad: #fa5f67;
@@ -71,6 +84,7 @@
   --accent-ink: var(--text-invert);
   --r-row: var(--r-card);
 
+  color-scheme: var(--color-scheme);
   font-family: var(--sans);
   font-size: 16px;
   line-height: 1.5;
@@ -291,8 +305,8 @@ button {
   padding: 0 20px;
   border-radius: var(--r-card);
   border: 1px solid transparent;
-  background: var(--text-primary);
-  color: var(--text-invert);
+  background: var(--action);
+  color: var(--action-ink);
   cursor: pointer;
   transition:
     background-color 80ms ease,
@@ -301,7 +315,7 @@ button {
 }
 
 button:hover:not(:disabled) {
-  background: var(--grey-900);
+  background: var(--action-hover);
 }
 
 /*
@@ -314,8 +328,8 @@ button:active:not(:disabled) {
 }
 
 button:disabled {
-  background: var(--grey-600);
-  color: var(--text-invert);
+  background: var(--action-disabled);
+  color: var(--action-disabled-ink);
   cursor: default;
 }
 
@@ -584,7 +598,7 @@ button.tile:hover:not(:disabled) {
   justify-content: center;
   padding: 8px;
   border-radius: var(--r-card);
-  background: var(--surface-container);
+  background: var(--mark-ground);
   border: 1px solid var(--border-container);
   flex: none;
 }
@@ -604,7 +618,7 @@ button.tile:hover:not(:disabled) {
   line-height: 1.05;
   text-align: center;
   letter-spacing: -0.02em;
-  color: var(--text-primary);
+  color: var(--mark-ink);
   hyphens: none;
 }
 
@@ -1077,4 +1091,79 @@ a {
 
 .window-status .status-line {
   margin: 0;
+}
+
+/*
+ * Dark, following the system. The CopilotKit theme defines light only; the brand's one verified dark
+ * context is near-black #010507 with the reversed wordmark. Everything else here is an
+ * implementation default built on that: the same structure, glass as faint white over near-black,
+ * text from the verified grey scale, and the ambient fields in the brand's lilac and mint rather
+ * than the light theme's greys, which would vanish.
+ */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --surface-main: #010507;
+    --surface-container: #14151b;
+    --surface-hovered: #1b1c23;
+    --white-50: rgba(255, 255, 255, 0.04);
+    --white-65: rgba(255, 255, 255, 0.05);
+    --white-70: rgba(255, 255, 255, 0.08);
+
+    --border-default: rgba(255, 255, 255, 0.1);
+    --border-container: rgba(255, 255, 255, 0.12);
+
+    --text-primary: #f7f7f9;
+    --text-secondary: #afafb7;
+    --text-disabled: #838389;
+    --text-invert: #010507;
+
+    --grey-200: rgba(255, 255, 255, 0.08);
+    --grey-600: rgba(255, 255, 255, 0.24);
+    --ink-5: rgba(255, 255, 255, 0.06);
+
+    --action-hover: #e2e2ea;
+    --action-disabled: #2b2b2b;
+    --action-disabled-ink: #838389;
+
+    --good: #85ecce;
+
+    --elevation-sm: 0px 1px 3px 0px rgba(0, 0, 0, 0.4);
+    --elevation-md: 0px 6px 6px -2px rgba(0, 0, 0, 0.4);
+
+    --color-scheme: dark;
+  }
+
+  .backdrop {
+    background:
+      radial-gradient(
+        circle 24vw at 87.7vw 16.3vw,
+        rgba(190, 194, 255, 0.12),
+        transparent
+      ),
+      radial-gradient(
+        circle 30vw at 67.7vw -4.2vw,
+        rgba(190, 194, 255, 0.08),
+        transparent
+      ),
+      radial-gradient(
+        circle 24vw at 24.4vw 38.5vw,
+        rgba(133, 236, 206, 0.07),
+        transparent
+      ),
+      radial-gradient(
+        circle 24vw at 1.3vw 71.3vw,
+        rgba(255, 172, 77, 0.06),
+        transparent
+      ),
+      radial-gradient(
+        circle 30vw at 56.5vw 70vw,
+        rgba(190, 194, 255, 0.05),
+        transparent
+      );
+  }
+
+  /* White edges on glass become faint ones; a 2px white rim on near-black is a frame, not frost. */
+  .sheet {
+    border-width: 1px;
+  }
 }

@@ -111,11 +111,18 @@ export function CopilotKitAccount({
   const agreement = seen.at === "agreement" ? seen.terms : null;
   return (
     <div className="sheet">
-      <img
-        className="copilotkit-logo"
-        src="/copilotkit-logo.svg"
-        alt="CopilotKit"
-      />
+      <picture>
+        {/* The reversed wordmark on dark, as the brand sets it; the symbol keeps its colour. */}
+        <source
+          srcSet="/copilotkit-logo-dark.svg"
+          media="(prefers-color-scheme: dark)"
+        />
+        <img
+          className="copilotkit-logo"
+          src="/copilotkit-logo.svg"
+          alt="CopilotKit"
+        />
+      </picture>
       <p className="steps-of">{stepLabel}</p>
       <h1>
         {agreement
