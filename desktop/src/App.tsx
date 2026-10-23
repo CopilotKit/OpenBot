@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Ask } from "./Ask";
+import { CopilotKitAccount } from "./CopilotKitAccount";
 import { DatabaseReset } from "./DatabaseReset";
 import { useWindowFitsContent } from "./fitWindow";
 import {
@@ -719,8 +720,8 @@ function Setup() {
     setStep("install");
     if (await install(choice)) {
       setSteps([]);
-      setStep("model");
-      local.prepare();
+      // The licensed part waits for the CopilotKit account and its agreement: see `account`.
+      setStep("account");
     }
   }
 
@@ -1057,7 +1058,7 @@ function Setup() {
       <main>
         <div className="sheet">
           <p className="steps-of">
-            {localFlow ? "Step 1 of 3" : "Step 2 of 4"}
+            {localFlow ? "Step 1 of 4" : "Step 2 of 4"}
           </p>
           <h1>
             {installationReady
@@ -1164,7 +1165,7 @@ function Setup() {
       <main>
         <Ask
           local={localFlow}
-          stepLabel={localFlow ? "Step 3 of 3" : undefined}
+          stepLabel={localFlow ? "Step 4 of 4" : undefined}
           onAsk={(question) =>
             invoke<string>("ask_the_bot", { root, question })
           }
@@ -1186,6 +1187,27 @@ function Setup() {
     );
   }
 
+  /*
+   * A local first run signs in to CopilotKit and accepts the evaluation agreement as a step of its
+   * own, after the software is installed and before anything licensed is set up. Intelligence then
+   * sets itself up behind the AI provider screen, with the version accepted here.
+   */
+  if (!running && step === "account") {
+    return (
+      <main>
+        <CopilotKitAccount
+          stepLabel="Step 2 of 4"
+          onDone={(acceptedVersion) => {
+            if (acceptedVersion) local.acceptTerms(acceptedVersion);
+            setStep("model");
+            local.prepare();
+          }}
+        />
+        {displayedFailure && <Failure problem={displayedFailure} />}
+      </main>
+    );
+  }
+
   if (!running && step === "model") {
     return (
       <main>
@@ -1195,7 +1217,7 @@ function Setup() {
           chosen={model}
           returning={returningToInstallation}
           busy={busy}
-          stepLabel={localFlow ? "Step 2 of 3" : undefined}
+          stepLabel={localFlow ? "Step 3 of 4" : undefined}
           status={localFlow && <LocalStatus sequence={local} />}
           onChoose={(choice) => {
             recordSetupEvent(modelChoiceEvent(choice));
@@ -1330,11 +1352,7 @@ function Setup() {
               onReset={resetLeftoverDatabase}
             />
           )}
-          {!returningToInstallation && (
-            <p className="steps-of">
-              {localFlow ? "Step 3 of 3" : "Step 4 of 4"}
-            </p>
-          )}
+          {!returningToInstallation && <p className="steps-of">Step 4 of 4</p>}
           <h1>Getting ready</h1>
           <p className="lede">
             OpenBot starts as soon as Intelligence is ready. This can take a few
