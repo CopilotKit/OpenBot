@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ExternalLink } from "./ExternalLink";
+import { Sections } from "./Sections";
 import {
   cancelLocalEval,
   type LocalTerms,
@@ -31,10 +32,8 @@ const COULD_NOT_CHECK =
  * decision of 2026-10-22). Nothing accepts it without the click.
  */
 export function CopilotKitAccount({
-  stepLabel,
   onDone,
 }: {
-  stepLabel: string;
   /** Signed in and agreed: the version accepted here, or null when nothing needed accepting. */
   onDone: (acceptedVersion: string | null) => void;
 }) {
@@ -123,7 +122,7 @@ export function CopilotKitAccount({
           alt="CopilotKit"
         />
       </picture>
-      <p className="steps-of">{stepLabel}</p>
+      <Sections local at="Account" />
       <h1>
         {agreement
           ? "Accept the evaluation agreement"

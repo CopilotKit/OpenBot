@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Ask } from "./Ask";
 import { CopilotKitAccount } from "./CopilotKitAccount";
+import { Sections } from "./Sections";
 import { DatabaseReset } from "./DatabaseReset";
 import { useWindowFitsContent } from "./fitWindow";
 import {
@@ -1089,7 +1090,7 @@ function Setup() {
     return (
       <main>
         <div className="sheet">
-          <p className="steps-of">Step 2 of 4</p>
+          <Sections local={localFlow} at="Install" />
           <h1>
             {installationReady
               ? "Installation complete"
@@ -1197,7 +1198,6 @@ function Setup() {
       <main>
         <Ask
           local={localFlow}
-          stepLabel={localFlow ? "Step 4 of 4" : undefined}
           onAsk={(question) =>
             invoke<string>("ask_the_bot", { root, question })
           }
@@ -1228,7 +1228,6 @@ function Setup() {
     return (
       <main>
         <CopilotKitAccount
-          stepLabel="Step 1 of 4"
           onDone={(acceptedVersion) => {
             if (acceptedVersion) local.acceptTerms(acceptedVersion);
             // Intelligence sets itself up once the install has Docker answering; see below. The
@@ -1255,7 +1254,7 @@ function Setup() {
           chosen={model}
           returning={returningToInstallation}
           busy={busy}
-          stepLabel={localFlow ? "Step 3 of 4" : undefined}
+          local={localFlow}
           status={localFlow && <LocalStatus sequence={local} />}
           onChoose={(choice) => {
             recordSetupEvent(modelChoiceEvent(choice));
@@ -1390,7 +1389,7 @@ function Setup() {
               onReset={resetLeftoverDatabase}
             />
           )}
-          {!returningToInstallation && <p className="steps-of">Step 4 of 4</p>}
+          {!returningToInstallation && <Sections local at="Start" />}
           <h1>Getting ready</h1>
           <p className="lede">
             OpenBot starts as soon as Intelligence is ready. This can take a few
@@ -1446,7 +1445,7 @@ function Setup() {
         )}
 
         {!running && !returningToInstallation && (
-          <p className="steps-of">Step 4 of 4</p>
+          <Sections local={localFlow} at="Start" />
         )}
         <h1>
           {running && !displayedFailure

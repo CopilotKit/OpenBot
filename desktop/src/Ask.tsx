@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { asProblem, Failure, type Problem } from "./Problem";
+import { Sections } from "./Sections";
 import { StatusLine } from "./SetupProgress";
 
 /**
@@ -36,7 +37,6 @@ export function Ask({
   onBack,
   onViewIntelligence,
   local = false,
-  stepLabel = "Last step",
 }: {
   /** Which of `PRESET_QUESTIONS` the box starts with; one at random unless a test says. */
   firstQuestion?: number;
@@ -49,7 +49,6 @@ export function Ask({
   onViewIntelligence?: () => Promise<void>;
   /** The local first run's wording: "Test OpenBot", then "Open OpenBot". */
   local?: boolean;
-  stepLabel?: string;
 }) {
   const [preset, setPreset] = useState(firstQuestion % PRESET_QUESTIONS.length);
   const [question, setQuestion] = useState<string>(PRESET_QUESTIONS[preset]);
@@ -123,7 +122,7 @@ export function Ask({
   const asked = answer !== null;
   return (
     <div className="sheet">
-      <p className="steps-of">{stepLabel}</p>
+      <Sections local={local} at="Start" />
       <h1>{local ? "Test OpenBot" : "Ask it something."}</h1>
       <p className="lede">
         {local
