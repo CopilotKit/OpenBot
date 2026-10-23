@@ -161,6 +161,26 @@ body::before {
     );
 }
 
+/*
+ * OpenBot Desktop on macOS has no separate title bar over this page: the window's buttons sit over
+ * the top-left corner and the sidebar runs to the top edge, as in Mac apps with a sidebar. The
+ * desktop marks the page (`data-desktop-titlebar`) and makes the sidebar's header the drag handle;
+ * here the header makes room for the buttons above its own row. With the sidebar collapsed the
+ * buttons are over the main column instead, so that moves down. Outside the desktop nothing changes.
+ */
+:root[data-desktop-titlebar="overlay"] [data-slot="sidebar-header"] {
+  height: auto;
+  padding-top: 36px;
+}
+
+:root[data-desktop-titlebar="overlay"]
+  [data-slot="sidebar-wrapper"]:has(
+    [data-slot="sidebar"][data-state="collapsed"]
+  )
+  [data-slot="sidebar-inset"] {
+  padding-top: 28px;
+}
+
 * {
   box-sizing: border-box;
 }

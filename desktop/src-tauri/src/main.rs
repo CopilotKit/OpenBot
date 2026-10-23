@@ -3068,28 +3068,119 @@ exist; the page follows the window's appearance through `prefers-color-scheme`, 
 */
 const SETUP_THEME: Option<tauri::Theme> = None;
 
-/**
-The setup screens' appearance and title bar on setup, and the system's on OpenBot.
+/// What the window is showing, as far as its chrome is concerned.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WindowPage {
+    Setup,
+    /// OpenBot served from this machine: its sidebar takes the title bar's place.
+    OwnedApp,
+    /// Anything else, such as an organization's OpenBot: the system's title bar.
+    Other,
+}
 
-The window starts transparent-titled and is given the setup ground for its appearance before the
-first page loads (in `setup`), so the first paint already matches. The same window then navigates to OpenBot, which keeps its own
-light and dark: it gets the system's appearance and title bar back, since a setup-coloured bar
-over it would be a seam.
+fn window_page<R: tauri::Runtime>(app: &tauri::AppHandle<R>, url: &tauri::Url) -> WindowPage {
+    if on_setup_page(app, url) {
+        WindowPage::Setup
+    } else if url.scheme() == "http"
+        && matches!(url.host_str(), Some("127.0.0.1" | "localhost" | "[::1]"))
+    {
+        WindowPage::OwnedApp
+    } else {
+        WindowPage::Other
+    }
+}
+
+/**
+The window's appearance and title bar for the page it shows.
+
+Setup: the setup screens' theme, a transparent title bar over their ground, the title shown. The
+window starts this way (in `setup`), so the first paint already matches.
+
+OpenBot from this machine: one surface, as Mac apps with a sidebar have it. The title bar becomes an
+overlay, its title text is hidden (the sidebar carries the name), and the page is marked so its
+sidebar makes room for the window buttons and works as the drag handle (`OVERLAY_TITLE_BAR_PAGE`).
+
+Anything else gets the system's bar back, since a page this app did not style cannot make room.
 */
-fn match_title_bar<R: tauri::Runtime>(window: &tauri::Window<R>, on_setup: bool) {
-    let _ = window.set_theme(if on_setup { SETUP_THEME } else { None });
+fn match_title_bar<R: tauri::Runtime>(window: &tauri::Window<R>, page: WindowPage) {
+    let _ = window.set_theme(if page == WindowPage::Setup {
+        SETUP_THEME
+    } else {
+        None
+    });
     #[cfg(target_os = "macos")]
     {
-        let _ = window.set_title_bar_style(if on_setup {
-            tauri::TitleBarStyle::Transparent
-        } else {
-            tauri::TitleBarStyle::Visible
+        let _ = window.set_title_bar_style(match page {
+            WindowPage::Setup => tauri::TitleBarStyle::Transparent,
+            WindowPage::OwnedApp => tauri::TitleBarStyle::Overlay,
+            WindowPage::Other => tauri::TitleBarStyle::Visible,
         });
         let ground = match SETUP_THEME.map_or_else(|| window.theme().ok(), Some) {
             Some(tauri::Theme::Dark) => SETUP_BACKGROUND_DARK,
             _ => SETUP_BACKGROUND,
         };
-        let _ = window.set_background_color(on_setup.then_some(ground));
+        let _ = window.set_background_color((page == WindowPage::Setup).then_some(ground));
+        show_window_title(window, page != WindowPage::OwnedApp);
+    }
+}
+
+/// The title text in the title bar. AppKit, so on the main thread.
+#[cfg(target_os = "macos")]
+fn show_window_title<R: tauri::Runtime>(window: &tauri::Window<R>, shown: bool) {
+    let target = window.clone();
+    let _ = window.run_on_main_thread(move || {
+        let Ok(ns_window) = target.ns_window() else {
+            return;
+        };
+        // NSWindowTitleVisible = 0, NSWindowTitleHidden = 1.
+        let visibility: isize = if shown { 0 } else { 1 };
+        // SAFETY: `ns_window` is this window's live NSWindow, used on the main thread.
+        unsafe {
+            let ns_window = ns_window.cast::<objc2::runtime::AnyObject>();
+            let _: () = objc2::msg_send![ns_window, setTitleVisibility: visibility];
+        }
+    });
+}
+
+/**
+Marks OpenBot's page for the overlay title bar: its styles pad the sidebar's header for the window
+buttons, and the header becomes the drag handle. The sidebar renders after the page loads and again
+on navigation, so new headers are marked as they appear, at most once a frame.
+*/
+const OVERLAY_TITLE_BAR_PAGE: &str = r#"(() => {
+  document.documentElement.dataset.desktopTitlebar = "overlay";
+  const mark = () => {
+    for (const header of document.querySelectorAll('[data-slot="sidebar-header"]:not([data-tauri-drag-region])')) {
+      header.setAttribute("data-tauri-drag-region", "");
+    }
+  };
+  let queued = false;
+  new MutationObserver(() => {
+    if (queued) return;
+    queued = true;
+    requestAnimationFrame(() => { queued = false; mark(); });
+  }).observe(document.documentElement, { childList: true, subtree: true });
+  mark();
+})();"#;
+
+/// Lets OpenBot's own page move and zoom the window from its drag handle, and nothing more.
+fn allow_window_drag<R: tauri::Runtime>(app: &tauri::AppHandle<R>, url: &tauri::Url) {
+    static GRANTED: Mutex<Vec<String>> = Mutex::new(Vec::new());
+    let origin = url.origin().ascii_serialization();
+    let mut granted = GRANTED.lock().unwrap();
+    if granted.contains(&origin) {
+        return;
+    }
+    let capability =
+        tauri::ipc::CapabilityBuilder::new(format!("openbot-app-window-{}", granted.len()))
+            .remote(format!("{origin}/*"))
+            .local(false)
+            .window("main")
+            .permission("core:window:allow-start-dragging")
+            .permission("core:window:allow-internal-toggle-maximize");
+    match app.add_capability(capability) {
+        Ok(()) => granted.push(origin),
+        Err(error) => eprintln!("[window] could not let the app page drag the window: {error}"),
     }
 }
 
@@ -5465,8 +5556,15 @@ fn main() {
         .on_page_load(|window, payload| {
             let _ = window
                 .eval("document.addEventListener('contextmenu', e => e.preventDefault(), true)");
-            let on_setup = on_setup_page(window.app_handle(), payload.url());
-            match_title_bar(&window.window(), on_setup);
+            let page = window_page(window.app_handle(), payload.url());
+            match_title_bar(&window.window(), page);
+            if page == WindowPage::OwnedApp
+                && cfg!(target_os = "macos")
+                && payload.event() == tauri::webview::PageLoadEvent::Finished
+            {
+                allow_window_drag(window.app_handle(), payload.url());
+                let _ = window.eval(OVERLAY_TITLE_BAR_PAGE);
+            }
         })
         // Closing the window hides it. A tray application whose window is destroyed on close has a
         // menu item that points at nothing: `get_webview_window` returns None from then on, and the
@@ -5480,11 +5578,12 @@ fn main() {
             // The setup screens follow the system's light and dark, and so does their title bar.
             tauri::WindowEvent::ThemeChanged(_) => {
                 let app = window.app_handle();
-                let on_setup = app
+                if let Some(url) = app
                     .get_webview_window("main")
                     .and_then(|main| main.url().ok())
-                    .is_some_and(|url| on_setup_page(app, &url));
-                match_title_bar(window, on_setup);
+                {
+                    match_title_bar(window, window_page(app, &url));
+                }
             }
             _ => {}
         })
@@ -5506,7 +5605,7 @@ fn main() {
 
             remember_setup_url(app.handle())?;
             if let Some(main) = app.get_webview_window("main") {
-                match_title_bar(&main.as_ref().window(), true);
+                match_title_bar(&main.as_ref().window(), WindowPage::Setup);
             }
             fit_main_window_to_screen(app.handle());
             // Built by `generate_context!`, so the bridge plugin's permissions are compiled in.
