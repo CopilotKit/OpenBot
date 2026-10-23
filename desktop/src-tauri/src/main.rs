@@ -894,15 +894,6 @@ impl ChosenModel {
     ) -> Result<openbot_env::ModelCredential, Problem> {
         let given = |value: Option<String>| value.unwrap_or_default().trim().to_string();
         let saved = self.saved.unwrap_or(false);
-        // TEMPORARY demo diagnosis: which fields arrived, never their values. Remove after.
-        eprintln!(
-            "[debug] model credential: provider={} login={} token_present={} token_len={} saved={:?}",
-            self.provider,
-            self.login,
-            self.token.is_some(),
-            self.token.as_deref().map(str::len).unwrap_or(0),
-            self.saved
-        );
         match (self.provider.as_str(), self.login.as_str()) {
             ("google" | "xai", "oauth") => {
                 let saved = openbot_desktop_lib::provider_oauth::read(root, &self.provider)
