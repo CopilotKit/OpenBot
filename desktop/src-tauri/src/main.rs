@@ -3062,17 +3062,17 @@ fn on_setup_page<R: tauri::Runtime>(app: &tauri::AppHandle<R>, url: &tauri::Url)
 }
 
 /**
-The appearance the setup screens use: dark for now, as a product choice (2026-10-23). Both themes
-exist; the page follows the window's appearance through `prefers-color-scheme`, so `None` here
-makes setup follow the system instead, and `Some(Light)` pins light.
+The appearance the setup screens use: the system's (a product choice, 2026-10-23). Both themes
+exist; the page follows the window's appearance through `prefers-color-scheme`, so `Some(Dark)` or
+`Some(Light)` here pins one instead.
 */
-const SETUP_THEME: Option<tauri::Theme> = Some(tauri::Theme::Dark);
+const SETUP_THEME: Option<tauri::Theme> = None;
 
 /**
 The setup screens' appearance and title bar on setup, and the system's on OpenBot.
 
-The window starts dark and transparent-titled over the setup background (`tauri.conf.json`), so
-the first paint already matches. The same window then navigates to OpenBot, which keeps its own
+The window starts transparent-titled and is given the setup ground for its appearance before the
+first page loads (in `setup`), so the first paint already matches. The same window then navigates to OpenBot, which keeps its own
 light and dark: it gets the system's appearance and title bar back, since a setup-coloured bar
 over it would be a seam.
 */
@@ -5505,6 +5505,9 @@ fn main() {
             )));
 
             remember_setup_url(app.handle())?;
+            if let Some(main) = app.get_webview_window("main") {
+                match_title_bar(&main.as_ref().window(), true);
+            }
             fit_main_window_to_screen(app.handle());
             // Built by `generate_context!`, so the bridge plugin's permissions are compiled in.
             intelligence_bridge::enable(app.handle());
