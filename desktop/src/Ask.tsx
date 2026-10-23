@@ -14,7 +14,7 @@ import { StatusLine } from "./SetupProgress";
 export const PRESET_QUESTIONS = [
   "How many r's are in strawberry?",
   "How many Die Hard movies are there?",
-  "Why are frosted strawberry Pop-Tarts better than brown sugar cinnamon?",
+  "Bulldogs or 'Bama? One word answer",
   "What is 17 times 23?",
 ] as const;
 
