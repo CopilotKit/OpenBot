@@ -35,6 +35,23 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   request for an administrator to switch on a work app, grant it to a Bot, or connect a Shared app's
   team account is kept, with who answered it and when. It starts empty and nothing is backfilled.
 
+### A Bot can choose from a dropdown
+
+A Bot filling in a form in its browser could not set a dropdown (a native `<select>`, such as a CRM's
+Industry or Stage). Typing into one waited until it timed out and was reported as a field that had
+gone from the page, so the Bot took a fresh snapshot and tried the same thing again. Typing into a
+dropdown now chooses the option it names, by the option's label or its value, and the page sees the
+same change a person's choice makes. Text that names no option is refused with a message saying so.
+A page snapshot now lists each dropdown's options and the one it shows, so the Bot can see what it
+may choose and what is already chosen.
+
+### A Bot carries on after a browser step fails
+
+When a click, typed entry or key press the Bot made in its browser failed, the Bot's turn ended on
+the spot: the step showed "Didn't work" and the Bot said nothing more. The failure now reaches the
+Bot like any other result, so it can take a fresh snapshot, try another way, or tell you what
+stopped it. A refused step reads as a refusal the Bot can explain.
+
 ### A Bot can send, draft and reply in Gmail
 
 OpenBot left out every Composio action that takes a file, because a Bot has no way to supply one.
