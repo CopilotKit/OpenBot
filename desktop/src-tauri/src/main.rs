@@ -3079,6 +3079,9 @@ enum WindowPage {
     Setup,
     /// OpenBot served from this machine: its sidebar takes the title bar's place.
     OwnedApp,
+    /// OpenBot served from this machine, from a release whose styles make no room for the window
+    /// buttons: the system's title bar, still in the app's own light or dark.
+    LocalApp,
     /// Anything else, such as an organization's OpenBot: the system's title bar.
     Other,
 }
@@ -3089,10 +3092,30 @@ fn window_page<R: tauri::Runtime>(app: &tauri::AppHandle<R>, url: &tauri::Url) -
     } else if url.scheme() == "http"
         && matches!(url.host_str(), Some("127.0.0.1" | "localhost" | "[::1]"))
     {
-        WindowPage::OwnedApp
+        if app_makes_room_for_window_buttons(&cleanup_root(
+            &app.state::<Shell>(),
+            &stack::default_root(),
+        )) {
+            WindowPage::OwnedApp
+        } else {
+            WindowPage::LocalApp
+        }
     } else {
         WindowPage::Other
     }
+}
+
+/**
+Whether the OpenBot installed under `root` pads its sidebar for the window's buttons.
+
+The overlay title bar needs the page's help: without the room its styles make, the buttons sit on
+the sidebar's name. Releases before that change (v0.2.0 among them) do not have it, so they keep the
+system's title bar. Read from the installed source the app is built from, which is what the page
+is.
+*/
+fn app_makes_room_for_window_buttons(root: &Path) -> bool {
+    std::fs::read_to_string(root.join("app/src/styles.css"))
+        .is_ok_and(|styles| styles.contains("data-desktop-titlebar"))
 }
 
 /**
@@ -3108,17 +3131,23 @@ sidebar makes room for the window buttons and works as the drag handle (`OVERLAY
 Anything else gets the system's bar back, since a page this app did not style cannot make room.
 */
 fn match_title_bar<R: tauri::Runtime>(window: &tauri::Window<R>, page: WindowPage) {
-    let _ = window.set_theme(if page == WindowPage::Setup {
-        SETUP_THEME
-    } else {
-        None
-    });
+    // OpenBot's own page sets the window's appearance to its own light or dark (`APP_THEME_PAGE`);
+    // setting it here as well would undo that on every theme event.
+    match page {
+        WindowPage::Setup => {
+            let _ = window.set_theme(SETUP_THEME);
+        }
+        WindowPage::OwnedApp | WindowPage::LocalApp => {}
+        WindowPage::Other => {
+            let _ = window.set_theme(None);
+        }
+    }
     #[cfg(target_os = "macos")]
     {
         let _ = window.set_title_bar_style(match page {
             WindowPage::Setup => tauri::TitleBarStyle::Transparent,
             WindowPage::OwnedApp => tauri::TitleBarStyle::Overlay,
-            WindowPage::Other => tauri::TitleBarStyle::Visible,
+            WindowPage::LocalApp | WindowPage::Other => tauri::TitleBarStyle::Visible,
         });
         let ground = match SETUP_THEME.map_or_else(|| window.theme().ok(), Some) {
             Some(tauri::Theme::Dark) => SETUP_BACKGROUND_DARK,
@@ -3168,7 +3197,33 @@ const OVERLAY_TITLE_BAR_PAGE: &str = r#"(() => {
   mark();
 })();"#;
 
-/// Lets OpenBot's own page move and zoom the window from its drag handle, and nothing more.
+/**
+Keeps the window's appearance on OpenBot's own light or dark, which it chooses itself (Settings)
+rather than following the system.
+
+MEASURED: with the Mac in dark and OpenBot set to light, the window kept the dark appearance, and
+macOS drew its dark-window outline, a black line, around a light window. The page sets the window's
+theme to its own whenever its `dark` class changes.
+*/
+const APP_THEME_PAGE: &str = r#"(() => {
+  const invoke = window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.invoke;
+  if (!invoke) return;
+  let applied = null;
+  const sync = () => {
+    const theme = document.documentElement.classList.contains("dark") ? "dark" : "light";
+    if (theme === applied) return;
+    applied = theme;
+    invoke("plugin:window|set_theme", { label: "main", value: theme }).catch(() => {});
+  };
+  new MutationObserver(sync).observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ["class"],
+  });
+  sync();
+})();"#;
+
+/// Lets OpenBot's own page move and zoom the window from its drag handle, and set the window's
+/// appearance to its own theme, and nothing more.
 fn allow_window_drag<R: tauri::Runtime>(app: &tauri::AppHandle<R>, url: &tauri::Url) {
     static GRANTED: Mutex<Vec<String>> = Mutex::new(Vec::new());
     let origin = url.origin().ascii_serialization();
@@ -3182,7 +3237,8 @@ fn allow_window_drag<R: tauri::Runtime>(app: &tauri::AppHandle<R>, url: &tauri::
             .local(false)
             .window("main")
             .permission("core:window:allow-start-dragging")
-            .permission("core:window:allow-internal-toggle-maximize");
+            .permission("core:window:allow-internal-toggle-maximize")
+            .permission("core:window:allow-set-theme");
     match app.add_capability(capability) {
         Ok(()) => granted.push(origin),
         Err(error) => eprintln!("[window] could not let the app page drag the window: {error}"),
@@ -5536,10 +5592,7 @@ fn install_menus<R: tauri::Runtime>(
     use tauri::menu::{IconMenuItem, Menu, MenuItem, NativeIcon, PredefinedMenuItem, Submenu};
 
     // The menu bar menu follows the system's appearance; its icons are drawn for each.
-    let dark = app
-        .get_webview_window("main")
-        .and_then(|window| window.theme().ok())
-        == Some(tauri::Theme::Dark);
+    let dark = system_is_dark(app);
     let running = !app.state::<Shell>().children.lock().unwrap().is_empty();
     let dashboard = || {
         intelligence_menu_item(
@@ -5713,6 +5766,27 @@ fn install_menus<R: tauri::Runtime>(
     )?;
     app.set_menu(Menu::with_items(app, &[&openbot, &edit])?)?;
     Ok(())
+}
+
+/**
+Whether the system, rather than any one window, is in dark: the menu bar follows the system, and the
+main window follows OpenBot's own theme once it shows OpenBot.
+*/
+fn system_is_dark<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = app;
+        quiet::command("defaults")
+            .args(["read", "-g", "AppleInterfaceStyle"])
+            .output()
+            .is_ok_and(|output| String::from_utf8_lossy(&output.stdout).trim() == "Dark")
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        app.get_webview_window("main")
+            .and_then(|window| window.theme().ok())
+            == Some(tauri::Theme::Dark)
+    }
 }
 
 /// One item of a menu: ours with an icon, ours without, or one of the system's own.
@@ -5942,12 +6016,15 @@ fn main() {
                 .eval("document.addEventListener('contextmenu', e => e.preventDefault(), true)");
             let page = window_page(window.app_handle(), payload.url());
             match_title_bar(&window.window(), page);
-            if page == WindowPage::OwnedApp
+            if matches!(page, WindowPage::OwnedApp | WindowPage::LocalApp)
                 && cfg!(target_os = "macos")
                 && payload.event() == tauri::webview::PageLoadEvent::Finished
             {
                 allow_window_drag(window.app_handle(), payload.url());
-                let _ = window.eval(OVERLAY_TITLE_BAR_PAGE);
+                let _ = window.eval(APP_THEME_PAGE);
+                if page == WindowPage::OwnedApp {
+                    let _ = window.eval(OVERLAY_TITLE_BAR_PAGE);
+                }
             }
         })
         // Closing the window hides it. A tray application whose window is destroyed on close has a
@@ -6069,6 +6146,22 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn only_an_app_that_makes_room_gets_the_overlay_title_bar() {
+        let root = test_support::temp_root("titlebar-room");
+        assert!(!app_makes_room_for_window_buttons(&root));
+        std::fs::create_dir_all(root.join("app/src")).unwrap();
+        std::fs::write(root.join("app/src/styles.css"), "body {}").unwrap();
+        assert!(!app_makes_room_for_window_buttons(&root));
+        std::fs::write(
+            root.join("app/src/styles.css"),
+            ":root[data-desktop-titlebar=\"overlay\"] [data-slot=\"sidebar-header\"] {}",
+        )
+        .unwrap();
+        assert!(app_makes_room_for_window_buttons(&root));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     use super::*;
     use std::io::{Read, Write};
 
