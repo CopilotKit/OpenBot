@@ -407,6 +407,56 @@ button.another-question:hover:not(:disabled) {
   border-color: var(--grey-600);
 }
 
+/*
+ * Intelligence stopped while another screen is in front: a card that interrupts on purpose. Lilac
+ * when it is waiting on the person, the failure dot when it failed.
+ */
+.local-alert {
+  border: 1px solid var(--border-default);
+  border-radius: var(--r-card);
+  background: var(--surface-container);
+  box-shadow: var(--elevation-md);
+  padding: 20px;
+  margin: 0 0 24px;
+}
+
+.local-alert.needs {
+  border-color: var(--border-action);
+  box-shadow:
+    0 0 0 3px var(--lilac-30),
+    var(--elevation-md);
+}
+
+.local-alert h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.local-alert h2::before {
+  content: "";
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--bad);
+}
+
+.local-alert.needs h2::before {
+  background: var(--border-action);
+}
+
+.local-alert p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.local-alert .row {
+  margin-top: 16px;
+}
+
 /* Local Intelligence setting up behind the screen in front: one line. */
 .local-status {
   font-size: 14px;

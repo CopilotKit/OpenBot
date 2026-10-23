@@ -823,19 +823,20 @@ test("the local sequence starts when installation completes and survives the pro
   expect(
     invokeCalls.find((call) => call.command === "set_up_local_eval")?.args,
   ).toMatchObject({ root: "/tmp/local-eval-overlap" });
-  expect(view.getByRole("status").textContent).toMatch(
-    /^Setting up Intelligence · \d+s elapsed$/,
-  );
+  // Working behind this screen says nothing on it: its progress has its own step.
+  expect(view.queryByText(/Setting up Intelligence/)).toBeNull();
+  expect(view.queryByRole("alert", { name: "Intelligence" })).toBeNull();
   // A local first run has nothing behind this screen to go back to.
   expect(view.queryByRole("button", { name: "Back" })).toBeNull();
   await userEvent.click(await view.findByRole("radio", { name: /OpenAI/ }));
   await act(async () => setUp.resolve(localStatus("starting", "valid")));
   await waitFor(() =>
-    expect(view.getByRole("status").textContent).toMatch(
-      /^Connecting OpenBot · /,
-    ),
+    expect(localSequence()).toEqual([
+      "set_up_local_eval",
+      "connect_local_eval",
+    ]),
   );
-  expect(localSequence()).toEqual(["set_up_local_eval", "connect_local_eval"]);
+  expect(view.queryByText(/Connecting OpenBot/)).toBeNull();
   expect(invokeCalls.some((call) => call.command === "cancel_local_eval")).toBe(
     false,
   );
@@ -1151,9 +1152,8 @@ test("Continue after Intelligence is ready starts OpenBot with the chosen model"
   const view = await renderApp();
   await installLocal(view);
   await view.findByRole("heading", { name: "Connect your AI" });
-  await waitFor(() =>
-    expect(view.getByRole("status").textContent).toBe("Intelligence is ready."),
-  );
+  await waitFor(() => expect(localSequence()).toContain("run_local_eval"));
+  expect(view.queryByRole("alert", { name: "Intelligence" })).toBeNull();
   expect(localSequence()).not.toContain("start_stack");
   await chooseOpenAi(view);
   await askTheTest(view);
@@ -1260,10 +1260,11 @@ test("a blocked setup stops at its row in plain words and Retry resumes there", 
   const view = await renderApp();
   await installLocal(view);
   await view.findByRole("heading", { name: "Connect your AI" });
-  await waitFor(() =>
-    expect(view.getByRole("status").textContent).toBe(
-      "Intelligence cannot start until the software it runs on is running.",
-    ),
+  // A stop interrupts the screen in front at once, in a card with its reason and Retry.
+  const alert = await view.findByRole("alert", { name: "Intelligence" });
+  expect(alert.textContent).toContain("Intelligence stopped");
+  expect(alert.textContent).toContain(
+    "Intelligence cannot start until the software it runs on is running.",
   );
   await chooseOpenAi(view);
   await view.findByRole("heading", { name: "Getting ready" });
