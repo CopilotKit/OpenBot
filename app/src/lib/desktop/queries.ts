@@ -44,7 +44,7 @@ export type IntelligenceReadiness =
 
 export const desktopKeys = {
   all: ["desktop"] as const,
-  status: ["desktop", "status"] as const,
+  status: (memory: boolean) => ["desktop", "status", { memory }] as const,
   intelligence: ["desktop", "intelligence"] as const,
 };
 
@@ -60,12 +60,17 @@ export async function invokeDesktop<T>(
   return (await shell.invoke(`${PLUGIN}|${command}`, args)) as T;
 }
 
-/** Read every few seconds while the page shows: memory moves. */
-export function desktopStatusQueryOptions() {
+/**
+ * What runs here, in two reads. Without `memory` it answers in milliseconds, with every container
+ * listed and none measured, so the page draws at once. With `memory` it takes about two seconds,
+ * because Docker samples before it reports, and fills the figures in; that one repeats while the page
+ * shows, since memory moves.
+ */
+export function desktopStatusQueryOptions({ memory }: { memory: boolean }) {
   return queryOptions({
-    queryKey: desktopKeys.status,
-    queryFn: (): Promise<DesktopStatus> => invokeDesktop("status"),
-    refetchInterval: 5000,
+    queryKey: desktopKeys.status(memory),
+    queryFn: (): Promise<DesktopStatus> => invokeDesktop("status", { memory }),
+    refetchInterval: memory ? 5000 : false,
   });
 }
 

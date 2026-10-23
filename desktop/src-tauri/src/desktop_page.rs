@@ -37,9 +37,13 @@ fn appearance(window: tauri::Window, dark: bool) -> Result<(), String> {
         .map_err(|error| error.to_string())
 }
 
+/// `memory` false answers in milliseconds without container memory; see `read_desktop_status`.
 #[tauri::command]
-async fn status(app: tauri::AppHandle) -> Result<crate::DesktopStatus, String> {
-    crate::desktop_status(app).await
+async fn status(
+    app: tauri::AppHandle,
+    memory: Option<bool>,
+) -> Result<crate::DesktopStatus, String> {
+    crate::desktop_status(app, memory).await
 }
 
 #[tauri::command]
