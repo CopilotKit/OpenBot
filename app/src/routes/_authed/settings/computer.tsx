@@ -291,7 +291,7 @@ function MachineSection({
             </ItemTitle>
           </ItemContent>
           <ItemActions>
-            <span className="text-muted-foreground text-xs">
+            <span className="text-muted-foreground text-sm">
               {status.engine ? "Running" : "Not running"}
             </span>
           </ItemActions>
@@ -346,7 +346,7 @@ function PartRows({
           <ItemTitle className="font-normal">{part.name}</ItemTitle>
         </ItemContent>
         <ItemActions>
-          <span className="text-muted-foreground text-xs tabular-nums">
+          <span className="text-muted-foreground text-sm tabular-nums">
             {part.memoryBytes === null ? "—" : formatBytes(part.memoryBytes)}
           </span>
         </ItemActions>

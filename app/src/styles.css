@@ -15,6 +15,16 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/*
+ * Small light text on dark keeps macOS's own smoothing. The root's `antialiased` (grayscale) is right
+ * for dark text on light, but it turns off the slight thickening light-on-dark text gets, and small
+ * text in the dark theme read thin and wiry.
+ */
+.dark .antialiased {
+  -webkit-font-smoothing: auto;
+  -moz-osx-font-smoothing: auto;
+}
+
 :root {
   /*
    * The CopilotKit visual system (the CopilotCloud tokens the desktop setup window uses), mapped
