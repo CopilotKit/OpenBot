@@ -8,7 +8,7 @@ export const Route = createFileRoute("/_authed/settings")({
 
 function RouteComponent() {
   return (
-    <SidebarShell width="300px">
+    <SidebarShell name="settings" width="300px">
       <SettingsSidebar />
       <main className="flex-1">
         <Outlet />
