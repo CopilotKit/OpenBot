@@ -3,7 +3,8 @@
 @import "shadcn/tailwind.css";
 /* Composer chips/dropdown. Reads the shadcn tokens declared below, so it themes itself. */
 @import "prompt-area/tailwind.css";
-@import "@fontsource-variable/inter";
+@import "@fontsource-variable/plus-jakarta-sans";
+@import "@fontsource-variable/spline-sans-mono";
 
 /*
  * Streamdown draws a Bot's prose, and Tailwind only ships classes it can see used. Its markup lives
@@ -15,76 +16,145 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
+  /*
+   * The CopilotKit visual system (the CopilotCloud tokens the desktop setup window uses), mapped
+   * onto shadcn's names so every component takes it without being edited. Light is the theme's own:
+   * the lavender-gray ground, white cards, near-black actions, white-edged frosted sidebar, lilac
+   * focus. Dark is an implementation default on the brand's near-black #010507.
+   */
   color-scheme: light;
-  --background: oklch(0.985 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.96 0 0);
-  --muted-foreground: oklch(0.5 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
+  --background: #dedee9;
+  --foreground: #010507;
+  --card: #ffffff;
+  --card-foreground: #010507;
+  --popover: #ffffff;
+  --popover-foreground: #010507;
+  --primary: #010507;
+  --primary-foreground: #ffffff;
+  --secondary: #f0f0f4;
+  --secondary-foreground: #010507;
+  --muted: #e9e9ef;
+  --muted-foreground: #57575b;
+  --accent: rgba(255, 255, 255, 0.7);
+  --accent-foreground: #010507;
   --destructive: oklch(0.577 0.245 27.325);
-  --success: oklch(0.6 0.118 184.704);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
+  --success: #189370;
+  --border: #dbdbe5;
+  --input: #dbdbe5;
+  --ring: #bec2ff;
+  --chart-1: #bec2ff;
+  --chart-2: #85ecce;
+  --chart-3: #ffac4d;
+  --chart-4: #189370;
+  --chart-5: #57575b;
   --radius: 0.5rem;
-  --sidebar: oklch(0.97 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.5 0 0);
-  --sidebar-accent: oklch(0.95 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --sidebar: rgba(255, 255, 255, 0.5);
+  --sidebar-foreground: #010507;
+  --sidebar-primary: #010507;
+  --sidebar-primary-foreground: #57575b;
+  --sidebar-accent: rgba(255, 255, 255, 0.7);
+  --sidebar-accent-foreground: #010507;
+  --sidebar-border: #ffffff;
+  --sidebar-ring: #bec2ff;
 }
 
 .dark {
   color-scheme: dark;
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --success: oklch(0.704 0.14 182.503);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --background: #010507;
+  --foreground: #f7f7f9;
+  --card: #14151b;
+  --card-foreground: #f7f7f9;
+  --popover: #14151b;
+  --popover-foreground: #f7f7f9;
+  --primary: #f7f7f9;
+  --primary-foreground: #010507;
+  --secondary: rgba(255, 255, 255, 0.08);
+  --secondary-foreground: #f7f7f9;
+  --muted: rgba(255, 255, 255, 0.06);
+  --muted-foreground: #afafb7;
+  --accent: rgba(255, 255, 255, 0.08);
+  --accent-foreground: #f7f7f9;
+  --destructive: #fa5f67;
+  --success: #85ecce;
+  --border: rgba(255, 255, 255, 0.1);
+  --input: rgba(255, 255, 255, 0.12);
+  --ring: #bec2ff;
+  --chart-1: #bec2ff;
+  --chart-2: #85ecce;
+  --chart-3: #ffac4d;
+  --chart-4: #fff388;
+  --chart-5: #afafb7;
+  --sidebar: rgba(255, 255, 255, 0.04);
+  --sidebar-foreground: #f7f7f9;
+  --sidebar-primary: #bec2ff;
+  --sidebar-primary-foreground: #010507;
+  --sidebar-accent: rgba(255, 255, 255, 0.08);
+  --sidebar-accent-foreground: #f7f7f9;
+  --sidebar-border: rgba(255, 255, 255, 0.1);
+  --sidebar-ring: #bec2ff;
+}
+
+/*
+ * The theme's ambient colour fields, behind everything, so the frosted sidebar has something to
+ * frost. Static radial gradients rather than blurred discs: a filtered layer repaints whenever
+ * anything above it changes, and a chat streams text constantly.
+ */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(
+      circle 24vw at 87.7vw 16.3vw,
+      rgba(255, 172, 77, 0.14),
+      transparent
+    ),
+    radial-gradient(
+      circle 30vw at 67.7vw -4.2vw,
+      #c9c9da 15%,
+      rgba(201, 201, 218, 0)
+    ),
+    radial-gradient(
+      circle 30vw at 56.5vw 70vw,
+      #f3f3fc 15%,
+      rgba(243, 243, 252, 0)
+    ),
+    radial-gradient(
+      circle 24vw at 24.4vw 38.5vw,
+      rgba(255, 243, 136, 0.22),
+      transparent
+    ),
+    radial-gradient(
+      circle 24vw at 1.3vw 71.3vw,
+      rgba(255, 172, 77, 0.14),
+      transparent
+    );
+}
+
+.dark body::before {
+  background:
+    radial-gradient(
+      circle 24vw at 87.7vw 16.3vw,
+      rgba(190, 194, 255, 0.12),
+      transparent
+    ),
+    radial-gradient(
+      circle 30vw at 67.7vw -4.2vw,
+      rgba(190, 194, 255, 0.08),
+      transparent
+    ),
+    radial-gradient(
+      circle 24vw at 24.4vw 38.5vw,
+      rgba(133, 236, 206, 0.07),
+      transparent
+    ),
+    radial-gradient(
+      circle 24vw at 1.3vw 71.3vw,
+      rgba(255, 172, 77, 0.06),
+      transparent
+    );
 }
 
 * {
@@ -98,7 +168,8 @@ body {
   min-height: 100vh;
   background: var(--background);
   color: var(--foreground);
-  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  font-family:
+    "Plus Jakarta Sans Variable", ui-sans-serif, system-ui, sans-serif;
 }
 
 /*
@@ -134,7 +205,9 @@ body {
   --text-3xl: 1.7578125rem; /* 28.125px */
   --text-4xl: 2.109375rem; /* 33.75px */
   --font-heading: var(--font-sans);
-  --font-sans: "Inter Variable", sans-serif;
+  --font-sans: "Plus Jakarta Sans Variable", sans-serif;
+  --font-mono:
+    "Spline Sans Mono Variable", ui-monospace, SFMono-Regular, monospace;
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
