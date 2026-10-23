@@ -55,7 +55,7 @@ export function elapsed(seconds: number): string {
     : `${minutes}:${rest}`;
 }
 
-const actionCount = (actions: number) =>
+export const actionCount = (actions: number) =>
   `${actions} ${actions === 1 ? "action" : "actions"}`;
 const phraseCount = (phrases: number) =>
   `${phrases} narrated ${phrases === 1 ? "phrase" : "phrases"}`;
@@ -144,7 +144,7 @@ export type Recording = ReturnType<typeof useRecording>;
  * said to be saved; the fifth saw one of narration alone said to hold nothing, from the only count the page had then,
  * the actions it read while the recording ran.
  */
-function stoppedRecording(
+export function stoppedRecording(
   phase: LauncherState["phase"],
   lastStopped: LauncherState["lastStopped"],
 ) {
@@ -155,7 +155,7 @@ function stoppedRecording(
   };
 }
 
-type Stopped = NonNullable<ReturnType<typeof stoppedRecording>>;
+export type Stopped = NonNullable<ReturnType<typeof stoppedRecording>>;
 
 /** What a recording holds, which the person can go by next time: the browser's own pages (a new tab, its settings)
  * are never recorded. */
@@ -169,14 +169,14 @@ function heldIn(stopped: Stopped): string {
     : actionCount(stopped.actions);
 }
 
-/** What the page says once Stop ended a recording, naming it. */
-function stoppedSentence(stopped: Stopped): string {
+/** What the page says once Stop ended a recording, naming it. The sidebar's Browser button says the same. */
+export function stoppedSentence(stopped: Stopped): string {
   return stopped.empty
     ? `Nothing was recorded in “${stopped.title}”. ${WHAT_IT_RECORDS}`
     : `Saved “${stopped.title}” to your Learning space: ${heldIn(stopped)}.`;
 }
 
-function StoppedIcon({
+export function StoppedIcon({
   stopped,
   className,
 }: {

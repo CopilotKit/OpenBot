@@ -1,15 +1,42 @@
 import type { RealBrowser } from "@openbot/shared/openbot-browser";
 import type { RecorderActivity } from "@openbot/shared/recorder-api";
+import type { RecorderPageState } from "@openbot/shared/recorder-page";
 import { IconBrowser } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import type { ReactNode } from "react";
+import { type ReactNode, useEffect, useState } from "react";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { SidebarMenuButton, SidebarMenuItem } from "@/components/ui/sidebar";
 import { toast } from "@/components/ui/toast";
 import { openBrowserMutationOptions } from "@/lib/browser/mutations";
 import { browserStateQueryOptions } from "@/lib/browser/queries";
+import {
+  CONFIRM_WINDOW_MS,
+  canMessageExtensions,
+  type RecorderHere,
+  type RecorderStore,
+  recorderStoreHere,
+} from "@/lib/recorder/bridge";
+import {
+  connectRecorderHereMutationOptions,
+  recordHereMutationOptions,
+  stopHereMutationOptions,
+} from "@/lib/recorder/mutations";
+import {
+  recorderConnectionsQueryOptions,
+  recorderHereQueryOptions,
+} from "@/lib/recorder/queries";
 import { queryClient } from "@/query-client";
 import { elapsed, RecordingMark, useSecondsSince } from "./recording";
+import {
+  type ConnectProgress,
+  ConnectHerePanel,
+  RecordHerePanel,
+} from "./recorder-here-popover";
 
 const BUTTON_CLASS = "hover:bg-foreground/5 h-10";
 
@@ -17,31 +44,90 @@ const BUTTON_CLASS = "hover:bg-foreground/5 h-10";
  * The sidebar's Browser button, beside Bots, Capabilities and Connections: the person's own browser, with the Recorder
  * in it, in one click.
  *
- * Where the browser is a window on the person's desktop (OpenBot Desktop, `shows: "native"`), the click opens it, or
- * brings it to the front, and leaves the person where they are in OpenBot: they record with the Recorder's own button in
- * that window's toolbar. That window is the person's own everyday Chrome or Edge once the Recorder is in it, and until
- * then, where the Recorder is published, the click opens its store page there for them to add it. Where it is a browser
- * in the page (hosted OpenBot, `shows: "screen"`), the click takes them to the Browser page, which is the browser.
+ * Where OpenBot is open in Chrome or Edge, that browser is the person's own, and the button works with it
+ * (`RecorderHere`): with the Recorder in it and connected to this OpenBot, the click opens a popover with Record and
+ * Stop, which go to that Recorder; with the Recorder in it but not connected here, the click connects it, as Settings,
+ * Browsers does, and the popover follows; with no Recorder in it, the click opens the Recorder's store page there in a
+ * new tab (once the Recorder is published in that store).
  *
- * While any of the person's Recorders records (`activity`: the OpenBot browser's, or one in their everyday browser),
- * the button carries a red dot either way, named for the recording.
+ * Everywhere else (OpenBot Desktop's own app window, Safari, Firefox), as before. Where the browser is a window on the
+ * person's desktop (OpenBot Desktop, `shows: "native"`), the click opens it, or brings it to the front, and leaves the
+ * person where they are in OpenBot: they record with the Recorder's own button in that window's toolbar. That window
+ * is the person's own everyday Chrome or Edge once the Recorder is in it, and until then, where the Recorder is
+ * published, the click opens its store page there for them to add it. Where it is a browser in the page (hosted
+ * OpenBot, `shows: "screen"`), the click takes them to the Browser page, which is the browser.
  *
- * Drawn only once the server has said OpenBot can run a browser for this person (`available`). While it is asked, and
- * when it cannot be asked, there is no button, rather than one that opens a page saying there is nothing there.
+ * While any of the person's Recorders records (`activity`: the OpenBot browser's, or one in their everyday browser, or
+ * the one in this browser, read from it directly), the button carries a red dot either way, named for the recording.
+ *
+ * Drawn only once the server has said OpenBot can run a browser for this person (`available`), and, in Chrome or Edge,
+ * once this browser has said whether the Recorder is in it. While either is asked, and when the server cannot be asked,
+ * there is no button, rather than one that opens a page saying there is nothing there or changes what it is a moment
+ * later.
  */
 export function BrowserNavItem() {
   const state = useQuery(browserStateQueryOptions());
-  if (state.isPending || !state.data?.available) return null;
+  const ids = useRecorderIds();
+  const here = useRecorderHere(ids);
+  if (state.isPending || !state.data?.available || here === undefined)
+    return null;
+  const activity = state.data.activity;
+  // Elsewhere, as before. A server from before `shows` only had the Browser page, so it keeps leading there.
   return (
     <SidebarMenuItem>
-      {/* A server from before `shows` only had the Browser page, so it keeps leading there. */}
-      {state.data.shows === "native" ? (
-        <OpenWindowButton activity={state.data.activity} />
+      {here.kind === "connected" || here.kind === "unconnected" ? (
+        <RecorderHereButton activity={activity} here={here} ids={ids ?? []} />
+      ) : here.kind === "absent" ? (
+        <StorePageLink activity={activity} store={here.store} url={here.page} />
+      ) : state.data.shows === "native" ? (
+        <OpenWindowButton activity={activity} />
       ) : (
-        <BrowserPageLink activity={state.data.activity} />
+        <BrowserPageLink activity={activity} />
       )}
     </SidebarMenuItem>
   );
+}
+
+const UNREACHABLE: RecorderHere = { kind: "unreachable" };
+
+/**
+ * Whether this page is somewhere the Recorder could be: it can message an extension now, or it is in Chrome or Edge on a
+ * computer, where adding the Recorder gives the page that at once. Read at every render, because adding the Recorder
+ * changes the first while the page is open.
+ */
+function mayHoldRecorder(): boolean {
+  return canMessageExtensions() || recorderStoreHere() !== null;
+}
+
+/**
+ * The Recorder ids this OpenBot trusts, from the server, as Settings, Browsers asks for them: `undefined` while asked,
+ * and `null` where the Recorder cannot be (no ids are asked for), or the server could not say. They are OpenBot's
+ * configuration, so they are not asked again each time the person comes back to the tab.
+ */
+function useRecorderIds(): readonly string[] | null | undefined {
+  const mayHold = mayHoldRecorder();
+  const connections = useQuery({
+    ...recorderConnectionsQueryOptions(),
+    enabled: mayHold,
+    staleTime: Number.POSITIVE_INFINITY,
+  });
+  if (!mayHold || connections.isError) return null;
+  return connections.data?.extensionIds;
+}
+
+/**
+ * The Recorder in the browser OpenBot is open in: `undefined` while this browser is asked, and `unreachable` where
+ * OpenBot cannot work with it, so the button is what it was before.
+ */
+function useRecorderHere(
+  ids: readonly string[] | null | undefined,
+): RecorderHere | undefined {
+  const here = useQuery({
+    ...recorderHereQueryOptions(ids ?? []),
+    enabled: !!ids,
+  });
+  if (ids === null) return UNREACHABLE;
+  return here.data;
 }
 
 /** The one toast a refused open says itself in. */
@@ -119,6 +205,217 @@ function OpenWindowButton({ activity }: { activity?: RecorderActivity }) {
         ) : null}
       </BrowserLabel>
     </SidebarMenuButton>
+  );
+}
+
+const STORE_NAMES: Record<RecorderStore, string> = {
+  chrome: "Google Chrome",
+  edge: "Microsoft Edge",
+};
+
+/**
+ * What the person is told when the click opened the Recorder's store page in a new tab of the browser OpenBot is open
+ * in: adding it there is what lets them record from here. Once it is added, the same click connects it.
+ */
+export function storeTabSentence(store: RecorderStore): string {
+  return `The OpenBot Recorder's page is open in a new tab. Add it to ${STORE_NAMES[store]} to record from OpenBot.`;
+}
+
+/**
+ * Chrome or Edge with no Recorder in it: a link to the Recorder's store page there, in a new tab, because it goes
+ * somewhere (a link opens it from the keyboard as from the mouse, and no popup blocker stops it). The new tab takes the
+ * person's attention, so a short note waits in OpenBot for when they come back.
+ */
+function StorePageLink({
+  activity,
+  store,
+  url,
+}: {
+  activity?: RecorderActivity;
+  store: RecorderStore;
+  url: string;
+}) {
+  const recording = useRecordingLabel(activity);
+  return (
+    <SidebarMenuButton
+      className={BUTTON_CLASS}
+      render={
+        <a
+          href={url}
+          onClick={() =>
+            toast.add({
+              // One at a time: a second click replaces the note rather than stacking another under it.
+              id: STORE_TOAST,
+              title: storeTabSentence(store),
+              type: "info",
+            })
+          }
+          rel="noopener noreferrer"
+          target="_blank"
+        />
+      }
+      tooltip={recordingTooltip(recording)}
+    >
+      <BrowserLabel>
+        {recording ? <RecordingDot {...recording} /> : null}
+      </BrowserLabel>
+    </SidebarMenuButton>
+  );
+}
+
+type ConnectedState = Extract<RecorderPageState, { connected: true }>;
+
+/**
+ * What the red dot follows while the Recorder in this browser is connected here: its own report when it records, read
+ * from it directly so the dot is there at once; otherwise the server's `activity`, which covers the person's other
+ * Recorders. Except a recording this Recorder has already stopped, which the server may not have heard of yet.
+ */
+function dotFrom(
+  local: ConnectedState | undefined,
+  activity: RecorderActivity | undefined,
+): RecorderActivity | undefined {
+  if (local && local.phase !== "idle") return local;
+  if (
+    activity?.recordingId !== undefined &&
+    activity.recordingId === local?.lastStopped?.recordingId
+  )
+    return undefined;
+  return activity;
+}
+
+/**
+ * Where a connect the click started has got to, from its mutation, while the Recorder does not yet say it is connected:
+ * null when none is under way, or when one finished with no Connect page to wait for (a trusted OpenBot, connected at
+ * once: the mutation is pending until the Recorder has been asked again, so by then it says connected).
+ */
+function connectProgress(
+  connect: {
+    isPending: boolean;
+    error: Error | null;
+    data?: { awaitingConfirmation: boolean };
+  },
+  expired: boolean,
+): ConnectProgress | null {
+  if (connect.isPending) return { state: "sending" };
+  if (connect.error) return { state: "failed", message: connect.error.message };
+  if (!connect.data?.awaitingConfirmation) return null;
+  return expired ? { state: "expired" } : { state: "awaiting" };
+}
+
+/**
+ * The Recorder in the browser OpenBot is open in, in a popover from the Browser button. Connected to this OpenBot:
+ * Record and Stop, through `openbot.record` and `openbot.stop`. Not connected here: the click that opens the popover
+ * connects it, as Settings, Browsers does, and the popover says how that goes until the Recorder answers connected,
+ * when it shows Record. A trusted OpenBot (the organization's own, or OpenBot Desktop) is connected at once; anywhere
+ * else the Recorder shows its Connect page, and the person confirms there.
+ *
+ * Base UI makes the button the popover's trigger (`aria-expanded`, `aria-haspopup`), moves focus into the popover as it
+ * opens and back to the button as it closes, and closes it on Escape or a press outside.
+ */
+function RecorderHereButton({
+  activity,
+  here,
+  ids,
+}: {
+  activity?: RecorderActivity;
+  here: Extract<RecorderHere, { kind: "connected" | "unconnected" }>;
+  ids: readonly string[];
+}) {
+  const [open, setOpen] = useState(false);
+  const connect = useMutation(connectRecorderHereMutationOptions(queryClient));
+  const record = useMutation(recordHereMutationOptions(queryClient));
+  const stop = useMutation(stopHereMutationOptions(queryClient));
+  const [expired, setExpired] = useState(false);
+  const connected = here.kind === "connected";
+  const progress = connected ? null : connectProgress(connect, expired);
+  const awaiting = progress?.state === "awaiting";
+  // Asked every 2 s while the person confirms the connect in the Recorder's own tab, as Settings, Browsers asks.
+  useQuery({
+    ...recorderHereQueryOptions(ids, { awaiting }),
+    enabled: awaiting,
+  });
+
+  useEffect(() => {
+    if (!awaiting) return;
+    const timer = setTimeout(() => setExpired(true), CONFIRM_WINDOW_MS);
+    return () => clearTimeout(timer);
+  }, [awaiting]);
+
+  // Connected: the connect is over, and a later one (after a Disconnect) starts afresh.
+  const { reset } = connect;
+  useEffect(() => {
+    if (!connected) return;
+    reset();
+    setExpired(false);
+  }, [connected, reset]);
+
+  function startConnect() {
+    setExpired(false);
+    connect.mutate(here.id);
+  }
+
+  const recording = useRecordingLabel(
+    dotFrom(connected ? here.state : undefined, activity),
+  );
+  return (
+    <Popover
+      onOpenChange={(next) => {
+        setOpen(next);
+        // The click that opens it connects the Recorder, unless a connect is already under way or has said why not.
+        if (next && !connected && progress === null) startConnect();
+        // A refusal is about the last Record or Stop; the next time the popover opens it starts clean.
+        if (!next) {
+          record.reset();
+          stop.reset();
+        }
+      }}
+      open={open}
+    >
+      <PopoverTrigger
+        render={
+          <SidebarMenuButton
+            className={BUTTON_CLASS}
+            tooltip={recordingTooltip(recording)}
+          />
+        }
+      >
+        <BrowserLabel>
+          {recording ? <RecordingDot {...recording} /> : null}
+        </BrowserLabel>
+      </PopoverTrigger>
+      {/* Above the button and as wide as it, as the account menu below it opens; never narrower than a task name
+       * needs, which a collapsed sidebar's icon would make it. */}
+      <PopoverContent
+        align="start"
+        className="w-(--anchor-width) min-w-72"
+        side="top"
+        sideOffset={8}
+      >
+        {connected ? (
+          <RecordHerePanel
+            controls={{
+              record: (title) => {
+                stop.reset();
+                record.mutate({ id: here.id, title });
+              },
+              recordPending: record.isPending,
+              stop: () => {
+                record.reset();
+                stop.mutate(here.id);
+              },
+              stopPending: stop.isPending,
+              error: record.error ?? stop.error,
+            }}
+            state={here.state}
+          />
+        ) : (
+          <ConnectHerePanel
+            connect={startConnect}
+            progress={progress ?? { state: "idle" }}
+          />
+        )}
+      </PopoverContent>
+    </Popover>
   );
 }
 
