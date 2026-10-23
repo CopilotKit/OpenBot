@@ -305,6 +305,21 @@ test("setup that needs the agreement shows it, and only Accept sets up again wit
   ).toEqual([null, "developer-edition-2026-10-01-web"]);
 });
 
+test("an acceptance setup does not take is said once, not offered again", async () => {
+  invokeHandler = answers({
+    set_up_local_eval: [blockedOnTerms, blockedOnTerms],
+    local_eval_terms: [requiredTerms, requiredTerms],
+    cancel_local_eval: [null],
+  });
+  const screen = view();
+  await userEvent.click(await screen.findByRole("button", { name: "Accept" }));
+  await screen.findByText(/Intelligence did not take the acceptance/);
+  expect(screen.queryByRole("button", { name: "Accept" })).toBeNull();
+  expect(
+    invokeCalls.filter((call) => call.command === "set_up_local_eval"),
+  ).toHaveLength(2);
+});
+
 test("no build sends the person to a terminal", async () => {
   for (const [blocked, terms] of [
     [blockedOnTerms, requiredTerms],
