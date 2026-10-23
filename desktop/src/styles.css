@@ -90,8 +90,13 @@ body {
 
 /*
  * The six blurred colour fields behind everything: the signature depth cue, without which the
- * ground reads flat. Positions and sizes are the CopilotCloud frame's (1440 wide), scaled to the
- * window so they sit in the same places at 1000 wide; colours and blur are as given.
+ * ground reads flat. Positions, sizes and colours are the CopilotCloud frame's (1440 wide), scaled
+ * to the window so they sit in the same places at 1000 wide.
+ *
+ * MEASURED: drawn as six discs under `filter: blur(103px)`, the window felt laggy. WebKit repaints
+ * a filtered layer whenever anything above it changes, and the progress spinners and elapsed
+ * counters change every frame and every second. Each field is now a radial gradient with the same
+ * centre and a soft edge as wide as that blur, painted once with the page.
  */
 .backdrop {
   position: fixed;
@@ -99,55 +104,13 @@ body {
   overflow: hidden;
   pointer-events: none;
   z-index: 0;
-}
-
-.backdrop span {
-  position: absolute;
-  border-radius: 50%;
-  filter: blur(103px);
-}
-
-.backdrop span:nth-child(1) {
-  width: 31vw;
-  height: 31vw;
-  left: 72.2vw;
-  top: 0.8vw;
-  background: rgba(255, 172, 77, 0.2);
-}
-.backdrop span:nth-child(2) {
-  width: 42.3vw;
-  height: 42.3vw;
-  left: 93vw;
-  top: 43.4vw;
-  background: #c9c9da;
-}
-.backdrop span:nth-child(3) {
-  width: 42.3vw;
-  height: 42.3vw;
-  left: 46.5vw;
-  top: -25.3vw;
-  background: #c9c9da;
-}
-.backdrop span:nth-child(4) {
-  width: 42.3vw;
-  height: 42.3vw;
-  left: 35.3vw;
-  top: 48.8vw;
-  background: #f3f3fc;
-}
-.backdrop span:nth-child(5) {
-  width: 31vw;
-  height: 31vw;
-  left: 8.9vw;
-  top: 23vw;
-  background: rgba(255, 243, 136, 0.3);
-}
-.backdrop span:nth-child(6) {
-  width: 31vw;
-  height: 31vw;
-  left: -14.2vw;
-  top: 55.8vw;
-  background: rgba(255, 172, 77, 0.2);
+  background:
+    radial-gradient(circle 24vw at 87.7vw 16.3vw, rgba(255, 172, 77, 0.14), transparent),
+    radial-gradient(circle 30vw at 114.2vw 64.6vw, #c9c9da 15%, rgba(201, 201, 218, 0)),
+    radial-gradient(circle 30vw at 67.7vw -4.2vw, #c9c9da 15%, rgba(201, 201, 218, 0)),
+    radial-gradient(circle 30vw at 56.5vw 70vw, #f3f3fc 15%, rgba(243, 243, 252, 0)),
+    radial-gradient(circle 24vw at 24.4vw 38.5vw, rgba(255, 243, 136, 0.22), transparent),
+    radial-gradient(circle 24vw at 1.3vw 71.3vw, rgba(255, 172, 77, 0.14), transparent);
 }
 
 /*
@@ -306,13 +269,22 @@ button {
   color: var(--text-invert);
   cursor: pointer;
   transition:
-    background 0.15s ease,
-    border-color 0.15s ease,
-    color 0.15s ease;
+    background-color 80ms ease,
+    border-color 80ms ease,
+    color 80ms ease;
 }
 
 button:hover:not(:disabled) {
   background: var(--grey-900);
+}
+
+/*
+ * Pressed is instant. With only a hover fade, nothing changed at the moment of the press, and the
+ * click read as arriving late.
+ */
+button:active:not(:disabled) {
+  transform: translateY(1px);
+  transition: none;
 }
 
 button:disabled {
@@ -330,6 +302,10 @@ button.quiet {
 button.quiet:hover:not(:disabled) {
   background: var(--surface-hovered);
   border-color: var(--grey-600);
+}
+
+button.quiet:active:not(:disabled) {
+  background: var(--grey-200);
 }
 
 button.quiet:disabled,
@@ -508,9 +484,17 @@ button.text-link.change-provider {
   background: var(--white-65);
   cursor: pointer;
   transition:
-    border-color 0.15s ease,
-    background 0.15s ease,
-    box-shadow 0.15s ease;
+    border-color 80ms ease,
+    background-color 80ms ease,
+    box-shadow 80ms ease;
+}
+
+.tile:active,
+button.tile:active:not(:disabled) {
+  transform: none;
+  background: var(--surface-container);
+  border-color: var(--border-action);
+  transition: none;
 }
 
 .tile:hover,
