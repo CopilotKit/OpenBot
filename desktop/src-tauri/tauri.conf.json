@@ -17,7 +17,9 @@
         "height": 800,
         "minWidth": 720,
         "minHeight": 560,
-        "resizable": true
+        "resizable": true,
+        "titleBarStyle": "Transparent",
+        "backgroundColor": "#dedee9"
       }
     ],
     "security": { "csp": null }

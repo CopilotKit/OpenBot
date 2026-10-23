@@ -2,6 +2,8 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { isShuttingDownPage, ShuttingDownWindow } from "./ShuttingDown";
+import "@fontsource-variable/plus-jakarta-sans";
+import "@fontsource-variable/spline-sans-mono";
 import "./styles.css";
 
 const root = document.getElementById("root");
@@ -11,6 +13,15 @@ if (!root)
 // Sent here by Quit: only the Shutting down screen, so none of setup's launch checks run again.
 createRoot(root).render(
   <StrictMode>
+    {/* The six blurred colour fields every screen sits on; see `.backdrop` in styles.css. */}
+    <div className="backdrop" aria-hidden="true">
+      <span />
+      <span />
+      <span />
+      <span />
+      <span />
+      <span />
+    </div>
     {isShuttingDownPage(window.location.hash) ? (
       <ShuttingDownWindow />
     ) : (

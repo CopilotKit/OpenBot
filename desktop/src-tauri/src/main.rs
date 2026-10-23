@@ -3048,6 +3048,30 @@ fn show_setup<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), String>
         .map_err(|error| format!("could not go back to setup: {error}"))
 }
 
+/// The setup screens' background, which the macOS title bar takes while they show.
+const SETUP_BACKGROUND: tauri::window::Color = tauri::window::Color(0xde, 0xde, 0xe9, 0xff);
+
+/**
+The title bar is the setup screen's own colour on setup, and the system's on OpenBot.
+
+The window starts transparent-titled over the setup background (`tauri.conf.json`), so the first
+paint already matches. The same window then navigates to OpenBot, which keeps its own light and
+dark, and a lavender title bar over it would be a seam; it gets the system's bar back.
+*/
+fn match_title_bar<R: tauri::Runtime>(window: &tauri::Window<R>, on_setup: bool) {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = window.set_title_bar_style(if on_setup {
+            tauri::TitleBarStyle::Transparent
+        } else {
+            tauri::TitleBarStyle::Visible
+        });
+        let _ = window.set_background_color(on_setup.then_some(SETUP_BACKGROUND));
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = (window, on_setup);
+}
+
 /// Both pages are single-page apps. Keep their route and in-memory state on restore.
 /// Compare the authority explicitly: tauri:// has an opaque URL origin.
 fn same_window_app(current: &tauri::Url, destination: &tauri::Url) -> bool {
@@ -5417,9 +5441,14 @@ fn main() {
         // macOS never showed this because Tauri suppresses it there in release builds; Windows has
         // no such setting, and Tauri has no configuration option for it either, so the page is
         // asked to refuse. Every navigation, because the window navigates to OpenBot and back.
-        .on_page_load(|window, _| {
+        .on_page_load(|window, payload| {
             let _ = window
                 .eval("document.addEventListener('contextmenu', e => e.preventDefault(), true)");
+            let setup = window.app_handle().state::<Shell>().setup_url.lock().unwrap().clone();
+            let on_setup = setup
+                .and_then(|setup| setup.parse::<tauri::Url>().ok())
+                .is_some_and(|setup| same_window_app(&setup, payload.url()));
+            match_title_bar(&window.window(), on_setup);
         })
         // Closing the window hides it. A tray application whose window is destroyed on close has a
         // menu item that points at nothing: `get_webview_window` returns None from then on, and the
