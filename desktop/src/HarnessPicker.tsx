@@ -1,8 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
 import { isHttpEndpointUrl } from "./http-endpoint-url";
-import { Sections } from "./Sections";
 import { Mark } from "./Mark";
+import { Sections } from "./Sections";
 
 export type Harness = {
   id: string;
