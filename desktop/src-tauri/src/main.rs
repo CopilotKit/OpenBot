@@ -5669,6 +5669,8 @@ fn install_menus<R: tauri::Runtime>(
     let tray = tray_entries()?;
     if let Some(icon) = app.tray_by_id("openbot") {
         icon.set_menu(Some(Menu::with_items(app, &menu_refs(&tray))?))?;
+        #[cfg(target_os = "macos")]
+        show_menu_images(&icon);
     }
 
     // The same items on the window itself, because the tray cannot be relied on.
@@ -5749,6 +5751,49 @@ fn menu_icon(name: &str, dark: bool) -> Option<tauri::image::Image<'static>> {
         _ => return None,
     };
     tauri::image::Image::from_bytes(bytes).ok()
+}
+
+/**
+Lets the menu bar menu draw its icons and status dot on macOS 27 and later.
+
+MEASURED: built with the macOS 27 SDK, every image in this menu was hidden, Apple's own status
+dot and SF Symbols included, in a bundled test app as much as here. macOS 27 added
+`NSMenuItem.preferredImageVisibility`, and its default lets AppKit hide images; an item has to ask
+for `NSMenuItemImageVisibilityVisible` (1). Docker's menu still showed icons only because it is
+built with an older SDK. Asked only where the selector exists, so earlier macOS is untouched.
+*/
+#[cfg(target_os = "macos")]
+fn show_menu_images<R: tauri::Runtime>(tray: &tauri::tray::TrayIcon<R>) {
+    use objc2::runtime::AnyObject;
+    let Ok(Some(status_item)) = tray.with_inner_tray_icon(|inner| {
+        inner
+            .ns_status_item()
+            .map(|item| objc2::rc::Retained::as_ptr(&item) as usize)
+    }) else {
+        return;
+    };
+    // SAFETY: the status item is retained by the tray for the app's lifetime; this runs on the
+    // main thread, as menus are built there; and the setter is sent only where it is implemented.
+    unsafe {
+        let status_item = status_item as *mut AnyObject;
+        let menu: *mut AnyObject = objc2::msg_send![status_item, menu];
+        if menu.is_null() {
+            return;
+        }
+        let visibility = objc2::sel!(setPreferredImageVisibility:);
+        let count: isize = objc2::msg_send![menu, numberOfItems];
+        for index in 0..count {
+            let item: *mut AnyObject = objc2::msg_send![menu, itemAtIndex: index];
+            if item.is_null() {
+                continue;
+            }
+            let implemented: bool = objc2::msg_send![item, respondsToSelector: visibility];
+            if implemented {
+                // NSMenuItemImageVisibilityVisible
+                let _: () = objc2::msg_send![item, setPreferredImageVisibility: 1isize];
+            }
+        }
+    }
 }
 
 /// Rebuild both menus on the main thread, for a new state, appearance or dashboard offer.
