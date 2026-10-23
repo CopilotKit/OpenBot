@@ -17,13 +17,7 @@ import {
 } from "./localEvalCli";
 import { localReadiness } from "./localReadiness";
 import { asProblem, Failure, type Problem } from "./Problem";
-import {
-  formatElapsed,
-  type Progress,
-  SetupProgress,
-  StatusLine,
-  useElapsed,
-} from "./SetupProgress";
+import { type Progress, SetupProgress, StatusLine } from "./SetupProgress";
 
 type Call<T> = { attempt: string; answer: Promise<T> };
 
@@ -491,26 +485,35 @@ export function LocalIntelligence({
 }
 
 /**
- * One line for the screen in front: the current row and how long it has taken. A stop the person
- * clears themselves (signing in, accepting the agreement) shows what to do instead of the line.
+ * Intelligence on a screen that is about something else: nothing while it works, and a card that
+ * cannot be missed when it stops. The person is installing OpenBot or choosing an AI here; a second
+ * progress line competed with that, and its full progress has its own step later. A stop is shown
+ * at once, because finding out only at that later step would waste the minutes since: one they
+ * clear themselves (signing in, accepting the agreement) with its action, anything else with Retry.
  */
 export function LocalStatus({ sequence }: { sequence: LocalSequence }) {
-  const current = sequence.steps.at(-1);
-  const elapsed = useElapsed(sequence.running, sequence.since);
-  if (!current) return null;
-  if (needsPerson(sequence)) return <LocalNeeds sequence={sequence} />;
+  if (!sequence.stopped) return null;
+  const needs = needsPerson(sequence);
   return (
-    <>
-      <p className="local-status" role="status">
-        {sequence.running
-          ? `${current.step} · ${formatElapsed(elapsed)} elapsed`
-          : sequence.ready
-            ? "Intelligence is ready."
-            : sequence.stopped
-              ? (sequence.blocked?.said ?? sequence.problem?.said)
-              : `${current.step}: complete.`}
-      </p>
-    </>
+    <section
+      className={`local-alert${needs ? " needs" : ""}`}
+      role="alert"
+      aria-label="Intelligence"
+    >
+      <h2>{needs ? "Intelligence needs you" : "Intelligence stopped"}</h2>
+      {needs ? (
+        <LocalNeeds sequence={sequence} />
+      ) : (
+        <>
+          <p>{sequence.blocked?.said ?? sequence.problem?.said}</p>
+          <div className="row">
+            <button type="button" onClick={sequence.retry}>
+              Retry
+            </button>
+          </div>
+        </>
+      )}
+    </section>
   );
 }
 

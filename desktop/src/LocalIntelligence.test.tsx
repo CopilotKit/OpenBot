@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, expect, mock, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { cleanup, render, waitFor } from "@testing-library/react";
+import { cleanup, render, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useEffect } from "react";
 import type { LocalConnection, LocalReport } from "./localEvalCli";
@@ -560,8 +560,10 @@ test("prepare runs to ready and waits for the go-ahead, which starts at once", a
       return true;
     },
   });
-  await screen.findByText("Intelligence is ready.");
-  expect(row(screen, WAIT).textContent).toContain("Complete");
+  await waitFor(() =>
+    expect(row(screen, WAIT).textContent).toContain("Complete"),
+  );
+  expect(screen.queryByRole("alert", { name: "Intelligence" })).toBeNull();
   expect(screen.queryByRole("listitem", { name: START })).toBeNull();
   expect(started).toEqual([]);
   // No Start OpenBot once it has run: the go-ahead comes from the screen in front.
@@ -570,17 +572,44 @@ test("prepare runs to ready and waits for the go-ahead, which starts at once", a
   invokeCalls = [];
 });
 
-test("the status line names the running row and its elapsed time", async () => {
+test("the screen in front hears nothing while Intelligence works, and a stop interrupts it", async () => {
   invokeHandler = answers({
     set_up_local_eval: [new Promise(() => {})],
     cancel_local_eval: [null],
   });
-  const screen = view({ prepare: true });
+  const working = view({ prepare: true });
   await waitFor(() =>
-    expect(screen.getByRole("status").textContent).toBe(
-      "Setting up Intelligence · 0s elapsed",
-    ),
+    expect(row(working, SETUP).textContent).toContain("In progress"),
   );
+  expect(working.queryByRole("alert", { name: "Intelligence" })).toBeNull();
+  cleanup();
+  invokeCalls = [];
+
+  invokeHandler = answers({
+    set_up_local_eval: [
+      report({ outcome: "blocked", stack: null, reason: "port-unavailable" }),
+    ],
+    cancel_local_eval: [null],
+  });
+  const failed = view({ prepare: true });
+  const stopped = await failed.findByRole("alert", { name: "Intelligence" });
+  expect(stopped.textContent).toContain("Intelligence stopped");
+  expect(stopped.textContent).toContain("A port Intelligence needs is in use.");
+  expect(within(stopped).getByRole("button", { name: "Retry" })).toBeTruthy();
+  cleanup();
+  invokeCalls = [];
+
+  invokeHandler = answers({
+    set_up_local_eval: [blockedOnTerms],
+    local_eval_terms: [requiredTerms],
+    cancel_local_eval: [null],
+  });
+  const waiting = view({ prepare: true });
+  const needs = await waiting.findByRole("alert", { name: "Intelligence" });
+  expect(needs.textContent).toContain("Intelligence needs you");
+  expect(
+    await within(needs).findByRole("button", { name: "Accept" }),
+  ).toBeTruthy();
 });
 
 test("the running screen offers no way to the hosted service", async () => {
