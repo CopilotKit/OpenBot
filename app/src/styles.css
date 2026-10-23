@@ -200,6 +200,8 @@ body {
   color: var(--foreground);
   font-family:
     "Plus Jakarta Sans Variable", ui-sans-serif, system-ui, sans-serif;
+  /* Text with no weight of its own takes the theme's regular, which is 450 (see @theme). */
+  font-weight: var(--font-weight-normal);
 }
 
 /*
@@ -234,6 +236,16 @@ body {
   --text-2xl: 1.40625rem; /* 22.5px */
   --text-3xl: 1.7578125rem; /* 28.125px */
   --text-4xl: 2.109375rem; /* 33.75px */
+  /*
+   * Plus Jakarta Sans, set one step heavier and less tightly than the Inter values these were.
+   * Regular and medium are 450 and 550 (it is a variable font, so neither tips into bold); at 400 on
+   * the dark ground small text read thin. Inter's tight tracking (-0.025em, -0.05em) ran this wider
+   * face's letters together in titles and previews, so tight is -0.01em and tighter -0.02em.
+   */
+  --font-weight-normal: 450;
+  --font-weight-medium: 550;
+  --tracking-tight: -0.01em;
+  --tracking-tighter: -0.02em;
   --font-heading: var(--font-sans);
   --font-sans: "Plus Jakarta Sans Variable", sans-serif;
   --font-mono:
