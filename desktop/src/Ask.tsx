@@ -16,6 +16,7 @@ export const PRESET_QUESTIONS = [
   "How many Die Hard movies are there?",
   "Bulldogs or 'Bama? One word answer",
   "What is 17 times 23?",
+  "How you doing today?",
 ] as const;
 
 /**
