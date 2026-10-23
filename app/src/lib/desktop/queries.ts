@@ -14,7 +14,13 @@ export type DesktopPart = { name: string; memoryBytes: number | null };
 
 /** What the desktop app reports about what it runs here. */
 export type DesktopStatus = {
+  /** OpenBot answers on its own address, whoever started it. */
   openbotRunning: boolean;
+  /**
+   * The desktop app holds OpenBot's processes, so Restart can bring them back. False for an OpenBot
+   * left running by an earlier session of the desktop app that ended without quitting.
+   */
+  openbotHeld: boolean;
   processes: DesktopPart[];
   containers: DesktopPart[];
   /** The local Intelligence stack recorded for this installation; null when there is none. */

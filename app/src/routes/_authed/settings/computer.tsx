@@ -126,21 +126,31 @@ function OpenBotSection({ status }: { status: DesktopStatus }) {
                 ? "Restarting…"
                 : stop.isPending
                   ? "Stopping…"
-                  : memory !== null
-                    ? `${formatBytes(memory)} in use`
-                    : "Memory could not be measured."}
+                  : [
+                      memory !== null
+                        ? `${formatBytes(memory)} in use`
+                        : "Memory could not be measured.",
+                      // Restart is the desktop app's supervisor bringing its own processes back.
+                      status.openbotRunning && !status.openbotHeld
+                        ? "Started before the desktop app last opened; Stop it and start again to restart."
+                        : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" ")}
             </ItemDescription>
           </ItemContent>
           {status.openbotRunning && (
             <ItemActions>
-              <Button
-                disabled={busy}
-                onClick={() => restart.mutate()}
-                size="sm"
-                variant="outline"
-              >
-                Restart
-              </Button>
+              {status.openbotHeld && (
+                <Button
+                  disabled={busy}
+                  onClick={() => restart.mutate()}
+                  size="sm"
+                  variant="outline"
+                >
+                  Restart
+                </Button>
+              )}
               <Button
                 disabled={busy}
                 onClick={() => stop.mutate()}
