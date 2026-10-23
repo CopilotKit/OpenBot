@@ -15,8 +15,22 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/*
+ * 16px, the rem every Tailwind token is documented against. It was 15px, tuned for Inter's tall
+ * lowercase; Plus Jakarta Sans's is shorter and wider, so at 15px the whole app read a size down.
+ */
 html {
-  font-size: 15px;
+  font-size: 16px;
+}
+
+/*
+ * Small light text on dark keeps macOS's own smoothing. The root's `antialiased` (grayscale) is right
+ * for dark text on light, but it turns off the slight thickening light-on-dark text gets, and small
+ * text in the dark theme read thin and wiry.
+ */
+.dark .antialiased {
+  -webkit-font-smoothing: auto;
+  -moz-osx-font-smoothing: auto;
 }
 
 :root {
