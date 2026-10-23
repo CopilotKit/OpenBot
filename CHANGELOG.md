@@ -35,6 +35,15 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   request for an administrator to switch on a work app, grant it to a Bot, or connect a Shared app's
   team account is kept, with who answered it and when. It starts empty and nothing is backfilled.
 
+### The audit trail says which Slack or Teams account a link bound
+
+Linking a Bot to Slack or Teams recorded a `delivery.linked` row filed under the Bot's owner, with
+the transport and workspace but not the chat account that sent the code. Whoever sends a link code
+is the account that then speaks as the owner, so a code redeemed by somebody else read on the trail
+as the owner connecting their own account, and once the link was removed nothing said which account
+it had been. The row now names it, for Slack and Teams only: for SMS and push the same field is a
+phone number or a device token, which stays off a trail every administrator can read.
+
 ### A Bot can send, draft and reply in Gmail
 
 OpenBot left out every Composio action that takes a file, because a Bot has no way to supply one.
