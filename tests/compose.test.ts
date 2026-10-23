@@ -475,7 +475,7 @@ test("builds the deployment image with Playwright's Chromium payload only", () =
       'bunx --bun "playwright@' +
         "$" +
         "{PLAYWRIGHT_VERSION}" +
-        '" install --with-deps chromium',
+        '" install --with-deps --no-shell chromium',
     );
     expect(dockerfile).not.toMatch(/\bnodejs\b|\bnpm\b/);
     expect(dockerfile).not.toMatch(
