@@ -170,6 +170,17 @@ hands out each capture pass; it receives nothing that is recorded.
   Settings → Learning as `learning.sharing_changed`, `learning.skill_opened` and
   `learning.skill_closed`.
 
+### When OpenBot is open in Chrome or Edge, the Browser button uses that browser
+
+With the OpenBot Recorder in that browser, one click on Browser opens Record and Stop right in OpenBot,
+and the red dot follows the recording at once. If the Recorder is not connected yet, the same click
+connects it (OpenBot Desktop and your organization's own OpenBot, when its address is set by policy,
+need no Connect click; any other site still asks you to confirm). If it is not installed, the click
+opens its store page in a new tab. Only the OpenBot the Recorder is connected to can start, stop or see
+its recordings; any other website is told it is not connected. Settings, Browsers shows Connected
+straight away when no Connect click is needed. OpenBot Desktop's own window, Safari and Firefox are
+unchanged.
+
 ### Your own everyday Chrome or Edge, with the Recorder in it
 
 On OpenBot Desktop the Browser button now works with your own everyday Chrome or Edge: your profile,
