@@ -3908,17 +3908,47 @@ async fn set_up_local_eval(
     app: tauri::AppHandle,
     attempt: String,
     root: String,
+    accepted_eula_version: Option<String>,
 ) -> Result<local_eval::Report, SetupError> {
     let root = stack::root_from(&root);
+    // Only a version the person accepted in the window, after `local_eval_terms` showed it.
+    let accepted = accepted_eula_version
+        .as_deref()
+        .map(local_eval::EulaVersion::parse)
+        .transpose()
+        .map_err(SetupError::Failure)?;
     let report = tauri::async_runtime::spawn_blocking(move || {
         set_up_local_eval_at(&root, |folder| {
-            local_eval::setup_installed(&attempt, folder)
+            local_eval::setup_installed(&attempt, folder, accepted.as_ref())
         })
     })
     .await
     .map_err(|_| SetupError::Failure(local_eval::Failure::Spawn))??;
     learn_dashboards(&app, report.stack.iter());
     Ok(report)
+}
+
+/**
+Sign in to CopilotKit, which local evaluation needs to issue its licence: `login --json`.
+
+The CLI opens the approval page in the browser and waits for it; this returns once the person has
+approved it there, or it failed. `attempt` lets `cancel_local_eval` stop the wait.
+*/
+#[tauri::command]
+async fn sign_in_to_copilotkit(
+    attempt: String,
+) -> Result<local_eval::AccountSignIn, local_eval::Failure> {
+    tauri::async_runtime::spawn_blocking(move || local_eval::account_sign_in_installed(&attempt))
+        .await
+        .map_err(|_| local_eval::Failure::Spawn)?
+}
+
+/// The evaluation agreement local setup needs accepted, for the window to show before Accept.
+#[tauri::command]
+async fn local_eval_terms(attempt: String) -> Result<local_eval::Terms, local_eval::Failure> {
+    tauri::async_runtime::spawn_blocking(move || local_eval::terms_installed(&attempt))
+        .await
+        .map_err(|_| local_eval::Failure::Spawn)?
 }
 
 /**
@@ -5302,6 +5332,8 @@ fn main() {
             open_local_intelligence,
             offer_local_intelligence,
             set_up_local_eval,
+            sign_in_to_copilotkit,
+            local_eval_terms,
             connect_local_eval,
             last_local_eval_stop_failure,
             ask_the_bot,
