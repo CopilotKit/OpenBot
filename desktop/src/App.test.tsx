@@ -663,12 +663,14 @@ test("Install prepares the default Bot in the default folder, with no Bot or fol
   expect(
     view.getByRole("heading", { name: "Installing OpenBot" }),
   ).toBeTruthy();
-  expect(stepLabel(view)).toBe("Step 1 of 4");
+  expect(stepLabel(view)).toBe("Step 2 of 4");
   expect(view.queryByLabelText("Where OpenBot lives")).toBeNull();
   expect(view.queryByText(/Pick a Bot|Which Bot/i)).toBeNull();
   expect(invokeCalls.some((call) => call.command === "harnesses")).toBe(false);
   // Nothing to press, and no way out while it installs.
   expect(view.queryAllByRole("button")).toEqual([]);
+  // Intelligence waits for the engine the install starts: nothing local runs yet.
+  expect(localCliCalls()).toEqual([]);
   // Native rows are summarised in plain words.
   await emitProgress({
     step: "engine",
@@ -704,7 +706,16 @@ test("Install prepares the default Bot in the default folder, with no Bot or fol
         (event as { event: { kind: string } }).event.kind === "harness_chosen",
     ),
   ).toEqual([{ event: { kind: "harness_chosen", harness: "langgraph" } }]);
-  expect(localCliCalls()).toEqual([]);
+  // Once the engine answers, Intelligence sets itself up alongside the install, once.
+  await waitFor(() =>
+    expect(
+      localCliCalls().filter((call) => call.command === "set_up_local_eval"),
+    ).toEqual([
+      expect.objectContaining({
+        args: expect.objectContaining({ root: "/tmp/local-eval-install" }),
+      }),
+    ]),
+  );
 });
 
 test("a signed-out first run signs in to CopilotKit and accepts the agreement as its own step, before choosing an AI", async () => {
@@ -727,9 +738,10 @@ test("a signed-out first run signs in to CopilotKit and accepts the agreement as
   });
   const view = await renderApp();
   await installLocal(view);
-  // Its own step, after the software and before the AI provider.
+  // The first step: it needs nothing installed, and nothing is installed before it.
   await view.findByRole("heading", { name: "Sign in to CopilotKit" });
-  expect(stepLabel(view)).toBe("Step 2 of 4");
+  expect(stepLabel(view)).toBe("Step 1 of 4");
+  expect(installationCalls()).toEqual([]);
   expect(localSequence()).toEqual([]);
   await userEvent.click(
     view.getByRole("button", { name: "Sign in to CopilotKit" }),

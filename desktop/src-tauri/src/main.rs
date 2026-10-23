@@ -3918,6 +3918,10 @@ async fn set_up_local_eval(
         .transpose()
         .map_err(SetupError::Failure)?;
     let report = tauri::async_runtime::spawn_blocking(move || {
+        // A local first run starts setup while OpenBot is still installing into this folder, which
+        // may not exist yet; the CLI runs in it.
+        std::fs::create_dir_all(&root)
+            .map_err(|_| SetupError::Failure(local_eval::Failure::Spawn))?;
         set_up_local_eval_at(&root, |folder| {
             local_eval::setup_installed(&attempt, folder, accepted.as_ref())
         })
