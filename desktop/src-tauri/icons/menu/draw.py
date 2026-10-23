@@ -70,6 +70,12 @@ ICONS = {
         seg_dist(x, y, 20.5, 27, 24, 19),
         seg_dist(x, y, 24, 19, 31, 19),
     ),
+    # About: an "i" in a ring.
+    "about": lambda x, y: min(
+        arc_dist(x, y, 18, 18, 12, 0, 2 * math.pi - 1e-6),
+        seg_dist(x, y, 18, 17, 18, 25),
+        dot_dist(x, y, 18, 12.3, 0),
+    ),
     # Quit: the power symbol, an open ring with a stem.
     "quit": lambda x, y: min(
         arc_dist(x, y, 18, 19.5, 10, math.radians(-50), math.radians(230)),

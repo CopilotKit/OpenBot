@@ -5671,7 +5671,7 @@ fn install_menus<R: tauri::Runtime>(
     if let Some(icon) = app.tray_by_id("openbot") {
         icon.set_menu(Some(Menu::with_items(app, &menu_refs(&tray))?))?;
         #[cfg(target_os = "macos")]
-        show_menu_images(&icon);
+        show_menu_images(&icon, dark);
     }
 
     // The same items on the window itself, because the tray cannot be relied on.
@@ -5740,7 +5740,12 @@ macOS does not treat these as template images, so a black icon would vanish in a
 drawn twice by `icons/menu/draw.py`, and the menus are rebuilt when the appearance changes.
 */
 fn menu_icon(name: &str, dark: bool) -> Option<tauri::image::Image<'static>> {
-    let bytes: &'static [u8] = match (name, dark) {
+    tauri::image::Image::from_bytes(menu_icon_png(name, dark)?).ok()
+}
+
+/// The PNG behind `menu_icon`.
+fn menu_icon_png(name: &str, dark: bool) -> Option<&'static [u8]> {
+    Some(match (name, dark) {
         ("open", false) => include_bytes!("../icons/menu/open-light.png"),
         ("open", true) => include_bytes!("../icons/menu/open-dark.png"),
         ("dashboard", false) => include_bytes!("../icons/menu/dashboard-light.png"),
@@ -5749,9 +5754,10 @@ fn menu_icon(name: &str, dark: bool) -> Option<tauri::image::Image<'static>> {
         ("status", true) => include_bytes!("../icons/menu/status-dark.png"),
         ("quit", false) => include_bytes!("../icons/menu/quit-light.png"),
         ("quit", true) => include_bytes!("../icons/menu/quit-dark.png"),
+        ("about", false) => include_bytes!("../icons/menu/about-light.png"),
+        ("about", true) => include_bytes!("../icons/menu/about-dark.png"),
         _ => return None,
-    };
-    tauri::image::Image::from_bytes(bytes).ok()
+    })
 }
 
 /**
@@ -5762,10 +5768,24 @@ dot and SF Symbols included, in a bundled test app as much as here. macOS 27 add
 `NSMenuItem.preferredImageVisibility`, and its default lets AppKit hide images; an item has to ask
 for `NSMenuItemImageVisibilityVisible` (1). Docker's menu still showed icons only because it is
 built with an older SDK. Asked only where the selector exists, so earlier macOS is untouched.
+
+About is the system's own item, which takes no icon through the menu API, so its icon is set here.
 */
 #[cfg(target_os = "macos")]
-fn show_menu_images<R: tauri::Runtime>(tray: &tauri::tray::TrayIcon<R>) {
+fn show_menu_images<R: tauri::Runtime>(tray: &tauri::tray::TrayIcon<R>, dark: bool) {
+    use objc2::encode::{Encode, Encoding};
     use objc2::runtime::AnyObject;
+
+    #[repr(C)]
+    struct Size {
+        width: f64,
+        height: f64,
+    }
+    // SAFETY: the same layout as CGSize, two doubles.
+    unsafe impl Encode for Size {
+        const ENCODING: Encoding = Encoding::Struct("CGSize", &[f64::ENCODING, f64::ENCODING]);
+    }
+
     let Ok(Some(status_item)) = tray.with_inner_tray_icon(|inner| {
         inner
             .ns_status_item()
@@ -5787,6 +5807,29 @@ fn show_menu_images<R: tauri::Runtime>(tray: &tauri::tray::TrayIcon<R>) {
             let item: *mut AnyObject = objc2::msg_send![menu, itemAtIndex: index];
             if item.is_null() {
                 continue;
+            }
+            let title: *mut AnyObject = objc2::msg_send![item, title];
+            let utf8: *const std::ffi::c_char = if title.is_null() {
+                std::ptr::null()
+            } else {
+                objc2::msg_send![title, UTF8String]
+            };
+            let is_about = !utf8.is_null() && std::ffi::CStr::from_ptr(utf8) == c"About";
+            if let Some(png) = is_about.then(|| menu_icon_png("about", dark)).flatten() {
+                let data: *mut AnyObject = objc2::msg_send![
+                    objc2::class!(NSData),
+                    dataWithBytes: png.as_ptr().cast::<std::ffi::c_void>(),
+                    length: png.len()
+                ];
+                let image: *mut AnyObject = objc2::msg_send![objc2::class!(NSImage), alloc];
+                let image: *mut AnyObject = objc2::msg_send![image, initWithData: data];
+                if !image.is_null() {
+                    let _: () =
+                        objc2::msg_send![image, setSize: Size { width: 18.0, height: 18.0 }];
+                    let _: () = objc2::msg_send![item, setImage: image];
+                    // `setImage:` keeps its own reference; this one came from `alloc`.
+                    let _: () = objc2::msg_send![image, release];
+                }
             }
             let implemented: bool = objc2::msg_send![item, respondsToSelector: visibility];
             if implemented {
