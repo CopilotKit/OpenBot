@@ -162,14 +162,6 @@ body::before {
 }
 
 /*
- * No line down the sidebar's edge. The frosted sidebar against the ground already separates the
- * two; the 1px border on top of that read as a bright stroke down the window, most of all in light.
- */
-[data-slot="sidebar-container"] {
-  border-color: transparent;
-}
-
-/*
  * OpenBot Desktop on macOS has no separate title bar over this page: the window's buttons sit over
  * the top-left corner and the sidebar runs to the top edge, as in Mac apps with a sidebar. The
  * desktop marks the page (`data-desktop-titlebar`) and makes the sidebar's header the drag handle;
