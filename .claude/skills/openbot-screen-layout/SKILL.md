@@ -51,7 +51,7 @@ PageShell        the page: header (title, description, action, backButton) then 
     PageEmpty    what a section says when it has nothing to list
 ```
 
-`PageShell` takes a `width`: `prose` (`max-w-3xl`, 720px here) is the default, and every
+`PageShell` takes a `width`: `prose` (`max-w-3xl`, 768px here) is the default, and every
 configuration screen uses it so no screen is wider than another. Sentences inside it are held to
 `max-w-prose`, so the column has room for a label beside its control without stretching the text.
 `wide` (`max-w-5xl`) exists for one screen — `admin/audit.tsx`, because an audit log is a table to be
@@ -144,19 +144,15 @@ itself when the dialog changes something.
 
 ## The rem Trap
 
-`app/src/styles.css` sets `html { font-size: 15px }`. Every rem-based Tailwind token is therefore
-**0.9375×** its documented pixel value:
+`app/src/styles.css` sets `html { font-size: 16px }`, so rem-based Tailwind tokens now match their
+documented pixel values (`max-w-2xl` 672px, `max-w-3xl` 768px, `max-w-5xl` 1024px). It was 15px until
+the move to Plus Jakarta Sans, and constants written then were wrong by 6.25%; the root can change
+again.
 
-| Token | Documented | Actual here |
-|-------|-----------|-------------|
-| `max-w-2xl` | 672px | **630px** |
-| `max-w-3xl` | 768px | **720px** |
-| `max-w-5xl` | 1024px | **960px** |
-
-Never hardcode a pixel constant derived from a Tailwind rem token, and never compute a ratio from
-one. Measure the element — `offsetWidth`, `clientWidth`, a `ResizeObserver` — and scale from what is
-actually on screen. A constant taken from the Tailwind docs is wrong by 6.25% here, which is enough
-to sit a centred element visibly off centre or clip a card's corners against its container.
+So the rule stands: never hardcode a pixel constant derived from a Tailwind rem token, and never
+compute a ratio from one. Measure the element — `offsetWidth`, `clientWidth`, a `ResizeObserver` —
+and scale from what is actually on screen. A constant that matches the docs today is one root change
+away from sitting a centred element visibly off centre or clipping a card's corners.
 
 ## Decision Tree
 
@@ -184,7 +180,7 @@ to sit a centred element visibly off centre or clip a card's corners against its
 | Children on an element passed to `Item`'s `render` | They replace the row's own children; the row draws empty | Pass a childless element |
 | `bg-card` on a row inside a dialog | `--card` equals `--popover`; the row is invisible | `variant="muted"` |
 | `Item variant="outline"` and `variant="muted"` on one screen | Reads as two kinds of list and invites a distinction that is not there | One variant per screen |
-| A pixel constant matching a Tailwind rem token (672, 768, 1024) | Assumes a 16px root; the root here is 15px | Measure the element |
+| A pixel constant matching a Tailwind rem token (672, 768, 1024) | Holds only while the root is 16px, which has changed before | Measure the element |
 | A `Switch` on a row that needs two or more values | Half the change happens in place and half in a dialog | A summary, a chevron, and a dialog |
 | A chevron on a row that opens nothing | Announces a destination that does not exist | Value in `ItemActions`, no chevron |
 | A set of chips or toggles crammed into `ItemActions` | It competes with the label for width and wraps badly | `ItemFooter`, which is `basis-full` |
@@ -195,7 +191,7 @@ to sit a centred element visibly off centre or clip a card's corners against its
 - **A row renders empty — media, title and actions all missing**: children were passed on the
   element given to `Item`'s `render`. Remove them.
 - **A row's content sits visibly off centre, or a card's corners are clipped by its container**: a
-  pixel constant was taken from the Tailwind docs and the root font size is 15px. Measure the drawn
+  pixel constant was taken from the Tailwind docs and the root font size has since moved. Measure the drawn
   element instead of the box it was given.
 - **A dialog's footer has body content painted over it**: `DialogBody` is missing
   `overflow-y-auto`. It has `flex-1 min-h-0` and no overflow of its own.

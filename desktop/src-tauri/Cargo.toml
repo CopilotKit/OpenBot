@@ -15,9 +15,11 @@ path = "src/main.rs"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+# Pins a bundled Intelligence CLI to the bytes the app was built with. See build.rs.
+sha2 = "0.10"
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon"] }
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-shell = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -38,5 +40,15 @@ tauri-plugin-dialog = "2"
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
+# The macOS quit OpenBot did not start (Dock, AppleScript, log out) routed through its own Quit.
+# The version Tauri already uses. See `macos_quit` in main.rs.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+
 [dev-dependencies]
 tauri = { version = "2", features = ["test"] }
+
+# Every local evaluation CLI call checks the pinned runtime and script against their digests,
+# about 150 MB. Unoptimized, that hash alone took 4.9 s per call in a debug build; optimized, 0.3 s.
+[profile.dev.package.sha2]
+opt-level = 3

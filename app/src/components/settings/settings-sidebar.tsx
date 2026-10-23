@@ -2,6 +2,7 @@ import {
   IconArrowLeft,
   IconBell,
   IconChecks,
+  IconDeviceDesktop,
   IconKey,
   IconLayoutGrid,
   IconSettings,
@@ -18,6 +19,7 @@ import {
   SidebarMenuItem,
   SidebarRail,
 } from "@/components/ui/sidebar";
+import { desktopShell } from "@/lib/desktop/intelligence-dashboard";
 
 const appLinkOptions = { to: "/" } satisfies LinkOptions;
 
@@ -29,6 +31,8 @@ const ITEMS: {
    * everywhere else, so an entry stays lit on the pages beneath it.
    */
   exact?: boolean;
+  /** Shown only inside OpenBot Desktop, which is what the page reads from. */
+  desktopOnly?: boolean;
   icon: React.ComponentType<{ className?: string }>;
   linkOptions: LinkOptions;
   title: string;
@@ -57,6 +61,13 @@ const ITEMS: {
     title: "Passwords",
     icon: IconKey,
     linkOptions: { to: "/settings/passwords" },
+  },
+  {
+    /* What OpenBot runs here and the memory it takes, with Restart and Stop. */
+    title: "This computer",
+    icon: IconDeviceDesktop,
+    desktopOnly: true,
+    linkOptions: { to: "/settings/computer" },
   },
   {
     /* The same mark Admin gives UI Components. It is the same subject seen from the other side. */
@@ -93,7 +104,9 @@ export function SettingsSidebar({
          */}
         <SidebarGroup>
           <SidebarMenu className="gap-px">
-            {ITEMS.map((option) => (
+            {ITEMS.filter(
+              (option) => !option.desktopOnly || desktopShell() !== null,
+            ).map((option) => (
               <SidebarMenuItem key={option.title}>
                 <SidebarMenuButton
                   render={(props) => (

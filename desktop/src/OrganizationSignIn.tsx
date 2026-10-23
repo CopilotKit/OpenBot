@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useRef, useState } from "react";
 import { asProblem, Failure } from "./Problem";
+import { StatusLine } from "./SetupProgress";
 
 export function OrganizationSignIn({
   root,
@@ -72,9 +73,9 @@ export function OrganizationSignIn({
         </button>
       ))}
       {busy && (
-        <p role="status">
+        <StatusLine>
           Complete sign-in in your browser, then return to OpenBot.
-        </p>
+        </StatusLine>
       )}
       {signInUrl && (
         <p>

@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
 import { isHttpEndpointUrl } from "./http-endpoint-url";
 import { Mark } from "./Mark";
+import { Sections } from "./Sections";
 
 export type Harness = {
   id: string;
@@ -86,7 +87,7 @@ export function HarnessPicker({
 
   return (
     <div className="sheet">
-      <p className="steps-of">Step 1 of 4</p>
+      <Sections local={false} at="Bot" />
       <h1>Your first Bot</h1>
       {/*
         Written to the person who has to act, not about the situation.

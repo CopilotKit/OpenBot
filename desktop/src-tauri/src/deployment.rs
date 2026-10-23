@@ -332,8 +332,25 @@ fn fetch_images(root: &Path, version: &str) -> Result<(), String> {
 /// Shared with `install.rs`, which fetches the engine's installers through it and then checks their
 /// digests. One client, one user agent, one set of TLS defaults.
 pub fn get(url: &str) -> Result<Vec<u8>, String> {
-    let response = reqwest::blocking::Client::builder()
+    get_waiting(url, IDLE_TIMEOUT)
+}
+
+/// How long a download may go without receiving anything before it is given up.
+const IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/**
+`get`, giving up only when nothing arrives for `idle`.
+
+READ AS A STREAM, NOT WITH `bytes()`. The blocking client's timeout (30 s by default) bounds each
+read on a stream, but `bytes()` waits for the whole body within it, and reports running out of time
+as "error decoding response body". So any download that took longer than 30 seconds failed, however
+steadily it was arriving: Bun's 30 MB on a connection under about 1 MB/s, every time.
+*/
+fn get_waiting(url: &str, idle: std::time::Duration) -> Result<Vec<u8>, String> {
+    use std::io::Read;
+    let mut response = reqwest::blocking::Client::builder()
         .user_agent("openbot-desktop")
+        .timeout(idle)
         .build()
         .map_err(|error| format!("could not prepare the download: {error}"))?
         .get(url)
@@ -342,15 +359,63 @@ pub fn get(url: &str) -> Result<Vec<u8>, String> {
     if !response.status().is_success() {
         return Err(format!("{url} answered {}", response.status()));
     }
+    let mut body = Vec::new();
     response
-        .bytes()
-        .map(|body| body.to_vec())
-        .map_err(|error| format!("the download did not finish: {error}"))
+        .read_to_end(&mut body)
+        .map_err(|error| format!("the download did not finish: {error}"))?;
+    Ok(body)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A server that sends `chunks` pieces of `body`, `gap` apart, then closes.
+    fn dripping(chunks: usize, gap: std::time::Duration) -> (String, std::thread::JoinHandle<()>) {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/file", listener.local_addr().unwrap());
+        let served = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0u8; 1024];
+            let _ = stream.read(&mut request);
+            let length = chunks * 4;
+            stream
+                .write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\ncontent-length: {length}\r\nconnection: close\r\n\r\n"
+                    )
+                    .as_bytes(),
+                )
+                .unwrap();
+            for _ in 0..chunks {
+                std::thread::sleep(gap);
+                if stream.write_all(b"data").is_err() {
+                    return;
+                }
+                let _ = stream.flush();
+            }
+        });
+        (url, served)
+    }
+
+    #[test]
+    fn a_download_that_keeps_arriving_finishes_however_long_it_takes() {
+        // Six pieces 300 ms apart take 1.8 s in all, longer than the 1 s allowed between pieces.
+        // `bytes()` gave up here with "error decoding response body"; a stream does not.
+        let (url, served) = dripping(6, std::time::Duration::from_millis(300));
+        let body = get_waiting(&url, std::time::Duration::from_secs(1)).unwrap();
+        assert_eq!(body, b"data".repeat(6));
+        served.join().unwrap();
+    }
+
+    #[test]
+    fn a_download_that_stalls_is_given_up() {
+        let (url, served) = dripping(2, std::time::Duration::from_millis(1500));
+        let error = get_waiting(&url, std::time::Duration::from_millis(500)).unwrap_err();
+        assert!(error.starts_with("the download did not finish"), "{error}");
+        served.join().unwrap();
+    }
 
     fn manifest(names: &[&str]) -> Images {
         Images {

@@ -1,5 +1,11 @@
 //! Installing an engine, instead of telling somebody to go and get one.
 //!
+//! **On macOS and Windows the engine is Docker Desktop** (see `docker_desktop`): started when it is
+//! installed, installed when it is not. Podman is never installed there for somebody; it is for an
+//! organization that cannot use Docker under its licence, and that is their decision. The Podman
+//! installers below are kept for that explicit path and for Linux, where Podman comes from the
+//! distribution's packages.
+//!
 //! The person this app is for does not have a package manager, has never heard of Podman, and is
 //! not going to read a release page. Every sentence that begins "install ..." is a step where an
 //! install stops for good, so the engine is fetched and installed here.
@@ -369,35 +375,104 @@ pub(crate) fn verify_bun(binary: &Path) -> Result<(), Problem> {
 /// somebody presses Start. Answers with the sentence for the step row, or a failure in both
 /// registers.
 pub fn install_engine(cache: &Path) -> Result<String, Problem> {
-    install_engine_observed(cache, |_| {})
+    install_engine_observed(cache, |_, _| {}, &mut |_| {})
 }
 
-/// Observe an actual Podman installer invocation, excluding existing engines and Compose repair.
+/// Observe an actual engine install (Docker Desktop, or Podman on Linux), excluding engines that
+/// were already here and Compose repair; `progress` is each line for the step row.
 pub fn install_engine_observed(
     cache: &Path,
-    installed: impl FnMut(bool),
+    installed: impl FnMut(Engine, bool),
+    progress: &mut dyn FnMut(crate::docker_desktop::Progress),
 ) -> Result<String, Problem> {
-    install_engine_with(cache, installed, install_podman, place_compose)
+    install_engine_with(
+        cache,
+        Found::here(),
+        installed,
+        |cache| crate::docker_desktop::ensure(cache, progress),
+        install_podman,
+        place_compose,
+    )
+}
+
+/// What engines this machine has, read once so the choice below can be tested on any machine.
+#[derive(Debug, Clone, Copy)]
+struct Found {
+    /// Docker Desktop is how this platform gets Docker: macOS and Windows, not Linux.
+    docker_desktop_platform: bool,
+    docker_answers: bool,
+    docker_app_installed: bool,
+    docker_cli_installed: bool,
+    podman_installed: bool,
+}
+
+impl Found {
+    fn here() -> Self {
+        Self {
+            docker_desktop_platform: cfg!(any(target_os = "macos", target_os = "windows")),
+            docker_answers: engine::Address::new(Engine::Docker, None).responds(),
+            docker_app_installed: crate::docker_desktop::installed_app().is_some(),
+            docker_cli_installed: engine::program(Engine::Docker).is_some(),
+            podman_installed: engine::program(Engine::Podman).is_some(),
+        }
+    }
 }
 
 fn install_engine_with(
     cache: &Path,
-    mut installed: impl FnMut(bool),
+    found: Found,
+    mut installed: impl FnMut(Engine, bool),
+    ensure_docker: impl FnOnce(&Path) -> Result<crate::docker_desktop::Ensured, Problem>,
     install_podman: impl FnOnce(&Path) -> Result<(), Problem>,
     place_compose: impl FnOnce(&Path) -> Result<String, Problem>,
 ) -> Result<String, Problem> {
     let into = crate::acquire::download_dir(cache);
+    let docker_app_installed = found.docker_app_installed;
 
-    // engine_ready can start an installed Podman machine, but cannot start Docker. A stopped
-    // Docker CLI must not skip installing the Podman that preparation will then try to run.
-    if engine::program(Engine::Podman).is_some()
-        || engine::Address::new(Engine::Docker, None).responds()
-    {
+    if found.docker_answers {
+        return place_compose(&into);
+    }
+
+    if found.docker_desktop_platform {
+        /*
+         * DOCKER IS THE ENGINE, AND PODMAN IS NEVER CHOSEN FOR SOMEBODY.
+         *
+         * An installed Docker Desktop that is not running is started; a machine with no engine at
+         * all gets Docker Desktop. This used to install Podman in both cases, behind an
+         * administrator prompt, which put a second engine on a machine that already had Docker and
+         * gave local Intelligence an engine it refuses. Podman is for an organization that cannot
+         * use Docker under its licence: a Podman somebody already has is theirs and is used, and
+         * one is never installed in Docker's place. See `docker_desktop`.
+         */
+        if docker_app_installed || !found.podman_installed {
+            // A `docker` with no Docker Desktop behind it is OrbStack, Colima or similar, stopped.
+            // Installing Docker Desktop over it is not the repair; starting it is, and only they
+            // can.
+            if !docker_app_installed && found.docker_cli_installed {
+                return Err(Problem::with(
+                    "Docker is installed but not running. Start it, then try again.",
+                    "a docker command is installed, Docker Desktop is not, and docker does not \
+                     answer",
+                ));
+            }
+            let result = ensure_docker(cache);
+            if !docker_app_installed {
+                installed(Engine::Docker, result.is_ok());
+            }
+            let ensured = result?;
+            place_compose(&into)?;
+            return Ok(ensured.said);
+        }
+        return place_compose(&into);
+    }
+
+    // Linux: the distribution's own Podman, through its package manager. See the module comment.
+    if found.podman_installed {
         return place_compose(&into);
     }
 
     let result = install_podman(&into);
-    installed(result.is_ok());
+    installed(Engine::Podman, result.is_ok());
     result?;
 
     // Installed is not found. The MSI extends the *user's* PATH and this process was started with
@@ -665,65 +740,139 @@ mod tests {
     use super::*;
     use crate::test_support::temp_root;
 
-    #[test]
-    #[cfg(windows)]
-    fn a_stopped_docker_does_not_skip_the_podman_needed_for_setup() {
-        if crate::test_support::isolated_process(
-            "install::tests::a_stopped_docker_does_not_skip_the_podman_needed_for_setup",
-        ) {
-            return;
+    fn found(docker_answers: bool, docker_app: bool, docker_cli: bool, podman: bool) -> Found {
+        Found {
+            docker_desktop_platform: true,
+            docker_answers,
+            docker_app_installed: docker_app,
+            docker_cli_installed: docker_cli,
+            podman_installed: podman,
         }
-        let root = temp_root("stopped-docker-install");
-        let bin = root.join("bin");
-        std::fs::create_dir_all(&bin).unwrap();
-        let source = root.join("engine.rs");
-        std::fs::write(
-            &source,
-            r#"fn main() {
-                if std::env::var_os("OPENBOT_TEST_DOCKER_RUNNING").is_none() {
-                    std::process::exit(1);
-                }
-                println!("1.44");
-            }"#,
+    }
+
+    fn ensured(installed: bool) -> crate::docker_desktop::Ensured {
+        crate::docker_desktop::Ensured {
+            said: if installed { "installed" } else { "started" }.into(),
+            installed,
+        }
+    }
+
+    #[test]
+    fn a_stopped_docker_desktop_is_started_and_podman_is_never_installed_for_it() {
+        let root = temp_root("stopped-docker-desktop");
+        let mut observed = Vec::new();
+        // Installed and stopped, with or without a Podman beside it: Docker is started.
+        for podman in [false, true] {
+            let said = install_engine_with(
+                &root,
+                found(false, true, true, podman),
+                |engine, ok| observed.push((engine, ok)),
+                |_| Ok(ensured(false)),
+                |_| panic!("Podman is never installed in Docker's place"),
+                |_| Ok("Compose placed".into()),
+            )
+            .unwrap();
+            assert_eq!(said, "started");
+        }
+        assert!(observed.is_empty(), "starting is not an install");
+    }
+
+    #[test]
+    fn a_machine_with_no_engine_gets_docker_desktop_not_podman() {
+        let root = temp_root("no-engine");
+        let mut observed = Vec::new();
+        let said = install_engine_with(
+            &root,
+            found(false, false, false, false),
+            |engine, ok| observed.push((engine, ok)),
+            |_| Ok(ensured(true)),
+            |_| panic!("Podman is never installed in Docker's place"),
+            |_| Ok("Compose placed".into()),
         )
         .unwrap();
-        crate::test_support::compile_fixture(&source, &bin.join("docker.exe"));
-        std::env::set_var("PATH", &bin);
-        std::env::set_var("LOCALAPPDATA", root.join("Local"));
-        std::env::set_var("ProgramFiles", root.join("Program Files"));
-        std::env::remove_var("OPENBOT_TEST_DOCKER_RUNNING");
-
-        let found = engine::detect();
-        assert_eq!(found.engine, Some(Engine::Docker));
-        assert!(!found.responding);
-        assert!(engine::program(Engine::Podman).is_none());
+        assert_eq!(said, "installed");
+        assert_eq!(observed, [(Engine::Docker, true)]);
+        // A failed Docker Desktop install is reported as one, and nothing else is tried.
         let mut observed = Vec::new();
-        let result = install_engine_with(
+        let problem = install_engine_with(
             &root,
-            |success| observed.push(success),
-            |_| {
-                // Installation supplies the engine that engine_ready will create/start.
-                std::fs::copy(bin.join("docker.exe"), bin.join("podman.exe")).unwrap();
-                Ok(())
-            },
-            |_| Ok("Compose placed".into()),
-        );
-        result.expect("setup should install its missing Podman");
-        assert_eq!(observed, [true], "the Podman installer must run");
-        assert!(engine::program(Engine::Podman).is_some());
+            found(false, false, false, false),
+            |engine, ok| observed.push((engine, ok)),
+            |_| Err(Problem::plain("no")),
+            |_| panic!("no Podman fallback"),
+            |_| panic!("no Compose without an engine"),
+        )
+        .unwrap_err();
+        assert_eq!(problem.said, "no");
+        assert_eq!(observed, [(Engine::Docker, false)]);
+    }
 
-        // A responding Docker still supplies the engine; never install a replacement.
-        std::fs::remove_file(bin.join("podman.exe")).unwrap();
-        std::env::set_var("OPENBOT_TEST_DOCKER_RUNNING", "1");
-        assert!(engine::detect().responding);
-        let result = install_engine_with(
+    #[test]
+    fn a_podman_somebody_already_has_is_theirs_and_is_used() {
+        let root = temp_root("existing-podman");
+        let said = install_engine_with(
             &root,
-            |_| panic!("no Podman installation should be observed"),
-            |_| panic!("responding Docker must be reused"),
+            found(false, false, false, true),
+            |_, _| panic!("nothing is installed"),
+            |_| panic!("Docker Desktop is not installed over somebody's own Podman"),
+            |_| panic!("no install"),
             |_| Ok("Compose placed".into()),
-        );
-        assert_eq!(result.unwrap(), "Compose placed");
-        std::fs::remove_dir_all(root).unwrap();
+        )
+        .unwrap();
+        assert_eq!(said, "Compose placed");
+    }
+
+    #[test]
+    fn a_stopped_docker_without_docker_desktop_is_left_for_its_owner_to_start() {
+        let root = temp_root("stopped-orbstack");
+        let problem = install_engine_with(
+            &root,
+            found(false, false, true, false),
+            |_, _| panic!("nothing is installed"),
+            |_| panic!("Docker Desktop is not installed over another Docker"),
+            |_| panic!("no Podman fallback"),
+            |_| panic!("no Compose without an engine"),
+        )
+        .unwrap_err();
+        assert!(problem
+            .said
+            .starts_with("Docker is installed but not running."));
+    }
+
+    #[test]
+    fn an_answering_docker_is_used_as_it_is() {
+        let root = temp_root("answering-docker");
+        let said = install_engine_with(
+            &root,
+            found(true, false, true, false),
+            |_, _| panic!("nothing is installed"),
+            |_| panic!("an answering Docker is not started again"),
+            |_| panic!("no install"),
+            |_| Ok("Compose placed".into()),
+        )
+        .unwrap();
+        assert_eq!(said, "Compose placed");
+    }
+
+    #[test]
+    fn linux_keeps_its_distribution_podman() {
+        let root = temp_root("linux-engine");
+        let mut observed = Vec::new();
+        let linux = Found {
+            docker_desktop_platform: false,
+            ..found(false, false, false, false)
+        };
+        install_engine_with(
+            &root,
+            linux,
+            |engine, ok| observed.push((engine, ok)),
+            |_| panic!("Linux does not get Docker Desktop"),
+            |_| Ok(()),
+            |_| Ok("Compose placed".into()),
+        )
+        .unwrap_err();
+        // The Podman install ran; it then finds no podman program on this test machine.
+        assert_eq!(observed, [(Engine::Podman, true)]);
     }
 
     /// Every platform this app runs on has a Compose build, or the stack cannot be raised there.

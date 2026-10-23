@@ -143,8 +143,9 @@ export function AttachmentStrip({
                 /*
                  * ON THE SIZE LINE, NOT UNDER IT, AND THAT IS A LAYOUT CONSTRAINT RATHER THAN A
                  * PREFERENCE. The tile's height is fixed so that a file and a thumbnail read as
-                 * one row. A third line does not fit: measured in Chromium at this repository's
-                 * 15px root, the two in-flow children need 63.75px inside a 58px box. Something
+                 * one row. A third line does not fit: measured in Chromium at the 15px root this
+                 * app had then, the two in-flow children need 63.75px inside a 58px box; the tile
+                 * and its text are both rem, so the shortfall scales with the root rather than going. Something
                  * has to give, and the only choices are the icon shrinking to 13px or the text
                  * spilling past the border. Folding the warning onto this line keeps two.
                  *

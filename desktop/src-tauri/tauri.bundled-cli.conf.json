@@ -1,0 +1,7 @@
+{
+  "bundle": {
+    "resources": {
+      "cli-bundle/": "cli-bundle/"
+    }
+  }
+}

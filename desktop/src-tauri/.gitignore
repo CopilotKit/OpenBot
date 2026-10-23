@@ -1,1 +1,3 @@
 target/
+# The Intelligence CLI a test build carries (tauri.bundled-cli.conf.json); assembled, never committed.
+cli-bundle/

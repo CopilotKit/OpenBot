@@ -2,13 +2,30 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Ask } from "./Ask";
+import { CopilotKitAccount } from "./CopilotKitAccount";
 import { DatabaseReset } from "./DatabaseReset";
+import { useWindowFitsContent } from "./fitWindow";
 import {
   DEFAULT_HARNESS,
   type HarnessChoice,
   HarnessPicker,
 } from "./HarnessPicker";
 import { isHttpEndpointUrl } from "./http-endpoint-url";
+import { IntelligenceOpening } from "./IntelligenceOpening";
+import {
+  IntelligenceChoice,
+  type IntelligenceMode,
+  LocalIntelligence,
+  LocalStatus,
+  useLocalSequence,
+} from "./LocalIntelligence";
+import {
+  intelligenceStopProblem,
+  listLocalEval,
+  offerLocalIntelligence,
+  openLocalIntelligence,
+  splitStopFailure,
+} from "./localEvalCli";
 import { OrganizationSignIn } from "./OrganizationSignIn";
 import { asProblem, Failure, type Problem } from "./Problem";
 import {
@@ -17,6 +34,14 @@ import {
   ProviderPicker,
   recordedModel,
 } from "./ProviderPicker";
+import { Sections } from "./Sections";
+import {
+  type Progress,
+  plainInstallSteps,
+  SetupProgress,
+  StatusLine,
+} from "./SetupProgress";
+import { ShuttingDown, useQuitStatus } from "./ShuttingDown";
 import {
   harnessChoiceEvent,
   modelChoiceEvent,
@@ -39,20 +64,20 @@ type Blocker =
   | "virtualization-disabled"
   | "not-administrator";
 
-type Progress = {
-  step: string;
-  ok: boolean;
-  detail: string;
-  running?: boolean;
-  downloadBytes?: number;
-};
-
 type AlreadyConfigured = {
   values: Record<string, string>;
   saved: NonNullable<HeldConfiguration["saved"]>;
   launch?: { harness: HarnessChoice | null } | null;
   installation?: { harness: HarnessChoice | null } | null;
   autoStart?: boolean;
+  /** The local evaluation's checkpoint, when this installation has one. */
+  localEval?: {
+    stack: string;
+    ownership: "created" | "shared";
+    phase: string;
+    /** OpenBot holds the key `local connect` gave it for this stack. */
+    connected?: boolean;
+  };
 };
 
 function installationKeyFor(root: string, harness: HarnessChoice | null) {
@@ -67,22 +92,39 @@ const MANAGED_INTELLIGENCE_API_URL = "https://api.intelligence.copilotkit.ai";
 const MANAGED_INTELLIGENCE_GATEWAY_WS_URL =
   "wss://realtime.intelligence.copilotkit.ai";
 
-/**
- * What the last screen offers to ask, mirroring `ask::SUGGESTED`.
- *
- * Two copies of one sentence, and a test in `ask.rs` pins what it has to contain. The window needs
- * it before it calls anything, and the Rust side needs it for the case where somebody clears the
- * field, so neither can be the only one that has it.
- */
-const SUGGESTED_QUESTION = "What is 17 times 23?";
-
 export function App() {
+  useWindowFitsContent();
+  return (
+    <>
+      <Setup />
+      <IntelligenceOpening />
+    </>
+  );
+}
+
+function Setup() {
   const [engine, setEngine] = useState<EngineStatus | null>(null);
   const [blocker, setBlocker] = useState<Blocker | null>(null);
   const [blockerFailure, setBlockerFailure] = useState<Problem | null>(null);
   const [instruction, setInstruction] = useState("");
   const [root, setRoot] = useState("");
   const [reuseIntelligence, setReuseIntelligence] = useState(false);
+  // Offered only when this build has an Intelligence CLI to run; a local stack is its own mode,
+  // not another setup step.
+  const [localAvailable, setLocalAvailable] = useState(false);
+  // The CLI answered either way, so the first screen knows which choice it offers.
+  const [localChecked, setLocalChecked] = useState(false);
+  // Null until somebody presses Continue on the choice, or a recorded local stack implies it.
+  // Held per root in memory, so returning to step 4 does not ask again.
+  const [intelligenceChoice, setIntelligenceMode] =
+    useState<IntelligenceMode | null>(null);
+  // The choice screen's selection, before Continue commits it.
+  const [pickedIntelligence, setPickedIntelligence] =
+    useState<IntelligenceMode | null>(null);
+  const [localStack, setLocalStack] = useState<string | null>(null);
+  const [localConnected, setLocalConnected] = useState(false);
+  // A relaunch found a connected stack it may start, as a hosted launch resumes.
+  const [localAutoStart, setLocalAutoStart] = useState(false);
   const [apiKey, setApiKey] = useState("");
   const [organizationAuthorityUrl, setOrganizationAuthorityUrl] = useState<
     string | null
@@ -99,8 +141,32 @@ export function App() {
     id: DEFAULT_HARNESS,
   });
   const [model, setModel] = useState<ModelChoice | null>(null);
+  /*
+   * The model as of the latest choice, without waiting for a render.
+   *
+   * Local Intelligence starts OpenBot from its own sequence, a tick after the go-ahead. A choice
+   * made by a click has rendered by then; one made from an effect (a sign-in that finished and moved
+   * on by itself) may not have, and Start ran with the model from before it: null.
+   */
+  const chosenModel = useRef(model);
+  // Follows every other change to the model, once committed; a choice sets it at once (below).
+  useEffect(() => {
+    chosenModel.current = model;
+  }, [model]);
   /** Model credentials a previous run already wrote, so the provider screen arrives filled in. */
   const [alreadyHeld, setAlreadyHeld] = useState<HeldConfiguration>({});
+  // A hosted connection somebody chose earlier: a saved key, or their own server's address.
+  const hostedChosen =
+    Boolean(alreadyHeld.saved?.intelligenceApiKey) ||
+    Boolean(alreadyHeld.INTELLIGENCE_API_URL);
+  // Before a choice, the preselection: local only when the CLI answered and nothing hosted is saved.
+  const intelligenceMode =
+    intelligenceChoice ??
+    (localAvailable && !hostedChosen ? "local" : "hosted");
+  // Step 4 asks first, and runs nothing until Continue. Only when the first screen did not ask.
+  const choosingIntelligence = localAvailable && intelligenceChoice === null;
+  // Local mode: three steps, and nothing a person reads about the software underneath.
+  const localFlow = localAvailable && intelligenceChoice === "local";
   const [projects, setProjects] = useState<
     { id: string; name: string }[] | null
   >(null);
@@ -164,6 +230,13 @@ export function App() {
    * out at all.
    */
   const [signInUrl, setSignInUrl] = useState<string | null>(null);
+  // The project whose key is being made, named while it is.
+  const [connectingProject, setConnectingProject] = useState<string | null>(
+    null,
+  );
+  // Running-screen actions that wait on the native side, said while they do.
+  const [stopping, setStopping] = useState(false);
+  const [showing, setShowing] = useState(false);
 
   async function signInToCopilotKit() {
     await cancelSelfHostedSignIn();
@@ -188,6 +261,9 @@ export function App() {
 
   async function pickProject(id: string) {
     setSigningIn(true);
+    setConnectingProject(
+      projects?.find((project) => project.id === id)?.name ?? null,
+    );
     setFailure(null);
     const selfHosted = intelligenceSignInKind === "self-hosted";
     const attempt = selfHostedAttempt.current;
@@ -209,6 +285,7 @@ export function App() {
     } finally {
       if (!selfHosted || selfHostedAttempt.current === attempt) {
         setSigningIn(false);
+        setConnectingProject(null);
         if (selfHosted) {
           selfHostedActiveRef.current = false;
           setSelfHostedActive(false);
@@ -238,6 +315,26 @@ export function App() {
     }
   }
 
+  function chooseIntelligence(mode: IntelligenceMode | null) {
+    setIntelligenceMode(mode);
+  }
+
+  function continueWithIntelligence() {
+    const mode = pickedIntelligence ?? intelligenceMode;
+    chooseIntelligence(mode);
+    // Continue with local is the go-ahead.
+    if (mode === "local" && modelCanStart()) local.start();
+    // Hosted begins at the sign-in, unless a connection is already saved to be checked at Start.
+    if (
+      mode === "hosted" &&
+      !hostedChosen &&
+      !apiKey.trim() &&
+      !reuseIntelligence
+    ) {
+      void signInToCopilotKit();
+    }
+  }
+
   const [step, setStep] = useState<SetupStep>("welcome");
   const [apiUrl, setApiUrl] = useState(MANAGED_INTELLIGENCE_API_URL);
   const [wsUrl, setWsUrl] = useState(MANAGED_INTELLIGENCE_GATEWAY_WS_URL);
@@ -246,6 +343,8 @@ export function App() {
   const [resuming, setResuming] = useState(false);
   const [checkingResume, setCheckingResume] = useState(true);
   const savedLaunch = useRef<string | null>(null);
+  // An interrupted run needs an explicit Start, local Intelligence included.
+  const interruptedAtLaunch = useRef(false);
   const [refreshIntelligence, setRefreshIntelligence] = useState(false);
   const [preparation, setPreparation] = useState<{
     key: string;
@@ -254,6 +353,23 @@ export function App() {
   const installationKey = installationKeyFor(root, harness);
   const installationReady =
     preparation?.key === installationKey && preparation.status === "complete";
+  /*
+   * A local first run sets Intelligence up alongside the OpenBot install, not after it: from the
+   * moment the install reports the container engine ready (Intelligence runs on the same Docker,
+   * and the install is what starts or installs it), or at once when the install is already done.
+   * Queued by the CopilotKit account step, which runs first.
+   */
+  const intelligenceQueued = useRef(false);
+  const engineReady = steps.some(
+    (row) => row.step === "engine" && row.ok && !row.running,
+  );
+  // biome-ignore lint/correctness/useExhaustiveDependencies: runs when the engine or install changes.
+  useEffect(() => {
+    if (!intelligenceQueued.current) return;
+    if (!engineReady && !installationReady) return;
+    intelligenceQueued.current = false;
+    local.prepare();
+  }, [engineReady, installationReady]);
   const returningToInstallation = savedLaunch.current === installationKey;
   const [running, setRunning] = useState(false);
   const visibleSetupStep =
@@ -295,7 +411,35 @@ export function App() {
     }
     if (problem.connection === "organization") setRefreshOrganization(true);
   }, []);
-  const displayedFailure = failure ?? recoveryFailure;
+  // A local Intelligence stack OpenBot could not stop. Shown, but it never holds a start.
+  const [intelligenceNotice, setIntelligenceNotice] = useState<Problem | null>(
+    null,
+  );
+  const displayedFailure = failure ?? recoveryFailure ?? intelligenceNotice;
+  // Held here, above the screens, so changing screens never cancels it.
+  const local = useLocalSequence({
+    root,
+    stack: localStack,
+    connected: localConnected,
+    onStart: (startable) => start(chosenModel.current, startable),
+    onRecorded: (stack, connected) => {
+      setLocalStack(stack);
+      if (connected) setLocalConnected(true);
+    },
+  });
+  // Local mode with a recorded stack: the dashboard can be opened, from here and from the menus.
+  const intelligenceOffered = localFlow && localStack !== null;
+  // What the menus were last told. Starts hidden, so a hosted run never calls.
+  const offeredToMenus = useRef({ root: "", offered: false });
+  useEffect(() => {
+    const last = offeredToMenus.current;
+    if (last.offered === intelligenceOffered && last.root === root) return;
+    if (!last.offered && !intelligenceOffered) return;
+    offeredToMenus.current = { root, offered: intelligenceOffered };
+    offerLocalIntelligence(root, intelligenceOffered).catch(() => {});
+  }, [root, intelligenceOffered]);
+  // Stop OpenBot was chosen in this window: nothing local starts again on its own.
+  const stoppedByChoice = useRef(false);
   const credentialContext = useRef([
     root,
     model,
@@ -334,6 +478,11 @@ export function App() {
     setOrganizationAuthorityUrl(null);
     setApiKey("");
     setReuseIntelligence(false);
+    setIntelligenceMode(null);
+    setPickedIntelligence(null);
+    setLocalStack(null);
+    setLocalConnected(false);
+    setLocalAutoStart(false);
     setApiUrl(MANAGED_INTELLIGENCE_API_URL);
     setWsUrl(MANAGED_INTELLIGENCE_GATEWAY_WS_URL);
     setAlreadyHeld({});
@@ -358,6 +507,11 @@ export function App() {
         if (values.INTELLIGENCE_GATEWAY_WS_URL)
           setWsUrl(values.INTELLIGENCE_GATEWAY_WS_URL);
         setAlreadyHeld({ ...values, saved });
+        if (configured.localEval) {
+          setLocalStack(configured.localEval.stack);
+          setLocalConnected(configured.localEval.connected === true);
+          setIntelligenceMode("local");
+        }
         setOrganizationAuthorityUrl(
           values.OPENBOT_ORGANIZATION_AUTH_URL ?? null,
         );
@@ -392,10 +546,28 @@ export function App() {
         setBlockerFailure(asProblem(error));
         return false;
       });
+    // A build without a pinned CLI answers `unavailable`, and local Intelligence is not offered.
+    listLocalEval()
+      .listing.then(() => {
+        if (active) setLocalAvailable(true);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (active) setLocalChecked(true);
+      });
+    // Read once and kept apart from `last_failure`, which would hold auto-start.
+    invoke<Problem | null>("last_local_eval_stop_failure")
+      .then((found) => {
+        if (active && found) setIntelligenceNotice(found);
+      })
+      .catch(() => {});
     // A supervisor that stopped retrying must stay stopped when it returns to this window.
     const interruptedRun = invoke<Problem | null>("last_failure")
       .then((found) => {
-        if (found) setRecoveryFailure(found);
+        if (found) {
+          interruptedAtLaunch.current = true;
+          setRecoveryFailure(found);
+        }
         return found;
       })
       .catch(() => null);
@@ -454,6 +626,11 @@ export function App() {
         const resumedHarness = configured.launch.harness;
         // An interrupted run needs an explicit Start, with its saved setup still available.
         if (interrupted || configured.autoStart === false) return;
+        // Local Intelligence must report ready and licensed first, which only its screen asks.
+        if (configured.localEval) {
+          if (configured.localEval.connected) setLocalAutoStart(true);
+          return;
+        }
         setBusy(true);
         setResuming(true);
         try {
@@ -516,8 +693,10 @@ export function App() {
     };
   }, [loadConfiguredRoot, recoverFromStart]);
 
-  async function install() {
-    if (busy || !root.trim()) return;
+  /** True when the installation completed. */
+  async function install(nextHarness = harness): Promise<boolean> {
+    if (busy || !root.trim()) return false;
+    const installationKey = installationKeyFor(root, nextHarness);
     setBusy(true);
     setFailure(null);
     setSteps([
@@ -530,23 +709,66 @@ export function App() {
     ]);
     setPreparation({ key: installationKey, status: "preparing" });
     try {
-      await invoke("prepare_installation", { root: root.trim(), harness });
+      await invoke("prepare_installation", {
+        root: root.trim(),
+        harness: nextHarness,
+      });
       setSteps((current) => settleProgress(current));
       setPreparation({ key: installationKey, status: "complete" });
+      return true;
     } catch (error) {
       const problem = asProblem(error);
       setSteps((current) => settleProgress(current, problem));
       setPreparation({ key: installationKey, status: "failed" });
       setFailure(problem);
+      return false;
     } finally {
       setBusy(false);
     }
   }
 
-  async function start(nextModel = model) {
+  /*
+   * Local mode installs on the first screen's click, with the default Bot in the default folder:
+   * one installation per computer. It needs no CopilotKit account, so it runs while the person
+   * signs in; only Intelligence waits for the agreement. Once it completes, Intelligence sets up
+   * behind the AI provider screen rather than after it.
+   */
+  const localInstall = useRef<Promise<boolean> | null>(null);
+  function beginLocalInstall(): Promise<boolean> {
+    if (localInstall.current) return localInstall.current;
+    const choice = { id: DEFAULT_HARNESS };
+    setHarness(choice);
+    const started = install(choice).then((ok) => {
+      // A failed install is started again by the next Install, not remembered.
+      if (!ok) localInstall.current = null;
+      return ok;
+    });
+    localInstall.current = started;
+    return started;
+  }
+
+  /** Shows the install until it completes, then the AI provider screen. */
+  async function installLocally() {
+    setStep("install");
+    if (await beginLocalInstall()) {
+      setSteps([]);
+      setStep("model");
+    }
+  }
+
+  /** True when OpenBot started. */
+  async function start(
+    nextModel = model,
+    local: { apiUrl: string; gatewayWsUrl: string } | null = null,
+  ): Promise<boolean> {
     if (!installationReady) {
       setStep("install");
-      return;
+      return false;
+    }
+    // Local Intelligence starts only from a stack its CLI reports ready and licensed.
+    if (intelligenceMode === "local" && !local) {
+      setStep("connect");
+      return false;
     }
     setBusy(true);
     setFailure(null);
@@ -554,9 +776,10 @@ export function App() {
     try {
       await invoke("start_stack", {
         root: root.trim(),
-        apiUrl,
-        gatewayWsUrl: wsUrl,
-        apiKey,
+        apiUrl: local?.apiUrl ?? apiUrl,
+        gatewayWsUrl: local?.gatewayWsUrl ?? wsUrl,
+        // Empty for a local stack: Start takes the key `local connect` gave OpenBot from the vault.
+        apiKey: local ? "" : apiKey,
         // The whole answer from the model screen, so the Rust side decides which keys that
         // implies. Sending a bare key here is what made `ANTHROPIC_API_KEY` and a plan token
         // expressible at the same time.
@@ -571,7 +794,8 @@ export function App() {
       setSteps((current) => settleProgress(current));
       setRunning(true);
       setRecoveryFailure(null);
-      // Refreshing credentials does not turn an existing installation into a first run.
+      // Refreshing credentials does not turn an existing installation into a first run. A first
+      // local run asks its question too: Intelligence reporting ready says nothing about the model.
       if (
         savedLaunch.current === installationKey ||
         organizationAuthorityUrl?.trim()
@@ -580,7 +804,7 @@ export function App() {
         setStep("connect");
         setRefreshIntelligence(false);
         await invoke("show_openbot");
-        return;
+        return true;
       }
       /*
        * One screen short of the handover, on purpose.
@@ -592,8 +816,10 @@ export function App() {
        * question, and the handover waits for an answer to come back.
        */
       setStep("ask");
+      return true;
     } catch (error) {
       recoverFromStart(error);
+      return false;
     } finally {
       setBusy(false);
       invoke<EngineStatus>("detect_engine")
@@ -639,18 +865,51 @@ export function App() {
     return model.login === "plan" || model.login === "api-key";
   }
 
-  async function stop() {
-    setBusy(true);
+  /** True when OpenBot stopped, even if the local Intelligence stack it started did not. */
+  async function stopStack(): Promise<boolean> {
     try {
       await invoke("stop_stack", { root });
-      setRunning(false);
-      setRecoveryFailure(null);
-      setStep("connect");
-      setRefreshIntelligence(false);
+      setIntelligenceNotice(null);
+      return true;
     } catch (error) {
+      const stopped = splitStopFailure(error);
+      if (stopped.openBot === null && stopped.intelligence !== null) {
+        setIntelligenceNotice(intelligenceStopProblem(stopped.intelligence));
+        return true;
+      }
       setFailure(asProblem(error));
+      return false;
+    }
+  }
+
+  async function stop() {
+    setBusy(true);
+    setStopping(true);
+    // Stopped by choice: nothing starts again on its own in this session.
+    setLocalAutoStart(false);
+    stoppedByChoice.current = true;
+    try {
+      if (await stopStack()) {
+        local.reset();
+        setRunning(false);
+        setRecoveryFailure(null);
+        setStep("connect");
+        setRefreshIntelligence(false);
+      }
     } finally {
       setBusy(false);
+      setStopping(false);
+    }
+  }
+
+  async function showOpenBot() {
+    setShowing(true);
+    try {
+      await invoke("show_openbot");
+    } catch (error) {
+      recoverFromStart(error);
+    } finally {
+      setShowing(false);
     }
   }
 
@@ -658,16 +917,41 @@ export function App() {
     setBusy(true);
     setFailure(null);
     try {
-      await invoke("stop_stack", { root });
-      setRunning(false);
-      setRecoveryFailure(null);
-      setStep("model");
-    } catch (error) {
-      setFailure(asProblem(error));
+      if (await stopStack()) {
+        local.reset();
+        setRunning(false);
+        setRecoveryFailure(null);
+        setStep("model");
+      }
     } finally {
       setBusy(false);
     }
   }
+
+  /*
+   * Starts local Intelligence without a click where a hosted setup would: a recorded stack on a
+   * first run that was not interrupted, or a connected one on relaunch with auto-start on. Never
+   * after Stop OpenBot.
+   */
+  const localAuto =
+    !checkingResume &&
+    !running &&
+    !stoppedByChoice.current &&
+    step === "connect" &&
+    intelligenceMode === "local" &&
+    !choosingIntelligence &&
+    modelCanStart() &&
+    (returningToInstallation
+      ? !refreshIntelligence && localAutoStart
+      : !interruptedAtLaunch.current);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: when it turns on.
+  useEffect(() => {
+    if (localAuto) local.start();
+  }, [localAuto]);
+
+  // Quit outranks every screen: the app is closing, whatever was on it.
+  const quitting = useQuitStatus(false);
+  if (quitting) return <ShuttingDown status={quitting} />;
 
   // Nothing else on this screen can be done until the machine allows it, so nothing else is shown.
   if (blockerFailure) {
@@ -691,16 +975,22 @@ export function App() {
     );
   }
 
-  if (resuming || checkingResume) {
+  if (
+    resuming ||
+    checkingResume ||
+    (!running && step === "welcome" && !localChecked)
+  ) {
     return (
       <main>
-        <h1>{resuming ? "Starting OpenBot" : "Opening OpenBot"}</h1>
-        <p role="status">
-          {resuming
-            ? "Opening your saved setup…"
-            : "Checking your saved setup…"}
-        </p>
-        <SetupProgress steps={steps} />
+        <div className="sheet connection-sheet">
+          <h1>{resuming ? "Starting OpenBot" : "Opening OpenBot"}</h1>
+          <p className="lede" role="status">
+            {resuming
+              ? "Opening your saved setup…"
+              : "Checking your saved setup…"}
+          </p>
+          <SetupProgress steps={steps} />
+        </div>
       </main>
     );
   }
@@ -742,7 +1032,23 @@ export function App() {
   if (!running && step === "welcome") {
     return (
       <main>
-        <Welcome onStart={() => setStep("harness")} />
+        <Welcome
+          onStart={() => setStep("harness")}
+          local={
+            localAvailable
+              ? {
+                  onInstall: () => {
+                    chooseIntelligence("local");
+                    // The default Bot, recorded as its Continue would.
+                    recordSetupEvent(harnessChoiceEvent(DEFAULT_HARNESS));
+                    // The account is the first screen; OpenBot installs behind it meanwhile.
+                    setStep("account");
+                    void beginLocalInstall();
+                  },
+                }
+              : undefined
+          }
+        />
         {displayedFailure && <Failure problem={displayedFailure} />}
       </main>
     );
@@ -784,59 +1090,75 @@ export function App() {
     return (
       <main>
         <div className="sheet">
-          <p className="steps-of">Step 2 of 4</p>
+          <Sections local={localFlow} at="Install" />
           <h1>
-            {installationReady ? "Installation complete" : "Install OpenBot"}
+            {installationReady
+              ? "Installation complete"
+              : localFlow
+                ? "Installing OpenBot"
+                : "Install OpenBot"}
           </h1>
           <p className="lede">
             {installationReady
               ? "OpenBot’s local software is ready. Next, connect your AI and CopilotKit accounts."
-              : "Install the software OpenBot needs on this computer. This can take a few minutes. You’ll sign in after installation finishes."}
+              : localFlow
+                ? "OpenBot is installing what it needs on this computer. This can take a few minutes."
+                : "Install the software OpenBot needs on this computer. This can take a few minutes. You’ll sign in after installation finishes."}
           </p>
-          {!installationReady && engine?.responding && (
+          {!localFlow && !installationReady && engine?.responding && (
             <p className="footnote">
               Using {engine.engine === "docker" ? "Docker" : "Podman"} for local
               services.
             </p>
           )}
-          <div className="field">
-            <label htmlFor="root">Where OpenBot lives</label>
-            <input
-              id="root"
-              disabled={busy}
-              value={root}
-              onChange={(event) => {
-                configuredRunRef.current += 1;
-                setRoot(event.target.value);
-                setModel(null);
-                setPreparation(null);
-                setSteps([]);
-                clearRootScopedSavedState();
-              }}
-              onBlur={(event) => loadConfiguredRoot(event.target.value)}
-              spellCheck={false}
-            />
-          </div>
-          <SetupProgress steps={steps} />
+          {!localFlow && (
+            <div className="field">
+              <label htmlFor="root">Where OpenBot lives</label>
+              <input
+                id="root"
+                disabled={busy}
+                value={root}
+                onChange={(event) => {
+                  configuredRunRef.current += 1;
+                  setRoot(event.target.value);
+                  setModel(null);
+                  setPreparation(null);
+                  setSteps([]);
+                  clearRootScopedSavedState();
+                }}
+                onBlur={(event) => loadConfiguredRoot(event.target.value)}
+                spellCheck={false}
+              />
+            </div>
+          )}
+          <SetupProgress
+            steps={localFlow ? plainInstallSteps(steps, busy) : steps}
+          />
+          {/* Intelligence sets itself up alongside, once the install has Docker answering. */}
+          {localFlow && <LocalStatus sequence={local} />}
           {displayedFailure && <Failure problem={displayedFailure} />}
-          {busy && <p role="status">Installing local software…</p>}
-          {installationReady && (
+          {busy && !localFlow && (
+            <p role="status">Installing local software…</p>
+          )}
+          {installationReady && !localFlow && (
             <details>
               <summary>Installation options</summary>
-              <button type="button" className="quiet" onClick={install}>
+              <button type="button" className="quiet" onClick={() => install()}>
                 Repair installation
               </button>
             </details>
           )}
           <div className="row">
-            <button
-              type="button"
-              className="quiet"
-              disabled={busy}
-              onClick={() => setStep("harness")}
-            >
-              Back
-            </button>
+            {!(localFlow && busy) && (
+              <button
+                type="button"
+                className="quiet"
+                disabled={busy}
+                onClick={() => setStep(localFlow ? "welcome" : "harness")}
+              >
+                Back
+              </button>
+            )}
             {installationReady ? (
               <button
                 type="button"
@@ -847,11 +1169,11 @@ export function App() {
               >
                 Continue to sign in
               </button>
-            ) : (
+            ) : localFlow && busy ? null : (
               <button
                 type="button"
                 disabled={busy || !root.trim()}
-                onClick={install}
+                onClick={() => (localFlow ? installLocally() : install())}
               >
                 {busy
                   ? "Installing…"
@@ -875,15 +1197,48 @@ export function App() {
     return (
       <main>
         <Ask
-          suggestion={SUGGESTED_QUESTION}
+          local={localFlow}
           onAsk={(question) =>
             invoke<string>("ask_the_bot", { root, question })
           }
           onOpen={() => {
             savedLaunch.current = installationKey;
-            invoke("show_openbot").catch((error) => recoverFromStart(error));
+            return invoke<void>("show_openbot").catch((error) =>
+              recoverFromStart(error),
+            );
           }}
           onBack={changeModelAfterAskFailure}
+          onViewIntelligence={
+            intelligenceOffered
+              ? () => openLocalIntelligence(root).opened
+              : undefined
+          }
+        />
+        {displayedFailure && <Failure problem={displayedFailure} />}
+      </main>
+    );
+  }
+
+  /*
+   * A local first run signs in to CopilotKit and accepts the evaluation agreement as a step of its
+   * own, after the software is installed and before anything licensed is set up. Intelligence then
+   * sets itself up behind the AI provider screen, with the version accepted here.
+   */
+  if (!running && step === "account") {
+    return (
+      <main>
+        <CopilotKitAccount
+          onDone={(acceptedVersion) => {
+            if (acceptedVersion) local.acceptTerms(acceptedVersion);
+            // Intelligence sets itself up once the install has Docker answering; see below. The
+            // install may have got there during sign-in, and that change has already been seen.
+            if (engineReady || installationReady) local.prepare();
+            else intelligenceQueued.current = true;
+            if (installationReady) {
+              setSteps([]);
+              setStep("model");
+            } else void installLocally();
+          }}
         />
         {displayedFailure && <Failure problem={displayedFailure} />}
       </main>
@@ -899,79 +1254,177 @@ export function App() {
           chosen={model}
           returning={returningToInstallation}
           busy={busy}
+          local={localFlow}
+          status={localFlow && <LocalStatus sequence={local} />}
           onChoose={(choice) => {
             recordSetupEvent(modelChoiceEvent(choice));
+            chosenModel.current = choice;
             setModel(choice);
-            if (returningToInstallation) void start(choice);
+            if (localFlow) {
+              // The go-ahead: OpenBot starts once Intelligence is ready, wherever it has got to.
+              setSteps([]);
+              setStep("connect");
+              local.start();
+            } else if (returningToInstallation) void start(choice);
             else setStep("connect");
           }}
-          onBack={() => {
-            setSteps([]);
-            setStep(returningToInstallation ? "connect" : "install");
-          }}
+          // Local first runs have nothing behind this screen to go back to.
+          onBack={
+            localFlow && !returningToInstallation
+              ? undefined
+              : () => {
+                  setSteps([]);
+                  setStep(returningToInstallation ? "connect" : "install");
+                }
+          }
         />
         {displayedFailure && <Failure problem={displayedFailure} />}
       </main>
     );
   }
 
+  const localStarting = intelligenceMode === "local" && local.running;
+
   if (!running && returningToInstallation && !refreshIntelligence) {
     return (
       <main>
-        <h1>OpenBot is stopped</h1>
-        <p className="lede">
-          Your installation and saved connections are ready to reopen.
-        </p>
-        <SetupProgress steps={steps} />
-        {displayedFailure && <Failure problem={displayedFailure} />}
-        <button
-          type="button"
-          disabled={busy || !installationReady || !modelCanStart()}
-          onClick={() => start()}
-        >
-          {busy ? "Starting…" : "Start OpenBot"}
-        </button>
-        <button
-          type="button"
-          className="quiet"
-          disabled={busy}
-          onClick={() => setStep("model")}
-        >
-          Change AI connection
-        </button>
-        <button
-          type="button"
-          className="quiet"
-          disabled={busy}
-          onClick={() => setRefreshIntelligence(true)}
-        >
-          Change CopilotKit connection
-        </button>
-        {displayedFailure && (
-          <button
-            type="button"
-            className="quiet"
-            disabled={busy}
-            onClick={install}
-          >
-            Repair installation
-          </button>
-        )}
-        <details>
-          <summary>Installation options</summary>
-          <button
-            type="button"
-            className="quiet"
-            disabled={busy}
-            onClick={() => {
-              setPreparation(null);
-              setSteps([]);
-              setStep("install");
-            }}
-          >
-            Change installation
-          </button>
-        </details>
+        <div className="sheet connection-sheet">
+          <h1>{localStarting ? "Starting OpenBot" : "OpenBot is stopped"}</h1>
+          <p className="lede">
+            {localStarting
+              ? "Starting Intelligence and OpenBot on this computer."
+              : "Your installation and saved connections are ready to reopen."}
+          </p>
+          {intelligenceMode === "local" && (
+            <LocalIntelligence sequence={local} offerStart />
+          )}
+          {intelligenceMode !== "local" && <SetupProgress steps={steps} />}
+          {displayedFailure && <Failure problem={displayedFailure} />}
+          {/* While a local step runs, its Cancel is the only control. */}
+          {(intelligenceMode === "hosted" || !localStarting) && (
+            <div className="row">
+              {intelligenceMode === "hosted" && (
+                <button
+                  type="button"
+                  disabled={busy || !installationReady || !modelCanStart()}
+                  onClick={() => start()}
+                >
+                  {busy ? "Starting…" : "Start OpenBot"}
+                </button>
+              )}
+              {!localStarting && (
+                <>
+                  <button
+                    type="button"
+                    className="quiet"
+                    disabled={busy}
+                    onClick={() => setStep("model")}
+                  >
+                    Change AI connection
+                  </button>
+                  {intelligenceMode !== "local" && (
+                    <button
+                      type="button"
+                      className="quiet"
+                      disabled={busy}
+                      onClick={() => {
+                        // Changing it asks again where Intelligence runs.
+                        chooseIntelligence(null);
+                        setRefreshIntelligence(true);
+                      }}
+                    >
+                      Change CopilotKit connection
+                    </button>
+                  )}
+                  {displayedFailure && (
+                    <button
+                      type="button"
+                      className="quiet"
+                      disabled={busy}
+                      onClick={() => install()}
+                    >
+                      Repair installation
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+          {!localStarting && (
+            <details>
+              <summary>Installation options</summary>
+              <button
+                type="button"
+                className="quiet"
+                disabled={busy}
+                onClick={() => {
+                  setPreparation(null);
+                  setSteps([]);
+                  setStep("install");
+                }}
+              >
+                Change installation
+              </button>
+            </details>
+          )}
+        </div>
+      </main>
+    );
+  }
+
+  /*
+   * Local Intelligence on step 4: its rows, and OpenBot starts by itself once the CLI reports it
+   * ready and valid. While a CLI call runs, Cancel is the only control; leaving is offered only
+   * once nothing runs.
+   */
+  if (!running && !choosingIntelligence && intelligenceMode === "local") {
+    return (
+      <main>
+        <div className="sheet connection-sheet">
+          {displayedFailure?.database_reset && (
+            <DatabaseReset
+              key={`${root}:${displayedFailure.database_reset}`}
+              busy={busy}
+              volume={displayedFailure.database_reset}
+              onReset={resetLeftoverDatabase}
+            />
+          )}
+          {!returningToInstallation && <Sections local at="Start" />}
+          <h1>Getting ready</h1>
+          <p className="lede">
+            OpenBot starts as soon as Intelligence is ready. This can take a few
+            minutes.
+          </p>
+          <LocalIntelligence sequence={local} offerStart />
+          {displayedFailure && <Failure problem={displayedFailure} />}
+          {!local.running && !busy && (
+            <div className="row">
+              <button
+                type="button"
+                className="quiet"
+                onClick={() =>
+                  returningToInstallation
+                    ? setRefreshIntelligence(false)
+                    : setStep("model")
+                }
+              >
+                Back
+              </button>
+              {localAvailable && (
+                <button
+                  type="button"
+                  className="quiet"
+                  onClick={() => {
+                    local.reset();
+                    chooseIntelligence("hosted");
+                  }}
+                >
+                  Use CopilotKit's hosted service instead
+                </button>
+              )}
+            </div>
+          )}
+        </div>
       </main>
     );
   }
@@ -992,24 +1445,35 @@ export function App() {
         )}
 
         {!running && !returningToInstallation && (
-          <p className="steps-of">Step 4 of 4</p>
+          <Sections local={localFlow} at="Start" />
         )}
         <h1>
           {running && !displayedFailure
             ? "OpenBot is running"
-            : returningToInstallation
-              ? "Refresh your CopilotKit connection"
-              : "Connect to CopilotKit"}
+            : choosingIntelligence && !running
+              ? "Choose where Intelligence runs"
+              : returningToInstallation
+                ? "Refresh your CopilotKit connection"
+                : "Connect to CopilotKit"}
         </h1>
         <p className="lede">
           {running && !displayedFailure
             ? "The stack is up. OpenBot is in this window; the menu bar has it too, and stops it."
-            : returningToInstallation
-              ? "Update this connection to reopen your existing OpenBot."
-              : "Local installation is complete. Connect CopilotKit, then start OpenBot."}
+            : choosingIntelligence && !running
+              ? "OpenBot keeps your conversations in CopilotKit Intelligence. Nothing is set up until you continue."
+              : returningToInstallation
+                ? "Update this connection to reopen your existing OpenBot."
+                : "Local installation is complete. Connect CopilotKit, then start OpenBot."}
         </p>
 
-        {!running && (
+        {!running && choosingIntelligence && (
+          <IntelligenceChoice
+            chosen={pickedIntelligence ?? intelligenceMode}
+            onChoose={setPickedIntelligence}
+          />
+        )}
+
+        {!running && !choosingIntelligence && intelligenceMode === "hosted" && (
           <fieldset className="connection-form" disabled={busy}>
             {/*
             Sign in on the main path; paste behind the disclosure.
@@ -1063,7 +1527,7 @@ export function App() {
                 <p className="footnote" style={{ userSelect: "text" }}>
                   {signInUrl}
                 </p>
-                <p className="footnote">Waiting for you to approve it…</p>
+                <StatusLine>Waiting for you to approve it…</StatusLine>
               </>
             ) : projects ? (
               <>
@@ -1082,6 +1546,11 @@ export function App() {
                     </button>
                   ))}
                 </fieldset>
+                {connectingProject && (
+                  <StatusLine>
+                    Connecting OpenBot to {connectingProject}…
+                  </StatusLine>
+                )}
                 {projects.length === 0 && (
                   <>
                     <p className="footnote">
@@ -1162,6 +1631,12 @@ export function App() {
                       </button>
                     )}
                 </div>
+                {/* Managed sign-in only: the self-hosted one says its own line below. */}
+                {signingIn && intelligenceSignInKind === "managed" && (
+                  <StatusLine>
+                    Opening CopilotKit sign-in in your browser…
+                  </StatusLine>
+                )}
               </>
             )}
             {/*
@@ -1255,6 +1730,16 @@ export function App() {
                 />
               </div>
             </details>
+            {localAvailable && (
+              <button
+                type="button"
+                className="quiet"
+                disabled={signingIn}
+                onClick={() => chooseIntelligence(null)}
+              >
+                Choose where Intelligence runs
+              </button>
+            )}
           </fieldset>
         )}
 
@@ -1279,6 +1764,8 @@ export function App() {
             </button>
           </details>
         )}
+        {stopping && <StatusLine>Stopping OpenBot…</StatusLine>}
+        {showing && <StatusLine>Opening OpenBot…</StatusLine>}
         <div className="row">
           {!running && (
             <button
@@ -1307,11 +1794,8 @@ export function App() {
                  * is running", which is the worst of both: a true sentence was available and the
                  * window threw it away. The Ask screen's copy of this call always showed it.
                  */
-                onClick={() =>
-                  invoke("show_openbot").catch((error) =>
-                    recoverFromStart(error),
-                  )
-                }
+                onClick={showOpenBot}
+                disabled={busy || showing}
               >
                 Show OpenBot
               </button>
@@ -1319,11 +1803,15 @@ export function App() {
                 type="button"
                 className="quiet"
                 onClick={stop}
-                disabled={busy}
+                disabled={busy || showing}
               >
                 Stop OpenBot
               </button>
             </>
+          ) : choosingIntelligence ? (
+            <button type="button" onClick={continueWithIntelligence}>
+              Continue
+            </button>
           ) : (
             <button
               type="button"
@@ -1334,7 +1822,8 @@ export function App() {
                 busy ||
                 signingIn ||
                 !installationReady ||
-                (apiKey.trim() === "" &&
+                (intelligenceMode === "hosted" &&
+                  apiKey.trim() === "" &&
                   !alreadyHeld.saved?.intelligenceApiKey &&
                   !reuseIntelligence) ||
                 !modelCanStart() ||
@@ -1363,67 +1852,6 @@ function settleProgress(steps: Progress[], problem?: Problem): Progress[] {
   );
 }
 
-function SetupProgress({ steps }: { steps: Progress[] }) {
-  if (steps.length === 0) return null;
-  return (
-    <ol className="steps" aria-label="Setup progress" aria-live="polite">
-      {steps.map((step) => (
-        <SetupProgressRow key={step.step} step={step} />
-      ))}
-    </ol>
-  );
-}
-
-function SetupProgressRow({ step }: { step: Progress }) {
-  const [elapsed, setElapsed] = useState(0);
-  const running = step.running ?? false;
-  useEffect(() => {
-    if (!running) return;
-    const started = Date.now();
-    setElapsed(0);
-    const timer = setInterval(
-      () => setElapsed(Math.floor((Date.now() - started) / 1000)),
-      1000,
-    );
-    return () => clearInterval(timer);
-  }, [running]);
-  return (
-    <li className="step" aria-label={label(step.step)}>
-      <span
-        className={`mark ${running ? "active" : step.ok ? "good" : "bad"}`}
-        aria-hidden="true"
-      >
-        {running ? <span className="step-spinner" /> : step.ok ? "✓" : "✗"}
-      </span>
-      <span className="step-label">{label(step.step)}</span>
-      <span className="step-status">
-        {running ? "In progress" : step.ok ? "Complete" : "Failed"}
-        {running && (
-          <span className="step-elapsed" aria-hidden="true" aria-live="off">
-            {" · "}
-            {elapsed < 60
-              ? `${elapsed}s`
-              : `${Math.floor(elapsed / 60)}m ${elapsed % 60}s`}{" "}
-            elapsed
-          </span>
-        )}
-      </span>
-      <span className="detail">
-        {step.detail}
-        {step.downloadBytes != null &&
-          ` ${formatDownloadBytes(step.downloadBytes)} downloaded.`}
-      </span>
-    </li>
-  );
-}
-
-function formatDownloadBytes(bytes: number): string {
-  if (bytes < 1000) return `${bytes} B`;
-  const units = ["kB", "MB", "GB", "TB"];
-  const power = Math.min(Math.floor(Math.log10(bytes) / 3), units.length);
-  return `${(bytes / 1000 ** power).toFixed(1)} ${units[power - 1]}`;
-}
-
 function titleFor(blocker: Blocker): string {
   switch (blocker) {
     case "wsl-absent":
@@ -1436,39 +1864,5 @@ function titleFor(blocker: Blocker): string {
       return "Virtualization is off in this machine's firmware";
     case "not-administrator":
       return "This account cannot install Windows components";
-  }
-}
-
-function label(step: string): string {
-  switch (step) {
-    case "engine":
-    case "install-engine":
-      return "Container engine";
-    case "create-machine":
-      return "Engine machine";
-    case "start-machine":
-      return "Starting the machine";
-    case "health-gate":
-      return "Engine answering";
-    case "deployment":
-      return "Deployment";
-    case "env":
-      return "Settings";
-    case "ports":
-      return "Ports";
-    case "dependencies":
-      return "Dependencies";
-    case "images":
-      return "Local software";
-    case "installation":
-      return "Installation";
-    case "answering":
-      return "Answering";
-    case "services":
-      return "Containers";
-    case "migrate":
-      return "Database";
-    default:
-      return step;
   }
 }

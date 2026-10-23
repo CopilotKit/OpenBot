@@ -1,12 +1,17 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { ExternalLink } from "./ExternalLink";
 import { isHttpEndpointUrl } from "./http-endpoint-url";
 import { Mark } from "./Mark";
 import { asProblem, InlineFailure, type Problem } from "./Problem";
+import { Sections } from "./Sections";
+import { StatusLine } from "./SetupProgress";
 
 export type Login = "plan" | "api-key" | "endpoint" | "oauth";
+
+/** How long "✓ Signed in" shows before the screen moves on by itself. */
+export const CONFIRMED_FOR_MS = 1000;
 
 export type Provider = {
   id: string;
@@ -144,6 +149,8 @@ export function ProviderPicker({
   onBack,
   returning = false,
   busy: starting = false,
+  local = false,
+  status,
 }: {
   chosen: ModelChoice | null;
   /**
@@ -155,9 +162,14 @@ export function ProviderPicker({
   held: HeldConfiguration;
   root: string;
   onChoose: (choice: ModelChoice) => void;
-  onBack: () => void;
+  /** Without it there is no Back, as while local Intelligence sets up behind this screen. */
+  onBack?: () => void;
   returning?: boolean;
   busy?: boolean;
+  /** A local first run: its sections are Account, Install, AI and Start. */
+  local?: boolean;
+  /** One line about work running behind this screen. */
+  status?: ReactNode;
 }) {
   const initialChoice = chosen ?? recordedModel(held);
   const [reuse, setReuse] = useState(
@@ -212,6 +224,8 @@ export function ProviderPicker({
   const [failure, setFailure] = useState<Problem | null>(null);
   const openRef = useRef(open);
   const signInRunRef = useRef(0);
+  // A sign-in that just finished on this screen moves on by itself once the screen is ready.
+  const continueAfterSignIn = useRef(false);
   const oauthAttempt = useRef<string | null>(null);
   const [oauthCode, setOauthCode] = useState<string | null>(null);
   const [oauthSignedIn, setOauthSignedIn] = useState<string | null>(
@@ -269,6 +283,7 @@ export function ProviderPicker({
         attemptId: authorization.attemptId,
       });
       if (current()) {
+        continueAfterSignIn.current = true;
         setOauthSignedIn(providerId);
         setSignInUrl(null);
         setOauthCode(null);
@@ -337,6 +352,7 @@ export function ProviderPicker({
       if (providerId !== "anthropic") {
         const nextToken = await invoke<string>("finish_chatgpt_sign_in");
         if (stillCurrent()) {
+          continueAfterSignIn.current = true;
           setTokens((previous) => ({ ...previous, [providerId]: nextToken }));
           setSignInUrl(null);
         }
@@ -367,6 +383,7 @@ export function ProviderPicker({
       // Held, not shown. It goes on to `start_stack` the same way a typed key does.
       const nextToken = await invoke<string>("finish_claude_sign_in", { code });
       if (stillCurrent()) {
+        continueAfterSignIn.current = true;
         setTokens((previous) => ({ ...previous, [providerId]: nextToken }));
         setSignInUrl(null);
         setCode("");
@@ -470,18 +487,79 @@ export function ProviderPicker({
       ...(trimmedModel ? { model: trimmedModel } : {}),
     });
   }
+  /*
+   * Signed in, so on to the next step: the sign-in was the thing this screen was waiting for, and
+   * a Continue after "Signed in" is a click that only confirms what just happened. A sign-in that
+   * leaves something else to fill in (an OAuth row's model) waits for Continue as before.
+   *
+   * Not at once, though: a tick beside "Signed in" for a second first, so the screen says it worked
+   * before it changes. Choosing another row in that second cancels the move.
+   */
+  const [confirmed, setConfirmed] = useState<string | null>(null);
+  const continueLatest = useRef(continueWithChoice);
+  continueLatest.current = continueWithChoice;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: runs when readiness or a sign-in changes.
+  useEffect(() => {
+    if (!continueAfterSignIn.current || busy) return;
+    // Used up on the first look after the sign-in either way, so a field filled in later never
+    // moves the screen on from under somebody still typing.
+    continueAfterSignIn.current = false;
+    if (ready && !starting && row) setConfirmed(row.id);
+  }, [ready, busy, starting, tokens, oauthSignedIn]);
+  useEffect(() => {
+    if (!confirmed) return;
+    if (confirmed !== open) {
+      setConfirmed(null);
+      return;
+    }
+    const timer = setTimeout(() => {
+      setConfirmed(null);
+      continueLatest.current();
+    }, CONFIRMED_FOR_MS);
+    return () => clearTimeout(timer);
+  }, [confirmed, open]);
+
+  /** Back to every provider: the chosen one's sign-in, if any, stops. */
+  function chooseAnother() {
+    if (oauthAttempt.current) void cancelOAuth();
+    signInRunRef.current += 1;
+    setOpen(null);
+    setFailure(null);
+    setSignInUrl(null);
+    setCode("");
+    setBusy(false);
+    setProgress(null);
+    setLogin(null);
+  }
+  const chooseAnotherLatest = useRef(chooseAnother);
+  chooseAnotherLatest.current = chooseAnother;
+  // Escape goes back too, except while typing, where it would throw away a half-typed key.
+  const anyChosen = row !== null;
+  useEffect(() => {
+    if (!anyChosen) return;
+    const onKey = (event: KeyboardEvent) => {
+      const typing =
+        event.target instanceof HTMLInputElement ||
+        event.target instanceof HTMLTextAreaElement;
+      if (event.key === "Escape" && !typing) chooseAnotherLatest.current();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [anyChosen]);
 
   return (
     <div className="sheet">
-      {!returning && <p className="steps-of">Step 3 of 4</p>}
+      {!returning && <Sections local={local} at="AI" />}
       <h1>{returning ? "Refresh your AI connection" : "Connect your AI"}</h1>
       <p className="lede">
         Connect your provider with a supported plan or an API key.
       </p>
+      {status}
 
       <fieldset className="picker providers">
         <legend className="sr-only">Model provider</legend>
-        {rows.map((r) => (
+        {/* Once one is chosen it stands alone, with Change to see them all again. */}
+        {(row ? [row] : rows).map((r) => (
           <label
             key={r.id}
             className={`tile wide${open === r.id ? " chosen" : ""}`}
@@ -539,6 +617,16 @@ export function ProviderPicker({
             <span className="tile-summary">{r.summary}</span>
           </label>
         ))}
+        {row && (
+          <button
+            type="button"
+            className="text-link change-provider"
+            aria-label="Choose a different provider"
+            onClick={chooseAnother}
+          >
+            Change
+          </button>
+        )}
       </fieldset>
 
       {row && (
@@ -576,12 +664,15 @@ export function ProviderPicker({
                   : "Authorize OpenBot to use models available to your xAI account."}
               </p>
               {oauthSignedIn === row.id ? (
-                <p className="lede">Signed in to {row.name}.</p>
+                <p className="lede">
+                  {confirmed === row.id && <SignedInMark />}
+                  Signed in to {row.name}.
+                </p>
               ) : signInUrl ? (
                 <>
-                  <p role="status">
+                  <StatusLine>
                     Waiting for you to approve sign-in in your browser.
-                  </p>
+                  </StatusLine>
                   {oauthCode && (
                     <p>
                       Verification code: <strong>{oauthCode}</strong>
@@ -601,7 +692,9 @@ export function ProviderPicker({
                   {row.name}
                 </button>
               )}
-              {busy && !signInUrl && <p role="status">Preparing sign-in…</p>}
+              {busy && !signInUrl && (
+                <StatusLine>Preparing sign-in…</StatusLine>
+              )}
               <div className="field">
                 <label htmlFor="oauth-model">Model name</label>
                 <input
@@ -618,6 +711,7 @@ export function ProviderPicker({
             (token || (savedPlan && !signInUrl && !busy) ? (
               <>
                 <p className="lede">
+                  {token && confirmed === row.id && <SignedInMark />}
                   {token
                     ? `Signed in to ${row.name}.`
                     : `A saved ${row.name} sign-in will be checked when you start.`}{" "}
@@ -677,11 +771,10 @@ export function ProviderPicker({
                     >
                       {busy ? "Checking…" : "Finish signing in"}
                     </button>
+                    {busy && <StatusLine>Checking the code…</StatusLine>}
                   </>
                 ) : (
-                  <p className="footnote" style={{ margin: 0 }}>
-                    Waiting for you to approve it…
-                  </p>
+                  <StatusLine>Waiting for you to approve it…</StatusLine>
                 )}
               </>
             ) : (
@@ -709,10 +802,8 @@ export function ProviderPicker({
                       </button>
                     )}
                 </div>
-                {busy && progress && (
-                  <p className="footnote" style={{ marginBottom: 0 }}>
-                    {progress}
-                  </p>
+                {busy && (
+                  <StatusLine>{progress ?? "Preparing sign-in…"}</StatusLine>
                 )}
               </>
             ))}
@@ -863,14 +954,16 @@ export function ProviderPicker({
       )}
 
       <div className="row">
-        <button
-          type="button"
-          className="quiet"
-          onClick={onBack}
-          disabled={starting}
-        >
-          Back
-        </button>
+        {onBack && (
+          <button
+            type="button"
+            className="quiet"
+            onClick={onBack}
+            disabled={starting}
+          >
+            Back
+          </button>
+        )}
         <button
           type="button"
           disabled={starting || !row || !login || !ready}
@@ -880,5 +973,14 @@ export function ProviderPicker({
         </button>
       </div>
     </div>
+  );
+}
+
+/** The tick beside "Signed in" for the second before the screen moves on by itself. */
+function SignedInMark() {
+  return (
+    <span className="signed-in-mark" aria-hidden="true">
+      ✓{" "}
+    </span>
   );
 }

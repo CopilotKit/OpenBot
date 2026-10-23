@@ -32,6 +32,10 @@ let invokeHandler: Invoke = async () => {
 const progressListeners = new Set<
   (event: { payload: ProgressEvent }) => void
 >();
+type QuitEvent = { seq: number; steps: ProgressEvent[] };
+const quitListeners = new Set<(event: { payload: QuitEvent }) => void>();
+type OpeningEvent = { state: "opening" | "opened" | "failed"; said: string };
+const openingListeners = new Set<(event: { payload: OpeningEvent }) => void>();
 
 mock.module("@tauri-apps/api/core", () => ({
   invoke: (command: string, args?: unknown) => {
@@ -46,7 +50,17 @@ mock.module("@tauri-apps/api/event", () => ({
     listener: (event: { payload: ProgressEvent }) => void,
   ) => {
     if (name === "setup:progress") progressListeners.add(listener);
-    return () => progressListeners.delete(listener);
+    const quit = listener as unknown as (event: { payload: QuitEvent }) => void;
+    if (name === "quit:progress") quitListeners.add(quit);
+    const opening = listener as unknown as (event: {
+      payload: OpeningEvent;
+    }) => void;
+    if (name === "intelligence:opening") openingListeners.add(opening);
+    return () => {
+      progressListeners.delete(listener);
+      quitListeners.delete(quit);
+      openingListeners.delete(opening);
+    };
   },
 }));
 
@@ -55,12 +69,19 @@ mock.module("./Mark", () => ({
 }));
 
 const { App } = await import("./App");
+const { PRESET_QUESTIONS } = await import("./Ask");
+const { ShuttingDownWindow, isShuttingDownPage } = await import(
+  "./ShuttingDown"
+);
 
 beforeAll(() => GlobalRegistrator.register());
 afterEach(() => {
-  invokeCalls = [];
+  // Unmounting can still call (a running local step is cancelled), so clear the record after it.
   cleanup();
+  invokeCalls = [];
   progressListeners.clear();
+  quitListeners.clear();
+  openingListeners.clear();
 });
 afterAll(() => GlobalRegistrator.unregister());
 
@@ -132,6 +153,55 @@ async function beginPendingInstallation() {
       return preparation;
     },
   };
+}
+
+async function emitQuit(payload: QuitEvent) {
+  await act(async () => {
+    for (const listener of quitListeners) listener({ payload });
+  });
+}
+
+/** One centred column, as every setup screen: the heading, its lede and rows in one sheet. */
+function expectStandardSheet(heading: HTMLElement) {
+  const sheet = heading.closest(".sheet");
+  expect(sheet).not.toBeNull();
+  expect(sheet?.classList.contains("connection-sheet")).toBe(true);
+  expect(sheet?.parentElement?.tagName).toBe("MAIN");
+  // Nothing beside the sheet: the grid would give each child its own row and spread them apart.
+  expect(sheet?.parentElement?.children).toHaveLength(1);
+  expect(sheet?.querySelector(".lede, [role=status]")).not.toBeNull();
+}
+
+const running = (step: string) => ({
+  step,
+  ok: true,
+  detail: "",
+  running: true,
+});
+const complete = (step: string) => ({
+  step,
+  ok: true,
+  detail: "",
+  running: false,
+});
+const failed = (step: string) => ({
+  step,
+  ok: false,
+  detail: "",
+  running: false,
+});
+
+/** A status line that is still working: its words, with the setup rows' spinner beside them. */
+function expectWorking(view: ReturnType<typeof render>, said: string) {
+  const status = view
+    .getAllByRole("status")
+    .find((line) => line.textContent === said);
+  expect(status?.textContent).toBe(said);
+  expect(status?.querySelector(".step-spinner")).not.toBeNull();
+}
+
+function rowStatus(view: ReturnType<typeof render>, name: string) {
+  return within(view.getByRole("listitem", { name }));
 }
 
 async function emitProgress(payload: ProgressEvent) {
@@ -370,6 +440,1346 @@ test("installation completes before either sign-in is available", async () => {
   expect(view.getByRole("heading", { name: "Connect your AI" })).toBeTruthy();
 });
 
+async function reachConnect(view: Awaited<ReturnType<typeof renderApp>>) {
+  await enterInstallation(view);
+  await completeInstallation(view);
+  await userEvent.click(await view.findByRole("radio", { name: /OpenAI/ }));
+  await userEvent.type(view.getByLabelText("OpenAI API key"), "model-test-key");
+  await userEvent.click(view.getByRole("button", { name: "Continue" }));
+  await view.findByRole("heading", { name: "Connect to CopilotKit" });
+}
+
+const localListing = { outcome: "completed", stacks: [], reason: null };
+
+test("local Intelligence is not offered when this build has no CLI", async () => {
+  setupRootConfiguration("/tmp/local-eval-unavailable", async () =>
+    emptyConfiguration(),
+  );
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) => {
+    if (command === "list_local_eval") throw "unavailable";
+    return previous(command, args);
+  };
+  const view = await renderApp();
+  await reachConnect(view);
+  expect(view.queryByText("Run Intelligence on this computer")).toBeNull();
+  expect(view.queryByRole("radio", { name: /Intelligence/ })).toBeNull();
+  expect(view.queryByText("Choose where Intelligence runs")).toBeNull();
+  expect(
+    view.getByRole("button", { name: "Sign in to CopilotKit" }),
+  ).toBeTruthy();
+  expect(
+    invokeCalls.some((call) => call.command === "begin_intelligence_sign_in"),
+  ).toBe(false);
+  expect(invokeCalls.some((call) => call.command === "set_up_local_eval")).toBe(
+    false,
+  );
+});
+
+function localStatus(readiness: string, licence: string) {
+  return {
+    outcome: "completed",
+    stack: {
+      id: "local-abc123",
+      installedRelease: "0.15.0",
+      step: "ready",
+      urls: {
+        api: "http://localhost:64770",
+        dashboard: "http://cpk.localhost:64771",
+        gateway: "ws://localhost:64772",
+      },
+      hasFailedStep: false,
+      updateInProgress: false,
+      observed: null,
+    },
+    reason: null,
+    readiness,
+    licence,
+    licenceExpiresAt: null,
+  };
+}
+
+const localConnection = {
+  outcome: "completed",
+  stack: localStatus("unknown", "unknown").stack,
+  reason: null,
+  conflicted: false,
+};
+
+/** This build has a CLI; each local command answers from `local`. */
+/** The agreement as the CLI reports it for a person who has already accepted it. */
+const ACCEPTED_TERMS = {
+  status: "required",
+  accepted: true,
+  version: "developer-edition-2026-10-01-web",
+  url: "https://copilotkit.ai/legal/developer-edition",
+  organizationName: "Acme",
+};
+
+function withLocalCli(local: Record<string, unknown>) {
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) => {
+    if (command === "list_local_eval") return localListing;
+    if (command === "cancel_local_eval") return null;
+    if (command === "show_openbot") return null;
+    // Signed in and agreed already, unless a test says otherwise: the account step passes.
+    if (command === "local_eval_terms" && !("local_eval_terms" in local))
+      return ACCEPTED_TERMS;
+    if (command in local) {
+      const answer = local[command];
+      return typeof answer === "function" ? answer(args) : answer;
+    }
+    return previous(command, args);
+  };
+}
+
+function localSequence() {
+  return invokeCalls
+    .map((call) => call.command)
+    .filter((command) =>
+      [
+        "set_up_local_eval",
+        "connect_local_eval",
+        "run_local_eval",
+        "start_stack",
+        "show_openbot",
+      ].includes(command),
+    );
+}
+
+/** Commands that set up, connect or run local Intelligence, or stop a call. */
+function localCliCalls() {
+  return invokeCalls.filter((call) =>
+    [
+      "set_up_local_eval",
+      "connect_local_eval",
+      "run_local_eval",
+      "cancel_local_eval",
+    ].includes(call.command),
+  );
+}
+
+const LOCAL_CHOICE = "Run Intelligence on this computer";
+const HOSTED_CHOICE = "Use CopilotKit's hosted Intelligence";
+const HOSTED_LINK = "Use CopilotKit's hosted service instead";
+
+/** Ask the question already in the Try OpenBot box, and wait for the answer. */
+async function askTheTest(
+  view: Awaited<ReturnType<typeof renderApp>>,
+  answer = "I am working.",
+) {
+  await userEvent.click(await view.findByRole("button", { name: "Ask" }));
+  return view.findByText(answer);
+}
+
+function choice(view: Awaited<ReturnType<typeof renderApp>>, name: string) {
+  return view.getByRole("radio", { name: new RegExp(name) });
+}
+
+/** The first screen's Install, which with a CLI installs OpenBot and local Intelligence. */
+async function installLocal(view: Awaited<ReturnType<typeof renderApp>>) {
+  await userEvent.click(view.getByRole("button", { name: "Install" }));
+}
+
+/** Words about the software underneath, which no local screen says. */
+const JARGON = [
+  /\bCLI\b/,
+  /Docker/i,
+  /Podman/i,
+  /Container engine/i,
+  /Engine machine/i,
+  /k3d/i,
+];
+
+function expectPlain(view: Awaited<ReturnType<typeof renderApp>>) {
+  const text = view.container.textContent ?? "";
+  for (const word of JARGON) expect(text).not.toMatch(word);
+}
+
+/** The section the screen is in, as the section list marks it. */
+function stepLabel(view: Awaited<ReturnType<typeof renderApp>>) {
+  return view.container.querySelector('[aria-current="step"]')?.textContent;
+}
+
+function buttons(view: Awaited<ReturnType<typeof renderApp>>) {
+  return view
+    .getAllByRole("button")
+    .map((button) => button.textContent)
+    .sort();
+}
+
+async function chooseOpenAi(view: Awaited<ReturnType<typeof renderApp>>) {
+  await userEvent.click(await view.findByRole("radio", { name: /OpenAI/ }));
+  await userEvent.type(view.getByLabelText("OpenAI API key"), "model-test-key");
+  await userEvent.click(view.getByRole("button", { name: "Continue" }));
+}
+
+test("with a CLI, the first screen is Install, local by default with nothing to choose, and without one it is unchanged", async () => {
+  setupRootConfiguration("/tmp/local-eval-welcome", async () =>
+    emptyConfiguration(),
+  );
+  withLocalCli({});
+  let view = await renderApp();
+  expect(view.getByRole("heading", { name: "Set up OpenBot" })).toBeTruthy();
+  expect(
+    view.getByText(
+      "Installs OpenBot and CopilotKit Intelligence on this computer. The first setup takes about 10 minutes.",
+    ),
+  ).toBeTruthy();
+  expect(buttons(view)).toEqual(["Install"]);
+  expect(view.queryByRole("radio")).toBeNull();
+  expectPlain(view);
+  expect(localCliCalls()).toEqual([]);
+  cleanup();
+  invokeCalls = [];
+
+  setupRootConfiguration("/tmp/local-eval-welcome-none", async () =>
+    emptyConfiguration(),
+  );
+  view = await renderApp();
+  expect(
+    view.getByRole("heading", {
+      name: "Your own AI coworkers, on this computer.",
+    }),
+  ).toBeTruthy();
+  expect(buttons(view)).toEqual(["Set up OpenBot"]);
+  await userEvent.click(view.getByRole("button", { name: "Set up OpenBot" }));
+  expect(stepLabel(view)).toBe("Bot");
+});
+
+test("Install prepares the default Bot in the default folder, with no Bot or folder screen", async () => {
+  setupRootConfiguration("/tmp/local-eval-install", async () =>
+    emptyConfiguration(),
+  );
+  const preparation = deferred<void>();
+  withLocalCli({ prepare_installation: () => preparation.promise });
+  const view = await renderApp();
+  await installLocal(view);
+  expect(installationCalls()).toEqual([
+    {
+      command: "prepare_installation",
+      args: { root: "/tmp/local-eval-install", harness: { id: "langgraph" } },
+    },
+  ]);
+  expect(
+    view.getByRole("heading", { name: "Installing OpenBot" }),
+  ).toBeTruthy();
+  expect(stepLabel(view)).toBe("Install");
+  expect(view.queryByLabelText("Where OpenBot lives")).toBeNull();
+  expect(view.queryByText(/Pick a Bot|Which Bot/i)).toBeNull();
+  expect(invokeCalls.some((call) => call.command === "harnesses")).toBe(false);
+  // Nothing to press, and no way out while it installs.
+  expect(view.queryAllByRole("button")).toEqual([]);
+  // Intelligence waits for the engine the install starts: nothing local runs yet.
+  expect(localCliCalls()).toEqual([]);
+  // Native rows are summarised in plain words.
+  await emitProgress({
+    step: "engine",
+    ok: true,
+    detail: "The container engine is answering.",
+  });
+  await emitProgress({
+    step: "create-machine",
+    ok: true,
+    detail: "Preparing the engine machine.",
+  });
+  await emitProgress({
+    step: "images",
+    ok: true,
+    running: true,
+    detail: "Downloading local software (2/4).",
+    downloadBytes: 2_400_000,
+  });
+  expect(
+    within(
+      view.getByRole("listitem", { name: "Preparing this computer" }),
+    ).getByText("Complete"),
+  ).toBeTruthy();
+  const installing = within(
+    view.getByRole("listitem", { name: "Installing OpenBot" }),
+  );
+  expect(installing.getByText("In progress")).toBeTruthy();
+  expect(installing.getByText(/2.4 MB downloaded/)).toBeTruthy();
+  expectPlain(view);
+  expect(
+    setupEvents().filter(
+      (event) =>
+        (event as { event: { kind: string } }).event.kind === "harness_chosen",
+    ),
+  ).toEqual([{ event: { kind: "harness_chosen", harness: "langgraph" } }]);
+  // Once the engine answers, Intelligence sets itself up alongside the install, once.
+  await waitFor(() =>
+    expect(
+      localCliCalls().filter((call) => call.command === "set_up_local_eval"),
+    ).toEqual([
+      expect.objectContaining({
+        args: expect.objectContaining({ root: "/tmp/local-eval-install" }),
+      }),
+    ]),
+  );
+});
+
+test("a signed-out first run signs in to CopilotKit and accepts the agreement as its own step, before choosing an AI", async () => {
+  setupRootConfiguration("/tmp/local-eval-account", async () =>
+    emptyConfiguration(),
+  );
+  let signedIn = false;
+  withLocalCli({
+    local_eval_terms: () =>
+      signedIn
+        ? { ...ACCEPTED_TERMS, accepted: false }
+        : { status: "signed-out" },
+    sign_in_to_copilotkit: () => {
+      signedIn = true;
+      return { signedIn: true };
+    },
+    set_up_local_eval: localStatus("starting", "valid"),
+    connect_local_eval: localConnection,
+    run_local_eval: localStatus("ready", "valid"),
+  });
+  const view = await renderApp();
+  await installLocal(view);
+  // The first step. OpenBot needs no account, so it installs behind it, exactly once; nothing
+  // of Intelligence's runs before the agreement.
+  await view.findByRole("heading", { name: "Sign in to CopilotKit" });
+  expect(stepLabel(view)).toBe("Account");
+  await waitFor(() =>
+    expect(installationCalls().map((call) => call.command)).toEqual([
+      "prepare_installation",
+    ]),
+  );
+  expect(localSequence()).toEqual([]);
+  await userEvent.click(
+    view.getByRole("button", { name: "Sign in to CopilotKit" }),
+  );
+  await view.findByRole("heading", { name: "Accept the evaluation agreement" });
+  expect(
+    view.getByText(
+      "To run Intelligence on this computer, accept the CopilotKit Intelligence evaluation agreement for Acme.",
+    ),
+  ).toBeTruthy();
+  expect(view.getByRole("link", { name: "Read the agreement" })).toBeTruthy();
+  // Nothing licensed runs before Accept.
+  expect(localSequence()).toEqual([]);
+  await userEvent.click(view.getByRole("button", { name: "Accept" }));
+  await view.findByRole("heading", { name: "Connect your AI" });
+  expect(stepLabel(view)).toBe("AI");
+  expect(view.queryByText(/needs your CopilotKit account/)).toBeNull();
+  // Leaving the account step does not install a second time.
+  expect(
+    installationCalls().filter(
+      (call) => call.command === "prepare_installation",
+    ),
+  ).toHaveLength(1);
+  await waitFor(() => expect(localSequence()).toContain("set_up_local_eval"));
+  expect(
+    invokeCalls.find((call) => call.command === "set_up_local_eval")?.args,
+  ).toMatchObject({
+    root: "/tmp/local-eval-account",
+    acceptedEulaVersion: "developer-edition-2026-10-01-web",
+  });
+  expectPlain(view);
+});
+
+test("a first run already signed in with the agreement accepted passes the account step by itself", async () => {
+  setupRootConfiguration("/tmp/local-eval-account-done", async () =>
+    emptyConfiguration(),
+  );
+  withLocalCli({
+    set_up_local_eval: localStatus("starting", "valid"),
+    connect_local_eval: localConnection,
+    run_local_eval: localStatus("ready", "valid"),
+  });
+  const view = await renderApp();
+  await installLocal(view);
+  await view.findByRole("heading", { name: "Connect your AI" });
+  expect(
+    invokeCalls.some((call) => call.command === "sign_in_to_copilotkit"),
+  ).toBe(false);
+  await waitFor(() => expect(localSequence()).toContain("set_up_local_eval"));
+  expect(
+    invokeCalls.find((call) => call.command === "set_up_local_eval")?.args,
+  ).toMatchObject({ acceptedEulaVersion: null });
+});
+
+test("the local sequence starts when installation completes and survives the provider screen", async () => {
+  setupRootConfiguration("/tmp/local-eval-overlap", async () =>
+    emptyConfiguration(),
+  );
+  const preparation = deferred<void>();
+  const setUp = deferred<unknown>();
+  withLocalCli({
+    prepare_installation: () => preparation.promise,
+    set_up_local_eval: () => setUp.promise,
+    connect_local_eval: () => new Promise(() => {}),
+  });
+  const view = await renderApp();
+  await installLocal(view);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(localCliCalls()).toEqual([]);
+  await act(async () => preparation.resolve());
+  await view.findByRole("heading", { name: "Connect your AI" });
+  expect(stepLabel(view)).toBe("AI");
+  await waitFor(() => expect(localSequence()).toEqual(["set_up_local_eval"]));
+  expect(
+    invokeCalls.find((call) => call.command === "set_up_local_eval")?.args,
+  ).toMatchObject({ root: "/tmp/local-eval-overlap" });
+  // Working behind this screen says nothing on it: its progress has its own step.
+  expect(view.queryByText(/Setting up Intelligence/)).toBeNull();
+  expect(view.queryByRole("alert", { name: "Intelligence" })).toBeNull();
+  // A local first run has nothing behind this screen to go back to.
+  expect(view.queryByRole("button", { name: "Back" })).toBeNull();
+  await userEvent.click(await view.findByRole("radio", { name: /OpenAI/ }));
+  await act(async () => setUp.resolve(localStatus("starting", "valid")));
+  await waitFor(() =>
+    expect(localSequence()).toEqual([
+      "set_up_local_eval",
+      "connect_local_eval",
+    ]),
+  );
+  expect(view.queryByText(/Connecting OpenBot/)).toBeNull();
+  expect(invokeCalls.some((call) => call.command === "cancel_local_eval")).toBe(
+    false,
+  );
+  expectPlain(view);
+});
+
+test("Continue during setup shows Getting ready, which starts, tests and opens OpenBot by itself", async () => {
+  setupRootConfiguration("/tmp/local-eval-auto", async () =>
+    emptyConfiguration(),
+  );
+  const setUp = deferred<unknown>();
+  withLocalCli({
+    set_up_local_eval: () => setUp.promise,
+    connect_local_eval: localConnection,
+    run_local_eval: localStatus("ready", "valid"),
+    ask_the_bot: "I am working.",
+  });
+  const view = await renderApp();
+  await installLocal(view);
+  await chooseOpenAi(view);
+  await view.findByRole("heading", { name: "Getting ready" });
+  expect(stepLabel(view)).toBe("Start");
+  const row = view.getByRole("listitem", { name: "Setting up Intelligence" });
+  expect(row.textContent).toContain("In progress");
+  expectPlain(view);
+  await act(async () => setUp.resolve(localStatus("starting", "valid")));
+  await view.findByRole("heading", { name: "Try OpenBot" });
+  expect(stepLabel(view)).toBe("Start");
+  expect(localSequence()).toEqual([
+    "set_up_local_eval",
+    "connect_local_eval",
+    "run_local_eval",
+    "start_stack",
+  ]);
+  expect(
+    invokeCalls.find((call) => call.command === "run_local_eval")?.args,
+  ).toMatchObject({ action: "status", stack: "local-abc123" });
+  // The local stack's own addresses, and no key from the window: Start takes the vaulted one.
+  expect(getStartStackPayload()).toMatchObject({
+    root: "/tmp/local-eval-auto",
+    apiUrl: "http://localhost:64770",
+    gatewayWsUrl: "ws://localhost:64772",
+    apiKey: "",
+  });
+  // One of the questions is already in the box, nothing is asked until Ask, Another question
+  // steps through the rest in order and back round, and a typed question replaces it.
+  const question = view.getByLabelText("Your question") as HTMLInputElement;
+  const first = PRESET_QUESTIONS.indexOf(
+    question.value as (typeof PRESET_QUESTIONS)[number],
+  );
+  expect(first).toBeGreaterThanOrEqual(0);
+  expect(invokeCalls.some((call) => call.command === "ask_the_bot")).toBe(
+    false,
+  );
+  for (let step = 1; step <= PRESET_QUESTIONS.length; step++) {
+    await userEvent.click(
+      view.getByRole("button", { name: "Another question" }),
+    );
+    expect(question.value).toBe(
+      PRESET_QUESTIONS[(first + step) % PRESET_QUESTIONS.length],
+    );
+  }
+  await userEvent.type(question, "Who are you?", {
+    initialSelectionStart: 0,
+    initialSelectionEnd: question.value.length,
+  });
+  await userEvent.click(view.getByRole("button", { name: "Ask" }));
+  await view.findByText("I am working.");
+  const asked = invokeCalls.filter((call) => call.command === "ask_the_bot");
+  expect(asked).toEqual([
+    {
+      command: "ask_the_bot",
+      args: { root: "/tmp/local-eval-auto", question: "Who are you?" },
+    },
+  ]);
+  // Asking again stays open after an answer.
+  expect(view.getByRole("button", { name: "Ask again" })).toBeTruthy();
+  expectPlain(view);
+  await userEvent.click(view.getByRole("button", { name: "Open OpenBot" }));
+  await waitFor(() => expect(localSequence()).toContain("show_openbot"));
+  expect(
+    invokeCalls.filter((call) => call.command === "start_stack"),
+  ).toHaveLength(1);
+});
+
+function intelligenceCalls() {
+  return invokeCalls.filter((call) =>
+    ["offer_local_intelligence", "open_local_intelligence"].includes(
+      call.command,
+    ),
+  );
+}
+
+test("a local Try OpenBot screen links to the Intelligence dashboard through the native sign-in", async () => {
+  setupRootConfiguration("/tmp/local-eval-view", async () =>
+    emptyConfiguration(),
+  );
+  withLocalCli({
+    set_up_local_eval: localStatus("starting", "valid"),
+    connect_local_eval: localConnection,
+    run_local_eval: localStatus("ready", "valid"),
+    ask_the_bot: "I am working.",
+    offer_local_intelligence: null,
+    open_local_intelligence: () => opening.promise,
+  });
+  const opening = deferred<null>();
+  const view = await renderApp();
+  await installLocal(view);
+  await chooseOpenAi(view);
+  await askTheTest(view);
+  // The menus offer the dashboard once local mode has a recorded stack.
+  expect(intelligenceCalls()).toEqual([
+    {
+      command: "offer_local_intelligence",
+      args: { root: "/tmp/local-eval-view", offered: true },
+    },
+  ]);
+  await userEvent.click(
+    view.getByRole("button", { name: "View in Intelligence" }),
+  );
+  // Said on the click, while the CLI call is still running.
+  expectWorking(view, "Opening the Intelligence dashboard…");
+  await act(async () => opening.resolve(null));
+  expect(view.getByRole("status").textContent).toBe("Opened in your browser.");
+  expect(view.queryByText("Opening the Intelligence dashboard…")).toBeNull();
+  const opened = intelligenceCalls().filter(
+    (call) => call.command === "open_local_intelligence",
+  );
+  expect(opened).toEqual([
+    {
+      command: "open_local_intelligence",
+      args: { attempt: expect.any(String), root: "/tmp/local-eval-view" },
+    },
+  ]);
+  // The sign-in opens the browser itself; the window stays on its screen.
+  expect(localSequence()).not.toContain("show_openbot");
+  expect(view.getByRole("heading", { name: "Try OpenBot" })).toBeTruthy();
+  expectPlain(view);
+});
+
+test("a local Try OpenBot step says it is asking, with a spinner, until the answer arrives", async () => {
+  setupRootConfiguration("/tmp/local-eval-asking", async () =>
+    emptyConfiguration(),
+  );
+  const answer = deferred<string>();
+  withLocalCli({
+    set_up_local_eval: localStatus("starting", "valid"),
+    connect_local_eval: localConnection,
+    run_local_eval: localStatus("ready", "valid"),
+    ask_the_bot: () => answer.promise,
+    offer_local_intelligence: null,
+  });
+  const view = await renderApp();
+  await installLocal(view);
+  await chooseOpenAi(view);
+  await view.findByRole("heading", { name: "Try OpenBot" });
+  await userEvent.click(view.getByRole("button", { name: "Ask" }));
+  await waitFor(() => expectWorking(view, "Asking…"));
+  await act(async () => answer.resolve("I am working."));
+  expect(view.queryByText("Asking…")).toBeNull();
+});
+
+test("View in Intelligence says the native sentence when the dashboard does not open", async () => {
+  setupRootConfiguration("/tmp/local-eval-view-failed", async () =>
+    emptyConfiguration(),
+  );
+  withLocalCli({
+    set_up_local_eval: localStatus("starting", "valid"),
+    connect_local_eval: localConnection,
+    run_local_eval: localStatus("ready", "valid"),
+    ask_the_bot: "I am working.",
+    offer_local_intelligence: null,
+    open_local_intelligence: () =>
+      Promise.reject({
+        said: "Your browser did not open. Try again.",
+        detail: null,
+      }),
+  });
+  const view = await renderApp();
+  await installLocal(view);
+  await chooseOpenAi(view);
+  await askTheTest(view);
+  await userEvent.click(
+    view.getByRole("button", { name: "View in Intelligence" }),
+  );
+  expect(
+    await view.findByText("Your browser did not open. Try again."),
+  ).toBeTruthy();
+  // The test result and its way forward are unchanged.
+  expect(view.getByText("I am working.")).toBeTruthy();
+  expect(view.getByRole("button", { name: "Open OpenBot" })).toBeTruthy();
+  expectPlain(view);
+});
+
+test("Continue after Intelligence is already ready starts OpenBot with the AI just chosen", async () => {
+  setupRootConfiguration("/tmp/local-eval-ready-first", async () =>
+    emptyConfiguration(),
+  );
+  withLocalCli({
+    set_up_local_eval: localStatus("starting", "valid"),
+    connect_local_eval: localConnection,
+    run_local_eval: localStatus("ready", "valid"),
+    ask_the_bot: "I am working.",
+  });
+  const view = await renderApp();
+  await installLocal(view);
+  await view.findByRole("heading", { name: "Connect your AI" });
+  // Intelligence finishes while the person is still choosing.
+  await waitFor(() =>
+    expect(localSequence()).toEqual([
+      "set_up_local_eval",
+      "connect_local_eval",
+      "run_local_eval",
+    ]),
+  );
+  await act(async () => new Promise((resolve) => setTimeout(resolve, 100)));
+  await chooseOpenAi(view);
+  await view.findByRole("heading", { name: "Try OpenBot" });
+  expect(getStartStackPayload()).toMatchObject({
+    model: { provider: "openai", login: "api-key", apiKey: "model-test-key" },
+  });
+});
+
+test("a Claude plan signed in on the provider screen reaches Start with its token", async () => {
+  setupRootConfiguration("/tmp/local-eval-plan", async () =>
+    emptyConfiguration(),
+  );
+  withLocalCli({
+    providers: [
+      {
+        id: "anthropic",
+        name: "Anthropic",
+        summary: "Sign in with a Claude plan.",
+        logins: ["plan", "api-key"],
+        mark: null,
+        caution: null,
+      },
+    ],
+    begin_claude_sign_in: "https://claude.example/authorize",
+    finish_claude_sign_in: "synthetic-plan-token",
+    set_up_local_eval: localStatus("starting", "valid"),
+    connect_local_eval: localConnection,
+    run_local_eval: localStatus("ready", "valid"),
+    ask_the_bot: "I am working.",
+  });
+  const view = await renderApp();
+  await installLocal(view);
+  await userEvent.click(await view.findByRole("radio", { name: /Anthropic/ }));
+  await userEvent.click(
+    await view.findByRole("button", { name: "Sign in with Anthropic" }),
+  );
+  await userEvent.type(
+    await view.findByLabelText("Code from your browser"),
+    "synthetic-code",
+  );
+  // Intelligence is ready and waiting before the sign-in finishes, as on a real machine. The
+  // finished sign-in then moves on by itself, from an effect rather than a click, and Start must
+  // still get the model it chose (it once got null: Start ran before the choice had rendered).
+  await waitFor(() => expect(localSequence()).toContain("run_local_eval"));
+  await act(async () => new Promise((resolve) => setTimeout(resolve, 100)));
+  await userEvent.click(
+    view.getByRole("button", { name: "Finish signing in" }),
+  );
+  // A tick for a second, then on by itself.
+  expect((await view.findByText(/✓/)).closest("p")?.textContent).toContain(
+    "Signed in to Anthropic.",
+  );
+  await view.findByRole("heading", { name: "Try OpenBot" }, { timeout: 4000 });
+  expect(getStartStackPayload()).toMatchObject({
+    model: {
+      provider: "anthropic",
+      login: "plan",
+      token: "synthetic-plan-token",
+    },
+  });
+});
+
+test("a development double mount runs each local step and asks the question once, on Ask", async () => {
+  setupRootConfiguration("/tmp/local-eval-strict", async () =>
+    emptyConfiguration(),
+  );
+  withLocalCli({
+    set_up_local_eval: localStatus("starting", "valid"),
+    connect_local_eval: localConnection,
+    run_local_eval: localStatus("ready", "valid"),
+    ask_the_bot: "I am working.",
+  });
+  const view = await renderApp(true);
+  await installLocal(view);
+  await chooseOpenAi(view);
+  await askTheTest(view);
+  expect(localSequence()).toEqual([
+    "set_up_local_eval",
+    "connect_local_eval",
+    "run_local_eval",
+    "start_stack",
+  ]);
+  expect(
+    invokeCalls.filter((call) => call.command === "ask_the_bot"),
+  ).toHaveLength(1);
+});
+
+test("Continue after Intelligence is ready starts OpenBot with the chosen model", async () => {
+  setupRootConfiguration("/tmp/local-eval-ready-first", async () =>
+    emptyConfiguration(),
+  );
+  withLocalCli({
+    set_up_local_eval: localStatus("ready", "valid"),
+    connect_local_eval: localConnection,
+    run_local_eval: localStatus("ready", "valid"),
+    ask_the_bot: "I am working.",
+  });
+  const view = await renderApp();
+  await installLocal(view);
+  await view.findByRole("heading", { name: "Connect your AI" });
+  await waitFor(() => expect(localSequence()).toContain("run_local_eval"));
+  expect(view.queryByRole("alert", { name: "Intelligence" })).toBeNull();
+  expect(localSequence()).not.toContain("start_stack");
+  await chooseOpenAi(view);
+  await askTheTest(view);
+  expect(getStartStackPayload()).toMatchObject({
+    model: { provider: "openai" },
+  });
+});
+
+test("while a CLI step runs only Cancel is offered, and Cancel stops the call and says so", async () => {
+  setupRootConfiguration("/tmp/local-eval-cancel", async () =>
+    emptyConfiguration(),
+  );
+  const pending = deferred<unknown>();
+  withLocalCli({
+    set_up_local_eval: () => pending.promise,
+    cancel_local_eval: () => {
+      pending.reject("cancelled");
+      return null;
+    },
+    begin_intelligence_sign_in: "https://signin.example/fixture",
+    finish_intelligence_sign_in: () => new Promise(() => {}),
+  });
+  const view = await renderApp();
+  await installLocal(view);
+  await chooseOpenAi(view);
+  await view.findByRole("heading", { name: "Getting ready" });
+  expect(buttons(view)).toEqual(["Cancel"]);
+  expect(view.queryByText("Installation options")).toBeNull();
+  await userEvent.click(view.getByRole("button", { name: "Cancel" }));
+  const setup = invokeCalls.find(
+    (call) => call.command === "set_up_local_eval",
+  );
+  expect(
+    invokeCalls.find((call) => call.command === "cancel_local_eval")?.args,
+  ).toEqual({
+    attempt: (setup?.args as { attempt: string } | undefined)?.attempt,
+  });
+  const row = view.getByRole("listitem", { name: "Setting up Intelligence" });
+  await waitFor(() =>
+    expect(row.textContent).toContain(
+      "Stopped at your request before it finished.",
+    ),
+  );
+  // Once nothing runs, leaving is offered.
+  expect(buttons(view)).toEqual(["Back", "Retry", HOSTED_LINK]);
+  await userEvent.click(view.getByRole("button", { name: HOSTED_LINK }));
+  await view.findByRole("heading", { name: "Connect to CopilotKit" });
+  expect(
+    invokeCalls.filter((call) => call.command === "set_up_local_eval"),
+  ).toHaveLength(1);
+});
+
+test("a first local run whose model cannot answer offers Change the model, as hosted does", async () => {
+  setupRootConfiguration("/tmp/local-eval-ask-failure", async () =>
+    emptyConfiguration(),
+  );
+  withLocalCli({
+    set_up_local_eval: localStatus("ready", "valid"),
+    connect_local_eval: localConnection,
+    run_local_eval: localStatus("ready", "valid"),
+    stop_stack: null,
+    ask_the_bot: () => {
+      throw { said: "The model could not answer.", detail: "401" };
+    },
+  });
+  const view = await renderApp();
+  await installLocal(view);
+  await chooseOpenAi(view);
+  await userEvent.click(await view.findByRole("button", { name: "Ask" }));
+  await view.findByText("The model could not answer.");
+  expect(localSequence()).not.toContain("show_openbot");
+  expect(view.queryByRole("button", { name: "Open OpenBot" })).toBeNull();
+  await userEvent.click(view.getByRole("button", { name: "Change the model" }));
+  await view.findByRole("heading", { name: "Connect your AI" });
+  expect(invokeCalls.some((call) => call.command === "stop_stack")).toBe(true);
+  // The rows start over: what ran before was for the OpenBot that stopped.
+  await chooseOpenAi(view);
+  await waitFor(() =>
+    expect(
+      invokeCalls.filter((call) => call.command === "start_stack"),
+    ).toHaveLength(2),
+  );
+});
+
+test("a blocked setup stops at its row in plain words and Retry resumes there", async () => {
+  setupRootConfiguration("/tmp/local-eval-blocked", async () =>
+    emptyConfiguration(),
+  );
+  let setups = 0;
+  withLocalCli({
+    set_up_local_eval: () =>
+      ++setups === 1
+        ? {
+            ...localStatus("unknown", "unknown"),
+            outcome: "blocked",
+            stack: null,
+            reason: "docker-unavailable",
+          }
+        : localStatus("starting", "valid"),
+    connect_local_eval: localConnection,
+    run_local_eval: localStatus("ready", "valid"),
+    ask_the_bot: "I am working.",
+  });
+  const view = await renderApp();
+  await installLocal(view);
+  await view.findByRole("heading", { name: "Connect your AI" });
+  // A stop interrupts the screen in front at once, in a card with its reason and Retry.
+  const alert = await view.findByRole("alert", { name: "Intelligence" });
+  expect(alert.textContent).toContain("Intelligence stopped");
+  expect(alert.textContent).toContain(
+    "Intelligence cannot start until the software it runs on is running.",
+  );
+  await chooseOpenAi(view);
+  await view.findByRole("heading", { name: "Getting ready" });
+  // Continue does not retry a blocked step: Retry does.
+  expect(setups).toBe(1);
+  const row = view.getByRole("listitem", { name: "Setting up Intelligence" });
+  expect(row.textContent).toContain(
+    "Intelligence cannot start until the software it runs on is running.",
+  );
+  expectPlain(view);
+  expect(invokeCalls.some((call) => call.command === "start_stack")).toBe(
+    false,
+  );
+  await userEvent.click(view.getByRole("button", { name: "Retry" }));
+  await askTheTest(view);
+  expect(setups).toBe(2);
+});
+
+test("an installation from before the first-screen choice still asks at step 4", async () => {
+  setupRootConfiguration("/tmp/local-eval-choice", async () => ({
+    ...savedOpenAiConfiguration(),
+    saved: {
+      ...savedOpenAiConfiguration().saved,
+      intelligenceApiKey: false,
+      model: "open-ai-api-key",
+    },
+    installation: { harness: { id: "mastra" } },
+  }));
+  withLocalCli({
+    set_up_local_eval: localStatus("ready", "valid"),
+    connect_local_eval: localConnection,
+    run_local_eval: localStatus("ready", "valid"),
+    ask_the_bot: "I am working.",
+  });
+  const view = await renderApp();
+  await view.findByRole("heading", { name: "Choose where Intelligence runs" });
+  expect(choice(view, LOCAL_CHOICE)).toHaveProperty("checked", true);
+  expect(choice(view, HOSTED_CHOICE)).toHaveProperty("checked", false);
+  expect(
+    view.getByText("For evaluation. The first setup takes about 10 minutes."),
+  ).toBeTruthy();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(localCliCalls()).toEqual([]);
+  await userEvent.click(view.getByRole("button", { name: "Continue" }));
+  await askTheTest(view);
+  expect(localSequence()).toEqual([
+    "set_up_local_eval",
+    "connect_local_eval",
+    "run_local_eval",
+    "start_stack",
+  ]);
+});
+
+test("a hosted connection chosen earlier preselects hosted at step 4", async () => {
+  for (const [name, configuration] of [
+    [
+      "url",
+      {
+        ...emptyConfiguration(),
+        saved: {
+          ...savedOpenAiConfiguration().saved,
+          model: "open-ai-api-key",
+        },
+        values: { INTELLIGENCE_API_URL: "https://intelligence.example" },
+        installation: { harness: { id: "mastra" } },
+      },
+    ],
+    [
+      "key",
+      {
+        ...savedOpenAiConfiguration(),
+        saved: {
+          ...savedOpenAiConfiguration().saved,
+          model: "open-ai-api-key",
+        },
+        installation: { harness: { id: "mastra" } },
+      },
+    ],
+  ] as const) {
+    setupRootConfiguration(
+      `/tmp/local-eval-hosted-chosen-${name}`,
+      async () => configuration,
+    );
+    withLocalCli({});
+    const view = await renderApp();
+    await view.findByRole("heading", {
+      name: "Choose where Intelligence runs",
+    });
+    expect(choice(view, HOSTED_CHOICE)).toHaveProperty("checked", true);
+    expect(choice(view, LOCAL_CHOICE)).toHaveProperty("checked", false);
+    // A saved connection is checked at Start; Continue does not sign in again.
+    await userEvent.click(view.getByRole("button", { name: "Continue" }));
+    await view.findByRole("heading", { name: "Connect to CopilotKit" });
+    expect(
+      invokeCalls.some((call) => call.command === "begin_intelligence_sign_in"),
+    ).toBe(false);
+    expect(localCliCalls()).toEqual([]);
+    cleanup();
+    invokeCalls = [];
+  }
+});
+
+test("a recorded, connected stack on step 4 skips the choice and starts", async () => {
+  setupRootConfiguration("/tmp/local-eval-recorded", async () => ({
+    ...savedOpenAiConfiguration(),
+    saved: { ...savedOpenAiConfiguration().saved, model: "open-ai-api-key" },
+    installation: { harness: { id: "mastra" } },
+    localEval: {
+      stack: "local-abc123",
+      ownership: "created",
+      phase: "installed",
+      connected: true,
+    },
+  }));
+  withLocalCli({
+    run_local_eval: localStatus("ready", "valid"),
+    ask_the_bot: "I am working.",
+  });
+  const view = await renderApp();
+  // Never launched, so this is a first run: it tests the model before handing over.
+  await askTheTest(view);
+  expect(
+    view.queryByRole("radio", { name: new RegExp(LOCAL_CHOICE) }),
+  ).toBeNull();
+  expect(localSequence()).toEqual(["run_local_eval", "start_stack"]);
+});
+
+test("relaunch says it is starting while it starts, and never offers a CopilotKit connection", async () => {
+  setupConnectedLocalStack(
+    "/tmp/local-eval-relaunch-heading",
+    localStatus("ready", "valid"),
+  );
+  const status = deferred<unknown>();
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) =>
+    command === "run_local_eval" ? status.promise : previous(command, args);
+  const view = await renderApp();
+  await view.findByRole("heading", { name: "Starting OpenBot" });
+  expect(
+    view.queryByRole("heading", { name: "OpenBot is stopped" }),
+  ).toBeNull();
+  expect(buttons(view)).toEqual(["Cancel"]);
+  expectPlain(view);
+  await act(async () => status.resolve(localStatus("ready", "valid")));
+  await view.findByRole("heading", { name: "OpenBot is running" });
+  await userEvent.click(view.getByRole("button", { name: "Stop OpenBot" }));
+  await view.findByRole("heading", { name: "OpenBot is stopped" });
+  expect(
+    view.queryByRole("button", { name: "Change CopilotKit connection" }),
+  ).toBeNull();
+  expect(
+    view.getByRole("button", { name: "Change AI connection" }),
+  ).toBeTruthy();
+  expectPlain(view);
+});
+
+test("Quit shows Shutting down with each part's row as it starts and ends", async () => {
+  setupConnectedLocalStack(
+    "/tmp/local-eval-quit-screen",
+    localStatus("ready", "valid"),
+  );
+  const view = await renderApp();
+  await view.findByRole("heading", { name: "OpenBot is running" });
+  const callsBefore = invokeCalls.length;
+
+  await emitQuit({ seq: 2, steps: [running("stop-openbot")] });
+  const heading = view.getByRole("heading", { name: "Shutting down OpenBot" });
+  expectStandardSheet(heading);
+  expect(
+    rowStatus(view, "Stopping OpenBot").getByText("In progress"),
+  ).toBeTruthy();
+  expect(
+    view.queryByRole("listitem", { name: "Stopping Intelligence" }),
+  ).toBeNull();
+  // Nothing to press: the app exits by itself.
+  expect(view.queryAllByRole("button")).toHaveLength(0);
+
+  await emitQuit({
+    seq: 4,
+    steps: [complete("stop-openbot"), running("stop-intelligence")],
+  });
+  expect(
+    rowStatus(view, "Stopping OpenBot").getByText("Complete"),
+  ).toBeTruthy();
+  expect(
+    rowStatus(view, "Stopping Intelligence").getByText("In progress"),
+  ).toBeTruthy();
+  // An older copy arriving late never undoes a newer one.
+  await emitQuit({ seq: 3, steps: [complete("stop-openbot")] });
+  expect(
+    rowStatus(view, "Stopping Intelligence").getByText("In progress"),
+  ).toBeTruthy();
+
+  await emitQuit({
+    seq: 5,
+    steps: [complete("stop-openbot"), failed("stop-intelligence")],
+  });
+  expect(
+    rowStatus(view, "Stopping Intelligence").getByText("Failed"),
+  ).toBeTruthy();
+  expect(view.getByRole("status").textContent).toBe(
+    "Part of it could not be stopped. OpenBot says what happened the next time it opens.",
+  );
+  // The window only shows; it never asks anything of the native side while it quits.
+  expect(invokeCalls.slice(callsBefore)).toEqual([]);
+});
+
+test("a window sent to the Shutting down page catches up, then follows the rows", async () => {
+  expect(isShuttingDownPage("#shutting-down")).toBe(true);
+  expect(isShuttingDownPage("")).toBe(false);
+  invokeHandler = async (command) => {
+    if (command === "quit_status")
+      return {
+        seq: 3,
+        steps: [complete("stop-openbot"), running("stop-intelligence")],
+      };
+    throw new Error(`unexpected ${command}`);
+  };
+  let view!: ReturnType<typeof render>;
+  await act(async () => {
+    view = render(<ShuttingDownWindow />);
+  });
+  const heading = await view.findByRole("heading", {
+    name: "Shutting down OpenBot",
+  });
+  expectStandardSheet(heading);
+  await waitFor(() =>
+    expect(
+      rowStatus(view, "Stopping OpenBot").getByText("Complete"),
+    ).toBeTruthy(),
+  );
+  expect(view.getByRole("status").textContent).toBe(
+    "OpenBot is stopping what it started on this computer, then it closes.",
+  );
+  await emitQuit({
+    seq: 4,
+    steps: [complete("stop-openbot"), complete("stop-intelligence")],
+  });
+  expect(
+    rowStatus(view, "Stopping Intelligence").getByText("Complete"),
+  ).toBeTruthy();
+  // Only the catch-up call; nothing that starts or stops anything.
+  expect(invokeCalls.map((call) => call.command)).toEqual(["quit_status"]);
+});
+
+test("Stop OpenBot and Show OpenBot say what they are doing at once", async () => {
+  setupConnectedLocalStack(
+    "/tmp/local-eval-stop-status",
+    localStatus("ready", "valid"),
+  );
+  const stopping = deferred<null>();
+  const showing = deferred<null>();
+  const previous = invokeHandler;
+  let shows = 0;
+  invokeHandler = async (command, args) => {
+    if (command === "stop_stack") return stopping.promise;
+    // The first show is the relaunch's own handover.
+    if (command === "show_openbot" && shows++ > 0) return showing.promise;
+    return previous(command, args);
+  };
+  const view = await renderApp();
+  await view.findByRole("heading", { name: "OpenBot is running" });
+
+  await userEvent.click(view.getByRole("button", { name: "Show OpenBot" }));
+  expectWorking(view, "Opening OpenBot…");
+  await act(async () => showing.resolve(null));
+  expect(view.queryByText("Opening OpenBot…")).toBeNull();
+
+  await userEvent.click(view.getByRole("button", { name: "Stop OpenBot" }));
+  expectWorking(view, "Stopping OpenBot…");
+  expect(view.getByRole("button", { name: "Stop OpenBot" })).toHaveProperty(
+    "disabled",
+    true,
+  );
+  await act(async () => stopping.resolve(null));
+  await view.findByRole("heading", { name: "OpenBot is stopped" });
+  expect(view.queryByText("Stopping OpenBot…")).toBeNull();
+});
+
+test("the menu's dashboard opening shows on a setup screen with a spinner, then how it went", async () => {
+  setupConnectedLocalStack(
+    "/tmp/local-eval-menu-opening",
+    localStatus("ready", "valid"),
+  );
+  const view = await renderApp();
+  await view.findByRole("heading", { name: "OpenBot is running" });
+  const emitOpening = async (payload: OpeningEvent) => {
+    await act(async () => {
+      for (const listener of openingListeners) listener({ payload });
+    });
+  };
+
+  await emitOpening({
+    state: "opening",
+    said: "Opening the Intelligence dashboard…",
+  });
+  expectWorking(view, "Opening the Intelligence dashboard…");
+  // The screen under it is unchanged.
+  expect(
+    view.getByRole("heading", { name: "OpenBot is running" }),
+  ).toBeTruthy();
+
+  await emitOpening({ state: "opened", said: "Opened in your browser." });
+  const opened = view
+    .getAllByRole("status")
+    .find((line) => line.textContent === "Opened in your browser.");
+  expect(opened?.querySelector(".step-spinner")).toBeNull();
+
+  await emitOpening({
+    state: "failed",
+    said: "Your browser did not open. Try again.",
+  });
+  expect(
+    view
+      .getAllByRole("status")
+      .some(
+        (line) => line.textContent === "Your browser did not open. Try again.",
+      ),
+  ).toBe(true);
+  expect(view.queryByText("Opened in your browser.")).toBeNull();
+});
+
+test("choosing a CopilotKit project says it is connecting until the key arrives", async () => {
+  const root = "/tmp/project-pick-status";
+  setupRootConfiguration(root, async () => ({
+    ...savedOpenAiConfiguration(),
+    saved: { ...savedOpenAiConfiguration().saved, model: "open-ai-api-key" },
+    launch: { harness: { id: "mastra" } },
+  }));
+  const key = deferred<string>();
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) => {
+    if (command === "start_stack")
+      throw {
+        said: "That saved CopilotKit connection is no longer available. Sign in again or enter a project key.",
+        connection: "intelligence",
+      };
+    if (command === "begin_intelligence_sign_in")
+      return "https://signin.example/fixture";
+    if (command === "finish_intelligence_sign_in")
+      return [{ id: "fixture", name: "Existing project" }];
+    if (command === "intelligence_key_for") return key.promise;
+    return previous(command, args);
+  };
+  const view = await renderApp();
+  await userEvent.click(
+    await view.findByRole("button", { name: "Sign in to CopilotKit again" }),
+  );
+  await userEvent.click(
+    await view.findByRole("button", { name: "Existing project" }),
+  );
+  expectWorking(view, "Connecting OpenBot to Existing project…");
+  await act(async () => key.resolve("refreshed-intelligence-key"));
+  expect(
+    view.queryByText("Connecting OpenBot to Existing project…"),
+  ).toBeNull();
+});
+
+test("relaunch's Starting and Opening screens use the standard setup column", async () => {
+  setupConnectedLocalStack(
+    "/tmp/local-eval-relaunch-layout",
+    localStatus("ready", "valid"),
+  );
+  const status = deferred<unknown>();
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) =>
+    command === "run_local_eval" ? status.promise : previous(command, args);
+  const view = await renderApp();
+  const starting = await view.findByRole("heading", {
+    name: "Starting OpenBot",
+  });
+  expectStandardSheet(starting);
+  const sheet = starting.closest(".sheet") as HTMLElement;
+  expect(
+    await within(sheet).findByRole("list", { name: "Setup progress" }),
+  ).toBeTruthy();
+  expect(within(sheet).getByRole("button", { name: "Cancel" })).toBeTruthy();
+  await act(async () => status.resolve(localStatus("ready", "valid")));
+  await view.findByRole("heading", { name: "OpenBot is running" });
+  await userEvent.click(view.getByRole("button", { name: "Stop OpenBot" }));
+  expectStandardSheet(
+    await view.findByRole("heading", { name: "OpenBot is stopped" }),
+  );
+  cleanup();
+
+  const reopened = "/tmp/reopen-layout";
+  const configuration = deferred<ReturnType<typeof savedOpenAiConfiguration>>();
+  setupRootConfiguration(reopened, async () => configuration.promise);
+  const reopening = invokeHandler;
+  invokeHandler = async (command, args) =>
+    command === "selected_root" ? reopened : reopening(command, args);
+  const opening = await renderApp();
+  expectStandardSheet(
+    opening.getByRole("heading", { name: "Opening OpenBot" }),
+  );
+  await act(async () => configuration.resolve(savedOpenAiConfiguration()));
+});
+
+function setupConnectedLocalStack(
+  root: string,
+  status: unknown,
+  overrides: Record<string, unknown> = {},
+) {
+  setupRootConfiguration(root, async () => ({
+    ...savedOpenAiConfiguration(),
+    saved: { ...savedOpenAiConfiguration().saved, model: "open-ai-api-key" },
+    launch: { harness: { id: "mastra" } },
+    localEval: {
+      stack: "local-abc123",
+      ownership: "created",
+      phase: "installed",
+      connected: true,
+    },
+    ...overrides,
+  }));
+  withLocalCli({
+    set_up_local_eval: status,
+    connect_local_eval: localConnection,
+    run_local_eval: status,
+    stop_stack: null,
+  });
+}
+
+test("relaunch starts a connected local stack that reports ready and valid", async () => {
+  setupConnectedLocalStack(
+    "/tmp/local-eval-ready",
+    localStatus("ready", "valid"),
+  );
+  const view = await renderApp();
+  await view.findByRole("heading", { name: "OpenBot is running" });
+  // A recorded, connected stack goes straight to waiting.
+  expect(localSequence()).toEqual([
+    "run_local_eval",
+    "start_stack",
+    "show_openbot",
+  ]);
+  expect(getStartStackPayload()).toMatchObject({
+    root: "/tmp/local-eval-ready",
+    apiUrl: "http://localhost:64770",
+    gatewayWsUrl: "ws://localhost:64772",
+    apiKey: "",
+  });
+  // Stopped by choice: nothing starts again on its own in this session.
+  await userEvent.click(view.getByRole("button", { name: "Stop OpenBot" }));
+  await view.findByRole("heading", { name: "OpenBot is stopped" });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(
+    invokeCalls.filter((call) => call.command === "start_stack"),
+  ).toHaveLength(1);
+  expect(view.getByRole("button", { name: "Start OpenBot" })).toBeTruthy();
+});
+
+test("relaunch never starts a local stack that is not exactly ready and valid", async () => {
+  for (const [readiness, licence, said] of [
+    [
+      "unknown",
+      "unknown",
+      "Intelligence started. Its licence and readiness are not reported yet.",
+    ],
+    ["ready", "expired", "The Intelligence evaluation licence has expired."],
+    ["degraded", "valid", "Intelligence is running but not healthy."],
+  ]) {
+    setupConnectedLocalStack(
+      `/tmp/local-eval-${readiness}-${licence}`,
+      localStatus(readiness, licence),
+    );
+    const view = await renderApp();
+    await view.findByText(said);
+    expect(view.getByRole("button", { name: "Retry" })).toBeTruthy();
+    expect(invokeCalls.some((call) => call.command === "start_stack")).toBe(
+      false,
+    );
+    cleanup();
+    invokeCalls = [];
+  }
+});
+
+test("relaunch waits for Start when auto-start is off, interrupted, or the stack is not connected", async () => {
+  for (const [name, overrides, failure] of [
+    ["auto-start-off", { autoStart: false }, null],
+    [
+      "not-connected",
+      {
+        localEval: {
+          stack: "local-abc123",
+          ownership: "created",
+          phase: "installed",
+        },
+      },
+      null,
+    ],
+    ["interrupted", {}, { said: "OpenBot stopped unexpectedly." }],
+  ] as const) {
+    setupConnectedLocalStack(
+      `/tmp/local-eval-${name}`,
+      localStatus("ready", "valid"),
+      overrides,
+    );
+    if (failure) {
+      const previous = invokeHandler;
+      invokeHandler = async (command, args) =>
+        command === "last_failure" ? failure : previous(command, args);
+    }
+    const view = await renderApp();
+    await view.findByRole("heading", { name: "OpenBot is stopped" });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(localSequence()).toEqual([]);
+    await userEvent.click(view.getByRole("button", { name: "Start OpenBot" }));
+    await waitFor(() => expect(localSequence()).toContain("start_stack"));
+    cleanup();
+    invokeCalls = [];
+  }
+});
+
 test("CopilotKit Back preserves the selected AI and connection settings", async () => {
   setupRootConfiguration("/tmp/back-preserves-setup", async () =>
     emptyConfiguration(),
@@ -518,7 +1928,12 @@ test("provider sign-in retries and Back reuse the completed local installation",
   await userEvent.click(
     view.getByRole("button", { name: "Sign in with OpenAI" }),
   );
-  await view.findByText(/Signed in to OpenAI/);
+  // Signed in, so on to the next step by itself, after a second showing the tick.
+  await view.findByRole(
+    "heading",
+    { name: "Connect to CopilotKit" },
+    { timeout: 4000 },
+  );
   expect(signIns).toBe(2);
   expect(installationCalls()).toHaveLength(1);
 });
@@ -958,6 +2373,69 @@ function useInterruptedShutdownSetup() {
   };
   return { root, notice };
 }
+
+test("a local Intelligence stack left running at Quit is shown without holding auto-start", async () => {
+  useInterruptedShutdownSetup();
+  const notice = {
+    said: "OpenBot could not stop the local Intelligence stack it started when it last quit.",
+    detail: "Intelligence stop failed: the CLI timed out",
+  };
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) => {
+    if (command === "last_failure") return null;
+    if (command === "last_local_eval_stop_failure") return notice;
+    return previous(command, args);
+  };
+  const view = await renderApp();
+  await waitFor(() =>
+    expect(invokeCalls.some((call) => call.command === "start_stack")).toBe(
+      true,
+    ),
+  );
+  expect(view.getByRole("alert").textContent).toContain(notice.said);
+});
+
+test("Stop that fails only for the local Intelligence stack still stops OpenBot", async () => {
+  useInterruptedShutdownSetup();
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) => {
+    if (command === "last_failure") return null;
+    if (command === "stop_stack")
+      throw "Intelligence stop failed: the CLI timed out";
+    return previous(command, args);
+  };
+  const view = await renderApp();
+  await userEvent.click(
+    await view.findByRole("button", { name: "Stop OpenBot" }),
+  );
+  await waitFor(() =>
+    expect(view.queryByRole("button", { name: "Stop OpenBot" })).toBeNull(),
+  );
+  expect(view.getByRole("alert").textContent).toContain(
+    "OpenBot stopped, but could not stop the local Intelligence stack it started.",
+  );
+});
+
+test("Stop that fails for OpenBot itself keeps OpenBot running", async () => {
+  useInterruptedShutdownSetup();
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) => {
+    if (command === "last_failure") return null;
+    if (command === "stop_stack")
+      throw "Compose down failed: busy\nIntelligence stop failed: the CLI timed out";
+    return previous(command, args);
+  };
+  const view = await renderApp();
+  await userEvent.click(
+    await view.findByRole("button", { name: "Stop OpenBot" }),
+  );
+  await waitFor(() =>
+    expect(view.getByRole("alert").textContent).toContain(
+      "Compose down failed: busy",
+    ),
+  );
+  expect(view.getByRole("button", { name: "Stop OpenBot" })).toBeTruthy();
+});
 
 test("an interrupted shutdown restores saved setup for explicit recovery", async () => {
   const { root, notice } = useInterruptedShutdownSetup();
@@ -1789,9 +3267,10 @@ test("Change the model after an Ask failure stops the stack and reaches the prov
     if (command === "ask_the_bot") {
       throw { said: "The model could not answer.", detail: "401" };
     }
-    if (command === "stop_stack") return null;
+    if (command === "stop_stack") return stopping.promise;
     throw new Error(`unexpected command ${command}`);
   };
+  const stopping = deferred<null>();
 
   const view = await renderApp();
 
@@ -1814,6 +3293,13 @@ test("Change the model after an Ask failure stops the stack and reaches the prov
   await userEvent.click(
     await view.findByRole("button", { name: "Change the model" }),
   );
+  // Stopping takes a while; it is said at once, and nothing else can be pressed meanwhile.
+  expectWorking(view, "Stopping OpenBot…");
+  expect(view.getByRole("button", { name: "Change the model" })).toHaveProperty(
+    "disabled",
+    true,
+  );
+  await act(async () => stopping.resolve(null));
 
   await waitFor(() =>
     expect(invokeCalls.some((call) => call.command === "stop_stack")).toBe(
@@ -2875,16 +4361,20 @@ for (const provider of [
           );
         }
       }
-      await view.findByText(
-        new RegExp(
-          session === "saved"
-            ? `A saved ${provider.name} sign-in will be checked`
-            : `Signed in to ${provider.name}`,
-        ),
-      );
-      await userEvent.click(view.getByRole("button", { name: "Continue" }));
+      // A fresh sign-in moves on by itself; a saved one is only offered, so it waits for Continue.
+      if (session === "saved") {
+        await view.findByText(
+          new RegExp(`A saved ${provider.name} sign-in will be checked`),
+        );
+        await userEvent.click(view.getByRole("button", { name: "Continue" }));
+      }
       await userEvent.click(
-        await view.findByRole("button", { name: "Start OpenBot" }),
+        await view.findByRole(
+          "button",
+          { name: "Start OpenBot" },
+          // A fresh sign-in shows its tick for a second before it moves on.
+          { timeout: 4000 },
+        ),
       );
 
       const payload = getStartStackPayload();
@@ -3138,6 +4628,30 @@ test("Start credential failures do not expose a restore action", async () => {
   expect(
     invokeCalls.filter(
       (c) => c.command === ["cancel", "_credential", "_reco", "very"].join(""),
+    ),
+  ).toEqual([]);
+});
+
+test("a hosted Ask screen has no Intelligence dashboard link and leaves the menus alone", async () => {
+  useCompatibleEndpointSetup({});
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) => {
+    if (command === "ask_the_bot") return "42";
+    return previous(command, args);
+  };
+  const view = await enterCompatibleEndpoint("https://models.example/v1");
+  await userEvent.click(view.getByRole("button", { name: "Continue" }));
+  await userEvent.click(view.getByRole("button", { name: "Start OpenBot" }));
+  await userEvent.click(await view.findByRole("button", { name: "Ask" }));
+  await view.findByText("42");
+  expect(
+    view.queryByRole("button", { name: "View in Intelligence" }),
+  ).toBeNull();
+  expect(
+    invokeCalls.filter((call) =>
+      ["offer_local_intelligence", "open_local_intelligence"].includes(
+        call.command,
+      ),
     ),
   ).toEqual([]);
 });
