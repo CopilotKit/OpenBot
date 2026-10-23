@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ExternalLink } from "./ExternalLink";
-import { Sections } from "./Sections";
 import {
   cancelLocalEval,
   type LocalTerms,
   localEvalTerms,
   signInToCopilotKit,
 } from "./localEvalCli";
+import { Sections } from "./Sections";
 import { StatusLine } from "./SetupProgress";
 
 type Seen =

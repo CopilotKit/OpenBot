@@ -3,7 +3,6 @@ import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Ask } from "./Ask";
 import { CopilotKitAccount } from "./CopilotKitAccount";
-import { Sections } from "./Sections";
 import { DatabaseReset } from "./DatabaseReset";
 import { useWindowFitsContent } from "./fitWindow";
 import {
@@ -35,6 +34,7 @@ import {
   ProviderPicker,
   recordedModel,
 } from "./ProviderPicker";
+import { Sections } from "./Sections";
 import {
   type Progress,
   plainInstallSteps,
