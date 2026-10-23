@@ -6,6 +6,7 @@ use std::sync::Mutex;
 
 mod desktop_connection;
 mod desktop_host_access;
+mod desktop_page;
 mod desktop_status;
 mod desktop_telemetry;
 mod intelligence_bridge;
@@ -3203,17 +3204,19 @@ rather than following the system.
 
 MEASURED: with the Mac in dark and OpenBot set to light, the window kept the dark appearance, and
 macOS drew its dark-window outline, a black line, around a light window. The page sets the window's
-theme to its own whenever its `dark` class changes.
+theme to its own whenever its `dark` class changes, through `desktop_page::appearance`.
 */
 const APP_THEME_PAGE: &str = r#"(() => {
-  const invoke = window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.invoke;
-  if (!invoke) return;
+  const internals = window.__TAURI_INTERNALS__;
+  if (!internals || typeof internals.invoke !== "function") return;
   let applied = null;
   const sync = () => {
     const theme = document.documentElement.classList.contains("dark") ? "dark" : "light";
     if (theme === applied) return;
     applied = theme;
-    invoke("plugin:window|set_theme", { label: "main", value: theme }).catch(() => {});
+    internals
+      .invoke("plugin:openbot-desktop|appearance", { dark: theme === "dark" })
+      .catch(() => {});
   };
   new MutationObserver(sync).observe(document.documentElement, {
     attributes: true,
@@ -3222,8 +3225,8 @@ const APP_THEME_PAGE: &str = r#"(() => {
   sync();
 })();"#;
 
-/// Lets OpenBot's own page move and zoom the window from its drag handle, and set the window's
-/// appearance to its own theme, and nothing more.
+/// Lets OpenBot's own page move and zoom the window from its drag handle, set the window's
+/// appearance to its own theme, and use Settings → This computer (`desktop_page`), and nothing more.
 fn allow_window_drag<R: tauri::Runtime>(app: &tauri::AppHandle<R>, url: &tauri::Url) {
     static GRANTED: Mutex<Vec<String>> = Mutex::new(Vec::new());
     let origin = url.origin().ascii_serialization();
@@ -3231,14 +3234,16 @@ fn allow_window_drag<R: tauri::Runtime>(app: &tauri::AppHandle<R>, url: &tauri::
     if granted.contains(&origin) {
         return;
     }
-    let capability =
+    let mut capability =
         tauri::ipc::CapabilityBuilder::new(format!("openbot-app-window-{}", granted.len()))
             .remote(format!("{origin}/*"))
             .local(false)
             .window("main")
             .permission("core:window:allow-start-dragging")
-            .permission("core:window:allow-internal-toggle-maximize")
-            .permission("core:window:allow-set-theme");
+            .permission("core:window:allow-internal-toggle-maximize");
+    for permission in desktop_page::PERMISSIONS {
+        capability = capability.permission(permission);
+    }
     match app.add_capability(capability) {
         Ok(()) => granted.push(origin),
         Err(error) => eprintln!("[window] could not let the app page drag the window: {error}"),
@@ -3255,6 +3260,9 @@ Its own window rather than a page of the main one, so looking at it never takes 
 screen. Closing it hides it, as the main window does; it reads everything again when shown.
 */
 fn show_status_window(app: &tauri::AppHandle) {
+    if show_status_in_app(app) {
+        return;
+    }
     if let Some(window) = app.get_webview_window("status") {
         let _ = window.show();
         let _ = window.unminimize();
@@ -3280,10 +3288,47 @@ fn show_status_window(app: &tauri::AppHandle) {
     }
 }
 
+/// Where OpenBot's Settings → This computer lives, in releases that have it.
+const COMPUTER_SETTINGS_PATH: &str = "/settings/computer";
+
+/**
+Status in OpenBot itself, Settings → This computer, when the OpenBot running here has that page:
+the main window goes there. True when it did. Otherwise, with OpenBot stopped or from a release
+without the page, the Status window does the job.
+*/
+fn show_status_in_app(app: &tauri::AppHandle) -> bool {
+    let root = cleanup_root(&app.state::<Shell>(), &stack::default_root());
+    if !root
+        .join("app/src/routes/_authed/settings/computer.tsx")
+        .is_file()
+    {
+        return false;
+    }
+    let Some(mut url) = ports_for_shell(app)
+        .ok()
+        .and_then(|ports| owned_app_url(&root, &ports))
+        .and_then(|url| url.parse::<tauri::Url>().ok())
+    else {
+        return false;
+    };
+    let Some(window) = app.get_webview_window("main") else {
+        return false;
+    };
+    url.set_path(COMPUTER_SETTINGS_PATH);
+    intelligence_bridge::allow(app, url.as_str());
+    if window.navigate(url).is_err() {
+        return false;
+    }
+    let _ = window.show();
+    let _ = window.unminimize();
+    let _ = window.set_focus();
+    true
+}
+
 /// What the Status window shows. Read fresh each time; nothing here is kept.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct DesktopStatus {
+pub(crate) struct DesktopStatus {
     /// OpenBot's host processes are up.
     openbot_running: bool,
     processes: Vec<desktop_status::Part>,
@@ -5951,6 +5996,7 @@ fn main() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(intelligence_bridge::plugin())
+        .plugin(desktop_page::plugin())
         .manage(Shell::default())
         .invoke_handler(tauri::generate_handler![
             record_setup_event,
@@ -6017,13 +6063,14 @@ fn main() {
             let page = window_page(window.app_handle(), payload.url());
             match_title_bar(&window.window(), page);
             if matches!(page, WindowPage::OwnedApp | WindowPage::LocalApp)
-                && cfg!(target_os = "macos")
                 && payload.event() == tauri::webview::PageLoadEvent::Finished
             {
                 allow_window_drag(window.app_handle(), payload.url());
-                let _ = window.eval(APP_THEME_PAGE);
-                if page == WindowPage::OwnedApp {
-                    let _ = window.eval(OVERLAY_TITLE_BAR_PAGE);
+                if cfg!(target_os = "macos") {
+                    let _ = window.eval(APP_THEME_PAGE);
+                    if page == WindowPage::OwnedApp {
+                        let _ = window.eval(OVERLAY_TITLE_BAR_PAGE);
+                    }
                 }
             }
         })
