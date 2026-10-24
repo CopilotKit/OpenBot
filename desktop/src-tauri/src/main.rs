@@ -13,8 +13,9 @@ mod test_support;
 
 use openbot_desktop_lib::{
     acquire, deployment, deployment_release, engine, env as openbot_env, harness, host_access,
-    install, preparation, problem::Problem, provider, pull_metrics, quiet, stack, supervise,
-    telemetry, tray, windows as win,
+    install, preparation,
+    problem::{LeftoverReset, Problem},
+    provider, pull_metrics, quiet, stack, supervise, telemetry, tray, windows as win,
 };
 
 const QUIT_CLEANUP_NOTICE_FILE: &str = ".openbot-quit-cleanup-notice";
@@ -57,7 +58,7 @@ struct Shell {
     last_failure: Mutex<Option<openbot_desktop_lib::problem::Problem>>,
     /// Reading the notification must not make a partially running deployment adoptable again.
     recovery_required: Mutex<Option<RecoveryRequired>>,
-    /// An explicit reset remains bound to the engine that found the leftover database.
+    /// An explicit reset remains bound to the engine and the exact volumes it offered.
     leftover_database: Mutex<Option<LeftoverDatabase>>,
     selected_root: Mutex<Option<PathBuf>>,
     root: Mutex<Option<PathBuf>>,
@@ -102,7 +103,10 @@ struct ContainerDeployment {
 
 struct LeftoverDatabase {
     root: PathBuf,
-    volume: String,
+    /// Sorted, exactly as offered: the only set a confirmation may remove.
+    volumes: Vec<String>,
+    /// Sorted names of the stopped containers removed before those volumes.
+    containers: Vec<String>,
     address: engine::Address,
 }
 
@@ -1094,44 +1098,111 @@ fn require_existing_encryption_key(
     Ok(())
 }
 
+/**
+Refuse a Start that would mint a key for, or reattach, a previous installation's data.
+
+A deleted installation folder takes `.env` and the vault with it, but the engine keeps every
+volume. Without this, a new installation reattaches the previous one's Bots' workspace files and
+browser profiles by name, and only the database was ever checked. An installation with its usable
+key is a returning one and is never probed: it keeps its data.
+*/
 fn require_existing_encryption_key_with_recovery(
     root: &Path,
     secrets: &stack::Secrets,
     existing_postgres_volume: impl FnOnce() -> Result<bool, Problem>,
-    resettable_volume: impl FnOnce() -> Result<Option<String>, Problem>,
+    leftovers: impl FnOnce() -> Result<stack::LeftoverVolumes, Problem>,
 ) -> Result<(), Problem> {
+    if secrets
+        .get("KEY_ENCRYPTION_KEY")
+        .is_some_and(|value| openbot_env::usable_encryption_key(value))
+    {
+        return Ok(());
+    }
     let mut volume_exists = false;
-    require_existing_encryption_key(root, secrets, || {
+    let guarded = require_existing_encryption_key(root, secrets, || {
         volume_exists = existing_postgres_volume()?;
         Ok(volume_exists)
-    })
-    .map_err(|mut problem| {
+    });
+    let mut problem = match guarded {
         // A failed probe is not proof of an existing volume. Configured roots never reach here.
-        if volume_exists {
-            let recovery = fresh_root_without_encryption_key(root, secrets).and_then(|fresh| {
-                if fresh {
-                    resettable_volume()
-                } else {
-                    Ok(None)
+        Err(problem) if !volume_exists => return Err(problem),
+        Err(problem) => problem,
+        Ok(()) => {
+            // No database, so a key would be minted. Anything else left behind would be reused.
+            let found = leftovers()?;
+            if found.volumes.is_empty() {
+                return Ok(());
+            }
+            let mut problem = Problem::plain("OpenBot found data from a previous installation, such as Bots' files and browser sign-ins. OpenBot will not reuse it in a new installation. Restore the previous installation's folder to keep it, or reset the leftover data to start fresh.");
+            match fresh_root_without_encryption_key(root, secrets) {
+                Ok(true) if found.resettable() => {
+                    problem.leftover = Some(Box::new(LeftoverReset {
+                        containers: found.container_names(),
+                        volumes: found.volumes,
+                    }));
                 }
-            });
-            match recovery {
-                Ok(volume) => {
-                    if volume.is_some() {
-                        problem.said = "OpenBot found a database from a previous installation, but its encryption key is unavailable. Restore the original key to keep its saved data, or reset the leftover database to start fresh.".into();
+                Ok(true) => {
+                    if let Some(running) = found.running_said() {
+                        problem.said = format!("{} {running}", problem.said);
                     }
-                    problem.database_reset = volume;
                 }
-                Err(verification) => {
-                    problem.detail = Some(match verification.detail {
-                        Some(detail) => format!("{}\n{detail}", verification.said),
-                        None => verification.said,
-                    });
-                }
+                Ok(false) => {}
+                Err(verification) => problem.detail = Some(verification_detail(verification)),
+            }
+            return Err(problem);
+        }
+    };
+    let recovery = fresh_root_without_encryption_key(root, secrets).and_then(|fresh| {
+        if fresh {
+            leftovers().map(Some)
+        } else {
+            Ok(None)
+        }
+    });
+    match recovery {
+        Ok(Some(found)) if found.database.is_some() && found.resettable() => {
+            problem.said = if found.volumes.len() > 1 {
+                "OpenBot found a database and other data from a previous installation, but its encryption key is unavailable. Restore the original key to keep its saved data, or reset the leftover data to start fresh."
+            } else {
+                "OpenBot found a database from a previous installation, but its encryption key is unavailable. Restore the original key to keep its saved data, or reset the leftover database to start fresh."
+            }
+            .into();
+            problem.leftover = Some(Box::new(LeftoverReset {
+                containers: found.container_names(),
+                volumes: found.volumes,
+            }));
+            problem.database_reset = found.database;
+        }
+        Ok(Some(found)) if found.database.is_some() => {
+            if let Some(running) = found.running_said() {
+                problem.said = format!("{} {running}", problem.said);
             }
         }
-        problem
+        Ok(_) => {}
+        Err(verification) => problem.detail = Some(verification_detail(verification)),
+    }
+    Err(problem)
+}
+
+/// The reset a refused Start offered, bound to the exact containers and volumes it named.
+fn leftover_offer(
+    problem: &Problem,
+    root: &Path,
+    address: &engine::Address,
+) -> Option<LeftoverDatabase> {
+    (!problem.leftover_volumes().is_empty()).then(|| LeftoverDatabase {
+        root: root.to_path_buf(),
+        volumes: problem.leftover_volumes().to_vec(),
+        containers: problem.leftover_containers().to_vec(),
+        address: address.clone(),
     })
+}
+
+fn verification_detail(verification: Problem) -> String {
+    match verification.detail {
+        Some(detail) => format!("{}\n{detail}", verification.said),
+        None => verification.said,
+    }
 }
 
 /// Destructive recovery needs positive evidence that root metadata is readable and unconfigured.
@@ -1147,7 +1218,7 @@ fn fresh_root_without_encryption_key(
         return Ok(false);
     }
     let unknown = || {
-        Problem::plain("OpenBot could not verify that this is an unconfigured installation. Its leftover database cannot be reset here.")
+        Problem::plain("OpenBot could not verify that this is an unconfigured installation. Its leftover data cannot be reset here.")
     };
     let settings = openbot_env::read_already_set(&root.join(".env"), &["DATABASE_URL"])
         .map_err(|_| unknown())?;
@@ -1173,13 +1244,16 @@ fn fresh_root_without_encryption_key(
 fn reset_leftover_database_with(
     shell: &Shell,
     root: &Path,
-    volume: &str,
+    volumes: &[String],
+    containers: &[String],
     confirmed: bool,
     read_secrets: impl FnOnce() -> Result<stack::Secrets, Problem>,
     reset: impl FnOnce(&engine::Address, &stack::Secrets) -> Result<(), Problem>,
 ) -> Result<(), Problem> {
     if !confirmed {
-        return Err(Problem::plain("Confirm that you want to permanently delete the leftover database before resetting it."));
+        return Err(Problem::plain(
+            "Confirm that you want to permanently delete the leftover data before resetting it.",
+        ));
     }
     let attempt = StartAttempt::begin(shell)?;
     let _startup = attempt.lock_current()?;
@@ -1187,7 +1261,7 @@ fn reset_leftover_database_with(
         || shell.root.lock().unwrap().is_some()
         || !shell.children.lock().unwrap().is_empty()
     {
-        return Err(Problem::plain("OpenBot still owns running services. Choose Stop OpenBot before resetting a leftover database."));
+        return Err(Problem::plain("OpenBot still owns running services. Choose Stop OpenBot before resetting leftover data."));
     }
     if shell
         .selected_root
@@ -1196,15 +1270,26 @@ fn reset_leftover_database_with(
         .as_ref()
         .is_some_and(|selected| selected != root)
     {
-        return Err(Problem::plain("The selected installation changed. Try Start again before resetting its leftover database."));
+        return Err(Problem::plain("The selected installation changed. Try Start again before resetting its leftover data."));
     }
+    let sorted = |names: &[String]| {
+        let mut names = names.to_vec();
+        names.sort();
+        names
+    };
+    let (volumes, containers) = (sorted(volumes), sorted(containers));
     let address = shell.leftover_database.lock().unwrap().as_ref()
-        .filter(|offer| offer.root == root && offer.volume == volume)
+        .filter(|offer| {
+            offer.root == root
+                && !volumes.is_empty()
+                && offer.volumes == volumes
+                && offer.containers == containers
+        })
         .map(|offer| offer.address.clone())
-        .ok_or_else(|| Problem::plain("The leftover database reset offer is no longer current. Try Start again before confirming a reset."))?;
+        .ok_or_else(|| Problem::plain("The leftover data reset offer is no longer current. Try Start again before confirming a reset."))?;
     let secrets = read_secrets()?;
     if !fresh_root_without_encryption_key(root, &secrets)? {
-        return Err(Problem::plain("This installation is already configured or has its original encryption key. Its database cannot be reset here."));
+        return Err(Problem::plain("This installation is already configured or has its original encryption key. Its data cannot be reset here."));
     }
     reset(&address, &secrets)?;
     *shell.leftover_database.lock().unwrap() = None;
@@ -1214,7 +1299,8 @@ fn reset_leftover_database_with(
 #[tauri::command]
 async fn reset_leftover_database<R: tauri::Runtime>(
     root: String,
-    volume: String,
+    volumes: Vec<String>,
+    containers: Vec<String>,
     confirmed: bool,
     app: tauri::AppHandle<R>,
 ) -> Result<(), Problem> {
@@ -1223,7 +1309,8 @@ async fn reset_leftover_database<R: tauri::Runtime>(
     reset_leftover_database_with(
         &shell,
         &root,
-        &volume,
+        &volumes,
+        &[],
         confirmed,
         || {
             openbot_desktop_lib::vault::already_given_no_ui(
@@ -1232,7 +1319,9 @@ async fn reset_leftover_database<R: tauri::Runtime>(
                 &openbot_env::MINTED[..],
             )
         },
-        |address, secrets| stack::reset_leftover_database(address, &root, secrets, &volume),
+        |address, secrets| {
+            stack::reset_leftover_volumes(address, &root, secrets, &volumes, &containers)
+        },
     )
 }
 
@@ -1421,18 +1510,10 @@ async fn start_stack_inner<R: tauri::Runtime>(
             &root,
             &existing_secrets,
             || stack::postgres_volume_exists(&found, &root, &existing_secrets),
-            || stack::leftover_database_volume(&found, &root, &existing_secrets),
+            || stack::leftover_volumes(&found, &root, &existing_secrets),
         )
         .inspect_err(|problem| {
-            *shell.leftover_database.lock().unwrap() =
-                problem
-                    .database_reset
-                    .as_ref()
-                    .map(|volume| LeftoverDatabase {
-                        root: root.clone(),
-                        volume: volume.clone(),
-                        address: found.clone(),
-                    });
+            *shell.leftover_database.lock().unwrap() = leftover_offer(problem, &root, &found);
         })?;
 
         // Only this deployment's recorded hosts are reclaimed; its existing containers are reusable.
@@ -5061,12 +5142,14 @@ mod tests {
             &root,
             &stack::Secrets::new(),
             || Ok(true),
-            || Ok(Some("openbot_postgres-data".into())),
+            || Ok(database_leftovers(&[])),
         )
         .unwrap_err();
+        let offered = serde_json::to_value(error).unwrap();
+        assert_eq!(offered["database_reset"], "openbot_postgres-data");
         assert_eq!(
-            serde_json::to_value(error).unwrap()["database_reset"],
-            "openbot_postgres-data"
+            offered["leftover_reset"],
+            serde_json::json!(["openbot_postgres-data"])
         );
         for (file, content) in [
             (".env", "DATABASE_URL=postgres://fixture\n"),
@@ -5091,10 +5174,9 @@ mod tests {
                 || panic!("unknown or configured roots must not offer deletion"),
             )
             .unwrap_err();
-            assert!(serde_json::to_value(error)
-                .unwrap()
-                .get("database_reset")
-                .is_none());
+            let refused = serde_json::to_value(error).unwrap();
+            assert!(refused.get("database_reset").is_none());
+            assert!(refused.get("leftover_reset").is_none());
             std::fs::remove_file(root.join(file)).unwrap();
         }
         let secrets = stack::Secrets::from([(
@@ -5111,6 +5193,245 @@ mod tests {
         std::fs::remove_dir_all(root).unwrap();
     }
 
+    fn database_leftovers(others: &[&str]) -> stack::LeftoverVolumes {
+        let mut volumes: Vec<String> = others.iter().map(|name| name.to_string()).collect();
+        volumes.push("openbot_postgres-data".into());
+        volumes.sort();
+        stack::LeftoverVolumes {
+            database: Some("openbot_postgres-data".into()),
+            database_exists: true,
+            volumes,
+            ..Default::default()
+        }
+    }
+
+    fn leftovers_without_database(volumes: &[&str]) -> stack::LeftoverVolumes {
+        stack::LeftoverVolumes {
+            database: None,
+            database_exists: false,
+            volumes: volumes.iter().map(|name| name.to_string()).collect(),
+            ..Default::default()
+        }
+    }
+
+    const BOT_LEFTOVERS: [&str; 3] = [
+        "openbot-profile-general-assistant",
+        "openbot-workspace-general-assistant",
+        "openbot_agent-profiles",
+    ];
+
+    /// Deleting the folder leaves Bots' files and sign-ins in the engine even with no database.
+    #[test]
+    fn a_fresh_root_refuses_to_reattach_any_leftover_volume() {
+        let root = temp_root("leftover-volumes-offer");
+        std::fs::create_dir_all(&root).unwrap();
+
+        let error = require_existing_encryption_key_with_recovery(
+            &root,
+            &stack::Secrets::new(),
+            || Ok(false),
+            || Ok(leftovers_without_database(&BOT_LEFTOVERS)),
+        )
+        .unwrap_err();
+        assert!(
+            error.said.contains("previous installation"),
+            "{}",
+            error.said
+        );
+        let offered = serde_json::to_value(error).unwrap();
+        assert!(offered.get("database_reset").is_none());
+        assert_eq!(offered["leftover_reset"], serde_json::json!(BOT_LEFTOVERS));
+
+        // Nothing left behind starts exactly as before.
+        assert!(require_existing_encryption_key_with_recovery(
+            &root,
+            &stack::Secrets::new(),
+            || Ok(false),
+            || Ok(stack::LeftoverVolumes::default()),
+        )
+        .is_ok());
+
+        // A probe that fails is not permission to reattach whatever is there.
+        assert!(require_existing_encryption_key_with_recovery(
+            &root,
+            &stack::Secrets::new(),
+            || Ok(false),
+            || Err(Problem::plain("inventory failed")),
+        )
+        .is_err());
+
+        // A database joins the same confirmation as everything else it would be reset with.
+        let error = require_existing_encryption_key_with_recovery(
+            &root,
+            &stack::Secrets::new(),
+            || Ok(true),
+            || Ok(database_leftovers(&BOT_LEFTOVERS)),
+        )
+        .unwrap_err();
+        assert_eq!(
+            error.database_reset.as_deref(),
+            Some("openbot_postgres-data")
+        );
+        assert_eq!(
+            error.leftover_volumes(),
+            database_leftovers(&BOT_LEFTOVERS).volumes
+        );
+
+        // A database OpenBot cannot verify keeps the existing refusal, with nothing offered.
+        let mut unverified = leftovers_without_database(&BOT_LEFTOVERS);
+        unverified.database_exists = true;
+        let error = require_existing_encryption_key_with_recovery(
+            &root,
+            &stack::Secrets::new(),
+            || Ok(true),
+            || Ok(unverified),
+        )
+        .unwrap_err();
+        assert_eq!(error.database_reset, None);
+        assert!(error.leftover_volumes().is_empty());
+        assert!(error
+            .said
+            .contains("OpenBot will not replace the key automatically"));
+
+        // Stopped containers that hold the volumes join the confirmation; running ones block it.
+        let mut held = leftovers_without_database(&BOT_LEFTOVERS);
+        held.containers = vec![stack::LeftoverContainer {
+            name: "openbot-computer-general-assistant".into(),
+            id: "c-computer".into(),
+        }];
+        let error = require_existing_encryption_key_with_recovery(
+            &root,
+            &stack::Secrets::new(),
+            || Ok(false),
+            || Ok(held.clone()),
+        )
+        .unwrap_err();
+        assert_eq!(error.leftover_volumes(), BOT_LEFTOVERS);
+        assert_eq!(
+            error.leftover_containers(),
+            ["openbot-computer-general-assistant"]
+        );
+        assert_eq!(
+            serde_json::to_value(&error).unwrap()["leftover_containers"],
+            serde_json::json!(["openbot-computer-general-assistant"])
+        );
+        held.running = vec!["openbot-agent-computer-1".into()];
+        let error = require_existing_encryption_key_with_recovery(
+            &root,
+            &stack::Secrets::new(),
+            || Ok(false),
+            || Ok(held),
+        )
+        .unwrap_err();
+        assert!(error.leftover_volumes().is_empty() && error.leftover_containers().is_empty());
+        assert!(
+            error.said.contains("openbot-agent-computer-1") && error.said.contains("still running"),
+            "{}",
+            error.said
+        );
+
+        // Unknown root metadata refuses Start but never offers deletion.
+        std::fs::write(
+            root.join(openbot_desktop_lib::saved_intent::FILE),
+            "invalid-settings-secret",
+        )
+        .unwrap();
+        let error = require_existing_encryption_key_with_recovery(
+            &root,
+            &stack::Secrets::new(),
+            || Ok(false),
+            || Ok(leftovers_without_database(&BOT_LEFTOVERS)),
+        )
+        .unwrap_err();
+        assert!(error.leftover_volumes().is_empty());
+        assert!(!format!("{error:?}").contains("invalid-settings-secret"));
+        std::fs::remove_file(root.join(openbot_desktop_lib::saved_intent::FILE)).unwrap();
+
+        // A returning installation with its key keeps its data and is never probed.
+        let secrets = stack::Secrets::from([(
+            "KEY_ENCRYPTION_KEY".into(),
+            "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=".into(),
+        )]);
+        std::fs::write(root.join(".env"), "DATABASE_URL=postgres://fixture\n").unwrap();
+        assert!(require_existing_encryption_key_with_recovery(
+            &root,
+            &secrets,
+            || panic!("original key needs no probe"),
+            || panic!("original key keeps its volumes")
+        )
+        .is_ok());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_refused_start_offers_exactly_the_containers_and_volumes_it_named() {
+        let root = temp_root("leftover-offer");
+        let address = engine::Address::new(engine::Engine::Docker, None);
+        assert!(leftover_offer(&Problem::plain("refused"), &root, &address).is_none());
+        let mut problem = Problem::plain("refused");
+        problem.leftover = Some(Box::new(LeftoverReset {
+            volumes: BOT_LEFTOVERS.map(String::from).to_vec(),
+            containers: vec!["openbot-computer-general-assistant".into()],
+        }));
+        let offer = leftover_offer(&problem, &root, &address).unwrap();
+        assert_eq!(offer.root, root);
+        assert_eq!(offer.volumes, BOT_LEFTOVERS);
+        assert_eq!(offer.containers, ["openbot-computer-general-assistant"]);
+        assert_eq!(offer.address, address);
+    }
+
+    #[test]
+    fn leftover_reset_is_bound_to_the_exact_offered_set() {
+        let root = temp_root("leftover-volumes-command");
+        std::fs::create_dir_all(&root).unwrap();
+        let shell = Shell::default();
+        let offered: Vec<String> = BOT_LEFTOVERS.map(String::from).to_vec();
+        *shell.leftover_database.lock().unwrap() = Some(LeftoverDatabase {
+            root: root.clone(),
+            volumes: offered.clone(),
+            containers: vec!["openbot-computer-general-assistant".into()],
+            address: engine::Address::new(engine::Engine::Docker, None),
+        });
+        let mut superset = offered.clone();
+        superset.push("other-profile-knowledge".into());
+        let containers = ["openbot-computer-general-assistant".to_string()];
+        for (stale, stale_containers) in [
+            (offered[..2].to_vec(), &containers[..]),
+            (superset, &containers[..]),
+            (Vec::new(), &containers[..]),
+            (offered.clone(), &[][..]),
+            (
+                offered.clone(),
+                &[containers[0].clone(), "other-computer-knowledge".into()][..],
+            ),
+        ] {
+            assert!(reset_leftover_database_with(
+                &shell,
+                &root,
+                &stale,
+                stale_containers,
+                true,
+                || panic!("a changed set must refuse before reading credentials"),
+                |_, _| panic!("a changed set must not remove anything")
+            )
+            .is_err());
+        }
+        let mut reordered = offered.clone();
+        reordered.reverse();
+        reset_leftover_database_with(
+            &shell,
+            &root,
+            &reordered,
+            &containers,
+            true,
+            || Ok(stack::Secrets::new()),
+            |_, _| Ok(()),
+        )
+        .unwrap();
+        assert!(shell.leftover_database.lock().unwrap().is_none());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn leftover_database_reset_rechecks_confirmation_configuration_key_and_ownership() {
         let root = temp_root("leftover-database-command");
@@ -5119,7 +5440,8 @@ mod tests {
         let offer = || {
             *shell.leftover_database.lock().unwrap() = Some(LeftoverDatabase {
                 root: root.clone(),
-                volume: "openbot_postgres-data".into(),
+                volumes: vec!["openbot_postgres-data".into()],
+                containers: Vec::new(),
                 address: engine::Address::new(
                     engine::Engine::Podman,
                     Some("original-machine".into()),
@@ -5130,7 +5452,8 @@ mod tests {
         assert!(reset_leftover_database_with(
             &shell,
             &root,
-            "openbot_postgres-data",
+            &["openbot_postgres-data".to_string()],
+            &[],
             false,
             || panic!("unconfirmed must not access credentials"),
             |_, _| panic!("unconfirmed must not delete")
@@ -5139,7 +5462,8 @@ mod tests {
         assert!(reset_leftover_database_with(
             &shell,
             &root,
-            "openbot_postgres-data",
+            &["openbot_postgres-data".to_string()],
+            &[],
             true,
             || Ok(stack::Secrets::new()),
             |_, _| Ok(())
@@ -5161,7 +5485,8 @@ mod tests {
             assert!(reset_leftover_database_with(
                 &shell,
                 &root,
-                "openbot_postgres-data",
+                &["openbot_postgres-data".to_string()],
+                &[],
                 true,
                 || Ok(stack::Secrets::new()),
                 |_, _| panic!("configured or unknown root must not delete")
@@ -5173,7 +5498,8 @@ mod tests {
         assert!(reset_leftover_database_with(
             &shell,
             &root,
-            "openbot_postgres-data",
+            &["openbot_postgres-data".to_string()],
+            &[],
             true,
             || Ok(stack::Secrets::new()),
             |_, _| panic!("unreadable settings must not delete")
@@ -5187,7 +5513,8 @@ mod tests {
         assert!(reset_leftover_database_with(
             &shell,
             &root,
-            "openbot_postgres-data",
+            &["openbot_postgres-data".to_string()],
+            &[],
             true,
             || Ok(secrets),
             |_, _| panic!("restored key must prevent deletion")
@@ -5197,7 +5524,8 @@ mod tests {
         assert!(reset_leftover_database_with(
             &shell,
             &root,
-            "openbot_postgres-data",
+            &["openbot_postgres-data".to_string()],
+            &[],
             true,
             || panic!("owned hosts must refuse before credential access"),
             |_, _| panic!("owned hosts must prevent deletion")
@@ -5211,7 +5539,8 @@ mod tests {
         assert!(reset_leftover_database_with(
             &shell,
             &root,
-            "openbot_postgres-data",
+            &["openbot_postgres-data".to_string()],
+            &[],
             true,
             || panic!("owned containers must refuse"),
             |_, _| panic!("owned containers must prevent deletion")
@@ -5222,7 +5551,8 @@ mod tests {
         assert!(reset_leftover_database_with(
             &shell,
             &root,
-            "openbot_postgres-data",
+            &["openbot_postgres-data".to_string()],
+            &[],
             true,
             || panic!("concurrent startup must refuse"),
             |_, _| panic!("concurrent startup must prevent deletion")
@@ -5232,7 +5562,8 @@ mod tests {
         assert!(reset_leftover_database_with(
             &shell,
             &root,
-            "openbot_postgres-data",
+            &["openbot_postgres-data".to_string()],
+            &[],
             true,
             || Ok(stack::Secrets::new()),
             |_, _| {
@@ -5263,11 +5594,12 @@ mod tests {
         let shell = Shell::default();
         let original =
             engine::Address::new(engine::Engine::Podman, Some("original-machine".into()));
-        let volume = "openbot_postgres-data";
+        let volume = &["openbot_postgres-data".to_string()][..];
         assert!(reset_leftover_database_with(
             &shell,
             &root,
             volume,
+            &[],
             true,
             || panic!("a missing offer must refuse before reading credentials"),
             |_, _| panic!("a missing offer must not remove anything")
@@ -5275,17 +5607,19 @@ mod tests {
         .is_err());
         *shell.leftover_database.lock().unwrap() = Some(LeftoverDatabase {
             root: root.clone(),
-            volume: volume.into(),
+            volumes: volume.to_vec(),
+            containers: Vec::new(),
             address: original.clone(),
         });
         for (selected_root, selected_volume) in [
-            (&root, "other-volume"),
+            (&root, &["other-volume".to_string()][..]),
             (&root.join("another-root"), volume),
         ] {
             assert!(reset_leftover_database_with(
                 &shell,
                 selected_root,
                 selected_volume,
+                &[],
                 true,
                 || panic!("a mismatched offer must refuse before reading credentials"),
                 |_, _| panic!("a mismatched offer must not remove anything")
@@ -5302,6 +5636,7 @@ mod tests {
                 &shell,
                 &root,
                 volume,
+                &[],
                 true,
                 || Ok(stack::Secrets::new()),
                 |address, _| {
@@ -5315,6 +5650,7 @@ mod tests {
             &shell,
             &root,
             volume,
+            &[],
             true,
             || Ok(stack::Secrets::new()),
             |address, _| {
@@ -5388,23 +5724,33 @@ mod tests {
                 &root,
                 &secrets,
                 || stack::postgres_volume_exists(&address, &root, &secrets),
-                || stack::leftover_database_volume(&address, &root, &secrets),
+                || stack::leftover_volumes(&address, &root, &secrets),
             )
             .unwrap_err();
             assert_eq!(guarded.database_reset.as_deref(), Some(volume.as_str()));
+            let volumes = [volume.clone()];
+            assert_eq!(guarded.leftover_volumes(), volumes);
             let shell = Shell::default();
             *shell.leftover_database.lock().unwrap() = Some(LeftoverDatabase {
                 root: root.clone(),
-                volume: volume.clone(),
+                volumes: volumes.to_vec(),
+                containers: Vec::new(),
                 address: address.clone(),
             });
             assert!(reset_leftover_database_with(
                 &shell,
                 &root,
-                &volume,
+                &volumes,
+                &[],
                 false,
                 || Ok(secrets.clone()),
-                |address, secrets| stack::reset_leftover_database(address, &root, secrets, &volume)
+                |address, secrets| stack::reset_leftover_volumes(
+                    address,
+                    &root,
+                    secrets,
+                    &volumes,
+                    &[]
+                )
             )
             .is_err());
             assert!(stack::postgres_volume_exists(&address, &root, &secrets).unwrap());
@@ -5413,10 +5759,13 @@ mod tests {
             reset_leftover_database_with(
                 &shell,
                 &root,
-                &volume,
+                &volumes,
+                &[],
                 true,
                 || Ok(secrets.clone()),
-                |address, secrets| stack::reset_leftover_database(address, &root, secrets, &volume),
+                |address, secrets| {
+                    stack::reset_leftover_volumes(address, &root, secrets, &volumes, &[])
+                },
             )
             .unwrap();
             require_existing_encryption_key(&root, &secrets, || {
@@ -5443,7 +5792,7 @@ mod tests {
                 String::from_utf8_lossy(&started.stderr)
             );
             assert!(
-                stack::reset_leftover_database(&address, &root, &secrets, &volume).is_err(),
+                stack::reset_leftover_volumes(&address, &root, &secrets, &volumes, &[]).is_err(),
                 "the real engine must refuse an attached database volume"
             );
             let ready = address
