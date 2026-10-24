@@ -261,6 +261,15 @@ With `OPENBOT_SINGLE_USER=true`, an address such as `example.com:3010` in `OPENB
 `OPENBOT_APP_URL` or `TRUSTED_ORIGINS` now refuses startup. It previously counted as a private
 network address and only warned, even though the missing URL scheme left its host unidentified.
 
+### `setup-learning.ts` runs on Windows
+
+On Windows, `bun scripts/setup-learning.ts` stopped at once with `spawn npx.cmd EINVAL` and wrote
+nothing to `.env`. Since CVE-2024-27980, Node and Bun refuse to start a `.cmd` without a shell, and
+`npx` is one there. The CopilotKit CLI is now started through `cmd.exe` on Windows. An argument the
+shell would run or expand, such as a project id containing `&` or `%`, is refused instead of passed.
+A CLI that outlives its two minutes now has its whole process tree stopped. The server's own
+Learning setup at boot calls the CLI the same way, and is fixed with it.
+
 ### A reply's tool calls fold into one line
 
 A Bot that searched, read two pages and checked Drive before answering drew four lines above its

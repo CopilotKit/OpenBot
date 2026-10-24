@@ -144,6 +144,21 @@ test("fresh managed setup creates and verifies the selected project's container 
   expect(f.calls).toHaveLength(3);
 });
 
+test.if(process.platform === "win32")(
+  "a project id the Windows shell would run is named, and the CLI is not called",
+  async () => {
+    const f = await fixture();
+    await writeFile(
+      join(f.directory, ".copilotkit/project.json"),
+      JSON.stringify({ projectId: "12&calc", projectSlug: "chosen" }),
+    );
+    await expect(
+      setupLearning({ ...f.options, runCli: f.runCli }),
+    ).rejects.toThrow("cannot be passed safely");
+    expect(f.calls).toEqual([]);
+  },
+);
+
 test("reuses an existing verified container without creating or editing it", async () => {
   const f = await fixture();
   await setupLearning({
