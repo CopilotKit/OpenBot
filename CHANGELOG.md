@@ -173,6 +173,13 @@ apps, which nobody could connect there. An app's own page, reached from an older
 available yet and that an administrator has to finish setting it up, instead of naming the setting.
 The administrator's page for the app still names `COMPOSIO_API_KEY`.
 
+### A new desktop install of v0.2.0 gets past Install again
+
+A desktop app built from `main` stopped every new install at "Installing OpenBot" with
+`shared/package.json: No such file or directory`. It had started reading `shared` and `toolkit` as
+packages, which v0.2.0 does not have: there `shared` is plain source and there is no `toolkit`. It now
+reads them only when the release includes them.
+
 ### A new desktop install starts its server again
 
 A desktop install of v0.2.0 stopped at start with `server stopped straight away (exit status: 1)` and
