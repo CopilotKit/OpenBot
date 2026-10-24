@@ -138,13 +138,10 @@ not a production installation. Run its
 `npx copilotkit@latest local connect` from the OpenBot root, where `.env` is.
 
 That command writes `INTELLIGENCE_API_URL`, `INTELLIGENCE_GATEWAY_WS_URL` and
-`CPK_INTELLIGENCE_API_KEY` to `.env`. OpenBot reads the first two as they are, but takes its project
-key only from `INTELLIGENCE_API_KEY` and refuses to start without it, so copy the `cpk-...` value
-across before `bash scripts/start.sh`:
-
-```sh
-INTELLIGENCE_API_KEY=cpk-...   # the value of CPK_INTELLIGENCE_API_KEY
-```
+`CPK_INTELLIGENCE_API_KEY` to `.env`. OpenBot reads those settings directly; no key
+copying or renaming is needed. `INTELLIGENCE_API_KEY` remains supported for older
+configurations. When both are set, the non-empty CLI key takes precedence so
+reconnecting uses the new project's key.
 
 To give the Bots a Learning container on that stack, see
 [Automatic Learning](docs/automatic-learning.md).
