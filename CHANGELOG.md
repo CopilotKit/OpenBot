@@ -42,6 +42,25 @@ already started and ended like one. That text could carry a
 notice in its own words, or close the tag and continue with instructions outside it. Content is now
 left as it is only when it is exactly what OpenBot itself wrapped; anything else is wrapped.
 
+### Filling in a form is no longer mistaken for paying
+
+The built-in safety rules (paying or moving money, credentials, security settings) read the words a
+Bot typed as well as where it typed them, so a Bot entering a CRM note about a customer's purchase
+orders, or a press release's source such as Business Wire, was stopped with "Paying, purchasing or
+moving money is always done by the person" and the step handed back to you. Typing is now judged by
+the field, the page and the button: a card number field, a checkout page or a new password field
+still goes to you, whatever is typed. A news wire (business, news or press wire) on a link or button
+no longer counts as wiring money; wiring money still does.
+
+### A Bot's browser step is no longer refused while it is being saved
+
+Before your browser runs a click or a typed entry for a Bot, the server checks it against the copy
+saved in the conversation. That copy is saved a moment behind, a piece at a time, and a check that
+read it half saved refused the step with "That unanswered tool call is not saved in this
+conversation" or "Supply a valid request", so a form the Bot was filling in could stop partway or ask
+for your approval twice. The check now waits, as it already did for a step not saved at all, until
+the step is saved whole.
+
 ### A Bot can choose from a dropdown
 
 A Bot filling in a form in its browser could not set a dropdown (a native `<select>`, such as a CRM's
