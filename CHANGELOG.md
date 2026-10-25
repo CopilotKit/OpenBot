@@ -35,6 +35,13 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   request for an administrator to switch on a work app, grant it to a Bot, or connect a Shared app's
   team account is kept, with who answered it and when. It starts empty and nothing is backfilled.
 
+### Outside content that looks marked as untrusted is marked anyway
+
+A connector's answer was passed to the model without the untrusted-data notice when its text
+already started and ended like one. That text could carry a
+notice in its own words, or close the tag and continue with instructions outside it. Content is now
+left as it is only when it is exactly what OpenBot itself wrapped; anything else is wrapped.
+
 ### A Bot can choose from a dropdown
 
 A Bot filling in a form in its browser could not set a dropdown (a native `<select>`, such as a CRM's
