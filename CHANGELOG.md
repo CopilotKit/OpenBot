@@ -40,6 +40,17 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - Migration `0062_action_policy_labels` adds a `labels` column to `action_policies`, defaulting to
   empty. Existing boundary rules keep working and show as "Custom rule" until somebody names them.
 
+### A Bot's owner can give it their own apps
+
+The owner of a Bot can now let it use an app they connect for themselves, without an administrator:
+from the app card ("Let Research Bot use your Gmail?"), under Your apps on the Bot's page, or on the
+New Bot sheet, which offers their connected apps. Calls under such a grant always use the asking
+person's own account, even on a published Team Bot, and an owner can take back only what they gave.
+By default this covers apps each person connects for themselves and Routines; an administrator
+decides per app on its page, and can switch it off for people with the "Give apps to their own Bots"
+capability. Migration `0063_owner_app_grants` adds two nullable columns, `mcp_servers.owner_grants`
+and `plugin_grants.granted_as`.
+
 ### An app card carries the task on once the app is ready
 
 When a Bot stopped because it needed an app, and the person then connected it in another tab or an
