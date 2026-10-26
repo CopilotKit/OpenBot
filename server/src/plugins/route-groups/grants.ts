@@ -5,7 +5,7 @@ import {
   exposureOf,
   type SharedUseApproval,
 } from "../shared-use";
-import { ownerGrantRefusal } from "../owner-grants";
+import { approveOwnersSharedUse, ownerGrantRefusal } from "../owner-grants";
 import {
   CatalogueEntryUnknownError,
   isDeploymentFault,
@@ -20,7 +20,8 @@ import type { PluginRouteContext } from "./context";
  *
  * Without an approval the gate refuses every call the grant just allowed, so a grant with none sent
  * approves the Bot's exposure as it stands now — unless an approval is already recorded, which is
- * an administrator's earlier decision and not this grant's to widen. "Is Shared" is the app's
+ * an administrator's earlier decision and not this grant's to widen (one an owner's grant set is not
+ * that, and is replaced). "Is Shared" is the app's
  * answer (its answering row), never the granted row's own column. Null `approval` is nothing to
  * record; `unreadable` is an approval sent that this deployment cannot read, which the caller
  * refuses.
@@ -46,7 +47,11 @@ export async function sharedGrantApproval(
     const approval = asSharedUseApproval(sent);
     return approval ? { appId, approval } : "unreadable";
   }
-  if (await shared.use.approvalFor(agentId, appId))
+  /*
+   * An audience an owner's grant set is not an administrator's decision, so an administrator
+   * granting over it approves the Bot's exposure now, which makes the audience theirs.
+   */
+  if ((await shared.use.approvalSource(agentId, appId)) === "admin")
     return { appId, approval: null };
   return {
     appId,
@@ -339,8 +344,8 @@ export function mountGrantRoutes({
      * {@link sharedGrantApproval} for what is recorded when none is sent.
      */
     /*
-     * An owner's grant records no Shared approval: who may reach a team account through a Bot is an
-     * administrator's decision, and the shared-use gate refuses the calls and files their request.
+     * An owner's grant sends no approval of its own. Where the app is Shared and an administrator
+     * lets owners decide, the grant sets the audience itself, below; see `approveOwnersSharedUse`.
      */
     const asOwner = kind === "mcp" && !skillActor(context).isAdmin;
     const decided =
@@ -373,6 +378,12 @@ export function mountGrantRoutes({
         by: context.var.actor.id,
       });
     }
+    if (asOwner && shared)
+      await approveOwnersSharedUse(store, shared.use, {
+        botId: grantAgentId,
+        serverId: grantRef.split("/")[0] ?? "",
+        ownerId: context.var.actor.id,
+      });
     return context.json({ ok: true });
   });
 
