@@ -2541,7 +2541,7 @@ test.each(["supervisor", "windows"])(
       if (blocker === "windows" && command === "windows_blocker")
         return "wsl-absent";
       if (command === "windows_blocker_instruction")
-        return "Install WSL before continuing.";
+        return "Install WSL: run `wsl --install`.";
       return previous(command, args);
     };
     const view = await renderApp();
@@ -2558,7 +2558,7 @@ test.each(["supervisor", "windows"])(
       view.getByText(
         blocker === "supervisor"
           ? "The supervisor stopped retrying."
-          : "Install WSL before continuing.",
+          : "wsl --install",
       ),
     ).toBeTruthy();
   },
@@ -2922,14 +2922,18 @@ test("a successfully detected missing WSL feature keeps its setup instruction", 
   );
   const setupHandler = invokeHandler;
   const instruction =
-    "Run wsl --install, restart Windows, and start OpenBot again.";
+    "Run `wsl --install`, restart Windows, and start OpenBot again.";
   invokeHandler = async (command, args) => {
     if (command === "windows_blocker") return "wsl-absent";
     if (command === "windows_blocker_instruction") return instruction;
     return setupHandler(command, args);
   };
   const view = await renderApp();
-  expect(await view.findByText(instruction)).toBeTruthy();
+  expect(await view.findByText("wsl --install")).toBeTruthy();
+  expect(
+    view.getByRole("heading", { name: "Turn on Windows Subsystem for Linux" }),
+  ).toBeTruthy();
+  expect(view.getByRole("button", { name: "Copy" })).toBeTruthy();
   expect(view.queryByRole("alert")).toBeNull();
   expect(view.queryByRole("button", { name: "Set up OpenBot" })).toBeNull();
 });
@@ -2951,11 +2955,13 @@ test("disabled Virtual Machine Platform displays its feature-specific fix and bl
     return setupHandler(command, args);
   };
   const view = await renderApp();
-  expect(await view.findByText(instruction)).toBeTruthy();
   expect(
-    view.getByRole("heading", {
-      name: "Virtual Machine Platform is switched off",
-    }),
+    await view.findByText(
+      "dism.exe /online /enable-feature /featurename:VirtualMachinePlatform /all /norestart",
+    ),
+  ).toBeTruthy();
+  expect(
+    view.getByRole("heading", { name: "Turn on Virtual Machine Platform" }),
   ).toBeTruthy();
   expect(view.queryByRole("alert")).toBeNull();
   expect(view.queryByRole("button", { name: "Set up OpenBot" })).toBeNull();

@@ -437,11 +437,20 @@ fn blocker_with(
         return Ok(Some(Blocker::VirtualizationDisabled));
     }
 
+    /*
+     * Whether this account can approve an administrator prompt, not whether this process already
+     * runs elevated. Under UAC an administrator's apps run with a filtered token in which
+     * Administrators (S-1-5-32-544) is a deny-only group, so `IsInRole(Administrator)` answered
+     * false for every administrator who opened OpenBot normally, and they were all told to go and
+     * find one. The group is in the token's claims either way: as a group SID once elevated, as a
+     * deny-only SID before. A standard account has neither. Matched by SID, so it is the same in
+     * every language.
+     */
     let administrator = "Windows administrator rights (powershell)";
     let elevated = probe_bool(administrator, &probe_text(administrator, run("powershell", &[
         "-NoProfile", "-NonInteractive", "-Command",
         "$ErrorActionPreference = 'Stop'; \
-         ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)",
+         [bool]([Security.Principal.WindowsIdentity]::GetCurrent().Claims | Where-Object { $_.Value -eq 'S-1-5-32-544' })",
     ]))?)?;
 
     let wsl_feature = "the WSL feature state (powershell)";
@@ -574,7 +583,7 @@ mod tests {
             assert_eq!(&args[..3], ["-NoProfile", "-NonInteractive", "-Command"]);
             match probe {
                 0 => assert!(args[3].contains("Get-CimInstance Win32_ComputerSystem")),
-                1 => assert!(args[3].contains("WindowsBuiltInRole]::Administrator")),
+                1 => assert!(args[3].contains("S-1-5-32-544")),
                 2 => assert_eq!(
                     args[3],
                     optional_feature_probe_command("Microsoft-Windows-Subsystem-Linux")
@@ -621,7 +630,7 @@ mod tests {
                     ));
                 } else if command.contains("Win32_ComputerSystem") {
                     PROBE_OUTPUTS[0]
-                } else if command.contains("WindowsBuiltInRole]::Administrator") {
+                } else if command.contains("S-1-5-32-544") {
                     "False"
                 } else if command.contains("Win32_OptionalFeature") {
                     "1"

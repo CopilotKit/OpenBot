@@ -49,6 +49,7 @@ import {
   type SetupStep,
 } from "./telemetry";
 import { Welcome } from "./Welcome";
+import { type Blocker, WindowsBlocker } from "./WindowsBlocker";
 
 type EngineStatus = {
   engine: "docker" | "podman" | null;
@@ -56,13 +57,6 @@ type EngineStatus = {
   engine_socket: string | null;
   detail: string;
 };
-
-type Blocker =
-  | "wsl-absent"
-  | "wsl-one"
-  | "virtual-machine-platform-disabled"
-  | "virtualization-disabled"
-  | "not-administrator";
 
 type AlreadyConfigured = {
   values: Record<string, string>;
@@ -964,15 +958,7 @@ function Setup() {
   }
 
   if (blocker) {
-    return (
-      <main>
-        <h1>OpenBot needs one thing first</h1>
-        <div className="blocker">
-          <h2>{titleFor(blocker)}</h2>
-          <p>{instruction}</p>
-        </div>
-      </main>
-    );
+    return <WindowsBlocker blocker={blocker} instruction={instruction} />;
   }
 
   if (
@@ -1852,17 +1838,3 @@ function settleProgress(steps: Progress[], problem?: Problem): Progress[] {
   );
 }
 
-function titleFor(blocker: Blocker): string {
-  switch (blocker) {
-    case "wsl-absent":
-      return "Windows Subsystem for Linux is not installed";
-    case "wsl-one":
-      return "Windows Subsystem for Linux is at version 1";
-    case "virtual-machine-platform-disabled":
-      return "Virtual Machine Platform is switched off";
-    case "virtualization-disabled":
-      return "Virtualization is off in this machine's firmware";
-    case "not-administrator":
-      return "This account cannot install Windows components";
-  }
-}

@@ -856,6 +856,55 @@ a {
   line-height: 22px;
 }
 
+/* A Windows prerequisite: wider than a step, because its commands are long and must stay legible. */
+.blocker-sheet {
+  max-width: 44rem;
+}
+
+.blocker-steps {
+  margin: 0;
+  padding-left: 20px;
+  display: grid;
+  gap: 12px;
+  font-size: 15px;
+  line-height: 24px;
+  color: var(--text-primary);
+}
+
+.blocker-steps li::marker {
+  font-family: var(--mono);
+  color: var(--text-secondary);
+}
+
+/* Commands to paste, in mono, with Copy pinned to the corner. */
+.command {
+  position: relative;
+  margin-top: 8px;
+  background: var(--surface-container);
+  border: 1px solid var(--border-container);
+  border-radius: var(--r-card);
+}
+
+.command pre {
+  margin: 0;
+  padding: 14px 96px 14px 16px;
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 22px;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.command button {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  min-height: 32px;
+  padding: 0 12px;
+  font-size: 12px;
+}
+
 .setup-help {
   display: inline-block;
   margin-top: 12px;
