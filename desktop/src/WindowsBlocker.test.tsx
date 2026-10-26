@@ -145,6 +145,24 @@ test("firmware virtualization has steps and nothing to run", () => {
   expect(view.getByText(/nested virtualization/)).toBeTruthy();
 });
 
+test("a virtual machine without nested virtualization is told what to change on its host", () => {
+  const view = render(
+    <WindowsBlocker
+      blocker="nested-virtualization-unavailable"
+      instruction="This Windows runs in a virtual machine whose host does not pass virtualization through to it."
+      onRestartNeeded={noRestart}
+    />,
+  );
+  expect(
+    view.getByRole("heading", { name: "Turn on nested virtualization" }),
+  ).toBeTruthy();
+  expect(view.getByText(/Shut down this virtual machine/)).toBeTruthy();
+  expect(view.getByText(/ExposeVirtualizationExtensions/)).toBeTruthy();
+  expect(view.getByText(/VMware Fusion does not/)).toBeTruthy();
+  expect(view.queryByRole("button", { name: "Set up Windows" })).toBeNull();
+  expect(view.queryByText(/firmware settings/)).toBeNull();
+});
+
 test("Restart now restarts Windows, and a refusal is said with the button back", async () => {
   answer = async () => {
     throw {

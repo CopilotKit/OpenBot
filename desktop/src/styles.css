@@ -891,6 +891,16 @@ a {
   margin-top: 16px;
 }
 
+.blocker-steps code {
+  font-family: var(--mono);
+  font-size: 13px;
+  padding: 1px 4px;
+  border-radius: var(--r-item);
+  background: var(--surface-container);
+  border: 1px solid var(--border-container);
+  overflow-wrap: anywhere;
+}
+
 /* Commands to paste, in mono, with Copy pinned to the corner. */
 .command {
   position: relative;

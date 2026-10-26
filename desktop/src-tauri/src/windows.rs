@@ -54,6 +54,9 @@ pub enum Blocker {
     VirtualMachinePlatformDisabled,
     /// Virtualization is off in firmware. Only the person, in their BIOS, can fix this.
     VirtualizationDisabled,
+    /// This Windows is itself a virtual machine whose host does not pass virtualization through,
+    /// so WSL 2 cannot start one. Only the host can fix this.
+    NestedVirtualizationUnavailable,
     /// The account cannot elevate.
     NotAdministrator,
 }
@@ -96,6 +99,12 @@ impl Blocker {
                 "Virtualization is switched off in this machine's firmware. It has to be turned on \
                  there, which OpenBot cannot do: restart, open the firmware settings, and enable \
                  Intel VT-x or AMD-V."
+            }
+            Blocker::NestedVirtualizationUnavailable => {
+                "This Windows runs in a virtual machine whose host does not pass virtualization \
+                 through to it, so Windows Subsystem for Linux cannot start. Turn on nested \
+                 virtualization for this virtual machine in its host, then start it and OpenBot \
+                 again."
             }
             Blocker::NotAdministrator => {
                 "Setting up Windows Subsystem for Linux needs administrator rights. Ask an \
@@ -558,6 +567,45 @@ pub fn blocker() -> Result<Option<Blocker>, Problem> {
     Ok(None)
 }
 
+/**
+Whether WSL 2 can start a virtual machine here, asked of WSL itself.
+
+Every other check reads the same on a PC running Hyper-V and in a virtual machine whose host passes
+no virtualization through: a hypervisor is present and the firmware flag reads off. Measured in
+Windows 11 on ARM under VMware Fusion: every check passed, Docker Desktop was installed, and it
+then stopped on "Nested virtualization is not available" while OpenBot waited for it. So this
+starts WSL's own system distribution, which exists with no Linux distribution installed, and asks
+whether Hyper-V refused to create its VM.
+
+Only that refusal is a blocker. Any other failure (an older WSL without `--system`, say) is not
+evidence about virtualization, and is left for Docker to report.
+*/
+#[cfg(target_os = "windows")]
+pub fn nested_virtualization_blocker() -> Option<Blocker> {
+    let output = crate::quiet::command("wsl.exe")
+        .args(["--system", "--exec", "true"])
+        .output()
+        .ok()?;
+    let said = format!(
+        "{}\n{}",
+        decode_probe_text(&output.stdout).unwrap_or_default(),
+        decode_probe_text(&output.stderr).unwrap_or_default()
+    );
+    (!output.status.success() && hyper_v_refused(&said))
+        .then_some(Blocker::NestedVirtualizationUnavailable)
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn nested_virtualization_blocker() -> Option<Blocker> {
+    None
+}
+
+/// WSL's words for "Hyper-V cannot create a virtual machine here": the HCS error, by name or code.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn hyper_v_refused(said: &str) -> bool {
+    said.contains("HCS_E_HYPERV_NOT_INSTALLED") || said.contains("0x80370102")
+}
+
 /// The machine's own architecture, in `std::env::consts::ARCH`'s words, for choosing what to
 /// download and run.
 ///
@@ -671,7 +719,7 @@ impl Blocker {
                 elevated: false,
                 restart: false,
             }),
-            Blocker::VirtualizationDisabled => None,
+            Blocker::VirtualizationDisabled | Blocker::NestedVirtualizationUnavailable => None,
         }
     }
 }
@@ -1873,6 +1921,22 @@ mod tests {
                 "{blocker:?} hides the restart"
             );
         }
+    }
+
+    #[test]
+    fn only_hyper_v_refusing_a_vm_is_missing_nested_virtualization() {
+        assert!(hyper_v_refused(
+            "Please enable the Virtual Machine Platform Windows feature and ensure virtualization \
+             is enabled in the BIOS.\nError code: \
+             Wsl/Service/CreateInstance/CreateVm/HCS/HCS_E_HYPERV_NOT_INSTALLED"
+        ));
+        assert!(hyper_v_refused(
+            "WslRegisterDistribution failed with error: 0x80370102"
+        ));
+        assert!(!hyper_v_refused("Invalid command line option: --system"));
+        assert!(!hyper_v_refused(""));
+        assert_eq!(Blocker::NestedVirtualizationUnavailable.fix(), None);
+        assert!(!Blocker::NestedVirtualizationUnavailable.ours_to_fix());
     }
 
     #[test]

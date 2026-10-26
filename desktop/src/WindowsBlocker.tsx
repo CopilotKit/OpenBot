@@ -9,6 +9,7 @@ export type Blocker =
   | "wsl-no-kernel"
   | "virtual-machine-platform-disabled"
   | "virtualization-disabled"
+  | "nested-virtualization-unavailable"
   | "not-administrator";
 
 /** What running a blocker's fix came to: Windows restarts before it counts, or it already does. */
@@ -77,6 +78,10 @@ const SCREENS: Record<
   "virtualization-disabled": {
     title: "Turn on virtualization",
     why: "WSL 2 runs a small virtual machine, and virtualization is turned off in this computer's firmware. OpenBot cannot change that setting.",
+  },
+  "nested-virtualization-unavailable": {
+    title: "Turn on nested virtualization",
+    why: "This Windows runs in a virtual machine, and its host does not pass virtualization through to it. WSL 2 needs it to run, and nothing inside this virtual machine can turn it on.",
   },
 };
 
@@ -151,6 +156,22 @@ export function WindowsBlocker({
           : "."}
       </li>
     </ol>
+  ) : blocker === "nested-virtualization-unavailable" ? (
+    <ol className="blocker-steps">
+      <li>Shut down this virtual machine.</li>
+      <li>
+        In the virtual machine app on the host, turn on nested virtualization
+        for it. In Hyper-V, run{" "}
+        <code>
+          Set-VMProcessor -VMName &lt;name&gt; -ExposeVirtualizationExtensions
+          $true
+        </code>
+        ; in VMware, <strong>Enable hypervisor applications</strong>; in
+        Parallels, <strong>Enable nested virtualization</strong>. In the cloud,
+        choose a size that supports it.
+      </li>
+      <li>Start the virtual machine, then open OpenBot again.</li>
+    </ol>
   ) : (
     <ol className="blocker-steps">
       <li>
@@ -195,8 +216,9 @@ export function WindowsBlocker({
           <>
             {steps}
             <p className="footnote">
-              In a virtual machine, turn on nested virtualization for it in the
-              host's settings instead.
+              {blocker === "nested-virtualization-unavailable"
+                ? "On a Mac with Apple silicon this needs an M3 chip or later, macOS 15 or later, and an app that offers it, such as Parallels Desktop. VMware Fusion does not."
+                : "In a virtual machine, turn on nested virtualization for it in the host's settings instead."}
             </p>
           </>
         )}

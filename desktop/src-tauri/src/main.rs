@@ -413,7 +413,15 @@ fn detect_engine<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> engine::EngineS
 fn windows_blocker<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
 ) -> Result<Option<win::Blocker>, Problem> {
-    let result = win::blocker();
+    // The rest of the machine is ready: ask WSL whether it can start a VM at all, unless Docker
+    // already answers, which proves it can.
+    let result = win::blocker().map(|found| {
+        found.or_else(|| {
+            (!openbot_desktop_lib::docker_desktop::answers())
+                .then(win::nested_virtualization_blocker)
+                .flatten()
+        })
+    });
     if cfg!(target_os = "windows") {
         use telemetry::WindowsStageOutcome as Outcome;
         let outcome = match &result {
@@ -425,6 +433,9 @@ fn windows_blocker<R: tauri::Runtime>(
                 Outcome::VirtualMachinePlatformDisabled
             }
             Ok(Some(win::Blocker::VirtualizationDisabled)) => Outcome::VirtualizationDisabled,
+            Ok(Some(win::Blocker::NestedVirtualizationUnavailable)) => {
+                Outcome::NestedVirtualizationUnavailable
+            }
             Ok(Some(win::Blocker::NotAdministrator)) => Outcome::NotAdministrator,
             Err(_) => Outcome::CheckFailed,
         };
