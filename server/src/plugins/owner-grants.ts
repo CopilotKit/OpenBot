@@ -1,6 +1,7 @@
 import { capabilityRefusal } from "../admin/capabilities";
 import { enterpriseControls } from "../admin/controls";
 import type { AppInspection } from "./plugin-store/app-access";
+import type { SharedUseStore } from "./shared-use-store";
 import type { PluginStore } from "./store";
 
 /**
@@ -18,6 +19,13 @@ import type { PluginStore } from "./store";
  * - WHOSE ACCOUNT. The grant is marked `granted_as = owner`, and a call made under it always uses
  *   the asking person's own account, even on the owner's published Team Bot. See
  *   `credentialActorFor`. Publishing a Bot must not hand teammates the owner's mailbox.
+ *
+ * A SHARED APP IS THE ONE EXCEPTION TO "WHOSE ACCOUNT", and the two rules do not meet. A Shared app
+ * runs on the deployment's one team account whoever the credential actor is (`accountFor` never
+ * reads it for `shared`), so the owner marker cannot send it to a personal account; and a Personal
+ * app never reaches here as Shared, so the marker keeps it on the asker's own. What a Shared app
+ * needs instead is an audience, and where an administrator has let owners decide (`owner_grants =
+ * any`, never the default for Shared) the owner's grant sets it: see {@link approveOwnersSharedUse}.
  *
  * And an administrator can switch the whole thing off for anybody through the `ownerApps`
  * capability, which every check here reads.
@@ -56,4 +64,68 @@ export async function ownerGrantRefusal(
   if (inspected.access.ownerGrants !== "any")
     return `Only an admin can give ${name} to a Bot.`;
   return null;
+}
+
+type OwnerSharedUseEvents = Pick<PluginStore, "recordAppAccessEvent">;
+
+/**
+ * The Shared-account audience a Bot owner's grant sets, and its row in the trail: who gave it, to
+ * which Bot, on which app, and the audience. Nothing where the app is not Shared, its rule is not
+ * `any`, or the Bot already holds an approval; see `approveOwnerGrant`.
+ */
+export async function approveOwnersSharedUse(
+  events: OwnerSharedUseEvents,
+  sharedUse: Pick<SharedUseStore, "approveOwnerGrant" | "appIdOf">,
+  input: { botId: string; serverId: string; ownerId: string },
+): Promise<void> {
+  if (!input.serverId) return;
+  const approval = await sharedUse.approveOwnerGrant({
+    botId: input.botId,
+    serverId: input.serverId,
+    by: input.ownerId,
+  });
+  if (!approval) return;
+  const appId = await sharedUse.appIdOf(input.serverId);
+  await events.recordAppAccessEvent({
+    eventType: "shared_use.owner_approved",
+    targetId: appId,
+    actorUserId: input.ownerId,
+    payload: {
+      bot: input.botId,
+      server: appId,
+      audience: approval.audience,
+      members: approval.members,
+      outsideInput: approval.outsideInput,
+    },
+  });
+}
+
+/**
+ * Withdraw the audiences owners' grants set at an app — one Bot's, when its owner takes the app
+ * back, or every Bot's, when an administrator stops letting owners decide — each with a row in the
+ * trail. An administrator's approval is never touched.
+ */
+export async function withdrawOwnersSharedUse(
+  events: OwnerSharedUseEvents,
+  sharedUse: Pick<SharedUseStore, "withdrawOwnerApprovals" | "appIdOf">,
+  input: {
+    serverId: string;
+    botId?: string;
+    actorId: string;
+    why: "owner_took_back" | "owner_grants_changed";
+  },
+): Promise<void> {
+  const bots = await sharedUse.withdrawOwnerApprovals({
+    serverId: input.serverId,
+    ...(input.botId ? { botId: input.botId } : {}),
+  });
+  if (bots.length === 0) return;
+  const appId = await sharedUse.appIdOf(input.serverId);
+  for (const bot of bots)
+    await events.recordAppAccessEvent({
+      eventType: "shared_use.owner_withdrawn",
+      targetId: appId,
+      actorUserId: input.actorId,
+      payload: { bot, server: appId, why: input.why },
+    });
 }

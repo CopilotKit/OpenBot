@@ -269,6 +269,14 @@ export const auditEventTypes = [
   // An administrator answered a request to use a Shared app through a Bot.
   "shared_use.declined",
   /*
+   * A Bot's owner gave it a Shared app whose rule lets owners decide, and that set who may use the
+   * team account through the Bot (`approved_as = owner`); and that audience withdrawn, because the
+   * owner took the app back or an administrator stopped letting owners decide. Target the app;
+   * payload `bot`, `server`, and the `audience` set or `why` it went.
+   */
+  "shared_use.owner_approved",
+  "shared_use.owner_withdrawn",
+  /*
    * A person asking an administrator to switch a work app on, grant it to a Bot, or connect a
    * Shared app's team account (`app_access_requests`), and what became of it: cancelled by the
    * person, approved or dismissed by an administrator, or refused — a request that could not be

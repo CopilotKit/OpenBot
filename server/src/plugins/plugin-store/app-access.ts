@@ -1258,7 +1258,9 @@ export function appAccessMethods(context: StoreContext) {
           | "app_access.dismissed"
           | "app_access.refused"
           | "app_access.owner_granted"
-          | "app_access.owner_revoked";
+          | "app_access.owner_revoked"
+          | "shared_use.owner_approved"
+          | "shared_use.owner_withdrawn";
       },
     ): Promise<void> {
       await recordAuditEvent(auditStore, {
