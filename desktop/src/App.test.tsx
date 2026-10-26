@@ -728,6 +728,9 @@ test("Install prepares the default Bot in the default folder, with no Bot or fol
     view.getByRole("listitem", { name: "Installing OpenBot" }),
   );
   expect(installing.getByText("In progress")).toBeTruthy();
+  expect(
+    installing.getByText(/Downloading local software \(2\/4\)\./),
+  ).toBeTruthy();
   expect(installing.getByText(/2.4 MB downloaded/)).toBeTruthy();
   expectPlain(view);
   expect(

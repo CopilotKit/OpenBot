@@ -83,9 +83,11 @@ const PREPARING = new Set([
  * An installation's native rows as two plain ones, for local mode: "Preparing this computer" and
  * "Installing OpenBot". A failure is shown in full under the rows.
  *
- * While "Preparing this computer" runs it carries the running step's own sentence and download
- * size: "Downloading Docker Desktop.", "Installing Docker Desktop.", "Starting Docker Desktop.
- * Accept its terms in its own window when it asks." Docker is named on purpose. Its installer and
+ * While a row runs it carries the running step's own sentence and download size, so a wait of
+ * minutes says what it is waiting on ("Installing the app's packages.", "Downloading local
+ * software (2/4)."). "Preparing this computer" says, for instance, "Downloading Docker
+ * Desktop.", "Installing Docker Desktop.", "Starting Docker Desktop. Accept its terms in its own
+ * window when it asks." Docker is named on purpose. Its installer and
  * its agreement appear in windows of their own, and a row that only said "Preparing" sat for
  * minutes while one of them waited, unseen, behind this one.
  */
@@ -113,12 +115,16 @@ export function plainInstallSteps(
     });
   }
   if (rest.length > 0 || (installing && !stillPreparing && !preparingFailed)) {
+    const installingNow = installing && !stillPreparing && !installingFailed;
+    const restNow = installingNow
+      ? [...rest].reverse().find((step) => step.running)
+      : undefined;
     rows.push({
       step: "Installing OpenBot",
       ok: !installingFailed,
-      running: installing && !stillPreparing && !installingFailed,
-      detail: "",
-      downloadBytes: rest.find((step) => step.running)?.downloadBytes,
+      running: installingNow,
+      detail: restNow?.detail ?? "",
+      downloadBytes: restNow?.downloadBytes,
     });
   }
   return rows;
