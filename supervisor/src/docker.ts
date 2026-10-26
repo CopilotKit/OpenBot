@@ -1,4 +1,5 @@
 import Docker from "dockerode";
+import { type ContainerHealth, healthOf } from "./health";
 import {
   BOT_LABEL,
   type ComputerNames,
@@ -99,18 +100,8 @@ export type ComputerState = {
    * `running` only means the process exists. A container still `starting` here is booting its
    * browser, and `ensure` would hold the caller until it is healthy, so a status read says so.
    */
-  health?: "starting" | "healthy" | "unhealthy";
+  health?: ContainerHealth;
 };
-
-/** The healthcheck verdict Docker writes into a container's status line, e.g. "Up 3 seconds (health: starting)". */
-export function healthOf(
-  status: string | undefined,
-): ComputerState["health"] | undefined {
-  const match = /\((?:health: )?(starting|healthy|unhealthy)\)/.exec(
-    status ?? "",
-  );
-  return match?.[1] as ComputerState["health"] | undefined;
-}
 
 /**
  * The name this Bot's computer would have is held by a container this supervisor does not own.
