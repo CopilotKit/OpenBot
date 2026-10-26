@@ -555,21 +555,21 @@ const ALLOW: Allowed[] = [
   },
   {
     file: "server/tests/computer-supervisor.test.ts",
-    line: 64,
+    line: 65,
     shape: "a",
     finding: "NEW (round 2 did not find this)",
     why: 'expect(client.locate("sales")).rejects.toThrow(SupervisorError);',
   },
   {
     file: "server/tests/computer-supervisor.test.ts",
-    line: 74,
+    line: 75,
     shape: "a",
     finding: "NEW (round 2 did not find this)",
     why: 'expect(client.locate("bad id")).rejects.toThrow( "A bot id may contain only letters.", );',
   },
   {
     file: "server/tests/computer-supervisor.test.ts",
-    line: 88,
+    line: 89,
     shape: "a",
     finding: "NEW (round 2 did not find this)",
     why: 'expect(client.locate("sales")).rejects.toThrow(/could not be reached/);',
@@ -711,7 +711,7 @@ const ALLOW: Allowed[] = [
   },
   {
     file: "server/tests/computer-sandbox.test.ts",
-    line: 78,
+    line: 79,
     shape: "b",
     finding: "NEW (round 2 did not find this)",
     why: 'expect( await providerWith(suspended).sessionOf?.("knowledge"), ).toBeUndefined();',
