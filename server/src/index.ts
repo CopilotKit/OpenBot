@@ -3,7 +3,7 @@ import {
   CopilotKitIntelligence,
   IntelligenceAgentRunner,
 } from "@copilotkit/runtime/v2";
-import { COMPUTER_GUIDANCE } from "@openbot/shared/bot-prompt";
+import { computerGuidance } from "@openbot/shared/bot-prompt";
 import { workOwner } from "@openbot/shared/work-owner";
 import { createTurnRunner } from "@openbot/toolkit/run-turn";
 import { and, eq, isNull, ne, sql } from "drizzle-orm";
@@ -1704,7 +1704,7 @@ const actorAgentResolver = createActorAgentResolver({
       proactiveReadOnlyRefs,
     ),
   signRunForActor,
-  computerGuidance: config.computer ? COMPUTER_GUIDANCE : undefined,
+  computerGuidance: config.computer ? computerGuidance : undefined,
   loadVendors,
   selectionForActor,
   agentFetch,

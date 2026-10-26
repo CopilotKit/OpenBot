@@ -1,4 +1,5 @@
 import type { AbstractAgent } from "@ag-ui/client";
+import type { ComputerGuidance } from "@openbot/shared/bot-prompt";
 import type { AuditInitiator } from "../audit";
 import type { AgentFetch, StallGuard } from "../channels/stall-guard";
 import {
@@ -49,7 +50,7 @@ export type ActorAgentResolverDependencies = {
     initiator?: AuditInitiator,
     depth?: number,
   ) => SignRun;
-  computerGuidance?: string;
+  computerGuidance?: ComputerGuidance;
   loadVendors?: () => Promise<readonly string[]>;
   selectionForActor?: (actorId: string) => ToolSelection;
   agentFetch?: AgentFetch;
