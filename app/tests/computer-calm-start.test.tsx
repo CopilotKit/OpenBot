@@ -314,7 +314,9 @@ test("a computer that goes to sleep stops showing its last frame", async () => {
   serve({
     "/status": () => Response.json({ botId: "sales", state: "absent" }),
     "/screenshot": () =>
-      shots++ === 0 ? frame() : Response.json({ ready: false, state: "absent" }),
+      shots++ === 0
+        ? frame()
+        : Response.json({ ready: false, state: "absent" }),
   });
 
   const view = renderWithQueries(
