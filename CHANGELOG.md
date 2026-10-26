@@ -51,6 +51,12 @@ decides per app on its page, and can switch it off for people with the "Give app
 capability. Migration `0063_owner_app_grants` adds two nullable columns, `mcp_servers.owner_grants`
 and `plugin_grants.granted_as`.
 
+Where an administrator lets owners give a Shared app, an owner's grant works straight away: it lets
+the people who can use the Bot (just the owner, or a Team Bot's audience) use the team account, with
+no separate approval. Writes still ask first. Taking the app back, or the administrator switching the
+app back to admins only, withdraws that. Migration `0064_owner_shared_audience` adds the nullable
+`shared_use_approvals.approved_as`.
+
 ### An app card carries the task on once the app is ready
 
 When a Bot stopped because it needed an app, and the person then connected it in another tab or an
