@@ -70,6 +70,14 @@ computer's cold start answers within 45 seconds, under a load balancer's usual 6
 timeout. A Docker computer still booting its browser reads as starting once the supervisor is
 upgraded too; an older supervisor works as before.
 
+### A conversation shows who it is waiting on
+
+When a Bot asks another Bot, the end of the conversation now reads "Asking Risk Analyst… 0:13", with
+the clock running, until the answer comes back; a routine firing into it reads "Market Scout is
+running a routine…". The sidebar keeps the conversation lit while it waits, and both survive a
+reload. In a shared conversation only the person whose Bot asked sees whom it asked; the others see
+only that it is busy. Migration `0063_work_items_open_thread` adds one partial index to `work_items`.
+
 ### Screens share one spacing, row and empty-state design
 
 Every configuration screen now takes its spacing from the page frame: 32px under the title, 48px
