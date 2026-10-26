@@ -59,6 +59,7 @@ import {
   toolResultFailed,
 } from "@/lib/plugins/tool-result";
 import { readTeamBotConsent } from "@/lib/team-bots";
+import type { CardPlace } from "@/lib/copilot/carry-on";
 import {
   readConnectPrompt,
   SHOW_APP_ACCESS_TOOL,
@@ -1301,12 +1302,15 @@ const TranscriptToolCall = memo(function TranscriptToolCall({
   name,
   args,
   result,
+  latest,
 }: {
   delay: number;
   toolCallId: string;
   name: string;
   args: string;
   result?: string;
+  /** Nothing said or queued since this call, and the Bot is not working. See `CardPlace`. */
+  latest: boolean;
 }) {
   const renderToolCall = useRenderToolCall();
   const toolCall = useMemo(
@@ -1344,7 +1348,13 @@ const TranscriptToolCall = memo(function TranscriptToolCall({
          * What was called, shimmering until its result arrives, and then the server's own words
          * drawn the way a Bot's prose is drawn.
          */}
-        {drawn ?? <ServerToolLine name={name} result={result} />}
+        {drawn ?? (
+          <ServerToolLine
+            name={name}
+            place={{ toolCallId, latest }}
+            result={result}
+          />
+        )}
       </ToolRenderBoundary>
     </Arriving>
   );
@@ -1361,9 +1371,12 @@ const TranscriptToolCall = memo(function TranscriptToolCall({
 export function ServerToolLine({
   name,
   result,
+  place,
 }: {
   name: string;
   result?: string;
+  /** Where this call sits in the conversation, for an app card that may carry the task on. */
+  place?: CardPlace;
 }) {
   const running = result === undefined;
   const { label, detail } = readToolName(name, running);
@@ -1398,7 +1411,7 @@ export function ServerToolLine({
     : name === SHOW_APP_ACCESS_TOOL
       ? readConnectPrompt(answer)
       : null;
-  if (card) return <AppAccessCard prompt={card} />;
+  if (card) return <AppAccessCard place={place} prompt={card} />;
   /*
    * THAT TOOL'S OTHER ANSWERS ARE FOR THE MODEL. An app nobody can name comes back as plain text
    * telling the Bot to say so plainly and not to browse to it — an instruction, which read by the
@@ -1602,6 +1615,19 @@ export function ChatTranscript({
     )?.id ?? null;
   useSmoothSendScroll(viewportRef, newestUserMessageId);
 
+  /*
+   * WHERE THE CONVERSATION HAS GOT TO, for an app card that may carry its task on once the app is
+   * ready (see `lib/copilot/carry-on.ts`). A card is the latest thing while the person has said
+   * nothing since it, has nothing queued, and the Bot is not working: past that, the conversation
+   * has moved on, and an older task is not picked up again underneath it.
+   */
+  const lastSaid = items.findLastIndex(
+    (item) =>
+      (item.kind === "text" && isPersonSentMessage(item.role, item.text)) ||
+      item.kind === "attachments",
+  );
+  const settled = !busy && queued.length === 0;
+
   /* One rule for both kinds of row — see `anchorRowIds`, which is where it is written down. */
   const anchorRows = anchorRowIds(items);
 
@@ -1723,6 +1749,7 @@ export function ChatTranscript({
                   <TranscriptToolCall
                     args={item.toolCall.function.arguments}
                     delay={delays.delayFor(item.id, index, items.length)}
+                    latest={settled && index > lastSaid}
                     name={item.toolCall.function.name}
                     result={item.result}
                     toolCallId={item.toolCall.id}
