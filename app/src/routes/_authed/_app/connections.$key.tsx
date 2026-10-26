@@ -1,4 +1,10 @@
-import { IconArrowUpRight, IconChevronDown } from "@tabler/icons-react";
+import {
+  IconAppsOff,
+  IconArrowUpRight,
+  IconChevronDown,
+  IconPlugOff,
+  IconUsers,
+} from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, useParams } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
@@ -370,9 +376,8 @@ function AppConnectionPage() {
   if (server?.provenance === "composio" && !plugins.data.composioConfigured) {
     return (
       <PageShell backButton={back} title={server.title}>
-        <PageEmpty>
-          {server.title} isn't set up yet. An admin has to turn it on before
-          anyone can connect it.
+        <PageEmpty icon={IconPlugOff} title="Not set up yet">
+          An admin has to turn on {server.title} before anyone can connect it.
         </PageEmpty>
       </PageShell>
     );
@@ -521,7 +526,10 @@ function AppConnectionPage() {
         description="You don't connect this app yourself."
         title={entry?.title ?? key}
       >
-        <PageEmpty>
+        <PageEmpty
+          icon={entry ? IconUsers : IconAppsOff}
+          title={entry ? "Shared account" : "App not found"}
+        >
           {entry
             ? "Bots use one shared account for this app, the same for everybody."
             : "OpenBot has no app by that name."}

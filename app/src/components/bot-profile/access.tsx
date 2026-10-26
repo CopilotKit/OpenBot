@@ -1,19 +1,24 @@
-import { IconApps, IconBox, IconChevronRight } from "@tabler/icons-react";
+import {
+  IconApps,
+  IconBox,
+  IconChevronRight,
+  IconPlus,
+} from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { Fragment } from "react";
 import { HandoffPanel } from "@/components/agents/handoff-panel";
+import {
+  PageEmpty,
+  PageRows,
+  PageSection,
+} from "@/components/layout/page-shell";
 import {
   AppAccessAction,
   appAccessSentence,
 } from "@/components/plugins/app-access-action";
 import { PluginLogo } from "@/components/plugins/plugin-logo";
 import { Button } from "@/components/ui/button";
-import {
-  PageEmpty,
-  PageRows,
-  PageSection,
-} from "@/components/layout/page-shell";
 import {
   Item,
   ItemActions,
@@ -114,15 +119,21 @@ function YourSkills({ agentId }: { agentId: string }) {
           Couldn't load your skills. Reload the page.
         </p>
       ) : skills.length === 0 ? (
-        <PageEmpty>
-          No skills yet.{" "}
-          <Link
-            className="underline underline-offset-4"
-            to="/capabilities/skills"
-          >
-            Write one
-          </Link>
-          .
+        <PageEmpty
+          action={
+            <Button
+              render={(props) => <Link {...props} to="/capabilities/skills" />}
+              size="sm"
+              variant="outline"
+            >
+              <IconPlus />
+              Write a skill
+            </Button>
+          }
+          icon={IconBox}
+          title="No skills yet"
+        >
+          Skills you write show up here.
         </PageEmpty>
       ) : (
         <PageRows>
@@ -212,9 +223,8 @@ function Granted({ agentId }: { agentId: string }) {
         </p>
       ) : null}
       {count === 0 ? (
-        <PageEmpty>
-          No apps yet. An admin has to add them. Until then this Bot can only
-          talk with you.
+        <PageEmpty icon={IconApps} title="No apps yet">
+          An admin has to add them. Until then this Bot can only talk with you.
         </PageEmpty>
       ) : (
         <PageRows>

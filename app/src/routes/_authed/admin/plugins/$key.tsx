@@ -2,6 +2,8 @@ import {
   IconArrowUpRight,
   IconChevronRight,
   IconExternalLink,
+  IconPuzzle,
+  IconTool,
 } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link, useParams } from "@tanstack/react-router";
@@ -55,6 +57,13 @@ import {
   removePluginServerMutationOptions,
 } from "@/lib/plugins/mutations";
 import {
+  brokeredConnectionDescription,
+  brokeredDisconnectNote,
+  brokeredPerActionTrip,
+  brokeredProvenance,
+  brokeredReach,
+} from "@/lib/plugins/provider-vocabulary";
+import {
   type CatalogueItem,
   connectionsQueryOptions,
   type PluginServer,
@@ -62,13 +71,6 @@ import {
   pluginsPageQueryOptions,
   pluginsProvider,
 } from "@/lib/plugins/queries";
-import {
-  brokeredConnectionDescription,
-  brokeredDisconnectNote,
-  brokeredPerActionTrip,
-  brokeredProvenance,
-  brokeredReach,
-} from "@/lib/plugins/provider-vocabulary";
 import {
   botSharedAppsQueryOptions,
   describeApproval,
@@ -531,7 +533,9 @@ function RouteComponent() {
         description="There is no plugin with that name, here or in the catalogue."
         title="Not a plugin"
       >
-        <PageEmpty>Nothing to configure.</PageEmpty>
+        <PageEmpty icon={IconPuzzle} title="Plugin not found">
+          Nothing to configure.
+        </PageEmpty>
       </PageShell>
     );
   }
@@ -1050,9 +1054,8 @@ function RouteComponent() {
         >
           <SkippedToolsNotice names={server.skippedTools ?? []} />
           {server.tools.length === 0 ? (
-            <PageEmpty>
-              {server.lastError ??
-                "No tools listed. Refresh tools to check again."}
+            <PageEmpty icon={IconTool} title="No tools listed">
+              {server.lastError ?? "Refresh tools to check again."}
             </PageEmpty>
           ) : (
             <PageRows>

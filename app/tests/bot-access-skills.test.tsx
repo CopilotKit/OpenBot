@@ -150,9 +150,8 @@ test("switching a skill on grants it to this Bot", async () => {
 test("on a Bot that is not yours there are no skill switches", async () => {
   serving();
   const view = draw({ ...BOT, mine: false, canManage: false });
-  expect(
-    await view.findByText(/^No apps yet\. An admin has to add them\./),
-  ).toBeTruthy();
+  expect(await view.findByText("No apps yet")).toBeTruthy();
+  expect(view.getByText(/^An admin has to add them\./)).toBeTruthy();
   expect(view.queryByRole("switch")).toBeNull();
 });
 

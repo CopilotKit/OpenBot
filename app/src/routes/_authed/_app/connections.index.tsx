@@ -414,9 +414,8 @@ function RouteComponent() {
             it keeps happening.
           </p>
         ) : rows.length === 0 ? (
-          <PageEmpty>
-            Nothing to connect yet. Apps show up here once an admin turns them
-            on.
+          <PageEmpty icon={IconPlug} title="No apps yet">
+            Apps show up here once an admin turns them on.
           </PageEmpty>
         ) : (
           <>

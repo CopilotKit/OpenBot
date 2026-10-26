@@ -3,6 +3,14 @@ import { Link, type LinkProps } from "@tanstack/react-router";
 import type * as React from "react";
 import { cn } from "@/lib/utils";
 import { Button } from "../ui/button";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "../ui/empty";
 import { SidebarToggle, useSidebarToggleVisible } from "./sidebar-toggle";
 
 /**
@@ -227,11 +235,38 @@ export function PageRows({
 }
 
 /**
- * What a section says when it has nothing to list.
+ * What a section says when it has nothing to list, drawn as shadcn's empty state.
  *
- * Said in a sentence rather than drawn as an illustration with a heading: on a configuration screen
- * "nothing here yet" is a fact, not an event, and the page already told you what the section is for.
+ * A dashed box where the rows would be, so the section keeps its shape: the icon says what kind of
+ * thing would be here, the title says that there is none, the description says how one arrives, and
+ * `action` is the button that adds the first one when the page has one to offer.
+ *
+ * Only the description is required. A section that is empty for a reason rather than because
+ * nothing was added yet (a feature turned off, a search with no match) can say just that.
  */
-export function PageEmpty({ children }: { children: React.ReactNode }) {
-  return <p className="mt-4 text-muted-foreground text-sm">{children}</p>;
+export function PageEmpty({
+  action,
+  children,
+  icon: Icon,
+  title,
+}: {
+  action?: React.ReactNode;
+  children?: React.ReactNode;
+  icon?: React.ComponentType<{ className?: string }>;
+  title?: string;
+}) {
+  return (
+    <Empty className="mt-4 rounded-lg border border-border">
+      <EmptyHeader>
+        {Icon ? (
+          <EmptyMedia variant="icon">
+            <Icon />
+          </EmptyMedia>
+        ) : null}
+        {title ? <EmptyTitle>{title}</EmptyTitle> : null}
+        {children ? <EmptyDescription>{children}</EmptyDescription> : null}
+      </EmptyHeader>
+      {action ? <EmptyContent>{action}</EmptyContent> : null}
+    </Empty>
+  );
 }

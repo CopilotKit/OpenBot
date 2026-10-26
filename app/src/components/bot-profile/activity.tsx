@@ -5,6 +5,7 @@ import {
   IconChecks,
   IconClockPlay,
   IconHelpCircle,
+  IconHistory,
   IconTargetArrow,
 } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
@@ -161,7 +162,7 @@ function ActivitySection({
   return (
     <PageSection title={title}>
       {items.length === 0 ? (
-        <PageEmpty>{empty}</PageEmpty>
+        <PageEmpty icon={IconHistory}>{empty}</PageEmpty>
       ) : (
         <PageRows>
           {items.map((item, index) => (

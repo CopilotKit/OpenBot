@@ -159,9 +159,8 @@ export function SuggestionsInbox({
           ))}
         </PageRows>
       ) : (
-        <PageEmpty>
-          No suggestions right now. Bots with background research on will
-          suggest next steps here.
+        <PageEmpty icon={IconBulb} title="No suggestions right now">
+          Bots with background research on will suggest next steps here.
         </PageEmpty>
       )}
       {act.error && (
@@ -207,7 +206,16 @@ export function ProactiveResearchSettings({
           {settings.error.message}
         </p>
       ) : shown.length === 0 ? (
-        <PageEmpty>Background research is off.</PageEmpty>
+        <PageEmpty
+          action={
+            <Button onClick={() => setAdding(true)} size="sm" variant="outline">
+              <IconPlus />
+              Turn on research
+            </Button>
+          }
+          icon={IconRadar}
+          title="Background research is off"
+        />
       ) : (
         <PageRows>
           {shown.map((setting, index) => (

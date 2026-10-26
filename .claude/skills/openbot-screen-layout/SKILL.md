@@ -84,8 +84,11 @@ heading 32px below the first says the same thing twice. Put the description on `
 (`connections.index.tsx`). A count or filter that belongs to a search sits on the search's row, not
 on a line of its own.
 
-`PageEmpty` is a sentence, not an illustration with a heading. On a configuration screen "nothing
-here yet" is a fact, and the section heading already said what the section is for.
+`PageEmpty` is shadcn's empty state: a bordered box where the rows would be, with an `icon` for
+the kind of thing, a `title` ("No rules yet", "No matches", "Background research is off"), one
+sentence of description saying how the first one arrives, and an `action` — the same Add button the
+page already has — when there is one to offer. Don't repeat "Add one with X" in the description when
+the action is right there. A search with no results uses `IconSearch` and "No matches".
 
 ## Procedures
 
