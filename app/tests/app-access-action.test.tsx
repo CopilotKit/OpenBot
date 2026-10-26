@@ -56,6 +56,7 @@ type Sent = { method: string; url: string; body: unknown };
 function mounted(
   access: AppAccess,
   answer?: { status: number; body: unknown },
+  options: { admin?: boolean } = {},
 ) {
   const sent: Sent[] = [];
   const opened: string[] = [];
@@ -79,6 +80,10 @@ function mounted(
       url,
       body: init?.body ? JSON.parse(String(init.body)) : undefined,
     });
+    if (options.admin && url === "/api/me")
+      return Response.json({ user: { id: "usr_admin", role: "admin" } });
+    if (options.admin && url === "/api/agents/expenses")
+      return Response.json({ agent: { id: "expenses", name: "Expenses" } });
     if (answer && method !== "GET")
       return Response.json(answer.body, { status: answer.status });
     if (url.endsWith("/connect?returnTo=settings"))
@@ -112,8 +117,13 @@ function mounted(
     path: "/connections/$key",
     component: () => null,
   });
+  const admin = createRoute({
+    getParentRoute: () => root,
+    path: "/admin/plugins/$key",
+    component: () => null,
+  });
   const router = createRouter({
-    routeTree: root.addChildren([page, settings]),
+    routeTree: root.addChildren([page, settings, admin]),
     history: createMemoryHistory({ initialEntries: ["/"] }),
   });
   const view = render(
@@ -442,3 +452,82 @@ test("the focus follows the press: Request access hands it to Withdraw, and With
     await view.findByRole("button", { name: "Request access to Gmail" }),
   );
 });
+
+test.each([
+  [
+    "disabled",
+    "Turn on and give it to Expenses",
+    "Turn on Gmail and give it to Expenses",
+  ],
+  ["not_granted", "Give it to Expenses", "Give Gmail to Expenses"],
+] as const)(
+  "an admin looking at %s gets the fix itself, in one press, never a request to themselves",
+  async (state, label, spoken) => {
+    const { view, sent } = mounted(
+      appAccess({
+        state,
+        unavailable: state === "disabled" ? "absent" : null,
+        requestKind: state === "disabled" ? "enable" : "grant",
+      }),
+      undefined,
+      { admin: true },
+    );
+    const button = await view.findByRole("button", { name: spoken });
+    expect(button.textContent).toBe(label);
+    expect(
+      view.queryByRole("button", { name: "Request access to Gmail" }),
+    ).toBeNull();
+    fireEvent.click(button);
+    await waitFor(() =>
+      expect(sent.find((call) => call.method === "POST")).toEqual({
+        method: "POST",
+        url: "/api/plugins/for/expenses/apps/composio-gmail/approve",
+        body: undefined,
+      }),
+    );
+  },
+);
+
+test("an admin's press that cannot be carried out says what is missing", async () => {
+  const { view } = mounted(
+    appAccess({ state: "not_granted", requestKind: "grant" }),
+    { status: 409, body: { error: "Gmail has no tools to give yet." } },
+    { admin: true },
+  );
+  fireEvent.click(
+    await view.findByRole("button", { name: "Give Gmail to Expenses" }),
+  );
+  expect((await view.findByRole("alert")).textContent).toBe(
+    "Gmail has no tools to give yet.",
+  );
+});
+
+test.each([
+  [
+    { state: "shared_not_connected", requestKind: "connect_shared" },
+    "Connect the team Gmail account",
+    "/admin/plugins/composio-gmail",
+  ],
+  [
+    { state: "disabled", unavailable: "token_missing", requestKind: "enable" },
+    "Set up Gmail",
+    "/admin/plugins/composio-gmail",
+  ],
+  [
+    {
+      state: "disabled",
+      unavailable: "composio_unconfigured",
+      requestKind: "enable",
+    },
+    "Set up Gmail",
+    "/admin/plugins/composio",
+  ],
+] as const)(
+  "an admin gets the page that fixes what one press cannot, in a new tab",
+  async (overrides, name, href) => {
+    const { view } = mounted(appAccess(overrides), undefined, { admin: true });
+    const link = await view.findByRole("button", { name });
+    expect(link.getAttribute("href")).toBe(href);
+    expect(link.getAttribute("target")).toBe("_blank");
+  },
+);

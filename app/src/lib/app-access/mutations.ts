@@ -85,6 +85,32 @@ export function approveAppAccessRequestMutationOptions(
   });
 }
 
+/**
+ * An administrator's one press: file the request this app needs on this Bot and approve it in the
+ * same step, through the inbox's own approval — the app switched on and its read-only actions
+ * granted, with the trail two presses would leave. Answers with what changed, or the sentence for
+ * what is missing (an OAuth client, a broker key) when it cannot be done from here.
+ */
+export function approveBotAppMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: async (variables: {
+      agentId: string;
+      app: string;
+    }): Promise<{
+      request: AppAccessRequest;
+      enabled: boolean;
+      granted: string[];
+    }> => {
+      const response = await client(
+        `/api/plugins/for/${encodeURIComponent(variables.agentId)}/apps/${encodeURIComponent(variables.app)}/approve`,
+        { method: "POST", fallback: "That app could not be turned on." },
+      );
+      return response.json();
+    },
+    onSettled: () => refresh(queryClient),
+  });
+}
+
 /** Dismiss a request without changing anything else. */
 export function dismissAppAccessRequestMutationOptions(
   queryClient: QueryClient,

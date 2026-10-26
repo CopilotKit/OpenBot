@@ -1,13 +1,16 @@
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
 import { useConnectInNewTab } from "@/components/plugins/connect-in-new-tab";
 import { Button } from "@/components/ui/button";
+import { agentQueryOptions } from "@/lib/agents/queries";
 import {
+  approveBotAppMutationOptions,
   cancelAppAccessRequestMutationOptions,
   requestAppAccessMutationOptions,
 } from "@/lib/app-access/mutations";
 import { type AppAccess, appAccessKeys } from "@/lib/app-access/queries";
+import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { queryClient } from "@/query-client";
 
 /**
@@ -92,7 +95,8 @@ function disabledSentence(access: AppAccess): string {
  *   that already has a row (which the connect route refuses until it is disconnected), go to the
  *   app's own page in Settings instead, where the form and Disconnect are.
  * - the three an administrator fixes — Request access, which files the request the server decides
- *   the kind of, and then Requested with a way to withdraw it.
+ *   the kind of, and then Requested with a way to withdraw it. Pressed by an administrator, it would
+ *   be a request to themselves, so they get the fix itself instead: see `AdminAction`.
  */
 export function AppAccessAction({
   agentId,
@@ -101,13 +105,116 @@ export function AppAccessAction({
   agentId: string;
   access: AppAccess;
 }) {
+  /*
+   * WHO IS LOOKING decides only which button is drawn, never what is allowed: the server answers
+   * the one press 403 for anybody else, and `SharedAppNotice` already reads the role the same way.
+   */
+  const me = useQuery(currentUserQueryOptions()).data;
   if (access.state === "ready" || access.state === "shared_not_approved")
     return null;
   if (access.state === "reconnect" && access.accountHolder === "owner")
     return null;
   if (access.state === "not_connected" || access.state === "reconnect")
     return <ConnectAction access={access} />;
+  if (me?.role === "admin")
+    return <AdminAction agentId={agentId} access={access} />;
   return <RequestAction agentId={agentId} access={access} />;
+}
+
+/**
+ * The step only an administrator can take, offered to the administrator as the step itself.
+ *
+ * ONE PRESS WHERE ONE PRESS CAN DO IT. An app nobody switched on, or one this Bot was never given,
+ * is switched on and given here through the inbox's own approval (`approveBotAppMutationOptions`):
+ * the same checks, the read-only actions only, and the same trail. Anything that sends or writes is
+ * still chosen on the Bot's page.
+ *
+ * A LINK WHERE IT CANNOT. A broker with no key, a set-up somebody left unfinished and a team account
+ * nobody connected all need something only typed or consented to on the app's admin page. That page
+ * opens in a new tab so the conversation stays where it is, and the card reads the app again when
+ * this tab has the focus back.
+ */
+function AdminAction({
+  agentId,
+  access,
+}: {
+  agentId: string;
+  access: AppAccess;
+}) {
+  const bot = useQuery(agentQueryOptions(agentId)).data?.name ?? "this Bot";
+  const approve = useMutation(approveBotAppMutationOptions(queryClient));
+  const name = access.displayName;
+
+  const oneClick =
+    access.state === "not_granted" ||
+    (access.state === "disabled" &&
+      (access.unavailable === null || access.unavailable === "absent"));
+  if (oneClick) {
+    const disabled = access.state === "disabled";
+    const label = disabled
+      ? `Turn on and give it to ${bot}`
+      : `Give it to ${bot}`;
+    // The card names the app beside the button; on its own, the button has to.
+    const spoken = disabled
+      ? `Turn on ${name} and give it to ${bot}`
+      : `Give ${name} to ${bot}`;
+    return (
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        {approve.error ? (
+          <p className="text-destructive text-xs" role="alert">
+            {approve.error.message}
+          </p>
+        ) : null}
+        <Button
+          aria-label={approve.isPending ? undefined : spoken}
+          disabled={approve.isPending}
+          onClick={() =>
+            approve.mutate(
+              { agentId, app: access.key },
+              /*
+               * The grants a Bot is offered are read per conversation, so the turn after this has
+               * to be asked against a store that knows about them. See `ConnectAction`.
+               */
+              { onSuccess: () => void queryClient.invalidateQueries() },
+            )
+          }
+          size="sm"
+        >
+          {approve.isPending ? (disabled ? "Turning on…" : "Giving…") : label}
+        </Button>
+      </div>
+    );
+  }
+
+  const page =
+    access.state === "disabled" &&
+    access.unavailable === "composio_unconfigured"
+      ? access.provider === "arcade"
+        ? "arcade"
+        : "composio"
+      : access.key;
+  const [label, spoken] =
+    access.state !== "shared_not_connected"
+      ? ["Set it up", `Set up ${name}`]
+      : access.requestKind
+        ? ["Connect the team account", `Connect the team ${name} account`]
+        : ["Reconnect the team account", `Reconnect the team ${name} account`];
+  return (
+    <Button
+      render={
+        <Link
+          params={{ key: page }}
+          rel="noreferrer"
+          target="_blank"
+          to="/admin/plugins/$key"
+        />
+      }
+      aria-label={spoken}
+      size="sm"
+    >
+      {label}
+    </Button>
+  );
 }
 
 /** The person's own account: connect it, or reconnect it. */

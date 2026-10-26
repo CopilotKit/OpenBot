@@ -50,7 +50,15 @@ function LiveAppAccessCard({
   agentId: string;
   prompt: ConnectPrompt;
 }) {
-  const live = useQuery(botAppQueryOptions(agentId, prompt.serverId));
+  const live = useQuery({
+    ...botAppQueryOptions(agentId, prompt.serverId),
+    /*
+     * Read again whenever this tab has the focus back. What changes the state usually happens in
+     * another tab — a consent screen, an admin's page for the app — and the person returning here
+     * is the moment the card should say what is true now.
+     */
+    refetchOnWindowFocus: true,
+  });
   /*
    * A read that failed falls back to what this card was before it read anything, where that was a
    * card at all: a person's own missing connection still gets its Connect button. The other reasons
