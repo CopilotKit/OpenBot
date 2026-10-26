@@ -199,9 +199,10 @@ export function ComputerTools() {
     available: offered.navigate,
     name: "computer_navigate",
     description:
-      "Open a web page on your own computer so the person can watch. Use this when asked to look " +
-      "at, visit, open or check a website. Returns the page title and its readable text, so answer " +
-      "from what comes back rather than telling the person to go and look.",
+      "Open a web page on your own computer so the person can watch. Use this when asked to open, " +
+      "visit or read a particular website. It is not a web search: never open a search engine with " +
+      "it to look something up. Returns the page title and its readable text, so answer from what " +
+      "comes back rather than telling the person to go and look.",
     parameters: z.object({
       url: z.string().describe("Full web address to open, including https://"),
     }),
