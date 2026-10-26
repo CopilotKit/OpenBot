@@ -276,6 +276,35 @@ struct ReadyRespondingEngine {
 }
 
 /// Return a responding engine only after Compose is present too.
+/// What follows installing or starting the engine.
+#[derive(Debug, PartialEq)]
+enum AfterEngineInstall {
+    /// It answers: nothing else to do.
+    Ready(engine::Address),
+    /// A Podman with no machine running: create and start one.
+    PodmanMachine,
+    /// Anything else that does not answer. Never the Podman machine steps: those run `podman`,
+    /// and on a machine with Docker Desktop there is no `podman` to run.
+    NotAnswering,
+}
+
+/**
+Decide, from a fresh look after the engine install, whether the Podman machine steps are needed.
+
+Seen on Windows: setup installed Docker Desktop, waited until it answered, then went on into
+`podman machine init` regardless and failed with "could not run podman: program not found". The
+machine steps came from when Podman was the only engine and every install was followed by its
+machine; Docker Desktop brings its own, and answers by the time its install returns. A Mac whose
+Docker was already running never reached this, because a responding engine returns earlier.
+*/
+fn after_engine_install(ready: &engine::EngineStatus) -> AfterEngineInstall {
+    match (&ready.address, ready.responding, ready.engine) {
+        (Some(address), true, _) => AfterEngineInstall::Ready(address.clone()),
+        (_, _, Some(engine::Engine::Podman)) => AfterEngineInstall::PodmanMachine,
+        _ => AfterEngineInstall::NotAnswering,
+    }
+}
+
 fn ready_responding_engine_after_compose_repair(
     found: engine::EngineStatus,
     install_missing_native: bool,
@@ -789,6 +818,29 @@ async fn engine_ready(app: &tauri::AppHandle) -> Result<engine::Address, Problem
             report(app, "install-engine", false, problem.said.clone());
             return Err(problem);
         }
+    }
+
+    let ready = engine::detect();
+    match after_engine_install(&ready) {
+        AfterEngineInstall::Ready(address) => {
+            desktop_telemetry::observe_engine(app, &ready);
+            if !engine::Address::composes(&address) {
+                let problem = Problem::plain(acquire::missing_compose(address.engine.binary()));
+                report(app, "engine", false, problem.said.clone());
+                return Err(problem);
+            }
+            report(app, "engine", true, ready.detail);
+            return Ok(address);
+        }
+        AfterEngineInstall::NotAnswering => {
+            let problem = Problem::with(
+                "OpenBot set up the software it runs on, but it is not answering. Try again.",
+                ready.detail,
+            );
+            report(app, "engine", false, problem.said.clone());
+            return Err(problem);
+        }
+        AfterEngineInstall::PodmanMachine => {}
     }
 
     // One at a time, and each only if the last one worked. Written as a loop over an array once,
@@ -8255,6 +8307,39 @@ mod tests {
                 assert_eq!(actual_key, api_key.unwrap_or_default().trim());
             }
         }
+    }
+
+    #[test]
+    fn after_an_engine_install_only_a_podman_without_a_machine_gets_the_machine_steps() {
+        let status = |engine, responding| engine::EngineStatus {
+            engine,
+            address: engine.map(|engine| engine::Address::new(engine, None)),
+            responding,
+            engine_socket: None,
+            detail: String::new(),
+        };
+        let docker = status(Some(engine::Engine::Docker), true);
+        assert_eq!(
+            after_engine_install(&docker),
+            AfterEngineInstall::Ready(engine::Address::new(engine::Engine::Docker, None))
+        );
+        assert!(matches!(
+            after_engine_install(&status(Some(engine::Engine::Podman), true)),
+            AfterEngineInstall::Ready(_)
+        ));
+        assert_eq!(
+            after_engine_install(&status(Some(engine::Engine::Podman), false)),
+            AfterEngineInstall::PodmanMachine
+        );
+        // A Docker Desktop that stopped answering is never handed to `podman machine init`.
+        assert_eq!(
+            after_engine_install(&status(Some(engine::Engine::Docker), false)),
+            AfterEngineInstall::NotAnswering
+        );
+        assert_eq!(
+            after_engine_install(&status(None, false)),
+            AfterEngineInstall::NotAnswering
+        );
     }
 
     #[test]
