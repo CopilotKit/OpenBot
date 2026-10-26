@@ -803,6 +803,11 @@ details > summary:hover {
   box-shadow: var(--elevation-sm);
 }
 
+a {
+  color: var(--text-primary);
+  text-underline-offset: 0.2em;
+}
+
 .caution,
 .fallback {
   font-size: 14px;
@@ -815,11 +820,6 @@ details > summary:hover {
 .fallback a {
   color: var(--text-primary);
   text-underline-offset: 2px;
-}
-
-a {
-  color: var(--text-primary);
-  text-underline-offset: 0.2em;
 }
 
 /* Something is in the way, or something failed. */
