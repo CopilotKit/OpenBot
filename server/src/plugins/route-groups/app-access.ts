@@ -8,7 +8,12 @@ import type {
   Unavailable,
 } from "../app-access";
 import type { CatalogueEntry } from "../catalogue";
-import { ownerAppsAllowed, ownerGrantRefusal } from "../owner-grants";
+import {
+  approveOwnersSharedUse,
+  ownerAppsAllowed,
+  ownerGrantRefusal,
+  withdrawOwnersSharedUse,
+} from "../owner-grants";
 import type {
   AppAccessRequestRecord,
   AppDirectory,
@@ -687,8 +692,25 @@ export function mountAppAccessRoutes({
       inspected,
     );
     if (refusal) return deny("owner_grant_refused", refusal, 403);
-    if (access.granted) return context.json({ granted: [] });
     const serverId = inspected.answeringId ?? "";
+    /*
+     * A SHARED APP OWNERS MAY GIVE IS USABLE AT ONCE: the grant sets who may use the team account
+     * through this Bot, the people who can use the Bot, and nobody else (`approveOwnerGrant`). Asked
+     * again of a Bot that already holds the owner's grant too, so pressing give puts back an
+     * audience withdrawn while an administrator had owners' choice switched off.
+     */
+    const approveShared = async () => {
+      if (shared)
+        await approveOwnersSharedUse(store, shared.use, {
+          botId: agentId,
+          serverId,
+          ownerId: context.var.actor.id,
+        });
+    };
+    if (access.granted) {
+      if (access.givenByOwner) await approveShared();
+      return context.json({ granted: [] });
+    }
     const tools = await store.appTools(serverId);
     if (tools.length === 0)
       return deny(
@@ -714,6 +736,7 @@ export function mountAppAccessRoutes({
       actorUserId: context.var.actor.id,
       payload: { app: access.key, bot: agentId, refs },
     });
+    await approveShared();
     return context.json({ granted: refs });
   });
 
@@ -757,6 +780,17 @@ export function mountAppAccessRoutes({
           actorUserId: context.var.actor.id,
           payload: { app: inspected.access.key, bot: agentId, refs },
         });
+      /*
+       * The Shared-account audience the owner's grant set goes with it. One an administrator
+       * approved stays, as their grants do.
+       */
+      if (shared && inspected.answeringId)
+        await withdrawOwnersSharedUse(store, shared.use, {
+          serverId: inspected.answeringId,
+          botId: agentId,
+          actorId: context.var.actor.id,
+          why: "owner_took_back",
+        });
       return context.json({ revoked: refs });
     },
   );
@@ -799,6 +833,18 @@ export function mountAppAccessRoutes({
     });
     if (!changed)
       return context.json({ error: "That app hasn't been added." }, 404);
+    /*
+     * Owners no longer decide, so the Shared-account audiences their grants set are withdrawn.
+     * The grants stay, an administrator's to keep or take, and their calls are refused until an
+     * administrator approves who may use the account. (`approvalFor` would not read those audiences
+     * now anyway; this removes them rather than leaving them to come back if the rule does.)
+     */
+    if (value !== "any" && shared)
+      await withdrawOwnersSharedUse(store, shared.use, {
+        serverId: context.req.param("id"),
+        actorId: context.var.actor.id,
+        why: "owner_grants_changed",
+      });
     return context.json({ ok: true });
   });
 

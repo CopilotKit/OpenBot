@@ -898,7 +898,7 @@ const ALLOW: Allowed[] = [
   },
   {
     file: "app/tests/connected-account-grants.test.tsx",
-    line: 124,
+    line: 126,
     shape: "e",
     finding: "NEW (round 2 did not find this)",
     why: "const siblingReads: string[] = [];",
