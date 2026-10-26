@@ -228,10 +228,13 @@ fn open() -> Result<(), Problem> {
     };
     #[cfg(target_os = "macos")]
     let spawned = crate::quiet::command("open").arg("-a").arg(&app).status();
+    // Starting Docker Desktop's own executable is the whole job, so a started process counts as
+    // success and its exit is not waited for. The status is named: `Default::default()` here left
+    // the type to inference, which had nothing to go on, and failed to compile off macOS.
     #[cfg(not(target_os = "macos"))]
     let spawned = crate::quiet::command(&app)
         .spawn()
-        .map(|_| Default::default());
+        .map(|_| std::process::ExitStatus::default());
     match spawned {
         Ok(status) if status.success() => Ok(()),
         Ok(status) => Err(Problem::with(
