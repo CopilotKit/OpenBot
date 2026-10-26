@@ -59,6 +59,7 @@ import {
   toolResultFailed,
 } from "@/lib/plugins/tool-result";
 import { readTeamBotConsent } from "@/lib/team-bots";
+import type { CardPlace } from "@/lib/copilot/carry-on";
 import {
   readConnectPrompt,
   SHOW_APP_ACCESS_TOOL,
@@ -1307,12 +1308,15 @@ const TranscriptToolCall = memo(function TranscriptToolCall({
   name,
   args,
   result,
+  latest,
 }: {
   delay: number;
   toolCallId: string;
   name: string;
   args: string;
   result?: string;
+  /** Nothing said or queued since this call, and the Bot is not working. See `CardPlace`. */
+  latest: boolean;
 }) {
   const renderToolCall = useRenderToolCall();
   const toolCall = useMemo(
@@ -1350,7 +1354,13 @@ const TranscriptToolCall = memo(function TranscriptToolCall({
          * What was called, shimmering until its result arrives, and then the server's own words
          * drawn the way a Bot's prose is drawn.
          */}
-        {drawn ?? <ServerToolLine name={name} result={result} />}
+        {drawn ?? (
+          <ServerToolLine
+            name={name}
+            place={{ toolCallId, latest }}
+            result={result}
+          />
+        )}
       </ToolRenderBoundary>
     </Arriving>
   );
@@ -1367,9 +1377,12 @@ const TranscriptToolCall = memo(function TranscriptToolCall({
 export function ServerToolLine({
   name,
   result,
+  place,
 }: {
   name: string;
   result?: string;
+  /** Where this call sits in the conversation, for an app card that may carry the task on. */
+  place?: CardPlace;
 }) {
   const running = result === undefined;
   const { label, detail } = readToolName(name, running);
@@ -1404,7 +1417,7 @@ export function ServerToolLine({
     : name === SHOW_APP_ACCESS_TOOL
       ? readConnectPrompt(answer)
       : null;
-  if (card) return <AppAccessCard prompt={card} />;
+  if (card) return <AppAccessCard place={place} prompt={card} />;
   /*
    * THAT TOOL'S OTHER ANSWERS ARE FOR THE MODEL. An app nobody can name comes back as plain text
    * telling the Bot to say so plainly and not to browse to it — an instruction, which read by the
@@ -1445,6 +1458,32 @@ export function isPersonSentMessage(
   text: string,
 ): boolean {
   return role === "user" && readFiring(text) === null;
+}
+
+/**
+ * WHERE THE CONVERSATION HAS GOT TO, for an app card that may carry its task on once the app is
+ * ready (see `lib/copilot/carry-on.ts`): the index from which a row is still the latest thing, or
+ * past the end when none is.
+ *
+ * A card is the latest thing while nothing has been said to the Bot since it, nothing is queued, and
+ * the Bot is not working: past that, the conversation has moved on, and an older task is not picked
+ * up again underneath it. ANY USER TURN COUNTS, a routine firing included — unlike the scroll
+ * machinery's `isPersonSentMessage`. A firing is not the person speaking, but it is a new task the
+ * Bot has answered, and "please carry on" sent after it would land on the routine's work rather than
+ * on the task the card interrupted. Exported so it can be checked without mounting anything.
+ */
+export function latestFrom(
+  items: readonly TranscriptItem[],
+  { busy, queued }: { busy: boolean; queued: number },
+): number {
+  if (busy || queued > 0) return items.length;
+  return (
+    items.findLastIndex(
+      (item) =>
+        (item.kind === "text" && item.role === "user") ||
+        item.kind === "attachments",
+    ) + 1
+  );
 }
 
 /**
@@ -1609,6 +1648,9 @@ export function ChatTranscript({
     )?.id ?? null;
   useSmoothSendScroll(viewportRef, newestUserMessageId);
 
+  /* Which tool calls are still the latest thing, for an app card: see `latestFrom`. */
+  const latestIndex = latestFrom(items, { busy, queued: queued.length });
+
   /* One rule for both kinds of row — see `anchorRowIds`, which is where it is written down. */
   const anchorRows = anchorRowIds(items);
 
@@ -1731,6 +1773,7 @@ export function ChatTranscript({
                   <TranscriptToolCall
                     args={item.toolCall.function.arguments}
                     delay={delays.delayFor(item.id, index, items.length)}
+                    latest={index >= latestIndex}
                     name={item.toolCall.function.name}
                     result={item.result}
                     toolCallId={item.toolCall.id}

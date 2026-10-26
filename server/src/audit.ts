@@ -280,6 +280,14 @@ export const auditEventTypes = [
   "app_access.approved",
   "app_access.dismissed",
   "app_access.refused",
+  /*
+   * A Bot's owner giving one of their own apps to their own Bot, or taking it back, without an
+   * administrator (`plugins/owner-grants.ts`). Target the app key; payload `app`, `bot`, and the
+   * refs given or taken. Each ref also has its own `plugin_granted` / `plugin_revoked` row marked
+   * `grantedAs: owner`.
+   */
+  "app_access.owner_granted",
+  "app_access.owner_revoked",
   // Every action a Bot takes on its computer, allowed or refused. Both, always: a trail that records
   // only what was permitted cannot answer whether the Bot tried.
   "computer.action_allowed",

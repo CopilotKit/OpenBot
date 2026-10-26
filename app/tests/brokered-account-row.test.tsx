@@ -179,6 +179,8 @@ function brokeredServer(authScheme: string): PluginServer {
     dynamicClient: false,
     accountMode: null,
     sharedVendorConnected: false,
+    ownerGrants: "any",
+    ownerGrantsChosen: null,
     tools: [],
     withdrawn: [],
   };
