@@ -119,7 +119,10 @@ fn bundled_cli() {
         return;
     }
     let root = std::path::Path::new("cli-bundle");
-    let node = format!("node{}", if cfg!(windows) { ".exe" } else { "" });
+    // The target's, not `cfg!(windows)`: a build script is compiled for the machine building, so
+    // a Windows app built on a Mac would otherwise pin a `node` that is not there.
+    let windows = std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows");
+    let node = format!("node{}", if windows { ".exe" } else { "" });
     for (variable, path) in [
         (
             "OPENBOT_BUNDLED_CLI_PROGRAM_SHA256",
