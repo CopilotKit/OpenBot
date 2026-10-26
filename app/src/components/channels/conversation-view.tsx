@@ -32,6 +32,7 @@ export function ConversationView({
   pending = false,
   autoFocus = false,
   stopped,
+  working,
   stoppable,
   queueWhileBusy = false,
   restoring = false,
@@ -69,6 +70,8 @@ export function ConversationView({
   autoFocus?: boolean;
   /** Why the last turn ended without an answer. Drawn at the end of the transcript, not here. */
   stopped?: string;
+  /** Work the conversation waits on that is not this tab's run. Drawn at the end of the transcript. */
+  working?: ReactNode;
   /**
    * There is a run for Stop to abort, which is a narrower fact than `pending` and is the honest one
    * to draw a Stop button from. Defaults to `pending` for a caller with no gap between the two.
@@ -432,6 +435,7 @@ export function ConversationView({
           queued={queued}
           restoring={restoring}
           {...(stopped ? { stopped } : {})}
+          working={working}
         />
       </div>
       <div className="max-w-2xl mx-auto w-full px-0 pb-4 shrink-0">
