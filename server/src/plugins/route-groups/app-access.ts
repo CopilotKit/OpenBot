@@ -626,8 +626,9 @@ export function mountAppAccessRoutes({
    *
    * WHAT IS GIVEN IS WHAT AN ADMINISTRATOR'S ONE PRESS GIVES: the app's read-only actions, through
    * the same `appTools` reading, so an owner never gets more by asking themselves than an
-   * administrator's approval would have given. Anything that sends or writes is still chosen action by
-   * action by an administrator. ONE EXCEPTION, the built-in Routines: every action it has keeps,
+   * administrator's approval would have given. Anything that sends or writes is chosen action by
+   * action: by an administrator, or by the owner one advertised action at a time through
+   * `POST /grants`, still on the asker's own account and still behind the approval gate. ONE EXCEPTION, the built-in Routines: every action it has keeps,
    * changes or drops the asking person's own standing instructions and nothing else, and "every
    * morning, …" is a write — given only its reads, a Bot could list routines and never make one.
    *
