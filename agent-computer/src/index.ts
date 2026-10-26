@@ -27,8 +27,8 @@ import {
   TAKE_CONTROL_FIRST,
 } from "./control";
 import { describeHumanGesture } from "./demonstration";
-import { enterText, FieldValueError } from "./enter-text";
 import { handleEgressPolicyRequest, startEgressFilter } from "./egress";
+import { enterText, FieldValueError } from "./enter-text";
 import { identity } from "./identity";
 import {
   assertPageAccess,
@@ -51,7 +51,6 @@ import {
   sensitiveRefs,
 } from "./secret-masking";
 import { type BotSession, createSessions } from "./sessions";
-import { createShell } from "./shell";
 import {
   fillSignIn,
   fillSignInCode,
@@ -61,12 +60,12 @@ import {
 import { startVirtualDisplay } from "./virtual-display";
 import { applyWebBotAuthPush } from "./web-bot-auth";
 import {
-  createWorkspace,
   WorkspaceFileError,
   WorkspaceFileNotFoundError,
   WorkspaceFileTooLargeError,
   WorkspacePathError,
 } from "./workspace";
+import { createWorkspaces } from "./workspaces";
 
 /**
  * The Bot's computer: one long-lived browser, reachable over HTTP.
@@ -197,9 +196,9 @@ function botIdOf(request: Request, fallback?: string | null): string {
  * The Bot's durable files.
  *
  * Rooted at WORKSPACE_DIR, which the image creates and docker-compose mounts as a volume, so what a
- * Bot saves outlives the container. Built once at boot: the root is fixed, and resolving it per request
- * would only add a syscall to every call. Everything about why confinement is harder than it looks
- * lives in workspace.ts.
+ * Bot saves outlives the container. Each folder is built the first time its Bot uses it and kept, so
+ * a request adds no syscall after that. Which folder a Bot gets lives in workspaces.ts; everything
+ * about why confinement is harder than it looks lives in workspace.ts.
  */
 /**
  * The two directories this process cannot do its job without, checked before it says it is ready.
@@ -245,8 +244,10 @@ await assertWritable(
   process.env.PROFILES_DIR?.trim() || "/profiles",
 );
 
-const workspace = createWorkspace(
+// One folder per Bot where one process serves many; see workspaces.ts.
+const workspaces = createWorkspaces(
   process.env.WORKSPACE_DIR?.trim() || "/workspace",
+  process.env.COMPUTER_SEPARATE_WORKSPACES?.trim().toLowerCase() === "on",
 );
 
 /**
@@ -286,9 +287,6 @@ const profiles = createProfiles(
     await sessions.get(botId)?.viewer.releaseAll(COMPUTER_STOPPED);
   },
 );
-// Rooted in the same workspace the file tools use, so a command and a written file see one
-// directory rather than two.
-const shell = createShell(process.env.WORKSPACE_DIR?.trim() || "/workspace");
 
 /**
  * The id normally arrives as a header on every request. This is the fallback for a caller that has no
@@ -1209,9 +1207,8 @@ serve<StreamData>({
       // MAY touch a path: the gateway in front of this process does that.
       if (url.pathname === "/files/download" && request.method === "GET") {
         try {
-          const file = await workspace.download(
-            url.searchParams.get("path") ?? "",
-          );
+          const { files } = await workspaces.for(botId);
+          const file = await files.download(url.searchParams.get("path") ?? "");
           return new Response(file.body, {
             headers: downloadHeaders(file.name, file.bytes),
           });
@@ -1228,7 +1225,8 @@ serve<StreamData>({
           path?: unknown;
         } | null;
         try {
-          return json(await workspace.read(String(body?.path ?? "")));
+          const { files } = await workspaces.for(botId);
+          return json(await files.read(String(body?.path ?? "")));
         } catch (error) {
           return json(
             { error: describe(error, "The file could not be read.") },
@@ -1242,8 +1240,9 @@ serve<StreamData>({
           path?: unknown;
         } | null;
         try {
+          const { files } = await workspaces.for(botId);
           return json(
-            await workspace.list(
+            await files.list(
               typeof body?.path === "string" ? body.path : undefined,
             ),
           );
@@ -1283,6 +1282,9 @@ serve<StreamData>({
           return json({ error: timeout.error }, 400);
         }
         try {
+          // Rooted in the same folder the file tools use, so a command and a written file see one
+          // directory rather than two.
+          const { shell } = await workspaces.for(botId);
           return json(
             await shell.run({
               command: body.command,
@@ -1310,8 +1312,9 @@ serve<StreamData>({
           return json({ error: "The contents to write are required." }, 400);
         }
         try {
+          const { files } = await workspaces.for(botId);
           return json(
-            await workspace.write(String(body?.path ?? ""), body.contents, {
+            await files.write(String(body?.path ?? ""), body.contents, {
               append: body.append === true,
             }),
           );
