@@ -61,6 +61,13 @@ const id = (name: string) => `${name}-${suite}`;
 const person = id("person");
 const other = id("other");
 const admin = id("admin");
+/**
+ * Who owns the suite's Bots: nobody the requests below are filed as. A Bot's owner may give it one
+ * of their own apps without asking anybody (`owner_grantable`), so a person asking an administrator
+ * for a grant is, here, asking about somebody else's Bot. `owner-app-grants.integration.test.ts`
+ * covers the owner's side.
+ */
+const maker = id("maker");
 const bot = id("bot");
 const hidden = id("hidden");
 
@@ -327,7 +334,7 @@ async function clearApps() {
 }
 
 beforeAll(async () => {
-  for (const user of [person, other, admin])
+  for (const user of [person, other, admin, maker])
     await database.insert(users).values({
       id: user,
       email: `${user}@example.test`,
@@ -343,8 +350,9 @@ beforeAll(async () => {
     });
     await database.insert(agentProfiles).values({
       agentId: agent,
-      ownerUserId: person,
-      visibility: "private",
+      ownerUserId: maker,
+      // Public, so the people asking below are in the audience a Shared app's approval covers.
+      visibility: agent === bot ? "public" : "private",
       title: "Helper",
       roleDescription: "Helper",
       avatarSeed: "x",
@@ -362,7 +370,9 @@ beforeEach(async () => {
 afterAll(async () => {
   await clearApps();
   await database.delete(agents).where(inArray(agents.id, [bot, hidden]));
-  await database.delete(users).where(inArray(users.id, [person, other, admin]));
+  await database
+    .delete(users)
+    .where(inArray(users.id, [person, other, admin, maker]));
 });
 
 describe("what each app a Bot holds is, for the person asking", () => {
@@ -1577,7 +1587,7 @@ describe("a teammate on somebody else's Team Bot", () => {
   beforeEach(async () => {
     await database
       .insert(teamBotPublications)
-      .values({ agentId: bot, publishedBy: person, audience: "team" });
+      .values({ agentId: bot, publishedBy: maker, audience: "team" });
     await seedApp({ key: GMAIL, title: "Gmail" });
   });
   const connect = (
@@ -1601,7 +1611,7 @@ describe("a teammate on somebody else's Team Bot", () => {
     ).app;
 
   test("the owner's connection is the one their calls use", async () => {
-    await connect(person);
+    await connect(maker);
     expect(await asTeammate()).toMatchObject({
       state: "ready",
       accountHolder: "owner",
@@ -1610,7 +1620,7 @@ describe("a teammate on somebody else's Team Bot", () => {
   });
 
   test("the owner's refused connection is theirs to reconnect, not the teammate's", async () => {
-    await connect(person, { verified: false, probeAction: "GMAIL_LIST" });
+    await connect(maker, { verified: false, probeAction: "GMAIL_LIST" });
     await connect(other);
     expect(await asTeammate()).toMatchObject({
       state: "reconnect",
@@ -1640,9 +1650,9 @@ describe("a teammate on somebody else's Team Bot", () => {
   });
 
   test("the owner reads their own account, and is never asked", async () => {
-    await connect(person);
+    await connect(maker);
     const { app } = await json<{ app: AppAccess }>(
-      await appAs(person).request(`/api/plugins/for/${bot}/apps/${GMAIL}`),
+      await appAs(maker).request(`/api/plugins/for/${bot}/apps/${GMAIL}`),
     );
     expect(app).toMatchObject({
       state: "ready",
