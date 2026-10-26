@@ -103,7 +103,7 @@ export function approveBotAppMutationOptions(queryClient: QueryClient) {
     }> => {
       const response = await client(
         `/api/plugins/for/${encodeURIComponent(variables.agentId)}/apps/${encodeURIComponent(variables.app)}/approve`,
-        { method: "POST", fallback: "That app could not be turned on." },
+        { method: "POST", fallback: "Couldn't turn that app on. Try again." },
       );
       return response.json();
     },

@@ -70,6 +70,7 @@ function unavailableSentence(
   reason: Unavailable,
   title: string,
   provider: BrokerProvider,
+  again = "approve this request again",
 ): string {
   switch (reason) {
     case "absent":
@@ -77,14 +78,14 @@ function unavailableSentence(
     case "composio_unconfigured": {
       const { vendor, envVar } = BROKERED_PROFILE[provider];
       const article = /^[aeiou]/i.test(vendor) ? "an" : "a";
-      return `${title} is ${article} ${vendor} app, and ${envVar} isn't set. Set it, then approve this request again.`;
+      return `${title} is ${article} ${vendor} app, and ${envVar} isn't set. Set it, then ${again}.`;
     }
     case "scheme_unreadable":
-      return `${title} is turned on, but OpenBot can't read how it connects. Remove it and turn it on again under Plugins, then approve this request again.`;
+      return `${title} is turned on, but OpenBot can't read how it connects. Remove it and turn it on again under Plugins, then ${again}.`;
     case "oauth_client_missing":
-      return `${title} has no OAuth client yet. Register one on its page under Plugins, then approve this request again.`;
+      return `${title} has no OAuth client yet. Register one on its page under Plugins, then ${again}.`;
     case "token_missing":
-      return `${title} has no token yet. Add one on its page under Plugins, then approve this request again.`;
+      return `${title} has no token yet. Add one on its page under Plugins, then ${again}.`;
   }
 }
 
@@ -199,6 +200,9 @@ export function mountAppAccessRoutes({
         directory,
       });
 
+    // The one press filed no request the admin could approve again: they press again instead.
+    const again = direct ? "try again" : "approve this request again";
+
     let inspected = await inspect();
     if (!inspected)
       return deny(
@@ -213,14 +217,24 @@ export function mountAppAccessRoutes({
       if (inspected.unavailable !== "absent")
         return deny(
           inspected.unavailable,
-          unavailableSentence(inspected.unavailable, title, activeProvider),
+          unavailableSentence(
+            inspected.unavailable,
+            title,
+            activeProvider,
+            again,
+          ),
           inspected.unavailable === "composio_unconfigured" ? 503 : 409,
         );
       if (inspected.toolkit) {
         if (!composio)
           return deny(
             "composio_unconfigured",
-            unavailableSentence("composio_unconfigured", title, activeProvider),
+            unavailableSentence(
+              "composio_unconfigured",
+              title,
+              activeProvider,
+              again,
+            ),
             503,
           );
         const outcome = await enableComposioApp(
@@ -235,7 +249,7 @@ export function mountAppAccessRoutes({
         if (needed)
           return deny(
             "needs_admin_input",
-            `${title} needs ${needed}. Add it on its page under Plugins, then approve this request again.`,
+            `${title} needs ${needed}. Add it on its page under Plugins, then ${again}.`,
             409,
           );
         try {
@@ -295,13 +309,13 @@ export function mountAppAccessRoutes({
       if (advertised.length === 0)
         return deny(
           "no_tools",
-          `${name} has no tools to give yet. Refresh its tools on its page under Plugins, then approve this request again.`,
+          `${name} has no tools to give yet. Refresh its tools on its page under Plugins, then ${again}.`,
           409,
         );
       if (refs.length === 0)
         return deny(
           "no_read_only_tools",
-          `None of ${name}'s actions are marked read-only, so approving here gives this Bot nothing. Choose its actions on ${name}'s page under Plugins, then approve this request again.`,
+          `None of ${name}'s actions are marked read-only, so approving here gives this Bot nothing. Choose its actions on ${name}'s page under Plugins, then ${again}.`,
           409,
         );
       for (const ref of refs) {
@@ -575,12 +589,30 @@ export function mountAppAccessRoutes({
       } finally {
         if (!done.carriedOut) {
           await store.releaseAppAccessRequest({ id: claimed.id, by });
-          if (filed.created)
-            await store.closeAppAccessRequest({
-              id: claimed.id,
-              status: "cancelled",
-              by,
-              requestedBy: by,
+          /*
+           * Withdrawn with the row a withdrawal always writes, so the trail does not hold an
+           * `app_access.requested` that nothing ever answered.
+           */
+          const withdrawn = filed.created
+            ? await store.closeAppAccessRequest({
+                id: claimed.id,
+                status: "cancelled",
+                by,
+                requestedBy: by,
+              })
+            : null;
+          if (withdrawn)
+            await store.recordAppAccessEvent({
+              eventType: "app_access.cancelled",
+              targetId: withdrawn.appKey,
+              actorUserId: by,
+              payload: {
+                request: withdrawn.id,
+                app: withdrawn.appKey,
+                bot: withdrawn.agentId,
+                kind: withdrawn.kind,
+                direct: true,
+              },
             });
         }
       }

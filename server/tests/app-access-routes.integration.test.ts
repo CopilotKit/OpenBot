@@ -1086,14 +1086,25 @@ describe("an administrator's one press on a card", () => {
   test("a press that cannot be carried out leaves no request waiting", async () => {
     const response = await press("google-drive");
     expect(response.status).toBe(409);
-    expect((await json<{ error: string }>(response)).error).toContain(
-      "OAuth client",
-    );
+    const { error } = await json<{ error: string }>(response);
+    expect(error).toContain("OAuth client");
+    // There is no request left to approve again: the admin presses again.
+    expect(error).toEndWith("then try again.");
     const rows = await database
       .select({ status: appAccessRequests.status })
       .from(appAccessRequests)
       .where(eq(appAccessRequests.requestedBy, admin));
     expect(rows.map((row) => row.status)).toEqual(["cancelled"]);
+    // The trail closes what it opened: filed, refused, then withdrawn.
+    const filed = eventsOf("app_access.requested")[0]?.payload as {
+      request?: string;
+    };
+    expect(eventsOf("app_access.cancelled")[0]?.payload).toMatchObject({
+      request: filed.request,
+      app: "google-drive",
+      direct: true,
+    });
+    expect(eventsOf("app_access.approved")).toHaveLength(0);
   });
 
   test("a request of theirs already waiting is put back as it was", async () => {
@@ -1107,6 +1118,7 @@ describe("an administrator's one press on a card", () => {
       .from(appAccessRequests)
       .where(eq(appAccessRequests.requestedBy, admin));
     expect(rows.map((row) => row.status)).toEqual(["pending"]);
+    expect(eventsOf("app_access.cancelled")).toHaveLength(0);
   });
 });
 
