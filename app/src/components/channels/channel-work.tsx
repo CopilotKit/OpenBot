@@ -1,5 +1,9 @@
+import { AbstractAvatar } from "@/components/agents/abstract-avatar";
 import type { ChannelWork } from "@/lib/channels/queries";
 import { ProgressRow } from "./progress-row";
+
+/** A Bot as this person knows it: its name and the seed its avatar is drawn from. */
+export type KnownBot = { name: string; avatarSeed: string };
 
 /**
  * What a conversation is waiting on, one row each, at the end of the transcript.
@@ -14,22 +18,34 @@ import { ProgressRow } from "./progress-row";
  */
 export function ChannelWorkRows({
   work,
-  nameOf,
+  botOf,
 }: {
   work: readonly ChannelWork[] | undefined;
-  /** The name this person knows a Bot by, when they know it at all. */
-  nameOf?: (botId: string) => string | undefined;
+  /** The Bot this person knows by that id, when they know it at all. */
+  botOf?: (botId: string) => KnownBot | undefined;
 }) {
   if (!work || work.length === 0) return null;
   return (
     <div className="flex flex-col gap-1" data-testid="channel-work">
-      {work.map((entry) => (
-        <ProgressRow
-          key={entry.key}
-          label={labelFor(entry, nameOf?.(entry.botId) ?? entry.botName)}
-          since={entry.since}
-        />
-      ))}
+      {work.map((entry) => {
+        const known = botOf?.(entry.botId);
+        const name = known?.name ?? entry.botName;
+        return (
+          <ProgressRow
+            key={entry.key}
+            label={labelFor(entry, name)}
+            // Seeded by the id when the person does not know the Bot, so the same Bot still draws
+            // the same face every time.
+            media={
+              <AbstractAvatar
+                name={name ?? "Bot"}
+                seed={known?.avatarSeed ?? entry.botId}
+                size={20}
+              />
+            }
+          />
+        );
+      })}
     </div>
   );
 }
