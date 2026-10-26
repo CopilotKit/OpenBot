@@ -34,6 +34,16 @@ function composeServices() {
           depends_on?: Record<string, { condition: string }>;
           restart?: string;
           networks?: string[];
+          user?: string;
+          volumes?: Array<
+            | string
+            | {
+                type: string;
+                source: string;
+                target: string;
+                bind?: { create_host_path?: boolean };
+              }
+          >;
         }
       >;
     }
@@ -723,4 +733,30 @@ test("addresses the server's Bots and endpoints from inside the network", () => 
     MANAGED_AGENT_AG_UI_URL: "",
     PICKED_HARNESS_URL: "https://agents.example/run",
   });
+});
+
+/**
+ * A Google or xAI sign-in is a file the server renews itself, so it reaches the container as the
+ * folder it sits in: the renewal writes a sibling and renames it over the original.
+ */
+test("mounts the model sign-in folder into the server, and only there", () => {
+  const services = composeServices();
+  const server = services.server;
+
+  expect(server.volumes).toContainEqual({
+    type: "bind",
+    source: "./.openbot",
+    target: "/openbot",
+    bind: { create_host_path: false },
+  });
+  expect(server.environment?.OPENBOT_MODEL_OAUTH_FILE).toBe(
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: the unexpanded placeholder is what is asserted.
+    "${OPENBOT_MODEL_OAUTH_FILE:+/openbot/model-oauth.json}",
+  );
+  // biome-ignore lint/suspicious/noTemplateCurlyInString: the unexpanded placeholder is what is asserted.
+  expect(server.user).toBe("${OPENBOT_SERVER_USER:-1001:1001}");
+  for (const [name, service] of Object.entries(services)) {
+    if (name === "server") continue;
+    expect(JSON.stringify(service.volumes ?? [])).not.toContain(".openbot");
+  }
 });

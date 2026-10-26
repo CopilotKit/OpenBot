@@ -155,6 +155,24 @@ services:
       # The desktop's host-access broker proves itself with this. Minted per start and given to the
       # server alone, so it is named here and nowhere else in this file.
       OPENBOT_DESKTOP_HOST_TOKEN: ${OPENBOT_DESKTOP_HOST_TOKEN:-}
+      # A Google or xAI sign-in, which the server reads and renews itself. The file is on the host,
+      # at `.openbot/model-oauth.json` beside this one, and reaches the container through the mount
+      # below, so a host path here becomes the mount's. Empty stays empty: no sign-in, no file.
+      OPENBOT_MODEL_OAUTH_FILE: ${OPENBOT_MODEL_OAUTH_FILE:+/openbot/model-oauth.json}
+    # Who the server runs as. The image's own user by default. On Linux the desktop names the host's,
+    # because the sign-in file below is the host user's and readable by nobody else, and a bind mount
+    # there keeps the host's numbers; Docker Desktop's file sharing on macOS and Windows does not.
+    user: "${OPENBOT_SERVER_USER:-1001:1001}"
+    volumes:
+      # The directory, not the file: the server renews the token by writing a sibling and renaming it
+      # over the original, which a single-file mount cannot take. Not created here, because Docker
+      # would create it as root on Linux and the desktop could then not write its sign-in into it;
+      # whoever starts this service makes it first.
+      - type: bind
+        source: ./.openbot
+        target: /openbot
+        bind:
+          create_host_path: false
     ports:
       # Two host ports, one process. The app's is the address a window is given: the server serves
       # the built app itself, so that one port reaches both halves on one origin. The server's is
