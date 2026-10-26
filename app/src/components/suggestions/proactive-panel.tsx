@@ -1,5 +1,6 @@
 import {
   IconBulb,
+  IconChevronDown,
   IconChevronRight,
   IconClock,
   IconPlus,
@@ -69,6 +70,9 @@ const intervalLabel = (minutes: number) =>
   intervals.find((interval) => interval.minutes === minutes)?.label ??
   `Every ${minutes} minutes`;
 /** Next steps a Bot proposed from background research: start one as a task, or dismiss it. */
+/** How many suggestions show before the rest fold behind "Show more". */
+const SUGGESTIONS_SHOWN = 3;
+
 export function SuggestionsInbox({
   agentId,
 }: {
@@ -81,9 +85,17 @@ export function SuggestionsInbox({
   );
   const bots = useQuery(agentListQueryOptions());
   const act = useMutation(resolveSuggestionMutationOptions(queryClient));
+  const [expanded, setExpanded] = useState(false);
   const botName = (id: string) =>
     bots.data?.find((bot) => bot.id === id)?.name ?? "Your Bot";
   if (agentId !== undefined && shown.length === 0) return null;
+  /*
+   * The newest few, the rest a click away. Each suggestion is a paragraph with two buttons, and a
+   * Bot that had piled up sixty of them made its own page 8,000px of suggestions with its settings
+   * somewhere underneath. The list arrives newest first.
+   */
+  const hidden = expanded ? 0 : Math.max(0, shown.length - SUGGESTIONS_SHOWN);
+  const visible = hidden ? shown.slice(0, SUGGESTIONS_SHOWN) : shown;
   return (
     <PageSection title="Suggested next steps">
       {suggestions.isPending ? null : suggestions.error ? (
@@ -92,7 +104,7 @@ export function SuggestionsInbox({
         </p>
       ) : shown.length ? (
         <PageRows>
-          {shown.map((suggestion, index) => (
+          {visible.map((suggestion, index) => (
             <Fragment key={suggestion.id}>
               {index > 0 ? <Separator /> : null}
               <Item size="sm">
@@ -157,6 +169,25 @@ export function SuggestionsInbox({
               </Item>
             </Fragment>
           ))}
+          {hidden ? (
+            <>
+              <Separator />
+              <Item
+                render={<button type="button" />}
+                onClick={() => setExpanded(true)}
+                size="sm"
+              >
+                <ItemContent>
+                  <ItemTitle className="text-muted-foreground">
+                    Show {hidden} more
+                  </ItemTitle>
+                </ItemContent>
+                <ItemActions>
+                  <IconChevronDown className="size-4 text-muted-foreground" />
+                </ItemActions>
+              </Item>
+            </>
+          ) : null}
         </PageRows>
       ) : (
         <PageEmpty icon={IconBulb} title="No suggestions right now">
