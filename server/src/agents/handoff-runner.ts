@@ -473,10 +473,14 @@ export function createHandoffRunner(options: {
              * this hop. A person who was told their question had been handed on, and then hears
              * nothing for ever, has no way to tell a slow Bot from a broken one.
              */
-            // The deployment's controls refused it (Use Bots, the model allowlist). Trying again in a
-            // minute gets the same answer, so this is the last try, whatever the count says.
+            // The deployment's controls refused it (Use Bots, the model allowlist), or the other
+            // Bot's address is one this deployment will not dial. Trying again in a minute gets the
+            // same answer, so this is the last try, whatever the count says. Retrying a refused
+            // address left the person watching "Asking …" for five minutes before being told.
             const refused =
-              error instanceof Error && error.name === "CapabilityRefusedError";
+              error instanceof Error &&
+              (error.name === "CapabilityRefusedError" ||
+                error.name === "EndpointNotAllowedError");
             if ((refused || item.attempts >= maxAttempts) && !work.answerIn) {
               await tell(work, item.key, reason).catch((failure) => {
                 // A notice that cannot be queued must not take the release with it: leaving the row

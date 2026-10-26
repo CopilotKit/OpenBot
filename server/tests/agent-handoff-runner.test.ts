@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { readRunAssertion } from "../src/agents/callback-token";
+import { EndpointNotAllowedError } from "../src/agents/endpoint";
 import { ThreadBusyError } from "../src/agents/handoff-delivery";
 import {
   createHandoffRunner,
@@ -409,6 +410,31 @@ describe("a hop that failed for good", () => {
     });
     expect(offered).toHaveLength(1);
     expect(offered[0]?.task).toContain("Use Bots is turned off");
+  });
+
+  test("a hop to an address this deployment will not dial ends on its first try", async () => {
+    const {
+      runner: sweeper,
+      offered,
+      calls,
+    } = runner({
+      deliver: async () => {
+        throw new EndpointNotAllowedError(
+          "This deployment will not dial http://localhost:4201/ag-ui: that address is inside OpenBot's own network, so an agent may not live there.",
+        );
+      },
+    });
+
+    await sweeper.sweep();
+
+    expect(calls.filter((call) => call.verb === "release")).toEqual([]);
+    expect(calls).toContainEqual({
+      verb: "finish",
+      key: "run-1:abc",
+      owner: "replica-a",
+    });
+    expect(offered).toHaveLength(1);
+    expect(offered[0]?.task).toContain("will not dial");
   });
 
   /*
