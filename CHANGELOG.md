@@ -78,6 +78,15 @@ running a routine…". The sidebar keeps the conversation lit while it waits, an
 reload. In a shared conversation only the person whose Bot asked sees whom it asked; the others see
 only that it is busy. Migration `0063_work_items_open_thread` adds one partial index to `work_items`.
 
+### An app card carries the task on once the app is ready
+
+When a Bot stopped because it needed an app, and the person then connected it in another tab or an
+administrator turned it on for the Bot, the card said "Ask again". It now sends "Gmail is ready now.
+Please carry on." for the person, once, and the Bot picks the task back up; a card opened after the
+change offers Continue instead. An administrator looking at the card gets the fix itself, "Turn on
+and give it to Sales" or "Give it to Sales", which grants the app's read-only actions with the same
+checks and trail as approving a request, or a link to the app's page where one press can't do it.
+
 ### Screens share one spacing, row and empty-state design
 
 Every configuration screen now takes its spacing from the page frame: 32px under the title, 48px

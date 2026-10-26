@@ -479,7 +479,7 @@ test.each([
     ).toBeNull();
     fireEvent.click(button);
     await waitFor(() =>
-      expect(sent.find((call) => call.method === "POST")).toEqual({
+      expect(sent.find((call) => call.method === "POST")).toStrictEqual({
         method: "POST",
         url: "/api/plugins/for/expenses/apps/composio-gmail/approve",
         body: undefined,
