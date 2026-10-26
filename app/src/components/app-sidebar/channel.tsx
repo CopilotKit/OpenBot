@@ -2,25 +2,14 @@ import { IconPin, IconPinnedOff, IconTrash } from "@tabler/icons-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { memo, useState } from "react";
-import { Button } from "@/components/ui/button";
+import { DeleteConversationDialog } from "@/components/channels/delete-conversation-dialog";
 import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
-  deleteChannelMutationOptions,
-  setChannelPinnedMutationOptions,
-} from "@/lib/channels/mutations";
+import { setChannelPinnedMutationOptions } from "@/lib/channels/mutations";
 import type { MessageListEmphasis } from "@/lib/settings/message-list";
 import { useTypedReveal } from "@/lib/typed-reveal";
 import { ChannelItemContent } from "./channel-item-content";
@@ -70,7 +59,6 @@ export const Channel = memo(function Channel({
   const revealed = useTypedReveal(summary);
   const threadTitle = revealed.text || lastMessage || "New conversation";
   const setPinned = useMutation(setChannelPinnedMutationOptions(queryClient));
-  const deleteChannel = useMutation(deleteChannelMutationOptions(queryClient));
   const [confirming, setConfirming] = useState(false);
   /**
    * Why a pin did not take, said on the row it was asked of.
@@ -81,28 +69,6 @@ export const Channel = memo(function Channel({
    * the next attempt.
    */
   const [pinProblem, setPinProblem] = useState<string | null>(null);
-
-  const confirmDelete = async () => {
-    /*
-     * Away first when this row's channel is the one on screen.
-     *
-     * The roster invalidates the moment the delete lands, so this row — and the dialog living inside
-     * it — unmounts while the rest of this function is still owed. Navigating after the mutation
-     * therefore ran in a component that was already gone, leaving somebody looking at a conversation
-     * that no longer exists. Leaving before asking is safe in the other direction: a refused delete
-     * puts them on the roster with the channel still in it, and says why in the dialog.
-     */
-    if (isOpen) {
-      await navigate({ to: "/" });
-    }
-    try {
-      await deleteChannel.mutateAsync(channelId);
-    } catch {
-      // The error is on the mutation and rendered in the dialog; leaving it open says "not done".
-      return;
-    }
-    setConfirming(false);
-  };
 
   return (
     <>
@@ -151,11 +117,7 @@ export const Channel = memo(function Channel({
           </ContextMenuItem>
           <ContextMenuItem
             variant="destructive"
-            onClick={() => {
-              // A refusal from a previous attempt is not news about this one.
-              deleteChannel.reset();
-              setConfirming(true);
-            }}
+            onClick={() => setConfirming(true)}
           >
             <IconTrash />
             Delete conversation…
@@ -167,45 +129,14 @@ export const Channel = memo(function Channel({
           {pinProblem}
         </p>
       ) : null}
-      <Dialog
-        onOpenChange={(open) => {
-          if (!open) setConfirming(false);
-        }}
+      <DeleteConversationDialog
+        channelId={channelId}
+        // Away first when this row's channel is the one on screen.
+        leave={isOpen ? () => navigate({ to: "/" }) : undefined}
+        name={name}
+        onOpenChange={setConfirming}
         open={confirming}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Delete {name}?</DialogTitle>
-            <DialogDescription>
-              It disappears for everyone in the conversation.
-            </DialogDescription>
-          </DialogHeader>
-          {deleteChannel.error ? (
-            <p className="text-destructive text-sm">
-              {deleteChannel.error.message}
-            </p>
-          ) : null}
-          <DialogFooter>
-            <Button
-              onClick={() => setConfirming(false)}
-              size="sm"
-              variant="ghost"
-            >
-              Cancel
-            </Button>
-            <Button
-              disabled={deleteChannel.isPending}
-              onClick={() => {
-                void confirmDelete();
-              }}
-              size="sm"
-              variant="destructive"
-            >
-              {deleteChannel.isPending ? "Deleting…" : "Delete"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      />
     </>
   );
 });

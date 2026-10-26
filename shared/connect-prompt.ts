@@ -66,6 +66,13 @@ export type ConnectPrompt = {
    * and the card stops saying Reconnect. See `AppAccess.connectedAt`.
    */
   at?: string;
+  /**
+   * True when the app could not be used at the moment the Bot asked: always so of a refusal, and
+   * written by `show_app_access` from the state it found. What lets a card that is drawn already
+   * `ready` tell "became ready since" — worth a Continue — from "was ready all along", which is not.
+   * Absent on a `show_app_access` answer from before it was written, which offers nothing.
+   */
+  blocked?: boolean;
 };
 
 /**
@@ -84,13 +91,14 @@ export const SHOW_APP_ACCESS_TOOL = "show_app_access";
  * the MODEL is told, and because a transcript that cannot parse the marker still reads correctly.
  */
 export function connectAppRefusal(prompt: ConnectPrompt): string {
-  const { serverId, title, message, agentId, reason, at } = prompt;
+  const { serverId, title, message, agentId, reason, at, blocked } = prompt;
   return `${CONNECT_APP_MARKER}${JSON.stringify({
     serverId,
     title,
     ...(agentId ? { agentId } : {}),
     ...(reason ? { reason } : {}),
     ...(at ? { at } : {}),
+    ...(blocked !== undefined ? { blocked } : {}),
   })} ${message}`;
 }
 
@@ -125,12 +133,13 @@ export function readConnectPrompt(
   try {
     const parsed: unknown = JSON.parse(rest.slice(0, end + 1));
     if (!parsed || typeof parsed !== "object") return null;
-    const { serverId, title, agentId, reason, at } = parsed as {
+    const { serverId, title, agentId, reason, at, blocked } = parsed as {
       serverId?: unknown;
       title?: unknown;
       agentId?: unknown;
       reason?: unknown;
       at?: unknown;
+      blocked?: unknown;
     };
     if (typeof serverId !== "string" || typeof title !== "string") return null;
     if (!serverId || !title) return null;
@@ -150,6 +159,7 @@ export function readConnectPrompt(
       ...(typeof at === "string" && !Number.isNaN(Date.parse(at))
         ? { at }
         : {}),
+      ...(typeof blocked === "boolean" ? { blocked } : {}),
     };
   } catch {
     return null;

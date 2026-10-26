@@ -57,12 +57,22 @@ let verdict: { ok: true; events: string[] } | { ok: false; reason: string };
 let creates: Record<string, unknown>[] = [];
 /** Every address the server was asked to reach. */
 let dialled: string[] = [];
+/** The person's own apps the server offers to give a new Bot, and every give it was sent. */
+let giveable: {
+  key: string;
+  displayName: string;
+  logo: null;
+  account: string;
+}[] = [];
+let given: string[] = [];
 
 beforeEach(() => {
   builtInAvailable = true;
   verdict = { ok: true, events: ["RUN_STARTED"] };
   creates = [];
   dialled = [];
+  giveable = [];
+  given = [];
   global.fetch = Object.assign(
     async (path: Parameters<typeof fetch>[0], init?: RequestInit) => {
       const body = init?.body ? JSON.parse(String(init.body)) : undefined;
@@ -76,6 +86,12 @@ beforeEach(() => {
       if (path === "/api/agents" && init?.method === "POST") {
         creates.push(body);
         return Response.json({ agent: { id: "agent_new" } }, { status: 201 });
+      }
+      if (path === "/api/plugins/giveable")
+        return Response.json({ apps: giveable });
+      if (String(path).endsWith("/give") && init?.method === "POST") {
+        given.push(String(path));
+        return Response.json({ granted: [] });
       }
       return new Response(null, { status: 404 });
     },
@@ -288,4 +304,43 @@ test("going back keeps what was answered, and Run it here leaves a typed address
   await view.findByText("Expense Review is ready");
   expect(creates[0]).toMatchObject({ endpoint: "", visibility: "public" });
   expect(creates[0]).not.toHaveProperty("auth");
+});
+
+test("the person's own apps arrive ticked, and the ones left ticked are given once the Bot exists", async () => {
+  giveable = [
+    {
+      key: "composio-gmail",
+      displayName: "Gmail",
+      logo: null,
+      account: "personal",
+    },
+    {
+      key: "routines",
+      displayName: "Routines",
+      logo: null,
+      account: "deployment",
+    },
+  ];
+  const { view, user } = await opened();
+  await user.click(view.getByRole("button", { name: "Continue" }));
+  await user.type(await view.findByLabelText("Name"), "Research");
+  const gmail = await view.findByRole("checkbox", { name: "Gmail" });
+  const routines = view.getByRole("checkbox", { name: "Routines" });
+  expect(gmail.getAttribute("aria-checked")).toBe("true");
+  expect(routines.getAttribute("aria-checked")).toBe("true");
+  await user.click(routines);
+  expect(routines.getAttribute("aria-checked")).toBe("false");
+  await user.click(view.getByRole("button", { name: "Create" }));
+  expect(await view.findByText("Research is ready")).toBeTruthy();
+  expect(given).toEqual([
+    "/api/plugins/for/agent_new/apps/composio-gmail/give",
+  ]);
+});
+
+test("a person with no apps to give is asked nothing about apps", async () => {
+  const { view, user } = await opened();
+  await user.click(view.getByRole("button", { name: "Continue" }));
+  await view.findByLabelText("Name");
+  await settle();
+  expect(view.queryByText("Apps it can use")).toBeNull();
 });

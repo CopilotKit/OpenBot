@@ -73,6 +73,12 @@ export class HeadlessToolsMiddleware extends Middleware {
       const tools = new Map(
         this.tools.map((tool) => [tool.definition.name, tool]),
       );
+      // A browser chat offers its own computer tools; a plugin added beside them must not answer those.
+      const callerOffers = new Set(
+        originalInput.tools
+          .map((tool) => tool.name)
+          .filter((name) => !tools.has(name)),
+      );
       const executed = new Set<string>();
       let subscription: Subscription | undefined;
       let started = false;
@@ -161,7 +167,8 @@ export class HeadlessToolsMiddleware extends Middleware {
           const owned = pending.filter(
             (call) =>
               tools.has(call.function.name) ||
-              call.function.name.startsWith("computer_"),
+              (call.function.name.startsWith("computer_") &&
+                !callerOffers.has(call.function.name)),
           );
           if (owned.length === 0) {
             subscriber.next(terminal);

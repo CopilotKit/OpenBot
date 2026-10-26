@@ -35,12 +35,19 @@ import {
   accountOf,
   appAccessState,
   connectOf,
+  type OwnerGrants,
+  ownerGrantsOf,
   REQUEST_KIND_FOR,
   type Unavailable,
   unavailableReason,
 } from "../app-access";
 import type { BrokerApp } from "../broker";
-import { CATALOGUE, type CatalogueEntry, catalogueEntry } from "../catalogue";
+import {
+  CATALOGUE,
+  type CatalogueEntry,
+  catalogueEntry,
+  classifyTool,
+} from "../catalogue";
 import type { StoreContext } from "./context";
 import { iso } from "./model";
 
@@ -66,6 +73,8 @@ type AppCandidate = {
   authScheme: string | null;
   accountMode: "personal" | "shared" | null;
   hasCredential: boolean;
+  /** The answering row's `owner_grants`, null where nobody chose or there is no row. */
+  ownerGrants: OwnerGrants | null;
   /**
    * Whether anything but the caller's own word says this app exists: a row, a catalogue entry, or
    * the vendor's directory. False only for an id in the broker's namespace (`composio-`,
@@ -84,7 +93,14 @@ type ServerRow = {
   authScheme: string | null;
   accountMode: "personal" | "shared" | null;
   credentialId: string | null;
+  ownerGrants: OwnerGrants | null;
 };
+
+/** An app a person could give their own Bots. See `giveableApps`. */
+export type GiveableApp = Pick<
+  AppAccess,
+  "key" | "displayName" | "logo" | "account"
+>;
 
 /** The directory, asked only to name an app this deployment has no row for. */
 export type AppDirectory = () => Promise<BrokerApp[]>;
@@ -96,6 +112,8 @@ export type AppInspection = {
   unavailable: Unavailable | null;
   /** The row a grant is written against, and null for an app with no row. */
   answeringId: string | null;
+  /** Every row that is this app, which is where the grants an owner takes back may be. */
+  rowIds: string[];
   /** The app at the broker, for a brokered one. */
   toolkit: string | null;
   /** The catalogue entry, for an app this deployment ships. */
@@ -189,6 +207,7 @@ export function appAccessMethods(context: StoreContext) {
         authScheme: mcpServers.authScheme,
         accountMode: mcpServers.accountMode,
         credentialId: mcpServers.credentialId,
+        ownerGrants: mcpServers.ownerGrants,
       })
       .from(mcpServers)
       .orderBy(asc(mcpServers.id));
@@ -240,6 +259,7 @@ export function appAccessMethods(context: StoreContext) {
           authScheme: toolkit ? (head?.authScheme ?? null) : source.authScheme,
           accountMode: toolkit ? (head?.accountMode ?? null) : null,
           hasCredential: source.credentialId !== null,
+          ownerGrants: source.ownerGrants,
           vouched: true,
         };
         apps.set(key, app);
@@ -279,6 +299,7 @@ export function appAccessMethods(context: StoreContext) {
       authScheme: null,
       accountMode: null,
       hasCredential: false,
+      ownerGrants: null,
       vouched: input.vouched ?? true,
     };
   }
@@ -405,17 +426,49 @@ export function appAccessMethods(context: StoreContext) {
     return absentFor(isBrokeredId(lower) ? lower : asked, undefined, listed);
   }
 
-  /** The server halves of a Bot's MCP grants. */
-  async function grantedServerIds(agentId: string): Promise<Set<string>> {
+  /**
+   * The server halves of a Bot's MCP grants, each with whether any of its grants an administrator
+   * made. A server whose every grant is the owner's reads `false`: see `plugin_grants.granted_as`.
+   */
+  async function grantsByServer(
+    agentId: string,
+  ): Promise<Map<string, { byAdmin: boolean }>> {
     const grants = await database
-      .select({ ref: pluginGrants.ref })
+      .select({ ref: pluginGrants.ref, grantedAs: pluginGrants.grantedAs })
       .from(pluginGrants)
       .where(
         and(eq(pluginGrants.kind, "mcp"), eq(pluginGrants.agentId, agentId)),
       );
-    return new Set(
-      grants.map((grant) => grant.ref.split("/")[0] ?? "").filter(Boolean),
-    );
+    const servers = new Map<string, { byAdmin: boolean }>();
+    for (const grant of grants) {
+      const serverId = grant.ref.split("/")[0] ?? "";
+      if (!serverId) continue;
+      const byAdmin = grant.grantedAs !== "owner";
+      servers.set(serverId, {
+        byAdmin: byAdmin || (servers.get(serverId)?.byAdmin ?? false),
+      });
+    }
+    return servers;
+  }
+
+  /** The server halves of a Bot's MCP grants. */
+  async function grantedServerIds(agentId: string): Promise<Set<string>> {
+    return new Set((await grantsByServer(agentId)).keys());
+  }
+
+  /** Who owns a Bot that still stands: a person's id, or null for one nobody owns or none at all. */
+  async function botOwnerOf(agentId: string): Promise<string | null> {
+    const [row] = await database
+      .select({ ownerUserId: agentProfiles.ownerUserId })
+      .from(agentProfiles)
+      .where(
+        and(
+          eq(agentProfiles.agentId, agentId),
+          isNull(agentProfiles.deletedAt),
+        ),
+      )
+      .limit(1);
+    return row?.ownerUserId ?? null;
   }
 
   /**
@@ -605,6 +658,13 @@ export function appAccessMethods(context: StoreContext) {
    * otherwise on the person's own, after they allow it. So the owner's connection decides the state
    * there, and a teammate is never offered a Connect that changes nothing, nor told `ready` over a
    * call that will stop to ask them first without saying so.
+   *
+   * EXCEPT WHERE THE OWNER GAVE THE APP THEMSELVES. A grant the Bot's owner made always runs on the
+   * asking person's own account (see `plugin_grants.granted_as`), so where every grant this Bot holds
+   * on the app is the owner's, the owner's connection is not asked about and the person's own is.
+   *
+   * `ownerGrantsAllowed` is whether an administrator left this person able to give their own apps
+   * to their own Bots at all — the `ownerApps` capability — and true where nobody asked.
    */
   async function describe(
     apps: AppCandidate[],
@@ -613,13 +673,18 @@ export function appAccessMethods(context: StoreContext) {
       agentId: string;
       composioConfigured: boolean;
       sharedAudience?: SharedAudienceCheck;
+      ownerGrantsAllowed?: boolean;
     },
   ): Promise<AppInspection[]> {
     const { userId } = input;
     const owner = userId ? await teamBotOwnerFor(input.agentId, userId) : null;
-    const [granted, connections, ownerConnections, consented, pending] =
+    const mayGiveOwn =
+      userId !== null &&
+      input.ownerGrantsAllowed !== false &&
+      (await botOwnerOf(input.agentId)) === userId;
+    const [grants, connections, ownerConnections, consented, pending] =
       await Promise.all([
-        grantedServerIds(input.agentId),
+        grantsByServer(input.agentId),
         connectionFacts(apps, userId),
         owner ? connectionFacts(apps, owner) : null,
         owner && userId
@@ -647,14 +712,21 @@ export function appAccessMethods(context: StoreContext) {
     return Promise.all(
       apps.map(async (app) => {
         const ids = [app.key, ...app.rowIds];
+        const held = ids.flatMap((id) => {
+          const grant = grants.get(id);
+          return grant ? [grant] : [];
+        });
+        const givenByOwner =
+          held.length > 0 && held.every((grant) => !grant.byAdmin);
         const teamAccount = app.toolkit
           ? connections.deploymentBrokered.get(app.toolkit)
           : undefined;
         const sharedUsable = teamAccount?.usable === true;
         const own = personalIn(connections, app);
-        const owners = ownerConnections
-          ? personalIn(ownerConnections, app)
-          : undefined;
+        const owners =
+          ownerConnections && !givenByOwner
+            ? personalIn(ownerConnections, app)
+            : undefined;
         const personal = owners ?? own;
         const known: AppAccessFacts = {
           provider: app.provider,
@@ -664,7 +736,9 @@ export function appAccessMethods(context: StoreContext) {
           accountMode: app.accountMode,
           catalogueAuth: app.entry?.auth ?? null,
           hasCredential: app.hasCredential,
-          granted: ids.some((id) => granted.has(id)),
+          granted: held.length > 0,
+          ownerGrants: app.ownerGrants,
+          mayGiveOwn,
           personal: personal === undefined ? null : { usable: personal.usable },
           shared: teamAccount ? { usable: sharedUsable } : null,
           sharedAdmitted: null,
@@ -722,6 +796,12 @@ export function appAccessMethods(context: StoreContext) {
               owner !== null &&
               !ids.some((id) => consented.has(id)),
             granted: facts.granted,
+            ownerGrants: ownerGrantsOf(facts),
+            givenByOwner,
+            needsConnect:
+              state === "owner_grantable" &&
+              account === "personal" &&
+              !facts.personal?.usable,
             connectedAt:
               account === "shared"
                 ? (teamAccount?.connectedAt ?? null)
@@ -739,6 +819,7 @@ export function appAccessMethods(context: StoreContext) {
           },
           unavailable: unavailableReason(facts),
           answeringId: app.answeringId,
+          rowIds: app.rowIds,
           toolkit: app.toolkit,
           entry: app.entry,
           sharedUsable,
@@ -836,6 +917,7 @@ export function appAccessMethods(context: StoreContext) {
       composioConfigured: boolean;
       directory?: AppDirectory;
       sharedAudience?: SharedAudienceCheck;
+      ownerGrantsAllowed?: boolean;
     }): Promise<AppAccess[]> {
       const granted = await grantedServerIds(input.agentId);
       if (granted.size === 0) return [];
@@ -878,6 +960,7 @@ export function appAccessMethods(context: StoreContext) {
       composioConfigured: boolean;
       directory?: AppDirectory;
       sharedAudience?: SharedAudienceCheck;
+      ownerGrantsAllowed?: boolean;
     }): Promise<AppInspection | null> {
       const candidate = await candidateFor(
         input.app,
@@ -890,10 +973,103 @@ export function appAccessMethods(context: StoreContext) {
     },
 
     /**
+     * The apps this person could give their own Bots, as the New Bot sheet and a Bot's page offer
+     * them: switched on and usable, opened to owners ({@link ownerGrantsOf}), and — for an app that
+     * runs on each person's own account — connected by this person with a key nobody refused.
+     *
+     * NOT ABOUT ANY ONE BOT. Whether a given Bot is theirs to give to is asked where it is given; this
+     * is the list of what they hold. Sorted by name.
+     */
+    async giveableApps(input: {
+      userId: string;
+      composioConfigured: boolean;
+    }): Promise<GiveableApp[]> {
+      const apps = [...new Set((await appsByRow(await allRows())).values())];
+      const connections = await connectionFacts(apps, input.userId);
+      const giveable: GiveableApp[] = [];
+      for (const app of apps) {
+        const own =
+          brokeredProvenance(app.provider) && app.toolkit
+            ? connections.personalBrokered.get(app.toolkit)
+            : app.provider === "catalogue"
+              ? app.rowIds
+                  .map((id) => connections.personalHeld.get(id))
+                  .find((value) => value !== undefined)
+              : undefined;
+        const facts: AppAccessFacts = {
+          provider: app.provider,
+          present: app.present,
+          composioConfigured: input.composioConfigured,
+          authScheme: app.authScheme,
+          accountMode: app.accountMode,
+          catalogueAuth: app.entry?.auth ?? null,
+          hasCredential: app.hasCredential,
+          granted: false,
+          ownerGrants: app.ownerGrants,
+          mayGiveOwn: true,
+          personal: own ? { usable: own.usable } : null,
+          shared: null,
+          sharedAdmitted: null,
+        };
+        if (unavailableReason(facts) !== null) continue;
+        if (ownerGrantsOf(facts) !== "any") continue;
+        const account = accountOf(facts);
+        if (account === "personal" && !own?.usable) continue;
+        giveable.push({
+          key: app.key,
+          displayName: app.title,
+          logo: app.logo,
+          account,
+        });
+      }
+      return giveable.sort((left, right) =>
+        left.displayName.localeCompare(right.displayName),
+      );
+    },
+
+    /**
+     * Who may give an app to a Bot, as an administrator chose it, or null to put the default for its
+     * account back. Written on every row at the app's url, so a duplicate row answers the same, and
+     * recorded in the trail. Answers false for an app with no row.
+     */
+    async setOwnerGrants(input: {
+      serverId: string;
+      ownerGrants: OwnerGrants | null;
+      by: string;
+    }): Promise<boolean> {
+      const [row] = await database
+        .select({ url: mcpServers.url, ownerGrants: mcpServers.ownerGrants })
+        .from(mcpServers)
+        .where(eq(mcpServers.id, input.serverId))
+        .limit(1);
+      if (!row) return false;
+      await database
+        .update(mcpServers)
+        .set({ ownerGrants: input.ownerGrants, updatedAt: new Date() })
+        .where(eq(mcpServers.url, row.url));
+      await recordAuditEvent(auditStore, {
+        eventType: "configuration.changed",
+        targetType: "mcp_server",
+        targetId: input.serverId,
+        payload: {
+          actor: input.by,
+          change: "owner_grants_changed",
+          from: row.ownerGrants,
+          to: input.ownerGrants,
+        },
+      });
+      return true;
+    },
+
+    /**
      * Every tool the app's answering row advertises, as grant refs, and whether each is a read.
      *
-     * `read` IS THE EXACT WORD AND NOTHING ELSE, as `classifyTool` reads `effect`: a null or an
-     * unrecognised value is a write, so a tool nobody classified is never handed out as a read.
+     * A READ IS WHAT `classifyTool` CALLS ONE, the same answer the call gate and the Plugins page
+     * give. For a brokered or custom app that is the exact word `read` in `effect` and nothing
+     * else, so a tool nobody classified is never handed out as a read. For an app this deployment
+     * ships it is also anything advertised that the reviewed entry does not list as a write — which
+     * this used to miss, reading `effect` alone, so a one-press approval of a built-in app whose
+     * listing records no effect found no reads at all and refused.
      */
     async appTools(
       serverId: string,
@@ -903,9 +1079,10 @@ export function appAccessMethods(context: StoreContext) {
         .from(mcpTools)
         .where(eq(mcpTools.serverId, serverId))
         .orderBy(asc(mcpTools.name));
+      const entry = catalogueEntry(serverId);
       return rows.map((row) => ({
         ref: `${serverId}/${row.name}`,
-        read: row.effect === "read",
+        read: classifyTool(entry, row.name, true, row.effect) === "read",
       }));
     },
 
@@ -1079,7 +1256,11 @@ export function appAccessMethods(context: StoreContext) {
           | "app_access.cancelled"
           | "app_access.approved"
           | "app_access.dismissed"
-          | "app_access.refused";
+          | "app_access.refused"
+          | "app_access.owner_granted"
+          | "app_access.owner_revoked"
+          | "shared_use.owner_approved"
+          | "shared_use.owner_withdrawn";
       },
     ): Promise<void> {
       await recordAuditEvent(auditStore, {

@@ -17,6 +17,7 @@ export function ToolLine({
   running,
   refused,
   failed,
+  notYet,
   children,
 }: {
   /** Drawn before the label, small and muted. A group of steps puts its kinds here. */
@@ -30,6 +31,12 @@ export function ToolLine({
   refused?: boolean;
   /** It was permitted and did not work. A different request might. */
   failed?: boolean;
+  /**
+   * Nothing was done yet, for an ordinary reason: a computer still starting turned the call away
+   * before it reached anything. Muted like a success, because nothing went wrong, and labelled so it
+   * does not read as one.
+   */
+  notYet?: boolean;
   /** Shown when the line is expanded. Without it the line is not expandable. */
   children?: ReactNode;
 }) {
@@ -51,7 +58,9 @@ export function ToolLine({
           ? `Blocked: ${label}`
           : failed
             ? `${label}, didn't work`
-            : label}
+            : notYet
+              ? `${label}, not done yet`
+              : label}
       </span>
       {detail ? <span className="truncate opacity-70">{detail}</span> : null}
     </span>

@@ -184,8 +184,8 @@ function RouteComponent() {
                   render={(props) => <Link {...item.linkOptions} {...props} />}
                   size="sm"
                 >
-                  <ItemMedia>
-                    <item.icon className="size-4 text-muted-foreground" />
+                  <ItemMedia variant="icon">
+                    <item.icon />
                   </ItemMedia>
                   <ItemContent>
                     <ItemTitle>{item.title}</ItemTitle>

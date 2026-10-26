@@ -84,4 +84,4 @@ export function PageShell({
   );
 }
 
-export { PageEmpty, PageRows, PageSection } from "./page-parts";
+export { PageCard, PageEmpty, PageRows, PageSection } from "./page-parts";

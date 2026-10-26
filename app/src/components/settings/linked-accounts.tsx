@@ -202,7 +202,7 @@ export function LinkedAccountSection({
   if (!state) {
     return (
       <PageSection title="Your account">
-        <PageEmpty>
+        <PageEmpty icon={IconLink} title="Not set up yet">
           You can't link a {linkableProviderTitle(provider)} account yet. An
           admin has to set it up first.
         </PageEmpty>

@@ -555,21 +555,21 @@ const ALLOW: Allowed[] = [
   },
   {
     file: "server/tests/computer-supervisor.test.ts",
-    line: 64,
+    line: 65,
     shape: "a",
     finding: "NEW (round 2 did not find this)",
     why: 'expect(client.locate("sales")).rejects.toThrow(SupervisorError);',
   },
   {
     file: "server/tests/computer-supervisor.test.ts",
-    line: 74,
+    line: 75,
     shape: "a",
     finding: "NEW (round 2 did not find this)",
     why: 'expect(client.locate("bad id")).rejects.toThrow( "A bot id may contain only letters.", );',
   },
   {
     file: "server/tests/computer-supervisor.test.ts",
-    line: 88,
+    line: 89,
     shape: "a",
     finding: "NEW (round 2 did not find this)",
     why: 'expect(client.locate("sales")).rejects.toThrow(/could not be reached/);',
@@ -625,7 +625,9 @@ const ALLOW: Allowed[] = [
   },
   {
     file: "server/tests/agent-handoff.test.ts",
-    line: 366,
+    // Moved from 366 by the work-list change, which added tests above it; the offence is the same one and
+    // is re-keyed rather than re-found.
+    line: 409,
     shape: "b",
     finding: "NEW (round 2 did not find this)",
     why: "expect(plain.events[0]?.initiator).toBe(undefined);",
@@ -639,7 +641,7 @@ const ALLOW: Allowed[] = [
   },
   {
     file: "server/tests/approvals-policy.test.ts",
-    line: 715,
+    line: 779,
     shape: "b",
     finding: "NEW (round 2 did not find this)",
     why: "expect(continued[0]?.error).toBeUndefined();",
@@ -709,21 +711,21 @@ const ALLOW: Allowed[] = [
   },
   {
     file: "server/tests/computer-sandbox.test.ts",
-    line: 78,
+    line: 79,
     shape: "b",
     finding: "NEW (round 2 did not find this)",
     why: 'expect( await providerWith(suspended).sessionOf?.("knowledge"), ).toBeUndefined();',
   },
   {
     file: "server/tests/headless-components.integration.test.ts",
-    line: 349,
+    line: 350,
     shape: "b",
     finding: "NEW (round 2 did not find this)",
     why: "expect(bar?.hidden).toBeUndefined();",
   },
   {
     file: "server/tests/headless-components.test.ts",
-    line: 197,
+    line: 202,
     shape: "b",
     finding: "NEW (round 2 did not find this)",
     why: "expect(bar?.hidden).toBeUndefined();",
@@ -814,7 +816,9 @@ const ALLOW: Allowed[] = [
   },
   {
     file: "server/tests/agent-handoff.test.ts",
-    line: 620,
+    // Moved from 620 by the work-list change, which added tests above it; the offence is the same one and
+    // is re-keyed rather than re-found.
+    line: 663,
     shape: "c",
     finding: "NEW (round 2 did not find this)",
     why: ').toEqual([ { eventType: "agent.handoff_offered", reason: undefined }, { eventType: "agent.handoff_refused", r',
@@ -869,14 +873,18 @@ const ALLOW: Allowed[] = [
   },
   {
     file: "server/tests/routine-runner.test.ts",
-    line: 169,
+    // Moved from 169 by the work-list change, which added tests above it; the offence is the same one and
+    // is re-keyed rather than re-found.
+    line: 185,
     shape: "c",
     finding: "NEW (round 2 did not find this)",
     why: 'expect(recorded.finished).toEqual([ { runId: RUN_ID, status: "succeeded", error: undefined }, ]);',
   },
   {
     file: "server/tests/routine-runner.test.ts",
-    line: 272,
+    // Moved from 272 by the work-list change, which added tests above it; the offence is the same one and
+    // is re-keyed rather than re-found.
+    line: 289,
     shape: "c",
     finding: "NEW (round 2 did not find this)",
     why: 'expect(recorded.finished).toEqual([ { runId: RUN_ID, status: "succeeded", error: undefined }, ]);',
@@ -890,7 +898,7 @@ const ALLOW: Allowed[] = [
   },
   {
     file: "app/tests/connected-account-grants.test.tsx",
-    line: 124,
+    line: 126,
     shape: "e",
     finding: "NEW (round 2 did not find this)",
     why: "const siblingReads: string[] = [];",

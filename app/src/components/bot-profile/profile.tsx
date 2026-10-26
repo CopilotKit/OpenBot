@@ -41,7 +41,7 @@ import {
   botLifecycleQueryOptions,
 } from "@/lib/bot-lifecycle/queries";
 import { queryClient } from "@/query-client";
-import { BotActivitySections } from "./activity";
+import { BotActivityGlance } from "./activity";
 import { BotPausedBanner } from "./pause-banner";
 
 const NOTIFY_LABEL: Record<BotNotify, string> = {
@@ -222,7 +222,7 @@ export function BotProfile({
         )}
       </PageSection>
 
-      <BotActivitySections agentId={agent.id} />
+      <BotActivityGlance agentId={agent.id} />
       {settings}
       {manage}
     </>

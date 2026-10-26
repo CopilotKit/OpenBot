@@ -26,6 +26,37 @@ export class ComputerStoppedError extends ComputerUnavailableError {
   }
 }
 
+/**
+ * What every caller is told when a computer did not finish starting in time.
+ *
+ * Written for the model and for a person at once, because both read it: the headless tools hand it
+ * to the model as the result, and the routes send it to the browser, which shows it on the line.
+ */
+export const STILL_STARTING_MESSAGE =
+  "The computer is still starting. This call was not performed. Try it again in a moment.";
+
+/**
+ * The wait for a cold computer ran out before it could take the call.
+ *
+ * A NORMAL WAIT THAT RAN LONG, NOT AN OUTAGE. A computer that was asleep costs a pod schedule and a
+ * browser launch to wake, and the first start pulls an image as well, so a minute is ordinary and
+ * two is not unheard of. Reporting that as a failure put red text and "did not become ready" in
+ * front of somebody whose computer was, at that moment, finishing its start.
+ *
+ * A subclass of `ComputerUnavailableError`, so everything that already catches an unavailable
+ * computer still does. What the type adds is that every surface can say the gentle thing instead:
+ * the route marks the body `starting`, the headless tools answer with a result rather than a throw,
+ * and the browser renders it as a wait rather than a failure. The message says the call was NOT
+ * performed, which is true by construction: this is only thrown before anything reached the
+ * computer, so a retry cannot do the thing twice.
+ */
+export class ComputerStillStartingError extends ComputerUnavailableError {
+  constructor(reason: string = STILL_STARTING_MESSAGE) {
+    super(reason);
+    this.name = "ComputerStillStartingError";
+  }
+}
+
 /** The requested element is not on the current page. */
 export class ElementNotFoundError extends Error {
   constructor(reason: string) {

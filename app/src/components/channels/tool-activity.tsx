@@ -10,7 +10,12 @@ import { useCallback, useContext, useMemo, useSyncExternalStore } from "react";
 import { Streamdown } from "streamdown";
 import { PendingApprovals } from "@/components/approvals/inline-approval";
 import { markdownComponents } from "@/lib/markdown";
-import { humanise, ownToolLabel, readToolName } from "@/lib/plugins/tool-name";
+import {
+  connectorName,
+  humanise,
+  ownToolLabel,
+  readToolName,
+} from "@/lib/plugins/tool-name";
 import {
   asText,
   forDisplay,
@@ -136,6 +141,42 @@ function asksThePerson(result: string | undefined): boolean {
   return readTeamBotConsent(body) !== null || readConnectPrompt(body) !== null;
 }
 
+/** The app a tool item draws a card for, or null when it draws none. */
+function cardApp(item: ToolItem): string | null {
+  if (item.result === undefined) return null;
+  const answer = asText(item.result);
+  const prompt = answer.startsWith(REFUSAL_MARKER)
+    ? readConnectPrompt(answer.slice(REFUSAL_MARKER.length).trim())
+    : item.toolCall.function.name === SHOW_APP_ACCESS_TOOL
+      ? readConnectPrompt(answer)
+      : null;
+  return prompt?.serverId ?? null;
+}
+
+/**
+ * One card per app per turn.
+ *
+ * A refused call already draws the app's card, and a Bot told to show the card for an app it cannot
+ * use often calls `show_app_access` for the same app straight after, which drew the same card again.
+ * The refused call is kept, because it is what the Bot did; a later `show_app_access` for an app
+ * whose card that turn already drew is dropped. A person's next message starts a new turn.
+ */
+export function dropRepeatedAppCards(
+  items: readonly VisibleChatItem[],
+): VisibleChatItem[] {
+  const drawn = new Set<string>();
+  return items.filter((item) => {
+    if (item.kind === "text" && item.role === "user") drawn.clear();
+    if (item.kind !== "tool") return true;
+    const app = cardApp(item);
+    if (app === null) return true;
+    const repeat =
+      drawn.has(app) && item.toolCall.function.name === SHOW_APP_ACCESS_TOOL;
+    drawn.add(app);
+    return !repeat;
+  });
+}
+
 type StepKind = "search" | "fetch" | "browser" | "connector" | "tool";
 
 export type StepDetails = {
@@ -194,15 +235,6 @@ function hostOf(url: string): string {
   } catch {
     return url;
   }
-}
-
-/** "google-drive" as "Google Drive". */
-function connectorName(key: string): string {
-  return key
-    .split(/[-_]/)
-    .filter(Boolean)
-    .map((word) => word[0]?.toUpperCase() + word.slice(1))
-    .join(" ");
 }
 
 /** A value from a tool's arguments, short enough for one line. */

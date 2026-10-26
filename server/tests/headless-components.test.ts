@@ -149,6 +149,7 @@ describe("headless components mirror the compiled gallery", () => {
     ) as typeof import("../../app/node_modules/@types/react-dom/server");
     const args = {
       title: "Open issues by team",
+      basis: "given",
       points: [
         { label: "Platform", value: 12 },
         { label: "Apps", value: 5 },
@@ -184,7 +185,11 @@ function fakeStore(decision: ComponentDecision): ComponentStore {
 
 describe("headless component tools", () => {
   const initiator = { kind: "routine" as const, id: "routine-1" };
-  const valid = { title: "Revenue", points: [{ label: "Q1", value: 3 }] };
+  const valid = {
+    title: "Revenue",
+    basis: "given",
+    points: [{ label: "Q1", value: 3 }],
+  };
 
   test("a held chart is offered with its published description and records a confirmation", async () => {
     const tools = await createHeadlessComponentTools({

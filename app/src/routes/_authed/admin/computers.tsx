@@ -1,3 +1,8 @@
+import {
+  IconAlertTriangle,
+  IconDeviceDesktop,
+  IconRobot,
+} from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
@@ -27,15 +32,15 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { useBotNames } from "@/lib/agents/bot-names";
 import { agentListQueryOptions } from "@/lib/agents/queries";
-import { setComputerStateMutationOptions } from "@/lib/computers/mutations";
 import {
+  type HostAccessPendingOperation,
+  type HostFolderGrant,
   hostAccessQueryOptions,
   requestHostFolderGrantMutationOptions,
   revokeHostFolderGrantMutationOptions,
   stopHostAccessMutationOptions,
-  type HostFolderGrant,
-  type HostAccessPendingOperation,
 } from "@/lib/computers/host-access";
+import { setComputerStateMutationOptions } from "@/lib/computers/mutations";
 import { computerFleetQueryOptions } from "@/lib/computers/queries";
 
 export const Route = createFileRoute("/_authed/admin/computers")({
@@ -156,10 +161,10 @@ function ComputersPage() {
           </p>
         ) : null}
         {computers === null && problem ? (
-          <PageEmpty>Couldn't load the list.</PageEmpty>
+          <PageEmpty icon={IconAlertTriangle} title="Couldn't load the list" />
         ) : computers === null ? null : computers.length === 0 ? (
-          <PageEmpty>
-            No computers yet. One shows up the first time a Bot opens a page.
+          <PageEmpty icon={IconDeviceDesktop} title="No computers yet">
+            One shows up the first time a Bot opens a page.
           </PageEmpty>
         ) : (
           <PageRows>
@@ -379,7 +384,9 @@ function HostFoldersSection({
       ) : null}
 
       {loading ? null : botIds.length === 0 ? (
-        <PageEmpty>No Bots yet. Create one, then choose its folders.</PageEmpty>
+        <PageEmpty icon={IconRobot} title="No Bots yet">
+          Create one, then choose its folders.
+        </PageEmpty>
       ) : (
         <PageRows>
           {botIds.map((botId, index) => (

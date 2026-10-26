@@ -6,6 +6,7 @@ import { CopilotKitContext } from "@copilotkit/react-core/v2/context";
 import type { ReactNode } from "react";
 import type { VisibleChatItem } from "../src/components/channels/chat-messages";
 import {
+  dropRepeatedAppCards,
   groupToolSteps,
   stepDetails,
   summarise,
@@ -245,6 +246,23 @@ test("the summary says what was done, never which provider searched", () => {
   ).toBe("Used Google Drive");
 });
 
+test("a brokered app is summarised as the app, never with its broker's name", () => {
+  const steps = [
+    call("l", "mcp__composio-airtable__AIRTABLE_LIST_BASES", {}, '"x"'),
+    call("s", "mcp__composio-airtable__AIRTABLE_GET_BASE_SCHEMA", {}, '"x"'),
+  ].map(stepDetails);
+  expect(summarise(steps)).toBe("Used Airtable");
+  expect(steps.map((step) => step.label)).toEqual([
+    "List bases",
+    "Get base schema",
+  ]);
+  expect(
+    summarise(
+      [call("a", "mcp__arcade-Gmail__ListEmails", {}, '"x"')].map(stepDetails),
+    ),
+  ).toBe("Used Gmail");
+});
+
 test("a refusal and a failure each count as an issue on the folded line", () => {
   const group: ToolGroup = {
     kind: "tools",
@@ -282,4 +300,30 @@ test("while running, the line names the step in progress; opened, a step shows i
   fireEvent.click(view.getAllByText("Search the web")[0] as HTMLElement);
   expect(view.getByText("query")).toBeDefined();
   expect(view.getAllByText("top 5 GDP 2025").length).toBeGreaterThan(0);
+});
+
+test("an app's card is drawn once a turn, even when the Bot also asks to show it", () => {
+  const refusal = JSON.stringify(
+    'Refused. [connect-app]{"serverId":"composio-airtable","title":"Airtable","agentId":"scout"} Connect Airtable and ask again.',
+  );
+  const shown = JSON.stringify(
+    '[connect-app]{"serverId":"composio-airtable","title":"Airtable","agentId":"scout"} Connect Airtable.',
+  );
+  const items: VisibleChatItem[] = [
+    { kind: "text", id: "q1", role: "user", text: "List my bases" },
+    call("list", "mcp__composio-airtable__AIRTABLE_LIST_BASES", {}, refusal),
+    call("show", "show_app_access", { app: "airtable" }, shown),
+    text("a1"),
+    { kind: "text", id: "q2", role: "user", text: "Try again" },
+    call("show2", "show_app_access", { app: "airtable" }, shown),
+  ];
+  // The refused call keeps its card; the second card for the same app in that turn is dropped, and
+  // a new turn may draw it again.
+  expect(dropRepeatedAppCards(items).map((item) => item.id)).toEqual([
+    "q1",
+    "list",
+    "a1",
+    "q2",
+    "show2",
+  ]);
 });

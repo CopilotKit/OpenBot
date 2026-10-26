@@ -28,6 +28,7 @@ import {
   connectAccountMutationOptions,
   connectBrokeredWithFieldsMutationOptions,
   disconnectBrokeredMutationOptions,
+  invalidatePlugins,
   recheckBrokeredConnectionMutationOptions,
 } from "@/lib/plugins/mutations";
 
@@ -398,9 +399,19 @@ export function useBrokeredAccount(input: {
      * shown to this person in their own browser; there is deliberately nothing here that could
      * complete it for them, and nothing about being an administrator changes that.
      */
-    onSuccess: (authorizationUrl) => {
+    onSuccess: (start) => {
       forgetConfirmation();
       forgetRecheck();
+      /*
+       * ALREADY CONNECTED, AND NOTHING TO LEAVE FOR. The vendor held this account and this
+       * deployment had no row for it, so the route recorded it on this press. The held answers
+       * were just dropped, so the row falls back to the recorded one, and the refetch is what
+       * brings that row in.
+       */
+      if (start !== null && "connected" in start) {
+        void invalidatePlugins(queryClient);
+        return;
+      }
       /*
        * NO URL IS AN ANSWER, NOT A URL TO FOLLOW.
        *
@@ -417,13 +428,13 @@ export function useBrokeredAccount(input: {
        * would leave nobody any reason to correct it — and the sentence names the one act that ends
        * the state, which is a reload against a deployment whose app has caught up.
        */
-      if (authorizationUrl === null) {
+      if (start === null) {
         report(
           "This app connects with a key, not a sign-in page, so nothing was connected. Reload the page and press Connect again.",
         );
         return;
       }
-      window.location.href = authorizationUrl;
+      window.location.href = start.authorizationUrl;
     },
   });
 

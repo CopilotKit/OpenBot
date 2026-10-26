@@ -1,4 +1,5 @@
 import Docker from "dockerode";
+import { type ContainerHealth, healthOf } from "./health";
 import {
   BOT_LABEL,
   type ComputerNames,
@@ -93,6 +94,13 @@ export type ComputerState = {
   port?: number;
   /** Where to reach it, however it is arranged. */
   url?: string;
+  /**
+   * What the image's healthcheck says, when Docker reports one.
+   *
+   * `running` only means the process exists. A container still `starting` here is booting its
+   * browser, and `ensure` would hold the caller until it is healthy, so a status read says so.
+   */
+  health?: ContainerHealth;
 };
 
 /**
@@ -197,6 +205,9 @@ export async function listOwned(): Promise<ComputerState[]> {
       botId: container.Labels?.[BOT_LABEL] ?? "unknown",
       container: (container.Names?.[0] ?? "").replace(/^\//, ""),
       status: container.State,
+      ...(healthOf(container.Status)
+        ? { health: healthOf(container.Status) }
+        : {}),
       ...(container.Created
         ? { startedAt: new Date(container.Created * 1000).toISOString() }
         : {}),

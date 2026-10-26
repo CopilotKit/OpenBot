@@ -92,6 +92,8 @@ type Props = {
   driving: boolean;
   /** Called with a human-readable reason when the stream cannot be established. */
   onProblem?: (problem: string | null) => void;
+  /** Called while a dropped stream is being retried on its own, and again when it is back or gone. */
+  onReconnecting?: (reconnecting: boolean) => void;
   retryKey?: number;
 };
 
@@ -105,6 +107,7 @@ export function LiveScreen({
   computerId,
   driving,
   onProblem,
+  onReconnecting,
   retryKey = 0,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -279,6 +282,7 @@ export function LiveScreen({
         setConnected(ready);
       },
       onProblem: (problem) => onProblem?.(problem),
+      onReconnecting: (reconnecting) => onReconnecting?.(reconnecting),
       onDisconnect: () => {
         frameSize.current = null;
         latestFrame.current = null;
@@ -296,7 +300,7 @@ export function LiveScreen({
       document.removeEventListener("visibilitychange", drawLatestFrame);
       socketRef.current = null;
     };
-  }, [computerId, onProblem, retryKey]);
+  }, [computerId, onProblem, onReconnecting, retryKey]);
 
   useEffect(() => {
     const wasDriving = previouslyDriving.current;
