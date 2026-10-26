@@ -2253,10 +2253,7 @@ mod tests {
             fixture.argv().unwrap(),
             "local\nsetup\n--defer-model\n--json"
         );
-        assert_eq!(
-            std::fs::read_to_string(fixture.root.join("cwd")).unwrap(),
-            installation.canonicalize().unwrap().display().to_string()
-        );
+        assert_eq!(fixture.cwd(), installation.canonicalize().unwrap());
     }
 
     // As `local connect` prints it at Intelligence 780313e4: no key, only the stack it connected.
@@ -2303,10 +2300,7 @@ mod tests {
             fixture.argv().unwrap(),
             "local\nconnect\n--approve-connection\n--json"
         );
-        assert_eq!(
-            std::fs::read_to_string(fixture.root.join("cwd")).unwrap(),
-            installation.canonicalize().unwrap().display().to_string()
-        );
+        assert_eq!(fixture.cwd(), installation.canonicalize().unwrap());
     }
 
     #[test]
@@ -3264,6 +3258,14 @@ fn main() {
 
         fn argv(&self) -> Option<String> {
             std::fs::read_to_string(self.root.join("argv")).ok()
+        }
+
+        /// The folder the program ran in, resolved: Windows reports the temporary folder by its
+        /// short 8.3 name (`RUNNER~1`) and `canonicalize` by its long one, with a `\\?\` prefix.
+        fn cwd(&self) -> PathBuf {
+            PathBuf::from(std::fs::read_to_string(self.root.join("cwd")).unwrap())
+                .canonicalize()
+                .unwrap()
         }
 
         fn run(&self, action: Action, limits: Limits, cancel: &Cancel) -> Result<Report, Failure> {

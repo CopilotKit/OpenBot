@@ -323,6 +323,7 @@ fn install_from(_installer: &Path, _into: &Path) -> Result<(), Problem> {
     ))
 }
 
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 fn install_failed(detail: String) -> Problem {
     Problem::with(
         "OpenBot could not install Docker Desktop. Install it from docker.com, then try again.",

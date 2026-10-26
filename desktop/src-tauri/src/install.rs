@@ -862,16 +862,16 @@ mod tests {
             docker_desktop_platform: false,
             ..found(false, false, false, false)
         };
-        install_engine_with(
+        let _ = install_engine_with(
             &root,
             linux,
             |engine, ok| observed.push((engine, ok)),
             |_| panic!("Linux does not get Docker Desktop"),
             |_| Ok(()),
             |_| Ok("Compose placed".into()),
-        )
-        .unwrap_err();
-        // The Podman install ran; it then finds no podman program on this test machine.
+        );
+        // Whether it then finds a podman program depends on the machine running the test: hosted
+        // Ubuntu runners ship one. What matters is that the engine installed was Podman.
         assert_eq!(observed, [(Engine::Podman, true)]);
     }
 
