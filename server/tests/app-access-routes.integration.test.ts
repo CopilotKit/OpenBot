@@ -1084,6 +1084,16 @@ describe("an administrator's one press on a card", () => {
       .from(appAccessRequests)
       .where(eq(appAccessRequests.requestedBy, admin));
     expect(rows.map((row) => row.status)).toEqual(["cancelled"]);
+    // The trail closes what it opened: filed, refused, then withdrawn.
+    const filed = eventsOf("app_access.requested")[0]?.payload as {
+      request?: string;
+    };
+    expect(eventsOf("app_access.cancelled")[0]?.payload).toMatchObject({
+      request: filed.request,
+      app: "google-drive",
+      direct: true,
+    });
+    expect(eventsOf("app_access.approved")).toHaveLength(0);
   });
 
   test("a request of theirs already waiting is put back as it was", async () => {
@@ -1097,6 +1107,7 @@ describe("an administrator's one press on a card", () => {
       .from(appAccessRequests)
       .where(eq(appAccessRequests.requestedBy, admin));
     expect(rows.map((row) => row.status)).toEqual(["pending"]);
+    expect(eventsOf("app_access.cancelled")).toHaveLength(0);
   });
 });
 

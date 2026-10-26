@@ -568,12 +568,30 @@ export function mountAppAccessRoutes({
       } finally {
         if (!done.carriedOut) {
           await store.releaseAppAccessRequest({ id: claimed.id, by });
-          if (filed.created)
-            await store.closeAppAccessRequest({
-              id: claimed.id,
-              status: "cancelled",
-              by,
-              requestedBy: by,
+          /*
+           * Withdrawn with the row a withdrawal always writes, so the trail does not hold an
+           * `app_access.requested` that nothing ever answered.
+           */
+          const withdrawn = filed.created
+            ? await store.closeAppAccessRequest({
+                id: claimed.id,
+                status: "cancelled",
+                by,
+                requestedBy: by,
+              })
+            : null;
+          if (withdrawn)
+            await store.recordAppAccessEvent({
+              eventType: "app_access.cancelled",
+              targetId: withdrawn.appKey,
+              actorUserId: by,
+              payload: {
+                request: withdrawn.id,
+                app: withdrawn.appKey,
+                bot: withdrawn.agentId,
+                kind: withdrawn.kind,
+                direct: true,
+              },
             });
         }
       }
