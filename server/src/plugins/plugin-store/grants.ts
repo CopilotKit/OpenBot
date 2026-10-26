@@ -32,8 +32,17 @@ export function grantMethods(context: StoreContext) {
       const insert = database
         .insert(pluginGrants)
         .values({ kind, ref, agentId, grantedBy: by, grantedAs: as });
-      if (as === "owner") await insert.onConflictDoNothing();
-      else
+      if (as === "owner") {
+        /*
+         * Nothing written, nothing in the trail. A row already there is an administrator's grant
+         * or the owner's own from before, and a `plugin_granted` row marked `owner` over an
+         * administrator's grant would tell a reader the owner had given what an administrator did.
+         */
+        const written = await insert
+          .onConflictDoNothing()
+          .returning({ ref: pluginGrants.ref });
+        if (written.length === 0) return;
+      } else
         await insert.onConflictDoUpdate({
           target: [pluginGrants.kind, pluginGrants.ref, pluginGrants.agentId],
           set: { grantedBy: by, grantedAs: "admin", updatedAt: new Date() },
