@@ -4,9 +4,11 @@ import { BROKERED_PROFILE, type BrokerProvider } from "../access";
 import type {
   AppAccess,
   AppAccessRequestKind,
+  OwnerGrants,
   Unavailable,
 } from "../app-access";
 import type { CatalogueEntry } from "../catalogue";
+import { ownerAppsAllowed, ownerGrantRefusal } from "../owner-grants";
 import type {
   AppAccessRequestRecord,
   AppDirectory,
@@ -368,6 +370,7 @@ export function mountAppAccessRoutes({
         composioConfigured,
         directory,
         sharedAudience,
+        ownerGrantsAllowed: await ownerAppsAllowed(context.var.actor.id),
       }),
     });
   });
@@ -391,6 +394,7 @@ export function mountAppAccessRoutes({
             composioConfigured,
             directory,
             sharedAudience,
+            ownerGrantsAllowed: await ownerAppsAllowed(context.var.actor.id),
           });
     if (!inspected)
       return context.json({ error: `OpenBot has no app called ${app}.` }, 404);
@@ -437,6 +441,7 @@ export function mountAppAccessRoutes({
       composioConfigured,
       directory,
       sharedAudience,
+      ownerGrantsAllowed: await ownerAppsAllowed(context.var.actor.id),
     });
     const inspected =
       found && (found.vouched || found.access.granted) ? found : null;
@@ -457,7 +462,9 @@ export function mountAppAccessRoutes({
         error:
           access.state === "ready"
             ? `${access.displayName} is ready to use. There's nothing to ask an admin for.`
-            : `${access.displayName} needs your own account, not an admin. Connect it yourself.`,
+            : access.state === "owner_grantable"
+              ? `This is your Bot, so you can give it ${access.displayName} yourself.`
+              : `${access.displayName} needs your own account, not an admin. Connect it yourself.`,
         status: 409,
       });
     return { agentId, access, requestKind: access.requestKind };
@@ -579,6 +586,188 @@ export function mountAppAccessRoutes({
       }
     },
   );
+
+  /**
+   * The Bot and the app an owner's give or take-back names, inspected for this person: the Bot one
+   * they may use, the app one this deployment can name. The refusal otherwise.
+   */
+  const ownersApp = async (context: RouteContext) => {
+    const agentId = context.req.param("agentId")?.trim() ?? "";
+    const app = context.req.param("app")?.trim() ?? "";
+    if (
+      !agentId ||
+      !app ||
+      agentId.length > MAX_NAME ||
+      app.length > MAX_NAME ||
+      !(await canUseBot(context.var.actor, agentId))
+    )
+      return context.json({ error: "There is no such Bot." }, 404);
+    const found = await store.inspectApp({
+      app,
+      agentId,
+      userId: context.var.actor.id,
+      composioConfigured,
+      directory,
+      sharedAudience,
+      ownerGrantsAllowed: await ownerAppsAllowed(context.var.actor.id),
+    });
+    if (!found || !(found.vouched || found.access.granted))
+      return context.json({ error: `OpenBot has no app called ${app}.` }, 404);
+    return { agentId, inspected: found };
+  };
+
+  /**
+   * A Bot's owner giving it one of their own apps, as one press: the card's "Let Research Bot use
+   * your Gmail?", a switch on the Bot's page, a box left ticked on the New Bot sheet.
+   *
+   * WHAT MAY BE GIVEN IS {@link ownerGrantRefusal}'S ANSWER: their own Bot, an app an administrator
+   * switched on and opened to owners, and the `ownerApps` capability. Refused 403 with the sentence
+   * otherwise, and the refusal is in the trail.
+   *
+   * WHAT IS GIVEN IS WHAT AN ADMINISTRATOR'S ONE PRESS GIVES: the app's read-only actions, through
+   * the same `appTools` reading, so an owner never gets more by asking themselves than an
+   * administrator's approval would have given. Anything that sends or writes is still chosen action by
+   * action by an administrator. ONE EXCEPTION, the built-in Routines: every action it has keeps,
+   * changes or drops the asking person's own standing instructions and nothing else, and "every
+   * morning, …" is a write — given only its reads, a Bot could list routines and never make one.
+   *
+   * Every grant is `granted_as = owner`, which keeps each call on the asking person's own account
+   * (`credentialActorFor`). A Bot that already holds any of the app is answered with nothing given.
+   */
+  routes.post("/for/:agentId/apps/:app/give", requireUser, async (context) => {
+    const found = await ownersApp(context);
+    if (found instanceof Response) return found;
+    const { agentId, inspected } = found;
+    const { access } = inspected;
+    const deny = (reason: string, error: string, status: 403 | 409) =>
+      refused(context, {
+        app: access.key,
+        bot: agentId,
+        reason,
+        error,
+        status,
+      });
+    const refusal = await ownerGrantRefusal(
+      store,
+      context.var.actor.id,
+      agentId,
+      inspected,
+    );
+    if (refusal) return deny("owner_grant_refused", refusal, 403);
+    if (access.granted) return context.json({ granted: [] });
+    const serverId = inspected.answeringId ?? "";
+    const tools = await store.appTools(serverId);
+    if (tools.length === 0)
+      return deny(
+        "no_tools",
+        `${access.displayName} has nothing to give yet. Ask an admin to refresh it.`,
+        409,
+      );
+    const builtin = inspected.entry?.auth.kind === "builtin";
+    const refs = tools
+      .filter((tool) => builtin || tool.read)
+      .map((tool) => tool.ref);
+    if (refs.length === 0)
+      return deny(
+        "no_read_only_tools",
+        `${access.displayName} has nothing a Bot can only read with. Ask an admin to choose what this Bot can do with it.`,
+        409,
+      );
+    for (const ref of refs)
+      await store.grant("mcp", ref, agentId, actorEmail(context), "owner");
+    await store.recordAppAccessEvent({
+      eventType: "app_access.owner_granted",
+      targetId: access.key,
+      actorUserId: context.var.actor.id,
+      payload: { app: access.key, bot: agentId, refs },
+    });
+    return context.json({ granted: refs });
+  });
+
+  /**
+   * A Bot's owner taking back what they gave it on one app. Only the owner's own grants go: one an
+   * administrator made stays, because it was not the owner's to give. Still asks that the Bot is
+   * theirs; it does not ask whether the app is still open to owners, since taking away is always
+   * allowed (see `enablementRefusal`'s note on `intent`).
+   */
+  routes.delete(
+    "/for/:agentId/apps/:app/give",
+    requireUser,
+    async (context) => {
+      const found = await ownersApp(context);
+      if (found instanceof Response) return found;
+      const { agentId, inspected } = found;
+      if ((await store.agentOwner(agentId)) !== context.var.actor.id)
+        return refused(context, {
+          app: inspected.access.key,
+          bot: agentId,
+          reason: "owner_revoke_refused",
+          error: "You can only change apps on Bots you own.",
+          status: 403,
+        });
+      const ids = [
+        ...new Set([
+          inspected.access.key,
+          ...inspected.rowIds,
+          ...(inspected.answeringId ? [inspected.answeringId] : []),
+        ]),
+      ];
+      const refs = await store.revokeOwnerGrants(
+        ids,
+        agentId,
+        actorEmail(context),
+      );
+      if (refs.length > 0)
+        await store.recordAppAccessEvent({
+          eventType: "app_access.owner_revoked",
+          targetId: inspected.access.key,
+          actorUserId: context.var.actor.id,
+          payload: { app: inspected.access.key, bot: agentId, refs },
+        });
+      return context.json({ revoked: refs });
+    },
+  );
+
+  /**
+   * The apps this person could give their own Bots: what the New Bot sheet offers ticked, and the
+   * switches on a Bot's page. Empty where an administrator switched the feature off for them.
+   */
+  routes.get("/giveable", requireUser, async (context) => {
+    if (!(await ownerAppsAllowed(context.var.actor.id)))
+      return context.json({ apps: [] });
+    return context.json({
+      apps: await store.giveableApps({
+        userId: context.var.actor.id,
+        composioConfigured,
+      }),
+    });
+  });
+
+  /**
+   * Who may give an app to a Bot: any Bot's owner (`any`), only an administrator (`admin`), or the
+   * default for the app's account (`null`). Admin only, and in the trail.
+   */
+  routes.put("/servers/:id/owner-grants", requireUser, async (context) => {
+    const forbidden = requireAdmin(context);
+    if (forbidden) return forbidden;
+    const body = (await context.req.json().catch(() => null)) as {
+      ownerGrants?: unknown;
+    } | null;
+    const value = body?.ownerGrants;
+    if (value !== null && value !== "any" && value !== "admin")
+      return context.json(
+        { error: "Choose any, admin, or null for the default." },
+        400,
+      );
+    const changed = await store.setOwnerGrants({
+      serverId: context.req.param("id"),
+      ownerGrants: value as OwnerGrants | null,
+      by: actorEmail(context),
+    });
+    if (!changed)
+      return context.json({ error: "That app hasn't been added." }, 404);
+    return context.json({ ok: true });
+  });
 
   /** The person's own pending requests, newest first. */
   routes.get("/access-requests/mine", requireUser, async (context) =>
