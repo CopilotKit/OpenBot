@@ -9,7 +9,22 @@ import {
   waitFor,
 } from "@testing-library/react";
 import type { ReactElement } from "react";
+import { ToolLine } from "@/components/channels/tool-line";
 import { ComputerView } from "@/components/computer/computer-view";
+
+test("a call turned away by a computer still starting reads as not done yet, not as a failure", () => {
+  const view = render(
+    <ToolLine
+      label="Clicked"
+      detail="The computer is still starting."
+      notYet
+    />,
+  );
+  const line = view.getByText("Clicked, not done yet");
+  expect(line.closest(".text-amber-600")).toBeNull();
+  expect(line.closest(".text-destructive")).toBeNull();
+  expect(view.queryByText(/didn't work/)).toBeNull();
+});
 
 /**
  * A computer starting in front of a person never reads as a failure.
