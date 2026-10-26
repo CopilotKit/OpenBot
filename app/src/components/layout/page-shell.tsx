@@ -235,6 +235,38 @@ export function PageRows({
 }
 
 /**
+ * The card a page-sized form sits in: the fields, then its buttons on the right.
+ *
+ * For a screen that exists to fill something in, reached from a list by its Add button, with
+ * `PageShell`'s back button returning to it. The same border and fill as `PageRows`, so a form and
+ * a list read as the same kind of surface, padded rather than divided because it holds fields.
+ */
+export function PageCard({
+  children,
+  className,
+  footer,
+}: {
+  children: React.ReactNode;
+  className?: string;
+  /** The form's buttons, Cancel then the primary action. */
+  footer?: React.ReactNode;
+}) {
+  return (
+    <div
+      className={cn(
+        "rounded-lg border border-border bg-card p-4 dark:border-transparent",
+        className,
+      )}
+    >
+      {children}
+      {footer ? (
+        <div className="mt-6 flex justify-end gap-2">{footer}</div>
+      ) : null}
+    </div>
+  );
+}
+
+/**
  * What a section says when it has nothing to list, drawn as shadcn's empty state.
  *
  * A dashed box where the rows would be, so the section keeps its shape: the icon says what kind of

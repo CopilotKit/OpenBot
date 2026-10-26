@@ -159,7 +159,19 @@ itself when the dialog changes something.
 4. `bg-card` is invisible inside a dialog. `--card` and `--popover` resolve to the same colour in
    both themes, so a card-coloured row against a popover is no row at all. Use `muted`.
 
-### Procedure 5: Lay out a dialog
+### Procedure 5: Add something from a list
+
+1. Creating a thing that takes several fields — a credential, a key — is its own screen, not a dialog
+   over the list. Put it at `<list>_.new.tsx` (the `_` keeps it from nesting inside the list's route),
+   and make the list's `action` a `Button` rendering a `Link` to it.
+2. `PageShell` with `backButton` pointing at the list, a title that is the verb ("Add credential"),
+   and a description saying what happens on save.
+3. The fields go in one `PageCard` inside a `<form>`, stacked in a single column, each a `Field`
+   with `FieldLabel`, an optional `FieldDescription`, then the control. `PageCard`'s `footer` takes
+   Cancel (`variant="outline"`, a `Link` back) and the submit button; on success, navigate to the list.
+4. `admin/credentials_.new.tsx` is the reference.
+
+### Procedure 6: Lay out a dialog
 
 1. `DialogContent` defaults to `max-w-lg` and `max-h-[85svh]` with `p-5`. Header, body and footer go
    in as `DialogHeader` / `DialogBody className="mt-4"` / `DialogFooter className="mt-4"`.
@@ -192,7 +204,8 @@ is actually on screen. The root was once 15px, and every constant taken from the
 - Adding a row to an existing screen → Procedure 2, then Procedure 3 to pick its kind.
 - The row toggles one thing → Procedure 3, kind 1: a `Switch`, no save.
 - The row edits text, or a set of grants, or more than one value → Procedure 3, kind 2: a summary, a
-  chevron, and a dialog. Then Procedure 5.
+  chevron, and a dialog. Then Procedure 6.
+- Adding a new thing that takes several fields → Procedure 5: its own screen with a back button.
 - The row only states something → Procedure 3, kind 3: a value and no chevron.
 - Unsure which `Item` size, `Button` size, or `variant` → Procedure 4.
 - A width, ratio or scale needs a number in pixels → the Units section. Measure, do not assume.

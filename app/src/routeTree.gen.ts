@@ -56,6 +56,7 @@ import { Route as AuthedAppGroupChannelIdRouteImport } from './routes/_authed/_a
 import { Route as AuthedAppGroupNewRouteImport } from './routes/_authed/_app/group/new'
 import { Route as AuthedAdminComponentsIndexRouteImport } from './routes/_authed/admin/components/index'
 import { Route as AuthedAdminComponentsNameRouteImport } from './routes/_authed/admin/components/$name'
+import { Route as AuthedAdminCredentialsNewRouteImport } from './routes/_authed/admin/credentials_.new'
 import { Route as AuthedAdminPluginsIndexRouteImport } from './routes/_authed/admin/plugins/index'
 import { Route as AuthedAdminPluginsKeyRouteImport } from './routes/_authed/admin/plugins/$key'
 import { Route as AuthedAdminPluginsArcadeRouteImport } from './routes/_authed/admin/plugins/arcade'
@@ -319,6 +320,12 @@ const AuthedAdminComponentsNameRoute =
     path: '/components/$name',
     getParentRoute: () => AuthedAdminRouteRoute,
   } as any)
+const AuthedAdminCredentialsNewRoute =
+  AuthedAdminCredentialsNewRouteImport.update({
+    id: '/credentials_/new',
+    path: '/credentials/new',
+    getParentRoute: () => AuthedAdminRouteRoute,
+  } as any)
 const AuthedAdminPluginsIndexRoute = AuthedAdminPluginsIndexRouteImport.update({
   id: '/plugins/',
   path: '/plugins/',
@@ -473,6 +480,7 @@ export interface FileRoutesByFullPath {
   '/group/$channelId': typeof AuthedAppGroupChannelIdRoute
   '/group/new': typeof AuthedAppGroupNewRoute
   '/admin/components/$name': typeof AuthedAdminComponentsNameRoute
+  '/admin/credentials/new': typeof AuthedAdminCredentialsNewRoute
   '/admin/plugins/$key': typeof AuthedAdminPluginsKeyRoute
   '/admin/plugins/arcade': typeof AuthedAdminPluginsArcadeRoute
   '/admin/plugins/composio': typeof AuthedAdminPluginsComposioRoute
@@ -536,6 +544,7 @@ export interface FileRoutesByTo {
   '/group/$channelId': typeof AuthedAppGroupChannelIdRoute
   '/group/new': typeof AuthedAppGroupNewRoute
   '/admin/components/$name': typeof AuthedAdminComponentsNameRoute
+  '/admin/credentials/new': typeof AuthedAdminCredentialsNewRoute
   '/admin/plugins/$key': typeof AuthedAdminPluginsKeyRoute
   '/admin/plugins/arcade': typeof AuthedAdminPluginsArcadeRoute
   '/admin/plugins/composio': typeof AuthedAdminPluginsComposioRoute
@@ -605,6 +614,7 @@ export interface FileRoutesById {
   '/_authed/_app/group/$channelId': typeof AuthedAppGroupChannelIdRoute
   '/_authed/_app/group/new': typeof AuthedAppGroupNewRoute
   '/_authed/admin/components/$name': typeof AuthedAdminComponentsNameRoute
+  '/_authed/admin/credentials_/new': typeof AuthedAdminCredentialsNewRoute
   '/_authed/admin/plugins/$key': typeof AuthedAdminPluginsKeyRoute
   '/_authed/admin/plugins/arcade': typeof AuthedAdminPluginsArcadeRoute
   '/_authed/admin/plugins/composio': typeof AuthedAdminPluginsComposioRoute
@@ -673,6 +683,7 @@ export interface FileRouteTypes {
     | '/group/$channelId'
     | '/group/new'
     | '/admin/components/$name'
+    | '/admin/credentials/new'
     | '/admin/plugins/$key'
     | '/admin/plugins/arcade'
     | '/admin/plugins/composio'
@@ -736,6 +747,7 @@ export interface FileRouteTypes {
     | '/group/$channelId'
     | '/group/new'
     | '/admin/components/$name'
+    | '/admin/credentials/new'
     | '/admin/plugins/$key'
     | '/admin/plugins/arcade'
     | '/admin/plugins/composio'
@@ -804,6 +816,7 @@ export interface FileRouteTypes {
     | '/_authed/_app/group/$channelId'
     | '/_authed/_app/group/new'
     | '/_authed/admin/components/$name'
+    | '/_authed/admin/credentials_/new'
     | '/_authed/admin/plugins/$key'
     | '/_authed/admin/plugins/arcade'
     | '/_authed/admin/plugins/composio'
@@ -1166,6 +1179,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedAdminComponentsNameRouteImport
       parentRoute: typeof AuthedAdminRouteRoute
     }
+    '/_authed/admin/credentials_/new': {
+      id: '/_authed/admin/credentials_/new'
+      path: '/credentials/new'
+      fullPath: '/admin/credentials/new'
+      preLoaderRoute: typeof AuthedAdminCredentialsNewRouteImport
+      parentRoute: typeof AuthedAdminRouteRoute
+    }
     '/_authed/admin/plugins/': {
       id: '/_authed/admin/plugins/'
       path: '/plugins'
@@ -1316,6 +1336,7 @@ interface AuthedAdminRouteRouteChildren {
   AuthedAdminSkillsRoute: typeof AuthedAdminSkillsRoute
   AuthedAdminIndexRoute: typeof AuthedAdminIndexRoute
   AuthedAdminComponentsNameRoute: typeof AuthedAdminComponentsNameRoute
+  AuthedAdminCredentialsNewRoute: typeof AuthedAdminCredentialsNewRoute
   AuthedAdminPluginsKeyRoute: typeof AuthedAdminPluginsKeyRoute
   AuthedAdminPluginsArcadeRoute: typeof AuthedAdminPluginsArcadeRoute
   AuthedAdminPluginsComposioRoute: typeof AuthedAdminPluginsComposioRoute
@@ -1339,6 +1360,7 @@ const AuthedAdminRouteRouteChildren: AuthedAdminRouteRouteChildren = {
   AuthedAdminSkillsRoute: AuthedAdminSkillsRoute,
   AuthedAdminIndexRoute: AuthedAdminIndexRoute,
   AuthedAdminComponentsNameRoute: AuthedAdminComponentsNameRoute,
+  AuthedAdminCredentialsNewRoute: AuthedAdminCredentialsNewRoute,
   AuthedAdminPluginsKeyRoute: AuthedAdminPluginsKeyRoute,
   AuthedAdminPluginsArcadeRoute: AuthedAdminPluginsArcadeRoute,
   AuthedAdminPluginsComposioRoute: AuthedAdminPluginsComposioRoute,
