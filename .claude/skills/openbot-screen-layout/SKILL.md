@@ -51,11 +51,38 @@ PageShell        the page: header (title, description, action, backButton) then 
     PageEmpty    what a section says when it has nothing to list
 ```
 
-`PageShell` takes a `width`: `prose` (`max-w-3xl`, 720px here) is the default, and every
+`PageShell` takes a `width`: `prose` (`max-w-3xl`, 768px) is the default, and every
 configuration screen uses it so no screen is wider than another. Sentences inside it are held to
 `max-w-prose`, so the column has room for a label beside its control without stretching the text.
 `wide` (`max-w-5xl`) exists for one screen — `admin/audit.tsx`, because an audit log is a table to be
 scanned and prose width would wrap every row. It is not a licence for anything else to be wide.
+
+## The Rhythm
+
+Spacing comes from the frame, not from the screen. These are the gaps every screen gets by using the
+components above; a screen that sets its own is drifting.
+
+| Between | Gap | Where it lives |
+|---------|-----|----------------|
+| Page edge (top / sides / bottom) | 48 / 16 / 64px | `PageShell` column (`pt-12` or `pt-8` under the bar, `px-4`, `pb-16`) |
+| Title → description | 8px | `PageShell` header |
+| Title block → first content | 32px | `PageShell`: `[&>header+*]:mt-8` |
+| Title → tabs, tabs → content | 24px, then 32px | `PageShell`: `[&>header+nav]`, `[&>header+nav+*]` |
+| Section → section | 48px | `PageSection` (`mt-12`) |
+| Section heading → description | 4px | `PageSection` |
+| Heading block → section content | 16px | `PageRows` / `PageEmpty` (`mt-4`) |
+| Controls stacked inside a section | 12px | the screen, with `gap-3` |
+| A row in `PageRows` | 65px with a description, never under 56px | `Item` (`px-4 py-3.5 gap-3`), `PageRows` (`min-h-14`) |
+| Divider between rows | inset 16px from both edges | `PageRows`, on every horizontal `Separator` inside it |
+
+The 32px under the title is deliberately tighter than the 48px between sections: the title belongs
+to the page it introduces. Those `PageShell` selectors outrank the first child's own `mt-*`, so a
+section or notice keeps its usual margin everywhere else and loses it only at the top.
+
+A page with one section gives that section no `title`: the page title already names it, and a second
+heading 32px below the first says the same thing twice. Put the description on `PageShell` instead
+(`connections.index.tsx`). A count or filter that belongs to a search sits on the search's row, not
+on a line of its own.
 
 `PageEmpty` is a sentence, not an illustration with a heading. On a configuration screen "nothing
 here yet" is a fact, and the section heading already said what the section is for.
@@ -142,21 +169,17 @@ itself when the dialog changes something.
    its own backing — the built-in one is a ghost button in the foreground colour and disappears over
    a pale image.
 
-## The rem Trap
+## Units
 
-`app/src/styles.css` sets `html { font-size: 15px }`. Every rem-based Tailwind token is therefore
-**0.9375×** its documented pixel value:
+The root is the browser's 16px, so Tailwind's spacing, sizes and widths are their documented values
+(`p-4` is 16px, `max-w-3xl` is 768px) and land on its 4px grid. Text is the exception: `styles.css`
+sets every `--text-*` to Tailwind's default times 15/16, so `text-sm` is 13.125px and body text is
+15px. That is the scale this app has always read at; do not size text in px or rem by hand to match
+the docs.
 
-| Token | Documented | Actual here |
-|-------|-----------|-------------|
-| `max-w-2xl` | 672px | **630px** |
-| `max-w-3xl` | 768px | **720px** |
-| `max-w-5xl` | 1024px | **960px** |
-
-Never hardcode a pixel constant derived from a Tailwind rem token, and never compute a ratio from
-one. Measure the element — `offsetWidth`, `clientWidth`, a `ResizeObserver` — and scale from what is
-actually on screen. A constant taken from the Tailwind docs is wrong by 6.25% here, which is enough
-to sit a centred element visibly off centre or clip a card's corners against its container.
+Even so, never hardcode a pixel constant derived from a Tailwind token, and never compute a ratio
+from one. Measure the element — `offsetWidth`, `clientWidth`, a `ResizeObserver` — and scale from what
+is actually on screen. The root was once 15px, and every constant taken from the docs sat 6.25% off.
 
 ## Decision Tree
 
@@ -167,9 +190,12 @@ to sit a centred element visibly off centre or clip a card's corners against its
   chevron, and a dialog. Then Procedure 5.
 - The row only states something → Procedure 3, kind 3: a value and no chevron.
 - Unsure which `Item` size, `Button` size, or `variant` → Procedure 4.
-- A width, ratio or scale needs a number in pixels → the rem Trap section. Measure, do not assume.
+- A width, ratio or scale needs a number in pixels → the Units section. Measure, do not assume.
+- Choosing a margin or gap between blocks → the Rhythm table. If the frame already gives it, set none.
 - The screen genuinely does not fit this shape → say so in the response and comment the reason in the
-  code. A table is the one accepted precedent (`admin/audit.tsx`, `width="wide"`).
+  code. There are two accepted precedents: a table (`admin/audit.tsx`, `width="wide"`), and the
+  Connections tiles (`connections.index.tsx`), a grid of separate `variant="outline"` cards, 56px
+  tall and 12px apart, because apps are picked out by their mark rather than read down as a list.
 - The question is which states the screen renders while loading or failing → not this skill;
   `openbot-data-access`, Procedure 3.
 
@@ -184,7 +210,9 @@ to sit a centred element visibly off centre or clip a card's corners against its
 | Children on an element passed to `Item`'s `render` | They replace the row's own children; the row draws empty | Pass a childless element |
 | `bg-card` on a row inside a dialog | `--card` equals `--popover`; the row is invisible | `variant="muted"` |
 | `Item variant="outline"` and `variant="muted"` on one screen | Reads as two kinds of list and invites a distinction that is not there | One variant per screen |
-| A pixel constant matching a Tailwind rem token (672, 768, 1024) | Assumes a 16px root; the root here is 15px | Measure the element |
+| A pixel constant matching a Tailwind rem token (672, 768, 1024) | Breaks the day a width or the root changes | Measure the element |
+| An `mt-*` on a screen's first block, or a gap between blocks not in the Rhythm table | A second spacing scale, which is what made every screen feel slightly off | Let `PageShell` and `PageSection` space it |
+| A one-section page whose section has a `title` | The heading repeats the page title | Drop the section title; description on `PageShell` |
 | A `Switch` on a row that needs two or more values | Half the change happens in place and half in a dialog | A summary, a chevron, and a dialog |
 | A chevron on a row that opens nothing | Announces a destination that does not exist | Value in `ItemActions`, no chevron |
 | A set of chips or toggles crammed into `ItemActions` | It competes with the label for width and wraps badly | `ItemFooter`, which is `basis-full` |
@@ -195,8 +223,8 @@ to sit a centred element visibly off centre or clip a card's corners against its
 - **A row renders empty — media, title and actions all missing**: children were passed on the
   element given to `Item`'s `render`. Remove them.
 - **A row's content sits visibly off centre, or a card's corners are clipped by its container**: a
-  pixel constant was taken from the Tailwind docs and the root font size is 15px. Measure the drawn
-  element instead of the box it was given.
+  pixel constant was taken from the Tailwind docs rather than measured. Measure the drawn element
+  instead of the box it was given.
 - **A dialog's footer has body content painted over it**: `DialogBody` is missing
   `overflow-y-auto`. It has `flex-1 min-h-0` and no overflow of its own.
 - **A dialog stops scrolling after a refactor**: `DialogBody` is no longer a direct child of
