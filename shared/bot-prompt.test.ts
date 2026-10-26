@@ -80,6 +80,10 @@ describe("computerGuidance", () => {
     for (const engine of ["google", "bing", "duckduckgo"])
       expect(guidance).toContain(engine);
     expect(guidance).not.toContain("use your search tool");
+    // Conditional, not a claim: a search tool from Composio or a server added by URL is not
+    // recognised by role, and a Bot holding one must not be told it holds none.
+    expect(guidance).toContain("none of your tools searches the web");
+    expect(guidance).not.toContain("you do not hold a search tool");
   });
 
   test("without a search tool, it answers marked as unchecked and offers a search app", () => {

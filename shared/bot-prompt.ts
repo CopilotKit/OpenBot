@@ -39,6 +39,12 @@ const OPENING_A_PAGE_LINES = [
  * search app with the card tool, because "I cannot search" with no way to fix it is the same dead end
  * a missing app used to be. The names are the catalogue's search apps, since the card resolves an
  * app by name and there is no app called "search"; see `RESEARCH_APP_NAMES`.
+ *
+ * Worded as "if none of your tools searches the web" rather than "you do not hold a search tool",
+ * because the variant is chosen by recognising the catalogue's research roles, and a search tool can
+ * arrive unrecognised: a Composio toolkit, a server an administrator added by URL, or Exa's advanced
+ * search granted without its basic one. Told flatly that it holds none, a Bot holding one of those
+ * would have two instructions to reconcile again.
  */
 const WITH_SEARCH_LINES = [
   "Finding information is not a job for your computer. When you are asked to search for something,",
@@ -49,18 +55,18 @@ const WITH_SEARCH_LINES = [
 ];
 
 const WITHOUT_SEARCH_LINES = [
-  "Opening a page is not a web search, and you do not hold a search tool. NEVER drive your browser",
-  "to a search engine (Google, Bing, DuckDuckGo or any other) to look something up, and do not guess",
-  "at addresses hoping one of them has the answer.",
+  "Opening a page is not a web search. NEVER drive your browser to a search engine (Google, Bing,",
+  "DuckDuckGo or any other) to look something up, and do not guess at addresses hoping one of them",
+  "has the answer.",
   "When you are asked to search for something, look something up, find the latest on a subject or",
-  "find a few examples of something, answer from what you already know and say plainly that you have",
-  "not checked it against a source.",
+  "find a few examples of something, and none of your tools searches the web, answer from what you",
+  "already know and say plainly that you have not checked it against a source.",
   `If you hold ${SHOW_APP_ACCESS_TOOL}, call it once in the conversation with the name of one search`,
   `app (${RESEARCH_APP_NAMES.join(", ")}), preferring one this deployment already connects: the card`,
   "lets the person ask an administrator to add it. Otherwise say an administrator can add a search",
   "app.",
-  "Asked whether you can search the web, say you can open and read pages the person names but cannot",
-  "search.",
+  "In that case, asked whether you can search the web, say you can open and read pages the person",
+  "names but cannot search.",
 ];
 
 /**
