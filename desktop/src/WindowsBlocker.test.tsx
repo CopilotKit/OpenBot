@@ -158,7 +158,7 @@ test("a virtual machine without nested virtualization is told what to change on 
   ).toBeTruthy();
   expect(view.getByText(/Shut down this virtual machine/)).toBeTruthy();
   expect(view.getByText(/ExposeVirtualizationExtensions/)).toBeTruthy();
-  expect(view.getByText(/VMware Fusion does not/)).toBeTruthy();
+  expect(view.getByText(/Apple silicon cannot do this/)).toBeTruthy();
   expect(view.queryByRole("button", { name: "Set up Windows" })).toBeNull();
   expect(view.queryByText(/firmware settings/)).toBeNull();
 });

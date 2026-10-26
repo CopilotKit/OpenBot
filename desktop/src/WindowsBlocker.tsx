@@ -217,7 +217,7 @@ export function WindowsBlocker({
             {steps}
             <p className="footnote">
               {blocker === "nested-virtualization-unavailable"
-                ? "On a Mac with Apple silicon this needs an M3 chip or later, macOS 15 or later, and an app that offers it, such as Parallels Desktop. VMware Fusion does not."
+                ? "Windows on a Mac with Apple silicon cannot do this in any virtual machine app. Use a Windows PC, or an x64 cloud virtual machine whose size supports nested virtualization."
                 : "In a virtual machine, turn on nested virtualization for it in the host's settings instead."}
             </p>
           </>
