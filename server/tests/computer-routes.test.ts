@@ -69,25 +69,25 @@ describe("a computer that is not ready yet", () => {
     );
   }
 
-  test.each([
-    "absent",
-    "starting",
-  ] as const)("answers %s as a state, without taking a screenshot", async (state) => {
-    let screenshots = 0;
-    const routes = routesFor({
-      status: async (botId: string) => ({ botId, state }),
-      screenshot: async () => {
-        screenshots++;
-        return { base64: "AAAA", width: 1, height: 1, capturedAt: "" };
-      },
-    });
+  test.each(["absent", "starting"] as const)(
+    "answers %s as a state, without taking a screenshot",
+    async (state) => {
+      let screenshots = 0;
+      const routes = routesFor({
+        status: async (botId: string) => ({ botId, state }),
+        screenshot: async () => {
+          screenshots++;
+          return { base64: "AAAA", width: 1, height: 1, capturedAt: "" };
+        },
+      });
 
-    const response = await routes.request("http://openbot.test/b/screenshot");
+      const response = await routes.request("http://openbot.test/b/screenshot");
 
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ ready: false, state });
-    expect(screenshots).toBe(0);
-  });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ ready: false, state });
+      expect(screenshots).toBe(0);
+    },
+  );
 
   test("passes an unreachable computer's reason through, still as an answer", async () => {
     const routes = routesFor({
