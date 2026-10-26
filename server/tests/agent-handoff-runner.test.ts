@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
 import { readRunAssertion } from "../src/agents/callback-token";
-import { EndpointNotAllowedError } from "../src/agents/endpoint";
 import { ThreadBusyError } from "../src/agents/handoff-delivery";
 import {
   createHandoffRunner,
@@ -418,8 +417,10 @@ describe("a hop that failed for good", () => {
       offered,
       calls,
     } = runner({
+      // As it arrives: the AG-UI client rebuilds the refusal from its RUN_ERROR, so only the
+      // message survives.
       deliver: async () => {
-        throw new EndpointNotAllowedError(
+        throw new Error(
           "This deployment will not dial http://localhost:4201/ag-ui: that address is inside OpenBot's own network, so an agent may not live there.",
         );
       },

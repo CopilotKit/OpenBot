@@ -17,6 +17,7 @@ import {
 } from "../audit";
 import { cutAtCodeUnits } from "../channels/text";
 import { DEFAULT_MAX_ATTEMPTS, type WorkQueue } from "../work/queue";
+import { isEndpointRefusal } from "./endpoint";
 import { HANDOFF_KIND } from "./handoff";
 import { ThreadBusyError } from "./handoff-delivery";
 import { BOT_PAUSED_REASON, isBotPaused } from "./lifecycle";
@@ -478,9 +479,9 @@ export function createHandoffRunner(options: {
             // same answer, so this is the last try, whatever the count says. Retrying a refused
             // address left the person watching "Asking …" for five minutes before being told.
             const refused =
-              error instanceof Error &&
-              (error.name === "CapabilityRefusedError" ||
-                error.name === "EndpointNotAllowedError");
+              (error instanceof Error &&
+                error.name === "CapabilityRefusedError") ||
+              isEndpointRefusal(error);
             if ((refused || item.attempts >= maxAttempts) && !work.answerIn) {
               await tell(work, item.key, reason).catch((failure) => {
                 // A notice that cannot be queued must not take the release with it: leaving the row
