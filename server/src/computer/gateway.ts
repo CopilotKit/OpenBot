@@ -27,6 +27,7 @@ import {
 import { HeadlessToolSuspension } from "@openbot/toolkit/headless-tools";
 import { withUntrustedNotice } from "../untrusted-content";
 import {
+  ComputerStillStartingError,
   ComputerStoppedError,
   ComputerUnavailableError,
   createComputerTransport,
@@ -35,6 +36,7 @@ import {
 import { checkComputerAddress } from "./target";
 
 export {
+  ComputerStillStartingError,
   ComputerUnavailableError,
   ElementNotFoundError,
   HandoffRequestError,
@@ -368,12 +370,22 @@ export function createComputerGateway(
    * has to be decided and recorded, and the attempt failing is what writes the failure row beside the
    * decision; throwing here would take the action off the trail entirely. So a failure answers
    * "unknown", which leaves the generation check where it was and leaves the address to the attempt.
+   *
+   * EXCEPT A COMPUTER THAT IS STILL STARTING, which is carried back rather than forgotten. Forgetting
+   * it sent the attempt to `locate` again, and that is a second full cold-start wait stacked on the
+   * first: a click on a sleeping computer held its request open twice as long before saying
+   * anything. The attempt throws the carried error instead, inside the block that writes the failure
+   * row, so the trail still shows a permitted action that was not performed.
    */
-  async function locateForAction(botId: string): Promise<string | undefined> {
+  async function locateForAction(
+    botId: string,
+  ): Promise<{ address?: string; starting?: ComputerStillStartingError }> {
     try {
-      return await locate(botId);
-    } catch {
-      return undefined;
+      return { address: await locate(botId) };
+    } catch (error) {
+      return error instanceof ComputerStillStartingError
+        ? { starting: error }
+        : {};
     }
   }
 
@@ -557,7 +569,8 @@ export function createComputerGateway(
      * the policy has even seen it. The address that comes back is the one the attempt then uses, so
      * on the supervisor this costs no extra call for the actions that do need it.
      */
-    const address = ref ? await locateForAction(botId) : undefined;
+    const located = ref ? await locateForAction(botId) : undefined;
+    const address = located?.address;
     const { session } = ref ? await sessionOf(botId) : { session: undefined };
     const element = resolve(stored, ref, snapshotId, session);
     // For a navigation the relevant page is the one being opened, not the one already loaded. Using
@@ -659,6 +672,7 @@ export function createComputerGateway(
        * was written would be a way to act without appearing on the trail. The failure row beside it is
        * what stops the trail claiming a permitted action was carried out when nothing was sent.
        */
+      if (located?.starting) throw located.starting;
       if (ref && stored && !element) {
         throw new StaleSnapshotError(
           `${ref} is not on the page this computer is showing, so nothing can be checked against it before acting. Take a fresh snapshot and use the refs it returns.`,

@@ -100,4 +100,11 @@ describe("computerGuidance", () => {
     // Asked "can you search the web?", a Bot with only a browser once said yes.
     expect(guidance).toContain("cannot search");
   });
+
+  test("says what it is about to do before its first computer action", () => {
+    // A first action can sit through a cold start; a sentence first means the wait has a reason.
+    expect(COMPUTER_GUIDANCE).toContain(
+      "Before your first computer action in a turn, say in one sentence what you are about to do and where.",
+    );
+  });
 });

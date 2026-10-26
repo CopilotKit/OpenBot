@@ -1,5 +1,7 @@
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ReactElement } from "react";
 import { act, cleanup, render, waitFor } from "@testing-library/react";
 import { ComputerView } from "@/components/computer/computer-view";
 import { LiveScreen } from "@/components/computer/live-screen";
@@ -137,6 +139,16 @@ afterAll(() => {
   GlobalRegistrator.unregister();
 });
 
+/** The view reads the computer's state through a query, so it needs a client of its own per test. */
+function renderWithQueries(ui: ReactElement) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  return render(
+    <QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>,
+  );
+}
+
 function setVisibility(state: DocumentVisibilityState) {
   Object.defineProperty(document, "visibilityState", {
     configurable: true,
@@ -264,7 +276,9 @@ test("hidden computer preview pauses screenshot polling while control polling co
     return new Response("not found", { status: 404 });
   }) as typeof fetch;
 
-  render(<ComputerView computerId="hidden-preview" active intervalMs={10} />);
+  renderWithQueries(
+    <ComputerView computerId="hidden-preview" active intervalMs={10} />,
+  );
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, 30));
   });
@@ -297,7 +311,7 @@ test("offscreen computer preview starts screenshot polling when it intersects", 
     return new Response("not found", { status: 404 });
   }) as typeof fetch;
 
-  render(
+  renderWithQueries(
     <ComputerView computerId="offscreen-preview" active intervalMs={10} />,
   );
   const entry = IntersectionObserverDouble.observed.at(0);
@@ -341,7 +355,9 @@ test("computer preview does not decode a screenshot response that lands after th
     return new Response("not found", { status: 404 });
   }) as typeof fetch;
 
-  render(<ComputerView computerId="pending-preview" active intervalMs={10} />);
+  renderWithQueries(
+    <ComputerView computerId="pending-preview" active intervalMs={10} />,
+  );
   const entry = IntersectionObserverDouble.observed.at(0);
   expect(entry).toBeDefined();
   await act(async () => {

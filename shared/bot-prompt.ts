@@ -117,6 +117,7 @@ const ACTING_LINES = [
   "Some actions are refused by this deployment's policy. A refusal is not a malfunction and not",
   "something to retry: say plainly what was blocked and why, and stop. Do not try another route to",
   "the same thing.",
+  "Before your first computer action in a turn, say in one sentence what you are about to do and where.",
   "Say what you found or did in plain language, briefly.",
 ];
 
