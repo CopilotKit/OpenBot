@@ -1,3 +1,4 @@
+import type { ConnectPrompt } from "@openbot/shared/connect-prompt";
 import { useQuery } from "@tanstack/react-query";
 import {
   AppAccessAction,
@@ -5,10 +6,10 @@ import {
 } from "@/components/plugins/app-access-action";
 import { PluginLogo } from "@/components/plugins/plugin-logo";
 import { Button } from "@/components/ui/button";
+import { agentQueryOptions } from "@/lib/agents/queries";
 import { type AppAccess, botAppQueryOptions } from "@/lib/app-access/queries";
 import { useDeclaredBotId } from "@/lib/copilot/active-bot";
 import { type CardPlace, useCarryOn } from "@/lib/copilot/carry-on";
-import type { ConnectPrompt } from "@openbot/shared/connect-prompt";
 import { ConnectAppCard } from "./connect-app-card";
 
 /**
@@ -76,6 +77,8 @@ function LiveAppAccessCard({
   });
   const access = live.data ? asRefused(live.data, prompt) : null;
   const name = access?.displayName ?? prompt.title;
+  // Only asked for by "Let Research Bot use your Gmail?", the one sentence that names the Bot.
+  const bot = useQuery(agentQueryOptions(agentId)).data?.name;
   const { carried, offer } = useCarryOn({
     place,
     ready: access ? access.state === "ready" : null,
@@ -111,12 +114,12 @@ function LiveAppAccessCard({
           {live.isPending ? null : access ? (
             <p className="text-muted-foreground text-sm">
               {access.state !== "ready"
-                ? refusedSentence(access, prompt)
+                ? refusedSentence(access, prompt, bot)
                 : carried || offer
                   ? `${name} is ready now.`
                   : prompt.reason !== "access"
                     ? `${name} is ready now. Ask again and the Bot can use it.`
-                    : refusedSentence(access, prompt)}
+                    : refusedSentence(access, prompt, bot)}
             </p>
           ) : (
             <p className="text-muted-foreground text-sm" role="alert">
@@ -178,12 +181,16 @@ function asRefused(live: AppAccess, prompt: ConnectPrompt): AppAccess {
 }
 
 /** As the shared sentence, except a lost team account, which needs reconnecting rather than connecting. */
-function refusedSentence(access: AppAccess, prompt: ConnectPrompt): string {
+function refusedSentence(
+  access: AppAccess,
+  prompt: ConnectPrompt,
+  bot?: string,
+): string {
   if (
     access.state === "shared_not_connected" &&
     prompt.reason === "shared" &&
     !access.requestKind
   )
     return `Your organisation's ${access.displayName} account needs reconnecting. Only an admin can reconnect it.`;
-  return appAccessSentence(access);
+  return appAccessSentence(access, bot);
 }

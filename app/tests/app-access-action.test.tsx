@@ -28,7 +28,7 @@ import { settleReactWork } from "./settle-react-work";
 /**
  * The one piece the Bot page and the chat card both draw an app's state with.
  *
- * Each of the seven states must say whose move it is and offer exactly that move — and nothing for a
+ * Each of the eight states must say whose move it is and offer exactly that move — and nothing for a
  * state that needs none, or a move that is somebody else's: an administrator's, or on somebody else's
  * Team Bot its owner's. The two moves that write are asserted against the request they send: the
  * browser names a Bot and an app and never a kind, which is the server's to decide.
@@ -531,3 +531,56 @@ test.each([
     expect(link.getAttribute("target")).toBe("_blank");
   },
 );
+
+test("an owner is asked about their own app, by the Bot's name where the caller has it", () => {
+  const owners = appAccess({ state: "owner_grantable", granted: false });
+  expect(appAccessSentence(owners)).toBe("Let this Bot use your Gmail?");
+  expect(appAccessSentence(owners, "Research Bot")).toBe(
+    "Let Research Bot use your Gmail?",
+  );
+  expect(
+    appAccessSentence({ ...owners, needsConnect: true }, "Research Bot"),
+  ).toBe("Let Research Bot use your Gmail? Connect it first.");
+  // An app on nobody's own account is not "your" anything.
+  expect(
+    appAccessSentence(
+      { ...owners, displayName: "Routines", account: "deployment" },
+      "Research Bot",
+    ),
+  ).toBe("Let Research Bot use Routines?");
+});
+
+test("an owner's Allow gives the app in one press, naming the Bot and the app and nothing else", async () => {
+  const { view, sent } = mounted(
+    appAccess({ state: "owner_grantable", granted: false }),
+  );
+  fireEvent.click(await view.findByRole("button", { name: /^Let .* Gmail$/ }));
+  await waitFor(() =>
+    expect(sent.filter((call) => call.method === "POST")).toEqual([
+      {
+        method: "POST",
+        url: "/api/plugins/for/expenses/apps/composio-gmail/give",
+        body: undefined,
+      },
+    ]),
+  );
+});
+
+test("Connect and allow opens the person's consent first, and gives the app once it is connected", async () => {
+  const waiting = appAccess({
+    state: "owner_grantable",
+    granted: false,
+    needsConnect: true,
+  });
+  const { view, sent, opened, swap } = mounted(waiting);
+  fireEvent.click(
+    await view.findByRole("button", { name: /after you connect it$/ }),
+  );
+  await waitFor(() => expect(opened).toEqual(["https://gmail.test/consent"]));
+  const gives = () =>
+    sent.filter((call) => call.url.endsWith("/apps/composio-gmail/give"));
+  expect(gives()).toEqual([]);
+  // The server's next answer: connected now, and still not given.
+  swap({ ...waiting, needsConnect: false });
+  await waitFor(() => expect(gives()).toHaveLength(1));
+});
