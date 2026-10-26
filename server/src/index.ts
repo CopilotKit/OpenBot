@@ -1098,6 +1098,8 @@ const handoffDesk = createHandoffDesk({
     actorFor(userId).catch(() => null),
   auditStore: bootAuditStore,
   caps: config.handoff,
+  // The asking conversation, told it is now waiting on the Bot it asked. See `onOffered`.
+  onOffered: (threadId) => channelStore.signalWork(threadId),
 });
 
 void recordAuditEvent(bootAuditStore, {

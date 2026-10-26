@@ -106,6 +106,12 @@ type ChatTranscriptProps = {
    * be told, and only the thing that ended the turn knows which one happened.
    */
   stopped?: string;
+  /**
+   * Work this conversation is waiting on that is not this tab's run: a Bot it asked, a routine.
+   * Drawn in the same slot as `Thinking`, under the last thing said, because that is where the
+   * answer will appear.
+   */
+  working?: React.ReactNode;
 };
 
 /** One shared empty array, so a screen without a queue does not hand down a new one per render. */
@@ -1549,6 +1555,7 @@ export function ChatTranscript({
   queued = EMPTY_QUEUE,
   restoring = false,
   stopped,
+  working,
 }: ChatTranscriptProps) {
   const isDrawn = useDrawnTool();
   /*
@@ -1692,6 +1699,7 @@ export function ChatTranscript({
               ) : waitingOnFirstToken ? (
                 <Thinking />
               ) : null}
+              {working}
               {queued.map((message) => (
                 <Queued
                   attachments={message.attachments}

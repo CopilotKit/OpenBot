@@ -140,71 +140,86 @@ export function createRoutineRunner(options: {
       await routineStore.finishRun(routineRunId, "skipped", BOT_PAUSED_REASON);
       return;
     }
-    let replyText: string;
+    /*
+     * The conversation shown as working while the firing runs, and told it is over once the run
+     * row has its outcome. The run row is what the conversation reads "a routine is running" from
+     * (see channels/working.ts), so the signal that ends it comes after `finishRun`, not after the
+     * turn. Best-effort both ways: a firing is not worth failing over a dot.
+     */
+    await channelStore.signalBusy(channel.threadId, true).catch(() => {});
     try {
-      ({ replyText } = await runTurn({
-        ownerUserId,
-        routineId,
-        agentId,
-        threadId: channel.threadId,
-        instruction,
-      }));
-    } catch (error) {
-      if (error instanceof HeadlessToolSuspension) {
-        await routineStore.finishRun(
-          routineRunId,
-          "waiting",
-          error.message,
-          error.waiting,
-        );
-        await say(error.message);
-        return;
-      }
-      const reason = reasonOf(error);
-      await routineStore.finishRun(routineRunId, "failed", reason);
-
-      /*
-       * THE FATIGUE RULE, read after the failure is recorded — the count has to include this
-       * firing, or the tenth failure in a row reads as the ninth and the routine keeps going.
-       *
-       * Its own try/catch, around the read and the switching-off as well as the message: this all
-       * happens after `finishRun`, and nothing in it is allowed to throw its way out of a firing
-       * whose failure is already on the row.
-       */
-      try {
-        const failures = await routineStore.consecutiveFailures(routineId);
-        if (failures === 1) {
-          // Only the first failure after a success. A routine that fails every night at three has
-          // one line in the channel, not one line a night for a month.
-          await say(`This routine failed: ${shorten(reason)}`);
-        } else if (failures >= FATIGUE_LIMIT) {
-          // A dead integration should not burn model spend for ever. Switched off, and said out
-          // loud, because a routine that goes quiet without explaining itself is worse than one
-          // that fails.
-          await routineStore.setEnabled(ownerUserId, routineId, false);
-          await say(SWITCHED_OFF);
-        }
-        // In between, nothing is said. The run rows carry it, and the routines page reads them.
-      } catch (fatigueError) {
-        console.error(
-          JSON.stringify({
-            type: "routine-fatigue-rule-failed",
-            routineId,
-            routineRunId,
-            reason: reasonOf(fatigueError),
-          }),
-        );
-      }
-      return;
+      await fire(channel.threadId);
+    } finally {
+      await channelStore.signalBusy(channel.threadId, false).catch(() => {});
     }
 
-    /*
-     * The reply, then the outcome. `say` cannot throw, and `finishRun` is finish-once, so neither
-     * order can lose the run row — this one is the browser's order: what was said lands in the
-     * channel, and then the firing is closed.
-     */
-    await say(replyText);
-    await routineStore.finishRun(routineRunId, "succeeded");
+    async function fire(threadId: string): Promise<void> {
+      let replyText: string;
+      try {
+        ({ replyText } = await runTurn({
+          ownerUserId,
+          routineId,
+          agentId,
+          threadId,
+          instruction,
+        }));
+      } catch (error) {
+        if (error instanceof HeadlessToolSuspension) {
+          await routineStore.finishRun(
+            routineRunId,
+            "waiting",
+            error.message,
+            error.waiting,
+          );
+          await say(error.message);
+          return;
+        }
+        const reason = reasonOf(error);
+        await routineStore.finishRun(routineRunId, "failed", reason);
+
+        /*
+         * THE FATIGUE RULE, read after the failure is recorded — the count has to include this
+         * firing, or the tenth failure in a row reads as the ninth and the routine keeps going.
+         *
+         * Its own try/catch, around the read and the switching-off as well as the message: this all
+         * happens after `finishRun`, and nothing in it is allowed to throw its way out of a firing
+         * whose failure is already on the row.
+         */
+        try {
+          const failures = await routineStore.consecutiveFailures(routineId);
+          if (failures === 1) {
+            // Only the first failure after a success. A routine that fails every night at three has
+            // one line in the channel, not one line a night for a month.
+            await say(`This routine failed: ${shorten(reason)}`);
+          } else if (failures >= FATIGUE_LIMIT) {
+            // A dead integration should not burn model spend for ever. Switched off, and said out
+            // loud, because a routine that goes quiet without explaining itself is worse than one
+            // that fails.
+            await routineStore.setEnabled(ownerUserId, routineId, false);
+            await say(SWITCHED_OFF);
+          }
+          // In between, nothing is said. The run rows carry it, and the routines page reads them.
+        } catch (fatigueError) {
+          console.error(
+            JSON.stringify({
+              type: "routine-fatigue-rule-failed",
+              routineId,
+              routineRunId,
+              reason: reasonOf(fatigueError),
+            }),
+          );
+        }
+        return;
+      }
+
+      /*
+       * The reply, then the outcome. `say` cannot throw, and `finishRun` is finish-once, so neither
+       * order can lose the run row — this one is the browser's order: what was said lands in the
+       * channel, and then the firing is closed.
+       */
+      await say(replyText);
+      await routineStore.finishRun(routineRunId, "succeeded");
+    }
   }
 
   return {

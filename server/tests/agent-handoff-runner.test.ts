@@ -38,6 +38,7 @@ function runner(options?: {
   }) => Promise<void>;
   /** What the delivery says the Bot answered. Null — nothing worth relaying — unless a test cares. */
   answer?: string | null;
+  onSettled?: () => Promise<void>;
 }) {
   const calls: Array<{ verb: string; key: string; owner?: string }> = [];
   const events: string[] = [];
@@ -48,6 +49,8 @@ function runner(options?: {
   const delivered: Array<{ message: string; assertion: string }> = [];
   const offered: HandoffWork[] = [];
   const delays: number[] = [];
+  /** Each time the asking conversation was told the queue moved, with what the queue had seen by then. */
+  const settled: Array<{ threadId: string; after: string[] }> = [];
 
   const queue = {
     claim: async () =>
@@ -101,12 +104,20 @@ function runner(options?: {
     delivered,
     offered,
     delays,
+    settled,
     runner: createHandoffRunner({
       queue,
       owner: "replica-a",
       sign: (work, claim) =>
         signHandoffDeliveryRun(work, KEY, "delivery-run", claim),
       auditStore,
+      onSettled: async (work) => {
+        settled.push({
+          threadId: work.threadId,
+          after: calls.map((call) => call.verb),
+        });
+        await options?.onSettled?.();
+      },
       delivery: {
         deliver: async ({ work, message, shown, assertion }) => {
           delivered.push({ message, assertion });
@@ -652,5 +663,51 @@ describe("what a notice shows", () => {
     expect(shownTexts[0]).toBe(
       "Assistant asked Researcher for this on your behalf: find the outage window",
     );
+  });
+});
+
+/*
+ * The asking conversation reads what it is waiting on from the queue, so it is told after the queue
+ * moved and not before. Told from inside the delivery, the row would still say the hop was in
+ * flight, and "Asking Ana…" would stay on screen for a hop that had finished.
+ */
+describe("telling the asking conversation", () => {
+  test("after a delivered hop is finished and its answer is on its way back", async () => {
+    const { runner: sweep, settled } = runner({
+      answer: "Tuesday 02:00 to 04:00.",
+    });
+
+    await sweep.sweep();
+
+    expect(settled).toEqual([
+      { threadId: WORK.threadId, after: ["finish", "offer"] },
+    ]);
+  });
+
+  test("after a failed delivery is released for another try", async () => {
+    const { runner: sweep, settled } = runner({
+      deliver: async () => {
+        throw new Error("the model stopped");
+      },
+    });
+
+    await sweep.sweep();
+
+    expect(settled).toEqual([{ threadId: WORK.threadId, after: ["release"] }]);
+  });
+
+  test("a conversation that cannot be told does not fail the hop", async () => {
+    const { runner: sweep, calls } = runner({
+      onSettled: async () => {
+        throw new Error("the socket is down");
+      },
+    });
+
+    const report = await sweep.sweep();
+
+    expect(report.delivered).toEqual(["researcher"]);
+    expect(calls).toEqual([
+      { verb: "finish", key: "run-1:abc", owner: "replica-a" },
+    ]);
   });
 });
