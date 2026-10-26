@@ -21,7 +21,7 @@ import { NewBotSheet } from "@/components/agents/new-bot-sheet";
 import { SetupSections } from "@/components/bot-profile/setup";
 import { type AgentProfile, agentKeys } from "@/lib/agents/queries";
 import { computerKeys } from "@/lib/computers/queries";
-import { Route as BoundariesRoute } from "@/routes/_authed/admin/boundaries";
+import { Route as NewRuleRoute } from "@/routes/_authed/admin/boundaries_.new";
 
 /**
  * The Enter that confirms a character an input method is composing is not an Enter.
@@ -188,33 +188,43 @@ test("the New Bot sheet does not create from the Enter that confirms a composed 
   expect(writes.map((write) => write.request)).toEqual(["POST /api/agents"]);
 });
 
-test("a boundary rule is not saved by the Enter that confirms a composed character", async () => {
-  const Boundaries = BoundariesRoute.options.component as ComponentType;
-  const view = draw(<Boundaries />, (client) =>
+test("a boundary rule is not added by the Enter that confirms a composed character", async () => {
+  const NewRule = NewRuleRoute.options.component as ComponentType;
+  const view = draw(<NewRule />, (client) =>
     client.setQueryData(computerKeys.policy(), POLICY),
   );
 
-  const field = await view.findByLabelText("A rule, written in CEL");
+  fireEvent.click(await view.findByText("Write your own"));
+  const field = await view.findByLabelText("Rule");
   expect(field.getAttribute("spellcheck")).toBe("false");
   expect(field.getAttribute("autocorrect")).toBe("off");
   expect(field.getAttribute("autocapitalize")).toBe("off");
   const rule = 'contains(element.name, "送信")';
   await type(field, rule);
+  const name = view.getByLabelText("Name");
+  await type(name, "送信しない");
 
-  await confirmComposedCharacter(field);
+  // The composing Enter is held back from the form; an ordinary one is left to submit it.
+  expect(fireEvent.keyDown(name, { key: "Enter", isComposing: true })).toBe(
+    false,
+  );
+  expect(fireEvent.keyDown(name, { key: "Enter", keyCode: 229 })).toBe(false);
+  expect(fireEvent.keyDown(name, { key: "Enter", keyCode: 13 })).toBe(true);
   await settle();
   expect(writes).toEqual([]);
-  expect(view.getByDisplayValue(rule)).toBeTruthy();
 
-  // An ordinary Enter still adds the rule, once.
   await act(async () => {
-    fireEvent.keyDown(field, { key: "Enter", keyCode: 13 });
+    fireEvent.click(view.getByRole("button", { name: "Add rule" }));
   });
   await settle();
   expect(writes).toEqual([
     {
       request: "PUT /api/computers/policy",
-      body: { ...POLICY, deny: [rule] },
+      body: {
+        ...POLICY,
+        deny: [rule],
+        labels: { [rule]: { name: "送信しない", description: "" } },
+      },
     },
   ]);
 });

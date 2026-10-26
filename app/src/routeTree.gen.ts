@@ -54,6 +54,8 @@ import { Route as AuthedAppConnectionsIndexRouteImport } from './routes/_authed/
 import { Route as AuthedAppConnectionsKeyRouteImport } from './routes/_authed/_app/connections.$key'
 import { Route as AuthedAppGroupChannelIdRouteImport } from './routes/_authed/_app/group/$channelId'
 import { Route as AuthedAppGroupNewRouteImport } from './routes/_authed/_app/group/new'
+import { Route as AuthedAdminBoundariesIndexRouteImport } from './routes/_authed/admin/boundaries_.$index'
+import { Route as AuthedAdminBoundariesNewRouteImport } from './routes/_authed/admin/boundaries_.new'
 import { Route as AuthedAdminComponentsIndexRouteImport } from './routes/_authed/admin/components/index'
 import { Route as AuthedAdminComponentsNameRouteImport } from './routes/_authed/admin/components/$name'
 import { Route as AuthedAdminCredentialsNewRouteImport } from './routes/_authed/admin/credentials_.new'
@@ -308,6 +310,18 @@ const AuthedAppGroupNewRoute = AuthedAppGroupNewRouteImport.update({
   path: '/group/new',
   getParentRoute: () => AuthedAppRoute,
 } as any)
+const AuthedAdminBoundariesIndexRoute =
+  AuthedAdminBoundariesIndexRouteImport.update({
+    id: '/boundaries_/$index',
+    path: '/boundaries/$index',
+    getParentRoute: () => AuthedAdminRouteRoute,
+  } as any)
+const AuthedAdminBoundariesNewRoute =
+  AuthedAdminBoundariesNewRouteImport.update({
+    id: '/boundaries_/new',
+    path: '/boundaries/new',
+    getParentRoute: () => AuthedAdminRouteRoute,
+  } as any)
 const AuthedAdminComponentsIndexRoute =
   AuthedAdminComponentsIndexRouteImport.update({
     id: '/components/',
@@ -479,6 +493,8 @@ export interface FileRoutesByFullPath {
   '/connections/$key': typeof AuthedAppConnectionsKeyRoute
   '/group/$channelId': typeof AuthedAppGroupChannelIdRoute
   '/group/new': typeof AuthedAppGroupNewRoute
+  '/admin/boundaries/$index': typeof AuthedAdminBoundariesIndexRoute
+  '/admin/boundaries/new': typeof AuthedAdminBoundariesNewRoute
   '/admin/components/$name': typeof AuthedAdminComponentsNameRoute
   '/admin/credentials/new': typeof AuthedAdminCredentialsNewRoute
   '/admin/plugins/$key': typeof AuthedAdminPluginsKeyRoute
@@ -543,6 +559,8 @@ export interface FileRoutesByTo {
   '/connections/$key': typeof AuthedAppConnectionsKeyRoute
   '/group/$channelId': typeof AuthedAppGroupChannelIdRoute
   '/group/new': typeof AuthedAppGroupNewRoute
+  '/admin/boundaries/$index': typeof AuthedAdminBoundariesIndexRoute
+  '/admin/boundaries/new': typeof AuthedAdminBoundariesNewRoute
   '/admin/components/$name': typeof AuthedAdminComponentsNameRoute
   '/admin/credentials/new': typeof AuthedAdminCredentialsNewRoute
   '/admin/plugins/$key': typeof AuthedAdminPluginsKeyRoute
@@ -613,6 +631,8 @@ export interface FileRoutesById {
   '/_authed/_app/connections/$key': typeof AuthedAppConnectionsKeyRoute
   '/_authed/_app/group/$channelId': typeof AuthedAppGroupChannelIdRoute
   '/_authed/_app/group/new': typeof AuthedAppGroupNewRoute
+  '/_authed/admin/boundaries_/$index': typeof AuthedAdminBoundariesIndexRoute
+  '/_authed/admin/boundaries_/new': typeof AuthedAdminBoundariesNewRoute
   '/_authed/admin/components/$name': typeof AuthedAdminComponentsNameRoute
   '/_authed/admin/credentials_/new': typeof AuthedAdminCredentialsNewRoute
   '/_authed/admin/plugins/$key': typeof AuthedAdminPluginsKeyRoute
@@ -682,6 +702,8 @@ export interface FileRouteTypes {
     | '/connections/$key'
     | '/group/$channelId'
     | '/group/new'
+    | '/admin/boundaries/$index'
+    | '/admin/boundaries/new'
     | '/admin/components/$name'
     | '/admin/credentials/new'
     | '/admin/plugins/$key'
@@ -746,6 +768,8 @@ export interface FileRouteTypes {
     | '/connections/$key'
     | '/group/$channelId'
     | '/group/new'
+    | '/admin/boundaries/$index'
+    | '/admin/boundaries/new'
     | '/admin/components/$name'
     | '/admin/credentials/new'
     | '/admin/plugins/$key'
@@ -815,6 +839,8 @@ export interface FileRouteTypes {
     | '/_authed/_app/connections/$key'
     | '/_authed/_app/group/$channelId'
     | '/_authed/_app/group/new'
+    | '/_authed/admin/boundaries_/$index'
+    | '/_authed/admin/boundaries_/new'
     | '/_authed/admin/components/$name'
     | '/_authed/admin/credentials_/new'
     | '/_authed/admin/plugins/$key'
@@ -1165,6 +1191,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedAppGroupNewRouteImport
       parentRoute: typeof AuthedAppRoute
     }
+    '/_authed/admin/boundaries_/$index': {
+      id: '/_authed/admin/boundaries_/$index'
+      path: '/boundaries/$index'
+      fullPath: '/admin/boundaries/$index'
+      preLoaderRoute: typeof AuthedAdminBoundariesIndexRouteImport
+      parentRoute: typeof AuthedAdminRouteRoute
+    }
+    '/_authed/admin/boundaries_/new': {
+      id: '/_authed/admin/boundaries_/new'
+      path: '/boundaries/new'
+      fullPath: '/admin/boundaries/new'
+      preLoaderRoute: typeof AuthedAdminBoundariesNewRouteImport
+      parentRoute: typeof AuthedAdminRouteRoute
+    }
     '/_authed/admin/components/': {
       id: '/_authed/admin/components/'
       path: '/components'
@@ -1335,6 +1375,8 @@ interface AuthedAdminRouteRouteChildren {
   AuthedAdminPlaygroundRoute: typeof AuthedAdminPlaygroundRoute
   AuthedAdminSkillsRoute: typeof AuthedAdminSkillsRoute
   AuthedAdminIndexRoute: typeof AuthedAdminIndexRoute
+  AuthedAdminBoundariesIndexRoute: typeof AuthedAdminBoundariesIndexRoute
+  AuthedAdminBoundariesNewRoute: typeof AuthedAdminBoundariesNewRoute
   AuthedAdminComponentsNameRoute: typeof AuthedAdminComponentsNameRoute
   AuthedAdminCredentialsNewRoute: typeof AuthedAdminCredentialsNewRoute
   AuthedAdminPluginsKeyRoute: typeof AuthedAdminPluginsKeyRoute
@@ -1359,6 +1401,8 @@ const AuthedAdminRouteRouteChildren: AuthedAdminRouteRouteChildren = {
   AuthedAdminPlaygroundRoute: AuthedAdminPlaygroundRoute,
   AuthedAdminSkillsRoute: AuthedAdminSkillsRoute,
   AuthedAdminIndexRoute: AuthedAdminIndexRoute,
+  AuthedAdminBoundariesIndexRoute: AuthedAdminBoundariesIndexRoute,
+  AuthedAdminBoundariesNewRoute: AuthedAdminBoundariesNewRoute,
   AuthedAdminComponentsNameRoute: AuthedAdminComponentsNameRoute,
   AuthedAdminCredentialsNewRoute: AuthedAdminCredentialsNewRoute,
   AuthedAdminPluginsKeyRoute: AuthedAdminPluginsKeyRoute,

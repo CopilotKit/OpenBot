@@ -34,7 +34,11 @@ export type ActionPolicy = {
   mode: PolicyMode;
   deny: string[];
   allow: string[];
+  /** Each rule's name and what it stops, keyed by the rule's text. Display only. */
+  labels?: Record<string, RuleLabel>;
 };
+
+export type RuleLabel = { name: string; description: string };
 
 export const computerKeys = {
   all: ["computers"] as const,
