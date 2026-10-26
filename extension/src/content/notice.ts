@@ -32,7 +32,7 @@ export const NOTICE_TOKENS = {
   },
 } as const;
 
-const RADIUS = "0.55rem";
+const RADIUS = "0.5rem";
 
 type Choice = "stop" | "restart" | "continue";
 
