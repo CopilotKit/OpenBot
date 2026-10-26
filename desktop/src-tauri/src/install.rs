@@ -67,7 +67,7 @@ pub struct Download {
 /// The Intel Mac case is real and not hypothetical: Podman 6.1.1 publishes `arm64` only. Answering
 /// with the arm64 package there would install something that cannot run, so it says so instead.
 pub fn podman_download() -> Result<Download, Problem> {
-    let (file, sha256) = match (std::env::consts::OS, std::env::consts::ARCH) {
+    let (file, sha256) = match (std::env::consts::OS, crate::windows::machine_arch()) {
         ("windows", "x86_64") => (
             "podman-installer-windows-amd64.msi",
             "91d0e8ea0846c0151d531c88c329bb2729387231e4d1e42306a8e3ae9d09fc8a",
@@ -113,7 +113,7 @@ pub fn podman_download() -> Result<Download, Problem> {
 /// One static binary on every platform, which is the whole reason this can be placed beside the
 /// engine rather than installed into the system.
 pub fn compose_download() -> Result<Download, Problem> {
-    let (file, sha256) = match (std::env::consts::OS, std::env::consts::ARCH) {
+    let (file, sha256) = match (std::env::consts::OS, crate::windows::machine_arch()) {
         ("windows", "x86_64") => (
             "docker-compose-windows-x86_64.exe",
             "a3c0c73033eaede90210345d0cc2233edf4fab8fe0282a91dad8fd8436809d2f",
@@ -268,7 +268,7 @@ fn bun_download(os: &str, arch: &str) -> Result<Download, Problem> {
 }
 
 fn install_bun(cache: &Path) -> Result<PathBuf, Problem> {
-    let download = bun_download(std::env::consts::OS, std::env::consts::ARCH)?;
+    let download = bun_download(std::env::consts::OS, crate::windows::machine_arch())?;
     let entry = format!(
         "{}/bun{}",
         download.file.trim_end_matches(".zip"),

@@ -31,7 +31,7 @@ use crate::problem::Problem;
 /// Pinned for the reason every other download is: these files are executed. The digests come from
 /// the `checksums.txt` Docker publishes beside each build, recorded here rather than fetched, since a
 /// checksum from the server that served the file proves nothing. Moving the version means
-/// re-recording all three.
+/// re-recording all four.
 pub const DOCKER_DESKTOP: &str = "4.96.3";
 const BUILD: &str = "244472";
 
@@ -42,8 +42,11 @@ const FIRST_START_PATIENCE: Duration = Duration::from_secs(15 * 60);
 const POLL: Duration = Duration::from_secs(2);
 
 /// Docker Desktop's installer for this machine, or why there is not one.
+///
+/// The machine's architecture, not OpenBot's: Windows on ARM runs an x64 OpenBot under emulation,
+/// and Docker's x64 installer refuses that machine outright.
 pub fn download() -> Result<Download, Problem> {
-    download_for(std::env::consts::OS, std::env::consts::ARCH)
+    download_for(std::env::consts::OS, crate::windows::machine_arch())
 }
 
 fn download_for(os: &str, arch: &str) -> Result<Download, Problem> {
@@ -63,6 +66,11 @@ fn download_for(os: &str, arch: &str) -> Result<Download, Problem> {
                 "win/main/amd64",
                 "Docker Desktop Installer.exe",
                 "3d8adad4f6c86583e0b00ea19a76197c51ccf5c83437c9ed775b739756452507",
+            ),
+            ("windows", "aarch64") => (
+                "win/main/arm64",
+                "Docker Desktop Installer.exe",
+                "7e9d3b4d090527bdb89999ed87e0dc42e8b4b5c3bfdf3d252c8cc7d2fddeadb4",
             ),
             (os, arch) => return Err(Problem::with(
                 "OpenBot cannot install Docker Desktop on this kind of computer. Install Docker, \
@@ -541,6 +549,7 @@ mod tests {
             ("macos", "aarch64"),
             ("macos", "x86_64"),
             ("windows", "x86_64"),
+            ("windows", "aarch64"),
         ] {
             let download = download_for(os, arch).unwrap();
             assert!(

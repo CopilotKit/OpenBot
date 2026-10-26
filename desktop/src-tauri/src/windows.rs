@@ -558,6 +558,51 @@ pub fn blocker() -> Result<Option<Blocker>, Problem> {
     Ok(None)
 }
 
+/// The machine's own architecture, in `std::env::consts::ARCH`'s words, for choosing what to
+/// download and run.
+///
+/// Not this program's: Windows on ARM runs an x64 OpenBot under emulation, where `ARCH` says
+/// `x86_64` on an ARM64 machine. Docker's x64 installer refuses that machine, and an x64 Bun or
+/// Compose would run emulated when a native one exists. Windows says what the machine is through
+/// `IsWow64Process2` (Windows 10 1709 and later); anything it cannot answer falls back to `ARCH`.
+pub fn machine_arch() -> &'static str {
+    #[cfg(target_os = "windows")]
+    if let Some(arch) = windows_machine_arch() {
+        return arch;
+    }
+    std::env::consts::ARCH
+}
+
+#[cfg(target_os = "windows")]
+fn windows_machine_arch() -> Option<&'static str> {
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetCurrentProcess() -> *mut std::ffi::c_void;
+        fn IsWow64Process2(
+            process: *mut std::ffi::c_void,
+            process_machine: *mut u16,
+            native_machine: *mut u16,
+        ) -> i32;
+    }
+    let (mut process, mut native) = (0u16, 0u16);
+    // SAFETY: the pseudo-handle for this process is always valid, and both out-pointers are to
+    // locals that outlive the call.
+    if unsafe { IsWow64Process2(GetCurrentProcess(), &mut process, &mut native) } == 0 {
+        return None;
+    }
+    machine_name(native)
+}
+
+/// `IMAGE_FILE_MACHINE_*` to `ARCH`'s names, for the two machines Windows 11 runs on.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn machine_name(machine: u16) -> Option<&'static str> {
+    match machine {
+        0xAA64 => Some("aarch64"),
+        0x8664 => Some("x86_64"),
+        _ => None,
+    }
+}
+
 /// What OpenBot runs to clear a blocker: a PowerShell script, behind one administrator prompt when
 /// it changes the machine, and whether Windows has to restart before the change is real.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1827,6 +1872,20 @@ mod tests {
                 blocker.instruction().contains("restart"),
                 "{blocker:?} hides the restart"
             );
+        }
+    }
+
+    #[test]
+    fn the_machine_is_named_as_arch_names_it() {
+        assert_eq!(machine_name(0xAA64), Some("aarch64"));
+        assert_eq!(machine_name(0x8664), Some("x86_64"));
+        assert_eq!(
+            machine_name(0x014C),
+            None,
+            "32-bit x86 is not a machine OpenBot runs on"
+        );
+        if !cfg!(target_os = "windows") {
+            assert_eq!(machine_arch(), std::env::consts::ARCH);
         }
     }
 
