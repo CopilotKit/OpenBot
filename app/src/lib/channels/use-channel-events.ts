@@ -102,6 +102,12 @@ export type ChannelActivityEvent = {
    * settles without a turn starting or ending.
    */
   work?: ChannelWork[];
+  /**
+   * When the server read `work`, as fixed-width UTC that compares as a string. Two events can
+   * arrive in the other order from the one they were read in, so a list older than the one already
+   * held is ignored. See `newerWork`.
+   */
+  workAt?: string;
 };
 
 /** The infinite query's cache, which holds pages rather than one array. */
@@ -185,7 +191,8 @@ export function applyChannelEvent(
    */
   if (activity.busy !== undefined || activity.work !== undefined) {
     const busy = activity.busy ?? previous.busy;
-    const work = activity.work ?? previous.work;
+    const fresh = newerWork(previous, activity);
+    const work = fresh ? activity.work : previous.work;
     if (
       (previous.busy ?? false) === (busy ?? false) &&
       sameWork(previous.work, work)
@@ -196,6 +203,7 @@ export function applyChannelEvent(
       ...previous,
       ...(busy === undefined ? {} : { busy }),
       ...(work === undefined ? {} : { work }),
+      ...(fresh && activity.workAt ? { workAt: activity.workAt } : {}),
     };
     const pages = data.pages.slice();
     pages[holdingPage] = { ...page, channels };
@@ -238,6 +246,22 @@ function sameWork(
 }
 
 /**
+ * Whether this event's work list should replace the one held.
+ *
+ * Only when it carries one, and was not read before the one already held. A list from a fetch has
+ * no stamp and gives way to any event; an event without a stamp, from an older server, always
+ * wins, as every event did before stamps.
+ */
+function newerWork(
+  held: { workAt?: string },
+  activity: ChannelActivityEvent,
+): boolean {
+  if (activity.work === undefined) return false;
+  if (!held.workAt || !activity.workAt) return true;
+  return activity.workAt >= held.workAt;
+}
+
+/**
  * Apply one event's work list to the open conversation's own read.
  *
  * The conversation screen reads the channel by id rather than from the roster: the roster is paged,
@@ -248,9 +272,13 @@ export function applyChannelWork(
   channel: AgentChannel | undefined,
   activity: ChannelActivityEvent,
 ): AgentChannel | undefined {
-  if (!channel || activity.work === undefined) return channel;
+  if (!channel || !newerWork(channel, activity)) return channel;
   if (sameWork(channel.work, activity.work)) return channel;
-  return { ...channel, work: activity.work };
+  return {
+    ...channel,
+    work: activity.work,
+    ...(activity.workAt ? { workAt: activity.workAt } : {}),
+  };
 }
 
 const FIRST_RETRY_MS = 500;

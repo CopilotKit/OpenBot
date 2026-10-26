@@ -1,7 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import type { ChannelPage, ChannelSummary } from "../src/lib/channels/queries";
+import type {
+  AgentChannel,
+  ChannelPage,
+  ChannelSummary,
+} from "../src/lib/channels/queries";
 import {
   applyChannelEvent,
+  applyChannelWork,
   type ChannelActivityEvent,
 } from "../src/lib/channels/use-channel-events";
 
@@ -284,6 +289,59 @@ describe("a work list", () => {
         event({ channelId: "a", busy: true, work: [...work] }),
       ),
     ).toBe(data);
+  });
+
+  test("an older list arriving late does not undo a newer one", () => {
+    const settled = applyChannelEvent(
+      cache([channel("a", { busy: true, work })]),
+      event({
+        channelId: "a",
+        work: [],
+        workAt: "2026-10-26T10:00:02.000000Z",
+      }),
+    );
+    if (settled === "unknown") throw new Error("expected a patch");
+
+    const late = applyChannelEvent(
+      settled,
+      event({
+        channelId: "a",
+        busy: false,
+        work,
+        workAt: "2026-10-26T10:00:01.000000Z",
+      }),
+    );
+
+    if (late === "unknown") throw new Error("expected a patch");
+    // The busy flag still moves; the list read before the settle is ignored.
+    expect(late.pages[0]?.channels[0]?.busy).toBe(false);
+    expect(late.pages[0]?.channels[0]?.work).toEqual([]);
+  });
+
+  test("the open conversation's read ignores an older list too", () => {
+    const held: AgentChannel = {
+      id: "a",
+      name: "A",
+      agentIds: [],
+      threadId: "thread-a",
+      active: true,
+      lastMessageAt: null,
+      work: [],
+      workAt: "2026-10-26T10:00:02.000000Z",
+    };
+
+    expect(
+      applyChannelWork(
+        held,
+        event({ channelId: "a", work, workAt: "2026-10-26T10:00:01.000000Z" }),
+      ),
+    ).toBe(held);
+    expect(
+      applyChannelWork(
+        held,
+        event({ channelId: "a", work, workAt: "2026-10-26T10:00:03.000000Z" }),
+      )?.work,
+    ).toEqual(work);
   });
 });
 

@@ -28,6 +28,11 @@ export type AgentChannel = {
    * the socket last said. Absent from a server that predates it, which reads as nothing.
    */
   work?: ChannelWork[];
+  /**
+   * When the server read `work`, from the socket event that last set it. Absent on a fetched read.
+   * Kept so an older event arriving late does not put back a list that has moved on.
+   */
+  workAt?: string;
 };
 
 /**
