@@ -40,6 +40,19 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - Migration `0062_action_policy_labels` adds a `labels` column to `action_policies`, defaulting to
   empty. Existing boundary rules keep working and show as "Custom rule" until somebody names them.
 
+### A computer that is starting says so, instead of showing a problem
+
+Opening the Computer panel while a Bot's computer was asleep or starting showed "Can't show the
+screen right now", and an action during a cold start was marked "didn't work". The panel now says
+the computer is starting, or is off until the Bot next uses it, and shows a problem only when it
+can't be reached or has gone two and a half minutes without a picture; a live screen being
+reconnected shows a small "Reconnecting…" badge. An action turned away by a cold start reads "not
+done yet" and the Bot is told to try again. Looking at the panel no longer wakes a sleeping computer,
+a Bot says in one sentence what it is about to do before its first computer action, and a hosted
+computer's cold start answers within 45 seconds, under a load balancer's usual 60-second idle
+timeout. A Docker computer still booting its browser reads as starting once the supervisor is
+upgraded too; an older supervisor works as before.
+
 ### Screens share one spacing, row and empty-state design
 
 Every configuration screen now takes its spacing from the page frame: 32px under the title, 48px
