@@ -1,7 +1,13 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
 import { useEffect } from "react";
-import { type ChannelPage, type ChannelSummary, channelKeys } from "./queries";
+import {
+  type AgentChannel,
+  type ChannelPage,
+  type ChannelSummary,
+  type ChannelWork,
+  channelKeys,
+} from "./queries";
 import { socketUrl as buildSocketUrl } from "@/lib/socket-url";
 
 /**
@@ -90,6 +96,12 @@ export type ChannelActivityEvent = {
    * indicator without disturbing the preview or the order.
    */
   busy?: boolean;
+  /**
+   * Everything the channel is waiting on now, replacing what the row held. Absent on an ordinary
+   * activity event. Rides on every busy event, and alone on the one the server sends when a hop
+   * settles without a turn starting or ending.
+   */
+  work?: ChannelWork[];
 };
 
 /** The infinite query's cache, which holds pages rather than one array. */
@@ -171,10 +183,20 @@ export function applyChannelEvent(
    * is also not activity — a channel does not jump to the top of the roster because a turn started
    * in it — so the order is left exactly as it was.
    */
-  if (activity.busy !== undefined) {
-    if ((previous.busy ?? false) === activity.busy) return data;
+  if (activity.busy !== undefined || activity.work !== undefined) {
+    const busy = activity.busy ?? previous.busy;
+    const work = activity.work ?? previous.work;
+    if (
+      (previous.busy ?? false) === (busy ?? false) &&
+      sameWork(previous.work, work)
+    )
+      return data;
     const channels = page.channels.slice();
-    channels[index] = { ...previous, busy: activity.busy };
+    channels[index] = {
+      ...previous,
+      ...(busy === undefined ? {} : { busy }),
+      ...(work === undefined ? {} : { work }),
+    };
     const pages = data.pages.slice();
     pages[holdingPage] = { ...page, channels };
     return { ...data, pages };
@@ -192,6 +214,43 @@ export function applyChannelEvent(
   const pages = data.pages.slice();
   pages[holdingPage] = { ...page, channels: next };
   return { ...data, pages };
+}
+
+/**
+ * The same list, entry for entry. Compared rather than replaced so an event that changes nothing
+ * leaves the cache alone and the transcript does not re-render to draw the same rows.
+ */
+function sameWork(
+  left: readonly ChannelWork[] | undefined,
+  right: readonly ChannelWork[] | undefined,
+): boolean {
+  const a = left ?? [];
+  const b = right ?? [];
+  return (
+    a.length === b.length &&
+    a.every(
+      (entry, at) =>
+        entry.key === b[at]?.key &&
+        entry.since === b[at]?.since &&
+        entry.botName === b[at]?.botName,
+    )
+  );
+}
+
+/**
+ * Apply one event's work list to the open conversation's own read.
+ *
+ * The conversation screen reads the channel by id rather than from the roster: the roster is paged,
+ * and the conversation somebody has open need not be on a page they have loaded. So the list is
+ * patched there too, and only there when the event carries one.
+ */
+export function applyChannelWork(
+  channel: AgentChannel | undefined,
+  activity: ChannelActivityEvent,
+): AgentChannel | undefined {
+  if (!channel || activity.work === undefined) return channel;
+  if (sameWork(channel.work, activity.work)) return channel;
+  return { ...channel, work: activity.work };
 }
 
 const FIRST_RETRY_MS = 500;
@@ -219,6 +278,7 @@ export function useChannelEvents() {
         retryDelay = FIRST_RETRY_MS;
         // Recover events missed while the socket was disconnected.
         void queryClient.invalidateQueries({ queryKey: channelKeys.list() });
+        void queryClient.invalidateQueries({ queryKey: channelKeys.details() });
       };
 
       socket.onmessage = (message) => {
@@ -229,6 +289,9 @@ export function useChannelEvents() {
         // `channelId`, because this message has none.
         if (isResync(parsed)) {
           void queryClient.invalidateQueries({ queryKey: channelKeys.list() });
+          void queryClient.invalidateQueries({
+            queryKey: channelKeys.details(),
+          });
           return;
         }
 
@@ -259,6 +322,14 @@ export function useChannelEvents() {
             return data;
           },
         );
+
+        if (activity.work !== undefined) {
+          queryClient.setQueryData(
+            channelKeys.detail(activity.channelId),
+            (channel: AgentChannel | undefined) =>
+              applyChannelWork(channel, activity),
+          );
+        }
 
         /*
          * A tab looking at the channel somebody just deleted in another tab.

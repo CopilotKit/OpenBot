@@ -226,6 +226,68 @@ describe("a busy signal", () => {
 });
 
 /**
+ * What the channel is waiting on, carried whole on every busy event and alone on a settle.
+ *
+ * Replaced rather than merged, so the newest event is the answer and a retried hop never shows
+ * twice. The sidebar lights from it as well as from `busy`, so a hop still running after a turn
+ * ended keeps the row lit.
+ */
+describe("a work list", () => {
+  const work = [
+    {
+      kind: "handoff" as const,
+      key: "hop-1",
+      botId: "ana",
+      botName: "Ana",
+      since: "2026-10-26T10:00:00.000Z",
+    },
+  ];
+
+  test("rides on a busy event and patches only the busy flag and the list", () => {
+    const data = cache([
+      channel("a", { lastMessage: "Said something." }),
+      channel("b"),
+    ]);
+
+    const patched = applyChannelEvent(
+      data,
+      event({ channelId: "a", busy: true, work }),
+    );
+
+    expect(patched).not.toBe("unknown");
+    if (patched === "unknown") return;
+    expect(patched.pages[0]?.channels[0]).toEqual({
+      ...(data.pages[0]?.channels[0] as ChannelSummary),
+      busy: true,
+      work,
+    });
+  });
+
+  test("a settle replaces the list and leaves the busy flag as it was", () => {
+    const patched = applyChannelEvent(
+      cache([channel("a", { busy: true, work })]),
+      event({ channelId: "a", work: [] }),
+    );
+
+    expect(patched).not.toBe("unknown");
+    if (patched === "unknown") return;
+    expect(patched.pages[0]?.channels[0]?.busy).toBe(true);
+    expect(patched.pages[0]?.channels[0]?.work).toEqual([]);
+  });
+
+  test("the same list again changes nothing", () => {
+    const data = cache([channel("a", { busy: true, work })]);
+
+    expect(
+      applyChannelEvent(
+        data,
+        event({ channelId: "a", busy: true, work: [...work] }),
+      ),
+    ).toBe(data);
+  });
+});
+
+/**
  * A conversation the server has just named.
  *
  * Written by a sweep some seconds after the message that prompted it, so it arrives on its own long

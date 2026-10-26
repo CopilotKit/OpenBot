@@ -210,7 +210,8 @@ function ChannelRow({
         }
         pinned={channel.pinned}
         unread={unread}
-        busy={channel.busy ?? false}
+        // A turn running, or work the conversation waits on between turns: a hop, a routine.
+        busy={(channel.busy ?? false) || (channel.work?.length ?? 0) > 0}
       />
     </motion.div>
   );
