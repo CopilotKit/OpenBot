@@ -3047,7 +3047,9 @@ fn show_setup<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), String>
 
 /// The setup screens' background in light and in dark, which the macOS title bar takes while they
 /// show. The same values as `--surface-main` in styles.css.
+#[cfg(target_os = "macos")]
 const SETUP_BACKGROUND: tauri::window::Color = tauri::window::Color(0xde, 0xde, 0xe9, 0xff);
+#[cfg(target_os = "macos")]
 const SETUP_BACKGROUND_DARK: tauri::window::Color = tauri::window::Color(0x01, 0x05, 0x07, 0xff);
 
 /// Whether `url` is the setup page rather than OpenBot.
