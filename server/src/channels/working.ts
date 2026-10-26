@@ -25,6 +25,7 @@ import {
   gt,
   inArray,
   isNull,
+  like,
   lt,
   lte,
   notLike,
@@ -116,7 +117,8 @@ export async function workIn(
    * of when the question was put.
    */
   const asked = alias(workItems, "asked");
-  const threadOf = sql<string>`${workItems.payload}->>'threadId'`;
+  // The same expression as `work_items_open_thread_idx`, so the read uses it. See work.ts.
+  const threadOf = sql<string>`(${workItems.payload}->>'threadId')`;
   const hops = await database
     .select({
       key: workItems.key,
@@ -130,7 +132,16 @@ export async function workIn(
       asked,
       and(
         eq(asked.kind, workItems.kind),
-        sql`${workItems.key} = ${RELAY_PREFIX} || ${asked.key}`,
+        like(workItems.key, `${RELAY_PREFIX}%`),
+        /*
+         * The asked key cut out of the relay's, rather than the relay's built from every asked
+         * key: this way round it is a primary-key lookup per relay, and the other way round is a
+         * scan of every hop the table holds.
+         */
+        eq(
+          asked.key,
+          sql`substr(${workItems.key}, ${RELAY_PREFIX.length + 1})`,
+        ),
       ),
     )
     .where(
