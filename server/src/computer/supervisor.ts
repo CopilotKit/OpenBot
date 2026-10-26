@@ -115,8 +115,18 @@ export function createDockerSupervisorProvider(
       stopped?: boolean;
       reset?: boolean;
       computers?: SupervisorComputerLocation[];
+      starting?: boolean;
     } | null;
     if (!response.ok) {
+      // The supervisor's own health wait ran out on a container that is up and still booting. The
+      // same slow start as a timeout here, so it gets the same gentle answer.
+      if (
+        startingOnTimeout &&
+        response.status === 503 &&
+        body?.starting === true
+      ) {
+        throw new ComputerStillStartingError();
+      }
       throw new SupervisorError(
         body?.error ?? `The supervisor answered ${response.status}.`,
       );
