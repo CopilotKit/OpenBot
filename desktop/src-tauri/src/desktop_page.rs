@@ -34,7 +34,9 @@ fn appearance(window: tauri::Window, dark: bool) -> Result<(), String> {
         } else {
             tauri::Theme::Light
         }))
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    crate::page_appearance(&window, dark);
+    Ok(())
 }
 
 /// `memory` false answers in milliseconds without container memory; see `read_desktop_status`.

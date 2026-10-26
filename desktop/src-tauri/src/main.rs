@@ -3101,9 +3101,9 @@ fn show_setup<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), String>
 
 /// The setup screens' background in light and in dark, which the macOS title bar takes while they
 /// show. The same values as `--surface-main` in styles.css.
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 const SETUP_BACKGROUND: tauri::window::Color = tauri::window::Color(0xde, 0xde, 0xe9, 0xff);
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 const SETUP_BACKGROUND_DARK: tauri::window::Color = tauri::window::Color(0x01, 0x05, 0x07, 0xff);
 
 /// Whether `url` is the setup page rather than OpenBot.
@@ -3203,6 +3203,91 @@ fn match_title_bar<R: tauri::Runtime>(window: &tauri::Window<R>, page: WindowPag
         };
         let _ = window.set_background_color((page == WindowPage::Setup).then_some(ground));
         show_window_title(window, page != WindowPage::OwnedApp);
+    }
+    // OpenBot's own page tints the bar to its own light or dark through `appearance`.
+    #[cfg(target_os = "windows")]
+    match page {
+        WindowPage::Setup => {
+            let dark =
+                SETUP_THEME.map_or_else(|| window.theme().ok(), Some) == Some(tauri::Theme::Dark);
+            tint_title_bar(window, Some(dark));
+        }
+        WindowPage::OwnedApp => {}
+        WindowPage::LocalApp | WindowPage::Other => tint_title_bar(window, None),
+    }
+}
+
+/// OpenBot's own page reporting its light or dark (`APP_THEME_PAGE`). On Windows the title bar
+/// takes the page's ground, when the page is one whose ground that is: an OpenBot from before the
+/// reskin keeps Windows's own bar, in the page's light or dark.
+pub(crate) fn page_appearance<R: tauri::Runtime>(window: &tauri::Window<R>, dark: bool) {
+    #[cfg(target_os = "windows")]
+    {
+        let app = window.app_handle();
+        let owned = app
+            .get_webview_window(window.label())
+            .and_then(|own| own.url().ok())
+            .is_some_and(|url| window_page(app, &url) == WindowPage::OwnedApp);
+        if owned {
+            tint_title_bar(window, Some(dark));
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    let _ = (window, dark);
+}
+
+/**
+Windows 11's title bar in the ground of the page under it, or Windows's own colours for `None`.
+
+`Some(dark)` is the setup screens' ground, which OpenBot's own pages share (`--background` in the
+app's styles): the bar, its text and the window's border become one surface with the page instead
+of a white band across its top. Windows 10 has no such attributes and keeps its bar; the calls fail
+there and are ignored.
+*/
+#[cfg(target_os = "windows")]
+fn tint_title_bar<R: tauri::Runtime>(window: &tauri::Window<R>, dark: Option<bool>) {
+    #[link(name = "dwmapi")]
+    extern "system" {
+        fn DwmSetWindowAttribute(
+            window: *mut std::ffi::c_void,
+            attribute: u32,
+            value: *const std::ffi::c_void,
+            size: u32,
+        ) -> i32;
+    }
+    const BORDER_COLOR: u32 = 34;
+    const CAPTION_COLOR: u32 = 35;
+    const TEXT_COLOR: u32 = 36;
+    /// `DWMWA_COLOR_DEFAULT`: give the attribute back to Windows.
+    const DEFAULT: u32 = 0xFFFF_FFFF;
+    // COLORREF is 0x00BBGGRR.
+    let colorref = |tauri::window::Color(r, g, b, _): tauri::window::Color| {
+        u32::from(r) | u32::from(g) << 8 | u32::from(b) << 16
+    };
+    let (caption, text) = match dark {
+        Some(true) => (colorref(SETUP_BACKGROUND_DARK), 0x00F9_F7F7),
+        Some(false) => (colorref(SETUP_BACKGROUND), colorref(SETUP_BACKGROUND_DARK)),
+        None => (DEFAULT, DEFAULT),
+    };
+    let Ok(hwnd) = window.hwnd() else {
+        return;
+    };
+    let hwnd = hwnd.0;
+    for (attribute, value) in [
+        (CAPTION_COLOR, caption),
+        (BORDER_COLOR, caption),
+        (TEXT_COLOR, text),
+    ] {
+        // SAFETY: `hwnd` is this window's live handle, and `value` is a u32 that outlives the call,
+        // which is the size and type these three attributes take.
+        unsafe {
+            DwmSetWindowAttribute(
+                hwnd,
+                attribute,
+                (&value as *const u32).cast(),
+                std::mem::size_of::<u32>() as u32,
+            );
+        }
     }
 }
 
@@ -5859,6 +5944,16 @@ fn install_menus<R: tauri::Runtime>(
         show_menu_images(&icon, dark);
     }
 
+    /*
+     * No menu bar on Windows. Windows draws it as a white strip of its own that no colour reaches,
+     * between a title bar tinted to the page and the page itself. Nothing is lost: the Edit menu is
+     * there for macOS, which routes Command-V through the menu bar, while WebView2 handles Ctrl+V
+     * itself; and the OpenBot menu's items are in the tray and in Settings → This computer.
+     */
+    if cfg!(target_os = "windows") {
+        return Ok(());
+    }
+
     // The same items on the window itself, because the tray cannot be relied on.
     //
     // Linux needs a tray host to draw the icon, and Windows can place it in overflow.
@@ -6156,11 +6251,12 @@ fn main() {
                 && payload.event() == tauri::webview::PageLoadEvent::Finished
             {
                 allow_window_drag(window.app_handle(), payload.url());
-                if cfg!(target_os = "macos") {
+                // macOS draws the window's outline from it; Windows tints the title bar with it.
+                if cfg!(any(target_os = "macos", target_os = "windows")) {
                     let _ = window.eval(APP_THEME_PAGE);
-                    if page == WindowPage::OwnedApp {
-                        let _ = window.eval(OVERLAY_TITLE_BAR_PAGE);
-                    }
+                }
+                if cfg!(target_os = "macos") && page == WindowPage::OwnedApp {
+                    let _ = window.eval(OVERLAY_TITLE_BAR_PAGE);
                 }
             }
         })
