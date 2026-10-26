@@ -66,6 +66,8 @@ function server(accountMode: "shared" | null): PluginServer {
     dynamicClient: false,
     accountMode,
     sharedVendorConnected: false,
+    ownerGrants: "any",
+    ownerGrantsChosen: null,
     tools: [],
     withdrawn: [],
   };

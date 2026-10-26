@@ -26,6 +26,7 @@ import {
   removeSkillMutationOptions,
   saveSkillMutationOptions,
   setAccountModeMutationOptions,
+  setOwnerGrantsMutationOptions,
   setPluginGrantMutationOptions,
 } from "../src/lib/plugins/mutations";
 import { pluginKeys } from "../src/lib/plugins/queries";
@@ -299,6 +300,14 @@ const REFUSALS: {
       mode: "shared" as const,
     },
   },
+  {
+    name: "choosing who may give an app to a Bot",
+    route: "PUT /api/plugins/servers/:id/owner-grants",
+    status: 404,
+    message: "That app hasn't been added.",
+    factory: setOwnerGrantsMutationOptions,
+    variables: { serverId: "linear", ownerGrants: "admin" as const },
+  },
 ];
 
 for (const refusal of REFUSALS) {
@@ -566,6 +575,12 @@ const ENCODED_REQUESTS: {
     url: `/api/plugins/servers/${ENCODED_ID}/account-mode`,
     build: setAccountModeMutationOptions,
     variables: { serverId: HOSTILE_ID, mode: "shared" as const },
+  },
+  {
+    name: "choosing who may give an app to a Bot",
+    url: `/api/plugins/servers/${ENCODED_ID}/owner-grants`,
+    build: setOwnerGrantsMutationOptions,
+    variables: { serverId: HOSTILE_ID, ownerGrants: "any" as const },
   },
   {
     /*
