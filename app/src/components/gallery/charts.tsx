@@ -10,6 +10,39 @@ const point = z.object({
   value: z.number().describe("Its value"),
 });
 
+const source = z.object({
+  title: z
+    .string()
+    .describe("The page, report or dataset, named the way a person would"),
+  url: z.string().optional().describe("Its address, when it has one"),
+});
+
+/**
+ * Where the figures came from, drawn under every chart.
+ *
+ * Required of the model, optional for the renderer. A chart is the most confident-looking thing a
+ * Bot can produce, and a number recalled from training looks exactly like one read this morning, so
+ * the Bot has to say which it is every time it draws one. Older conversations were drawn before the
+ * field existed, which is why the card still renders without it.
+ */
+const provenance = {
+  basis: z
+    .enum(["read", "given", "own-knowledge"])
+    .describe(
+      "Where the figures come from. read: you read them with a tool in this conversation, and sources lists what you read. given: the person supplied them, in the conversation or a file. own-knowledge: you recalled them without looking them up; the chart then says they are unchecked. For figures that change over time, look them up before charting if you can",
+    ),
+  sources: z
+    .array(source)
+    .optional()
+    .describe("What you read the figures from. Required when basis is read"),
+  asOf: z
+    .string()
+    .optional()
+    .describe(
+      "When the figures are from, e.g. 'Q3 2026' or '24 Oct 2026'. Leave out for figures that do not date",
+    ),
+};
+
 const common = {
   title: z.string().describe("A short title for the chart"),
   caption: z
@@ -18,7 +51,63 @@ const common = {
     .describe(
       "One line under the title saying what the reader should take from it",
     ),
+  ...provenance,
 };
+
+type Provenance = Partial<{
+  basis: "read" | "given" | "own-knowledge";
+  sources: { title?: string; url?: string }[];
+  asOf: string;
+}>;
+
+/** Only web addresses become links. Anything else the model wrote is shown as text. */
+function isWebAddress(url: string | undefined): url is string {
+  return !!url && /^https?:\/\//i.test(url);
+}
+
+/** The line under a chart that says where its figures came from. Nothing when nobody said. */
+function Sources({ basis, sources, asOf }: Provenance) {
+  const named = (sources ?? []).filter((entry) => entry?.title?.trim());
+  const unchecked = basis === "own-knowledge";
+  if (!unchecked && named.length === 0 && !asOf) return null;
+  return (
+    <p className="mt-3 text-xs text-muted-foreground">
+      {unchecked ? (
+        <span className="text-amber-700 dark:text-amber-400">
+          From the Bot's own knowledge. Not checked against a source.
+        </span>
+      ) : null}
+      {named.length > 0 ? (
+        <>
+          {"Sources: "}
+          {named.map((entry, index) => (
+            <span key={`${entry.title}|${entry.url ?? ""}`}>
+              {index > 0 ? ", " : null}
+              {isWebAddress(entry.url) ? (
+                <a
+                  className="underline underline-offset-2 hover:text-foreground"
+                  href={entry.url}
+                  rel="noreferrer"
+                  target="_blank"
+                >
+                  {entry.title}
+                </a>
+              ) : (
+                entry.title
+              )}
+            </span>
+          ))}
+        </>
+      ) : null}
+      {asOf ? (
+        <>
+          {unchecked || named.length > 0 ? " · " : null}
+          {`As of ${asOf}`}
+        </>
+      ) : null}
+    </p>
+  );
+}
 
 /** Charts share a height so several in one answer do not stagger down the page. */
 const HEIGHT = 180;
@@ -66,6 +155,7 @@ export function BarChartCard({
   title,
   caption,
   points: given,
+  ...origin
 }: Partial<z.infer<typeof BarChartProps>>) {
   const points = given ?? [];
   const max = Math.max(...points.map((entry) => entry.value ?? 0), 0);
@@ -106,6 +196,7 @@ export function BarChartCard({
           ))}
         </div>
       )}
+      <Sources {...origin} />
     </GalleryFrame>
   );
 }
@@ -121,6 +212,7 @@ export function PieChartCard({
   title,
   caption,
   points: given,
+  ...origin
 }: Partial<z.infer<typeof PieChartProps>>) {
   const points = given ?? [];
   const size = 160;
@@ -186,6 +278,7 @@ export function PieChartCard({
           </ul>
         </div>
       )}
+      <Sources {...origin} />
     </GalleryFrame>
   );
 }
@@ -313,6 +406,7 @@ export function LineChartCard(args: Partial<LineArgs>) {
       ) : (
         <Plot filled={false} labels={labels} series={series} />
       )}
+      <Sources {...args} />
     </GalleryFrame>
   );
 }
@@ -332,6 +426,7 @@ export function AreaChartCard(args: Partial<LineArgs>) {
       ) : (
         <Plot filled labels={labels} series={series} />
       )}
+      <Sources {...args} />
     </GalleryFrame>
   );
 }
@@ -356,6 +451,7 @@ export function ProgressChartCard({
   title,
   caption,
   points: given,
+  ...origin
 }: Partial<z.infer<typeof ProgressChartProps>>) {
   const points = given ?? [];
   return (
@@ -391,6 +487,7 @@ export function ProgressChartCard({
           })}
         </ul>
       )}
+      <Sources {...origin} />
     </GalleryFrame>
   );
 }
@@ -406,6 +503,7 @@ export const GALLERY: GalleryComponent[] = [
     parameters: BarChartProps,
     Component: BarChartCard as GalleryComponent["Component"],
     preview: {
+      basis: "given",
       title: "Revenue by team",
       caption: "Sales leads, and Engineering is closing the gap.",
       points: [
@@ -425,6 +523,7 @@ export const GALLERY: GalleryComponent[] = [
     parameters: PieChartProps,
     Component: PieChartCard as GalleryComponent["Component"],
     preview: {
+      basis: "given",
       title: "Where the month went",
       points: [
         { label: "Build", value: 48 },
@@ -443,6 +542,7 @@ export const GALLERY: GalleryComponent[] = [
     parameters: LineChartProps,
     Component: LineChartCard as GalleryComponent["Component"],
     preview: {
+      basis: "given",
       title: "Signups",
       caption: "Six weeks, one release.",
       labels: ["W1", "W2", "W3", "W4", "W5", "W6"],
@@ -459,6 +559,7 @@ export const GALLERY: GalleryComponent[] = [
     parameters: AreaChartProps,
     Component: AreaChartCard as GalleryComponent["Component"],
     preview: {
+      basis: "given",
       title: "Storage used",
       caption: "Growing steadily since the migration.",
       labels: ["Jan", "Feb", "Mar", "Apr", "May"],
@@ -475,6 +576,7 @@ export const GALLERY: GalleryComponent[] = [
     parameters: ProgressChartProps,
     Component: ProgressChartCard as GalleryComponent["Component"],
     preview: {
+      basis: "given",
       title: "Migration to the new runtime",
       caption: "Two services left.",
       points: [
