@@ -556,7 +556,7 @@ test("an owner's Allow gives the app in one press, naming the Bot and the app an
   );
   fireEvent.click(await view.findByRole("button", { name: /^Let .* Gmail$/ }));
   await waitFor(() =>
-    expect(sent.filter((call) => call.method === "POST")).toEqual([
+    expect(sent.filter((call) => call.method === "POST")).toStrictEqual([
       {
         method: "POST",
         url: "/api/plugins/for/expenses/apps/composio-gmail/give",
