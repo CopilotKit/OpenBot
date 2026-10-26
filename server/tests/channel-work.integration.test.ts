@@ -15,6 +15,7 @@ import { createDatabase } from "../src/db/client";
 import {
   agentProfiles,
   agents,
+  channelMemberships,
   channels,
   intelligenceChannelMappings,
   routineRuns,
@@ -150,16 +151,61 @@ async function hop(input: {
   return key;
 }
 
-async function workFor(channel: { id: string; threadId: string }) {
-  return (await store.workIn([channel])).get(channel.id) ?? [];
+async function workFor(
+  owner: AgentActor,
+  channel: { id: string; threadId: string },
+) {
+  return (await store.workIn(owner, [channel])).get(channel.id) ?? [];
+}
+
+/** A second person in the channel, with a thread of their own in it, as `group.ts` adds one. */
+async function addMember(channelId: string) {
+  const member = await createUser();
+  const threadId = `${testPrefix}-thread-${randomUUID()}`;
+  await database
+    .insert(channelMemberships)
+    .values({ channelId, userId: member.id });
+  await database
+    .insert(intelligenceChannelMappings)
+    .values({ userId: member.id, channelId, threadId });
+  return { member, channel: { id: channelId, threadId } };
+}
+
+/** Hear what the activity socket would carry to each of these people. */
+async function listen(people: AgentActor[]) {
+  const heard = new Map<string, ChannelActivityEvent[]>(
+    people.map((person) => [person.id, []]),
+  );
+  const hub = createChannelEventHub();
+  const detachers = people.map((person) =>
+    hub.register(person.id, (payload) => {
+      heard.get(person.id)?.push(JSON.parse(payload) as ChannelActivityEvent);
+    }),
+  );
+  const listener = await startChannelActivityListener(databaseUrl, hub);
+  return {
+    heard,
+    async until(
+      count: (heard: Map<string, ChannelActivityEvent[]>) => boolean,
+    ) {
+      const deadline = Date.now() + 5_000;
+      while (!count(heard) && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+    },
+    async stop() {
+      for (const detach of detachers) detach();
+      await listener.stop();
+    },
+  };
 }
 
 describe("what a conversation is waiting on", () => {
   test("a Bot it asked, from the moment the hop is queued", async () => {
-    const { channel } = await setup();
+    const { owner, channel } = await setup();
     const key = await hop({ threadId: channel.threadId, toName: "Ana" });
 
-    const work = await workFor(channel);
+    const work = await workFor(owner, channel);
 
     expect(work).toHaveLength(1);
     expect(work[0]).toMatchObject({
@@ -172,21 +218,21 @@ describe("what a conversation is waiting on", () => {
   });
 
   test("nothing, once the hop is finished", async () => {
-    const { channel } = await setup();
+    const { owner, channel } = await setup();
     await hop({ threadId: channel.threadId, finished: true });
 
-    expect(await workFor(channel)).toEqual([]);
+    expect(await workFor(owner, channel)).toEqual([]);
   });
 
   test("one entry for a hop however many times it was tried", async () => {
-    const { channel } = await setup();
+    const { owner, channel } = await setup();
     await hop({ threadId: channel.threadId, attempts: 3 });
 
-    expect(await workFor(channel)).toHaveLength(1);
+    expect(await workFor(owner, channel)).toHaveLength(1);
   });
 
   test("two Bots asked at once are two entries, oldest first", async () => {
-    const { channel } = await setup();
+    const { owner, channel } = await setup();
     await hop({
       threadId: channel.threadId,
       toBotId: "ben",
@@ -198,13 +244,13 @@ describe("what a conversation is waiting on", () => {
       createdAt: new Date(Date.now() - 5_000),
     });
 
-    const work = await workFor(channel);
+    const work = await workFor(owner, channel);
 
     expect(work.map((entry) => entry.botId)).toEqual(["ana", "ben"]);
   });
 
   test("not a hop that was given up on, nor the notice saying so", async () => {
-    const { channel } = await setup();
+    const { owner, channel } = await setup();
     const key = await hop({ threadId: channel.threadId, attempts: 5 });
     await hop({
       threadId: channel.threadId,
@@ -212,18 +258,18 @@ describe("what a conversation is waiting on", () => {
       answerIn: channel.threadId,
     });
 
-    expect(await workFor(channel)).toEqual([]);
+    expect(await workFor(owner, channel)).toEqual([]);
   });
 
   test("a given-up hop's last attempt, while it is still running", async () => {
-    const { channel } = await setup();
+    const { owner, channel } = await setup();
     await hop({ threadId: channel.threadId, attempts: 5, claimed: true });
 
-    expect(await workFor(channel)).toHaveLength(1);
+    expect(await workFor(owner, channel)).toHaveLength(1);
   });
 
   test("an answer on its way back is the same wait, with the same clock", async () => {
-    const { channel } = await setup();
+    const { owner, channel } = await setup();
     const askedAt = new Date(Date.now() - 30_000);
     const key = await hop({
       threadId: channel.threadId,
@@ -239,7 +285,7 @@ describe("what a conversation is waiting on", () => {
       answerIn: channel.threadId,
     });
 
-    const work = await workFor(channel);
+    const work = await workFor(owner, channel);
 
     expect(work).toHaveLength(1);
     expect(work[0]).toMatchObject({
@@ -252,7 +298,7 @@ describe("what a conversation is waiting on", () => {
   });
 
   test("not once the answer is being given", async () => {
-    const { channel } = await setup();
+    const { owner, channel } = await setup();
     const key = await hop({ threadId: channel.threadId, finished: true });
     await hop({
       threadId: channel.threadId,
@@ -261,14 +307,14 @@ describe("what a conversation is waiting on", () => {
       claimed: true,
     });
 
-    expect(await workFor(channel)).toEqual([]);
+    expect(await workFor(owner, channel)).toEqual([]);
   });
 
   test("not a hop asked from a thread no conversation shows", async () => {
-    const { channel } = await setup();
+    const { owner, channel } = await setup();
     await hop({ threadId: `scratch-${testPrefix}` });
 
-    expect(await workFor(channel)).toEqual([]);
+    expect(await workFor(owner, channel)).toEqual([]);
   });
 
   test("a routine firing into it, until the run has an outcome", async () => {
@@ -287,7 +333,7 @@ describe("what a conversation is waiting on", () => {
     const runId = `${testPrefix}-run`;
     await database.insert(routineRuns).values({ id: runId, routineId });
 
-    const running = await workFor(channel);
+    const running = await workFor(owner, channel);
     expect(running).toHaveLength(1);
     expect(running[0]).toMatchObject({
       kind: "routine",
@@ -300,7 +346,30 @@ describe("what a conversation is waiting on", () => {
       .update(routineRuns)
       .set({ status: "succeeded", finishedAt: new Date() })
       .where(eq(routineRuns.id, runId));
-    expect(await workFor(channel)).toEqual([]);
+    expect(await workFor(owner, channel)).toEqual([]);
+  });
+  test("only what this person's own thread and routines wait on, in a shared channel", async () => {
+    const { owner, asker, channel } = await setup();
+    const { member, channel: theirs } = await addMember(channel.id);
+    await hop({ threadId: channel.threadId, toName: "Ana" });
+    const routineId = `${testPrefix}-routine-shared`;
+    await database.insert(routines).values({
+      id: routineId,
+      ownerUserId: owner.id,
+      agentId: asker,
+      channelId: channel.id,
+      instruction: "Post the standup summary.",
+      cron: "0 9 * * *",
+      nextRunAt: new Date(Date.now() + 86_400_000),
+    });
+    createdRoutineIds.push(routineId);
+    await database
+      .insert(routineRuns)
+      .values({ id: `${testPrefix}-run-shared`, routineId });
+
+    expect(await workFor(owner, channel)).toHaveLength(2);
+    // The other member's read names neither the Bot the owner asked nor the owner's routine.
+    expect(await workFor(member, theirs)).toEqual([]);
   });
 });
 
@@ -348,6 +417,41 @@ describe("announcing it", () => {
     } finally {
       detach();
       await listener.stop();
+    }
+  });
+
+  test("another member hears that a turn moved, and nothing about whom it asked", async () => {
+    const { owner, channel } = await setup();
+    const { member } = await addMember(channel.id);
+    const socket = await listen([owner, member]);
+    try {
+      await hop({ threadId: channel.threadId, toName: "Ana" });
+      await store.signalBusy(channel.threadId, true);
+      await store.signalWork(channel.threadId);
+      await socket.until(
+        (heard) =>
+          (heard.get(owner.id)?.length ?? 0) >= 2 &&
+          (heard.get(member.id)?.length ?? 0) >= 1,
+      );
+
+      const ownerHeard = socket.heard.get(owner.id) ?? [];
+      const memberHeard = socket.heard.get(member.id) ?? [];
+      expect(ownerHeard).toHaveLength(2);
+      expect(ownerHeard[0]?.work).toHaveLength(1);
+      expect(ownerHeard[0]?.workAt).toMatch(/^\d{4}-\d{2}-\d{2}T[\d:.]+Z$/);
+      // Stamped in the order they were read, so a browser can drop the older of two.
+      expect(
+        (ownerHeard[0]?.workAt ?? "") < (ownerHeard[1]?.workAt ?? ""),
+      ).toBe(true);
+      // The settle is the owner's alone; the busy signal reaches the member without the list.
+      expect(memberHeard).toHaveLength(1);
+      expect(memberHeard[0]).toMatchObject({
+        channelId: channel.id,
+        busy: true,
+      });
+      expect(memberHeard[0]?.work).toBeUndefined();
+    } finally {
+      await socket.stop();
     }
   });
 });

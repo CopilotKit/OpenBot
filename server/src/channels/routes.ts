@@ -243,8 +243,12 @@ export type ChannelStore = {
    * turned into a relay. Every busy signal carries the same list, so this is only for those.
    */
   signalWork(threadId: string): Promise<void>;
-  /** What each of these channels is waiting on. See `workIn` in working.ts. */
+  /**
+   * What each of these channels is waiting on, for this person: their own thread's hops and their
+   * own routines. See `workIn` in working.ts.
+   */
   workIn(
+    actor: AgentActor,
     channels: readonly { id: string; threadId: string }[],
   ): Promise<Map<string, ChannelWork[]>>;
 };
@@ -338,10 +342,18 @@ export function createChannelStore(
    * truth. Just the announcement, carrying the members the same way recordActivity does. The list
    * rides on every one of these so a client never merges a delta into what it holds: the newest
    * event is the whole answer, and the same answer a reload gets.
+   *
+   * THE LIST GOES ONLY TO THE PERSON WHOSE THREAD IT IS. Each member has a thread of their own in
+   * a channel, and what that thread waits on names the Bots its owner asked. The other members
+   * hear that a turn started or ended, as they always have, and nothing about whom it asked.
+   *
+   * `workAt` is the database's clock just before the list was read. Two announcements for one
+   * channel can be read on two replicas and delivered in either order, so the browser keeps the
+   * list with the latest `workAt` rather than the one that happened to arrive last.
    */
   const announceWork = async (
     channelId: string,
-    threadId: string | null,
+    thread: { threadId: string; userId: string } | null,
     busy?: boolean,
   ): Promise<void> => {
     const members = await database
@@ -350,23 +362,47 @@ export function createChannelStore(
       .where(eq(channelMemberships.channelId, channelId));
     if (members.length === 0) return;
 
-    const work = threadId
-      ? ((await workIn(database, [{ id: channelId, threadId }])).get(
-          channelId,
-        ) ?? [])
-      : [];
-    const event: ChannelActivityEvent = {
+    const notify = (event: ChannelActivityEvent) =>
+      database.execute(
+        sql`select pg_notify(${CHANNEL_ACTIVITY_TOPIC}, ${JSON.stringify(event)})`,
+      );
+    const base = {
       channelId,
-      memberIds: members.map((member) => member.userId),
       lastMessage: null,
       lastMessageAt: null,
       lastMessageAgentId: null,
       ...(busy === undefined ? {} : { busy }),
-      work: work.map(channelWorkDto),
     };
-    await database.execute(
-      sql`select pg_notify(${CHANNEL_ACTIVITY_TOPIC}, ${JSON.stringify(event)})`,
-    );
+
+    const owner =
+      thread && members.some((member) => member.userId === thread.userId)
+        ? thread
+        : null;
+    const others = members
+      .map((member) => member.userId)
+      .filter((userId) => userId !== owner?.userId);
+
+    if (owner) {
+      // Fixed-width UTC to the microsecond, so two stamps compare as strings.
+      const [stamp] = await database.execute<{ at: string }>(
+        sql`select to_char(clock_timestamp() at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as at`,
+      );
+      const work =
+        (
+          await workIn(database, [
+            { id: channelId, threadId: owner.threadId, userId: owner.userId },
+          ])
+        ).get(channelId) ?? [];
+      await notify({
+        ...base,
+        memberIds: [owner.userId],
+        work: work.map(channelWorkDto),
+        ...(stamp ? { workAt: stamp.at } : {}),
+      });
+    }
+    // A settle with no turn moving has nothing to tell anybody but the thread's owner.
+    if (busy !== undefined && others.length > 0)
+      await notify({ ...base, memberIds: others });
   };
 
   const store: ChannelStore = {
@@ -884,22 +920,32 @@ export function createChannelStore(
       // The channel this thread is shown in, if any. A scratch thread maps to nothing, so a hop
       // running there signals nowhere and the branch below returns without announcing.
       const [mapped] = await database
-        .select({ channelId: intelligenceChannelMappings.channelId })
+        .select({
+          channelId: intelligenceChannelMappings.channelId,
+          userId: intelligenceChannelMappings.userId,
+        })
         .from(intelligenceChannelMappings)
         .where(eq(intelligenceChannelMappings.threadId, threadId))
         .limit(1);
       if (!mapped) return;
-      await announceWork(mapped.channelId, threadId, busy);
+      await announceWork(
+        mapped.channelId,
+        { threadId, userId: mapped.userId },
+        busy,
+      );
     },
 
     async signalWork(threadId) {
       const [mapped] = await database
-        .select({ channelId: intelligenceChannelMappings.channelId })
+        .select({
+          channelId: intelligenceChannelMappings.channelId,
+          userId: intelligenceChannelMappings.userId,
+        })
         .from(intelligenceChannelMappings)
         .where(eq(intelligenceChannelMappings.threadId, threadId))
         .limit(1);
       if (!mapped) return;
-      await announceWork(mapped.channelId, threadId);
+      await announceWork(mapped.channelId, { threadId, userId: mapped.userId });
     },
 
     async signalChannelBusy(actor, channelId, busy) {
@@ -938,10 +984,20 @@ export function createChannelStore(
       // to a channel is not something an outsider can probe for.
       if (!membership) throw new ChannelNotFoundError(channelId);
 
-      await announceWork(channelId, membership.threadId, busy);
+      await announceWork(
+        channelId,
+        membership.threadId
+          ? { threadId: membership.threadId, userId: membership.userId }
+          : null,
+        busy,
+      );
     },
 
-    workIn: (list) => workIn(database, list),
+    workIn: (actor, list) =>
+      workIn(
+        database,
+        list.map((channel) => ({ ...channel, userId: actor.id })),
+      ),
   };
   return store;
 }
@@ -1175,7 +1231,7 @@ export function createChannelRoutes(
        * flag that only ever arrived as an event was gone on every reload, so a conversation a Bot
        * was still answering in looked finished to anybody who refreshed.
        */
-      const work = await store.workIn(page.channels);
+      const work = await store.workIn(context.var.actor, page.channels);
       return context.json({
         channels: page.channels.map((channel) =>
           channelSummaryDto(channel, work.get(channel.id) ?? []),
@@ -1282,7 +1338,7 @@ export function createChannelRoutes(
       if (!channel) {
         return context.json({ error: "Couldn't find that conversation." }, 404);
       }
-      const work = await store.workIn([channel]);
+      const work = await store.workIn(context.var.actor, [channel]);
       return context.json({
         channel: {
           ...channelDto(channel),

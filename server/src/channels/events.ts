@@ -55,6 +55,12 @@ export type ChannelActivityEvent = {
    * is also what the roster and the channel read return. See `working.ts`.
    */
   work?: ChannelWorkWire[];
+  /**
+   * When `work` was read, by the database's clock: ISO-8601 in UTC to the microsecond, fixed width
+   * so two compare as strings. Present whenever `work` is. Events
+   * can arrive out of order across replicas, so a browser keeps the list with the latest stamp.
+   */
+  workAt?: string;
 };
 
 /** "The roster you hold may be wrong." Carries no delta, because what was lost is not recoverable. */

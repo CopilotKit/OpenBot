@@ -92,18 +92,34 @@ type HandoffPayload = {
 const text = (value: unknown): string | null =>
   typeof value === "string" && value.length > 0 ? value : null;
 
+/** A conversation as one person holds it: the channel, and that person's own thread in it. */
+export type ChannelThread = {
+  id: string;
+  /** The thread this person's Bot runs in. Hops are offered from it, so it scopes theirs. */
+  threadId: string;
+  /** The person. Their routines fire into this thread; another member's do not. */
+  userId: string;
+};
+
 /**
  * What each of these conversations is waiting on, oldest first. A conversation waiting on nothing
  * is absent from the map.
+ *
+ * SCOPED TO THE PERSON, never to the channel. Every member of a channel has a thread of their own
+ * in it, and the hops and routines in that thread are theirs: another member reading the same
+ * channel must not learn which Bot somebody else asked, or which Bot their routine runs as.
  */
 export async function workIn(
   database: Database,
-  channels: readonly { id: string; threadId: string }[],
+  channels: readonly ChannelThread[],
 ): Promise<Map<string, ChannelWork[]>> {
   const found = new Map<string, ChannelWork[]>();
   if (channels.length === 0) return found;
   const channelByThread = new Map(
     channels.map((channel) => [channel.threadId, channel.id]),
+  );
+  const ownerByChannel = new Map(
+    channels.map((channel) => [channel.id, channel.userId]),
   );
   const add = (channelId: string, work: ChannelWork) => {
     const list = found.get(channelId) ?? [];
@@ -200,6 +216,7 @@ export async function workIn(
       runId: routineRuns.id,
       routineId: routines.id,
       channelId: routines.channelId,
+      ownerUserId: routines.ownerUserId,
       botId: routines.agentId,
       botName: agents.name,
       startedAt: routineRuns.startedAt,
@@ -221,6 +238,8 @@ export async function workIn(
       ),
     );
   for (const run of runs) {
+    // Somebody else's routine, firing into their own thread in a channel this person shares.
+    if (ownerByChannel.get(run.channelId) !== run.ownerUserId) continue;
     add(run.channelId, {
       kind: "routine",
       key: run.runId,
