@@ -84,9 +84,10 @@ upgraded too; an older supervisor works as before.
 
 ### A conversation shows who it is waiting on
 
-When a Bot asks another Bot, the end of the conversation now reads "Asking Risk Analyst… 0:13", with
-the clock running, until the answer comes back; a routine firing into it reads "Market Scout is
-running a routine…". The sidebar keeps the conversation lit while it waits, and both survive a
+When a Bot asks another Bot, the end of the conversation now shows that Bot's avatar and "Asking
+Risk Analyst…" until the answer comes back; a routine firing into it reads "Market Scout is running a
+routine…". A Bot whose address this deployment will not dial is reported at once, not after five
+minutes of retries. The sidebar keeps the conversation lit while it waits, and both survive a
 reload. In a shared conversation only the person whose Bot asked sees whom it asked; the others see
 only that it is busy. Migration `0063_work_items_open_thread` adds one partial index to `work_items`.
 

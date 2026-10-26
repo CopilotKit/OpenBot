@@ -1092,8 +1092,8 @@ export function ChannelChat({
             working={
               agent.isRunning || turnsInFlight > 0 ? null : (
                 <ChannelWorkRows
-                  nameOf={(botId) =>
-                    agentProfiles?.find((profile) => profile.id === botId)?.name
+                  botOf={(botId) =>
+                    agentProfiles?.find((profile) => profile.id === botId)
                   }
                   work={channel.work}
                 />

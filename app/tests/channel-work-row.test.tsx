@@ -1,12 +1,4 @@
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  expect,
-  jest,
-  setSystemTime,
-  test,
-} from "bun:test";
+import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import {
   QueryClient,
@@ -15,7 +7,6 @@ import {
 } from "@tanstack/react-query";
 import { act, cleanup, render, waitFor } from "@testing-library/react";
 import { ChannelWorkRows } from "@/components/channels/channel-work";
-import { formatElapsed } from "@/components/channels/progress-row";
 import {
   type AgentChannel,
   type ChannelWork,
@@ -26,17 +17,15 @@ import { applyChannelWork } from "@/lib/channels/use-channel-events";
 import { settleReactWork } from "./settle-react-work";
 
 /**
- * The row a conversation shows while it waits on work nobody's browser is running: "Asking Ana…
- * 0:12" for a Bot its Bot asked, and the same for a routine. Driven by the server's list, so it
- * has to appear from a fetched channel as well as from a socket event, tick while it is up, and go
- * when the list empties.
+ * The row a conversation shows while it waits on work nobody's browser is running: the Bot's avatar
+ * and "Asking Ana…" for a Bot its Bot asked, and the same for a routine. Driven by the server's
+ * list, so it has to appear from a fetched channel as well as from a socket event, and go when the
+ * list empties.
  */
 
 beforeAll(() => GlobalRegistrator.register());
 afterEach(() => {
   cleanup();
-  jest.useRealTimers();
-  setSystemTime();
 });
 afterAll(async () => {
   await settleReactWork();
@@ -48,8 +37,6 @@ afterEach(() => {
   global.fetch = originalFetch;
 });
 
-const NOW = new Date("2026-10-26T10:00:12.000Z");
-
 const asking = (overrides: Partial<ChannelWork> = {}): ChannelWork =>
   ({
     kind: "handoff",
@@ -60,49 +47,41 @@ const asking = (overrides: Partial<ChannelWork> = {}): ChannelWork =>
     ...overrides,
   }) as ChannelWork;
 
-test("says who was asked and for how long", () => {
-  setSystemTime(NOW);
-
+test("says who was asked, with their avatar and no clock", () => {
   const view = render(<ChannelWorkRows work={[asking()]} />);
 
   const row = view.getByTestId("progress-row");
-  expect(row.textContent).toBe("Asking Ana…0:12");
-  // Announced as progress, and only by its words: the clock is hidden from a screen reader.
+  expect(row.textContent).toBe("Asking Ana…");
   expect(row.getAttribute("role")).toBe("status");
-  expect(row.querySelector("[aria-hidden='true']")?.textContent).toBe("0:12");
+  // The avatar is decoration beside a label that already names the Bot, so it is announced once.
+  const avatar = row.querySelector("[aria-hidden='true'] [role='img']");
+  expect(avatar?.getAttribute("aria-label")).toBe("Ana");
+  expect(row.querySelector("svg")).not.toBeNull();
 });
 
-test("the clock moves while the row is up", () => {
-  jest.useFakeTimers();
-  setSystemTime(NOW);
-  const view = render(<ChannelWorkRows work={[asking()]} />);
-
-  // The fake clock moves `Date.now()` with the timers, as a real second would.
-  act(() => {
-    jest.advanceTimersByTime(3_000);
-  });
-
-  expect(view.getByTestId("progress-row").textContent).toBe("Asking Ana…0:15");
-});
-
-test("prefers the name the person knows the Bot by", () => {
-  setSystemTime(NOW);
-
+test("prefers the name and avatar the person knows the Bot by", () => {
   const view = render(
     <ChannelWorkRows
-      nameOf={(botId) => (botId === "ana" ? "Ana Research" : undefined)}
+      botOf={(botId) =>
+        botId === "ana"
+          ? { name: "Ana Research", avatarSeed: "seed-ana" }
+          : undefined
+      }
       work={[asking()]}
     />,
   );
+  const known = view.getByTestId("progress-row").innerHTML;
+  cleanup();
+  const unknown = render(<ChannelWorkRows work={[asking()]} />).getByTestId(
+    "progress-row",
+  ).innerHTML;
 
-  expect(view.getByTestId("progress-row").textContent).toContain(
-    "Asking Ana Research…",
-  );
+  expect(known).toContain("Asking Ana Research…");
+  // Drawn from the Bot's own seed, so it is the same face the Bot has everywhere else.
+  expect(known.replace("Ana Research", "Ana")).not.toBe(unknown);
 });
 
 test("one row for each Bot asked, and one for a routine", () => {
-  setSystemTime(NOW);
-
   const view = render(
     <ChannelWorkRows
       work={[
@@ -123,14 +102,13 @@ test("one row for each Bot asked, and one for a routine", () => {
   expect(
     view.getAllByTestId("progress-row").map((row) => row.textContent),
   ).toEqual([
-    "Asking Ana…0:12",
-    "Asking another Bot…0:12",
-    "Assistant is running a routine…1:12",
+    "Asking Ana…",
+    "Asking another Bot…",
+    "Assistant is running a routine…",
   ]);
 });
 
 test("goes when the list empties", () => {
-  setSystemTime(NOW);
   const view = render(<ChannelWorkRows work={[asking()]} />);
 
   view.rerender(<ChannelWorkRows work={[]} />);
@@ -144,7 +122,6 @@ test("goes when the list empties", () => {
  * conversation a Bot is still answering in looks finished to anybody who refreshed.
  */
 test("comes back from the channel read after a reload", async () => {
-  setSystemTime(NOW);
   global.fetch = (async (input: RequestInfo | URL) => {
     if (String(input) === "/api/channels/channel-1") {
       return Response.json({
@@ -176,9 +153,7 @@ test("comes back from the channel read after a reload", async () => {
   );
 
   await waitFor(() => {
-    expect(view.getByTestId("progress-row").textContent).toBe(
-      "Asking Ana…0:12",
-    );
+    expect(view.getByTestId("progress-row").textContent).toBe("Asking Ana…");
   });
 
   // The socket then says the answer is being given, and the row goes.
@@ -230,11 +205,4 @@ test("an event with no list leaves the conversation's list alone", () => {
       work: [asking()],
     }),
   ).toBe(channel);
-});
-
-test("the clock reads minutes, then hours, and never runs backwards", () => {
-  expect(formatElapsed(12_000)).toBe("0:12");
-  expect(formatElapsed(245_000)).toBe("4:05");
-  expect(formatElapsed(3_727_000)).toBe("1:02:07");
-  expect(formatElapsed(-4_000)).toBe("0:00");
 });
