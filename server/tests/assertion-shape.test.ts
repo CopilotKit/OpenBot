@@ -718,14 +718,14 @@ const ALLOW: Allowed[] = [
   },
   {
     file: "server/tests/headless-components.integration.test.ts",
-    line: 349,
+    line: 350,
     shape: "b",
     finding: "NEW (round 2 did not find this)",
     why: "expect(bar?.hidden).toBeUndefined();",
   },
   {
     file: "server/tests/headless-components.test.ts",
-    line: 197,
+    line: 202,
     shape: "b",
     finding: "NEW (round 2 did not find this)",
     why: "expect(bar?.hidden).toBeUndefined();",

@@ -40,6 +40,15 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - Migration `0062_action_policy_labels` adds a `labels` column to `action_policies`, defaulting to
   empty. Existing boundary rules keep working and show as "Custom rule" until somebody names them.
 
+### Every chart says where its figures came from
+
+A chart a Bot draws now ends with a line naming what its figures were read from and when they are
+from, such as "Sources: World Bank World Development Indicators · As of 2025". Figures a Bot charted
+from its own knowledge, without looking them up, are marked "From the Bot's own knowledge. Not
+checked against a source." Bots are told to look up figures that change over time before charting
+them. In Slack and Teams the same line follows the chart in the reply. Charts already in a
+conversation are drawn as before, with no such line.
+
 ### Screens share one spacing, row and empty-state design
 
 Every configuration screen now takes its spacing from the page frame: 32px under the title, 48px
