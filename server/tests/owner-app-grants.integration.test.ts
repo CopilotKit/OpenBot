@@ -371,6 +371,30 @@ describe("an owner giving their own app to their own Bot", () => {
     ]);
   });
 
+  test("the grant route refuses an owner a ref the app does not advertise, and records nothing over an admin's grant", async () => {
+    const bot = await botOf(owner);
+    for (const ref of [`${GMAIL}/LATER`, GMAIL]) {
+      const refused = await appAs(owner).request(
+        "/api/plugins/grants",
+        send("POST", { kind: "mcp", ref, agentId: bot }),
+      );
+      expect(refused.status).toBe(403);
+    }
+    expect(await grantsOn(bot)).toEqual([]);
+
+    await store.grant("mcp", `${GMAIL}/FETCH`, bot, "admin@example.test");
+    events.length = 0;
+    const again = await appAs(owner).request(
+      "/api/plugins/grants",
+      send("POST", { kind: "mcp", ref: `${GMAIL}/FETCH`, agentId: bot }),
+    );
+    expect(again.status).toBe(200);
+    expect(await grantsOn(bot)).toEqual([
+      { ref: `${GMAIL}/FETCH`, grantedAs: "admin" },
+    ]);
+    expect(events).toEqual([]);
+  });
+
   test("the apps a person could give are the ones they connected, and open to owners", async () => {
     await seedApp(SLACK, "Slack", "shared");
     const listed = async () =>
