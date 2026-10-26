@@ -15,6 +15,7 @@
  * in-cluster service account gives a token and a CA, which is what `inClusterConfig` reads.
  */
 import { readFile } from "node:fs/promises";
+import { ComputerStillStartingError } from "./client";
 import type {
   ComputerLocation,
   ComputerProvider,
@@ -328,9 +329,20 @@ export function createSandboxComputerProvider(
         return sandbox;
       }
       if (Date.now() >= deadline) {
-        throw new SandboxError(
-          `The computer for ${botId} did not become ready within ${Math.round(resumeTimeoutMs / 1000)}s. A resume costs a pod schedule and a browser launch, so this is a real wait rather than a failure, but it has to end somewhere.`,
+        /*
+         * A resume costs a pod schedule and a browser launch, so this is a real wait rather than a
+         * failure, but it has to end somewhere. When it does, the caller is told the computer is
+         * still starting and nothing was done, which is the truth: the pod is very likely seconds
+         * away. The operator's version, with the Bot and the budget, goes to the log.
+         */
+        console.warn(
+          JSON.stringify({
+            type: "computer-sandbox-still-starting",
+            botId,
+            waitedMs: resumeTimeoutMs,
+          }),
         );
+        throw new ComputerStillStartingError();
       }
       await new Promise((resolve) => setTimeout(resolve, 1_000));
     }

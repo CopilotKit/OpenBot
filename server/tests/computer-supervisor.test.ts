@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { ComputerStillStartingError } from "../src/computer/client";
 import type { ComputerProvider } from "../src/computer/provider";
 import {
   createDockerSupervisorProvider,
@@ -86,6 +87,28 @@ describe("locating a Bot's computer", () => {
       }) as unknown as typeof fetch,
     });
     expect(client.locate("sales")).rejects.toThrow(/could not be reached/);
+  });
+
+  test("an ensure that runs out of time is a computer still starting, not a broken supervisor", async () => {
+    // `/ensure` is the call that waits on a container coming up, so its deadline is a slow start.
+    const client = createDockerSupervisorProvider({
+      baseUrl: "http://supervisor:4300",
+      fetchImpl: (async () => {
+        throw new DOMException("The operation timed out.", "TimeoutError");
+      }) as unknown as typeof fetch,
+    });
+    const failure = await client.locate("sales").catch((error) => error);
+    expect(failure).toBeInstanceOf(ComputerStillStartingError);
+  });
+
+  test("a timeout on a plain read is still the supervisor's fault", async () => {
+    const client = createDockerSupervisorProvider({
+      baseUrl: "http://supervisor:4300",
+      fetchImpl: (async () => {
+        throw new DOMException("The operation timed out.", "TimeoutError");
+      }) as unknown as typeof fetch,
+    });
+    expect(client.stop("sales")).rejects.toThrow(SupervisorError);
   });
 
   test("the bot id is escaped into the path", async () => {
