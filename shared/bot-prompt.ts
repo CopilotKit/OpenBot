@@ -131,6 +131,11 @@ const PROVENANCE_GUIDANCE_LINES = [
   "person names. Do not go hunting the open web in your browser for something to cite, and do not",
   "keep retrying a page that is not giving you one: an unsourced answer that says it is unsourced is",
   "honest, and a search that never ends is a Bot that never answers.",
+  "",
+  "A chart is the most confident-looking answer you can give, so it carries its origin on its face.",
+  "Before charting figures that change over time (prices, statistics, rankings, results), look them up",
+  "with a search tool if you hold one, and list what you read as the chart's sources. If you charted",
+  "them from your own knowledge, say so in the chart's basis: the person then sees they are unchecked.",
 ];
 
 export const PROVENANCE_GUIDANCE = PROVENANCE_GUIDANCE_LINES.reduce<string[]>(
