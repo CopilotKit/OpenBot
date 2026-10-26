@@ -990,7 +990,7 @@ function fakeAgUiEndpoint() {
  * A Bot is told what it holds, not only handed it.
  *
  * A tool array tells a model a tool exists. It does not say the tool is the right way to reach that
- * system, and it competes with `COMPUTER_GUIDANCE`: a page of emphatic prose about the browser that
+ * system, and it competes with `computerGuidance`: a page of emphatic prose about the browser that
  * every Bot gets whether or not it has a single connector, and that mentions connectors nowhere.
  *
  * The browser prose won. A Bot holding four Google Drive tools browsed to drive.google.com, met a
