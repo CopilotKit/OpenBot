@@ -13,7 +13,11 @@ import { and, eq, inArray, like } from "drizzle-orm";
 import { Hono, type MiddlewareHandler } from "hono";
 import { createAgentProfileStore } from "../src/agents/profile-store";
 import type { AgentActor } from "../src/agents/profile-types";
-import type { AuditEventInput, AuditStore } from "../src/audit";
+import {
+  type AuditEventInput,
+  type AuditStore,
+  PERSON_INITIATOR,
+} from "../src/audit";
 import type { AppVariables } from "../src/auth/guards";
 import { createDatabase } from "../src/db/client";
 import {
@@ -23,6 +27,7 @@ import {
   mcpServers,
   mcpTools,
   pluginGrants,
+  sharedUseApprovals,
   teamBotConsents,
   teamBotPublications,
   users,
@@ -30,7 +35,10 @@ import {
 import type { AppAccess } from "../src/plugins/app-access";
 import type { GiveableApp } from "../src/plugins/plugin-store/app-access";
 import { createPluginRoutes } from "../src/plugins/routes";
-import { createSharedUseStore } from "../src/plugins/shared-use-store";
+import {
+  createSharedUseGate,
+  createSharedUseStore,
+} from "../src/plugins/shared-use-store";
 import { createPluginStore, PluginRefusedError } from "../src/plugins/store";
 import {
   createTeamBots,
@@ -107,6 +115,8 @@ async function connectedServers(userId: string): Promise<Set<string>> {
   return new Set(rows.map((row) => `composio-${row.app}`));
 }
 const teamBots = createTeamBots({ database, connectedServers });
+const sharedUse = createSharedUseStore(database, "composio");
+const sharedGate = createSharedUseGate(sharedUse, audit);
 
 function appAs(actorId: string, role: "admin" | "user" = "user") {
   const signedIn: MiddlewareHandler<{ Variables: AppVariables }> = async (
@@ -128,7 +138,7 @@ function appAs(actorId: string, role: "admin" | "user" = "user") {
       async () => true,
       undefined,
       { broker: stub.broker, provider: "composio" },
-      { modes: {} as never, use: createSharedUseStore(database, "composio") },
+      { modes: {} as never, use: sharedUse },
     ),
   );
 }
@@ -473,5 +483,235 @@ describe("a Team Bot whose owner gave it their own Gmail", () => {
       state: "ready",
       accountHolder: "owner",
     });
+  });
+});
+
+describe("a Shared app whose rule lets Bot owners decide", () => {
+  /** The admin opens Slack, a Shared app with its team account connected, to owners. */
+  async function openSlack() {
+    await seedApp(SLACK, "Slack", "shared");
+    await database.insert(brokeredConnections).values({
+      provider: "composio",
+      app: slug("slack"),
+      holder: "deployment",
+      userId: null,
+      vendorUserId: `openbot-deployment:${suite}`,
+      verified: true,
+    });
+    const opened = await appAs(admin, "admin").request(
+      `/api/plugins/servers/${SLACK}/owner-grants`,
+      send("PUT", { ownerGrants: "any" }),
+    );
+    expect(opened.status).toBe(200);
+  }
+
+  const give = (botId: string) =>
+    appAs(owner).request(
+      `/api/plugins/for/${botId}/apps/${SLACK}/give`,
+      send("POST"),
+    );
+
+  /** Whether this person's own chat with the Bot may reach the team account now. */
+  const allowed = async (botId: string, actorId: string) =>
+    (
+      await sharedGate({
+        botId,
+        serverId: SLACK,
+        title: "Slack",
+        actorId,
+        initiator: PERSON_INITIATOR,
+      })
+    ).allowed;
+
+  async function approvalRow(botId: string) {
+    const [row] = await database
+      .select({
+        audience: sharedUseApprovals.audience,
+        outsideInput: sharedUseApprovals.outsideInput,
+        approvedBy: sharedUseApprovals.approvedBy,
+        approvedAs: sharedUseApprovals.approvedAs,
+      })
+      .from(sharedUseApprovals)
+      .where(eq(sharedUseApprovals.agentId, botId));
+    return row ?? null;
+  }
+
+  const publishToTeam = (botId: string) =>
+    teamBots.publish({ id: owner, role: "user" }, botId, {
+      audience: "team",
+      emails: [],
+      groups: [],
+    });
+
+  test("the owner's grant on a private Bot is usable at once, by the owner only, with no admin approval", async () => {
+    await openSlack();
+    const bot = await botOf(owner);
+    expect(await allowed(bot, owner)).toBe(false);
+
+    expect((await give(bot)).status).toBe(200);
+    expect(await approvalRow(bot)).toEqual({
+      audience: "owner",
+      outsideInput: false,
+      approvedBy: owner,
+      approvedAs: "owner",
+    });
+    expect(await allowed(bot, owner)).toBe(true);
+    expect(await allowed(bot, teammate)).toBe(false);
+    expect(await stateOf(owner, bot, SLACK)).toMatchObject({
+      state: "ready",
+      givenByOwner: true,
+    });
+    expect(
+      events.find((event) => event.eventType === "shared_use.owner_approved"),
+    ).toMatchObject({
+      actorUserId: owner,
+      targetId: SLACK,
+      payload: { bot, server: SLACK, audience: "owner", outsideInput: false },
+    });
+  });
+
+  test("on a published Team Bot it reaches the Bot's audience, as it stood when given, and no further", async () => {
+    await openSlack();
+    const team = await botOf(owner);
+    await publishToTeam(team);
+    expect((await give(team)).status).toBe(200);
+    expect(await approvalRow(team)).toMatchObject({
+      audience: "team",
+      outsideInput: false,
+      approvedAs: "owner",
+    });
+    expect(await allowed(team, teammate)).toBe(true);
+    expect(await stateOf(teammate, team, SLACK)).toMatchObject({
+      state: "ready",
+    });
+    // The account is the team's whoever asks: the owner marker never points it at a person.
+    expect(
+      await teamBots.credentialActorFor(teammate, team)(`${SLACK}/FETCH`),
+    ).toBe(teammate);
+
+    // Published after the grant: the audience the grant set is the owner's, and widening asks an admin.
+    const later = await botOf(owner);
+    expect((await give(later)).status).toBe(200);
+    await publishToTeam(later);
+    expect(await allowed(later, owner)).toBe(true);
+    expect(await allowed(later, teammate)).toBe(false);
+  });
+
+  test("taking the app back withdraws the audience, and an admin's approval stays", async () => {
+    await openSlack();
+    const bot = await botOf(owner);
+    expect((await give(bot)).status).toBe(200);
+    const taken = await appAs(owner).request(
+      `/api/plugins/for/${bot}/apps/${SLACK}/give`,
+      send("DELETE"),
+    );
+    expect(await taken.json()).toEqual({ revoked: [`${SLACK}/FETCH`] });
+    expect(await approvalRow(bot)).toBeNull();
+    expect(await allowed(bot, owner)).toBe(false);
+    expect(
+      events.find((event) => event.eventType === "shared_use.owner_withdrawn"),
+    ).toMatchObject({
+      actorUserId: owner,
+      payload: { bot, server: SLACK, why: "owner_took_back" },
+    });
+
+    // An admin granting over the owner's audience makes it theirs, and the owner's take-back leaves it.
+    expect((await give(bot)).status).toBe(200);
+    const byAdmin = await appAs(admin, "admin").request(
+      "/api/plugins/grants",
+      send("POST", { kind: "mcp", ref: `${SLACK}/SEND`, agentId: bot }),
+    );
+    expect(byAdmin.status).toBe(200);
+    expect(await approvalRow(bot)).toMatchObject({ approvedAs: "admin" });
+    await appAs(owner).request(
+      `/api/plugins/for/${bot}/apps/${SLACK}/give`,
+      send("DELETE"),
+    );
+    expect(await approvalRow(bot)).toMatchObject({ approvedAs: "admin" });
+    expect(await allowed(bot, owner)).toBe(true);
+  });
+
+  test("an admin switching the rule back to admin withdraws the audience and refuses the calls", async () => {
+    await openSlack();
+    const bot = await botOf(owner);
+    const other = await botOf(owner);
+    expect((await give(bot)).status).toBe(200);
+    // An admin's own approval on another Bot is not the owner's to lose.
+    await store.grant("mcp", `${SLACK}/FETCH`, other, "admin@example.test");
+    await sharedUse.setApproval({
+      botId: other,
+      serverId: SLACK,
+      approval: { audience: "owner", outsideInput: false, members: [] },
+      by: admin,
+    });
+
+    const closed = await appAs(admin, "admin").request(
+      `/api/plugins/servers/${SLACK}/owner-grants`,
+      send("PUT", { ownerGrants: "admin" }),
+    );
+    expect(closed.status).toBe(200);
+    expect(await approvalRow(bot)).toBeNull();
+    expect(await allowed(bot, owner)).toBe(false);
+    expect(await approvalRow(other)).toMatchObject({ approvedAs: "admin" });
+    expect(
+      events.find((event) => event.eventType === "shared_use.owner_withdrawn"),
+    ).toMatchObject({
+      actorUserId: admin,
+      payload: { bot, server: SLACK, why: "owner_grants_changed" },
+    });
+
+    // Opened again, the owner's press puts it back; their grant was never taken.
+    await appAs(admin, "admin").request(
+      `/api/plugins/servers/${SLACK}/owner-grants`,
+      send("PUT", { ownerGrants: "any" }),
+    );
+    expect(await allowed(bot, owner)).toBe(false);
+    expect(await (await give(bot)).json()).toEqual({ granted: [] });
+    expect(await allowed(bot, owner)).toBe(true);
+  });
+
+  test("an owner's audience left behind is not read while the rule is not any", async () => {
+    await openSlack();
+    const bot = await botOf(owner);
+    expect((await give(bot)).status).toBe(200);
+    // The rule changed without the withdrawal, as a replica from before this change would.
+    await database
+      .update(mcpServers)
+      .set({ ownerGrants: null })
+      .where(eq(mcpServers.id, SLACK));
+    expect(await approvalRow(bot)).not.toBeNull();
+    expect(await allowed(bot, owner)).toBe(false);
+  });
+
+  test("a Personal app's owner grant sets no Shared audience", async () => {
+    const bot = await botOf(owner);
+    await connect(owner);
+    expect(
+      (
+        await appAs(owner).request(
+          `/api/plugins/for/${bot}/apps/${GMAIL}/give`,
+          send("POST"),
+        )
+      ).status,
+    ).toBe(200);
+    expect(await approvalRow(bot)).toBeNull();
+    expect(
+      events.some((event) => event.eventType === "shared_use.owner_approved"),
+    ).toBe(false);
+  });
+
+  test("an owner adding one action through the grant route sets the same audience", async () => {
+    await openSlack();
+    const bot = await botOf(owner);
+    const added = await appAs(owner).request(
+      "/api/plugins/grants",
+      send("POST", { kind: "mcp", ref: `${SLACK}/SEND`, agentId: bot }),
+    );
+    expect(added.status).toBe(200);
+    expect(await approvalRow(bot)).toMatchObject({
+      audience: "owner",
+      approvedAs: "owner",
+    });
+    expect(await allowed(bot, owner)).toBe(true);
   });
 });
