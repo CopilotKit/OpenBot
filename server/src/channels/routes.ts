@@ -37,6 +37,7 @@ import {
 import { upgradeWebSocket } from "./socket";
 import { oneLine } from "./text";
 import type { ThreadIdentity } from "./thread-identity";
+import { type ChannelWork, channelWorkDto, workIn } from "./working";
 
 export type AgentChannel = {
   id: string;
@@ -235,6 +236,17 @@ export type ChannelStore = {
     channelId: string,
     busy: boolean,
   ): Promise<void>;
+  /**
+   * Tell a channel's members what it is waiting on now, without saying a turn started or ended.
+   *
+   * For the moments the queue moves and no turn does: a hop finished, released for another try, or
+   * turned into a relay. Every busy signal carries the same list, so this is only for those.
+   */
+  signalWork(threadId: string): Promise<void>;
+  /** What each of these channels is waiting on. See `workIn` in working.ts. */
+  workIn(
+    channels: readonly { id: string; threadId: string }[],
+  ): Promise<Map<string, ChannelWork[]>>;
 };
 
 const PRIVATE_AGENT_CHANNEL_DESCRIPTION = "Private agent channel.";
@@ -317,6 +329,44 @@ export function createChannelStore(
     });
 
     return { id, name, agentIds, threadId, active: true, lastMessageAt: null };
+  };
+
+  /**
+   * Tell a channel's members what it is waiting on, and whether a turn just started or ended.
+   *
+   * No table write: busy is a moment, and the rows the work list is read from stay the source of
+   * truth. Just the announcement, carrying the members the same way recordActivity does. The list
+   * rides on every one of these so a client never merges a delta into what it holds: the newest
+   * event is the whole answer, and the same answer a reload gets.
+   */
+  const announceWork = async (
+    channelId: string,
+    threadId: string | null,
+    busy?: boolean,
+  ): Promise<void> => {
+    const members = await database
+      .select({ userId: channelMemberships.userId })
+      .from(channelMemberships)
+      .where(eq(channelMemberships.channelId, channelId));
+    if (members.length === 0) return;
+
+    const work = threadId
+      ? ((await workIn(database, [{ id: channelId, threadId }])).get(
+          channelId,
+        ) ?? [])
+      : [];
+    const event: ChannelActivityEvent = {
+      channelId,
+      memberIds: members.map((member) => member.userId),
+      lastMessage: null,
+      lastMessageAt: null,
+      lastMessageAgentId: null,
+      ...(busy === undefined ? {} : { busy }),
+      work: work.map(channelWorkDto),
+    };
+    await database.execute(
+      sql`select pg_notify(${CHANNEL_ACTIVITY_TOPIC}, ${JSON.stringify(event)})`,
+    );
   };
 
   const store: ChannelStore = {
@@ -839,31 +889,25 @@ export function createChannelStore(
         .where(eq(intelligenceChannelMappings.threadId, threadId))
         .limit(1);
       if (!mapped) return;
+      await announceWork(mapped.channelId, threadId, busy);
+    },
 
-      const members = await database
-        .select({ userId: channelMemberships.userId })
-        .from(channelMemberships)
-        .where(eq(channelMemberships.channelId, mapped.channelId));
-      if (members.length === 0) return;
-
-      // No table write: busy is a moment, and the roster query stays the source of truth. Just the
-      // announcement, carrying the members the same way recordActivity does.
-      const event: ChannelActivityEvent = {
-        channelId: mapped.channelId,
-        memberIds: members.map((member) => member.userId),
-        lastMessage: null,
-        lastMessageAt: null,
-        lastMessageAgentId: null,
-        busy,
-      };
-      await database.execute(
-        sql`select pg_notify(${CHANNEL_ACTIVITY_TOPIC}, ${JSON.stringify(event)})`,
-      );
+    async signalWork(threadId) {
+      const [mapped] = await database
+        .select({ channelId: intelligenceChannelMappings.channelId })
+        .from(intelligenceChannelMappings)
+        .where(eq(intelligenceChannelMappings.threadId, threadId))
+        .limit(1);
+      if (!mapped) return;
+      await announceWork(mapped.channelId, threadId);
     },
 
     async signalChannelBusy(actor, channelId, busy) {
       const [membership] = await database
-        .select({ userId: channelMemberships.userId })
+        .select({
+          userId: channelMemberships.userId,
+          threadId: intelligenceChannelMappings.threadId,
+        })
         .from(channelMemberships)
         .innerJoin(
           channels,
@@ -872,33 +916,32 @@ export function createChannelStore(
             isNull(channels.deletedAt),
           ),
         )
+        // The caller's own thread for the channel, which is the one their hops are offered from.
+        .leftJoin(
+          intelligenceChannelMappings,
+          and(
+            eq(
+              intelligenceChannelMappings.channelId,
+              channelMemberships.channelId,
+            ),
+            eq(intelligenceChannelMappings.userId, channelMemberships.userId),
+          ),
+        )
         .where(
           and(
             eq(channelMemberships.channelId, channelId),
             eq(channelMemberships.userId, actor.id),
           ),
-        );
+        )
+        .limit(1);
       // Not a member, no such channel, or a deleted one: the same refusal every way, so belonging
       // to a channel is not something an outsider can probe for.
       if (!membership) throw new ChannelNotFoundError(channelId);
 
-      const members = await database
-        .select({ userId: channelMemberships.userId })
-        .from(channelMemberships)
-        .where(eq(channelMemberships.channelId, channelId));
-
-      const event: ChannelActivityEvent = {
-        channelId,
-        memberIds: members.map((member) => member.userId),
-        lastMessage: null,
-        lastMessageAt: null,
-        lastMessageAgentId: null,
-        busy,
-      };
-      await database.execute(
-        sql`select pg_notify(${CHANNEL_ACTIVITY_TOPIC}, ${JSON.stringify(event)})`,
-      );
+      await announceWork(channelId, membership.threadId, busy);
     },
+
+    workIn: (list) => workIn(database, list),
   };
   return store;
 }
@@ -1127,8 +1170,16 @@ export function createChannelRoutes(
         ...(parsed.limit !== undefined ? { limit: parsed.limit } : {}),
       });
 
+      /*
+       * What each row is waiting on, read with the page rather than left to the socket. A busy
+       * flag that only ever arrived as an event was gone on every reload, so a conversation a Bot
+       * was still answering in looked finished to anybody who refreshed.
+       */
+      const work = await store.workIn(page.channels);
       return context.json({
-        channels: page.channels.map(channelSummaryDto),
+        channels: page.channels.map((channel) =>
+          channelSummaryDto(channel, work.get(channel.id) ?? []),
+        ),
         nextCursor: page.nextCursor,
       });
     } catch (error) {
@@ -1231,7 +1282,13 @@ export function createChannelRoutes(
       if (!channel) {
         return context.json({ error: "Couldn't find that conversation." }, 404);
       }
-      return context.json({ channel: channelDto(channel) });
+      const work = await store.workIn([channel]);
+      return context.json({
+        channel: {
+          ...channelDto(channel),
+          work: (work.get(channel.id) ?? []).map(channelWorkDto),
+        },
+      });
     } catch (error) {
       return mapStoreError(context, error);
     }
@@ -1257,7 +1314,10 @@ function channelDto(channel: AgentChannel): ChannelWire {
   };
 }
 
-function channelSummaryDto(channel: ChannelSummary) {
+function channelSummaryDto(
+  channel: ChannelSummary,
+  work: readonly ChannelWork[],
+) {
   return {
     ...channelDto(channel),
     summary: channel.summary,
@@ -1267,6 +1327,12 @@ function channelSummaryDto(channel: ChannelSummary) {
     pinned: channel.pinned,
     // Serialised as ISO-8601 like lastMessageAt, so the browser can compare the two as strings.
     lastReadAt: channel.lastReadAt?.toISOString() ?? null,
+    work: work.map(channelWorkDto),
+    /*
+     * Only ever true from here. A person's own run is not on any row this can read, so a roster
+     * that said false would put out the dot another tab's run had just lit.
+     */
+    ...(work.length > 0 ? { busy: true } : {}),
   };
 }
 
