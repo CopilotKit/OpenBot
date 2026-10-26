@@ -418,9 +418,9 @@ test("a computer still starting answers 'not performed, try again' rather than t
       },
     },
     policy: () => ({ mode: "enforce", allow: ["true"], deny: [] }),
-    fetchImpl: async () => {
+    fetchImpl: (async () => {
       throw new Error("nothing should reach the computer");
-    },
+    }) as unknown as typeof fetch,
   });
   const tools = headless.createHeadlessComputerTools({
     gateway,
