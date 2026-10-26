@@ -648,7 +648,8 @@ function RouteComponent() {
            * Who may give the app to a Bot. Binary and immediate, so a Switch. Every person's own
            * account and the built-in Routines start on; a deployment token, a shared account and an
            * app with no account start off, because a Bot given one of those reaches an account that
-           * is not the asker's. An owner's grant always runs on the asker's own account.
+           * is not the asker's. An owner's grant runs on the asker's own account, except on a shared
+           * account, where the grant lets the people who can use the Bot use the team account.
            */}
           {server ? (
             <>
@@ -657,9 +658,11 @@ function RouteComponent() {
                 <ItemContent>
                   <ItemTitle>Bot owners can give it to their Bots</ItemTitle>
                   <ItemDescription>
-                    {server.ownerGrants === "any"
-                      ? "People can let Bots they own use it, on the account of whoever is asking."
-                      : "Only an admin can give it to a Bot."}
+                    {server.ownerGrants !== "any"
+                      ? "Only an admin can give it to a Bot."
+                      : shared
+                        ? "Bot owners who give it to their Bots let those Bots use the team account."
+                        : "People can let Bots they own use it, on the account of whoever is asking."}
                   </ItemDescription>
                 </ItemContent>
                 <ItemActions>
