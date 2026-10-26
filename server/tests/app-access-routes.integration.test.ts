@@ -1076,9 +1076,10 @@ describe("an administrator's one press on a card", () => {
   test("a press that cannot be carried out leaves no request waiting", async () => {
     const response = await press("google-drive");
     expect(response.status).toBe(409);
-    expect((await json<{ error: string }>(response)).error).toContain(
-      "OAuth client",
-    );
+    const { error } = await json<{ error: string }>(response);
+    expect(error).toContain("OAuth client");
+    // There is no request left to approve again: the admin presses again.
+    expect(error).toEndWith("then try again.");
     const rows = await database
       .select({ status: appAccessRequests.status })
       .from(appAccessRequests)
