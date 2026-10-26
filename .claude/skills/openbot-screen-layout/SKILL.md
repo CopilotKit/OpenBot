@@ -106,8 +106,10 @@ here yet" is a fact, and the section heading already said what the section is fo
 
 ### Procedure 2: Compose a row
 
-1. `ItemMedia variant="icon"` holds a leading icon from `@tabler/icons-react`. It is what makes a
-   card of rows scannable; a row without one reads as a paragraph.
+1. `ItemMedia variant="icon"` holds a leading icon from `@tabler/icons-react`, drawn as a 16px glyph
+   on a 32px muted tile. It is what makes a card of rows scannable; a row without one reads as a
+   paragraph. Pass the bare icon — the variant sizes and colours it — and use plain `ItemMedia` only
+   for something that is its own picture, such as a Bot's avatar.
 2. `ItemContent` holds `ItemTitle` and, where the row needs a second line, `ItemDescription`.
 3. `ItemActions` holds the control, or the value when the row is read-only.
 4. `ItemHeader` and `ItemFooter` are `basis-full`, so they wrap onto a line of their own inside the
