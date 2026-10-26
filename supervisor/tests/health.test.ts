@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { healthOf } from "../src/docker";
+import { healthOf } from "../src/health";
 
 describe("reading a container's healthcheck from its status line", () => {
   test.each([
