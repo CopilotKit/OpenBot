@@ -25,6 +25,8 @@ type SupervisorComputerLocation = {
   /** Where to reach it, decided by the supervisor rather than assembled here. */
   url?: string;
   startedAt?: string;
+  /** The image's healthcheck verdict, from a supervisor new enough to report it. */
+  health?: string;
 };
 
 export type SupervisorOptions = {
@@ -165,7 +167,11 @@ export function createDockerSupervisorProvider(
     const rawStatus = location.status.toLowerCase();
     switch (rawStatus) {
       case "running":
-        return { botId, state: "ready" };
+        // Running is the process; healthy is the browser inside it. Until the healthcheck passes,
+        // `/ensure` holds every caller, so the computer is still starting.
+        return location.health === "starting"
+          ? { botId, state: "starting" }
+          : { botId, state: "ready" };
       case "created":
       case "restarting":
         return { botId, state: "starting" };

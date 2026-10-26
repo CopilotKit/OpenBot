@@ -199,6 +199,28 @@ describe("Docker supervisor provider", () => {
     },
   );
 
+  test("a running container whose healthcheck is still starting is starting, not ready", async () => {
+    const provider = createDockerSupervisorProvider({
+      baseUrl: "http://supervisor:4300",
+      fetchImpl: (async () =>
+        Response.json({
+          computers: [
+            { botId: "bot", status: "running", health: "starting" },
+            { botId: "other", status: "running", health: "healthy" },
+          ],
+        })) as unknown as typeof fetch,
+    });
+
+    expect(await provider.status("bot")).toEqual({
+      botId: "bot",
+      state: "starting",
+    });
+    expect(await provider.status("other")).toEqual({
+      botId: "other",
+      state: "ready",
+    });
+  });
+
   test("reports missing bot as absent", async () => {
     const provider = createDockerSupervisorProvider({
       baseUrl: "http://supervisor:4300",
