@@ -28,4 +28,11 @@ describe("COMPUTER_GUIDANCE", () => {
     expect(COMPUTER_GUIDANCE).toContain("Opening a page is not a web search.");
     expect(COMPUTER_GUIDANCE).toContain("cannot search");
   });
+
+  test("says what it is about to do before its first computer action", () => {
+    // A first action can sit through a cold start; a sentence first means the wait has a reason.
+    expect(COMPUTER_GUIDANCE).toContain(
+      "Before your first computer action in a turn, say in one sentence what you are about to do and where.",
+    );
+  });
 });
