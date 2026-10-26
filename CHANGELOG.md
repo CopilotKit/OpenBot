@@ -8,7 +8,7 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-**Before upgrading.** Six things change for an existing deployment:
+**Before upgrading.** Eight things change for an existing deployment:
 - A hosted computer's browser is now headed by default. It uses a little more memory than headless
   did; set `COMPUTER_BROWSER_MODE=headless` (Helm: `computers.browserMode: headless`) to keep the old
   behaviour.
@@ -34,6 +34,46 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - Migration `0060_app_access_requests` adds one table, `app_access_requests`, where a person's
   request for an administrator to switch on a work app, grant it to a Bot, or connect a Shared app's
   team account is kept, with who answered it and when. It starts empty and nothing is backfilled.
+- Migration `0061_suggestion_superseded` widens the check on `proactive_suggestions.status` to allow
+  `superseded` (below). Open suggestions from before the upgrade stay open until that Bot's next
+  research run replaces them.
+- Migration `0062_action_policy_labels` adds a `labels` column to `action_policies`, defaulting to
+  empty. Existing boundary rules keep working and show as "Custom rule" until somebody names them.
+
+### Screens share one spacing, row and empty-state design
+
+Every configuration screen now takes its spacing from the page frame: 32px under the title, 48px
+between sections, rows at least 56px tall with dividers inset to the text. Rows draw their icon as a
+glyph on a small tile, and a section with nothing in it says so with an icon, a title and, where
+there is one, the button that adds the first thing. The root font size is the browser's 16px again,
+with text kept on its 15px scale, so Tailwind sizes are their documented values.
+
+### Adding a credential and a boundary rule are screens of their own
+
+Add credential opens a page with a back button instead of a dialog. Boundaries is now a list of
+named rules ("Bots may never…"); adding one starts from a template or a blank rule and can be tested
+against recent activity before it applies, and each rule opens to what it has stopped lately.
+
+### A Bot's page is shorter
+
+Its In progress, Scheduled and Completed lists move to their own Activity page. The Bot's page keeps
+what is running or scheduled, three at most, with a dot on anything under way, and shows its newest
+three suggested next steps with the rest behind "Show more".
+
+### Suggested next steps no longer pile up
+
+Each research run replaces the open suggestions from the one before, and one with the same title as
+a suggestion that is already open, or was dismissed in the last 30 days, is not suggested again. The
+research is asked to suggest nothing when nothing needs doing, and not to name the Bot's tools.
+
+### Pin or delete a conversation from its Bot panel
+
+The gear panel in a conversation ends with Pin and Delete for that conversation.
+
+### The @ menu shows each Bot's avatar, at the caret
+
+On the home screen the @ menu opened away from the text, partly off the window; it now opens at the
+caret. It is wider and shows each Bot's avatar beside its name.
 
 ### Filling in a form is no longer mistaken for paying
 
@@ -665,7 +705,7 @@ A call that is refused anyway, from a schema offered earlier, is still refused a
 
 ## 0.1.0
 
-**Before upgrading.** Six things change for an existing deployment:
+**Before upgrading.** Eight things change for an existing deployment:
 - Automatic Learning is on unless an administrator saved it off. It does nothing until a Learning
   container is assigned; see below.
 - A Bot's computer refuses the network until the server pushes its policy. A computer run without
