@@ -49,6 +49,14 @@ checked against a source." Bots are told to look up figures that change over tim
 them. In Slack and Teams the same line follows the chart in the reply. Charts already in a
 conversation are drawn as before, with no such line.
 
+### A Bot searches with its search tool, never its browser
+
+Asked to search for something, a Bot could drive its browser to Google or another search engine
+instead of using the search tool it held. With a search tool it now searches with that, and keeps
+the browser for signing in, clicking through a site, filling in a form or opening a page the person
+named. Without one it answers from what it knows, says it has not checked, and shows a card for a
+search app (Parallel Search, Exa Search or Firecrawl) that the person can ask an administrator for.
+
 ### Screens share one spacing, row and empty-state design
 
 Every configuration screen now takes its spacing from the page frame: 32px under the title, 48px
