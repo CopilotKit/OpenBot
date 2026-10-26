@@ -876,6 +876,21 @@ a {
   color: var(--text-secondary);
 }
 
+.blocker-asks {
+  margin: 0;
+  font-size: 15px;
+  line-height: 24px;
+  color: var(--text-primary);
+}
+
+.blocker-manual {
+  margin-top: 28px;
+}
+
+.blocker-manual > .blocker-steps {
+  margin-top: 16px;
+}
+
 /* Commands to paste, in mono, with Copy pinned to the corner. */
 .command {
   position: relative;

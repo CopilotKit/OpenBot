@@ -2916,6 +2916,25 @@ test("a failed Windows blocker instruction is visible instead of an empty blocke
   expect(view.queryByRole("button", { name: "Set up OpenBot" })).toBeNull();
 });
 
+test("a restart still owed from a Windows fix comes before any check or setup", async () => {
+  setupRootConfiguration("/tmp/openbot-windows-restart-test", async () =>
+    emptyConfiguration(),
+  );
+  const setupHandler = invokeHandler;
+  invokeHandler = async (command, args) => {
+    if (command === "windows_restart_pending") return true;
+    return setupHandler(command, args);
+  };
+  const view = await renderApp();
+  expect(
+    await view.findByRole("heading", { name: "Restart Windows to finish" }),
+  ).toBeTruthy();
+  expect(invokeCalls.some((call) => call.command === "windows_blocker")).toBe(
+    false,
+  );
+  expect(view.queryByRole("button", { name: "Set up OpenBot" })).toBeNull();
+});
+
 test("a successfully detected missing WSL feature keeps its setup instruction", async () => {
   setupRootConfiguration("/tmp/openbot-windows-detection-test", async () =>
     emptyConfiguration(),

@@ -450,6 +450,60 @@ fn windows_blocker_instruction(blocker: win::Blocker) -> String {
     blocker.instruction().to_string()
 }
 
+/// Clear a Windows blocker by running its fix, behind Windows's own administrator prompt.
+///
+/// A fix that needs a restart is recorded against this boot, so the next launch knows whether the
+/// restart has happened rather than trusting a feature that reads as on but is not yet running.
+#[tauri::command]
+async fn windows_fix(app: tauri::AppHandle, blocker: win::Blocker) -> Result<win::Fixed, Problem> {
+    let failed = |detail: String| {
+        Problem::with(
+            "OpenBot could not set up Windows Subsystem for Linux. Try again, or run the commands \
+             yourself.",
+            detail,
+        )
+    };
+    let fix = blocker.fix().ok_or_else(|| {
+        Problem::plain("OpenBot cannot change this setting. Follow the steps on this screen.")
+    })?;
+    let data = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|error| failed(error.to_string()))?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let fixed = win::run_fix(fix, &data)?;
+        if fixed == win::Fixed::RestartNeeded {
+            win::record_restart_needed(&data, &win::boot()?)
+                .map_err(|error| failed(error.to_string()))?;
+        }
+        Ok(fixed)
+    })
+    .await
+    .map_err(|error| failed(error.to_string()))?
+}
+
+/// Whether a fix made earlier is still waiting for Windows to restart.
+#[tauri::command]
+async fn windows_restart_pending(app: tauri::AppHandle) -> Result<bool, Problem> {
+    if !cfg!(target_os = "windows") {
+        return Ok(false);
+    }
+    let Ok(data) = app.path().app_local_data_dir() else {
+        return Ok(false);
+    };
+    tauri::async_runtime::spawn_blocking(move || Ok(win::restart_pending(&data, &win::boot()?)))
+        .await
+        .map_err(|error| {
+            Problem::with("OpenBot could not check Windows setup.", error.to_string())
+        })?
+}
+
+/// Restart Windows to finish a fix, with OpenBot set to open again afterwards.
+#[tauri::command]
+fn windows_restart() -> Result<(), Problem> {
+    win::restart()
+}
+
 /// Bring the engine up: create the machine if it is missing, start it, then prove it answers.
 ///
 /// Reported step by step rather than as one result, because these take minutes and a window with
@@ -6037,6 +6091,9 @@ fn main() {
             detect_engine,
             windows_blocker,
             windows_blocker_instruction,
+            windows_fix,
+            windows_restart_pending,
+            windows_restart,
             prepare_engine,
             prepare_installation,
             start_stack,

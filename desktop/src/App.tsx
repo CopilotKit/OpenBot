@@ -49,7 +49,7 @@ import {
   type SetupStep,
 } from "./telemetry";
 import { Welcome } from "./Welcome";
-import { type Blocker, WindowsBlocker } from "./WindowsBlocker";
+import { type Blocker, WindowsBlocker, WindowsRestart } from "./WindowsBlocker";
 
 type EngineStatus = {
   engine: "docker" | "podman" | null;
@@ -99,6 +99,8 @@ export function App() {
 function Setup() {
   const [engine, setEngine] = useState<EngineStatus | null>(null);
   const [blocker, setBlocker] = useState<Blocker | null>(null);
+  // A Windows fix made earlier that only counts once Windows has restarted, and it has not.
+  const [restartPending, setRestartPending] = useState(false);
   const [blockerFailure, setBlockerFailure] = useState<Problem | null>(null);
   const [instruction, setInstruction] = useState("");
   const [root, setRoot] = useState("");
@@ -524,8 +526,15 @@ function Setup() {
     invoke<EngineStatus>("detect_engine")
       .then(setEngine)
       .catch(() => undefined);
-    const windowsReady = invoke<Blocker | null>("windows_blocker")
-      .then(async (found) => {
+    // A restart still owed comes first: a feature switched on reads as on before it runs.
+    const windowsReady = invoke<boolean>("windows_restart_pending")
+      .catch(() => false)
+      .then(async (pending) => {
+        if (pending) {
+          setRestartPending(true);
+          return false;
+        }
+        const found = await invoke<Blocker | null>("windows_blocker");
         setBlocker(found);
         if (found) {
           setInstruction(
@@ -957,8 +966,16 @@ function Setup() {
     );
   }
 
+  if (restartPending) return <WindowsRestart />;
+
   if (blocker) {
-    return <WindowsBlocker blocker={blocker} instruction={instruction} />;
+    return (
+      <WindowsBlocker
+        blocker={blocker}
+        instruction={instruction}
+        onRestartNeeded={() => setRestartPending(true)}
+      />
+    );
   }
 
   if (
@@ -1837,4 +1854,3 @@ function settleProgress(steps: Progress[], problem?: Problem): Progress[] {
       : step,
   );
 }
-

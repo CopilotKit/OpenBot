@@ -108,13 +108,9 @@ impl Blocker {
         }
     }
 
-    /// Whether the shell can clear this itself. Two of the four are ours; two are not.
-    /// Whether OpenBot could fix this itself, one day.
-    ///
-    /// Nothing acts on this yet. `wsl --install` needs elevation and a restart, and the resumable
-    /// state machine that would carry somebody across that reboot is designed and not built, so
-    /// every blocker screen currently tells a person what to run. Kept because the two halves are
-    /// genuinely different: WSL is installable and a firmware setting is not.
+    /// Whether this account can clear it without anybody else. A standard account can still use
+    /// `fix`, with an administrator typing their password into the prompt; a firmware setting
+    /// cannot be fixed from Windows at all.
     pub fn ours_to_fix(self) -> bool {
         matches!(
             self,
@@ -560,6 +556,305 @@ fn blocker_with(
 #[cfg(not(target_os = "windows"))]
 pub fn blocker() -> Result<Option<Blocker>, Problem> {
     Ok(None)
+}
+
+/// What OpenBot runs to clear a blocker: a PowerShell script, behind one administrator prompt when
+/// it changes the machine, and whether Windows has to restart before the change is real.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Fix {
+    pub script: &'static str,
+    pub elevated: bool,
+    pub restart: bool,
+}
+
+/// Turn on WSL 2 and nothing else: no Linux distribution, which `wsl --install` would add and then
+/// open after the restart asking for a UNIX username nobody needs.
+///
+/// Both Windows features through DISM every time, because that works on every build and is a no-op
+/// for one already on; `wsl --install` alone can find WSL present and leave Virtual Machine
+/// Platform off. DISM exits 3010 for "done, restart needed", which is success here. Then the
+/// current WSL and its kernel, best effort: the inbox `wsl.exe` of older builds refuses
+/// `--no-distribution` (measured on Server 2022), and a kernel still missing after the restart is
+/// its own blocker, with its own fix.
+const ENABLE_WSL: &str = r#"$ErrorActionPreference = 'Continue'
+foreach ($feature in 'Microsoft-Windows-Subsystem-Linux', 'VirtualMachinePlatform') {
+  & dism.exe /online /enable-feature /featurename:$feature /all /norestart /quiet | Out-Null
+  if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 3010) {
+    throw "dism.exe could not turn on $feature (exit $LASTEXITCODE)"
+  }
+}
+& wsl.exe --install --no-distribution | Out-Null
+exit 0"#;
+
+/// The WSL kernel, from GitHub where this WSL knows how, because the Store is often what a managed
+/// machine has switched off; the Store otherwise.
+const UPDATE_WSL: &str = r#"$ErrorActionPreference = 'Continue'
+& wsl.exe --update --web-download | Out-Null
+if ($LASTEXITCODE -eq 0) { exit 0 }
+& wsl.exe --update | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "wsl.exe --update failed (exit $LASTEXITCODE)" }
+exit 0"#;
+
+/// A per-account setting, so it runs as the person rather than as whoever approved a prompt.
+const WSL_VERSION_TWO: &str = r#"$ErrorActionPreference = 'Continue'
+& wsl.exe --set-default-version 2 | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "wsl.exe --set-default-version 2 failed (exit $LASTEXITCODE)" }
+exit 0"#;
+
+impl Blocker {
+    /// How OpenBot clears this itself, or None when it cannot: firmware is not Windows's to change.
+    ///
+    /// A standard account gets the same fix as an administrator. Windows asks for an
+    /// administrator's password instead of a yes, and the features it turns on are the machine's,
+    /// so they are on for this account too.
+    pub fn fix(self) -> Option<Fix> {
+        match self {
+            Blocker::WslAbsent
+            | Blocker::VirtualMachinePlatformDisabled
+            | Blocker::NotAdministrator => Some(Fix {
+                script: ENABLE_WSL,
+                elevated: true,
+                restart: true,
+            }),
+            Blocker::WslNoKernel => Some(Fix {
+                script: UPDATE_WSL,
+                elevated: true,
+                restart: true,
+            }),
+            Blocker::WslOne => Some(Fix {
+                script: WSL_VERSION_TWO,
+                elevated: false,
+                restart: false,
+            }),
+            Blocker::VirtualizationDisabled => None,
+        }
+    }
+}
+
+/// The exit code that means the person said no to the administrator prompt: `ERROR_CANCELLED`.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+const DECLINED: i32 = 1223;
+
+/// The script as PowerShell's `-EncodedCommand` takes it: UTF-16LE, base64. Nothing in it is
+/// quoted twice, which is what passing a script through `Start-Process` otherwise comes to.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn encoded(script: &str) -> String {
+    use base64::Engine;
+    let bytes: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
+    base64::engine::general_purpose::STANDARD.encode(bytes)
+}
+
+/// Run `script` elevated: Windows shows its prompt, the script runs hidden, and its error, if it
+/// has one, comes back through `log` because an elevated process cannot write to our pipes.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn elevated_launcher(script: &str, log: &Path) -> String {
+    let log = log.display().to_string().replace('\'', "''");
+    let inner = format!(
+        "try {{\n{script}\n}} catch {{ $_ | Out-String | Set-Content -LiteralPath '{log}' -Encoding UTF8; exit 1 }}"
+    );
+    format!(
+        r#"$ErrorActionPreference = 'Stop'
+try {{
+  $process = Start-Process -FilePath powershell.exe -Verb RunAs -Wait -PassThru -WindowStyle Hidden -ArgumentList '-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-EncodedCommand','{}'
+  exit $process.ExitCode
+}} catch {{
+  $error_ = $_.Exception
+  while ($error_) {{ if ($error_.NativeErrorCode -eq {DECLINED}) {{ exit {DECLINED} }}; $error_ = $error_.InnerException }}
+  throw
+}}"#,
+        encoded(&inner)
+    )
+}
+
+/// What came of running a fix, before any restart.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Fixed {
+    /// Done; Windows has to restart before it counts.
+    RestartNeeded,
+    /// Done, and nothing else needed.
+    Done,
+}
+
+/// Turn the outcome of running a fix into what the screen says.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn fixed(
+    fix: Fix,
+    status: Option<i32>,
+    log: Option<String>,
+    stderr: &str,
+) -> Result<Fixed, Problem> {
+    match status {
+        Some(0) => Ok(if fix.restart {
+            Fixed::RestartNeeded
+        } else {
+            Fixed::Done
+        }),
+        Some(DECLINED) => Err(Problem::plain(
+            "Windows did not get permission to make the change. Choose Set up Windows again and \
+             approve the prompt, or run the commands yourself.",
+        )),
+        status => Err(Problem::with(
+            "OpenBot could not set up Windows Subsystem for Linux. Try again, or run the commands \
+             yourself.",
+            log.filter(|log| !log.trim().is_empty())
+                .unwrap_or_else(|| format!("exit {status:?}: {}", stderr.trim())),
+        )),
+    }
+}
+
+/// Run a blocker's fix and say what came of it. `scratch` holds the elevated script's error log.
+#[cfg(target_os = "windows")]
+pub fn run_fix(fix: Fix, scratch: &Path) -> Result<Fixed, Problem> {
+    std::fs::create_dir_all(scratch).map_err(|error| {
+        Problem::with(
+            "OpenBot could not set up Windows Subsystem for Linux.",
+            error.to_string(),
+        )
+    })?;
+    let log = scratch.join("windows-fix-error.txt");
+    let _ = std::fs::remove_file(&log);
+    let script = if fix.elevated {
+        elevated_launcher(fix.script, &log)
+    } else {
+        fix.script.to_string()
+    };
+    let output = crate::quiet::command("powershell")
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-EncodedCommand",
+        ])
+        .arg(encoded(&script))
+        .output()
+        .map_err(|error| {
+            Problem::with(
+                "OpenBot could not set up Windows Subsystem for Linux.",
+                error.to_string(),
+            )
+        })?;
+    fixed(
+        fix,
+        output.status.code(),
+        std::fs::read_to_string(&log).ok(),
+        &String::from_utf8_lossy(&output.stderr),
+    )
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn run_fix(_fix: Fix, _scratch: &Path) -> Result<Fixed, Problem> {
+    Err(Problem::plain(
+        "Only Windows needs Windows Subsystem for Linux.",
+    ))
+}
+
+/// Where a fix that needs a restart is remembered, with the boot it was made in.
+pub fn restart_path(data_dir: &Path) -> PathBuf {
+    data_dir.join("windows-restart.json")
+}
+
+#[derive(Serialize, Deserialize)]
+struct AwaitingRestart {
+    boot: String,
+}
+
+/// Remember that Windows has to restart, against this boot.
+pub fn record_restart_needed(data_dir: &Path, boot: &str) -> std::io::Result<()> {
+    std::fs::create_dir_all(data_dir)?;
+    std::fs::write(
+        restart_path(data_dir),
+        serde_json::to_string(&AwaitingRestart {
+            boot: boot.to_string(),
+        })
+        .unwrap_or_default(),
+    )
+}
+
+/// Whether a fix is still waiting for its restart: recorded in the boot that is running now.
+///
+/// Checked before the blocker is, because a feature switched on reads as on straight away while
+/// WSL cannot use it until Windows restarts; going on then would fail later, in Docker. A record
+/// from an earlier boot means the restart happened, so it is removed.
+pub fn restart_pending(data_dir: &Path, boot: &str) -> bool {
+    let path = restart_path(data_dir);
+    let Some(recorded) = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|text| serde_json::from_str::<AwaitingRestart>(&text).ok())
+    else {
+        let _ = std::fs::remove_file(&path);
+        return false;
+    };
+    if recorded.boot == boot {
+        return true;
+    }
+    let _ = std::fs::remove_file(&path);
+    false
+}
+
+/// When Windows last started, to tell one boot from the next.
+#[cfg(target_os = "windows")]
+pub fn boot() -> Result<String, Problem> {
+    probe_text(
+        "when Windows last started (powershell)",
+        crate::quiet::command("powershell")
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "(Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToUniversalTime().ToString('yyyyMMddHHmmss')",
+            ])
+            .output(),
+    )
+    .map(|text| text.trim().to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn boot() -> Result<String, Problem> {
+    Ok(String::new())
+}
+
+/// Restart Windows now, with OpenBot set to open once when the person signs back in.
+#[cfg(target_os = "windows")]
+pub fn restart() -> Result<(), Problem> {
+    let failed = |detail: String| {
+        Problem::with(
+            "OpenBot could not restart Windows. Restart it from the Start menu.",
+            detail,
+        )
+    };
+    let program = std::env::current_exe().map_err(|error| failed(error.to_string()))?;
+    // Best effort: without it the person opens OpenBot themselves, as the screen already says.
+    let _ = crate::quiet::command("reg.exe")
+        .args([
+            "add",
+            r"HKCU\Software\Microsoft\Windows\CurrentVersion\RunOnce",
+            "/v",
+            "OpenBot",
+            "/t",
+            "REG_SZ",
+            "/d",
+            &format!("\"{}\"", program.display()),
+            "/f",
+        ])
+        .output();
+    let output = crate::quiet::command("shutdown.exe")
+        .args(["/r", "/t", "0"])
+        .output()
+        .map_err(|error| failed(error.to_string()))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(failed(
+            String::from_utf8_lossy(&output.stderr).trim().to_string(),
+        ))
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn restart() -> Result<(), Problem> {
+    Err(Problem::plain("Only Windows restarts from here."))
 }
 
 #[cfg(test)]
@@ -1533,6 +1828,110 @@ mod tests {
                 "{blocker:?} hides the restart"
             );
         }
+    }
+
+    #[test]
+    fn every_blocker_but_firmware_has_a_fix_and_only_the_account_setting_skips_the_prompt() {
+        for blocker in [
+            Blocker::WslAbsent,
+            Blocker::WslNoKernel,
+            Blocker::VirtualMachinePlatformDisabled,
+            Blocker::NotAdministrator,
+        ] {
+            let fix = blocker.fix().unwrap();
+            assert!(fix.elevated && fix.restart, "{blocker:?}");
+        }
+        let fix = Blocker::WslOne.fix().unwrap();
+        assert!(!fix.elevated && !fix.restart);
+        assert_eq!(Blocker::VirtualizationDisabled.fix(), None);
+    }
+
+    #[test]
+    fn enabling_wsl_turns_on_both_features_and_never_installs_a_distribution() {
+        assert!(ENABLE_WSL.contains("--install --no-distribution"));
+        assert!(!ENABLE_WSL.contains("wsl.exe --install\n"));
+        assert!(ENABLE_WSL.contains("Microsoft-Windows-Subsystem-Linux"));
+        assert!(ENABLE_WSL.contains("VirtualMachinePlatform"));
+        assert!(
+            ENABLE_WSL.contains("3010"),
+            "a restart-needed DISM exit is success"
+        );
+    }
+
+    #[test]
+    fn the_encoded_script_is_utf16le_base64() {
+        use base64::Engine;
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(encoded("exit 0"))
+            .unwrap();
+        assert_eq!(bytes, b"e\0x\0i\0t\0 \x000\0");
+    }
+
+    #[test]
+    fn the_elevated_launcher_asks_through_runas_and_reports_a_refusal() {
+        let launcher = elevated_launcher("exit 0", Path::new(r"C:\Users\o'brien\fix.txt"));
+        assert!(launcher.contains("-Verb RunAs"));
+        assert!(launcher.contains("-Wait -PassThru"));
+        assert!(launcher.contains("exit 1223"));
+        // The log path is inside the encoded inner script, quoted for PowerShell there.
+        let encoded_inner = launcher
+            .split("'-EncodedCommand','")
+            .nth(1)
+            .and_then(|rest| rest.split('\'').next())
+            .unwrap();
+        use base64::Engine;
+        let inner = base64::engine::general_purpose::STANDARD
+            .decode(encoded_inner)
+            .unwrap();
+        let inner: Vec<u16> = inner
+            .chunks(2)
+            .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+            .collect();
+        let inner = String::from_utf16(&inner).unwrap();
+        assert!(inner.contains(r"'C:\Users\o''brien\fix.txt'"), "{inner}");
+    }
+
+    #[test]
+    fn a_fix_says_restart_done_declined_or_failed_with_its_log() {
+        let enable = Blocker::WslAbsent.fix().unwrap();
+        let version = Blocker::WslOne.fix().unwrap();
+        assert_eq!(fixed(enable, Some(0), None, ""), Ok(Fixed::RestartNeeded));
+        assert_eq!(fixed(version, Some(0), None, ""), Ok(Fixed::Done));
+        let declined = fixed(enable, Some(DECLINED), None, "").unwrap_err();
+        assert!(declined.said.contains("did not get permission"));
+        let failed = fixed(
+            enable,
+            Some(1),
+            Some("dism.exe could not turn on X".into()),
+            "",
+        )
+        .unwrap_err();
+        assert_eq!(
+            failed.detail.as_deref(),
+            Some("dism.exe could not turn on X")
+        );
+        let failed = fixed(enable, Some(1), None, "boom").unwrap_err();
+        assert!(failed.detail.unwrap().contains("boom"));
+    }
+
+    #[test]
+    fn a_restart_is_pending_only_within_the_boot_that_recorded_it() {
+        let dir = temp_root("winrestart");
+        assert!(!restart_pending(&dir, "20261026120000"));
+        record_restart_needed(&dir, "20261026120000").unwrap();
+        assert!(restart_pending(&dir, "20261026120000"));
+        assert!(
+            restart_pending(&dir, "20261026120000"),
+            "asking does not clear it"
+        );
+        assert!(
+            !restart_pending(&dir, "20261026130500"),
+            "a new boot is the restart"
+        );
+        assert!(!restart_path(&dir).exists(), "and the record is gone");
+        std::fs::write(restart_path(&dir), "{ not json").unwrap();
+        assert!(!restart_pending(&dir, "20261026130500"));
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
