@@ -56,6 +56,37 @@ test("figures from the Bot's own knowledge are marked as unchecked", () => {
   expect(view.getByText(/Not checked against a source/)).toBeTruthy();
 });
 
+test("the unchecked note and the sources read as separate parts", () => {
+  const view = render(
+    <BarChartCard
+      basis="own-knowledge"
+      points={POINTS}
+      sources={[{ title: "Annual report" }]}
+      title="GDP"
+    />,
+  );
+  expect(view.container.textContent).toContain(
+    "Not checked against a source. · Sources: Annual report",
+  );
+});
+
+test("sources the model wrote in the wrong shape are skipped, not fatal", () => {
+  const view = render(
+    <BarChartCard
+      {...({
+        basis: "read",
+        points: POINTS,
+        sources: [null, { title: 3 }, { title: "Notes" }, { title: "Notes" }],
+        asOf: { year: 2025 },
+        title: "GDP",
+      } as unknown as Parameters<typeof BarChartCard>[0])}
+    />,
+  );
+  expect(view.container.textContent).toContain("Sources: Notes");
+  expect(view.container.textContent).not.toContain("Notes, Notes");
+  expect(view.queryByText(/As of/)).toBeNull();
+});
+
 test("only web addresses become links", () => {
   const view = render(
     <BarChartCard
