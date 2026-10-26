@@ -46,7 +46,8 @@ A chart a Bot draws now ends with a line naming what its figures were read from 
 from, such as "Sources: World Bank World Development Indicators · As of 2025". Figures a Bot charted
 from its own knowledge, without looking them up, are marked "From the Bot's own knowledge. Not
 checked against a source." Bots are told to look up figures that change over time before charting
-them. Charts already in a conversation are drawn as before, with no such line.
+them. In Slack and Teams the same line follows the chart in the reply. Charts already in a
+conversation are drawn as before, with no such line.
 
 ### Screens share one spacing, row and empty-state design
 
