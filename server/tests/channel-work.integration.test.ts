@@ -413,7 +413,8 @@ describe("announcing it", () => {
       ]);
       // A settle says what is left without claiming a turn started or ended.
       expect(heard[1]).toMatchObject({ channelId: channel.id, work: [] });
-      expect(heard[1]?.busy).toBeUndefined();
+      expect(heard[1]).toBeDefined();
+      expect(heard[1]).not.toHaveProperty("busy");
     } finally {
       detach();
       await listener.stop();
@@ -449,7 +450,7 @@ describe("announcing it", () => {
         channelId: channel.id,
         busy: true,
       });
-      expect(memberHeard[0]?.work).toBeUndefined();
+      expect(memberHeard[0]).not.toHaveProperty("work");
     } finally {
       await socket.stop();
     }

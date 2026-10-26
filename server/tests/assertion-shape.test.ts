@@ -625,7 +625,9 @@ const ALLOW: Allowed[] = [
   },
   {
     file: "server/tests/agent-handoff.test.ts",
-    line: 366,
+    // Moved from 366 by the work-list change, which added tests above it; the offence is the same one and
+    // is re-keyed rather than re-found.
+    line: 409,
     shape: "b",
     finding: "NEW (round 2 did not find this)",
     why: "expect(plain.events[0]?.initiator).toBe(undefined);",
@@ -814,7 +816,9 @@ const ALLOW: Allowed[] = [
   },
   {
     file: "server/tests/agent-handoff.test.ts",
-    line: 620,
+    // Moved from 620 by the work-list change, which added tests above it; the offence is the same one and
+    // is re-keyed rather than re-found.
+    line: 663,
     shape: "c",
     finding: "NEW (round 2 did not find this)",
     why: ').toEqual([ { eventType: "agent.handoff_offered", reason: undefined }, { eventType: "agent.handoff_refused", r',
@@ -869,14 +873,18 @@ const ALLOW: Allowed[] = [
   },
   {
     file: "server/tests/routine-runner.test.ts",
-    line: 169,
+    // Moved from 169 by the work-list change, which added tests above it; the offence is the same one and
+    // is re-keyed rather than re-found.
+    line: 185,
     shape: "c",
     finding: "NEW (round 2 did not find this)",
     why: 'expect(recorded.finished).toEqual([ { runId: RUN_ID, status: "succeeded", error: undefined }, ]);',
   },
   {
     file: "server/tests/routine-runner.test.ts",
-    line: 272,
+    // Moved from 272 by the work-list change, which added tests above it; the offence is the same one and
+    // is re-keyed rather than re-found.
+    line: 289,
     shape: "c",
     finding: "NEW (round 2 did not find this)",
     why: 'expect(recorded.finished).toEqual([ { runId: RUN_ID, status: "succeeded", error: undefined }, ]);',

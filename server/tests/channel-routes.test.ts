@@ -232,7 +232,8 @@ describe("what a channel is waiting on", () => {
     expect(body.channels[0]).toMatchObject({ id: "channel-1", busy: true });
     expect(body.channels[0]?.work).toHaveLength(1);
     // Absent rather than false: a person's own run in another tab is not on any row this reads.
-    expect(body.channels[1]?.busy).toBeUndefined();
+    expect(body.channels[1]).toBeDefined();
+    expect(body.channels[1]).not.toHaveProperty("busy");
     expect(body.channels[1]?.work).toEqual([]);
   });
 });

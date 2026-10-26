@@ -393,9 +393,7 @@ describe("createRoutineRunner", () => {
     await runner.run(RUN_ID);
 
     expect(recorded.turns).toHaveLength(1);
-    expect(recorded.finished).toEqual([
-      { runId: RUN_ID, status: "succeeded", error: undefined },
-    ]);
+    expect(recorded.finished).toEqual([{ runId: RUN_ID, status: "succeeded" }]);
   });
 
   test("signals nothing for a firing that never runs", async () => {
