@@ -8,7 +8,7 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-**Before upgrading.** Eight things change for an existing deployment:
+**Before upgrading.** Nine things change for an existing deployment:
 - A hosted computer's browser is now headed by default. It uses a little more memory than headless
   did; set `COMPUTER_BROWSER_MODE=headless` (Helm: `computers.browserMode: headless`) to keep the old
   behaviour.
@@ -39,6 +39,18 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   research run replaces them.
 - Migration `0062_action_policy_labels` adds a `labels` column to `action_policies`, defaulting to
   empty. Existing boundary rules keep working and show as "Custom rule" until somebody names them.
+- On Helm's `shared` computer and the docker-compose `agent-computer`, each Bot's files now live in
+  `computers/<Bot id>` on the workspace volume (below). Files saved before the upgrade stay at the
+  root of the volume, where no Bot sees them; move them into a Bot's folder to give them back.
+
+### Each Bot on a shared computer has its own files
+
+A computer that serves many Bots kept one folder of files for all of them, so a note one Bot saved
+was a file every other Bot could list and read. Each Bot now gets its own folder, and its commands
+start there. Logins were already kept apart. This is on for Helm's `shared` computer and the
+docker-compose `agent-computer`, and `COMPUTER_SEPARATE_WORKSPACES=on` turns it on for the
+all-in-one image. A command can still read another Bot's folder, so a deployment that needs people
+kept apart should give each Bot a computer of its own (`computers.mode: sandbox`).
 
 ### Screens share one spacing, row and empty-state design
 

@@ -149,6 +149,12 @@ spec:
                 secretKeyRef:
                   name: {{ default (include "openbot.secretName" .) .Values.computers.existingTokenSecret }}
                   key: computer-token
+            {{- /*
+              Every Bot reaches this one pod, so each gets its own folder of files and its shell
+              starts there. See agent-computer/src/workspaces.ts.
+            */}}
+            - name: COMPUTER_SEPARATE_WORKSPACES
+              value: "on"
             {{- with .Values.computers.maxBrowsers }}
             - name: COMPUTER_MAX_BROWSERS
               value: {{ . | quote }}
