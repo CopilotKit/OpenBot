@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { ComputerStillStartingError } from "../src/computer/client";
 import type { ComputerProvider } from "../src/computer/provider";
 import {
   createDockerSupervisorProvider,
@@ -88,6 +89,59 @@ describe("locating a Bot's computer", () => {
     expect(client.locate("sales")).rejects.toThrow(/could not be reached/);
   });
 
+  test("an ensure that runs out of time is a computer still starting, not a broken supervisor", async () => {
+    // `/ensure` is the call that waits on a container coming up, so its deadline is a slow start.
+    const client = createDockerSupervisorProvider({
+      baseUrl: "http://supervisor:4300",
+      fetchImpl: (async () => {
+        throw new DOMException("The operation timed out.", "TimeoutError");
+      }) as unknown as typeof fetch,
+    });
+    const failure = await client.locate("sales").catch((error) => error);
+    expect(failure).toBeInstanceOf(ComputerStillStartingError);
+  });
+
+  test("a timeout on a plain read is still the supervisor's fault", async () => {
+    const client = createDockerSupervisorProvider({
+      baseUrl: "http://supervisor:4300",
+      fetchImpl: (async () => {
+        throw new DOMException("The operation timed out.", "TimeoutError");
+      }) as unknown as typeof fetch,
+    });
+    await expect(client.stop("sales")).rejects.toThrow(SupervisorError);
+  });
+
+  test("an ensure the supervisor answers as still booting is a computer still starting", async () => {
+    // The supervisor's own health wait ran out on a container that is up, and it says so.
+    const client = createDockerSupervisorProvider({
+      baseUrl: "http://supervisor:4300",
+      fetchImpl: (async () =>
+        Response.json(
+          {
+            error: "The computer started but did not answer within 60000ms.",
+            starting: true,
+          },
+          { status: 503 },
+        )) as unknown as typeof fetch,
+    });
+    const failure = await client.locate("sales").catch((error) => error);
+    expect(failure).toBeInstanceOf(ComputerStillStartingError);
+  });
+
+  test("a 503 from an unreachable Docker is still the supervisor's fault", async () => {
+    const client = createDockerSupervisorProvider({
+      baseUrl: "http://supervisor:4300",
+      fetchImpl: (async () =>
+        Response.json(
+          { error: "Docker is not reachable." },
+          { status: 503 },
+        )) as unknown as typeof fetch,
+    });
+    const failure = await client.locate("sales").catch((error) => error);
+    expect(failure).toBeInstanceOf(SupervisorError);
+    expect(failure).not.toBeInstanceOf(ComputerStillStartingError);
+  });
+
   test("the bot id is escaped into the path", async () => {
     let seen = "";
     const client = createDockerSupervisorProvider({
@@ -144,6 +198,28 @@ describe("Docker supervisor provider", () => {
       expect(result).toMatchObject(expected);
     },
   );
+
+  test("a running container whose healthcheck is still starting is starting, not ready", async () => {
+    const provider = createDockerSupervisorProvider({
+      baseUrl: "http://supervisor:4300",
+      fetchImpl: (async () =>
+        Response.json({
+          computers: [
+            { botId: "bot", status: "running", health: "starting" },
+            { botId: "other", status: "running", health: "healthy" },
+          ],
+        })) as unknown as typeof fetch,
+    });
+
+    expect(await provider.status("bot")).toEqual({
+      botId: "bot",
+      state: "starting",
+    });
+    expect(await provider.status("other")).toEqual({
+      botId: "other",
+      state: "ready",
+    });
+  });
 
   test("reports missing bot as absent", async () => {
     const provider = createDockerSupervisorProvider({

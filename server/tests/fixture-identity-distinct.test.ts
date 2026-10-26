@@ -115,6 +115,10 @@ const KNOWN_COLLAPSES: Record<string, Record<string, number>> = {
   "server/tests/composio-broker-seam.test.ts": {
     '"u" | "u"': 1,
   },
+  // The row Connect records for a person's held account, expected as the store writes it.
+  "server/tests/composio-connect-adopts-held-account.test.ts": {
+    "PERSON | PERSON": 1,
+  },
   "server/tests/composio-connection-kinds.test.ts": {
     "person | person": 14,
   },

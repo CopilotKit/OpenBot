@@ -1,4 +1,4 @@
-import { IconChevronRight, IconPlus } from "@tabler/icons-react";
+import { IconChecklist, IconChevronRight, IconPlus } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { Fragment, useState } from "react";
 import {
@@ -62,10 +62,23 @@ export function BotResponsibilities({ agentId }: { agentId?: string }) {
           {goals.error.message}
         </p>
       ) : shown.length === 0 ? (
-        <PageEmpty>
+        <PageEmpty
+          action={
+            <Button
+              onClick={() => setCreating(true)}
+              size="sm"
+              variant="outline"
+            >
+              <IconPlus />
+              New responsibility
+            </Button>
+          }
+          icon={IconChecklist}
+          title="No responsibilities yet"
+        >
           {agentId
-            ? "No responsibilities for this Bot yet. Add one with New responsibility."
-            : "No responsibilities yet. Add one with New responsibility."}
+            ? "Work you give this Bot to keep doing shows up here."
+            : "Work you give your Bots to keep doing shows up here."}
         </PageEmpty>
       ) : (
         <PageRows>

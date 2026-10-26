@@ -91,6 +91,8 @@ function server(): PluginServer {
     dynamicClient: false,
     accountMode: null,
     sharedVendorConnected: false,
+    ownerGrants: "any",
+    ownerGrantsChosen: null,
     authScheme: null,
     tools: [
       {

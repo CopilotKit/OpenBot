@@ -1,377 +1,214 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
-import { createFileRoute, Link } from "@tanstack/react-router";
-import { useState } from "react";
-import { PageSection, PageShell } from "@/components/layout/page-shell";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { isComposing } from "@/lib/composing";
-import { saveActionPolicyMutationOptions } from "@/lib/computers/mutations";
 import {
-  type ActionPolicy,
-  actionPolicyQueryOptions,
-  type DryRunReport,
-  dryRunActionPolicy,
-  type PolicyMode,
-} from "@/lib/computers/queries";
-import { queryClient } from "@/query-client";
-
-/**
- * CEL computer-action boundary editor. Rules are shown as the gateway evaluates them, and denied
- * actions are recorded in Audit with the matching rule.
- */
-
-/**
- * Presets are concrete CEL rules, not a separate policy language.
- */
-const PRESETS: { label: string; rule: string; cost?: string }[] = [
-  {
-    label: "Never submit a form",
-    // `key` is guarded by tool name so the clause short-circuits before it on actions that have no
-    // keypress in them. Both tools that can press Enter are named: `computer_type` takes a `submit`
-    // flag that presses it once the text is in, and a rule naming only `computer_key` left that door
-    // open.
-    rule: '(intent == "activate" && contains(element.name, "submit")) || ((tool.name == "computer_key" || tool.name == "computer_type") && key == "Enter")',
-    cost: "Also stops the Bot pressing Enter anywhere else. A form can submit from Enter in any field.",
-  },
-  {
-    label: "Never type into a password field",
-    rule: 'intent == "type" && contains(element.name, "password")',
-    cost: "A password box with a different label isn't covered. The rule matches the label.",
-  },
-  {
-    label: "Stay off social media",
-    rule: 'intent == "navigate" && (contains(page.host, "facebook.com") || contains(page.host, "x.com"))',
-    cost: "Only these two hosts. A link that redirects there from elsewhere is allowed.",
-  },
-];
+  IconChevronRight,
+  IconListSearch,
+  IconPlus,
+  IconShieldX,
+} from "@tabler/icons-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { createFileRoute, Link } from "@tanstack/react-router";
+import {
+  PageEmpty,
+  PageRows,
+  PageSection,
+  PageShell,
+} from "@/components/layout/page-shell";
+import { StaggerItem } from "@/components/layout/stagger";
+import { Button } from "@/components/ui/button";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemMedia,
+  ItemTitle,
+} from "@/components/ui/item";
+import { Separator } from "@/components/ui/separator";
+import { Switch } from "@/components/ui/switch";
+import { ruleLabel } from "@/lib/boundaries/rules";
+import { saveActionPolicyMutationOptions } from "@/lib/computers/mutations";
+import { actionPolicyQueryOptions } from "@/lib/computers/queries";
 
 export const Route = createFileRoute("/_authed/admin/boundaries")({
   component: BoundariesPage,
 });
 
+const DESCRIPTION =
+  "Things no Bot may do, whatever it's asked. Every action a Bot takes on its computer or in a connected app is checked against these rules before it happens.";
+
+/**
+ * The deployment's boundaries, read as a list of things Bots may never do.
+ *
+ * It used to be one screen that was also the editor: the rule language explained in a paragraph of
+ * attribute names, rules shown as raw CEL, and ready-made rules drawn as buttons. Nobody could tell
+ * from it what the page was for. Now each rule is a row with a name, adding one is its own screen
+ * (`boundaries_.new.tsx`) and a rule opens to what it has stopped (`boundaries_.$index.tsx`).
+ */
 function BoundariesPage() {
-  const [problem, setProblem] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
-  const [draft, setDraft] = useState("");
-
-  const [tested, setTested] = useState<{
-    rule: string;
-    report: DryRunReport;
-  } | null>(null);
-  const [testing, setTesting] = useState(false);
-
+  const queryClient = useQueryClient();
   const stored = useQuery(actionPolicyQueryOptions());
   const savePolicy = useMutation(saveActionPolicyMutationOptions(queryClient));
-
-  /*
-   * The saved policy wins while a save is in flight and after it lands: the server normalises what
-   * it stores, so what came back is the policy, not what was sent.
-   */
+  /* What the server stored wins once a save lands: it normalises what it keeps. */
   const policy = savePolicy.data ?? stored.data ?? null;
-  const saving = savePolicy.isPending;
 
-  const save = (next: ActionPolicy) => {
-    setSaved(false);
-    setProblem(null);
-    savePolicy.mutate(next, {
-      onError: (thrown: Error) => setProblem(thrown.message),
-      onSuccess: () => setSaved(true),
-    });
-  };
+  const addRule = (
+    <Button
+      render={(props) => <Link {...props} to="/admin/boundaries/new" />}
+      size="sm"
+      variant="ghost"
+    >
+      <IconPlus />
+      Add rule
+    </Button>
+  );
 
-  /*
-   * A read that failed says so. This screen used to set "The boundary could not be read." itself;
-   * since the read became a query, that sentence (or the server's own) is the query's error, and
-   * without this the page sat on its title with nothing under it for as long as it was open.
-   */
-  const unreadable = problem ?? stored.error?.message ?? null;
-  if (unreadable && !policy) {
+  if (!policy) {
     return (
-      <PageShell title="Boundaries">
-        <p className="mt-4 text-destructive text-sm" role="alert">
-          {unreadable}
-        </p>
+      <PageShell description={DESCRIPTION} title="Boundaries">
+        {/* Nothing until the policy is known: a rule list that guesses is worse than a blank. */}
+        {stored.error ? (
+          <p className="text-destructive text-sm" role="alert">
+            {stored.error.message}
+          </p>
+        ) : null}
       </PageShell>
     );
   }
 
-  /* Nothing until the policy is known: a rule list that guesses is worse than a blank. */
-  if (!policy) {
-    return <PageShell title="Boundaries">{null}</PageShell>;
-  }
-
-  const addRule = (rule: string) => {
-    const trimmed = rule.trim();
-    if (!trimmed || policy.deny.includes(trimmed)) return;
-    void save({ ...policy, deny: [...policy.deny, trimmed] });
-    setDraft("");
-    setTested(null);
-  };
-
-  /*
-   * The rule as it would be in force — the current policy plus this draft — replayed over recent
-   * recorded actions. Nothing is saved and nothing is decided; the reply names the actions the
-   * addition would have decided differently, so the rule's real reach is known before it starts
-   * refusing anybody.
-   */
-  const testRule = async (rule: string) => {
-    const trimmed = rule.trim();
-    if (!trimmed) return;
-    setProblem(null);
-    setTesting(true);
-    try {
-      const report = await dryRunActionPolicy({
-        ...policy,
-        deny: [...policy.deny, trimmed],
-      });
-      setTested({ rule: trimmed, report });
-    } catch (thrown) {
-      setProblem((thrown as Error).message);
-    } finally {
-      setTesting(false);
-    }
-  };
+  const trial = policy.mode === "dry-run";
+  const allowsEverythingElse =
+    policy.allow.length === 1 && policy.allow[0] === "true";
 
   return (
-    <PageShell
-      description={
-        <>
-          What a Bot can and can't do with its computer. Every action is checked
-          before it happens. Refusals show in{" "}
-          <Link className="underline" to="/admin/audit">
-            Audit
-          </Link>{" "}
-          with the rule that refused them.
-        </>
-      }
-      title="Boundaries"
-    >
-      <PageSection
-        description="Stop the action, or record it and let it through. Recording lets you try a rule on real activity before it refuses anything."
-        title="When a rule matches"
-      >
-        <div className="mt-2 flex gap-2">
-          {(["enforce", "dry-run"] as PolicyMode[]).map((mode) => (
-            <Button
-              key={mode}
-              aria-pressed={policy.mode === mode}
-              className={policy.mode === mode ? "bg-foreground/5" : undefined}
-              disabled={saving}
-              onClick={() => void save({ ...policy, mode })}
-              size="sm"
-              variant="outline"
-            >
-              {mode === "enforce"
-                ? "Stop the action"
-                : "Record it and allow it"}
-            </Button>
-          ))}
-        </div>
-        <p className="mt-2 text-xs text-muted-foreground">
-          {policy.mode === "enforce"
-            ? "The Bot is stopped and told which rule refused it."
-            : "Nothing is stopped. Each match is recorded as if it had been refused."}
-        </p>
-      </PageSection>
-
-      <PageSection
-        description={
-          <>
-            Checked first. A match stops the action, and the Bot is told which
-            rule refused it. Rules are CEL. They can check{" "}
-            <code>tool.name</code>, <code>intent</code>, <code>bot.id</code>,{" "}
-            <code>actor.id</code>, <code>page.url</code>, <code>page.host</code>
-            , the element, the <code>key</code> pressed, the file, the{" "}
-            <code>command</code> run, and <code>mcp.server</code>,{" "}
-            <code>mcp.tool</code> and <code>mcp.effect</code> for outside tools.{" "}
-            <code>initiator.kind</code> says what started the run:{" "}
-            <code>person</code>, <code>routine</code> or <code>handoff</code>. A
-            scheduled run acts as its owner, so <code>actor.id</code> alone
-            can't tell you that. A rule that can't be evaluated counts as a
-            match. A typo never lets an action through.
-          </>
-        }
-        title="Bots may never"
-      >
+    <PageShell action={addRule} description={DESCRIPTION} title="Boundaries">
+      <PageSection title="Bots may never">
         {policy.deny.length === 0 ? (
-          <p className="mt-2 text-sm text-muted-foreground">
-            No rules. Every action is allowed and recorded.
-          </p>
-        ) : (
-          <ul className="mt-2 divide-y divide-border rounded-md border border-border">
-            {policy.deny.map((rule) => (
-              <li
-                className="flex items-center justify-between gap-4 px-3 py-2"
-                key={rule}
-              >
-                <code className="min-w-0 break-all font-mono text-xs">
-                  {rule}
-                </code>
-                <Button
-                  disabled={saving}
-                  onClick={() =>
-                    void save({
-                      ...policy,
-                      deny: policy.deny.filter((one) => one !== rule),
-                    })
-                  }
-                  size="sm"
-                  variant="ghost"
-                >
-                  Remove
-                </Button>
-              </li>
-            ))}
-          </ul>
-        )}
-
-        <div className="mt-3 flex gap-2">
-          <Input
-            aria-label="A rule, written in CEL"
-            autoCapitalize="off"
-            autoCorrect="off"
-            spellCheck={false}
-            className="min-w-0 flex-1 font-mono text-xs"
-            onChange={(event) => {
-              setDraft(event.target.value);
-              setSaved(false);
-              setTested(null);
-            }}
-            onKeyDown={(event) => {
-              // Not the Enter that confirms a composed character, which would put a half-typed
-              // rule into the policy in force.
-              if (event.key === "Enter" && !isComposing(event)) addRule(draft);
-            }}
-            placeholder='tool.name == "computer_click" && contains(element.name, "submit")'
-            value={draft}
-          />
-          <Button
-            disabled={testing || draft.trim().length === 0}
-            onClick={() => void testRule(draft)}
-            size="sm"
-            variant="outline"
-          >
-            {testing ? "Testing…" : "Test first"}
-          </Button>
-          <Button
-            disabled={saving || draft.trim().length === 0}
-            onClick={() => addRule(draft)}
-            size="sm"
-          >
-            Add rule
-          </Button>
-        </div>
-
-        {tested ? <DryRunResult report={tested.report} /> : null}
-
-        <ul className="mt-3 space-y-2">
-          {PRESETS.map((preset) => (
-            <li className="flex items-start gap-3" key={preset.rule}>
+          <PageEmpty
+            action={
               <Button
-                className="shrink-0"
-                disabled={saving || policy.deny.includes(preset.rule)}
-                onClick={() => addRule(preset.rule)}
+                render={(props) => (
+                  <Link {...props} to="/admin/boundaries/new" />
+                )}
                 size="sm"
                 variant="outline"
               >
-                {preset.label}
+                <IconPlus />
+                Add rule
               </Button>
-              {preset.cost ? (
-                <span className="pt-1 text-xs text-muted-foreground">
-                  {preset.cost}
-                </span>
-              ) : null}
-            </li>
-          ))}
-        </ul>
-      </PageSection>
-
-      <PageSection
-        description="Applies to anything the list above didn't catch. An empty list here allows nothing, and every action is refused."
-        title="Otherwise they may"
-      >
-        <ul className="mt-2 space-y-1">
-          {policy.allow.map((rule) => (
-            <li className="font-mono text-xs text-muted-foreground" key={rule}>
-              {rule === "true" ? "true, anything not refused above" : rule}
-            </li>
-          ))}
-        </ul>
-      </PageSection>
-
-      <p className="mt-8 text-muted-foreground text-xs">
-        {problem ? (
-          <span className="text-destructive" role="alert">
-            {problem}
-          </span>
-        ) : saved ? (
-          "Saved. It applies to the next action any Bot takes."
+            }
+            icon={IconShieldX}
+            title="No rules yet"
+          >
+            Bots can do anything their own permissions allow.
+          </PageEmpty>
         ) : (
-          "Changes apply to the next action any Bot takes. They stay after a restart."
+          <PageRows>
+            {policy.deny.map((rule, index) => {
+              const label = ruleLabel(policy, rule);
+              return (
+                <StaggerItem index={index} key={rule}>
+                  <Item
+                    render={(props) => (
+                      <Link
+                        {...props}
+                        params={{ index: String(index) }}
+                        to="/admin/boundaries/$index"
+                      />
+                    )}
+                    size="sm"
+                  >
+                    <ItemMedia variant="icon">
+                      <IconShieldX />
+                    </ItemMedia>
+                    <ItemContent className="min-w-0">
+                      <ItemTitle>{label.name}</ItemTitle>
+                      {label.description ? (
+                        <ItemDescription>{label.description}</ItemDescription>
+                      ) : (
+                        // A rule nobody named is still told apart from the next by what it says.
+                        <ItemDescription className="line-clamp-1 font-mono">
+                          {rule}
+                        </ItemDescription>
+                      )}
+                    </ItemContent>
+                    <IconChevronRight className="size-4 shrink-0 text-muted-foreground" />
+                  </Item>
+                  {index !== policy.deny.length - 1 && <Separator />}
+                </StaggerItem>
+              );
+            })}
+          </PageRows>
         )}
-      </p>
+      </PageSection>
+
+      <PageSection title="How rules apply">
+        <PageRows>
+          <Item size="sm">
+            <ItemContent>
+              <ItemTitle>Trial mode</ItemTitle>
+              <ItemDescription>
+                {trial
+                  ? "On. A matching action goes ahead and is recorded in Audit, so you can see what a rule catches before it stops anything."
+                  : "Off. A matching action is stopped, and the Bot is told which rule stopped it."}
+              </ItemDescription>
+            </ItemContent>
+            <ItemActions>
+              <Switch
+                aria-label="Trial mode"
+                checked={trial}
+                disabled={savePolicy.isPending}
+                onCheckedChange={(checked) =>
+                  savePolicy.mutate({
+                    ...policy,
+                    mode: checked ? "dry-run" : "enforce",
+                  })
+                }
+              />
+            </ItemActions>
+          </Item>
+          <Separator />
+          <Item
+            render={(props) => <Link {...props} to="/admin/audit" />}
+            size="sm"
+          >
+            <ItemMedia variant="icon">
+              <IconListSearch />
+            </ItemMedia>
+            <ItemContent>
+              <ItemTitle>Stopped actions</ItemTitle>
+              <ItemDescription>
+                In Audit, choose Blocked to see every action a rule stopped and
+                which rule it was.
+              </ItemDescription>
+            </ItemContent>
+            <IconChevronRight className="size-4 shrink-0 text-muted-foreground" />
+          </Item>
+          <Separator />
+          {/*
+           * Read-only, and only interesting when it is not the default. Allow rules are checked after
+           * the list above and an empty list refuses everything, so a deployment that narrowed them
+           * in configuration needs to see that here rather than wonder why every action is refused.
+           */}
+          <Item size="sm">
+            <ItemContent className="min-w-0">
+              <ItemTitle>Everything else</ItemTitle>
+              <ItemDescription
+                className={allowsEverythingElse ? undefined : "font-mono"}
+              >
+                {allowsEverythingElse
+                  ? "Allowed. A Bot can do anything no rule above stops, within its own permissions."
+                  : policy.allow.length === 0
+                    ? "Nothing else is allowed. Every action is refused."
+                    : `Only what these allow: ${policy.allow.join(" · ")}`}
+              </ItemDescription>
+            </ItemContent>
+          </Item>
+        </PageRows>
+        {savePolicy.error ? (
+          <p className="mt-3 text-destructive text-sm" role="alert">
+            {savePolicy.error.message}
+          </p>
+        ) : null}
+      </PageSection>
     </PageShell>
-  );
-}
-
-/**
- * What the tested rule would have done to actions already on the trail.
- *
- * Says the number over everything scanned first, because the list below it is capped and a reader
- * who stops at the rows should not believe the rows are the whole answer.
- */
-function DryRunResult({ report }: { report: DryRunReport }) {
-  if (report.scanned === 0) {
-    return (
-      <p className="mt-2 text-xs text-muted-foreground" role="status">
-        No recorded computer actions to test against yet. The rule is valid.
-        You'll see what it matches once Bots have acted.
-      </p>
-    );
-  }
-
-  return (
-    <div className="mt-2" role="status">
-      <p className="text-xs text-muted-foreground">
-        {report.wouldRefuse === 0
-          ? `Tested on the last ${report.scanned} recorded actions. This rule would have refused none. It may still match future ones.`
-          : `Tested on the last ${report.scanned} recorded actions. This rule would have refused ${report.wouldRefuse}.`}
-      </p>
-      {report.changes.length > 0 ? (
-        <ul className="mt-2 divide-y divide-border rounded-md border border-border">
-          {report.changes.map((change) => (
-            <li className="px-3 py-2" key={change.id}>
-              <p className="text-xs">
-                <span className="font-medium">
-                  {change.would === "refused"
-                    ? "Would refuse"
-                    : "Would now allow"}
-                </span>{" "}
-                <code className="font-mono">{change.action}</code>
-                {change.element?.name ? <> on “{change.element.name}”</> : null}
-                {change.command ? (
-                  <>
-                    {" "}
-                    running <code className="font-mono">{change.command}</code>
-                  </>
-                ) : null}
-                {change.file ? <> touching {change.file}</> : null}
-              </p>
-              <p className="mt-0.5 text-muted-foreground text-xs">
-                {change.bot}
-                {change.page ? <> · {change.page}</> : null} ·{" "}
-                {new Date(change.createdAt).toLocaleString()}
-              </p>
-            </li>
-          ))}
-        </ul>
-      ) : null}
-      {report.wouldRefuse > report.changes.length ? (
-        <p className="mt-1 text-muted-foreground text-xs">
-          Showing the first {report.changes.length}. The count above covers
-          everything checked.
-        </p>
-      ) : null}
-    </div>
   );
 }

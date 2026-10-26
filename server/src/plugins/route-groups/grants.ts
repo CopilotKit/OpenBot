@@ -5,6 +5,7 @@ import {
   exposureOf,
   type SharedUseApproval,
 } from "../shared-use";
+import { approveOwnersSharedUse, ownerGrantRefusal } from "../owner-grants";
 import {
   CatalogueEntryUnknownError,
   isDeploymentFault,
@@ -19,7 +20,8 @@ import type { PluginRouteContext } from "./context";
  *
  * Without an approval the gate refuses every call the grant just allowed, so a grant with none sent
  * approves the Bot's exposure as it stands now — unless an approval is already recorded, which is
- * an administrator's earlier decision and not this grant's to widen. "Is Shared" is the app's
+ * an administrator's earlier decision and not this grant's to widen (one an owner's grant set is not
+ * that, and is replaced). "Is Shared" is the app's
  * answer (its answering row), never the granted row's own column. Null `approval` is nothing to
  * record; `unreadable` is an approval sent that this deployment cannot read, which the caller
  * refuses.
@@ -45,7 +47,11 @@ export async function sharedGrantApproval(
     const approval = asSharedUseApproval(sent);
     return approval ? { appId, approval } : "unreadable";
   }
-  if (await shared.use.approvalFor(agentId, appId))
+  /*
+   * An audience an owner's grant set is not an administrator's decision, so an administrator
+   * granting over it approves the Bot's exposure now, which makes the audience theirs.
+   */
+  if ((await shared.use.approvalSource(agentId, appId)) === "admin")
     return { appId, approval: null };
   return {
     appId,
@@ -60,6 +66,7 @@ export function mountGrantRoutes({
   requireUser,
   canUseBot,
   shared,
+  composio,
   actorEmail,
   skillActor,
 }: PluginRouteContext) {
@@ -84,9 +91,54 @@ export function mountGrantRoutes({
       : null;
 
   /**
+   * May this Bot's owner, who is not an administrator, give it this one action of an app?
+   *
+   * The Bot is asked about first, so somebody who does not own it learns nothing about the app from
+   * the answer. The ref has to name a row that is the app, not merely a word an app answers to.
+   */
+  async function ownerMcpRefusal(
+    context: { var: AppVariables },
+    ref: string,
+    agentId: string,
+  ): Promise<string | null> {
+    const actorId = context.var.actor.id;
+    if (
+      !(await store.agentIsRegistered(agentId)) ||
+      (await store.agentOwner(agentId)) !== actorId
+    )
+      return "Only an admin can choose which Bots use a tool.";
+    const [serverId] = ref.split("/");
+    const inspected = serverId
+      ? await store.inspectApp({
+          app: serverId,
+          agentId,
+          userId: actorId,
+          composioConfigured: Boolean(composio),
+        })
+      : null;
+    if (!inspected?.rowIds.includes(serverId ?? ""))
+      return `${serverId} hasn't been added yet. Only an admin can add it.`;
+    const refusal = await ownerGrantRefusal(store, actorId, agentId, inspected);
+    if (refusal) return refusal;
+    /*
+     * AN ACTION THE APP ADVERTISES NOW, NOT ANY WORD AFTER THE SLASH. An administrator may grant a
+     * tool a server has stopped listing, to restore it (see `enablementRefusal`). An owner may not:
+     * a ref naming nothing would sit there until the vendor shipped an action by that name, and the
+     * Bot would then hold it with nobody having chosen it — and a bare server ref would mark the app
+     * given without giving it a single action.
+     */
+    if (
+      !(await store.appTools(serverId ?? "")).some((tool) => tool.ref === ref)
+    )
+      return `${inspected.access.displayName} doesn't have that action.`;
+    return null;
+  }
+
+  /**
    * May this person put this on that Bot?
    *
-   * MCP is an administrator's, always: it reaches another company's system with a stored credential.
+   * MCP is an administrator's, except one of the owner's own apps on their own Bot (see
+   * {@link ownerMcpRefusal}): it reaches another company's system with a stored credential.
    * A skill is an instruction, so somebody may put their own skill on a Bot they own, and neither
    * half alone is enough. Both are checked here rather than in the store, because this is the only
    * place that knows who is asking.
@@ -111,7 +163,20 @@ export function mountGrantRoutes({
 
     if (kind === "mcp") {
       if (!actor.isAdmin) {
-        return "Only an admin can choose which Bots use a tool.";
+        /*
+         * A BOT'S OWNER MAY GIVE IT ONE OF THEIR OWN APPS, and nothing else changes for anybody who
+         * is not an administrator. The owner rule — their Bot, an app an administrator switched on
+         * and opened to owners, the `ownerApps` capability — is {@link ownerGrantRefusal}'s, the
+         * same one the card's one press asks. The grant this allows is written `granted_as = owner`
+         * by the route below, which is what keeps it on the asker's own account.
+         *
+         * TAKING AWAY IS NOT RELAXED HERE. An owner takes back what they gave through
+         * `DELETE /for/:agentId/apps/:app/give`, which removes only the owner's own grants; this
+         * route's revoke would remove an administrator's as readily, so it stays theirs.
+         */
+        if (intent === "revoke")
+          return "Only an admin can choose which Bots use a tool.";
+        return ownerMcpRefusal(context, ref, agentId);
       }
       // Taking something away is always allowed: see the note on `intent`. It matters more here
       // than anywhere else, because the rows this check exists to prevent are the same shape as the
@@ -278,8 +343,13 @@ export function mountGrantRoutes({
      * A SHARED APP'S ACTION IS GRANTED WITH WHO MAY USE IT, in the one request. See
      * {@link sharedGrantApproval} for what is recorded when none is sent.
      */
+    /*
+     * An owner's grant sends no approval of its own. Where the app is Shared and an administrator
+     * lets owners decide, the grant sets the audience itself, below; see `approveOwnersSharedUse`.
+     */
+    const asOwner = kind === "mcp" && !skillActor(context).isAdmin;
     const decided =
-      kind === "mcp"
+      kind === "mcp" && !asOwner
         ? await sharedGrantApproval(
             { store, shared },
             grantRef,
@@ -293,7 +363,13 @@ export function mountGrantRoutes({
         400,
       );
     }
-    await store.grant(kind, grantRef, grantAgentId, actorEmail(context));
+    await store.grant(
+      kind,
+      grantRef,
+      grantAgentId,
+      actorEmail(context),
+      asOwner ? "owner" : "admin",
+    );
     if (decided?.approval && shared) {
       await shared.use.setApproval({
         botId: grantAgentId,
@@ -302,6 +378,12 @@ export function mountGrantRoutes({
         by: context.var.actor.id,
       });
     }
+    if (asOwner && shared)
+      await approveOwnersSharedUse(store, shared.use, {
+        botId: grantAgentId,
+        serverId: grantRef.split("/")[0] ?? "",
+        ownerId: context.var.actor.id,
+      });
     return context.json({ ok: true });
   });
 

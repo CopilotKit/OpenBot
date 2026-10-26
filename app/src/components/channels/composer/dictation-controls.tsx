@@ -62,10 +62,20 @@ export function DictationSurface({
           aria-hidden={dictation.busy || undefined}
           inert={dictation.busy}
           className={cn(
-            "min-w-0 transition-[opacity,transform] duration-200 ease-out motion-reduce:transform-none motion-reduce:transition-none",
+            /*
+             * NO TRANSLATE AT REST, NOT EVEN ZERO. Tailwind's `translate-y-0` sets the `translate`
+             * property to `0px`, which is not `none`, and any translate makes this box the containing
+             * block for `position: fixed` descendants. The @ menu is one: it is placed at the caret in
+             * viewport coordinates, and was drawn that far again from this box's corner, off the bottom
+             * of the screen. The idle state therefore names no translate at all.
+             *
+             * `translate` in the transition list, not `transform`: Tailwind v4's translate utilities
+             * set the `translate` property, so a transition on `transform` never animated the lift.
+             */
+            "min-w-0 transition-[opacity,translate] duration-200 ease-out motion-reduce:transition-none motion-reduce:translate-none",
             dictation.busy
               ? "pointer-events-none -translate-y-1 opacity-0"
-              : "translate-y-0 opacity-100",
+              : "opacity-100",
           )}
         >
           {children}

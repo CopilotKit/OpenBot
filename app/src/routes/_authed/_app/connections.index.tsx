@@ -361,7 +361,11 @@ function RouteComponent() {
     providers.isPending;
 
   return (
-    <PageShell className="@container" title="Connections">
+    <PageShell
+      className="@container"
+      description="The apps and accounts your Bots use as you. Open one to connect it or change it."
+      title="Connections"
+    >
       {/*
        * For `?connected=` only the failure is worth saying. A success needs no sentence: the row it
        * came back to now reads "Connected", which is the same news told by the thing it is news
@@ -393,10 +397,11 @@ function RouteComponent() {
           {arrival.authorizationNotice}
         </p>
       ) : null}
-      <PageSection
-        description="The apps and accounts your Bots use as you. Open one to connect it or change it."
-        title="Your connections"
-      >
+      {/*
+       * One section, so it carries no heading of its own: "Your connections" under "Connections"
+       * said the same thing twice, 48px apart, and the description now sits under the page title.
+       */}
+      <PageSection>
         {/*
          * BOTH APP READS DECIDE THIS. A `/api/plugins` that succeeded beside a
          * `/api/plugins/connections` that failed would leave the `connected` set empty and every row
@@ -409,32 +414,38 @@ function RouteComponent() {
             it keeps happening.
           </p>
         ) : rows.length === 0 ? (
-          <PageEmpty>
-            Nothing to connect yet. Apps show up here once an admin turns them
-            on.
+          <PageEmpty icon={IconPlug} title="No apps yet">
+            Apps show up here once an admin turns them on.
           </PageEmpty>
         ) : (
           <>
-            <p className="mt-4 text-xs text-muted-foreground">
-              {inUse} in use · {rows.length} in all
-            </p>
-            <InputGroup className="mt-3 h-9 border-transparent bg-muted/60 shadow-none dark:bg-muted/60">
-              <InputGroupAddon>
-                <IconSearch aria-hidden="true" className="size-4" />
-              </InputGroupAddon>
-              <InputGroupInput
-                aria-label="Search connections"
-                placeholder="Search connections"
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-              />
-            </InputGroup>
+            <div className="flex items-center gap-3">
+              <InputGroup className="h-9 flex-1 border-transparent bg-muted/60 shadow-none dark:bg-muted/60">
+                <InputGroupAddon>
+                  <IconSearch aria-hidden="true" className="size-4" />
+                </InputGroupAddon>
+                <InputGroupInput
+                  aria-label="Search connections"
+                  placeholder="Search connections"
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                />
+              </InputGroup>
+              <p className="shrink-0 text-xs text-muted-foreground">
+                {inUse} in use · {rows.length} in all
+              </p>
+            </div>
             {matching.length === 0 ? (
-              <p className="mt-8 text-sm text-muted-foreground" role="status">
+              <p className="mt-4 text-sm text-muted-foreground" role="status">
                 Nothing matches “{search.trim()}”.
               </p>
             ) : (
-              <div className="mt-6 grid grid-cols-1 gap-x-6 gap-y-2 @min-[36rem]:grid-cols-2">
+              /*
+               * A grid of separate cards, where every other list is one `PageRows` card of divided
+               * rows. The accepted exception: connections are apps you pick out by their mark, so
+               * they are laid out as tiles two across rather than read down as a list.
+               */
+              <div className="mt-4 grid grid-cols-1 gap-3 @min-[36rem]:grid-cols-2">
                 {matching.map((row) => (
                   <ConnectionItem key={row.key} row={row} />
                 ))}
@@ -457,10 +468,11 @@ function RouteComponent() {
 function ConnectionItem({ row }: { row: ConnectionRow }) {
   return (
     <Item
-      className="min-w-0 flex-nowrap gap-3 px-2 py-3"
+      className="min-h-14 min-w-0 flex-nowrap gap-3 bg-card px-3 py-1.5"
       data-testid={`account-${row.key}`}
       render={<Link params={{ key: row.key }} to="/connections/$key" />}
       size="sm"
+      variant="outline"
     >
       <RowMark className="size-9">
         <ConnectionMark mark={row.mark} />

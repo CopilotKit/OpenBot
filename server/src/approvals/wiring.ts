@@ -13,6 +13,52 @@ import { createApprovalQuestions, type PersonQuestion } from "./questions";
 import { createApprovalService } from "./service";
 import { ApprovalRefusedError, type ApprovalStore } from "./types";
 
+type ThreadHistory = Awaited<
+  ReturnType<Pick<IntelligenceLike, "getThreadMessages">["getThreadMessages"]>
+>;
+
+/**
+ * The saved copy of the call the browser is about to run, read back from the conversation.
+ *
+ * Intelligence saves a streaming run's messages a moment behind the stream, and the browser runs
+ * the tool as soon as the call arrives. It saves the call's arguments delta by delta too, so a read
+ * can find the call with half its arguments: that is not a mismatch yet, any more than a call not
+ * saved yet is. Either is waited for briefly; one that never appears whole does not match, and the
+ * caller refuses it.
+ */
+export async function savedToolCall(
+  read: () => Promise<ThreadHistory>,
+  snapshot: { toolCallId: string; toolName: string; args: unknown },
+  wait: { attempts?: number; sleep?: (ms: number) => Promise<void> } = {},
+): Promise<{ matches: boolean; answered: boolean }> {
+  const attempts = wait.attempts ?? 10;
+  const sleep = wait.sleep ?? ((ms: number) => Bun.sleep(ms));
+  let history = await read();
+  const matches = () => {
+    const call = history.messages
+      .flatMap((message) => message.toolCalls ?? [])
+      .find((saved) => saved.id === snapshot.toolCallId);
+    if (!call || call.name !== snapshot.toolName) return false;
+    try {
+      return isDeepStrictEqual(JSON.parse(call.args), snapshot.args);
+    } catch {
+      // Arguments still being saved.
+      return false;
+    }
+  };
+  for (let attempt = 0; !matches() && attempt < attempts; attempt++) {
+    await sleep(500);
+    history = await read();
+  }
+  return {
+    matches: matches(),
+    answered: history.messages.some(
+      (message) =>
+        message.role === "tool" && message.toolCallId === snapshot.toolCallId,
+    ),
+  };
+}
+
 /**
  * The deployment's approval service: the stored approvals, told the person's channel when one
  * opens; the question store; and a computer tool resumed only when its call is really saved in the
@@ -120,35 +166,15 @@ export function createServerApprovalService(deps: {
         throw new ApprovalRefusedError(
           "That conversation is no longer available to this Bot and person.",
         );
-      // Intelligence saves a streaming run's messages a moment behind the stream, and the browser runs
-      // the tool as soon as the call arrives. A call that is not saved yet is waited for briefly; one
-      // that never appears is refused below.
-      let history = await routineIntelligence.getThreadMessages({
-        threadId: snapshot.threadId,
-        userId: ownerUserId,
-      });
-      const findCall = () =>
-        history.messages
-          .flatMap((message) => message.toolCalls ?? [])
-          .find((call) => call.id === snapshot.toolCallId);
-      for (let attempt = 0; !findCall() && attempt < 10; attempt++) {
-        await Bun.sleep(500);
-        history = await routineIntelligence.getThreadMessages({
-          threadId: snapshot.threadId,
-          userId: ownerUserId,
-        });
-      }
-      const canonicalCall = findCall();
-      if (
-        !canonicalCall ||
-        canonicalCall.name !== snapshot.toolName ||
-        !isDeepStrictEqual(JSON.parse(canonicalCall.args), snapshot.args) ||
-        history.messages.some(
-          (message) =>
-            message.role === "tool" &&
-            message.toolCallId === snapshot.toolCallId,
-        )
-      )
+      const saved = await savedToolCall(
+        () =>
+          routineIntelligence.getThreadMessages({
+            threadId: snapshot.threadId,
+            userId: ownerUserId,
+          }),
+        snapshot,
+      );
+      if (!saved.matches || saved.answered)
         throw new ApprovalRefusedError(
           "That unanswered tool call is not saved in this conversation.",
         );

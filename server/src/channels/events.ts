@@ -1,4 +1,5 @@
 import postgres from "postgres";
+import type { ChannelWorkWire } from "./working";
 
 /**
  * Live channel activity, from whoever ran an agent to everybody else in the channel.
@@ -45,6 +46,21 @@ export type ChannelActivityEvent = {
    * streams. A missed one costs at most a stuck-looking dot until the next real event, never data.
    */
   busy?: boolean;
+  /**
+   * Everything this channel is waiting on right now: a Bot it asked, a routine firing into it.
+   * Absent on an ordinary activity event.
+   *
+   * The WHOLE list, never a change to it, so the newest event is the answer and a missed one is
+   * corrected by the next. Read from the queue and the run history at the moment of sending, which
+   * is also what the roster and the channel read return. See `working.ts`.
+   */
+  work?: ChannelWorkWire[];
+  /**
+   * When `work` was read, by the database's clock: ISO-8601 in UTC to the microsecond, fixed width
+   * so two compare as strings. Present whenever `work` is. Events
+   * can arrive out of order across replicas, so a browser keeps the list with the latest stamp.
+   */
+  workAt?: string;
 };
 
 /** "The roster you hold may be wrong." Carries no delta, because what was lost is not recoverable. */

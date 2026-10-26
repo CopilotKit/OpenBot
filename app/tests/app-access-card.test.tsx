@@ -1,4 +1,11 @@
-import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  test,
+} from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
@@ -9,12 +16,20 @@ import {
   Outlet,
   RouterProvider,
 } from "@tanstack/react-router";
-import { cleanup, render, waitFor } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  waitFor,
+} from "@testing-library/react";
 import type { ReactNode } from "react";
 import { AppAccessCard } from "@/components/channels/app-access-card";
 import { ServerToolLine } from "@/components/channels/chat-transcript";
 import type { AppAccess } from "@/lib/app-access/queries";
 import { ActiveBotProvider, useActiveBot } from "@/lib/copilot/active-bot";
+import { carryOnMessage } from "@/lib/copilot/carry-on";
+import { ConversationProvider } from "@/lib/copilot/conversation";
 import { REFUSAL_MARKER } from "@/lib/plugins/tool-result";
 import {
   type ConnectPrompt,
@@ -83,11 +98,12 @@ function mount(children: ReactNode) {
     routeTree: root.addChildren([page, settings]),
     history: createMemoryHistory({ initialEntries: ["/"] }),
   });
-  return render(
+  const view = render(
     <QueryClientProvider client={client}>
       <RouterProvider router={router as never} />
     </QueryClientProvider>,
   );
+  return Object.assign(view, { client });
 }
 
 const prompt = (overrides: Partial<ConnectPrompt> = {}): ConnectPrompt => ({
@@ -387,4 +403,143 @@ test("show_app_access about an app nobody can name draws the line, never its wor
   expect(view.container.textContent).not.toContain("Say so plainly");
   // Nothing behind a disclosure either: the line is not expandable.
   expect(view.container.querySelector("details")).toBeNull();
+});
+
+/*
+ * CARRYING ON. Once the app is ready the conversation goes on by itself — one message, as the
+ * person, through the conversation's `ask` — but only from the card that is still the latest thing,
+ * only once, and only where the card saw the change; a card drawn already ready offers Continue.
+ */
+describe("carrying the task on once the app is ready", () => {
+  let calls = 0;
+  const nextId = () => {
+    calls += 1;
+    return `call_${calls}_${Math.random().toString(36).slice(2)}`;
+  };
+
+  /** Answers the live read with whatever `state.live` is now, so a test can change it. */
+  function servingNow(state: { live: AppAccess }) {
+    global.fetch = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/apps/")) return Response.json({ app: state.live });
+      if (url.includes("/api/plugins/connections"))
+        return Response.json({ connections: [], redirectUri: null });
+      return Response.json({});
+    }) as unknown as typeof fetch;
+  }
+
+  function inConversation(
+    children: ReactNode,
+  ): ReturnType<typeof mount> & { asked: string[] } {
+    const asked: string[] = [];
+    const view = mount(
+      <ConversationProvider ask={(text) => asked.push(text)}>
+        {children}
+      </ConversationProvider>,
+    );
+    return Object.assign(view, { asked });
+  }
+
+  test("a card that sees the app become ready carries on, once", async () => {
+    const state = { live: appAccess({ state: "not_connected" }) };
+    servingNow(state);
+    const place = { toolCallId: nextId(), latest: true };
+    const view = inConversation(
+      <AppAccessCard place={place} prompt={prompt()} />,
+    );
+    expect((await card(view)).getAttribute("data-state")).toBe("not_connected");
+    state.live = appAccess({ state: "ready" });
+    await act(() => view.client.invalidateQueries());
+    await waitFor(() => expect(view.asked).toEqual([carryOnMessage("Gmail")]));
+    expect((await card(view)).textContent).toContain("Gmail is ready now.");
+    expect(view.container.textContent).not.toContain("Ask again");
+    // Read again and drawn again: still the one message.
+    await act(() => view.client.invalidateQueries());
+    await settleReactWork();
+    expect(view.asked).toHaveLength(1);
+    expect(view.queryByRole("button", { name: "Continue" })).toBeNull();
+  });
+
+  test("a card the conversation has moved on from only says the app is ready", async () => {
+    const state = { live: appAccess({ state: "not_connected" }) };
+    servingNow(state);
+    const view = inConversation(
+      <AppAccessCard
+        place={{ toolCallId: nextId(), latest: false }}
+        prompt={prompt()}
+      />,
+    );
+    await card(view);
+    state.live = appAccess({ state: "ready" });
+    await act(() => view.client.invalidateQueries());
+    await waitFor(async () =>
+      expect((await card(view)).getAttribute("data-state")).toBe("ready"),
+    );
+    await settleReactWork();
+    expect(view.asked).toEqual([]);
+    expect((await card(view)).textContent).toContain(
+      "Gmail is ready now. Ask again and the Bot can use it.",
+    );
+  });
+
+  test("a card drawn already ready offers Continue, which carries on once", async () => {
+    servingNow({ live: appAccess({ state: "ready" }) });
+    const place = { toolCallId: nextId(), latest: true };
+    const view = inConversation(
+      <AppAccessCard place={place} prompt={prompt()} />,
+    );
+    fireEvent.click(await view.findByRole("button", { name: "Continue" }));
+    expect(view.asked).toEqual([carryOnMessage("Gmail")]);
+    await waitFor(() =>
+      expect(view.queryByRole("button", { name: "Continue" })).toBeNull(),
+    );
+    cleanup();
+    // The same card drawn again, here or in another tab, has nothing left to offer.
+    const again = inConversation(
+      <AppAccessCard place={place} prompt={prompt()} />,
+    );
+    expect((await card(again)).textContent).toContain("Gmail is ready now.");
+    expect(again.queryByRole("button", { name: "Continue" })).toBeNull();
+    expect(again.asked).toEqual([]);
+  });
+
+  test.each([
+    [true, true],
+    [false, false],
+    [undefined, false],
+  ])(
+    "show_app_access drawn ready offers Continue only if the app was blocked when asked (blocked: %p)",
+    async (blocked, offered) => {
+      servingNow({ live: appAccess({ state: "ready" }) });
+      const view = inConversation(
+        <AppAccessCard
+          place={{ toolCallId: nextId(), latest: true }}
+          prompt={prompt({
+            reason: "access",
+            ...(blocked === undefined ? {} : { blocked }),
+          })}
+        />,
+      );
+      await card(view);
+      await settleReactWork();
+      expect(view.queryByRole("button", { name: "Continue" }) !== null).toBe(
+        offered,
+      );
+      expect(view.asked).toEqual([]);
+    },
+  );
+
+  test("with no conversation around it, the card only says the app is ready", async () => {
+    servingNow({ live: appAccess({ state: "ready" }) });
+    const view = mount(
+      <AppAccessCard
+        place={{ toolCallId: nextId(), latest: true }}
+        prompt={prompt()}
+      />,
+    );
+    expect((await card(view)).textContent).toContain(
+      "Ask again and the Bot can use it.",
+    );
+    expect(view.queryByRole("button", { name: "Continue" })).toBeNull();
+  });
 });

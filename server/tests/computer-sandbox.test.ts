@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { ComputerStillStartingError } from "../src/computer/client";
 import {
   createSandboxComputerProvider,
   sandboxNameFor,
@@ -103,6 +104,78 @@ describe("telling one run of a Bot's computer from the next", () => {
     const status = await providerWith(suspended, seen).status("knowledge");
 
     expect(status.state).toBe("absent");
+    expect(seen.every((call) => call.startsWith("GET "))).toBe(true);
+  });
+});
+
+/**
+ * A cold start that runs past the wait is a wait, not a fault.
+ *
+ * It used to throw a `SandboxError` whose message explained the pod schedule to whoever was
+ * watching, and the route answered 500. Now it is the typed "still starting" every surface knows to
+ * render gently, and the call it interrupted is said to have done nothing.
+ */
+describe("a computer that takes longer than the wait to start", () => {
+  const booting = {
+    metadata: { name: "bot-general-abc" },
+    spec: { operatingMode: "Running" },
+    status: {
+      conditions: [
+        { type: "Suspended", status: "False" },
+        { type: "Ready", status: "False" },
+      ],
+    },
+  };
+
+  test("locate gives up with the still-starting error, not a sandbox failure", async () => {
+    const provider = createSandboxComputerProvider({
+      namespace: "openbot",
+      template: { podTemplate: { spec: { containers: [] } } },
+      idleAfterMs: 60_000,
+      apiServer: "https://kubernetes.default",
+      token: "t",
+      resumeTimeoutMs: 0,
+      fetchImpl: (async () =>
+        Response.json(booting)) as unknown as typeof fetch,
+    });
+    const warn = console.warn;
+    console.warn = () => undefined;
+    try {
+      const failure = await provider.locate("general").catch((error) => error);
+      expect(failure).toBeInstanceOf(ComputerStillStartingError);
+      expect(failure.message).toContain("not performed");
+    } finally {
+      console.warn = warn;
+    }
+  });
+
+  test("locate answers within its own wait, well before a resume's budget runs out", async () => {
+    // Held under a load balancer's idle timeout, so the person's request is answered, not cut.
+    const provider = createSandboxComputerProvider({
+      namespace: "openbot",
+      template: { podTemplate: { spec: { containers: [] } } },
+      idleAfterMs: 60_000,
+      apiServer: "https://kubernetes.default",
+      token: "t",
+      resumeTimeoutMs: 600_000,
+      locateWaitMs: 0,
+      fetchImpl: (async () =>
+        Response.json(booting)) as unknown as typeof fetch,
+    });
+    const warn = console.warn;
+    console.warn = () => undefined;
+    try {
+      const failure = await provider.locate("general").catch((error) => error);
+      expect(failure).toBeInstanceOf(ComputerStillStartingError);
+    } finally {
+      console.warn = warn;
+    }
+  });
+
+  test("status calls one on its way up starting, without touching it", async () => {
+    const seen: string[] = [];
+    const status = await providerWith(booting, seen).status("general");
+    expect(status.state).toBe("starting");
     expect(seen.every((call) => call.startsWith("GET "))).toBe(true);
   });
 });

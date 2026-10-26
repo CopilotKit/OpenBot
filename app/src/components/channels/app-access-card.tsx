@@ -1,12 +1,15 @@
+import type { ConnectPrompt } from "@openbot/shared/connect-prompt";
 import { useQuery } from "@tanstack/react-query";
 import {
   AppAccessAction,
   appAccessSentence,
 } from "@/components/plugins/app-access-action";
 import { PluginLogo } from "@/components/plugins/plugin-logo";
+import { Button } from "@/components/ui/button";
+import { agentQueryOptions } from "@/lib/agents/queries";
 import { type AppAccess, botAppQueryOptions } from "@/lib/app-access/queries";
 import { useDeclaredBotId } from "@/lib/copilot/active-bot";
-import type { ConnectPrompt } from "@openbot/shared/connect-prompt";
+import { type CardPlace, useCarryOn } from "@/lib/copilot/carry-on";
 import { ConnectAppCard } from "./connect-app-card";
 
 /**
@@ -31,35 +34,65 @@ import { ConnectAppCard } from "./connect-app-card";
  * `reconnect` or `shared` refusal over a live `ready` is drawn as the refusal says — unless the
  * account was connected after the refusal, which is the reconnection. Anything else live is newer
  * than the refusal and is drawn as it is.
+ *
+ * AND THEN THE TASK CARRIES ON. Once the app is ready — connected in the other tab, switched on and
+ * given by an admin — the card sends the conversation on by itself, or offers Continue where it was
+ * not watching when that happened. `place` is where the card sits in its conversation, without
+ * which (a card drawn outside one) it only says the app is ready. See `lib/copilot/carry-on.ts`.
  */
-export function AppAccessCard({ prompt }: { prompt: ConnectPrompt }) {
+export function AppAccessCard({
+  prompt,
+  place,
+}: {
+  prompt: ConnectPrompt;
+  place?: CardPlace;
+}) {
   const declared = useDeclaredBotId();
   const agentId = prompt.agentId ?? declared;
   /*
    * A refusal from before refusals named their Bot, on a surface that declared none: there is no Bot
    * to ask about, so the card it was drawn as then is the card it is drawn as now.
    */
-  if (!agentId) return <ConnectAppCard {...prompt} />;
-  return <LiveAppAccessCard agentId={agentId} prompt={prompt} />;
+  if (!agentId) return <ConnectAppCard {...prompt} place={place} />;
+  return <LiveAppAccessCard agentId={agentId} place={place} prompt={prompt} />;
 }
 
 function LiveAppAccessCard({
   agentId,
+  place,
   prompt,
 }: {
   agentId: string;
+  place: CardPlace | undefined;
   prompt: ConnectPrompt;
 }) {
-  const live = useQuery(botAppQueryOptions(agentId, prompt.serverId));
+  const live = useQuery({
+    ...botAppQueryOptions(agentId, prompt.serverId),
+    /*
+     * Read again whenever this tab has the focus back. What changes the state usually happens in
+     * another tab — a consent screen, an admin's page for the app — and the person returning here
+     * is the moment the card should say what is true now.
+     */
+    refetchOnWindowFocus: true,
+  });
+  const access = live.data ? asRefused(live.data, prompt) : null;
+  const name = access?.displayName ?? prompt.title;
+  // Only asked for by "Let Research Bot use your Gmail?", the one sentence that names the Bot.
+  const bot = useQuery(agentQueryOptions(agentId)).data?.name;
+  const { carried, offer } = useCarryOn({
+    place,
+    ready: access ? access.state === "ready" : null,
+    // A refusal was blocked by definition; `show_app_access` says what it found.
+    blockedWhenAsked: prompt.reason !== "access" || prompt.blocked === true,
+    app: name,
+  });
   /*
    * A read that failed falls back to what this card was before it read anything, where that was a
    * card at all: a person's own missing connection still gets its Connect button. The other reasons
    * had only ever been a sentence, and the sentence is what is left.
    */
   if (live.error && (prompt.reason ?? "connect") === "connect")
-    return <ConnectAppCard {...prompt} />;
-  const access = live.data ? asRefused(live.data, prompt) : null;
-  const name = access?.displayName ?? prompt.title;
+    return <ConnectAppCard {...prompt} place={place} />;
   return (
     <div
       className="my-2 flex w-full max-w-2xl flex-col gap-3 rounded-xl border border-border p-4"
@@ -80,9 +113,13 @@ function LiveAppAccessCard({
            */}
           {live.isPending ? null : access ? (
             <p className="text-muted-foreground text-sm">
-              {access.state === "ready" && prompt.reason !== "access"
-                ? `${name} is ready now. Ask again and the Bot can use it.`
-                : refusedSentence(access, prompt)}
+              {access.state !== "ready"
+                ? refusedSentence(access, prompt, bot)
+                : carried || offer
+                  ? `${name} is ready now.`
+                  : prompt.reason !== "access"
+                    ? `${name} is ready now. Ask again and the Bot can use it.`
+                    : refusedSentence(access, prompt, bot)}
             </p>
           ) : (
             <p className="text-muted-foreground text-sm" role="alert">
@@ -94,6 +131,12 @@ function LiveAppAccessCard({
       {access && access.state !== "ready" ? (
         <div className="flex justify-end">
           <AppAccessAction access={access} agentId={agentId} />
+        </div>
+      ) : offer ? (
+        <div className="flex justify-end">
+          <Button onClick={offer} size="sm">
+            Continue
+          </Button>
         </div>
       ) : null}
     </div>
@@ -138,12 +181,16 @@ function asRefused(live: AppAccess, prompt: ConnectPrompt): AppAccess {
 }
 
 /** As the shared sentence, except a lost team account, which needs reconnecting rather than connecting. */
-function refusedSentence(access: AppAccess, prompt: ConnectPrompt): string {
+function refusedSentence(
+  access: AppAccess,
+  prompt: ConnectPrompt,
+  bot?: string,
+): string {
   if (
     access.state === "shared_not_connected" &&
     prompt.reason === "shared" &&
     !access.requestKind
   )
     return `Your organisation's ${access.displayName} account needs reconnecting. Only an admin can reconnect it.`;
-  return appAccessSentence(access);
+  return appAccessSentence(access, bot);
 }

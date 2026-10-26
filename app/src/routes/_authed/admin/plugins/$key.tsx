@@ -2,6 +2,8 @@ import {
   IconArrowUpRight,
   IconChevronRight,
   IconExternalLink,
+  IconPuzzle,
+  IconTool,
 } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link, useParams } from "@tanstack/react-router";
@@ -53,7 +55,15 @@ import {
   refreshPluginServerMutationOptions,
   registerOAuthClientMutationOptions,
   removePluginServerMutationOptions,
+  setOwnerGrantsMutationOptions,
 } from "@/lib/plugins/mutations";
+import {
+  brokeredConnectionDescription,
+  brokeredDisconnectNote,
+  brokeredPerActionTrip,
+  brokeredProvenance,
+  brokeredReach,
+} from "@/lib/plugins/provider-vocabulary";
 import {
   type CatalogueItem,
   connectionsQueryOptions,
@@ -62,13 +72,6 @@ import {
   pluginsPageQueryOptions,
   pluginsProvider,
 } from "@/lib/plugins/queries";
-import {
-  brokeredConnectionDescription,
-  brokeredDisconnectNote,
-  brokeredPerActionTrip,
-  brokeredProvenance,
-  brokeredReach,
-} from "@/lib/plugins/provider-vocabulary";
 import {
   botSharedAppsQueryOptions,
   describeApproval,
@@ -299,6 +302,10 @@ function RouteComponent() {
     ...refreshPluginServerMutationOptions(queryClient),
     ...report,
   });
+  const ownerGrants = useMutation({
+    ...setOwnerGrantsMutationOptions(queryClient),
+    ...report,
+  });
   const remove = useMutation({
     ...removePluginServerMutationOptions(queryClient),
     ...report,
@@ -312,13 +319,20 @@ function RouteComponent() {
      * shown to this person in their own browser; there is deliberately nothing here that could
      * complete it for them, and nothing about being an administrator changes that.
      */
-    onSuccess: (authorizationUrl) => {
+    onSuccess: (start) => {
       /*
        * A 200 with no url on it is not a url to follow. This press is on a `user-oauth` catalogue
        * entry, whose half of that route always mints one or refuses, so this is the server having
        * answered something this page does not understand. Assigning it navigated to a page called
        * `undefined` on this deployment's own origin. See `connectAccountMutationOptions`.
+       *
+       * `{ connected: true }` is a brokered app's answer and never this half's, so it is the same
+       * not-understood answer here.
        */
+      const authorizationUrl =
+        start !== null && "authorizationUrl" in start
+          ? start.authorizationUrl
+          : null;
       if (authorizationUrl === null) {
         setError(
           "OpenBot got no consent link back, so nothing was connected. Try again, or check this connector's setup if it keeps happening.",
@@ -524,7 +538,9 @@ function RouteComponent() {
         description="There is no plugin with that name, here or in the catalogue."
         title="Not a plugin"
       >
-        <PageEmpty>Nothing to configure.</PageEmpty>
+        <PageEmpty icon={IconPuzzle} title="Plugin not found">
+          Nothing to configure.
+        </PageEmpty>
       </PageShell>
     );
   }
@@ -623,6 +639,45 @@ function RouteComponent() {
                       ? "Make personal"
                       : "Make shared"}
                   </Button>
+                </ItemActions>
+              </Item>
+            </>
+          ) : null}
+
+          {/*
+           * Who may give the app to a Bot. Binary and immediate, so a Switch. Every person's own
+           * account and the built-in Routines start on; a deployment token, a shared account and an
+           * app with no account start off, because a Bot given one of those reaches an account that
+           * is not the asker's. An owner's grant runs on the asker's own account, except on a shared
+           * account, where the grant lets the people who can use the Bot use the team account.
+           */}
+          {server ? (
+            <>
+              <Separator />
+              <Item size="sm">
+                <ItemContent>
+                  <ItemTitle>Bot owners can give it to their Bots</ItemTitle>
+                  <ItemDescription>
+                    {server.ownerGrants !== "any"
+                      ? "Only an admin can give it to a Bot."
+                      : shared
+                        ? "Bot owners who give it to their Bots let those Bots use the team account."
+                        : "People can let Bots they own use it, on the account of whoever is asking."}
+                  </ItemDescription>
+                </ItemContent>
+                <ItemActions>
+                  <Switch
+                    aria-label={`Let Bot owners give ${title} to their Bots`}
+                    checked={server.ownerGrants === "any"}
+                    disabled={ownerGrants.isPending}
+                    onCheckedChange={(next) => {
+                      setError(null);
+                      ownerGrants.mutate({
+                        serverId: key,
+                        ownerGrants: next ? "any" : "admin",
+                      });
+                    }}
+                  />
                 </ItemActions>
               </Item>
             </>
@@ -1043,9 +1098,8 @@ function RouteComponent() {
         >
           <SkippedToolsNotice names={server.skippedTools ?? []} />
           {server.tools.length === 0 ? (
-            <PageEmpty>
-              {server.lastError ??
-                "No tools listed. Refresh tools to check again."}
+            <PageEmpty icon={IconTool} title="No tools listed">
+              {server.lastError ?? "Refresh tools to check again."}
             </PageEmpty>
           ) : (
             <PageRows>

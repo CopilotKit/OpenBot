@@ -184,6 +184,55 @@ describe("a run that does produce something is left alone", () => {
       false,
     );
   });
+
+  test("the calls of one step name the message the store keeps them in", async () => {
+    // The store keeps a step's calls in one message named for the first call. Without a parent the
+    // surface named each after itself, and sent that copy back next turn as a second message.
+    const sent = await collect([
+      {
+        event: "on_chat_model_end",
+        data: {
+          output: {
+            tool_calls: [
+              { id: "call_a", name: "list_bases", args: {} },
+              { id: "call_b", name: "get_schema", args: {} },
+            ],
+          },
+        },
+      },
+      {
+        event: "on_chain_end",
+        name: "tools",
+        data: {
+          output: {
+            messages: [
+              { tool_call_id: "call_a", content: "bases" },
+              { tool_call_id: "call_b", content: "schema" },
+            ],
+          },
+        },
+      },
+    ]);
+    const starts = sent.filter((event) => event.type === "TOOL_CALL_START");
+    expect(starts.map((event) => event.parentMessageId)).toEqual([
+      "assistant-call_a",
+      "assistant-call_a",
+    ]);
+  });
+
+  test("a call the surface owns names its message the same way", async () => {
+    const sent = await collect([
+      {
+        event: "on_chat_model_end",
+        data: {
+          output: {
+            tool_calls: [{ id: "call_1", name: "computer_navigate", args: {} }],
+          },
+        },
+      },
+    ]);
+    expect(sent[0]).toMatchObject({ parentMessageId: "assistant-call_1" });
+  });
 });
 
 describe("message boundaries across a multi-turn run", () => {

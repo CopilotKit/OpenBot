@@ -1,3 +1,4 @@
+import { IconPlugOff, IconRobot, IconTool } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useParams } from "@tanstack/react-router";
 import { useState } from "react";
@@ -110,10 +111,13 @@ function RouteComponent() {
          * Says which of the two it is. A tool disappears from this list when the vendor stops
          * offering it, and that reads very differently from a mistyped address.
          */}
-        <PageEmpty>
+        <PageEmpty
+          icon={server ? IconTool : IconPlugOff}
+          title={server ? "Tool not found" : "This connector is off"}
+        >
           {server
             ? "It may have been removed since the tool list was last refreshed."
-            : "This connector isn't turned on."}
+            : "Turn it on to see its tools."}
         </PageEmpty>
       </PageShell>
     );
@@ -188,7 +192,9 @@ function RouteComponent() {
         title="Bots"
       >
         {bots.length === 0 ? (
-          <PageEmpty>No Bots yet. Create one to give it this tool.</PageEmpty>
+          <PageEmpty icon={IconRobot} title="No Bots yet">
+            Create one to give it this tool.
+          </PageEmpty>
         ) : (
           <PageRows>
             {bots.map((bot, index) => {

@@ -155,3 +155,121 @@ test("a change goes to the server's gate even when nothing about approvals has l
     global.fetch = originalFetch;
   }
 });
+
+/**
+ * Runs the kept computer_click handler against a gate that answers with `answer`.
+ *
+ * The SDK starts no follow-up run after a frontend tool throws (core's executeSpecificTool returns
+ * false on a handler error), so a handler that throws ends the Bot's turn on the spot with nothing
+ * said. A form field the computer could not fill did exactly that: the Bot opened a CRM form, failed
+ * on one dropdown, and the conversation simply stopped.
+ */
+async function clickAgainstGate(
+  answer: () => Promise<Response>,
+): Promise<unknown> {
+  const originalFetch = global.fetch;
+  global.fetch = Object.assign(async () => answer(), {
+    preconnect: originalFetch.preconnect,
+  });
+  try {
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <Tools />
+      </QueryClientProvider>,
+    );
+    const tool = registered.find((entry) => entry.name === "computer_click");
+    const toolCall = {
+      id: "click-call",
+      type: "function" as const,
+      function: {
+        name: "computer_click",
+        arguments: '{"ref":"e7","snapshotId":3}',
+      },
+    };
+    const subscribers: {
+      onRunInitialized?: (input: { input: unknown }) => void;
+    }[] = [];
+    const agent = {
+      threadId: "thread",
+      state: {},
+      messages: [
+        { id: "u1", role: "user", content: "Submit the form" },
+        { id: "a1", role: "assistant", content: "", toolCalls: [toolCall] },
+      ],
+      subscribe: (subscriber: (typeof subscribers)[number]) => {
+        subscribers.push(subscriber);
+        return { unsubscribe: () => undefined };
+      },
+    };
+    const stop = observeApprovalAgent(agent as never);
+    for (const subscriber of subscribers)
+      subscriber.onRunInitialized?.({
+        input: {
+          runId: "run-1",
+          threadId: "thread",
+          messages: agent.messages,
+          tools: [],
+          context: [],
+          state: {},
+          forwardedProps: {},
+        },
+      });
+    try {
+      return await tool?.handler?.({ ref: "e7", snapshotId: 3 }, {
+        agent,
+        toolCall,
+      } as never);
+    } finally {
+      stop();
+    }
+  } finally {
+    global.fetch = originalFetch;
+  }
+}
+
+test("a change the computer could not make comes back to the Bot as a result, not a throw", async () => {
+  const result = await clickAgainstGate(async () =>
+    Response.json(
+      {
+        error:
+          "Element e7 is not on the page any more. Take a fresh snapshot and use the refs from it.",
+      },
+      { status: 409 },
+    ),
+  );
+  expect(result).toEqual({
+    ok: false,
+    reason:
+      "Element e7 is not on the page any more. Take a fresh snapshot and use the refs from it.",
+    staleRefs: true,
+  });
+});
+
+test("a refused change comes back as a refusal the Bot can explain", async () => {
+  const result = await clickAgainstGate(async () =>
+    Response.json(
+      { error: "Your team does not allow this.", rule: "team-rule-1" },
+      { status: 403 },
+    ),
+  );
+  expect(result).toEqual({
+    ok: false,
+    reason: "Your team does not allow this.",
+    refused: true,
+    rule: "team-rule-1",
+  });
+});
+
+test("a gate that cannot be reached, or answers with no result, is still a result", async () => {
+  expect(
+    await clickAgainstGate(async () => {
+      throw new TypeError("fetch failed");
+    }),
+  ).toEqual({
+    ok: false,
+    reason: "The assistant's computer could not be reached.",
+  });
+  expect(
+    await clickAgainstGate(async () => Response.json({}, { status: 200 })),
+  ).toEqual({ ok: false, reason: "The computer action returned no result." });
+});

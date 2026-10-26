@@ -2,6 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { MutationObserver, QueryClient } from "@tanstack/react-query";
 import {
   approveAppAccessRequestMutationOptions,
+  approveBotAppMutationOptions,
   cancelAppAccessRequestMutationOptions,
   dismissAppAccessRequestMutationOptions,
   requestAppAccessMutationOptions,
@@ -104,6 +105,22 @@ test("approving sends refs only when given", async () => {
   // `toEqual` passes over a key it is not given, so the first approval's missing body is its own
   // assertion: no refs means no body at all, not an empty one.
   expect(sent[0]).not.toHaveProperty("body");
+});
+
+test("an admin's one press names the Bot and the app in the path, and sends no refs", async () => {
+  const sent = answering(200, { request: {}, enabled: true, granted: [] });
+  const { asked } = await run(approveBotAppMutationOptions, {
+    agentId: "bot 1",
+    app: "composio-gmail",
+  });
+  expect(sent).toEqual([
+    {
+      url: "/api/plugins/for/bot%201/apps/composio-gmail/approve",
+      method: "POST",
+    },
+  ]);
+  expect(sent[0]).not.toHaveProperty("body");
+  expect(asked).toEqual([{ queryKey: pluginKeys.all }]);
 });
 
 test("a refused write still refreshes every plugin screen", async () => {

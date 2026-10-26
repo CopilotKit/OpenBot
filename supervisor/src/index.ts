@@ -124,11 +124,13 @@ app.post("/computers/:botId/ensure", async (context) => {
     }
     // Not ready is a 503 like an outage is, because the caller's next move is the same: wait and
     // ask again. The message is what differs, and it is the part an operator acts on.
-    if (
-      error instanceof DockerUnavailableError ||
-      error instanceof ComputerNotAnsweringError
-    ) {
+    if (error instanceof DockerUnavailableError) {
       return context.json({ error: error.message }, 503);
+    }
+    // Marked `starting`, because the container is up and still booting: the server tells the Bot
+    // the call was not performed and is worth repeating, instead of reporting an outage.
+    if (error instanceof ComputerNotAnsweringError) {
+      return context.json({ error: error.message, starting: true }, 503);
     }
     throw error;
   }

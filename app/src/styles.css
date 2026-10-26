@@ -94,3 +94,28 @@
 :where(div:has(> iframe.websandbox__frame)) {
   min-height: 200px;
 }
+
+/*
+ * The composer's @ menu, at the width prompt-area allows rather than the width of its longest name,
+ * so a Bot's title reads in full. prompt-area takes no class for its menu; it labels it by the
+ * trigger's character, so "@ suggestions" is this menu and not the `/` one. 20rem is the package's
+ * own cap, which its placement assumes when it keeps the menu inside the window, and its inline
+ * `max-width` still narrows the menu on a small screen.
+ *
+ * Each row centres the Bot's avatar on its name and title; the package aligns an icon to the first
+ * line, sized for a glyph, not a face.
+ */
+[role="listbox"][aria-label="@ suggestions"] {
+  width: 20rem;
+
+  & > [role="option"] {
+    align-items: center;
+    gap: --spacing(3);
+  }
+
+  /* A flex box, not an inline one, so no line-height space sits under the face. */
+  & > [role="option"] > span:first-child {
+    display: flex;
+    margin-top: 0;
+  }
+}

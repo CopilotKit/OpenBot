@@ -1,4 +1,4 @@
-import { IconPlug } from "@tabler/icons-react";
+import { IconPlug, IconSearch } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import * as React from "react";
 import {
@@ -158,7 +158,10 @@ export function BrokerDirectory({ provider }: { provider: PluginsProvider }) {
             {apps.error.message || directoryReadFailure(provider)}
           </p>
         ) : listed.length === 0 ? (
-          <PageEmpty>
+          <PageEmpty
+            icon={query ? IconSearch : IconPlug}
+            title={query ? "No matches" : "No apps"}
+          >
             {query
               ? `No ${name} app matches "${query}".`
               : `${name} returned no apps.`}

@@ -13,6 +13,7 @@
  * honest about being one shared computer.
  */
 
+import { ComputerStillStartingError } from "./client";
 import type { ComputerLocation, ComputerProvider } from "./provider";
 import type { ComputerStatus } from "./schema";
 
@@ -24,6 +25,8 @@ type SupervisorComputerLocation = {
   /** Where to reach it, decided by the supervisor rather than assembled here. */
   url?: string;
   startedAt?: string;
+  /** The image's healthcheck verdict, from a supervisor new enough to report it. */
+  health?: string;
 };
 
 export type SupervisorOptions = {
@@ -75,7 +78,18 @@ export function createDockerSupervisorProvider(
    */
   const sessions = new Map<string, string>();
 
-  async function call(path: string, method = "POST"): Promise<unknown> {
+  async function call(
+    path: string,
+    method = "POST",
+    /**
+     * Whether running out of time means the computer is still starting.
+     *
+     * Only for `/ensure`, which is the one call that waits on a container coming up: there a timeout
+     * is a slow start, and the caller is told so gently. Anywhere else it is a supervisor that has
+     * stopped answering, which is a real fault and keeps its own message.
+     */
+    startingOnTimeout = false,
+  ): Promise<unknown> {
     let response: Response;
     try {
       response = await doFetch(`${base}${path}`, {
@@ -86,6 +100,13 @@ export function createDockerSupervisorProvider(
         signal: AbortSignal.timeout(timeoutMs),
       });
     } catch (error) {
+      if (
+        startingOnTimeout &&
+        error instanceof Error &&
+        error.name === "TimeoutError"
+      ) {
+        throw new ComputerStillStartingError();
+      }
       throw new SupervisorError(
         `The container supervisor at ${base} could not be reached (${error instanceof Error ? error.message : String(error)}).`,
       );
@@ -96,8 +117,18 @@ export function createDockerSupervisorProvider(
       stopped?: boolean;
       reset?: boolean;
       computers?: SupervisorComputerLocation[];
+      starting?: boolean;
     } | null;
     if (!response.ok) {
+      // The supervisor's own health wait ran out on a container that is up and still booting. The
+      // same slow start as a timeout here, so it gets the same gentle answer.
+      if (
+        startingOnTimeout &&
+        response.status === 503 &&
+        body?.starting === true
+      ) {
+        throw new ComputerStillStartingError();
+      }
       throw new SupervisorError(
         body?.error ?? `The supervisor answered ${response.status}.`,
       );
@@ -136,7 +167,11 @@ export function createDockerSupervisorProvider(
     const rawStatus = location.status.toLowerCase();
     switch (rawStatus) {
       case "running":
-        return { botId, state: "ready" };
+        // Running is the process; healthy is the browser inside it. Until the healthcheck passes,
+        // `/ensure` holds every caller, so the computer is still starting.
+        return location.health === "starting"
+          ? { botId, state: "starting" }
+          : { botId, state: "ready" };
       case "created":
       case "restarting":
         return { botId, state: "starting" };
@@ -206,6 +241,8 @@ export function createDockerSupervisorProvider(
     async locate(botId: string): Promise<string> {
       const state = (await call(
         `/computers/${encodeURIComponent(botId)}/ensure`,
+        "POST",
+        true,
       )) as SupervisorComputerLocation;
       // Recorded on every ensure, so a replaced container is visible to whatever asks next.
       if (state?.startedAt) sessions.set(botId, state.startedAt);

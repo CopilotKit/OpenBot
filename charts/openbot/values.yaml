@@ -327,7 +327,8 @@ config:
 # How a Bot gets a computer.
 #
 #   shared    One browser for every Bot, run by this chart. Needs nothing installed in the cluster,
-#             and is what a first install should use.
+#             and is what a first install should use. Each Bot keeps its own logins and files,
+#             but a command one Bot runs can read another's files.
 #   sandbox   A computer each, as a `Sandbox` from kubernetes-sigs/agent-sandbox, suspended when
 #             idle and resumed with its logins intact. Needs that controller in the cluster.
 #   external  Neither. `url` points at a computer somebody else runs.

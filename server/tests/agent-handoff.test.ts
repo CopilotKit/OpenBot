@@ -47,6 +47,7 @@ function desk(options?: {
   offered?: number;
   caps?: HandoffCaps;
   role?: "admin" | "user";
+  onOffered?: (threadId: string) => Promise<void>;
 }) {
   const rows: Array<{ kind: string; key: string; payload: unknown }> = [];
   const events: Array<{
@@ -103,6 +104,7 @@ function desk(options?: {
       }),
       auditStore,
       caps: options?.caps ?? CAPS,
+      ...(options?.onOffered ? { onOffered: options.onOffered } : {}),
     }),
   };
 }
@@ -135,6 +137,47 @@ describe("handing work to another Bot", () => {
       // One deeper than the run that asked, so the cap keeps counting across pods.
       depth: 1,
     });
+  });
+
+  /*
+   * The conversation that asked is told at once, so it shows who it is waiting on before the hop is
+   * picked up. Only for a hop that was queued: a refusal or a repeat starts no wait.
+   */
+  test("a queued hop tells the conversation that asked, and a repeat does not", async () => {
+    const told: string[] = [];
+    const { desk: handoff } = desk({
+      onOffered: async (threadId) => {
+        told.push(threadId);
+      },
+    });
+    const send = () =>
+      handoff.send({
+        from: FROM,
+        target: "researcher",
+        envelope: { task: "find the outage window" },
+      });
+
+    await send();
+    await send();
+
+    expect(told).toEqual(["thread-1"]);
+  });
+
+  test("a conversation that cannot be told does not refuse the hop", async () => {
+    const { desk: handoff, rows } = desk({
+      onOffered: async () => {
+        throw new Error("the socket is down");
+      },
+    });
+
+    const outcome = await handoff.send({
+      from: FROM,
+      target: "researcher",
+      envelope: { task: "find the outage window" },
+    });
+
+    expect(outcome).toMatchObject({ ok: true });
+    expect(rows).toHaveLength(1);
   });
 
   /*

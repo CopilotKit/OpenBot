@@ -5,6 +5,7 @@ import {
 import type { GrantedTool } from "@openbot/toolkit/granted-tool";
 import { z } from "zod";
 import type { AppAccess, AppAccessState } from "./app-access";
+import { ownerAppsAllowed } from "./owner-grants";
 import type {
   AppDirectory,
   SharedAudienceCheck,
@@ -74,6 +75,9 @@ export function appAccessTools(options: {
           ...(options.sharedAudience
             ? { sharedAudience: options.sharedAudience }
             : {}),
+          ownerGrantsAllowed: options.actorId
+            ? await ownerAppsAllowed(options.actorId)
+            : false,
         });
         /*
          * No card for an app nobody can name. A card about it would have nothing to ask the server
@@ -87,6 +91,8 @@ export function appAccessTools(options: {
           title: access.displayName,
           agentId: options.botId,
           reason: "access",
+          // Lets a card drawn later tell "ready since" from "ready all along".
+          blocked: access.state !== "ready",
           message: toldTheModel(access),
         });
       },
@@ -114,6 +120,7 @@ function toldTheModel(access: AppAccess): string {
     shared_not_approved: `${name} uses one shared account for this deployment, and you reach more people than an administrator approved for it, so its calls are refused. Only an administrator can approve that; the card in front of the person says so.`,
     disabled: `${name} is switched off on this deployment. The card in front of the person lets them ask an administrator to switch it on.`,
     not_granted: `${name} is switched on, and you have not been granted it. The card in front of the person lets them ask an administrator to grant it to you.`,
+    owner_grantable: `${name} is switched on, and you have not been given it. This person owns you and can give it to you themselves: the card in front of them asks whether to let you use their ${name}. Ask them to try again once they have.`,
   };
   return `${said[access.state]} Do not browse to its website or ask them to sign in there.`;
 }

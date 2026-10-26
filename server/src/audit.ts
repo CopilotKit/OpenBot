@@ -269,6 +269,14 @@ export const auditEventTypes = [
   // An administrator answered a request to use a Shared app through a Bot.
   "shared_use.declined",
   /*
+   * A Bot's owner gave it a Shared app whose rule lets owners decide, and that set who may use the
+   * team account through the Bot (`approved_as = owner`); and that audience withdrawn, because the
+   * owner took the app back or an administrator stopped letting owners decide. Target the app;
+   * payload `bot`, `server`, and the `audience` set or `why` it went.
+   */
+  "shared_use.owner_approved",
+  "shared_use.owner_withdrawn",
+  /*
    * A person asking an administrator to switch a work app on, grant it to a Bot, or connect a
    * Shared app's team account (`app_access_requests`), and what became of it: cancelled by the
    * person, approved or dismissed by an administrator, or refused — a request that could not be
@@ -280,6 +288,14 @@ export const auditEventTypes = [
   "app_access.approved",
   "app_access.dismissed",
   "app_access.refused",
+  /*
+   * A Bot's owner giving one of their own apps to their own Bot, or taking it back, without an
+   * administrator (`plugins/owner-grants.ts`). Target the app key; payload `app`, `bot`, and the
+   * refs given or taken. Each ref also has its own `plugin_granted` / `plugin_revoked` row marked
+   * `grantedAs: owner`.
+   */
+  "app_access.owner_granted",
+  "app_access.owner_revoked",
   // Every action a Bot takes on its computer, allowed or refused. Both, always: a trail that records
   // only what was permitted cannot answer whether the Bot tried.
   "computer.action_allowed",
