@@ -7,6 +7,7 @@ import { AgentProfile } from "@/components/agents/agent-profile";
 import { BotPausedBanner } from "@/components/bot-profile/pause-banner";
 import { ChannelAvatar } from "@/components/channels/avatar";
 import { ChannelChat } from "@/components/channels/channel-chat";
+import { ConversationActions } from "@/components/channels/conversation-actions";
 import { ComputerChatControls } from "@/components/computer/computer-controls";
 import { ComputerViewPanel } from "@/components/computer/computer-panel";
 import { useAutoWatchScreen } from "@/components/computer/use-auto-watch-screen";
@@ -89,7 +90,18 @@ function RouteComponent() {
           // Manual watch remains active even when there is no current browser action.
           <ComputerViewPanel agentId={agentId} name={channel?.data?.name} />
         ) : (
-          <AgentProfile agentId={agentId} />
+          <AgentProfile
+            agentId={agentId}
+            footer={
+              channel.data ? (
+                <ConversationActions
+                  channelId={channelId}
+                  leave={() => navigate({ to: "/" })}
+                  name={channel.data.name}
+                />
+              ) : null
+            }
+          />
         )
       }
     >
