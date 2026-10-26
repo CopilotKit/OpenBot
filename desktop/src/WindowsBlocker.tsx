@@ -182,7 +182,7 @@ export function WindowsBlocker({
         Turn on <strong>Intel VT-x</strong> (Intel Virtualization Technology) or{" "}
         <strong>AMD-V</strong> (SVM Mode), then save and restart.
       </li>
-      <li>Open OpenBot again.</li>
+      <li>Start OpenBot again.</li>
     </ol>
   );
 

@@ -945,7 +945,9 @@ test("Continue during setup shows Getting ready, which starts, tests and opens O
   // Asking again stays open after an answer.
   expect(view.getByRole("button", { name: "Ask again" })).toBeTruthy();
   expectPlain(view);
-  await userEvent.click(view.getByRole("button", { name: "Open OpenBot" }));
+  await userEvent.click(
+    view.getByRole("button", { name: "Start using OpenBot" }),
+  );
   await waitFor(() => expect(localSequence()).toContain("show_openbot"));
   expect(
     invokeCalls.filter((call) => call.command === "start_stack"),
@@ -1057,7 +1059,9 @@ test("View in Intelligence says the native sentence when the dashboard does not 
   ).toBeTruthy();
   // The test result and its way forward are unchanged.
   expect(view.getByText("I am working.")).toBeTruthy();
-  expect(view.getByRole("button", { name: "Open OpenBot" })).toBeTruthy();
+  expect(
+    view.getByRole("button", { name: "Start using OpenBot" }),
+  ).toBeTruthy();
   expectPlain(view);
 });
 
@@ -1255,7 +1259,9 @@ test("a first local run whose model cannot answer offers Change the model, as ho
   await userEvent.click(await view.findByRole("button", { name: "Ask" }));
   await view.findByText("The model could not answer.");
   expect(localSequence()).not.toContain("show_openbot");
-  expect(view.queryByRole("button", { name: "Open OpenBot" })).toBeNull();
+  expect(
+    view.queryByRole("button", { name: "Start using OpenBot" }),
+  ).toBeNull();
   await userEvent.click(view.getByRole("button", { name: "Change the model" }));
   await view.findByRole("heading", { name: "Connect your AI" });
   expect(invokeCalls.some((call) => call.command === "stop_stack")).toBe(true);
@@ -1559,9 +1565,9 @@ test("Stop OpenBot and Show OpenBot say what they are doing at once", async () =
   await view.findByRole("heading", { name: "OpenBot is running" });
 
   await userEvent.click(view.getByRole("button", { name: "Show OpenBot" }));
-  expectWorking(view, "Opening OpenBot…");
+  expectWorking(view, "Loading OpenBot…");
   await act(async () => showing.resolve(null));
-  expect(view.queryByText("Opening OpenBot…")).toBeNull();
+  expect(view.queryByText("Loading OpenBot…")).toBeNull();
 
   await userEvent.click(view.getByRole("button", { name: "Stop OpenBot" }));
   expectWorking(view, "Stopping OpenBot…");
@@ -1688,7 +1694,7 @@ test("relaunch's Starting and Opening screens use the standard setup column", as
     command === "selected_root" ? reopened : reopening(command, args);
   const opening = await renderApp();
   expectStandardSheet(
-    opening.getByRole("heading", { name: "Opening OpenBot" }),
+    opening.getByRole("heading", { name: "Getting OpenBot ready" }),
   );
   await act(async () => configuration.resolve(savedOpenAiConfiguration()));
 });
@@ -2370,7 +2376,9 @@ test("reopening a retained root waits for its saved setup without flashing the w
     return previous(command, args);
   };
   const view = await renderApp();
-  expect(view.getByRole("heading", { name: "Opening OpenBot" })).toBeTruthy();
+  expect(
+    view.getByRole("heading", { name: "Getting OpenBot ready" }),
+  ).toBeTruthy();
   expect(view.queryByRole("button", { name: "Set up OpenBot" })).toBeNull();
   await act(async () => configuration.resolve(savedOpenAiConfiguration()));
   // A retained folder with no successful launch still needs the setup screens.

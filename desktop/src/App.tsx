@@ -986,10 +986,10 @@ function Setup() {
     return (
       <main>
         <div className="sheet connection-sheet">
-          <h1>{resuming ? "Starting OpenBot" : "Opening OpenBot"}</h1>
+          <h1>{resuming ? "Starting OpenBot" : "Getting OpenBot ready"}</h1>
           <p className="lede" role="status">
             {resuming
-              ? "Opening your saved setup…"
+              ? "Loading your saved setup…"
               : "Checking your saved setup…"}
           </p>
           <SetupProgress steps={steps} />
@@ -1768,7 +1768,7 @@ function Setup() {
           </details>
         )}
         {stopping && <StatusLine>Stopping OpenBot…</StatusLine>}
-        {showing && <StatusLine>Opening OpenBot…</StatusLine>}
+        {showing && <StatusLine>Loading OpenBot…</StatusLine>}
         <div className="row">
           {!running && (
             <button

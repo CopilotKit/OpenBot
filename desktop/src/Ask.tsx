@@ -48,7 +48,7 @@ export function Ask({
   onBack: () => void | Promise<void>;
   /** Local mode with a recorded stack: opens its Intelligence dashboard, already signed in. */
   onViewIntelligence?: () => Promise<void>;
-  /** The local first run's wording: "Try OpenBot", then "Open OpenBot". */
+  /** The local first run's wording: "Try OpenBot" as its heading. */
   local?: boolean;
 }) {
   const [preset, setPreset] = useState(firstQuestion % PRESET_QUESTIONS.length);
@@ -102,7 +102,7 @@ export function Ask({
   const open = () => leave("showing", onOpen);
   const leavingSaid = leaving && (
     <StatusLine>
-      {leaving === "stopping" ? "Stopping OpenBot…" : "Opening OpenBot…"}
+      {leaving === "stopping" ? "Stopping OpenBot…" : "Loading OpenBot…"}
     </StatusLine>
   );
 
@@ -215,7 +215,7 @@ export function Ask({
       <div className="row">
         {asked ? (
           <button type="button" disabled={leaving !== null} onClick={open}>
-            {local ? "Open OpenBot" : "Start using OpenBot"}
+            Start using OpenBot
           </button>
         ) : (
           <button type="button" onClick={ask} disabled={asking}>
