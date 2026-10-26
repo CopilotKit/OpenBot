@@ -62,12 +62,18 @@ class SocketDouble {
 let originalFetch: typeof fetch;
 let originalWebSocket: typeof WebSocket;
 let originalIntersectionObserver: typeof IntersectionObserver | undefined;
+// Prototypes outlive this file: bun runs every test file in one process, and a canvas stub left
+// behind here breaks the next file that draws on one.
+let originalGetContext: typeof HTMLCanvasElement.prototype.getContext;
+let originalDecode: typeof HTMLImageElement.prototype.decode;
 
 beforeAll(() => {
   GlobalRegistrator.register();
   originalFetch = globalThis.fetch;
   originalWebSocket = globalThis.WebSocket;
   originalIntersectionObserver = globalThis.IntersectionObserver;
+  originalGetContext = HTMLCanvasElement.prototype.getContext;
+  originalDecode = HTMLImageElement.prototype.decode;
   globalThis.WebSocket = SocketDouble as unknown as typeof WebSocket;
   // Without an observer the preview counts as on screen, which is what these cases are about.
   Reflect.deleteProperty(globalThis, "IntersectionObserver");
@@ -86,6 +92,8 @@ afterAll(() => {
   if (originalIntersectionObserver) {
     globalThis.IntersectionObserver = originalIntersectionObserver;
   }
+  HTMLCanvasElement.prototype.getContext = originalGetContext;
+  HTMLImageElement.prototype.decode = originalDecode;
   GlobalRegistrator.unregister();
 });
 
