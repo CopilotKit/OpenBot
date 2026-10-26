@@ -61,14 +61,35 @@ type Provenance = Partial<{
 }>;
 
 /** Only web addresses become links. Anything else the model wrote is shown as text. */
-function isWebAddress(url: string | undefined): url is string {
-  return !!url && /^https?:\/\//i.test(url);
+function isWebAddress(url: unknown): url is string {
+  return typeof url === "string" && /^https?:\/\//i.test(url);
+}
+
+/**
+ * The sources worth naming, once each. The arguments are drawn as the model wrote them, unchecked,
+ * so a source that is not a titled object is skipped instead of breaking the card.
+ */
+function namedSources(sources: unknown): { title: string; url?: string }[] {
+  if (!Array.isArray(sources)) return [];
+  const seen = new Set<string>();
+  const named: { title: string; url?: string }[] = [];
+  for (const entry of sources) {
+    const title = typeof entry?.title === "string" ? entry.title.trim() : "";
+    if (!title) continue;
+    const url = isWebAddress(entry.url) ? entry.url : undefined;
+    const key = `${title}|${url ?? ""}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    named.push(url ? { title, url } : { title });
+  }
+  return named;
 }
 
 /** The line under a chart that says where its figures came from. Nothing when nobody said. */
-function Sources({ basis, sources, asOf }: Provenance) {
-  const named = (sources ?? []).filter((entry) => entry?.title?.trim());
+function Sources({ basis, sources, asOf: when }: Provenance) {
+  const named = namedSources(sources);
   const unchecked = basis === "own-knowledge";
+  const asOf = typeof when === "string" ? when.trim() : "";
   if (!unchecked && named.length === 0 && !asOf) return null;
   return (
     <p className="mt-3 text-xs text-muted-foreground">
@@ -79,11 +100,12 @@ function Sources({ basis, sources, asOf }: Provenance) {
       ) : null}
       {named.length > 0 ? (
         <>
+          {unchecked ? " · " : null}
           {"Sources: "}
           {named.map((entry, index) => (
             <span key={`${entry.title}|${entry.url ?? ""}`}>
               {index > 0 ? ", " : null}
-              {isWebAddress(entry.url) ? (
+              {entry.url ? (
                 <a
                   className="underline underline-offset-2 hover:text-foreground"
                   href={entry.url}
