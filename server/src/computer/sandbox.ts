@@ -117,9 +117,23 @@ export type SandboxProviderOptions = {
   token?: string | (() => Promise<string>);
   ca?: string;
   fetchImpl?: typeof fetch;
-  /** How long `locate` waits for a suspended computer to come back before giving up. */
+  /** How long a computer is waited on to come back, by `update`'s restart and at most by `locate`. */
   resumeTimeoutMs?: number;
+  /**
+   * How long one `locate` waits before answering that the computer is still starting.
+   *
+   * Shorter than a resume can take ON PURPOSE. `locate` runs inside a person's request, and a load
+   * balancer with the usual 60s idle timeout cuts a request that says nothing for longer: the browser
+   * got a bare gateway error, the action could still land once the pod came up, and the model was
+   * told it had failed. Answering before that line keeps the "not performed" true. Giving up costs
+   * nothing, because the resume has already been written and the pod keeps coming up; the next call
+   * waits again.
+   */
+  locateWaitMs?: number;
 };
+
+/** See `locateWaitMs`. Under a 60s load balancer idle timeout, with room for the call itself. */
+const LOCATE_WAIT_MS = 45_000;
 
 /**
  * The service account this pod was given, which is how it reaches the API server.
@@ -251,6 +265,10 @@ export function createSandboxComputerProvider(
 } {
   const doFetch = options.fetchImpl ?? fetch;
   const resumeTimeoutMs = options.resumeTimeoutMs ?? 120_000;
+  const locateWaitMs = Math.min(
+    resumeTimeoutMs,
+    options.locateWaitMs ?? LOCATE_WAIT_MS,
+  );
   /** Restarts started by `update` and not yet finished, one per Bot. */
   const lastRestart = new Map<string, Promise<void>>();
   const base = () =>
@@ -321,8 +339,11 @@ export function createSandboxComputerProvider(
     };
   }
 
-  async function waitForReady(botId: string): Promise<Sandbox> {
-    const deadline = Date.now() + resumeTimeoutMs;
+  async function waitForReady(
+    botId: string,
+    budgetMs: number = resumeTimeoutMs,
+  ): Promise<Sandbox> {
+    const deadline = Date.now() + budgetMs;
     for (;;) {
       const sandbox = await read(botId);
       if (sandbox && isReady(sandbox) && sandbox.status?.serviceFQDN) {
@@ -339,7 +360,7 @@ export function createSandboxComputerProvider(
           JSON.stringify({
             type: "computer-sandbox-still-starting",
             botId,
-            waitedMs: resumeTimeoutMs,
+            waitedMs: budgetMs,
           }),
         );
         throw new ComputerStillStartingError();
@@ -470,7 +491,7 @@ export function createSandboxComputerProvider(
       // A computer that is running on an older image is left alone here. It may be in the middle of
       // a task, and restarting it under the Bot is the person's decision, which is `update`.
 
-      const ready = await waitForReady(botId);
+      const ready = await waitForReady(botId, locateWaitMs);
       const fqdn = ready.status?.serviceFQDN;
       if (!fqdn) {
         throw new SandboxError(

@@ -149,6 +149,29 @@ describe("a computer that takes longer than the wait to start", () => {
     }
   });
 
+  test("locate answers within its own wait, well before a resume's budget runs out", async () => {
+    // Held under a load balancer's idle timeout, so the person's request is answered, not cut.
+    const provider = createSandboxComputerProvider({
+      namespace: "openbot",
+      template: { podTemplate: { spec: { containers: [] } } },
+      idleAfterMs: 60_000,
+      apiServer: "https://kubernetes.default",
+      token: "t",
+      resumeTimeoutMs: 600_000,
+      locateWaitMs: 0,
+      fetchImpl: (async () =>
+        Response.json(booting)) as unknown as typeof fetch,
+    });
+    const warn = console.warn;
+    console.warn = () => undefined;
+    try {
+      const failure = await provider.locate("general").catch((error) => error);
+      expect(failure).toBeInstanceOf(ComputerStillStartingError);
+    } finally {
+      console.warn = warn;
+    }
+  });
+
   test("status calls one on its way up starting, without touching it", async () => {
     const seen: string[] = [];
     const status = await providerWith(booting, seen).status("general");
