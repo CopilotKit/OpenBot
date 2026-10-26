@@ -96,6 +96,7 @@ describe("show_app_access", () => {
         title: "Gmail",
         agentId: "expenses",
         reason: "access",
+        blocked: state !== "ready",
       });
       expect(prompt?.message).toMatch(said);
       expect(prompt?.message).toContain("Do not browse to its website");

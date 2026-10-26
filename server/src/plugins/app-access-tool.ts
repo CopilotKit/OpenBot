@@ -87,6 +87,8 @@ export function appAccessTools(options: {
           title: access.displayName,
           agentId: options.botId,
           reason: "access",
+          // Lets a card drawn later tell "ready since" from "ready all along".
+          blocked: access.state !== "ready",
           message: toldTheModel(access),
         });
       },

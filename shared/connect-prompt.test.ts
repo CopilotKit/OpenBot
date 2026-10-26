@@ -69,6 +69,7 @@ describe("the Bot, the reason and the moment it carries", () => {
       agentId: "expenses",
       reason: "reconnect",
       at: "2026-10-20T12:00:00.000Z",
+      blocked: true,
     });
     expect(readConnectPrompt(text)).toEqual({
       serverId: "composio-gmail",
@@ -77,6 +78,7 @@ describe("the Bot, the reason and the moment it carries", () => {
       agentId: "expenses",
       reason: "reconnect",
       at: "2026-10-20T12:00:00.000Z",
+      blocked: true,
     });
     expect(connectAppRefusal({ serverId: "s", title: "T", message: "m" })).toBe(
       `${CONNECT_APP_MARKER}{"serverId":"s","title":"T"} m`,
@@ -85,7 +87,7 @@ describe("the Bot, the reason and the moment it carries", () => {
 
   test("a field of the wrong shape is dropped, and the prompt still names its app", () => {
     const prompt = readConnectPrompt(
-      `${CONNECT_APP_MARKER}{"serverId":"composio-gmail","title":"Gmail","agentId":7,"reason":"grant me","at":"yesterday"} hello`,
+      `${CONNECT_APP_MARKER}{"serverId":"composio-gmail","title":"Gmail","agentId":7,"reason":"grant me","at":"yesterday","blocked":"yes"} hello`,
     );
     expect(prompt).toEqual({
       serverId: "composio-gmail",
