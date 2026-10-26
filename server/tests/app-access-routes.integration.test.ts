@@ -998,6 +998,108 @@ describe("answering a request", () => {
   });
 });
 
+describe("an administrator's one press on a card", () => {
+  const press = (app: string, as = admin, role: "admin" | "user" = "admin") =>
+    appAs(as, role).request(
+      `/api/plugins/for/${bot}/apps/${encodeURIComponent(app)}/approve`,
+      { method: "POST" },
+    );
+
+  test("turns an app on and gives it to the Bot, read-only, with the trail two presses leave", async () => {
+    const response = await press("Dropbox");
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      request: {
+        kind: "enable",
+        appKey: DROPBOX,
+        status: "approved",
+        requestedBy: admin,
+        resolvedBy: admin,
+      },
+      enabled: true,
+      granted: [`${DROPBOX}/LIST_FILES`],
+    });
+    expect(enabled).toEqual([slug("dropbox")]);
+    expect(eventsOf("app_access.requested")[0]?.payload).toMatchObject({
+      app: DROPBOX,
+      kind: "enable",
+    });
+    expect(eventsOf("app_access.approved")[0]?.payload).toMatchObject({
+      app: DROPBOX,
+      kind: "enable",
+      enabled: true,
+      granted: 1,
+      direct: true,
+    });
+    const { app } = await json<{ app: AppAccess }>(
+      await appAs(person).request(`/api/plugins/for/${bot}/apps/${DROPBOX}`),
+    );
+    expect(app.state).toBe("not_connected");
+  });
+
+  test("gives an app that is on to the Bot, and grants no send", async () => {
+    await seedApp({
+      key: CALENDAR,
+      title: "Google Calendar",
+      tools: ["SEND", "LIST"],
+      effects: { LIST: "read", SEND: "write" },
+      grant: false,
+    });
+    const response = await press(CALENDAR);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      request: { kind: "grant", status: "approved" },
+      enabled: false,
+      granted: [`${CALENDAR}/LIST`],
+    });
+  });
+
+  test("only an administrator may press it, and nothing is filed for anybody else", async () => {
+    await seedApp({ key: CALENDAR, title: "Google Calendar", grant: false });
+    expect((await press(CALENDAR, person, "user")).status).toBe(403);
+    const rows = await database
+      .select()
+      .from(appAccessRequests)
+      .where(eq(appAccessRequests.appKey, CALENDAR));
+    expect(rows).toHaveLength(0);
+  });
+
+  test("a state with nothing for an administrator to do is refused like a request", async () => {
+    await seedApp({ key: GMAIL, title: "Gmail" });
+    const response = await press(GMAIL);
+    expect(response.status).toBe(409);
+    expect(eventsOf("app_access.refused").at(-1)?.payload).toMatchObject({
+      reason: "nothing_to_request:not_connected",
+    });
+  });
+
+  test("a press that cannot be carried out leaves no request waiting", async () => {
+    const response = await press("google-drive");
+    expect(response.status).toBe(409);
+    expect((await json<{ error: string }>(response)).error).toContain(
+      "OAuth client",
+    );
+    const rows = await database
+      .select({ status: appAccessRequests.status })
+      .from(appAccessRequests)
+      .where(eq(appAccessRequests.requestedBy, admin));
+    expect(rows.map((row) => row.status)).toEqual(["cancelled"]);
+  });
+
+  test("a request of theirs already waiting is put back as it was", async () => {
+    await appAs(admin, "admin").request(
+      "/api/plugins/access-requests",
+      post({ agentId: bot, app: "google-drive" }),
+    );
+    expect((await press("google-drive")).status).toBe(409);
+    const rows = await database
+      .select({ status: appAccessRequests.status })
+      .from(appAccessRequests)
+      .where(eq(appAccessRequests.requestedBy, admin));
+    expect(rows.map((row) => row.status)).toEqual(["pending"]);
+  });
+});
+
 /*
  * THE SAME RULE ON AN ARCADE DEPLOYMENT. Which rows are brokered apps, which connections count and
  * which id an app nobody enabled would get all come from the store's broker, so a personal Arcade
