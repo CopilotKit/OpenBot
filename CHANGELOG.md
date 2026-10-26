@@ -40,6 +40,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - Migration `0062_action_policy_labels` adds a `labels` column to `action_policies`, defaulting to
   empty. Existing boundary rules keep working and show as "Custom rule" until somebody names them.
 
+### A Bot searches with its search tool, never its browser
+
+Asked to search for something, a Bot could drive its browser to Google or another search engine
+instead of using the search tool it held. With a search tool it now searches with that, and keeps
+the browser for signing in, clicking through a site, filling in a form or opening a page the person
+named. Without one it answers from what it knows, says it has not checked, and shows a card for a
+search app (Parallel Search, Exa Search or Firecrawl) that the person can ask an administrator for.
+
 ### Screens share one spacing, row and empty-state design
 
 Every configuration screen now takes its spacing from the page frame: 32px under the title, 48px
