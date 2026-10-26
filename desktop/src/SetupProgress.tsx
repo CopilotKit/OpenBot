@@ -81,8 +81,13 @@ const PREPARING = new Set([
 
 /**
  * An installation's native rows as two plain ones, for local mode: "Preparing this computer" and
- * "Installing OpenBot". Native details name the engine, so only download sizes are kept; a
- * failure is shown in full under the rows.
+ * "Installing OpenBot". A failure is shown in full under the rows.
+ *
+ * While "Preparing this computer" runs it carries the running step's own sentence and download
+ * size: "Downloading Docker Desktop.", "Installing Docker Desktop.", "Starting Docker Desktop.
+ * Accept its terms in its own window when it asks." Docker is named on purpose. Its installer and
+ * its agreement appear in windows of their own, and a row that only said "Preparing" sat for
+ * minutes while one of them waited, unseen, behind this one.
  */
 export function plainInstallSteps(
   steps: Progress[],
@@ -93,6 +98,9 @@ export function plainInstallSteps(
   const preparingFailed = preparing.some((step) => !step.ok);
   const stillPreparing =
     installing && preparing.some((step) => step.running) && !preparingFailed;
+  const preparingNow = stillPreparing
+    ? [...preparing].reverse().find((step) => step.running)
+    : undefined;
   const installingFailed = rest.some((step) => !step.ok);
   const rows: Progress[] = [];
   if (preparing.length > 0) {
@@ -100,7 +108,8 @@ export function plainInstallSteps(
       step: "Preparing this computer",
       ok: !preparingFailed,
       running: stillPreparing,
-      detail: "",
+      detail: preparingNow?.detail ?? "",
+      downloadBytes: preparingNow?.downloadBytes,
     });
   }
   if (rest.length > 0 || (installing && !stillPreparing && !preparingFailed)) {

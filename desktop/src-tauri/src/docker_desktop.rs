@@ -106,12 +106,19 @@ fn app_places() -> Vec<PathBuf> {
         }
         places
     }
+    // Per user first, which is how OpenBot installs it; per machine is how most people already have it.
     #[cfg(target_os = "windows")]
     {
-        std::env::var_os("ProgramFiles")
-            .map(|files| PathBuf::from(files).join("Docker\\Docker\\Docker Desktop.exe"))
-            .into_iter()
-            .collect()
+        [
+            std::env::var_os("LOCALAPPDATA").map(|local| {
+                PathBuf::from(local).join("Programs\\DockerDesktop\\Docker Desktop.exe")
+            }),
+            std::env::var_os("ProgramFiles")
+                .map(|files| PathBuf::from(files).join("Docker\\Docker\\Docker Desktop.exe")),
+        ]
+        .into_iter()
+        .flatten()
+        .collect()
     }
     #[cfg(target_os = "linux")]
     {
@@ -308,10 +315,23 @@ fn install_from(dmg: &Path, into: &Path) -> Result<(), Problem> {
 
 #[cfg(target_os = "windows")]
 fn install_from(exe: &Path, _into: &Path) -> Result<(), Problem> {
-    // Docker's installer elevates itself through UAC. `install` without `--accept-license` leaves
-    // the agreement to Docker Desktop's first start, where the person accepts it.
+    /*
+     * Unattended, for this person only, on WSL 2. Run bare, Docker's installer opens its own
+     * Configuration window (per user or for everyone, WSL 2 or Hyper-V) and waits on it, and that
+     * window opened behind OpenBot's, so setup sat on "Preparing this computer" with nothing on
+     * screen to answer. `--user` installs to %LOCALAPPDATA%\Programs\DockerDesktop with no
+     * administrator prompt, the installer's own recommendation; WSL 2 is what the Windows setup
+     * screen has already made sure of. Still no `--accept-license`: Docker's agreement is the
+     * person's to accept, in Docker Desktop's first start.
+     */
     let status = crate::quiet::command(exe)
-        .arg("install")
+        .args([
+            "install",
+            "--quiet",
+            "--user",
+            "--backend=wsl-2",
+            "--no-windows-containers",
+        ])
         .status()
         .map_err(|error| install_failed(format!("{}: {error}", exe.display())))?;
     if status.success() {

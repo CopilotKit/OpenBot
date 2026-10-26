@@ -455,11 +455,19 @@ fn where_installers_put(engine: Engine) -> Option<PathBuf> {
             .flatten()
             .collect()
         }
+        // Docker Desktop per user, as OpenBot installs it, then per machine.
         #[cfg(target_os = "windows")]
-        Engine::Docker => std::env::var_os("ProgramFiles")
-            .map(|files| PathBuf::from(files).join("Docker\\Docker\\resources\\bin\\docker.exe"))
-            .into_iter()
-            .collect(),
+        Engine::Docker => [
+            std::env::var_os("LOCALAPPDATA").map(|local| {
+                PathBuf::from(local).join("Programs\\DockerDesktop\\resources\\bin\\docker.exe")
+            }),
+            std::env::var_os("ProgramFiles").map(|files| {
+                PathBuf::from(files).join("Docker\\Docker\\resources\\bin\\docker.exe")
+            }),
+        ]
+        .into_iter()
+        .flatten()
+        .collect(),
         #[cfg(target_os = "macos")]
         Engine::Podman => [
             "/opt/podman/bin/podman",

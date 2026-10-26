@@ -582,9 +582,10 @@ async function installLocal(view: Awaited<ReturnType<typeof renderApp>>) {
 }
 
 /** Words about the software underneath, which no local screen says. */
+// Docker is not here: its installer and its agreement show windows of their own, so the screen
+// says what it is waiting for by name. See `plainInstallSteps`.
 const JARGON = [
   /\bCLI\b/,
-  /Docker/i,
   /Podman/i,
   /Container engine/i,
   /Engine machine/i,
@@ -672,7 +673,35 @@ test("Install prepares the default Bot in the default folder, with no Bot or fol
   expect(view.queryAllByRole("button")).toEqual([]);
   // Intelligence waits for the engine the install starts: nothing local runs yet.
   expect(localCliCalls()).toEqual([]);
-  // Native rows are summarised in plain words.
+  // Native rows are summarised in plain words, with what the computer is doing now.
+  await emitProgress({
+    step: "install-engine",
+    ok: true,
+    running: true,
+    detail: "Downloading Docker Desktop.",
+    downloadBytes: 48_000_000,
+  });
+  const preparing = within(
+    view.getByRole("listitem", { name: "Preparing this computer" }),
+  );
+  expect(preparing.getByText(/Downloading Docker Desktop\./)).toBeTruthy();
+  expect(preparing.getByText(/48\.0 MB downloaded/)).toBeTruthy();
+  await emitProgress({
+    step: "install-engine",
+    ok: true,
+    running: true,
+    detail:
+      "Starting Docker Desktop. Accept its terms in its own window when it asks.",
+  });
+  expect(
+    preparing.getByText(/Accept its terms in its own window/),
+  ).toBeTruthy();
+  expect(preparing.queryByText(/downloaded/)).toBeNull();
+  await emitProgress({
+    step: "install-engine",
+    ok: true,
+    detail: "Docker Desktop 4.96.3 installed and running.",
+  });
   await emitProgress({
     step: "engine",
     ok: true,
