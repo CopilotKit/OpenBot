@@ -1455,6 +1455,32 @@ export function isPersonSentMessage(
 }
 
 /**
+ * WHERE THE CONVERSATION HAS GOT TO, for an app card that may carry its task on once the app is
+ * ready (see `lib/copilot/carry-on.ts`): the index from which a row is still the latest thing, or
+ * past the end when none is.
+ *
+ * A card is the latest thing while nothing has been said to the Bot since it, nothing is queued, and
+ * the Bot is not working: past that, the conversation has moved on, and an older task is not picked
+ * up again underneath it. ANY USER TURN COUNTS, a routine firing included — unlike the scroll
+ * machinery's `isPersonSentMessage`. A firing is not the person speaking, but it is a new task the
+ * Bot has answered, and "please carry on" sent after it would land on the routine's work rather than
+ * on the task the card interrupted. Exported so it can be checked without mounting anything.
+ */
+export function latestFrom(
+  items: readonly TranscriptItem[],
+  { busy, queued }: { busy: boolean; queued: number },
+): number {
+  if (busy || queued > 0) return items.length;
+  return (
+    items.findLastIndex(
+      (item) =>
+        (item.kind === "text" && item.role === "user") ||
+        item.kind === "attachments",
+    ) + 1
+  );
+}
+
+/**
  * The turn a row belongs to.
  *
  * The attachments row is identified as `${messageId}:attachments` by `toVisibleChatItems`, so that
@@ -1615,18 +1641,8 @@ export function ChatTranscript({
     )?.id ?? null;
   useSmoothSendScroll(viewportRef, newestUserMessageId);
 
-  /*
-   * WHERE THE CONVERSATION HAS GOT TO, for an app card that may carry its task on once the app is
-   * ready (see `lib/copilot/carry-on.ts`). A card is the latest thing while the person has said
-   * nothing since it, has nothing queued, and the Bot is not working: past that, the conversation
-   * has moved on, and an older task is not picked up again underneath it.
-   */
-  const lastSaid = items.findLastIndex(
-    (item) =>
-      (item.kind === "text" && isPersonSentMessage(item.role, item.text)) ||
-      item.kind === "attachments",
-  );
-  const settled = !busy && queued.length === 0;
+  /* Which tool calls are still the latest thing, for an app card: see `latestFrom`. */
+  const latestIndex = latestFrom(items, { busy, queued: queued.length });
 
   /* One rule for both kinds of row — see `anchorRowIds`, which is where it is written down. */
   const anchorRows = anchorRowIds(items);
@@ -1749,7 +1765,7 @@ export function ChatTranscript({
                   <TranscriptToolCall
                     args={item.toolCall.function.arguments}
                     delay={delays.delayFor(item.id, index, items.length)}
-                    latest={settled && index > lastSaid}
+                    latest={index >= latestIndex}
                     name={item.toolCall.function.name}
                     result={item.result}
                     toolCallId={item.toolCall.id}
