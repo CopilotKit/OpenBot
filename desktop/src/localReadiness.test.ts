@@ -156,9 +156,10 @@ test("specific wording and actions", () => {
   ).toBe("Another Intelligence command is still running.");
   expect(said("timeout")).toEqual({
     state: "blocked",
-    said: "Intelligence could not start.",
+    said: "Intelligence took too long to start, so OpenBot stopped waiting. What it already downloaded is kept, so trying again picks up from there.",
     action: "restart-intelligence",
   });
+  expect(said("unexpected-exit").said).toBe("Intelligence could not start.");
   expect(said("unavailable").action).toBeUndefined();
   expect(said("unverified").action).toBe("repair");
   expect(said("invalid-json")).toEqual({

@@ -1000,10 +1000,12 @@ impl Limits {
     }
 
     /// `local setup` downloads a release and creates the cluster. 88 seconds on a warm machine
-    /// with a fast connection; a first pull of every image is what this allows for.
+    /// with a fast connection; a first pull of every image is what this allows for. An hour, not
+    /// half of one: a fresh Windows VM ran out the 30 minutes this used to allow while it was also
+    /// installing OpenBot's packages, and a timeout throws away a setup that was getting there.
     pub fn for_setup() -> Self {
         Self {
-            timeout: Duration::from_secs(30 * 60),
+            timeout: Duration::from_secs(60 * 60),
             ..Self::for_action(Action::Start)
         }
     }

@@ -626,7 +626,7 @@ test("failures arrive as categories, and a stack that could not be recorded as a
   const screen = view();
   await waitFor(() =>
     expect(row(screen, SETUP).textContent).toContain(
-      "Intelligence could not start.",
+      "Intelligence took too long to start",
     ),
   );
   invokeHandler = async () => {

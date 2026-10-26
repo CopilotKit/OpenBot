@@ -130,7 +130,13 @@ const failureRows: Record<LocalFailure, ReadinessRow> = {
   // Cancelled is the person's own call stopping, not another command holding the stack.
   cancelled: blocked("Stopped at your request before it finished.", "retry"),
   spawn: couldNotStart,
-  timeout: couldNotStart,
+  // Ran out of time, which on a slow disk or connection is not the same as failing: the cluster and
+  // the images it fetched are still there for the retry. Seen at exactly 30 minutes on a Windows VM
+  // that was installing OpenBot's packages at the same time.
+  timeout: blocked(
+    "Intelligence took too long to start, so OpenBot stopped waiting. What it already downloaded is kept, so trying again picks up from there.",
+    "restart-intelligence",
+  ),
   "unexpected-exit": couldNotStart,
   "invalid-stack": blocked(contract),
   "output-limit": blocked(contract),
