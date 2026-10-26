@@ -133,6 +133,10 @@ services:
       OPENAI_BASE_URL: ${OPENAI_CONTAINER_BASE_URL:-${OPENAI_BASE_URL:-}}
       INTELLIGENCE_API_URL: ${INTELLIGENCE_CONTAINER_API_URL:-${INTELLIGENCE_API_URL:-}}
       INTELLIGENCE_GATEWAY_WS_URL: ${INTELLIGENCE_CONTAINER_GATEWAY_WS_URL:-${INTELLIGENCE_GATEWAY_WS_URL:-}}
+      # The browser opens the gateway too, at the address the server gives it in `/info`, and the
+      # browser is on the host. So it gets the deployment's own address, the one a host server would
+      # have used, whatever this container uses itself.
+      INTELLIGENCE_BROWSER_GATEWAY_WS_URL: ${INTELLIGENCE_GATEWAY_WS_URL:-}
       # The deployment's secrets, from the environment Compose runs in and then from `.env`, which
       # Compose reads for these `${...}` and the host server reads for itself. OpenBot Desktop keeps
       # them out of that file and hands them to Compose in its environment, so they reach this

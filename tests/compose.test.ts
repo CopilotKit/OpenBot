@@ -702,11 +702,16 @@ test("addresses the server's Bots and endpoints from inside the network", () => 
     OPENAI_BASE_URL: "http://127.0.0.1:3001/api/model-provider/v1",
     OPENAI_CONTAINER_BASE_URL:
       "http://host.docker.internal:3001/api/model-provider/v1",
+    INTELLIGENCE_GATEWAY_WS_URL: "ws://localhost:14401",
+    INTELLIGENCE_CONTAINER_GATEWAY_WS_URL: "ws://host.docker.internal:14401",
   });
   expect(withBots.services.server.environment).toMatchObject({
     MANAGED_AGENT_AG_UI_URL: "http://agent-langgraph:4201/ag-ui",
     PICKED_HARNESS_URL: "http://agent-harness:4202/run",
     OPENAI_BASE_URL: "http://host.docker.internal:3001/api/model-provider/v1",
+    // The server's own way to the gateway, and the browser's, which is on the host.
+    INTELLIGENCE_GATEWAY_WS_URL: "ws://host.docker.internal:14401",
+    INTELLIGENCE_BROWSER_GATEWAY_WS_URL: "ws://localhost:14401",
   });
 
   // No managed Bot stays no managed Bot, and a remote harness keeps its own address.
