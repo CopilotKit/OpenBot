@@ -274,3 +274,60 @@ test("a live stream that drops shows a quiet badge, not the Retry panel", async 
   expect(view.getByText("Reconnecting…")).toBeDefined();
   expect(view.queryByText("Retry")).toBeNull();
 });
+
+test("a computer that was off and then fails is not called off for ever", async () => {
+  // The first answer says off; every one after it is a failed screenshot of a computer now up.
+  let shots = 0;
+  serve({
+    "/status": () => Response.json({ botId: "sales", state: "ready" }),
+    "/screenshot": () =>
+      shots++ === 0
+        ? Response.json({ ready: false, state: "absent" })
+        : Response.json(
+            { error: "The computer did not respond." },
+            { status: 503 },
+          ),
+  });
+
+  const view = renderWithQueries(
+    <ComputerView
+      active
+      computerId="sales"
+      intervalMs={10}
+      name="Sales"
+      startupGraceMs={100}
+    />,
+  );
+
+  expect(
+    await view.findByText(
+      "Can't show the screen right now",
+      {},
+      { timeout: 1000 },
+    ),
+  ).toBeDefined();
+  expect(view.queryByText(/is off/)).toBeNull();
+});
+
+test("a computer that goes to sleep stops showing its last frame", async () => {
+  let shots = 0;
+  serve({
+    "/status": () => Response.json({ botId: "sales", state: "absent" }),
+    "/screenshot": () =>
+      shots++ === 0 ? frame() : Response.json({ ready: false, state: "absent" }),
+  });
+
+  const view = renderWithQueries(
+    <ComputerView active computerId="sales" intervalMs={10} name="Sales" />,
+  );
+
+  await view.findByAltText("What the Bot is looking at");
+  await waitFor(() => {
+    expect(
+      view.getByText(
+        "Sales's computer is off. It starts when the Bot next uses it.",
+      ),
+    ).toBeDefined();
+    expect(view.queryByAltText("What the Bot is looking at")).toBeNull();
+  });
+});

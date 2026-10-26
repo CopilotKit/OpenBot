@@ -405,8 +405,19 @@ export function ComputerView({
            */
           setPolledState(notReady.state);
           setProblem(null);
+          /*
+           * A frame from before the computer went to sleep is not what it shows now, and keeping it
+           * would also keep the live stream mounted, which reconnects to a computer nobody woke.
+           */
+          setShot(null);
         } else if (!frame) {
           setProblem(error ?? "The screen isn't available right now.");
+          /*
+           * The state is unknown again, not whatever the last not-ready answer said. A stale
+           * "absent" would keep calling a computer that is failing "off", and an off computer is
+           * never timed out, so the failure would never be shown. Cleared, the status read resumes.
+           */
+          setPolledState(null);
         } else {
           // Exact byte comparison is the settling signal.
           unchanged = frame.base64 === lastFrame ? unchanged + 1 : 0;
