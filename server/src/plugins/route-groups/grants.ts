@@ -113,12 +113,7 @@ export function mountGrantRoutes({
       : null;
     if (!inspected?.rowIds.includes(serverId ?? ""))
       return `${serverId} hasn't been added yet. Only an admin can add it.`;
-    const refusal = await ownerGrantRefusal(
-      store,
-      actorId,
-      agentId,
-      inspected,
-    );
+    const refusal = await ownerGrantRefusal(store, actorId, agentId, inspected);
     if (refusal) return refusal;
     /*
      * AN ACTION THE APP ADVERTISES NOW, NOT ANY WORD AFTER THE SLASH. An administrator may grant a
@@ -127,7 +122,9 @@ export function mountGrantRoutes({
      * Bot would then hold it with nobody having chosen it — and a bare server ref would mark the app
      * given without giving it a single action.
      */
-    if (!(await store.appTools(serverId ?? "")).some((tool) => tool.ref === ref))
+    if (
+      !(await store.appTools(serverId ?? "")).some((tool) => tool.ref === ref)
+    )
       return `${inspected.access.displayName} doesn't have that action.`;
     return null;
   }
