@@ -156,7 +156,7 @@ export function TabHeader({
           aria-label={label}
           aria-pressed={canDictate ? presence.recording : undefined}
           className={cn(
-            "pointer-events-auto grid shrink-0 place-items-center rounded-full transition-transform active:scale-95",
+            "pointer-events-auto grid shrink-0 place-items-center rounded-full transition-transform active:scale-95 motion-reduce:transition-none motion-reduce:active:scale-100",
             FOCUS,
           )}
           onClick={press}
@@ -194,7 +194,7 @@ function DoingPill({ line }: { line: string | null }) {
     <div aria-live="polite" className="flex h-6 max-w-full justify-center">
       <p
         aria-hidden={shown ? undefined : true}
-        className="openduet-glass openduet-type-caption flex h-6 max-w-full items-center rounded-full px-2.5 font-semibold text-openduet-ink shadow-openduet-glass transition-opacity duration-200 data-[shown=false]:opacity-0"
+        className="openduet-glass openduet-type-caption flex h-6 max-w-full items-center rounded-full px-2.5 font-semibold text-openduet-ink shadow-openduet-glass transition-opacity duration-200 data-[shown=false]:opacity-0 motion-reduce:transition-none"
         data-shown={shown}
       >
         <span className="tool-line-running truncate">{held}</span>
@@ -204,17 +204,16 @@ function DoingPill({ line }: { line: string | null }) {
 }
 
 /**
- * The chrome for a page opened over the app: a back disc on the left, the page's name in a glass
- * pill in the middle, and nothing on the right. No menu, no avatar and no tab bar, so a page reads
- * as somewhere you came to and go back from. Back goes back through history when there is any, and
- * to Chat otherwise.
+ * The chrome for a page opened over the app: a back disc on the left, and the page's own heading
+ * under it. No menu, no avatar and no tab bar, so a page reads as somewhere you came to and go back
+ * from. Back goes back through history when there is any, and to Chat otherwise.
  */
-export function PageHeader({ title }: { title: string | null }) {
+export function PageHeader() {
   const router = useRouter();
   const navigate = useNavigate();
   const canGoBack = useCanGoBack();
   return (
-    <header className="relative z-20 flex h-[72px] shrink-0 items-start gap-2 bg-openduet-surface px-4 pt-3">
+    <header className="relative z-20 flex h-[72px] shrink-0 items-start px-4 pt-3">
       <button
         aria-label="Back"
         className={DISC}
@@ -227,20 +226,6 @@ export function PageHeader({ title }: { title: string | null }) {
       >
         <IconChevronLeft size={22} stroke={1.8} />
       </button>
-      <div className="flex min-w-0 flex-1 justify-center">
-        {title ? (
-          <div className="openduet-glass flex h-[46px] min-w-0 max-w-full items-center justify-center rounded-full px-4 shadow-openduet-glass">
-            {/* The page's own heading is kept for screen readers; this is what the eye reads. */}
-            <p
-              aria-hidden
-              className="openduet-type-sub max-w-full truncate font-semibold text-openduet-ink"
-            >
-              {title}
-            </p>
-          </div>
-        ) : null}
-      </div>
-      <span aria-hidden className="shrink-0" style={{ width: SIDE }} />
     </header>
   );
 }

@@ -39,6 +39,25 @@ export function isSkinScreen(pathname: string): boolean {
   return pathname.startsWith("/s/");
 }
 
+/**
+ * How wide the frame's column is. `phone` holds Chat and Tasks to a phone's width. `pane` is a
+ * conversation with its Bot's details or computer open: the phone column plus OpenBot's 400px pane
+ * beside it (`DetailPanel` lays the pane out beside the conversation once there is room for both).
+ * `page` is every other page, at the width OpenBot gave it.
+ */
+export type OpenDuetColumn = "phone" | "pane" | "page";
+
+export function columnFor(
+  pathname: string,
+  search: Record<string, unknown> = {},
+): OpenDuetColumn {
+  const tab = tabForPath(pathname);
+  if (!tab) return "page";
+  if (tab === "chat" && (search.watch === true || search.settings === true))
+    return "pane";
+  return "phone";
+}
+
 export type ManagePlace = {
   label: string;
   /** Where the menu row goes. */

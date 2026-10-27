@@ -360,19 +360,37 @@ describe("the frame reaches every OpenBot surface", () => {
     expect(links).not.toContain("/admin");
   });
 
-  test("a page opened over the app has a way back, no tab bar, and its own name in the pill", async () => {
+  /*
+   * Found in review: the frame wrote an attribute onto the page's own heading, an element React
+   * owns, to hide it behind a pill. The page's heading is left exactly as the page drew it now.
+   */
+  test("a page opened over the app has a way back and no tab bar, and its heading is the page's own", async () => {
     api("user");
     const view = renderApp("/bots");
     await view.findByRole("button", { name: "Back" });
     expect(view.queryByRole("navigation", { name: "Main" })).toBeNull();
     expect(view.queryByRole("button", { name: "Menu" })).toBeNull();
     const heading = await view.findByRole("heading", { name: "Bots" });
-    await waitFor(() =>
-      expect(heading.hasAttribute("data-openduet-titled")).toBe(true),
-    );
-    expect(
-      document.querySelector("header [aria-hidden] ")?.textContent,
-    ).toContain("Bots");
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(heading.getAttributeNames()).toEqual([]);
+  });
+
+  test("Chat and Tasks are phone-shaped, other pages keep OpenBot's width, and an open computer gets OpenBot's pane", async () => {
+    api("user");
+    const column = () =>
+      document
+        .querySelector("[data-openduet-column]")
+        ?.getAttribute("data-openduet-column");
+    for (const [path, expected] of [
+      ["/", "phone"],
+      ["/s/tasks", "phone"],
+      ["/bots", "page"],
+      ["/channel/c-1?watch=true", "pane"],
+    ] as const) {
+      const view = renderApp(path);
+      await waitFor(() => expect(column()).toBe(expected));
+      view.unmount();
+    }
   });
 
   test("the Tasks tab counts what waits on the person", async () => {
@@ -384,44 +402,45 @@ describe("the frame reaches every OpenBot surface", () => {
   });
 });
 
-describe("Tasks draws OpenBot's data", () => {
-  test("Active lists what waits on the person and what their Bots carry, and nothing that is not under way", async () => {
+/*
+ * Found in review: Tasks re-implemented OpenBot's approvals, suggestions and routines, and the copies
+ * had drifted. It now draws OpenBot's own lists, so these drive those lists through Tasks.
+ */
+describe("Tasks is OpenBot's own lists under OpenDuet's headings", () => {
+  test("Active shows OpenBot's waiting list, responsibilities and routines, and every region has its own name", async () => {
     api("user");
     const view = renderApp("/s/tasks");
     fireEvent.click(await view.findByRole("tab", { name: "Active" }));
     const needs = await view.findByRole("region", { name: "Needs input" });
     expect(within(needs).getByText("Needs input")).toBeTruthy();
-    expect(within(needs).getByText("Send email")).toBeTruthy();
-    expect(within(needs).queryByText("Share")).toBeNull();
+    expect(await within(needs).findByText(/Inbox Bot wants to/)).toBeTruthy();
+    expect(within(needs).queryByText(/drive\/share/)).toBeNull();
     expect(
-      within(needs).getByText("Which kiln should I book the repair for?"),
+      within(needs).getByText(/Which kiln should I book the repair for\?/),
     ).toBeTruthy();
-    const carried = view.getByRole("region", { name: "Responsibilities" });
+    // OpenBot's list always shows what the action would send.
+    expect(within(needs).getByText(/Thursday at 10 works\./)).toBeTruthy();
     expect(
-      within(carried).getByText("Keep the support inbox at zero"),
+      await view.findByText("Keep the support inbox at zero"),
     ).toBeTruthy();
-    expect(within(carried).queryByText("Chase overdue invoices")).toBeNull();
-    expect(
-      within(carried)
-        .getByText("Keep the support inbox at zero")
-        .closest("a")
-        ?.getAttribute("href"),
-    ).toBe("/bots/b-1/responsibilities");
     const routines = view.getByRole("region", { name: "Routines" });
-    expect(within(routines).getByText("Post the standup notes")).toBeTruthy();
     expect(
-      within(routines).queryByText("Summarise last week's orders"),
-    ).toBeNull();
+      await within(routines).findByText("Post the standup notes"),
+    ).toBeTruthy();
+    const names = view
+      .getAllByRole("region")
+      .map((region) => region.getAttribute("aria-label"));
+    expect(new Set(names).size).toBe(names.length);
   });
 
-  test("an approval is decided on its card with OpenBot's own decision", async () => {
+  test("an approval is decided in OpenBot's own row", async () => {
     const sent = api("user");
     const view = renderApp("/s/tasks");
     fireEvent.click(await view.findByRole("tab", { name: "Active" }));
-    const card = await view.findByRole("region", {
-      name: "Waiting for your approval",
-    });
-    fireEvent.click(within(card).getByRole("button", { name: "Allow once" }));
+    const needs = await view.findByRole("region", { name: "Needs input" });
+    fireEvent.click(
+      await within(needs).findByRole("button", { name: "Allow once" }),
+    );
     await waitFor(() =>
       expect(sent).toContainEqual({
         method: "POST",
@@ -431,15 +450,15 @@ describe("Tasks draws OpenBot's data", () => {
     );
   });
 
-  test("a Bot's question is answered on its card, and the run picks up with the answer", async () => {
+  test("a Bot's question is answered in OpenBot's own row", async () => {
     const sent = api("user");
     const view = renderApp("/s/tasks");
     fireEvent.click(await view.findByRole("tab", { name: "Active" }));
-    const card = await view.findByRole("region", { name: "Ops Bot asks" });
+    const needs = await view.findByRole("region", { name: "Needs input" });
     await userEvent
       .setup({ document })
-      .type(within(card).getByLabelText("Your answer"), "Kiln 2");
-    const send = within(card).getByRole("button", { name: "Send answer" });
+      .type(await within(needs).findByLabelText("Your answer"), "Kiln 2");
+    const send = within(needs).getByRole("button", { name: "Send answer" });
     await waitFor(() => expect(send.hasAttribute("disabled")).toBe(false));
     fireEvent.click(send);
     await waitFor(() =>
@@ -451,14 +470,14 @@ describe("Tasks draws OpenBot's data", () => {
     );
   });
 
-  test("Up next starts or dismisses a suggestion with OpenBot's own suggestion actions", async () => {
+  test("Up next starts or dismisses a suggestion with OpenBot's own suggestion list", async () => {
     const sent = api("user");
     const view = renderApp("/s/tasks");
     fireEvent.click(await view.findByRole("tab", { name: "Up next" }));
-    const start = await view.findByRole("button", {
-      name: "Start Confirm Friday ship date for the 120 mugs as a task",
-    });
-    fireEvent.click(start);
+    expect(
+      await view.findByText("Confirm Friday ship date for the 120 mugs"),
+    ).toBeTruthy();
+    fireEvent.click(view.getByRole("button", { name: "Start as task" }));
     await waitFor(() =>
       expect(sent).toContainEqual({
         method: "POST",
@@ -466,11 +485,7 @@ describe("Tasks draws OpenBot's data", () => {
         body: null,
       }),
     );
-    fireEvent.click(
-      view.getByRole("button", {
-        name: "Dismiss Confirm Friday ship date for the 120 mugs",
-      }),
-    );
+    fireEvent.click(await view.findByRole("button", { name: "Dismiss" }));
     await waitFor(() =>
       expect(sent).toContainEqual({
         method: "POST",
@@ -489,9 +504,11 @@ describe("Tasks draws OpenBot's data", () => {
         "aria-selected",
       ),
     ).toBe("true");
-    expect(
-      await view.findByRole("region", { name: "Responsibilities" }),
-    ).toBeTruthy();
+    await waitFor(() =>
+      expect(
+        document.getElementById("responsibilities")?.textContent,
+      ).toContain("Keep the support inbox at zero"),
+    );
   });
 });
 
@@ -533,7 +550,7 @@ describe("the frame carries the deployment's brand, not OpenDuet's", () => {
     fireEvent.click(await view.findByRole("tab", { name: "Active" }));
     await view.findByRole("region", { name: "Needs input" });
     fireEvent.click(view.getByRole("tab", { name: "Up next" }));
-    await view.findByRole("button", { name: /as a task$/ });
+    await view.findByRole("button", { name: "Start as task" });
     expect(readable()).not.toContain("OpenDuet");
   });
 });

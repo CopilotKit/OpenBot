@@ -91,7 +91,7 @@ function rememberOpen(key: string, open: boolean) {
 
 /** A row in the menu: a line glyph and the place's name, at least 48px tall. */
 const ROW = cn(
-  "openduet-type-nav flex min-h-12 w-full items-center gap-3 rounded-[22px] px-3 font-medium text-openduet-ink transition-colors duration-[120ms] hover:bg-openduet-tile active:bg-openduet-tile [&_svg]:shrink-0 [&>svg]:text-openduet-ink-2",
+  "openduet-type-nav flex min-h-12 w-full items-center gap-3 rounded-[22px] px-3 font-medium text-openduet-ink transition-colors duration-[120ms] motion-reduce:transition-none hover:bg-openduet-tile active:bg-openduet-tile [&_svg]:shrink-0 [&>svg]:text-openduet-ink-2",
   FOCUS,
 );
 /** A row with a disc, a name and a line under it: Chat and each conversation. */

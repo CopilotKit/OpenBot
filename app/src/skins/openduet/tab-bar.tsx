@@ -9,7 +9,7 @@ import { type OpenDuetTab, TASKS_LINK } from "./places";
 import { waitingCount } from "./tasks-model";
 
 const TAB =
-  "relative flex flex-1 flex-col items-center justify-center gap-px rounded-[27px] transition-colors";
+  "relative flex flex-1 flex-col items-center justify-center gap-px rounded-[27px] transition-colors motion-reduce:transition-none";
 
 /**
  * The frosted pill at the foot of the app: Chat and Tasks, the current one on a grey capsule.
