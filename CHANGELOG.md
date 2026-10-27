@@ -36,10 +36,11 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 A desktop installation set up again after its folder was deleted reused whatever the previous one
 left in the container engine: Bot workspace files, and each Bot's browser profile with its website
-sign-ins, under the same Bot ids. Only the database was checked. Start now lists every volume and
-stopped container the previous installation left, and offers one confirmed reset that removes them;
-nothing is reused without asking. A container from it that is still running stops the reset until it
-is stopped. An installation with its saved key keeps its data as before.
+sign-ins, under the same Bot ids. Only the database was checked. Start now finds every volume and
+stopped container the previous installation left and offers Start fresh, which deletes exactly those
+and then starts; nothing is reused without asking. To keep the data, restore the previous folder
+instead. A container from it that is still running stops the deletion until it is stopped. An
+installation with its saved key keeps its data as before.
 
 ### A new desktop install starts its server again
 

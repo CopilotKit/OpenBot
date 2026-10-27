@@ -1134,7 +1134,7 @@ fn require_existing_encryption_key_with_recovery(
             if found.volumes.is_empty() {
                 return Ok(());
             }
-            let mut problem = Problem::plain("OpenBot found data from a previous installation, such as Bots' files and browser sign-ins. OpenBot will not reuse it in a new installation. Restore the previous installation's folder to keep it, or reset the leftover data to start fresh.");
+            let mut problem = Problem::plain("OpenBot found data from a previous installation, such as Bots' files and browser sign-ins. OpenBot will not reuse it in a new installation. Restore the previous installation's folder to keep it, or choose Start fresh to delete it.");
             match fresh_root_without_encryption_key(root, secrets) {
                 Ok(true) if found.resettable() => {
                     problem.leftover = Some(Box::new(LeftoverReset {
@@ -1163,9 +1163,9 @@ fn require_existing_encryption_key_with_recovery(
     match recovery {
         Ok(Some(found)) if found.database.is_some() && found.resettable() => {
             problem.said = if found.volumes.len() > 1 {
-                "OpenBot found a database and other data from a previous installation, but its encryption key is unavailable. Restore the original key to keep its saved data, or reset the leftover data to start fresh."
+                "OpenBot found a database and other data from a previous installation, but its encryption key is unavailable. Restore the original key to keep its saved data, or choose Start fresh to delete it."
             } else {
-                "OpenBot found a database from a previous installation, but its encryption key is unavailable. Restore the original key to keep its saved data, or reset the leftover database to start fresh."
+                "OpenBot found a database from a previous installation, but its encryption key is unavailable. Restore the original key to keep its saved data, or choose Start fresh to delete it."
             }
             .into();
             problem.leftover = Some(Box::new(LeftoverReset {
@@ -1271,7 +1271,9 @@ fn reset_leftover_database_with(
         .as_ref()
         .is_some_and(|selected| selected != root)
     {
-        return Err(Problem::plain("The selected installation changed. Try Start again before resetting its leftover data."));
+        return Err(Problem::plain(
+            "The selected installation changed. Try Start again.",
+        ));
     }
     let sorted = |names: &[String]| {
         let mut names = names.to_vec();
@@ -1288,7 +1290,7 @@ fn reset_leftover_database_with(
                 && offer.containers == containers
         })
         .cloned()
-        .ok_or_else(|| Problem::plain("The leftover data reset offer is no longer current. Try Start again before confirming a reset."))?;
+        .ok_or_else(|| Problem::plain("The leftover data changed after it was shown. Try Start again to see what is left now."))?;
     let secrets = read_secrets()?;
     if !fresh_root_without_encryption_key(root, &secrets)? {
         return Err(Problem::plain("This installation is already configured or has its original encryption key. Its data cannot be reset here."));

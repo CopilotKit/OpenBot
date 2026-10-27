@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Ask } from "./Ask";
-import { DatabaseReset } from "./DatabaseReset";
+import { StartFresh } from "./StartFresh";
 import {
   DEFAULT_HARNESS,
   type HarnessChoice,
@@ -609,7 +609,8 @@ export function App() {
     }
   }
 
-  async function resetLeftoverData(volumes: string[], containers: string[]) {
+  /** The leftovers go first, then Start carries on: starting fresh is one choice, not two. */
+  async function startFresh(volumes: string[], containers: string[]) {
     setBusy(true);
     try {
       await invoke("reset_leftover_database", {
@@ -618,14 +619,17 @@ export function App() {
         containers,
         confirmed: true,
       });
-      setFailure(null);
-      setRecoveryFailure(null);
-      setSteps([]);
     } catch (error) {
       setFailure(asProblem(error));
+      return;
     } finally {
+      // `start` sets `busy` itself, and its early return would never clear it.
       setBusy(false);
     }
+    setFailure(null);
+    setRecoveryFailure(null);
+    setSteps([]);
+    await start();
   }
 
   function modelCanStart() {
@@ -991,13 +995,13 @@ export function App() {
           back here, and a heading that still says everything is running while the box underneath
           names the process that stopped is a screen arguing with itself. */}
         {!running && leftoverVolumes.length > 0 && (
-          <DatabaseReset
+          <StartFresh
             key={`${root}:${leftoverVolumes.join(",")}:${leftoverContainers.join(",")}`}
             busy={busy}
             containers={leftoverContainers}
             database={Boolean(displayedFailure?.database_reset)}
             volumes={leftoverVolumes}
-            onReset={resetLeftoverData}
+            onStartFresh={startFresh}
           />
         )}
 
@@ -1270,7 +1274,10 @@ export function App() {
 
         <SetupProgress steps={steps} />
 
-        {displayedFailure && <Failure problem={displayedFailure} />}
+        {/* Leftover data is a choice, offered above, not a failure to report here. */}
+        {displayedFailure && leftoverVolumes.length === 0 && (
+          <Failure problem={displayedFailure} />
+        )}
 
         {!running && !returningToInstallation && (
           <details>

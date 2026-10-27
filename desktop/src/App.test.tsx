@@ -1227,7 +1227,7 @@ function emptyConfiguration() {
   };
 }
 
-test("leftover database recovery requires confirmation and keeps setup ready to retry", async () => {
+test("leftover database is offered as a fresh start that carries on into Start", async () => {
   useCompatibleEndpointSetup({});
   const previous = invokeHandler;
   const reset = deferred<void>();
@@ -1250,21 +1250,15 @@ test("leftover database recovery requires confirmation and keeps setup ready to 
   await userEvent.click(view.getByRole("button", { name: "Start OpenBot" }));
   const resets = () =>
     invokeCalls.filter((call) => call.command === "reset_leftover_database");
-  await userEvent.click(
-    await view.findByRole("button", { name: "Reset leftover database" }),
-  );
+  const startFresh = await view.findByRole("button", { name: "Start fresh" });
+  // A choice, not a failure: nothing announces that Start did not finish.
+  expect(view.queryByRole("alert")).toBeNull();
+  expect(view.getByText(/saved chats, Bots, and settings/)).toBeTruthy();
   expect(view.getByText(/permanently deletes/)).toBeTruthy();
+  expect(view.getByText(/with its original encryption key/)).toBeTruthy();
   expect(view.getByText("fixture_postgres-data")).toBeTruthy();
   expect(resets()).toHaveLength(0);
-  await userEvent.click(view.getByRole("button", { name: "Keep saved data" }));
-  expect(resets()).toHaveLength(0);
-  expect(view.queryByRole("button", { name: "Delete saved data" })).toBeNull();
-  await userEvent.click(
-    view.getByRole("button", { name: "Reset leftover database" }),
-  );
-  await userEvent.click(
-    view.getByRole("button", { name: "Delete saved data" }),
-  );
+  await userEvent.click(startFresh);
   expect(resets()).toEqual([
     {
       command: "reset_leftover_database",
@@ -1276,25 +1270,22 @@ test("leftover database recovery requires confirmation and keeps setup ready to 
       },
     },
   ]);
-  expect(
-    view.getByRole("button", { name: "Deleting saved data…" }),
-  ).toHaveProperty("disabled", true);
+  expect(view.getByRole("button", { name: "Starting fresh…" })).toHaveProperty(
+    "disabled",
+    true,
+  );
   expect(view.getByRole("button", { name: "Working…" })).toHaveProperty(
     "disabled",
     true,
   );
-  await act(async () => reset.resolve());
-  expect(
-    view.queryByRole("button", { name: "Reset leftover database" }),
-  ).toBeNull();
-  expect(view.queryByRole("alert")).toBeNull();
   expect(starts).toBe(1);
-  await userEvent.click(view.getByRole("button", { name: "Start OpenBot" }));
+  await act(async () => reset.resolve());
   await view.findByRole("button", { name: "Ask" });
+  expect(starts).toBe(2);
   expect(installationCalls()).toHaveLength(1);
 });
 
-test("leftover data recovery names every container and volume and removes only that list", async () => {
+test("starting fresh names every container and volume and removes only that list", async () => {
   useCompatibleEndpointSetup({});
   const previous = invokeHandler;
   const volumes = [
@@ -1322,18 +1313,18 @@ test("leftover data recovery names every container and volume and removes only t
   );
   await userEvent.click(view.getByRole("button", { name: "Continue" }));
   await userEvent.click(view.getByRole("button", { name: "Start OpenBot" }));
-  await userEvent.click(
-    await view.findByRole("button", { name: "Reset leftover data" }),
-  );
-  expect(view.queryByText(/local OpenBot database/)).toBeNull();
+  const startFresh = await view.findByRole("button", { name: "Start fresh" });
+  expect(view.queryByText(/saved chats/)).toBeNull();
+  expect(view.queryByText(/encryption key/)).toBeNull();
   expect(view.getByText(/browser sign-ins/)).toBeTruthy();
+  expect(
+    view.getByText(/Restore the previous installation’s folder/),
+  ).toBeTruthy();
   for (const volume of volumes) expect(view.getByText(volume)).toBeTruthy();
   expect(view.getByText(/stopped containers/)).toBeTruthy();
   for (const container of containers)
     expect(view.getByText(container)).toBeTruthy();
-  await userEvent.click(
-    view.getByRole("button", { name: "Delete saved data" }),
-  );
+  await userEvent.click(startFresh);
   expect(
     invokeCalls.filter((call) => call.command === "reset_leftover_database"),
   ).toEqual([
@@ -1349,7 +1340,7 @@ test("leftover data recovery names every container and volume and removes only t
   ]);
 });
 
-test("database recovery failure is shown without restarting services", async () => {
+test("a fresh start that cannot delete the leftovers is shown without starting", async () => {
   useCompatibleEndpointSetup({});
   const previous = invokeHandler;
   invokeHandler = async (command, args) => {
@@ -1371,12 +1362,10 @@ test("database recovery failure is shown without restarting services", async () 
   await userEvent.click(view.getByRole("button", { name: "Continue" }));
   await userEvent.click(view.getByRole("button", { name: "Start OpenBot" }));
   await userEvent.click(
-    await view.findByRole("button", { name: "Reset leftover database" }),
-  );
-  await userEvent.click(
-    view.getByRole("button", { name: "Delete saved data" }),
+    await view.findByRole("button", { name: "Start fresh" }),
   );
   expect(await view.findByText(/database is still in use/)).toBeTruthy();
+  expect(view.getByRole("alert")).toBeTruthy();
   expect(
     invokeCalls.filter((call) => call.command === "start_stack"),
   ).toHaveLength(1);
