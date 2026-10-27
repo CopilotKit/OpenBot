@@ -416,7 +416,13 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
                 </FieldSet>
               </>
             ) : step === "runtime" ? (
-              <RuntimeStep onChoose={setRuntime} runtime={runtime} />
+              <RuntimeStep
+                onChoose={(chosen) => {
+                  setRuntime(chosen);
+                  go("endpoint");
+                }}
+                runtime={runtime}
+              />
             ) : (
               <EndpointStep
                 endpoint={endpoint}
@@ -463,20 +469,22 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
             Back
           </Button>
         )}
-        <Button
-          className="px-4"
-          disabled={!canContinue}
-          size="lg"
-          type="submit"
-        >
-          {checking
-            ? "Checking…"
-            : createAgent.isPending
-              ? "Creating…"
-              : step === "endpoint" || (step === "about" && !custom)
-                ? "Create Bot"
-                : "Continue"}
-        </Button>
+        {step !== "runtime" && (
+          <Button
+            className="px-4"
+            disabled={!canContinue}
+            size="lg"
+            type="submit"
+          >
+            {checking
+              ? "Checking…"
+              : createAgent.isPending
+                ? "Creating…"
+                : step === "endpoint" || (step === "about" && !custom)
+                  ? "Create Bot"
+                  : "Continue"}
+          </Button>
+        )}
       </SheetFooter>
     </form>
   );

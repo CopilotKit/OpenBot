@@ -141,8 +141,8 @@ async function customFlow() {
 }
 async function connected(address = "https://agent.example.com/ag-ui") {
   const { view, user } = await customFlow();
+  expect(view.queryByRole("button", { name: "Continue" })).toBeNull();
   await user.click(view.getByRole("button", { name: /LangGraph/ }));
-  await user.click(view.getByRole("button", { name: "Continue" }));
   if (address)
     await user.type(await view.findByLabelText("Agent address"), address);
   return { view, user };
@@ -273,7 +273,7 @@ test("preserves every entry across back navigation and hosting switches", async 
     view.getByRole("button", { name: /^Connect a custom agent/ }),
   );
   await user.click(view.getByRole("button", { name: "Continue" }));
-  await user.click(view.getByRole("button", { name: "Continue" }));
+  await user.click(view.getByRole("button", { name: /LangGraph/ }));
   expect((view.getByLabelText("Agent address") as HTMLInputElement).value).toBe(
     "https://agent.example.com/ag-ui",
   );
