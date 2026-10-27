@@ -19,7 +19,7 @@ function RouteComponent() {
   return (
     <SidebarShell width="300px">
       <AdminSidebar />
-      <main className="flex-1">
+      <main className="min-w-0 flex-1">
         <Outlet />
       </main>
     </SidebarShell>

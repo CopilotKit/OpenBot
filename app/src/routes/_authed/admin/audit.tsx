@@ -1,4 +1,13 @@
-import { IconDownload, IconRefresh, IconSearch } from "@tabler/icons-react";
+import {
+  IconAlertTriangle,
+  IconBan,
+  IconDeviceDesktop,
+  IconDownload,
+  IconEyeOff,
+  IconList,
+  IconRefresh,
+  IconSearch,
+} from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
@@ -15,6 +24,7 @@ import {
 } from "@/lib/audit/outcome";
 import { auditEventsQueryOptions, auditExportUrl } from "@/lib/audit/queries";
 import { client } from "@/lib/client";
+import { cn } from "@/lib/utils";
 
 /**
  * Read surface for policy, computer, component, MCP, and credential audit events.
@@ -32,15 +42,25 @@ export const Route = createFileRoute("/_authed/admin/audit")({
  * answered.
  */
 const FILTERS = [
-  { label: "Everything", search: "" },
-  { label: "Computer actions", search: "?eventType=computer.action_allowed" },
-  { label: "Blocked", search: eventTypeFilter(REFUSED_EVENT_TYPES) },
+  { label: "Everything", icon: IconList, search: "" },
+  {
+    label: "Computer actions",
+    icon: IconDeviceDesktop,
+    search: "?eventType=computer.action_allowed",
+  },
+  {
+    label: "Blocked",
+    icon: IconBan,
+    search: eventTypeFilter(REFUSED_EVENT_TYPES),
+  },
   {
     label: "Did not happen",
+    icon: IconAlertTriangle,
     search: eventTypeFilter(DID_NOT_HAPPEN_EVENT_TYPES),
   },
   {
     label: "Nobody watching",
+    icon: IconEyeOff,
     search: "?initiatorKind=routine,handoff,responsibility,memory",
   },
 ] as const;
@@ -112,42 +132,63 @@ function AuditPage() {
           events={rows}
           nameFor={nameFor}
           query={query}
-          toolbar={(count) => (
+          toolbar={({ count, filters }) => (
             <div className="flex shrink-0 flex-col gap-3 border-border border-b px-4 pb-3">
-              <div className="flex flex-wrap items-center gap-2">
-                {FILTERS.map((filter) => (
-                  <Button
-                    key={filter.label}
-                    onClick={() => setSearch(filter.search)}
-                    size="sm"
-                    type="button"
-                    /* The fill is the state, as on every other set of switches in the app. */
-                    variant={search === filter.search ? "default" : "outline"}
-                  >
-                    {filter.label}
-                  </Button>
-                ))}
+              {/*
+               * The saved views are one control with one answer, so they are drawn as a segmented
+               * group: the pressed one is filled, the rest sit flat inside the same outline.
+               */}
+              <div className="flex items-center gap-2">
+                <span className="text-muted-foreground text-xs">View</span>
+                <fieldset
+                  aria-label="View"
+                  className="inline-flex items-center gap-0.5 rounded-lg border border-border p-0.5"
+                >
+                  {FILTERS.map((filter) => {
+                    const active = search === filter.search;
+                    return (
+                      <Button
+                        aria-pressed={active}
+                        className={cn(
+                          "h-6 px-2 font-normal",
+                          active
+                            ? "bg-muted text-foreground"
+                            : "text-muted-foreground",
+                        )}
+                        key={filter.label}
+                        onClick={() => setSearch(filter.search)}
+                        size="xs"
+                        type="button"
+                        variant="ghost"
+                      >
+                        <filter.icon />
+                        {filter.label}
+                      </Button>
+                    );
+                  })}
+                </fieldset>
               </div>
-              <div className="flex flex-wrap items-center gap-3">
-                <div className="relative w-full max-w-sm">
-                  <IconSearch className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="relative w-64">
+                  <IconSearch className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
                   <Input
                     aria-label="Search events"
-                    className="pl-8"
+                    className="h-8 pl-8"
                     onChange={(event) => setQuery(event.target.value)}
                     placeholder="Search events…"
                     type="search"
                     value={query}
                   />
                 </div>
-                <span className="text-muted-foreground text-sm tabular-nums">
+                {filters}
+                <span className="ml-1 text-muted-foreground text-xs tabular-nums">
                   {count}
                 </span>
                 <div className="ml-auto flex items-center gap-2">
                   <Button
                     onClick={() => events.refetch()}
                     size="sm"
-                    variant="ghost"
+                    variant="outline"
                   >
                     <IconRefresh />
                     Refresh

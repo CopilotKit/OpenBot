@@ -145,3 +145,14 @@ test("a row about a Bot names it under Bot, not under On", () => {
   expect(botText(routed, nameFor)).toBe("General Assistant");
   expect(subjectText(routed)).toBe("");
 });
+
+test("the Outcome button narrows the rows to the outcomes ticked", async () => {
+  const view = await renderAudit();
+  const user = userEvent.setup({ document });
+  await user.click(view.getByRole("button", { name: /Outcome/ }));
+  await user.click(
+    await view.findByRole("menuitemcheckbox", { name: /Blocked/ }),
+  );
+  await waitFor(() => expect(whats(view.container)).toEqual(["navigate"]));
+  expect(view.getByText("1 of 3 events")).toBeTruthy();
+});

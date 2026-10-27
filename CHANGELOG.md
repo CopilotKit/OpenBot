@@ -45,11 +45,12 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### The audit log reads like a log
 
-Admin → Audit keeps its title in the same column as every other screen and runs the table across
-the whole pane under it. Each row shows the full date and time and a mark for what happened, with
-blocked rows tinted red and actions that did not happen tinted amber. The newest come first, and a
-press on When turns the order round. A search box narrows the events already loaded by anything a
-row shows, and says how many of them match.
+Admin → Audit fills the window and runs the table across the whole pane, with the title, the views
+and the search held in place while only the rows scroll. Each row shows the full date and time and a
+mark for what happened, with blocked rows tinted red and actions that did not happen tinted amber.
+The newest come first, and a press on When turns the order round. A search box and Outcome, Bot and
+Started by buttons narrow the events already loaded, and the count says how many of them match. A
+row about a Bot (a message routed to it, say) now names it under Bot.
 
 ### Each Bot on a shared computer has its own files
 

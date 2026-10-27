@@ -1,6 +1,12 @@
-import { IconArrowDown, IconArrowUp, IconSearch } from "@tabler/icons-react";
+import {
+  IconArrowDown,
+  IconArrowUp,
+  IconCirclePlus,
+  IconSearch,
+} from "@tabler/icons-react";
 import {
   type ColumnDef,
+  type ColumnFiltersState,
   columnFilteringFeature,
   createFilteredRowModel,
   createSortedRowModel,
@@ -13,6 +19,15 @@ import {
 import type * as React from "react";
 import { useMemo, useState } from "react";
 import { PageEmpty } from "@/components/layout/page-shell";
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Table,
   TableBody,
@@ -21,7 +36,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { outcomeOf } from "@/lib/audit/outcome";
+import { type AuditOutcome, outcomeOf } from "@/lib/audit/outcome";
 import { cn } from "@/lib/utils";
 import {
   type AuditEvent,
@@ -31,7 +46,9 @@ import {
   OUTCOME_MARK,
   OUTCOME_ROW,
   StartedByCell,
+  botText,
   searchTextOf,
+  startedByText,
   whatText,
   whenText,
 } from "./audit-cells";
@@ -56,6 +73,22 @@ const SEARCHABLE = new Set(["search"]);
 
 const INITIAL_SORT: SortingState = [{ id: "when", desc: true }];
 
+const OUTCOME_LABEL: Record<AuditOutcome, string> = {
+  allowed: "Allowed",
+  refused: "Blocked",
+  "did-not-happen": "Did not happen",
+};
+
+/**
+ * The columns a toolbar button narrows by, each matching any of the values ticked. Like search, they
+ * act on the rows already loaded.
+ */
+const FACETS = [
+  { id: "mark", title: "Outcome" },
+  { id: "bot", title: "Bot" },
+  { id: "startedBy", title: "Started by" },
+] as const;
+
 export function AuditTable({
   events,
   nameFor,
@@ -66,20 +99,25 @@ export function AuditTable({
   nameFor: NameFor;
   query: string;
   /**
-   * Drawn above the table, given how many rows it shows ("3 events", "1 of 3 events"). It stays put;
-   * only the rows under it scroll.
+   * Drawn above the table, given how many rows it shows ("3 events", "1 of 3 events") and the filter
+   * buttons to place beside the search. It stays put; only the rows under it scroll.
    */
-  toolbar: (count: string) => React.ReactNode;
+  toolbar: (parts: {
+    count: string;
+    filters: React.ReactNode;
+  }) => React.ReactNode;
 }) {
   const [sorting, setSorting] = useState<SortingState>(INITIAL_SORT);
+  const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
   const columns = useMemo(() => auditColumns(nameFor), [nameFor]);
   const table = useTable({
     features,
     columns,
     data: events,
     getRowId: (event) => event.id,
-    state: { sorting, globalFilter: query },
+    state: { sorting, globalFilter: query, columnFilters },
     onSortingChange: setSorting,
+    onColumnFiltersChange: setColumnFilters,
     enableSortingRemoval: false,
     globalFilterFn: (row, _columnId, value: string) =>
       row
@@ -91,7 +129,26 @@ export function AuditTable({
 
   return (
     <>
-      {toolbar(countLabel(rows.length, events.length))}
+      {toolbar({
+        count: countLabel(rows.length, events.length),
+        filters: FACETS.map((facet) => {
+          const column = table.getColumn(facet.id);
+          const selected = (column?.getFilterValue() as string[]) ?? [];
+          return (
+            <Facet
+              key={facet.id}
+              onChange={(next) =>
+                column?.setFilterValue(next.length > 0 ? next : undefined)
+              }
+              options={tally(events, (event) =>
+                String(column?.accessorFn?.(event, 0) ?? ""),
+              )}
+              selected={selected}
+              title={facet.title}
+            />
+          );
+        }),
+      })}
       <Table
         containerClassName={rows.length > 0 ? "min-h-0 flex-1" : undefined}
       >
@@ -150,11 +207,96 @@ export function AuditTable({
       {events.length > 0 && rows.length === 0 ? (
         <div className="px-4">
           <PageEmpty icon={IconSearch} title="No matches">
-            Nothing loaded matches this search.
+            Nothing loaded matches this search and these filters.
           </PageEmpty>
         </div>
       ) : null}
     </>
+  );
+}
+
+/** A row passes when its value is one of those ticked. */
+function anyOf(
+  row: { getValue: <T>(id: string) => T },
+  columnId: string,
+  value: string[],
+): boolean {
+  return value.includes(row.getValue<string>(columnId));
+}
+
+/** Each value a column holds across the loaded events, with how many rows have it, most first. */
+function tally(
+  events: AuditEvent[],
+  valueFor: (event: AuditEvent) => string,
+): { value: string; count: number }[] {
+  const counts = new Map<string, number>();
+  for (const event of events) {
+    const value = valueFor(event);
+    counts.set(value, (counts.get(value) ?? 0) + 1);
+  }
+  return [...counts]
+    .map(([value, count]) => ({ value, count }))
+    .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value));
+}
+
+/** A dashed button that opens a list of a column's values to tick, as in a data table's toolbar. */
+function Facet({
+  title,
+  options,
+  selected,
+  onChange,
+}: {
+  title: string;
+  options: { value: string; count: number }[];
+  selected: string[];
+  onChange: (next: string[]) => void;
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <Button className="border-dashed" size="sm" variant="outline" />
+        }
+      >
+        <IconCirclePlus />
+        {title}
+        {selected.length > 0 ? (
+          <span className="ml-1 rounded-sm bg-muted px-1 font-normal text-xs">
+            {selected.length === 1
+              ? selected[0]
+              : `${selected.length} selected`}
+          </span>
+        ) : null}
+      </DropdownMenuTrigger>
+      <DropdownMenuContent className="min-w-52">
+        {options.map((option) => (
+          <DropdownMenuCheckboxItem
+            checked={selected.includes(option.value)}
+            key={option.value}
+            onCheckedChange={(next) =>
+              onChange(
+                next
+                  ? [...selected, option.value]
+                  : selected.filter((value) => value !== option.value),
+              )
+            }
+          >
+            <span className="truncate">{option.value}</span>
+            <span className="ml-auto text-muted-foreground text-xs tabular-nums">
+              {option.count}
+            </span>
+          </DropdownMenuCheckboxItem>
+        ))}
+        {selected.length > 0 ? (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => onChange([])}>
+              Clear filter
+            </DropdownMenuItem>
+          </>
+        ) : null}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -170,6 +312,8 @@ function auditColumns(
   return [
     {
       id: "mark",
+      accessorFn: (event) => OUTCOME_LABEL[outcomeOf(event.eventType)],
+      filterFn: anyOf,
       header: () => <span className="sr-only">Outcome</span>,
       cell: ({ row }) => (
         <span
@@ -223,12 +367,16 @@ function auditColumns(
     },
     {
       id: "bot",
+      accessorFn: (event) => botText(event, nameFor) || "None",
+      filterFn: anyOf,
       header: "Bot",
       cell: ({ row }) => <BotCell event={row.original} nameFor={nameFor} />,
       enableSorting: false,
     },
     {
       id: "startedBy",
+      accessorFn: (event) => startedByText(event, nameFor),
+      filterFn: anyOf,
       header: "Started by",
       cell: ({ row }) => (
         <StartedByCell event={row.original} nameFor={nameFor} />
