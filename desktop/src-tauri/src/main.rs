@@ -101,6 +101,7 @@ struct ContainerDeployment {
     address: engine::Address,
 }
 
+#[derive(Clone)]
 struct LeftoverDatabase {
     root: PathBuf,
     /// Sorted, exactly as offered: the only set a confirmation may remove.
@@ -1248,7 +1249,7 @@ fn reset_leftover_database_with(
     containers: &[String],
     confirmed: bool,
     read_secrets: impl FnOnce() -> Result<stack::Secrets, Problem>,
-    reset: impl FnOnce(&engine::Address, &stack::Secrets) -> Result<(), Problem>,
+    reset: impl FnOnce(&LeftoverDatabase, &stack::Secrets) -> Result<(), Problem>,
 ) -> Result<(), Problem> {
     if !confirmed {
         return Err(Problem::plain(
@@ -1278,20 +1279,21 @@ fn reset_leftover_database_with(
         names
     };
     let (volumes, containers) = (sorted(volumes), sorted(containers));
-    let address = shell.leftover_database.lock().unwrap().as_ref()
+    // The removal receives the offer itself, so it can only remove the set this check matched.
+    let offer = shell.leftover_database.lock().unwrap().as_ref()
         .filter(|offer| {
             offer.root == root
                 && !volumes.is_empty()
                 && offer.volumes == volumes
                 && offer.containers == containers
         })
-        .map(|offer| offer.address.clone())
+        .cloned()
         .ok_or_else(|| Problem::plain("The leftover data reset offer is no longer current. Try Start again before confirming a reset."))?;
     let secrets = read_secrets()?;
     if !fresh_root_without_encryption_key(root, &secrets)? {
         return Err(Problem::plain("This installation is already configured or has its original encryption key. Its data cannot be reset here."));
     }
-    reset(&address, &secrets)?;
+    reset(&offer, &secrets)?;
     *shell.leftover_database.lock().unwrap() = None;
     Ok(())
 }
@@ -1310,7 +1312,7 @@ async fn reset_leftover_database<R: tauri::Runtime>(
         &shell,
         &root,
         &volumes,
-        &[],
+        &containers,
         confirmed,
         || {
             openbot_desktop_lib::vault::already_given_no_ui(
@@ -1319,8 +1321,14 @@ async fn reset_leftover_database<R: tauri::Runtime>(
                 &openbot_env::MINTED[..],
             )
         },
-        |address, secrets| {
-            stack::reset_leftover_volumes(address, &root, secrets, &volumes, &containers)
+        |offer, secrets| {
+            stack::reset_leftover_volumes(
+                &offer.address,
+                &root,
+                secrets,
+                &offer.volumes,
+                &offer.containers,
+            )
         },
     )
 }
@@ -5425,7 +5433,11 @@ mod tests {
             &containers,
             true,
             || Ok(stack::Secrets::new()),
-            |_, _| Ok(()),
+            |offer, _| {
+                assert_eq!(offer.volumes, offered, "removal gets the confirmed volumes");
+                assert_eq!(offer.containers, containers, "and the confirmed containers");
+                Ok(())
+            },
         )
         .unwrap();
         assert!(shell.leftover_database.lock().unwrap().is_none());
@@ -5639,8 +5651,8 @@ mod tests {
                 &[],
                 true,
                 || Ok(stack::Secrets::new()),
-                |address, _| {
-                    assert_eq!(address, &original);
+                |offer, _| {
+                    assert_eq!(offer.address, original);
                     Err(unavailable.clone())
                 }
             ),
@@ -5653,9 +5665,9 @@ mod tests {
             &[],
             true,
             || Ok(stack::Secrets::new()),
-            |address, _| {
-                assert_eq!(address, &original);
-                let command = address.command();
+            |offer, _| {
+                assert_eq!(offer.address, original);
+                let command = offer.address.command();
                 let arguments: Vec<_> = command.get_args().collect();
                 assert_eq!(arguments, ["--connection", "original-machine"]);
                 Ok(())
@@ -5744,12 +5756,12 @@ mod tests {
                 &[],
                 false,
                 || Ok(secrets.clone()),
-                |address, secrets| stack::reset_leftover_volumes(
-                    address,
+                |offer, secrets| stack::reset_leftover_volumes(
+                    &offer.address,
                     &root,
                     secrets,
-                    &volumes,
-                    &[]
+                    &offer.volumes,
+                    &offer.containers
                 )
             )
             .is_err());
@@ -5763,8 +5775,14 @@ mod tests {
                 &[],
                 true,
                 || Ok(secrets.clone()),
-                |address, secrets| {
-                    stack::reset_leftover_volumes(address, &root, secrets, &volumes, &[])
+                |offer, secrets| {
+                    stack::reset_leftover_volumes(
+                        &offer.address,
+                        &root,
+                        secrets,
+                        &offer.volumes,
+                        &offer.containers,
+                    )
                 },
             )
             .unwrap();
