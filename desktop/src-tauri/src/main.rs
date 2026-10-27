@@ -11565,7 +11565,7 @@ fn main() {
         ["compose","-f","docker-compose.yml","config","--format","json"] => println!("{{\"services\":{{\"supervisor\":{{\"environment\":{{\"COMPUTER_NAMESPACE\":\"fixture\"}}}}}}}}"),
         ["compose","-f","docker-compose.yml","stop","supervisor"] => (),
         ["ps","--quiet","--filter",_,"--filter",_] => (),
-        ["compose","-f","docker-compose.yml","--profile","harness","down"] => {
+        ["compose","-f","docker-compose.yml","--profile","harness","--profile","openbot","down"] => {
             if cwd.join("fail-down").exists() { eprintln!("synthetic down refusal");std::process::exit(73); }
             if fs::read_to_string(cwd.join("fixture-containers-running")).ok().as_deref()==Some(&identity) {
                 fs::remove_file(cwd.join("fixture-containers-running")).unwrap();

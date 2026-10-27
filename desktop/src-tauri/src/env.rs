@@ -226,6 +226,37 @@ fn bind_loopbacks(port: u16) -> std::io::Result<Vec<std::net::TcpListener>> {
     Ok(held)
 }
 
+/**
+A loopback address as a container on this machine reaches it, or empty if it is not loopback.
+
+`localhost`, `*.localhost`, `127.x.y.z` and `[::1]` become `host.docker.internal`, keeping the
+scheme, port and path. Anything else is already reachable from a container as written, and empty is
+how `docker-compose.yml` is told to use it unchanged.
+*/
+pub fn container_address(address: &str) -> String {
+    let address = address.trim();
+    let Ok(mut url) = reqwest::Url::parse(address) else {
+        return String::new();
+    };
+    let host = url.host_str().unwrap_or_default();
+    let loopback = host == "localhost"
+        || host.ends_with(".localhost")
+        || host
+            .trim_start_matches('[')
+            .trim_end_matches(']')
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback());
+    if !loopback || url.set_host(Some("host.docker.internal")).is_err() {
+        return String::new();
+    }
+    // The parser writes an empty path as `/`; given without one, it is returned without one.
+    let moved = url.to_string();
+    match moved.strip_suffix('/') {
+        Some(bare) if url.path() == "/" && !address.ends_with('/') => bare.to_string(),
+        _ => moved,
+    }
+}
+
 #[cfg(test)]
 mod port_tests {
     use super::*;
@@ -596,6 +627,23 @@ pub fn compose(
         "INTELLIGENCE_GATEWAY_WS_URL".into(),
         intelligence.gateway_ws_url.trim().to_string(),
     );
+    /*
+     * The same two addresses as the server's container reaches them.
+     *
+     * Local Intelligence answers on this machine's loopback, which inside a container is the
+     * container. `host.docker.internal` is the machine. Only the server is moved: the browser opens
+     * the gateway too, from the address in `/info`, and the browser is on the host, so
+     * `docker-compose.yml` hands it the address above unchanged. Empty for an Intelligence somewhere
+     * else, which the container reaches at the address it was given.
+     */
+    env.insert(
+        "INTELLIGENCE_CONTAINER_API_URL".into(),
+        container_address(&intelligence.api_url),
+    );
+    env.insert(
+        "INTELLIGENCE_CONTAINER_GATEWAY_WS_URL".into(),
+        container_address(&intelligence.gateway_ws_url),
+    );
     // Explicit desktop selection must override a CLI key left in the checkout's .env.
     // Supply both names for consumers that still read the legacy variable directly.
     for key in ["CPK_INTELLIGENCE_API_KEY", "INTELLIGENCE_API_KEY"] {
@@ -685,6 +733,9 @@ pub fn compose(
         }
         .into(),
     );
+    // Empty unless a harness runs here, so the address a remote Bot was given is the one used and a
+    // harness picked on an earlier start does not leave its container address behind.
+    env.insert("PICKED_HARNESS_CONTAINER_URL".into(), String::new());
     if let Some(picked) = harness {
         match picked {
             PickedHarness::Installed {
@@ -700,15 +751,20 @@ pub fn compose(
                 env.insert("PICKED_HARNESS_PORT".into(), port.to_string());
                 env.insert("PICKED_HARNESS_NAME".into(), name.clone());
                 let run_path = run_path.trim();
+                let run_path = if run_path.is_empty() || run_path.starts_with('/') {
+                    run_path.to_string()
+                } else {
+                    format!("/{run_path}")
+                };
                 env.insert(
                     "PICKED_HARNESS_URL".into(),
-                    if run_path.is_empty() {
-                        format!("http://127.0.0.1:{host_port}")
-                    } else if run_path.starts_with('/') {
-                        format!("http://127.0.0.1:{host_port}{run_path}")
-                    } else {
-                        format!("http://127.0.0.1:{host_port}/{run_path}")
-                    },
+                    format!("http://127.0.0.1:{host_port}{run_path}"),
+                );
+                // The server is a container on the harness's network, so it dials the service by
+                // name on the image's own port, not the host port published for everything else.
+                env.insert(
+                    "PICKED_HARNESS_CONTAINER_URL".into(),
+                    format!("http://agent-harness:{port}{run_path}"),
                 );
                 /*
                  * The kind, as the package spells it.
@@ -772,12 +828,11 @@ pub fn compose(
     );
 
     env.extend(ports.settings());
+    // The server is a container on the Bots' network now, so they reach it by name and on its own
+    // port, whichever host port this start published it on.
     env.insert(
         "OPENBOT_TOOL_URL".into(),
-        format!(
-            "http://host.docker.internal:{}/api/agent-tools/call",
-            ports.server
-        ),
+        "http://server:3001/api/agent-tools/call".into(),
     );
 
     // The whole deployment is on this machine, so the server must be allowed to talk to it.
@@ -2135,8 +2190,8 @@ HTTPS_PROXY=http://proxy:8080
         );
         assert_eq!(
             value_of(&written, "OPENBOT_TOOL_URL"),
-            "http://host.docker.internal:3999/api/agent-tools/call",
-            "container tools must call the selected API port"
+            "http://server:3001/api/agent-tools/call",
+            "Bots call the server container by name, on its own port, whatever the host port"
         );
     }
 
@@ -2167,6 +2222,99 @@ HTTPS_PROXY=http://proxy:8080
         assert_eq!(
             settings["PICKED_HARNESS_URL"],
             "http://127.0.0.1:52106/ag-ui"
+        );
+        // The server container dials the service by name, on the image's port.
+        assert_eq!(
+            settings["PICKED_HARNESS_CONTAINER_URL"],
+            "http://agent-harness:4206/ag-ui"
+        );
+    }
+
+    #[test]
+    fn a_remote_harness_and_no_harness_leave_no_container_address() {
+        let remote = compose(
+            &intelligence(),
+            &Model::default(),
+            &engine_status(None),
+            &Ports::default(),
+            &pinned(),
+            Some(&PickedHarness::RemoteAgUi {
+                url: "https://agents.example/run".into(),
+                name: "Remote".into(),
+                remote_agent_id: String::new(),
+            }),
+            &BTreeMap::new(),
+        );
+        assert_eq!(remote["PICKED_HARNESS_URL"], "https://agents.example/run");
+        assert_eq!(remote["PICKED_HARNESS_CONTAINER_URL"], "");
+
+        let none = compose(
+            &intelligence(),
+            &Model::default(),
+            &engine_status(None),
+            &Ports::default(),
+            &pinned(),
+            None,
+            &BTreeMap::new(),
+        );
+        assert_eq!(none["PICKED_HARNESS_CONTAINER_URL"], "");
+    }
+
+    /// Local Intelligence answers on loopback; the server's container reaches it through the host.
+    #[test]
+    fn local_intelligence_gets_a_container_address_and_hosted_does_not() {
+        for (given, expected) in [
+            (
+                "http://localhost:18082",
+                "http://host.docker.internal:18082",
+            ),
+            ("ws://localhost:14401", "ws://host.docker.internal:14401"),
+            ("ws://localhost:14401/", "ws://host.docker.internal:14401/"),
+            (
+                "http://127.0.0.1:8082/api",
+                "http://host.docker.internal:8082/api",
+            ),
+            ("http://[::1]:8082", "http://host.docker.internal:8082"),
+            (
+                "http://cpk.localhost:8080",
+                "http://host.docker.internal:8080",
+            ),
+            (
+                " http://localhost:18082 ",
+                "http://host.docker.internal:18082",
+            ),
+            ("https://api.intelligence.copilotkit.ai", ""),
+            ("wss://realtime.intelligence.copilotkit.ai", ""),
+            ("http://localhost.evil.test:8082", ""),
+            ("not a url", ""),
+            ("", ""),
+        ] {
+            assert_eq!(container_address(given), expected, "{given}");
+        }
+
+        let env = compose(
+            &Intelligence {
+                api_url: "http://localhost:18082".into(),
+                gateway_ws_url: "ws://localhost:14401".into(),
+                api_key: "synthetic".into(),
+            },
+            &Model::default(),
+            &engine_status(None),
+            &Ports::default(),
+            &pinned(),
+            None,
+            &BTreeMap::new(),
+        );
+        // The host's own addresses stay as given: the browser reads the gateway's from these.
+        assert_eq!(env["INTELLIGENCE_API_URL"], "http://localhost:18082");
+        assert_eq!(env["INTELLIGENCE_GATEWAY_WS_URL"], "ws://localhost:14401");
+        assert_eq!(
+            env["INTELLIGENCE_CONTAINER_API_URL"],
+            "http://host.docker.internal:18082"
+        );
+        assert_eq!(
+            env["INTELLIGENCE_CONTAINER_GATEWAY_WS_URL"],
+            "ws://host.docker.internal:14401"
         );
     }
 }
