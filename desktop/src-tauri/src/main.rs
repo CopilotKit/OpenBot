@@ -2625,9 +2625,17 @@ where
     server_capabilities_answer(port) && owns_server(root, port).unwrap_or(false)
 }
 
+/// Off the event-loop thread: installation holds startup for the whole download, and waiting for it
+/// there froze the window until the download finished.
 #[tauri::command]
-fn already_running<R: tauri::Runtime>(app: tauri::AppHandle<R>, root: String) -> bool {
-    let root = stack::root_from(&root);
+async fn already_running<R: tauri::Runtime>(app: tauri::AppHandle<R>, root: String) -> bool {
+    tauri::async_runtime::spawn_blocking(move || already_running_now(&app, &root))
+        .await
+        .unwrap_or(false)
+}
+
+fn already_running_now<R: tauri::Runtime>(app: &tauri::AppHandle<R>, root: &str) -> bool {
+    let root = stack::root_from(root);
     let shell = app.state::<Shell>();
     let _startup = shell.startup.lock().unwrap();
     !recovery_required_or_pending_quit_notice(&shell, &root)
@@ -2651,9 +2659,23 @@ fn owned_app_url(root: &Path, ports: &openbot_env::Ports) -> Option<String> {
 /// What stopped the stack, if anything did, and forget it once it has been read.
 ///
 /// Cleared on reading so a failure from an hour ago does not greet somebody who has since fixed it.
+/// Off the event-loop thread for the same reason as `already_running`.
 #[tauri::command]
-fn last_failure<R: tauri::Runtime>(
+async fn last_failure<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
+) -> Option<openbot_desktop_lib::problem::Problem> {
+    tauri::async_runtime::spawn_blocking(move || last_failure_now(&app))
+        .await
+        .unwrap_or_else(|error| {
+            Some(Problem::with(
+                "OpenBot could not read what stopped it.",
+                error.to_string(),
+            ))
+        })
+}
+
+fn last_failure_now<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
 ) -> Option<openbot_desktop_lib::problem::Problem> {
     let shell = app.state::<Shell>();
     if let Some(problem) = shell.last_failure.lock().unwrap().take() {
@@ -4404,7 +4426,7 @@ mod tests {
             "http://tauri.localhost/recovery"
         );
         assert_eq!(
-            last_failure(app.handle().clone()).unwrap().connection,
+            last_failure_now(app.handle()).unwrap().connection,
             Some(openbot_desktop_lib::problem::Connection::Model)
         );
         assert!(publish_connection_failure(
@@ -4415,7 +4437,7 @@ mod tests {
         )
         .unwrap());
         assert!(
-            last_failure(app.handle().clone()).is_none(),
+            last_failure_now(app.handle()).is_none(),
             "one refresh per run; a second signal cannot replace the pending screen"
         );
     }
@@ -8961,15 +8983,15 @@ fn main() {
             mark_recovery_required(&shell, &f.owned, 0);
         }
         *shell.last_failure.lock().unwrap() = Some(Problem::plain("worker exhausted"));
-        assert!(last_failure(app.handle().clone()).is_some());
-        assert!(last_failure(app.handle().clone()).is_none());
+        assert!(last_failure_now(app.handle()).is_some());
+        assert!(last_failure_now(app.handle()).is_none());
         assert!(recovery_required(&shell, &f.owned));
         write_quit_cleanup_notice(
             &f.owned,
             &["[exit] cleanup failed: Compose down failed: synthetic".into()],
         )
         .unwrap();
-        let notice = last_failure(app.handle().clone()).expect("persisted Quit notice");
+        let notice = last_failure_now(app.handle()).expect("persisted Quit notice");
         assert_eq!(notice.said, "OpenBot had trouble shutting down last time.");
         assert!(notice
             .detail
@@ -8981,7 +9003,7 @@ fn main() {
             recovery_required(&shell, &f.owned),
             "consuming the persisted notice cannot make survivors adoptable"
         );
-        assert!(last_failure(app.handle().clone()).is_none());
+        assert!(last_failure_now(app.handle()).is_none());
         let window = app.get_webview_window("main").unwrap();
         let problem = tauri::test::get_ipc_response(&window, tauri::webview::InvokeRequest {
             cmd: "start_stack".into(), callback: tauri::ipc::CallbackFn(0), error: tauri::ipc::CallbackFn(1),
@@ -9045,7 +9067,7 @@ fn main() {
             quit_cleanup_notice_path(&f.owned).exists(),
             "restore must not consume the persisted notice before React asks for it"
         );
-        let notice = last_failure(app.handle().clone()).expect("persisted Quit notice");
+        let notice = last_failure_now(app.handle()).expect("persisted Quit notice");
         assert_eq!(notice.said, "OpenBot had trouble shutting down last time.");
         assert!(notice
             .detail
@@ -9076,7 +9098,7 @@ fn main() {
         publish_quit_notice_failure(app.handle().clone(), "notice path is unavailable".into());
 
         assert!(recovery_required(&shell, &f.owned));
-        let failure = last_failure(app.handle().clone()).expect("volatile sink failure");
+        let failure = last_failure_now(app.handle()).expect("volatile sink failure");
         assert_eq!(failure.said, "OpenBot could not record a shutdown problem.");
         assert!(failure
             .detail
@@ -10002,7 +10024,11 @@ fn main() {
             *shell.setup_url.lock().unwrap() = Some(setup.into());
             let app = tauri::test::mock_builder()
                 .manage(shell)
-                .invoke_handler(tauri::generate_handler![start_stack])
+                .invoke_handler(tauri::generate_handler![
+                    start_stack,
+                    already_running,
+                    last_failure
+                ])
                 .build(tauri::test::mock_context(tauri::test::noop_assets()))
                 .unwrap();
             let window = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
@@ -10251,10 +10277,10 @@ fn main() {
         }
         let app = f.app(&f.owned, "tauri://localhost/");
         assert_eq!(ports_for_shell(app.handle()).unwrap(), f.ports);
-        assert!(already_running(
+        assert!(tauri::async_runtime::block_on(already_running(
             app.handle().clone(),
             f.owned.to_string_lossy().into_owned()
-        ));
+        )));
         tauri::async_runtime::block_on(show_openbot(app.handle().clone())).unwrap();
         assert_eq!(
             app.get_webview_window("main")
@@ -10265,11 +10291,79 @@ fn main() {
             Some(f.ports.app)
         );
         let other = f.app(&f.selected, "tauri://localhost/");
-        assert!(!already_running(
+        assert!(!tauri::async_runtime::block_on(already_running(
             other.handle().clone(),
             f.selected.to_string_lossy().into_owned()
-        ));
+        )));
         assert!(tauri::async_runtime::block_on(show_openbot(other.handle().clone())).is_err());
+    }
+
+    #[test]
+    fn setup_page_probes_do_not_wait_on_the_event_loop_for_startup_held_by_installation() {
+        let f = RestoreFixture::new();
+        openbot_env::write(
+            &f.owned.join(".env"),
+            &f.ports.settings(),
+            &std::collections::BTreeMap::new(),
+        )
+        .unwrap();
+        let app = f.app(&f.owned, "tauri://localhost/");
+        let window = app.get_webview_window("main").unwrap();
+        let shell = app.state::<Shell>();
+        let held = shell.startup.lock().unwrap();
+        let (answered, answers) = std::sync::mpsc::channel();
+        let (dispatched, dispatches) = std::sync::mpsc::channel();
+        let webview = window.as_ref().clone();
+        let root = f.owned.clone();
+        // `on_message` is where the window's invoke lands. A synchronous command runs inside it,
+        // which is the event-loop thread in the real app.
+        std::thread::spawn(move || {
+            for (command, body) in [
+                ("already_running", serde_json::json!({ "root": root })),
+                ("last_failure", serde_json::json!({})),
+            ] {
+                let answered = answered.clone();
+                webview.clone().on_message(
+                    tauri::webview::InvokeRequest {
+                        cmd: command.into(),
+                        callback: tauri::ipc::CallbackFn(0),
+                        error: tauri::ipc::CallbackFn(1),
+                        url: "tauri://localhost".parse().unwrap(),
+                        body: tauri::ipc::InvokeBody::Json(body),
+                        headers: Default::default(),
+                        invoke_key: tauri::test::INVOKE_KEY.into(),
+                    },
+                    Box::new(move |_, _, response, _, _| {
+                        let _ = answered.send((command, response));
+                    }),
+                );
+            }
+            let _ = dispatched.send(());
+        });
+        let returned = dispatches.recv_timeout(std::time::Duration::from_secs(5));
+        let early = answers.try_recv();
+        drop(held);
+        returned.expect("the window's invoke waited on the startup lock installation was holding");
+        assert!(early.is_err(), "a probe answered before startup was free");
+        let mut answered: Vec<_> = (0..2)
+            .map(|_| {
+                let (command, response) = answers
+                    .recv_timeout(std::time::Duration::from_secs(5))
+                    .unwrap();
+                let tauri::ipc::InvokeResponse::Ok(body) = response else {
+                    panic!("{command} failed");
+                };
+                (command, body.deserialize::<serde_json::Value>().unwrap())
+            })
+            .collect();
+        answered.sort_by_key(|(command, _)| *command);
+        assert_eq!(
+            answered,
+            [
+                ("already_running", serde_json::json!(true)),
+                ("last_failure", serde_json::Value::Null),
+            ]
+        );
     }
 
     #[test]

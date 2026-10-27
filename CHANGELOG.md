@@ -43,6 +43,12 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `computers/<Bot id>` on the workspace volume (below). Files saved before the upgrade stay at the
   root of the volume, where no Bot sees them; move them into a Bot's folder to give them back.
 
+### The desktop setup page does not freeze when it loads during an install
+
+If the setup page loaded again while the desktop app downloaded local software, the window showed a
+spinning cursor until the download finished. Its checks for a running OpenBot and for the last
+failure now wait in the background, so the window keeps answering.
+
 ### Each Bot on a shared computer has its own files
 
 A computer that serves many Bots kept one folder of files for all of them, so a note one Bot saved
