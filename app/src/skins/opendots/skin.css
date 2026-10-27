@@ -269,3 +269,33 @@
     padding-inline: 16px;
   }
 }
+
+/*
+ * A conversation's own Computer pane, which the top bar's computer toggle opens there, dressed as
+ * OpenDots' right pane: its grey ground, a ruled 56px header and the title as the selected tab.
+ */
+:root[data-skin="opendots"] [data-opendots-main] .bg-sidebar.border-l {
+  background: var(--opendots-pane);
+  border-left-color: var(--opendots-line);
+}
+
+:root[data-skin="opendots"] [data-opendots-main] .bg-sidebar.border-l > .h-12.sticky {
+  height: 56px;
+  padding-inline: 16px;
+  border-bottom: 1px solid var(--opendots-line);
+  background: var(--opendots-pane);
+}
+
+:root[data-skin="opendots"]
+  [data-opendots-main]
+  .bg-sidebar.border-l
+  > .h-12.sticky
+  > div:first-child:not(:empty) {
+  width: auto;
+  flex: none;
+  border-radius: 9px;
+  padding: 7px 9px;
+  background: var(--opendots-tab);
+  color: var(--foreground);
+  font-size: 13px;
+}
