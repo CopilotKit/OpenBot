@@ -108,6 +108,11 @@ pub enum Failure {
     UnexpectedExit,
     /// An accepted agreement version that is not one `terms` could have reported.
     InvalidAcceptance,
+    /// OpenBot runs on a rootless Podman machine, and local Intelligence needs rootful Podman.
+    /// Refused here, before `setup` or `start`, so the window can name the switch; the CLI would
+    /// refuse it too, as an engine it does not support. See `acquire::create_machine` for why the
+    /// switch is the person's to make.
+    RootlessPodman,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -1178,6 +1183,160 @@ const INHERITED: &[&str] = &[
     "TMP",
 ];
 
+/*
+ * ONE ENGINE FOR OPENBOT AND INTELLIGENCE.
+ *
+ * Left to itself the CLI picks Docker when Docker answers and Podman otherwise. That is not always
+ * the engine OpenBot is running on: Docker Desktop started after OpenBot settled on Podman, or a
+ * Podman machine of the person's own that is running beside ours. Two engines on one computer is
+ * two VMs' worth of memory, and an Intelligence that OpenBot's containers reach through a host
+ * port of a different VM. So every CLI process is told the engine OpenBot uses, by the variable
+ * the CLI reads for exactly this (`COPILOTKIT_LOCAL_ENGINE`), and for Podman the API of the
+ * machine OpenBot uses: the CLI would otherwise take the first running machine, and it looks
+ * `podman` up on a PATH that, in the session OpenBot installed Podman, does not have it.
+ *
+ * Recorded by the app when it knows its engine (`use_engine`), and read for every call, because
+ * the machine's mode can change between calls and asking costs one `podman machine inspect`.
+ */
+static ENGINE: std::sync::Mutex<Option<crate::engine::Address>> = std::sync::Mutex::new(None);
+
+/// Run the CLI on the engine OpenBot runs on.
+pub fn use_engine(address: &crate::engine::Address) {
+    *ENGINE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(address.clone());
+}
+
+/// Whether the app has said which engine OpenBot runs on.
+pub fn engine_known() -> bool {
+    ENGINE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .is_some()
+}
+
+/// What the CLI is told about its engine. Addresses and a name; nothing here is a secret.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct CliEngine {
+    engine: crate::engine::Engine,
+    /// The Podman API OpenBot's machine forwards to this computer, when it could be found.
+    api: Option<String>,
+    /// A Podman machine running rootless, which local Intelligence does not run on.
+    rootless: bool,
+}
+
+impl CliEngine {
+    fn of(address: &crate::engine::Address) -> Self {
+        use crate::engine::Engine;
+        let named_only = || Self {
+            engine: address.engine,
+            api: None,
+            rootless: false,
+        };
+        // Linux runs OpenBot's containers without local Intelligence for now, and its Podman has
+        // no machine: the CLI finds the rootful socket itself, or declines a rootless one.
+        if address.engine == Engine::Docker || cfg!(target_os = "linux") {
+            return named_only();
+        }
+        let connection = address
+            .connection
+            .clone()
+            .or_else(|| address.pin().ok().and_then(|pinned| pinned.connection));
+        match connection.map(|connection| crate::acquire::machine_behind(&connection)) {
+            Some(Ok(facts)) => Self {
+                engine: Engine::Podman,
+                api: facts.api,
+                rootless: facts.rootful == Some(false),
+            },
+            // Not a machine this computer can inspect: the CLI finds its own way, and judges it.
+            _ => named_only(),
+        }
+    }
+}
+
+fn recorded_engine() -> Option<CliEngine> {
+    let address = ENGINE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone()?;
+    Some(CliEngine::of(&address))
+}
+
+/// The variables that name the engine, and those the CLI must not inherit beside them.
+///
+/// For Podman, `CONTAINER_HOST` is what the CLI and the Podman CLI read and `DOCKER_HOST` is what
+/// k3d reads, so both name the machine's API. An inherited `DOCKER_HOST` or `DOCKER_CONTEXT` names
+/// a Docker, and is dropped rather than handed to k3d beside a Podman. For Docker nothing else is
+/// set: the CLI finds Docker as Docker's own CLI does, through what it inherits.
+fn engine_environment(engine: Option<&CliEngine>) -> Vec<(&'static str, Option<String>)> {
+    use crate::engine::Engine;
+    let Some(engine) = engine else {
+        return Vec::new();
+    };
+    let mut environment = vec![(
+        "COPILOTKIT_LOCAL_ENGINE",
+        Some(engine.engine.binary().to_string()),
+    )];
+    if engine.engine == Engine::Podman {
+        environment.push(("CONTAINER_HOST", engine.api.clone()));
+        environment.push(("DOCKER_HOST", engine.api.clone()));
+        environment.push(("DOCKER_CONTEXT", None));
+    }
+    environment
+}
+
+/// Decline the calls that create or start Intelligence's cluster on a rootless Podman machine.
+/// Everything else runs: `status`, `stop` and the account calls work on any engine.
+fn refuse_rootless(arguments: &[&str], engine: Option<&CliEngine>) -> Result<(), Failure> {
+    let runs_workloads = matches!(arguments, ["local", "setup", ..] | ["local", "start", ..]);
+    if runs_workloads && engine.is_some_and(|engine| engine.rootless) {
+        return Err(Failure::RootlessPodman);
+    }
+    Ok(())
+}
+
+/// The CLI process for one call: its program, its environment and its folder, not yet started.
+fn command_for(
+    cli: &PinnedCli,
+    arguments: &[&str],
+    folder: Option<&std::path::Path>,
+    engine: Option<&CliEngine>,
+) -> std::process::Command {
+    let mut command = crate::quiet::command(&cli.program);
+    if let Some(entry) = &cli.entry {
+        command.arg(entry);
+    }
+    command.env_clear();
+    for name in INHERITED {
+        if let Some(value) = std::env::var_os(name) {
+            command.env(name, value);
+        }
+    }
+    // The CLI looks `docker` and `podman` up by name. Opened from Finder, this app has the system's
+    // minimal PATH, which reaches neither Docker Desktop's `/usr/local/bin` nor `/opt/podman/bin`;
+    // the CLI gets the engine's own directory added.
+    let engines: &[crate::engine::Engine] = match engine.map(|engine| engine.engine) {
+        Some(crate::engine::Engine::Podman) => {
+            &[crate::engine::Engine::Docker, crate::engine::Engine::Podman]
+        }
+        _ => &[crate::engine::Engine::Docker],
+    };
+    if let Some(path) = crate::engine::path_with_engines(engines) {
+        command.env("PATH", path);
+    }
+    for (name, value) in engine_environment(engine) {
+        match value {
+            Some(value) => command.env(name, value),
+            None => command.env_remove(name),
+        };
+    }
+    if let Some(folder) = folder {
+        command.current_dir(folder);
+    }
+    command.args(arguments);
+    command
+}
+
 /**
 Run one CLI call to completion, within its limits.
 
@@ -1271,28 +1430,11 @@ fn execute(
     limits: Limits,
     cancel: &Cancel,
 ) -> Result<(i32, Vec<u8>), Failure> {
+    let engine = recorded_engine();
+    refuse_rootless(arguments, engine.as_ref())?;
     let output = Output::create()?;
-    let mut command = crate::quiet::command(&cli.program);
-    if let Some(entry) = &cli.entry {
-        command.arg(entry);
-    }
-    command.env_clear();
-    for name in INHERITED {
-        if let Some(value) = std::env::var_os(name) {
-            command.env(name, value);
-        }
-    }
-    // The CLI looks `docker` up by name. Opened from Finder, this app has the system's minimal
-    // PATH, which does not reach Docker Desktop's `/usr/local/bin`; the CLI gets Docker's own
-    // directory added.
-    if let Some(path) = crate::engine::path_with_docker() {
-        command.env("PATH", path);
-    }
-    if let Some(folder) = folder {
-        command.current_dir(folder);
-    }
+    let mut command = command_for(cli, arguments, folder, engine.as_ref());
     command
-        .args(arguments)
         .stdin(Stdio::null())
         .stdout(output.file.try_clone().map_err(|_| Failure::Spawn)?)
         // stderr can carry anything a dependency prints. It is never read, so it is not kept.
@@ -3043,6 +3185,169 @@ mod tests {
         assert!(status(&input).is_ok());
     }
 
+    fn engine_variables(
+        engine: Option<&CliEngine>,
+    ) -> std::collections::BTreeMap<String, Option<String>> {
+        let cli = PinnedCli {
+            program: PathBuf::from("copilotkit"),
+            entry: None,
+            sha256: String::new(),
+        };
+        command_for(&cli, &["local", "status", "--json"], None, engine)
+            .get_envs()
+            .map(|(name, value)| {
+                (
+                    name.to_string_lossy().into_owned(),
+                    value.map(|value| value.to_string_lossy().into_owned()),
+                )
+            })
+            .collect()
+    }
+
+    const ENGINE_VARIABLES: [&str; 4] = [
+        "COPILOTKIT_LOCAL_ENGINE",
+        "CONTAINER_HOST",
+        "DOCKER_HOST",
+        "DOCKER_CONTEXT",
+    ];
+
+    #[test]
+    fn the_cli_is_told_the_engine_openbot_runs_on() {
+        use crate::engine::Engine;
+        let docker = CliEngine {
+            engine: Engine::Docker,
+            api: None,
+            rootless: false,
+        };
+        let variables = engine_variables(Some(&docker));
+        assert_eq!(
+            variables.get("COPILOTKIT_LOCAL_ENGINE"),
+            Some(&Some("docker".to_string()))
+        );
+        // Docker is found as Docker's own CLI finds it: nothing is set or taken away for it.
+        for name in ["CONTAINER_HOST", "DOCKER_HOST", "DOCKER_CONTEXT"] {
+            assert!(!variables.contains_key(name), "{name} in {variables:?}");
+        }
+
+        let api = "unix:///var/folders/xy/T/podman/openbot-api.sock";
+        let podman = CliEngine {
+            engine: Engine::Podman,
+            api: Some(api.into()),
+            rootless: false,
+        };
+        let variables = engine_variables(Some(&podman));
+        assert_eq!(
+            variables.get("COPILOTKIT_LOCAL_ENGINE"),
+            Some(&Some("podman".to_string()))
+        );
+        assert_eq!(
+            variables.get("CONTAINER_HOST"),
+            Some(&Some(api.to_string()))
+        );
+        assert_eq!(variables.get("DOCKER_HOST"), Some(&Some(api.to_string())));
+        // An inherited Docker context names a Docker, and is not handed to k3d beside a Podman.
+        assert!(
+            engine_environment(Some(&podman)).contains(&("DOCKER_CONTEXT", None)),
+            "a Podman call must drop DOCKER_CONTEXT"
+        );
+        assert!(!matches!(variables.get("DOCKER_CONTEXT"), Some(Some(_))));
+
+        // A Podman whose API could not be found is still named, and inherits no Docker address.
+        let unfound = CliEngine {
+            api: None,
+            ..podman
+        };
+        let variables = engine_variables(Some(&unfound));
+        assert_eq!(
+            variables.get("COPILOTKIT_LOCAL_ENGINE"),
+            Some(&Some("podman".to_string()))
+        );
+        assert_eq!(
+            engine_environment(Some(&unfound))[1..],
+            [
+                ("CONTAINER_HOST", None),
+                ("DOCKER_HOST", None),
+                ("DOCKER_CONTEXT", None)
+            ]
+        );
+        for name in ["CONTAINER_HOST", "DOCKER_HOST", "DOCKER_CONTEXT"] {
+            assert!(
+                !matches!(variables.get(name), Some(Some(_))),
+                "{name} in {variables:?}"
+            );
+        }
+
+        // Before the app knows its engine the CLI chooses for itself, as it did before.
+        let variables = engine_variables(None);
+        for name in ENGINE_VARIABLES {
+            assert!(!variables.contains_key(name), "{name} in {variables:?}");
+        }
+    }
+
+    /// The engine adds names and addresses, never a secret: what the CLI receives is the inherited
+    /// allowlist and the engine's own variables, and nothing else.
+    #[test]
+    fn naming_the_engine_adds_nothing_secret() {
+        use crate::engine::Engine;
+        for engine in [
+            None,
+            Some(CliEngine {
+                engine: Engine::Docker,
+                api: None,
+                rootless: false,
+            }),
+            Some(CliEngine {
+                engine: Engine::Podman,
+                api: Some("npipe:////./pipe/podman-openbot".into()),
+                rootless: false,
+            }),
+        ] {
+            for name in engine_variables(engine.as_ref()).keys() {
+                assert!(
+                    INHERITED.contains(&name.as_str()) || ENGINE_VARIABLES.contains(&name.as_str()),
+                    "{name} is neither inherited nor the engine's"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_rootless_podman_declines_setup_and_start_and_nothing_else() {
+        use crate::engine::Engine;
+        let rootless = CliEngine {
+            engine: Engine::Podman,
+            api: Some("unix:///tmp/podman.sock".into()),
+            rootless: true,
+        };
+        let rootful = CliEngine {
+            rootless: false,
+            ..rootless.clone()
+        };
+        let stack = StackId::parse("local-abc123").unwrap();
+        for arguments in [
+            SETUP_ARGUMENTS.to_vec(),
+            arguments(Action::Start, &stack).to_vec(),
+        ] {
+            assert_eq!(
+                refuse_rootless(&arguments, Some(&rootless)),
+                Err(Failure::RootlessPodman)
+            );
+            assert_eq!(refuse_rootless(&arguments, Some(&rootful)), Ok(()));
+            assert_eq!(refuse_rootless(&arguments, None), Ok(()));
+        }
+        for arguments in [
+            arguments(Action::Status, &stack).to_vec(),
+            arguments(Action::Stop, &stack).to_vec(),
+            LIST_ARGUMENTS.to_vec(),
+            CONNECT_ARGUMENTS.to_vec(),
+            login_arguments(&stack).to_vec(),
+            ACCOUNT_SIGN_IN_ARGUMENTS.to_vec(),
+            TERMS_ARGUMENTS.to_vec(),
+        ] {
+            assert_eq!(refuse_rootless(&arguments, Some(&rootless)), Ok(()));
+        }
+    }
+
     #[test]
     fn every_failure_category_is_known_to_the_window() {
         let window = include_str!("../../src/localEvalCli.ts");
@@ -3063,6 +3368,7 @@ mod tests {
             Failure::ContractMismatch,
             Failure::UnexpectedExit,
             Failure::InvalidAcceptance,
+            Failure::RootlessPodman,
         ];
         // Adding a variant without listing it above stops compiling here.
         for failure in all {
@@ -3082,7 +3388,8 @@ mod tests {
                 | Failure::UnsafeEndpoint
                 | Failure::ContractMismatch
                 | Failure::UnexpectedExit
-                | Failure::InvalidAcceptance => {}
+                | Failure::InvalidAcceptance
+                | Failure::RootlessPodman => {}
             }
             let name = serde_json::to_string(&failure).unwrap();
             assert!(window.contains(&name), "localEvalCli.ts is missing {name}");

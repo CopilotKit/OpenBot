@@ -29,6 +29,7 @@ export const localFailures = [
   "contract-mismatch",
   "unexpected-exit",
   "invalid-acceptance",
+  "rootless-podman",
 ] as const;
 export type LocalFailure = (typeof localFailures)[number];
 

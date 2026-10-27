@@ -84,7 +84,7 @@ test("every failure gives a plain, non-empty sentence without its own name", () 
 
 test("the reason and failure lists in this test match the source", () => {
   expect(new Set(reasons).size).toBe(18);
-  expect(localFailures.length).toBe(16);
+  expect(localFailures.length).toBe(17);
 });
 
 test("Docker reasons block the runtime when the probe has no answer", () => {
@@ -95,7 +95,7 @@ test("Docker reasons block the runtime when the probe has no answer", () => {
   });
   expect(rows.runtime).toEqual({
     state: "blocked",
-    said: "Docker Desktop is not running.",
+    said: "The container engine is not running.",
     action: "retry",
   });
   expect(rows.intelligence.state).toBe("blocked");
@@ -104,7 +104,9 @@ test("Docker reasons block the runtime when the probe has no answer", () => {
     runtime: "unknown",
     intelligence: report({ outcome: "blocked", reason: "unsupported-engine" }),
   });
-  expect(engine.runtime.said).toBe("This Docker setup is not supported.");
+  expect(engine.runtime.said).toBe(
+    "This container engine setup is not supported.",
+  );
   expect(engine.runtime.action).toBeUndefined();
 });
 
@@ -122,7 +124,7 @@ test("runtime probe maps directly", () => {
   );
   expect(localReadiness({ ...base, runtime: "not-running" }).runtime).toEqual({
     state: "blocked",
-    said: "Docker Desktop is not running.",
+    said: "The container engine is not running.",
     action: "retry",
   });
   expect(localReadiness({ ...base, runtime: "unknown" }).runtime.state).toBe(
