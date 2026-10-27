@@ -826,11 +826,14 @@ fn main() {
             .expect_err("Start must not run a browser with no Recorder to load");
         assert!(gone.said.contains("Finish installing"), "{gone:?}");
 
-        // A changed lockfile for the computer is a changed installation, as the root's is.
+        // A changed lockfile for the computer is a changed installation, as the root's is. Start no
+        // longer refuses over it: the browser's next Start installs again rather than running the
+        // old packages (`install_dependencies_if_needed`).
         place_recorder_with(&f.root, COMPUTER, &mut image.engine()).unwrap();
         complete_with(&f.root, None, images(), |_| Ok(())).unwrap();
+        assert!(dependencies_ready(&f.root).is_ok());
         std::fs::write(f.root.join("agent-computer/bun.lock"), "changed-lock").unwrap();
-        assert!(require_with(&f.root, None, |_| Ok(())).is_err());
+        assert!(dependencies_ready(&f.root).is_err());
     }
 
     /// Releases before the browser have no Recorder to put in place and no computer to install for.

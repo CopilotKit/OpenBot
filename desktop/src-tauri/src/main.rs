@@ -648,34 +648,16 @@ async fn prepare_installation(
         if let Some(problem) = stack::deployment_problem(&root) {
             return Err(Problem::from(problem));
         }
-        report_running(
-            &handle,
-            "dependencies",
-            "Preparing the app's dependencies.",
-            None,
-        );
-        preparation::install_dependencies_if_needed(&root, || {
-            report_running(
-                &handle,
-                "dependencies",
-                "Preparing the local runtime.",
-                None,
-            );
-            let bun = install::ensure_bun(&root, which_bun())?;
-            report_running(
-                &handle,
-                "dependencies",
-                "Installing the app's packages.",
-                None,
-            );
-            Ok(bun)
-        })?;
-        report(
-            &handle,
-            "dependencies",
-            true,
-            "The app's dependencies are installed.",
-        );
+        /*
+         * NO BUN, NO `bun install`, NO APP BUILD.
+         *
+         * The server, the app and the worker run from the published server image, so installing
+         * OpenBot is pulling images and nothing else. This step used to download Bun and install
+         * the app's packages here, on every machine, and on a fresh Windows machine that took longer
+         * than everything else in the install together: Defender scans each of the thousands of
+         * small files it writes. The one thing on the host that still needs them, the self-hosted
+         * Intelligence sign-in helper, prepares them itself the first time somebody uses it.
+         */
         report_running(
             &handle,
             "images",
@@ -4426,7 +4408,12 @@ async fn begin_self_hosted_intelligence_sign_in(
         .self_hosted_sign_in_generation
         .load(std::sync::atomic::Ordering::SeqCst);
     tauri::async_runtime::spawn_blocking(move || {
-        let bun = preparation::dependencies_ready(&root)?;
+        // The helper is a Bun script run from the downloaded source, and the only thing on the host
+        // that still needs Bun and the source's packages. Installing OpenBot no longer prepares
+        // them, so the first sign-in does, once; later ones reuse what it recorded.
+        let bun = preparation::install_dependencies_if_needed(&root, || {
+            install::ensure_bun(&root, which_bun())
+        })?;
         let shell = app.state::<Shell>();
         let signing = {
             let mut slot = shell.self_hosted_intelligence.lock().unwrap();
