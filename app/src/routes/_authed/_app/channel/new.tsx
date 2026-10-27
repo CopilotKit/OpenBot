@@ -1,8 +1,8 @@
 import type { Message } from "@ag-ui/core";
-import { IconPlus } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
+import AgentOrb from "@/components/agents/orb/agent-orb";
 import { ChannelAvatar } from "@/components/channels/avatar";
 import {
   canSend,
@@ -197,7 +197,7 @@ function RouteComponent() {
               {(item: BotOption) =>
                 "createNew" in item ? (
                   <ComboboxItem key={item.id} value={item} className="h-10">
-                    <IconPlus className="size-6" />
+                    <AgentOrb size="24px" state="idle" />
                     New Bot
                   </ComboboxItem>
                 ) : (
