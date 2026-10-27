@@ -132,7 +132,7 @@ async function customFlow() {
   const result = await opened();
   await result.user.type(result.view.getByLabelText("Name"), "Expense Review");
   await result.user.click(
-    result.view.getByRole("button", { name: "Connect a custom agent" }),
+    result.view.getByRole("button", { name: /^Connect a custom agent/ }),
   );
   await result.user.click(
     result.view.getByRole("button", { name: "Continue" }),
@@ -159,7 +159,9 @@ test("opens on New Bot details and creates locally without another screen", asyn
   const { view, user } = await opened();
   expect(view.getByRole("heading", { name: "New Bot" })).toBeTruthy();
   expect(
-    view.getByRole("button", { name: "Run here" }).getAttribute("aria-pressed"),
+    view
+      .getByRole("button", { name: /^Run here/ })
+      .getAttribute("aria-pressed"),
   ).toBe("true");
   expect(
     view.getByRole("button", { name: "Create Bot" }).hasAttribute("disabled"),
@@ -175,14 +177,14 @@ test("unavailable hosting still permits the custom path", async () => {
   const { view, user } = await opened();
   await settle();
   expect(
-    view.getByRole("button", { name: "Run here" }).hasAttribute("disabled"),
+    view.getByRole("button", { name: /^Run here/ }).hasAttribute("disabled"),
   ).toBe(true);
   await user.type(view.getByLabelText("Name"), "External");
   expect(
     view.getByRole("button", { name: "Create Bot" }).hasAttribute("disabled"),
   ).toBe(true);
   await user.click(
-    view.getByRole("button", { name: "Connect a custom agent" }),
+    view.getByRole("button", { name: /^Connect a custom agent/ }),
   );
   await user.click(view.getByRole("button", { name: "Continue" }));
   expect(view.getByRole("button", { name: /LangGraph/ })).toBeTruthy();
@@ -263,12 +265,12 @@ test("preserves every entry across back navigation and hosting switches", async 
   );
   await user.type(view.getByLabelText(/^Role/), "Review carefully");
   await user.click(view.getByRole("button", { name: /Public/ }));
-  await user.click(view.getByRole("button", { name: "Run here" }));
+  await user.click(view.getByRole("button", { name: /^Run here/ }));
   expect(
     (view.getByLabelText(/^Instructions/) as HTMLTextAreaElement).value,
   ).toBe("Review carefully");
   await user.click(
-    view.getByRole("button", { name: "Connect a custom agent" }),
+    view.getByRole("button", { name: /^Connect a custom agent/ }),
   );
   await user.click(view.getByRole("button", { name: "Continue" }));
   await user.click(view.getByRole("button", { name: "Continue" }));
@@ -280,7 +282,7 @@ test("preserves every entry across back navigation and hosting switches", async 
   );
   await user.click(view.getByRole("button", { name: "Back" }));
   await user.click(view.getByRole("button", { name: "Back" }));
-  await user.click(view.getByRole("button", { name: "Run here" }));
+  await user.click(view.getByRole("button", { name: /^Run here/ }));
   await user.click(view.getByRole("button", { name: "Create Bot" }));
   await view.findByText("Expense Review is ready");
   expect(creates[0]).toMatchObject({

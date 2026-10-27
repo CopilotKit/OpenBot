@@ -1,5 +1,11 @@
 import { summaryFor, WEB_HARNESSES } from "@openbot/shared/harnesses";
-import { IconCheck, IconLock, IconUsers } from "@tabler/icons-react";
+import {
+  IconCheck,
+  IconDeviceDesktop,
+  IconLock,
+  IconPlugConnected,
+  IconUsers,
+} from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { MotionConfig, motion, useReducedMotion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
@@ -74,9 +80,6 @@ export function NewBotSheet({
         side="right"
         variant="inset"
       >
-        <SheetTitle className="px-6 pt-6 text-2xl font-semibold">
-          New Bot
-        </SheetTitle>
         {/* Inside the popup, so it unmounts on close and a reopened sheet starts empty. */}
         <NewBotFlow onCreated={onCreated} />
       </SheetContent>
@@ -279,6 +282,7 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
   if (createdId) {
     return (
       <MotionConfig reducedMotion="user">
+        <SheetTitle className="sr-only">New Bot</SheetTitle>
         <CreatedView name={name.trim()} />
       </MotionConfig>
     );
@@ -320,12 +324,17 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
       <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-6 pt-8 pb-6">
         <MotionConfig reducedMotion="user">
           {/* Shares its layout id with the orb on the created view, so it travels there. */}
-          <motion.div className="w-fit" layoutId={ORB_LAYOUT_ID}>
-            <AgentOrb
-              size="40px"
-              state={busy ? "thinking" : named ? "listening" : "idle"}
-            />
-          </motion.div>
+          <div className="flex items-center gap-3">
+            <motion.div className="w-fit" layoutId={ORB_LAYOUT_ID}>
+              <AgentOrb
+                size="40px"
+                state={busy ? "thinking" : named ? "listening" : "idle"}
+              />
+            </motion.div>
+            <SheetTitle className="text-2xl font-semibold tracking-tight">
+              New Bot
+            </SheetTitle>
+          </div>
 
           <motion.div
             animate={{ opacity: 1, x: 0 }}
@@ -336,34 +345,6 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
           >
             {step === "about" ? (
               <>
-                <fieldset
-                  className="mb-6 grid grid-cols-2 gap-2"
-                  aria-label="Hosting"
-                >
-                  <Button
-                    type="button"
-                    variant={custom ? "outline" : "default"}
-                    aria-pressed={!custom && builtInAvailable}
-                    disabled={!builtInAvailable}
-                    onClick={() => setCustom(false)}
-                  >
-                    Run here
-                  </Button>
-                  <Button
-                    type="button"
-                    variant={custom ? "default" : "outline"}
-                    aria-pressed={custom}
-                    onClick={() => setCustom(true)}
-                  >
-                    Connect a custom agent
-                  </Button>
-                </fieldset>
-                {!builtInAvailable && (
-                  <p className="mb-4 text-sm text-muted-foreground">
-                    An admin must enable built-in hosting before you can run a
-                    Bot here.
-                  </p>
-                )}
                 <AboutStep
                   apps={giveable}
                   instructions={instructions}
@@ -389,6 +370,50 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
                   onVisibility={setVisibility}
                   visibility={visibility}
                 />
+                <FieldSet className="mt-6">
+                  <FieldLegend variant="label">Where it runs</FieldLegend>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <button
+                      type="button"
+                      className={OPTION_CLASSES}
+                      aria-pressed={!custom && builtInAvailable}
+                      disabled={!builtInAvailable}
+                      onClick={() => setCustom(false)}
+                    >
+                      <IconDeviceDesktop className="size-5 shrink-0 text-muted-foreground" />
+                      <span className="min-w-0">
+                        <span className="block font-medium text-sm">
+                          Run here
+                        </span>
+                        <span className="block text-pretty text-muted-foreground text-xs">
+                          OpenBot hosts and runs your Bot.
+                        </span>
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      className={OPTION_CLASSES}
+                      aria-pressed={custom}
+                      onClick={() => setCustom(true)}
+                    >
+                      <IconPlugConnected className="size-5 shrink-0 text-muted-foreground" />
+                      <span className="min-w-0">
+                        <span className="block font-medium text-sm">
+                          Connect a custom agent
+                        </span>
+                        <span className="block text-pretty text-muted-foreground text-xs">
+                          Connect an agent you host elsewhere.
+                        </span>
+                      </span>
+                    </button>
+                  </div>
+                  {!builtInAvailable && (
+                    <FieldDescription>
+                      An admin must enable built-in hosting before you can run a
+                      Bot here.
+                    </FieldDescription>
+                  )}
+                </FieldSet>
               </>
             ) : step === "runtime" ? (
               <RuntimeStep onChoose={setRuntime} runtime={runtime} />
