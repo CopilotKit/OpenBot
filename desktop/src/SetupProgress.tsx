@@ -85,10 +85,9 @@ const PREPARING = new Set([
  *
  * While a row runs it carries the running step's own sentence and download size, so a wait of
  * minutes says what it is waiting on ("Installing the app's packages.", "Downloading local
- * software (2/4)."). "Preparing this computer" says, for instance, "Downloading Docker
- * Desktop.", "Installing Docker Desktop.", "Starting Docker Desktop. Accept its terms in its own
- * window when it asks." Docker is named on purpose. Its installer and
- * its agreement appear in windows of their own, and a row that only said "Preparing" sat for
+ * software (2/4)."). "Preparing this computer" says, for instance, "Starting Docker Desktop.
+ * Accept anything it asks in its own window." Docker is named on purpose. Its agreement and
+ * helper prompt appear in windows of their own, and a row that only said "Preparing" sat for
  * minutes while one of them waited, unseen, behind this one.
  */
 export function plainInstallSteps(
