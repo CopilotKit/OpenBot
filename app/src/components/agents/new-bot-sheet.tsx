@@ -89,6 +89,10 @@ export function NewBotSheet({
 
 /** Details come first; custom agents then choose a framework and verify their endpoint. */
 const STEPS = ["about", "runtime", "endpoint"] as const;
+const CONNECTION_OPTIONS = [
+  ...WEB_HARNESSES.filter((harness) => harness.id === "byo-url"),
+  ...WEB_HARNESSES.filter((harness) => harness.id !== "byo-url"),
+];
 type Step = (typeof STEPS)[number];
 
 /**
@@ -746,7 +750,7 @@ function RuntimeStep({
         Connect a custom agent
       </h2>
 
-      {WEB_HARNESSES.map((harness) => (
+      {CONNECTION_OPTIONS.map((harness) => (
         <button
           aria-pressed={
             runtime?.kind === "managed" && runtime.harness === harness.id
