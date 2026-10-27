@@ -341,6 +341,22 @@ describe("OpenDots frame", () => {
     );
   });
 
+  test("a new conversation with a chosen Bot is OpenDots' coworker home", async () => {
+    const { view } = draw("/channel/new?agent=ada");
+    expect(await view.findByRole("heading", { name: "Ada" })).toBeTruthy();
+    expect(view.getByText("Ada helps.")).toBeTruthy();
+    expect(
+      view.getByRole("link", { name: /Edit specialist/ }).getAttribute("href"),
+    ).toBe("/bots/ada");
+    cleanup();
+    // Without a chosen Bot there is no one to introduce.
+    const open = draw("/channel/new");
+    await open.view.findByText("OpenBot page");
+    expect(
+      open.view.queryByRole("link", { name: /Edit specialist/ }),
+    ).toBeNull();
+  });
+
   test("every OpenBot surface is reachable from the frame", async () => {
     const { view } = draw("/");
     await view.findByText("Planning the Lisbon trip");

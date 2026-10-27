@@ -33,9 +33,11 @@ export type Place = {
    */
   ownsWatch: boolean;
   watching: boolean;
+  /** OpenBot's new-conversation page with its Bot already chosen: OpenDots' coworker home. */
+  coworkerHome: boolean;
 };
 
-type Parsed = Omit<Place, "label" | "botId" | "watching"> & {
+type Parsed = Omit<Place, "label" | "botId" | "watching" | "coworkerHome"> & {
   label: string | ((bot: string | undefined) => string);
   agentFromUrl?: string;
 };
@@ -156,6 +158,7 @@ export function usePlace(): Place {
     label: typeof parsed.label === "string" ? parsed.label : parsed.label(name),
     detail: parsed.detail,
     botId,
+    coworkerHome: pathname.replace(/\/+$/, "") === "/channel/new" && !!botId,
     channelId: parsed.channelId,
     ownsWatch: parsed.ownsWatch,
     watching: parsed.ownsWatch && watch,

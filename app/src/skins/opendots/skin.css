@@ -85,6 +85,8 @@
   --opendots-send-off: #ececec;
   --opendots-send-off-ink: #9a9a9a;
   --opendots-note: #93949e;
+  --opendots-persona-ink: #777777;
+  --opendots-text-button: #9296a7;
   --opendots-avatar: #eeeae1;
   --opendots-avatar-line: #e2dfd8;
   --opendots-avatar-ink: #8d877d;
@@ -168,6 +170,8 @@
   --opendots-send-off: #272727;
   --opendots-send-off-ink: #646464;
   --opendots-note: #a1a2ab;
+  --opendots-persona-ink: #a4a4a4;
+  --opendots-text-button: #a1a5b4;
   --opendots-avatar: #2b2823;
   --opendots-avatar-line: #32302b;
   --opendots-avatar-ink: #a9a49b;
@@ -238,4 +242,30 @@
   background: var(--opendots-send-off);
   color: var(--opendots-send-off-ink);
   opacity: 1;
+}
+
+/*
+ * A conversation's own header row sits directly under the top bar. OpenDots draws no rule under
+ * its chat header, so the two read as one band instead of two stacked bars.
+ */
+:root[data-skin="opendots"] [data-opendots-main] .sticky.top-0.border-b {
+  border-bottom-color: transparent;
+}
+
+/* The coworker home steps aside as soon as the conversation has a message to show. */
+:root[data-skin="opendots"]
+  [data-opendots-main]:has([data-slot="message"])
+  [data-opendots-persona] {
+  display: none;
+}
+
+/*
+ * Where the conversation column is no wider than its composer, OpenDots still keeps the composer
+ * off the edges of the pane; OpenBot's runs it flush. 972px is the widest window at which the
+ * 672px column fills the pane beside the rail and sidebar.
+ */
+@media (max-width: 972px) {
+  :root[data-skin="opendots"] [data-opendots-main] .mx-auto.max-w-2xl.px-0 {
+    padding-inline: 16px;
+  }
 }

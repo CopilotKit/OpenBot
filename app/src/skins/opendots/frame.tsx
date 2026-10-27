@@ -45,6 +45,7 @@ import { useChannelEvents } from "@/lib/channels/use-channel-events";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
 import { ComputerPane } from "./computer-pane";
+import { CoworkerPersona } from "./persona";
 import { botName, type Place, usePlace } from "./place";
 import { IconAction, initialsOf, OpenDotsSidebar } from "./sidebar";
 
@@ -416,10 +417,13 @@ export function OpenDotsFrame({ children }: { children: ReactNode }) {
         <SelfHostBanner />
         <div className="relative flex min-h-0 flex-1">
           <main
-            className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
+            className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
             data-opendots-main
           >
             {children}
+            {place.coworkerHome && place.botId ? (
+              <CoworkerPersona botId={place.botId} />
+            ) : null}
           </main>
           {paneOpen && !place.ownsWatch ? (
             <div className="w-[clamp(390px,40vw,660px)] shrink-0 border-l border-(--opendots-line) max-[1100px]:fixed max-[1100px]:top-16 max-[1100px]:right-0 max-[1100px]:bottom-0 max-[1100px]:z-[15] max-[1100px]:w-[min(600px,100vw)] max-[1100px]:shadow-(--opendots-pane-shadow)">
