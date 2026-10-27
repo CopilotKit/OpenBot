@@ -16,8 +16,8 @@ export function NotificationsSheet({ onClose }: { onClose: () => void }) {
   return (
     <MuseSheet
       onClose={onClose}
-      subtitle="Approvals and questions that need your attention."
-      title="Notifications"
+      subtitle="Approvals and questions your Bots are waiting on."
+      title="Needs you"
     >
       <div className="flex flex-col gap-3.5">
         {inbox.isPending ? null : inbox.error ? (

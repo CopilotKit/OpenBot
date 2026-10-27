@@ -125,7 +125,7 @@ export function ActivityScreen() {
             <WorkCard agentId={agentId} item={item} key={item.id} live={live} />
           ))
         )}
-        <SectionHeading className="mt-2 mb-0" title="Reviews & receipts" />
+        <SectionHeading className="mt-2 mb-0" title="Approvals" />
         <div className="flex flex-wrap gap-2.5">
           <MuseButton
             aria-pressed={receipts === "all"}
@@ -133,7 +133,7 @@ export function ActivityScreen() {
             primary={receipts === "all"}
             small
           >
-            All activity
+            All approvals
           </MuseButton>
           <MuseButton
             aria-pressed={receipts === "review"}
@@ -141,7 +141,7 @@ export function ActivityScreen() {
             primary={receipts === "review"}
             small
           >
-            Needs review · {pending.length}
+            Waiting · {pending.length}
           </MuseButton>
         </div>
         {inbox.isPending ? null : inbox.error ? (
@@ -164,7 +164,7 @@ export function ActivityScreen() {
           </MuseCard>
         ) : (
           <MuseCard>
-            <SectionHeading title="Your actions" />
+            <SectionHeading title="Approval requests" />
             {shownApprovals.map((request) => {
               const waiting = request.status === "pending";
               return (
@@ -282,7 +282,7 @@ function WorkCard({
         <p className="font-semibold text-[11px] text-[var(--openmuse-accent)] leading-[17px]">
           {item.kind === "question"
             ? "Your input is needed"
-            : "Review requested"}
+            : "Approval requested"}
         </p>
       ) : null}
     </>

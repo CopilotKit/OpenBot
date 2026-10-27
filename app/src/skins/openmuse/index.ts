@@ -6,14 +6,16 @@ import { GoalsScreen } from "./screens/goals";
 import { IdeasScreen } from "./screens/ideas";
 
 /**
- * OpenMuse: one agent at the centre of a single phone-shaped column, five tabs in a floating pill,
- * and a capybara. Chat is OpenBot's own; Activity, Ideas, Goals and Apps draw OpenBot's approvals,
+ * OpenMuse's look: one Bot at the centre of a single phone-shaped column and five tabs in a floating
+ * pill. Its identity is the deployment's: the brand.yaml name and each Bot's own OpenBot avatar.
+ * Chat is OpenBot's own; Activity, Ideas, Goals and Apps draw OpenBot's approvals,
  * Bot activity, suggestions, routines, responsibilities, connections and memory.
  */
 export const openmuse: Skin = {
   id: "openmuse",
   name: "OpenMuse",
-  description: "A personal agent whose work keeps going, shaped like a phone.",
+  description:
+    "One Bot at the centre of a phone-shaped column, with five tabs.",
   Frame: OpenMuseFrame,
   screens: {
     activity: ActivityScreen,

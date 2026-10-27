@@ -13,6 +13,7 @@ import {
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useState } from "react";
+import { AbstractAvatar } from "@/components/agents/abstract-avatar";
 import { PluginLogo } from "@/components/plugins/plugin-logo";
 import { providerIcon } from "@/components/settings/linked-accounts";
 import { Item } from "@/components/ui/item";
@@ -41,12 +42,10 @@ import {
   sharedAccountsListedOn,
 } from "@/routes/_authed/_app/connections.index";
 import { useMuse } from "../context";
-import { mascotTint } from "../model";
 import {
   ErrorNotice,
   HeadingLink,
   LinkRow,
-  Mascot,
   MuseButton,
   MuseCard,
   MuseField,
@@ -70,15 +69,15 @@ export function AppsScreen() {
       <div className="flex flex-col gap-[22px]">
         <MuseField
           bare
-          label="Search apps"
+          label="Search connections"
           onChange={(event) => setQuery(event.target.value)}
-          placeholder="Search connectors"
+          placeholder="Search connections"
           value={query}
         />
         <Connections query={query} />
         <ForYourBots query={query} />
         <MuseButton onClick={() => setSettings(!settings)}>
-          {settings ? "Close agent settings" : "Personality & memory"}
+          {settings ? "Close Bot settings" : "Personality & memory"}
         </MuseButton>
         {settings ? (
           <>
@@ -132,7 +131,7 @@ function Connections({ query }: { query: string }) {
     );
   }
   if (matching.length === 0) {
-    return <p className={museText.muted}>No matching connectors.</p>;
+    return <p className={museText.muted}>No matching connections.</p>;
   }
   const groups = [
     {
@@ -140,7 +139,7 @@ function Connections({ query }: { query: string }) {
       rows: matching.filter((row) => row.state !== "available"),
     },
     {
-      title: "Available integrations",
+      title: "Not connected yet",
       rows: matching.filter((row) => row.state === "available"),
     },
   ].filter((group) => group.rows.length);
@@ -281,14 +280,14 @@ function ForYourBots({ query }: { query: string }) {
  * shows them and goes there.
  */
 function YourAgent() {
-  const { bot, defaultBotId } = useMuse();
+  const { bot } = useMuse();
   if (!bot) return null;
   return (
     <MuseCard className="flex flex-col gap-2.5">
-      <SectionHeading title="Your agent" />
+      <SectionHeading title="Your Bot" />
       <div className="mb-3 flex flex-col items-center gap-2 text-center">
-        <span className="rounded-[24px] bg-[var(--openmuse-sky)] p-[7px]">
-          <Mascot size={62} tint={mascotTint(bot.id, defaultBotId)} />
+        <span className="rounded-full bg-[var(--openmuse-sky)] p-[7px]">
+          <AbstractAvatar name={bot.name} seed={bot.avatarSeed} size={62} />
         </span>
         <p className={museText.heading}>{bot.name}</p>
         {bot.title ? <p className={museText.small}>{bot.title}</p> : null}

@@ -21,7 +21,6 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { cn } from "@/lib/utils";
-import type { MascotTint } from "./model";
 
 /*
  * OpenMuse's primitives, rebuilt on OpenBot's own. Each one is an OpenBot component — Button, Item,
@@ -370,49 +369,6 @@ export function StatusDot({ tone }: { tone: "green" | "blue" }) {
           : "border-[var(--openmuse-blue-ring)] bg-[var(--openmuse-blue-dot)]",
       )}
     />
-  );
-}
-
-export const MASCOT_SRC = "/skins/openmuse/capybara.png";
-
-const MASCOT_TINTS: Record<MascotTint, string> = {
-  sky: "bg-[var(--openmuse-tint-sky)]",
-  sand: "bg-[var(--openmuse-tint-sand)]",
-  lilac: "bg-[var(--openmuse-tint-lilac)]",
-};
-
-/**
- * OpenMuse's capybara on its tinted disc: how OpenMuse draws an agent. Sized by `size`, or by a
- * class when the size changes with the viewport; the disc is placed in proportion either way.
- */
-export function Mascot({
-  size,
-  className,
-  tint = "sky",
-}: {
-  size?: number;
-  className?: string;
-  tint?: MascotTint;
-}) {
-  return (
-    <span
-      aria-hidden="true"
-      className={cn("relative block shrink-0", className)}
-      style={size ? { height: size, width: size } : undefined}
-    >
-      <span
-        className={cn(
-          "absolute top-[15%] left-[12%] size-[76%] rounded-full",
-          MASCOT_TINTS[tint],
-        )}
-      />
-      <img
-        alt=""
-        className="relative block size-full object-contain"
-        draggable={false}
-        src={MASCOT_SRC}
-      />
-    </span>
   );
 }
 

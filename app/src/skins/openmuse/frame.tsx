@@ -11,9 +11,10 @@ import {
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { Link, useParams, useRouterState } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useState } from "react";
+import { AbstractAvatar } from "@/components/agents/abstract-avatar";
+import AgentOrb from "@/components/agents/orb/agent-orb";
 import { BotsNavBadge } from "@/components/bot-profile/attention";
 import { SelfHostBanner } from "@/components/layout/self-host-banner";
-import { defaultAgentProfile } from "@/lib/agents/default-agent";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { approvalInboxOptions } from "@/lib/approvals";
 import { botAttentionQueryOptions } from "@/lib/bot-lifecycle/queries";
@@ -22,6 +23,7 @@ import {
   channelQueryOptions,
 } from "@/lib/channels/queries";
 import { useChannelEvents } from "@/lib/channels/use-channel-events";
+import { appConfig } from "@/lib/generated/application-config";
 import { cn } from "@/lib/utils";
 import { BotsSheet } from "./bots-sheet";
 import { chooseBot, useChosenBotId } from "./chosen-bot";
@@ -31,13 +33,15 @@ import { MenuSheet } from "./menu-sheet";
 import {
   centreBot,
   type MuseTab,
-  mascotTint,
   statusLine,
   tabFor,
   waitingOnYou,
 } from "./model";
 import { NotificationsSheet } from "./notifications-sheet";
-import { Mascot, type MuseIcon, RoundButton } from "./ui";
+import { type MuseIcon, RoundButton } from "./ui";
+
+/** The deployment's own name, from its brand.yaml: the name OpenBot's sidebar shows. */
+const PRODUCT = appConfig.brand.productName;
 
 const TABS: { id: MuseTab; label: string; icon: MuseIcon }[] = [
   { id: "chat", label: "Chat", icon: IconMessageCircle },
@@ -87,7 +91,6 @@ export function OpenMuseFrame({ children }: { children: ReactNode }) {
         ? addressed
         : params.agentId;
   const bot = centreBot(agents.data, chosenId, onScreenBot);
-  const defaultBotId = defaultAgentProfile(agents.data)?.id;
 
   // Talking to a Bot puts it at the centre, and it stays there after the conversation closes.
   useEffect(() => {
@@ -111,7 +114,7 @@ export function OpenMuseFrame({ children }: { children: ReactNode }) {
   });
 
   return (
-    <MuseContext.Provider value={{ bot, defaultBotId, openSheet: setSheet }}>
+    <MuseContext.Provider value={{ bot, openSheet: setSheet }}>
       <div
         className="openmuse-frame flex h-svh flex-col overflow-hidden bg-background text-foreground"
         data-openmuse-tab={tab}
@@ -140,12 +143,23 @@ export function OpenMuseFrame({ children }: { children: ReactNode }) {
                 onClick={() => setSheet("bots")}
                 type="button"
               >
-                <Mascot
-                  className="size-[49px] min-[900px]:size-[58px]"
-                  tint={bot ? mascotTint(bot.id, defaultBotId) : "sky"}
-                />
+                {/*
+                 * The Bot's own OpenBot avatar, the one its page and the Bots roster draw. With no Bot
+                 * yet, the deployment's own mark stands in.
+                 */}
+                <span className="mt-1 mb-1 flex size-11 items-center justify-center min-[900px]:size-[52px] [&>[role=img]]:size-full! [&_svg]:size-full">
+                  {bot ? (
+                    <AbstractAvatar
+                      name={bot.name}
+                      seed={bot.avatarSeed}
+                      size={52}
+                    />
+                  ) : (
+                    <AgentOrb size="100%" />
+                  )}
+                </span>
                 <span className="flex max-w-full items-center gap-1 font-semibold text-[16px] text-foreground tracking-[-0.4px]">
-                  <span className="truncate">{bot?.name ?? "OpenMuse"}</span>
+                  <span className="truncate">{bot?.name ?? PRODUCT}</span>
                   <IconChevronDown
                     aria-hidden="true"
                     className="size-3 shrink-0 text-muted-foreground opacity-60 transition-opacity group-hover:opacity-100"
@@ -163,7 +177,7 @@ export function OpenMuseFrame({ children }: { children: ReactNode }) {
             <div className="absolute top-4 right-0">
               <RoundButton
                 icon={IconBell}
-                label={`Notifications, ${waiting} waiting on you`}
+                label={`Needs you, ${waiting} waiting`}
                 onClick={() => setSheet("notifications")}
               >
                 {waiting > 0 ? (
@@ -179,7 +193,7 @@ export function OpenMuseFrame({ children }: { children: ReactNode }) {
             {children}
           </main>
           <nav
-            aria-label="OpenMuse"
+            aria-label={PRODUCT}
             className="flex shrink-0 justify-center px-[22px] pt-2.5 pb-[max(7px,env(safe-area-inset-bottom))] min-[900px]:pb-[22px]"
           >
             <div className="flex w-full max-w-[370px] rounded-[40px] border border-[var(--openmuse-pill-border)] bg-[var(--openmuse-pill)] p-[5px] shadow-[0_2px_18px_0_var(--openmuse-pill-shadow)]">

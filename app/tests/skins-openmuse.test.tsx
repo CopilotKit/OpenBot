@@ -28,6 +28,7 @@ import type { AgentProfile } from "@/lib/agents/queries";
 import type { ApprovalInboxData } from "@/lib/approvals";
 import type { BotActivity, BotAttention } from "@/lib/bot-lifecycle/queries";
 import type { ChannelSummary } from "@/lib/channels/queries";
+import { appConfig } from "@/lib/generated/application-config";
 import type { MemoryRecord } from "@/lib/memory";
 import type { PluginsPage } from "@/lib/plugins/queries";
 import type { ProactiveSetting, ProactiveSuggestion } from "@/lib/proactive";
@@ -49,6 +50,9 @@ import { SKINS } from "@/skins/registry";
  * route returns, envelope and all, so the frame reads it through the same query factories the rest
  * of the app uses. What is checked is what a person sees and can reach.
  */
+
+/** The deployment's own name, from brand.yaml. The skin never names itself. */
+const PRODUCT = appConfig.brand.productName;
 
 beforeAll(() => GlobalRegistrator.register());
 afterAll(() => GlobalRegistrator.unregister());
@@ -529,7 +533,7 @@ describe("the frame", () => {
     );
     // The bell carries the one pending approval.
     expect(
-      page().getByRole("button", { name: "Notifications, 1 waiting on you" }),
+      page().getByRole("button", { name: "Needs you, 1 waiting" }),
     ).toBeTruthy();
   });
 
@@ -551,7 +555,7 @@ describe("the frame", () => {
   test("the five tabs lead to OpenBot's chat and the skin's own screens", async () => {
     serve();
     renderAt("/s/goals");
-    const nav = await page().findByRole("navigation", { name: "OpenMuse" });
+    const nav = await page().findByRole("navigation", { name: PRODUCT });
     const tabs = within(nav);
     // Chat is the centre Bot's main chat: its one-to-one conversation.
     await waitFor(() =>
@@ -590,13 +594,83 @@ describe("the frame", () => {
       );
     })();
     renderAt("/s/ideas");
-    const nav = await page().findByRole("navigation", { name: "OpenMuse" });
+    const nav = await page().findByRole("navigation", { name: PRODUCT });
     await page().findByRole("button", { name: /^Scout, / });
     await waitFor(() =>
       expect(
         within(nav).getByRole("link", { name: "Chat" }).getAttribute("href"),
       ).toBe("/channel/new?agent=scout"),
     );
+  });
+});
+
+describe("the frame wears the deployment's brand, not OpenMuse's", () => {
+  /** Everything a person can read or hear: the text, and every name, label and alt text. */
+  function readable() {
+    const attributes = [...document.body.querySelectorAll("*")].flatMap(
+      (element) =>
+        ["aria-label", "alt", "title", "placeholder"]
+          .map((name) => element.getAttribute(name))
+          .filter((value): value is string => Boolean(value)),
+    );
+    return [document.body.textContent ?? "", ...attributes].join("\n");
+  }
+
+  function capybaras() {
+    return [...document.body.querySelectorAll("img")].filter((image) =>
+      /capybara|mascot/i.test(
+        `${image.getAttribute("src")} ${image.getAttribute("alt")}`,
+      ),
+    );
+  }
+
+  test.each([
+    "/",
+    "/channel/c-muse",
+    "/s/activity",
+    "/s/ideas",
+    "/s/goals",
+    "/s/apps",
+  ])(
+    "%s shows the deployment's name, never OpenMuse, and no capybara",
+    async (path) => {
+      serve();
+      renderAt(path);
+      // The tab bar is named for the deployment, and so is the menu.
+      await page().findByRole("navigation", { name: PRODUCT });
+      const menu = within(await openMenu());
+      expect(menu.getByRole("heading", { name: PRODUCT })).toBeTruthy();
+      await menu.findByText("Planning the week");
+      expect(readable()).toContain(PRODUCT);
+      expect(readable()).not.toMatch(/openmuse/i);
+      expect(capybaras()).toEqual([]);
+    },
+  );
+
+  test("the centre Bot is drawn with its own OpenBot avatar", async () => {
+    serve();
+    renderAt("/s/apps");
+    const centre = await page().findByRole("button", { name: /Switch Bot$/ });
+    // AbstractAvatar names the drawing after the Bot, as on its OpenBot page.
+    expect(within(centre).getByRole("img", { name: "Muse" })).toBeTruthy();
+    expect(capybaras()).toEqual([]);
+  });
+
+  test("with no Bot yet, the deployment's name and mark stand at the centre", async () => {
+    serve();
+    const real = globalThis.fetch;
+    globalThis.fetch = Object.assign(
+      (input: RequestInfo | URL, init?: RequestInit) =>
+        String(input) === "/api/agents"
+          ? Promise.resolve(Response.json({ agents: [] }))
+          : real(input, init),
+      { preconnect: originalFetch.preconnect },
+    );
+    renderAt("/s/activity");
+    const centre = await page().findByRole("button", { name: "Choose a Bot" });
+    await waitFor(() => expect(centre.textContent).toContain(PRODUCT));
+    expect(readable()).not.toMatch(/openmuse/i);
+    expect(capybaras()).toEqual([]);
   });
 });
 
@@ -701,7 +775,7 @@ describe("each tab reads OpenBot's data", () => {
     expect(page().getByText("Draft the launch post")).toBeTruthy();
     expect(await page().findByText("Open url")).toBeTruthy();
     expect(page().getByText("Send email")).toBeTruthy();
-    expect(page().getByText("needs review")).toBeTruthy();
+    expect(page().getByText("waiting")).toBeTruthy();
     expect(page().getByText("done")).toBeTruthy();
     fireEvent.click(page().getByRole("button", { name: "Finished" }));
     await waitFor(() =>
@@ -794,7 +868,7 @@ describe("each tab reads OpenBot's data", () => {
       ),
     ).toBe("/connections/notion");
     expect(page().getByText("Connected")).toBeTruthy();
-    expect(page().getByText("Available integrations")).toBeTruthy();
+    expect(page().getByText("Not connected yet")).toBeTruthy();
     expect(hrefOf("Manage Google Drive")).toBe("/connections/google-drive");
     fireEvent.click(
       page().getByRole("button", { name: "Personality & memory" }),
@@ -808,7 +882,7 @@ describe("each tab reads OpenBot's data", () => {
     renderAt("/s/apps");
     fireEvent.click(
       await page().findByRole("button", {
-        name: "Notifications, 1 waiting on you",
+        name: "Needs you, 1 waiting",
       }),
     );
     const sheet = within(await page().findByRole("dialog"));

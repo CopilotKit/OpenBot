@@ -6,8 +6,6 @@ export type MuseSheetKind = "menu" | "notifications" | "bots";
 export type MuseContextValue = {
   /** The Bot at the centre of the frame, or undefined while the roster loads or when there is none. */
   bot: AgentProfile | undefined;
-  /** OpenBot's default Bot, which keeps OpenMuse's original sky-blue capybara. */
-  defaultBotId: string | undefined;
   openSheet: (sheet: MuseSheetKind) => void;
 };
 
@@ -16,6 +14,6 @@ export const MuseContext = createContext<MuseContextValue | null>(null);
 export function useMuse(): MuseContextValue {
   const context = useContext(MuseContext);
   if (!context)
-    throw new Error("useMuse must be used inside the OpenMuse frame.");
+    throw new Error("useMuse must be used inside the skin's frame.");
   return context;
 }
