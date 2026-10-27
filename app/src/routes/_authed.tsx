@@ -1,4 +1,5 @@
 import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
+import { FirstRunNamePrompt } from "../components/settings/profile";
 import { currentUserQueryOptions, needsOnboarding } from "../lib/auth/queries";
 import { CopilotProvider } from "../lib/copilot/provider";
 import { AppHotkeys } from "../lib/hotkeys/app-hotkeys";
@@ -26,6 +27,7 @@ export const Route = createFileRoute("/_authed")({
     <CopilotProvider>
       <AppHotkeys />
       <Outlet />
+      <FirstRunNamePrompt />
     </CopilotProvider>
   ),
 });

@@ -6,6 +6,7 @@ import {
   PageShell,
 } from "@/components/layout/page-shell";
 import { MessageListPreference } from "@/components/settings/message-list-preference";
+import { ProfileSettings } from "@/components/settings/profile";
 import { StandingInstructions } from "@/components/settings/standing-instructions";
 import { useTheme } from "@/components/theme-provider";
 import {
@@ -39,6 +40,7 @@ function RouteComponent() {
       description="Customize OpenBot’s appearance and message display. Message settings apply to your account; the theme applies only to this browser."
       title="Preferences"
     >
+      <ProfileSettings />
       <PageSection title="General">
         <PageRows>
           <Item size="sm">

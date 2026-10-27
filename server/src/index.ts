@@ -160,6 +160,7 @@ import {
   createIntelligenceClient,
   observeIntelligenceAuthentication,
 } from "./intelligence-client";
+import { reportIntelligenceEntitlement } from "./intelligence-entitlement-check";
 import {
   createLearningAutoAssign,
   probeLearningContainer,
@@ -178,33 +179,34 @@ import { createMemoryDefaults } from "./memory/defaults";
 import { createMemoryIngestion } from "./memory/ingestion";
 import { createIntelligenceMemory } from "./memory/intelligence";
 import { createMemoryStore } from "./memory/store";
-import { reportModelAvailability } from "./model-availability-check";
 import { memoryTools } from "./memory/tools";
-import { appAccessTools } from "./plugins/app-access-tool";
+import { reportModelAvailability } from "./model-availability-check";
 import { createSignInNotifier, createSignInResumer } from "./passwords/resume";
 import { createSignInService } from "./passwords/service";
 import { createPasswordStore } from "./passwords/store";
 import { createOnboardingStore } from "./people/onboarding";
+import { createProfileStore } from "./people/profile";
 import { createPeopleStore } from "./people/store";
-import { createAccountModeSwitch } from "./plugins/account-mode";
-import { assertActivatable, providerDecision } from "./plugins/broker";
 import { BROKERED_PROFILE } from "./plugins/access";
-import { useRoutineTools } from "./plugins/builtin-routines";
+import { createAccountModeSwitch } from "./plugins/account-mode";
+import { appAccessTools } from "./plugins/app-access-tool";
 import { useArcadeClient } from "./plugins/arcade";
 import { createArcadeClient } from "./plugins/arcade-adapter";
+import { assertActivatable, providerDecision } from "./plugins/broker";
+import { useRoutineTools } from "./plugins/builtin-routines";
 import { useComposioClient } from "./plugins/composio";
 import { createComposioClient } from "./plugins/composio-adapter";
 import { backfillBrokeredLogos } from "./plugins/logos";
 import { redirectUriFor } from "./plugins/oauth";
 import {
-  createSharedUseGate,
-  createSharedUseStore,
-} from "./plugins/shared-use-store";
-import {
   arcadeVerifierNotice,
   selectProviderWiring,
   storedProvider,
 } from "./plugins/provider-wiring";
+import {
+  createSharedUseGate,
+  createSharedUseStore,
+} from "./plugins/shared-use-store";
 import { createPluginStore } from "./plugins/store";
 import {
   grantedSkills,
@@ -249,7 +251,6 @@ import { createRoutineRunner } from "./routines/runner";
 import { createRoutineStore } from "./routines/store";
 import { createIntentRouter } from "./routing/classify";
 import { createModelCompleter } from "./routing/model";
-import { reportIntelligenceEntitlement } from "./intelligence-entitlement-check";
 import { createSelfHostBanner } from "./self-host-banner";
 import { createTeamBots } from "./team-bots/team-bots";
 import {
@@ -2576,6 +2577,7 @@ const app = createApp(
 
   identityStore,
   identityGithubCallback,
+  createProfileStore(database),
 );
 
 startHttpServer({
