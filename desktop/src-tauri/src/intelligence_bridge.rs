@@ -240,6 +240,12 @@ mod tests {
     }
 
     const OPEN: &str = "plugin:openbot-intelligence|open";
+    /// The setup page's own origin, which Tauri serves differently on Windows.
+    const SETUP_PAGE: &str = if cfg!(any(windows, target_os = "android")) {
+        "http://tauri.localhost"
+    } else {
+        "tauri://localhost"
+    };
 
     #[test]
     fn the_owned_app_origin_reaches_these_commands_and_nothing_else() {
@@ -253,7 +259,7 @@ mod tests {
         // Not the app's other commands, and not another port on the same address.
         assert!(ask(&window, page, "default_root").is_err());
         assert!(
-            ask(&window, "tauri://localhost", "default_root").is_ok(),
+            ask(&window, SETUP_PAGE, "default_root").is_ok(),
             "the setup page still reaches it, so the refusal above is the origin's"
         );
         assert!(ask(&window, "http://127.0.0.1:3011/", OPEN).is_err());
