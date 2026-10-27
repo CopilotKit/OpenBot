@@ -252,6 +252,65 @@ describe("Notion", () => {
   });
 });
 
+describe("Ouzap", () => {
+  const entry = catalogueEntry("ouzap");
+
+  test("is in the catalogue with the MCP transport", () => {
+    expect(entry).not.toBeNull();
+    expect(entry?.transport).toBeUndefined();
+    expect(entry?.host).toBe("https://ouzap.com.br");
+    expect(entry?.path).toBe("/mcp");
+  });
+
+  test("registers its client dynamically, with every endpoint pinned to https", () => {
+    if (entry?.auth.kind !== "user-oauth") throw new Error("wrong auth kind");
+    expect(entry.auth.clientRegistration).toBe("dynamic");
+    expect(entry.auth.registrationUrl?.startsWith("https://")).toBe(true);
+    expect(entry.auth.authorizationUrl.startsWith("https://")).toBe(true);
+    expect(entry.auth.tokenUrl.startsWith("https://")).toBe(true);
+    // Read and reply only; contacts:write is deliberately not asked for.
+    expect(entry.auth.scopes).toEqual([
+      "conversations",
+      "messages:read",
+      "messages:write",
+    ]);
+  });
+
+  test("pins the exact write list, so a dropped or renamed entry fails here", () => {
+    // Every one of these reaches a real person's phone, so the list is pinned literally.
+    expect(entry?.writeTools).toEqual([
+      "create_contact",
+      "reply_conversation",
+      "schedule_whatsapp_message",
+      "send_whatsapp_message",
+    ]);
+    for (const name of entry?.writeTools ?? []) {
+      expect(classifyTool(entry, name, true)).toBe("write");
+    }
+    expect(classifyTool(entry, "brand-new-tool", false)).toBe("write");
+  });
+
+  test("names its reads, so a tool Ouzap adds later is a write until reviewed", () => {
+    expect(entry?.readTools).toEqual([
+      "get_message_status",
+      "list_conversations",
+      "list_scheduled_messages",
+      "list_whatsapp_numbers",
+      "read_conversation",
+      "search_contacts",
+    ]);
+    for (const name of entry?.readTools ?? []) {
+      expect(classifyTool(entry, name, true)).toBe("read");
+    }
+    // Advertised but unreviewed: a new sending tool must not slip through as a read.
+    expect(classifyTool(entry, "send_whatsapp_template", true)).toBe("write");
+    // The read list does not loosen a vendor label that says write.
+    expect(classifyTool(entry, "list_conversations", true, "write")).toBe(
+      "write",
+    );
+  });
+});
+
 describe("Routines", () => {
   const entry = catalogueEntry("routines");
 

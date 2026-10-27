@@ -410,6 +410,64 @@ export const CATALOGUE: readonly CatalogueEntry[] = Object.freeze([
     docsUrl: "https://developers.notion.com/guides/mcp/build-mcp-client",
   },
   {
+    key: "ouzap",
+    title: "Ouzap",
+    vendor: "Ouzap",
+    summary: "WhatsApp conversations on the asker's Ouzap number.",
+    /*
+     * Ouzap's hosted MCP server, on the default MCP transport — the same shape as Notion: a public
+     * client that registers itself and proves itself with PKCE (`token_endpoint_auth_methods_supported`
+     * is `none`).
+     */
+    host: "https://ouzap.com.br",
+    path: "/mcp",
+    auth: {
+      kind: "user-oauth",
+      // From https://ouzap.com.br/.well-known/oauth-authorization-server, verified live.
+      authorizationUrl: "https://ouzap.com.br/oauth/authorize",
+      tokenUrl: "https://ouzap.com.br/oauth/token",
+      /*
+       * Ouzap publishes no revocation_endpoint. The token endpoint stands in, as it does for Notion
+       * by Notion's own choice; a disconnect still drops the grant here.
+       */
+      revokeUrl: "https://ouzap.com.br/oauth/token",
+      /*
+       * Read and reply, which is what Ouzap's consent screen describes. `contacts:write` is left out
+       * on purpose: nothing a Bot does in a conversation needs it, so `create_contact` fails at the
+       * vendor until somebody decides it should not.
+       */
+      scopes: Object.freeze([
+        "conversations",
+        "messages:read",
+        "messages:write",
+      ]),
+      clientRegistration: "dynamic",
+      registrationUrl: "https://ouzap.com.br/oauth/register",
+    },
+    /*
+     * Everything that sends a message or creates a record. `create_contact` stays listed for the
+     * reason Drive's writes do. The read list below is what actually closes the gap: a write tool
+     * Ouzap adds later reaches a real person's phone, so it must not classify as a read just because
+     * nobody listed it here.
+     */
+    writeTools: Object.freeze([
+      "create_contact",
+      "reply_conversation",
+      "schedule_whatsapp_message",
+      "send_whatsapp_message",
+    ]),
+    // The only reads, so anything else Ouzap advertises is a write until reviewed.
+    readTools: Object.freeze([
+      "get_message_status",
+      "list_conversations",
+      "list_scheduled_messages",
+      "list_whatsapp_numbers",
+      "read_conversation",
+      "search_contacts",
+    ]),
+    docsUrl: "https://ouzap.com.br/whatsapp-para-agentes",
+  },
+  {
     key: "routines",
     title: "Routines",
     vendor: "OpenBot",

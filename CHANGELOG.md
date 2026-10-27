@@ -43,6 +43,16 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `computers/<Bot id>` on the workspace volume (below). Files saved before the upgrade stay at the
   root of the volume, where no Bot sees them; move them into a Bot's folder to give them back.
 
+### Ouzap joins the connector catalogue
+
+Ouzap, a Brazilian WhatsApp gateway with a hosted MCP server, is now a governed connector, connected
+the way Notion is: this deployment registers itself on first connect, so there is no client to set
+up, and each person consents with their own Ouzap account. Bots can list, read and reply to that
+number's WhatsApp conversations and start new ones. Sending, replying, scheduling and creating a
+contact are writes, so a boundary written about writes covers every message a Bot could send.
+`contacts:write` is not requested, so `create_contact` is refused by Ouzap. Setup is enable at
+`/admin/plugins/ouzap`, connect at `/settings/connected-accounts`, refresh tools, then grant.
+
 ### Each Bot on a shared computer has its own files
 
 A computer that serves many Bots kept one folder of files for all of them, so a note one Bot saved
