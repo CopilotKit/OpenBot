@@ -171,9 +171,57 @@ pub fn needs_fetch(root: &Path, wanted: &str) -> bool {
     }
     match installed(root) {
         // A deployment laid out by an app that copied less is missing something this one runs.
-        Some(found) => found.version != wanted || found.layout != layout(),
+        Some(found) => {
+            found.version != wanted || found.layout != layout() || predates_containers(root)
+        }
         None => true,
     }
+}
+
+/// Whether the deployment on disk is a release from before OpenBot's server and worker were
+/// Compose services.
+///
+/// Such a release ran both as Bun processes on the host, and this app no longer starts those. Its
+/// Compose file has no `server` or `worker` to raise, and its server image has no worker in it, so
+/// keeping its pin would leave an installation that used to start unable to. Answered from the
+/// Compose file because that is what is missing; an unreadable or absent file is a damaged
+/// deployment, not an old one, and the ordinary repair of the pinned version covers it.
+pub fn predates_containers(root: &Path) -> bool {
+    let Ok(text) = std::fs::read_to_string(root.join("docker-compose.yml")) else {
+        return false;
+    };
+    let services = compose_services(&text);
+    !(services.contains(&"server") && services.contains(&"worker"))
+}
+
+/// The service names in a Compose file, read line by line.
+///
+/// Not a YAML parser, and not meant to be one: it reads the shape `docker-compose.yml` in this
+/// repository has always had, a top-level `services:` with each service two spaces in. That is the
+/// only file this is ever pointed at, and it is enough to tell whether a service is declared.
+fn compose_services(text: &str) -> Vec<&str> {
+    let mut in_services = false;
+    let mut services = Vec::new();
+    for line in text.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        if !line.starts_with(' ') {
+            in_services = line.starts_with("services:");
+            continue;
+        }
+        let Some(entry) = line.strip_prefix("  ").filter(|_| in_services) else {
+            continue;
+        };
+        if entry.starts_with(' ') {
+            continue;
+        }
+        if let Some((name, _)) = entry.split_once(':') {
+            services.push(name.trim().trim_matches(|c| c == '"' || c == '\''));
+        }
+    }
+    services
 }
 
 /// What this app lays out, in a fixed order, as recorded in the stamp.
@@ -426,6 +474,49 @@ mod tests {
         let error = get_waiting(&url, std::time::Duration::from_millis(500)).unwrap_err();
         assert!(error.starts_with("the download did not finish"), "{error}");
         served.join().unwrap();
+    }
+
+    #[test]
+    fn this_repositorys_compose_file_runs_the_server_and_worker_as_services() {
+        let text = include_str!("../../../docker-compose.yml");
+        let services = compose_services(text);
+        for name in ["postgres", "supervisor", "server", "worker"] {
+            assert!(services.contains(&name), "{name} not in {services:?}");
+        }
+    }
+
+    #[test]
+    fn a_release_whose_server_ran_on_the_host_is_fetched_again_at_its_own_version() {
+        let root = crate::test_support::temp_root("deployment-host-server");
+        std::fs::create_dir_all(&root).unwrap();
+        // The shape of every release before the server moved into Compose: services, none of them
+        // OpenBot's own, and one commented-out line that must not count.
+        std::fs::write(
+            root.join("docker-compose.yml"),
+            "services:\n  postgres:\n    image: postgres\n  # server: on the host\n  supervisor:\n    \
+             environment:\n      server: x\nvolumes:\n  worker:\n",
+        )
+        .unwrap();
+        std::fs::write(images_path(&root), "{}").unwrap();
+        record(&root, "v0.0.15").unwrap();
+        assert!(predates_containers(&root));
+        assert!(needs_fetch(&root, "v0.0.15"));
+
+        std::fs::write(
+            root.join("docker-compose.yml"),
+            "services:\n  postgres: {}\n  server:\n    profiles: [\"openbot\"]\n  worker:\n    \
+             profiles: [\"openbot\"]\n",
+        )
+        .unwrap();
+        assert!(!predates_containers(&root));
+        assert!(!needs_fetch(&root, "v0.0.15"));
+
+        std::fs::remove_file(root.join("docker-compose.yml")).unwrap();
+        assert!(
+            !predates_containers(&root),
+            "a missing file is damage, not age"
+        );
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     fn manifest(names: &[&str]) -> Images {

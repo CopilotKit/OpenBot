@@ -983,6 +983,19 @@ async fn deployment_ready<R: tauri::Runtime>(
             error,
         )
     })?;
+    // Only reachable when the latest release itself still ran the server on the host, which is an
+    // app published ahead of the release it needs. Saying so beats the Compose error that follows.
+    if deployment::predates_containers(root) {
+        let detail = format!(
+            "OpenBot {version} runs its server on the host; this app runs it in a container."
+        );
+        report(app, "deployment", false, detail.clone());
+        return Err(Problem::with(
+            "This OpenBot app needs a newer OpenBot release than the latest one. Try again \
+             once it is published.",
+            detail,
+        ));
+    }
     report(
         app,
         "deployment",
@@ -7347,7 +7360,7 @@ mod tests {
         assert_eq!(deployment::installed(&root).unwrap().version, "v0.0.7");
         assert_eq!(
             std::fs::read_to_string(root.join("docker-compose.yml")).unwrap(),
-            "services: {}\n"
+            INSTALLED_COMPOSE
         );
         std::fs::remove_dir_all(root).unwrap();
     }
@@ -13071,6 +13084,9 @@ fn main() {
         let _ = std::fs::remove_dir_all(record.parent().expect("record parent"));
     }
 
+    /// A Compose file from a release that runs the server and worker as services.
+    const INSTALLED_COMPOSE: &str = "services:\n  server: {}\n  worker: {}\n";
+
     fn write_installed_deployment(root: &Path) {
         const DEPLOYMENT_VERSION: &str = "v0.0.8";
         std::fs::create_dir_all(root.join("server")).unwrap();
@@ -13079,7 +13095,7 @@ fn main() {
         std::fs::create_dir_all(root.join("shared")).unwrap();
         std::fs::create_dir_all(root.join("toolkit")).unwrap();
         std::fs::create_dir_all(root.join("extension")).unwrap();
-        std::fs::write(root.join("docker-compose.yml"), "services: {}\n").unwrap();
+        std::fs::write(root.join("docker-compose.yml"), INSTALLED_COMPOSE).unwrap();
         std::fs::write(
             root.join("app/package.json"),
             r#"{"scripts":{"serve":"vite preview"}}"#,

@@ -507,6 +507,12 @@ fn require_with(
     if let Some(problem) = stack::deployment_problem(root) {
         return Err(required(problem));
     }
+    // Install moves this one to the latest release; Start cannot. See `deployment_release`.
+    if deployment::predates_containers(root) {
+        return Err(required(
+            "The deployment is a release from before OpenBot ran its server in a container.",
+        ));
+    }
     // A deployment laid out by an app that copied less still matches its own fingerprint. Install
     // lays it out again; Start cannot.
     if deployment::installed(root)
@@ -536,6 +542,9 @@ pub fn image_settings(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A Compose file from a release that runs the server and worker as services.
+    const COMPOSE: &str = "services:\n  server: {}\n  worker: {}\n";
 
     #[test]
     fn the_saved_engine_outlives_a_new_preparation() {
@@ -607,7 +616,7 @@ mod tests {
             )
             .unwrap();
             std::fs::write(root.join("bun.lock"), "synthetic-lock").unwrap();
-            std::fs::write(root.join("docker-compose.yml"), "services: {}\n").unwrap();
+            std::fs::write(root.join("docker-compose.yml"), COMPOSE).unwrap();
             std::fs::write(root.join("container-images.json"), "{}").unwrap();
             deployment::record(&root, "v-test").unwrap();
             let source = root.join("runtime.rs");
@@ -736,6 +745,22 @@ fn main() {
     }
 
     #[test]
+    fn a_release_whose_server_ran_on_the_host_must_be_installed_again_before_start() {
+        let f = Fixture::new();
+        std::fs::write(
+            f.root.join("docker-compose.yml"),
+            "services:\n  postgres: {}\n  supervisor: {}\n",
+        )
+        .unwrap();
+        f.prepared(None);
+        let problem = require_with(&f.root, Some(&None), |_| Ok(())).unwrap_err();
+        assert!(
+            format!("{problem:?}").contains("before OpenBot ran its server in a container"),
+            "{problem:?}"
+        );
+    }
+
+    #[test]
     fn changed_bot_requires_installation_but_host_packages_do_not() {
         let f = Fixture::new();
         let chosen = Some(HarnessChoice {
@@ -755,7 +780,11 @@ fn main() {
         // The images still are.
         assert!(require_with(&f.root, Some(&chosen), |_| Err(required("missing image"))).is_err());
         // And the deployment Compose runs.
-        std::fs::write(f.root.join("docker-compose.yml"), "services: {x: {}}\n").unwrap();
+        std::fs::write(
+            f.root.join("docker-compose.yml"),
+            format!("{COMPOSE}  x: {{}}\n"),
+        )
+        .unwrap();
         assert!(require_with(&f.root, Some(&chosen), |_| Ok(())).is_err());
     }
 
