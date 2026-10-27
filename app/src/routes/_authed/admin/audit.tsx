@@ -133,7 +133,7 @@ function AuditPage() {
           </Button>
         </div>
       }
-      description="Every action a Bot took, and every one this deployment's policy refused."
+      description="Review Bot actions and actions blocked by this deployment’s policy."
       title="Audit"
       width="wide"
     >

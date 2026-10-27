@@ -74,7 +74,7 @@ function NewCredentialPage() {
   return (
     <PageShell
       backButton={BACK}
-      description="Saved for this deployment. You won't see the secret again."
+      description="Save a credential for this deployment. You won’t be able to view the secret after saving it."
       title="Add credential"
     >
       <form
