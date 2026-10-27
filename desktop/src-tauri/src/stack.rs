@@ -1715,6 +1715,46 @@ fn configure_local_browser(
     Ok(())
 }
 
+/// The last build error can precede Bun's wrapper stack, version, and exit message.
+/// Bound both the file read and displayed lines while preserving that useful context.
+fn tail_of(logs: &Path, name: &str) -> String {
+    use std::io::{Read, Seek, SeekFrom};
+    const MAX_BYTES: u64 = 8 * 1024;
+    let read = || -> std::io::Result<Vec<u8>> {
+        let mut file = std::fs::File::open(logs.join(format!("{name}.log")))?;
+        let offset = file.metadata()?.len().saturating_sub(MAX_BYTES);
+        file.seek(SeekFrom::Start(offset))?;
+        let mut bytes = Vec::new();
+        file.take(MAX_BYTES).read_to_end(&mut bytes)?;
+        // Do not show a truncated first line, which may include part of a credential.
+        if offset > 0 {
+            let first_line = bytes.iter().position(|byte| *byte == b'\n');
+            bytes.drain(..first_line.map_or(bytes.len(), |index| index + 1));
+        }
+        Ok(bytes)
+    };
+    let bytes = match read() {
+        Ok(bytes) => bytes,
+        Err(error) => return format!("Could not read {name}.log: {error}"),
+    };
+    let text = String::from_utf8_lossy(&bytes);
+    let tail: Vec<&str> = text
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .rev()
+        .take(40)
+        .collect();
+    if tail.is_empty() {
+        return format!("No complete lines were available in the tail of {name}.log.");
+    }
+    let mut lines = tail;
+    lines.reverse();
+    format!(
+        "Last from {name}.log (up to 40 lines, 8 KiB):\n{}",
+        lines.join("\n")
+    )
+}
+
 /// Keep a replacement handle even if refreshing durable ownership fails. The caller must
 /// report success only after this Result succeeds; Stop still has the handle on failure.
 #[cfg(unix)]
@@ -3321,6 +3361,93 @@ pub fn ports_we_already_publish(engine: &Address, root: &Path) -> std::collectio
 }
 
 /**
+Whether this deployment's own `server` container publishes every one of `ports` on the host.
+
+THIS IS WHAT OWNERSHIP MEANS NOW. The server and the app used to be host processes, and a port
+belonged to this deployment when a process recorded in its `host-pids.json` was listening on it.
+They are one container now, and the listener on the host is the engine's port forwarder, which no
+pid file names. What does name it is Compose: this project's `server` row lists the host ports it
+was given. Something else answering on the same port, another installation's server or a stranger,
+is not in that row.
+
+Every service rather than `server` alone, read row by row: naming a service on `ps` makes Compose
+resolve it, and `server` sits behind a profile this command would otherwise have to repeat.
+*/
+pub fn server_publishes(engine: &Address, root: &Path, ports: &[u16]) -> Result<bool, Problem> {
+    let operation = format!("{} compose ps", engine.engine.binary());
+    let output = compose_command(engine, root, &Secrets::new())
+        .args(["ps", "--format", "{{.Service}}\t{{.Ports}}"])
+        .output()
+        .map_err(|error| {
+            Problem::with(
+                "OpenBot could not inspect its Compose services.",
+                format!("could not run {operation}: {error}"),
+            )
+        })?;
+    if !output.status.success() {
+        return Err(Problem::with(
+            "OpenBot could not inspect its Compose services.",
+            format!("{operation}: {}", command_said(&output.stderr)),
+        ));
+    }
+    Ok(server_publishes_in(
+        &String::from_utf8_lossy(&output.stdout),
+        ports,
+    ))
+}
+
+/// `server_publishes` over a `{{.Service}}\t{{.Ports}}` listing. Pure, for the reason
+/// `published_in` is.
+pub fn server_publishes_in(listing: &str, ports: &[u16]) -> bool {
+    let published: std::collections::HashSet<u16> = listing
+        .lines()
+        .filter_map(|row| row.split_once('\t'))
+        .filter(|(service, _)| service.trim() == "server")
+        .flat_map(|(_, mappings)| published_in(mappings))
+        .collect();
+    !ports.is_empty() && ports.iter().all(|port| published.contains(port))
+}
+
+/**
+Restart OpenBot itself, the server and the worker, and leave everything else running.
+
+What the Status window's Restart did to the host processes, now done by the engine that runs them:
+the database and the Bots stay up, so nothing is lost and it takes seconds. The profile is named
+because both services sit behind it, and Compose refuses to restart a service it cannot see.
+*/
+pub fn restart_openbot(engine: &Address, root: &Path) -> Result<(), String> {
+    let output = compose_command(engine, root, &Secrets::new())
+        .args(["--profile", OPENBOT_PROFILE, "restart", "server", "worker"])
+        .output()
+        .map_err(|error| format!("could not restart OpenBot: {error}"))?;
+    if output.status.success() {
+        return Ok(());
+    }
+    Err(command_said(&output.stderr))
+}
+
+/**
+The name Compose gives this deployment's project, and so the prefix of its networks.
+
+The desktop runs Compose from the deployment folder with no `-p` and the file names no `name:`, so
+the project is the folder's own name as Compose normalises it: lower case, with everything but
+`a-z`, `0-9`, `_` and `-` dropped, then any leading `_` or `-` trimmed. Worked out here rather than
+asked of Compose, because the answer is wanted before `up`, to tell the supervisor which network to
+put each Bot's computer on, and it has to match what `up` is about to create.
+*/
+pub fn project_name(root: &Path) -> String {
+    let base = root
+        .file_name()
+        .map(|name| name.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+    base.chars()
+        .filter(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == '_' || *c == '-')
+        .collect::<String>()
+        .trim_start_matches(['_', '-'])
+        .to_string()
+}
+
+/**
 The published ports in a `compose ps` listing.
 
 Pure, because the format is the contract and a regex over engine output is exactly the thing that
@@ -3406,21 +3533,11 @@ pub fn port_already_taken_except(
     None
 }
 
-/// Wait until the API answers, or say why it never did.
-///
-/// Spawning is not starting. Each of these three can exit in the first second for a reason that has
-/// nothing to do with the others, and a shell that reports "running" because it called `spawn`
-/// three times is telling somebody the stack is up while nothing is listening. That is worse than
-/// an error, because the next thing they do is open a page that will not load and go looking for
-/// the fault in the wrong place.
-///
-/// So: watch the child, and watch the port. Whichever fails first is what gets reported, with the
-/// tail of the log that explains it.
-/// The two things that have to answer before anybody is told the stack is up.
+/// The two addresses that have to answer before anybody is told the stack is up.
 ///
 /// The API alone is not enough. The window navigates to the app, so a person told "running" who
-/// then gets a blank window has been told something that is not true, and the API was answering the
-/// whole time.
+/// then gets a blank window has been told something that is not true. Both are the one `server`
+/// container now, published on two host ports, and either mapping can be the one that is missing.
 pub struct Ready {
     pub api: u16,
     pub app: u16,
@@ -3463,33 +3580,28 @@ pub fn app_url(port: u16) -> Option<String> {
     answering_at(port, "/")
 }
 
-/// Wait until the stack is genuinely usable, or say which part is not.
+/// Wait until the server container answers its health check on both host ports, or say which
+/// one never did.
 ///
-/// Watches the children as well as the ports, because three processes that died leave a port
-/// unanswered for the same length of time as three that are still starting, and only one of those
-/// is worth waiting out.
-pub fn wait_until_answering(
-    children: &mut [(&'static str, std::process::Child)],
-    logs: &Path,
+/// `compose up` returns once it has asked for the container, not once the server inside it is
+/// listening, and a server still running its first start leaves the port unanswered for the same
+/// length of time as one that is crash-looping under its restart policy. Only an answer settles it.
+///
+/// `keep_going` is asked between polls, so a Stop pressed during the wait ends it there rather than
+/// after the full patience. What a stopped wait returns does not matter: the caller asks its own
+/// ticket first, and the cancellation is what it reports.
+pub fn wait_until_healthy(
     ready: &Ready,
     patience: std::time::Duration,
+    keep_going: impl Fn() -> bool,
 ) -> Result<(), String> {
     let deadline = std::time::Instant::now() + patience;
     let mut api_up = false;
 
-    while std::time::Instant::now() < deadline {
-        for (name, child) in children.iter_mut() {
-            if let Ok(Some(status)) = child.try_wait() {
-                return Err(format!(
-                    "{name} stopped straight away ({status}). {}",
-                    tail_of(logs, name)
-                ));
-            }
-        }
-
+    while std::time::Instant::now() < deadline && keep_going() {
         // An earlier API success is no longer sufficient when the app becomes ready later.
-        api_up = answering_at(ready.api, "/api/capabilities").is_some();
-        if api_up && app_url(ready.app).is_some() {
+        api_up = answering_at(ready.api, "/health").is_some();
+        if api_up && answering_at(ready.app, "/health").is_some() {
             return Ok(());
         }
 
@@ -3498,56 +3610,11 @@ pub fn wait_until_answering(
 
     if api_up {
         return Err(format!(
-            "the API is answering, but the app is not answering on port {}. {}",
-            ready.app,
-            tail_of(logs, "app")
+            "the API is answering, but the app is not answering on port {}.",
+            ready.app
         ));
     }
-    Err(format!(
-        "the API is not answering on port {}. {}",
-        ready.api,
-        tail_of(logs, "server")
-    ))
-}
-
-/// The last build error can precede Bun's wrapper stack, version, and exit message.
-/// Bound both the file read and displayed lines while preserving that useful context.
-fn tail_of(logs: &Path, name: &str) -> String {
-    use std::io::{Read, Seek, SeekFrom};
-    const MAX_BYTES: u64 = 8 * 1024;
-    let read = || -> std::io::Result<Vec<u8>> {
-        let mut file = std::fs::File::open(logs.join(format!("{name}.log")))?;
-        let offset = file.metadata()?.len().saturating_sub(MAX_BYTES);
-        file.seek(SeekFrom::Start(offset))?;
-        let mut bytes = Vec::new();
-        file.take(MAX_BYTES).read_to_end(&mut bytes)?;
-        // Do not show a truncated first line, which may include part of a credential.
-        if offset > 0 {
-            let first_line = bytes.iter().position(|byte| *byte == b'\n');
-            bytes.drain(..first_line.map_or(bytes.len(), |index| index + 1));
-        }
-        Ok(bytes)
-    };
-    let bytes = match read() {
-        Ok(bytes) => bytes,
-        Err(error) => return format!("Could not read {name}.log: {error}"),
-    };
-    let text = String::from_utf8_lossy(&bytes);
-    let tail: Vec<&str> = text
-        .lines()
-        .filter(|line| !line.trim().is_empty())
-        .rev()
-        .take(40)
-        .collect();
-    if tail.is_empty() {
-        return format!("No complete lines were available in the tail of {name}.log.");
-    }
-    let mut lines = tail;
-    lines.reverse();
-    format!(
-        "Last from {name}.log (up to 40 lines, 8 KiB):\n{}",
-        lines.join("\n")
-    )
+    Err(format!("the API is not answering on port {}.", ready.api))
 }
 
 /// Keep a short startup headline and useful local diagnostics, with credentials removed.
@@ -3689,29 +3756,6 @@ fn dirs_home() -> PathBuf {
 mod tests {
     use super::*;
     use crate::test_support::temp_root;
-
-    #[test]
-    fn startup_log_tail_retains_build_error_before_wrapper_without_loading_whole_log() {
-        let root = temp_root("startup-build-diagnostic");
-        std::fs::create_dir_all(&root).unwrap();
-        let mut log = "old output must be omitted\n".repeat(1_000);
-        log.push_str("error during build: Could not resolve imported module\n");
-        log.push_str(&"    at synthetic build frame\n".repeat(20));
-        log.push_str("    at run (app/scripts/serve-or-build.ts:36:11)\n");
-        log.push_str("Bun v1.2.15 (macOS arm64)\nerror: script serve exited with code 1\n");
-        std::fs::write(root.join("app.log"), log).unwrap();
-
-        let detail = tail_of(&root, "app");
-        assert!(
-            detail.contains("Could not resolve imported module"),
-            "{detail}"
-        );
-        assert!(detail.contains("serve-or-build.ts:36:11"), "{detail}");
-        assert!(!detail.contains(&"old output must be omitted\n".repeat(20)));
-        assert!(detail.len() < 8_500, "unbounded startup diagnostic");
-        assert!(detail.lines().count() <= 42, "too many startup log lines");
-        std::fs::remove_dir_all(root).unwrap();
-    }
 
     #[test]
     fn startup_problem_keeps_build_and_cleanup_details_but_removes_credentials() {
@@ -8484,7 +8528,14 @@ fn main() {
         let services = up(&podman, &root, true, BundledBots::none(), &Secrets::new()).unwrap();
         assert_eq!(
             services,
-            ["postgres", "supervisor", "agent-computer", "agent-harness"]
+            [
+                "postgres",
+                "supervisor",
+                "agent-computer",
+                "server",
+                "worker",
+                "agent-harness"
+            ]
         );
         migrate(&podman, &root, &Secrets::new()).unwrap();
         let log = std::fs::read_to_string(&record).unwrap();
@@ -8638,7 +8689,9 @@ fn main() {
                 .unwrap();
             let snapshot = log.find("ps --quiet").unwrap();
             let computers = log.find("stop current late restarted").unwrap();
-            let teardown = log.find("--profile harness down").unwrap();
+            let teardown = log
+                .find("--profile harness --profile openbot down")
+                .unwrap();
             assert!(
                 config < supervisor
                     && supervisor < snapshot
@@ -8717,7 +8770,7 @@ fn main() {
             );
             assert!(
                 log.contains(&format!(
-                    "{prefix}compose -f docker-compose.yml --profile harness down"
+                    "{prefix}compose -f docker-compose.yml --profile harness --profile openbot down"
                 )),
                 "{log}"
             );
@@ -8935,7 +8988,7 @@ fn main() {
         }
 
         fn wait(&mut self, patience: std::time::Duration) -> Result<(), String> {
-            wait_until_answering(&mut self.children, &self.root, &self.ready, patience)
+            wait_until_healthy(&self.ready, patience, || true)
         }
 
         fn requests(&self, name: &str) -> String {
@@ -8973,31 +9026,30 @@ fn main() {
             .children
             .iter_mut()
             .all(|(_, child)| child.try_wait().unwrap().is_none());
-        let api_now = answering_at(fixture.ready.api, "/api/capabilities");
-        let app_now = app_url(fixture.ready.app);
+        let api_now = answering_at(fixture.ready.api, "/health");
+        let app_now = answering_at(fixture.ready.app, "/health");
         eprintln!("current API readiness: result={result:?}; children_alive={live}; api_requests={api_requests:?}; api_now={api_now:?}; app_now={app_now:?}");
         drop(fixture);
         assert!(live && api_now.is_none() && app_now.is_some());
         let error = result.expect_err("a historical API success cannot satisfy readiness");
         assert!(api_requests.lines().count() >= 2, "{api_requests}");
         assert!(error.contains("the API is not answering"), "{error}");
-        assert!(error.contains("synthetic server diagnostic"), "{error}");
     }
 
     #[test]
-    fn readiness_accepts_currently_healthy_api_and_app() {
+    fn readiness_asks_the_server_health_check_on_both_ports() {
         let mut fixture = ReadinessFixture::new("200", "200");
         let result = fixture.wait(std::time::Duration::from_secs(2));
         let api_requests = fixture.requests("server");
         let app_requests = fixture.requests("app");
         drop(fixture);
         assert!(result.is_ok(), "{result:?}");
-        assert!(api_requests.contains("200 GET /api/capabilities HTTP/1.1"));
-        assert!(app_requests.contains("200 GET / HTTP/1.1"));
+        assert!(api_requests.contains("200 GET /health HTTP/1.1"));
+        assert!(app_requests.contains("200 GET /health HTTP/1.1"));
     }
 
     #[test]
-    fn readiness_timeout_names_the_currently_unavailable_service() {
+    fn readiness_timeout_names_the_currently_unavailable_port() {
         for (api, app, missing) in [("503", "200", "server"), ("200", "503", "app")] {
             let mut fixture = ReadinessFixture::new(api, app);
             let result = fixture.wait(std::time::Duration::from_millis(100));
@@ -9013,26 +9065,52 @@ fn main() {
                 error.contains(&format!("the {service} is not answering on port {port}")),
                 "{error}"
             );
-            assert!(
-                error.contains(&format!("synthetic {missing} diagnostic")),
-                "{error}"
-            );
         }
     }
 
     #[test]
-    fn readiness_reports_child_exit_without_waiting_for_timeout() {
-        let mut fixture = ReadinessFixture::new("exit", "200");
+    fn readiness_ends_at_once_when_the_start_is_stopped() {
+        // Port 1 needs privilege to bind, so nothing here will ever answer it.
+        let ready = Ready { api: 1, app: 1 };
         let started = std::time::Instant::now();
-        let result = fixture.wait(std::time::Duration::from_secs(30));
-        let elapsed = started.elapsed();
-        let status = fixture.children[0].1.try_wait().unwrap().unwrap();
-        drop(fixture);
-        let error = result.unwrap_err();
-        assert!(elapsed < std::time::Duration::from_secs(5), "{elapsed:?}");
-        assert_eq!(status.code(), Some(17));
-        assert!(error.contains("server stopped straight away"), "{error}");
-        assert!(error.contains("synthetic server diagnostic"), "{error}");
+        let result = wait_until_healthy(&ready, std::time::Duration::from_secs(30), || false);
+        assert!(result.is_err());
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(5),
+            "a stopped Start sat out the readiness wait"
+        );
+    }
+
+    #[test]
+    fn project_name_is_the_folder_name_as_compose_normalises_it() {
+        assert_eq!(project_name(Path::new("/Users/someone/OpenBot")), "openbot");
+        assert_eq!(
+            project_name(Path::new("/home/someone/My OpenBot!")),
+            "myopenbot"
+        );
+        assert_eq!(project_name(Path::new("/srv/_x")), "x");
+        assert_eq!(project_name(Path::new("/srv/-_open.bot_2-")), "openbot_2-");
+        assert_eq!(
+            project_name(Path::new("C:/Users/someone/ÖpenBot")),
+            "penbot"
+        );
+    }
+
+    #[test]
+    fn only_the_server_row_can_own_the_app_and_api_ports() {
+        let listing = "postgres\t127.0.0.1:5432->5432/tcp\n\
+            server\t127.0.0.1:3010->3001/tcp, [::1]:3010->3001/tcp, 127.0.0.1:3001->3001/tcp, [::1]:3001->3001/tcp\n\
+            worker\t\n";
+        assert!(server_publishes_in(listing, &[3001, 3010]));
+        assert!(server_publishes_in(listing, &[3001]));
+        // Published by the project, but not by the server: still not the app.
+        assert!(!server_publishes_in(listing, &[3001, 5432]));
+        assert!(!server_publishes_in(listing, &[3002]));
+        assert!(!server_publishes_in("", &[3001]));
+        assert!(
+            !server_publishes_in(listing, &[]),
+            "nothing asked is nothing proven"
+        );
     }
 
     #[test]

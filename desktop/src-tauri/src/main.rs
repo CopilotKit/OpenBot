@@ -19,7 +19,7 @@ use openbot_desktop_lib::{
     install, local_browser, local_eval, local_eval_state, preparation,
     problem::{LeftoverReset, Problem},
     provider, pull_metrics, quiet, recorder_external, recorder_host, recorder_install, stack,
-    supervise, telemetry, tray, windows as win,
+    telemetry, tray, windows as win,
 };
 
 const QUIT_CLEANUP_NOTICE_FILE: &str = ".openbot-quit-cleanup-notice";
@@ -37,22 +37,20 @@ use tauri::{Emitter, Manager};
 struct Shell {
     /// Session-only local folder authority; shutdown retires it before stopping the API server.
     host_access: Mutex<Option<host_access::HostAccess>>,
-    /// Named, because a restart policy that cannot say which process died cannot start it again.
-    children: Mutex<Vec<(&'static str, std::process::Child)>>,
     /// Native Linux engine API owned by this desktop session, kept through Stop/Start.
     #[cfg(target_os = "linux")]
     podman_api: Mutex<engine::local_api::Service>,
     /// Which run is the current one.
     ///
-    /// Stopping and starting again inside two seconds would otherwise leave the previous watcher
-    /// alive beside the new one, both answering the same death, and a process restarted twice is
-    /// one process and one orphan holding a port.
+    /// Stopping and starting again inside two seconds would otherwise leave the previous run's
+    /// connection watcher alive beside the new one, both sending the window back to setup for the
+    /// same refusal, and a recovery marked by the old run would outlive the run that cleared it.
     generation: std::sync::atomic::AtomicU64,
     /// Cancellation of pending Start is independent of the hosts still serving the previous run.
     start_generation: std::sync::atomic::AtomicU64,
     /// Stop serializes with synchronous startup side effects, never with an async wait.
     startup: Mutex<()>,
-    /// A cancelled attempt must finish returning its unpublished children before another starts.
+    /// A cancelled attempt must finish unwinding before another starts.
     starting: std::sync::atomic::AtomicBool,
     /// An explicit Stop must survive setup navigation; a new app session may resume again.
     stopped_in_session: std::sync::atomic::AtomicBool,
@@ -1454,10 +1452,7 @@ fn reset_leftover_database_with(
     }
     let attempt = StartAttempt::begin(shell)?;
     let _startup = attempt.lock_current()?;
-    if shell.containers.lock().unwrap().is_some()
-        || shell.root.lock().unwrap().is_some()
-        || !shell.children.lock().unwrap().is_empty()
-    {
+    if shell.containers.lock().unwrap().is_some() || shell.root.lock().unwrap().is_some() {
         return Err(Problem::plain("OpenBot still owns running services. Choose Stop OpenBot before resetting leftover data."));
     }
     if shell
@@ -1531,7 +1526,7 @@ async fn reset_leftover_database<R: tauri::Runtime>(
     )
 }
 
-/// Write the `.env`, raise the containers, migrate, then start the three host processes.
+/// Write the `.env`, raise the containers, migrate, then wait for the server container to answer.
 #[tauri::command]
 #[allow(
     clippy::too_many_arguments,
@@ -1720,7 +1715,15 @@ async fn start_stack_inner<R: tauri::Runtime>(
         attempt.require_current()?;
     }
 
-    let (logs, bun, mut secrets, ports, local_browser) = {
+    // Minted before Compose, because the server is a container now and Compose is how it gets its
+    // environment. Never persisted: it goes into `secrets` only after they are written to the
+    // credential store, and the Compose file names it for the `server` service alone, so model
+    // workers, Bots and the worker cannot impersonate the native approval transport.
+    use base64::Engine as _;
+    let host_token =
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(rand::random::<[u8; 32]>());
+
+    let (found, secrets, ports) = {
         let _startup = attempt.lock_current()?;
 
         // Belt and braces: a fetch that reported success and left something out is still not a
@@ -1749,7 +1752,7 @@ async fn start_stack_inner<R: tauri::Runtime>(
         #[cfg(target_os = "linux")]
         let status = found.status();
         acquire::prepare_for_compose(&found)?;
-        let bun = preparation::require(&root, Some(&requested_harness), &found)?;
+        preparation::require(&root, Some(&requested_harness), &found)?;
         // An installation from before engines were saved is pinned to the one its images were
         // just found on. Best effort: Start does not fail over a hint for next time.
         if saved.is_none() {
@@ -1781,7 +1784,14 @@ async fn start_stack_inner<R: tauri::Runtime>(
             *shell.leftover_database.lock().unwrap() = leftover_offer(problem, &root, &found);
         })?;
 
-        // Only this deployment's recorded hosts are reclaimed; its existing containers are reusable.
+        /*
+         * Only this deployment's recorded hosts are reclaimed; its existing containers are reusable.
+         *
+         * THIS IS ALSO THE UPGRADE. An installation from before the server was a container still
+         * has its Bun server, app and worker on the host, recorded in `host-pids.json` and holding
+         * the very ports the `server` container is about to publish. Stopping them here, and waiting
+         * for their sockets to close, is what lets that `up` bind them.
+         */
         let previous_ports = openbot_env::Ports::read(&root).map_err(|error| {
             Problem::with("OpenBot could not read its local ports.", error.to_string())
         })?;
@@ -1847,6 +1857,40 @@ async fn start_stack_inner<R: tauri::Runtime>(
             settings.insert("OPENBOT_ORGANIZATION_AUTH_URL".into(), authority);
         }
         openbot_env::explain_browser_absence(&mut settings, browser_absent);
+        /*
+         * Each Bot's computer on the network the server container is on.
+         *
+         * The supervisor publishes a computer on a loopback port of the host unless this names a
+         * network to attach it to instead, and a loopback port on the host is not one the server
+         * container can open. `default` is the network the server shares with the Bots, under the
+         * project name Compose is about to give it. See `stack::project_name`.
+         */
+        settings.insert(
+            "COMPUTER_NETWORK".into(),
+            format!("{}_default", stack::project_name(&root)),
+        );
+        /*
+         * On Linux the server runs as the person, not as the image's user.
+         *
+         * The model sign-in file is theirs and readable by nobody else, and a bind mount on Linux
+         * keeps the host's numbers, so the image's 1001 could not read it. The deployment folder is
+         * the one this app made for them, so its owner is who that is, with no call out to `id`.
+         * Docker Desktop on macOS and Windows maps ownership itself, and there the default stays.
+         */
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::unix::fs::MetadataExt as _;
+            let owner = std::fs::metadata(&root).map_err(|error| {
+                Problem::with(
+                    "OpenBot could not read its installation folder.",
+                    format!("{}: {error}", root.display()),
+                )
+            })?;
+            settings.insert(
+                "OPENBOT_SERVER_USER".into(),
+                format!("{}:{}", owner.uid(), owner.gid()),
+            );
+        }
         seed_learning_default(
             &root,
             &mut settings,
@@ -1886,13 +1930,32 @@ async fn start_stack_inner<R: tauri::Runtime>(
         report(&app, "env", true, "settings written, credentials stored");
         // Compose gives inherited environment precedence over .env. Pin this run's chosen ports.
         secrets.extend(ports.settings());
-        for key in ["PICKED_HARNESS_PORT", "OPENBOT_TOOL_URL"] {
+        for key in [
+            "PICKED_HARNESS_PORT",
+            "OPENBOT_TOOL_URL",
+            "COMPUTER_NETWORK",
+            "OPENBOT_SERVER_USER",
+        ] {
             if let Some(value) = settings.get(key) {
                 secrets.insert(key.into(), value.clone());
             }
         }
-        // Set before Bun imports the runtime, and retained for supervised restarts.
+        // Handed to Compose with the rest; a service receives only what the Compose file names.
         secrets.extend(desktop_telemetry::runtime_env(&app));
+        // After the credential store has been written, so the token never is. See where it is
+        // minted above.
+        secrets.insert("OPENBOT_DESKTOP_HOST_TOKEN".into(), host_token.clone());
+
+        // Compose's bind mount of the sign-in folder does not create it, because Docker would make
+        // it as root on Linux and this app could then not write a sign-in into it. So it is made
+        // here, as the person, before anything asks for it.
+        let sign_in_folder = root.join(".openbot");
+        std::fs::create_dir_all(&sign_in_folder).map_err(|error| {
+            Problem::with(
+                "OpenBot could not prepare its sign-in folder.",
+                format!("{}: {error}", sign_in_folder.display()),
+            )
+        })?;
 
         // Installation already verified these images. Start only raises the local containers;
         // its no-pull policy sends missing assets back to the installation step.
@@ -1932,53 +1995,55 @@ async fn start_stack_inner<R: tauri::Runtime>(
             report(&app, "services", false, detail);
         })?;
 
-        // Before spawning: if these are still held, whatever answers later is not ours.
-        let mut hosts = vec![("API server", ports.server), ("app", ports.app)];
-        if let Some(port) = ports.browser {
-            hosts.push(("browser", port));
-        }
-        if let Some(problem) = stack::port_already_taken(&hosts) {
-            report(&app, "ports", false, problem.clone());
-            return Err(problem.into());
-        }
-
-        let logs = root.join(".logs");
-        (logs, bun, secrets, ports, local_browser)
+        (found, secrets, ports)
     };
 
-    // Never persisted or passed to Compose. Only the server process receives this credential;
-    // model workers and frontend processes cannot impersonate the native approval transport.
-    use base64::Engine as _;
-    let host_token =
-        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(rand::random::<[u8; 32]>());
-    secrets.insert("OPENBOT_DESKTOP_HOST_TOKEN".into(), host_token.clone());
-
-    let logs_for_wait = logs.clone();
-    let generation = start_host_processes(
-        &attempt,
-        &root,
-        &logs,
-        &bun,
-        &secrets,
-        local_browser.as_ref(),
-        |name| report(&app, name, true, "started"),
-        move |started| {
-            stack::wait_until_answering(
-                started,
-                &logs_for_wait,
-                &stack::Ready {
-                    api: ports.server,
-                    app: ports.app,
-                },
-                std::time::Duration::from_secs(180),
-            )
-        },
-    )
+    /*
+     * The server container answering, on both of the host ports it was given.
+     *
+     * No port check before this, as there was before spawning host processes: these ports are now
+     * published by this deployment's own `server` container, which `Ports::available` already
+     * counts as ours, and anybody else on them was avoided when the ports were chosen. Docker's
+     * restart policy keeps it up from here, so there is nothing to supervise after it answers.
+     */
+    report_running(&app, "answering", "waiting for OpenBot to answer", None);
+    let ticket = attempt.generation;
+    let waiting = app.clone();
+    let ready = stack::Ready {
+        api: ports.server,
+        app: ports.app,
+    };
+    let answered = tauri::async_runtime::spawn_blocking(move || {
+        stack::wait_until_healthy(&ready, std::time::Duration::from_secs(180), || {
+            waiting
+                .state::<Shell>()
+                .start_generation
+                .load(std::sync::atomic::Ordering::SeqCst)
+                == ticket
+        })
+    })
     .await
-    .inspect_err(|problem| report(&app, "answering", false, problem.said.clone()))?;
+    .unwrap_or_else(|error| Err(format!("the wait did not run: {error}")));
+    // A Stop during the wait is the reason it ended, whatever the wait itself says.
+    attempt.require_current()?;
+    if let Err(error) = answered {
+        // What the server said while it was not answering, from Compose's log, with every
+        // credential this run handed out taken out of it.
+        let log = stack::service_log(&found, &root, "server", 40);
+        let detail = if log.is_empty() {
+            "The server container wrote nothing to its log.".to_string()
+        } else {
+            format!("Last from the server container (up to 40 lines):\n{log}")
+        };
+        let problem = stack::startup_problem(Problem::with(error, detail), &secrets);
+        report(&app, "answering", false, problem.said.clone());
+        return Err(problem);
+    }
     // Stop must not finish between accepting readiness and reporting a successful Start.
     let _startup = attempt.lock_current()?;
-    // Only a stack that answered successfully acquires a restart policy.
+    *shell.root.lock().unwrap() = Some(root.clone());
+    clear_recovery_required(&shell, &root);
+    let generation = shell.generation.load(std::sync::atomic::Ordering::SeqCst);
     let address = shell
         .containers
         .lock()
@@ -1988,7 +2053,7 @@ async fn start_stack_inner<R: tauri::Runtime>(
         .ok_or_else(|| Problem::plain("The local container runtime is unavailable."))?;
     let config = host_access::HostAccessConfig::new(
         format!("http://127.0.0.1:{}", ports.server),
-        host_token,
+        host_token.clone(),
         address,
         deployment::reference(&root, "agent-computer")?,
         vec![root.clone()],
@@ -2007,16 +2072,7 @@ async fn start_stack_inner<R: tauri::Runtime>(
         )
     })?;
     preparation::save_selected_root(&config, &root)?;
-    supervise_host_processes(
-        app.clone(),
-        root,
-        logs,
-        bun,
-        secrets,
-        generation,
-        ports,
-        local_browser,
-    );
+    watch_connections(app.clone(), root, host_token, generation, ports.server);
 
     report(&app, "answering", true, "the API and the app are answering");
     Ok(())
@@ -2053,8 +2109,8 @@ fn shutdown_root(shell: &Shell, fallback_root: &Path) -> PathBuf {
     root
 }
 
-/// Take the whole stack down: the host processes, anything left over, the containers, and the
-/// local Intelligence stack if OpenBot created it.
+/// Take the whole stack down: any host processes an installation from before the server was a
+/// container left running, the containers, and the local Intelligence stack if OpenBot created it.
 ///
 /// One implementation, because there are three ways to ask for it (the button, the menu bar, and
 /// quitting) and a person who used one of them and got a different amount of stopping would be
@@ -2463,102 +2519,16 @@ fn down_containers_on_quit(shell: &Shell, root: &Path) -> Result<(), String> {
     down_owned_containers(shell, root)
 }
 
-/// Reclaim held replacements before consulting durable inventory. Keep the handles and pidfile
-/// if any phase fails, so the next Stop or Start can retry with the same ownership evidence.
-fn cleanup_host_children<C>(
-    root: &Path,
-    children: &mut Vec<(&'static str, std::process::Child)>,
-    cleanup: C,
-) -> Result<usize, Problem>
-where
-    C: FnOnce(&Path) -> Result<usize, Problem>,
-{
-    let held = stack::stop_host_children(root, children)?;
-    stop_held_process_handles(children)?;
-    let recorded = cleanup(root)?;
-    Ok(held + recorded)
-}
-
-fn stop_held_process_handles(
-    children: &mut Vec<(&'static str, std::process::Child)>,
-) -> Result<(), Problem> {
-    for (name, child) in children.iter_mut() {
-        let failure = |error| {
-            Problem::with(
-                "OpenBot could not stop one of its host processes.",
-                format!("could not finish stopping held {name}: {error}"),
-            )
-        };
-        if child.try_wait().map_err(failure)?.is_none() {
-            child.kill().map_err(failure)?;
-        }
-        child.wait().map_err(failure)?;
-    }
-    children.clear();
-    Ok(())
-}
-
-fn cleanup_after_host_recording_failure<C, F>(
-    shell: &Shell,
-    root: &Path,
-    children: &mut Vec<(&'static str, std::process::Child)>,
-    recording: Problem,
-    cleanup: C,
-    force_handles: F,
-) -> Result<u64, Problem>
-where
-    C: FnOnce(&Path, &mut Vec<(&'static str, std::process::Child)>) -> Result<usize, Problem>,
-    F: FnOnce(&mut Vec<(&'static str, std::process::Child)>) -> Result<(), Problem>,
-{
-    shell
-        .generation
-        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    let cleanup = cleanup(root, children);
-    let failure = match cleanup {
-        Ok(_) => {
-            *shell.root.lock().unwrap() = None;
-            return Err(recording);
-        }
-        Err(cleanup) => cleanup,
-    };
-    let forced = force_handles(children);
-    let mut detail = recording.detail.unwrap_or_default();
-    if !detail.is_empty() {
-        detail.push('\n');
-    }
-    detail.push_str(&problem_detail(failure));
-    match forced {
-        Ok(()) => {
-            *shell.root.lock().unwrap() = None;
-        }
-        Err(forced) => {
-            detail.push('\n');
-            detail.push_str(&problem_detail(forced));
-        }
-    }
-    Err(Problem::with(recording.said, detail))
-}
-
-#[cfg(test)]
-fn retire_host_processes<C>(shell: &Shell, root: &Path, cleanup: C) -> Result<usize, Problem>
-where
-    C: FnOnce(&Path) -> Result<usize, Problem>,
-{
-    // Invalidate before waiting for a restart that already owns the lock. That restart either
-    // observes retirement before spawning, or publishes its handle before cleanup can proceed.
-    shell
-        .generation
-        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    let _startup = shell.startup.lock().unwrap();
-    cleanup_host_state(shell, root, cleanup)
-}
-
+/// Stop what this session holds and then what the deployment's records name. The records are
+/// how an installation from before the server was a container still has Bun processes on the
+/// host to stop; a current one has none, and the cleanup finds nothing. Keep failed cleanup
+/// owned for a later Stop.
 fn cleanup_host_state<C>(shell: &Shell, root: &Path, cleanup: C) -> Result<usize, Problem>
 where
     C: FnOnce(&Path) -> Result<usize, Problem>,
 {
     // Also runs for startup replacement and failure recovery, so a retired authorization session
-    // cannot leave a job running beside a new server. Keep failed cleanup owned for a later Stop.
+    // cannot leave a job running beside a new server.
     let host_access_result = {
         let mut slot = shell.host_access.lock().unwrap();
         let result = slot.as_ref().map_or(Ok(()), |broker| {
@@ -2569,14 +2539,13 @@ where
         }
         result
     };
-    let mut children = shell.children.lock().unwrap();
     let selected = shell
         .root
         .lock()
         .unwrap()
         .clone()
         .unwrap_or_else(|| root.to_path_buf());
-    let result = cleanup_host_children(&selected, &mut children, cleanup);
+    let result = cleanup(&selected);
     let result = match (host_access_result, result) {
         (Ok(()), result) => result,
         (Err(error), Ok(_)) => Err(Problem::with(
@@ -2592,176 +2561,6 @@ where
         *shell.root.lock().unwrap() = None;
     }
     result
-}
-
-/// The initial host launch, including ownership handoff on every outcome.
-#[allow(
-    clippy::too_many_arguments,
-    reason = "The launch carries what every host process needs and what this start decided about the person's browser."
-)]
-async fn start_host_processes<R, W>(
-    attempt: &StartAttempt<'_>,
-    root: &Path,
-    logs: &Path,
-    bun: &Path,
-    secrets: &stack::Secrets,
-    local_browser: Option<&local_browser::LocalBrowser>,
-    mut report_started: R,
-    wait: W,
-) -> Result<u64, Problem>
-where
-    R: FnMut(&'static str),
-    W: FnOnce(&mut Vec<(&'static str, std::process::Child)>) -> Result<(), String> + Send + 'static,
-{
-    let started = {
-        let _startup = attempt.lock_current()?;
-        let mut started = Vec::new();
-        for process in stack::host_processes(local_browser.is_some()) {
-            if attempt.require_current().is_err() {
-                return finish_host_start_locked(attempt, root, started, Ok(()));
-            }
-            let child =
-                match stack::spawn_host_process(process, root, logs, bun, secrets, local_browser) {
-                    Ok(child) => child,
-                    Err(error) => {
-                        return finish_host_start_locked(
-                            attempt,
-                            root,
-                            started,
-                            Err(format!("could not start {}: {error}", process.name)),
-                        );
-                    }
-                };
-            started.push((process.name, child));
-            report_started(process.name);
-        }
-        // Stop and Quit need durable ownership while readiness is still waiting, especially on
-        // Windows where a deployment directory alone cannot authorize terminating a process.
-        if let Err(recording) = stack::record_host_processes(
-            root,
-            &started
-                .iter()
-                .map(|(name, child)| (*name, child.id()))
-                .collect::<Vec<_>>(),
-        ) {
-            let shell = attempt.shell;
-            let mut children = shell.children.lock().unwrap();
-            children.extend(started);
-            *shell.root.lock().unwrap() = Some(root.to_path_buf());
-            return cleanup_after_host_recording_failure(
-                shell,
-                root,
-                &mut children,
-                recording,
-                |root, children| cleanup_host_children(root, children, stack::stop_processes_under),
-                stop_held_process_handles,
-            );
-        }
-        if attempt.require_current().is_err() {
-            return finish_host_start_locked(attempt, root, started, Ok(()));
-        }
-        started
-    };
-    // A failed blocking task must not drop the only handles either. The caller retains the
-    // vector while readiness borrows it; even a panic returns every child to the same cleanup.
-    let owned = std::sync::Arc::new(Mutex::new(started));
-    let waiting = std::sync::Arc::clone(&owned);
-    let outcome = tauri::async_runtime::spawn_blocking(move || {
-        let mut started = waiting.lock().unwrap();
-        wait(&mut started)
-    })
-    .await
-    .unwrap_or_else(|error| Err(format!("the wait did not run: {error}")));
-    let started = std::mem::take(
-        &mut *owned
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner),
-    );
-    let readiness_failure = outcome.as_ref().err().cloned();
-    finish_host_start(attempt, root, started, outcome).map_err(|problem| {
-        // Preserve cancellation and lifecycle failures. Only the actual readiness error gets
-        // the startup headline; cleanup details remain attached and are redacted with it.
-        if readiness_failure.as_deref() == Some(problem.said.as_str()) {
-            stack::startup_problem(problem, secrets)
-        } else {
-            problem
-        }
-    })
-}
-
-fn finish_host_start(
-    attempt: &StartAttempt<'_>,
-    root: &Path,
-    started: Vec<(&'static str, std::process::Child)>,
-    outcome: Result<(), String>,
-) -> Result<u64, Problem> {
-    let _startup = attempt.shell.startup.lock().unwrap();
-    finish_host_start_locked(attempt, root, started, outcome)
-}
-
-fn finish_host_start_locked(
-    attempt: &StartAttempt<'_>,
-    root: &Path,
-    mut started: Vec<(&'static str, std::process::Child)>,
-    outcome: Result<(), String>,
-) -> Result<u64, Problem> {
-    let shell = attempt.shell;
-    if let Err(cancelled) = attempt.require_current() {
-        // These handles were never published. Stop may already have finished, so this attempt
-        // must reap them itself. A concurrent initial Start is excluded until its ticket drops.
-        let cleaned = cleanup_host_children(root, &mut started, stack::stop_processes_under);
-        return match cleaned {
-            Ok(_) => Err(cancelled),
-            Err(cleanup) => {
-                let mut detail = problem_detail(cleanup);
-                if let Err(forced) = stop_held_process_handles(&mut started) {
-                    detail.push('\n');
-                    detail.push_str(&problem_detail(forced));
-                    shell.children.lock().unwrap().extend(started);
-                    *shell.root.lock().unwrap() = Some(root.to_path_buf());
-                }
-                Err(Problem::with(cancelled.said, detail))
-            }
-        };
-    }
-    let mut children = shell.children.lock().unwrap();
-    children.extend(started);
-    *shell.root.lock().unwrap() = Some(root.to_path_buf());
-    if let Err(original) = outcome {
-        shell
-            .generation
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        // The initial failure is the reason Start failed, even if its cleanup also needs help.
-        return match cleanup_host_children(root, &mut children, stack::stop_processes_under) {
-            Ok(_) => {
-                *shell.root.lock().unwrap() = None;
-                Err(original.into())
-            }
-            Err(cleanup) => Err(Problem::with(original, problem_detail(cleanup))),
-        };
-    }
-    // Keep handles only while the recording failure is being cleaned up. Reporting Start failure
-    // while leaving the just-spawned host processes alive would recreate the orphan this ownership
-    // record exists to prevent.
-    if let Err(recording) = stack::record_host_processes(
-        root,
-        &children
-            .iter()
-            .map(|(name, child)| (*name, child.id()))
-            .collect::<Vec<_>>(),
-    ) {
-        return cleanup_after_host_recording_failure(
-            shell,
-            root,
-            &mut children,
-            recording,
-            |root, children| cleanup_host_children(root, children, stack::stop_processes_under),
-            stop_held_process_handles,
-        );
-    }
-    attempt.require_current()?;
-    clear_recovery_required(shell, root);
-    Ok(shell.generation.load(std::sync::atomic::Ordering::SeqCst))
 }
 
 fn require_no_exited_compose_services(
@@ -2805,9 +2604,9 @@ where
     C: FnOnce(&Path) -> Result<usize, openbot_desktop_lib::problem::Problem>,
 {
     attempt.require_current()?;
-    // Preflight can fail while the previous run still owns live hosts. Retire that watcher only
-    // when replacement actually begins reclaiming them, before taking the children lock, so a
-    // restart already in progress hands its child to this cleanup and never adopts the new run.
+    // Preflight can fail while the previous run is still serving. Retire its connection watcher
+    // only when replacement actually begins, so a refusal it finds now cannot be published
+    // against the run that replaces it.
     attempt
         .shell
         .generation
@@ -3267,7 +3066,7 @@ fn show_openbot_on<R: tauri::Runtime>(
     if recovery_required_or_pending_quit_notice(&shell, &root) && !organization_recovery {
         return Err("Part of OpenBot needs recovery. Try starting OpenBot once more.".into());
     }
-    let url = owned_app_url(&root, ports).ok_or_else(|| {
+    let url = owned_app_url(&shell, &root, ports).ok_or_else(|| {
         format!("OpenBot could not verify its app on port {port} belongs to this installation. Try starting OpenBot again.")
     })?;
     let authority =
@@ -3747,7 +3546,7 @@ fn show_status_in_app(app: &tauri::AppHandle) -> bool {
     }
     let Some(mut url) = ports_for_shell(app)
         .ok()
-        .and_then(|ports| owned_app_url(&root, &ports))
+        .and_then(|ports| owned_app_url(&app.state::<Shell>(), &root, &ports))
         .and_then(|url| url.parse::<tauri::Url>().ok())
     else {
         return false;
@@ -3772,9 +3571,11 @@ fn show_status_in_app(app: &tauri::AppHandle) -> bool {
 pub(crate) struct DesktopStatus {
     /// OpenBot answers on its own address, whoever started it.
     openbot_running: bool,
-    /// This session of the desktop app holds OpenBot's processes, so its supervisor can restart
-    /// them. False for an OpenBot left running by an earlier session that ended without its Quit.
+    /// This session of the desktop app started the OpenBot that is running, so it can restart it.
+    /// False for an OpenBot left running by an earlier session that ended without its Quit.
     openbot_held: bool,
+    /// Always empty now: OpenBot's server and worker are containers and are listed with them.
+    /// Kept so a Status window from before that still reads the shape it expects.
     processes: Vec<desktop_status::Part>,
     containers: Vec<desktop_status::Part>,
     /// The local Intelligence stack recorded for this installation, if any.
@@ -3810,14 +3611,7 @@ fn read_desktop_status<R: tauri::Runtime>(
 ) -> DesktopStatus {
     let shell = app.state::<Shell>();
     let root = cleanup_root(&shell, &stack::default_root());
-    let pids: Vec<(&'static str, u32)> = shell
-        .children
-        .lock()
-        .unwrap()
-        .iter()
-        .map(|(name, child)| (*name, child.id()))
-        .collect();
-    let processes = resident_parts(&pids);
+    let held = shell.root.lock().unwrap().is_some() && shell.containers.lock().unwrap().is_some();
     let stack_id =
         local_eval_state::read(&root, None).map(|state| state.stack_id().as_str().to_owned());
     let found = engine::detect();
@@ -3854,11 +3648,11 @@ fn read_desktop_status<R: tauri::Runtime>(
     let ports = ports_for_shell(app).ok();
     let answering = ports
         .as_ref()
-        .is_some_and(|ports| owned_app_url(&root, ports).is_some());
+        .is_some_and(|ports| owned_app_url(&shell, &root, ports).is_some());
     DesktopStatus {
-        openbot_running: !pids.is_empty() || answering,
-        openbot_held: !pids.is_empty(),
-        processes,
+        openbot_running: held || answering,
+        openbot_held: held,
+        processes: Vec::new(),
         containers,
         intelligence_stack: stack_id,
         intelligence_containers,
@@ -3874,57 +3668,34 @@ fn read_desktop_status<R: tauri::Runtime>(
     }
 }
 
-/// Each host process by name, with its resident memory where `ps` could read it.
-fn resident_parts(pids: &[(&'static str, u32)]) -> Vec<desktop_status::Part> {
-    let sizes = if pids.is_empty() {
-        Vec::new()
-    } else {
-        let list = pids
-            .iter()
-            .map(|(_, pid)| pid.to_string())
-            .collect::<Vec<_>>()
-            .join(",");
-        quiet::command("ps")
-            .args(["-o", "pid=,rss=", "-p", &list])
-            .output()
-            .ok()
-            .map(|output| desktop_status::resident(&String::from_utf8_lossy(&output.stdout)))
-            .unwrap_or_default()
-    };
-    pids.iter()
-        .map(|(name, pid)| desktop_status::Part {
-            name: (*name).to_owned(),
-            memory_bytes: sizes
-                .iter()
-                .find(|(found, _)| found == pid)
-                .map(|(_, bytes)| *bytes),
-        })
-        .collect()
-}
-
 /**
-Restart OpenBot's host processes: each is ended, and the supervisor that keeps them alive starts it
-again, as it would after a crash. The containers, its database among them, keep running, so nothing
-is lost and the restart takes seconds.
+Restart OpenBot itself: the server and the worker containers, through Compose. The other
+containers, its database among them, keep running, so nothing is lost and the restart takes seconds.
+Only an OpenBot this session started, whose engine it knows.
 */
 #[tauri::command]
-fn restart_openbot<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), String> {
+async fn restart_openbot<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), String> {
+    // Compose takes seconds to restart a container. Off Tauri's threads, as Stop is.
+    tauri::async_runtime::spawn_blocking(move || restart_openbot_now(&app))
+        .await
+        .map_err(|error| format!("the restart did not run: {error}"))?
+}
+
+fn restart_openbot_now<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<(), String> {
     let shell = app.state::<Shell>();
-    let mut children = shell.children.lock().unwrap();
-    if children.is_empty() {
+    let root = shell.root.lock().unwrap().clone();
+    let address = shell
+        .containers
+        .lock()
+        .unwrap()
+        .as_ref()
+        .filter(|owned| Some(&owned.root) == root.as_ref())
+        .map(|owned| owned.address.clone());
+    let (Some(root), Some(address)) = (root, address) else {
         return Err("OpenBot is not running.".into());
-    }
-    for (name, child) in children.iter_mut() {
-        // SAFETY: the pid is this app's own child, held and not yet reaped, so it cannot be reused.
-        #[cfg(unix)]
-        let ended = unsafe { libc::kill(child.id() as i32, libc::SIGTERM) } == 0;
-        #[cfg(not(unix))]
-        let ended = child.kill().is_ok();
-        if !ended {
-            eprintln!("[status] could not restart {name}");
-        }
-    }
-    Ok(())
+    };
+    stack::restart_openbot(&address, &root)
+        .map_err(|error| format!("OpenBot could not restart: {error}"))
 }
 
 /// Stop, as the menu used to offer it: everything, Intelligence included if OpenBot started it.
@@ -4005,18 +3776,37 @@ fn already_running_now<R: tauri::Runtime>(app: &tauri::AppHandle<R>, root: &str)
     let shell = app.state::<Shell>();
     let _startup = shell.startup.lock().unwrap();
     !recovery_required_or_pending_quit_notice(&shell, &root)
-        && openbot_env::Ports::read(&root).is_ok_and(|ports| already_running_at(&root, &ports))
+        && openbot_env::Ports::read(&root)
+            .is_ok_and(|ports| already_running_at(&shell, &root, &ports))
 }
 
-fn already_running_at(root: &Path, ports: &openbot_env::Ports) -> bool {
-    owned_app_url(root, ports).is_some()
+fn already_running_at(shell: &Shell, root: &Path, ports: &openbot_env::Ports) -> bool {
+    owned_app_url(shell, root, ports).is_some()
 }
 
-/// Neither an owned API nor an answering app port alone authorizes showing a deployment.
-fn owned_app_url(root: &Path, ports: &openbot_env::Ports) -> Option<String> {
-    if !already_running_on(root, ports.server, stack::recorded_server_owns_port)
-        || !stack::recorded_process_owns_port(root, "app", ports.app).unwrap_or(false)
-    {
+/// Neither an owned API nor an answering app port alone authorizes showing a deployment: this
+/// root's own `server` container has to be the one publishing both.
+fn owned_app_url(shell: &Shell, root: &Path, ports: &openbot_env::Ports) -> Option<String> {
+    let owned = shell
+        .containers
+        .lock()
+        .unwrap()
+        .as_ref()
+        .filter(|owned| owned.root == root)
+        .map(|owned| owned.address.clone());
+    app_url_published_by(owned.as_ref(), root, ports)
+}
+
+/// [`owned_app_url`] without a window: the Recorder's native host is a process of its own, started
+/// by the browser, so it holds no engine and asks whichever one answers.
+fn app_url_published_by(
+    owned: Option<&engine::Address>,
+    root: &Path,
+    ports: &openbot_env::Ports,
+) -> Option<String> {
+    if !already_running_on(root, ports.server, |root, server| {
+        server_container_publishes(owned, root, &[server, ports.app])
+    }) {
         return None;
     }
     stack::app_url(ports.app)
@@ -4134,10 +3924,42 @@ fn recorder_host_environment() -> recorder_host::HostEnvironment {
         app_url: Box::new(move || {
             let root = root.as_deref()?;
             let ports = openbot_env::Ports::read(root).ok()?;
-            owned_app_url(root, &ports)
+            app_url_published_by(None, root, &ports)
         }),
         organization_cookie,
     }
+}
+
+/// Whether `root`'s `server` container publishes `ports`, asked of the engine this session raised
+/// it on when there is one, and otherwise of whichever engine answers: an OpenBot left running by
+/// an earlier session is still this deployment's, and its restart policy kept it up.
+#[cfg(not(test))]
+fn server_container_publishes(
+    owned: Option<&engine::Address>,
+    root: &Path,
+    ports: &[u16],
+) -> Result<bool, Problem> {
+    let address = match owned {
+        Some(address) => address.clone(),
+        None => {
+            let status = engine::detect();
+            match status.address.filter(|_| status.responding) {
+                Some(address) => address,
+                None => return Ok(false),
+            }
+        }
+    };
+    stack::server_publishes(&address, root, ports)
+}
+
+/// Tests never ask a real engine. They say which roots' server containers publish which ports.
+#[cfg(test)]
+fn server_container_publishes(
+    _owned: Option<&engine::Address>,
+    root: &Path,
+    ports: &[u16],
+) -> Result<bool, Problem> {
+    Ok(tests::published_by_server(root, ports))
 }
 
 /// What stopped the stack, if anything did, and forget it once it has been read.
@@ -4230,7 +4052,9 @@ async fn ask_the_bot_inner(root: PathBuf, question: String) -> Result<String, Pr
         openbot_env::Ports::read(&checked)
             .ok()
             .filter(|ports| {
-                already_running_on(&checked, ports.server, stack::recorded_server_owns_port)
+                already_running_on(&checked, ports.server, |root, port| {
+                    server_container_publishes(None, root, &[port])
+                })
             })
             .map(|ports| format!("http://127.0.0.1:{}", ports.server))
     })
@@ -5704,10 +5528,10 @@ fn which_bun() -> Option<PathBuf> {
     candidates.into_iter().find(|path| path.exists())
 }
 
-/// Watch the three host processes and start one again when it dies.
+/// Mark this run as needing its connection refreshed, and send the window to setup to do it.
 ///
-/// The policy is in `supervise.rs`; this is the loop that applies it. It ends when the stack is
-/// stopped, which is what clearing the root means, so stopping does not race a restart.
+/// False when the run it was found for is no longer the current one, which a Stop or a new Start
+/// in the meantime makes it.
 fn publish_connection_failure<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     root: &Path,
@@ -5738,39 +5562,32 @@ fn publish_connection_failure<R: tauri::Runtime>(
     Ok(true)
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "Retain selected ports alongside the supervised run's identity and credentials."
-)]
-fn supervise_host_processes<R: tauri::Runtime>(
+/**
+Watch a running OpenBot for a connection it reports refused, and send the window back to setup to
+refresh it.
+
+What is left of the host-process supervisor. Docker's restart policy keeps the server and the worker
+up now, so nothing here starts anything. The server still knows, as only it can, when the model, the
+Intelligence or the organization sign-in it was given has been refused, and it tells the desktop
+through the token minted for this run. The watcher ends with the run it was started for: a Stop or
+another Start moves the generation on, and clearing the root says there is no run at all.
+*/
+fn watch_connections<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     root: PathBuf,
-    logs: PathBuf,
-    bun: PathBuf,
-    // Carried rather than fetched again on each restart. A restart happens when something is
-    // already wrong, and a credential prompt at that moment is the worst time to ask for one.
-    secrets: stack::Secrets,
+    // Carried rather than fetched again: it was minted for this run and is kept nowhere else.
+    token: String,
     generation: u64,
-    ports: openbot_env::Ports,
-    // The person's browser this start runs, carried so a restart starts the same one.
-    local_browser: Option<local_browser::LocalBrowser>,
+    server_port: u16,
 ) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
-        eprintln!(
-            "[watch] supervising {} host processes",
-            stack::host_processes(local_browser.is_some()).count()
-        );
-        let mut watches: Vec<supervise::Watch> = stack::HOST_PROCESSES
-            .iter()
-            .map(|process| supervise::Watch::new(process.name))
-            .collect();
-        let connection_client = desktop_connection::client()
-            .map_err(|error| {
-                eprintln!("[watch] {error}");
-            })
-            .ok();
-        let mut connection_notice_sent = false;
-        let mut connection_poll_failed = false;
+        let Ok(client) = desktop_connection::client().map_err(|error| {
+            eprintln!("[watch] {error}");
+        }) else {
+            return;
+        };
+        let mut notice_sent = false;
+        let mut poll_failed = false;
 
         loop {
             std::thread::sleep(std::time::Duration::from_secs(2));
@@ -5782,172 +5599,31 @@ fn supervise_host_processes<R: tauri::Runtime>(
                 return;
             }
 
-            if connection_notice_sent && !recovery_required(&shell, &root) {
-                connection_notice_sent = false;
+            if notice_sent && !recovery_required(&shell, &root) {
+                notice_sent = false;
             }
-            if !connection_notice_sent {
-                if let (Some(client), Some(token)) = (
-                    &connection_client,
-                    secrets.get("OPENBOT_DESKTOP_HOST_TOKEN"),
-                ) {
-                    match desktop_connection::poll(client, ports.server, token) {
-                        Ok(Some(connection)) => {
-                            match publish_connection_failure(&app, &root, generation, connection) {
-                                Ok(published) => connection_notice_sent = published,
-                                Err(error) => {
-                                    eprintln!("[watch] could not show connection refresh: {error}")
-                                }
-                            }
-                        }
-                        Ok(None) => connection_poll_failed = false,
+            if notice_sent {
+                continue;
+            }
+            match desktop_connection::poll(&client, server_port, &token) {
+                Ok(Some(connection)) => {
+                    match publish_connection_failure(&app, &root, generation, connection) {
+                        Ok(published) => notice_sent = published,
                         Err(error) => {
-                            if !connection_poll_failed {
-                                eprintln!("[watch] {error}");
-                            }
-                            connection_poll_failed = true;
+                            eprintln!("[watch] could not show connection refresh: {error}")
                         }
                     }
                 }
-            }
-
-            // Which ones have died. Collected rather than acted on under the lock, because a
-            // restart waits, and waiting while holding the children is how Stop would block on a
-            // backoff nobody asked it to sit through.
-            let dead: Vec<&'static str> = {
-                let mut children = shell.children.lock().unwrap();
-                let mut dead = Vec::new();
-                for (name, child) in children.iter_mut() {
-                    if let Ok(Some(_)) = child.try_wait() {
-                        dead.push(*name);
+                Ok(None) => poll_failed = false,
+                Err(error) => {
+                    if !poll_failed {
+                        eprintln!("[watch] {error}");
                     }
-                }
-                dead
-            };
-
-            if !dead.is_empty() {
-                eprintln!("[watch] dead: {dead:?}");
-            }
-            for name in dead {
-                let Some(watch) = watches.iter_mut().find(|watch| watch.name == name) else {
-                    continue;
-                };
-                if !watch.should_restart(std::time::Instant::now()) {
-                    // A restore already probing may finish first; publish recovery and its setup
-                    // navigation together after it, so that late probe cannot undo this transition.
-                    let _startup = shell.startup.lock().unwrap();
-                    // Let go of it. A dead child left in the list is found dead again two seconds
-                    // later, and forever after: the count climbs past what actually happened, the
-                    // window is sent back to the setup screen on a loop, and the giving up that was
-                    // supposed to stop a hot laptop becomes one.
-                    {
-                        let mut children = shell.children.lock().unwrap();
-                        if shell.generation.load(std::sync::atomic::Ordering::SeqCst) != generation
-                            || shell.root.lock().unwrap().as_deref() != Some(root.as_path())
-                        {
-                            return;
-                        }
-                        children.retain(|(held, _)| *held != name);
-                    }
-
-                    let reason = watch.gave_up();
-                    mark_recovery_required(&shell, &root, generation);
-                    report(&app, name, false, reason.clone());
-                    /*
-                     * Both registers here too. `gave_up` names the process and quotes the tail of
-                     * its log, which is the developer half; the person needs to know a piece of
-                     * OpenBot stopped and that starting again is the thing to try.
-                     */
-                    *shell.last_failure.lock().unwrap() =
-                        Some(openbot_desktop_lib::problem::Problem::with(
-                            format!(
-                                "Part of OpenBot ({name}) stopped and could not be started again. \
-                                 Try starting OpenBot once more."
-                            ),
-                            reason,
-                        ));
-                    // Back to the setup screen. By now the window is showing OpenBot, and OpenBot
-                    // is not running: leaving it there is a window that lies.
-                    let _ = show_setup(app.clone());
-                    continue;
-                }
-                report(
-                    &app,
-                    name,
-                    false,
-                    format!("{name} stopped. Starting it again."),
-                );
-                std::thread::sleep(supervise::backoff(watch.restarts - 1));
-
-                // Asked again after the backoff: a stop, or another start, may have happened while
-                // this was waiting, and starting a process into either is how an orphan is made.
-                if shell.generation.load(std::sync::atomic::Ordering::SeqCst) != generation
-                    || shell.root.lock().unwrap().is_none()
-                {
-                    return;
-                }
-                let Some(process) = stack::HOST_PROCESSES
-                    .iter()
-                    .find(|process| process.name == name)
-                else {
-                    continue;
-                };
-                match restart_host_process_with(&shell, &root, name, generation, || {
-                    stack::spawn_host_process(
-                        process,
-                        &root,
-                        &logs,
-                        &bun,
-                        &secrets,
-                        local_browser.as_ref(),
-                    )
-                }) {
-                    Ok(true) => report(&app, name, true, "started again"),
-                    Ok(false) => return,
-                    Err(problem) => {
-                        report(&app, name, false, problem.said.clone());
-                        *shell.last_failure.lock().unwrap() = Some(problem);
-                    }
+                    poll_failed = true;
                 }
             }
         }
     })
-}
-
-/// The same lock covers generation validation, launch, publication, and owned cleanup on every
-/// platform. Stop can retire during spawn, but cannot finish before receiving that child handle.
-fn restart_host_process_with<F>(
-    shell: &Shell,
-    root: &Path,
-    name: &'static str,
-    generation: u64,
-    spawn: F,
-) -> Result<bool, Problem>
-where
-    F: FnOnce() -> std::io::Result<std::process::Child>,
-{
-    let mut children = shell.children.lock().unwrap();
-    if shell.generation.load(std::sync::atomic::Ordering::SeqCst) != generation
-        || shell.root.lock().unwrap().as_deref() != Some(root)
-    {
-        return Ok(false);
-    }
-    let child = spawn().map_err(|error| {
-        Problem::with(
-            format!("OpenBot could not restart {name}."),
-            error.to_string(),
-        )
-    })?;
-    #[cfg(unix)]
-    stack::replace_host_process(root, &mut children, name, child)?;
-    #[cfg(not(unix))]
-    stack::replace_windows_host_process_with(
-        root,
-        &mut children,
-        name,
-        child,
-        Path::new("powershell"),
-    )?;
-    Ok(shell.generation.load(std::sync::atomic::Ordering::SeqCst) == generation)
 }
 
 /// Point the window at OpenBot if it is up, and at the setup screen if it is not.
@@ -5985,7 +5661,7 @@ fn restore_window_on<R: tauri::Runtime>(app: &tauri::AppHandle<R>, ports: &openb
     let destination = startup.as_ref().and_then(|_| {
         let root = cleanup_root(&shell, &stack::default_root());
         if let Some(url) = (!recovery_required_or_pending_quit_notice(&shell, &root))
-            .then(|| owned_app_url(&root, ports))
+            .then(|| owned_app_url(&shell, &root, ports))
             .flatten()
         {
             intelligence_bridge::allow(app, &url);
@@ -6261,7 +5937,7 @@ fn install_menus<R: tauri::Runtime>(
 
     // The menu bar menu follows the system's appearance; its icons are drawn for each.
     let dark = system_is_dark(app);
-    let running = !app.state::<Shell>().children.lock().unwrap().is_empty();
+    let running = app.state::<Shell>().root.lock().unwrap().is_some();
     let dashboard = || {
         intelligence_menu_item(
             app.state::<Shell>()
@@ -12023,6 +11699,8 @@ fn main() {
                     "docker-compose.yml",
                     "--profile",
                     "harness",
+                    "--profile",
+                    "openbot",
                     "down",
                 ],
             );
@@ -12485,33 +12163,33 @@ fn main() {
         let mut choice = serde_json::json!({"id":"byo-url", "agentUrl":remote});
         let (expected_up, expected_image) = match case {
             "remote" | "remote-stale-image" => (
-                "compose up -d --no-build --pull never postgres supervisor agent-computer agent-bot agent-langgraph",
+                "compose up -d --no-build --pull never postgres supervisor agent-computer server worker agent-bot agent-langgraph",
                 None,
             ),
             "anthropic-api" => {
                 model = serde_json::json!({"provider":"anthropic", "login":"api-key", "apiKey":"synthetic-anthropic-key"});
                 choice = serde_json::json!({"id":"langgraph"});
-                ("compose --profile harness up -d --no-build --pull never postgres supervisor agent-computer agent-langgraph agent-harness", Some("agent-langgraph-agui"))
+                ("compose --profile harness up -d --no-build --pull never postgres supervisor agent-computer server worker agent-langgraph agent-harness", Some("agent-langgraph-agui"))
             }
             "compatible" => {
                 model = serde_json::json!({"provider":"openai-compatible", "login":"endpoint", "baseUrl":"http://127.0.0.1:11434/v1", "model":"synthetic-model", "apiKey":""});
-                ("compose up -d --no-build --pull never postgres supervisor agent-computer agent-bot agent-langgraph", None)
+                ("compose up -d --no-build --pull never postgres supervisor agent-computer server worker agent-bot agent-langgraph", None)
             }
             "installed" => {
                 choice = serde_json::json!({"id":"langgraph"});
-                ("compose --profile harness up -d --no-build --pull never postgres supervisor agent-computer agent-bot agent-langgraph agent-harness", Some("agent-langgraph-agui"))
+                ("compose --profile harness up -d --no-build --pull never postgres supervisor agent-computer server worker agent-bot agent-langgraph agent-harness", Some("agent-langgraph-agui"))
             }
             "none" => {
                 choice = serde_json::Value::Null;
-                ("compose up -d --no-build --pull never postgres supervisor agent-computer agent-bot agent-langgraph", None)
+                ("compose up -d --no-build --pull never postgres supervisor agent-computer server worker agent-bot agent-langgraph", None)
             }
             "chatgpt-plan" => {
                 model = serde_json::json!({"provider":"openai", "login":"plan", "token":"{\"refresh_token\":\"synthetic-plan\"}"});
-                ("compose --profile harness up -d --no-build --pull never postgres supervisor agent-computer agent-harness", Some("agent-langgraph-agui"))
+                ("compose --profile harness up -d --no-build --pull never postgres supervisor agent-computer server worker agent-harness", Some("agent-langgraph-agui"))
             }
             "claude-plan" => {
                 model = serde_json::json!({"provider":"anthropic", "login":"plan", "token":"synthetic-claude-plan"});
-                ("compose --profile harness up -d --no-build --pull never postgres supervisor agent-computer agent-harness", Some("agent-claude-sdk"))
+                ("compose --profile harness up -d --no-build --pull never postgres supervisor agent-computer server worker agent-harness", Some("agent-claude-sdk"))
             }
             _ => panic!("unknown test case"),
         };
@@ -12592,6 +12270,24 @@ fn main() {
         );
         assert!(commands.contains("\tcompose run --rm --pull never migrate\n"));
         assert!(!root.join(".logs").exists(), "no host runtime was launched");
+        // The server container's own credential reaches Compose for `up`, and only Compose.
+        assert_eq!(
+            std::fs::read_to_string(root.join("host-token-at-up")).ok(),
+            Some("43".to_string()),
+            "case={case}: Compose must be handed the host token before it starts the server"
+        );
+        assert!(!std::fs::read_to_string(root.join(".env"))
+            .unwrap()
+            .contains("OPENBOT_DESKTOP_HOST_TOKEN"));
+        // Compose's bind mount does not create the sign-in folder, so Start must have.
+        assert!(root.join(".openbot").is_dir());
+        // Each Bot's computer goes on the network the server container is on.
+        assert_eq!(
+            openbot_env::read_already_set(&root.join(".env"), &["COMPUTER_NETWORK"])
+                .unwrap()
+                .get("COMPUTER_NETWORK"),
+            Some(&format!("{}_default", stack::project_name(&root)))
+        );
         let settings = openbot_env::read_already_set(
             &root.join(".env"),
             &[
@@ -12799,7 +12495,7 @@ fn main() {
             "{commands}"
         );
         assert!(commands.contains("\tcompose version\n"), "{commands}");
-        assert!(commands.contains("\tcompose up -d --no-build --pull never postgres supervisor agent-computer agent-bot agent-langgraph\n"), "{commands}");
+        assert!(commands.contains("\tcompose up -d --no-build --pull never postgres supervisor agent-computer server worker agent-bot agent-langgraph\n"), "{commands}");
         assert!(
             commands.contains("\tcompose run --rm --pull never migrate\n"),
             "{commands}"
@@ -12866,13 +12562,13 @@ fn main() {
         let commands = std::fs::read_to_string(&record).expect("command record");
         assert!(
             commands.contains(
-                "\tcompose up -d --no-build --pull never postgres supervisor agent-computer agent-langgraph\n"
+                "\tcompose up -d --no-build --pull never postgres supervisor agent-computer server worker agent-langgraph\n"
             ),
             "{commands}"
         );
         assert!(
             !commands
-                .contains("compose up -d --no-build --pull never postgres supervisor agent-computer agent-bot"),
+                .contains("compose up -d --no-build --pull never postgres supervisor agent-computer server worker agent-bot"),
             "Anthropic Start must not target the OpenAI-only agent-bot: {commands}"
         );
         assert_eq!(problem.said, "Part of OpenBot stopped during startup.");
@@ -13569,575 +13265,28 @@ fn main() {
         std::fs::remove_dir_all(root).unwrap();
     }
 
-    #[cfg(unix)]
-    struct InitialHostFixture {
-        base: PathBuf,
-        root: PathBuf,
-        bun: PathBuf,
-        pids: std::cell::RefCell<Vec<u32>>,
-    }
-
-    #[cfg(unix)]
-    impl InitialHostFixture {
-        fn new(mode: &str) -> Self {
-            use std::os::unix::fs::PermissionsExt;
-            let base = temp_root("initial-host-launch");
-            let root = base.join("deployment");
-            std::fs::create_dir_all(&root).unwrap();
-            for process in stack::host_processes(false) {
-                if mode == "first-fails"
-                    || ((mode == "second-fails" || mode == "cleanup-refuses")
-                        && process.name != "server")
-                {
-                    break;
-                }
-                std::fs::create_dir(root.join(process.cwd)).unwrap();
-            }
-            let bun = base.join("bun");
-            // The production spawn boundary supplies cwd/argv/log files. Only the executable is
-            // synthetic: one direct child with no network, engine, or credential access.
-            std::fs::write(
-                &bun,
-                "#!/bin/sh\nprintf '%s' \"$$\" > child.pid\nexec /bin/sleep 60\n",
-            )
-            .unwrap();
-            std::fs::set_permissions(&bun, std::fs::Permissions::from_mode(0o700)).unwrap();
-            Self {
-                base,
-                root,
-                bun,
-                pids: std::cell::RefCell::new(Vec::new()),
-            }
-        }
-
-        fn observe(&self, name: &str) {
-            let path = self.root.join(name).join("child.pid");
-            let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
-            let pid = loop {
-                if let Ok(text) = std::fs::read_to_string(&path) {
-                    if let Ok(pid) = text.parse::<u32>() {
-                        break pid;
-                    }
-                }
-                assert!(std::time::Instant::now() < until, "child did not start");
-                std::thread::sleep(std::time::Duration::from_millis(5));
-            };
-            self.pids.borrow_mut().push(pid);
-        }
-
-        fn alive(&self) -> Vec<u32> {
-            self.pids
-                .borrow()
-                .iter()
-                .copied()
-                .filter(|pid| unsafe { libc::kill(*pid as i32, 0) } == 0)
-                .collect()
-        }
-    }
-
-    #[cfg(unix)]
-    impl Drop for InitialHostFixture {
-        fn drop(&mut self) {
-            // Even an old-code regression failure must not orphan the fixture. waitpid first
-            // proves this is still our direct, unreaped child; ECHILD never authorizes a signal.
-            for pid in self.pids.get_mut() {
-                if unsafe { libc::waitpid(*pid as i32, std::ptr::null_mut(), libc::WNOHANG) } == 0 {
-                    unsafe {
-                        libc::kill(*pid as i32, libc::SIGKILL);
-                        libc::waitpid(*pid as i32, std::ptr::null_mut(), 0);
-                    }
-                }
-            }
-            if self.base.is_file() {
-                std::fs::remove_file(&self.base).unwrap();
-            } else {
-                std::fs::remove_dir_all(&self.base).unwrap();
-            }
-        }
-    }
-
-    #[cfg(unix)]
-    struct SupervisionFixture {
-        host: InitialHostFixture,
-        app: tauri::App<tauri::test::MockRuntime>,
-        watcher: Option<std::thread::JoinHandle<()>>,
-    }
-
-    #[cfg(unix)]
-    impl Drop for SupervisionFixture {
-        fn drop(&mut self) {
-            let shell = self.app.state::<Shell>();
-            shell
-                .generation
-                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            stop_held_process_handles(
-                &mut shell
-                    .children
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner),
-            )
-            .unwrap();
-            *shell
-                .root
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
-            if let Some(watcher) = self.watcher.take() {
-                watcher.join().unwrap();
-            }
-            eprintln!(
-                "{}",
-                serde_json::json!({"supervisionCleanup": self.host.root,
-                "heldChildren": shell.children.lock().unwrap_or_else(std::sync::PoisonError::into_inner).len(), "watcherJoined": true})
-            );
-        }
-    }
-
-    #[cfg(unix)]
-    fn failed_retry_keeps_survivor_supervised(failed_role: &str) {
-        let host = InitialHostFixture::new("success");
-        std::fs::write(
-            &host.bun,
-            "#!/bin/sh\nprintf '%s' \"$$\" > child.pid\nif [ -f fail ]; then exit 71; fi\nexec /bin/sleep 300\n",
-        ).unwrap();
-        let app = tauri::test::mock_builder()
-            .manage(Shell::default())
-            .invoke_handler(tauri::generate_handler![start_stack])
-            .build(tauri::test::mock_context(tauri::test::noop_assets()))
-            .unwrap();
-        let window = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
-            .build()
-            .unwrap();
-        let mut fixture = SupervisionFixture {
-            host,
-            app,
-            watcher: None,
-        };
-        let shell = fixture.app.state::<Shell>();
-        let setup = "tauri://localhost/failed-retry-setup";
-        *shell.setup_url.lock().unwrap() = Some(setup.into());
-        let attempt = StartAttempt::begin(&shell).unwrap();
-        let generation = tauri::async_runtime::block_on(start_host_processes(
-            &attempt,
-            &fixture.host.root,
-            &fixture.host.root.join(".logs"),
-            &fixture.host.bun,
-            &stack::Secrets::new(),
-            None,
-            |name| fixture.host.observe(name),
-            |_| Ok(()),
-        ))
-        .unwrap();
-        drop(attempt);
-        fixture.watcher = Some(supervise_host_processes(
-            fixture.app.handle().clone(),
-            fixture.host.root.clone(),
-            fixture.host.root.join(".logs"),
-            fixture.host.bun.clone(),
-            stack::Secrets::new(),
-            generation,
-            openbot_env::Ports::default(),
-            None,
-        ));
-        // The actual watcher exhausts its actual budget and backoffs after this role fails.
-        std::fs::write(fixture.host.root.join(failed_role).join("fail"), "").unwrap();
-        {
-            let mut children = shell.children.lock().unwrap();
-            children
-                .iter_mut()
-                .find(|(name, _)| *name == failed_role)
-                .unwrap()
-                .1
-                .kill()
-                .unwrap();
-        }
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(70);
-        loop {
-            if shell
-                .last_failure
-                .lock()
-                .unwrap()
-                .as_ref()
-                .is_some_and(|p| p.said.contains("could not be started again"))
-                && window.url().unwrap().as_str() == setup
-            {
-                break;
-            }
-            assert!(
-                std::time::Instant::now() < deadline,
-                "watcher did not produce recovery setup"
-            );
-            std::thread::sleep(std::time::Duration::from_millis(20));
-        }
-        let survivor_pid = {
-            let mut children = shell.children.lock().unwrap();
-            assert!(!children.iter().any(|(name, _)| *name == failed_role));
-            let (_, survivor) = children
-                .iter_mut()
-                .find(|(name, _)| *name == "worker")
-                .unwrap();
-            assert!(survivor.try_wait().unwrap().is_none());
-            survivor.id()
-        };
-        // Deliberate invalid input rejects before saved-secret/deployment/engine access. This is
-        // the generated production Start handler, after recovery has exposed ordinary Start.
-        let problem = tauri::test::get_ipc_response(&window, tauri::webview::InvokeRequest {
-            cmd: "start_stack".into(), callback: tauri::ipc::CallbackFn(0), error: tauri::ipc::CallbackFn(1),
-            url: "tauri://localhost".parse().unwrap(),
-            body: tauri::ipc::InvokeBody::Json(serde_json::json!({
-                "root": fixture.host.root, "apiUrl": "https://intelligence.example.test",
-                "gatewayWsUrl": "wss://gateway.example.test", "apiKey": "synthetic-unused-key",
-                "model": {"provider": "synthetic-invalid-provider", "login": "api-key"}, "harness": null,
-            })),
-            headers: Default::default(), invoke_key: tauri::test::INVOKE_KEY.into(),
-        }).expect_err("credential preflight must reject the synthetic provider");
-        assert!(problem["said"]
-            .as_str()
-            .unwrap()
-            .contains("synthetic-invalid-provider"));
-        assert_eq!(
-            shell.root.lock().unwrap().as_ref(),
-            Some(&fixture.host.root)
-        );
-        assert!(!shell.starting.load(std::sync::atomic::Ordering::SeqCst));
-        {
-            let mut children = shell.children.lock().unwrap();
-            let (_, survivor) = children
-                .iter_mut()
-                .find(|(name, _)| *name == "worker")
-                .unwrap();
-            assert_eq!(survivor.id(), survivor_pid);
-            assert!(
-                survivor.try_wait().unwrap().is_none(),
-                "preflight unexpectedly reclaimed survivor"
-            );
-            survivor.kill().unwrap();
-        }
-        // A subsequent real child death must still cause the existing watcher to restart it.
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
-        let replacement = loop {
-            let replacement = shell
-                .children
-                .lock()
-                .unwrap()
-                .iter_mut()
-                .find(|(name, child)| *name == "worker" && child.id() != survivor_pid)
-                .and_then(|(_, child)| child.try_wait().unwrap().is_none().then_some(child.id()));
-            if replacement.is_some()
-                || fixture.watcher.as_ref().unwrap().is_finished()
-                || std::time::Instant::now() >= deadline
-            {
-                break replacement;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(20));
-        };
-        eprintln!(
-            "{}",
-            serde_json::json!({
-                "failedRole": failed_role, "recoveryUrl": window.url().unwrap().as_str(),
-                "ipcError": problem, "survivorPid": survivor_pid, "replacementPid": replacement,
-                "watcherRetired": fixture.watcher.as_ref().unwrap().is_finished(),
-                "generationBefore": generation,
-                "generationAfterPreflight": shell.generation.load(std::sync::atomic::Ordering::SeqCst),
-            })
-        );
-        assert!(
-            replacement.is_some(),
-            "failed retry preflight abandoned the surviving host's watcher"
-        );
-    }
-
-    #[cfg(unix)]
     #[test]
-    fn worker_exhaustion_does_not_adopt_healthy_survivors() {
-        if crate::test_support::isolated_process(
-            "tests::worker_exhaustion_does_not_adopt_healthy_survivors",
-        ) {
-            return;
-        }
-        let host = InitialHostFixture::new("success");
-        write_installed_deployment(&host.root);
-        let source = host.base.join("worker-recovery-host.rs");
-        std::fs::write(&source, r#"
-use std::{fs,io::{Read,Write},net::TcpListener,time::Duration};
-fn main() {
-    let cwd=std::env::current_dir().unwrap();
-    let role=cwd.file_name().unwrap().to_str().unwrap();
-    fs::write("child.pid",std::process::id().to_string()).unwrap();
-    let mut starts=fs::OpenOptions::new().create(true).append(true).open("starts.log").unwrap();
-    writeln!(starts,"{}",std::process::id()).unwrap();
-    if role=="worker" {
-        loop {
-            if cwd.join("fail").exists() { std::process::exit(71); }
-            std::thread::sleep(Duration::from_millis(20));
-        }
-    }
-    let port=match role { "server"=>3001,"app"=>3010,_=>panic!("unexpected role") };
-    let listener=TcpListener::bind(("127.0.0.1",port)).unwrap();
-    for stream in listener.incoming() {
-        let mut stream=stream.unwrap();
-        stream.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
-        let mut request=[0;2048];
-        if stream.read(&mut request).unwrap_or(0)>0 {
-            let _=stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}");
-        }
-    }
-}
-"#).unwrap();
-        crate::test_support::compile_fixture(&source, &host.bun);
-        let app = tauri::test::mock_builder()
-            .manage(Shell::default())
-            .invoke_handler(tauri::generate_handler![
-                already_running,
-                show_openbot,
-                last_failure
-            ])
-            .build(tauri::test::mock_context(tauri::test::noop_assets()))
-            .unwrap();
-        let window = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
-            .build()
-            .unwrap();
-        let mut fixture = SupervisionFixture {
-            host,
-            app,
-            watcher: None,
-        };
-        let shell = fixture.app.state::<Shell>();
-        let setup = "tauri://localhost/worker-recovery-setup";
-        *shell.setup_url.lock().unwrap() = Some(setup.into());
-        let attempt = StartAttempt::begin(&shell).unwrap();
-        let logs = fixture.host.root.join(".logs");
-        let wait_logs = logs.clone();
-        let generation = tauri::async_runtime::block_on(start_host_processes(
-            &attempt,
-            &fixture.host.root,
-            &logs,
-            &fixture.host.bun,
-            &stack::Secrets::new(),
-            None,
-            |name| fixture.host.observe(name),
-            move |children| {
-                stack::wait_until_answering(
-                    children,
-                    &wait_logs,
-                    &stack::Ready {
-                        api: 3001,
-                        app: 3010,
-                    },
-                    std::time::Duration::from_secs(10),
-                )
-            },
-        ))
-        .unwrap();
-        drop(attempt);
-        fixture.watcher = Some(supervise_host_processes(
-            fixture.app.handle().clone(),
-            fixture.host.root.clone(),
-            logs,
-            fixture.host.bun.clone(),
-            stack::Secrets::new(),
-            generation,
-            openbot_env::Ports::default(),
-            None,
-        ));
-        std::fs::write(fixture.host.root.join("worker/fail"), "").unwrap();
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(70);
-        loop {
-            if shell
-                .last_failure
-                .lock()
-                .unwrap()
-                .as_ref()
-                .is_some_and(|p| {
-                    p.said.contains("(worker)") && p.said.contains("could not be started again")
-                })
-                && window.url().unwrap().as_str() == setup
-            {
-                break;
-            }
-            assert!(
-                std::time::Instant::now() < deadline,
-                "worker did not exhaust actual restart budget"
-            );
-            std::thread::sleep(std::time::Duration::from_millis(20));
-        }
-        assert!(server_capabilities_answer(3001));
-        assert!(stack::recorded_server_owns_port(&fixture.host.root, 3001).unwrap());
-        assert!(stack::recorded_process_owns_port(&fixture.host.root, "app", 3010).unwrap());
-        let invoke = |command: &str, body: serde_json::Value| {
-            tauri::test::get_ipc_response(
-                &window,
-                tauri::webview::InvokeRequest {
-                    cmd: command.into(),
-                    callback: tauri::ipc::CallbackFn(0),
-                    error: tauri::ipc::CallbackFn(1),
-                    url: "tauri://localhost".parse().unwrap(),
-                    body: tauri::ipc::InvokeBody::Json(body),
-                    headers: Default::default(),
-                    invoke_key: tauri::test::INVOKE_KEY.into(),
-                },
-            )
-            .map(|response| response.deserialize::<serde_json::Value>().unwrap())
-        };
-        let result = invoke(
-            "already_running",
-            serde_json::json!({"root":fixture.host.root}),
-        )
-        .unwrap()
-        .as_bool()
-        .unwrap();
-        let children = shell.children.lock().unwrap();
-        let survivors: Vec<_> = children
-            .iter()
-            .map(|(name, child)| (*name, child.id()))
-            .collect();
-        drop(children);
-        let starts = std::fs::read_to_string(fixture.host.root.join("worker/starts.log")).unwrap();
-        let failure = shell.last_failure.lock().unwrap().clone();
-        println!(
-            "WORKER_RECOVERY_PROOF={}",
-            serde_json::json!({
-                "root":fixture.host.root,"base":fixture.host.base,"generation":generation,
-                "setupUrl":window.url().unwrap().as_str(),"alreadyRunning":result,
-                "survivors":survivors,"workerStarts":starts,"failure":failure,
-            })
-        );
-        assert_eq!(starts.lines().count(), supervise::MAX_RESTARTS as usize + 1);
-        assert!(
-            !result,
-            "exhausted worker was automatically adopted through generated already_running IPC"
-        );
-        let notification = invoke("last_failure", serde_json::json!({})).unwrap();
-        assert!(notification["said"].as_str().unwrap().contains("(worker)"));
-        assert!(invoke("last_failure", serde_json::json!({}))
-            .unwrap()
-            .is_null());
-        assert!(recovery_required(&shell, &fixture.host.root));
-        let show_error = invoke("show_openbot", serde_json::json!({})).unwrap_err();
-        assert!(show_error["said"]
-            .as_str()
-            .unwrap()
-            .contains("needs recovery"));
-        restore_window_on(fixture.app.handle(), &openbot_env::Ports::default());
-        assert_eq!(window.url().unwrap().as_str(), setup);
-        println!(
-            "WORKER_RECOVERY_COMMANDS={}",
-            serde_json::json!({
-                "notification":notification,"generatedShowError":show_error,
-                "recoveryAfterNoticeRead":true,"restoreUrl":window.url().unwrap().as_str(),
-            })
-        );
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn recovery_transient_worker_restart_does_not_require_recovery() {
-        let host = InitialHostFixture::new("success");
-        let app = tauri::test::mock_builder()
-            .manage(Shell::default())
-            .build(tauri::test::mock_context(tauri::test::noop_assets()))
-            .unwrap();
-        let mut fixture = SupervisionFixture {
-            host,
-            app,
-            watcher: None,
-        };
-        let shell = fixture.app.state::<Shell>();
-        let attempt = StartAttempt::begin(&shell).unwrap();
-        let generation = tauri::async_runtime::block_on(start_host_processes(
-            &attempt,
-            &fixture.host.root,
-            &fixture.host.root.join(".logs"),
-            &fixture.host.bun,
-            &stack::Secrets::new(),
-            None,
-            |name| fixture.host.observe(name),
-            |_| Ok(()),
-        ))
-        .unwrap();
-        drop(attempt);
-        fixture.watcher = Some(supervise_host_processes(
-            fixture.app.handle().clone(),
-            fixture.host.root.clone(),
-            fixture.host.root.join(".logs"),
-            fixture.host.bun.clone(),
-            stack::Secrets::new(),
-            generation,
-            openbot_env::Ports::default(),
-            None,
-        ));
-        let original = {
-            let mut children = shell.children.lock().unwrap();
-            let (_, worker) = children
-                .iter_mut()
-                .find(|(name, _)| *name == "worker")
-                .unwrap();
-            worker.kill().unwrap();
-            worker.id()
-        };
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
-        let replacement = loop {
-            let replacement = shell
-                .children
-                .lock()
-                .unwrap()
-                .iter_mut()
-                .find(|(name, child)| *name == "worker" && child.id() != original)
-                .and_then(|(_, child)| child.try_wait().unwrap().is_none().then_some(child.id()));
-            if let Some(pid) = replacement {
-                break pid;
-            }
-            assert!(
-                std::time::Instant::now() < deadline,
-                "transient worker was not restarted"
-            );
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        };
-        assert!(!recovery_required(&shell, &fixture.host.root));
-        assert!(shell.last_failure.lock().unwrap().is_none());
-        println!(
-            "WORKER_TRANSIENT_PROOF={}",
-            serde_json::json!({"original":original,"replacement":replacement,"generation":generation,"recoveryRequired":false})
-        );
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn recovery_ready_start_and_completed_stop_resolve_condition() {
-        let host = InitialHostFixture::new("success");
+    fn recovery_is_resolved_only_by_a_completed_stop() {
+        let root = temp_root("recovery-completed-stop");
         let shell = Shell::default();
-        mark_recovery_required(&shell, &host.root, 0);
-        *shell.last_failure.lock().unwrap() = Some(Problem::plain("worker exhausted"));
-        assert!(recovery_required(&shell, &host.root));
-        assert!(!recovery_required(&shell, &host.base.join("other")));
-        let attempt = StartAttempt::begin(&shell).unwrap();
-        tauri::async_runtime::block_on(start_host_processes(
-            &attempt,
-            &host.root,
-            &host.root.join(".logs"),
-            &host.bun,
-            &stack::Secrets::new(),
-            None,
-            |name| host.observe(name),
-            |_| Ok(()),
-        ))
-        .unwrap();
-        drop(attempt);
-        assert!(!recovery_required(&shell, &host.root));
-        assert!(shell.last_failure.lock().unwrap().is_none());
-        mark_recovery_required(&shell, &host.root, 0);
+        mark_recovery_required(&shell, &root, 0);
+        *shell.last_failure.lock().unwrap() = Some(Problem::plain("server refused"));
+        assert!(recovery_required(&shell, &root));
+        assert!(!recovery_required(&shell, &root.join("other")));
+        assert!(stop_everything_with(
+            &shell,
+            &root,
+            |_| Ok(0),
+            |_| Err("synthetic container cleanup refusal".into())
+        )
+        .is_err());
         assert!(
-            stop_everything_with(&shell, &host.root, stack::stop_processes_under, |_| Err(
-                "synthetic container cleanup refusal".into()
-            ))
-            .is_err()
-        );
-        assert!(
-            recovery_required(&shell, &host.root),
+            recovery_required(&shell, &root),
             "failed Stop cannot resolve recovery"
         );
-        stop_everything_with(&shell, &host.root, stack::stop_processes_under, |_| Ok(())).unwrap();
-        assert!(!recovery_required(&shell, &host.root));
-        assert!(host.alive().is_empty());
+        stop_everything_with(&shell, &root, |_| Ok(0), |_| Ok(())).unwrap();
+        assert!(!recovery_required(&shell, &root));
+        assert!(shell.last_failure.lock().unwrap().is_none());
     }
 
     #[test]
@@ -14197,7 +13346,7 @@ fn main() {
         );
         assert!(recovery_required(&shell, &f.owned));
         assert!(
-            owned_app_url(&f.owned, &f.ports).is_some(),
+            owned_app_url(&shell, &f.owned, &f.ports).is_some(),
             "survivors must still answer"
         );
         assert!(show_openbot_on(app.handle().clone(), &f.ports).is_err());
@@ -14227,7 +13376,7 @@ fn main() {
         let shell = app.state::<Shell>();
         let window = app.get_webview_window("main").unwrap();
         assert!(
-            owned_app_url(&f.owned, &f.ports).is_some(),
+            owned_app_url(&shell, &f.owned, &f.ports).is_some(),
             "survivors must still answer before restore"
         );
         assert!(!recovery_required(&shell, &f.owned));
@@ -14327,213 +13476,17 @@ fn main() {
         assert!(recovery_required(&app.state::<Shell>(), &f.owned));
     }
 
-    #[cfg(unix)]
     #[test]
-    fn failed_retry_after_server_exhaustion_keeps_survivor_supervised() {
-        failed_retry_keeps_survivor_supervised("server");
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn failed_retry_after_app_exhaustion_keeps_survivor_supervised() {
-        failed_retry_keeps_survivor_supervised("app");
-    }
-
-    #[cfg(unix)]
-    fn initial_host_case(mode: &'static str) {
-        let fixture = InitialHostFixture::new(mode);
-        let shell = Shell::default();
-        let attempt = StartAttempt::begin(&shell).unwrap();
-        let result = tauri::async_runtime::block_on(start_host_processes(
-            &attempt,
-            &fixture.root,
-            &fixture.root.join(".logs"),
-            &fixture.bun,
-            &stack::Secrets::new(),
-            None,
-            |name| {
-                fixture.observe(name);
-                if mode == "cleanup-refuses" {
-                    // A real filesystem failure prevents both the second spawn and verification
-                    // of the first child's deployment. No cleanup failure is mocked away.
-                    std::fs::remove_dir_all(&fixture.base).unwrap();
-                    std::fs::write(&fixture.base, b"blocked fixture parent").unwrap();
-                }
-            },
-            move |_| match mode {
-                "wait-fails" => Err("synthetic readiness failure".into()),
-                "wait-panics" => panic!("synthetic readiness task panic"),
-                "success" => Ok(()),
-                _ => panic!("readiness must not run after a spawn failure"),
-            },
-        ));
-        let alive = fixture.alive();
-        eprintln!(
-            "{}",
-            serde_json::json!({
-                "initialHostCase": mode,
-                "spawned": fixture.pids.borrow().len(),
-                "aliveAfterStart": alive,
-                "heldAfterStart": shell.children.lock().unwrap().len(),
-                "error": result.as_ref().err().map(|problem| &problem.said),
-            })
-        );
-        if mode == "success" {
-            assert!(result.is_ok(), "{result:?}");
-            assert_eq!(alive.len(), 3);
-            assert_eq!(stack::recorded_host_pids(&fixture.root).unwrap().len(), 3);
-        } else {
-            let problem = result.unwrap_err();
-            let expected = match mode {
-                "first-fails" => "could not start server:",
-                "second-fails" | "cleanup-refuses" => "could not start app:",
-                "wait-fails" => "synthetic readiness failure",
-                "wait-panics" => "the wait did not run:",
-                _ => unreachable!(),
-            };
-            if matches!(mode, "wait-fails" | "wait-panics") {
-                assert!(
-                    problem.said.contains("could not finish starting"),
-                    "{problem:?}"
-                );
-                assert!(
-                    problem
-                        .detail
-                        .as_deref()
-                        .unwrap_or_default()
-                        .starts_with(expected),
-                    "{problem:?}"
-                );
-            } else {
-                assert!(problem.said.starts_with(expected), "{problem:?}");
-            }
-            if mode == "cleanup-refuses" {
-                assert_eq!(alive.len(), 1);
-                assert_eq!(shell.children.lock().unwrap().len(), 1);
-                assert_eq!(shell.root.lock().unwrap().as_ref(), Some(&fixture.root));
-                assert!(
-                    problem.detail.is_some(),
-                    "cleanup failure must remain visible"
-                );
-                std::fs::remove_file(&fixture.base).unwrap();
-                std::fs::create_dir_all(&fixture.root).unwrap();
-            } else {
-                assert!(
-                    alive.is_empty(),
-                    "failed Start left owned children alive: {alive:?}"
-                );
-                assert!(shell.children.lock().unwrap().is_empty());
-                assert!(shell.root.lock().unwrap().is_none());
-            }
-        }
-        if mode == "success" || mode == "cleanup-refuses" {
-            retire_host_processes(&shell, &fixture.root, stack::stop_processes_under).unwrap();
-            assert!(fixture.alive().is_empty());
-            assert!(shell.children.lock().unwrap().is_empty());
-            assert!(shell.root.lock().unwrap().is_none());
-        }
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn initial_start_stopped_during_readiness_cannot_publish_and_cleans_real_children() {
-        use std::sync::{atomic::Ordering::SeqCst, Arc, Barrier};
-        let fixture = InitialHostFixture::new("success");
-        let shell = Arc::new(Shell::default());
-        let entered = Arc::new(Barrier::new(2));
-        let release = Arc::new(Barrier::new(2));
-        let starter = {
-            let (shell, root, bun, entered, release) = (
-                shell.clone(),
-                fixture.root.clone(),
-                fixture.bun.clone(),
-                entered.clone(),
-                release.clone(),
-            );
-            std::thread::spawn(move || {
-                let attempt = StartAttempt::begin(&shell).unwrap();
-                tauri::async_runtime::block_on(start_host_processes(
-                    &attempt,
-                    &root,
-                    &root.join(".logs"),
-                    &bun,
-                    &stack::Secrets::new(),
-                    None,
-                    |_| {},
-                    move |_| {
-                        entered.wait();
-                        release.wait();
-                        Ok(())
-                    },
-                ))
-            })
-        };
-        entered.wait();
-        for process in stack::host_processes(false) {
-            fixture.observe(process.cwd);
-        }
-        assert_eq!(
-            stack::recorded_host_pids(&fixture.root).unwrap().len(),
-            stack::host_processes(false).count()
-        );
-        stop_everything_with(&shell, &fixture.root, stack::stop_processes_under, |_| {
-            Ok(())
-        })
-        .unwrap();
-        let stopped_generation = shell.generation.load(SeqCst);
-        assert!(shell.children.lock().unwrap().is_empty());
-        assert!(shell.root.lock().unwrap().is_none());
-        release.wait();
-        let result = starter.join().unwrap();
-        let published = shell.children.lock().unwrap().len();
-        let active_root = shell.root.lock().unwrap().clone();
-        let completed_generation = shell.generation.load(SeqCst);
-        let alive = fixture.alive();
-        // The old-code run must also leave no fixture processes behind.
-        retire_host_processes(&shell, &fixture.root, stack::stop_processes_under).unwrap();
-        eprintln!(
-            "{}",
-            serde_json::json!({
-                "stoppedGeneration": stopped_generation,
-                "completedGeneration": completed_generation,
-                "publishedAfterStop": published,
-                "aliveAfterStartFinished": alive,
-                "result": result.as_ref().err().map(|problem| &problem.said),
-            })
-        );
-        assert!(
-            result.is_err(),
-            "Start succeeded after Stop completed: {result:?}"
-        );
-        assert_eq!(completed_generation, stopped_generation);
-        assert_eq!(published, 0);
-        assert!(active_root.is_none());
-        assert!(
-            alive.is_empty(),
-            "cancelled Start leaked its children: {alive:?}"
-        );
-    }
-
-    #[test]
-    fn initial_start_cancelled_during_preparation_never_launches_hosts() {
+    fn initial_start_cancelled_during_preparation_cannot_take_the_startup_lock() {
         let shell = Shell::default();
         let attempt = StartAttempt::begin(&shell).unwrap();
         // Deployment/download or dependency preparation returns after Stop has completed.
         stop_everything_with(&shell, Path::new("unused-root"), |_| Ok(0), |_| Ok(())).unwrap();
-        let problem = tauri::async_runtime::block_on(start_host_processes(
-            &attempt,
-            Path::new("unused-root"),
-            Path::new("unused-logs"),
-            Path::new("must-not-be-launched"),
-            &stack::Secrets::new(),
-            None,
-            |_| panic!("cancelled preparation launched a host"),
-            |_| panic!("cancelled preparation reached readiness"),
-        ))
-        .unwrap_err();
+        let problem = attempt
+            .lock_current()
+            .expect_err("a cancelled Start resumed a side effect");
         assert_eq!(problem.said, StartAttempt::cancelled().said);
         assert!(shell.root.lock().unwrap().is_none());
-        assert!(shell.children.lock().unwrap().is_empty());
         assert!(
             StartAttempt::begin(&shell).is_err(),
             "cancelled attempt is still unwinding"
@@ -14601,283 +13554,6 @@ fn main() {
         }
     }
 
-    #[cfg(unix)]
-    #[test]
-    fn initial_host_second_spawn_failure_cleans_the_real_first_child() {
-        initial_host_case("second-fails");
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn initial_host_first_spawn_failure_never_waits_or_publishes() {
-        initial_host_case("first-fails");
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn initial_host_success_records_then_stops_all_children() {
-        initial_host_case("success");
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn initial_host_readiness_failure_preserves_error_and_cleans_children() {
-        initial_host_case("wait-fails");
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn initial_host_wait_panic_keeps_children_available_for_cleanup() {
-        initial_host_case("wait-panics");
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn initial_host_cleanup_refusal_keeps_original_error_and_stop_ownership() {
-        initial_host_case("cleanup-refuses");
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn failed_host_recording_retires_children_and_preserves_recording_failure() {
-        let root = temp_root("failed-recording-lifecycle");
-        std::fs::create_dir_all(&root).unwrap();
-        let worker = std::process::Command::new("/bin/sleep")
-            .arg("60")
-            .current_dir(&root)
-            .spawn()
-            .unwrap();
-        let children = vec![("bogus", worker)];
-        let shell = Shell::default();
-        let attempt = StartAttempt::begin(&shell).unwrap();
-        let result = finish_host_start(&attempt, &root, children, Ok(())).unwrap_err();
-        assert_eq!(
-            result.said,
-            "OpenBot could not verify its host process ownership."
-        );
-        assert!(
-            result
-                .detail
-                .as_deref()
-                .is_some_and(|detail| detail.contains("invalid host launch bogus")),
-            "{result:?}"
-        );
-        assert!(shell.children.lock().unwrap().is_empty());
-        assert!(shell.root.lock().unwrap().is_none());
-        assert_eq!(
-            shell.generation.load(std::sync::atomic::Ordering::SeqCst),
-            1
-        );
-        assert!(
-            !restart_host_process_with(&shell, &root, "worker", 0, || panic!(
-                "failed recording attempt restarted"
-            ))
-            .unwrap()
-        );
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn failed_host_recording_keeps_root_and_handles_when_forced_cleanup_fails() {
-        let root = temp_root("failed-recording-stubborn-child");
-        std::fs::create_dir_all(&root).unwrap();
-        let child = std::process::Command::new("/bin/sleep")
-            .arg("60")
-            .current_dir(&root)
-            .spawn()
-            .unwrap();
-        let pid = child.id();
-        let mut children = vec![("server", child)];
-        let shell = Shell::default();
-        *shell.root.lock().unwrap() = Some(root.clone());
-        let result = cleanup_after_host_recording_failure(
-            &shell,
-            &root,
-            &mut children,
-            Problem::with("recording failed", "recording detail"),
-            |_, _| {
-                Err(Problem::with(
-                    "normal cleanup failed",
-                    "normal cleanup detail",
-                ))
-            },
-            |_| {
-                Err(Problem::with(
-                    "forced cleanup failed",
-                    "forced cleanup detail",
-                ))
-            },
-        )
-        .unwrap_err();
-
-        assert_eq!(result.said, "recording failed");
-        let detail = result.detail.as_deref().unwrap_or_default();
-        assert!(detail.contains("recording detail"), "{detail}");
-        assert!(detail.contains("normal cleanup detail"), "{detail}");
-        assert!(detail.contains("forced cleanup detail"), "{detail}");
-        assert_eq!(shell.root.lock().unwrap().as_deref(), Some(root.as_path()));
-        assert_eq!(children.len(), 1);
-        assert_eq!(children[0].1.id(), pid);
-        for (_, child) in children.iter_mut() {
-            let _ = child.kill();
-            let _ = child.wait();
-        }
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn failed_host_recording_clears_root_and_handles_when_forced_cleanup_succeeds() {
-        let root = temp_root("failed-recording-forced-cleanup");
-        std::fs::create_dir_all(&root).unwrap();
-        let child = std::process::Command::new("/bin/sleep")
-            .arg("60")
-            .current_dir(&root)
-            .spawn()
-            .unwrap();
-        let mut children = vec![("server", child)];
-        let shell = Shell::default();
-        *shell.root.lock().unwrap() = Some(root.clone());
-        let result = cleanup_after_host_recording_failure(
-            &shell,
-            &root,
-            &mut children,
-            Problem::with("recording failed", "recording detail"),
-            |_, _| {
-                Err(Problem::with(
-                    "normal cleanup failed",
-                    "normal cleanup detail",
-                ))
-            },
-            |children| {
-                for (_, child) in children.iter_mut() {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                }
-                children.clear();
-                Ok(())
-            },
-        )
-        .unwrap_err();
-
-        assert_eq!(result.said, "recording failed");
-        let detail = result.detail.as_deref().unwrap_or_default();
-        assert!(detail.contains("recording detail"), "{detail}");
-        assert!(detail.contains("normal cleanup detail"), "{detail}");
-        assert!(!detail.contains("forced cleanup"), "{detail}");
-        assert!(shell.root.lock().unwrap().is_none());
-        assert!(children.is_empty());
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn failed_readiness_retires_children_and_preserves_original_failure() {
-        let root = temp_root("failed-readiness-lifecycle");
-        std::fs::create_dir_all(&root).unwrap();
-        let mut failed = std::process::Command::new("/bin/sh")
-            .args(["-c", "exit 71"])
-            .spawn()
-            .unwrap();
-        failed.wait().unwrap();
-        let worker = std::process::Command::new("/bin/sleep")
-            .arg("60")
-            .current_dir(&root)
-            .spawn()
-            .unwrap();
-        let mut children = vec![("server", failed), ("worker", worker)];
-        let original = stack::wait_until_answering(
-            &mut children,
-            &root,
-            &stack::Ready { api: 0, app: 0 },
-            std::time::Duration::from_secs(1),
-        )
-        .unwrap_err();
-        let shell = Shell::default();
-        let attempt = StartAttempt::begin(&shell).unwrap();
-        let result =
-            finish_host_start(&attempt, &root, children, Err(original.clone())).unwrap_err();
-        assert_eq!(result.said, original);
-        assert!(result.detail.is_none());
-        assert!(shell.children.lock().unwrap().is_empty());
-        assert!(shell.root.lock().unwrap().is_none());
-        assert_eq!(
-            shell.generation.load(std::sync::atomic::Ordering::SeqCst),
-            1
-        );
-        assert!(
-            !restart_host_process_with(&shell, &root, "server", 0, || panic!(
-                "failed attempt restarted"
-            ))
-            .unwrap()
-        );
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn stop_serializes_with_a_restart_already_inside_spawn() {
-        use std::sync::{atomic::Ordering::SeqCst, Arc, Barrier};
-        let root = temp_root("restart-stop-barrier");
-        std::fs::create_dir_all(&root).unwrap();
-        let shell = Arc::new(Shell::default());
-        *shell.root.lock().unwrap() = Some(root.clone());
-        shell.generation.store(1, SeqCst);
-        let entered = Arc::new(Barrier::new(2));
-        let release = Arc::new(Barrier::new(2));
-        let restart = {
-            let (shell, root, entered, release) = (
-                shell.clone(),
-                root.clone(),
-                entered.clone(),
-                release.clone(),
-            );
-            std::thread::spawn(move || {
-                restart_host_process_with(&shell, &root, "server", 1, || {
-                    entered.wait();
-                    release.wait();
-                    std::process::Command::new("/bin/sleep")
-                        .arg("60")
-                        .current_dir(&root)
-                        .spawn()
-                })
-            })
-        };
-        entered.wait();
-        let (sent, completed) = std::sync::mpsc::channel();
-        let stop = {
-            let (shell, root) = (shell.clone(), root.clone());
-            std::thread::spawn(move || {
-                let result =
-                    stop_everything_with(&shell, &root, stack::stop_processes_under, |_| Ok(()));
-                sent.send(()).unwrap();
-                result
-            })
-        };
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        while shell.generation.load(SeqCst) == 1 {
-            assert!(std::time::Instant::now() < deadline);
-            std::thread::yield_now();
-        }
-        assert!(matches!(
-            completed.try_recv(),
-            Err(std::sync::mpsc::TryRecvError::Empty)
-        ));
-        release.wait();
-        assert!(!restart.join().unwrap().unwrap());
-        stop.join().unwrap().unwrap();
-        assert!(shell.children.lock().unwrap().is_empty());
-        assert!(shell.root.lock().unwrap().is_none());
-        assert!(
-            !restart_host_process_with(&shell, &root, "server", 1, || panic!(
-                "retired restart spawned"
-            ))
-            .unwrap()
-        );
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
     #[test]
     fn failed_retry_cleanup_retires_generation_and_retains_selected_root() {
         let app = tauri::test::mock_builder()
@@ -14920,12 +13596,31 @@ fn main() {
             5
         );
         assert_eq!(shell.root.lock().unwrap().as_ref(), Some(&root));
-        assert!(
-            !restart_host_process_with(&shell, &root, "server", 4, || panic!(
-                "old generation resumed"
-            ))
-            .unwrap()
-        );
+    }
+
+    /// Which roots' `server` containers publish which host ports, as far as the code under test
+    /// can tell. Keyed by root, and every test root is its own temporary folder, so tests running
+    /// side by side cannot see each other's.
+    static PUBLISHED_BY_SERVER: Mutex<Vec<(PathBuf, Vec<u16>)>> = Mutex::new(Vec::new());
+
+    pub(super) fn published_by_server(root: &Path, ports: &[u16]) -> bool {
+        PUBLISHED_BY_SERVER
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .iter()
+            .any(|(published, by)| {
+                published == root && !ports.is_empty() && ports.iter().all(|port| by.contains(port))
+            })
+    }
+
+    fn publish_from_server(root: &Path, ports: &[u16]) {
+        let mut published = PUBLISHED_BY_SERVER
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        published.retain(|(published, _)| published != root);
+        if !ports.is_empty() {
+            published.push((root.to_path_buf(), ports.to_vec()));
+        }
     }
 
     fn temp_root(name: &str) -> PathBuf {
@@ -15051,30 +13746,26 @@ fn main() {
         assert!(
             lines.lines().any(|line| line
                 == format!(
-                    "{}\tcompose -f docker-compose.yml --profile harness down",
+                    "{}\tcompose -f docker-compose.yml --profile harness --profile openbot down",
                     root.display()
                 )),
             "{lines}"
         );
     }
-    /// Real loopback responder in a separate process, so root/PID ownership checks use the same
-    /// OS inventory as production. The Tauri mock replaces only the window, never the HTTP/PID path.
+    /// Real loopback responders in separate processes, so the HTTP probes are the production ones.
+    /// The Tauri mock replaces only the window, and `publish_from_server` only the engine's word on
+    /// which root's `server` container publishes the two ports.
     struct RestoreFixture {
         base: PathBuf,
         selected: PathBuf,
         owned: PathBuf,
         child: std::process::Child,
         app_child: std::process::Child,
-        app_descendant_pid: Option<u32>,
         ports: openbot_env::Ports,
     }
 
     impl RestoreFixture {
         fn new() -> Self {
-            Self::with_app_descendant(false)
-        }
-
-        fn with_app_descendant(descendant: bool) -> Self {
             let base = temp_root("restore-owned-loopback");
             let selected = base.join("selected");
             let owned = base.join("owned");
@@ -15101,19 +13792,6 @@ fn serve(listener: TcpListener) {
     }
 }
 fn main() {
-    let args: Vec<String> = std::env::args().collect();
-    if args.get(1).map(String::as_str) == Some("--parent") {
-        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
-            .arg("--record-pid").arg(&args[2]).stdin(std::process::Stdio::null()).spawn().unwrap();
-        let mut stop = [0; 1];
-        let _ = std::io::stdin().read(&mut stop);
-        let _ = child.kill();
-        let _ = child.wait();
-        return;
-    }
-    if args.get(1).map(String::as_str) == Some("--record-pid") {
-        std::fs::write(&args[2], std::process::id().to_string()).unwrap();
-    }
     let api = TcpListener::bind("127.0.0.1:0").unwrap();
     let app = TcpListener::bind("127.0.0.1:0").unwrap();
     println!("{} {}", api.local_addr().unwrap().port(), app.local_addr().unwrap().port());
@@ -15143,13 +13821,7 @@ fn main() {
                 .split_whitespace()
                 .map(|n| n.parse().unwrap())
                 .collect();
-            let mut app_command = std::process::Command::new(&binary);
-            let descendant_file = base.join("app-listener.pid");
-            if descendant {
-                app_command.arg("--parent").arg(&descendant_file);
-            }
-            let mut app_child = app_command
-                .stdin(std::process::Stdio::piped())
+            let mut app_child = std::process::Command::new(&binary)
                 .current_dir(&owned)
                 .stdout(std::process::Stdio::piped())
                 .spawn()
@@ -15164,33 +13836,19 @@ fn main() {
                 .split_whitespace()
                 .map(|n| n.parse().unwrap())
                 .collect();
-            let app_descendant_pid = descendant.then(|| {
-                std::fs::read_to_string(descendant_file)
-                    .unwrap()
-                    .parse()
-                    .unwrap()
-            });
             let fixture = Self {
                 base,
                 selected,
                 owned,
                 child,
                 app_child,
-                app_descendant_pid,
                 ports: openbot_env::Ports {
                     server: numbers[0],
                     app: app_numbers[1],
                     ..Default::default()
                 },
             };
-            stack::record_host_processes(
-                &fixture.owned,
-                &[
-                    ("server", fixture.child.id()),
-                    ("app", fixture.app_child.id()),
-                ],
-            )
-            .unwrap();
+            publish_from_server(&fixture.owned, &[fixture.ports.server, fixture.ports.app]);
             fixture
         }
 
@@ -15221,13 +13879,9 @@ fn main() {
         fn drop(&mut self) {
             let _ = self.child.kill();
             let _ = self.child.wait();
-            if self.app_descendant_pid.is_some() {
-                // Dropping the pipe asks the fixture launcher to kill and reap its own child.
-                drop(self.app_child.stdin.take());
-            } else {
-                let _ = self.app_child.kill();
-            }
+            let _ = self.app_child.kill();
             let _ = self.app_child.wait();
+            publish_from_server(&self.owned, &[]);
             let _ = std::fs::remove_dir_all(&self.base);
         }
     }
@@ -15553,8 +14207,8 @@ fn main() {
         let f = RestoreFixture::new();
         assert!(server_capabilities_answer(f.ports.server));
         assert!(stack::app_url(f.ports.app).is_some());
-        assert!(!stack::recorded_server_owns_port(&f.selected, f.ports.server).unwrap());
-        assert!(stack::recorded_server_owns_port(&f.owned, f.ports.server).unwrap());
+        assert!(!published_by_server(&f.selected, &[f.ports.server]));
+        assert!(published_by_server(&f.owned, &[f.ports.server]));
         for setup in ["tauri://localhost/", "http://tauri.localhost/"] {
             let app = f.app(&f.selected, setup);
             restore_window_on(app.handle(), &f.ports);
@@ -15595,7 +14249,7 @@ fn main() {
             app.state::<Shell>().selected_root.lock().unwrap().as_ref(),
             Some(&f.owned)
         );
-        assert!(stack::recorded_server_owns_port(&f.owned, f.ports.server).unwrap());
+        assert!(published_by_server(&f.owned, &[f.ports.server]));
     }
 
     #[test]
@@ -15674,7 +14328,8 @@ fn main() {
     #[test]
     fn restore_window_unproven_identity_shows_setup_without_losing_selected_root() {
         let f = RestoreFixture::new();
-        std::fs::write(f.owned.join(".logs/host-pids.json"), "not-json").unwrap();
+        // Answering on both ports, but the engine does not say this root's server publishes them.
+        publish_from_server(&f.owned, &[]);
         let app = f.app(&f.owned, "tauri://localhost/");
         restore_window_on(app.handle(), &f.ports);
         assert_eq!(
@@ -15697,16 +14352,16 @@ fn main() {
     #[test]
     fn app_adoption_and_restore_refuse_foreign_app_with_owned_api_still_running() {
         let f = RestoreFixture::new();
-        stack::record_host_processes(&f.owned, &[("server", f.child.id())]).unwrap();
-        stack::record_host_processes(&f.selected, &[("app", f.app_child.id())]).unwrap();
+        // This root's server publishes the API port; something else has the app port.
+        publish_from_server(&f.owned, &[f.ports.server]);
         assert!(already_running_on(
             &f.owned,
             f.ports.server,
-            stack::recorded_server_owns_port
+            |root, port| { server_container_publishes(None, root, &[port]) }
         ));
         assert!(stack::app_url(f.ports.app).is_some());
-        let initial_adoption = already_running_at(&f.owned, &f.ports);
         let app = f.app(&f.owned, "tauri://localhost/");
+        let initial_adoption = already_running_at(&app.state::<Shell>(), &f.owned, &f.ports);
         let shown = show_openbot_on(app.handle().clone(), &f.ports);
         restore_window_on(app.handle(), &f.ports);
         let destination = app.get_webview_window("main").unwrap().url().unwrap();
@@ -15715,25 +14370,23 @@ fn main() {
     }
 
     #[test]
-    fn app_adoption_and_restore_allow_owned_app_direct_and_launcher_descendant() {
-        for descendant in [false, true] {
-            let f = RestoreFixture::with_app_descendant(descendant);
-            assert_ne!(f.child.id(), f.app_child.id());
-            if descendant {
-                assert_ne!(f.app_descendant_pid.unwrap(), f.app_child.id());
-            }
-            assert!(already_running_at(&f.owned, &f.ports));
-            let app = f.app(&f.owned, "tauri://localhost/");
-            show_openbot_on(app.handle().clone(), &f.ports).unwrap();
-            restore_window_on(app.handle(), &f.ports);
-            assert_eq!(
-                app.get_webview_window("main")
-                    .unwrap()
-                    .url()
-                    .unwrap()
-                    .as_str(),
-                format!("http://127.0.0.1:{}/", f.ports.app)
-            );
-        }
+    fn app_adoption_and_restore_allow_the_app_its_own_server_container_publishes() {
+        let f = RestoreFixture::new();
+        let app = f.app(&f.owned, "tauri://localhost/");
+        assert!(already_running_at(
+            &app.state::<Shell>(),
+            &f.owned,
+            &f.ports
+        ));
+        show_openbot_on(app.handle().clone(), &f.ports).unwrap();
+        restore_window_on(app.handle(), &f.ports);
+        assert_eq!(
+            app.get_webview_window("main")
+                .unwrap()
+                .url()
+                .unwrap()
+                .as_str(),
+            format!("http://127.0.0.1:{}/", f.ports.app)
+        );
     }
 }

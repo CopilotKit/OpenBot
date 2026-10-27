@@ -49,8 +49,8 @@ async fn status(
 }
 
 #[tauri::command]
-fn restart(app: tauri::AppHandle) -> Result<(), String> {
-    crate::restart_openbot(app)
+async fn restart(app: tauri::AppHandle) -> Result<(), String> {
+    crate::restart_openbot(app).await
 }
 
 /// Stops everything, as the menu's Stop did. The page asking goes with it; the window shows setup.
