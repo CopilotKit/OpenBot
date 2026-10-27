@@ -137,6 +137,8 @@ impl Ports {
     /// Hold the probes until every port is chosen so allocations cannot collide with each other.
     /// Existing containers from this exact Compose project are reusable, never foreign listeners.
     /// `browser` asks for a port for the person's browser, kept from the last run where it is free.
+    /// The app and the API are among them: both are host ports of the one `server` container, so
+    /// a running OpenBot keeps its own ports across a Start rather than being moved off them.
     pub fn available(
         self,
         ours: &std::collections::HashSet<u16>,
@@ -175,8 +177,8 @@ impl Ports {
             }))
         };
         Ok(Self {
-            app: choose(self.app, false)?,
-            server: choose(self.server, false)?,
+            app: choose(self.app, true)?,
+            server: choose(self.server, true)?,
             postgres: choose(self.postgres, true)?,
             computer: choose(self.computer, true)?,
             bot: choose(self.bot, true)?,
@@ -350,19 +352,17 @@ mod port_tests {
     }
 
     #[test]
-    fn own_published_container_ports_are_reused_but_do_not_authorize_host_port_reuse() {
+    fn own_published_container_ports_are_reused_but_a_foreign_listener_is_not() {
         let owned = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = owned.local_addr().unwrap().port();
         let preferred = Ports {
             postgres: port,
-            server: port,
             ..Ports::default()
         };
         let chosen = preferred
             .available(&HashSet::from([port]), None, false)
             .unwrap();
         assert_eq!(chosen.postgres, port);
-        assert_ne!(chosen.server, port);
         assert_ne!(
             preferred
                 .available(&HashSet::new(), None, false)
@@ -370,6 +370,28 @@ mod port_tests {
                 .postgres,
             port
         );
+    }
+
+    #[test]
+    fn the_app_and_api_ports_our_server_container_publishes_are_kept() {
+        // The one `server` container publishes both, so both are held while it runs.
+        let app = TcpListener::bind("127.0.0.1:0").unwrap();
+        let server = TcpListener::bind("127.0.0.1:0").unwrap();
+        let preferred = Ports {
+            app: app.local_addr().unwrap().port(),
+            server: server.local_addr().unwrap().port(),
+            ..Ports::default()
+        };
+        let ours = HashSet::from([preferred.app, preferred.server]);
+        let chosen = preferred.available(&ours, None, false).unwrap();
+        assert_eq!(
+            (chosen.app, chosen.server),
+            (preferred.app, preferred.server)
+        );
+        // Held by somebody else, they are moved, as they always were.
+        let moved = preferred.available(&HashSet::new(), None, false).unwrap();
+        assert_ne!(moved.app, preferred.app);
+        assert_ne!(moved.server, preferred.server);
     }
 
     #[test]

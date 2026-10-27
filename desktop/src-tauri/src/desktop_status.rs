@@ -2,8 +2,8 @@
 //!
 //! Containers are told apart by the names their owners give them: Compose names OpenBot's
 //! `openbot-<service>-<n>` (its project is `openbot`), and k3d names an Intelligence stack's
-//! `k3d-<stack id>-<role>`. Memory is Docker's own figure for each container, and the resident size
-//! of OpenBot's host processes, so the total is what the machine is actually spending.
+//! `k3d-<stack id>-<role>`. Memory is Docker's own figure for each container, OpenBot's own server
+//! and worker among them, so the total is what the machine is actually spending.
 
 use serde::Serialize;
 
@@ -60,18 +60,6 @@ pub fn containers(stats: &str, stack: Option<&str>) -> (Vec<Part>, Vec<Part>) {
         }
     }
     (openbot, intelligence)
-}
-
-/// `ps -o pid=,rss= -p …`: each process's resident size, in bytes (ps reports kibibytes).
-pub fn resident(ps: &str) -> Vec<(u32, u64)> {
-    ps.lines()
-        .filter_map(|line| {
-            let mut fields = line.split_whitespace();
-            let pid = fields.next()?.parse().ok()?;
-            let kib: u64 = fields.next()?.parse().ok()?;
-            Some((pid, kib * 1024))
-        })
-        .collect()
 }
 
 #[cfg(test)]
@@ -132,13 +120,5 @@ mod tests {
             }]
         );
         assert_eq!(intelligence[0].memory_bytes, None);
-    }
-
-    #[test]
-    fn resident_sizes_are_kibibytes_per_pid() {
-        assert_eq!(
-            resident("  123  2048\n 456 10\nnonsense\n"),
-            vec![(123, 2_097_152), (456, 10_240)]
-        );
     }
 }

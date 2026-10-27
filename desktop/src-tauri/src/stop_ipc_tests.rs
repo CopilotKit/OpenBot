@@ -185,7 +185,8 @@ mod stop_ipc {
         let fixture = Fixture::new();
         let compose = fixture.compose_barrier();
         let shell = fixture.app.state::<Shell>();
-        let cleanup = shell.children.lock().unwrap();
+        // The first lock host cleanup takes; held here, it keeps that cleanup waiting.
+        let cleanup = shell.host_access.lock().unwrap();
         let dispatch = fixture.dispatch();
         wait_until(|| shell.generation.load(SeqCst) == 1);
         // Always release both barriers before asserting against the old synchronous command.
@@ -278,19 +279,10 @@ mod stop_ipc {
             pending,
             "Stop finished while Start still held the side-effect lock"
         );
-        let error = tauri::async_runtime::block_on(start_host_processes(
-            &attempt,
-            &fixture.root,
-            &fixture.root.join(".logs"),
-            Path::new("must-not-launch"),
-            &stack::Secrets::new(),
-            None,
-            |_| panic!("cancelled Start published a child"),
-            |_| panic!("cancelled Start reached readiness"),
-        ))
-        .unwrap_err();
+        let error = attempt
+            .lock_current()
+            .expect_err("a cancelled Start resumed a side effect");
         assert_eq!(error.said, StartAttempt::cancelled().said);
-        assert!(shell.children.lock().unwrap().is_empty());
         assert!(shell.root.lock().unwrap().is_none());
     }
 
@@ -394,7 +386,7 @@ mod stop_ipc {
         let shell = fixture.app.state::<Shell>();
         // A poisoned cleanup lock is a real panic boundary; it must reject IPC, not abandon it.
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let _cleanup = shell.children.lock().unwrap();
+            let _cleanup = shell.host_access.lock().unwrap();
             panic!("synthetic cleanup lock poisoning");
         }))
         .expect_err("poison the cleanup lock");

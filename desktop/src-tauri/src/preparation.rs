@@ -475,11 +475,16 @@ fn complete_with(
 }
 
 /// `selection=None` is the auth check, which has no authority to change the Bot selection.
+///
+/// No runtime and no packages: OpenBot's server and worker are containers now, so what Start needs
+/// from the installation is the deployment it laid out and the images it downloaded. Installation
+/// still records the host packages, for the self-hosted Intelligence sign-in that runs on the host,
+/// and that sign-in checks them itself.
 pub fn require(
     root: &Path,
     selection: Option<&Option<HarnessChoice>>,
     address: &Address,
-) -> Result<PathBuf, Problem> {
+) -> Result<(), Problem> {
     require_with(root, selection, |images| require_images(address, images))
 }
 
@@ -487,7 +492,7 @@ fn require_with(
     root: &Path,
     selection: Option<&Option<HarnessChoice>>,
     verify: impl FnOnce(&[String]) -> Result<(), Problem>,
-) -> Result<PathBuf, Problem> {
+) -> Result<(), Problem> {
     let record: Prepared = serde_json::from_slice(
         &std::fs::read(root.join(FILE)).map_err(|e| required(e.to_string()))?,
     )
@@ -511,9 +516,7 @@ fn require_with(
             "The deployment was laid out by an earlier OpenBot and is missing files this version runs.",
         ));
     }
-    let bun = dependencies_ready(root)?;
-    verify(&record.images)?;
-    Ok(bun)
+    verify(&record.images)
 }
 
 /// Public Compose overrides suffice to identify and download software before authentication.
@@ -733,7 +736,7 @@ fn main() {
     }
 
     #[test]
-    fn changed_bot_lockfile_or_deleted_package_requires_installation() {
+    fn changed_bot_requires_installation_but_host_packages_do_not() {
         let f = Fixture::new();
         let chosen = Some(HarnessChoice {
             id: "langgraph".into(),
@@ -745,11 +748,14 @@ fn main() {
             "wrong selection must stop first"
         ))
         .is_err());
+        // Start runs containers, so the host's packages and runtime are not its business.
         std::fs::remove_file(f.root.join("node_modules/synthetic-package/package.json")).unwrap();
-        assert!(require_with(&f.root, Some(&chosen), |_| Ok(())).is_err());
-        f.dependencies();
-        f.prepared(chosen.as_ref());
-        std::fs::write(f.root.join("bun.lock"), "changed-lock").unwrap();
+        std::fs::write(f.root.join("runtime-version"), "1.2.15").unwrap();
+        require_with(&f.root, Some(&chosen), |_| Ok(())).unwrap();
+        // The images still are.
+        assert!(require_with(&f.root, Some(&chosen), |_| Err(required("missing image"))).is_err());
+        // And the deployment Compose runs.
+        std::fs::write(f.root.join("docker-compose.yml"), "services: {x: {}}\n").unwrap();
         assert!(require_with(&f.root, Some(&chosen), |_| Ok(())).is_err());
     }
 
