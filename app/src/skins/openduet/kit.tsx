@@ -81,7 +81,7 @@ export function Rule() {
 
 /**
  * A pill button that shares its row: black for the answer that moves things on, outlined for the
- * other. Allow once and Refuse, Start and Hide.
+ * other. Allow once and Deny, Start as task and Dismiss.
  */
 export function PillButton({
   children,

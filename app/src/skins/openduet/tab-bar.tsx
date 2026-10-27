@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { approvalInboxOptions } from "@/lib/approvals";
 import { cn } from "@/lib/utils";
-import { IconOpenDuetTasks } from "./icons";
+import { IconTasksList } from "./icons";
 import { FOCUS } from "./kit";
 import { type OpenDuetTab, TASKS_LINK } from "./places";
 import { waitingCount } from "./tasks-model";
@@ -24,7 +24,7 @@ export function TabBar({ current }: { current: OpenDuetTab }) {
     {
       id: "tasks" as const,
       label: "Tasks",
-      Glyph: IconOpenDuetTasks,
+      Glyph: IconTasksList,
       badge: waiting,
     },
   ];
