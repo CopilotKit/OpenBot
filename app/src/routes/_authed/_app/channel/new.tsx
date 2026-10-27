@@ -1,4 +1,5 @@
 import type { Message } from "@ag-ui/core";
+import { IconPlus } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
@@ -39,6 +40,13 @@ import { newId } from "../../../../lib/new-id";
  * profile links and reloads preserve the pending recipient without creating an empty channel.
  */
 /** What `GET /api/agents/:id` answers for a Bot this person cannot see. */
+const NEW_BOT = {
+  id: "new-bot-action",
+  name: "New Bot",
+  createNew: true,
+} as const;
+type BotOption = AgentProfile | typeof NEW_BOT;
+
 const AGENT_NOT_FOUND = "Couldn't find that Bot.";
 
 export const Route = createFileRoute("/_authed/_app/channel/new")({
@@ -127,14 +135,21 @@ function RouteComponent() {
           defaultOpen={!chosen && !loadError && !waitingForUrlAgent}
           autoHighlight
           multiple
-          items={profiles ?? []}
-          isItemEqualToValue={(item: AgentProfile, value: AgentProfile) =>
+          items={[NEW_BOT, ...(profiles ?? [])]}
+          isItemEqualToValue={(item: BotOption, value: BotOption) =>
             item.id === value.id
           }
-          itemToStringLabel={(item: AgentProfile) => item.name}
-          itemToStringValue={(item: AgentProfile) => item.id}
-          onValueChange={(next: AgentProfile[], details) => {
-            const kept = toFieldChange(selected, next, details.reason);
+          itemToStringLabel={(item: BotOption) => item.name}
+          itemToStringValue={(item: BotOption) => item.id}
+          onValueChange={(next: BotOption[], details) => {
+            if (next.some((item) => "createNew" in item)) {
+              void navigate({ to: "/bots", search: { new: true } });
+              return;
+            }
+            const bots = next.filter(
+              (item): item is AgentProfile => !("createNew" in item),
+            );
+            const kept = toFieldChange(selected, bots, details.reason);
             setPicked(kept);
             // The first Bot stays in the URL so a reload keeps the conversation's recipient; the
             // rest of a group lives in the page. Not a separate navigation history entry.
@@ -179,15 +194,22 @@ function RouteComponent() {
           >
             <ComboboxEmpty>No Bots found.</ComboboxEmpty>
             <ComboboxList>
-              {(item: AgentProfile) => (
-                <ComboboxItem key={item.id} value={item} className="h-10">
-                  <ChannelAvatar participantIds={[item.id]} size={24} />
-                  {item.name}
-                  <span className="truncate text-muted-foreground ml-1">
-                    {item.title}
-                  </span>
-                </ComboboxItem>
-              )}
+              {(item: BotOption) =>
+                "createNew" in item ? (
+                  <ComboboxItem key={item.id} value={item} className="h-10">
+                    <IconPlus className="size-6" />
+                    New Bot
+                  </ComboboxItem>
+                ) : (
+                  <ComboboxItem key={item.id} value={item} className="h-10">
+                    <ChannelAvatar participantIds={[item.id]} size={24} />
+                    {item.name}
+                    <span className="truncate text-muted-foreground ml-1">
+                      {item.title}
+                    </span>
+                  </ComboboxItem>
+                )
+              }
             </ComboboxList>
           </ComboboxContent>
         </Combobox>
