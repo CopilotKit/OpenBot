@@ -162,6 +162,8 @@ services:
     # Who the server runs as. The image's own user by default. On Linux the desktop names the host's,
     # because the sign-in file below is the host user's and readable by nobody else, and a bind mount
     # there keeps the host's numbers; Docker Desktop's file sharing on macOS and Windows does not.
+    # Under rootless Podman on Linux it names container root, which that user namespace maps to the
+    # host user; any other uid there is one of their subordinate ids and cannot read the file.
     user: "${OPENBOT_SERVER_USER:-1001:1001}"
     volumes:
       # The directory, not the file: the server renews the token by writing a sibling and renaming it
