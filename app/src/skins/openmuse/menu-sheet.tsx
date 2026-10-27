@@ -29,6 +29,7 @@ import {
   pinnedFirst,
 } from "@/components/app-sidebar/app-sidebar";
 import { ChannelPagination } from "@/components/app-sidebar/channel-pagination";
+import { ChannelAvatar } from "@/components/channels/avatar";
 import { DeleteConversationDialog } from "@/components/channels/delete-conversation-dialog";
 import { Item, ItemContent, ItemTitle } from "@/components/ui/item";
 import { agentListQueryOptions } from "@/lib/agents/queries";
@@ -39,6 +40,7 @@ import {
   type ChannelSummary,
   channelListQueryOptions,
 } from "@/lib/channels/queries";
+import { appConfig } from "@/lib/generated/application-config";
 import { relativeTime } from "@/lib/relative-time";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
@@ -75,7 +77,7 @@ export function MenuSheet({ onClose }: { onClose: () => void }) {
       bodyRef={body}
       onClose={onClose}
       subtitle={user.data?.name || user.data?.email}
-      title="OpenMuse"
+      title={appConfig.brand.productName}
     >
       <div className="flex flex-col gap-3.5">
         <LinkRow
@@ -193,7 +195,7 @@ export function MenuSheet({ onClose }: { onClose: () => void }) {
             title="Memory"
           />
           <LinkRow
-            detail="The apps your Bots use as you"
+            detail="The accounts your Bots use as you"
             icon={IconPlug}
             render={<Link onClick={onClose} to="/connections" />}
             tint="orange"
@@ -250,7 +252,7 @@ export function MenuSheet({ onClose }: { onClose: () => void }) {
 }
 
 /**
- * One conversation, as OpenMuse lists a side chat: its icon and title, then its actions as pills.
+ * One conversation, laid out as this look lists a side chat: its Bots' faces and title, then its actions as pills.
  * Pin and delete are the same two OpenBot offers on its sidebar row.
  */
 function ConversationRow({
@@ -298,19 +300,14 @@ function ConversationRow({
           />
         }
       >
-        {group ? (
-          <IconUsersGroup
-            aria-hidden="true"
-            className="mt-0.5 size-[19px] shrink-0 text-foreground"
-            stroke={1.8}
+        {/* The same faces OpenBot's own conversation list draws: the Bot, or the group's Bots. */}
+        <span className="mt-0.5 shrink-0">
+          <ChannelAvatar
+            participantIds={channel.agentIds}
+            size={24}
+            typing={busy}
           />
-        ) : (
-          <IconMessageCircle
-            aria-hidden="true"
-            className="mt-0.5 size-[19px] shrink-0 text-foreground"
-            stroke={1.8}
-          />
-        )}
+        </span>
         <ItemContent className="min-w-0 gap-0.5">
           <ItemTitle
             className={cn(

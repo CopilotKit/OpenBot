@@ -51,7 +51,7 @@ export function IdeasScreen() {
             {settings.isPending
               ? ""
               : runnable.length
-                ? "Inspired by your connected apps"
+                ? "Suggested from your connections"
                 : `Background research is off for ${bot?.name ?? "this Bot"}`}
           </p>
           {runnable.length ? (
@@ -83,7 +83,7 @@ export function IdeasScreen() {
           <ErrorNotice error={suggestions.error.message} />
         ) : ideas.length === 0 ? (
           <MuseEmpty
-            detail={`${bot?.name ?? "Your Bot"} suggests next steps here from the apps it can read, and says where each one came from.`}
+            detail={`${bot?.name ?? "Your Bot"} suggests next steps here from the connections it can read, and says where each one came from.`}
             icon={IconBulb}
             title="Room for a good idea"
           />

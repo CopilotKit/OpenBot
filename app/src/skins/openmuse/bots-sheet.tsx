@@ -6,6 +6,7 @@ import {
 } from "@tabler/icons-react";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
+import { AbstractAvatar } from "@/components/agents/abstract-avatar";
 import {
   attentionSummary,
   needsInput,
@@ -14,25 +15,19 @@ import { Item, ItemContent, ItemTitle } from "@/components/ui/item";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { botAttentionQueryOptions } from "@/lib/bot-lifecycle/queries";
 import { channelListQueryOptions } from "@/lib/channels/queries";
+import { appConfig } from "@/lib/generated/application-config";
 import { cn } from "@/lib/utils";
 import { chooseBot } from "./chosen-bot";
 import { useMuse } from "./context";
-import { mainChannel, mascotTint, tabFor } from "./model";
-import {
-  Divider,
-  ErrorNotice,
-  LinkRow,
-  Mascot,
-  MuseSheet,
-  museText,
-} from "./ui";
+import { mainChannel, tabFor } from "./model";
+import { Divider, ErrorNotice, LinkRow, MuseSheet, museText } from "./ui";
 
 /**
- * Who sits at the centre of OpenMuse. OpenMuse has one agent; OpenBot has a roster, so this is the
+ * Who sits at the centre of the frame. This look has one agent; OpenBot has a roster, so this is the
  * one place the difference shows, and it stays a sheet behind the name rather than a fixture.
  */
 export function BotsSheet({ onClose }: { onClose: () => void }) {
-  const { bot: centre, defaultBotId } = useMuse();
+  const { bot: centre } = useMuse();
   const agents = useQuery(agentListQueryOptions());
   const attention = useQuery(botAttentionQueryOptions());
   const channels = useInfiniteQuery(channelListQueryOptions());
@@ -55,7 +50,7 @@ export function BotsSheet({ onClose }: { onClose: () => void }) {
   return (
     <MuseSheet
       onClose={onClose}
-      subtitle="Choose who is at the centre of OpenMuse."
+      subtitle={`Choose who is at the centre of ${appConfig.brand.productName}.`}
       title="Your Bots"
     >
       <div className="flex flex-col gap-3.5">
@@ -85,7 +80,11 @@ export function BotsSheet({ onClose }: { onClose: () => void }) {
                     <button onClick={() => choose(agent.id)} type="button" />
                   }
                 >
-                  <Mascot size={48} tint={mascotTint(agent.id, defaultBotId)} />
+                  <AbstractAvatar
+                    name={agent.name}
+                    seed={agent.avatarSeed}
+                    size={44}
+                  />
                   <ItemContent className="min-w-0 gap-0.5">
                     <ItemTitle className={cn(museText.body, "font-medium")}>
                       {agent.name}

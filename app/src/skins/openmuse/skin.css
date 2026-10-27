@@ -84,9 +84,6 @@
   --openmuse-composer-border: #eef0f2;
   --openmuse-composer-shadow: rgba(24, 56, 75, 0.06);
   --openmuse-send-idle: #f3f5f6;
-  --openmuse-tint-sky: #ecf5fa;
-  --openmuse-tint-sand: #faf0df;
-  --openmuse-tint-lilac: #f1ecf9;
 }
 
 :root[data-skin="openmuse"].dark {
@@ -164,9 +161,6 @@
   --openmuse-composer-border: #242d32;
   --openmuse-composer-shadow: rgba(0, 0, 0, 0.35);
   --openmuse-send-idle: #1f272b;
-  --openmuse-tint-sky: #1a3040;
-  --openmuse-tint-sand: #3a2f1e;
-  --openmuse-tint-lilac: #2b2640;
 }
 
 /*

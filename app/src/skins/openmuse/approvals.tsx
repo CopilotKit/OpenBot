@@ -1,11 +1,7 @@
-import {
-  IconChevronDown,
-  IconHandStop,
-  IconMessageQuestion,
-  IconShieldCheck,
-} from "@tabler/icons-react";
+import { IconChevronDown } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
+import { AbstractAvatar } from "@/components/agents/abstract-avatar";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import {
   type ApprovalInboxData,
@@ -17,7 +13,6 @@ import { queryClient } from "@/query-client";
 import { actionPhrase } from "./model";
 import {
   ErrorNotice,
-  IconTile,
   MuseButton,
   MuseCard,
   MuseChip,
@@ -28,10 +23,23 @@ import {
 type ApprovalRequest = ApprovalInboxData["requests"][number];
 type PersonQuestion = ApprovalInboxData["questions"][number];
 
-function useBotName() {
+function useBots() {
   const agents = useQuery(agentListQueryOptions());
-  return (id: string) =>
-    agents.data?.find((agent) => agent.id === id)?.name ?? id;
+  const find = (id: string) => agents.data?.find((agent) => agent.id === id);
+  return {
+    name: (id: string) => find(id)?.name ?? id,
+    /** The Bot's own OpenBot avatar, as its page draws it. */
+    avatar: (id: string) => {
+      const bot = find(id);
+      return (
+        <AbstractAvatar
+          name={bot?.name ?? id}
+          seed={bot?.avatarSeed ?? id}
+          size={42}
+        />
+      );
+    },
+  };
 }
 
 /**
@@ -41,7 +49,7 @@ function useBotName() {
  * OpenBot's own screen.
  */
 export function ApprovalCard({ request }: { request: ApprovalRequest }) {
-  const botName = useBotName();
+  const bots = useBots();
   const decision = useMutation(decideApprovalMutationOptions(queryClient));
   const [details, setDetails] = useState(false);
   const handOff = request.action.policy?.behaviour === "hand_off";
@@ -51,13 +59,10 @@ export function ApprovalCard({ request }: { request: ApprovalRequest }) {
   return (
     <MuseCard className="flex flex-col gap-3">
       <div className="flex items-start gap-3">
-        <IconTile
-          icon={handOff ? IconHandStop : IconShieldCheck}
-          tint="lavender"
-        />
+        {bots.avatar(request.action.botId)}
         <div className="flex min-w-0 flex-1 flex-col gap-1">
           <p className={museText.heading}>
-            {botName(request.action.botId)}{" "}
+            {bots.name(request.action.botId)}{" "}
             {handOff ? "handed you" : "wants to"}{" "}
             {actionPhrase(request.action.toolRef)}
           </p>
@@ -67,7 +72,7 @@ export function ApprovalCard({ request }: { request: ApprovalRequest }) {
           </p>
         </div>
         <MuseChip tint="lavender">
-          {handOff ? "Yours to do" : "Review"}
+          {handOff ? "Yours to do" : "Approval"}
         </MuseChip>
       </div>
       {request.action.policy?.reason ? (
@@ -139,17 +144,18 @@ export function ApprovalCard({ request }: { request: ApprovalRequest }) {
 
 /** A question a Bot asked mid-run. Answering resumes the run with the answer. */
 export function QuestionCard({ question }: { question: PersonQuestion }) {
-  const botName = useBotName();
+  const bots = useBots();
   const answer = useMutation(answerPersonQuestionMutationOptions(queryClient));
   const [text, setText] = useState("");
   return (
     <MuseCard className="flex flex-col gap-3 bg-[var(--openmuse-sky)]">
       <div className="flex items-start gap-3">
-        <IconTile accent icon={IconMessageQuestion} tint="plain" />
+        {bots.avatar(question.botId)}
         <div className="flex min-w-0 flex-1 flex-col gap-1">
           <p className={museText.heading}>{question.question}</p>
           <p className={museText.small}>
-            {botName(question.botId)} asks · {relativeTime(question.createdAt)}
+            {bots.name(question.botId)} asks ·{" "}
+            {relativeTime(question.createdAt)}
           </p>
         </div>
         <MuseChip>New</MuseChip>

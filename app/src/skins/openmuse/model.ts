@@ -115,27 +115,13 @@ export function waitingOnYou(inbox: ApprovalInboxData | undefined) {
   return { requests, questions, count: requests.length + questions.length };
 }
 
-/** OpenMuse's three capybara backdrops. The person's default Bot keeps the original sky. */
-export type MascotTint = "sky" | "sand" | "lilac";
-
-const TINTS: readonly MascotTint[] = ["sky", "sand", "lilac"];
-
-export function mascotTint(agentId: string, defaultId?: string): MascotTint {
-  if (agentId === defaultId) return "sky";
-  let hash = 0;
-  for (const character of agentId) {
-    hash = (hash * 31 + character.charCodeAt(0)) >>> 0;
-  }
-  return TINTS[hash % TINTS.length] ?? "sky";
-}
-
 /** A tool reference as a person would say it: `computer_open_url` is "open url". */
 export function actionPhrase(toolRef: string): string {
   return toolRef.replace(/^computer_|^host\//, "").replaceAll("_", " ");
 }
 
 const APPROVAL_STATUS: Record<string, string> = {
-  pending: "Needs review",
+  pending: "Waiting",
   approved: "Approved",
   denied: "Denied",
   consumed: "Done",
