@@ -49,11 +49,9 @@ export function whatText(event: AuditEvent): string {
 type Element = { role?: string; name?: string } | string | undefined;
 
 /** The row's subject, the part of "On" that is not the page host. */
-export function subjectText(event: AuditEvent, nameFor: NameFor): string {
+export function subjectText(event: AuditEvent): string {
   const payload = event.payload ?? {};
   const element = payload.element as Element;
-  if (event.eventType === "channel.routed" && event.targetId)
-    return nameFor(event.targetId);
   if (event.eventType === "mcp.tools_discovered")
     return typeof payload.offered === "number" &&
       typeof payload.granted === "number"
@@ -82,10 +80,18 @@ export function hostText(event: AuditEvent): string {
     : "";
 }
 
+/**
+ * The Bot a row is about. Actions a Bot took carry it in the payload; events done TO a Bot (routed
+ * to it, started, handed work, paused) record it as the target instead, and are just as much its row.
+ */
+export function botIdOf(event: AuditEvent): string | null {
+  if (typeof event.payload?.bot === "string") return event.payload.bot;
+  return event.targetType === "agent" && event.targetId ? event.targetId : null;
+}
+
 export function botText(event: AuditEvent, nameFor: NameFor): string {
-  return typeof event.payload?.bot === "string"
-    ? nameFor(event.payload.bot)
-    : "";
+  const bot = botIdOf(event);
+  return bot ? nameFor(bot) : "";
 }
 
 export function startedByText(event: AuditEvent, nameFor: NameFor): string {
@@ -214,7 +220,7 @@ export function decisionDetails(event: AuditEvent): string[] {
 export function searchTextOf(event: AuditEvent, nameFor: NameFor): string {
   return [
     whatText(event),
-    subjectText(event, nameFor),
+    subjectText(event),
     hostText(event),
     botText(event, nameFor),
     startedByText(event, nameFor),
@@ -225,21 +231,14 @@ export function searchTextOf(event: AuditEvent, nameFor: NameFor): string {
     .toLowerCase();
 }
 
-export function OnCell({
-  event,
-  nameFor,
-}: {
-  event: AuditEvent;
-  nameFor: NameFor;
-}) {
+export function OnCell({ event }: { event: AuditEvent }) {
   const payload = event.payload ?? {};
   const element = payload.element as Element;
-  const subject = subjectText(event, nameFor);
+  const subject = subjectText(event);
   const host = hostText(event);
   /*
    * Named targets, tool counts, files and commands are identifiers and read in mono; a page element
-   * is a label and does not. A routing row's subject is the coworker it went to, named as on the
-   * roster with the immutable id kept in the tooltip.
+   * is a label and does not.
    */
   const mono =
     event.eventType === "mcp.tools_discovered" ||
@@ -250,8 +249,6 @@ export function OnCell({
     <>
       {!subject ? (
         <span className="text-muted-foreground">-</span>
-      ) : event.eventType === "channel.routed" ? (
-        <span title={event.targetId ?? undefined}>{subject}</span>
       ) : mono ? (
         <span className="font-mono text-xs">{subject}</span>
       ) : typeof element === "object" && element?.name ? (
@@ -278,9 +275,9 @@ export function BotCell({
   event: AuditEvent;
   nameFor: NameFor;
 }) {
-  const bot = event.payload?.bot;
+  const bot = botIdOf(event);
   // Keep the immutable bot id available even when names collide.
-  return typeof bot === "string" ? (
+  return bot ? (
     <span className="text-muted-foreground" title={bot}>
       {nameFor(bot)}
     </span>

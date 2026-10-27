@@ -9,13 +9,18 @@ import {
 } from "@tanstack/react-router";
 import { cleanup, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import {
+  type AuditEvent,
+  botText,
+  subjectText,
+} from "@/components/audit/audit-cells";
 import { agentKeys } from "@/lib/agents/queries";
 import { auditKeys } from "@/lib/audit/queries";
 import { Route as AuditRoute } from "@/routes/_authed/admin/audit";
 
 /**
- * Admin → Audit as a log viewer: the title in the same centred column as every other screen, the
- * table across the whole pane under it, searchable and sortable by time, each row coloured by what
+ * Admin → Audit as a log viewer: one window tall, the table across the whole pane and the only thing
+ * that scrolls, searchable and sortable by time, each row coloured by what
  * happened.
  */
 beforeAll(() => GlobalRegistrator.register());
@@ -123,4 +128,20 @@ test("each row carries what happened, for its colour", async () => {
     row.getAttribute("data-outcome"),
   );
   expect(outcomes).toEqual(["refused", "allowed", "did-not-happen"]);
+});
+
+test("a row about a Bot names it under Bot, not under On", () => {
+  const routed = {
+    ...event("e4", "channel.routed", "2026-10-27T11:00:00Z"),
+    targetType: "agent",
+    targetId: "general-assistant",
+    payload: {
+      chosen: "general-assistant",
+      reason: "named by the person asking",
+    },
+  } as unknown as AuditEvent;
+  const nameFor = (id: string) =>
+    id === "general-assistant" ? "General Assistant" : id;
+  expect(botText(routed, nameFor)).toBe("General Assistant");
+  expect(subjectText(routed)).toBe("");
 });

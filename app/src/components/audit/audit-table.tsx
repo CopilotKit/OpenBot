@@ -217,7 +217,7 @@ function auditColumns(
     {
       id: "on",
       header: "On",
-      cell: ({ row }) => <OnCell event={row.original} nameFor={nameFor} />,
+      cell: ({ row }) => <OnCell event={row.original} />,
       enableSorting: false,
     },
     {
