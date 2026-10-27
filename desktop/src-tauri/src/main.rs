@@ -678,15 +678,8 @@ async fn engine_ready(app: &tauri::AppHandle) -> Result<engine::Address, Problem
                     },
                 );
             },
-            // Starting or installing Docker Desktop takes minutes; each line says where it is.
-            &mut |progress| {
-                report_running(
-                    &progress_app,
-                    "install-engine",
-                    progress.said,
-                    progress.downloaded,
-                )
-            },
+            // Starting Docker Desktop can take minutes; each line says where it is.
+            &mut |said| report_running(&progress_app, "install-engine", said, None),
         )
     })
     .await
