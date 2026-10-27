@@ -22,7 +22,8 @@ export function ProfileNameForm({
 }) {
   const id = useId();
   const queryClient = useQueryClient();
-  const [name, setName] = useState(initialName);
+  const [draft, setDraft] = useState<string | null>(null);
+  const name = draft ?? initialName;
   const save = useMutation({
     mutationFn: (name: string) =>
       client("/api/me/profile", "profile", {
@@ -53,7 +54,7 @@ export function ProfileNameForm({
         value={name}
         disabled={save.isPending}
         onChange={(event) => {
-          setName(event.target.value);
+          setDraft(event.target.value);
           save.reset();
         }}
       />

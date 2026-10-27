@@ -587,23 +587,8 @@ const VISIBILITY_OPTIONS: Array<{
 ];
 
 /**
- * The last step: what to call it, who can see it, and — only if the person wants to be more
- * specific — the instructions it follows.
- *
- * Instructions are optional; who can see it always holds an answer, so a Bot
- * named and nothing else is a complete answer, and Create waits for nothing more.
- *
- * The instructions field says what it is for the Bot being made. For one that runs here it is the
- * prompt it runs on, so it is called Instructions; for one
- * somebody else runs it is a line added to a prompt written elsewhere, so it is called Role. The
- * display subtitle is assigned automatically from the runtime.
- *
- * Who can see it was the old wizard's last step. It is here because this step had the room, and a
- * question that does not change what is being made is cheaper answered alongside the name than as a
- * screen of its own.
- *
- * The apps it can use come last and arrive ticked: the person's own connected apps an admin lets
- * owners give. Drawn only when there are some, so a person with none connected is asked nothing.
+ * Shared details for both hosting paths. Name is required; instructions are optional.
+ * Connected app choices stay in the parent flow while navigating between screens.
  */
 function AboutStep({
   apps,
@@ -736,29 +721,8 @@ const OPTION_CLASSES =
   "flex w-full items-center gap-3 rounded-lg border border-transparent bg-muted/50 p-3 text-left transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-50 aria-pressed:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset";
 
 /**
- * Where it runs, answered by recognition: the Bot this deployment runs itself first, then every
- * framework somebody might already have running.
- *
- * NAMES RATHER THAN TWO RADIOS. The person here arrives knowing the role they want and could not
- * tell "Built-in" from "Managed" — both are a kind of Bot, and neither word says which is theirs. A
- * list of frameworks by name and mark is answered by finding your own.
- *
- * EVERY FRAMEWORK LEADS TO THE SAME PLACE. Picking Google ADK rather than CrewAI changes nothing but
- * the default title: both ask for an AG-UI address next and are stored identically. The names are
- * there so somebody finds theirs and knows it will work, not because the choice branches.
- *
- * RUN IT HERE IS THE BIG CARD, ALREADY CHOSEN. It is the answer that needs nothing set up, and most
- * people making a Bot want exactly that, so the sheet opens with it chosen and Continue ready. The
- * frameworks sit below at their usual size for the person who arrived with an agent of their own.
- *
- * A press chooses rather than advances, because the sheet has a Continue and the choice should be
- * visible before it is confirmed.
- *
- * No inner scroller: the sheet's body already scrolls, and a second one inside it would give the
- * list two scrollbars at once.
- *
- * The heading takes focus on arrival, so a keyboard or screen reader lands on the question rather
- * than on the Continue it just pressed, which is still there.
+ * Choose a custom framework and advance immediately to its connection settings.
+ * The heading receives focus when arriving or returning from the endpoint screen.
  */
 function RuntimeStep({
   runtime,

@@ -105,3 +105,37 @@ test("failed saves show an error and preserve the draft for retry", async () => 
   );
   expect((view.getByLabelText("Name") as HTMLInputElement).value).toBe("Sam");
 });
+
+test("an untouched settings form reflects a name saved by the welcome dialog", () => {
+  const query = client();
+  const view = render(
+    <QueryClientProvider client={query}>
+      <ProfileNameForm initialName="" />
+    </QueryClientProvider>,
+  );
+  view.rerender(
+    <QueryClientProvider client={query}>
+      <ProfileNameForm initialName="Sam" />
+    </QueryClientProvider>,
+  );
+  expect((view.getByLabelText("Name") as HTMLInputElement).value).toBe("Sam");
+});
+
+test("a profile refetch does not overwrite an unsaved draft", async () => {
+  const query = client(false);
+  const view = render(
+    <QueryClientProvider client={query}>
+      <ProfileNameForm initialName="Sam" />
+    </QueryClientProvider>,
+  );
+  const user = userEvent.setup({ document });
+  await user.type(view.getByLabelText("Name"), " Julien");
+  view.rerender(
+    <QueryClientProvider client={query}>
+      <ProfileNameForm initialName="Samuel" />
+    </QueryClientProvider>,
+  );
+  expect((view.getByLabelText("Name") as HTMLInputElement).value).toBe(
+    "Sam Julien",
+  );
+});

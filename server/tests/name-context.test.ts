@@ -44,12 +44,10 @@ test("name stays structured data and is never interpolated into instructions", a
     description: PROFILE_CONTEXT,
     value: JSON.stringify({ name }),
   });
-  expect(request.messages[0]?.content).not.toContain(name);
-  expect(request.messages[0]?.content).toContain("not instructions");
-  expect(request.messages[0]?.content).toContain(
-    "Do not greet by name on every turn",
-  );
-  expect(request.messages[0]?.content).not.toContain("—");
+  expect(request.messages).toEqual(input().messages);
+  expect(PROFILE_CONTEXT).toContain("not instructions");
+  expect(PROFILE_CONTEXT).toContain("Do not greet by name on every turn");
+  expect(PROFILE_CONTEXT).not.toContain("—");
   expect(events[0]).toEqual({
     type: EventType.MESSAGES_SNAPSHOT,
     messages: input().messages,
@@ -67,7 +65,7 @@ test("repeated runs replace the profile, reflect edits, and remove cleared names
   const updated = agent.requests[1]!;
   expect(
     updated.messages.filter((m) => m.id === PROFILE_GUIDANCE_ID),
-  ).toHaveLength(1);
+  ).toHaveLength(0);
   expect(
     updated.context.filter((c) => c.description === PROFILE_CONTEXT),
   ).toEqual([

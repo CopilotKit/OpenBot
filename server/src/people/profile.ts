@@ -11,7 +11,9 @@ export type ProfileStore = {
   save(userId: string, name: string): Promise<Profile>;
 };
 
-export function createProfileStore(database: Database): ProfileStore {
+export function createProfileStore(
+  database: Pick<Database, "select" | "update">,
+): ProfileStore {
   const read = async (userId: string): Promise<Profile> => {
     const [user] = await database
       .select({
