@@ -1717,6 +1717,10 @@ const actorAgentResolver = createActorAgentResolver({
       coordinationForActor(actorId, initiator, depth),
     ),
   loadInstructionsForActor,
+  loadNameForActor: async (actorId) => {
+    const profile = await createProfileStore(database).read(actorId);
+    return profile.needsName ? null : profile.name;
+  },
   loadAttachmentForActor,
   markAttachmentsSentForActor,
   // The runtime owns Learning. Resolve its reader only when a turn is built, after boot wiring.

@@ -16,6 +16,7 @@ import {
 } from "../copilot";
 import type { AcquireLearnedSkills } from "../learning/runtime";
 import type { LoadPersonalMemory } from "../memory/tools";
+import { NameContextMiddleware } from "../people/name-context";
 import type { AgentActor } from "./profile-types";
 
 export type AgentResolutionContext = {
@@ -37,6 +38,7 @@ export type ActorAgentResolver = {
 };
 
 export type ActorAgentResolverDependencies = {
+  loadNameForActor?: (actorId: string) => Promise<string | null>;
   loadAgents: LoadAgentsForActor;
   model: RuntimeModel;
   resolveModelApiKey: () => Promise<string | null>;
@@ -113,7 +115,15 @@ export function createActorAgentResolver(
       deps.markAttachmentsSentForActor?.(actor.id),
       deps.acquireLearnedSkills,
       deps.loadPersonalMemoryForActor?.(actor.id),
-    );
+    ).then((agents) => {
+      const loadName = deps.loadNameForActor;
+      if (loadName) {
+        for (const agent of Object.values(agents)) {
+          agent.use(new NameContextMiddleware(() => loadName(actor.id)));
+        }
+      }
+      return agents;
+    });
 
   const resolveAgentsForActor = async (actor: AgentActor) =>
     resolveRegisteredAgents(actor, await deps.loadAgents(actor));
