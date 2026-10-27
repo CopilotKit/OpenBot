@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
 import {
   createPolicyStore,
@@ -112,4 +112,8 @@ describe("a boundary set while running", () => {
     await store.reset();
     expect(store.get()).toEqual(configured);
   });
+});
+
+afterAll(async () => {
+  await database.$client.close();
 });

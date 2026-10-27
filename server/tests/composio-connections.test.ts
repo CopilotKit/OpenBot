@@ -1122,6 +1122,7 @@ afterEach(() => useComposioClient(null));
 afterAll(async () => {
   await clean();
   await cleanForeign();
+  await database.$client.close();
 });
 
 /**

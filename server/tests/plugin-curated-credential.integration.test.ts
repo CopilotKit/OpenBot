@@ -120,6 +120,7 @@ afterAll(async () => {
         personalCredentialId,
       ]),
     );
+  await database.$client.close();
 });
 
 describe("a curated server may only be pointed at its own kind of credential", () => {

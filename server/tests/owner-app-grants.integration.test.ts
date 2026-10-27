@@ -261,6 +261,7 @@ beforeEach(async () => {
 afterAll(async () => {
   await clear();
   await database.delete(users).where(inArray(users.id, people));
+  await database.$client.close();
 });
 
 describe("an owner giving their own app to their own Bot", () => {

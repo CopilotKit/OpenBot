@@ -360,6 +360,7 @@ afterAll(async () => {
   await database.delete(agents).where(eq(agents.id, botId));
   await database.delete(users).where(eq(users.id, askerId));
   await database.delete(users).where(eq(users.id, otherId));
+  await database.$client.close();
 });
 
 describe("a person who has not connected", () => {

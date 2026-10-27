@@ -106,6 +106,7 @@ afterAll(async () => {
   await database
     .delete(computerSnapshot)
     .where(eq(computerSnapshot.computerId, botId));
+  await database.$client.close();
 });
 
 test("replica B refuses a ref that replica A took before the container was replaced", async () => {

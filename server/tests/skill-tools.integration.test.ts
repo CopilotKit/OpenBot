@@ -97,6 +97,7 @@ afterAll(async () => {
   await database.delete(mcpServers).where(eq(mcpServers.id, server));
   await database.delete(agents).where(eq(agents.id, bot));
   await database.delete(users).where(eq(users.id, author));
+  await database.$client.close();
 });
 
 async function saveSkill(tools: string[] | undefined, slug = skill) {

@@ -9,7 +9,7 @@
 // audit row. `brokered_connections_holder_check` is `(person AND user_id IS NOT NULL) OR
 // (deployment AND user_id IS NULL)`, and `''` satisfies `IS NOT NULL`, so the person-with-no-user
 // row IS writable and is what both tests below seed.
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { eq, inArray } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
@@ -133,4 +133,8 @@ describe("a stored pair that names nobody", () => {
     expect(asked).toEqual([]);
     expect(outcome).toBeInstanceOf(PluginInvariantError);
   });
+});
+
+afterAll(async () => {
+  await database.$client.close();
 });

@@ -1,12 +1,16 @@
 export {};
 
 /**
- * `server/tests` in shards, because the whole directory in one process no longer runs.
+ * `server/tests` in shards: faster wall-clock, and headroom under PostgreSQL's connection ceiling.
  *
- * Around a hundred of those files open a module-scope connection pool. PostgreSQL's default
- * `max_connections` is 100, so a single `bun test server/tests` exhausts the server's connection
- * slots during the import phase and dies with `sorry, too many clients already` BEFORE it reports
- * anything. That is a harness ceiling, not a regression, and it is never a reason to change source.
+ * Around a hundred of those files open a module-scope connection pool. Constructing one costs no
+ * connection: the driver opens the pool's `max` (two by default) on the file's first query, and
+ * a pool nobody closes holds its slots for the rest of the run. PostgreSQL's default
+ * `max_connections` is 100, so a single `bun test server/tests` crosses that ceiling as a function
+ * of how many files have RUN, not how many have been imported, and dies with `sorry, too many
+ * clients already` BEFORE it reports anything. That is why #785 has every file close its pool and
+ * a guard test keep the pairing: an unclosed pool is a defect in the source, not a harness
+ * ceiling.
  *
  * Shards keep the pools-per-process count under the ceiling. The suite is split into fixed-size
  * groups of files and each group runs in its own `bun test` invocation, so each process opens its

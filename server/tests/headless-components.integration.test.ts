@@ -82,6 +82,7 @@ afterAll(async () => {
   await database
     .delete(agents)
     .where(inArray(agents.id, [allowedBot, deniedBot]));
+  await database.$client.close();
 });
 
 function lifecycle(input: RunAgentInput, body: BaseEvent[]): BaseEvent[] {

@@ -1,5 +1,5 @@
 // server/tests/account-mode.integration.test.ts
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
@@ -405,4 +405,8 @@ describe("switching back to Personal", () => {
     await modes.forgetRule(app, "admin");
     expect(rules[0]?.revokedAt).not.toBeNull();
   });
+});
+
+afterAll(async () => {
+  await database.$client.close();
 });

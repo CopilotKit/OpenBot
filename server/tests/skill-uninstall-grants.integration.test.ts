@@ -85,6 +85,7 @@ afterAll(async () => {
     .delete(agents)
     .where(inArray(agents.id, [aliceBot, sharedBot]));
   await database.delete(users).where(inArray(users.id, [alice, bob]));
+  await database.$client.close();
 });
 
 function routesAs(actor: {
