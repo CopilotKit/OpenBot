@@ -81,8 +81,14 @@ export function useComposerPresence(root: HTMLElement | null) {
 
   useEffect(() => {
     if (!root) return;
-    const read = () =>
-      setRecording(root.querySelector(RECORDING_SELECTOR) !== null);
+    // The transcript mutates on every streamed word; only a change in recording is news.
+    let last: boolean | null = null;
+    const read = () => {
+      const now = root.querySelector(RECORDING_SELECTOR) !== null;
+      if (now === last) return;
+      last = now;
+      setRecording(now);
+    };
     read();
     const observer = new MutationObserver(read);
     observer.observe(root, { childList: true, subtree: true });
