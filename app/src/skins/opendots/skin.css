@@ -3,7 +3,7 @@
  * for dark.
  *
  * Light is OpenDots' own compact chrome: white canvas, one ink accent (#242424), a pale grey rail
- * and sidebar, lavender for the row you are on, and teal for the brand dot and your own messages.
+ * and sidebar, lavender for the row you are on, and teal for unread chats and your own messages.
  * Dark is what OpenDots' build-time theme makes of the same colours (src/build/dark-theme.ts flips
  * OKLab lightness, keeps hue, and lifts text to AA), with two departures where the flip loses
  * hierarchy: cards sit a step above the canvas, and the breadcrumb keeps a dim and a bright half.
@@ -63,10 +63,7 @@
   --opendots-faint: #646d5d;
   --opendots-icon: #989baa;
   --opendots-rail-icon: #555555;
-  --opendots-brand: #222222;
   --opendots-teal: #438c81;
-  --opendots-logo: #8492c6;
-  --opendots-logo-ink: #42485d;
   --opendots-crumb: #636d5b;
   --opendots-crumb-ink: #686b76;
   --opendots-toggle-ink: #575e59;
@@ -148,10 +145,7 @@
   --opendots-faint: #9fa899;
   --opendots-icon: #a1a4b1;
   --opendots-rail-icon: #9c9c9c;
-  --opendots-brand: #c7c7c7;
   --opendots-teal: #76b2a8;
-  --opendots-logo: #5b668f;
-  --opendots-logo-ink: #9fa5ba;
   --opendots-crumb: #9fa898;
   --opendots-crumb-ink: #c7c9d1;
   --opendots-toggle-ink: #a0a6a1;
@@ -280,7 +274,10 @@
   border-left-color: var(--opendots-line);
 }
 
-:root[data-skin="opendots"] [data-opendots-main] .bg-sidebar.border-l > .h-12.sticky {
+:root[data-skin="opendots"]
+  [data-opendots-main]
+  .bg-sidebar.border-l
+  > .h-12.sticky {
   height: 56px;
   padding-inline: 16px;
   border-bottom: 1px solid var(--opendots-line);

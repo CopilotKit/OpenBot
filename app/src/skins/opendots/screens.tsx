@@ -60,7 +60,7 @@ export function MemoriesScreen() {
   return (
     <OpenDotsPage
       action={<RememberFact />}
-      description="Preferences you choose to share with your Dots."
+      description="Preferences you choose to share with your Bots."
       title="Memories"
     >
       <MemoryList />
