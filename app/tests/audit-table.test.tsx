@@ -25,7 +25,11 @@ import { Route as AuditRoute } from "@/routes/_authed/admin/audit";
  */
 beforeAll(() => GlobalRegistrator.register());
 afterEach(() => cleanup());
-afterAll(() => GlobalRegistrator.unregister());
+// The filter test leaves a menu open; let React finish closing it before `window` goes away.
+afterAll(async () => {
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  await GlobalRegistrator.unregister();
+});
 
 function event(
   id: string,
