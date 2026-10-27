@@ -585,12 +585,7 @@ async function installLocal(view: Awaited<ReturnType<typeof renderApp>>) {
 // Docker and Podman are not here: they are the engine a person may already know, and their prompts
 // and agreements show windows of their own, so a screen names them when it waits on one. See
 // `plainInstallSteps`.
-const JARGON = [
-  /\bCLI\b/,
-  /Container engine/i,
-  /Engine machine/i,
-  /k3d/i,
-];
+const JARGON = [/\bCLI\b/, /Container engine/i, /Engine machine/i, /k3d/i];
 
 function expectPlain(view: Awaited<ReturnType<typeof renderApp>>) {
   const text = view.container.textContent ?? "";
