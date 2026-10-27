@@ -931,6 +931,21 @@ fn ensure_linux_podman_api(shell: &Shell, address: &engine::Address) -> Result<(
         .ensure(&address.pin()?, &stack::default_root())
 }
 
+/// Who the server container runs as on Linux, given who owns the deployment folder.
+///
+/// Rootful Docker keeps the host's numbers across a bind mount, so the owner's own uid and gid are
+/// what reads the owner-only sign-in folder. Rootless Podman does not: it runs every container in a
+/// user namespace where root is the person who started it and any other uid is one of their
+/// subordinate ids, so the owner's uid inside the container is a stranger on the host and cannot
+/// open `.openbot`. Root inside that namespace is the owner, with no more reach than the owner has.
+#[cfg(any(target_os = "linux", test))]
+fn linux_server_user(engine: engine::Engine, uid: u32, gid: u32) -> String {
+    match engine {
+        engine::Engine::Podman => "0:0".into(),
+        engine::Engine::Docker => format!("{uid}:{gid}"),
+    }
+}
+
 /// Install the latest published deployment on first use, then keep its recorded version.
 ///
 /// Local preparation fetches the manifest needed by both launch and plan sign-in images.
@@ -1858,6 +1873,7 @@ async fn start_stack_inner<R: tauri::Runtime>(
          * keeps the host's numbers, so the image's 1001 could not read it. The deployment folder is
          * the one this app made for them, so its owner is who that is, with no call out to `id`.
          * Docker Desktop on macOS and Windows maps ownership itself, and there the default stays.
+         * Rootless Podman is the exception on Linux; see `linux_server_user`.
          */
         #[cfg(target_os = "linux")]
         {
@@ -1870,7 +1886,7 @@ async fn start_stack_inner<R: tauri::Runtime>(
             })?;
             settings.insert(
                 "OPENBOT_SERVER_USER".into(),
-                format!("{}:{}", owner.uid(), owner.gid()),
+                linux_server_user(found.engine, owner.uid(), owner.gid()),
             );
         }
         seed_learning_default(
@@ -7305,6 +7321,15 @@ mod tests {
         std::fs::remove_dir_all(root).unwrap();
         assert!(up.is_ok(), "{up:?}");
         assert!(migrate.is_ok(), "{migrate:?}");
+    }
+
+    #[test]
+    fn the_linux_server_runs_as_the_owner_under_docker_and_as_namespace_root_under_podman() {
+        assert_eq!(
+            linux_server_user(engine::Engine::Docker, 1000, 1000),
+            "1000:1000"
+        );
+        assert_eq!(linux_server_user(engine::Engine::Podman, 1000, 1000), "0:0");
     }
 
     #[test]
