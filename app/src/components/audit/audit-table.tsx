@@ -134,6 +134,7 @@ export function AuditTable({
                         cell.column.id === "when" &&
                           "whitespace-nowrap font-mono text-muted-foreground text-xs tabular-nums",
                         cell.column.id === "what" && "font-medium",
+                        cell.column.id === "bot" && "whitespace-nowrap",
                       )}
                       data-column={cell.column.id}
                       key={cell.id}
