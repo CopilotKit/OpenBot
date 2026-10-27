@@ -157,7 +157,6 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
   const [step, setStep] = useState<Step>("runtime");
   const [direction, setDirection] = useState(1);
   const [name, setName] = useState("");
-  const [title, setTitle] = useState("");
   const [instructions, setInstructions] = useState("");
   /** Private until said otherwise: a Bot shown to everybody by accident is the worse mistake. */
   const [visibility, setVisibility] = useState<Visibility>("private");
@@ -234,7 +233,7 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
     const agent = await createAgent.mutateAsync(
       agentInputFrom({
         name: name.trim(),
-        title: title.trim() || defaultTitle(chosen),
+        title: defaultTitle(chosen),
         roleDescription:
           instructions.trim() || defaultInstructions(name.trim(), chosen),
         visibility,
@@ -375,9 +374,7 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
                 runtime={runtime ?? { kind: "builtin" }}
                 onInstructions={setInstructions}
                 onName={setName}
-                onTitle={setTitle}
                 onVisibility={setVisibility}
-                title={title}
                 visibility={visibility}
               />
             ) : step === "runtime" ? (
@@ -528,22 +525,22 @@ const VISIBILITY_OPTIONS: Array<{
   {
     value: "public",
     title: "Public",
-    description: "Everyone in your OpenBot can find and use it.",
+    description: "Everyone in your company can find and use it.",
     icon: IconUsers,
   },
 ];
 
 /**
  * The last step: what to call it, who can see it, and — only if the person wants to be more
- * specific — a line describing it and the instructions it follows.
+ * specific — the instructions it follows.
  *
- * Title and instructions are optional and say so; who can see it always holds an answer, so a Bot
+ * Instructions are optional; who can see it always holds an answer, so a Bot
  * named and nothing else is a complete answer, and Create waits for nothing more.
  *
  * The instructions field says what it is for the Bot being made. For one that runs here it is the
- * prompt it runs on, so it is called Instructions and says how it behaves without them; for one
+ * prompt it runs on, so it is called Instructions; for one
  * somebody else runs it is a line added to a prompt written elsewhere, so it is called Role. The
- * title's example is the framework's name, which is what it becomes when left blank.
+ * display subtitle is assigned automatically from the runtime.
  *
  * Who can see it was the old wizard's last step. It is here because this step had the room, and a
  * question that does not change what is being made is cheaper answered alongside the name than as a
@@ -557,22 +554,18 @@ function AboutStep({
   leftOut,
   onApp,
   name,
-  title,
   instructions,
   runtime,
   visibility,
   onName,
-  onTitle,
   onInstructions,
   onVisibility,
 }: {
   name: string;
-  title: string;
   instructions: string;
   runtime: Runtime;
   visibility: Visibility;
   onName: (value: string) => void;
-  onTitle: (value: string) => void;
   onInstructions: (value: string) => void;
   onVisibility: (value: Visibility) => void;
   apps: GiveableApp[];
@@ -595,21 +588,6 @@ function AboutStep({
         />
       </Field>
       <Field>
-        <FieldLabel htmlFor="new-bot-title">
-          Title
-          <span className="font-normal text-muted-foreground">Optional</span>
-        </FieldLabel>
-        <Input
-          autoComplete="off"
-          id="new-bot-title"
-          maxLength={120}
-          onChange={(event) => onTitle(event.target.value)}
-          placeholder={runsHere ? "Finance Operations" : defaultTitle(runtime)}
-          value={title}
-        />
-        <FieldDescription>A few words shown under its name.</FieldDescription>
-      </Field>
-      <Field>
         <FieldLabel htmlFor="new-bot-instructions">
           {runsHere ? "Instructions" : "Role"}
           <span className="font-normal text-muted-foreground">Optional</span>
@@ -623,11 +601,11 @@ function AboutStep({
           rows={5}
           value={instructions}
         />
-        <FieldDescription>
-          {runsHere
-            ? "How it should work. Leave it blank and it helps with anything."
-            : "Added to your agent's own instructions."}
-        </FieldDescription>
+        {!runsHere && (
+          <FieldDescription>
+            Added to your agent's own instructions.
+          </FieldDescription>
+        )}
       </Field>
       <FieldSet>
         <FieldLegend variant="label">Who can see it</FieldLegend>
