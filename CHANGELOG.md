@@ -489,6 +489,11 @@ close it, and the reason is in the server's and the computer's logs.
 - The Recorder times a narrated phrase from its first word when Chrome reuses a result slot; it was
   stamped up to seconds early.
 
+### The desktop window answers while software is installing
+
+Clicking or focusing the desktop window while it downloaded local software showed a spinning cursor
+until the download finished. The window now comes forward at once and keeps the setup screen.
+
 ### A new desktop install starts its server again
 
 A desktop install of v0.2.0 stopped at start with `server stopped straight away (exit status: 1)` and
