@@ -1,7 +1,8 @@
+import { downloadHeaders } from "@openbot/shared/file-download";
 import type { Context, MiddlewareHandler } from "hono";
 import { Hono } from "hono";
-import { downloadHeaders } from "@openbot/shared/file-download";
 import type { BotAccessCheck } from "../agents/profile-policy";
+import { ApprovalNeedsConversationError } from "../approvals/types";
 import type { AuditReader } from "../audit";
 import type { AppVariables } from "../auth/guards";
 import { requireAdmin } from "../auth/guards";
@@ -1030,6 +1031,13 @@ function errorBody(error: unknown): Record<string, unknown> {
     ...(error instanceof ComputerStillStartingError
       ? { starting: true, notPerformed: true }
       : {}),
+    /*
+     * A rule asks about this call and it came without the conversation the asking happens in. Marked
+     * so the browser sends the same call again through the approval route, which carries it.
+     */
+    ...(error instanceof ApprovalNeedsConversationError
+      ? { needsConversation: true, notPerformed: true }
+      : {}),
   };
 }
 
@@ -1053,6 +1061,8 @@ function statusFor(error: unknown): 400 | 403 | 404 | 409 | 413 | 500 | 503 {
   // another snapshot. Not 503, which says the computer is unavailable and sends an operator hunting a
   // container that is running perfectly.
   if (error instanceof ElementNotFoundError) return 409;
+  // Nothing is broken here either: the call has to come again with its conversation first.
+  if (error instanceof ApprovalNeedsConversationError) return 409;
   // A person holding the wheel, or a person driving before taking it. Nothing is broken; the caller
   // has to wait or take control first, and 409 is how both of those are already reported.
   if (
