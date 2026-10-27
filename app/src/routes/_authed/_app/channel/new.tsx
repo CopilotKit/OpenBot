@@ -200,7 +200,7 @@ function RouteComponent() {
                     <AgentOrb size="24px" state="idle" />
                     New Bot
                     <span className="truncate text-muted-foreground ml-1">
-                      Create a new Bot.
+                      Create a new Bot
                     </span>
                   </ComboboxItem>
                 ) : (
