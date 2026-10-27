@@ -7,6 +7,9 @@
  * Dark is what OpenDots' build-time theme makes of the same colours (src/build/dark-theme.ts flips
  * OKLab lightness, keeps hue, and lifts text to AA), with two departures where the flip loses
  * hierarchy: cards sit a step above the canvas, and the breadcrumb keeps a dim and a bright half.
+ *
+ * Every text colour meets WCAG AA (4.5:1) on the surface it sits on, and every icon 3:1, in both
+ * themes. Where OpenDots' own grey fell short, it is darkened along its own hue until it passes.
  */
 :root[data-skin="opendots"] {
   color-scheme: light;
@@ -55,13 +58,13 @@
   --opendots-active-ink: #596aa9;
   --opendots-tag: #edf1e7;
   --opendots-tag-ink: #526249;
-  --opendots-nav-ink: #858690;
+  --opendots-nav-ink: #6c6d77;
   --opendots-dot-ink: #58634f;
   --opendots-new-chat-ink: #53634d;
   --opendots-label: #646b61;
   --opendots-muted: #707070;
   --opendots-faint: #646d5d;
-  --opendots-icon: #989baa;
+  --opendots-icon: #878a99;
   --opendots-rail-icon: #555555;
   --opendots-teal: #438c81;
   --opendots-crumb: #636d5b;
@@ -70,7 +73,7 @@
   --opendots-pause-ink: #53624d;
   --opendots-menu-ink: #333333;
   --opendots-tab: #ededed;
-  --opendots-eyebrow: #999ca8;
+  --opendots-eyebrow: #71747f;
   --opendots-scrim: #2f34464d;
   --opendots-pane-shadow: -8px 0 28px #20263418;
   --opendots-user-bubble: #3d7e75;
@@ -81,13 +84,13 @@
   --opendots-composer-focus: #c8c8c8;
   --opendots-send-off: #ececec;
   --opendots-send-off-ink: #9a9a9a;
-  --opendots-note: #93949e;
-  --opendots-persona-ink: #777777;
-  --opendots-text-button: #9296a7;
+  --opendots-note: #72737d;
+  --opendots-persona-ink: #747474;
+  --opendots-text-button: #707484;
   --opendots-avatar: #eeeae1;
   --opendots-avatar-line: #e2dfd8;
-  --opendots-avatar-ink: #8d877d;
-  --opendots-error-ink: #b59288;
+  --opendots-avatar-ink: #6d675d;
+  --opendots-error-ink: #8b6a61;
 }
 
 :root[data-skin="opendots"].dark {
@@ -296,4 +299,26 @@
   background: var(--opendots-tab);
   color: var(--foreground);
   font-size: 13px;
+}
+
+/*
+ * Reduced motion. The frame's own chrome (rail, sidebar, top bar, computer pane, phone drawer) and
+ * the menus, tooltips, sheets and dialogs it opens stop moving: no transitions, no animations.
+ * OpenBot's orb in the rail already stills itself through `useReducedMotion`. No `!important`:
+ * this rule sits in no cascade layer, so it outranks every Tailwind utility as it is.
+ */
+@media (prefers-reduced-motion: reduce) {
+  :root[data-skin="opendots"] [data-opendots-chrome],
+  :root[data-skin="opendots"] [data-opendots-chrome] *,
+  :root[data-skin="opendots"] [data-slot="tooltip-content"],
+  :root[data-skin="opendots"] [data-slot="dropdown-menu-content"],
+  :root[data-skin="opendots"] [data-slot="context-menu-content"],
+  :root[data-skin="opendots"] [data-slot="select-content"],
+  :root[data-skin="opendots"] [data-slot="sheet-content"],
+  :root[data-skin="opendots"] [data-slot="sheet-overlay"],
+  :root[data-skin="opendots"] [data-slot="dialog-content"],
+  :root[data-skin="opendots"] [data-slot="dialog-overlay"] {
+    animation: none;
+    transition: none;
+  }
 }

@@ -7,7 +7,7 @@ import { appConfig } from "@/lib/generated/application-config";
 /** Which part of OpenDots' sidebar a page belongs to, so the right row is lit. */
 export type Section =
   | "chat"
-  | "activity"
+  | "routines"
   | "memories"
   | "bots"
   | "skills"
@@ -88,7 +88,7 @@ export function parsePlace(
   if (path === "/bot") {
     return {
       section: "chat",
-      label: (bot) => bot ?? "Chat",
+      label: (bot) => bot ?? "Conversation",
       agentFromUrl: agent,
       ownsWatch: true,
     };
@@ -106,8 +106,8 @@ export function parsePlace(
   if (path === "/bots" || path === "/agents") {
     return { section: "bots", label: "All Bots", ownsWatch: false };
   }
-  if (path === "/s/activity" || path === "/routines") {
-    return { section: "activity", label: "Activity", ownsWatch: false };
+  if (path === "/s/routines" || path === "/routines") {
+    return { section: "routines", label: "Routines", ownsWatch: false };
   }
   if (path === "/s/memories" || path === "/capabilities/memory") {
     return { section: "memories", label: "Memories", ownsWatch: false };

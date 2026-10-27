@@ -1,6 +1,6 @@
 import type { Skin } from "../types";
 import { OpenDotsFrame } from "./frame";
-import { ActivityScreen, MemoriesScreen } from "./screens";
+import { MemoriesScreen, RoutinesScreen } from "./screens";
 
 /*
  * OpenDots over OpenBot. The frame is OpenDots' rail, Dots sidebar, top bar and computer pane; the
@@ -11,10 +11,11 @@ import { ActivityScreen, MemoriesScreen } from "./screens";
 export const opendots: Skin = {
   id: "opendots",
   name: "OpenDots",
-  description: "Always-on coworkers, each with its own computer.",
+  description:
+    "A compact sidebar of your Bots, with each Bot's computer beside the conversation.",
   Frame: OpenDotsFrame,
   screens: {
-    activity: ActivityScreen,
+    routines: RoutinesScreen,
     memories: MemoriesScreen,
   },
 };

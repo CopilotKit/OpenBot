@@ -18,13 +18,14 @@ import {
 } from "@tabler/icons-react";
 import { useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query";
 import { Link, type LinkProps, useNavigate } from "@tanstack/react-router";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useRef, useState } from "react";
 import { AbstractAvatar } from "@/components/agents/abstract-avatar";
 import {
   isUnread,
   matchingChannels,
   pinnedFirst,
 } from "@/components/app-sidebar/app-sidebar";
+import { ChannelPagination } from "@/components/app-sidebar/channel-pagination";
 import { BotsNavBadge } from "@/components/bot-profile/attention";
 import { DeleteConversationDialog } from "@/components/channels/delete-conversation-dialog";
 import { Button } from "@/components/ui/button";
@@ -189,11 +190,11 @@ function BotsSection({
       </NavLabel>
       {agents.isPending ? null : agents.error ? (
         <p className="px-3.5 py-1.5 text-[12px] text-destructive" role="alert">
-          Couldn't load your Bots.
+          Couldn't load your Bots. Reload the page.
         </p>
       ) : dots.length === 0 ? (
         <p className="px-3.5 py-1.5 text-[12px] leading-relaxed text-(--opendots-faint)">
-          Create a Bot and it shows up here.
+          No Bots yet. Use + to create one.
         </p>
       ) : (
         <nav
@@ -377,6 +378,7 @@ function RecentChats({
   const channels = useInfiniteQuery(channelListQueryOptions());
   const [searching, setSearching] = useState(false);
   const [search, setSearch] = useState("");
+  const scrollRoot = useRef<HTMLDivElement>(null);
   const visible = pinnedFirst(matchingChannels(channels.data, search));
   const nameOf = (id: string) =>
     agents.data?.find((agent) => agent.id === id)?.name;
@@ -387,7 +389,7 @@ function RecentChats({
   return (
     <section
       aria-label="Recent chats"
-      className="mt-4 flex min-h-0 flex-1 flex-col max-[700px]:flex-none"
+      className="mt-4 flex min-h-0 flex-1 flex-col max-md:flex-none"
     >
       <NavLabel
         actions={
@@ -427,16 +429,19 @@ function RecentChats({
           />
         </div>
       ) : null}
-      <div className="min-h-0 flex-1 overflow-y-auto max-[700px]:max-h-[27vh]">
+      <div
+        className="min-h-0 flex-1 overflow-y-auto max-md:max-h-[27vh]"
+        ref={scrollRoot}
+      >
         {channels.isPending ? null : channels.error ? (
           <p className="px-3.5 py-1.5 text-[12px] text-(--opendots-error-ink)">
-            Couldn't load your conversations.
+            Couldn't load your conversations. Reload the page.
           </p>
         ) : visible.length === 0 ? (
           <p className="px-3.5 py-1.5 text-[12px] leading-relaxed text-(--opendots-faint)">
             {search.trim()
               ? `No conversation has “${search.trim()}” in its name or latest message.`
-              : "Your first conversation will live here."}
+              : "No conversations yet. Start one with New chat."}
           </p>
         ) : (
           visible.map((channel) => (
@@ -452,20 +457,12 @@ function RecentChats({
             />
           ))
         )}
-        {channels.hasNextPage ? (
-          <button
-            className="px-3.5 py-2 text-[12px] text-(--opendots-muted) hover:text-foreground disabled:opacity-50"
-            disabled={channels.isFetchingNextPage}
-            onClick={() =>
-              void channels.fetchNextPage({ cancelRefetch: false })
-            }
-            type="button"
-          >
-            {channels.isFetchingNextPage
-              ? "Loading older conversations…"
-              : "Load more conversations"}
-          </button>
-        ) : null}
+        {/* OpenBot's own pager: it loads older conversations as the list scrolls to its end. */}
+        <ChannelPagination
+          query={channels}
+          scrollRoot={scrollRoot}
+          searching={search.trim().length > 0}
+        />
       </div>
     </section>
   );
@@ -505,21 +502,21 @@ function WorkspaceLinks({
    * in the rail at desktop width, so they join these rows only in the phone drawer, where there is
    * no rail.
    */
-  const drawerOnly = "min-[701px]:hidden";
+  const drawerOnly = "md:hidden";
   return (
     <nav
       aria-label="Workspace"
       className="mt-auto border-t border-(--opendots-line) pt-2.5"
     >
       <Link
-        aria-current={current("activity")}
-        className={row("activity")}
+        aria-current={current("routines")}
+        className={row("routines")}
         onClick={onNavigate}
-        params={{ screen: "activity" }}
+        params={{ screen: "routines" }}
         to="/s/$screen"
       >
         <IconClockHour3 />
-        <span className="min-w-0 flex-1 truncate">Scheduled & activity</span>
+        <span className="min-w-0 flex-1 truncate">Routines</span>
         <Count value={routines.data?.routines.length} />
       </Link>
       <Link
@@ -591,7 +588,7 @@ function UserRow() {
   const name = user.data.name?.trim() || user.data.email;
   const initials = initialsOf(user.data);
   return (
-    <div className="mt-1.5 flex items-center gap-2.5 px-2.5 pt-1.5 min-[701px]:hidden">
+    <div className="mt-1.5 flex items-center gap-2.5 px-2.5 pt-1.5 md:hidden">
       <span
         aria-hidden
         className="grid size-[29px] shrink-0 place-items-center rounded-full border border-(--opendots-avatar-line) bg-(--opendots-avatar) text-[10px] text-(--opendots-avatar-ink)"
@@ -630,7 +627,7 @@ export function OpenDotsSidebar({
 }) {
   const channels = useInfiniteQuery(channelListQueryOptions());
   return (
-    <div className="flex h-full min-h-0 flex-col px-3 pt-[23px] pb-3 max-[700px]:overflow-y-auto">
+    <div className="flex h-full min-h-0 flex-col px-3 pt-[23px] pb-3 max-md:overflow-y-auto">
       <Wordmark onNavigate={onNavigate} />
       <Link
         {...newChat}

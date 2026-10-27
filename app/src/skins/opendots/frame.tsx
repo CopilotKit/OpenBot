@@ -32,11 +32,13 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { signOutMutationOptions } from "@/lib/auth/mutations";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
@@ -128,7 +130,8 @@ function Rail({
   return (
     <nav
       aria-label="Workspace navigation"
-      className="flex w-12 shrink-0 flex-col items-center gap-3 border-r border-(--opendots-line) bg-(--opendots-rail) px-[5px] py-4 max-[700px]:hidden"
+      data-opendots-chrome
+      className="flex w-12 shrink-0 flex-col items-center gap-3 border-r border-(--opendots-line) bg-(--opendots-rail) px-[5px] py-4 max-md:hidden"
     >
       {/* OpenBot's own mark where OpenDots puts its monogram; the deployment owns the identity. */}
       <Link
@@ -160,11 +163,11 @@ function Rail({
           <IconLayoutGrid />
         </Link>
       </RailTip>
-      <RailTip label="Scheduled & activity">
+      <RailTip label="Routines">
         <Link
-          aria-label="Open activity"
+          aria-label="Routines"
           className={railButton}
-          params={{ screen: "activity" }}
+          params={{ screen: "routines" }}
           to="/s/$screen"
         >
           <IconClockHour3 />
@@ -231,7 +234,7 @@ function PauseControl({ botId, name }: { botId: string; name: string }) {
       type="button"
     >
       {paused ? <IconPlayerPlay /> : <IconPlayerPause />}
-      <span className="max-[700px]:hidden">{paused ? "Resume" : "Pause"}</span>
+      <span className="max-md:hidden">{paused ? "Resume" : "Pause"}</span>
     </button>
   );
 }
@@ -252,12 +255,15 @@ function Topbar({
   const agents = useQuery(agentListQueryOptions());
   const name = botName(agents.data, place.botId);
   return (
-    <header className="flex h-16 shrink-0 items-center gap-4 border-b border-(--opendots-line) bg-(--opendots-topbar) px-[22px] max-[700px]:pr-[15px] max-[700px]:pl-12">
+    <header
+      data-opendots-chrome
+      className="flex h-16 shrink-0 items-center gap-4 border-b border-(--opendots-line) bg-(--opendots-topbar) px-[22px] max-md:pr-[15px] max-md:pl-12"
+    >
       <button
         aria-controls="opendots-sidebar"
         aria-expanded={!navCollapsed}
         aria-label={navCollapsed ? "Show navigation" : "Hide navigation"}
-        className="grid size-10 shrink-0 place-items-center rounded-lg text-(--opendots-toggle-ink) outline-none transition-colors hover:bg-(--opendots-hover) focus-visible:ring-2 focus-visible:ring-ring max-[700px]:hidden [&_svg]:size-[18px]"
+        className="grid size-10 shrink-0 place-items-center rounded-lg text-(--opendots-toggle-ink) outline-none transition-colors hover:bg-(--opendots-hover) focus-visible:ring-2 focus-visible:ring-ring max-md:hidden [&_svg]:size-[18px]"
         onClick={onToggleNav}
         type="button"
       >
@@ -265,10 +271,10 @@ function Topbar({
       </button>
       <nav
         aria-label="Breadcrumb"
-        className="flex min-w-0 flex-1 items-center gap-[13px] text-[13px] text-(--opendots-crumb) max-[700px]:gap-[7px]"
+        className="flex min-w-0 flex-1 items-center gap-[13px] text-[13px] text-(--opendots-crumb) max-md:gap-[7px]"
       >
-        <span className="shrink-0 max-[700px]:hidden">Bots</span>
-        <span aria-hidden className="shrink-0 max-[700px]:hidden">
+        <span className="shrink-0 max-md:hidden">Bots</span>
+        <span aria-hidden className="shrink-0 max-md:hidden">
           /
         </span>
         <strong
@@ -288,7 +294,7 @@ function Topbar({
           </>
         ) : null}
       </nav>
-      <div className="flex shrink-0 items-center gap-[15px] max-[700px]:gap-3">
+      <div className="flex shrink-0 items-center gap-[15px] max-md:gap-3">
         {place.botId && name ? (
           <PauseControl botId={place.botId} name={name} />
         ) : null}
@@ -323,20 +329,14 @@ export function OpenDotsFrame({ children }: { children: ReactNode }) {
   const [paneOpen, setPaneOpen] = useState(false);
   const href = useRouterState({ select: (state) => state.location.href });
 
+  // OpenBot's own breakpoint, so the drawer and OpenBot's pages agree about what a phone is.
+  const isMobile = useIsMobile();
+
   // A page chosen from the drawer replaces it, as tapping a row in OpenDots' drawer does.
   // biome-ignore lint/correctness/useExhaustiveDependencies: closing on every navigation is the point.
   useEffect(() => {
     setMobileOpen(false);
   }, [href]);
-
-  useEffect(() => {
-    if (!mobileOpen) return;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setMobileOpen(false);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [mobileOpen]);
 
   /** New chat is with the Bot on screen when there is one, as OpenDots starts it with the open one. */
   const newChat: LinkProps =
@@ -375,40 +375,50 @@ export function OpenDotsFrame({ children }: { children: ReactNode }) {
         newChat={newChat}
         onToggleNav={() => setNavCollapsed((collapsed) => !collapsed)}
       />
-      <button
-        aria-controls="opendots-sidebar"
-        aria-expanded={mobileOpen}
-        aria-label="Open navigation"
-        className="fixed top-3.5 left-2.5 z-20 grid size-9 place-items-center rounded-lg text-(--opendots-menu-ink) outline-none focus-visible:ring-2 focus-visible:ring-ring min-[701px]:hidden [&_svg]:size-[21px]"
-        onClick={() => setMobileOpen(true)}
-        type="button"
-      >
-        <IconMenu2 />
-      </button>
-      {mobileOpen ? (
-        <button
-          aria-label="Close navigation"
-          className="fixed inset-0 z-[25] bg-(--opendots-scrim) min-[701px]:hidden"
-          onClick={() => setMobileOpen(false)}
-          type="button"
-        />
-      ) : null}
-      <aside
-        aria-label="Sidebar"
-        className={cn(
-          "w-[220px] shrink-0 border-r border-(--opendots-line) bg-(--opendots-sidebar)",
-          navCollapsed && "min-[701px]:hidden",
-          "max-[700px]:fixed max-[700px]:inset-y-0 max-[700px]:left-0 max-[700px]:z-30 max-[700px]:w-[252px]",
-          !mobileOpen && "max-[700px]:invisible max-[700px]:-translate-x-full",
-        )}
-        id="opendots-sidebar"
-      >
-        <OpenDotsSidebar
-          newChat={newChat}
-          onNavigate={() => setMobileOpen(false)}
-          place={place}
-        />
-      </aside>
+      {isMobile ? (
+        <>
+          <button
+            aria-expanded={mobileOpen}
+            aria-label="Open navigation"
+            className="fixed top-3.5 left-2.5 z-20 grid size-9 place-items-center rounded-lg text-(--opendots-menu-ink) outline-none focus-visible:ring-2 focus-visible:ring-ring [&_svg]:size-[21px]"
+            data-opendots-chrome
+            onClick={() => setMobileOpen(true)}
+            type="button"
+          >
+            <IconMenu2 />
+          </button>
+          {/* OpenBot's own sheet: it traps focus, closes on Escape and on the scrim. */}
+          <Sheet onOpenChange={setMobileOpen} open={mobileOpen}>
+            <SheetContent
+              className="w-[252px] max-w-[85vw] gap-0 border-(--opendots-line) bg-(--opendots-sidebar) p-0 text-foreground"
+              data-opendots-chrome
+              showCloseButton={false}
+              side="left"
+            >
+              <SheetTitle className="sr-only">Navigation</SheetTitle>
+              <OpenDotsSidebar
+                newChat={newChat}
+                onNavigate={() => setMobileOpen(false)}
+                place={place}
+              />
+            </SheetContent>
+          </Sheet>
+        </>
+      ) : (
+        <aside
+          aria-label="Sidebar"
+          className="w-[220px] shrink-0 border-r border-(--opendots-line) bg-(--opendots-sidebar)"
+          data-opendots-chrome
+          hidden={navCollapsed}
+          id="opendots-sidebar"
+        >
+          <OpenDotsSidebar
+            newChat={newChat}
+            onNavigate={() => setMobileOpen(false)}
+            place={place}
+          />
+        </aside>
+      )}
       <div className="flex min-w-0 flex-1 flex-col">
         <Topbar
           computerOpen={computerOpen}
@@ -429,7 +439,10 @@ export function OpenDotsFrame({ children }: { children: ReactNode }) {
             ) : null}
           </main>
           {paneOpen && !place.ownsWatch ? (
-            <div className="w-[clamp(390px,40vw,660px)] shrink-0 border-l border-(--opendots-line) max-[1100px]:fixed max-[1100px]:top-16 max-[1100px]:right-0 max-[1100px]:bottom-0 max-[1100px]:z-[15] max-[1100px]:w-[min(600px,100vw)] max-[1100px]:shadow-(--opendots-pane-shadow)">
+            <div
+              data-opendots-chrome
+              className="w-[clamp(390px,40vw,660px)] shrink-0 border-l border-(--opendots-line) max-[1100px]:fixed max-[1100px]:top-16 max-[1100px]:right-0 max-[1100px]:bottom-0 max-[1100px]:z-[15] max-[1100px]:w-[min(600px,100vw)] max-[1100px]:shadow-(--opendots-pane-shadow)"
+            >
               <ComputerPane
                 defaultBotId={place.botId}
                 onClose={() => setPaneOpen(false)}
