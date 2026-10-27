@@ -214,8 +214,9 @@
   line-height: 1.75;
 }
 
-/* The composer is OpenDots' rounded card: a 22px radius, a hairline and a breath of shadow. */
+/* The composer is OpenDots' rounded card on the canvas: a 22px radius, a hairline and a breath of shadow. */
 :root[data-skin="opendots"] [data-opendots-main] form.rounded-2xl {
+  background: var(--background);
   border-radius: 22px;
   border-color: var(--opendots-composer-line);
   box-shadow: var(--opendots-composer-shadow);
