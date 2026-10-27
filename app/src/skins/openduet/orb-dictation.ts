@@ -20,6 +20,18 @@ export const DICTATE_SELECTOR = 'button[aria-label="Dictate a message"]';
 export const RECORDING_SELECTOR = 'button[aria-label="Cancel dictation"]';
 /** Ends the recording and puts the words in the draft. */
 export const STOP_SELECTOR = 'button[aria-label="Stop and transcribe"]';
+/**
+ * Drawn by the composer for as long as the Bot's turn runs in this conversation: the most direct
+ * word OpenBot has that the Bot is working, and it needs no round trip through the server.
+ */
+export const WORKING_SELECTOR = 'button[aria-label="Stop the Bot"]';
+/**
+ * How long the Stop control has to stay before the orb reads the Bot as working. Opening a
+ * conversation shows it for a moment while OpenBot checks for a turn already running, and an orb
+ * that thought for that moment on every open would be a flicker, not news. A real turn runs far
+ * longer than this.
+ */
+export const WORKING_SETTLE_MS = 700;
 /** The composer's editor. */
 export const EDITOR_SELECTOR = '[aria-label="Message"]';
 
@@ -71,23 +83,35 @@ export function pressOrbWhenReady(
 }
 
 /**
- * Whether the composer inside `root` is listening, and a count that moves on each keystroke in its
- * editor, for the orb to look down at what is being typed.
+ * Whether the composer inside `root` is listening, whether the Bot it talks to is working, and a
+ * count that moves on each keystroke in its editor, for the orb to look down at what is typed.
  */
 export function useComposerPresence(root: HTMLElement | null) {
   const [recording, setRecording] = useState(false);
+  const [working, setWorking] = useState(false);
   const [typing, setTyping] = useState(false);
   const [keystrokes, setKeystrokes] = useState(0);
 
   useEffect(() => {
     if (!root) return;
-    // The transcript mutates on every streamed word; only a change in recording is news.
-    let last: boolean | null = null;
+    // The transcript mutates on every streamed word; only a change in either is news.
+    let lastRecording: boolean | null = null;
+    let lastWorking: boolean | null = null;
+    let settle: ReturnType<typeof setTimeout> | undefined;
     const read = () => {
-      const now = root.querySelector(RECORDING_SELECTOR) !== null;
-      if (now === last) return;
-      last = now;
-      setRecording(now);
+      const isRecording = root.querySelector(RECORDING_SELECTOR) !== null;
+      const isWorking = root.querySelector(WORKING_SELECTOR) !== null;
+      if (isRecording !== lastRecording) {
+        lastRecording = isRecording;
+        setRecording(isRecording);
+      }
+      if (isWorking !== lastWorking) {
+        lastWorking = isWorking;
+        clearTimeout(settle);
+        if (isWorking)
+          settle = setTimeout(() => setWorking(true), WORKING_SETTLE_MS);
+        else setWorking(false);
+      }
     };
     read();
     const observer = new MutationObserver(read);
@@ -108,11 +132,12 @@ export function useComposerPresence(root: HTMLElement | null) {
     root.addEventListener("keydown", onKey);
     return () => {
       observer.disconnect();
+      clearTimeout(settle);
       root.removeEventListener("focusin", onFocusIn);
       root.removeEventListener("focusout", onFocusOut);
       root.removeEventListener("keydown", onKey);
     };
   }, [root]);
 
-  return { recording, typing, keystrokes };
+  return { recording, working, typing, keystrokes };
 }

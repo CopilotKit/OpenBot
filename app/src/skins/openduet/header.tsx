@@ -97,9 +97,11 @@ export function TabHeader({
   const [goingToTalk, setGoingToTalk] = useState<(() => void) | null>(null);
   useEffect(() => () => goingToTalk?.(), [goingToTalk]);
 
+  // Working is the composer's own Stop control or the roster's word for a run nobody here started.
+  const working = presence.working || conversation.busy;
   const state: MicOrbState = presence.recording
     ? "listening"
-    : conversation.busy
+    : working
       ? "thinking"
       : presence.typing
         ? "listening"
@@ -164,7 +166,7 @@ export function TabHeader({
             state={state}
           />
         </button>
-        <DoingPill line={doingLine(conversation.busy, conversation.work)} />
+        <DoingPill line={doingLine(working, conversation.work)} />
       </div>
       <Link
         {...SETTINGS_LINK}

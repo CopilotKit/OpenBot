@@ -54,6 +54,22 @@ export function actionName(toolRef: string): string {
     .trim();
 }
 
+export type ActionKind = "command" | "file" | "mail" | "browser" | "other";
+
+/**
+ * What kind of thing a waiting action is, for the glyph on its card. A command or a file write is
+ * named before the computer, because both run on the Bot's computer (`computer_run_command`) and
+ * are not browsing.
+ */
+export function actionKind(toolRef: string): ActionKind {
+  const tool = toolRef.split("/").pop() ?? toolRef;
+  if (/run_command|command$/.test(tool)) return "command";
+  if (/write_file|file$/.test(tool)) return "file";
+  if (/mail|message|send/.test(toolRef)) return "mail";
+  if (/^computer_|browser|navigate/.test(toolRef)) return "browser";
+  return "other";
+}
+
 export type TasksModel = {
   /** Needs input: pending approvals, then the Bots' questions. */
   requests: ApprovalRequest[];

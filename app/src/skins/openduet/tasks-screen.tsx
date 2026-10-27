@@ -2,6 +2,7 @@ import {
   type Icon,
   IconArrowsSort,
   IconChevronRight,
+  IconFile,
   IconMail,
   IconMessageQuestion,
   IconRepeat,
@@ -58,7 +59,9 @@ import {
 } from "./kit";
 import { RESPONSIBILITIES_HASH } from "./places";
 import {
+  type ActionKind,
   type ApprovalRequest,
+  actionKind,
   actionName,
   type PersonQuestion,
   type SortOrder,
@@ -537,13 +540,14 @@ function Section({
   );
 }
 
-/** What kind of thing a waiting action is, by the tool it would call. */
-function actionGlyph(toolRef: string): Icon {
-  if (/mail|email|message|send/i.test(toolRef)) return IconMail;
-  if (/^computer_|browser|navigate|click/i.test(toolRef)) return IconWorld;
-  if (/^host\//.test(toolRef)) return IconTerminal2;
-  return IconShield;
-}
+/** The glyph for each kind of waiting action. */
+const ACTION_GLYPH: Record<ActionKind, Icon> = {
+  command: IconTerminal2,
+  file: IconFile,
+  mail: IconMail,
+  browser: IconWorld,
+  other: IconShield,
+};
 
 /**
  * One action a Bot wants to take, as OpenDuet draws it: what it is and where, why the Bot asked,
@@ -573,7 +577,10 @@ export function ApprovalCard({
   return (
     <DuetCard aria-label="Waiting for your approval" raised role="region">
       <div className="flex min-h-[54px] items-center gap-2.5 px-4 py-2.5">
-        <Tile icon={actionGlyph(request.action.toolRef)} size={32} />
+        <Tile
+          icon={ACTION_GLYPH[actionKind(request.action.toolRef)]}
+          size={32}
+        />
         <div className="min-w-0 flex-1">
           <p className="openduet-type-body font-semibold [overflow-wrap:anywhere]">
             {title}

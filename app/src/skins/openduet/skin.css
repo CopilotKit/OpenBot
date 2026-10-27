@@ -309,6 +309,17 @@
   justify-content: flex-end;
 }
 
+/*
+ * A conversation's composer floats inset from the column's edges, as OpenDuet's does, rather than
+ * running flush to them with its focus ring on the screen's edge. OpenBot draws it in a wrapper with
+ * no side padding (`conversation-view.tsx`); home's composer already has its own.
+ */
+[data-skin="openduet"]
+  [data-openduet-frame]
+  .px-0:has(> div > form [aria-label="Message"]) {
+  padding-inline: 12px;
+}
+
 /* A task checked off: the check pops in a little past full size and settles. */
 [data-skin="openduet"] .openduet-check-land {
   display: block;

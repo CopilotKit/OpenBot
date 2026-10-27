@@ -9,6 +9,7 @@ import {
   tabForPath,
 } from "@/skins/openduet/places";
 import {
+  actionKind,
   actionName,
   tasksModel,
   waitingCount,
@@ -253,4 +254,18 @@ describe("what Tasks shows from OpenBot's data", () => {
     expect(actionName("host/run_command")).toBe("run command");
     expect(actionName("bot/handoff")).toBe("handoff");
   });
+});
+
+/*
+ * Found live: a waiting `computer_run_command` was drawn with the browser's globe, because the card
+ * asked "is it the computer?" before "is it a command?". Each kind against the refs the server sends.
+ */
+test("a waiting action's card names its kind from the real tool refs", () => {
+  expect(actionKind("computer_run_command")).toBe("command");
+  expect(actionKind("host/run_command")).toBe("command");
+  expect(actionKind("computer_write_file")).toBe("file");
+  expect(actionKind("mcp/gmail/send_email")).toBe("mail");
+  expect(actionKind("computer_click")).toBe("browser");
+  expect(actionKind("computer_type")).toBe("browser");
+  expect(actionKind("mcp/drive/share")).toBe("other");
 });
