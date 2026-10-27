@@ -162,6 +162,14 @@ the field, the page and the button: a card number field, a checkout page or a ne
 still goes to you, whatever is typed. A news wire (business, news or press wire) on a link or button
 no longer counts as wiring money; wiring money still does.
 
+### A page visit an approval rule covers now asks you
+
+With an approval rule that asks before a Bot opens, reads or scrolls a page, the Bot was told the
+action "was not started from a conversation that can ask you", did nothing, and said it could not get
+an approval in this chat. The visit now waits on the approval card in the conversation, like a click
+or a command does: Allow once opens the page and the Bot carries on, Deny tells the Bot it was
+declined. Page visits no rule asks about still go straight to the computer.
+
 ### A Bot's browser step is no longer refused while it is being saved
 
 Before your browser runs a click or a typed entry for a Bot, the server checks it against the copy
