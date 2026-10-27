@@ -582,11 +582,11 @@ async function installLocal(view: Awaited<ReturnType<typeof renderApp>>) {
 }
 
 /** Words about the software underneath, which no local screen says. */
-// Docker is not here: its installer and its agreement show windows of their own, so the screen
-// says what it is waiting for by name. See `plainInstallSteps`.
+// Docker and Podman are not here: they are the engine a person may already know, and their prompts
+// and agreements show windows of their own, so a screen names them when it waits on one. See
+// `plainInstallSteps`.
 const JARGON = [
   /\bCLI\b/,
-  /Podman/i,
   /Container engine/i,
   /Engine machine/i,
   /k3d/i,
