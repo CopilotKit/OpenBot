@@ -192,7 +192,7 @@ function label(step: string): string {
     case "installation":
       return "Installation";
     case "answering":
-      return "Answering";
+      return "Starting OpenBot";
     case "services":
       return "Containers";
     case "migrate":

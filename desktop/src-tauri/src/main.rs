@@ -2017,7 +2017,12 @@ async fn start_stack_inner<R: tauri::Runtime>(
      * counts as ours, and anybody else on them was avoided when the ports were chosen. Docker's
      * restart policy keeps it up from here, so there is nothing to supervise after it answers.
      */
-    report_running(&app, "answering", "waiting for OpenBot to answer", None);
+    report_running(
+        &app,
+        "answering",
+        "Starting OpenBot. This can take a few minutes the first time.",
+        None,
+    );
     let ticket = attempt.generation;
     let waiting = app.clone();
     let ready = stack::Ready {
@@ -2085,7 +2090,7 @@ async fn start_stack_inner<R: tauri::Runtime>(
     preparation::save_selected_root(&config, &root)?;
     watch_connections(app.clone(), root, host_token, generation, ports.server);
 
-    report(&app, "answering", true, "the API and the app are answering");
+    report(&app, "answering", true, "OpenBot is ready.");
     Ok(())
 }
 
