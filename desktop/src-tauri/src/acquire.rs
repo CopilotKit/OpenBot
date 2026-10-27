@@ -9,6 +9,14 @@
 //! needs elevation. So the two halves run in different contexts, and the elevated half is the only
 //! part that may be handed to a helper. See `windows.rs`. Fetching and installing Podman itself is
 //! `install.rs`.
+//!
+//! **The machine is rootful.** Local Intelligence runs a k3d cluster, and the Intelligence CLI
+//! accepts Podman only in rootful mode, because k3d's node needs privileges a rootless engine
+//! cannot grant. A rootful machine is the same VM with three things changed: its default
+//! connection is `<name>-root`, `/var/run/docker.sock` inside it is the rootful socket, and the API
+//! socket it forwards to this computer is the rootful one. OpenBot's own containers are addressed
+//! through `<name>-root` as well (see `connection_for`), so OpenBot and Intelligence share one
+//! engine and the supervisor's mount of `/var/run/docker.sock` is the engine it was started by.
 
 use crate::quiet::said as command_said;
 use std::net::Ipv4Addr;
@@ -80,7 +88,94 @@ impl StepOutcome {
 pub const MACHINE: &str = "openbot";
 
 const USER_MODE_NETWORKING_FLAG: &str = "--user-mode-networking=true";
+const ROOTFUL_FLAG: &str = "--rootful";
 const HOST_GATEWAY_CONFIG: &str = ".config/containers/containers.conf.d/90-openbot-host.conf";
+/// Where a rootful engine reads the same setting. Root's own `~/.config` is not read by rootful
+/// Podman, and the API service a rootful machine runs is the system one, not a user unit.
+const ROOTFUL_HOST_GATEWAY_CONFIG: &str = "/etc/containers/containers.conf.d/90-openbot-host.conf";
+
+/// The connection that reaches a machine's engine in the mode the machine runs in.
+///
+/// `podman machine init` makes two connections for every machine, whatever its mode: `<name>`,
+/// which logs in as the machine's user and reaches the rootless engine, and `<name>-root`, which
+/// reaches the rootful one. The machine's own mode decides only which of the two is the default,
+/// which socket `/var/run/docker.sock` is inside it, and which API it forwards to this computer.
+/// Addressing a rootful machine by its bare name would put OpenBot's containers in the rootless
+/// engine beside a rootful one, with the supervisor mounting a socket it cannot open.
+pub fn connection_for(machine: &str, rootful: bool) -> String {
+    if rootful {
+        format!("{machine}-root")
+    } else {
+        machine.to_string()
+    }
+}
+
+/// The machine a connection belongs to, by the naming `connection_for` describes.
+fn machine_of(connection: &str) -> &str {
+    connection.strip_suffix("-root").unwrap_or(connection)
+}
+
+/// What `podman machine inspect` says about one machine that matters here.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct MachineFacts {
+    /// `None` when inspect did not say, which no supported Podman does.
+    pub rootful: Option<bool>,
+    /// The engine API this machine forwards to this computer: a Unix socket on macOS, a named pipe
+    /// on Windows, as a `unix://` or `npipe://` address.
+    pub api: Option<String>,
+}
+
+fn machine_facts(listing: &str, machine: &str) -> Result<MachineFacts, String> {
+    let machines: Vec<Value> = serde_json::from_str(listing)
+        .map_err(|error| format!("could not read podman machine inspect JSON: {error}"))?;
+    let found = machines
+        .iter()
+        .find(|entry| entry.get("Name").and_then(Value::as_str) == Some(machine))
+        .ok_or_else(|| format!("podman machine inspect did not return {machine}"))?;
+    let path = |key: &str| {
+        found
+            .pointer(&format!("/ConnectionInfo/{key}/Path"))
+            .and_then(Value::as_str)
+            .filter(|path| !path.is_empty())
+    };
+    // The pipe first: Windows reports a pipe, and a socket path beside it is not one this
+    // computer can open.
+    let api = path("PodmanPipe")
+        .map(pipe_address)
+        .or_else(|| path("PodmanSocket").map(|socket| format!("unix://{socket}")));
+    Ok(MachineFacts {
+        rootful: found.get("Rootful").and_then(Value::as_bool),
+        api,
+    })
+}
+
+/// `\\.\pipe\podman-openbot` as the `npipe:////./pipe/podman-openbot` that Docker clients, k3d and
+/// the Intelligence CLI read.
+fn pipe_address(pipe: &str) -> String {
+    format!("npipe://{}", pipe.replace('\\', "/"))
+}
+
+/// What the machine behind a Podman connection is, or why that could not be found.
+///
+/// A connection that is not a machine's (a remote host somebody added) answers with an error, and
+/// the caller then leaves the engine to find its own way.
+pub fn machine_behind(connection: &str) -> Result<MachineFacts, String> {
+    let machine = machine_of(connection);
+    machine_facts(&podman(&["machine", "inspect", machine])?, machine)
+}
+
+/// The connection for a machine found by name, in the mode it runs in.
+///
+/// A machine that cannot be inspected keeps its bare name, which is how it was addressed before
+/// machines were rootful.
+pub fn connection_of_machine(machine: &str) -> String {
+    let rootful = podman(&["machine", "inspect", machine])
+        .and_then(|listing| machine_facts(&listing, machine))
+        .ok()
+        .and_then(|facts| facts.rootful)
+        .unwrap_or(false);
+    connection_for(machine, rootful)
+}
 
 fn podman(args: &[&str]) -> Result<String, String> {
     podman_with(args, || {
@@ -148,6 +243,17 @@ pub fn machine_exists() -> Result<bool, String> {
 /// No `--provider`: `applehv` has been the default on Apple silicon since Podman 6.1, and pinning it
 /// asks for what you already get. The libkrun bind-mount trouble that the pin was written for
 /// belonged to 5.7, where libkrun was the default.
+///
+/// `--rootful`, for local Intelligence: see the module comment.
+///
+/// AN EXISTING MACHINE IS NEVER SWITCHED TO ROOTFUL, OURS INCLUDED. `podman machine set --rootful`
+/// would do it, on a stopped machine, and it would cost the person their OpenBot. A rootless
+/// machine keeps its containers and volumes in the rootless engine's storage, and the rootful
+/// engine in the same VM does not see them, so OpenBot would come back on an empty database while
+/// the old one sat unreachable beside it. Releases up to 0.2.0 created this machine rootless, so
+/// "ours" is not "empty". A rootless machine is left as it is and OpenBot keeps running on it;
+/// local Intelligence then declines to start there with a sentence that names the switch, which
+/// is the person's to make (see `local_eval::Failure::RootlessPodman`).
 pub fn create_machine(cpus: u32, memory_mib: u32, disk_gib: u32) -> StepOutcome {
     create_machine_with(cpus, memory_mib, disk_gib, machine_exists, podman)
 }
@@ -190,6 +296,7 @@ fn create_machine_args(
         memory_mib.to_string(),
         "--disk-size".to_string(),
         disk_gib.to_string(),
+        ROOTFUL_FLAG.to_string(),
     ];
     if target_is_windows {
         args.push(USER_MODE_NETWORKING_FLAG.to_string());
@@ -201,14 +308,19 @@ fn create_machine_args(
 struct MachineNetworking {
     state: String,
     user_mode: bool,
+    /// Decides where the host-gateway setting is written. Absent reads as rootless, which is what
+    /// every machine was before this app created them rootful.
+    rootful: bool,
 }
 
+/// Answers with the machine's networking on Windows, where the gateway is configured after start,
+/// and with nothing elsewhere.
 fn prepare_user_mode_networking_before_start(
     run: &mut impl FnMut(&[&str]) -> Result<String, String>,
     target_is_windows: bool,
-) -> Result<(), String> {
+) -> Result<Option<MachineNetworking>, String> {
     if !target_is_windows {
-        return Ok(());
+        return Ok(None);
     }
 
     let listing = run(&["machine", "inspect", MACHINE])?;
@@ -221,7 +333,7 @@ fn prepare_user_mode_networking_before_start(
     if networking.state.eq_ignore_ascii_case("stopped") && !networking.user_mode {
         run(&["machine", "set", USER_MODE_NETWORKING_FLAG, MACHINE])?;
     }
-    Ok(())
+    Ok(Some(networking))
 }
 
 fn owned_machine_networking(listing: &str) -> Result<MachineNetworking, String> {
@@ -242,12 +354,21 @@ fn owned_machine_networking(listing: &str) -> Result<MachineNetworking, String> 
         .ok_or_else(|| {
             format!("podman machine inspect did not include {MACHINE} user-mode networking")
         })?;
-    Ok(MachineNetworking { state, user_mode })
+    let rootful = machine
+        .get("Rootful")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    Ok(MachineNetworking {
+        state,
+        user_mode,
+        rootful,
+    })
 }
 
 fn configure_host_gateway_after_start(
     run: &mut impl FnMut(&[&str]) -> Result<String, String>,
     target_is_windows: bool,
+    rootful: bool,
 ) -> Result<(), String> {
     if !target_is_windows {
         return Ok(());
@@ -262,7 +383,11 @@ fn configure_host_gateway_after_start(
         "host.containers.internal",
     ])?;
     let ip = first_valid_host_gateway_ip(&resolved)?;
-    let script = host_gateway_config_script(ip);
+    let script = if rootful {
+        rootful_host_gateway_config_script(ip)
+    } else {
+        host_gateway_config_script(ip)
+    };
     run(&["machine", "ssh", MACHINE, &script]).map(|_| ())
 }
 
@@ -281,7 +406,7 @@ fn configure_owned_windows_podman_for_compose(
             "{MACHINE} is running without Podman user-mode networking. Stop the OpenBot engine machine and start OpenBot again so host callbacks can be configured."
         ));
     }
-    configure_host_gateway_after_start(&mut run, true)
+    configure_host_gateway_after_start(&mut run, true, networking.rootful)
 }
 
 /// Run before Compose even when an existing engine skipped the install/start steps.
@@ -292,7 +417,10 @@ pub fn prepare_for_compose(address: &Address) -> Result<(), String> {
 fn owned_windows_podman_address(address: &Address, target_is_windows: bool) -> bool {
     target_is_windows
         && address.engine == Engine::Podman
-        && address.connection.as_deref() == Some(MACHINE)
+        && address
+            .connection
+            .as_deref()
+            .is_some_and(|connection| machine_of(connection) == MACHINE)
 }
 
 fn first_valid_host_gateway_ip(raw: &str) -> Result<Ipv4Addr, String> {
@@ -331,13 +459,36 @@ fn host_gateway_config_script(ip: Ipv4Addr) -> String {
     )
 }
 
+/// The same setting for a rootful machine: in the system's configuration, and the system's API
+/// service restarted.
+///
+/// Through `sudo`, which is a no-op for root and passwordless for the machine's own user, so the
+/// script does not depend on which of the two `podman machine ssh` logs in as.
+fn rootful_host_gateway_config_script(ip: Ipv4Addr) -> String {
+    format!(
+        "set -e; \
+         target=\"{ROOTFUL_HOST_GATEWAY_CONFIG}\"; \
+         tmp=\"$(mktemp)\"; \
+         cat > \"$tmp\" <<'EOF'\n[containers]\nhost_containers_internal_ip=\"{ip}\"\nEOF\n\
+         if sudo test -f \"$target\" && sudo cmp -s \"$tmp\" \"$target\"; then \
+           rm \"$tmp\"; \
+         else \
+           sudo mkdir -p \"$(dirname \"$target\")\"; \
+           sudo install -m 0644 \"$tmp\" \"$target\"; \
+           rm \"$tmp\"; \
+           sudo systemctl try-restart podman.service; \
+         fi"
+    )
+}
+
 fn start_machine_with(
     mut run: impl FnMut(&[&str]) -> Result<String, String>,
     target_is_windows: bool,
 ) -> StepOutcome {
-    if let Err(error) = prepare_user_mode_networking_before_start(&mut run, target_is_windows) {
-        return StepOutcome::stopped(Step::StartMachine, &error);
-    }
+    let rootful = match prepare_user_mode_networking_before_start(&mut run, target_is_windows) {
+        Ok(networking) => networking.is_some_and(|networking| networking.rootful),
+        Err(error) => return StepOutcome::stopped(Step::StartMachine, &error),
+    };
     let started = match run(&["machine", "start", MACHINE]) {
         Ok(_) => format!("{MACHINE} started."),
         Err(error) if error.contains("already running") => {
@@ -345,7 +496,7 @@ fn start_machine_with(
         }
         Err(error) => return StepOutcome::stopped(Step::StartMachine, &error),
     };
-    if let Err(error) = configure_host_gateway_after_start(&mut run, target_is_windows) {
+    if let Err(error) = configure_host_gateway_after_start(&mut run, target_is_windows, rootful) {
         return StepOutcome::stopped(Step::StartMachine, &error);
     }
     StepOutcome::went(Step::StartMachine, started)
@@ -380,9 +531,21 @@ fn explain_machine_error(error: &str) -> String {
 /// How to reach the machine this app just started.
 ///
 /// Always by name. The default connection belongs to whoever set it, and after `machine init` it is
-/// usually still pointing somewhere else.
+/// usually still pointing somewhere else. The rootful connection for the rootful machine this app
+/// creates; the bare name for one an earlier release created rootless (see `create_machine`).
 pub fn address() -> Address {
-    Address::new(Engine::Podman, Some(MACHINE.to_string()))
+    address_with(|| podman(&["machine", "inspect", MACHINE]))
+}
+
+fn address_with(inspect: impl FnOnce() -> Result<String, String>) -> Address {
+    // Unknown reads as rootful: that is how this app creates the machine, and a machine that cannot
+    // be inspected is not going to answer on either connection.
+    let rootful = inspect()
+        .and_then(|listing| machine_facts(&listing, MACHINE))
+        .ok()
+        .and_then(|facts| facts.rootful)
+        .unwrap_or(true);
+    Address::new(Engine::Podman, Some(connection_for(MACHINE, rootful)))
 }
 
 /// The gate before Compose is touched.
@@ -679,9 +842,127 @@ mod tests {
                 "8192",
                 "--disk-size",
                 "64",
+                "--rootful",
                 "--user-mode-networking=true"
             ]
         );
+    }
+
+    /// Local Intelligence's k3d needs a rootful engine, on macOS as on Windows.
+    #[test]
+    fn the_machine_is_created_rootful_on_every_platform() {
+        for windows in [false, true] {
+            let args = create_machine_args(4, 6144, 60, windows);
+            assert!(args.iter().any(|arg| arg == "--rootful"), "{args:?}");
+            assert_eq!(&args[..3], ["machine", "init", "openbot"]);
+        }
+        assert_eq!(
+            create_machine_args(4, 6144, 60, false),
+            [
+                "machine",
+                "init",
+                "openbot",
+                "--cpus",
+                "4",
+                "--memory",
+                "6144",
+                "--disk-size",
+                "60",
+                "--rootful"
+            ]
+        );
+    }
+
+    /// Nothing switches a machine that already exists, ours included: its OpenBot lives in the
+    /// rootless engine's storage. Creating is skipped, and nothing else is run.
+    #[test]
+    fn an_existing_rootless_machine_is_not_switched_to_rootful() {
+        let listing = r#"[{"Name":"openbot","Default":true,"Running":false}]"#;
+        let result = create_machine_with(
+            4,
+            6144,
+            60,
+            || machine_exists_with(|| Ok(listing.into())),
+            |args| panic!("nothing runs against an existing machine: {args:?}"),
+        );
+        assert!(result.ok, "{result:?}");
+
+        let mut calls = Vec::<Vec<String>>::new();
+        let inspect = serde_json::json!([{
+            "Name": "openbot",
+            "State": "stopped",
+            "UserModeNetworking": true,
+            "Rootful": false
+        }])
+        .to_string();
+        let started = start_machine_with(
+            |args| {
+                calls.push(args.iter().map(|arg| (*arg).to_string()).collect());
+                match args {
+                    ["machine", "inspect", "openbot"] => Ok(inspect.clone()),
+                    ["machine", "start", "openbot"] => Ok(String::new()),
+                    ["machine", "ssh", "openbot", "getent", ..] => {
+                        Ok("192.168.127.254 STREAM host.containers.internal\n".into())
+                    }
+                    ["machine", "ssh", "openbot", _] => Ok(String::new()),
+                    _ => Err(format!("unexpected args: {args:?}")),
+                }
+            },
+            true,
+        );
+        assert!(started.ok, "{started:?}");
+        assert!(
+            !calls
+                .iter()
+                .any(|call| call.iter().any(|arg| arg == "--rootful")),
+            "{calls:?}"
+        );
+        // Its gateway goes where its rootless engine reads it.
+        assert!(calls
+            .last()
+            .unwrap()
+            .last()
+            .unwrap()
+            .contains(HOST_GATEWAY_CONFIG));
+    }
+
+    #[test]
+    fn a_rootful_windows_machine_gets_the_gateway_in_the_system_configuration() {
+        let mut calls = Vec::<Vec<String>>::new();
+        let inspect = serde_json::json!([{
+            "Name": "openbot",
+            "State": "stopped",
+            "UserModeNetworking": true,
+            "Rootful": true
+        }])
+        .to_string();
+        let started = start_machine_with(
+            |args| {
+                calls.push(args.iter().map(|arg| (*arg).to_string()).collect());
+                match args {
+                    ["machine", "inspect", "openbot"] => Ok(inspect.clone()),
+                    ["machine", "start", "openbot"] => Ok(String::new()),
+                    ["machine", "ssh", "openbot", "getent", ..] => {
+                        Ok("192.168.127.254 STREAM host.containers.internal\n".into())
+                    }
+                    ["machine", "ssh", "openbot", _] => Ok(String::new()),
+                    _ => Err(format!("unexpected args: {args:?}")),
+                }
+            },
+            true,
+        );
+        assert!(started.ok, "{started:?}");
+        let script = calls.last().unwrap().last().unwrap().clone();
+        assert_eq!(
+            script,
+            rootful_host_gateway_config_script("192.168.127.254".parse().unwrap())
+        );
+        assert!(script.contains(ROOTFUL_HOST_GATEWAY_CONFIG), "{script}");
+        assert!(
+            script.contains("sudo systemctl try-restart podman.service"),
+            "{script}"
+        );
+        assert!(!script.contains("--user"), "{script}");
     }
 
     #[test]
@@ -974,9 +1255,94 @@ mod tests {
 
     #[test]
     fn the_machine_this_app_starts_is_addressed_by_name_not_by_the_default_connection() {
-        let addressed = address();
-        assert_eq!(addressed.connection.as_deref(), Some(MACHINE));
+        let inspect = |rootful: bool| {
+            serde_json::json!([{ "Name": "openbot", "Rootful": rootful }]).to_string()
+        };
+        // Rootful, as this app creates it: its root connection, where the rootful engine is.
+        let addressed = address_with(|| Ok(inspect(true)));
+        assert_eq!(addressed.connection.as_deref(), Some("openbot-root"));
         assert_eq!(addressed.engine, Engine::Podman);
+        // Rootless, as releases up to 0.2.0 created it: its bare name, where its OpenBot is.
+        let addressed = address_with(|| Ok(inspect(false)));
+        assert_eq!(addressed.connection.as_deref(), Some(MACHINE));
+        // Not inspectable: as this app creates it.
+        let addressed = address_with(|| Err("no such machine".into()));
+        assert_eq!(addressed.connection.as_deref(), Some("openbot-root"));
+    }
+
+    #[test]
+    fn a_connection_names_its_machine_and_its_mode() {
+        assert_eq!(connection_for("openbot", true), "openbot-root");
+        assert_eq!(connection_for("openbot", false), "openbot");
+        assert_eq!(machine_of("openbot-root"), "openbot");
+        assert_eq!(machine_of("openbot"), "openbot");
+        assert_eq!(
+            machine_of("podman-machine-default-root"),
+            "podman-machine-default"
+        );
+    }
+
+    #[test]
+    fn machine_facts_give_the_mode_and_the_api_this_computer_can_open() {
+        let mac = serde_json::json!([{
+            "Name": "openbot",
+            "Rootful": true,
+            "ConnectionInfo": {
+                "PodmanSocket": { "Path": "/var/folders/xy/T/podman/openbot-api.sock" },
+                "PodmanPipe": null
+            }
+        }])
+        .to_string();
+        assert_eq!(
+            machine_facts(&mac, "openbot").unwrap(),
+            MachineFacts {
+                rootful: Some(true),
+                api: Some("unix:///var/folders/xy/T/podman/openbot-api.sock".into()),
+            }
+        );
+        let windows = serde_json::json!([{
+            "Name": "openbot",
+            "Rootful": false,
+            "ConnectionInfo": {
+                "PodmanSocket": { "Path": "C:\\Users\\me\\podman.sock" },
+                "PodmanPipe": { "Path": "\\\\.\\pipe\\podman-openbot" }
+            }
+        }])
+        .to_string();
+        assert_eq!(
+            machine_facts(&windows, "openbot").unwrap(),
+            MachineFacts {
+                rootful: Some(false),
+                api: Some("npipe:////./pipe/podman-openbot".into()),
+            }
+        );
+        let bare = serde_json::json!([{ "Name": "openbot" }]).to_string();
+        assert_eq!(
+            machine_facts(&bare, "openbot").unwrap(),
+            MachineFacts::default()
+        );
+        assert!(machine_facts(&bare, "somebody-else").is_err());
+        assert!(machine_facts("not json", "openbot").is_err());
+    }
+
+    #[test]
+    fn the_root_connection_of_our_windows_machine_is_still_ours() {
+        assert!(owned_windows_podman_address(
+            &Address::new(Engine::Podman, Some("openbot-root".into())),
+            true
+        ));
+        assert!(owned_windows_podman_address(
+            &Address::new(Engine::Podman, Some("openbot".into())),
+            true
+        ));
+        assert!(!owned_windows_podman_address(
+            &Address::new(Engine::Podman, Some("somebody-else-root".into())),
+            true
+        ));
+        assert!(!owned_windows_podman_address(
+            &Address::new(Engine::Podman, Some("openbot-root".into())),
+            false
+        ));
     }
 
     #[test]

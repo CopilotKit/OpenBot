@@ -4,8 +4,9 @@
 //! documentation, and the three differ more than they look:
 //!
 //! - **macOS.** `podman machine` puts a Linux VM behind a socket. Inside that VM
-//!   `/var/run/docker.sock` is already a symlink to the rootless socket, so Compose's mount needs no
-//!   help and `ENGINE_SOCKET` stays unset. `applehv` is the default on Apple silicon as of Podman
+//!   `/var/run/docker.sock` is already a symlink to the socket of the mode the machine runs in
+//!   (rootful for the machine OpenBot creates, see `acquire`), so Compose's mount needs no help and
+//!   `ENGINE_SOCKET` stays unset. `applehv` is the default on Apple silicon as of Podman
 //!   6.1, so no `--provider` is passed.
 //! - **Linux.** Podman is native and rootless and there is no VM. `/var/run/docker.sock` is either
 //!   absent or, with `podman-docker` installed, a symlink to the *rootful* socket, which is not the
@@ -279,6 +280,9 @@ pub struct EngineStatus {
 /// Somebody who already has a machine up is handed it rather than made to wait while a duplicate
 /// boots beside it. Ours is preferred among running machines only so that repeat launches settle on
 /// the same one.
+///
+/// Answers with the connection for the machine's own mode (see `acquire::connection_for`): a rootful
+/// machine is reached through `<name>-root`, where its rootful engine is.
 fn running_machine(preferred: &str) -> Option<String> {
     let output = tool(Engine::Podman)
         .args(["machine", "list", "--format", "json"])
@@ -292,7 +296,7 @@ fn running_machine(preferred: &str) -> Option<String> {
     running()
         .find(|machine| machine.name == preferred)
         .or_else(|| running().next())
-        .map(|machine| machine.name.clone())
+        .map(|machine| crate::acquire::connection_of_machine(&machine.name))
 }
 
 #[derive(Deserialize)]
@@ -381,17 +385,33 @@ does not reach Docker Desktop's `/usr/local/bin`. Appended, so a `docker` the pe
 their PATH stays first; both the link and the directory it resolves to, as `command_at` does.
 */
 pub fn path_with_docker() -> Option<OsString> {
-    let binary = program(Engine::Docker)?;
+    path_with_engines(&[Engine::Docker])
+}
+
+/// `path_with_docker`, for each of `engines` that is here, or None when none is.
+///
+/// The Intelligence CLI runs `podman` by name as it runs `docker`, and a Podman OpenBot installed
+/// in this session is not on this process's PATH (see the PATH rule above).
+pub fn path_with_engines(engines: &[Engine]) -> Option<OsString> {
+    let binaries: Vec<PathBuf> = engines
+        .iter()
+        .filter_map(|engine| program(*engine))
+        .collect();
+    if binaries.is_empty() {
+        return None;
+    }
     let mut entries: Vec<PathBuf> = std::env::var_os("PATH")
         .map(|path| std::env::split_paths(&path).collect())
         .unwrap_or_default();
-    let resolved = std::fs::canonicalize(&binary).ok();
-    for directory in [binary.parent(), resolved.as_deref().and_then(Path::parent)]
-        .into_iter()
-        .flatten()
-    {
-        if !entries.iter().any(|entry| entry == directory) {
-            entries.push(directory.to_path_buf());
+    for binary in &binaries {
+        let resolved = std::fs::canonicalize(binary).ok();
+        for directory in [binary.parent(), resolved.as_deref().and_then(Path::parent)]
+            .into_iter()
+            .flatten()
+        {
+            if !entries.iter().any(|entry| entry == directory) {
+                entries.push(directory.to_path_buf());
+            }
         }
     }
     std::env::join_paths(entries).ok()
@@ -529,7 +549,8 @@ pub fn rootless_socket() -> Option<PathBuf> {
 #[cfg(not(target_os = "linux"))]
 pub fn rootless_socket() -> Option<PathBuf> {
     // macOS and Windows run the engine in a virtual machine, and inside it `/var/run/docker.sock`
-    // is already the rootless socket. Compose mounts that path, so there is nothing to override.
+    // is already the socket of the machine's own mode. Compose mounts that path, so there is
+    // nothing to override.
     None
 }
 

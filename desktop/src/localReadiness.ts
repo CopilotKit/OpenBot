@@ -33,7 +33,7 @@ export type ReadinessRow = {
 };
 
 export type ReadinessInput = {
-  /** Docker Desktop, as probed by the window. */
+  /** The container engine, Docker or Podman, as probed by the window. */
   runtime: "running" | "not-running" | "unknown";
   /** The latest status call: a report, a failure category, or nothing yet. */
   intelligence: ChatGateInput["intelligence"];
@@ -151,6 +151,12 @@ const failureRows: Record<LocalFailure, ReadinessRow> = {
     "The evaluation agreement could not be accepted.",
     "retry",
   ),
+  // OpenBot runs on a Podman machine without root, and Intelligence needs root. Switching it is
+  // the person's call: the containers already in that machine stay with its current mode.
+  "rootless-podman": blocked(
+    "Intelligence needs Podman in rootful mode. Stop your Podman machine, run podman machine set --rootful, then start it again.",
+    "retry",
+  ),
 };
 
 function intelligenceRow(
@@ -209,9 +215,9 @@ function runtimeRow(
   intelligence: ReadinessInput["intelligence"],
 ): ReadinessRow {
   if (runtime === "running") {
-    return { state: "ready", said: "Docker Desktop is running." };
+    return { state: "ready", said: "The container engine is running." };
   }
-  const notRunning = blocked("Docker Desktop is not running.", "retry");
+  const notRunning = blocked("The container engine is not running.", "retry");
   if (runtime === "not-running") return notRunning;
   const reason =
     intelligence !== null && typeof intelligence !== "string"
@@ -219,9 +225,12 @@ function runtimeRow(
       : null;
   if (reason === "docker-unavailable") return notRunning;
   if (reason === "unsupported-engine") {
-    return blocked("This Docker setup is not supported.");
+    return blocked("This container engine setup is not supported.");
   }
-  return { state: "unknown", said: "Docker Desktop has not been checked." };
+  return {
+    state: "unknown",
+    said: "The container engine has not been checked.",
+  };
 }
 
 export function localReadiness(input: ReadinessInput): Readiness {

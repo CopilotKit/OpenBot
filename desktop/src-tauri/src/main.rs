@@ -799,6 +799,7 @@ async fn engine_ready(
                     )
                 })??;
             }
+            local_eval::use_engine(&ready.address);
             report(app, "engine", true, ready.detail);
             return Ok(ready.address);
         }
@@ -843,7 +844,7 @@ async fn engine_ready(
                     },
                 );
             },
-            // Starting Docker Desktop can take minutes; each line says where it is.
+            // Installing Podman or starting Docker Desktop can take minutes; each line says where it is.
             &mut |said| report_running(&progress_app, "install-engine", said, None),
         )
     })
@@ -870,6 +871,7 @@ async fn engine_ready(
     let after = engine::detect_saved(Some(chosen));
     if let Some(address) = answering_after_install(&after, engine::Address::composes)? {
         desktop_telemetry::observe_engine(app, &after);
+        local_eval::use_engine(&address);
         report(app, "engine", true, after.detail);
         return Ok(address);
     }
@@ -877,7 +879,19 @@ async fn engine_ready(
     // One at a time, and each only if the last one worked. Written as a loop over an array once,
     // which ran all three before the first was checked: a failed `machine init` was still followed
     // by `machine start`.
-    report_running(app, "create-machine", "Preparing the engine machine.", None);
+    report_running(
+        app,
+        "create-machine",
+        if cfg!(target_os = "windows") {
+            // Podman's own installer for WSL, when WSL is missing: its dialog, then Windows' own
+            // administrator prompt, then a restart. Said before it happens rather than after.
+            "Preparing the engine machine. If Windows Subsystem for Linux is missing, Podman \
+             offers to install it. Windows then asks for administrator approval and a restart."
+        } else {
+            "Preparing the engine machine."
+        },
+        None,
+    );
     let created = acquire::create_machine(4, 6144, 60);
     report(app, "create-machine", created.ok, created.said.clone());
     if !created.ok {
@@ -915,6 +929,7 @@ async fn engine_ready(
                 ready.detail,
             )
         })?;
+    local_eval::use_engine(&address);
     report(app, "engine", true, "The container engine is answering.");
     Ok(address)
 }
@@ -1763,6 +1778,8 @@ async fn start_stack_inner<R: tauri::Runtime>(
             return Err(status.detail.into());
         };
         let found = found.pin()?;
+        // Intelligence runs on the engine OpenBot is about to run on. See `local_eval::use_engine`.
+        local_eval::use_engine(&found);
         #[cfg(target_os = "linux")]
         ensure_linux_podman_api(&shell, &found)?;
         #[cfg(target_os = "linux")]
@@ -4791,13 +4808,37 @@ async fn run_local_eval(
     stack: String,
 ) -> Result<local_eval::Report, local_eval::Failure> {
     let stack = local_eval::StackId::parse(&stack)?;
+    let root = {
+        let shell = app.state::<Shell>();
+        let selected = shell.selected_root.lock().unwrap().clone();
+        selected.unwrap_or_else(stack::default_root)
+    };
     let report = tauri::async_runtime::spawn_blocking(move || {
+        know_cli_engine(&root);
         local_eval::run_installed(&attempt, action, &stack)
     })
     .await
     .map_err(|_| local_eval::Failure::Spawn)??;
     learn_dashboards(&app, report.stack.iter());
     Ok(report)
+}
+
+/**
+The engine for the Intelligence CLI when nothing this run has named one yet.
+
+A relaunched OpenBot can ask Intelligence for its status before Start has pinned an engine. The
+answer is the one Start would reach with no containers of its own: the engine `root` was set up on
+if it saved one (see `preparation::saved_engine`), otherwise whatever `engine::detect` finds
+answering. Blocking, so only from a blocking thread.
+*/
+fn know_cli_engine(root: &Path) {
+    if local_eval::engine_known() {
+        return;
+    }
+    let found = engine::detect_saved(preparation::saved_engine(root));
+    if let Some(address) = found.address.filter(|_| found.responding) {
+        local_eval::use_engine(&address);
+    }
 }
 
 /// Keep the dashboard address of every stack a CLI report described, for `Dashboards`.
@@ -4848,6 +4889,7 @@ async fn set_up_local_eval(
         // may not exist yet; the CLI runs in it.
         std::fs::create_dir_all(&root)
             .map_err(|_| SetupError::Failure(local_eval::Failure::Spawn))?;
+        know_cli_engine(&root);
         set_up_local_eval_at(&root, |folder| {
             local_eval::setup_installed(&attempt, folder, accepted.as_ref())
         })
