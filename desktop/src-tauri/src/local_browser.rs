@@ -574,20 +574,18 @@ mod tests {
                 ("COMPUTER_SANDBOX", "on".into()),
                 ("COMPUTER_BROWSER_IDLE_MS", "0".into()),
                 ("PORT", "4107".into()),
-                (
-                    "PROFILES_DIR",
-                    "/home/ada/.local/share/openbot/local-computer/profiles".into()
-                ),
-                (
-                    "WORKSPACE_DIR",
-                    "/home/ada/.local/share/openbot/local-computer/workspace".into()
-                ),
+                // Joined as the code joins them, so Windows' separator is expected where it puts one.
+                ("PROFILES_DIR", lossy(browser.data.join("profiles"))),
+                ("WORKSPACE_DIR", lossy(browser.data.join("workspace"))),
                 (
                     "OPENBOT_RECORDER_DIR",
-                    "/home/ada/OpenBot/extension/dist".into()
+                    lossy(Path::new("/home/ada/OpenBot").join(RECORDER_DIST))
                 ),
             ])
         );
+        fn lossy(path: PathBuf) -> String {
+            path.to_string_lossy().into_owned()
+        }
     }
 
     /// Each name is the contract's own. The contract is TypeScript the other slices import; reading
