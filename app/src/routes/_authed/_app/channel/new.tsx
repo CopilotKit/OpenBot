@@ -199,6 +199,9 @@ function RouteComponent() {
                   <ComboboxItem key={item.id} value={item} className="h-10">
                     <AgentOrb size="24px" state="idle" />
                     New Bot
+                    <span className="truncate text-muted-foreground ml-1">
+                      Create a new Bot.
+                    </span>
                   </ComboboxItem>
                 ) : (
                   <ComboboxItem key={item.id} value={item} className="h-10">
