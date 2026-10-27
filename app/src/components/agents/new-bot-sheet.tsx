@@ -1,8 +1,8 @@
 import { summaryFor, WEB_HARNESSES } from "@openbot/shared/harnesses";
 import {
   IconCheck,
+  IconDeviceDesktop,
   IconLock,
-  IconSparkles,
   IconUsers,
 } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
@@ -752,7 +752,7 @@ function RuntimeStep({
         type="button"
       >
         <span className="flex size-11 shrink-0 items-center justify-center rounded-lg bg-background shadow-xs">
-          <IconSparkles className="size-6 text-foreground" />
+          <IconDeviceDesktop className="size-6 text-foreground" />
         </span>
         <span className="min-w-0 pt-0.5">
           <span className="block font-semibold text-base">Run it here</span>
