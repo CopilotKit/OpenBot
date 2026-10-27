@@ -263,7 +263,7 @@ test("preserves every entry across back navigation and hosting switches", async 
   expect((view.getByLabelText("Name") as HTMLInputElement).value).toBe(
     "Expense Review",
   );
-  await user.type(view.getByLabelText(/^Role/), "Review carefully");
+  await user.type(view.getByLabelText(/^Instructions/), "Review carefully");
   await user.click(view.getByRole("button", { name: /Public/ }));
   await user.click(view.getByRole("button", { name: /^Run here/ }));
   expect(

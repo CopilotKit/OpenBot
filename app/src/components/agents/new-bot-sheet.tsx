@@ -358,13 +358,6 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
                       return next;
                     })
                   }
-                  runtime={
-                    custom
-                      ? runtime?.kind === "managed"
-                        ? runtime
-                        : { kind: "managed", harness: "byo-url" }
-                      : { kind: "builtin" }
-                  }
                   onInstructions={setInstructions}
                   onName={setName}
                   onVisibility={setVisibility}
@@ -597,7 +590,6 @@ function AboutStep({
   onApp,
   name,
   instructions,
-  runtime,
   visibility,
   onName,
   onInstructions,
@@ -605,7 +597,6 @@ function AboutStep({
 }: {
   name: string;
   instructions: string;
-  runtime: Runtime;
   visibility: Visibility;
   onName: (value: string) => void;
   onInstructions: (value: string) => void;
@@ -614,7 +605,6 @@ function AboutStep({
   leftOut: Set<string>;
   onApp: (app: string, used: boolean) => void;
 }) {
-  const runsHere = runtime.kind === "builtin";
   return (
     <FieldGroup>
       <Field>
@@ -631,7 +621,7 @@ function AboutStep({
       </Field>
       <Field>
         <FieldLabel htmlFor="new-bot-instructions">
-          {runsHere ? "Instructions" : "Role"}
+          Instructions
           <span className="font-normal text-muted-foreground">Optional</span>
         </FieldLabel>
         <Textarea
@@ -643,11 +633,6 @@ function AboutStep({
           rows={5}
           value={instructions}
         />
-        {!runsHere && (
-          <FieldDescription>
-            Added to your agent's own instructions.
-          </FieldDescription>
-        )}
       </Field>
       <FieldSet>
         <FieldLegend variant="label">Who can see it</FieldLegend>
