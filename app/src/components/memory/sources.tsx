@@ -122,7 +122,27 @@ export function MemorySources({ agentId: fixedBot }: { agentId?: string }) {
           {sources.error.message}
         </p>
       ) : shown.length === 0 ? (
-        <PageEmpty>No sources yet. Add one with Add source.</PageEmpty>
+        <PageEmpty
+          action={
+            <Button
+              onClick={() => {
+                // The draft is kept on purpose; the last attempt's failure is not.
+                setError("");
+                add.reset();
+                setAdding(true);
+              }}
+              size="sm"
+              variant="outline"
+            >
+              <IconPlus />
+              Add source
+            </Button>
+          }
+          icon={IconPlugConnected}
+          title="No sources yet"
+        >
+          Apps this Bot can read from show up here.
+        </PageEmpty>
       ) : (
         <PageRows>
           {shown.map((source, index) => (

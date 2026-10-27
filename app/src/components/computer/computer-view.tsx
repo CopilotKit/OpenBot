@@ -1,6 +1,11 @@
+import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { supplySecret } from "@/lib/computers/control";
+import {
+  type ComputerState,
+  computerStatusQueryOptions,
+} from "@/lib/computers/queries";
 import {
   readPageFrame,
   readScreenshot,
@@ -85,6 +90,23 @@ async function preloadFrame(base64: string): Promise<void> {
   }
 }
 
+function capitalise(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+/**
+ * How long a computer may go without a frame before that is worth telling anybody.
+ *
+ * GENEROUS ON PURPOSE. A first start pulls an image, schedules a pod and launches a browser, and a
+ * minute is ordinary. The panel used to call the first frameless poll a problem, so every cold start
+ * opened on "Can't show the screen right now… ask an admin", in front of a person whose computer was
+ * doing exactly what it should. Past the server's own wait for a cold start, with room to spare.
+ */
+const STARTUP_GRACE_MS = 150_000;
+
+/** How often a computer that has not drawn a frame yet is asked where it is. */
+const STATUS_POLL_MS = 2_000;
+
 /** Identical frames in a row that mean the page has stopped changing. */
 const SETTLED_FRAMES = 3;
 
@@ -107,9 +129,22 @@ function NothingToSee({
   blankBrowser,
   settled,
   page,
+  waiting,
+  owner = "the Bot's",
 }: {
   problem: string | null;
   blankBrowser: boolean;
+  /**
+   * Why there is no picture yet, when the reason is ordinary.
+   *
+   * `starting` is a computer on its way up, which on a first start takes about a minute; `asleep` is
+   * one that is off and starts on the Bot's next action. Neither is a problem and neither is drawn as
+   * one. A problem is only what is left after a generous wait, or a computer the server says it
+   * cannot reach.
+   */
+  waiting?: "starting" | "asleep" | undefined;
+  /** Whose computer, possessive and lower case: "Sales's", or "the Bot's" without a name. */
+  owner?: string;
   /** Whether this is a turn that has finished, rather than the browser as it is now. */
   settled?: boolean;
   /** The page that turn opened, named when there is no picture of it. */
@@ -157,6 +192,15 @@ function NothingToSee({
             to check its Computer.
           </span>
         </>
+      ) : waiting === "starting" ? (
+        <span role="status">
+          Starting {owner} computer. The first start takes about a minute.
+        </span>
+      ) : waiting === "asleep" ? (
+        <span role="status">
+          {capitalise(owner)} computer is off. It starts when the Bot next uses
+          it.
+        </span>
       ) : blankBrowser ? (
         <span>The Bot hasn't opened a page yet.</span>
       ) : (
@@ -202,6 +246,8 @@ type Props = {
    * side panel is not a turn and has nothing to remember.
    */
   toolCallId?: string;
+  /** How long to wait for a first frame before calling it a problem. Shortened by tests. */
+  startupGraceMs?: number;
 };
 
 export function ComputerView({
@@ -215,11 +261,21 @@ export function ComputerView({
   page,
   finished,
   toolCallId,
+  startupGraceMs = STARTUP_GRACE_MS,
 }: Props) {
   const [shot, setShot] = useState<Screenshot | null>(null);
+  /**
+   * The last screenshot that was attempted and failed. Held, not shown: see `shownProblem` below.
+   */
   const [problem, setProblem] = useState<string | null>(null);
+  /** What the last poll said about a computer that is not ready, which it says without waking it. */
+  const [polledState, setPolledState] = useState<ComputerState | null>(null);
+  /** Set once a computer has gone `startupGraceMs` without a frame. */
+  const [stalled, setStalled] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [streamProblem, setStreamProblem] = useState<string | null>(null);
+  /** A dropped live stream being retried on its own. A badge, never the overlay. */
+  const [reconnecting, setReconnecting] = useState(false);
   const [retryKey, setRetryKey] = useState(0);
   /**
    * A finished turn is history, and history is not polled.
@@ -339,11 +395,29 @@ export function ComputerView({
     // Always fetch at least one frame; only repeated refreshes are conditional.
     const tick = async () => {
       try {
-        const { frame, error } = await readScreenshot(computerId);
+        const { frame, error, notReady } = await readScreenshot(computerId);
         if (generation.current !== mine) return;
 
-        if (!frame) {
+        if (notReady) {
+          /*
+           * Asleep or starting, said by the server without waking the computer. Not a problem:
+           * nothing has failed, so the last failure (if any) is no longer the news.
+           */
+          setPolledState(notReady.state);
+          setProblem(null);
+          /*
+           * A frame from before the computer went to sleep is not what it shows now, and keeping it
+           * would also keep the live stream mounted, which reconnects to a computer nobody woke.
+           */
+          setShot(null);
+        } else if (!frame) {
           setProblem(error ?? "The screen isn't available right now.");
+          /*
+           * The state is unknown again, not whatever the last not-ready answer said. A stale
+           * "absent" would keep calling a computer that is failing "off", and an off computer is
+           * never timed out, so the failure would never be shown. Cleared, the status read resumes.
+           */
+          setPolledState(null);
         } else {
           // Exact byte comparison is the settling signal.
           unchanged = frame.base64 === lastFrame ? unchanged + 1 : 0;
@@ -353,6 +427,7 @@ export function ComputerView({
           if (generation.current !== mine) return;
           setShot(frame);
           setProblem(null);
+          setPolledState(null);
         }
       } finally {
         if (generation.current === mine && shouldContinue()) {
@@ -367,6 +442,38 @@ export function ComputerView({
       clearTimeout(timer);
     };
   }, [computerId, active, intervalMs, secretPending, settled, visualVisible]);
+
+  /*
+   * Where the computer is in its life, until there is a picture to show.
+   *
+   * The status route never wakes a computer, so this is safe to poll while one is starting. It is
+   * what the panel knows before its first screenshot has come back, and the only word on a computer
+   * the server cannot reach. Once a frame arrives the frame is the answer and this stops asking, and
+   * so it does while the screenshot poll is itself reporting the state, which it does every second.
+   * A failed status read is "not known yet", never a problem in itself.
+   */
+  const status = useQuery({
+    ...computerStatusQueryOptions(computerId),
+    enabled: !settled && visualVisible && shot === null && polledState === null,
+    refetchInterval: STATUS_POLL_MS,
+    retry: false,
+  });
+  /** The fresher of the two answers: the poll that just ran, else the status read. */
+  const computerState: ComputerState | undefined =
+    polledState ?? status.data?.state;
+  /** In a turn, an absent computer is one the Bot's action is about to start, not one left off. */
+  const asleep = computerState === "absent" && !toolCallId;
+  /** Waiting for a first frame, for a reason that can end. A computer that is off waits for the Bot. */
+  const waitingForFrame = !settled && visualVisible && shot === null && !asleep;
+
+  useEffect(() => {
+    if (!waitingForFrame) {
+      setStalled(false);
+      return;
+    }
+    const timer = setTimeout(() => setStalled(true), startupGraceMs);
+    return () => clearTimeout(timer);
+  }, [waitingForFrame, startupGraceMs]);
 
   // Input forwarding lives in LiveScreen on the socket.
   // Escape is bound to the window so it works regardless of overlay focus.
@@ -385,6 +492,36 @@ export function ComputerView({
    * live browser can be sitting on about:blank.
    */
   const blankBrowser = !settled && shot ? isBlankBrowser(shot) : false;
+
+  const owner = name ? `${name}'s` : "the Bot's";
+  /**
+   * The problem worth showing, which is not the same as the last one that happened.
+   *
+   * A computer the server says it cannot reach is a problem at once. Anything else that failed is
+   * shown only once the wait has run past what a start can take, because before then a failed
+   * screenshot is far more often a browser still launching than a broken computer.
+   */
+  const shownProblem =
+    computerState === "unreachable"
+      ? `${capitalise(owner)} computer can't be reached right now.`
+      : stalled
+        ? (problem ?? "It's taking longer than usual to start.")
+        : null;
+  /**
+   * The calm sentence, when there is no picture and nothing wrong.
+   *
+   * A ready computer that has simply not sent its first frame yet keeps the plain "Waiting for the
+   * Bot's screen…", and so does one whose state is not known yet: saying "Starting" over a computer
+   * that is already running would be the panel inventing a delay. A failed screenshot from a computer
+   * that is not known to be ready is read as one still coming up.
+   */
+  const waiting: "starting" | "asleep" | undefined = asleep
+    ? "asleep"
+    : computerState === "starting" ||
+        computerState === "absent" ||
+        (problem !== null && computerState !== "ready")
+      ? "starting"
+      : undefined;
 
   /*
    * Sized from the ratio, never from the payload, so the frame is identical while a screen is
@@ -474,9 +611,11 @@ export function ComputerView({
           {showScreen ? null : (
             <NothingToSee
               blankBrowser={blankBrowser}
+              owner={owner}
               page={knownPage}
-              problem={problem}
+              problem={shownProblem}
               settled={settled}
+              waiting={waiting}
             />
           )}
         </button>
@@ -651,8 +790,23 @@ export function ComputerView({
                         computerId={computerId}
                         driving={driving}
                         onProblem={setStreamProblem}
+                        onReconnecting={setReconnecting}
                         retryKey={retryKey}
                       />
+                      {/*
+                        A drop being retried, said quietly in a corner. The stream retries on its
+                        own with a backoff, and the screen under it is usually back in a second;
+                        covering it with the Retry panel made a routine reconnect look like a dead
+                        one. The panel below is for when the retries have run out.
+                      */}
+                      {reconnecting && !streamProblem ? (
+                        <span
+                          role="status"
+                          className="absolute top-2 left-2 rounded-full bg-black/60 px-2.5 py-1 font-medium text-white text-xs backdrop-blur-sm"
+                        >
+                          Reconnecting…
+                        </span>
+                      ) : null}
                       {/*
                         A live screen that ends reports why through `onProblem`, and this is the
                         branch that is mounted when it does. Without drawing it here the message
@@ -679,9 +833,11 @@ export function ComputerView({
                     <div className="relative w-full" style={{ aspectRatio }}>
                       <NothingToSee
                         blankBrowser={blankBrowser}
+                        owner={owner}
                         page={knownPage}
-                        problem={problem}
+                        problem={shownProblem}
                         settled={settled}
+                        waiting={waiting}
                       />
                     </div>
                   )}

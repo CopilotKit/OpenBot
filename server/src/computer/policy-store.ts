@@ -24,7 +24,7 @@
 import { eq, sql } from "drizzle-orm";
 import type { Database } from "../db/client";
 import { actionPolicy } from "../db/schema";
-import type { ActionPolicy } from "./policy";
+import type { ActionPolicy, RuleLabel } from "./policy";
 
 /** There is one boundary per deployment, so there is one row. */
 const CURRENT = "current";
@@ -102,6 +102,7 @@ export function createPolicyStore(
               mode: next.mode,
               deny: next.deny,
               allow: next.allow,
+              labels: next.labels ?? {},
               updatedBy: by ?? null,
               updatedAt: new Date(),
             })
@@ -111,6 +112,7 @@ export function createPolicyStore(
                 mode: next.mode,
                 deny: next.deny,
                 allow: next.allow,
+                labels: next.labels ?? {},
                 updatedBy: by ?? null,
                 updatedAt: new Date(),
               },
@@ -148,11 +150,7 @@ export function createPolicyStore(
         .limit(1);
       if (!row) return "configuration";
 
-      current = {
-        mode: row.mode as ActionPolicy["mode"],
-        deny: [...row.deny],
-        allow: [...row.allow],
-      };
+      current = fromRow(row);
       return "the database";
     },
 
@@ -167,13 +165,7 @@ export function createPolicyStore(
       // No row means somebody reset it, and reset means this deployment goes back to what
       // configuration says. Leaving the last saved rules in memory here would make a reset apply on
       // the server that served it and nowhere else, which is the bug this function exists to fix.
-      current = row
-        ? {
-            mode: row.mode as ActionPolicy["mode"],
-            deny: [...row.deny],
-            allow: [...row.allow],
-          }
-        : clone(configured);
+      current = row ? fromRow(row) : clone(configured);
     },
   };
 }
@@ -204,7 +196,64 @@ function clone(policy: ActionPolicy): ActionPolicy {
     mode: policy.mode,
     deny: [...policy.deny],
     allow: [...policy.allow],
+    ...(policy.labels ? { labels: { ...policy.labels } } : {}),
   };
+}
+
+function fromRow(row: typeof actionPolicy.$inferSelect): ActionPolicy {
+  return {
+    mode: row.mode as ActionPolicy["mode"],
+    deny: [...row.deny],
+    allow: [...row.allow],
+    labels: { ...row.labels },
+  };
+}
+
+const MAX_LABEL_NAME = 80;
+const MAX_LABEL_DESCRIPTION = 300;
+
+/**
+ * Each rule's name and description, kept only for rules the policy still has.
+ *
+ * A label for a rule that is not in either list is dropped rather than refused: it is what removing a
+ * rule from a policy read moments ago leaves behind, and it can never be shown against anything.
+ */
+function parseLabels(
+  input: unknown,
+  rules: string[],
+):
+  | { ok: true; labels: Record<string, RuleLabel> }
+  | { ok: false; error: string } {
+  if (input === undefined) return { ok: true, labels: {} };
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    return { ok: false, error: "labels must map each rule to a name." };
+  }
+  const known = new Set(rules);
+  const labels: Record<string, RuleLabel> = {};
+  for (const [rule, value] of Object.entries(input)) {
+    const label = value as Partial<RuleLabel> | null;
+    const name = typeof label?.name === "string" ? label.name.trim() : "";
+    const description =
+      label?.description === undefined
+        ? ""
+        : typeof label.description === "string"
+          ? label.description.trim()
+          : null;
+    if (!name || name.length > MAX_LABEL_NAME) {
+      return {
+        ok: false,
+        error: `Each rule needs a name of at most ${MAX_LABEL_NAME} characters.`,
+      };
+    }
+    if (description === null || description.length > MAX_LABEL_DESCRIPTION) {
+      return {
+        ok: false,
+        error: `A rule's description must be at most ${MAX_LABEL_DESCRIPTION} characters.`,
+      };
+    }
+    if (known.has(rule)) labels[rule] = { name, description };
+  }
+  return { ok: true, labels };
 }
 
 /**
@@ -243,5 +292,16 @@ export function parseActionPolicy(
     lists[key] = value as string[];
   }
 
-  return { ok: true, policy: { mode, deny: lists.deny, allow: lists.allow } };
+  const labels = parseLabels(candidate.labels, [...lists.deny, ...lists.allow]);
+  if (!labels.ok) return labels;
+
+  return {
+    ok: true,
+    policy: {
+      mode,
+      deny: lists.deny,
+      allow: lists.allow,
+      labels: labels.labels,
+    },
+  };
 }

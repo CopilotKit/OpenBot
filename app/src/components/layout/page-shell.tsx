@@ -3,6 +3,14 @@ import { Link, type LinkProps } from "@tanstack/react-router";
 import type * as React from "react";
 import { cn } from "@/lib/utils";
 import { Button } from "../ui/button";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "../ui/empty";
 import { SidebarToggle, useSidebarToggleVisible } from "./sidebar-toggle";
 
 /**
@@ -23,7 +31,7 @@ import { SidebarToggle, useSidebarToggleVisible } from "./sidebar-toggle";
 
 /**
  * `prose` is the default because configuration is mostly reading, and every screen uses it so none is
- * wider than another. It is `max-w-3xl`, 720px against this app's 15px root: room for a row's label
+ * wider than another. It is `max-w-3xl`, 768px: room for a row's label
  * and its control side by side. Sentences are held to `max-w-prose` (around 65 characters) inside it,
  * which is where reading stays comfortable, so the column widening does not stretch them.
  *
@@ -109,12 +117,22 @@ export function PageShell({
        * eighteen screens are unaffected.
        *
        * Separate from the centred column below so the scrollbar rides the pane's edge instead of
-       * appearing inside a 630px measure with content either side of it.
+       * appearing inside the measure with content either side of it.
        */}
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div
           className={cn(
-            "mx-auto flex w-full flex-col px-4 pb-12",
+            /*
+             * The page's rhythm lives here, so a screen gets it by being a child rather than by
+             * choosing a margin. The title block sits 32px above whatever comes first, tighter than
+             * the 48px between sections, so the heading reads as part of the page it introduces
+             * rather than as one more block at the same distance as all the others. Tabs are the
+             * exception: they belong to the title, so they sit 24px under it and the content 32px
+             * under them. These outrank the child's own `mt-*`, which is the point: a first section
+             * or notice keeps its usual margin everywhere else and loses it only here.
+             */
+            "mx-auto flex w-full flex-col px-4 pb-16",
+            "[&>header+*]:mt-8 [&>header+nav]:mt-6 [&>header+nav+*]:mt-8",
             // Without a bar above it the heading keeps the full original space.
             bar ? "pt-8" : "pt-12",
             WIDTHS[width],
@@ -196,11 +214,18 @@ export function PageRows({
      * The rows are squared off and the card clips them. `Item` carries `rounded-lg` of its own, which
      * inside a card of divided rows painted a hover as a floating pill: a middle row has no corners,
      * and the first and last cannot be concentric with the card while sitting a border inside it.
+     *
+     * Every row is at least 56px, whatever it holds. A title over a description is 65px; a lone
+     * line would be 48px and look stunted beside it, so it is held up to the floor. A description
+     * that wraps to a second line still grows the row rather than being clipped.
      */
     <div
       className={cn(
         "mt-4 overflow-hidden rounded-lg border border-border bg-card dark:border-transparent",
-        "[&_[data-slot=item]]:rounded-none",
+        "[&_[data-slot=item]]:rounded-none [&_[data-slot=item]]:min-h-14",
+        // Dividers stop 16px short of each edge, lined up with the rows' text, as Linear draws them.
+        // Any depth: a screen may wrap each row and its divider, as Admin does to stagger them in.
+        "[&_[data-slot=separator][data-orientation=horizontal]]:mx-4 [&_[data-slot=separator][data-orientation=horizontal]]:w-auto",
         className,
       )}
     >
@@ -210,11 +235,70 @@ export function PageRows({
 }
 
 /**
- * What a section says when it has nothing to list.
+ * The card a page-sized form sits in: the fields, then its buttons on the right.
  *
- * Said in a sentence rather than drawn as an illustration with a heading: on a configuration screen
- * "nothing here yet" is a fact, not an event, and the page already told you what the section is for.
+ * For a screen that exists to fill something in, reached from a list by its Add button, with
+ * `PageShell`'s back button returning to it. The same border and fill as `PageRows`, so a form and
+ * a list read as the same kind of surface, padded rather than divided because it holds fields.
  */
-export function PageEmpty({ children }: { children: React.ReactNode }) {
-  return <p className="mt-4 text-muted-foreground text-sm">{children}</p>;
+export function PageCard({
+  children,
+  className,
+  footer,
+}: {
+  children: React.ReactNode;
+  className?: string;
+  /** The form's buttons, Cancel then the primary action. */
+  footer?: React.ReactNode;
+}) {
+  return (
+    <div
+      className={cn(
+        "rounded-lg border border-border bg-card p-4 dark:border-transparent",
+        className,
+      )}
+    >
+      {children}
+      {footer ? (
+        <div className="mt-6 flex justify-end gap-2">{footer}</div>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * What a section says when it has nothing to list, drawn as shadcn's empty state.
+ *
+ * A dashed box where the rows would be, so the section keeps its shape: the icon says what kind of
+ * thing would be here, the title says that there is none, the description says how one arrives, and
+ * `action` is the button that adds the first one when the page has one to offer.
+ *
+ * Only the description is required. A section that is empty for a reason rather than because
+ * nothing was added yet (a feature turned off, a search with no match) can say just that.
+ */
+export function PageEmpty({
+  action,
+  children,
+  icon: Icon,
+  title,
+}: {
+  action?: React.ReactNode;
+  children?: React.ReactNode;
+  icon?: React.ComponentType<{ className?: string }>;
+  title?: string;
+}) {
+  return (
+    <Empty className="mt-4 rounded-lg border border-border">
+      <EmptyHeader>
+        {Icon ? (
+          <EmptyMedia variant="icon">
+            <Icon />
+          </EmptyMedia>
+        ) : null}
+        {title ? <EmptyTitle>{title}</EmptyTitle> : null}
+        {children ? <EmptyDescription>{children}</EmptyDescription> : null}
+      </EmptyHeader>
+      {action ? <EmptyContent>{action}</EmptyContent> : null}
+    </Empty>
+  );
 }

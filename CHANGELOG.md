@@ -8,7 +8,7 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-**Before upgrading.** Six things change for an existing deployment:
+**Before upgrading.** Nine things change for an existing deployment:
 - A hosted computer's browser is now headed by default. It uses a little more memory than headless
   did; set `COMPUTER_BROWSER_MODE=headless` (Helm: `computers.browserMode: headless`) to keep the old
   behaviour.
@@ -34,6 +34,214 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - Migration `0060_app_access_requests` adds one table, `app_access_requests`, where a person's
   request for an administrator to switch on a work app, grant it to a Bot, or connect a Shared app's
   team account is kept, with who answered it and when. It starts empty and nothing is backfilled.
+- Migration `0061_suggestion_superseded` widens the check on `proactive_suggestions.status` to allow
+  `superseded` (below). Open suggestions from before the upgrade stay open until that Bot's next
+  research run replaces them.
+- Migration `0062_action_policy_labels` adds a `labels` column to `action_policies`, defaulting to
+  empty. Existing boundary rules keep working and show as "Custom rule" until somebody names them.
+- On Helm's `shared` computer and the docker-compose `agent-computer`, each Bot's files now live in
+  `computers/<Bot id>` on the workspace volume (below). Files saved before the upgrade stay at the
+  root of the volume, where no Bot sees them; move them into a Bot's folder to give them back.
+
+### Each Bot on a shared computer has its own files
+
+A computer that serves many Bots kept one folder of files for all of them, so a note one Bot saved
+was a file every other Bot could list and read. Each Bot now gets its own folder, and its commands
+start there. Logins were already kept apart. This is on for Helm's `shared` computer and the
+docker-compose `agent-computer`, and `COMPUTER_SEPARATE_WORKSPACES=on` turns it on for the
+all-in-one image. A command can still read another Bot's folder, so a deployment that needs people
+kept apart should give each Bot a computer of its own (`computers.mode: sandbox`).
+
+### Every chart says where its figures came from
+
+A chart a Bot draws now ends with a line naming what its figures were read from and when they are
+from, such as "Sources: World Bank World Development Indicators · As of 2025". Figures a Bot charted
+from its own knowledge, without looking them up, are marked "From the Bot's own knowledge. Not
+checked against a source." Bots are told to look up figures that change over time before charting
+them. In Slack and Teams the same line follows the chart in the reply. Charts already in a
+conversation are drawn as before, with no such line.
+
+### A Bot searches with its search tool, never its browser
+
+Asked to search for something, a Bot could drive its browser to Google or another search engine
+instead of using the search tool it held. With a search tool it now searches with that, and keeps
+the browser for signing in, clicking through a site, filling in a form or opening a page the person
+named. Without one it answers from what it knows, says it has not checked, and shows a card for a
+search app (Parallel Search, Exa Search or Firecrawl) that the person can ask an administrator for.
+
+### A computer that is starting says so, instead of showing a problem
+
+Opening the Computer panel while a Bot's computer was asleep or starting showed "Can't show the
+screen right now", and an action during a cold start was marked "didn't work". The panel now says
+the computer is starting, or is off until the Bot next uses it, and shows a problem only when it
+can't be reached or has gone two and a half minutes without a picture; a live screen being
+reconnected shows a small "Reconnecting…" badge. An action turned away by a cold start reads "not
+done yet" and the Bot is told to try again. Looking at the panel no longer wakes a sleeping computer,
+a Bot says in one sentence what it is about to do before its first computer action, and a hosted
+computer's cold start answers within 45 seconds, under a load balancer's usual 60-second idle
+timeout. A Docker computer still booting its browser reads as starting once the supervisor is
+upgraded too; an older supervisor works as before.
+
+### A conversation shows who it is waiting on
+
+When a Bot asks another Bot, the end of the conversation now shows that Bot's avatar and "Asking
+Risk Analyst…" until the answer comes back; a routine firing into it reads "Market Scout is running a
+routine…". A Bot whose address this deployment will not dial is reported at once, not after five
+minutes of retries. The sidebar keeps the conversation lit while it waits, and both survive a
+reload. In a shared conversation only the person whose Bot asked sees whom it asked; the others see
+only that it is busy. Migration `0063_work_items_open_thread` adds one partial index to `work_items`.
+
+### A Bot's owner can give it their own apps
+
+The owner of a Bot can now let it use an app they connect for themselves, without an administrator:
+from the app card ("Let Research Bot use your Gmail?"), under Your apps on the Bot's page, or on the
+New Bot sheet, which offers their connected apps. Calls under such a grant always use the asking
+person's own account, even on a published Team Bot, and an owner can take back only what they gave.
+By default this covers apps each person connects for themselves and Routines; an administrator
+decides per app on its page, and can switch it off for people with the "Give apps to their own Bots"
+capability. Migration `0063_owner_app_grants` adds two nullable columns, `mcp_servers.owner_grants`
+and `plugin_grants.granted_as`.
+
+Where an administrator lets owners give a Shared app, an owner's grant works straight away: it lets
+the people who can use the Bot (just the owner, or a Team Bot's audience) use the team account, with
+no separate approval. Writes still ask first. Taking the app back, or the administrator switching the
+app back to admins only, withdraws that. Migration `0064_owner_shared_audience` adds the nullable
+`shared_use_approvals.approved_as`.
+
+### An app card carries the task on once the app is ready
+
+When a Bot stopped because it needed an app, and the person then connected it in another tab or an
+administrator turned it on for the Bot, the card said "Ask again". It now sends "Gmail is ready now.
+Please carry on." for the person, once, and the Bot picks the task back up; a card opened after the
+change offers Continue instead. An administrator looking at the card gets the fix itself, "Turn on
+and give it to Sales" or "Give it to Sales", which grants the app's read-only actions with the same
+checks and trail as approving a request, or a link to the app's page where one press can't do it.
+
+### Screens share one spacing, row and empty-state design
+
+Every configuration screen now takes its spacing from the page frame: 32px under the title, 48px
+between sections, rows at least 56px tall with dividers inset to the text. Rows draw their icon as a
+glyph on a small tile, and a section with nothing in it says so with an icon, a title and, where
+there is one, the button that adds the first thing. The root font size is the browser's 16px again,
+with text kept on its 15px scale, so Tailwind sizes are their documented values.
+
+### Adding a credential and a boundary rule are screens of their own
+
+Add credential opens a page with a back button instead of a dialog. Boundaries is now a list of
+named rules ("Bots may never…"); adding one starts from a template or a blank rule and can be tested
+against recent activity before it applies, and each rule opens to what it has stopped lately.
+
+### A Bot's page is shorter
+
+Its In progress, Scheduled and Completed lists move to their own Activity page. The Bot's page keeps
+what is running or scheduled, three at most, with a dot on anything under way, and shows its newest
+three suggested next steps with the rest behind "Show more".
+
+### Suggested next steps no longer pile up
+
+Each research run replaces the open suggestions from the one before, and one with the same title as
+a suggestion that is already open, or was dismissed in the last 30 days, is not suggested again. The
+research is asked to suggest nothing when nothing needs doing, and not to name the Bot's tools.
+
+### Pin or delete a conversation from its Bot panel
+
+The gear panel in a conversation ends with Pin and Delete for that conversation.
+
+### The @ menu shows each Bot's avatar, at the caret
+
+On the home screen the @ menu opened away from the text, partly off the window; it now opens at the
+caret. It is wider and shows each Bot's avatar beside its name.
+
+### Filling in a form is no longer mistaken for paying
+
+The built-in safety rules (paying or moving money, credentials, security settings) read the words a
+Bot typed as well as where it typed them, so a Bot entering a CRM note about a customer's purchase
+orders, or a press release's source such as Business Wire, was stopped with "Paying, purchasing or
+moving money is always done by the person" and the step handed back to you. Typing is now judged by
+the field, the page and the button: a card number field, a checkout page or a new password field
+still goes to you, whatever is typed. A news wire (business, news or press wire) on a link or button
+no longer counts as wiring money; wiring money still does.
+
+### A Bot's browser step is no longer refused while it is being saved
+
+Before your browser runs a click or a typed entry for a Bot, the server checks it against the copy
+saved in the conversation. That copy is saved a moment behind, a piece at a time, and a check that
+read it half saved refused the step with "That unanswered tool call is not saved in this
+conversation" or "Supply a valid request", so a form the Bot was filling in could stop partway or ask
+for your approval twice. The check now waits, as it already did for a step not saved at all, until
+the step is saved whole.
+
+### A Bot can choose from a dropdown
+
+A Bot filling in a form in its browser could not set a dropdown (a native `<select>`, such as a CRM's
+Industry or Stage). Typing into one waited until it timed out and was reported as a field that had
+gone from the page, so the Bot took a fresh snapshot and tried the same thing again. Typing into a
+dropdown now chooses the option it names, by the option's label or its value, and the page sees the
+same change a person's choice makes. Text that names no option is refused with a message saying so.
+A page snapshot now lists each dropdown's options and the one it shows, so the Bot can see what it
+may choose and what is already chosen.
+
+### A Bot carries on after a browser step fails
+
+When a click, typed entry or key press the Bot made in its browser failed, the Bot's turn ended on
+the spot: the step showed "Didn't work" and the Bot said nothing more. The failure now reaches the
+Bot like any other result, so it can take a fresh snapshot, try another way, or tell you what
+stopped it. A refused step reads as a refusal the Bot can explain.
+
+### A Bot can send, draft and reply in Gmail
+
+OpenBot left out every Composio action that takes a file, because a Bot has no way to supply one.
+That also left out actions where the file is optional, such as an email's attachment, so Gmail's
+send, draft, reply and update-draft actions never appeared and a Bot could read mail but not send
+it. These actions are now offered without the optional file, and a call that includes one anyway is
+refused with a message saying to try again without it. An action that cannot run without a file,
+such as uploading one to Google Drive, is still left out. For an app that is already on, press
+Refresh tools on its page in Admin to list the new actions, then grant them to a Bot as usual.
+
+### Connect works for an app Composio already holds your account for
+
+Pressing Connect on a Composio app, from a conversation's Connect card or from Connections, could end
+in a refusal saying Composio already held a connected account for the app and that disconnecting it
+would clear the way. The app showed as not connected, so there was nothing to disconnect. This
+happened when Composio held the account and OpenBot had no record of it: on a fresh or upgraded
+install, or on a second local install signing in as the same person with the same Composio key. Connect
+now asks Composio again, records the account it holds, and shows the app as connected, the same way
+opening the app's page already did. A Shared app's team account is still recorded only by an admin.
+If Composio then reports no account after all, Connect says nothing was connected and asks you to
+press it again. It no longer tells you to disconnect anything.
+
+### A Bot with an app or web research can use its browser in a conversation again
+
+A Bot that held any app or research tool, such as Parallel Search, could not open a page, click or
+type in a conversation: every browser and computer step came back as unavailable, and the Bot
+fetched the page some other way instead. Its browser now works beside those tools, as it does for a
+Bot that holds none. Routines and other unattended turns are unchanged.
+
+### An app a Bot could not use asks to be connected once
+
+When a Bot reached for an app the person had not connected, such as Airtable, the conversation drew
+the Connect card twice, and still did after a reload. The built-in LangGraph Bot now names the message
+its tool calls belong to the way the conversation store does, so a conversation no longer keeps a
+second copy of every tool call, and a conversation that already has one draws each call once.
+
+### An app's steps are named for the app, never for the service behind it
+
+A conversation named a Composio app's work after the broker and the vendor's own prefix: "Used
+Composio Airtable", then "Airtable list bases". It now says "Used Airtable", and each step reads as
+the action, "List bases", with the app beside it. An Arcade app is named the same way, as the app
+rather than `arcade-Gmail`.
+
+### An app a Bot cannot use yet asks once per turn
+
+When a Bot's call to an unconnected app was refused, the Bot often also asked to show that app's
+card, and the conversation drew the same Connect card twice. Each app's card is now drawn once per
+turn; asking again in a new message can draw it again.
+
+### The Computer panel shows the Bot's screen when it opens
+
+Opening the Computer panel beside a conversation could leave it on "Waiting for the Bot's screen…"
+while the Bot browsed, because the panel slid in from off-screen and the screen counted as out of
+view for as long as it stayed open. The panel now starts showing the screen once it has opened.
 
 ### Plainer words, and one word for each thing
 
@@ -107,6 +315,11 @@ A desktop app built from `main` stopped every new install at "Installing OpenBot
 `shared/package.json: No such file or directory`. It had started reading `shared` and `toolkit` as
 packages, which v0.2.0 does not have: there `shared` is plain source and there is no `toolkit`. It now
 reads them only when the release includes them.
+
+### The desktop window answers while software is installing
+
+Clicking or focusing the desktop window while it downloaded local software showed a spinning cursor
+until the download finished. The window now comes forward at once and keeps the setup screen.
 
 ### A new desktop install starts its server again
 
@@ -581,7 +794,7 @@ A call that is refused anyway, from a schema offered earlier, is still refused a
 
 ## 0.1.0
 
-**Before upgrading.** Six things change for an existing deployment:
+**Before upgrading.** Eight things change for an existing deployment:
 - Automatic Learning is on unless an administrator saved it off. It does nothing until a Learning
   container is assigned; see below.
 - A Bot's computer refuses the network until the server pushes its policy. A computer run without

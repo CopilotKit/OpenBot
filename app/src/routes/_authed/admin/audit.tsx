@@ -1,4 +1,4 @@
-import { IconDownload, IconRefresh } from "@tabler/icons-react";
+import { IconDownload, IconRefresh, IconSearch } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
@@ -169,7 +169,9 @@ function AuditPage() {
             Couldn't load the audit log. Reload the page.
           </p>
         ) : rows.length === 0 ? (
-          <PageEmpty>No events match this filter yet.</PageEmpty>
+          <PageEmpty icon={IconSearch} title="No matches">
+            No events match this filter yet.
+          </PageEmpty>
         ) : (
           <div className="mt-4 overflow-x-auto rounded-lg border border-border bg-card">
             <table className="w-full text-left text-sm">

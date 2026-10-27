@@ -5,7 +5,10 @@ import type { AbstractAgent, RunAgentInput } from "@ag-ui/client";
 import { HttpAgent } from "@ag-ui/client";
 import { LLMock } from "@copilotkit/aimock";
 import { BuiltInAgent } from "@copilotkit/runtime/v2";
-import { PROVENANCE_GUIDANCE } from "@openbot/shared/bot-prompt";
+import {
+  computerGuidance,
+  PROVENANCE_GUIDANCE,
+} from "@openbot/shared/bot-prompt";
 import { defaultModelFor } from "@openbot/shared/model-providers";
 import { EMPTY, lastValueFrom } from "rxjs";
 import { z } from "zod";
@@ -987,7 +990,7 @@ function fakeAgUiEndpoint() {
  * A Bot is told what it holds, not only handed it.
  *
  * A tool array tells a model a tool exists. It does not say the tool is the right way to reach that
- * system, and it competes with `COMPUTER_GUIDANCE`: a page of emphatic prose about the browser that
+ * system, and it competes with `computerGuidance`: a page of emphatic prose about the browser that
  * every Bot gets whether or not it has a single connector, and that mentions connectors nowhere.
  *
  * The browser prose won. A Bot holding four Google Drive tools browsed to drive.google.com, met a
@@ -1133,7 +1136,7 @@ describe("what a Bot is told it holds", () => {
       { provider: "openai", defaultModel: "gpt-5.6-terra" },
       "openai-secret",
       drive,
-      "BROWSER GUIDANCE HERE",
+      () => "BROWSER GUIDANCE HERE",
     ).prompt as string;
 
     // Order is the fix, not merely presence: the grants have to land before the browser prose.
@@ -1141,6 +1144,88 @@ describe("what a Bot is told it holds", () => {
     expect(prompt.indexOf("google-drive")).toBeLessThan(
       prompt.indexOf("BROWSER GUIDANCE HERE"),
     );
+  });
+});
+
+/**
+ * Whether the browser leaves searching to a search tool, decided by what this run holds.
+ *
+ * "search for X" in a demo made a Bot drive its browser to a search engine. The guidance has two
+ * wordings, and which one a built-in Bot gets has to follow the tools it is built with, including a
+ * narrowed run that was not offered the search tool it was granted.
+ */
+describe("what a built-in Bot is told about searching", () => {
+  const promptHolding = (
+    tools: { name: string; ref: string }[],
+    guidance: typeof computerGuidance | null = computerGuidance,
+  ) => {
+    const configuration = builtInAgentConfiguration(
+      {
+        id: "general-assistant",
+        name: "General Assistant",
+        type: "built_in",
+        systemPrompt: "Be helpful.",
+      },
+      { provider: "openai", defaultModel: "gpt-5.6-terra" },
+      "openai-secret",
+      tools as never[],
+      guidance ?? undefined,
+    );
+    return String((configuration as { prompt?: unknown }).prompt);
+  };
+  const card = { name: "show_app_access", ref: "app-access/show_app_access" };
+  const exaSearch = {
+    name: "mcp__exa__web_search_exa",
+    ref: "exa/web_search_exa",
+  };
+  const exaFetch = {
+    name: "mcp__exa__web_fetch_exa",
+    ref: "exa/web_fetch_exa",
+  };
+
+  test.each([
+    ["a provider's pair", [card, exaSearch, exaFetch]],
+    ["a search tool alone", [card, exaSearch]],
+    [
+      "another provider",
+      [
+        card,
+        {
+          name: "mcp__firecrawl__firecrawl_search",
+          ref: "firecrawl/firecrawl_search",
+        },
+      ],
+    ],
+  ])("holding %s, it is told to search with it", (_, tools) => {
+    const prompt = promptHolding(tools);
+    expect(prompt).toContain(computerGuidance({ search: true }));
+    expect(prompt).not.toContain(computerGuidance({ search: false }));
+  });
+
+  test.each([
+    ["nothing", []],
+    ["only the card", [card]],
+    ["a reader with no search", [card, exaFetch]],
+    [
+      "a tool called search that finds no sources",
+      [
+        card,
+        {
+          name: "mcp__google-drive__search_files",
+          ref: "google-drive/search_files",
+        },
+      ],
+    ],
+  ])("holding %s, it is told never to search in the browser", (_, tools) => {
+    const prompt = promptHolding(tools);
+    expect(prompt).toContain(computerGuidance({ search: false }));
+    expect(prompt).not.toContain(computerGuidance({ search: true }));
+  });
+
+  test("a deployment with no computer is told about neither", () => {
+    const prompt = promptHolding([card, exaSearch], null);
+    expect(prompt).toContain("Be helpful.");
+    expect(prompt).not.toContain("computer_navigate");
   });
 });
 
@@ -1277,7 +1362,7 @@ describe("a person's standing instructions", () => {
       model,
       "openai-secret",
       [{ name: "mcp__google-drive__search_files" }] as never[],
-      "Computer guidance.",
+      () => "Computer guidance.",
       [],
       "Write in British English.",
     ).prompt as string;

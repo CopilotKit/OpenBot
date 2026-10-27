@@ -618,7 +618,11 @@ function ModelUsage() {
       </p>
     );
   if (usage.data.summary.length === 0)
-    return <PageEmpty>No Bot runs in the last 30 days.</PageEmpty>;
+    return (
+      <PageEmpty icon={IconChartBar} title="No recent runs">
+        No Bot runs in the last 30 days.
+      </PageEmpty>
+    );
   return (
     <PageRows>
       {usage.data.summary.map((row, index) => (
@@ -659,7 +663,7 @@ function RecordedActions() {
       </p>
     );
   if (actions.data.length === 0)
-    return <PageEmpty>No commands recorded yet.</PageEmpty>;
+    return <PageEmpty icon={IconTerminal2} title="No commands recorded yet" />;
   return (
     <PageRows>
       {actions.data.map((action, index) => (

@@ -16,6 +16,7 @@ import {
   toolkitOf,
   useComposioClient,
   vendorSentence,
+  withheldArguments,
 } from "../src/plugins/composio";
 import { MAX_RESULT_CHARS } from "../src/plugins/mcp";
 
@@ -193,11 +194,22 @@ const FILE_PROPERTY = { type: "string", file_uploadable: true };
  * asserted by nothing. `if`, `then`, `else`, `items` and `$ref` live on `JSONSchemaPropertySchema`
  * and not on the parameters root (`@composio/core` 0.18.1, `src/types/tool.types.ts:77-131` against
  * `:134-175`), so a case for one of them has to nest to be a shape the vendor could send.
+ *
+ * REQUIRED BY DEFAULT, because a file under a property the action can do without is withheld
+ * rather than dropping the action. A walk that missed the keyword and one that found it would
+ * then both offer the action, and these cases are about which of the two this is; required, a
+ * file found is an action dropped and a file missed is an action offered. Pass `false` for the
+ * other reading, where a file found is a `field` removed.
  */
-function underProperty(keyword: string, sub: unknown): Record<string, unknown> {
+function underProperty(
+  keyword: string,
+  sub: unknown,
+  required = true,
+): Record<string, unknown> {
   return {
     type: "object",
     properties: { field: { type: "object", [keyword]: sub } },
+    ...(required ? { required: ["field"] } : {}),
   };
 }
 
@@ -589,7 +601,10 @@ describe("listing an app's actions", () => {
     expect(asked).toEqual(["gmail"]);
   });
 
-  test("an action that stages a file is not offered at all", async () => {
+  test("an action that needs a file is not offered at all", async () => {
+    // REQUIRED HERE ON PURPOSE. Composio's own GMAIL_SEND_EMAIL requires nothing and is offered
+    // without its attachment (`composio-file-parameters.test.ts`); the `required` below is what
+    // makes this the case no call can satisfy.
     useComposioClient(
       recording({
         listActions: async () => [
@@ -881,6 +896,225 @@ describe("listing an app's actions", () => {
         offered: ["GMAIL_FETCH_EMAILS", "GMAIL_STAGES_A_FILE"],
       });
     }
+  });
+
+  test("a file under a parameter nothing requires is removed, down every keyword the walk reads", async () => {
+    /*
+     * THE SAME KEYWORDS AS THE TWO TESTS ABOVE, READ THE OTHER WAY. There `field` is required, so a
+     * file found beneath it is an action nobody can call. Here it is not, so a file found beneath it
+     * is a parameter the call can leave out: the action is offered and `field` is gone from it. A
+     * keyword the walk did not descend would leave `field` in place, file and all, which is the one
+     * outcome that gives a model a parameter it can only fill with an invented staging key.
+     */
+    const keywords: [string, unknown][] = [
+      ["additionalProperties", FILE_PROPERTY],
+      ["patternProperties", { any: FILE_PROPERTY }],
+      ["not", FILE_PROPERTY],
+      ["if", FILE_PROPERTY],
+      ["then", FILE_PROPERTY],
+      ["else", FILE_PROPERTY],
+      ["items", FILE_PROPERTY],
+      ["items", [{ type: "string" }, FILE_PROPERTY]],
+      ["anyOf", [{ type: "null" }, FILE_PROPERTY]],
+      ["oneOf", [FILE_PROPERTY]],
+      ["allOf", [FILE_PROPERTY]],
+      ["prefixItems", [{ type: "string" }, FILE_PROPERTY]],
+      ["contains", FILE_PROPERTY],
+      ["dependentSchemas", { send: FILE_PROPERTY }],
+      ["dependencies", { send: FILE_PROPERTY }],
+      ["propertyNames", FILE_PROPERTY],
+      ["unevaluatedProperties", FILE_PROPERTY],
+      ["unevaluatedItems", FILE_PROPERTY],
+    ];
+
+    for (const [keyword, sub] of keywords) {
+      useComposioClient(listing(underProperty(keyword, sub, false)));
+      const listed = await listTools({ url: "composio://gmail" });
+      const staged = listed.find((tool) => tool.name === "GMAIL_STAGES_A_FILE");
+      expect({ keyword, schema: staged?.inputSchema }).toEqual({
+        keyword,
+        schema: { type: "object", properties: {} },
+      });
+    }
+  });
+
+  test("a file is removed at the deepest parameter a call can leave out, and nothing else goes with it", async () => {
+    /*
+     * A FILE THE OBJECT AROUND IT REQUIRES MAKES THAT OBJECT THE FILE PARAMETER, one level up. So an
+     * optional `message` that requires its `attachment` goes whole, a required `message` whose
+     * `attachment` is optional loses only the `attachment`, and required all the way down is an
+     * action no call can satisfy. Every sibling, every `required` and every description stays.
+     */
+    const message = (requiresAttachment: boolean) => ({
+      type: "object",
+      description: "The message to send.",
+      properties: {
+        subject: { type: "string", description: "Its subject." },
+        attachment: FILE_PROPERTY,
+      },
+      ...(requiresAttachment ? { required: ["subject", "attachment"] } : {}),
+    });
+    const action = (
+      requiresMessage: boolean,
+      requiresAttachment: boolean,
+    ): Record<string, unknown> => ({
+      type: "object",
+      properties: {
+        to: { type: "string", description: "Who it goes to." },
+        message: message(requiresAttachment),
+      },
+      required: requiresMessage ? ["to", "message"] : ["to"],
+    });
+
+    const cases: { where: string; schema: Record<string, unknown> }[] = [
+      { where: "optional inside a required one", schema: action(true, false) },
+      { where: "required inside an optional one", schema: action(false, true) },
+    ];
+    const offered = [
+      {
+        type: "object",
+        properties: {
+          to: { type: "string", description: "Who it goes to." },
+          message: {
+            type: "object",
+            description: "The message to send.",
+            properties: {
+              subject: { type: "string", description: "Its subject." },
+            },
+          },
+        },
+        required: ["to", "message"],
+      },
+      {
+        type: "object",
+        properties: { to: { type: "string", description: "Who it goes to." } },
+        required: ["to"],
+      },
+    ];
+
+    for (const [index, { where, schema }] of cases.entries()) {
+      const asHandedOver = structuredClone(schema);
+      useComposioClient(listing(schema));
+      const listed = await listTools({ url: "composio://gmail" });
+      const staged = listed.find((tool) => tool.name === "GMAIL_STAGES_A_FILE");
+      expect({ where, schema: staged?.inputSchema }).toEqual({
+        where,
+        schema: offered[index],
+      });
+      // Removed from what a model is shown, never from the object the vendor handed over.
+      expect({ where, schema }).toEqual({ where, schema: asHandedOver });
+    }
+
+    useComposioClient(listing(action(true, true)));
+    const listed = await listTools({ url: "composio://gmail" });
+    expect(listed.map((tool) => tool.name)).toEqual(["GMAIL_FETCH_EMAILS"]);
+  });
+
+  test("a file required anywhere a requirement can be written still drops the action", async () => {
+    /*
+     * A PARAMETER REMOVED THAT THE VENDOR STILL INSISTS ON IS THE WORST OUTCOME AVAILABLE: offered,
+     * granted, and failing on every call. So "nothing requires it" is read wherever a requirement
+     * can apply to the object, and a requirement that cannot be read is taken as one.
+     */
+    const file = { attachment: FILE_PROPERTY, body: { type: "string" } };
+    const required: { where: string; schema: Record<string, unknown> }[] = [
+      {
+        where: "required under allOf",
+        schema: {
+          type: "object",
+          properties: file,
+          allOf: [{ required: ["attachment"] }],
+        },
+      },
+      {
+        where: "required by one arm of anyOf",
+        schema: {
+          type: "object",
+          properties: file,
+          anyOf: [{ required: ["body"] }, { required: ["attachment"] }],
+        },
+      },
+      {
+        where: "required once another parameter is sent",
+        schema: {
+          type: "object",
+          properties: file,
+          dependentRequired: { body: ["attachment"] },
+        },
+      },
+      {
+        where: "required by a draft-07 dependency",
+        schema: {
+          type: "object",
+          properties: file,
+          dependencies: { body: ["attachment"] },
+        },
+      },
+      {
+        where: "a required list that is not a list",
+        schema: { type: "object", properties: file, required: "attachment" },
+      },
+      {
+        where: "a reference nothing here resolves",
+        schema: {
+          type: "object",
+          properties: file,
+          $ref: "#/$defs/needsAttachment",
+        },
+      },
+    ];
+
+    for (const { where, schema } of required) {
+      useComposioClient(listing(schema));
+      const listed = await listTools({ url: "composio://gmail" });
+      expect({ where, offered: listed.map((tool) => tool.name) }).toEqual({
+        where,
+        offered: ["GMAIL_FETCH_EMAILS"],
+      });
+    }
+  });
+
+  test("a call is checked for a removed file wherever the listing removed it", () => {
+    const schema = {
+      type: "object",
+      properties: {
+        to: { type: "string" },
+        attachment: FILE_PROPERTY,
+        message: {
+          type: "object",
+          properties: { subject: { type: "string" }, inline: FILE_PROPERTY },
+        },
+      },
+      required: ["to", "message"],
+    };
+    const invented = { name: "a.pdf", mimetype: "application/pdf", s3key: "x" };
+
+    expect(
+      withheldArguments(schema, {
+        to: "a@example.com",
+        attachment: invented,
+        message: { subject: "Hi", inline: [invented] },
+      }),
+    ).toEqual(["attachment", "message.inline"]);
+    // Absent, or the `null` Composio documents as "no file", is nothing to refuse.
+    expect(
+      withheldArguments(schema, {
+        to: "a@example.com",
+        attachment: null,
+        message: { subject: "Hi" },
+      }),
+    ).toEqual([]);
+    // A parameter of the same name somewhere the listing removed nothing is not one it removed.
+    expect(
+      withheldArguments(schema, { to: "a@example.com", inline: invented }),
+    ).toEqual([]);
+    // And an action the listing never offered has nothing withheld to check for.
+    expect(
+      withheldArguments(
+        { ...schema, required: ["to", "message", "attachment"] },
+        { attachment: invented },
+      ),
+    ).toEqual([]);
   });
 
   /**
@@ -1812,40 +2046,44 @@ describe("listing an app's actions", () => {
      * its `effect`, `destructive` and `version`, under a refresh that reported success. The
      * versions are the loss no later refresh repairs where Composio publishes none.
      *
-     * An app whose actions all stage files is not an app with no actions, and the sentence has to
-     * say which of the two this is.
+     * An app whose actions all need files is not an app with no actions, and the sentence has to
+     * say which of the two this is. Both files are REQUIRED here, as they are on Composio's own two
+     * Drive uploads: an optional one is removed from the action rather than dropping it, and would
+     * leave nothing for this refusal to be about.
      */
+    const upload = {
+      type: "object",
+      properties: {
+        file_to_upload: FILE_PROPERTY,
+        folder_to_upload_to: { type: "string" },
+      },
+      required: ["file_to_upload"],
+    };
     const onlyFiles = [
       {
-        slug: "GMAIL_SEND_EMAIL",
-        description: "Send an email.",
+        slug: "GOOGLEDRIVE_UPLOAD_FILE",
+        description: "Upload a file.",
         tags: ["createHint"],
         version: "20260903_00",
-        inputParameters: {
-          type: "object",
-          properties: { attachment: FILE_PROPERTY },
-        },
+        inputParameters: upload,
       },
       {
-        slug: "GMAIL_REPLY_TO_THREAD",
-        description: "Reply to a thread.",
+        slug: "GOOGLEDRIVE_RESUMABLE_UPLOAD",
+        description: "Upload a large file.",
         tags: ["createHint"],
         version: "20260903_00",
-        inputParameters: {
-          type: "object",
-          properties: { attachment: FILE_PROPERTY },
-        },
+        inputParameters: upload,
       },
     ];
     useComposioClient(recording({ listActions: async () => onlyFiles }).client);
 
-    const outcome = await listTools({ url: "composio://gmail" }).then(
+    const outcome = await listTools({ url: "composio://googledrive" }).then(
       (listed) => `the listing was committed with ${listed.length} actions`,
       (error: unknown) => (error as Error).message,
     );
 
     expect(outcome).not.toContain("committed");
-    expect(outcome).toContain("gmail");
+    expect(outcome).toContain("googledrive");
     expect(outcome).toMatch(/file/i);
     // The COUNT, which is the only thing separating this refusal from the empty answer asserted
     // below. Both are listings with nothing left in them; a sentence that did not say how many
@@ -1883,7 +2121,7 @@ describe("listing an app's actions", () => {
      * end of `listTools`: a slug that is absent becomes `a tool named undefined that fails the
      * insert`, a `tags` that is not iterable throws `{} is not iterable` out of it, a `version`
      * that is not a string throws `version?.trim is not a function` out of it. The map runs over
-     * the OFFERED actions. An action that stages a file never reaches it — the file filter has
+     * the OFFERED actions. An action that needs a file never reaches it — the file filter has
      * already dropped it, deliberately and on every refresh — so nothing it carries can reach the
      * thing the guard exists to protect.
      *
@@ -1893,8 +2131,10 @@ describe("listing an app's actions", () => {
      * was never going to publish. That is exactly the tool-and-version stranding the refusals were
      * written to prevent, caused by the refusals.
      *
-     * The malformed field is paired with a staged file in each case, so the only thing keeping the
-     * listing alive is that the action was dropped before it was read.
+     * The malformed field is paired with a required file in each case, so the only thing keeping
+     * the listing alive is that the action was dropped before it was read. Required, because an
+     * optional file is removed from an action that is then offered, and its broken field would
+     * reach the map after all.
      */
     const dropped: { where: string; action: Record<string, unknown> }[] = [
       { where: "no slug", action: { slug: undefined } },
@@ -1928,6 +2168,7 @@ describe("listing an app's actions", () => {
                 inputParameters: {
                   type: "object",
                   properties: { attachment: FILE_PROPERTY },
+                  required: ["attachment"],
                 },
               },
             ] as unknown as ComposioAction[],

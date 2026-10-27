@@ -337,7 +337,10 @@ export function consentMethods(
        * route refuses a second connection before it ever reaches this method, and that refusal is
        * the sentence a person reads; this is the same rule one layer further down, where the
        * vendor is the only party that can still see an account this deployment's rows have lost
-       * track of. `toolkits.authorize` passed `allowMultiple: true` unconditionally — the SDK
+       * track of. What it raises there is {@link BrokerAccountHeldError}, and the route answers
+       * that by recording the account the vendor holds, so the person who pressed Connect is
+       * connected through it and is not told to disconnect an account their page never showed.
+       * `toolkits.authorize` passed `allowMultiple: true` unconditionally — the SDK
        * calls it a "magic function" for exactly that — which is the opposite of what this
        * deployment wants.
        *

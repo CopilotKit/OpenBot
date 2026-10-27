@@ -10,7 +10,9 @@ import { MotionConfig, motion, useReducedMotion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import { HarnessMark } from "@/components/agents/harness-mark";
 import AgentOrb from "@/components/agents/orb/agent-orb";
+import { PluginLogo } from "@/components/plugins/plugin-logo";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Field,
   FieldDescription,
@@ -39,7 +41,13 @@ import {
   agentCapabilitiesQueryOptions,
   testAgentConnection,
 } from "@/lib/agents/queries";
+import { giveBotApp } from "@/lib/app-access/mutations";
+import {
+  type GiveableApp,
+  giveableAppsQueryOptions,
+} from "@/lib/app-access/queries";
 import { isComposing } from "@/lib/composing";
+import { pluginKeys } from "@/lib/plugins/queries";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
 
@@ -165,6 +173,13 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
   const [unreachable, setUnreachable] = useState<string>();
   /** The Bot just made, held for the moment the sheet spends saying so before it hands over. */
   const [createdId, setCreatedId] = useState<string>();
+  /**
+   * The person's own apps this Bot may use. Ticked unless the person unticks one: an app they
+   * connected is one they already use, and a new Bot that cannot reach any of it is no use until
+   * somebody finds the Bot page. Kept as what was UNticked so an app that loads late arrives ticked.
+   */
+  const giveable = useQuery(giveableAppsQueryOptions()).data ?? [];
+  const [leftOut, setLeftOut] = useState<Set<string>>(() => new Set());
   const reduceMotion = useReducedMotion();
 
   // A deployment with no Bot of its own cannot run one here, so nothing is chosen for the person.
@@ -228,6 +243,17 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
         authValue: managed ? key : "",
       }),
     );
+    /*
+     * The ticked apps, given once the Bot exists. A refusal is not a failed create: the Bot is made,
+     * and its page lists every app it could be given with a switch each. So each is tried, none
+     * holds up the others, and none stops the hand-over.
+     */
+    await Promise.allSettled(
+      giveable
+        .filter((app) => !leftOut.has(app.key))
+        .map((app) => giveBotApp({ agentId: agent.id, app: app.key })),
+    );
+    void queryClient.invalidateQueries({ queryKey: pluginKeys.all });
     setCreatedId(agent.id);
   };
 
@@ -334,8 +360,18 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
           >
             {step === "about" ? (
               <AboutStep
+                apps={giveable}
                 instructions={instructions}
+                leftOut={leftOut}
                 name={name}
+                onApp={(app, used) =>
+                  setLeftOut((current) => {
+                    const next = new Set(current);
+                    if (used) next.delete(app);
+                    else next.add(app);
+                    return next;
+                  })
+                }
                 runtime={runtime ?? { kind: "builtin" }}
                 onInstructions={setInstructions}
                 onName={setName}
@@ -512,8 +548,14 @@ const VISIBILITY_OPTIONS: Array<{
  * Who can see it was the old wizard's last step. It is here because this step had the room, and a
  * question that does not change what is being made is cheaper answered alongside the name than as a
  * screen of its own.
+ *
+ * The apps it can use come last and arrive ticked: the person's own connected apps an admin lets
+ * owners give. Drawn only when there are some, so a person with none connected is asked nothing.
  */
 function AboutStep({
+  apps,
+  leftOut,
+  onApp,
   name,
   title,
   instructions,
@@ -533,6 +575,9 @@ function AboutStep({
   onTitle: (value: string) => void;
   onInstructions: (value: string) => void;
   onVisibility: (value: Visibility) => void;
+  apps: GiveableApp[];
+  leftOut: Set<string>;
+  onApp: (app: string, used: boolean) => void;
 }) {
   const runsHere = runtime.kind === "builtin";
   return (
@@ -611,6 +656,35 @@ function AboutStep({
           })}
         </div>
       </FieldSet>
+      {apps.length > 0 ? (
+        <FieldSet>
+          <FieldLegend variant="label">Apps it can use</FieldLegend>
+          <FieldDescription>
+            It always uses the account of whoever is asking.
+          </FieldDescription>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {apps.map((app) => (
+              <label
+                className="flex items-center gap-3 rounded-lg bg-muted/50 p-3 text-sm"
+                htmlFor={`new-bot-app-${app.key}`}
+                key={app.key}
+              >
+                <Checkbox
+                  checked={!leftOut.has(app.key)}
+                  id={`new-bot-app-${app.key}`}
+                  onCheckedChange={(checked) =>
+                    onApp(app.key, checked === true)
+                  }
+                />
+                <PluginLogo logo={app.logo} />
+                <span className="min-w-0 truncate font-medium">
+                  {app.displayName}
+                </span>
+              </label>
+            ))}
+          </div>
+        </FieldSet>
+      ) : null}
     </FieldGroup>
   );
 }

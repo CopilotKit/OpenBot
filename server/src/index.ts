@@ -3,7 +3,7 @@ import {
   CopilotKitIntelligence,
   IntelligenceAgentRunner,
 } from "@copilotkit/runtime/v2";
-import { COMPUTER_GUIDANCE } from "@openbot/shared/bot-prompt";
+import { computerGuidance } from "@openbot/shared/bot-prompt";
 import { workOwner } from "@openbot/shared/work-owner";
 import { createTurnRunner } from "@openbot/toolkit/run-turn";
 import { and, eq, isNull, ne, sql } from "drizzle-orm";
@@ -1098,6 +1098,8 @@ const handoffDesk = createHandoffDesk({
     actorFor(userId).catch(() => null),
   auditStore: bootAuditStore,
   caps: config.handoff,
+  // The asking conversation, told it is now waiting on the Bot it asked. See `onOffered`.
+  onOffered: (threadId) => channelStore.signalWork(threadId),
 });
 
 void recordAuditEvent(bootAuditStore, {
@@ -1704,7 +1706,7 @@ const actorAgentResolver = createActorAgentResolver({
       proactiveReadOnlyRefs,
     ),
   signRunForActor,
-  computerGuidance: config.computer ? COMPUTER_GUIDANCE : undefined,
+  computerGuidance: config.computer ? computerGuidance : undefined,
   loadVendors,
   selectionForActor,
   agentFetch,

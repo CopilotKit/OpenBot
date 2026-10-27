@@ -14,10 +14,6 @@
 
 @custom-variant dark (&:is(.dark *));
 
-html {
-  font-size: 15px;
-}
-
 :root {
   color-scheme: light;
   --background: oklch(0.985 0 0);
@@ -44,7 +40,7 @@ html {
   --chart-3: oklch(0.439 0 0);
   --chart-4: oklch(0.371 0 0);
   --chart-5: oklch(0.269 0 0);
-  --radius: 0.55rem;
+  --radius: 0.5rem;
   --sidebar: oklch(0.97 0 0);
   --sidebar-foreground: oklch(0.145 0 0);
   --sidebar-primary: oklch(0.205 0 0);
@@ -119,7 +115,24 @@ body {
  * not in that selector list — rendered a size smaller than the fields they belonged to.
  */
 
+/*
+ * Text is sized on a 15px base while everything else is on Tailwind's 16px rem.
+ *
+ * The root stays at the browser's 16px so spacing, sizes and radii land on Tailwind's 4px grid
+ * (`p-4` is 16px, `h-8` is 32px). Only type keeps the scale it had under the old 15px root: each
+ * size below is Tailwind's default multiplied by 15/16, so `text-sm` is still 13.125px. Line
+ * heights are Tailwind's own unitless ratios and scale with them. `body` reads `--text-base`, so
+ * unclassed text is 15px too.
+ */
 @theme inline {
+  --text-xs: 0.703125rem; /* 11.25px */
+  --text-sm: 0.8203125rem; /* 13.125px */
+  --text-base: 0.9375rem; /* 15px */
+  --text-lg: 1.0546875rem; /* 16.875px */
+  --text-xl: 1.171875rem; /* 18.75px */
+  --text-2xl: 1.40625rem; /* 22.5px */
+  --text-3xl: 1.7578125rem; /* 28.125px */
+  --text-4xl: 2.109375rem; /* 33.75px */
   --font-heading: var(--font-sans);
   --font-sans: "Inter Variable", sans-serif;
   --color-sidebar-ring: var(--sidebar-ring);
@@ -168,7 +181,7 @@ body {
     @apply border-border outline-ring/50;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground text-base;
   }
   html {
     @apply font-sans;
@@ -288,4 +301,29 @@ body {
  */
 :where(div:has(> iframe.websandbox__frame)) {
   min-height: 200px;
+}
+
+/*
+ * The composer's @ menu, at the width prompt-area allows rather than the width of its longest name,
+ * so a Bot's title reads in full. prompt-area takes no class for its menu; it labels it by the
+ * trigger's character, so "@ suggestions" is this menu and not the `/` one. 20rem is the package's
+ * own cap, which its placement assumes when it keeps the menu inside the window, and its inline
+ * `max-width` still narrows the menu on a small screen.
+ *
+ * Each row centres the Bot's avatar on its name and title; the package aligns an icon to the first
+ * line, sized for a glyph, not a face.
+ */
+[role="listbox"][aria-label="@ suggestions"] {
+  width: 20rem;
+
+  & > [role="option"] {
+    align-items: center;
+    gap: --spacing(3);
+  }
+
+  /* A flex box, not an inline one, so no line-height space sits under the face. */
+  & > [role="option"] > span:first-child {
+    display: flex;
+    margin-top: 0;
+  }
 }

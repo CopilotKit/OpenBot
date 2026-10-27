@@ -43,6 +43,24 @@ describe("a boundary set while running", () => {
     expect(after.get().deny).toEqual([rule]);
   });
 
+  test("keeps each rule's name and description across a restart", async () => {
+    const before = createPolicyStore(configured, database);
+    await before.load();
+    const labels = {
+      [rule]: { name: "Never submit a form", description: "Stops submits." },
+    };
+    await before.set({
+      mode: "enforce",
+      deny: [rule],
+      allow: ["true"],
+      labels,
+    });
+
+    const after = createPolicyStore(configured, database);
+    await after.load();
+    expect(after.get().labels).toEqual(labels);
+  });
+
   test("a deployment that never set one gets its configured default", async () => {
     const store = createPolicyStore(configured, database);
     expect(await store.load()).toBe("configuration");

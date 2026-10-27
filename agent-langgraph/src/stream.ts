@@ -143,14 +143,17 @@ export async function streamRun(
           | undefined;
         // Prose and tool calls cannot interleave inside one message.
         closeText();
+        let parentMessageId: string | undefined;
         for (const message of output?.messages ?? []) {
           const id = message.tool_call_id ?? "";
           const call = pending.get(id);
           if (!call) continue;
+          parentMessageId ??= stepMessageId(id);
           send({
             type: "TOOL_CALL_START",
             toolCallId: id,
             toolCallName: call.name,
+            parentMessageId,
           } as BaseEvent);
           send({
             type: "TOOL_CALL_ARGS",
@@ -183,11 +186,14 @@ export async function streamRun(
      * because an empty run is not an error by the protocol, nothing says so. No result is sent
      * with them; producing it is the surface's half, and it begins the next run holding it.
      */
+    let drainedParent: string | undefined;
     for (const [id, call] of pending) {
+      drainedParent ??= stepMessageId(id);
       send({
         type: "TOOL_CALL_START",
         toolCallId: id,
         toolCallName: call.name,
+        parentMessageId: drainedParent,
       } as BaseEvent);
       send({
         type: "TOOL_CALL_ARGS",
@@ -234,4 +240,13 @@ export async function streamRun(
         error instanceof Error ? error.message : "The Bot could not answer.",
     } as BaseEvent);
   }
+}
+
+/**
+ * The message a step's tool calls belong to, named the way the conversation store names it: for the
+ * step's first call. Left unnamed, the surface named each call's message after the call itself, a
+ * different id from the stored one, and sent its copy back on the next turn as a second message.
+ */
+function stepMessageId(firstToolCallId: string): string {
+  return `assistant-${firstToolCallId}`;
 }

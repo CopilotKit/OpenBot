@@ -1,19 +1,25 @@
-import { IconApps, IconBox, IconChevronRight } from "@tabler/icons-react";
+import {
+  IconApps,
+  IconBox,
+  IconChevronRight,
+  IconPlug,
+  IconPlus,
+} from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { Fragment } from "react";
 import { HandoffPanel } from "@/components/agents/handoff-panel";
+import {
+  PageEmpty,
+  PageRows,
+  PageSection,
+} from "@/components/layout/page-shell";
 import {
   AppAccessAction,
   appAccessSentence,
 } from "@/components/plugins/app-access-action";
 import { PluginLogo } from "@/components/plugins/plugin-logo";
 import { Button } from "@/components/ui/button";
-import {
-  PageEmpty,
-  PageRows,
-  PageSection,
-} from "@/components/layout/page-shell";
 import {
   Item,
   ItemActions,
@@ -25,7 +31,16 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import type { AgentProfile } from "@/lib/agents/queries";
-import { botAppsQueryOptions } from "@/lib/app-access/queries";
+import {
+  giveBotAppMutationOptions,
+  takeBackBotAppMutationOptions,
+} from "@/lib/app-access/mutations";
+import {
+  type AppAccess,
+  botAppsQueryOptions,
+  type GiveableApp,
+  giveableAppsQueryOptions,
+} from "@/lib/app-access/queries";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { setPluginGrantMutationOptions } from "@/lib/plugins/mutations";
 import {
@@ -81,10 +96,130 @@ export function connectorCount(plugins: GrantedPlugins): number {
 export function AccessSections({ agent }: { agent: AgentProfile }) {
   return (
     <>
+      {agent.mine ? <YourApps agent={agent} /> : null}
       {agent.mine ? <YourSkills agentId={agent.id} /> : null}
-      <Granted agentId={agent.id} />
+      <Granted agentId={agent.id} mine={agent.mine} />
       <HandoffPanel agentId={agent.id} />
     </>
+  );
+}
+
+/**
+ * Your own apps, one switch each: the ones you connected that an admin lets owners give, and any you
+ * already gave this Bot. Only on your own Bot, for the reason the server gives — see
+ * `server/src/plugins/owner-grants.ts`.
+ *
+ * WHAT A SWITCH GIVES is what an admin's one press gives: the app's read-only actions. Every call
+ * runs on the asking person's own account, even after the Bot is published to the team, so the
+ * description says "your" only about the person reading it.
+ *
+ * AN APP AN ADMIN GAVE THIS BOT is drawn switched on and locked. Taking it away is the admin's, and
+ * the server would refuse it.
+ */
+function YourApps({ agent }: { agent: AgentProfile }) {
+  const giveable = useQuery(giveableAppsQueryOptions());
+  const held = useQuery(botAppsQueryOptions(agent.id));
+  const give = useMutation(giveBotAppMutationOptions(queryClient));
+  const takeBack = useMutation(takeBackBotAppMutationOptions(queryClient));
+  const error = give.error ?? takeBack.error;
+  const busy = give.isPending || takeBack.isPending;
+  if (giveable.isPending || held.isPending) return null;
+  const states = new Map((held.data ?? []).map((app) => [app.key, app]));
+  /*
+   * What you could give, and then anything you already gave that no longer is — an account you
+   * disconnected since, an app an admin closed to owners — so it can still be switched off here.
+   */
+  const rows: (GiveableApp & { access?: AppAccess })[] = [
+    ...(giveable.data ?? []).map((app) => ({
+      ...app,
+      access: states.get(app.key),
+    })),
+    ...(held.data ?? [])
+      .filter(
+        (app) =>
+          app.givenByOwner &&
+          !(giveable.data ?? []).some((given) => given.key === app.key),
+      )
+      .map((app) => ({ ...app, access: app })),
+  ];
+  return (
+    <PageSection
+      description={`Turn on an app to let ${agent.name} use it. It always uses the account of whoever is asking.`}
+      title="Your apps"
+    >
+      {error ? (
+        <p className="mt-4 text-destructive text-sm" role="alert">
+          {error.message}
+        </p>
+      ) : null}
+      {giveable.error ? (
+        <p className="mt-4 text-destructive text-sm" role="alert">
+          Couldn't load your apps. Reload the page.
+        </p>
+      ) : rows.length === 0 ? (
+        <PageEmpty
+          action={
+            <Button
+              render={(props) => <Link {...props} to="/connections" />}
+              size="sm"
+              variant="outline"
+            >
+              <IconPlug />
+              Connections
+            </Button>
+          }
+          icon={IconApps}
+          title="No apps to give yet"
+        >
+          Connect an app to let your Bots use it.
+        </PageEmpty>
+      ) : (
+        <PageRows>
+          {rows.map((app, index) => {
+            const granted = app.access?.granted ?? false;
+            const locked = granted && !app.access?.givenByOwner;
+            const yours =
+              app.account === "personal"
+                ? `your ${app.displayName}`
+                : app.displayName;
+            return (
+              <Fragment key={app.key}>
+                {index > 0 ? <Separator /> : null}
+                <Item data-app={app.key} size="sm">
+                  <ItemMedia variant="icon">
+                    <PluginLogo logo={app.logo} />
+                  </ItemMedia>
+                  <ItemContent>
+                    <ItemTitle>{app.displayName}</ItemTitle>
+                    <ItemDescription>
+                      {locked
+                        ? "An admin gave it to this Bot."
+                        : granted
+                          ? `${agent.name} can use ${yours}.`
+                          : `${agent.name} can't use ${yours}.`}
+                    </ItemDescription>
+                  </ItemContent>
+                  <ItemActions>
+                    <Switch
+                      aria-label={`Let ${agent.name} use ${app.displayName}`}
+                      checked={granted}
+                      disabled={busy || locked}
+                      onCheckedChange={(next) => {
+                        give.reset();
+                        takeBack.reset();
+                        const variables = { agentId: agent.id, app: app.key };
+                        if (next) give.mutate(variables);
+                        else takeBack.mutate(variables);
+                      }}
+                    />
+                  </ItemActions>
+                </Item>
+              </Fragment>
+            );
+          })}
+        </PageRows>
+      )}
+    </PageSection>
   );
 }
 
@@ -114,15 +249,21 @@ function YourSkills({ agentId }: { agentId: string }) {
           Couldn't load your skills. Reload the page.
         </p>
       ) : skills.length === 0 ? (
-        <PageEmpty>
-          No skills yet.{" "}
-          <Link
-            className="underline underline-offset-4"
-            to="/capabilities/skills"
-          >
-            Write one
-          </Link>
-          .
+        <PageEmpty
+          action={
+            <Button
+              render={(props) => <Link {...props} to="/capabilities/skills" />}
+              size="sm"
+              variant="outline"
+            >
+              <IconPlus />
+              Write a skill
+            </Button>
+          }
+          icon={IconBox}
+          title="No skills yet"
+        >
+          Skills you write show up here.
         </PageEmpty>
       ) : (
         <PageRows>
@@ -166,7 +307,7 @@ function YourSkills({ agentId }: { agentId: string }) {
  * the person looking.
  *
  * READ-ONLY FOR GRANTS, NOT FOR THE PERSON'S OWN PART. Apps are granted by an administrator, who gets
- * a link to where that is decided. But a Bot that holds Gmail is no use to somebody who has not
+ * a link to where that is decided — or, on a Bot you own, by you, under Your apps above. But a Bot that holds Gmail is no use to somebody who has not
  * connected their Gmail, and this list used to say "Gmail · 4 tools" to everybody alike — so each
  * app now says what it is for the person reading (`GET /api/plugins/for/:agentId/apps`) with the one
  * thing they can do about it: Connect, Reconnect, Request access, or Requested. The state is the
@@ -176,7 +317,7 @@ function YourSkills({ agentId }: { agentId: string }) {
  * whoever is asking, exactly as the connections read does, so this cannot become a list of who has
  * connected what.
  */
-function Granted({ agentId }: { agentId: string }) {
+function Granted({ agentId, mine }: { agentId: string; mine: boolean }) {
   const me = useQuery(currentUserQueryOptions()).data;
   const plugins = useQuery(agentPluginsQueryOptions(agentId));
   const apps = useQuery(botAppsQueryOptions(agentId));
@@ -212,9 +353,10 @@ function Granted({ agentId }: { agentId: string }) {
         </p>
       ) : null}
       {count === 0 ? (
-        <PageEmpty>
-          No apps yet. An admin has to add them. Until then this Bot can only
-          talk with you.
+        <PageEmpty icon={IconApps} title="No apps yet">
+          {mine
+            ? "Turn one on under Your apps, or ask an admin. Until then this Bot can only talk with you."
+            : "An admin has to add them. Until then this Bot can only talk with you."}
         </PageEmpty>
       ) : (
         <PageRows>

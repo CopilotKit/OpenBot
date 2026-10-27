@@ -1,4 +1,9 @@
-import { IconChevronRight } from "@tabler/icons-react";
+import {
+  IconChevronRight,
+  IconPlus,
+  IconRobot,
+  IconShare,
+} from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { Fragment, useState } from "react";
@@ -76,12 +81,35 @@ export function BotRoster() {
         {yours.length ? (
           <RosterRows agents={yours} byId={byId} />
         ) : (
-          <PageEmpty>
+          <PageEmpty
+            action={
+              yoursPinned || yoursWaiting ? undefined : (
+                <Button
+                  render={(props) => (
+                    <Link {...props} search={{ new: true }} to="/bots" />
+                  )}
+                  size="sm"
+                  variant="outline"
+                >
+                  <IconPlus />
+                  New Bot
+                </Button>
+              )
+            }
+            icon={IconRobot}
+            title={
+              yoursPinned
+                ? "All pinned"
+                : yoursWaiting
+                  ? "All waiting on you"
+                  : "No Bots yet"
+            }
+          >
             {yoursPinned
               ? "Your Bots are all pinned above."
               : yoursWaiting
                 ? "Your Bots are all under Needs you."
-                : "You don't have any Bots yet. Create one with New Bot."}
+                : "Bots you create show up here."}
           </PageEmpty>
         )}
       </PageSection>
@@ -89,7 +117,9 @@ export function BotRoster() {
         {shared.length ? (
           <RosterRows agents={shared} byId={byId} />
         ) : (
-          <PageEmpty>Nobody has shared a Bot with you yet.</PageEmpty>
+          <PageEmpty icon={IconShare} title="Nothing shared yet">
+            Bots somebody shares with you show up here.
+          </PageEmpty>
         )}
       </PageSection>
       {hidden.data?.length ? (

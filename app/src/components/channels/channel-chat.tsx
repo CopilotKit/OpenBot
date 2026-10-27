@@ -12,6 +12,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { HandoffResumeNotice } from "@/components/computer/handoff-resume-notice";
 import { attachmentModality } from "@/components/channels/chat-messages";
 import { toAgentOptions } from "@/components/channels/composer";
+import { ChannelWorkRows } from "@/components/channels/channel-work";
 import { ConversationView } from "@/components/channels/conversation-view";
 import { VoiceCallWidget } from "@/components/channels/voice-call-widget";
 import {
@@ -124,17 +125,43 @@ export function channelHistoryNotice({
  * A shorter read can still contain missing turns after unreadable rows are filtered out. Without a
  * following shared anchor, append the missing tail: the store cannot place it among local-only rows.
  * Return the original array when nothing was added so refreshes can wait for the store to catch up.
+ *
+ * Exported for its tests.
  */
-function mergeStoredMessages(local: Message[], stored: Message[]): Message[] {
+export function mergeStoredMessages(
+  local: Message[],
+  stored: Message[],
+): Message[] {
   const localIds = new Set(local.map((message) => message.id));
+  /*
+   * The store can name a tool call's message differently from the live turn — `assistant-call_1`
+   * where the stream said `call_1` — so a stored message whose every call the live turn already
+   * holds is that live message, not a missing one. Added as missing, its card was drawn twice.
+   */
+  const localByCall = new Map<string, string>();
+  for (const message of local) {
+    if (message.role !== "assistant") continue;
+    for (const call of message.toolCalls ?? [])
+      localByCall.set(call.id, message.id);
+  }
+  const heldAs = (message: Message): string | undefined => {
+    if (localIds.has(message.id)) return message.id;
+    if (message.role !== "assistant" || !message.toolCalls?.length) return;
+    const holders = new Set(
+      message.toolCalls.map((call) => localByCall.get(call.id)),
+    );
+    const [holder] = holders;
+    return holders.size === 1 ? holder : undefined;
+  };
   const seenStored = new Set<string>();
   const before = new Map<string, Message[]>();
   let pending: Message[] = [];
   for (const message of stored) {
     if (seenStored.has(message.id)) continue;
     seenStored.add(message.id);
-    if (localIds.has(message.id)) {
-      if (pending.length > 0) before.set(message.id, pending);
+    const held = heldAs(message);
+    if (held !== undefined) {
+      if (pending.length > 0) before.set(held, pending);
       pending = [];
     } else {
       pending.push(message);
@@ -1055,6 +1082,23 @@ export function ChannelChat({
              * run before closing it; see server/src/channels/stall-guard.ts.
              */
             stopped={runError ?? undefined}
+            /*
+             * What the server says this conversation waits on: a Bot its Bot asked, a routine.
+             * Hidden while this tab's own turn is going, which already shows itself and would
+             * otherwise draw "Asking Ana…" under the sentence saying it had asked. The composer
+             * stays open either way: a person may keep talking while a hop runs, and a relay that
+             * finds them mid-turn waits and is tried again.
+             */
+            working={
+              agent.isRunning || turnsInFlight > 0 ? null : (
+                <ChannelWorkRows
+                  botOf={(botId) =>
+                    agentProfiles?.find((profile) => profile.id === botId)
+                  }
+                  work={channel.work}
+                />
+              )
+            }
           />
         </div>
       </ConversationProvider>

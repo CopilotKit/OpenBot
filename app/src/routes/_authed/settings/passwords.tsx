@@ -1,4 +1,4 @@
-import { IconKey, IconTrash } from "@tabler/icons-react";
+import { IconKey, IconLockOff, IconTrash } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import {
@@ -45,14 +45,12 @@ function PasswordsPage() {
             Couldn't load your passwords. Reload the page.
           </p>
         ) : !logins.data.passwordManager ? (
-          <PageEmpty>
-            An admin has turned off saved passwords. Your logins are kept but
-            won't be offered.
+          <PageEmpty icon={IconLockOff} title="Saved passwords are off">
+            An admin turned them off. Your logins are kept but won't be offered.
           </PageEmpty>
         ) : logins.data.logins.length === 0 ? (
-          <PageEmpty>
-            No saved logins. Choose Save to Passwords when you sign a Bot in to
-            a website.
+          <PageEmpty icon={IconKey} title="No saved logins yet">
+            Choose Save to Passwords when you sign a Bot in to a website.
           </PageEmpty>
         ) : (
           <PageRows>
