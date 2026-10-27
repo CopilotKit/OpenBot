@@ -1782,6 +1782,7 @@ export function mountCopilotRuntime(
       new IntelligenceKnowingANewThread({
         apiUrl: intelligence.apiUrl,
         wsUrl: intelligence.gatewayWsUrl,
+        browserWsUrl: intelligence.browserGatewayWsUrl,
         apiKey: intelligence.apiKey,
         getLearningContainerId: async ({
           agentId,
