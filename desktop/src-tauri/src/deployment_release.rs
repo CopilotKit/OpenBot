@@ -10,6 +10,10 @@ const LATEST_RELEASE: &str = "https://api.github.com/repos/CopilotKit/OpenBot/re
 
 /// Only new deployments consult GitHub. The fetcher records the exact tag after the source and
 /// image manifest have both downloaded successfully; restarts and repairs retain that pin.
+///
+/// The one exception is a pin this app cannot run: a release from before the server and worker
+/// were Compose services. Repairing it at its own version lays out the same Compose file again, so
+/// that installation is moved to the latest release instead. See `deployment::predates_containers`.
 /// Uses blocking HTTP, so callers in an async runtime must use a blocking task.
 pub fn resolve_version(root: &Path) -> Result<String, String> {
     resolve_version_with(root, || {
@@ -24,8 +28,8 @@ fn resolve_version_with(
     latest: impl FnOnce() -> Result<String, String>,
 ) -> Result<String, String> {
     match deployment::installed(root) {
-        Some(installed) => Ok(installed.version),
-        None => latest(),
+        Some(installed) if !deployment::predates_containers(root) => Ok(installed.version),
+        _ => latest(),
     }
 }
 
@@ -72,6 +76,22 @@ mod tests {
         let version = resolve_version_with(&root, || panic!("must work offline")).unwrap();
         assert_eq!(version, "v0.0.7");
         assert!(!deployment::needs_fetch(&root, &version));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_pinned_release_whose_server_ran_on_the_host_is_upgraded_to_latest() {
+        let root = scratch("release-host-server");
+        std::fs::write(
+            root.join("docker-compose.yml"),
+            "services:\n  postgres: {}\n  supervisor: {}\n",
+        )
+        .unwrap();
+        std::fs::write(deployment::images_path(&root), "{}").unwrap();
+        deployment::record(&root, "v0.0.15").unwrap();
+        let version = resolve_version_with(&root, || Ok("v0.0.16".into())).unwrap();
+        assert_eq!(version, "v0.0.16");
+        assert!(deployment::needs_fetch(&root, &version));
         std::fs::remove_dir_all(root).unwrap();
     }
 
