@@ -42,7 +42,7 @@ test("asks existing users without a name even when onboarding is completed", () 
     </QueryClientProvider>,
   );
   expect(
-    view.getByRole("heading", { name: "What should we call you?" }),
+    view.getByRole("heading", { name: "Hello, nice to meet you." }),
   ).toBeTruthy();
   expect(
     view.getByRole("button", { name: "Continue" }).hasAttribute("disabled"),

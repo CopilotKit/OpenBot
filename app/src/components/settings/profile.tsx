@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useId, useState } from "react";
+import AgentOrb from "@/components/agents/orb/agent-orb";
 import { PageSection } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
 import {
@@ -99,10 +100,13 @@ export function FirstRunNamePrompt() {
   if (!user?.needsName) return null;
   return (
     <Dialog open>
-      <DialogContent showCloseButton={false}>
-        <DialogTitle>What should we call you?</DialogTitle>
+      <DialogContent showCloseButton={false} className="gap-6 p-8">
+        <AgentOrb size="64px" state="listening" />
+        <DialogTitle className="text-3xl font-semibold tracking-tight">
+          Hello, nice to meet you.
+        </DialogTitle>
         <DialogDescription>
-          You can change your name later in Settings.
+          What should we call you? You can change your name later in Settings.
         </DialogDescription>
         <ProfileNameForm firstRun />
       </DialogContent>

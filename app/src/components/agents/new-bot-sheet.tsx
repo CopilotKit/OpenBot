@@ -1,10 +1,5 @@
 import { summaryFor, WEB_HARNESSES } from "@openbot/shared/harnesses";
-import {
-  IconCheck,
-  IconDeviceDesktop,
-  IconLock,
-  IconUsers,
-} from "@tabler/icons-react";
+import { IconCheck, IconLock, IconUsers } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { MotionConfig, motion, useReducedMotion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
@@ -48,18 +43,13 @@ import {
 } from "@/lib/app-access/queries";
 import { isComposing } from "@/lib/composing";
 import { pluginKeys } from "@/lib/plugins/queries";
-import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
 
 /**
  * Where a new Bot is made: a wide sheet floating in from the right, so the roster it is being added
  * to stays in view behind it.
  *
- * No visible header and no corner ✕ — Cancel, Escape and a click outside all close it. It replaced
- * a centred wizard dialog that asked the same questions over four screens, one of them only to say
- * who could see the Bot.
- *
- * The title is still there for screen readers: a dialog with no name is announced as just "dialog".
+ * New Bot details open first. Cancel, Escape and a click outside close the sheet.
  */
 export function NewBotSheet({
   open,
@@ -84,7 +74,9 @@ export function NewBotSheet({
         side="right"
         variant="inset"
       >
-        <SheetTitle className="sr-only">New Bot</SheetTitle>
+        <SheetTitle className="px-6 pt-6 text-2xl font-semibold">
+          New Bot
+        </SheetTitle>
         {/* Inside the popup, so it unmounts on close and a reopened sheet starts empty. */}
         <NewBotFlow onCreated={onCreated} />
       </SheetContent>
@@ -92,16 +84,8 @@ export function NewBotSheet({
   );
 }
 
-/**
- * The steps, in the order they are asked.
- *
- * WHERE IT RUNS COMES FIRST because it decides what the rest of the sheet means. For a Bot that runs
- * here, its instructions are the system prompt it runs on; for one somebody else runs, they are a
- * line added on top of a prompt written elsewhere. Asking for them before knowing which left the
- * field unable to say what it was for. The address is asked only of a Bot somebody else runs, and is
- * checked before the person spends time naming it. About it is always last, and always creates.
- */
-const STEPS = ["runtime", "endpoint", "about"] as const;
+/** Details come first; custom agents then choose a framework and verify their endpoint. */
+const STEPS = ["about", "runtime", "endpoint"] as const;
 type Step = (typeof STEPS)[number];
 
 /**
@@ -154,7 +138,7 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
    */
   const { data: capabilities } = useQuery(agentCapabilitiesQueryOptions());
   const builtInAvailable = capabilities?.builtInAvailable ?? true;
-  const [step, setStep] = useState<Step>("runtime");
+  const [step, setStep] = useState<Step>("about");
   const [direction, setDirection] = useState(1);
   const [name, setName] = useState("");
   const [instructions, setInstructions] = useState("");
@@ -162,6 +146,7 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
   const [visibility, setVisibility] = useState<Visibility>("private");
   /** Run it here unless the person picks otherwise: the answer that needs nothing set up. */
   const [runtime, setRuntime] = useState<Runtime | null>({ kind: "builtin" });
+  const [custom, setCustom] = useState(false);
   const [endpoint, setEndpoint] = useState("");
   const [key, setKey] = useState("");
   /** Whether Continue was pressed on the address, which is when its error becomes worth showing. */
@@ -215,9 +200,9 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
   const canContinue =
     !busy &&
     (step === "about"
-      ? named
+      ? named && (custom || builtInAvailable)
       : step === "runtime"
-        ? runtime !== null
+        ? runtime?.kind === "managed"
         : endpointIssue === undefined || !tried);
 
   const go = (to: Step) => {
@@ -258,25 +243,17 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
 
   const advance = () => {
     if (step === "runtime" && runtime) {
-      return go(runtime.kind === "builtin" ? "about" : "endpoint");
+      return go("endpoint");
     }
     if (step === "endpoint") return connect();
-    if (step === "about" && runtime) return create(runtime);
+    if (step === "about")
+      return custom ? go("runtime") : create({ kind: "builtin" });
   };
 
-  /** Where Back goes: the address for a Bot somebody else runs, where it runs otherwise. */
-  const previous = (): Step =>
-    step === "about" && runtime?.kind === "managed" ? "endpoint" : "runtime";
+  /** Back returns to the previous screen without resetting any answers. */
+  const previous = (): Step => (step === "endpoint" ? "runtime" : "about");
 
-  /**
-   * Continue on the address: dial it from the server, and move on only if it answers.
-   *
-   * There is no separate Test button. A test that could be skipped let a Bot be made pointed at
-   * nothing, and one that could not be skipped was a second button doing Continue's job. So Continue
-   * tests: an agent that answers moves on, and one that does not says why under its address, where
-   * the fix will be typed. Continue stays pressable after that, because the usual fix is starting the
-   * agent, not editing what was typed.
-   */
+  /** Verify the endpoint before creating a custom Bot. */
   const connect = async () => {
     const focusAddress = () =>
       // Focus would otherwise fall to the page while the button below is busy or disabled.
@@ -296,7 +273,7 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
       focusAddress();
       return;
     }
-    go("about");
+    if (runtime?.kind === "managed") await create(runtime);
   };
 
   if (createdId) {
@@ -358,31 +335,63 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
             transition={{ duration: 0.2, ease: "easeOut" }}
           >
             {step === "about" ? (
-              <AboutStep
-                apps={giveable}
-                instructions={instructions}
-                leftOut={leftOut}
-                name={name}
-                onApp={(app, used) =>
-                  setLeftOut((current) => {
-                    const next = new Set(current);
-                    if (used) next.delete(app);
-                    else next.add(app);
-                    return next;
-                  })
-                }
-                runtime={runtime ?? { kind: "builtin" }}
-                onInstructions={setInstructions}
-                onName={setName}
-                onVisibility={setVisibility}
-                visibility={visibility}
-              />
+              <>
+                <fieldset
+                  className="mb-6 grid grid-cols-2 gap-2"
+                  aria-label="Hosting"
+                >
+                  <Button
+                    type="button"
+                    variant={custom ? "outline" : "default"}
+                    aria-pressed={!custom && builtInAvailable}
+                    disabled={!builtInAvailable}
+                    onClick={() => setCustom(false)}
+                  >
+                    Run here
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={custom ? "default" : "outline"}
+                    aria-pressed={custom}
+                    onClick={() => setCustom(true)}
+                  >
+                    Connect a custom agent
+                  </Button>
+                </fieldset>
+                {!builtInAvailable && (
+                  <p className="mb-4 text-sm text-muted-foreground">
+                    An admin must enable built-in hosting before you can run a
+                    Bot here.
+                  </p>
+                )}
+                <AboutStep
+                  apps={giveable}
+                  instructions={instructions}
+                  leftOut={leftOut}
+                  name={name}
+                  onApp={(app, used) =>
+                    setLeftOut((current) => {
+                      const next = new Set(current);
+                      if (used) next.delete(app);
+                      else next.add(app);
+                      return next;
+                    })
+                  }
+                  runtime={
+                    custom
+                      ? runtime?.kind === "managed"
+                        ? runtime
+                        : { kind: "managed", harness: "byo-url" }
+                      : { kind: "builtin" }
+                  }
+                  onInstructions={setInstructions}
+                  onName={setName}
+                  onVisibility={setVisibility}
+                  visibility={visibility}
+                />
+              </>
             ) : step === "runtime" ? (
-              <RuntimeStep
-                builtInAvailable={builtInAvailable}
-                onChoose={setRuntime}
-                runtime={runtime}
-              />
+              <RuntimeStep onChoose={setRuntime} runtime={runtime} />
             ) : (
               <EndpointStep
                 endpoint={endpoint}
@@ -411,7 +420,7 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
       </div>
 
       <SheetFooter className="flex-row justify-between border-t border-border">
-        {step === "runtime" ? (
+        {step === "about" ? (
           <SheetClose
             render={<Button className="px-4" size="lg" variant="ghost" />}
           >
@@ -439,8 +448,8 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
             ? "Checking…"
             : createAgent.isPending
               ? "Creating…"
-              : step === "about"
-                ? "Create"
+              : step === "endpoint" || (step === "about" && !custom)
+                ? "Create Bot"
                 : "Continue"}
         </Button>
       </SheetFooter>
@@ -700,12 +709,9 @@ const OPTION_CLASSES =
  * than on the Continue it just pressed, which is still there.
  */
 function RuntimeStep({
-  builtInAvailable,
   runtime,
   onChoose,
 }: {
-  /** Whether this deployment has a Bot of its own to run one here on. */
-  builtInAvailable: boolean;
   runtime: Runtime | null;
   onChoose: (runtime: Runtime) => void;
 }) {
@@ -719,34 +725,8 @@ function RuntimeStep({
         ref={heading}
         tabIndex={-1}
       >
-        Where will your Bot run?
+        Connect a custom agent
       </h2>
-
-      <button
-        aria-pressed={runtime?.kind === "builtin"}
-        className={cn(OPTION_CLASSES, "items-start gap-4 p-5")}
-        disabled={!builtInAvailable}
-        onClick={() => onChoose({ kind: "builtin" })}
-        type="button"
-      >
-        <span className="flex size-11 shrink-0 items-center justify-center rounded-lg bg-background shadow-xs">
-          <IconDeviceDesktop className="size-6 text-foreground" />
-        </span>
-        <span className="min-w-0 pt-0.5">
-          <span className="block font-semibold text-base">Run it here</span>
-          <span className="mt-1 block text-pretty text-muted-foreground text-sm">
-            {builtInAvailable
-              ? "OpenBot runs it for you. Nothing to set up, and it can start right away."
-              : "Not available yet. An admin has to turn this on first."}
-          </span>
-        </span>
-      </button>
-
-      <div className="flex items-center gap-2 py-1 text-muted-foreground text-xs">
-        <span className="h-px flex-1 bg-border" />
-        or connect one you run
-        <span className="h-px flex-1 bg-border" />
-      </div>
 
       {WEB_HARNESSES.map((harness) => (
         <button

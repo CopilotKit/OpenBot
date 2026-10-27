@@ -123,20 +123,28 @@ async function opened(onCreated: (id: string) => void = () => {}) {
   const view = draw(
     <NewBotSheet onClose={() => {}} onCreated={onCreated} open />,
   );
-  await view.findByText("Where will your Bot run?");
+  await view.findByLabelText("Name");
   const user = userEvent.setup({ document: view.container.ownerDocument });
   return { view, user };
 }
 
-/** A framework chosen and its address answered, which lands on the last step. */
-async function connected(onCreated?: (id: string) => void) {
-  const { view, user } = await opened(onCreated);
+async function customFlow() {
+  const result = await opened();
+  await result.user.type(result.view.getByLabelText("Name"), "Expense Review");
+  await result.user.click(
+    result.view.getByRole("button", { name: "Connect a custom agent" }),
+  );
+  await result.user.click(
+    result.view.getByRole("button", { name: "Continue" }),
+  );
+  return result;
+}
+async function connected(address = "https://agent.example.com/ag-ui") {
+  const { view, user } = await customFlow();
   await user.click(view.getByRole("button", { name: /LangGraph/ }));
   await user.click(view.getByRole("button", { name: "Continue" }));
-  await user.type(
-    await view.findByLabelText("Agent address"),
-    "https://agent.example.com/ag-ui",
-  );
+  if (address)
+    await user.type(await view.findByLabelText("Agent address"), address);
   return { view, user };
 }
 
@@ -147,59 +155,42 @@ async function settle() {
   });
 }
 
-test("opens on where it runs, with Run it here already chosen", async () => {
-  const { view } = await opened();
-  const runHere = view.getByRole("button", { name: /Run it here/ });
-  expect(runHere.getAttribute("aria-pressed")).toBe("true");
+test("opens on New Bot details and creates locally without another screen", async () => {
+  const { view, user } = await opened();
+  expect(view.getByRole("heading", { name: "New Bot" })).toBeTruthy();
   expect(
-    view.getByRole("button", { name: "Continue" }).hasAttribute("disabled"),
+    view.getByRole("button", { name: "Run here" }).getAttribute("aria-pressed"),
+  ).toBe("true");
+  expect(
+    view.getByRole("button", { name: "Create Bot" }).hasAttribute("disabled"),
+  ).toBe(true);
+  await user.type(view.getByLabelText("Name"), "Expense Review");
+  expect(
+    view.getByRole("button", { name: "Create Bot" }).hasAttribute("disabled"),
   ).toBe(false);
 });
 
-test("lists the partners people look for first, and never offers Mastra", async () => {
-  const { view } = await opened();
-  const frameworks = view
-    .getAllByRole("button", { pressed: false })
-    .map((button) => button.textContent ?? "");
-  expect(frameworks.slice(0, 4)).toEqual([
-    expect.stringContaining("Claude Agent SDK"),
-    expect.stringContaining("Google ADK"),
-    expect.stringContaining("Google Antigravity"),
-    expect.stringContaining("LangGraph"),
-  ]);
-  expect(view.queryByRole("button", { name: /Mastra/ })).toBeNull();
-});
-
-test("chooses nothing where the deployment has no Bot of its own", async () => {
+test("unavailable hosting still permits the custom path", async () => {
   builtInAvailable = false;
-  const { view } = await opened();
-  await settle();
-  const runHere = view.getByRole("button", { name: /Run it here/ });
-  expect(runHere.hasAttribute("disabled")).toBe(true);
-  expect(runHere.getAttribute("aria-pressed")).toBe("false");
-  expect(runHere.textContent).toContain("An admin has to turn this on");
-  expect(
-    view.getByRole("button", { name: "Continue" }).hasAttribute("disabled"),
-  ).toBe(true);
-});
-
-test("Run it here goes straight to the name, and Create waits for one", async () => {
   const { view, user } = await opened();
+  await settle();
+  expect(
+    view.getByRole("button", { name: "Run here" }).hasAttribute("disabled"),
+  ).toBe(true);
+  await user.type(view.getByLabelText("Name"), "External");
+  expect(
+    view.getByRole("button", { name: "Create Bot" }).hasAttribute("disabled"),
+  ).toBe(true);
+  await user.click(
+    view.getByRole("button", { name: "Connect a custom agent" }),
+  );
   await user.click(view.getByRole("button", { name: "Continue" }));
-  const name = await view.findByLabelText("Name");
-  // Its instructions are the prompt it runs on, so the field is named for that.
-  expect(view.getByLabelText(/^Instructions/)).toBeTruthy();
-  const create = view.getByRole("button", { name: "Create" });
-  expect(create.hasAttribute("disabled")).toBe(true);
-  await user.type(name, "Expense Review");
-  expect(create.hasAttribute("disabled")).toBe(false);
-  expect(dialled).toEqual([]);
+  expect(view.getByRole("button", { name: /LangGraph/ })).toBeTruthy();
 });
 
 test("Create fills in what was left blank, then hands over", async () => {
   const handedOver: string[] = [];
   const { view, user } = await opened((id) => handedOver.push(id));
-  await user.click(view.getByRole("button", { name: "Continue" }));
   const name = await view.findByLabelText("Name");
   await user.type(name, "Expense Review");
   // Enter in the name is Create.
@@ -226,83 +217,77 @@ test("Create fills in what was left blank, then hands over", async () => {
   expect(handedOver).toEqual(["agent_new"]);
 });
 
-test("a framework asks for its address, and refuses an empty one without dialling it", async () => {
-  const { view, user } = await opened();
-  await user.click(view.getByRole("button", { name: /LangGraph/ }));
-  await user.click(view.getByRole("button", { name: "Continue" }));
-  await view.findByText("Where can it be reached?");
-
-  await user.click(view.getByRole("button", { name: "Continue" }));
+test("refuses an empty or unreachable custom endpoint without creating", async () => {
+  verdict = { ok: false, reason: "Nothing answered at that address." };
+  const { view, user } = await connected("");
+  await user.click(view.getByRole("button", { name: "Create Bot" }));
   expect(await view.findByText("Enter your agent's address.")).toBeTruthy();
   expect(dialled).toEqual([]);
-});
-
-test("an address that does not answer says why under it, and goes no further", async () => {
-  verdict = { ok: false, reason: "Nothing answered at that address." };
-  const { view } = await connected();
-  // Enter in the address is Continue, as it is everywhere else.
-  await act(async () => {
-    fireEvent.keyDown(view.getByLabelText("Agent address"), {
-      key: "Enter",
-      keyCode: 13,
-    });
-  });
-
+  await user.type(
+    view.getByLabelText("Agent address"),
+    "https://agent.example.com/ag-ui",
+  );
+  await user.click(view.getByRole("button", { name: "Create Bot" }));
   expect(
     await view.findByText("Nothing answered at that address."),
   ).toBeTruthy();
-  expect(dialled).toEqual(["https://agent.example.com/ag-ui"]);
-  expect(view.queryByLabelText("Name")).toBeNull();
   expect(creates).toEqual([]);
 });
 
-test("an address that answers moves on, and Create sends it with its key", async () => {
+test("checks the connection then creates with its saved name and key", async () => {
   const { view, user } = await connected();
   await user.type(view.getByLabelText(/Key/), "Bearer secret");
-  await user.click(view.getByRole("button", { name: "Continue" }));
-
-  await user.type(await view.findByLabelText("Name"), "Expense Review");
-  // Somebody else's agent has its own prompt; what is typed here is added to it.
-  expect(view.getByLabelText(/^Role/)).toBeTruthy();
-  expect(creates).toEqual([]);
-  await user.click(view.getByRole("button", { name: "Create" }));
-
-  expect(await view.findByText("Expense Review is ready")).toBeTruthy();
-  expect(creates).toHaveLength(1);
+  await user.click(view.getByRole("button", { name: "Create Bot" }));
+  await view.findByText("Expense Review is ready");
+  expect(dialled).toEqual(["https://agent.example.com/ag-ui"]);
   expect(creates[0]).toMatchObject({
+    name: "Expense Review",
     endpoint: "https://agent.example.com/ag-ui",
     auth: { header: "Authorization", value: "Bearer secret" },
     title: "LangGraph",
-    roleDescription: "Connected from LangGraph.",
   });
 });
 
-test("going back keeps what was answered, and Run it here leaves a typed address behind", async () => {
+test("preserves every entry across back navigation and hosting switches", async () => {
   const { view, user } = await connected();
-  await user.click(view.getByRole("button", { name: "Continue" }));
-  await user.type(await view.findByLabelText("Name"), "Expense Review");
-  await user.click(view.getByRole("button", { name: /Public/ }));
-
-  // Back from the name returns to the address, still filled in, then to the framework, still chosen.
+  await user.type(view.getByLabelText(/Key/), "Bearer secret");
   await user.click(view.getByRole("button", { name: "Back" }));
   expect(
-    ((await view.findByLabelText("Agent address")) as HTMLInputElement).value,
-  ).toBe("https://agent.example.com/ag-ui");
-  await user.click(view.getByRole("button", { name: "Back" }));
-  expect(
-    (await view.findByRole("button", { name: /LangGraph/ })).getAttribute(
-      "aria-pressed",
-    ),
+    view
+      .getByRole("button", { name: /LangGraph/ })
+      .getAttribute("aria-pressed"),
   ).toBe("true");
-
-  await user.click(view.getByRole("button", { name: /Run it here/ }));
-  await user.click(view.getByRole("button", { name: "Continue" }));
-  expect(((await view.findByLabelText("Name")) as HTMLInputElement).value).toBe(
+  await user.click(view.getByRole("button", { name: "Back" }));
+  expect((view.getByLabelText("Name") as HTMLInputElement).value).toBe(
     "Expense Review",
   );
-  await user.click(view.getByRole("button", { name: "Create" }));
+  await user.type(view.getByLabelText(/^Role/), "Review carefully");
+  await user.click(view.getByRole("button", { name: /Public/ }));
+  await user.click(view.getByRole("button", { name: "Run here" }));
+  expect(
+    (view.getByLabelText(/^Instructions/) as HTMLTextAreaElement).value,
+  ).toBe("Review carefully");
+  await user.click(
+    view.getByRole("button", { name: "Connect a custom agent" }),
+  );
+  await user.click(view.getByRole("button", { name: "Continue" }));
+  await user.click(view.getByRole("button", { name: "Continue" }));
+  expect((view.getByLabelText("Agent address") as HTMLInputElement).value).toBe(
+    "https://agent.example.com/ag-ui",
+  );
+  expect((view.getByLabelText(/Key/) as HTMLInputElement).value).toBe(
+    "Bearer secret",
+  );
+  await user.click(view.getByRole("button", { name: "Back" }));
+  await user.click(view.getByRole("button", { name: "Back" }));
+  await user.click(view.getByRole("button", { name: "Run here" }));
+  await user.click(view.getByRole("button", { name: "Create Bot" }));
   await view.findByText("Expense Review is ready");
-  expect(creates[0]).toMatchObject({ endpoint: "", visibility: "public" });
+  expect(creates[0]).toMatchObject({
+    endpoint: "",
+    visibility: "public",
+    roleDescription: "Review carefully",
+  });
   expect(creates[0]).not.toHaveProperty("auth");
 });
 
@@ -322,7 +307,6 @@ test("the person's own apps arrive ticked, and the ones left ticked are given on
     },
   ];
   const { view, user } = await opened();
-  await user.click(view.getByRole("button", { name: "Continue" }));
   await user.type(await view.findByLabelText("Name"), "Research");
   const gmail = await view.findByRole("checkbox", { name: "Gmail" });
   const routines = view.getByRole("checkbox", { name: "Routines" });
@@ -330,7 +314,7 @@ test("the person's own apps arrive ticked, and the ones left ticked are given on
   expect(routines.getAttribute("aria-checked")).toBe("true");
   await user.click(routines);
   expect(routines.getAttribute("aria-checked")).toBe("false");
-  await user.click(view.getByRole("button", { name: "Create" }));
+  await user.click(view.getByRole("button", { name: "Create Bot" }));
   expect(await view.findByText("Research is ready")).toBeTruthy();
   expect(given).toEqual([
     "/api/plugins/for/agent_new/apps/composio-gmail/give",
@@ -338,8 +322,7 @@ test("the person's own apps arrive ticked, and the ones left ticked are given on
 });
 
 test("a person with no apps to give is asked nothing about apps", async () => {
-  const { view, user } = await opened();
-  await user.click(view.getByRole("button", { name: "Continue" }));
+  const { view } = await opened();
   await view.findByLabelText("Name");
   await settle();
   expect(view.queryByText("Apps it can use")).toBeNull();
