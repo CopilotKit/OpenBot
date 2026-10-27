@@ -5,6 +5,7 @@ import {
   applySkin,
   DEFAULT_SKIN,
   parseStoredSkin,
+  reconcileSkin,
   SKIN_STORAGE_KEY,
 } from "../src/skins/store";
 import { SKIN_IDS } from "../src/skins/types";
@@ -39,6 +40,15 @@ describe("skin preference", () => {
     ]);
     // The default clears the attribute, so no skin's rules can match OpenBot's own look.
     expect(roots).toEqual(["opendots", null]);
+  });
+
+  test("a skin this build no longer ships is cleared from the document on load", () => {
+    const roots: Array<string | null> = [];
+    const setRootSkin = (id: string | null) => roots.push(id);
+
+    expect(reconcileSkin("retired-skin", { setRootSkin })).toBe(DEFAULT_SKIN);
+    expect(reconcileSkin("openmuse", { setRootSkin })).toBe("openmuse");
+    expect(roots).toEqual([null, "openmuse"]);
   });
 
   test("every skin is registered under its own id", () => {

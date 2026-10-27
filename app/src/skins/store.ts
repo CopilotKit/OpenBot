@@ -33,6 +33,8 @@ const browserEffects: SkinEffects = {
     } catch {}
   },
   setRootSkin: (id) => {
+    // Importing the registry outside a browser (a test with no DOM) has no document to mark.
+    if (typeof document === "undefined") return;
     if (id) {
       document.documentElement.dataset.skin = id;
     } else {
@@ -41,15 +43,29 @@ const browserEffects: SkinEffects = {
   },
 };
 
-function readStoredSkin() {
+/*
+ * `index.html` applies whatever the key holds before the first paint, without knowing which skins
+ * this build ships. A stored skin that has since been removed would otherwise stay on `<html>` for
+ * the rest of the visit while the app draws the default, so the app settles the attribute on load.
+ */
+export function reconcileSkin(
+  stored: string | null,
+  effects: Pick<SkinEffects, "setRootSkin">,
+): SkinId {
+  const id = parseStoredSkin(stored);
+  effects.setRootSkin(id === DEFAULT_SKIN ? null : id);
+  return id;
+}
+
+function readStoredValue() {
   try {
-    return parseStoredSkin(window.localStorage.getItem(SKIN_STORAGE_KEY));
+    return window.localStorage.getItem(SKIN_STORAGE_KEY);
   } catch {
-    return DEFAULT_SKIN;
+    return null;
   }
 }
 
-let current: SkinId = readStoredSkin();
+let current: SkinId = reconcileSkin(readStoredValue(), browserEffects);
 const listeners = new Set<() => void>();
 
 function notify() {
