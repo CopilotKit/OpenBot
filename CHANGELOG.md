@@ -43,6 +43,18 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `computers/<Bot id>` on the workspace volume (below). Files saved before the upgrade stay at the
   root of the volume, where no Bot sees them; move them into a Bot's folder to give them back.
 
+### Pick a skin: OpenDuet, OpenDots or OpenMuse
+
+Settings → Preferences → Skin changes how OpenBot looks for you, and nothing about what it does.
+Three skins draw the open-source templates' looks over OpenBot's own features: OpenDuet (one
+phone-width column with Chat and Tasks), OpenDots (a rail, a sidebar of Bots with their avatars, and
+the Bot's computer beside the chat) and OpenMuse (one Bot at the centre, with Chat, Activity, Ideas,
+Goals and Apps). Every skin keeps your deployment's name from `brand.yaml`, OpenBot's own mark and
+each Bot's own avatar; only the look changes. The choice is kept in your browser, like the dark
+theme, and changes nothing for anybody else. The templates' own features that
+OpenBot has no server for, such as OpenDots' Spaces, OpenDuet's morning brief and OpenMuse's mail and
+calendar, are not part of the skins.
+
 ### Each Bot on a shared computer has its own files
 
 A computer that serves many Bots kept one folder of files for all of them, so a note one Bot saved
