@@ -148,6 +148,7 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
   const [step, setStep] = useState<Step>("about");
   const [direction, setDirection] = useState(1);
   const [name, setName] = useState("");
+  const [nameError, setNameError] = useState<string>();
   const [instructions, setInstructions] = useState("");
   /** Private until said otherwise: a Bot shown to everybody by accident is the worse mistake. */
   const [visibility, setVisibility] = useState<Visibility>("private");
@@ -354,6 +355,7 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
                   instructions={instructions}
                   leftOut={leftOut}
                   name={name}
+                  nameError={nameError}
                   onApp={(app, used) =>
                     setLeftOut((current) => {
                       const next = new Set(current);
@@ -363,7 +365,10 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
                     })
                   }
                   onInstructions={setInstructions}
-                  onName={setName}
+                  onName={(value) => {
+                    setName(value);
+                    setNameError(undefined);
+                  }}
                   onVisibility={setVisibility}
                   visibility={visibility}
                 />
@@ -391,7 +396,19 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
                       type="button"
                       className={OPTION_CLASSES}
                       aria-pressed={custom}
-                      onClick={() => setCustom(true)}
+                      onClick={() => {
+                        if (busy) return;
+                        setCustom(true);
+                        const parsed =
+                          agentFormSchema.shape.name.safeParse(name);
+                        if (!parsed.success) {
+                          setNameError(parsed.error.issues[0]?.message);
+                          document.getElementById("new-bot-name")?.focus();
+                          return;
+                        }
+                        setNameError(undefined);
+                        go("runtime");
+                      }}
                     >
                       <IconPlugConnected className="size-5 shrink-0 text-muted-foreground" />
                       <span className="min-w-0">
@@ -593,6 +610,7 @@ function AboutStep({
   leftOut,
   onApp,
   name,
+  nameError,
   instructions,
   visibility,
   onName,
@@ -600,6 +618,7 @@ function AboutStep({
   onVisibility,
 }: {
   name: string;
+  nameError?: string;
   instructions: string;
   visibility: Visibility;
   onName: (value: string) => void;
@@ -617,11 +636,22 @@ function AboutStep({
           autoComplete="off"
           autoFocus
           id="new-bot-name"
+          aria-invalid={Boolean(nameError)}
+          aria-describedby={nameError ? "new-bot-name-error" : undefined}
           maxLength={80}
           onChange={(event) => onName(event.target.value)}
           placeholder="Expense Review"
           value={name}
         />
+        {nameError && (
+          <p
+            id="new-bot-name-error"
+            role="alert"
+            className="text-sm text-destructive"
+          >
+            {nameError}
+          </p>
+        )}
       </Field>
       <Field>
         <FieldLabel htmlFor="new-bot-instructions">

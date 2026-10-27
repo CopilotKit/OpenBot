@@ -134,9 +134,6 @@ async function customFlow() {
   await result.user.click(
     result.view.getByRole("button", { name: /^Connect a custom agent/ }),
   );
-  await result.user.click(
-    result.view.getByRole("button", { name: "Continue" }),
-  );
   return result;
 }
 async function connected(address = "https://agent.example.com/ag-ui") {
@@ -186,7 +183,6 @@ test("unavailable hosting still permits the custom path", async () => {
   await user.click(
     view.getByRole("button", { name: /^Connect a custom agent/ }),
   );
-  await user.click(view.getByRole("button", { name: "Continue" }));
   expect(view.getByRole("button", { name: /LangGraph/ })).toBeTruthy();
 });
 
@@ -272,7 +268,6 @@ test("preserves every entry across back navigation and hosting switches", async 
   await user.click(
     view.getByRole("button", { name: /^Connect a custom agent/ }),
   );
-  await user.click(view.getByRole("button", { name: "Continue" }));
   await user.click(view.getByRole("button", { name: /LangGraph/ }));
   expect((view.getByLabelText("Agent address") as HTMLInputElement).value).toBe(
     "https://agent.example.com/ag-ui",
@@ -328,4 +323,22 @@ test("a person with no apps to give is asked nothing about apps", async () => {
   await view.findByLabelText("Name");
   await settle();
   expect(view.queryByText("Apps it can use")).toBeNull();
+});
+
+test("custom-agent selection validates the name before advancing", async () => {
+  const { view, user } = await opened();
+  await user.type(view.getByLabelText("Name"), "   ");
+  await user.click(
+    view.getByRole("button", { name: /^Connect a custom agent/ }),
+  );
+  expect((await view.findByRole("alert")).textContent).toBe(
+    "Name is required.",
+  );
+  expect(document.activeElement).toBe(view.getByLabelText("Name"));
+  expect(view.queryByRole("button", { name: /LangGraph/ })).toBeNull();
+  await user.type(view.getByLabelText("Name"), "My Bot");
+  await user.click(
+    view.getByRole("button", { name: /^Connect a custom agent/ }),
+  );
+  expect(await view.findByRole("button", { name: /LangGraph/ })).toBeTruthy();
 });
