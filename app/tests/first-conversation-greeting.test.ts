@@ -12,7 +12,7 @@ const user: AuthenticatedUser = {
 };
 test("greets by the saved name only with a confirmed empty conversation list", () => {
   expect(firstConversationGreeting(user, true)).toBe(
-    "Hi Sam Julien. What would you like to work on?",
+    "Hi Sam Julien, what would you like to work on?",
   );
   expect(firstConversationGreeting(user, false)).toBe("Start a conversation");
 });
