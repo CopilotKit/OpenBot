@@ -18,6 +18,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { formatHotkey, HOTKEYS } from "@/lib/hotkeys/hotkeys";
+import { SkinPicker } from "@/skins/skin-picker";
 
 export const Route = createFileRoute("/_authed/settings/")({
   component: RouteComponent,
@@ -36,7 +37,7 @@ function RouteComponent() {
    */
   return (
     <PageShell
-      description="How OpenBot looks and works for you. Message list settings follow your account. The theme stays in this browser."
+      description="How OpenBot looks and works for you. Message list settings follow your account. The theme and skin stay in this browser."
       title="Preferences"
     >
       <PageSection title="General">
@@ -56,6 +57,8 @@ function RouteComponent() {
               />
             </ItemActions>
           </Item>
+          <Separator />
+          <SkinPicker />
         </PageRows>
         <MessageListPreference />
       </PageSection>
