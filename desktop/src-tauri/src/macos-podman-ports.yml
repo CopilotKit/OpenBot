@@ -20,3 +20,7 @@ services:
   agent-harness:
     ports: !override
       - "127.0.0.1:${PICKED_HARNESS_PORT:-4202}:${PICKED_HARNESS_PORT:-4202}"
+  server:
+    ports: !override
+      - "127.0.0.1:${APP_PORT:-3010}:3001"
+      - "127.0.0.1:${SERVER_PORT:-3001}:3001"

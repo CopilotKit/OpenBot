@@ -26,7 +26,24 @@ use crate::problem::Problem;
 
 /// The services Compose owns. `migrate` is deliberately absent: it is run once, to completion,
 /// rather than raised, and treating it as a long-lived service makes it look like a crash loop.
-const SERVICES: [&str; 3] = ["postgres", "supervisor", "agent-computer"];
+///
+/// `server` and `worker` are OpenBot itself, from the published server image: the API, the app it
+/// serves, and the routines sweep. They used to be Bun processes this app started on the host after
+/// downloading Bun and running `bun install`, which on a fresh Windows machine took longer than
+/// everything else in the install put together. Now they are containers like the rest, and the
+/// restart policy that keeps them up is Docker's.
+const SERVICES: [&str; 5] = [
+    "postgres",
+    "supervisor",
+    "agent-computer",
+    "server",
+    "worker",
+];
+
+/// The Compose profile `server` and `worker` sit behind, so `scripts/start.sh`, whose server is a
+/// host process, never starts a second one. Named on every command rather than only on `up`, so
+/// `down` stops them and `config` describes them.
+const OPENBOT_PROFILE: &str = "openbot";
 
 /**
 The Bots that ship with OpenBot, which only run on an API key.
@@ -1273,9 +1290,20 @@ pub fn down(engine: &Address, root: &Path) -> Result<(), String> {
      *
      * Named unconditionally rather than only when a harness was picked: this has to stop what an
      * earlier run started, and whether that run picked one is not something a Stop can know.
+     *
+     * `openbot` for the same reason: `server` and `worker` sit behind it, and a Stop that left them
+     * running would leave the app answering a window that says OpenBot is stopped.
      */
     let output = compose_command(engine, root, &Secrets::new())
-        .args(["-f", "docker-compose.yml", "--profile", "harness", "down"])
+        .args([
+            "-f",
+            "docker-compose.yml",
+            "--profile",
+            "harness",
+            "--profile",
+            OPENBOT_PROFILE,
+            "down",
+        ])
         .output()
         .map_err(|error| format!("could not stop the stack: {error}"))?;
 
@@ -6190,7 +6218,8 @@ fn main() {
                     }
                 }
             }
-            Some("compose") if actual == ["compose", "--profile", "harness", "down"] => {
+            Some("compose")
+                if actual == ["compose", "--profile", "harness", "--profile", "openbot", "down"] => {
                 if race {
                     std::fs::write(root.join("supervisor.stopped"), "").unwrap();
                     std::fs::write(root.join("stack.down"), "").unwrap();
@@ -8075,6 +8104,29 @@ fn main() {
 
         let picked = selected_services(true, BundledBots::none());
         assert!(picked.contains(&"agent-harness"));
+    }
+
+    /// Stop has to name both profiles, or what sits behind them keeps running: the one Bot the
+    /// person picked, and OpenBot's own server and worker.
+    #[test]
+    fn stopping_names_the_harness_and_openbot_profiles() {
+        let source = include_str!("stack.rs");
+        let down = &source[source.find("pub fn down(").unwrap()..];
+        let down = &down[..down.find("\n}\n").unwrap()];
+        assert_eq!(
+            down.matches(r#""--profile","#).count(),
+            2,
+            "compose down without a profile leaves that profile's services running"
+        );
+        assert!(
+            down.contains(r#""harness","#),
+            "agent-harness keeps running"
+        );
+        assert!(
+            down.contains("OPENBOT_PROFILE,"),
+            "server and worker keep running"
+        );
+        assert_eq!(OPENBOT_PROFILE, "openbot");
     }
 
     #[test]
