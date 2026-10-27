@@ -8,16 +8,18 @@ import {
   useRouter,
 } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
+import AgentOrb from "@/components/agents/orb/agent-orb";
+import type { AIState } from "@/components/agents/orb/ai-core";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import {
   type ChannelWork,
   channelListQueryOptions,
 } from "@/lib/channels/queries";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import { appConfig } from "@/lib/generated/application-config";
 import { cn } from "@/lib/utils";
-import { IconOpenDuetMenu } from "./icons";
+import { IconMenuShort } from "./icons";
 import { DISC, FOCUS } from "./kit";
-import { MicOrb, type MicOrbState } from "./mic-orb";
 import {
   EDITOR_SELECTOR,
   pressOrb,
@@ -67,8 +69,10 @@ export function doingLine(busy: boolean, work: ChannelWork[]): string | null {
 }
 
 /**
- * OpenDuet's header on a tab: the menu in a disc on the left, the mic orb in the centre, the
- * person's initial in a disc on the right (their settings). The orb is the way to talk: pressed, it
+ * OpenDuet's header on a tab: the menu in a disc on the left, an orb in the centre, the person's
+ * initial in a disc on the right (their settings). The orb is OpenBot's own (`AgentOrb`, as sign-in
+ * and onboarding draw it), so the frame carries the deployment's identity, not OpenDuet's. It is the
+ * way to talk: pressed, it
  * starts the composer's own dictation, or, on a screen with no composer, opens Chat and starts it
  * there. It looks down while the person types or talks, and thinks while the Bot works, with a pill
  * under it saying what the Bot is doing.
@@ -99,7 +103,7 @@ export function TabHeader({
 
   // Working is the composer's own Stop control or the roster's word for a run nobody here started.
   const working = presence.working || conversation.busy;
-  const state: MicOrbState = presence.recording
+  const state: AIState = presence.recording
     ? "listening"
     : working
       ? "thinking"
@@ -125,7 +129,7 @@ export function TabHeader({
     ? "Chat"
     : presence.recording
       ? "Stop and add to your message"
-      : "Talk to OpenDuet";
+      : `Talk to ${appConfig.brand.productName}`;
 
   return (
     <header
@@ -144,7 +148,7 @@ export function TabHeader({
         style={{ width: SIDE, height: SIDE }}
         type="button"
       >
-        <IconOpenDuetMenu size={21} stroke={1.8} />
+        <IconMenuShort size={21} stroke={1.8} />
       </button>
       {/* The span between the discs, so the pill under the orb never reaches under either. */}
       <div className="flex min-w-0 flex-1 flex-col items-center gap-1 px-2">
@@ -160,11 +164,7 @@ export function TabHeader({
           title={label}
           type="button"
         >
-          <MicOrb
-            keystrokes={presence.keystrokes}
-            size={ORB - 2}
-            state={state}
-          />
+          <AgentOrb size={`${ORB - 6}px`} state={state} />
         </button>
         <DoingPill line={doingLine(working, conversation.work)} />
       </div>

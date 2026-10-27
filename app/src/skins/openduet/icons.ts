@@ -7,17 +7,17 @@ import { createReactComponent } from "@tabler/icons-react";
  * a row of Tabler icons at the same weight. Everything else in the skin is Tabler's own.
  */
 
-export const IconOpenDuetMenu = createReactComponent(
+export const IconMenuShort = createReactComponent(
   "outline",
-  "openduet-menu",
-  "OpenDuetMenu",
-  [["path", { d: "M4 7h16M4 12h16M4 17h10", key: "openduet-menu-lines" }]],
+  "menu-short",
+  "MenuShort",
+  [["path", { d: "M4 7h16M4 12h16M4 17h10", key: "menu-short-lines" }]],
 );
 
-export const IconOpenDuetTasks = createReactComponent(
+export const IconTasksList = createReactComponent(
   "outline",
-  "openduet-tasks",
-  "OpenDuetTasks",
+  "tasks-list",
+  "TasksList",
   [
     [
       "rect",
@@ -27,14 +27,14 @@ export const IconOpenDuetTasks = createReactComponent(
         width: "6",
         height: "6",
         rx: "1.5",
-        key: "openduet-tasks-box",
+        key: "tasks-list-box",
       },
     ],
     [
       "path",
       {
         d: "m3 17 2 2 4-4M13 5h8M13 12h8M13 19h8",
-        key: "openduet-tasks-lines",
+        key: "tasks-list-lines",
       },
     ],
   ],

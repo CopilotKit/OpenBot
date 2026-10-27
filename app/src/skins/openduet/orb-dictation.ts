@@ -83,14 +83,13 @@ export function pressOrbWhenReady(
 }
 
 /**
- * Whether the composer inside `root` is listening, whether the Bot it talks to is working, and a
- * count that moves on each keystroke in its editor, for the orb to look down at what is typed.
+ * Whether the composer inside `root` is listening, whether the Bot it talks to is working, and
+ * whether the person is typing in it.
  */
 export function useComposerPresence(root: HTMLElement | null) {
   const [recording, setRecording] = useState(false);
   const [working, setWorking] = useState(false);
   const [typing, setTyping] = useState(false);
-  const [keystrokes, setKeystrokes] = useState(0);
 
   useEffect(() => {
     if (!root) return;
@@ -124,20 +123,15 @@ export function useComposerPresence(root: HTMLElement | null) {
     const onFocusOut = (event: FocusEvent) => {
       if (inEditor(event.target)) setTyping(false);
     };
-    const onKey = (event: KeyboardEvent) => {
-      if (inEditor(event.target)) setKeystrokes((count) => count + 1);
-    };
     root.addEventListener("focusin", onFocusIn);
     root.addEventListener("focusout", onFocusOut);
-    root.addEventListener("keydown", onKey);
     return () => {
       observer.disconnect();
       clearTimeout(settle);
       root.removeEventListener("focusin", onFocusIn);
       root.removeEventListener("focusout", onFocusOut);
-      root.removeEventListener("keydown", onKey);
     };
   }, [root]);
 
-  return { recording, working, typing, keystrokes };
+  return { recording, working, typing };
 }

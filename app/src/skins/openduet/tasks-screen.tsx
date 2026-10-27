@@ -552,7 +552,7 @@ const ACTION_GLYPH: Record<ActionKind, Icon> = {
 /**
  * One action a Bot wants to take, as OpenDuet draws it: what it is and where, why the Bot asked,
  * everything it would send one tap away under Details, and the person's answers. Allow once and
- * Refuse share the row; Always allow is a quiet text button under them, because it changes a rule
+ * Deny share the row; Always allow here is a quiet text button under them, because it changes a rule
  * rather than answering this one request. A hand-off asks the person to do it, or not.
  */
 export function ApprovalCard({
@@ -644,7 +644,7 @@ export function ApprovalCard({
           ) : (
             <>
               <PillButton disabled={busy} onClick={() => onDecide("deny")}>
-                Refuse
+                Deny
               </PillButton>
               <PillButton
                 disabled={busy}
@@ -666,7 +666,7 @@ export function ApprovalCard({
             onClick={() => onDecide("allow_always")}
             type="button"
           >
-            Always allow
+            Always allow here
           </button>
         )}
       </div>
@@ -842,7 +842,7 @@ function RoutineLine({
 
 /**
  * Tasks' Up next: the next steps background research suggested and nobody has started yet. Each
- * card takes Start, which hands it to its Bot as a task, or Hide.
+ * card takes Start as task, which hands it to its Bot, or Dismiss.
  */
 function UpNextView({ order, query }: { order: SortOrder; query: string }) {
   const suggestions = useQuery(proactiveSuggestionsQueryOptions());
@@ -918,7 +918,7 @@ function UpNextView({ order, query }: { order: SortOrder; query: string }) {
   );
 }
 
-/** One thing not started: what to do, a line or two of why, who and where from, Hide and Start. */
+/** One thing not started: what to do, a line or two of why, who and where from, and its answers. */
 function SuggestionCard({
   suggestion,
   botName,
@@ -976,21 +976,21 @@ function SuggestionCard({
       ) : null}
       <div className="mt-2.5 flex gap-2">
         <PillButton
-          aria-label={`Hide ${suggestion.title}`}
+          aria-label={`Dismiss ${suggestion.title}`}
           disabled={busy}
           onClick={() => onAnswer("dismiss")}
           small
         >
-          Hide
+          Dismiss
         </PillButton>
         <PillButton
-          aria-label={`Start ${suggestion.title}`}
+          aria-label={`Start ${suggestion.title} as a task`}
           disabled={busy}
           onClick={() => onAnswer("start")}
           primary
           small
         >
-          Start
+          Start as task
         </PillButton>
       </div>
     </DuetCard>

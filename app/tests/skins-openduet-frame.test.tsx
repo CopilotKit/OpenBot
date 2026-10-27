@@ -24,6 +24,7 @@ import {
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { appConfig } from "@/lib/generated/application-config";
 import { SKINS } from "@/skins/registry";
 import { settleReactWork } from "./settle-react-work";
 
@@ -450,12 +451,12 @@ describe("Tasks draws OpenBot's data", () => {
     );
   });
 
-  test("Up next starts or hides a suggestion with OpenBot's own suggestion actions", async () => {
+  test("Up next starts or dismisses a suggestion with OpenBot's own suggestion actions", async () => {
     const sent = api("user");
     const view = renderApp("/s/tasks");
     fireEvent.click(await view.findByRole("tab", { name: "Up next" }));
     const start = await view.findByRole("button", {
-      name: "Start Confirm Friday ship date for the 120 mugs",
+      name: "Start Confirm Friday ship date for the 120 mugs as a task",
     });
     fireEvent.click(start);
     await waitFor(() =>
@@ -467,7 +468,7 @@ describe("Tasks draws OpenBot's data", () => {
     );
     fireEvent.click(
       view.getByRole("button", {
-        name: "Hide Confirm Friday ship date for the 120 mugs",
+        name: "Dismiss Confirm Friday ship date for the 120 mugs",
       }),
     );
     await waitFor(() =>
@@ -491,5 +492,48 @@ describe("Tasks draws OpenBot's data", () => {
     expect(
       await view.findByRole("region", { name: "Responsibilities" }),
     ).toBeTruthy();
+  });
+});
+
+/*
+ * A skin takes OpenDuet's look and the deployment's identity: the name a person reads is the one in
+ * brand.yaml, and the orb is OpenBot's own, never OpenDuet's name or its robot face.
+ */
+describe("the frame carries the deployment's brand, not OpenDuet's", () => {
+  /** Every word a person can read or hear: the text, and the names and titles on controls. */
+  function readable(): string {
+    const named = [...document.querySelectorAll("[aria-label], [title], [alt]")]
+      .flatMap((node) => [
+        node.getAttribute("aria-label"),
+        node.getAttribute("title"),
+        node.getAttribute("alt"),
+      ])
+      .filter(Boolean);
+    return `${document.body.textContent ?? ""}\n${named.join("\n")}`;
+  }
+
+  test("the menu and the orb name the deployment's product, and nothing says OpenDuet", async () => {
+    api("admin");
+    const view = renderApp("/");
+    const orb = await view.findByRole("button", {
+      name: `Talk to ${appConfig.brand.productName}`,
+    });
+    await openMenu(view);
+    const menu = view.getByRole("dialog");
+    expect(within(menu).getByText(appConfig.brand.productName)).toBeTruthy();
+    expect(readable()).not.toContain("OpenDuet");
+    // OpenBot's own orb, as sign-in and onboarding draw it, and no drawing of OpenDuet's.
+    expect(orb.querySelector(".agent-orb")).not.toBeNull();
+    expect(orb.querySelector("canvas")).toBeNull();
+  });
+
+  test("Tasks names nothing as OpenDuet either", async () => {
+    api("user");
+    const view = renderApp("/s/tasks");
+    fireEvent.click(await view.findByRole("tab", { name: "Active" }));
+    await view.findByRole("region", { name: "Needs input" });
+    fireEvent.click(view.getByRole("tab", { name: "Up next" }));
+    await view.findByRole("button", { name: /as a task$/ });
+    expect(readable()).not.toContain("OpenDuet");
   });
 });

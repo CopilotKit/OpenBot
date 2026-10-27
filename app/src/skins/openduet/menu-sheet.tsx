@@ -40,6 +40,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { agentListQueryOptions } from "@/lib/agents/queries";
 import { signOutMutationOptions } from "@/lib/auth/mutations";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { botAttentionQueryOptions } from "@/lib/bot-lifecycle/queries";
@@ -48,6 +49,7 @@ import {
   type ChannelSummary,
   channelListQueryOptions,
 } from "@/lib/channels/queries";
+import { appConfig } from "@/lib/generated/application-config";
 import { relativeTime } from "@/lib/relative-time";
 import { useMessageListEmphasis } from "@/lib/settings/message-list";
 import { cn } from "@/lib/utils";
@@ -141,7 +143,7 @@ export function MenuSheet({
       >
         <SheetHeader className="px-5 pt-5 pb-3">
           <SheetTitle className="openduet-type-display font-semibold text-openduet-ink">
-            OpenDuet
+            {appConfig.brand.productName}
           </SheetTitle>
           <SheetDescription className="openduet-type-sub truncate text-openduet-ink-2">
             {user?.name || user?.email}
@@ -346,7 +348,7 @@ function RowText({
 }
 
 /**
- * One conversation: its Bots' faces on a disc, then its title and its Bot, in the order the person
+ * One conversation: its Bots' avatars on a disc (OpenBot's, from each Bot's seed), then its title and its Bot, in the order the person
  * chose in OpenBot's preferences. A dot when a Bot said something they have not seen; the faces
  * type while a Bot works there. Held down or right-clicked, it pins or deletes, as OpenBot's roster
  * does.
@@ -360,6 +362,11 @@ function ConversationRow({
 }) {
   const emphasis = useMessageListEmphasis();
   const navigate = useNavigate();
+  const bots = useQuery(agentListQueryOptions());
+  // Each Bot's own avatar, drawn from its seed as OpenBot's Bot pages draw it.
+  const seeds = channel.agentIds.map(
+    (id) => bots.data?.find((bot) => bot.id === id)?.avatarSeed ?? id,
+  );
   const isOpen = useParams({
     strict: false,
     select: (params) =>
@@ -392,11 +399,7 @@ function ConversationRow({
             to={group ? "/group/$channelId" : "/channel/$channelId"}
           >
             <span className="shrink-0">
-              <ChannelAvatar
-                participantIds={channel.agentIds}
-                size={28}
-                typing={busy}
-              />
+              <ChannelAvatar participantIds={seeds} size={28} typing={busy} />
             </span>
             <RowText line={line} name={name} strong={unread} />
             {channel.pinned ? (
