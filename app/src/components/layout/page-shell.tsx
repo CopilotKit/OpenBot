@@ -35,15 +35,12 @@ import { SidebarToggle, useSidebarToggleVisible } from "./sidebar-toggle";
  * and its control side by side. Sentences are held to `max-w-prose` (around 65 characters) inside it,
  * which is where reading stays comfortable, so the column widening does not stretch them.
  *
- * `wide` exists for one page. An audit log is a table you scan, and forcing it into the prose column
- * would wrap every row. It is not a licence for anything else to be wide.
+ * `full` exists for one page. An audit log is a table you scan, and forcing it into the prose column
+ * would wrap every row. The header stays in the prose column, where every other screen's title is,
+ * and only the content under it takes the whole pane, as Linear lays out its lists. It is not a
+ * licence for anything else to be wide.
  */
-type ShellWidth = "prose" | "wide";
-
-const WIDTHS: Record<ShellWidth, string> = {
-  prose: "max-w-3xl",
-  wide: "max-w-5xl",
-};
+type ShellWidth = "prose" | "full";
 
 export function PageShell({
   action,
@@ -135,8 +132,8 @@ export function PageShell({
             "[&>header+*]:mt-8 [&>header+nav]:mt-6 [&>header+nav+*]:mt-8",
             // Without a bar above it the heading keeps the full original space.
             bar ? "pt-8" : "pt-12",
-            WIDTHS[width],
-            className,
+            "max-w-3xl",
+            width === "full" ? "pb-0" : className,
           )}
         >
           <header className="flex flex-col gap-2">
@@ -150,8 +147,11 @@ export function PageShell({
               </p>
             ) : null}
           </header>
-          {children}
+          {width === "full" ? null : children}
         </div>
+        {width === "full" ? (
+          <div className={cn("mt-8 w-full pb-16", className)}>{children}</div>
+        ) : null}
       </div>
     </>
   );

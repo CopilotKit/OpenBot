@@ -43,6 +43,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `computers/<Bot id>` on the workspace volume (below). Files saved before the upgrade stay at the
   root of the volume, where no Bot sees them; move them into a Bot's folder to give them back.
 
+### The audit log reads like a log
+
+Admin → Audit keeps its title in the same column as every other screen and runs the table across
+the whole pane under it. Each row shows the full date and time and a mark for what happened, with
+blocked rows tinted red and actions that did not happen tinted amber. The newest come first, and a
+press on When turns the order round. A search box narrows the events already loaded by anything a
+row shows, and says how many of them match.
+
 ### Each Bot on a shared computer has its own files
 
 A computer that serves many Bots kept one folder of files for all of them, so a note one Bot saved
