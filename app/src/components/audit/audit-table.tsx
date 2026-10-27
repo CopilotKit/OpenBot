@@ -65,7 +65,10 @@ export function AuditTable({
   events: AuditEvent[];
   nameFor: NameFor;
   query: string;
-  /** Drawn above the table, given how many rows it shows ("3 events", "1 of 3 events"). */
+  /**
+   * Drawn above the table, given how many rows it shows ("3 events", "1 of 3 events"). It stays put;
+   * only the rows under it scroll.
+   */
   toolbar: (count: string) => React.ReactNode;
 }) {
   const [sorting, setSorting] = useState<SortingState>(INITIAL_SORT);
@@ -89,7 +92,9 @@ export function AuditTable({
   return (
     <>
       {toolbar(countLabel(rows.length, events.length))}
-      <Table>
+      <Table
+        containerClassName={rows.length > 0 ? "min-h-0 flex-1" : undefined}
+      >
         <TableHeader>
           {table.getHeaderGroups().map((group) => (
             <TableRow className="hover:bg-transparent" key={group.id}>

@@ -82,13 +82,19 @@ const whats = (container: HTMLElement) =>
     (row) => row.querySelector("[data-column=what]")?.textContent,
   );
 
-test("the title sits in the centred column and the table spans the pane under it", async () => {
+test("the page is one viewport tall and only the table scrolls", async () => {
   const view = await renderAudit();
   const heading = view.getByRole("heading", { name: "Audit" });
-  const table = view.container.querySelector("table") as HTMLElement;
-  const column = heading.closest(".max-w-3xl");
-  expect(column).not.toBeNull();
-  expect(column?.contains(table)).toBe(false);
+  const page = heading.closest(".h-dvh");
+  expect(page).not.toBeNull();
+  expect(page?.className).toContain("overflow-hidden");
+  expect(heading.closest(".max-w-3xl")).toBeNull();
+  const scroller = view.container.querySelector(
+    "[data-slot=table-container]",
+  ) as HTMLElement;
+  expect(scroller.className).toContain("overflow-auto");
+  expect(scroller.className).toContain("flex-1");
+  expect(scroller.contains(heading)).toBe(false);
 });
 
 test("newest first, and a press on When turns it oldest first", async () => {

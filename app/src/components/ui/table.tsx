@@ -5,14 +5,18 @@ import { cn } from "@/lib/utils";
 /**
  * A data table's parts, for a log or report read across the full pane.
  *
- * No card around it and no scroller of its own: the page decides where the table sits, and a table
- * wider than the pane scrolls sideways in the one container that wraps it.
+ * No card around it. The container is the scroller: given a height (`containerClassName`), the
+ * rows scroll under a header that stays put; without one, a table wider than the pane scrolls sideways.
  */
-function Table({ className, ...props }: React.ComponentProps<"table">) {
+function Table({
+  className,
+  containerClassName,
+  ...props
+}: React.ComponentProps<"table"> & { containerClassName?: string }) {
   return (
     <div
       data-slot="table-container"
-      className="relative w-full overflow-x-auto"
+      className={cn("relative w-full overflow-auto", containerClassName)}
     >
       <table
         data-slot="table"
@@ -27,7 +31,14 @@ function TableHeader({ className, ...props }: React.ComponentProps<"thead">) {
   return (
     <thead
       data-slot="table-header"
-      className={cn("[&_tr]:border-b", className)}
+      /*
+       * Pinned to the top of the container. The line under it is a shadow, not a border: a collapsed
+       * table border belongs to the rows and scrolls away with them.
+       */
+      className={cn(
+        "sticky top-0 z-10 bg-background shadow-[inset_0_-1px_0_var(--color-border)] [&_tr]:border-b-0",
+        className,
+      )}
       {...props}
     />
   );

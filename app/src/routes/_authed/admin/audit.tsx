@@ -94,9 +94,9 @@ function AuditPage() {
 
   return (
     /*
-     * THE ONE FULL-WIDTH PAGE IN ADMIN, and the one that keeps a table. The title and description
-     * sit in the same centred column as every other screen; the log under them takes the whole
-     * pane, because a log is scanned across and rows of prose would make every entry a paragraph.
+     * THE ONE FULL-WIDTH PAGE IN ADMIN, and the one that keeps a table. The page is the window's
+     * height; the title, the views and the search stay where they are and only the rows scroll,
+     * because a log is scanned across and rows of prose would make every entry a paragraph.
      */
     <PageShell
       description="Every action a Bot took, and every one this deployment's policy refused."
@@ -113,7 +113,7 @@ function AuditPage() {
           nameFor={nameFor}
           query={query}
           toolbar={(count) => (
-            <div className="flex flex-col gap-3 border-border border-b px-4 pb-3">
+            <div className="flex shrink-0 flex-col gap-3 border-border border-b px-4 pb-3">
               <div className="flex flex-wrap items-center gap-2">
                 {FILTERS.map((filter) => (
                   <Button
