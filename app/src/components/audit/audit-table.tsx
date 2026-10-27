@@ -41,12 +41,12 @@ import { cn } from "@/lib/utils";
 import {
   type AuditEvent,
   BotCell,
+  botText,
   DecisionCell,
   OnCell,
   OUTCOME_MARK,
   OUTCOME_ROW,
   StartedByCell,
-  botText,
   searchTextOf,
   startedByText,
   whatText,
