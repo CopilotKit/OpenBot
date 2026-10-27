@@ -19,6 +19,7 @@ import {
 import { useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query";
 import { Link, type LinkProps, useNavigate } from "@tanstack/react-router";
 import { type ReactNode, useState } from "react";
+import { AbstractAvatar } from "@/components/agents/abstract-avatar";
 import {
   isUnread,
   matchingChannels,
@@ -43,11 +44,11 @@ import {
   type ChannelSummary,
   channelListQueryOptions,
 } from "@/lib/channels/queries";
+import { appConfig } from "@/lib/generated/application-config";
 import { memoriesQueryOptions } from "@/lib/memory";
 import { routinesQueryOptions } from "@/lib/routines/queries";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
-import { DotAvatar } from "./dot-avatar";
 import type { Place } from "./place";
 
 /** OpenDots' sidebar row: a quiet line of text that lights lavender when it is the page. */
@@ -109,25 +110,22 @@ export function IconAction({
   );
 }
 
-/** The two-by-two dot mark and the name, which is also the way home. */
+/**
+ * The deployment's own name, set in OpenDots' wordmark type, which is also the way home. The name
+ * is `brand.yaml`'s, the same one OpenBot's sidebar header shows; a skin changes the look, never
+ * whose product it is.
+ */
 function Wordmark({ onNavigate }: { onNavigate: () => void }) {
+  const productName = appConfig.brand.productName;
   return (
     <Link
-      aria-label="OpenDots home"
-      className="mb-[23px] flex h-[18px] items-center gap-2.5 self-start rounded-lg px-2.5 text-[16px] leading-[18px] font-bold tracking-[-0.5px] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      aria-label={`${productName} home`}
+      className="mb-[23px] flex h-[18px] min-w-0 items-center self-start rounded-lg px-2.5 text-[16px] leading-[18px] font-bold tracking-[-0.5px] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      data-testid="opendots-wordmark"
       onClick={onNavigate}
       to="/"
     >
-      <span
-        aria-hidden
-        className="grid w-[13px] shrink-0 -rotate-10 grid-cols-[repeat(2,5px)] gap-[3px]"
-      >
-        <i className="size-[5px] rounded-full bg-(--opendots-logo-ink)" />
-        <i className="size-[5px] rounded-full bg-(--opendots-logo)" />
-        <i className="size-[5px] rounded-full bg-(--opendots-logo)" />
-        <i className="size-[5px] rounded-full bg-(--opendots-logo)" />
-      </span>
-      OpenDots
+      <span className="truncate">{productName}</span>
     </Link>
   );
 }
@@ -161,7 +159,7 @@ export function dotOrder(agents: readonly AgentProfile[]): AgentProfile[] {
   return [...roster.pinned, ...roster.yours, ...roster.shared];
 }
 
-function DotsSection({
+function BotsSection({
   place,
   channels,
   onNavigate,
@@ -173,7 +171,7 @@ function DotsSection({
   const agents = useQuery(agentListQueryOptions());
   const dots = agents.data ? dotOrder(agents.data) : [];
   return (
-    <section aria-label="Dots">
+    <section aria-label="Bots">
       <NavLabel
         actions={
           <IconAction
@@ -187,7 +185,7 @@ function DotsSection({
           </IconAction>
         }
       >
-        DOTS
+        BOTS
       </NavLabel>
       {agents.isPending ? null : agents.error ? (
         <p className="px-3.5 py-1.5 text-[12px] text-destructive" role="alert">
@@ -195,7 +193,7 @@ function DotsSection({
         </p>
       ) : dots.length === 0 ? (
         <p className="px-3.5 py-1.5 text-[12px] leading-relaxed text-(--opendots-faint)">
-          Create a Bot to give it a dot of its own.
+          Create a Bot and it shows up here.
         </p>
       ) : (
         <nav
@@ -212,10 +210,12 @@ function DotsSection({
                   className={cn(
                     navItem,
                     "min-h-[42px] gap-[9px] px-2.5 py-1.5 text-[12px] text-(--opendots-dot-ink) hover:bg-(--opendots-hover)",
+                    // The row's only drawing is the avatar, which keeps its own size.
+                    "[&_svg]:size-full",
                     active &&
                       "bg-(--opendots-active) hover:bg-(--opendots-active)",
                   )}
-                  data-testid="opendots-dot"
+                  data-testid="opendots-bot"
                   onClick={onNavigate}
                   {...(latest
                     ? {
@@ -224,7 +224,14 @@ function DotsSection({
                       }
                     : { to: "/channel/new", search: { agent: agent.id } })}
                 >
-                  <DotAvatar identity={agent.id} size={30} />
+                  {/* OpenBot's own avatar for the Bot; hidden so the row is named once. */}
+                  <span aria-hidden className="contents">
+                    <AbstractAvatar
+                      name={agent.name}
+                      seed={agent.avatarSeed}
+                      size={30}
+                    />
+                  </span>
                   <span className="min-w-0 flex-1 truncate">{agent.name}</span>
                 </Link>
                 <IconAction
@@ -636,7 +643,7 @@ export function OpenDotsSidebar({
         <IconPlus />
         <span>New chat</span>
       </Link>
-      <DotsSection
+      <BotsSection
         channels={channels.data}
         onNavigate={onNavigate}
         place={place}

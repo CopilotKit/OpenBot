@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useRouterState } from "@tanstack/react-router";
 import { type AgentProfile, agentListQueryOptions } from "@/lib/agents/queries";
 import { channelQueryOptions } from "@/lib/channels/queries";
+import { appConfig } from "@/lib/generated/application-config";
 
 /** Which part of OpenDots' sidebar a page belongs to, so the right row is lit. */
 export type Section =
@@ -117,7 +118,11 @@ export function parsePlace(
   if (path.startsWith("/connections")) {
     return { section: "connections", label: "Connections", ownsWatch: false };
   }
-  return { section: "other", label: "OpenDots", ownsWatch: false };
+  return {
+    section: "other",
+    label: appConfig.brand.productName,
+    ownsWatch: false,
+  };
 }
 
 export function botName(

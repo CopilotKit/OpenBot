@@ -19,9 +19,10 @@ import {
 } from "@tanstack/react-router";
 import { cleanup, render, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { AbstractAvatar } from "@/components/agents/abstract-avatar";
+import { appConfig } from "@/lib/generated/application-config";
 import { queryClient } from "@/query-client";
 import { opendots } from "@/skins/opendots";
-import { dotCharacter } from "@/skins/opendots/dot-avatar";
 import type { AgentProfileStore } from "../../server/src/agents/profile-store";
 import type { AgentProfile } from "../../server/src/agents/profile-types";
 import { createAgentRoutes } from "../../server/src/agents/routes";
@@ -79,7 +80,8 @@ function profile(
     name,
     title: "Coworker",
     roleDescription: `${name} helps.`,
-    avatarSeed: id,
+    // Unlike the id on purpose, so a test can tell which of the two an avatar was drawn from.
+    avatarSeed: `seed-${id}`,
     ownerUserId: person.id,
     visibility: "private",
     systemOwned: false,
@@ -288,32 +290,24 @@ function hrefs(container: HTMLElement) {
 }
 
 describe("OpenDots frame", () => {
-  test("DOTS lists the Bots OpenBot's agent list returns, each with a stable plush", async () => {
+  test("BOTS lists the Bots OpenBot's agent list returns, in the roster's order", async () => {
     const { view } = draw("/");
-    const dots = await view.findByRole("navigation", { name: "Your Bots" });
+    const list = await view.findByRole("navigation", { name: "Your Bots" });
     await waitFor(() =>
-      expect(within(dots).getAllByTestId("opendots-dot")).toHaveLength(3),
+      expect(within(list).getAllByTestId("opendots-bot")).toHaveLength(3),
     );
     // Pinned first, then the person's own, then shared with them: the Bots roster's own order.
     expect(
-      within(dots)
-        .getAllByTestId("opendots-dot")
+      within(list)
+        .getAllByTestId("opendots-bot")
         .map((row) => row.textContent),
     ).toEqual(["Brook", "Ada", "Cass"]);
-    for (const bot of bots) {
-      const row = within(dots).getByText(bot.name).closest("a");
-      expect(row?.querySelector("img")?.getAttribute("src")).toBe(
-        `/skins/opendots/${dotCharacter(bot.id)}.png`,
-      );
-    }
-    // The same Bot always wears the same plush.
-    expect(dotCharacter("ada")).toBe(dotCharacter("ada"));
     expect(requests.some((request) => request.path === "/api/agents")).toBe(
       true,
     );
   });
 
-  test("a Dot reopens its latest chat, starts one when there is none, and its settings open the Bot", async () => {
+  test("a Bot's row reopens its latest chat, starts one when there is none, and its settings open the Bot", async () => {
     const { view, router, user } = draw("/");
     const dots = await view.findByRole("navigation", { name: "Your Bots" });
     await within(dots).findByText("Ada");
@@ -346,15 +340,13 @@ describe("OpenDots frame", () => {
     expect(await view.findByRole("heading", { name: "Ada" })).toBeTruthy();
     expect(view.getByText("Ada helps.")).toBeTruthy();
     expect(
-      view.getByRole("link", { name: /Edit specialist/ }).getAttribute("href"),
+      view.getByRole("link", { name: /Edit Bot/ }).getAttribute("href"),
     ).toBe("/bots/ada");
     cleanup();
     // Without a chosen Bot there is no one to introduce.
     const open = draw("/channel/new");
     await open.view.findByText("OpenBot page");
-    expect(
-      open.view.queryByRole("link", { name: /Edit specialist/ }),
-    ).toBeNull();
+    expect(open.view.queryByRole("link", { name: /Edit Bot/ })).toBeNull();
   });
 
   test("every OpenBot surface is reachable from the frame", async () => {
@@ -499,5 +491,72 @@ describe("OpenDots screens", () => {
     expect(view.getByRole("heading", { name: "Memories" })).toBeTruthy();
     expect(await view.findByText("No memories yet")).toBeTruthy();
     expect(view.getByRole("button", { name: /Remember a fact/ })).toBeTruthy();
+  });
+});
+
+/**
+ * The skin is OpenDots' look, never its identity: whatever a person reads as the product is the
+ * deployment's own name from `brand.yaml`, and every Bot wears OpenBot's own avatar.
+ */
+describe("OpenDots skin wears the deployment's brand", () => {
+  /** What the drawing of one avatar looks like, without the ids React gives each instance. */
+  const drawing = (root: Element | null) =>
+    (root?.querySelector("svg")?.outerHTML ?? "").replace(/_r_[\w]+_/g, "");
+
+  test("the frame names the product from brand.yaml and never says OpenDots or Dots", async () => {
+    const { view } = draw("/channel/new?agent=ada");
+    await view.findByRole("navigation", { name: "Your Bots" });
+    await view.findByRole("heading", { name: "Ada" });
+    const productName = appConfig.brand.productName;
+    expect(view.getByTestId("opendots-wordmark").textContent).toBe(productName);
+    expect(
+      view.getAllByRole("link", { name: `${productName} home` }).length,
+    ).toBe(2);
+    const read = [
+      view.container.textContent ?? "",
+      ...[...view.container.querySelectorAll("[aria-label],[title],[alt]")].map(
+        (element) =>
+          [
+            element.getAttribute("aria-label"),
+            element.getAttribute("title"),
+            element.getAttribute("alt"),
+          ].join(" "),
+      ),
+    ].join(" ");
+    expect(read).not.toContain("OpenDots");
+    expect(read).not.toMatch(/\bDots?\b/);
+    expect(view.getByText("BOTS")).toBeTruthy();
+    expect(view.getByText("Bots", { selector: "span" })).toBeTruthy();
+    // No plush, no monogram: nothing of OpenDots' own identity is drawn.
+    expect(view.container.querySelector('img[src*="/skins/"]')).toBeNull();
+  });
+
+  test("every Bot wears OpenBot's own avatar, drawn from its avatarSeed", async () => {
+    const { view } = draw("/channel/new?agent=ada");
+    const list = await view.findByRole("navigation", { name: "Your Bots" });
+    await waitFor(() =>
+      expect(within(list).getAllByTestId("opendots-bot")).toHaveLength(3),
+    );
+    await view.findByRole("heading", { name: "Ada" });
+    const persona = view.container.querySelector("[data-opendots-persona]");
+    for (const bot of bots) {
+      const reference = render(
+        <AbstractAvatar name={bot.name} seed={bot.avatarSeed} size={30} />,
+      );
+      const row = within(list).getByText(bot.name).closest("a");
+      expect(
+        row?.querySelector(`[role="img"][aria-label="${bot.name}"]`),
+      ).toBeTruthy();
+      expect(drawing(row)).toBe(drawing(reference.container));
+      // Drawn from the seed, not the id: the id would be a different Bot's face.
+      const fromId = render(
+        <AbstractAvatar name={bot.name} seed={bot.id} size={30} />,
+      );
+      expect(drawing(row)).not.toBe(drawing(fromId.container));
+      reference.unmount();
+      fromId.unmount();
+    }
+    const ada = render(<AbstractAvatar name="Ada" seed="seed-ada" size={64} />);
+    expect(drawing(persona)).toBe(drawing(ada.container));
   });
 });

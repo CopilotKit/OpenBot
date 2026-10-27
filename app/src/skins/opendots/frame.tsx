@@ -21,6 +21,7 @@ import {
   useRouterState,
 } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useState } from "react";
+import AgentOrb from "@/components/agents/orb/agent-orb";
 import { SelfHostBanner } from "@/components/layout/self-host-banner";
 import {
   DropdownMenu,
@@ -42,6 +43,7 @@ import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { setBotPausedMutationOptions } from "@/lib/bot-lifecycle/mutations";
 import { botLifecycleQueryOptions } from "@/lib/bot-lifecycle/queries";
 import { useChannelEvents } from "@/lib/channels/use-channel-events";
+import { appConfig } from "@/lib/generated/application-config";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
 import { ComputerPane } from "./computer-pane";
@@ -128,12 +130,13 @@ function Rail({
       aria-label="Workspace navigation"
       className="flex w-12 shrink-0 flex-col items-center gap-3 border-r border-(--opendots-line) bg-(--opendots-rail) px-[5px] py-4 max-[700px]:hidden"
     >
+      {/* OpenBot's own mark where OpenDots puts its monogram; the deployment owns the identity. */}
       <Link
-        aria-label="OpenDots home"
-        className="mb-3 inline-flex size-9 shrink-0 items-center justify-center gap-2 rounded-lg pr-1.5 text-[29px] font-[650] tracking-[-7px] text-(--opendots-brand) outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        aria-label={`${appConfig.brand.productName} home`}
+        className="mb-3 grid size-9 shrink-0 place-items-center rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring"
         to="/"
       >
-        o<span className="text-(--opendots-teal)">·</span>
+        <AgentOrb size="26px" />
       </Link>
       <RailTip label={navCollapsed ? "Expand sidebar" : "Collapse sidebar"}>
         <button
@@ -264,7 +267,7 @@ function Topbar({
         aria-label="Breadcrumb"
         className="flex min-w-0 flex-1 items-center gap-[13px] text-[13px] text-(--opendots-crumb) max-[700px]:gap-[7px]"
       >
-        <span className="shrink-0 max-[700px]:hidden">Dots</span>
+        <span className="shrink-0 max-[700px]:hidden">Bots</span>
         <span aria-hidden className="shrink-0 max-[700px]:hidden">
           /
         </span>
@@ -335,7 +338,7 @@ export function OpenDotsFrame({ children }: { children: ReactNode }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [mobileOpen]);
 
-  /** New chat is with the Bot on screen when there is one, as OpenDots starts it with the open Dot. */
+  /** New chat is with the Bot on screen when there is one, as OpenDots starts it with the open one. */
   const newChat: LinkProps =
     place.section === "chat" && place.botId
       ? { to: "/channel/new", search: { agent: place.botId } }
