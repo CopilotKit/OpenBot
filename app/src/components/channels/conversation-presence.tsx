@@ -15,7 +15,12 @@ import type { BotOrbState } from "@/components/agents/orb/bot-orb";
 import { ChannelAvatar } from "@/components/channels/avatar";
 import { approvalInboxOptions } from "@/lib/approvals";
 import { channelListQueryOptions } from "@/lib/channels/queries";
-import { type StepApproval, stepFor } from "@/lib/channels/step";
+import {
+  type BrowserStep,
+  browserSteps,
+  type StepApproval,
+  stepFor,
+} from "@/lib/channels/step";
 import { cn } from "@/lib/utils";
 
 /**
@@ -29,6 +34,7 @@ import { cn } from "@/lib/utils";
  * - `useConversationOrb()`: the Bot's orb state. `ConversationOrb` draws it.
  * - `useConversationStatus()`: resting, working (with the step, or null for work the server is doing
  *   that this tab did not start), or needs you. `ConversationStatusLine` draws it.
+ * - `useConversationSteps()`: the browser steps the Bot took, for the computer pane's step log.
  *
  * The conversation's reports live in a store outside React, and each reader subscribes to the
  * fields it uses, so a keystroke reaches the orb and nothing else, and a new step reaches the line
@@ -55,7 +61,14 @@ type Reported = {
   drafting: boolean;
   /** Counts the turns that ended in an answer, rather than a failure or a Stop. */
   answers: number;
+  /** The browser steps in the conversation, oldest first. */
+  steps: readonly ConversationStep[];
 };
+
+/** A browser step, and when this tab first saw it, which is where it sits among the commands. */
+export type ConversationStep = BrowserStep & { at: number };
+
+const NO_STEPS: readonly ConversationStep[] = [];
 
 const AT_REST: Reported = {
   channelId: null,
@@ -63,7 +76,52 @@ const AT_REST: Reported = {
   step: null,
   drafting: false,
   answers: 0,
+  steps: NO_STEPS,
 };
+
+/**
+ * When this tab first saw each browser step, by its call.
+ *
+ * MODULE SCOPE, SO A STEP KEEPS ITS PLACE. The command log beside these steps lives for the session,
+ * and a conversation opened again would otherwise stamp every step it already showed with the moment
+ * it came back, after commands that ran later. A step from before this tab opened is stamped when
+ * the conversation first showed it. Bounded, oldest out.
+ */
+const FIRST_SEEN = new Map<string, number>();
+const MAX_FIRST_SEEN = 1000;
+
+function firstSeen(callId: string, now: number): number {
+  const seen = FIRST_SEEN.get(callId);
+  if (seen !== undefined) return seen;
+  FIRST_SEEN.set(callId, now);
+  while (FIRST_SEEN.size > MAX_FIRST_SEEN) {
+    const oldest = FIRST_SEEN.keys().next().value;
+    if (oldest === undefined) break;
+    FIRST_SEEN.delete(oldest);
+  }
+  return now;
+}
+
+/** The same steps, unchanged: a streamed token rewrites the array and usually nothing in it. */
+function sameSteps(
+  current: readonly ConversationStep[],
+  next: readonly BrowserStep[],
+): boolean {
+  return (
+    current.length === next.length &&
+    current.every((step, index) => {
+      const other = next[index];
+      return (
+        other !== undefined &&
+        step.item.id === other.item.id &&
+        step.item.result === other.item.result &&
+        step.item.toolCall.function.arguments ===
+          other.item.toolCall.function.arguments &&
+        step.latest === other.latest
+      );
+    })
+  );
+}
 
 type Store = {
   read: () => Reported;
@@ -252,8 +310,16 @@ export function useConversationStatus(): ConversationStatus {
 }
 
 /**
- * Report a conversation's turn and draft, for as long as it is mounted. Outside a conversation route
- * there is nothing to report to, and it returns undefined.
+ * The browser steps the conversation's Bot took, oldest first, each with when this tab first saw it.
+ * None outside a conversation route.
+ */
+export function useConversationSteps(): readonly ConversationStep[] {
+  return useReported(useContext(StoreContext), "steps");
+}
+
+/**
+ * Report a conversation's turn, draft and browser steps, for as long as it is mounted. Outside a
+ * conversation route there is nothing to report to, and it returns undefined.
  *
  * `working` is the turn, not the run, for the reason `ConversationView` gives: a browser action ends
  * one run and starts another, and the orb would land in the gap. `failed` is the turn having ended
@@ -273,6 +339,8 @@ export function useReportConversation({
   const presence = useContext(StoreContext);
   const { approvals } = useContext(ServerContext);
   const step = presence ? stepFor(messages, working, approvals) : null;
+  // Read on every render for the same reason as the step.
+  const steps = presence ? browserSteps(messages) : NO_STEPS;
   const wasWorking = useRef(false);
   const stopped = useRef(false);
   /*
@@ -322,6 +390,19 @@ export function useReportConversation({
   useEffect(() => {
     report((current) => (current.step === step ? null : { step }));
   }, [report, step]);
+
+  useEffect(() => {
+    report((current) => {
+      if (sameSteps(current.steps, steps)) return null;
+      const now = Date.now();
+      return {
+        steps: steps.map((browser) => ({
+          ...browser,
+          at: firstSeen(browser.item.id, now),
+        })),
+      };
+    });
+  }, [report, steps]);
 
   const onTextChange = useCallback(
     (text: string) => {

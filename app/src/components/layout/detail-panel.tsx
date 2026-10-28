@@ -1,6 +1,12 @@
 import { IconX } from "@tabler/icons-react";
 import { motion, useReducedMotion } from "motion/react";
-import { type ReactNode, useLayoutEffect, useRef, useState } from "react";
+import {
+  type ReactNode,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { EASE_OUT } from "@/lib/motion";
@@ -13,6 +19,9 @@ import { EASE_OUT } from "@/lib/motion";
  *
  * The pane is animated by width and the content inside it is given that width outright, so the
  * content is laid out once and the pane reveals it.
+ *
+ * Whether it would be a sheet is the owner's business too, open or closed: something that opens
+ * the pane by itself can keep from covering the page it sits beside (`onOverlayChange`).
  */
 
 const ANIMATION_DURATION_SECONDS = 0.3;
@@ -32,17 +41,23 @@ export function DetailPanel({
   open,
   onClose,
   title,
+  actions,
   detail,
   detailWidth = DEFAULT_DETAIL_WIDTH,
+  onOverlayChange,
   children,
 }: {
   open: boolean;
   onClose: () => void;
   /** Rendered at the left of the detail pane's header row, beside the close button. */
   title?: ReactNode;
+  /** Controls for the detail, at the right of its header row before the close button. */
+  actions?: ReactNode;
   detail?: ReactNode;
   /** Open width of the detail pane, in pixels. */
   detailWidth?: number;
+  /** Told whether the detail would be a sheet over the page, and again whenever that changes. */
+  onOverlayChange?: (overlay: boolean) => void;
   children: ReactNode;
 }) {
   // Reduced motion keeps the fade, which explains the change, and drops the movement.
@@ -61,6 +76,12 @@ export function DetailPanel({
     observer.observe(element);
     return () => observer.disconnect();
   }, [detailWidth]);
+  // Read when the answer changes, so an owner passing a new function each render is not told again.
+  const reportOverlay = useRef(onOverlayChange);
+  reportOverlay.current = onOverlayChange;
+  useEffect(() => {
+    reportOverlay.current?.(overlay);
+  }, [overlay]);
 
   return (
     <div ref={container} className="flex h-full min-h-0">
@@ -76,9 +97,13 @@ export function DetailPanel({
             className="gap-0"
             style={{ width: `min(${detailWidth}px, 100vw)`, maxWidth: "100vw" }}
           >
-            <SheetTitle className="h-12 shrink-0 px-4 pr-12 flex items-center">
-              {title ?? "Details"}
-            </SheetTitle>
+            {/* The sheet's own close button sits at the top right, past the actions. */}
+            <div className="h-12 shrink-0 px-4 pr-12 flex items-center gap-2">
+              <SheetTitle className="flex min-w-0 flex-1 items-center gap-1.5">
+                {title ?? "Details"}
+              </SheetTitle>
+              {actions}
+            </div>
             <div className="flex-1 min-h-0 overflow-y-auto">
               {open ? detail : null}
             </div>
@@ -111,7 +136,8 @@ export function DetailPanel({
               >
                 {title}
               </div>
-              <div className="flex flex-row gap-1.5">
+              <div className="flex shrink-0 flex-row items-center gap-1.5">
+                {actions}
                 <Button
                   aria-label="Close details"
                   onClick={onClose}
