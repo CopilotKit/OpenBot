@@ -50,8 +50,8 @@ Three skins draw the open-source templates' looks over OpenBot's own features: O
 phone-width column with Chat and Tasks), OpenDots (a rail, a sidebar of Bots with their avatars, and
 the Bot's computer beside the chat) and OpenMuse (one Bot at the centre, with Chat, Activity, Ideas,
 Goals and Apps). Every skin keeps your deployment's name from `brand.yaml`, OpenBot's own mark and
-each Bot's own avatar; only the look changes. The choice is kept in your browser, like the dark
-theme, and changes nothing for anybody else. The templates' own features that
+each Bot's own avatar; only the look changes. The choice is saved on your account, so it follows
+you to every device, and changes nothing for anybody else. The templates' own features that
 OpenBot has no server for, such as OpenDots' Spaces, OpenDuet's morning brief and OpenMuse's mail and
 calendar, are not part of the skins.
 
