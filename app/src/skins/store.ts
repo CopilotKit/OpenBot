@@ -1,35 +1,58 @@
 import { useSyncExternalStore } from "react";
-import { SKIN_IDS, type SkinId } from "./types";
+import { DEFAULT_SKIN, SKIN_IDS, type SkinId } from "./types";
 
 /*
- * The skin is a per-browser preference, like the dark theme: it lives in localStorage and nowhere
- * else, so choosing one changes nothing on the server or for anybody else. `index.html` reads the
- * same key before the first paint and sets `data-skin`, so a reload never flashes the default.
+ * The skin is saved on the person's account (`skin` in their preferences), so it follows them to
+ * every device they sign in from. This store is the browser's copy of it, and the one thing every
+ * frame reads.
+ *
+ * localStorage holds it only as a pre-paint cache. `index.html` reads the same key before the first
+ * paint and sets `data-skin`, so a reload never flashes the default while the preferences load. Once
+ * they have loaded, `SkinAccountSync` applies the account's skin over whatever the cache held, so
+ * the account always wins. Signing out clears the cache, so the next person on a shared machine
+ * starts from the default.
  */
 export const SKIN_STORAGE_KEY = "openbot-skin";
 
-export const DEFAULT_SKIN: SkinId = "openbot";
+export { DEFAULT_SKIN };
 
-export function parseStoredSkin(value: string | null): SkinId {
+export function parseStoredSkin(value: string | null | undefined): SkinId {
   return SKIN_IDS.find((id) => id === value) ?? DEFAULT_SKIN;
 }
 
 type SkinEffects = {
   setStoredValue: (key: string, value: string) => void;
+  removeStoredValue: (key: string) => void;
   setRootSkin: (id: SkinId | null) => void;
 };
 
 /** The default skin clears the attribute rather than naming itself, so no skin rule can match it. */
-export function applySkin(id: SkinId, effects: SkinEffects) {
+export function applySkin(
+  id: SkinId,
+  effects: Pick<SkinEffects, "setStoredValue" | "setRootSkin">,
+) {
   effects.setStoredValue(SKIN_STORAGE_KEY, id);
   effects.setRootSkin(id === DEFAULT_SKIN ? null : id);
 }
 
+/** Forget the cached skin and draw the default, as a browser nobody has signed in to does. */
+export function clearCachedSkin(
+  effects: Pick<SkinEffects, "removeStoredValue" | "setRootSkin">,
+) {
+  effects.removeStoredValue(SKIN_STORAGE_KEY);
+  effects.setRootSkin(null);
+}
+
 const browserEffects: SkinEffects = {
+  // localStorage throws in some privacy modes; the skin still applies for this visit.
   setStoredValue: (key, value) => {
-    // localStorage throws in some privacy modes; the skin still applies for this visit.
     try {
       window.localStorage.setItem(key, value);
+    } catch {}
+  },
+  removeStoredValue: (key) => {
+    try {
+      window.localStorage.removeItem(key);
     } catch {}
   },
   setRootSkin: (id) => {
@@ -74,10 +97,28 @@ function notify() {
   }
 }
 
+/** The skin drawn right now, for code outside React (a mutation remembering what to go back to). */
+export function getSkinId(): SkinId {
+  return current;
+}
+
+/**
+ * Draw `id` and cache it for the next pre-paint. This changes nothing on the account: the picker
+ * saves through `saveSkinMutationOptions`, and the account sync calls this with what was saved.
+ */
 export function setSkin(id: SkinId) {
+  const changed = id !== current;
   current = id;
   applySkin(id, browserEffects);
-  notify();
+  if (changed) notify();
+}
+
+/** Signing out: forget the cached skin and go back to the default. */
+export function clearSkin() {
+  const changed = current !== DEFAULT_SKIN;
+  current = DEFAULT_SKIN;
+  clearCachedSkin(browserEffects);
+  if (changed) notify();
 }
 
 /*

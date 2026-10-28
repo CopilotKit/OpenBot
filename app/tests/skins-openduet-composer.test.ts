@@ -14,7 +14,7 @@ const read = (path: string) =>
 test("OpenBot draws a conversation's composer in a wrapper with no side padding", () => {
   const view = read("../src/components/channels/conversation-view.tsx");
   expect(view).toMatch(
-    /<div className="[^"]*\bpx-0\b[^"]*">\s*\{notice\}\s*<Composer/,
+    /<div\s+className="[^"]*\bpx-0\b[^"]*"[^>]*>\s*\{notice\}\s*<Composer/,
   );
 });
 
