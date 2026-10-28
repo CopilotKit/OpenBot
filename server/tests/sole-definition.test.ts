@@ -163,10 +163,10 @@ const KNOWN_DUPLICATES: Record<
 > = {
   "brokered-provenance": {
     finding: "round-1 DRY sweep (`brokeredProvenance` defined 2x) + G-series",
-    why: "One predicate for the app and one for the server, plus the same two-arm literal open-coded as `isBrokered` on the connected-accounts page; collapsing them is a cross-package move the fix cycle owns.",
+    why: "One predicate for the app and one for the server, plus the same two-arm literal open-coded as `isBrokered` in the Connections page's helpers (`lib/plugins/listed.ts`); collapsing them is a cross-package move the fix cycle owns.",
     sites: [
+      "app/src/lib/plugins/listed.ts",
       "app/src/lib/plugins/provider-vocabulary.ts",
-      "app/src/routes/_authed/_app/connections.index.tsx",
       "server/src/plugins/access.ts",
     ],
   },
