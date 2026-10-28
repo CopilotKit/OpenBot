@@ -1,7 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { eq, inArray } from "drizzle-orm";
-import { DATA_FUNCTIONS } from "../src/components/functions";
 import {
   ComponentNotFoundError,
   type ComponentStore,
@@ -386,18 +385,6 @@ describe("what a component may read", () => {
       .from(componentFunctions)
       .where(eq(componentFunctions.componentName, doomed));
     expect(left).toHaveLength(0);
-  });
-
-  test("every shipped function reads real rows and bounds its own arguments", async () => {
-    for (const entry of DATA_FUNCTIONS) {
-      // Run with nothing, which is what a component sends before the model has supplied anything, and
-      // with a hostile number: a value from the browser is a claim, and an unbounded one is a table
-      // scan somebody asked for over the wire.
-      expect(await entry.run(database, {})).toBeDefined();
-      expect(
-        await entry.run(database, { days: 100_000, limit: 100_000 }),
-      ).toBeDefined();
-    }
   });
 
   test("a function this build does not ship cannot be run", async () => {

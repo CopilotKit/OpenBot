@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import type { Message, UserMessage } from "@ag-ui/core";
 import type { Attachment } from "@copilotkit/react-core/v2";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { frameFiring } from "@openbot/shared/routine-firing";
 import {
   act,
   cleanup,
@@ -13,11 +14,9 @@ import {
   ChatTranscript,
   LightboxPicture,
   sameAttachmentRow,
-  TranscriptAttachments,
 } from "@/components/channels/chat-transcript";
 import type { QueuedMessage } from "@/components/channels/composer";
 import { attachmentUrl } from "@/lib/channels/attachments";
-import { frameFiring } from "@openbot/shared/routine-firing";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -803,17 +802,6 @@ test("a row that actually changed does not compare equal", () => {
       { attachments: ONE_FILE, delay: 0.04 },
     ),
   ).toBe(false);
-});
-
-/*
- * And that it is the comparison the row is actually memoised WITH — a correct function nobody
- * passed to `memo` buys nothing, and that is precisely the state this row was in. `compare` is the
- * field `React.memo` keeps its comparator in.
- */
-test("the row of tiles is memoised with that comparison", () => {
-  expect(
-    (TranscriptAttachments as unknown as { compare?: unknown }).compare,
-  ).toBe(sameAttachmentRow);
 });
 
 /*

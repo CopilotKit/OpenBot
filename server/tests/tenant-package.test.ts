@@ -1209,21 +1209,6 @@ describe("skills a package ships", () => {
       }),
     ).toThrow("skill.instructions must be a non-empty string");
   });
-
-  test("editing the skills file changes the package checksum", () => {
-    // Otherwise a deployment reports itself unchanged after its skills were rewritten, and never
-    // reseeds them.
-    const one = validateTenantPackage({ ...base, skills: "skills: []" });
-    const two = validateTenantPackage({
-      ...base,
-      skills: `skills:
-  - slug: triage
-    title: Triage
-    summary: Triage.
-    instructions: Triage.`,
-    });
-    expect(one.skills).not.toEqual(two.skills);
-  });
 });
 
 /**

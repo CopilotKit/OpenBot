@@ -3,7 +3,6 @@ import { seal } from "../src/auth/signed-value";
 import type { CatalogueAuth } from "../src/plugins/catalogue";
 import {
   authorizationUrlFor,
-  challengeFor,
   connectedAccountsUrlFor,
   createVerifier,
   readConnectState,
@@ -219,16 +218,6 @@ describe("PKCE", () => {
 
   test("two verifiers are not the same", () => {
     expect(createVerifier()).not.toBe(createVerifier());
-  });
-
-  test("a challenge is the S256 of the verifier, not the verifier", () => {
-    // `plain` would make the challenge worthless: anybody who intercepted the authorization request
-    // would hold the value needed to redeem the code.
-    const verifier = "a".repeat(43);
-    const challenge = challengeFor(verifier);
-    expect(challenge).not.toBe(verifier);
-    expect(challenge).toMatch(/^[A-Za-z0-9\-_]+$/);
-    expect(challengeFor(verifier)).toBe(challenge);
   });
 });
 

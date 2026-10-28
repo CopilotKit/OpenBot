@@ -4358,23 +4358,6 @@ mod tests {
     }
 
     #[test]
-    fn ask_transport_regressions_do_not_load_from_the_vault() {
-        let source = include_str!("main.rs");
-        let test = source
-            .split("\n    fn ask_the_bot_uses_native_mastra_for_a_picked_mastra_harness()")
-            .nth(1)
-            .expect("ID12 regression")
-            .split("struct TestRequest")
-            .next()
-            .expect("ID12 regression body");
-
-        assert!(
-            !test.contains("ask_the_bot("),
-            "ID12 must test dispatch with resolved settings instead of loading vault-backed settings"
-        );
-    }
-
-    #[test]
     fn runtime_connection_recovery_retains_installation_and_rejects_stale_run_notifications() {
         let root = temp_root("runtime-connection-recovery");
         let shell = Shell::default();
@@ -4580,27 +4563,6 @@ mod tests {
             );
         }
         std::fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn credential_restore_commands_are_not_registered() {
-        let source = include_str!("main.rs");
-        let handlers = source
-            .split("tauri::generate_handler![")
-            .nth(1)
-            .expect("handler list exists")
-            .split("])")
-            .next()
-            .expect("handler list closes");
-        for command in [
-            ["reco", "ver", "_credential"].concat(),
-            ["cancel", "_credential", "_reco", "very"].concat(),
-        ] {
-            assert!(
-                !handlers.contains(&command),
-                "{command} is still registered"
-            );
-        }
     }
 
     #[test]

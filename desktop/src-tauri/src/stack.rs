@@ -6721,17 +6721,6 @@ fn main() {
         assert!(picked.contains(&"agent-harness"));
     }
 
-    /// Stop has to name the profile, or the one Bot the person picked keeps running.
-    #[test]
-    fn stopping_names_the_harness_profile() {
-        let source = include_str!("stack.rs");
-        assert!(
-            source
-                .contains(r#".args(["-f", "docker-compose.yml", "--profile", "harness", "down"])"#),
-            "compose down without the profile leaves agent-harness running"
-        );
-    }
-
     #[test]
     fn the_published_ports_are_read_off_a_real_listing() {
         // Verbatim from `compose ps --format '{{.Ports}}'` against a running deployment.

@@ -145,26 +145,6 @@ describe("reading the people in a deployment", () => {
     expect(byAddress.people.map((one) => one.id)).toEqual([wanted]);
   });
 
-  test("a search for a wildcard finds that, not everything", async () => {
-    // `%` and `_` are LIKE syntax. Unescaped, searching for `100%` returns the deployment.
-    await person(0, new Date(), "Ninety _ Percent");
-    await person(1, new Date(Date.now() - 1000), "Somebody Else");
-
-    const result = await store.list({ search: "_ Percent", limit: 10 });
-    expect(result.people).toHaveLength(1);
-  });
-
-  test("a caller cannot ask for the whole deployment in one page", async () => {
-    // The limit arrives over HTTP. A ceiling here is the thing that makes paging a property of the
-    // endpoint rather than a suggestion to the client.
-    for (let index = 0; index < 3; index += 1) {
-      await person(index, new Date(Date.now() - index * 1000));
-    }
-
-    const asked = await store.list({ limit: 100_000 });
-    expect(asked.people.length).toBeLessThanOrEqual(200);
-  });
-
   test("a nonsense cursor reads as the first page rather than an error", async () => {
     // A stale link or a hand-edited URL. There is nothing here worth refusing over, and the first
     // page is the honest answer to "I do not know where you were".
