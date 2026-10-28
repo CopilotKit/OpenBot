@@ -49,6 +49,7 @@ async function renderSettings() {
     messageListEmphasis: "thread",
     selfHostBannerDismissed: true,
     narration: null,
+    skin: "openbot",
   };
   queryClient.setQueryData(
     userPreferencesQueryOptions("alice").queryKey,
