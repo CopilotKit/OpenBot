@@ -1,9 +1,9 @@
 import { expect, test } from "bun:test";
-import { Hono } from "hono";
 import {
   DEFAULT_USER_PREFERENCES,
   type UserPreferences,
 } from "@openbot/shared/user-preferences";
+import { Hono } from "hono";
 import type { UserPreferencesStore } from "../src/user-preferences";
 import { userPreferencesRoutes } from "../src/user-preferences-routes";
 
@@ -54,6 +54,7 @@ test("preferences default to thread and persist separately for each authenticate
       messageListEmphasis: "thread",
       selfHostBannerDismissed: false,
       narration: null,
+      skin: "openbot",
     },
   });
   const saved = await alice.request(
@@ -66,6 +67,7 @@ test("preferences default to thread and persist separately for each authenticate
       messageListEmphasis: "agent",
       selfHostBannerDismissed: false,
       narration: null,
+      skin: "openbot",
     },
   });
   expect(await (await appFor("bob").request(path)).json()).toEqual({
@@ -73,6 +75,7 @@ test("preferences default to thread and persist separately for each authenticate
       messageListEmphasis: "thread",
       selfHostBannerDismissed: false,
       narration: null,
+      skin: "openbot",
     },
   });
 });
@@ -85,6 +88,9 @@ test.each([
   { narration: "always" },
   { narration: null },
   { messageListEmphasis: "agent", userId: "bob" },
+  { skin: "retired-skin" },
+  { skin: "" },
+  { skin: null },
 ])("rejects invalid or extra preference fields: %j", async (body) => {
   const { appFor, state } = fixture();
   expect((await appFor("alice").request(path, patch(body))).status).toBe(400);
@@ -120,6 +126,7 @@ test("saves the self-host banner dismissal without touching message list emphasi
       messageListEmphasis: "agent",
       selfHostBannerDismissed: true,
       narration: null,
+      skin: "openbot",
     },
   });
   expect(await (await appFor("bob").request(path)).json()).toEqual({
@@ -127,6 +134,7 @@ test("saves the self-host banner dismissal without touching message list emphasi
       messageListEmphasis: "thread",
       selfHostBannerDismissed: false,
       narration: null,
+      skin: "openbot",
     },
   });
 });
@@ -146,6 +154,7 @@ test("keeps the person's narration choice without touching the others, and start
       messageListEmphasis: "agent",
       selfHostBannerDismissed: false,
       narration: "on",
+      skin: "openbot",
     },
   });
   await alice.request(path, patch({ narration: "off" }));
@@ -155,4 +164,48 @@ test("keeps the person's narration choice without touching the others, and start
   expect(
     (await (await appFor("bob").request(path)).json()).preferences.narration,
   ).toBe(null);
+});
+
+test("saves the skin on the account without touching the other preferences", async () => {
+  const { appFor } = fixture();
+  const alice = appFor("alice");
+  await alice.request(path, patch({ messageListEmphasis: "agent" }));
+  const saved = await alice.request(path, patch({ skin: "opendots" }));
+  expect(saved.status).toBe(200);
+  expect(await saved.json()).toEqual({
+    preferences: {
+      messageListEmphasis: "agent",
+      selfHostBannerDismissed: false,
+      narration: null,
+      skin: "opendots",
+    },
+  });
+  // Another browser signed in as Alice reads the same skin; Bob keeps the default.
+  expect(await (await appFor("alice").request(path)).json()).toEqual({
+    preferences: {
+      messageListEmphasis: "agent",
+      selfHostBannerDismissed: false,
+      narration: null,
+      skin: "opendots",
+    },
+  });
+  expect(
+    (
+      (await (await appFor("bob").request(path)).json()) as {
+        preferences: UserPreferences;
+      }
+    ).preferences.skin,
+  ).toBe("openbot");
+});
+
+test("a skin OpenBot does not ship is refused with the skins it does", async () => {
+  const { appFor } = fixture();
+  const refused = await appFor("alice").request(
+    path,
+    patch({ skin: "retired-skin" }),
+  );
+  expect(refused.status).toBe(400);
+  expect(((await refused.json()) as { error: string }).error).toContain(
+    "openbot, openduet, opendots, openmuse",
+  );
 });

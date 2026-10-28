@@ -5,6 +5,7 @@
 @import "prompt-area/tailwind.css";
 @import "@fontsource-variable/inter";
 @import "./theme.css";
+@import "./skins/skins.css";
 
 /*
  * Streamdown draws a Bot's prose, and Tailwind only ships classes it can see used. Its markup lives

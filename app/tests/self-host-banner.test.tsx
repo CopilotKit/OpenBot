@@ -87,6 +87,7 @@ function setup({
     messageListEmphasis: "thread",
     selfHostBannerDismissed: dismissed,
     narration: null,
+    skin: "openbot",
   };
   client.setQueryData(
     userPreferencesQueryOptions("alice").queryKey,

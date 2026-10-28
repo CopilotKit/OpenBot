@@ -96,9 +96,11 @@ export function PageHeader({
   title: string;
 }) {
   return (
-    <header className="flex flex-col gap-2">
+    <header className="flex flex-col gap-2" data-slot="page-header">
       <div className="flex flex-row items-center justify-between gap-4">
-        <h1 className="font-bold text-2xl">{title}</h1>
+        <h1 className="font-bold text-2xl" data-slot="page-title">
+          {title}
+        </h1>
         {action}
       </div>
       {description ? (

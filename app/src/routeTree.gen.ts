@@ -57,6 +57,7 @@ import { Route as AuthedAppConnectionsIndexRouteImport } from './routes/_authed/
 import { Route as AuthedAppConnectionsKeyRouteImport } from './routes/_authed/_app/connections.$key'
 import { Route as AuthedAppGroupChannelIdRouteImport } from './routes/_authed/_app/group/$channelId'
 import { Route as AuthedAppGroupNewRouteImport } from './routes/_authed/_app/group/new'
+import { Route as AuthedAppSScreenRouteImport } from './routes/_authed/_app/s/$screen'
 import { Route as AuthedAdminBoundariesIndexRouteImport } from './routes/_authed/admin/boundaries_.$index'
 import { Route as AuthedAdminBoundariesNewRouteImport } from './routes/_authed/admin/boundaries_.new'
 import { Route as AuthedAdminComponentsIndexRouteImport } from './routes/_authed/admin/components/index'
@@ -329,6 +330,11 @@ const AuthedAppGroupNewRoute = AuthedAppGroupNewRouteImport.update({
   path: '/group/new',
   getParentRoute: () => AuthedAppRoute,
 } as any)
+const AuthedAppSScreenRoute = AuthedAppSScreenRouteImport.update({
+  id: '/s/$screen',
+  path: '/s/$screen',
+  getParentRoute: () => AuthedAppRoute,
+} as any)
 const AuthedAdminBoundariesIndexRoute =
   AuthedAdminBoundariesIndexRouteImport.update({
     id: '/boundaries_/$index',
@@ -521,6 +527,7 @@ export interface FileRoutesByFullPath {
   '/connections/$key': typeof AuthedAppConnectionsKeyRoute
   '/group/$channelId': typeof AuthedAppGroupChannelIdRoute
   '/group/new': typeof AuthedAppGroupNewRoute
+  '/s/$screen': typeof AuthedAppSScreenRoute
   '/admin/boundaries/$index': typeof AuthedAdminBoundariesIndexRoute
   '/admin/boundaries/new': typeof AuthedAdminBoundariesNewRoute
   '/admin/components/$name': typeof AuthedAdminComponentsNameRoute
@@ -591,6 +598,7 @@ export interface FileRoutesByTo {
   '/connections/$key': typeof AuthedAppConnectionsKeyRoute
   '/group/$channelId': typeof AuthedAppGroupChannelIdRoute
   '/group/new': typeof AuthedAppGroupNewRoute
+  '/s/$screen': typeof AuthedAppSScreenRoute
   '/admin/boundaries/$index': typeof AuthedAdminBoundariesIndexRoute
   '/admin/boundaries/new': typeof AuthedAdminBoundariesNewRoute
   '/admin/components/$name': typeof AuthedAdminComponentsNameRoute
@@ -667,6 +675,7 @@ export interface FileRoutesById {
   '/_authed/_app/connections/$key': typeof AuthedAppConnectionsKeyRoute
   '/_authed/_app/group/$channelId': typeof AuthedAppGroupChannelIdRoute
   '/_authed/_app/group/new': typeof AuthedAppGroupNewRoute
+  '/_authed/_app/s/$screen': typeof AuthedAppSScreenRoute
   '/_authed/admin/boundaries_/$index': typeof AuthedAdminBoundariesIndexRoute
   '/_authed/admin/boundaries_/new': typeof AuthedAdminBoundariesNewRoute
   '/_authed/admin/components/$name': typeof AuthedAdminComponentsNameRoute
@@ -742,6 +751,7 @@ export interface FileRouteTypes {
     | '/connections/$key'
     | '/group/$channelId'
     | '/group/new'
+    | '/s/$screen'
     | '/admin/boundaries/$index'
     | '/admin/boundaries/new'
     | '/admin/components/$name'
@@ -812,6 +822,7 @@ export interface FileRouteTypes {
     | '/connections/$key'
     | '/group/$channelId'
     | '/group/new'
+    | '/s/$screen'
     | '/admin/boundaries/$index'
     | '/admin/boundaries/new'
     | '/admin/components/$name'
@@ -887,6 +898,7 @@ export interface FileRouteTypes {
     | '/_authed/_app/connections/$key'
     | '/_authed/_app/group/$channelId'
     | '/_authed/_app/group/new'
+    | '/_authed/_app/s/$screen'
     | '/_authed/admin/boundaries_/$index'
     | '/_authed/admin/boundaries_/new'
     | '/_authed/admin/components/$name'
@@ -1261,6 +1273,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedAppGroupNewRouteImport
       parentRoute: typeof AuthedAppRoute
     }
+    '/_authed/_app/s/$screen': {
+      id: '/_authed/_app/s/$screen'
+      path: '/s/$screen'
+      fullPath: '/s/$screen'
+      preLoaderRoute: typeof AuthedAppSScreenRouteImport
+      parentRoute: typeof AuthedAppRoute
+    }
     '/_authed/admin/boundaries_/$index': {
       id: '/_authed/admin/boundaries_/$index'
       path: '/boundaries/$index'
@@ -1563,6 +1582,7 @@ interface AuthedAppRouteChildren {
   AuthedAppConnectionsKeyRoute: typeof AuthedAppConnectionsKeyRoute
   AuthedAppGroupChannelIdRoute: typeof AuthedAppGroupChannelIdRoute
   AuthedAppGroupNewRoute: typeof AuthedAppGroupNewRoute
+  AuthedAppSScreenRoute: typeof AuthedAppSScreenRoute
   AuthedAppAgentsIndexRoute: typeof AuthedAppAgentsIndexRoute
   AuthedAppBotsIndexRoute: typeof AuthedAppBotsIndexRoute
   AuthedAppConnectionsIndexRoute: typeof AuthedAppConnectionsIndexRoute
@@ -1595,6 +1615,7 @@ const AuthedAppRouteChildren: AuthedAppRouteChildren = {
   AuthedAppConnectionsKeyRoute: AuthedAppConnectionsKeyRoute,
   AuthedAppGroupChannelIdRoute: AuthedAppGroupChannelIdRoute,
   AuthedAppGroupNewRoute: AuthedAppGroupNewRoute,
+  AuthedAppSScreenRoute: AuthedAppSScreenRoute,
   AuthedAppAgentsIndexRoute: AuthedAppAgentsIndexRoute,
   AuthedAppBotsIndexRoute: AuthedAppBotsIndexRoute,
   AuthedAppConnectionsIndexRoute: AuthedAppConnectionsIndexRoute,

@@ -2,12 +2,23 @@ import { createFileRoute, Outlet } from "@tanstack/react-router";
 import { AppSidebar } from "@/components/app-sidebar/app-sidebar";
 import { SelfHostBanner } from "@/components/layout/self-host-banner";
 import { SidebarShell } from "@/components/layout/sidebar-shell";
+import { useActiveSkin } from "@/skins/registry";
 
 export const Route = createFileRoute("/_authed/_app")({
   component: RouteComponent,
 });
 
 function RouteComponent() {
+  const { Frame } = useActiveSkin();
+
+  if (Frame) {
+    return (
+      <Frame>
+        <Outlet />
+      </Frame>
+    );
+  }
+
   return (
     // One viewport, never scrolls: panes scroll inside it. A growable shell lets the transcript's
     // scroller size against the page, grow it, and grow again.

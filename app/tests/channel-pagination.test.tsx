@@ -169,6 +169,7 @@ function renderSidebar() {
     messageListEmphasis: "thread",
     selfHostBannerDismissed: false,
     narration: null,
+    skin: "openbot",
   });
   queryClient.setQueryData(authKeys.currentUser(), {
     id: "user",
@@ -230,6 +231,7 @@ test("message emphasis updates mounted rows from the account preferences cache",
       messageListEmphasis: "agent",
       selfHostBannerDismissed: false,
       narration: null,
+      skin: "openbot",
     }),
   );
   await waitFor(() => expect(agent.className).toContain("text-[0.9rem]"));
