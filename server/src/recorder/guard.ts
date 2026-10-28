@@ -14,6 +14,7 @@ import {
   ORGANIZATION_SESSION_COOKIE,
 } from "../auth/organization";
 import type { OpenBotRole } from "../auth/roles";
+import { reasonWithoutStatement } from "../db/query-failure";
 import type { RecorderConnectionStore } from "./connections";
 import type { RecorderVariables } from "./variables";
 
@@ -97,6 +98,13 @@ export function createRecorderResolver(deps: {
   now?: () => number;
   /** Test seam: the cache the organization's verdicts are kept in. */
   verdicts?: OrganizationVerdictCache;
+  /**
+   * Organization mode: the organization no longer signs in the session this connection holds a copy of, so the
+   * connection ends (connections.ts `revoke`, with its sealed copy). Whatever ended that session at the organization (a
+   * sign-out there, signing out everywhere, a password reset, an administrator) ends the Recorder with it, the next
+   * time it asks.
+   */
+  endConnection?: (userId: string, connectionId: string) => Promise<void>;
 }): RecorderResolver {
   const now = deps.now ?? Date.now;
   const organizationVerdicts: OrganizationVerdictCache =
@@ -182,6 +190,17 @@ export function createRecorderResolver(deps: {
         throw error;
       }
       remember(connectionId, verdict);
+      if ("refused" in verdict && deps.endConnection) {
+        // The refusal stands either way: the organization refuses this session on every ask.
+        await deps.endConnection(userId, connectionId).catch((error: unknown) =>
+          console.error(
+            JSON.stringify({
+              type: "recorder-organization-end-failed",
+              error: reasonWithoutStatement(error),
+            }),
+          ),
+        );
+      }
     }
     if ("refused" in verdict) return { refused: "organization", userId };
     return { actor: { ...person, role: verdict.role, connectionId } };

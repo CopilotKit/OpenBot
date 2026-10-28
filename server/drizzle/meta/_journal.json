@@ -477,6 +477,13 @@
       "when": 1793052258554,
       "tag": "0067_recorder_activity",
       "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1793203501366,
+      "tag": "0068_recorder_organization_session_expiry",
+      "breakpoints": true
     }
   ]
 }

@@ -8,18 +8,8 @@ import {
   IconSettings,
   IconShieldLock,
 } from "@tabler/icons-react";
-import {
-  useInfiniteQuery,
-  useMutation,
-  useQuery,
-  useQueryClient,
-} from "@tanstack/react-query";
-import {
-  Link,
-  type LinkOptions,
-  useNavigate,
-  useParams,
-} from "@tanstack/react-router";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import { Link, type LinkOptions, useParams } from "@tanstack/react-router";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import type * as React from "react";
 import { useRef, useState } from "react";
@@ -45,7 +35,6 @@ import {
   SidebarMenuItem,
   SidebarRail,
 } from "@/components/ui/sidebar";
-import { signOutMutationOptions } from "@/lib/auth/mutations";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import {
   type ChannelSummary,
@@ -65,6 +54,7 @@ import { Button } from "../ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty";
 import { Channel } from "./channel";
 import { ChannelPagination } from "./channel-pagination";
+import { useSignOut } from "./use-sign-out";
 
 const appLinkOptions = { to: "/" } satisfies LinkOptions;
 const adminLinkOptions = { to: "/admin" } satisfies LinkOptions;
@@ -221,9 +211,7 @@ function ChannelRow({
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const emphasis = useMessageListEmphasis();
   const { data: currentUser } = useQuery(currentUserQueryOptions());
-  const queryClient = useQueryClient();
-  const navigate = useNavigate();
-  const signOut = useMutation(signOutMutationOptions(queryClient));
+  const signOut = useSignOut();
   const channels = useInfiniteQuery(channelListQueryOptions());
   // One socket for the app, opened where the roster is kept live.
   useChannelEvents();
@@ -239,11 +227,6 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
    */
   const animateOrder =
     !searching && (channels.data?.length ?? 0) <= MAX_ANIMATED_ROWS;
-
-  const handleSignOut = async () => {
-    await signOut.mutateAsync();
-    await navigate({ to: "/sign" });
-  };
 
   return (
     <Sidebar {...props}>
@@ -451,8 +434,8 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   className={userMenuItemClassName}
-                  disabled={signOut.isPending}
-                  onClick={handleSignOut}
+                  disabled={signOut.pending}
+                  onClick={signOut.run}
                   variant="destructive"
                 >
                   <IconLogout />

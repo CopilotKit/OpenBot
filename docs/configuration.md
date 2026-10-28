@@ -391,6 +391,21 @@ origin, or HTTP on loopback, and a bare origin: a username, password, query, fra
 other than `/` is refused at start-up. Naming one settles sign-in by itself, ahead of
 `OPENBOT_SINGLE_USER`.
 
+**A browser connected with the OpenBot Recorder is signed in as its person, and only while they
+are.** Its connection ends after a week unused, as a session does, or, with
+`OPENBOT_ORGANIZATION_AUTH_URL`, when the organization session cookie it was connected with expires.
+It ends at once when the person signs out, when their sessions are ended any other way (signing out
+everywhere, the directory deactivating them, SSO-required being turned on, or their organization
+ending the session), and when they are removed. A sign-out that cannot end their Recorder connections
+does not happen: the person is told to try again, still signed in, and a `recorder.sign_out_failed`
+row goes on the audit trail.
+
+**Recordings cannot be deleted from OpenBot yet.** A recording goes from the person's browser to
+Intelligence, into their own Learning space (see [Automatic Learning](automatic-learning.md));
+OpenBot keeps only which recordings are whose. Intelligence has no API a server credential can call
+to delete a recording, or a Learning space that still holds one, so nobody can delete a recording
+from OpenBot, and a person's recordings stay in Intelligence after they are removed from OpenBot.
+
 **Any one provider turns sign-in on**, and several may be configured at once. Each provider's id and
 secret must be set together, Okta additionally needs its issuer, and any of them requires
 `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL` and `INITIAL_ADMIN_EMAILS`. Every incomplete combination is

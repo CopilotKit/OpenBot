@@ -483,6 +483,8 @@ const peopleStore = createPeopleStore(
           userId,
           by,
         ),
+      // Removing somebody ends their sessions, so it ends their browsers' Recorders too.
+      recorders: () => signOutRecorders(userId, "person_removed"),
     }),
 );
 const identityProviderStore = createIdentityProviderStore(database);
@@ -492,18 +494,19 @@ const identityProviderStore = createIdentityProviderStore(database);
  */
 const signInAuditStore = createAuditStore(database);
 /*
- * Signing out of OpenBot signs the person's browsers' Recorders out with them: every connection they hold ends. Called
- * on a sign-out, which comes after the Recorder's wiring below exists.
+ * A person's sign-in ending here ends their browsers' Recorders with it, however it ends: they sign out, their sessions
+ * are ended (by them, an administrator, the directory, the identity provider), or they are removed. Retried, and when it
+ * still fails the sign-in does not end either (recorder/sign-out.ts). Called only once something ends, which comes after
+ * the Recorder's wiring below exists.
  */
-const signOutRecorders = async (userId: string) => {
-  await recorderExtension.connections.revokeAll(userId, "signed_out");
-};
+const signOutRecorders = (userId: string, via: string) =>
+  recorderExtension.signOut(userId, via);
 // Its own const so the Recorder can re-check a stored session through `verifySessionQuietly`.
 const organizationAuth = config.organizationAuthUrl
   ? createOrganizationAuth({
       authorityUrl: config.organizationAuthUrl,
       materializeUser: organizationUserStore(database),
-      onSignedOut: signOutRecorders,
+      signOutRecorders,
     })
   : undefined;
 // Its own const so the Recorder's connections can last as long as one of its sessions does.
@@ -514,7 +517,7 @@ const betterAuth =
         database,
         (email) => peopleStore.isRevoked(email),
         signInAuditStore,
-        { onSignedOut: signOutRecorders },
+        { signOutRecorders },
       )
     : undefined;
 const auth: AuthService | undefined = organizationAuth ?? betterAuth;
@@ -2420,6 +2423,10 @@ await installEnterpriseControls({
   builtInModel: `${runtimeModel.provider}/${runtimeModel.defaultModel}`,
   people: peopleStore,
   initialAdminEmails: config.auth?.initialAdminEmails ?? [],
+  recorders: {
+    holders: () => recorderExtension.connections.holders(),
+    signOut: signOutRecorders,
+  },
 });
 guardDeliveryStore(
   deliveryStore,

@@ -8,6 +8,8 @@ import { desktopAuthPage } from "../src/auth/native-browser";
 import {
   AuthorityUnavailable,
   createOrganizationAuth,
+  organizationCookieExpiresAt,
+  SIGN_OUT_UNFINISHED,
 } from "../src/auth/organization";
 import {
   clearDesktopConnectionFailure,
@@ -172,8 +174,8 @@ test("organization identity and current role come from the authority; expiry and
   }
 });
 
-test("signing out ends what else the person was signed in with, once the organization has signed them out", async () => {
-  const signedOutAt: string[] = [];
+test("signing out ends the person's Recorders first, and does not sign out when they could not be ended", async () => {
+  const happened: string[] = [];
   const authority = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
@@ -181,18 +183,20 @@ test("signing out ends what else the person was signed in with, once the organiz
       const path = new URL(request.url).pathname;
       if (path === "/api/me") return Response.json({ user: employee });
       if (path === "/api/auth/sign-out") {
-        signedOutAt.push("authority");
+        happened.push("organization signed out");
         return Response.json({ success: true });
       }
       return new Response(null, { status: 404 });
     },
   });
   const app = "http://127.0.0.1:3010";
-  const signOut = async (onSignedOut: (userId: string) => Promise<void>) => {
+  const signOut = async (
+    signOutRecorders: (userId: string, via: string) => Promise<void>,
+  ) => {
     const auth = createOrganizationAuth({
       authorityUrl: authority.url.origin,
       materializeUser: async (user) => user,
-      onSignedOut,
+      signOutRecorders,
     });
     const start = await auth.handler(
       new Request(`${app}/api/auth/organization/session`, {
@@ -216,22 +220,26 @@ test("signing out ends what else the person was signed in with, once the organiz
     );
   };
   try {
-    const ended: string[] = [];
-    const response = await signOut(async (userId) => {
-      signedOutAt.push("here");
-      ended.push(userId);
+    const signedOut = await signOut(async (userId, via) => {
+      happened.push(`Recorders of ${userId} ended by ${via}`);
     });
-    expect(response.status).toBe(200);
-    expect(ended).toEqual([employee.id]);
-    // Only after the organization accepted the sign-out.
-    expect(signedOutAt).toEqual(["authority", "here"]);
+    expect(signedOut.status).toBe(200);
+    expect(signedOut.headers.get("set-cookie")).toContain("Max-Age=0");
+    // The Recorders before the organization's session: never a sign-out answered with a Recorder still signed in.
+    expect(happened).toEqual([
+      `Recorders of ${employee.id} ended by organization-sign-out`,
+      "organization signed out",
+    ]);
 
-    // What follows failing never undoes the sign-out the organization already made.
-    const failing = await signOut(async () => {
+    // When they could not be ended, nothing is: the organization's session and the cookie stay, and the person is told.
+    happened.length = 0;
+    const refused = await signOut(async () => {
       throw new Error("the database is unavailable");
     });
-    expect(failing.status).toBe(200);
-    expect(failing.headers.get("set-cookie")).toContain("Max-Age=0");
+    expect(refused.status).toBe(503);
+    expect(await refused.json()).toEqual({ error: SIGN_OUT_UNFINISHED });
+    expect(refused.headers.get("set-cookie")).toBeNull();
+    expect(happened).toEqual([]);
   } finally {
     authority.stop(true);
   }
@@ -443,5 +451,88 @@ describe("quiet verification of a forwarded cookie", () => {
     const user = await auth.verifySessionQuietly(cookieHeader);
     expect(user?.id).toBe("local-employee-1");
     expect(materialized).toEqual(["employee-1"]);
+  });
+});
+
+describe("the organization session cookie's own expiry", () => {
+  const record = (fields: Record<string, unknown>) =>
+    Buffer.from(
+      JSON.stringify({
+        authority: "http://127.0.0.1:1",
+        cookie: "better-auth.session_token=fixture",
+        ...fields,
+      }),
+    ).toString("base64url");
+  const now = Date.parse("2026-10-28T12:00:00.000Z");
+  const week = 7 * 24 * 60 * 60_000;
+
+  test("is the expiry the cookie carries, never later than its Max-Age from now", () => {
+    const inTwoDays = now + 2 * 24 * 60 * 60_000;
+    expect(
+      organizationCookieExpiresAt(record({ expiresAt: inTwoDays }), now),
+    ).toEqual(new Date(inTwoDays));
+    // The record is the browser's to edit: a later expiry than any cookie set now could have is not believed.
+    expect(
+      organizationCookieExpiresAt(record({ expiresAt: now + 10 * week }), now),
+    ).toEqual(new Date(now + week));
+    // A cookie set before the expiry was written into it lasts no longer than one set now would.
+    expect(organizationCookieExpiresAt(record({}), now)).toEqual(
+      new Date(now + week),
+    );
+  });
+
+  test("the handoff writes it into the cookie, and a cookie past it signs nobody in", async () => {
+    const authority = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: () => Response.json({ user: employee }),
+    });
+    try {
+      const auth = createOrganizationAuth({
+        authorityUrl: authority.url.origin,
+        materializeUser: async (user) => user,
+      });
+      const app = "http://127.0.0.1:3010";
+      const start = await auth.handler(
+        new Request(`${app}/api/auth/organization/session`, {
+          method: "POST",
+          headers: { origin: app, "content-type": "application/json" },
+          body: JSON.stringify({
+            cookie: "better-auth.session_token=fixture-session",
+          }),
+        }),
+      );
+      const { ticket } = await start.json();
+      const issuedAt = Date.now();
+      const consumed = await auth.handler(
+        new Request(`${app}/api/auth/organization/session?ticket=${ticket}`),
+      );
+      const [cookie = ""] = (consumed.headers.get("set-cookie") ?? "").split(
+        ";",
+      );
+      const value = cookie.slice("openbot.organization-session=".length);
+      const written = JSON.parse(
+        Buffer.from(value, "base64url").toString(),
+      ) as { expiresAt: number };
+      expect(written.expiresAt).toBeGreaterThanOrEqual(issuedAt + week);
+      expect(written.expiresAt).toBeLessThanOrEqual(Date.now() + week);
+      const session = (cookieValue: string) =>
+        auth.api.getSession({
+          headers: new Headers({
+            cookie: `openbot.organization-session=${cookieValue}`,
+          }),
+          query: { disableCookieCache: true },
+        });
+      expect((await session(value))?.user.id).toBe(employee.id);
+      const expired = Buffer.from(
+        JSON.stringify({
+          ...JSON.parse(Buffer.from(value, "base64url").toString()),
+          expiresAt: Date.now() - 1,
+        }),
+      ).toString("base64url");
+      expect(await session(expired)).toBeNull();
+    } finally {
+      authority.stop(true);
+    }
   });
 });

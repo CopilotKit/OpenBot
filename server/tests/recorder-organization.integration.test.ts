@@ -16,10 +16,7 @@ import { RECORDER_EXTENSION_ID } from "@openbot/shared/recorder-extension";
 import { eq } from "drizzle-orm";
 import { createApp } from "../src/app";
 import type { AuditEventInput } from "../src/audit";
-import {
-  createOrganizationAuth,
-  ORGANIZATION_SESSION_MAX_AGE_SECONDS,
-} from "../src/auth/organization";
+import { createOrganizationAuth } from "../src/auth/organization";
 import { organizationUserStore } from "../src/auth/organization-store";
 import { loadConfig } from "../src/config";
 import { createDatabase } from "../src/db/client";
@@ -237,20 +234,45 @@ test("an odd answer from the organization's sign-in server never signs the Recor
   });
   expect((await me()).status).toBe(200);
 
-  // Only an explicit refusal signs the Recorder out, 401 and 403 alike.
+  // Only an explicit refusal signs the Recorder out, 401 and 403 alike, and for good: see the next test.
   for (const status of [401, 403]) {
+    const fresh = await connect(cookie, String(status).padEnd(32, "f"));
+    const asks = () =>
+      call("/api/recorder/me", { headers: bearer(fresh.token) });
     pastTheCache();
     answer = () => new Response(null, { status });
-    const signedOut = await me();
+    const signedOut = await asks();
     expect(signedOut.status, String(status)).toBe(401);
     expect(await signedOut.json(), String(status)).toMatchObject({
       code: RECORDER_SIGNED_OUT,
       reason: "organization",
     });
     answer = signedIn;
-    pastTheCache();
-    expect((await me()).status, `after ${status}`).toBe(200);
   }
+});
+
+test("a session the organization ended, however it ended there, ends the Recorder connection that holds a copy of it", async () => {
+  const cookie = await organizationCookie();
+  const { token, connection } = await connect(cookie, "e".repeat(32));
+  const me = () => call("/api/recorder/me", { headers: bearer(token) });
+  expect((await me()).status).toBe(200);
+  // Signed out everywhere at the organization, or reset their password there, or an administrator ended it.
+  pastTheCache();
+  answer = () => new Response(null, { status: 401 });
+  expect((await me()).status).toBe(401);
+  const [row] = await database
+    .select({
+      revokedAt: recorderConnections.revokedAt,
+      sealed: recorderConnections.organizationSession,
+    })
+    .from(recorderConnections)
+    .where(eq(recorderConnections.id, connection.id));
+  expect(row?.revokedAt).not.toBeNull();
+  expect(row?.sealed).toBeNull();
+  // Ended, not paused: the organization answering for that cookie again does not bring it back.
+  answer = signedIn;
+  pastTheCache();
+  expect((await me()).status).toBe(401);
 });
 
 test("a person the organization removed is refused once the cached answer ages out, and the re-check leaves Desktop's failure state alone", async () => {
@@ -298,23 +320,37 @@ test("the stored organization session is sealed, never the raw cookie", async ()
   expect(row?.sealed).not.toContain(cookie);
 });
 
-test("a connection lasts no longer than the organization session cookie it carries a copy of, however much it is used", async () => {
-  const cookie = await organizationCookie();
+test("a connection lasts until the organization session cookie it carries a copy of expires, not a week from connecting", async () => {
+  // A cookie set five days ago: two days left, as the cookie itself says.
+  const issued = await organizationCookie();
+  const [name, value] = issued.split("=") as [string, string];
+  const record = JSON.parse(Buffer.from(value, "base64url").toString()) as {
+    expiresAt: number;
+  };
+  const twoDaysLeft = Date.now() + 2 * 24 * 60 * 60_000;
+  const cookie = `${name}=${Buffer.from(
+    JSON.stringify({ ...record, expiresAt: twoDaysLeft }),
+  ).toString("base64url")}`;
   const { token, connection } = await connect(cookie, "d".repeat(32));
   const me = () => call("/api/recorder/me", { headers: bearer(token) });
   expect((await me()).status).toBe(200);
-  // Made a minute short of the cookie's Max-Age ago, and used just now: it still stands. On the real clock, which the
-  // store reads: `Date.now` is skewed here for the guard's cache.
-  const madeAgo = async (ms: number) => {
-    await database
-      .update(recorderConnections)
-      .set({ createdAt: new Date(realNow() - ms), lastUsedAt: new Date() })
-      .where(eq(recorderConnections.id, connection.id));
-  };
-  await madeAgo(ORGANIZATION_SESSION_MAX_AGE_SECONDS * 1_000 - 60_000);
-  expect((await me()).status).toBe(200);
-  // A minute past it: the browser that held the cookie no longer would, and nor does the connection.
-  await madeAgo(ORGANIZATION_SESSION_MAX_AGE_SECONDS * 1_000 + 60_000);
+  const kept = async () =>
+    (
+      await database
+        .select({ at: recorderConnections.organizationSessionExpiresAt })
+        .from(recorderConnections)
+        .where(eq(recorderConnections.id, connection.id))
+    )[0]?.at?.getTime();
+  expect(await kept()).toBe(twoDaysLeft);
+  // Those two days gone (the store reads the real clock: `Date.now` is skewed here for the guard's cache), however
+  // recently it was used: the browser no longer holds the cookie, and the connection no longer stands.
+  await database
+    .update(recorderConnections)
+    .set({
+      organizationSessionExpiresAt: new Date(realNow() - 1_000),
+      lastUsedAt: new Date(),
+    })
+    .where(eq(recorderConnections.id, connection.id));
   const expired = await me();
   expect(expired.status).toBe(401);
   expect(await expired.json()).toMatchObject({ code: RECORDER_SIGNED_OUT });

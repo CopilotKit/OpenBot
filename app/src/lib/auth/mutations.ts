@@ -5,7 +5,8 @@ import { authKeys } from "./queries";
 async function signOut() {
   await client("/api/auth/sign-out", {
     method: "POST",
-    fallback: "Could not sign out",
+    // What a refused sign-out means whoever answers it (Better Auth puts its sentence where `client` does not read).
+    fallback: "Signing out did not finish. Try again.",
   });
 }
 

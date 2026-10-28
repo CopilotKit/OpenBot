@@ -25,6 +25,10 @@ export const recorderConnectCodes = pgTable(
     /** Organization mode only: the minting request's organization session cookie, sealed with KEY_ENCRYPTION_KEY. The
      * code is deleted when it is used and once it has expired, and this copy with it. */
     organizationSession: text("organization_session"),
+    /** When that cookie itself expires, which the connection made from this code keeps (connections.ts). */
+    organizationSessionExpiresAt: timestamp("organization_session_expires_at", {
+      withTimezone: true,
+    }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -48,6 +52,13 @@ export const recorderConnections = pgTable(
     installId: text("install_id").notNull(),
     /** Organization mode only, copied from the connect code: re-verified against the authority. Cleared on revoke. */
     organizationSession: text("organization_session"),
+    /**
+     * When the organization session cookie that copy was taken from expires: the connection ends then, and the copy with
+     * it, since it must not outlive the cookie. Null for a connection made before this was kept, and once revoked.
+     */
+    organizationSessionExpiresAt: timestamp("organization_session_expires_at", {
+      withTimezone: true,
+    }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
