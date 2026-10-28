@@ -36,14 +36,15 @@
 import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { type BrowserContext, chromium, type Page } from "playwright";
-import { profileDirectoryFor } from "./bot-id";
+import { profileDirectoryFor, seatParts } from "./bot-id";
 import { chooseEvictions, chooseIdle } from "./browser-eviction";
+import { type CarryOverOutcome, carryOverProfile } from "./carry-over";
 import { browserRuntimeFromEnv } from "./browser-runtime";
 import { egressFor, egressLabel } from "./egress";
 import { numberFromEnv, settleWithin } from "./env";
 import { chooseLivePage } from "./live-page";
 import { attachBrowserNetwork, attachPageNetwork } from "./page-network";
-import { botIdsIn } from "./profile-listing";
+import { seatIdsIn } from "./profile-listing";
 import {
   type SessionCookieKeeper,
   sessionCookieKeeper,
@@ -197,7 +198,11 @@ export type BotBrowser = {
 };
 
 export type ProfileSummary = {
+  /** The seat: the Bot, or the person and the Bot on a computer many people share. */
+  seat: string;
   botId: string;
+  /** Whose seat it is, where this computer serves more than one person. */
+  personId?: string;
   /** Whether a browser is running for this Bot right now. */
   running: boolean;
   /** When this Bot's browser was last started, or null if it is not running. */
@@ -472,7 +477,9 @@ export function createProfiles(root: string, onClosed: BrowserClosed) {
           await sweepLocks(dir);
           await keepWebRtcInsideProxy(dir);
         }
-        const proxy = egressFor(botId, process.env);
+        // The Bot's own proxy and policy, whoever's seat this is: a seat is a Bot's place on this
+        // computer (see `seatIdFor`), and what it may reach is decided per Bot.
+        const proxy = egressFor(seatParts(botId).botId, process.env);
         const context = await chromium.launchPersistentContext(dir, {
           channel: BROWSER_RUNTIME.channel,
           headless: BROWSER_RUNTIME.mode === "headless",
@@ -603,6 +610,25 @@ export function createProfiles(root: string, onClosed: BrowserClosed) {
     },
 
     /**
+     * Give a person the profile their private Bot had before seats were per person. See carry-over.ts.
+     *
+     * Held as a close of the seat, so a request for it cannot launch a browser on a directory that is
+     * half way through arriving.
+     */
+    async carryOver(botId: string, seatId: string): Promise<CarryOverOutcome> {
+      let outcome: CarryOverOutcome = "absent";
+      await whileClosing(seatId, async () => {
+        outcome = await carryOverProfile(root, botId, seatId, () =>
+          closeOnRequest(
+            botId,
+            "its profile moved to the person it belongs to",
+          ),
+        );
+      });
+      return outcome;
+    },
+
+    /**
      * Every Bot that has a computer, whether or not one is running.
      *
      * Read from disk rather than from memory, because a Bot's computer exists as long as its profile
@@ -617,16 +643,19 @@ export function createProfiles(root: string, onClosed: BrowserClosed) {
        * The rule lives in its own module, so the test that covers it imports the same one this uses.
        * It had a copy before, which meant deleting this filter left the suite green.
        */
-      return [...new Set([...botIdsIn(onDisk), ...live.keys()])].sort();
+      return [...new Set([...seatIdsIn(onDisk), ...live.keys()])].sort();
     },
 
     /** What the admin surface lists. Running or not, because a Bot that has a profile has a computer. */
     summary(botIds: string[]): ProfileSummary[] {
       const known = new Set([...botIds, ...live.keys()]);
-      return [...known].sort().map((botId) => {
-        const running = live.get(botId);
+      return [...known].sort().map((seat) => {
+        const running = live.get(seat);
+        const { botId, personId } = seatParts(seat);
         return {
+          seat,
           botId,
+          ...(personId ? { personId } : {}),
           running: Boolean(running),
           startedAt: running?.startedAt ?? null,
           egress: egressLabel(botId, process.env),

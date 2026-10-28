@@ -16,7 +16,7 @@ import {
   mutatesBrowser,
   offeredToken,
 } from "./authorisation";
-import { isPlainBotId } from "./bot-id";
+import { isPlainBotId, seatIdFor } from "./bot-id";
 import { browserRuntimeFromEnv } from "./browser-runtime";
 import { detectChallenge } from "./challenge";
 import {
@@ -180,16 +180,36 @@ const sessions = createSessions({
 });
 
 /**
- * Sent by the server as a header on every call. Absent means the caller does not know or does not
- * care, such as a health check, and that gets the default computer rather than an error, because
- * refusing it would make the container undemonstrable on its own.
+ * Which Bot a request is for, and whose seat on this computer it reaches.
+ *
+ * The Bot is sent by the server as a header on every call. Absent means the caller does not know or
+ * does not care, such as a health check, and that gets the default computer rather than an error,
+ * because refusing it would make the container undemonstrable on its own.
+ *
+ * The person is sent only to a computer many people share (Helm's `computers.mode: shared`), and
+ * there the seat is the pair: each person's profile, folder and session for that Bot are their own,
+ * so one person's logins never reach another. A computer of one person's own is sent the Bot alone,
+ * and its seat is the Bot. See `seatIdFor`.
+ *
+ * `seat` is undefined when either half is not a usable id, which the caller refuses.
  */
-function botIdOf(request: Request, fallback?: string | null): string {
-  return (
+function seatOf(
+  request: Request,
+  query?: URLSearchParams,
+): { bot: string; seat: string | undefined } {
+  const bot =
     request.headers.get("x-openbot-bot-id")?.trim() ||
-    fallback?.trim() ||
-    DEFAULT_BOT_ID
-  );
+    query?.get("bot")?.trim() ||
+    DEFAULT_BOT_ID;
+  const person =
+    request.headers.get("x-openbot-person-id")?.trim() ||
+    query?.get("person")?.trim() ||
+    undefined;
+  try {
+    return { bot, seat: seatIdFor(bot, person) };
+  } catch {
+    return { bot, seat: undefined };
+  }
 }
 
 /**
@@ -750,14 +770,19 @@ serve<StreamData>({
     }
 
     // Resolved once per request. Everything below that touches a browser, a takeover or a snapshot
-    // goes through this Bot's session, so there is no path where one Bot's call reaches another's.
-    const botId = botIdOf(request);
+    // goes through this seat's session, so there is no path where one Bot's call reaches another's,
+    // nor one person's call another person's seat on a computer they share.
+    const named = seatOf(request);
+    /** The Bot, for what is decided per Bot: its network policy. */
+    const requestBot = named.bot;
+    /** The seat, for everything else. Named `botId` because on most computers it is exactly that. */
+    const botId = named.seat ?? named.bot;
 
     // Refused here rather than deeper down, because the id names a directory and the API server
     // forwards whatever URL segment a caller typed. `reset` deletes that directory as root.
     // `/health` is exempt for the same reason it is exempt from the token: it names no Bot, and an
     // orchestrator's probe must not fail on a header it never meant to send.
-    if (!isOpenPath(url.pathname) && !isPlainBotId(botId)) {
+    if (!isOpenPath(url.pathname) && named.seat === undefined) {
       return json({ error: "That is not a usable bot id." }, 400);
     }
     // The admin network policy, pushed by the server on every change; applied without a restart.
@@ -767,7 +792,7 @@ serve<StreamData>({
         .clone()
         .json()
         .catch(() => null)) as { webBotAuth?: unknown } | null;
-      const applied = await handleEgressPolicyRequest(botId, request);
+      const applied = await handleEgressPolicyRequest(requestBot, request);
       if (applied.ok) await applyWebBotAuthPush(body?.webBotAuth);
       return applied;
     }
@@ -796,8 +821,8 @@ serve<StreamData>({
          * so the stream, and only the stream, also accepts the Bot as a query parameter. The header
          * still wins where there is one.
          */
-        const streamBotId = botIdOf(request, url.searchParams.get("bot"));
-        if (!isPlainBotId(streamBotId)) {
+        const streamBotId = seatOf(request, url.searchParams).seat;
+        if (streamBotId === undefined) {
           return json({ error: "That is not a usable bot id." }, 400);
         }
         const recordingId = url.searchParams.get("recording")?.trim();
@@ -1086,6 +1111,29 @@ serve<StreamData>({
           "The computer stopped; the previous task was interrupted.",
         );
         return json({ stopped: true, wasRunning });
+      }
+
+      /**
+       * Hand a private Bot's profile from before seats were per person to its owner's seat.
+       *
+       * Asked by the server, once per seat, before that seat's first use, and only for a private Bot
+       * on its owner's seat: a public Bot's old profile had no single owner. Idempotent, because a
+       * move leaves nothing to move again. See carry-over.ts.
+       */
+      if (
+        url.pathname === "/computers/carry-over" &&
+        request.method === "POST"
+      ) {
+        const outcome = await profiles.carryOver(requestBot, botId);
+        console.info(
+          JSON.stringify({
+            type: "computer-profile-carried-over",
+            bot: requestBot,
+            seat: botId,
+            outcome,
+          }),
+        );
+        return json({ outcome });
       }
 
       /**
