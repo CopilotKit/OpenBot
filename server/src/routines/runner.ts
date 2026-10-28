@@ -22,11 +22,11 @@
  * within a firing never sees the routine that fails cleanly, once, every single night.
  */
 
+import { HeadlessToolSuspension } from "@openbot/toolkit/headless-tools";
+import type { TurnRunner } from "@openbot/toolkit/run-turn";
 import { BOT_PAUSED_REASON, isBotPaused } from "../agents/lifecycle";
 import type { AgentActor } from "../agents/profile-types";
 import type { ChannelStore } from "../channels/routes";
-import { HeadlessToolSuspension } from "@openbot/toolkit/headless-tools";
-import type { TurnRunner } from "@openbot/toolkit/run-turn";
 import type { RoutineStore } from "./store";
 
 export type RoutineRunner = { run(routineRunId: string): Promise<void> };

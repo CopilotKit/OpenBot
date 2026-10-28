@@ -18,13 +18,13 @@
  * The refs are opaque to the caller precisely so that the server holds the mapping.
  */
 
+import { HeadlessToolSuspension } from "@openbot/toolkit/headless-tools";
 import { type ApprovalGate, currentApprovalContext } from "../approvals/types";
 import {
   type AuditInitiator,
   type AuditStore,
   recordAuditEvent,
 } from "../audit";
-import { HeadlessToolSuspension } from "@openbot/toolkit/headless-tools";
 import { withUntrustedNotice } from "../untrusted-content";
 import {
   ComputerStillStartingError,
@@ -1113,6 +1113,8 @@ export function createComputerGateway(
           : "no saved state was present to delete",
       });
       await forget(seatText(seat));
+      // And what was filed under the Bot alone, before computers were per person: pictures of the same signed-in pages.
+      await forget(seat.botId);
       return result;
     },
 
@@ -1150,6 +1152,10 @@ export function createComputerGateway(
           ? seatText({ botId: target.botId, key: target.key })
           : computerKeyText(target.key),
       );
+      // A Bot's own, as `resetComputer` does: what was filed under the Bot alone before computers were per person.
+      const bot =
+        target.botId ?? (target.key.kind === "bot" ? target.key.botId : null);
+      if (bot) await forget(bot);
       return result;
     },
 

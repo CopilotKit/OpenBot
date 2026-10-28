@@ -1,5 +1,4 @@
 import { and, eq, isNotNull, isNull, or } from "drizzle-orm";
-import { teamBotAccess } from "../team-bots/access";
 import type { ManagedAgentConfig } from "../config";
 import { type RegisteredAgent, registeredAgentFromRow } from "../copilot";
 import type { CredentialSecretReader } from "../credentials";
@@ -11,6 +10,7 @@ import {
   channelMemberships,
   channels,
 } from "../db/schema";
+import { teamBotAccess } from "../team-bots/access";
 import { agentAuthHeaders, authFromConfiguration } from "./auth-header";
 import { isManagedEndpoint } from "./managed-endpoint";
 import type { AgentActor } from "./profile-types";

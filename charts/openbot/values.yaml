@@ -439,14 +439,19 @@ computers:
     # safe default; `Delete` is for a trial you want to leave no trace of.
     whenDeleted: Retain
 
+  # SIZED FOR A PERSON, NOT A BOT. A computer is one person's and runs a browser for each of their
+  # Bots in use at once, up to `maxBrowsers` (8 when empty), closing each after `browserIdleMs`
+  # untouched (30 minutes when empty). Chromium is roughly 200-500MB per browser (a little more
+  # headed, plus a few MB for Xvfb) and up to 2GB with real pages open. Running out of memory takes
+  # down every one of that person's browsers at once, so size the limit to `maxBrowsers` times what
+  # one browser takes on your Bots' sites, plus headroom; on a small node, lower `maxBrowsers` (the
+  # least recently used browser closes first) rather than the limit.
   resources:
     requests:
       cpu: 500m
-      # Chromium is roughly 200-500MB per browser (a little more headed, plus a few MB for Xvfb) and
-      # up to 2GB with real pages open.
-      memory: 1Gi
+      memory: 2Gi
     limits:
-      memory: 4Gi
+      memory: 8Gi
 
   nodeSelector: {}
   tolerations: []

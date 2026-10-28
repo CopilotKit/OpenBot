@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { AbstractAgent } from "@ag-ui/client";
+import { createTurnRunner } from "@openbot/toolkit/run-turn";
 import { and, eq, inArray, like } from "drizzle-orm";
 import { Hono } from "hono";
 import { EMPTY } from "rxjs";
@@ -14,9 +15,11 @@ import {
 import { createEnterpriseGate } from "../src/admin/gate";
 import { createEnterpriseAdminRoutes } from "../src/admin/routes";
 import { createHandoffDelivery } from "../src/agents/handoff-delivery";
+import { serverTurnAdmission } from "../src/agents/turn-admission";
 import { addAuditTap, createAuditStore, recordAuditEvent } from "../src/audit";
 import { createAuth } from "../src/auth";
 import type { AppVariables } from "../src/auth/guards";
+import { computerKeyText } from "../src/computer/computer-key";
 import type { ComputerProvider } from "../src/computer/provider";
 import type { DeploymentConfig } from "../src/config";
 import { createDatabase } from "../src/db/client";
@@ -36,11 +39,8 @@ import {
   teamBotPublications,
   users,
 } from "../src/db/schema";
-import { createTurnRunner } from "@openbot/toolkit/run-turn";
 import { createTeamBots } from "../src/team-bots/team-bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
-import { serverTurnAdmission } from "../src/agents/turn-admission";
-import { computerKeyText } from "../src/computer/computer-key";
 
 /**
  * The enterprise controls against a real PostgreSQL, through the same seams production uses: the

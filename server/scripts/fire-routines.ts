@@ -12,6 +12,8 @@
  * routine that fires a minute late has lost nothing, and a failing CronJob that pages somebody at 3am
  * should mean something worse than that.
  */
+
+import { workOwner } from "@openbot/shared/work-owner";
 import { loadConfig } from "../src/config";
 import { createDatabase } from "../src/db/client";
 import { createRoutineStore } from "../src/routines/store";
@@ -21,7 +23,6 @@ import {
   ROUTINE_FIRE_KIND,
 } from "../src/routines/sweep";
 import { createWorkQueue } from "../src/work/queue";
-import { workOwner } from "@openbot/shared/work-owner";
 
 const config = loadConfig(process.env);
 

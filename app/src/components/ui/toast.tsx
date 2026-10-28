@@ -1,8 +1,8 @@
 "use client";
 
 import {
-  Toast as ToastPrimitive,
   type ToastManager,
+  Toast as ToastPrimitive,
 } from "@base-ui/react/toast";
 import {
   IconAlertOctagon,
@@ -237,12 +237,12 @@ function Toaster({
 }
 
 export {
-  Toaster,
   Toast,
   ToastAction,
   ToastClose,
   ToastContent,
   ToastDescription,
+  Toaster,
   ToastPortal,
   ToastProvider,
   ToastTitle,

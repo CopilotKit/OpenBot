@@ -2,10 +2,10 @@ import { describe, expect, test } from "bun:test";
 import type { MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import type { AppVariables } from "../src/auth/guards";
+import { personSeat } from "../src/computer/computer-key";
 import type { ComputerGateway } from "../src/computer/gateway";
 import type { PolicyStore } from "../src/computer/policy-store";
 import { createComputerRoutes } from "../src/computer/routes";
-import { personSeat } from "../src/computer/computer-key";
 
 /**
  * The fleet is a fact about the deployment, not about a Bot. This is the same bug as the boundary

@@ -10,12 +10,12 @@ import type {
   ComputerControlState,
   HandoffStatus,
 } from "@openbot/shared/computer-control";
+import { releaseControl, takeControl } from "../src/lib/computers/control";
 import {
   awaitHandoff,
   runHelpRequest,
   runNavigation,
 } from "../src/lib/computers/handoff";
-import { releaseControl, takeControl } from "../src/lib/computers/control";
 
 let fetchSpy: Mock<typeof fetch>;
 beforeEach(() => {

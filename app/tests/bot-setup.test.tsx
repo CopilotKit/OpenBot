@@ -7,7 +7,11 @@ import {
   test,
 } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+  QueryClient,
+  QueryClientProvider,
+  useQuery,
+} from "@tanstack/react-query";
 import {
   createMemoryHistory,
   createRootRoute,
@@ -16,10 +20,11 @@ import {
 } from "@tanstack/react-router";
 import { cleanup, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useQuery } from "@tanstack/react-query";
 import { SetupSections } from "@/components/bot-profile/setup";
 import {
   ISOLATED_EXPLAINED,
+  ISOLATED_MAKING_PUBLIC,
+  ISOLATED_PUBLIC_SHARES_LOGINS,
   ISOLATION_NOT_ALLOWED,
   ISOLATION_UNAVAILABLE,
   ISOLATION_WITHDRAWN,
@@ -89,7 +94,11 @@ function me() {
 function serve(
   endpoint: string,
   ownerUserId = actor.id,
-  options: { isolated?: boolean; isolationAvailable?: boolean } = {},
+  options: {
+    isolated?: boolean;
+    isolationAvailable?: boolean;
+    visibility?: AgentProfile["visibility"];
+  } = {},
 ) {
   let profile: AgentProfile = {
     id: "expenses",
@@ -98,7 +107,8 @@ function serve(
     roleDescription: "Review receipts.",
     avatarSeed: "expenses",
     ownerUserId,
-    visibility: ownerUserId === actor.id ? "private" : "public",
+    visibility:
+      options.visibility ?? (ownerUserId === actor.id ? "private" : "public"),
     systemOwned: false,
     hidden: false,
     pinned: false,
@@ -252,6 +262,33 @@ test("the Isolated row gives a Bot a computer of its own through the real route"
   expect((await isolatedSwitch(reloaded)).getAttribute("aria-checked")).toBe(
     "true",
   );
+});
+
+test("an isolated Bot's Visibility row says, before it is made public and while it is, that everyone who uses it shares its computer", async () => {
+  serve(MANAGED, actor.id, { isolated: true });
+  const view = draw();
+  expect(
+    await view.findByText(
+      `Only you can see it and start conversations with it. ${ISOLATED_MAKING_PUBLIC}`,
+    ),
+  ).toBeTruthy();
+  cleanup();
+
+  serve(MANAGED, actor.id, { isolated: true, visibility: "public" });
+  const shared = draw();
+  expect(
+    await shared.findByText(
+      `Everyone on OpenBot can find and use it. ${ISOLATED_PUBLIC_SHARES_LOGINS}`,
+    ),
+  ).toBeTruthy();
+  cleanup();
+
+  // A Bot on its person's computer has nothing of its own to share, so nothing more is said.
+  serve(MANAGED, actor.id, { visibility: "public" });
+  const plain = draw();
+  expect(
+    await plain.findByText("Everyone on OpenBot can find and use it."),
+  ).toBeTruthy();
 });
 
 test("other edits leave Isolated alone", async () => {

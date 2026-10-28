@@ -7,7 +7,7 @@ import {
   test,
 } from "bun:test";
 import type Docker from "dockerode";
-import { legacyNamesFor, namesFor, NAMESPACE } from "../../src/names";
+import { legacyNamesFor, NAMESPACE, namesFor } from "../../src/names";
 
 // Launched by docker.integration.test.ts in a fresh process: names.ts reads its namespace once.
 const namespace = NAMESPACE;
@@ -556,6 +556,50 @@ describe("a private Bot's login, carried over to its owner", () => {
       .docker.getVolume(LEGACY.profileVolume)
       .inspect();
     expect(kept.Name).toBe(LEGACY.profileVolume);
+  }, 180_000);
+
+  test("brings the Bot's old files into its folder on the owner's computer, once", async () => {
+    await oldProfile("ada-login");
+    await withDocker()
+      .docker.createVolume({
+        Name: LEGACY.workspaceVolume,
+        Labels: LEGACY_LABELS,
+      })
+      .catch(() => undefined);
+    await inVolumes(
+      [`${LEGACY.workspaceVolume}:/v`],
+      "mkdir -p /v/reports && printf %s 'march totals' > /v/reports/march.txt",
+    );
+    withDocker().supervisor.forgetCarryOvers();
+    await withDocker().supervisor.ensure(ADA, {
+      image: IMAGE,
+      environment: [],
+    });
+    await withDocker().supervisor.carryOverProfile(ADA, LEGACY_BOT, {
+      image: IMAGE,
+    });
+    // Where the Bot's shell and file tools start on its person's computer (agent-computer's workspaces.ts).
+    const filesIn = () =>
+      inVolumes(
+        [`${ADA.workspaceVolume}:/w`],
+        `cat /w/computers/${LEGACY_BOT}/reports/march.txt 2>/dev/null || echo none`,
+      );
+    expect(await filesIn()).toBe("march totals");
+
+    // Once: a later change to the old volume is not copied over what the Bot has now.
+    withDocker().supervisor.forgetCarryOvers();
+    await inVolumes(
+      [`${LEGACY.workspaceVolume}:/v`],
+      "printf %s stale > /v/reports/march.txt",
+    );
+    await withDocker().supervisor.carryOverProfile(ADA, LEGACY_BOT, {
+      image: IMAGE,
+    });
+    expect(await filesIn()).toBe("march totals");
+    expect(
+      (await withDocker().docker.getVolume(LEGACY.workspaceVolume).inspect())
+        .Name,
+    ).toBe(LEGACY.workspaceVolume);
   }, 180_000);
 
   test("never overwrites a profile the owner's computer already has for that Bot", async () => {

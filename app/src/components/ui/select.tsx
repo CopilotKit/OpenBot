@@ -1,13 +1,12 @@
-import type * as React from "react";
 import { Select as SelectPrimitive } from "@base-ui/react/select";
-
-import { cn } from "@/lib/utils";
 import {
-  IconSelector,
   IconCheck,
-  IconChevronUp,
   IconChevronDown,
+  IconChevronUp,
+  IconSelector,
 } from "@tabler/icons-react";
+import type * as React from "react";
+import { cn } from "@/lib/utils";
 
 const Select = SelectPrimitive.Root;
 

@@ -1,9 +1,9 @@
 import { expect, test } from "bun:test";
-import type { MiddlewareHandler } from "hono";
 import type {
   BrowserChallenge,
   ComputerControlState,
 } from "@openbot/shared/computer-control";
+import type { MiddlewareHandler } from "hono";
 import type { AppVariables } from "../src/auth/guards";
 import { createComputerGateway } from "../src/computer/gateway";
 import type { PolicyStore } from "../src/computer/policy-store";

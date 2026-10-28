@@ -7,6 +7,11 @@ import {
   test,
 } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import {
+  type ConnectPrompt,
+  connectAppRefusal,
+  SHOW_APP_ACCESS_TOOL,
+} from "@openbot/shared/connect-prompt";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   createMemoryHistory,
@@ -31,11 +36,6 @@ import { ActiveBotProvider, useActiveBot } from "@/lib/copilot/active-bot";
 import { carryOnMessage } from "@/lib/copilot/carry-on";
 import { ConversationProvider } from "@/lib/copilot/conversation";
 import { REFUSAL_MARKER } from "@/lib/plugins/tool-result";
-import {
-  type ConnectPrompt,
-  connectAppRefusal,
-  SHOW_APP_ACCESS_TOOL,
-} from "@openbot/shared/connect-prompt";
 import { appAccess } from "./app-access-fixture";
 import { settleReactWork } from "./settle-react-work";
 

@@ -11,13 +11,13 @@ import {
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { act, createElement, useEffect, useRef, useState } from "react";
-import { flushSync } from "react-dom";
-import { createRoot } from "react-dom/client";
 import {
   type CapturedEvent,
   sha256HexSync,
 } from "@openbot/shared/recorder-masking";
+import { act, createElement, useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
+import { createRoot } from "react-dom/client";
 import {
   collectorBeforeSend,
   startEventCapture,

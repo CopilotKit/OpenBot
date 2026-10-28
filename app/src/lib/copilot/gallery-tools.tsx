@@ -1,4 +1,5 @@
 import { useFrontendTool, useHumanInTheLoop } from "@copilotkit/react-core/v2";
+import { NOT_SHOWN, NOT_SHOWN_TAIL } from "@openbot/shared/component-markers";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { RefusedCard } from "@/components/gallery/refused";
@@ -15,7 +16,6 @@ import {
   type GalleryComponent,
   galleryManifest,
 } from "@/lib/copilot/gallery-registry";
-import { NOT_SHOWN, NOT_SHOWN_TAIL } from "@openbot/shared/component-markers";
 
 /**
  * Register compiled gallery components once per name, scoped to the active Bot with `available`.

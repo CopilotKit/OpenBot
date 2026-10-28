@@ -1,11 +1,11 @@
 import { serve } from "bun";
 import { Hono } from "hono";
 import { authorised } from "./authorisation";
-import { environmentFor } from "./environment";
+import { computerMemoryBytes } from "./computer-memory-bytes";
 import {
   type CarryOverOutcome,
-  carryOverProfile,
   ComputerNotAnsweringError,
+  carryOverProfile,
   DockerUnavailableError,
   ensure,
   listOwned,
@@ -15,10 +15,10 @@ import {
   retireLegacyComputers,
   stop,
 } from "./docker";
+import { environmentFor } from "./environment";
 import { registerEntry } from "./identity";
-import { legacyNamesFor, namesFor } from "./names";
-import { computerMemoryBytes } from "./computer-memory-bytes";
 import { listenPort } from "./listen-port";
+import { legacyNamesFor, namesFor } from "./names";
 
 /**
  * The container supervisor: the only thing here that holds the Docker socket.

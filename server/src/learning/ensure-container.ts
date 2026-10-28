@@ -23,12 +23,13 @@
  * server also makes each person's own Learning space with the same credential (`createLearningContainer`,
  * called by learning/personal-space.ts).
  */
-import { intelligenceApiKey } from "@openbot/shared/intelligence-key";
+
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
+import { intelligenceApiKey } from "@openbot/shared/intelligence-key";
 import {
   type ContainerProbe,
   type KeyIdentity,

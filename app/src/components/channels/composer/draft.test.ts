@@ -1,10 +1,10 @@
-import type { Attachment } from "@copilotkit/react-core/v2";
 import { describe, expect, test } from "bun:test";
+import type { Attachment } from "@copilotkit/react-core/v2";
 import { chip, type Segment, text } from "prompt-area/helpers";
 import {
   applyCommandChips,
-  canSendDraft,
   type CommandOption,
+  canSendDraft,
   enforceSingleAgent,
   toDraft,
 } from "./draft";

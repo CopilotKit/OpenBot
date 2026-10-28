@@ -14,6 +14,7 @@ import {
   RECORDER_EXTENSION_ID,
   RECORDER_NATIVE_HOST,
 } from "../../shared/recorder-extension";
+import { navigationFailure } from "../src/navigation";
 import {
   computerOwner,
   NOT_ITS_OWN_COMPUTER,
@@ -21,14 +22,15 @@ import {
   personMayUse,
   refusedHere,
 } from "../src/person-access";
+import { isBrowserNotInstalled, PersonOpenError } from "../src/person-browser";
 import {
+  browserExecutableCandidates,
   copyNativeMessagingHosts,
   defaultNativeMessagingHosts,
   forgetRecorderPins,
   PLAYWRIGHT_DEFAULTS_A_PERSON_DOES_NOT_GET,
   personBrowserEnv,
   personLaunchOptions,
-  browserExecutableCandidates,
   personNativeLaunch,
   runnable,
 } from "../src/person-launch";
@@ -37,8 +39,6 @@ import {
   findRecorder,
   isRecorderSetupPage,
 } from "../src/recorder";
-import { navigationFailure } from "../src/navigation";
-import { isBrowserNotInstalled, PersonOpenError } from "../src/person-browser";
 import { addressFrom } from "../src/request-validation";
 
 /**

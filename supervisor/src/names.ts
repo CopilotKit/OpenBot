@@ -138,12 +138,13 @@ export type LegacyNames = {
   botId: string;
   container: string;
   profileVolume: string;
+  workspaceVolume: string;
 };
 
 /**
  * The names a Bot's computer had when every Bot had its own.
  *
- * Read only, to find a private Bot's old profile and give it to its owner. Nothing is created under
+ * Read only, to find a private Bot's old profile and files and give them to its owner. Nothing is created under
  * these names any more, and they share a prefix with the new ones, which is why a new computer also
  * checks {@link KIND_LABEL} before it treats a container or volume as its own.
  */
@@ -159,6 +160,7 @@ export function legacyNamesFor(
       botId: plain,
       container: `${NAMESPACE}-computer-${plain}`,
       profileVolume: `${NAMESPACE}-profile-${plain}`,
+      workspaceVolume: `${NAMESPACE}-workspace-${plain}`,
     },
   };
 }

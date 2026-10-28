@@ -346,6 +346,60 @@ describe("changing it later", () => {
     }
   });
 
+  test("an administrator ticking Isolated on somebody's Bot is asked about the owner's switch, not their own", async () => {
+    const agent = await createBot(owner, `Owners ${suite}`);
+    // Off for everybody, and given back to a group only the administrator is in: the editor holds the switch, the
+    // owner does not, which is the case that used to save a tick the Bot never ran with.
+    const admins = `${group}-admins`;
+    const forAdmins = async (allowed: boolean | null) =>
+      expect(
+        (
+          await call(admin, "PUT", "/api/admin/enterprise/capabilities", {
+            scopeKind: "group",
+            scopeId: admins,
+            capability: "isolatedComputers",
+            allowed,
+          })
+        ).status,
+      ).toBe(200);
+    await database
+      .update(users)
+      .set({ groups: [admins] })
+      .where(eq(users.id, admin.id));
+    await setSwitch(false);
+    await forAdmins(true);
+    try {
+      const refused = await call(
+        admin,
+        "PATCH",
+        `/api/agents/${agent.id}`,
+        bot(`Owners ${suite}`, { isolated: true }),
+      );
+      expect(refused.status).toBe(403);
+      const body = await refused.json();
+      expect(body.capability).toBe("isolatedComputers");
+      expect(body.error).toContain("this Bot's owner");
+      // Never saved, so it never sits ticked while running on the owner's computer.
+      expect(await storedIsolated(agent.id)).toBe(false);
+    } finally {
+      await forAdmins(null);
+      await setSwitch(null);
+      await database
+        .update(users)
+        .set({ groups: [] })
+        .where(eq(users.id, admin.id));
+    }
+    // With the owner's switch on, the administrator may tick it for them.
+    const ticked = await call(
+      admin,
+      "PATCH",
+      `/api/agents/${agent.id}`,
+      bot(`Owners ${suite}`, { isolated: true }),
+    );
+    expect(ticked.status).toBe(200);
+    expect(await storedIsolated(agent.id)).toBe(true);
+  });
+
   test("a Bot that belongs to no person is refused one, and the trail says why", async () => {
     const [deploymentPackage] = await database
       .insert(deploymentPackages)

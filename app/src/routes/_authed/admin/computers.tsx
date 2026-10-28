@@ -171,8 +171,11 @@ function ComputersPage() {
         </p>
       ) : isolation === "per-person" ? (
         <p className="mt-4 rounded-md border border-border bg-muted/40 px-3 py-2 text-muted-foreground text-sm">
-          Each person has their own computer, with a browser profile and folder
-          for each Bot they use. An isolated Bot has a computer of its own.
+          Each person has their own computer, and every Bot they use runs on it,
+          public Bots made by other people included. Each Bot keeps its own
+          browser profile and folder there, but a command one Bot runs can reach
+          anything else on that person's computer. An isolated Bot has a
+          computer of its own.
         </p>
       ) : null}
 

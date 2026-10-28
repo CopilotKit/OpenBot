@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import {
+  type ArcadeFailure,
   callTool,
   isAuthorizationRequired,
   listTools,
   useArcadeClient,
-  type ArcadeFailure,
 } from "../src/plugins/arcade";
 import { MAX_RESULT_CHARS } from "../src/plugins/mcp";
 

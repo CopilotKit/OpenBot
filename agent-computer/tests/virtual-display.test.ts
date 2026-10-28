@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
-  startVirtualDisplay,
   type DisplayProcess,
   type DisplayRuntime,
+  startVirtualDisplay,
 } from "../src/virtual-display";
 
 function deferred<T>() {

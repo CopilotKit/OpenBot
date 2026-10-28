@@ -7,6 +7,11 @@ import {
   test,
 } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import {
+  RECORDER_COLLECTS,
+  RECORDER_DISCLOSURE,
+} from "@openbot/shared/recorder-disclosure";
+import { RECORDER_STORE_IDS } from "@openbot/shared/recorder-extension";
 import { environmentManager, QueryClientProvider } from "@tanstack/react-query";
 import {
   act,
@@ -16,11 +21,6 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import {
-  RECORDER_COLLECTS,
-  RECORDER_DISCLOSURE,
-} from "@openbot/shared/recorder-disclosure";
-import { RECORDER_STORE_IDS } from "@openbot/shared/recorder-extension";
 import { storeTabSentence } from "@/components/browser/browser-nav-item";
 import { BrowserSections } from "@/components/settings/browsers/browser-sections";
 import { ConnectedBrowsers } from "@/components/settings/browsers/connected-browsers";

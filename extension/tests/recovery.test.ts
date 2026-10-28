@@ -16,13 +16,13 @@ import {
   recorderState,
 } from "../src/background/recording";
 import { recoverInterruptedRecording } from "../src/background/recovery";
-import { KEPT_FOR_PERSON_MS } from "../src/shared/limits";
 import { installRouter } from "../src/background/router";
 import {
   type BackgroundToOffscreen,
   type PageResponse,
   PORT_OFFSCREEN,
 } from "../src/protocol/messages";
+import { KEPT_FOR_PERSON_MS } from "../src/shared/limits";
 import { isRecordablePage } from "../src/shared/origin";
 import type { DrainRecord } from "../src/shared/storage";
 import {

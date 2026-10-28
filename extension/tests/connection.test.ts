@@ -9,11 +9,11 @@ import {
 } from "bun:test";
 import {
   type ConnectionLoss,
+  connectThroughDesktop,
   currentConnection,
   forgetConnection,
   handleConnectionMessage,
   handleExternalConnect,
-  connectThroughDesktop,
   installConnection,
   trustedConnectRule,
 } from "../src/background/connection";

@@ -2,6 +2,11 @@ import { describe, expect, test } from "bun:test";
 import type { AuditEventInput, AuditStore } from "../src/audit";
 import { StaleSnapshotError } from "../src/computer/client";
 import {
+  botSeat,
+  computerKeyText,
+  personSeat,
+} from "../src/computer/computer-key";
+import {
   ActionRefusedError,
   createComputerGateway,
   WorkspaceNotFoundError,
@@ -19,11 +24,6 @@ import {
   createInMemorySnapshotStore,
   type SnapshotStore,
 } from "../src/computer/snapshot-store";
-import {
-  botSeat,
-  computerKeyText,
-  personSeat,
-} from "../src/computer/computer-key";
 
 /**
  * What the gateway must guarantee, tested as properties rather than as call sequences.
@@ -1884,6 +1884,22 @@ describe("seats on a person's computer", () => {
       bot: "sales",
       computer: "person:ada",
     });
+  });
+
+  test("a reset also forgets what was filed under the Bot alone, before computers were per person", async () => {
+    const { gateway, snapshots } = onePerPerson();
+    await gateway.snapshot(personSeat("ada", "sales"));
+    const taken = await snapshots.load("person:ada/sales");
+    if (!taken) throw new Error("No snapshot was taken.");
+    // Filed as every snapshot and picture of a page was before: under the Bot, for everybody who used it.
+    await snapshots.save("sales", taken);
+    await gateway.resetComputer(personSeat("ada", "sales"), ACTOR);
+    expect(await snapshots.load("sales")).toBeUndefined();
+
+    // An administrator resetting an isolated Bot's computer from the list does the same.
+    await snapshots.save("notes", taken);
+    await gateway.resetTarget({ key: { kind: "bot", botId: "notes" } }, ACTOR);
+    expect(await snapshots.load("notes")).toBeUndefined();
   });
 
   test("an administrator resetting a person's whole computer clears every seat on it, and only theirs", async () => {

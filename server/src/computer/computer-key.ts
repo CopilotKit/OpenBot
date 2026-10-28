@@ -17,9 +17,13 @@
  * Who "the person" is: whoever the computer acts for. The person in the conversation, or, for a
  * background turn (a routine, a hand-off, an approval), the owner of that turn.
  *
- * Reference: Grok Bot for Teams gives each user one persistent computer that all of their Bots share
- * ("Bots isolate personalities and workspaces, not compute"). Logins here stay per Bot inside it,
- * which is stronger.
+ * THE BOTS ON A PERSON'S COMPUTER ARE NOT KEPT FROM EACH OTHER, which is the industry standard for an
+ * always-on agent's computer: one per user, shared by every Bot that user runs, with Bots isolating
+ * personalities and workspaces rather than compute. A command any of them runs, a public Bot
+ * somebody else wrote included, can reach anything on that computer, and the admin Computers screen
+ * says so. Logins here stay per Bot inside it (a browser profile each), which is stricter than the
+ * standard, where a person's Bots share their browser sessions too. A Bot that must be kept apart is
+ * made Isolated.
  */
 import { isPersonBrowserId } from "@openbot/shared/openbot-browser";
 import { and, eq, isNull } from "drizzle-orm";

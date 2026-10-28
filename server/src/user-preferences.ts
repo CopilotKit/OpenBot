@@ -1,9 +1,9 @@
-import { eq, sql } from "drizzle-orm";
 import {
   DEFAULT_USER_PREFERENCES,
   isSkinId,
   type UserPreferences,
 } from "@openbot/shared/user-preferences";
+import { eq, sql } from "drizzle-orm";
 import type { Database } from "./db/client";
 import { users } from "./db/schema";
 

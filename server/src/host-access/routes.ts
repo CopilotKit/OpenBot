@@ -1,10 +1,10 @@
 import type { MiddlewareHandler } from "hono";
 import { Hono } from "hono";
-import { recordAuditEvent, type AuditStore } from "../audit";
-import type { AppVariables } from "../auth/guards";
 import { sameToken } from "../agents/callback-token";
 import type { BotAccessCheck } from "../agents/profile-policy";
-import { HostAccessRefusedError, type HostAccessBroker } from "./broker";
+import { type AuditStore, recordAuditEvent } from "../audit";
+import type { AppVariables } from "../auth/guards";
+import { type HostAccessBroker, HostAccessRefusedError } from "./broker";
 import {
   asHostAccessDesktopResult,
   HOST_ACCESS_DESKTOP_LEASE_MS,

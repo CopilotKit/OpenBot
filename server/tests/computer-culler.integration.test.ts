@@ -1,6 +1,7 @@
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { and, eq, like } from "drizzle-orm";
+import { computerKeyText } from "../src/computer/computer-key";
 import type {
   ComputerLocation,
   ComputerProvider,
@@ -14,7 +15,6 @@ import {
 } from "../src/work/culler";
 import { createWorkQueue } from "../src/work/queue";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
-import { computerKeyText } from "../src/computer/computer-key";
 
 /**
  * Spinning a computer down when nobody is using it, which is the whole reason the fleet does not

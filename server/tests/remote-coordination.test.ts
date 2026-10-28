@@ -3,15 +3,15 @@ import {
   mintRunAssertion,
   type RunAssertion,
 } from "../src/agents/callback-token";
+import type { HandoffWork } from "../src/agents/handoff-runner";
+import {
+  authoriseCoordinationRun,
+  createCoordinationTools,
+} from "../src/agents/handoff-tool";
 import { createApp, type DeploymentToolCaller } from "../src/app";
+import type { AuditStore } from "../src/audit";
 import { loadConfig } from "../src/config";
 import { testEnvironment } from "./support/environment";
-import {
-  createCoordinationTools,
-  authoriseCoordinationRun,
-} from "../src/agents/handoff-tool";
-import type { HandoffWork } from "../src/agents/handoff-runner";
-import type { AuditStore } from "../src/audit";
 
 const KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
 const TOKEN = "remote-coordination-test-token";

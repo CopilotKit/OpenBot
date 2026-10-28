@@ -1,5 +1,5 @@
-import { headlessTurnRefusal } from "../admin/controls";
 import type { TurnAdmission } from "@openbot/toolkit/ports";
+import { headlessTurnRefusal } from "../admin/controls";
 import { guardBotTurn } from "./lifecycle";
 
 /**

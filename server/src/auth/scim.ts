@@ -18,10 +18,10 @@
  */
 import type { SCIMOptions } from "@better-auth/scim";
 import { eq } from "drizzle-orm";
+import { enterpriseControls } from "../admin/controls";
 import { type AuditStore, recordAuditEvent } from "../audit";
 import type { Database } from "../db/client";
 import { revokedAccess, userRoles, users } from "../db/schema";
-import { enterpriseControls } from "../admin/controls";
 import { roleForEmail } from "./roles";
 
 export const SCIM_REVOKED_BY_PREFIX = "scim:";

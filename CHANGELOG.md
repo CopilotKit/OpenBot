@@ -16,8 +16,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   when it starts, keeping their volumes. A private Bot's logins are copied into its owner's computer
   once; public Bots, the built-in ones included, sign in again once, because their old logins were
   shared by everyone who used them. Helm `shared` moves private Bots' profiles the same way. On Helm
-  `sandbox` nothing is copied, so private Bots sign in again once there too. Old per-Bot volumes are
-  left in place; remove them when you are satisfied.
+  `sandbox` nothing is copied, so private Bots sign in again once there too. With the supervisor, a
+  private Bot's files come along the same way, into its folder on its owner's computer; a public
+  Bot's old files stay in its old volume. Old per-Bot volumes are left in place; remove them when you
+  are satisfied. Helm's computer memory defaults rise to a 2Gi request and an 8Gi limit.
 - A hosted computer's browser is now headed by default. It uses a little more memory than headless
   did; set `COMPUTER_BROWSER_MODE=headless` (Helm: `computers.browserMode: headless`) to keep the old
   behaviour.
@@ -112,6 +114,22 @@ Bots, on for everyone by default, and can be turned off for everyone or allowed 
 groups. When it is turned off for somebody, their isolated Bots run on their own computer from the
 next run, and the Bot's Setup says why. A deployment with one shared computer (Helm `shared`, or no
 supervisor) cannot give a Bot its own, and the checkbox says so.
+
+As is the industry standard for an always-on agent's computer, the Bots on a person's computer are
+not kept from each other: a command any of them runs, a public Bot somebody else made included, can
+reach anything on that computer. Each Bot still keeps its own browser profile there, which is
+stricter than the standard, where a person's Bots share their sign-ins too. The admin Computers
+screen says this, and a Bot that must be kept apart is made Isolated.
+
+An isolated Bot's one computer is shared by everybody who uses it, so its Setup says, before it is
+made public and while it is, that anything signed in to there is theirs too. Only the Bot's owner's
+switch decides whether it may be isolated: an administrator ticking Isolated on somebody else's Bot
+is refused when that owner lacks the switch, rather than saving a tick the Bot never ran with.
+
+A person's computer runs a browser for each of their Bots in use, so Helm's computer now requests
+2Gi of memory with an 8Gi limit (was 1Gi and 4Gi); `computers.resources` in values.yaml says how to
+size it. Removing a person or deleting an isolated Bot leaves its computer until an administrator
+resets it from Admin → Computers, which signs every Bot on it out of everything.
 
 ### The audit log reads like a log
 

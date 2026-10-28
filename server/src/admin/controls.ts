@@ -19,7 +19,7 @@
  */
 
 import { isPersonBrowserId } from "@openbot/shared/openbot-browser";
-import { and, eq, inArray, like, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import postgres from "postgres";
 import {
   type AuditStore,

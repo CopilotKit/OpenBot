@@ -8,8 +8,7 @@ import {
   IconUser,
   IconWorldOff,
 } from "@tabler/icons-react";
-import { Fragment } from "react";
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import {
   PageEmpty,
   PageRows,

@@ -3,7 +3,6 @@ import { useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { generativeUiProviderOptions } from "./a2ui";
-import { SignInTool } from "./sign-in-tool";
 import { ActiveBotProvider } from "./active-bot";
 import { BotTools } from "./bot-tools";
 import { ComputerTools } from "./computer-tools";
@@ -12,6 +11,7 @@ import { GalleryTools } from "./gallery-tools";
 import { GENERATIVE_UI_DESIGN_SKILL } from "./generative-ui";
 import { HandoffTool } from "./handoff-tool";
 import { SandboxedTools } from "./sandboxed-tools";
+import { SignInTool } from "./sign-in-tool";
 import { SkillTools } from "./skill-tools";
 
 /**

@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import type { AuditEventInput, AuditStore } from "../src/audit";
 import { StaleSnapshotError } from "../src/computer/client";
+import { botSeat } from "../src/computer/computer-key";
 import { createComputerGateway } from "../src/computer/gateway";
 import type { ActionPolicy } from "../src/computer/policy";
 import type { SnapshotResult } from "../src/computer/schema";
@@ -11,7 +12,6 @@ import { createDockerSupervisorProvider } from "../src/computer/supervisor";
 import { createDatabase } from "../src/db/client";
 import { computerSnapshot } from "../src/db/schema";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
-import { botSeat } from "../src/computer/computer-key";
 
 /**
  * Two replicas, one Postgres, a container replaced between them.

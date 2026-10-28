@@ -3,9 +3,9 @@ import { readControl } from "@/lib/computers/control";
 import {
   forgetHandoff,
   hasActiveHandoff,
+  type PendingHandoff,
   pendingHandoff,
   rememberHandoff,
-  type PendingHandoff,
 } from "@/lib/computers/handoff";
 import {
   findPendingTool,

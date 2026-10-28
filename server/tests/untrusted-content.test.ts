@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { withoutUntrustedEnvelope } from "../../app/src/lib/plugins/tool-result";
+import { botSeat } from "../src/computer/computer-key";
 import { createComputerGateway } from "../src/computer/gateway";
 import type { ComputerProvider } from "../src/computer/provider";
 import { vendorAnswer } from "../src/plugins/tools";
@@ -9,7 +10,6 @@ import {
   untrustedNotice,
   withUntrustedNotice,
 } from "../src/untrusted-content";
-import { botSeat } from "../src/computer/computer-key";
 
 /**
  * Outside content reaches the model marked as data, in one wording, and the transcript still draws

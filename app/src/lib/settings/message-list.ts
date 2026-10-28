@@ -1,3 +1,4 @@
+import type { SkinId, UserPreferences } from "@openbot/shared/user-preferences";
 import {
   mutationOptions,
   type QueryClient,
@@ -6,7 +7,6 @@ import {
 } from "@tanstack/react-query";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { client } from "@/lib/client";
-import type { SkinId, UserPreferences } from "@openbot/shared/user-preferences";
 import { getSkinId, setSkin } from "@/skins/store";
 import { settingsKeys } from "./queries";
 

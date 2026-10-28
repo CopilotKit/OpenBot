@@ -5,6 +5,10 @@ import {
   useRenderToolCall,
 } from "@copilotkit/react-core/v2";
 import {
+  readConnectPrompt,
+  SHOW_APP_ACCESS_TOOL,
+} from "@openbot/shared/connect-prompt";
+import {
   IconAlertTriangle,
   IconBox,
   IconChevronDown,
@@ -48,7 +52,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { attachmentUrl } from "@/lib/channels/attachments";
 import { readResponsibilityTurn } from "@/lib/channels/responsibility-turn";
 import { readFiring } from "@/lib/channels/routine-firing";
-import { splitChatOrigin } from "./chat-origin";
+import type { CardPlace } from "@/lib/copilot/carry-on";
 import { markdownComponents } from "@/lib/markdown";
 import { EASE_OUT, ENTRANCE_SECONDS } from "@/lib/motion";
 import { readToolName } from "@/lib/plugins/tool-name";
@@ -59,28 +63,24 @@ import {
   toolResultFailed,
 } from "@/lib/plugins/tool-result";
 import { readTeamBotConsent } from "@/lib/team-bots";
-import type { CardPlace } from "@/lib/copilot/carry-on";
-import {
-  readConnectPrompt,
-  SHOW_APP_ACCESS_TOOL,
-} from "@openbot/shared/connect-prompt";
 import { cn } from "@/lib/utils";
 import { VOICE_CHAT_ACTIVITY, type VoiceChatEntry } from "@/lib/voice/archive";
-import {
-  dropRepeatedAppCards,
-  groupToolSteps,
-  ToolActivity,
-  useDrawnTool,
-  type TranscriptItem,
-} from "./tool-activity";
+import { AppAccessCard } from "./app-access-card";
 import {
   attachmentModality,
   type SentAttachment,
   toVisibleChatItems,
 } from "./chat-messages";
+import { splitChatOrigin } from "./chat-origin";
 import type { QueuedMessage } from "./composer";
-import { AppAccessCard } from "./app-access-card";
 import { TeamBotConsentCard } from "./team-bot-consent";
+import {
+  dropRepeatedAppCards,
+  groupToolSteps,
+  ToolActivity,
+  type TranscriptItem,
+  useDrawnTool,
+} from "./tool-activity";
 import { ToolRenderBoundary } from "./tool-boundary";
 import { ToolLine } from "./tool-line";
 import { VoiceChatCard } from "./voice-chat-card";

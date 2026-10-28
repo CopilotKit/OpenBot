@@ -1,14 +1,14 @@
 import { afterAll, afterEach, describe, expect, spyOn, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { and, eq, isNull, sql } from "drizzle-orm";
-import type { MiddlewareHandler } from "hono";
-import { Hono } from "hono";
 import {
   attachmentUrl,
   MAX_ATTACHMENTS_PER_MESSAGE,
   MAX_FILE_BYTES,
   MAX_IMAGE_BYTES,
 } from "@openbot/shared/attachments";
+import { and, eq, isNull, sql } from "drizzle-orm";
+import type { MiddlewareHandler } from "hono";
+import { Hono } from "hono";
 import { createApp, UPLOAD_BODY_LIMIT_BYTES } from "../src/app";
 import type { AppVariables } from "../src/auth/guards";
 import { resolveAttachmentParts } from "../src/channels/attachment-parts";
@@ -17,8 +17,8 @@ import {
   createAttachmentRoutes,
   createChannelAttachmentRoutes,
   loadAttachmentForTurn,
-  markAttachmentsSent,
   MAX_STAGED_ATTACHMENTS_PER_UPLOADER,
+  markAttachmentsSent,
 } from "../src/channels/attachments";
 import { loadConfig } from "../src/config";
 import type { Database } from "../src/db/client";

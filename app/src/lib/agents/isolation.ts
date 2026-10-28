@@ -13,6 +13,18 @@ export const ISOLATED_EXPLAINED =
 export const ISOLATED_PUBLIC =
   "Everyone who uses this Bot shares that computer.";
 
+/**
+ * Said on an isolated Bot's Visibility row. Its one computer is shared by everybody who uses it, so a public one shares
+ * whatever anybody signed in to there with everybody else, as a shared Bot's computer does across the industry. Said
+ * before it is made public, and while it is.
+ */
+export const ISOLATED_PUBLIC_SHARES_LOGINS =
+  "Everyone who uses it shares its computer, so anything signed in to there is theirs too.";
+
+/** The same, said to the owner of a private isolated Bot before they make it public. */
+export const ISOLATED_MAKING_PUBLIC =
+  "Making it public shares its computer, and anything signed in to there, with everyone who uses it.";
+
 /** Why it cannot be ticked on this deployment. */
 export const ISOLATION_UNAVAILABLE =
   "This OpenBot can't give a Bot a computer of its own.";

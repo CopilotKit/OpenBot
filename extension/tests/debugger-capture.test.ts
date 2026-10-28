@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import {
   afterEach,
   beforeEach,
@@ -8,17 +6,19 @@ import {
   spyOn,
   test,
 } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   type CapturedEvent,
   normaliseSecret,
   sha256HexSync,
 } from "@openbot/shared/recorder-masking";
+import type { AgentObservation } from "../src/background/agent/observation";
 import {
   createNetworkCapture,
   type NetworkCapture,
   type NetworkMode,
 } from "../src/background/network";
-import type { AgentObservation } from "../src/background/agent/observation";
 import type { PageFallback } from "../src/background/network/fallback";
 import type { StepCall } from "../src/background/steps";
 import { NETWORK_BODY_READ_MAX_BYTES } from "../src/shared/network-body";

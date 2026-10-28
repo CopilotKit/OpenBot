@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { browserStepDetails } from "../src/components/channels/browser-activity";
-import { groupToolSteps } from "../src/components/channels/tool-activity";
 import type { VisibleChatItem } from "../src/components/channels/chat-messages";
+import { groupToolSteps } from "../src/components/channels/tool-activity";
 
 function step(
   id: string,

@@ -7,8 +7,8 @@ import {
   test,
 } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { RECORDER_COLLECTS } from "@openbot/shared/recorder-disclosure";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { SetupPage, type SetupPageDeps } from "../src/pages/setup/setup-page";
 import { DISCLOSURE } from "../src/pages/ui/disclosure";
 import {

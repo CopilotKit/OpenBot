@@ -1,15 +1,15 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import {
+  botSeat,
+  type ComputerSeat,
+  personSeat,
+} from "../src/computer/computer-key";
+import {
   createComputerProvider,
   createSharedComputerProvider,
   describeComputerIsolation,
   ProviderError,
 } from "../src/computer/provider";
-import {
-  botSeat,
-  type ComputerSeat,
-  personSeat,
-} from "../src/computer/computer-key";
 import type { ComputerConfig } from "../src/config";
 
 /** Ada's seat on a Bot, which is what every call to the shared computer is now made for. */

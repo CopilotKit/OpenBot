@@ -17,6 +17,7 @@ import {
   parseApprovalContinuation,
 } from "../src/approvals/types";
 import type { AppVariables } from "../src/auth/guards";
+import { botSeat } from "../src/computer/computer-key";
 import { createComputerGateway } from "../src/computer/gateway";
 import { createHeadlessComputerTools } from "../src/computer/headless-tools";
 import { createDatabase } from "../src/db/client";
@@ -24,7 +25,6 @@ import { auditEvents } from "../src/db/schema";
 import { users } from "../src/db/schema/core";
 import { workItems } from "../src/db/schema/work";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
-import { botSeat } from "../src/computer/computer-key";
 
 /**
  * The interactive path, over HTTP: a person's own chat asks the browser to click, the browser posts

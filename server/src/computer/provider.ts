@@ -84,7 +84,7 @@ export function describeComputerIsolation(
   if (provider.isolation === "per-person") {
     return {
       isolation: "one computer per person",
-      note: "Each person gets their own computer, and every Bot they use runs on it with its own browser profile and folder. An isolated Bot gets a computer of its own.",
+      note: "Each person gets their own computer, and every Bot they use runs on it, public Bots made by other people included, with its own browser profile and folder. A command one Bot runs can reach anything else on that person's computer. An isolated Bot gets a computer of its own.",
     };
   }
 

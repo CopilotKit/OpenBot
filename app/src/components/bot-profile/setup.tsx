@@ -47,6 +47,8 @@ import {
   profileUpdateInput,
 } from "@/lib/agents/form";
 import {
+  ISOLATED_MAKING_PUBLIC,
+  ISOLATED_PUBLIC_SHARES_LOGINS,
   ISOLATION_GONE,
   ISOLATION_NOT_ALLOWED,
   ISOLATION_UNAVAILABLE,
@@ -58,8 +60,8 @@ import {
   type AgentProfile,
   agentCapabilitiesQueryOptions,
 } from "@/lib/agents/queries";
-import { myCapabilitiesQueryOptions } from "@/lib/enterprise/queries";
 import { isComposing } from "@/lib/composing";
+import { myCapabilitiesQueryOptions } from "@/lib/enterprise/queries";
 import { queryClient } from "@/query-client";
 
 type TextField = "name" | "title" | "roleDescription";
@@ -186,8 +188,12 @@ function VisibilityRow({
         <ItemDescription>
           {error ??
             (agent.visibility === "private"
-              ? "Only you can see it and start conversations with it."
-              : "Everyone on OpenBot can find and use it.")}
+              ? agent.isolationActive
+                ? `Only you can see it and start conversations with it. ${ISOLATED_MAKING_PUBLIC}`
+                : "Only you can see it and start conversations with it."
+              : agent.isolationActive
+                ? `Everyone on OpenBot can find and use it. ${ISOLATED_PUBLIC_SHARES_LOGINS}`
+                : "Everyone on OpenBot can find and use it.")}
         </ItemDescription>
       </ItemContent>
       <ItemActions>

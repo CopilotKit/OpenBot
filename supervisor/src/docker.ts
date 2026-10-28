@@ -764,24 +764,29 @@ export type CarryOverOutcome = "copied" | "kept" | "done" | "absent";
  * That is Docker's own documented way to back up, restore or migrate a volume: a container with the
  * volume mounted, doing the copy itself, because a volume lives outside every image and `docker cp`
  * cannot reach it. Both volumes are mounted rather than tarred through a host directory, so nothing
- * of a person's logins ever lands on the host's disk.
+ * of a person's logins or files ever lands on the host's disk.
  *
- * Once, recorded in the destination: a marker under `.openbot-carried-over/` says it was done, and a
- * profile the owner already has for that Bot is never overwritten. Staged under a dot-name and moved
- * into place, so the computer never sees half a profile; a dot-name is not a seat it lists.
+ * Once, recorded in the destination: a marker under `.openbot-carried-over/` says it was done, and
+ * what the owner already has for that Bot is never overwritten. Staged under a dot-name and moved
+ * into place, so the computer never sees half of it; a dot-name is not a seat it lists.
+ *
+ * `ROOT` is where the owner's volume is mounted (`/profiles`, `/workspace`) and `DEST` the Bot's
+ * place in it: its profile is `<bot>`, its folder `computers/<bot>` (agent-computer's
+ * `workspaceDirectoryFor`).
  *
  * The exit code is the outcome, so nothing depends on parsing a log stream.
  */
 const CARRY_OVER_SCRIPT = `set -eu
-marks=/profiles/.openbot-carried-over
-dest="/profiles/$BOT"
+marks="$ROOT/.openbot-carried-over"
+dest="$ROOT/$DEST"
 if [ -e "$marks/$BOT" ]; then exit 11; fi
 mkdir -p "$marks"
 if [ -e "$dest" ]; then touch "$marks/$BOT"; exit 10; fi
-staging="/profiles/.openbot-carrying-$BOT"
+staging="$ROOT/.openbot-carrying-$BOT"
 rm -rf "$staging"
 mkdir "$staging"
 cp -a /carry-from/. "$staging"/
+mkdir -p "$(dirname "$dest")"
 mv "$staging" "$dest"
 touch "$marks/$BOT"
 exit 0`;
@@ -799,13 +804,72 @@ export function forgetCarryOvers(): void {
   carrying.clear();
 }
 
+/** One old volume copied into the owner's, by {@link CARRY_OVER_SCRIPT}, in a container that can do nothing else. */
+async function copyVolume(input: {
+  botId: string;
+  from: string;
+  to: string;
+  root: "/profiles" | "/workspace";
+  dest: string;
+  image: string;
+  runtime?: string;
+}): Promise<Exclude<CarryOverOutcome, "absent">> {
+  let helper: Docker.Container;
+  try {
+    helper = await docker.createContainer({
+      Image: input.image,
+      Labels: {
+        [OWNER_LABEL]: "true",
+        [NAMESPACE_LABEL]: NAMESPACE,
+        "openbot.carry-over": input.botId,
+      },
+      Entrypoint: ["sh", "-c"],
+      Cmd: [CARRY_OVER_SCRIPT],
+      // A plain id checked by the caller, and fixed paths, handed over as data, never spliced into the script.
+      Env: [`BOT=${input.botId}`, `ROOT=${input.root}`, `DEST=${input.dest}`],
+      NetworkDisabled: true,
+      HostConfig: {
+        Binds: [`${input.from}:/carry-from:ro`, `${input.to}:${input.root}`],
+        NetworkMode: "none",
+        SecurityOpt: ["no-new-privileges:true"],
+        // Only what copying files with their owners and modes takes, and nothing else.
+        CapDrop: ["ALL"],
+        CapAdd: ["CHOWN", "DAC_OVERRIDE", "FOWNER"],
+        ...(input.runtime ? { Runtime: input.runtime } : {}),
+      },
+    });
+  } catch (error) {
+    throw new DockerUnavailableError(String(error));
+  }
+  try {
+    await helper.start();
+    const { StatusCode } = (await helper.wait()) as { StatusCode: number };
+    const outcome =
+      StatusCode === 0
+        ? "copied"
+        : StatusCode === 10
+          ? "kept"
+          : StatusCode === 11
+            ? "done"
+            : undefined;
+    if (!outcome) {
+      throw new Error(
+        `Copying ${input.from} into ${input.to} failed (exit ${StatusCode}).`,
+      );
+    }
+    return outcome;
+  } finally {
+    await helper.remove({ force: true }).catch(() => undefined);
+  }
+}
+
 /**
- * Give a private Bot's profile from before one computer per person to its owner's computer.
+ * Give a private Bot's profile, and its files, from before one computer per person to its owner's computer.
  *
- * The server asks for it only for a private Bot, on its owner's computer: that profile had exactly
+ * The server asks for it only for a private Bot, on its owner's computer: that profile and those files had exactly
  * one user. A public Bot's had no single owner, so its users sign in again once and nothing is asked.
  *
- * The old volume is copied, not moved, and left exactly where it was; the old container is stopped
+ * The old volumes are copied, not moved, and left exactly where they were; the old container is stopped
  * first, if it is still running, so Chromium has flushed what it holds and nothing writes to the
  * profile while it is read. The new computer is already running when this is asked, which is safe
  * because the Bot's folder in it does not exist until the copy lands: the server waits for this
@@ -856,67 +920,53 @@ export async function carryOverProfile(
         });
     }
 
-    let helper: Docker.Container;
-    try {
-      helper = await docker.createContainer({
-        Image: options.image,
-        Labels: {
-          [OWNER_LABEL]: "true",
-          [NAMESPACE_LABEL]: NAMESPACE,
-          "openbot.carry-over": botId,
-        },
-        Entrypoint: ["sh", "-c"],
-        Cmd: [CARRY_OVER_SCRIPT],
-        // Validated a plain id above, and handed over as data, never spliced into the script.
-        Env: [`BOT=${botId}`],
-        NetworkDisabled: true,
-        HostConfig: {
-          Binds: [
-            `${legacy.names.profileVolume}:/carry-from:ro`,
-            `${person.profileVolume}:/profiles`,
-          ],
-          NetworkMode: "none",
-          SecurityOpt: ["no-new-privileges:true"],
-          // Only what copying files with their owners and modes takes, and nothing else.
-          CapDrop: ["ALL"],
-          CapAdd: ["CHOWN", "DAC_OVERRIDE", "FOWNER"],
-          ...(options.runtime ? { Runtime: options.runtime } : {}),
-        },
+    const profile = await copyVolume({
+      botId,
+      from: legacy.names.profileVolume,
+      to: person.profileVolume,
+      root: "/profiles",
+      dest: botId,
+      ...options,
+    });
+    /*
+     * Its files too, into its folder on the owner's computer, the same way and once. An old Bot with no workspace
+     * volume of ours had nothing saved there, which is not a failure.
+     */
+    const files = await docker
+      .getVolume(legacy.names.workspaceVolume)
+      .inspect()
+      .catch((error: unknown) => {
+        if (statusOf(error) === 404) return null;
+        throw new DockerUnavailableError(String(error));
       });
-    } catch (error) {
-      throw new DockerUnavailableError(String(error));
-    }
-    try {
-      await helper.start();
-      const { StatusCode } = (await helper.wait()) as { StatusCode: number };
-      const outcome: CarryOverOutcome | undefined =
-        StatusCode === 0
-          ? "copied"
-          : StatusCode === 10
-            ? "kept"
-            : StatusCode === 11
-              ? "done"
-              : undefined;
-      if (!outcome) {
-        throw new Error(
-          `Copying ${legacy.names.profileVolume} into ${person.profileVolume} failed (exit ${StatusCode}).`,
-        );
-      }
-      console.info(
-        JSON.stringify({
-          type: "computer-profile-carried-over",
-          bot: botId,
-          person: person.id,
-          from: legacy.names.profileVolume,
-          to: `${person.profileVolume}:/profiles/${botId}`,
-          outcome,
-          note: "The old volume is left in place.",
-        }),
-      );
-      return outcome;
-    } finally {
-      await helper.remove({ force: true }).catch(() => undefined);
-    }
+    const filesOutcome =
+      files && isLegacyOf(files.Labels ?? undefined)
+        ? await copyVolume({
+            botId,
+            from: legacy.names.workspaceVolume,
+            to: person.workspaceVolume,
+            root: "/workspace",
+            dest: `computers/${botId}`,
+            ...options,
+          })
+        : "absent";
+    console.info(
+      JSON.stringify({
+        type: "computer-profile-carried-over",
+        bot: botId,
+        person: person.id,
+        from: legacy.names.profileVolume,
+        to: `${person.profileVolume}:/profiles/${botId}`,
+        outcome: profile,
+        files: {
+          from: legacy.names.workspaceVolume,
+          to: `${person.workspaceVolume}:/workspace/computers/${botId}`,
+          outcome: filesOutcome,
+        },
+        note: "The old volumes are left in place.",
+      }),
+    );
+    return profile;
   })();
   carrying.set(key, attempt);
   attempt.catch(() => {

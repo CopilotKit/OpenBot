@@ -7,9 +7,9 @@
 // The mark file is how the runner tells "the suite caught the mutation" apart from "the suite never
 // imported the mutated file": it is written only when the rewrite actually happened.
 
-import { plugin } from "bun";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { plugin } from "bun";
 import { mutate, REGISTER, REPO_ROOT } from "./mutation-register";
 
 const id = process.env.MUTATION_REGISTER_ENTRY;

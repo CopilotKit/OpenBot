@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from "react";
 import {
-  cancelControl,
   type ControlState,
+  cancelControl,
   readControl,
   releaseControl,
   takeControl,

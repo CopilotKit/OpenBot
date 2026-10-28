@@ -1,11 +1,11 @@
 import { describe, expect, test } from "bun:test";
+import type { TurnRunner } from "@openbot/toolkit/run-turn";
 import type { AgentActor } from "../src/agents/profile-types";
 import type {
   AgentChannel,
   ChannelActivity,
   ChannelStore,
 } from "../src/channels/routes";
-import type { TurnRunner } from "@openbot/toolkit/run-turn";
 import { createRoutineRunner } from "../src/routines/runner";
 import type {
   RoutineRunContext,

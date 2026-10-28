@@ -1,6 +1,6 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
-import { client } from "@/lib/client";
 import { agentKeys } from "@/lib/agents/queries";
+import { client } from "@/lib/client";
 import {
   type CapabilityKey,
   type EgressRule,

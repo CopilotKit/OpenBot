@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import * as arcade from "../src/plugins/arcade";
 import type { BrokerProvider } from "../src/plugins/access";
+import * as arcade from "../src/plugins/arcade";
 import type {
   CuratedTransportKind,
   TransportKind,

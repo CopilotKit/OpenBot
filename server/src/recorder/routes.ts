@@ -14,8 +14,8 @@ import { extensionIdFromOrigin } from "@openbot/shared/recorder-extension";
 import { Hono, type MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { type AuditStore, DEPLOYMENT_INITIATOR } from "../audit";
-import { reasonWithoutStatement } from "../db/query-failure";
 import type { AppVariables, AuthenticatedActor } from "../auth/guards";
+import { reasonWithoutStatement } from "../db/query-failure";
 import { recorderAudit, recorderConnected } from "./connected";
 import type {
   RecorderConnectionStore,

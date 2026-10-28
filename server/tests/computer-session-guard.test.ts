@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { AuditEventInput, AuditStore } from "../src/audit";
 import { StaleSnapshotError } from "../src/computer/client";
+import { botSeat } from "../src/computer/computer-key";
 import {
   ActionRefusedError,
   createComputerGateway,
@@ -9,7 +10,6 @@ import type { ActionPolicy } from "../src/computer/policy";
 import type { SnapshotResult } from "../src/computer/schema";
 import { createInMemorySnapshotStore } from "../src/computer/snapshot-store";
 import { createDockerSupervisorProvider } from "../src/computer/supervisor";
-import { botSeat } from "../src/computer/computer-key";
 
 /**
  * A ref is only meaningful for the run of the computer that produced it.

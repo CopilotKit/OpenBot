@@ -38,7 +38,19 @@ export function deploymentCanIsolate(
 export async function mayIsolate(userId: string): Promise<boolean> {
   const controls = enterpriseControls();
   if (!controls) return DEFAULT_CAPABILITIES.isolatedComputers;
-  return controls.capabilityFor(userId, "isolatedComputers").catch(() => false);
+  return controls
+    .capabilityFor(userId, "isolatedComputers")
+    .catch((error: unknown) => {
+      // Refused, as every other unreadable switch is, but said: an isolated Bot then runs on the person's computer.
+      console.warn(
+        JSON.stringify({
+          type: "isolation-capability-read-failed",
+          userId,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
+      return false;
+    });
 }
 
 /** Why an isolated Bot is running on a shared computer instead. */

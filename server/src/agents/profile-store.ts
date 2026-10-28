@@ -1,4 +1,5 @@
 import { and, eq, isNotNull, isNull, or, sql } from "drizzle-orm";
+import { capabilityRefusal } from "../admin/capabilities";
 import type { CredentialStore } from "../credentials";
 import type { Database } from "../db/client";
 import {
@@ -7,6 +8,12 @@ import {
   agents,
   deploymentPackages,
 } from "../db/schema";
+import { teamBotPublications } from "../db/schema/team-bots";
+import {
+  assignedCondition,
+  assignedToActor,
+  teamBotAccess,
+} from "../team-bots/access";
 import {
   authFromConfiguration,
   retireReplacedKey,
@@ -17,14 +24,7 @@ import {
   mintCallbackToken,
   sameToken,
 } from "./callback-token";
-import {
-  assignedCondition,
-  assignedToActor,
-  teamBotAccess,
-} from "../team-bots/access";
-import { capabilityRefusal } from "../admin/capabilities";
 import { mayIsolate } from "./isolation";
-import { teamBotPublications } from "../db/schema/team-bots";
 import { canManageAgent } from "./profile-policy";
 import type {
   AgentActor,
@@ -129,11 +129,20 @@ export class ProtectedAgentError extends Error {
  * switch is a person's, so there is nobody it could be granted to. The route records both on the trail.
  */
 export class IsolationRefusedError extends Error {
-  constructor(readonly reason: "capability" | "unowned") {
+  /**
+   * `forOwner`: the switch refused is the Bot's owner's, asked while somebody else (an administrator) edits it, so the
+   * sentence names the owner rather than telling the editor their own switch is off.
+   */
+  constructor(
+    readonly reason: "capability" | "unowned",
+    options: { forOwner?: boolean } = {},
+  ) {
     super(
-      reason === "capability"
-        ? capabilityRefusal("isolatedComputers")
-        : "This Bot doesn't belong to a person, so it can't have a computer of its own.",
+      reason === "unowned"
+        ? "This Bot doesn't belong to a person, so it can't have a computer of its own."
+        : options.forOwner
+          ? "An admin has turned off \"Isolated Bots\" for this Bot's owner, so it can't have a computer of its own."
+          : capabilityRefusal("isolatedComputers"),
     );
     this.name = "IsolationRefusedError";
   }
@@ -153,6 +162,31 @@ async function requireMayIsolate(actor: AgentActor) {
   if (!(await mayIsolate(actor.id))) {
     throw new IsolationRefusedError("capability");
   }
+}
+
+/**
+ * Refuse a computer of its own to a Bot whose OWNER lacks "Isolated Bots", whoever is editing it.
+ *
+ * The owner's switch is the one that decides at run time (`runsIsolated` in isolation.ts), so it is the one asked here:
+ * asking the editor let an administrator tick Isolated on somebody's Bot whose owner lacks the switch, the save
+ * succeeded, and the Bot never ran isolated. Read before the transaction, for the reason `requireMayIsolate` gives. An
+ * unknown Bot, and one that belongs to nobody, are refused inside, each for its own reason.
+ */
+async function requireOwnerMayIsolate(
+  database: Database,
+  actor: AgentActor,
+  agentId: string,
+) {
+  const [row] = await database
+    .select({ ownerUserId: agentProfiles.ownerUserId })
+    .from(agentProfiles)
+    .where(eq(agentProfiles.agentId, agentId))
+    .limit(1);
+  const owner = row?.ownerUserId;
+  if (!owner || (await mayIsolate(owner))) return;
+  throw new IsolationRefusedError("capability", {
+    forOwner: owner !== actor.id,
+  });
 }
 
 export class ManagedAgentUnavailableError extends Error {
@@ -549,7 +583,8 @@ export function createAgentProfileStore(
     },
 
     async update(actor, id, input) {
-      if (input.isolated === true) await requireMayIsolate(actor);
+      if (input.isolated === true)
+        await requireOwnerMayIsolate(database, actor, id);
       return database.transaction(
         async (transaction) => {
           await lockProfileMutationRows(transaction, id);

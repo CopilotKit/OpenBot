@@ -1,11 +1,11 @@
 import { PERSON_INITIATOR } from "../../audit";
 import type { AppVariables } from "../../auth/guards";
+import { approveOwnersSharedUse, ownerGrantRefusal } from "../owner-grants";
 import {
   asSharedUseApproval,
   exposureOf,
   type SharedUseApproval,
 } from "../shared-use";
-import { approveOwnersSharedUse, ownerGrantRefusal } from "../owner-grants";
 import {
   CatalogueEntryUnknownError,
   isDeploymentFault,

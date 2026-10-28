@@ -1,14 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import type { MiddlewareHandler } from "hono";
 import type { AppVariables, AuthenticatedActor } from "../src/auth/guards";
+import type { ComputerSeat } from "../src/computer/computer-key";
+import { personSeat } from "../src/computer/computer-key";
 import {
   type ComputerGateway,
   ComputerStillStartingError,
 } from "../src/computer/gateway";
 import type { PolicyStore } from "../src/computer/policy-store";
 import { createComputerRoutes } from "../src/computer/routes";
-import type { ComputerSeat } from "../src/computer/computer-key";
-import { personSeat } from "../src/computer/computer-key";
 
 describe("computer routes", () => {
   test("gets a screenshot through the governed computer gateway", async () => {

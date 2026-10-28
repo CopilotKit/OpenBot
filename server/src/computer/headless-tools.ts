@@ -1,17 +1,17 @@
-import { z } from "zod";
-import { currentApprovalContext } from "../approvals/types";
-import { type AuditStore, recordAuditEvent } from "../audit";
 import {
   type HeadlessTool,
   HeadlessToolSuspension,
 } from "@openbot/toolkit/headless-tools";
+import { z } from "zod";
+import { currentApprovalContext } from "../approvals/types";
+import { type AuditStore, recordAuditEvent } from "../audit";
+import type { ComputerSeat } from "./computer-key";
 import {
   type ActionActor,
   type ComputerGateway,
   ComputerStillStartingError,
   HumanHasControlError,
 } from "./gateway";
-import type { ComputerSeat } from "./computer-key";
 import type { ControlState } from "./schema";
 
 /** What the headless sign-in tool needs from the passwords module. See passwords/service.ts. */

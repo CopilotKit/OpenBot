@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test";
+import { botSeat } from "../src/computer/computer-key";
 import * as network from "../src/computer/policy-network";
 import type {
   ComputerLocation,
   ComputerProvider,
 } from "../src/computer/provider";
-import { botSeat } from "../src/computer/computer-key";
 
 /**
  * A computer that wakes is pushed its network policy before the action that woke it runs.

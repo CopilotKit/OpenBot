@@ -2,13 +2,13 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { inArray } from "drizzle-orm";
 import type { AuditEventInput } from "../src/audit";
+import { personSeat } from "../src/computer/computer-key";
 import { createDatabase } from "../src/db/client";
 import { users } from "../src/db/schema/core";
 import { savedLogins, signInRequests } from "../src/db/schema/passwords";
 import { createSignInService } from "../src/passwords/service";
 import { createPasswordStore } from "../src/passwords/store";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
-import { personSeat } from "../src/computer/computer-key";
 
 /**
  * The Postgres store behind the private sign-in form, against a real database: every read is the

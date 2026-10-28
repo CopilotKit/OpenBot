@@ -6,11 +6,19 @@ import {
   HttpAgent,
   type RunAgentInput,
 } from "@ag-ui/client";
+import { HeadlessToolSuspension } from "@openbot/toolkit/headless-tools";
+import { createTurnRunner, type RunnerLike } from "@openbot/toolkit/run-turn";
 import { Hono } from "hono";
 import { Observable } from "rxjs";
+import { serverTurnAdmission } from "../src/agents/turn-admission";
 import { parseApprovalContinuation } from "../src/approvals/types";
 import type { AuditEventInput, AuditStore } from "../src/audit";
 import type { AppVariables } from "../src/auth/guards";
+import {
+  botSeat,
+  type ComputerSeat,
+  personSeat,
+} from "../src/computer/computer-key";
 import type { ComputerGateway } from "../src/computer/gateway";
 import { createHeadlessComputerTools } from "../src/computer/headless-tools";
 import type {
@@ -29,14 +37,6 @@ import {
 } from "../src/passwords/service";
 import { createMemoryPasswordStore } from "../src/passwords/store";
 import { originOf, type SignInRequestRecord } from "../src/passwords/types";
-import { createTurnRunner, type RunnerLike } from "@openbot/toolkit/run-turn";
-import { HeadlessToolSuspension } from "@openbot/toolkit/headless-tools";
-import { serverTurnAdmission } from "../src/agents/turn-admission";
-import {
-  botSeat,
-  type ComputerSeat,
-  personSeat,
-} from "../src/computer/computer-key";
 
 /**
  * The private sign-in request and the Passwords vault, as properties:

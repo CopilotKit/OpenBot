@@ -1,10 +1,10 @@
 import { expect, test } from "bun:test";
 import type { SaveVoiceSessionInput } from "@openbot/shared/voice-session";
-import {
-  VoiceTranscript,
-  VOICE_CONTEXT_ITEM_ID,
-} from "../src/lib/voice/transcript";
 import { VoiceSession } from "../src/lib/voice/session";
+import {
+  VOICE_CONTEXT_ITEM_ID,
+  VoiceTranscript,
+} from "../src/lib/voice/transcript";
 import type { VoiceEvent } from "../src/lib/voice/types";
 
 test("late input transcription keeps the user's turn ahead of the live answer", () => {

@@ -7,19 +7,19 @@ import {
   spyOn,
   test,
 } from "bun:test";
+import * as ReactCoreV2 from "@copilotkit/react-core/v2";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import {
   cleanup,
   fireEvent,
-  render,
   type RenderResult,
+  render,
   waitFor,
 } from "@testing-library/react";
-import * as ReactCoreV2 from "@copilotkit/react-core/v2";
 import { useCallback } from "react";
 import { Composer } from "@/components/channels/composer/composer";
-import { ConversationView } from "@/components/channels/conversation-view";
 import type { ComposerDraft } from "@/components/channels/composer/draft";
+import { ConversationView } from "@/components/channels/conversation-view";
 import {
   attachmentUrl,
   MAX_ATTACHMENTS_PER_MESSAGE,

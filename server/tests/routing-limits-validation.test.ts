@@ -4,6 +4,7 @@ import { Hono } from "hono";
 import type { AgentProfileStore } from "../src/agents/profile-store";
 import { createApp } from "../src/app";
 import type { AppVariables } from "../src/auth/guards";
+import { personSeat } from "../src/computer/computer-key";
 import { createComputerRoutes } from "../src/computer/routes";
 import { loadConfig } from "../src/config";
 import type { RoutineRunner } from "../src/routines/runner";
@@ -11,7 +12,6 @@ import type { IntentRouter } from "../src/routing/classify";
 import { createRoutingRoutes } from "../src/routing/routes";
 import { createCoworkerRoutingService } from "../src/routing/service";
 import { testEnvironment } from "./support/environment";
-import { personSeat } from "../src/computer/computer-key";
 
 const requireUser: MiddlewareHandler<{ Variables: AppVariables }> = async (
   context,

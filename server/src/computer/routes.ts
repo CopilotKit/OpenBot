@@ -8,6 +8,12 @@ import type { AuditReader } from "../audit";
 import type { AppVariables } from "../auth/guards";
 import { requireAdmin } from "../auth/guards";
 import { ownsPersonBrowser } from "../browser/person";
+import {
+  type ComputerSeat,
+  parseComputerKey,
+  personSeat,
+  seatText,
+} from "./computer-key";
 import { DEPLOYMENT_ROUTES } from "./deployment-routes";
 import {
   type ActionActor,
@@ -25,12 +31,6 @@ import {
   WorkspaceRequestError,
   WorkspaceTooLargeError,
 } from "./gateway";
-import {
-  type ComputerSeat,
-  parseComputerKey,
-  personSeat,
-  seatText,
-} from "./computer-key";
 import type { PageFrameStore } from "./page-frames";
 import { dryRunAgainstHistory, REPLAYABLE_EVENT_TYPES } from "./policy-dry-run";
 import { type PolicyStore, parseActionPolicy } from "./policy-store";

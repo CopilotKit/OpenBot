@@ -8,11 +8,11 @@ import {
   within,
 } from "@testing-library/react";
 import { StrictMode, useState } from "react";
-import type { ControlState } from "@/lib/computers/control";
 import {
   ComputerChatControls,
   ComputerControlButton,
 } from "@/components/computer/computer-controls";
+import type { ControlState } from "@/lib/computers/control";
 
 const originalFetch = globalThis.fetch;
 beforeAll(() => GlobalRegistrator.register());

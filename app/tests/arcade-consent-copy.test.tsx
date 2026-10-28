@@ -1,14 +1,14 @@
 import { expect, test } from "bun:test";
-import fixture from "../../server/tests/fixtures/arcade-catalogue.json";
 import {
-  consentCopy,
   type ConsentAction,
+  consentCopy,
 } from "@/lib/plugins/enablement-notes";
 import {
   consentActionsFrom,
   type GrantState,
   groupGrants,
 } from "@/lib/plugins/grants";
+import fixture from "../../server/tests/fixtures/arcade-catalogue.json";
 
 /**
  * The copy shown before redirecting somebody to a consent screen (spec D30). The action list is

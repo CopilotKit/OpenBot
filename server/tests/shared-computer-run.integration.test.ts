@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import type { AuditEventInput, AuditStore } from "../src/audit";
 import { StaleSnapshotError } from "../src/computer/client";
+import { botSeat } from "../src/computer/computer-key";
 import { createComputerGateway } from "../src/computer/gateway";
 import type { ActionPolicy } from "../src/computer/policy";
 import { createSharedComputerProvider } from "../src/computer/provider";
@@ -9,7 +10,6 @@ import { createSnapshotStore } from "../src/computer/snapshot-store";
 import { createDatabase } from "../src/db/client";
 import { computerSnapshot } from "../src/db/schema";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
-import { botSeat } from "../src/computer/computer-key";
 
 /**
  * The one shared computer, through the table rather than through a `Map`.

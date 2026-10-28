@@ -17,6 +17,7 @@ import {
   RouterProvider,
 } from "@tanstack/react-router";
 import { cleanup, render } from "@testing-library/react";
+import { serversListedFor } from "@/lib/plugins/listed";
 import {
   type PluginConnections,
   type PluginServer,
@@ -24,7 +25,6 @@ import {
   pluginKeys,
 } from "@/lib/plugins/queries";
 import { Route as ConnectedAccountRoute } from "@/routes/_authed/_app/connections.$key";
-import { serversListedFor } from "@/lib/plugins/listed";
 import { settleReactWork } from "./settle-react-work";
 
 /**
