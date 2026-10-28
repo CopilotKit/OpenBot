@@ -68,7 +68,8 @@ export type SealedOrganizationSession = { sealed: string; expiresAt: Date };
  * here ended: they signed out, their sessions were ended, they were removed; the row's `ending` says how) or `expired`
  * (its lifetime ran out). A Bot's browser's connection, which lasts one recording (browser/bot-browser.ts), ends
  * `stopped` (the person's Stop), `ended` (the recording ended without one, and the connection was found left behind)
- * or `not-started` (the start it was minted for did not happen).
+ * or `not-started` (the start it was minted for did not happen). The person's own OpenBot browser's ends `cleared` when
+ * they clear that browser (browser/routes.ts): its token was in the profile the clear deleted.
  */
 export type RecorderRevokeReason =
   | "replaced"
@@ -76,6 +77,7 @@ export type RecorderRevokeReason =
   | "revoked"
   | "signed_out"
   | "expired"
+  | "cleared"
   | BotBrowserRevokeReason;
 
 /** Why a Bot's browser's connection ended (`RecorderRevokeReason`). */
@@ -420,6 +422,7 @@ export function createRecorderConnectionStore(
         | "disconnected"
         | "revoked"
         | "signed_out"
+        | "cleared"
         | BotBrowserRevokeReason,
       /** How the person's sign-in ended, for `signed_out`. */
       ending?: string,

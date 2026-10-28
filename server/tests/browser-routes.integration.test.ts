@@ -1537,6 +1537,15 @@ describe("clearing a person's own browser", () => {
     asked.filter(
       (line) => line === `POST /browser/clear ${personBrowserId(userId)}`,
     ).length;
+  /** The reason each `recorder.revoked` row gives for this connection. */
+  const revokedAs = (connectionId: string) =>
+    audits
+      .filter(
+        (event) =>
+          event.eventType === "recorder.revoked" &&
+          event.targetId === connectionId,
+      )
+      .map((event) => event.payload?.reason);
 
   test("wipes the person's browser, says who did it on the trail, and opens it again fresh with its Recorder connected anew", async () => {
     await open(openbot, "ada");
@@ -1561,6 +1570,8 @@ describe("clearing a person's own browser", () => {
         })
       ).status,
     ).toBe(401);
+    // Ended by the clear, whose wipe took its token, before the open made the new one.
+    expect(revokedAs(before.connectionId)).toEqual(["cleared"]);
     expect(
       await (
         await call(openbot, "/api/recorder/me", {
@@ -1579,8 +1590,15 @@ describe("clearing a person's own browser", () => {
     ]);
   });
 
-  test("a closed browser is cleared and left closed, and nobody signed out reaches it", async () => {
+  test("a closed browser is cleared and left closed, its Recorder connection ended with it, and nobody signed out reaches it", async () => {
+    await open(openbot, "ben");
+    const held = handed(ben.id);
     await call(openbot, "/api/browser/close", { method: "POST", as: "ben" });
+    // Closed, the browser keeps its connection in its profile, and OpenBot keeps it live for the next open.
+    expect(
+      (await call(openbot, "/api/recorder/me", { headers: bearer(held.token) }))
+        .status,
+    ).toBe(200);
     const opensBefore = asked.filter((line) =>
       line.startsWith("POST /browser/open "),
     ).length;
@@ -1591,6 +1609,22 @@ describe("clearing a person's own browser", () => {
     expect(
       asked.filter((line) => line.startsWith("POST /browser/open ")).length,
     ).toBe(opensBefore);
+    // The token went with the profile, so nothing stands for it here either: ended, and on the trail as the clear's.
+    expect(
+      (await call(openbot, "/api/recorder/me", { headers: bearer(held.token) }))
+        .status,
+    ).toBe(401);
+    expect(revokedAs(held.connectionId)).toEqual(["cleared"]);
+    expect(
+      audits.find(
+        (event) =>
+          event.eventType === "recorder.revoked" &&
+          event.targetId === held.connectionId,
+      ),
+    ).toMatchObject({
+      actorUserId: ben.id,
+      payload: { via: "openbot-browser", reason: "cleared" },
+    });
 
     const unsigned = asked.length;
     expect((await clear()).status).toBe(401);

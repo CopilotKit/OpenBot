@@ -1420,9 +1420,14 @@ export function createBrowserRoutes(deps: BrowserRouteDeps) {
   /**
    * Clear the person's browser (shared/bot-browser.ts, CLEARING A BROWSER), theirs alone, as every route here is. The
    * computer wipes it and leaves it closed; past that point of no return the row is written, as a computer reset's is.
+   *
+   * The Recorder connection OpenBot holds for this browser ends with it (`cleared`, with its `recorder.revoked` row), open
+   * or closed: its token was in the profile the clear deleted, so nothing should stand for it. Left live, a closed
+   * browser's stayed in Settings, Browsers as connected until the person next opened it.
+   *
    * One that was open opens again at once, fresh, as Open opens it, so the person is back where they were with nothing
-   * signed in; its Recorder holds no connection after the wipe, so Open connects it anew, which replaces the one OpenBot
-   * held for it. One that does not open again is answered closed: it was cleared, and the page offers to open it.
+   * signed in, its Recorder connected anew. One that does not open again is answered closed: it was cleared, and the page
+   * offers to open it.
    */
   routes.post("/clear", openBudget, deps.requireUser, async (context) => {
     const actor = context.var.actor;
@@ -1470,6 +1475,26 @@ export function createBrowserRoutes(deps: BrowserRouteDeps) {
         );
         return context.json({ error: SENTENCES.clearedNotFinished }, 500);
       }
+    }
+    try {
+      const installId = personBrowserInstallId(computerId);
+      for (const connection of await deps.recorder.connections.list(actor.id))
+        if (connection.installId === installId)
+          await deps.recorder.connections.revoke(
+            actor.id,
+            connection.id,
+            "cleared",
+          );
+    } catch (error) {
+      // Not ended without its row (the two are one transaction): it stands, and clearing again ends it.
+      console.error(
+        JSON.stringify({
+          type: "browser-cleared-connection-not-revoked",
+          // A failed query's message carries the values bound to it: never logged.
+          error: reasonWithoutStatement(error),
+        }),
+      );
+      return context.json({ error: SENTENCES.clearedNotFinished }, 500);
     }
     if (!wasOpen) return context.json(await currentState(actor.id));
     const opened = await connect(askerOf(context));

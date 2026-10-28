@@ -633,7 +633,8 @@ export const auditEventTypes = [
    * a sign-out, sessions ended another way, the person removed, their organization ending the session it holds a copy
    * of) or expired (its lifetime ran out: the deployment ended it, payload `owner`); for a Bot's browser's connection,
    * which lasts one recording, stopped (the person's Stop), ended (the recording ended without one) or not-started (the
-   * start it was for did not happen). Written in the transaction that ends the connection, as `recorder.connected` is in
+   * start it was for did not happen); for the person's own OpenBot browser's, cleared (they cleared that browser, and its
+   * token went with the profile). Written in the transaction that ends the connection, as `recorder.connected` is in
    * the one that makes it.
    */
   "recorder.revoked",
