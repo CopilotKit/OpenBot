@@ -82,7 +82,7 @@ export function OpenDuetFrame({ children }: { children: ReactNode }) {
             onMenu={() => setMenuOpen(true)}
           />
         ) : (
-          <PageHeader />
+          <PageHeader main={main} />
         )}
         <main
           className={cn(

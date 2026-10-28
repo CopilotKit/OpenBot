@@ -1,6 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useLocation } from "@tanstack/react-router";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useState } from "react";
 import { WaitingForYou } from "@/components/approvals/waiting";
 import { BotResponsibilities } from "@/components/responsibilities/responsibilities";
 import { RoutinesList } from "@/components/routines/routines-list";
@@ -9,7 +8,6 @@ import { approvalInboxOptions } from "@/lib/approvals";
 import { routinesQueryOptions } from "@/lib/routines/queries";
 import { cn } from "@/lib/utils";
 import { FOCUS } from "./kit";
-import { RESPONSIBILITIES_HASH } from "./places";
 import { waitingCount } from "./tasks-model";
 
 /** Which list Tasks shows: what waits on you and what your Bots carry, or what to start next. */
@@ -44,22 +42,13 @@ function rememberView(view: TasksView) {
  * for suggested next steps. So every choice, field and confirmation OpenBot offers is here, and a
  * new one arrives without this screen changing. The skin adds only the switch, the headings and
  * the layout around them.
- *
- * Followed from the menu's Responsibilities row, it opens on Active at that section.
  */
 export function TasksScreen() {
-  const hash = useLocation({ select: (location) => location.hash });
-  const wantsResponsibilities = hash === RESPONSIBILITIES_HASH;
-  const [view, setView] = useState<TasksView>(() =>
-    wantsResponsibilities ? "active" : rememberedView(),
-  );
+  const [view, setView] = useState<TasksView>(rememberedView);
   const show = (next: TasksView) => {
     setView(next);
     rememberView(next);
   };
-  useEffect(() => {
-    if (wantsResponsibilities) setView("active");
-  }, [wantsResponsibilities]);
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
@@ -70,11 +59,7 @@ export function TasksScreen() {
           id="openduet-tasks-panel"
           role="tabpanel"
         >
-          {view === "active" ? (
-            <ActiveView focusResponsibilities={wantsResponsibilities} />
-          ) : (
-            <SuggestionsInbox />
-          )}
+          {view === "active" ? <ActiveView /> : <SuggestionsInbox />}
         </div>
       </div>
     </div>
@@ -153,19 +138,10 @@ function SwitchTab({
  * Active: what waits on the person, decided in OpenBot's own rows, then the responsibilities and
  * routines their Bots carry, in OpenBot's own lists. Needs input is left out when nothing waits.
  */
-function ActiveView({
-  focusResponsibilities,
-}: {
-  focusResponsibilities: boolean;
-}) {
+function ActiveView() {
   const inbox = useQuery(approvalInboxOptions());
   const routines = useQuery(routinesQueryOptions());
-  const responsibilities = useRef<HTMLDivElement>(null);
   const waiting = waitingCount(inbox.data);
-  useEffect(() => {
-    if (focusResponsibilities)
-      responsibilities.current?.scrollIntoView({ block: "start" });
-  }, [focusResponsibilities]);
 
   return (
     <div className="flex flex-col gap-9">
@@ -174,13 +150,7 @@ function ActiveView({
           <WaitingForYou />
         </Section>
       ) : null}
-      <div
-        className="scroll-mt-[96px]"
-        id={RESPONSIBILITIES_HASH}
-        ref={responsibilities}
-      >
-        <BotResponsibilities />
-      </div>
+      <BotResponsibilities />
       <Section count={routines.data?.routines.length} label="Routines">
         <RoutinesList embedded />
       </Section>

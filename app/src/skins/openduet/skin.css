@@ -278,12 +278,44 @@
 }
 
 /*
- * A conversation's composer floats inset from the column's edges, as OpenDuet's does, rather than
- * running flush to them with its focus ring on the screen's edge. OpenBot draws it in a wrapper with
- * no side padding (`conversation-view.tsx`); home's composer already has its own.
+ * A conversation's composer floats inset from the column's edges, as OpenDuet's does, with its
+ * focus ring off the screen's edge. OpenBot draws it in a column with no side padding.
+ */
+[data-skin="openduet"] [data-openduet-frame] [data-slot="composer-column"] {
+  padding-inline: 12px;
+}
+
+/*
+ * A page opened over the app names itself in the chrome's title pill, read from the page's own
+ * title, which stays for screen readers only, as OpenDuet draws a page. The page then starts right
+ * under the chrome, and its one action keeps its place on the right of the title's line.
+ */
+[data-skin="openduet"] [data-openduet-page] [data-slot="page-title"] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+[data-skin="openduet"] [data-openduet-page] [data-slot="page-header"] > div {
+  justify-content: flex-end;
+}
+[data-skin="openduet"]
+  [data-openduet-page]
+  div:has(> [data-slot="page-header"]) {
+  padding-top: 0.5rem;
+}
+
+/*
+ * The bar a page draws above its scroller holds its own back link. The chrome's back disc goes
+ * where that link goes (`header.tsx`), so the bar is not drawn twice.
  */
 [data-skin="openduet"]
-  [data-openduet-frame]
-  .px-0:has(> div > form [aria-label="Message"]) {
-  padding-inline: 12px;
+  [data-openduet-page]
+  div:has(+ div > div > [data-slot="page-header"]) {
+  display: none;
 }

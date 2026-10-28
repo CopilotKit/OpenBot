@@ -1,22 +1,11 @@
 import {
-  type Icon,
-  IconBell,
-  IconBolt,
-  IconBox,
-  IconBrain,
   IconChevronRight,
   IconLogout,
   IconPin,
   IconPinFilled,
   IconPinnedOff,
-  IconPlug,
   IconPlus,
-  IconRepeat,
-  IconSettings,
-  IconShieldCheck,
-  IconShieldLock,
   IconStack2,
-  IconTargetArrow,
   IconTrash,
 } from "@tabler/icons-react";
 import { useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query";
@@ -50,25 +39,12 @@ import {
   channelListQueryOptions,
 } from "@/lib/channels/queries";
 import { appConfig } from "@/lib/generated/application-config";
+import { useNavigationItems } from "@/lib/navigation";
 import { relativeTime } from "@/lib/relative-time";
 import { useMessageListEmphasis } from "@/lib/settings/message-list";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
 import { FOCUS } from "./kit";
-import { MANAGE_PLACES, SETTINGS_LINK } from "./places";
-
-/** The glyph for each Manage row, by its label. */
-const MANAGE_ICONS: Record<string, Icon> = {
-  Bots: IconBolt,
-  Connections: IconPlug,
-  Skills: IconBox,
-  Memory: IconBrain,
-  Routines: IconRepeat,
-  Responsibilities: IconTargetArrow,
-  Approvals: IconShieldCheck,
-  Notifications: IconBell,
-  Admin: IconShieldLock,
-};
 
 /** Whether Manage was left open, kept in this browser between visits. */
 export const MANAGE_STORAGE_KEY = "openduet.menu-manage";
@@ -129,9 +105,10 @@ export function MenuSheet({
   const scrollRoot = useRef<HTMLDivElement>(null);
   const close = () => onOpenChange(false);
   const conversations = pinnedFirst(channels.data ?? []);
-  const places = MANAGE_PLACES.filter(
-    (place) => !place.adminOnly || user?.role === "admin",
-  );
+  // OpenBot's one navigation list, for this person: Settings on its own, the rest under Manage.
+  const navigation = useNavigationItems();
+  const settings = navigation.find((item) => item.id === "settings");
+  const places = navigation.filter((item) => item.id !== "settings");
 
   return (
     <Sheet onOpenChange={onOpenChange} open={open}>
@@ -242,32 +219,31 @@ export function MenuSheet({
               hidden={!manageOpen}
               id={manageId}
             >
-              {places.map((place) => {
-                const Glyph = MANAGE_ICONS[place.label] ?? IconBox;
-                return (
-                  <Link
-                    {...place.link}
-                    activeProps={HERE}
-                    className={ROW}
-                    key={place.label}
-                    onClick={close}
-                  >
-                    <Glyph size={22} stroke={1.8} />
-                    {place.label}
-                    {place.label === "Bots" ? <AccentBadge /> : null}
-                  </Link>
-                );
-              })}
+              {places.map((place) => (
+                <Link
+                  activeProps={HERE}
+                  className={ROW}
+                  key={place.id}
+                  onClick={close}
+                  to={place.to}
+                >
+                  <place.icon size={22} stroke={1.8} />
+                  {place.label}
+                  {place.id === "bots" ? <AccentBadge /> : null}
+                </Link>
+              ))}
             </div>
-            <Link
-              {...SETTINGS_LINK}
-              activeProps={HERE}
-              className={ROW}
-              onClick={close}
-            >
-              <IconSettings size={22} stroke={1.8} />
-              Settings
-            </Link>
+            {settings ? (
+              <Link
+                activeProps={HERE}
+                className={ROW}
+                onClick={close}
+                to={settings.to}
+              >
+                <settings.icon size={22} stroke={1.8} />
+                {settings.label}
+              </Link>
+            ) : null}
             <button
               className={ROW}
               disabled={signOut.isPending}

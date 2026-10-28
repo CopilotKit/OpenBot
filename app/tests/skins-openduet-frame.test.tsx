@@ -24,7 +24,9 @@ import {
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { PageShell } from "@/components/layout/page-shell";
 import { appConfig } from "@/lib/generated/application-config";
+import { navigationFor } from "@/lib/navigation";
 import { SKINS } from "@/skins/registry";
 import { settleReactWork } from "./settle-react-work";
 
@@ -285,12 +287,13 @@ function renderApp(path: string) {
     routeTree: rootRoute.addChildren([
       page("/", () => <h1>Start a conversation</h1>),
       page("/bots", () => (
-        <div>
-          <header>
-            <h1>Bots</h1>
-          </header>
-          <p>Your Bots and the ones shared with you.</p>
-        </div>
+        <PageShell
+          backButton={{ label: "Home", linkProps: { to: "/" } }}
+          description="Your Bots and the ones shared with you."
+          title="Bots"
+        >
+          <p>The roster</p>
+        </PageShell>
       )),
       page("/channel/$channelId", () => <p>A conversation</p>),
       screenRoute,
@@ -334,19 +337,38 @@ describe("the frame reaches every OpenBot surface", () => {
       "/channel/c-1",
       "/group/g-1",
       "/channel/new",
+      "/s/tasks",
       "/bots",
+      "/capabilities",
       "/connections",
-      "/capabilities/skills",
-      "/capabilities/memory",
-      "/routines",
-      "/s/tasks#responsibilities",
-      "/settings/approvals",
-      "/settings/notifications",
       "/admin",
       "/settings",
-      "/s/tasks",
     ])
       expect(links).toContain(place);
+  });
+
+  /*
+   * Found in review: the menu kept its own list of destinations beside OpenBot's sidebar. It draws
+   * OpenBot's one navigation list now, so a destination added there reaches this menu too.
+   */
+  test("the menu's destinations are exactly OpenBot's navigation list, for admins and for everyone else", async () => {
+    for (const role of ["admin", "user"] as const) {
+      api(role);
+      const view = renderApp("/");
+      const menu = await openMenu(view);
+      const manage = within(menu).getByRole("button", { name: /Manage/ });
+      const group = document.getElementById(
+        manage.getAttribute("aria-controls") ?? "",
+      );
+      const drawn = [...(group?.querySelectorAll("a") ?? [])].map((link) =>
+        link.textContent?.replace(/\d+$/, "").trim(),
+      );
+      const settings = within(menu).getByRole("link", { name: "Settings" });
+      expect([...drawn, settings.textContent?.trim()]).toEqual(
+        navigationFor(role).map((item) => item.label),
+      );
+      view.unmount();
+    }
   });
 
   test("Settings, which holds the skin picker, is on every tab without opening anything; Admin only for administrators", async () => {
@@ -362,17 +384,34 @@ describe("the frame reaches every OpenBot surface", () => {
 
   /*
    * Found in review: the frame wrote an attribute onto the page's own heading, an element React
-   * owns, to hide it behind a pill. The page's heading is left exactly as the page drew it now.
+   * owns, and a page with its own back link showed two ways back. The chrome now reads the page's
+   * `page-title` and its back link, writes nothing to either, and its one back disc goes where the
+   * page's own link goes.
    */
-  test("a page opened over the app has a way back and no tab bar, and its heading is the page's own", async () => {
+  test("a page opened over the app names itself from its own title, writes nothing to it, and has one way back that goes where the page's does", async () => {
     api("user");
     const view = renderApp("/bots");
-    await view.findByRole("button", { name: "Back" });
+    const back = await view.findByRole("button", { name: "Back to Home" });
     expect(view.queryByRole("navigation", { name: "Main" })).toBeNull();
     expect(view.queryByRole("button", { name: "Menu" })).toBeNull();
-    const heading = await view.findByRole("heading", { name: "Bots" });
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    expect(heading.getAttributeNames()).toEqual([]);
+    await waitFor(() =>
+      expect(document.querySelector("header p[aria-hidden]")?.textContent).toBe(
+        "Bots",
+      ),
+    );
+    const title = document.querySelector('[data-slot="page-title"]');
+    expect(title?.getAttributeNames().sort()).toEqual(["class", "data-slot"]);
+    /*
+     * The skin hides the page's own bar by its place beside the page-header hook
+     * (`div:has(+ div > div > [data-slot="page-header"])`, which this DOM cannot evaluate): the
+     * div just before the one holding the header's column. It is the bar with the page's back link.
+     */
+    const header = document.querySelector('[data-slot="page-header"]');
+    const bar = header?.parentElement?.parentElement?.previousElementSibling;
+    expect(bar?.tagName).toBe("DIV");
+    expect(bar?.querySelector("a")?.textContent).toContain("Home");
+    fireEvent.click(back);
+    await view.findByRole("heading", { name: "Start a conversation" });
   });
 
   test("Chat and Tasks are phone-shaped, other pages keep OpenBot's width, and an open computer gets OpenBot's pane", async () => {
@@ -492,22 +531,6 @@ describe("Tasks is OpenBot's own lists under OpenDuet's headings", () => {
         path: "/api/proactive/suggestions/s-1/dismiss",
         body: null,
       }),
-    );
-  });
-
-  test("the menu's Responsibilities opens Tasks on Active at that section", async () => {
-    api("user");
-    window.localStorage.setItem("openduet.tasks-view", "up_next");
-    const view = renderApp("/s/tasks#responsibilities");
-    expect(
-      (await view.findByRole("tab", { name: "Active" })).getAttribute(
-        "aria-selected",
-      ),
-    ).toBe("true");
-    await waitFor(() =>
-      expect(
-        document.getElementById("responsibilities")?.textContent,
-      ).toContain("Keep the support inbox at zero"),
     );
   });
 });
