@@ -8,7 +8,8 @@ import { cn } from "@/lib/utils";
  * `use-channel-events` preserves participant id arrays for unchanged rows.
  *
  * Each face is the Bot's orb, in the colour its id picks: the same colour `AbstractAvatar` draws
- * from the seed, which is the id unless a tenant package sets one. Clipped to its circle, so its glow
+ * from the seed, which is the id unless a tenant package set one or the Bot was copied from another
+ * (a copy keeps its source's seed). Clipped to its circle, so its glow
  * never spills into the row.
  *
  * `typing` overlays a working indicator at the bottom-right — three bouncing dots, so a channel

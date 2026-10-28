@@ -2,9 +2,10 @@
 
 /*
  * OpenBot's visual system, in the variables every screen already reads. Neutral greys with a cool
- * bias; a near-black primary that turns light in the dark; one accent, `--brand`, for focus,
- * selection and links and never for headings (shadcn's `--accent` stays the neutral hover fill);
- * four status colours for how work stands. Every colour here has a dark value in `.dark` below, and
+ * bias; a near-black primary that turns light in the dark; one accent, `--brand`, kept for focus,
+ * selection and links and never for headings (shadcn's `--accent` stays the neutral hover fill); it
+ * reaches the focus ring today. Four status colours for how work stands, and the glass and shadow
+ * below, are here for the screens that adopt them. Every colour here has a dark value in `.dark` below, and
  * `tests/visual-system.test.ts` fails if one is missing or a colour that carries words falls under
  * 4.5:1 on a ground it sits on.
  */

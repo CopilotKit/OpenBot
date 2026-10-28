@@ -135,9 +135,9 @@ changes for a deployment.
 
 ### OpenBot has a new look
 
-- Every screen uses a new visual system: cool neutral greys, one purple accent for focus,
-  selection and links, four status colours, frosted chrome and new motion. Text now follows the
-  browser's own size, so it is a little larger than before.
+- Every screen has new colours: cool neutral greys, a near-black primary button that turns light
+  in dark mode, a purple focus ring, slightly rounder corners and quicker easing. Text now follows
+  the browser's own size, so it is a little larger than before.
 - Dark mode follows the system by default. Settings → General → Appearance offers System, Light and
   Dark, kept in this browser. Someone who had turned the old dark switch on stays dark.
 - Every Bot, and OpenBot's own mark, is an orb with eyes, in a colour picked from the Bot, that blinks

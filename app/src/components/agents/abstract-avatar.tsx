@@ -2,7 +2,9 @@ import { BotOrb } from "@/components/agents/orb/bot-orb";
 import { orbPaletteFor } from "@/components/agents/orb/bot-orb-draw";
 
 /**
- * A Bot's face: its orb, in the colour its seed picks, so the same Bot looks the same everywhere.
+ * A Bot's face: its orb, in the colour its seed picks. The seed is the Bot's id unless a tenant
+ * package set one or the Bot was copied from another, so `ChannelAvatar`, which goes by id, matches it
+ * for every other Bot.
  * The orb hides itself from assistive tech, so the Bot is announced once, by name.
  *
  * Clipped to its circle, so its glow never spills into the row beside it or makes a list scroll.
