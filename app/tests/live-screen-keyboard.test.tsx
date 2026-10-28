@@ -385,3 +385,56 @@ test("the screen is a stop in the Tab order only while it takes input", async ()
   expect(screen.getAttribute("tabindex")).toBe("0");
   expect(screen.getAttribute("role")).toBe("application");
 });
+
+/*
+ * A key still down when the keyboard stops being forwarded: its release used to be dropped with the listeners, and a
+ * Shift or a Control left down in the remote browser changed every key and click after it.
+ */
+test("a key still down when control is handed back, or the screen closes, is released in the remote browser", async () => {
+  const shift = {
+    type: "key",
+    event: "down",
+    key: "Shift",
+    code: "ShiftLeft",
+    windowsVirtualKeyCode: 16,
+    modifiers: 8,
+  };
+  const press = (target: HTMLElement) =>
+    target.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Shift",
+        code: "ShiftLeft",
+        keyCode: 16,
+        shiftKey: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+  const released = {
+    type: "key",
+    event: "up",
+    key: "Shift",
+    code: "ShiftLeft",
+    windowsVirtualKeyCode: 16,
+    modifiers: 0,
+  };
+
+  // Control handed back with Shift held.
+  const view = render(<LiveScreen computerId="handback-test" driving />);
+  await waitFor(() => expect(SocketDouble.latest).toBeDefined());
+  const socket = SocketDouble.latest as SocketDouble;
+  const canvas = document.querySelector("canvas") as HTMLCanvasElement;
+  await waitFor(() => expect(canvas.dataset.connected).toBe("true"));
+  canvas.focus();
+  press(canvas);
+  view.rerender(<LiveScreen computerId="handback-test" driving={false} />);
+  expect(socket.sent).toEqual([shift, released]);
+  cleanup();
+
+  // The screen closed with Shift held: released before its socket goes.
+  const again = await liveSocket();
+  press(screen);
+  cleanup();
+  expect(again.sent).toEqual([shift, released]);
+  expect(again.readyState).toBe(SocketDouble.CLOSED);
+});

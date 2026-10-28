@@ -115,8 +115,24 @@ export function LiveScreen({
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
-  /** Keys sent down to the remote browser, whose release goes there too, wherever the focus is by then. */
-  const keysDown = useRef(new Set<string>());
+  /** Keys sent down to the remote browser, by code, whose release goes there too, wherever the focus is by then. */
+  const keysDown = useRef(new Map<string, ReturnType<typeof remoteKey>>());
+  /**
+   * Every key still down in the remote browser, released there: when the keyboard stops being forwarded (control handed
+   * back, the screen closed, its stream ended) with a key held, its release would never be sent, and a Shift or a Control
+   * left down there changes every key and click after it. Straight to the socket, as the person's own release would
+   * have gone; with modifiers none, since every one is being let go.
+   */
+  const releaseKeys = useCallback(() => {
+    const socket = socketRef.current;
+    for (const key of keysDown.current.values())
+      if (socket?.readyState === WebSocket.OPEN)
+        socket.send(
+          JSON.stringify({ type: "key", event: "up", ...key, modifiers: 0 }),
+        );
+    keysDown.current.clear();
+  }, []);
+
   /** The size of the frames Chrome is sending, which is what input coordinates are relative to. */
   const frameSize = useRef<{ width: number; height: number } | null>(null);
   /** Latest validated encoded frame. Hidden tabs keep only this, never decoded bitmaps. */
@@ -299,6 +315,8 @@ export function LiveScreen({
     document.addEventListener("visibilitychange", drawLatestFrame);
     return () => {
       closed = true;
+      // Before the socket goes: a key still down over there would stay held in the remote browser.
+      releaseKeys();
       connection.stop();
       document.removeEventListener("visibilitychange", drawLatestFrame);
       socketRef.current = null;
@@ -444,7 +462,7 @@ export function LiveScreen({
       if (isPasteShortcut(event)) return;
       event.preventDefault();
       event.stopPropagation();
-      held.add(event.code);
+      held.set(event.code, remoteKey(event));
       send({
         type: "key",
         event: "down",
@@ -486,9 +504,9 @@ export function LiveScreen({
       window.removeEventListener("keydown", onKeyDown, true);
       window.removeEventListener("keyup", onKeyUp);
       window.removeEventListener("paste", onPaste);
-      held.clear();
+      releaseKeys();
     };
-  }, [driving, connected, send]);
+  }, [driving, connected, send, releaseKeys]);
 
   /**
    * The wheel, forwarded while driving, from a listener that is allowed to stop it here.
