@@ -520,6 +520,10 @@ someone records, so recording a task needs no extension and no Connect step.
 - **A Bot's request for help shows in the conversation**, with its reason and Take control, and folds
   into one line once answered. After you hand back, the Bot is told what you did and carries on, saying
   what it does next; if it still stops without a word, the card says so and offers Carry on.
+- **Clear browser data.** One button beside reload, in a Bot's browser and in your own, asks "Clear this
+  browser?" and wipes it: cookies, saved passwords, history, site storage and the screenshots kept of its
+  pages. It starts fresh, signed out of everything; OpenBot's own Passwords stay. A Bot's browser can be
+  cleared only by the person holding its control. Audited as `computer.browser_cleared`.
 - Leaving a conversation while you hold a Bot's control no longer leaves it blank: the Bot's reply after
   you hand back shows when you return, with no "A browser task is paused" notice.
 
