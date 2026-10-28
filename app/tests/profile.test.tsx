@@ -41,9 +41,7 @@ test("onboarding name step starts empty for a placeholder profile", () => {
       <OnboardingNameStep onSaved={() => {}} />
     </QueryClientProvider>,
   );
-  expect(
-    view.getByRole("heading", { name: "Let's get to it." }),
-  ).toBeTruthy();
+  expect(view.getByRole("heading", { name: "Let's get to it." })).toBeTruthy();
   expect(
     view.getByRole("button", { name: "Get started" }).hasAttribute("disabled"),
   ).toBe(true);
