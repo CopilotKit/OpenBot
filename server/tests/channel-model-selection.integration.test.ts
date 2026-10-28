@@ -1,7 +1,15 @@
 import { afterAll, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
-import { createChannelModelStore } from "../src/channels/model-selection";
+import {
+  createChannelModelStore,
+  modelSelectionEnabled,
+} from "../src/channels/model-selection";
+import {
+  type EnterpriseControls,
+  installEnterpriseControls,
+} from "../src/admin/controls";
+import { createAuditStore } from "../src/audit";
 import { createDatabase } from "../src/db/client";
 import {
   agentProfiles,
@@ -43,9 +51,11 @@ test("persists per-user channel choice and refuses foreign, deleted and revoked 
         : [],
   };
   const store = createChannelModelStore(deps);
+  let controls: EnterpriseControls | undefined;
   const old = process.env.OPENAI_BASE_URL;
   delete process.env.OPENAI_BASE_URL;
   try {
+    expect(modelSelectionEnabled()).toBe(false);
     await db
       .insert(users)
       .values({ id, name: "Test", email: `${id}@test.invalid` });
@@ -70,6 +80,14 @@ test("persists per-user channel choice and refuses foreign, deleted and revoked 
     await db
       .insert(intelligenceChannelMappings)
       .values({ channelId: channel, userId: id, threadId: thread });
+    controls = await installEnterpriseControls({
+      database: db,
+      databaseUrl: testDatabaseUrl(),
+      auditStore: createAuditStore(db),
+      env: {},
+    });
+    await controls.store.setSetting("modelSelectionEnabled", true, actor.id);
+    await controls.refresh();
     expect((await store.read(actor, channel, bot)).selectedModel).toBeNull();
     await store.write(actor, channel, bot, "gpt-6-luna");
     expect(
@@ -106,6 +124,10 @@ test("persists per-user channel choice and refuses foreign, deleted and revoked 
       .where(eq(channelMemberships.channelId, channel));
     await expect(store.readForRun(actor, bot, thread)).rejects.toThrow();
   } finally {
+    if (controls) {
+      await controls.store.setSetting("modelSelectionEnabled", false, actor.id);
+      await controls.stop();
+    }
     if (old === undefined) delete process.env.OPENAI_BASE_URL;
     else process.env.OPENAI_BASE_URL = old;
     await db.delete(channels).where(eq(channels.id, channel));

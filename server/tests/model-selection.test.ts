@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import type { RuntimeModel } from "../src/copilot";
 import {
   directModelConnection,
   modelOptions,
@@ -56,5 +57,25 @@ describe("conversation model rules", () => {
         OPENAI_BASE_URL: "https://example.com/v1",
       }),
     ).toBe(false);
+  });
+  test("account-backed plans cannot select API models even when an API key exists", () => {
+    for (const provider of ["chatgpt", "claude"] as const) {
+      const plan: RuntimeModel = {
+        ...base,
+        plan: {
+          provider,
+          endpoint: new URL("http://localhost:4200"),
+          token: "test-token",
+        },
+      };
+      expect(directModelConnection(plan, "test-api-key", {})).toBe(false);
+      expect(() =>
+        resolveChoice(
+          plan,
+          { agentId: "bot", provider: "openai", model: "gpt-6-luna" },
+          ["gpt-6-luna"],
+        ),
+      ).toThrow();
+    }
   });
 });

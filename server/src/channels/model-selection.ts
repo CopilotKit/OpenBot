@@ -39,7 +39,7 @@ function allowedModels(): readonly string[] | undefined {
 }
 export function modelSelectionEnabled(): boolean {
   const controls = enterpriseControls();
-  if (!controls) return true;
+  if (!controls) return false;
   const snapshot = controls.snapshot();
   if (!snapshot)
     throw new ModelSelectionError(
