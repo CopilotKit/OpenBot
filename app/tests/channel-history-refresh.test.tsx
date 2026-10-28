@@ -92,6 +92,22 @@ beforeAll(() => {
             : input.url,
         "http://localhost",
       );
+      // Model selection is off by default; this channel is ready to send on its configured model.
+      if (
+        /^\/api\/channels\/[^/]+\/agents\/refresh-bot\/model$/.test(
+          url.pathname,
+        )
+      )
+        return NativeResponse.json({
+          model: {
+            selectable: false,
+            provider: null,
+            defaultModel: null,
+            selectedModel: null,
+            options: [],
+            selectionUnavailable: false,
+          },
+        });
       if (url.pathname === "/api/agents")
         return NativeResponse.json({ agents: [] });
       if (url.pathname === "/api/plugins/for/refresh-bot")

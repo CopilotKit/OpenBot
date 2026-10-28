@@ -730,6 +730,7 @@ describe("offboarding", () => {
     stopped.length = 0;
     const result = await controls.terminateInactiveComputers();
     expect(result?.stopped).toEqual([bot]);
+    expect(stopped).toEqual([bot]);
   });
 });
 

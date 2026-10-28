@@ -933,13 +933,7 @@ const ALLOW: Allowed[] = [
     finding: "NEW (round 2 did not find this)",
     why: "const viewers: string[] = [];",
   },
-  {
-    file: "server/tests/enterprise-controls.integration.test.ts",
-    line: 59,
-    shape: "e",
-    finding: "NEW (round 2 did not find this)",
-    why: "const stopped: string[] = []; — pushed to at :65, cleared at :718, read nowhere; the `.stopped` at :704 and :720 is the response's own field",
-  },
+
   {
     file: "server/tests/arcade-vendor-error-engine.test.ts",
     line: 186,

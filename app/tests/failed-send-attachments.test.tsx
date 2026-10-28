@@ -138,6 +138,21 @@ beforeAll(() => {
         deletes.push(url.pathname);
         return new NativeResponse(null, { status: 204 });
       }
+      // Model selection is off by default; this channel is ready to send on its configured model.
+      if (
+        url.pathname ===
+        `/api/channels/${channel.id}/agents/failed-send-bot/model`
+      )
+        return NativeResponse.json({
+          model: {
+            selectable: false,
+            provider: null,
+            defaultModel: null,
+            selectedModel: null,
+            options: [],
+            selectionUnavailable: false,
+          },
+        });
       if (url.pathname === "/api/agents")
         return NativeResponse.json({ agents: [] });
       if (url.pathname === "/api/voice/sessions")
