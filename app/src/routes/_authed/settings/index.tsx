@@ -37,7 +37,7 @@ function RouteComponent() {
    */
   return (
     <PageShell
-      description="How OpenBot looks and works for you. Message list settings follow your account. The theme and skin stay in this browser."
+      description="How OpenBot looks and works for you. Your skin and message list settings follow your account. The theme stays in this browser."
       title="Preferences"
     >
       <PageSection title="General">
