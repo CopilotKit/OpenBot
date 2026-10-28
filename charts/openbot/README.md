@@ -293,7 +293,7 @@ about that cluster:
 | --- | --- |
 | `self-hosted-values.yaml` | Nothing turned on. If this file needs to grow, a default is wrong. |
 | `eks-values.yaml` | IRSA, Secrets Manager, ALB, zone spread, autoscaling. |
-| `eks-sandbox-values.yaml` | The same, with a computer each rather than one shared browser. `shared` and `sandbox` render a different Deployment, different RBAC and a different pod template, so a target that renders only one checks half the chart. |
+| `eks-sandbox-values.yaml` | The same, with a computer for each person rather than one shared browser. `shared` and `sandbox` render a different Deployment, different RBAC and a different pod template, so a target that renders only one checks half the chart. |
 | `gke-values.yaml` | Workload Identity, Secret Manager, Gateway API instead of an Ingress. |
 | `aks-values.yaml` | Workload identity, Key Vault, the AKS web app routing class. |
 

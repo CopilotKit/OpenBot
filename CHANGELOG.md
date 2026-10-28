@@ -8,7 +8,16 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-**Before upgrading.** Nine things change for an existing deployment:
+**Before upgrading.** Ten things change for an existing deployment:
+- Bots now share one computer per person instead of each having its own. Migration
+  `0066_isolated_bots` adds `agent_profiles.isolated`, off for every existing Bot. With the
+  supervisor (laptop, Desktop, Compose), a person's computer is created the first time one of their
+  Bots acts, as `<namespace>-computer-person-<id>`, and the supervisor stops the old per-Bot containers
+  when it starts, keeping their volumes. A private Bot's logins are copied into its owner's computer
+  once; public Bots, the built-in ones included, sign in again once, because their old logins were
+  shared by everyone who used them. Helm `shared` moves private Bots' profiles the same way. On Helm
+  `sandbox` nothing is copied, so private Bots sign in again once there too. Old per-Bot volumes are
+  left in place; remove them when you are satisfied.
 - A hosted computer's browser is now headed by default. It uses a little more memory than headless
   did; set `COMPUTER_BROWSER_MODE=headless` (Helm: `computers.browserMode: headless`) to keep the old
   behaviour.
@@ -42,6 +51,19 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - On Helm's `shared` computer and the docker-compose `agent-computer`, each Bot's files now live in
   `computers/<Bot id>` on the workspace volume (below). Files saved before the upgrade stay at the
   root of the volume, where no Bot sees them; move them into a Bot's folder to give them back.
+
+### Each person's Bots share one computer, and a Bot can have its own
+
+Every Bot used to get a computer of its own, which on a laptop or Desktop meant a container per Bot
+running all the time, and meant everyone who used a public Bot shared its logins. Now all the Bots a
+person uses run on that person's one computer, each with its own browser profile and folder, so a
+login belongs to the person and the Bot, never to everyone who uses it. Tick **Isolated** when you
+make a Bot, or in its Setup, to give it a computer of its own that keeps its logins; everyone who
+uses that Bot shares that computer. Administrators decide who may: Admin → Enterprise → Isolated
+Bots, on for everyone by default, and can be turned off for everyone or allowed for chosen roles and
+groups. When it is turned off for somebody, their isolated Bots run on their own computer from the
+next run, and the Bot's Setup says why. A deployment with one shared computer (Helm `shared`, or no
+supervisor) cannot give a Bot its own, and the checkbox says so.
 
 ### The audit log reads like a log
 

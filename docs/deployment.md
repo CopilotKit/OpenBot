@@ -46,9 +46,10 @@ enable it for you.
 
 **Not in it:**
 
-**The supervisor.** It gives each Bot its own container, which needs a Docker socket, which no
-serverless container platform permits. Without it, every Bot shares the one browser, exactly as they
-do on a laptop with no supervisor configured. A shared browser means shared logins, shared files and
+**The supervisor.** It gives each person their own container, and each Isolated Bot one of its own,
+which needs a Docker socket, which no serverless container platform permits. Without it, every Bot
+shares the one computer, exactly as they do on a laptop with no supervisor configured. Each person's
+Bots still keep their own browser profile and folder there, but a shared computer means shared files and
 shared session between Bots, which is fine for a deployment where one team trusts its own Bots and
 is not fine as a boundary between tenants.
 
@@ -222,7 +223,7 @@ Plain ECS on Fargate behind an ALB is the answer if you want task definitions an
 No shared-memory configuration is needed or possible.
 
 **Kubernetes.** Everything above describes one container run by hand. A cluster is the other shape,
-and it is the only one that gives a Bot a computer of its own, runs the routines schedule without
+and it is the only one that gives each person (or an Isolated Bot) a computer of its own, runs the routines schedule without
 something outside the container, and scales the API past a single replica. That is the Helm chart:
 [charts/openbot/README.md](../charts/openbot/README.md), which covers EKS, GKE, AKS and a plain
 self-hosted cluster from the same templates.
