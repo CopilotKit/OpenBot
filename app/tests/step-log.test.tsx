@@ -423,7 +423,9 @@ describe("the step log under the screen", () => {
     const log = pane.log();
     expect(log.getByText("Opened page")).toBeTruthy();
     expect(log.getByText("Example Domain")).toBeTruthy();
-    expect(log.getByText("Clicked on page")).toBeTruthy();
+    // Waiting on its card, it hasn't happened, so it says what it would do.
+    expect(log.getByText("Click on page")).toBeTruthy();
+    expect(log.queryByText("Clicked on page")).toBeNull();
     const waiting = log.getByText("Waiting for you");
     expect(waiting.className).toContain("text-status-needs");
     // Done is said by its mark, in the done colour.

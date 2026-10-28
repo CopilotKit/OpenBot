@@ -13,6 +13,17 @@ const labels: Record<string, string> = {
   computer_scroll: "Scrolled page",
 };
 
+/** The same steps as what they would do, for one that didn't happen: declined, blocked or cut off. */
+const plainLabels: Record<string, string> = {
+  computer_navigate: "Open page",
+  computer_read: "Read page",
+  computer_snapshot: "Inspect page",
+  computer_click: "Click on page",
+  computer_type: "Fill in field",
+  computer_key: "Press key",
+  computer_scroll: "Scroll page",
+};
+
 /** Whether a tool call is one of the browser steps a tool group draws with its page link. */
 export function isBrowserStep(item: BrowserStep): boolean {
   return Object.hasOwn(labels, item.toolCall.function.name);
@@ -50,6 +61,7 @@ export function browserStepDetails(step: BrowserStep) {
     step.result?.startsWith("Error:") === true;
   return {
     label: labels[step.toolCall.function.name],
+    plain: plainLabels[step.toolCall.function.name],
     href: url?.href,
     title:
       navigation && typeof result.title === "string" && result.title.trim()

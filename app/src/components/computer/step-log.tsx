@@ -109,7 +109,11 @@ export function stepLogEntries(
       id: step.item.id,
       at: step.at,
       status,
-      label: details.label,
+      // Only a step that ran, or is running, is named as done; one waiting or cut off says what it would do.
+      label:
+        status === "done" || status === "running"
+          ? details.label
+          : details.plain,
       ...(details.detail ? { detail: details.detail } : {}),
       ...(details.href ? { href: details.href } : {}),
       ...(status === "failed"

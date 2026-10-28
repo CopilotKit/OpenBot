@@ -307,12 +307,15 @@ export function stepDetails(step: ToolItem): StepDetails {
     const browser = browserStepDetails(step);
     // Read the way the computer pane's step log reads it, so the two never disagree.
     const outcome = browserOutcome(step);
-    const label = browser.label ?? "Used the browser";
+    // A step that didn't happen is named for what it would have done, never as done.
+    const happened = outcome === "done" || outcome === "pending";
+    const plain = browser.plain ?? "Use the browser";
+    const label = happened ? (browser.label ?? "Used the browser") : plain;
     return {
       id: step.id,
       kind: "browser",
       label,
-      plain: label,
+      plain,
       ...(browser.title ? { detail: browser.title } : {}),
       ...(browser.href ? { href: browser.href } : {}),
       pending: outcome === "pending",
