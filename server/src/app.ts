@@ -1,8 +1,8 @@
+import { MAX_IMAGE_BYTES } from "@openbot/shared/attachments";
 import type { Hono as HonoApp, MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { serveStatic } from "hono/bun";
-import { MAX_IMAGE_BYTES } from "@openbot/shared/attachments";
 import { enterpriseControls } from "./admin/controls";
 import { createEnterpriseGate } from "./admin/gate";
 import { createEnterpriseAdminRoutes } from "./admin/routes";
@@ -26,10 +26,10 @@ import type { ApprovalService } from "./approvals/service";
 import {
   type AuditEventType,
   type AuditInitiator,
-  auditEventsToCsv,
   AuditQueryError,
   type AuditReader,
   type AuditStore,
+  auditEventsToCsv,
   auditQueryFromUrl,
   DEPLOYMENT_INITIATOR,
   readAuditExportRows,
@@ -49,6 +49,11 @@ import {
   createAttachmentRoutes,
   createChannelAttachmentRoutes,
 } from "./channels/attachments";
+import {
+  type BrowserRouteDeps,
+  browserConnectionRevoked,
+  createBrowserRoutes,
+} from "./browser/routes";
 import type { ChannelEventHub } from "./channels/events";
 import { createGroupRoutes, type GroupConversations } from "./channels/group";
 import { type ChannelStore, createChannelRoutes } from "./channels/routes";
@@ -90,6 +95,10 @@ import {
   createLearningRoutes,
   type LearningAdminDependencies,
 } from "./learning/routes";
+import {
+  createPersonalLearningRoutes,
+  type PersonalLearningRouteDeps,
+} from "./learning/sharing-routes";
 import type { MemoryIngestion } from "./memory/ingestion";
 import { createMemoryRoutes } from "./memory/routes";
 import type { MemoryStore } from "./memory/store";
@@ -118,6 +127,9 @@ import {
   type ModelProviderProxy,
   mountProviderOAuthProxy,
 } from "./provider-oauth";
+import { createRequireRecorder } from "./recorder/guard";
+import { createRecorderRoutes } from "./recorder/routes";
+import type { RecorderExtensionDeps } from "./recorder/wiring";
 import type { ResponsibilityBindingStore } from "./responsibilities/bindings";
 import type { ResponsibilityEngine } from "./responsibilities/engine";
 import { createGithubResponsibilityRoutes } from "./responsibilities/github";
@@ -401,6 +413,13 @@ export function createApp(
       recorder: DemonstrationRecorder;
     };
     approvals?: ApprovalService;
+    /** The Recorder extension's routes and guards (recorder/wiring.ts). Absent, nothing about it is mounted. */
+    recorder?: RecorderExtensionDeps;
+    /** A person's own OpenBot browser, with the Recorder in it already connected (browser/routes.ts). Absent, nothing
+     * about it is mounted and the app shows no Browser button. */
+    browser?: Omit<BrowserRouteDeps, "requireUser" | "auditStore">;
+    /** Settings, Learning: who else's Bots use a person's own learned Skills. Absent, the screen has nothing to read. */
+    personalLearning?: PersonalLearningRouteDeps;
     /**
      * Shared apps: who may use an app's one team account, and the switch that makes an app Shared.
      *
@@ -1602,6 +1621,37 @@ export function createApp(
       createDeliveryRoutes({ ...coworker.delivery.authenticated, requireUser }),
     );
   }
+  if (coworker?.recorder) {
+    app.route(
+      "/api/recorder",
+      createRecorderRoutes({
+        ...coworker.recorder,
+        // A Disconnect in Settings, Browsers reaches the person's own OpenBot browser at once.
+        ...(coworker.browser
+          ? { onRevoked: browserConnectionRevoked(coworker.browser) }
+          : {}),
+        requireUser,
+        requireRecorder: createRequireRecorder(
+          coworker.recorder.resolve,
+          coworker.recorder.onRefused,
+        ),
+        auditStore,
+      }),
+    );
+  }
+  if (coworker?.browser)
+    app.route(
+      "/api/browser",
+      createBrowserRoutes({ ...coworker.browser, requireUser, auditStore }),
+    );
+  if (coworker?.personalLearning)
+    app.route(
+      "/api/settings/learning",
+      createPersonalLearningRoutes(
+        { ...coworker.personalLearning, auditStore },
+        requireUser,
+      ),
+    );
   if (coworker?.demonstrations)
     app.route(
       "/api/demonstrations",

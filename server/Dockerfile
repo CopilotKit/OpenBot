@@ -17,6 +17,8 @@ WORKDIR /app
 
 # Manifests before sources, so a source change does not reinstall the world.
 COPY package.json bun.lock ./
+# The dependency patches package.json names in patchedDependencies: the install stops without them.
+COPY patches patches
 # The shared tsconfig, which every package extends. Vite reads it while transforming and fails
 # without it, in a stack trace that names esbuild rather than a missing file.
 COPY tsconfig.base.json tsconfig.base.json
@@ -26,6 +28,7 @@ COPY server/package.json server/package.json
 COPY worker/package.json worker/package.json
 COPY shared/package.json shared/package.json
 COPY toolkit/package.json toolkit/package.json
+COPY extension/package.json extension/package.json
 RUN bun install --frozen-lockfile
 
 
@@ -58,6 +61,8 @@ COPY --from=deps /app/package.json package.json
 COPY --from=deps /app/bun.lock bun.lock
 COPY --from=deps /app/server/node_modules server/node_modules
 COPY --from=deps /app/toolkit/node_modules toolkit/node_modules
+# shared files import zod at runtime, and the isolated install resolves it from shared/node_modules
+COPY --from=deps /app/shared/node_modules shared/node_modules
 # The worker's own `node_modules` holds one thing, the link to `@openbot/shared`, and without it the
 # first import in `worker/src/env.ts` fails. The install is isolated: each workspace resolves through
 # the folder beside its own manifest, so the server's copy of that link is no use to the worker.

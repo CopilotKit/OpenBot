@@ -1,0 +1,98 @@
+{
+  "name": "run-error",
+  "transport": "sse",
+  "recordedWith": {
+    "copilotkit": "c21eeda029",
+    "@ag-ui/client": "1.0.2"
+  },
+  "exchanges": [
+    {
+      "at": 56,
+      "url": "http://127.0.0.1:4000/api/copilotkit",
+      "method": "POST",
+      "body": "{\"method\":\"agent/run\",\"params\":{\"agentId\":\"broken\"},\"body\":{\"threadId\":\"c79b6da3-7e7a-4994-9d72-78aa2a6713ce\",\"runId\":\"646d881a-a791-4256-a9fc-ed13a26d8fb0\",\"protocolVersion\":\"1.0\",\"tools\":[],\"context\":[],\"forwardedProps\":{},\"state\":{},\"messages\":[{\"id\":\"866566bb-9f73-4750-a65a-efbd9c045d20\",\"role\":\"user\",\"content\":\"Hello?\"}]}}",
+      "status": 200,
+      "contentType": "text/event-stream",
+      "chunks": [
+        {
+          "at": 70,
+          "text": "data: {\"type\":\"RUN_STARTED\",\"threadId\":\"c79b6da3-7e7a-4994-9d72-78aa2a6713ce\",\"runId\":\"646d881a-a791-4256-a9fc-ed13a26d8fb0\",\"protocolVersion\":\"1.0\",\"input\":{\"threadId\":\"c79b6da3-7e7a-4994-9d72-78aa2a6713ce\",\"runId\":\"646d881a-a791-4256-a9fc-ed13a26d8fb0\",\"protocolVersion\":\"1.0\",\"state\":{},\"messages\":[{\"id\":\"866566bb-9f73-4750-a65a-efbd9c045d20\",\"role\":\"user\",\"content\":\"Hello?\"}],\"tools\":[],\"context\":[],\"forwardedProps\":{}}}\n\n"
+        },
+        {
+          "at": 5424,
+          "text": "data: {\"type\":\"RUN_ERROR\",\"message\":\"The model `gpt-recorder-no-such-model` does not exist or you do not have access to it.\"}\n\n"
+        }
+      ],
+      "end": {
+        "at": 5425,
+        "outcome": "complete"
+      }
+    }
+  ],
+  "frames": [],
+  "sink": [
+    {
+      "trajectoryId": "8b9eaf7e-b5f6-482c-96a9-7a1843aa5085",
+      "events": [
+        {
+          "type": "CUSTOM",
+          "name": "page",
+          "value": {
+            "route": "/",
+            "url": "http://127.0.0.1:4000/",
+            "title": "",
+            "referrer": "",
+            "seq": 1
+          },
+          "timestamp": 1792538318179
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.message",
+          "value": {
+            "messageId": "866566bb-9f73-4750-a65a-efbd9c045d20",
+            "runId": null,
+            "threadId": "c79b6da3-7e7a-4994-9d72-78aa2a6713ce",
+            "agentId": "broken",
+            "role": "user",
+            "textLength": 6,
+            "text": "Hello?",
+            "seq": 2
+          },
+          "timestamp": 1792538318231
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.run",
+          "value": {
+            "phase": "started",
+            "runId": "646d881a-a791-4256-a9fc-ed13a26d8fb0",
+            "threadId": "c79b6da3-7e7a-4994-9d72-78aa2a6713ce",
+            "agentId": "broken",
+            "seq": 3
+          },
+          "timestamp": 1792538318250
+        }
+      ],
+      "dropped": 0
+    },
+    {
+      "trajectoryId": "8b9eaf7e-b5f6-482c-96a9-7a1843aa5085",
+      "events": [
+        {
+          "type": "CUSTOM",
+          "name": "agent.run",
+          "value": {
+            "phase": "error",
+            "runId": "646d881a-a791-4256-a9fc-ed13a26d8fb0",
+            "threadId": "c79b6da3-7e7a-4994-9d72-78aa2a6713ce",
+            "agentId": "broken",
+            "seq": 4
+          },
+          "timestamp": 1792538323603
+        }
+      ],
+      "dropped": 0
+    }
+  ]
+}

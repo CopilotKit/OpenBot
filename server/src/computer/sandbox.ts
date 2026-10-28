@@ -96,6 +96,56 @@ export function imagesOf(podTemplate: unknown): string {
     .join(",");
 }
 
+/**
+ * The pod template, cut for one computer: what the container is told about whose it is, as the supervisor tells each
+ * container it starts (supervisor/src/environment.ts).
+ *
+ * A COMPUTER OF ONE ID (an isolated Bot's, or a person's own browser) is told the id (`COMPUTER_BOT_ID`), and keeps
+ * its files at the root of its volume (`COMPUTER_SEPARATE_WORKSPACES=off`). The computer decides from the id whether a
+ * person's browser may run on it (agent-computer's `person-access.ts`): without it, it reads as a computer Bots share
+ * and refuses one. The root stays where it was because an isolated Bot keeps the Sandbox, and the volume, its Bot had
+ * before computers were per person, with its files at the root; moving the root under it would hide every one
+ * (agent-computer's `workspaces.ts`).
+ *
+ * A PERSON'S COMPUTER carries every Bot they use, so it names no id (anything it was given is taken out) and gives
+ * each Bot a folder of its own (`COMPUTER_SEPARATE_WORKSPACES=on`), as each has a browser profile of its own.
+ *
+ * The template itself is left as it was, since every computer is cut from it.
+ */
+export function podTemplateFor(
+  podTemplate: unknown,
+  key: ComputerKey,
+): unknown {
+  const template = podTemplate as
+    | { spec?: { containers?: Record<string, unknown>[] } }
+    | undefined;
+  const containers = template?.spec?.containers;
+  if (!template?.spec || !Array.isArray(containers)) return podTemplate;
+  const told =
+    key.kind === "bot"
+      ? [
+          { name: "COMPUTER_BOT_ID", value: key.botId },
+          { name: "COMPUTER_SEPARATE_WORKSPACES", value: "off" },
+        ]
+      : [{ name: "COMPUTER_SEPARATE_WORKSPACES", value: "on" }];
+  return {
+    ...template,
+    spec: {
+      ...template.spec,
+      containers: containers.map((container) => {
+        const env = Array.isArray(container.env)
+          ? (container.env as { name?: unknown }[]).filter(
+              (variable) =>
+                variable.name !== "COMPUTER_BOT_ID" &&
+                variable.name !== "COMPUTER_SEPARATE_WORKSPACES",
+            )
+          : [];
+        return { ...container, env: [...env, ...told] };
+      }),
+    },
+  };
+}
+
 export type SandboxProviderOptions = {
   /** Where the Bots' computers live. The provider is scoped to exactly this namespace. */
   namespace: string;
@@ -371,6 +421,7 @@ export function createSandboxComputerProvider(
         // `podTemplate` is required and `volumeClaimTemplates` is what makes a suspend worth doing,
         // and both arrive together from the mounted template.
         ...options.template,
+        podTemplate: podTemplateFor(options.template.podTemplate, key),
       },
     };
   }
@@ -438,7 +489,7 @@ export function createSandboxComputerProvider(
         {
           op: "replace",
           path: "/spec/podTemplate",
-          value: options.template.podTemplate,
+          value: podTemplateFor(options.template.podTemplate, key),
         },
         { op: "add", path: "/spec/operatingMode", value: operatingMode },
       ]),

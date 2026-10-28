@@ -9,14 +9,16 @@ import {
 } from "../src/admin/controls";
 import { createEnterpriseAdminRoutes } from "../src/admin/routes";
 import { runsIsolated } from "../src/agents/isolation";
-import {
-  botOwnership,
-  createComputerSeatResolver,
-} from "../src/computer/computer-key";
 import { createAgentProfileStore } from "../src/agents/profile-store";
 import { createAgentRoutes } from "../src/agents/routes";
 import { createAuditStore } from "../src/audit";
 import type { AppVariables } from "../src/auth/guards";
+import { personBrowserId } from "../src/browser/person";
+import {
+  botOwnership,
+  createComputerSeatResolver,
+  seatOf,
+} from "../src/computer/computer-key";
 import { createDatabase } from "../src/db/client";
 import {
   agentProfiles,
@@ -495,6 +497,27 @@ describe("whether it is in effect", () => {
     } finally {
       await setSwitch(null);
     }
+  });
+
+  test("a person's own browser is a computer of its own, never a seat on their computer beside their Bots", async () => {
+    // Asked of nothing: a person's browser is not a Bot, has no Isolated flag and no owner row.
+    const unasked = () => Promise.reject(new Error("Not asked for a person."));
+    const browser = personBrowserId(owner.id);
+    for (const canIsolate of [true, false]) {
+      const seats = createComputerSeatResolver({
+        runsIsolated: unasked,
+        bot: unasked,
+        canIsolate,
+      });
+      expect(await seats.seatFor(browser, owner.id)).toEqual({
+        botId: browser,
+        key: { kind: "bot", botId: browser },
+      });
+    }
+    expect(seatOf(browser, owner.id, null, false).key).toEqual({
+      kind: "bot",
+      botId: browser,
+    });
   });
 
   test("a deployment that cannot make a second computer says so, and refuses to promise one", async () => {

@@ -11,11 +11,12 @@ import { queryClient } from "@/query-client";
 /**
  * This page's own fields while a person drives a Bot's browser.
  *
- * LiveScreen takes every keystroke on the window while someone holds the wheel, because the canvas
- * cannot hold focus. The full-size view also carries fields of its own, the recorder's workflow name
- * and the secret box, and taking their keys left them dead: typing into "Workflow name" did nothing,
- * and every letter went to the Bot's browser instead. And the recorder's button, a Base UI Button,
- * defaults to type="button", so pressing it never submitted the form and no recording ever started.
+ * LiveScreen used to take every keystroke on the window while someone held the wheel, because its canvas could not
+ * hold focus. The full-size view also carries fields of its own, the recorder's workflow name and the secret box, and
+ * taking their keys left them dead: typing into "Workflow name" did nothing, and every letter went to the Bot's browser
+ * instead. The screen now takes only the keys aimed at it, once a click (or Tab) has given it the focus. And the
+ * recorder's button, a Base UI Button, defaults to type="button", so pressing it never submitted the form and no
+ * recording ever started.
  */
 
 class SocketDouble {
@@ -139,30 +140,52 @@ test("a paste into a field on this page stays in the field", async () => {
   expect(socket.sent).toEqual([]);
 });
 
-test("keys with no field focused still go to the Bot's browser", async () => {
-  const { socket } = await driving(<Field />);
-  const key = new KeyboardEvent("keydown", {
-    key: "a",
-    code: "KeyA",
-    keyCode: 65,
-    bubbles: true,
-    cancelable: true,
-  });
+test("keys typed after clicking the screen go to the Bot's browser, with no second click", async () => {
+  const { socket, user } = await driving(<Field />);
 
-  document.body.dispatchEvent(key);
+  await user.click(document.querySelector("canvas") as HTMLCanvasElement);
+  await user.keyboard("a");
 
-  expect(key.defaultPrevented).toBe(true);
-  expect(socket.sent).toEqual([
+  // The key, not its legacy code, which the test DOM's keyboard leaves at zero (live-screen-keyboard.test.tsx pins it).
+  expect(
+    socket.sent.map(({ windowsVirtualKeyCode: _zero, ...sent }) => sent),
+  ).toEqual([
     {
       type: "key",
       event: "down",
       key: "a",
       code: "KeyA",
       text: "a",
-      windowsVirtualKeyCode: 65,
       modifiers: 0,
     },
+    { type: "key", event: "up", key: "a", code: "KeyA", modifiers: 0 },
   ]);
+});
+
+test("a key with nothing focused, or a button focused, stays on this page", async () => {
+  const { socket } = await driving(<button type="button">Hand back</button>);
+  const nowhere = new KeyboardEvent("keydown", {
+    key: "a",
+    code: "KeyA",
+    keyCode: 65,
+    bubbles: true,
+    cancelable: true,
+  });
+  document.body.dispatchEvent(nowhere);
+  const button = document.querySelector("button") as HTMLButtonElement;
+  button.focus();
+  const enter = new KeyboardEvent("keydown", {
+    key: "Enter",
+    code: "Enter",
+    keyCode: 13,
+    bubbles: true,
+    cancelable: true,
+  });
+  button.dispatchEvent(enter);
+
+  expect(nowhere.defaultPrevented).toBe(false);
+  expect(enter.defaultPrevented).toBe(false);
+  expect(socket.sent).toEqual([]);
 });
 
 test("naming a workflow and pressing Record your steps starts a recording", async () => {

@@ -21,6 +21,9 @@ import ts from "typescript";
 const SUBMITTED_ELSEWHERE = new Set([
   // Enter submits through the editor, and the send action is its own typed control.
   "src/components/channels/composer/composer.tsx",
+  // The Browser page's address bar, which Enter submits as a browser's does: its one field submits the form on its
+  // own (HTML's implicit submission), and a Go button would be the one thing no browser's address bar has.
+  "src/components/browser/browser-screen.tsx",
 ]);
 
 function attribute(node: ts.JsxOpeningLikeElement, name: string) {

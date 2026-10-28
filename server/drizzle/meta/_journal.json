@@ -467,8 +467,29 @@
     {
       "idx": 66,
       "version": "7",
-      "when": 1793205391687,
-      "tag": "0066_isolated_bots",
+      "when": 1793052162276,
+      "tag": "0066_recorder_extension",
+      "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "7",
+      "when": 1793052258554,
+      "tag": "0067_recorder_activity",
+      "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1793203501366,
+      "tag": "0068_recorder_organization_session_expiry",
+      "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1793224884828,
+      "tag": "0069_isolated_bots",
       "breakpoints": true
     }
   ]

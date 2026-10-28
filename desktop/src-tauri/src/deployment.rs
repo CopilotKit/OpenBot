@@ -195,8 +195,11 @@ fn layout() -> Vec<String> {
 pub const REQUIRED: [&str; 4] = ["docker-compose.yml", "server", "app", "worker"];
 
 /// The rest of what a deployment needs, which is not what it is checked for.
-pub const ALSO_COPIED: [&str; 9] = [
+pub const ALSO_COPIED: [&str; 11] = [
     "shared",
+    // The dependency patches `package.json` names in `patchedDependencies`. Without them `bun install
+    // --frozen-lockfile` stops with `Couldn't find patch file`.
+    "patches",
     // Not a workspace, but the server imports its egress rules from `agent-computer/src` and
     // `scripts/start-local-chrome-computer.ts` its browser runtime. Without it the server exits at
     // start with `Cannot find module '../../../agent-computer/src/egress'`.
@@ -212,7 +215,16 @@ pub const ALSO_COPIED: [&str; 9] = [
     // stack trace that names the parser and not the missing file.
     "tsconfig.base.json",
     "bunfig.toml",
+    // The Recorder, whole. Installation builds it into `extension/dist` (see
+    // `preparation::build_recorder`), and the person's browser loads that build. Its build reads
+    // its source, its public assets and its public key, and `bun install --frozen-lockfile` needs
+    // its manifest as a workspace.
+    "extension",
 ];
+
+/// Single files copied from a directory that is otherwise left behind. None now: the Recorder's
+/// manifest was the one, before Desktop built the Recorder.
+pub const ALSO_COPIED_FILES: [&str; 0] = [];
 
 /// Fetch the tagged tarball and lay the deployment out under `root`.
 ///
@@ -265,14 +277,13 @@ fn destination_in(root: &Path, path: &Path) -> Result<Option<PathBuf>, String> {
     }
 
     // Only what a deployment needs. The rest of the tree is a place to develop, not to run.
-    let wanted = relative
+    let names: Vec<String> = relative
         .components()
-        .next()
-        .map(|first| {
-            let name = first.as_os_str().to_string_lossy().into_owned();
-            REQUIRED.contains(&name.as_str()) || ALSO_COPIED.contains(&name.as_str())
-        })
-        .unwrap_or(false);
+        .map(|part| part.as_os_str().to_string_lossy().into_owned())
+        .collect();
+    let wanted = names.first().is_some_and(|first| {
+        REQUIRED.contains(&first.as_str()) || ALSO_COPIED.contains(&first.as_str())
+    }) || ALSO_COPIED_FILES.contains(&names.join("/").as_str());
     if !wanted {
         return Ok(None);
     }
@@ -731,6 +742,64 @@ mod tests {
         );
     }
 
+    /// Installation builds the Recorder in the deployment, so everything its build reads is laid
+    /// out: its source, its public assets, its public key and its build script, as well as the
+    /// manifest the frozen install needs. `tests/desktop-release-tree.test.ts` runs that build in a
+    /// tree laid out from these lists.
+    #[test]
+    fn the_recorder_is_copied_whole_so_installation_can_build_it() {
+        let dir = scratch("extension");
+
+        let files = [
+            "extension/package.json",
+            "extension/src/background/index.ts",
+            "extension/public/icons/16.png",
+            "extension/keys/public-key.txt",
+            "extension/scripts/build.ts",
+            "shared/openbot-browser.ts",
+        ];
+        let entries: Vec<(String, &[u8])> = files
+            .iter()
+            .map(|file| (format!("OpenBot-0.0.8/{file}"), b"x".as_slice()))
+            .collect();
+        let archive = tarball(
+            &entries
+                .iter()
+                .map(|(name, body)| (name.as_str(), *body))
+                .collect::<Vec<_>>(),
+        );
+        unpack(&dir, &archive).expect("the download is laid out");
+
+        let missing: Vec<&str> = files
+            .iter()
+            .copied()
+            .filter(|file| !dir.join(file).is_file())
+            .collect();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(missing.is_empty(), "not laid out: {missing:?}");
+    }
+
+    /// An app that copied only the Recorder's manifest laid out a deployment that cannot build it,
+    /// and its stamp still matches its version. It is fetched again once, like any deployment laid
+    /// out by an app that copied less.
+    #[test]
+    fn a_deployment_without_the_recorders_source_is_fetched_again() {
+        let dir = std::env::temp_dir().join(format!("openbot-dep-recorder-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(images_path(&dir), "{}").unwrap();
+        let before: Vec<String> = layout()
+            .into_iter()
+            .filter(|entry| entry != "extension")
+            .collect();
+        std::fs::write(
+            stamp_path(&dir),
+            serde_json::json!({ "version": "v0.2.0", "layout": before }).to_string(),
+        )
+        .unwrap();
+        assert!(needs_fetch(&dir, "v0.2.0"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
     #[test]
     fn a_recorded_version_is_not_fetched_again() {
         let dir = std::env::temp_dir().join(format!("openbot-dep-same-{}", std::process::id()));
@@ -808,5 +877,20 @@ mod tests {
             "a deployment is not a place to develop"
         );
         assert!(!REQUIRED.contains(&"docs"));
+    }
+
+    #[test]
+    fn every_root_workspace_is_copied() {
+        let manifest: serde_json::Value =
+            serde_json::from_str(include_str!("../../../package.json")).unwrap();
+        for workspace in manifest["workspaces"].as_array().unwrap() {
+            let workspace = workspace.as_str().unwrap();
+            assert!(
+                REQUIRED.contains(&workspace)
+                    || ALSO_COPIED.contains(&workspace)
+                    || ALSO_COPIED_FILES.contains(&format!("{workspace}/package.json").as_str()),
+                "{workspace} is a root workspace that a frozen install needs, but is not copied"
+            );
+        }
     }
 }

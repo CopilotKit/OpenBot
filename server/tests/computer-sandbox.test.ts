@@ -401,6 +401,147 @@ describe("a computer on an older image", () => {
   });
 });
 
+describe("which id a computer is for", () => {
+  /*
+   * A computer of one id (a person's own browser, an isolated Bot) has to know it: it runs a person's browser only on a
+   * computer of its own (agent-computer's person-access.ts), and without `COMPUTER_BOT_ID` it reads as a computer Bots
+   * share and refuses. A person's computer carries several Bots and names none. Told on creation and on every new
+   * template, as the supervisor tells each container.
+   */
+  const PERSON = "person-0123456789abcdef0123456789abcdef";
+  const envOf = (template: unknown) =>
+    (
+      template as {
+        spec: { containers: { env?: { name: string; value?: string }[] }[] };
+      }
+    ).spec.containers[0]?.env;
+
+  test("a new computer's pod says the id it was made for", async () => {
+    const created: unknown[] = [];
+    const fetchImpl = (async (_url: string, init?: RequestInit) => {
+      if (init?.method === "POST") {
+        created.push(JSON.parse(String(init.body)));
+        return Response.json({});
+      }
+      if (created.length === 0) return new Response("", { status: 404 });
+      return Response.json(running("2026-10-27T00:00:00Z", "n", "1.2.3.4"));
+    }) as unknown as typeof fetch;
+    const template = {
+      spec: {
+        containers: [
+          {
+            name: "computer",
+            image: "openbot:new",
+            env: [
+              { name: "PORT", value: "4100" },
+              // One the template carried is replaced, never doubled.
+              { name: "COMPUTER_BOT_ID", value: "shared" },
+            ],
+          },
+        ],
+      },
+    };
+    await createSandboxComputerProvider({
+      namespace: "openbot",
+      template: { podTemplate: template },
+      idleAfterMs: 60_000,
+      apiServer: "https://kubernetes.default",
+      token: "t",
+      fetchImpl,
+    }).locate(botSeat(PERSON));
+    const body = created[0] as { spec: { podTemplate: unknown } };
+    expect(envOf(body.spec.podTemplate)).toEqual([
+      { name: "PORT", value: "4100" },
+      { name: "COMPUTER_BOT_ID", value: PERSON },
+      { name: "COMPUTER_SEPARATE_WORKSPACES", value: "off" },
+    ]);
+    // The template every computer is cut from is left as it was.
+    expect(template.spec.containers[0]?.env).toHaveLength(2);
+    expect(template.spec.containers[0]?.env[1]?.value).toBe("shared");
+  });
+
+  test("a computer brought onto a new image keeps being told", async () => {
+    const cluster = fakeCluster({ mode: "Suspended", image: "old" });
+    await providerOn(cluster, "new").locate(botSeat(PERSON));
+    expect(envOf(cluster.state.podTemplate)).toEqual([
+      { name: "COMPUTER_BOT_ID", value: PERSON },
+      { name: "COMPUTER_SEPARATE_WORKSPACES", value: "off" },
+    ]);
+    // An id is no reason to call a computer out of date: only its image is.
+    const [current] = await providerOn(cluster, "new").list();
+    expect(current?.updateAvailable).toBe(false);
+  });
+});
+
+describe("where a computer keeps its files", () => {
+  const envOf = (template: unknown) =>
+    (
+      template as {
+        spec: { containers: { env?: { name: string; value?: string }[] }[] };
+      }
+    ).spec.containers[0]?.env;
+  /** The chart's template, which gives every Bot a folder of its own. */
+  const separated = (tag: string) => ({
+    spec: {
+      containers: [
+        {
+          name: "computer",
+          image: `openbot:${tag}`,
+          env: [{ name: "COMPUTER_SEPARATE_WORKSPACES", value: "on" }],
+        },
+      ],
+    },
+  });
+
+  test("an isolated Bot brought onto a new image keeps its files at the root of the volume it had", async () => {
+    // The Sandbox its Bot had before computers were per person, named for the Bot, with its files at the root.
+    const cluster = fakeCluster({ mode: "Suspended", image: "old" });
+    await createSandboxComputerProvider({
+      namespace: "openbot",
+      template: {
+        podTemplate: separated("new"),
+        volumeClaimTemplates: [{ metadata: { name: "profile" } }],
+      },
+      idleAfterMs: 60_000,
+      apiServer: "https://kubernetes.default",
+      token: "t",
+      fetchImpl: cluster.fetchImpl,
+    }).locate(botSeat("general"));
+    expect(envOf(cluster.state.podTemplate)).toEqual([
+      { name: "COMPUTER_BOT_ID", value: "general" },
+      { name: "COMPUTER_SEPARATE_WORKSPACES", value: "off" },
+    ]);
+  });
+
+  test("a person's computer gives each Bot a folder, and names no Bot", async () => {
+    const cluster = fakeCluster({ mode: "Suspended", image: "old" });
+    await createSandboxComputerProvider({
+      namespace: "openbot",
+      template: {
+        podTemplate: {
+          spec: {
+            containers: [
+              {
+                name: "computer",
+                image: "openbot:new",
+                env: [{ name: "COMPUTER_BOT_ID", value: "stray" }],
+              },
+            ],
+          },
+        },
+        volumeClaimTemplates: [{ metadata: { name: "profile" } }],
+      },
+      idleAfterMs: 60_000,
+      apiServer: "https://kubernetes.default",
+      token: "t",
+      fetchImpl: cluster.fetchImpl,
+    }).locate(personSeat("user-1", "general"));
+    expect(envOf(cluster.state.podTemplate)).toEqual([
+      { name: "COMPUTER_SEPARATE_WORKSPACES", value: "on" },
+    ]);
+  });
+});
+
 describe("updating a computer on request", () => {
   test("a running one restarts on the new image and keeps its volumes", async () => {
     const cluster = fakeCluster({ mode: "Running", image: "old" });

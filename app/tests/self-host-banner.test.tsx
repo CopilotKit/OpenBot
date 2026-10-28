@@ -86,6 +86,8 @@ function setup({
   const preferences: UserPreferences = {
     messageListEmphasis: "thread",
     selfHostBannerDismissed: dismissed,
+    narration: null,
+    skin: "openbot",
   };
   client.setQueryData(
     userPreferencesQueryOptions("alice").queryKey,

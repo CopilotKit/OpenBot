@@ -8,6 +8,12 @@ import {
   isLearningContainerId,
   type LearningTarget,
 } from "@openbot/shared/learning";
+import {
+  BROWSER_ABSENT_ENV,
+  BROWSER_URL_ENV,
+  type BrowserAbsence,
+  isBrowserAbsence,
+} from "@openbot/shared/openbot-browser";
 import { singleUserEnabled } from "./auth/dev-actor";
 import { normalizeDomain } from "./auth/email-domain";
 import { organizationAuthority } from "./auth/organization";
@@ -177,6 +183,11 @@ export type HandoffCaps = {
 };
 
 export type DeploymentConfig = {
+  /**
+   * Browser extension ids OpenBot trusts as the Recorder besides its own fixed id, for a fork or a
+   * build signed with another key. From OPENBOT_RECORDER_EXTRA_EXTENSION_IDS, never from NODE_ENV.
+   */
+  recorder: { extraExtensionIds: string[] };
   /** Optional environment default. A saved Admin setting takes precedence. */
   learning?: LearningTarget;
   /**
@@ -376,6 +387,19 @@ export type DeploymentConfig = {
    * mounted and failing: a capability that is not configured should be missing, not broken.
    */
   computer?: ComputerConfig;
+  /**
+   * The computer that runs people's own OpenBot browsers here when it is not the Bots' (`OPENBOT_BROWSER_URL`): OpenBot
+   * Desktop's host-side local Chrome computer, so a person's browser is a window on their own desktop while Bots'
+   * computers stay where they are. Called with the same COMPUTER_TOKEN as every computer. Absent, the Bots' computer
+   * provider runs people's browsers too.
+   */
+  browser?: { url: string; token?: string };
+  /**
+   * Why OpenBot Desktop found no browser of the person's own to run on this machine (`OPENBOT_BROWSER_ABSENT`), which
+   * the person is told beside whatever browser runs for them instead. A name this server does not know is left out:
+   * Desktop and the deployment it runs are released apart, and an explanation is no reason to refuse to start.
+   */
+  browserAbsent?: BrowserAbsence;
   /** How far one Bot handing work to another may go. */
   handoff: HandoffCaps;
   /**
@@ -1147,6 +1171,19 @@ export function durationMs(value: string): number {
   }
 }
 
+function browserConfig(
+  environment: Environment,
+): Pick<DeploymentConfig, "browser" | "browserAbsent"> {
+  const address = url(environment, BROWSER_URL_ENV);
+  if (!address) {
+    // Only where there is no browser of the person's own: one that runs needs no reason why it does not.
+    const absent = optional(environment, BROWSER_ABSENT_ENV);
+    return absent && isBrowserAbsence(absent) ? { browserAbsent: absent } : {};
+  }
+  const token = optional(environment, "COMPUTER_TOKEN");
+  return { browser: { url: address, ...(token ? { token } : {}) } };
+}
+
 function computerConfig(environment: Environment): ComputerConfig | undefined {
   const supervisorAddress = optional(environment, "COMPUTER_SUPERVISOR_URL");
   const sharedAddress = optional(environment, "AGENT_COMPUTER_URL");
@@ -1410,6 +1447,7 @@ export function loadConfig(
     tenantPackageDirectory:
       optional(environment, "TENANT_PACKAGE_DIR") ?? "../examples/fintech",
     runtime: runtimeCapabilities(environment),
+    recorder: { extraExtensionIds: recorderExtraExtensionIds(environment) },
     learning: learningDefault(environment),
     learningAutoAssign: learningAutoAssignEnabled(environment),
     ...learningSetupCredential(environment),
@@ -1437,6 +1475,7 @@ export function loadConfig(
       ? { appDistDir: optional(environment, "APP_DIST_DIR") as string }
       : {}),
     computer: computerConfig(environment),
+    ...browserConfig(environment),
     handoff: handoffCaps(environment),
     ...(optional(environment, "AGENT_TOOL_TOKEN")
       ? { agentToolToken: optional(environment, "AGENT_TOOL_TOKEN") as string }
@@ -1454,6 +1493,20 @@ function learningAutoAssignEnabled(environment: Environment): boolean {
     return false;
   const value = optional(environment, "OPENBOT_LEARNING_AUTO_ASSIGN");
   return value !== "false" && value !== "0";
+}
+
+/** Comma separated, each trimmed, each a Chrome extension id (32 letters a to p). */
+function recorderExtraExtensionIds(environment: Environment): string[] {
+  const value = optional(environment, "OPENBOT_RECORDER_EXTRA_EXTENSION_IDS");
+  if (!value) return [];
+  const ids = value.split(",").map((id) => id.trim());
+  for (const id of ids) {
+    if (!/^[a-p]{32}$/.test(id))
+      throw new Error(
+        `OPENBOT_RECORDER_EXTRA_EXTENSION_IDS lists "${id}", which is not an extension id. An id is 32 letters from a to p; separate several with commas.`,
+      );
+  }
+  return ids;
 }
 
 /** On unless the variable is "false" or "0", the rule every default-on switch here follows. */

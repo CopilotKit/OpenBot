@@ -719,8 +719,10 @@ that the all-in-one image uses to drop to `pwuser` and to set `HOME=/home/pwuser
 therefore set here instead. See `computers.podSecurityContext` in values.yaml for why the uid is
 1001 and what is deliberately NOT set alongside it.
 
-`COMPUTER_SEPARATE_WORKSPACES` is on because a Sandbox is one person's computer and carries every
-Bot they use: each keeps a folder of its own there, as each keeps a browser profile of its own.
+`COMPUTER_SEPARATE_WORKSPACES` is on because a person's Sandbox carries every Bot they use: each
+keeps a folder of its own there, as each keeps a browser profile of its own. The server cuts the
+template for each computer (`podTemplateFor` in server/src/computer/sandbox.ts) and turns it off
+for an isolated Bot's, which keeps its files at the root of the volume it had before.
 */}}
 {{- define "openbot.sandboxPodTemplate" -}}
 {{- $computerEnv := include "openbot.computerEnv" . | fromJsonArray -}}

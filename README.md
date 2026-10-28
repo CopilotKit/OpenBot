@@ -64,7 +64,7 @@ A Bot is any endpoint speaking [AG-UI](https://github.com/ag-ui-protocol/ag-ui),
 ## Requirements
 
 - Docker, for PostgreSQL and the shipped Bots.
-- [Bun](https://bun.sh) 1.3+, for the app and API server.
+- [Bun](https://bun.sh) 1.4+, for the app, the API server and the tests (some tests fail on 1.3).
 - A CopilotKit Intelligence project and license. A free plan is available, and Intelligence can be self-hosted.
 - A model key. The proof-of-concept Bot uses OpenAI; the LangGraph Bot can use OpenAI, Anthropic, or Google.
 
@@ -98,7 +98,12 @@ A Bot is any endpoint speaking [AG-UI](https://github.com/ag-ui-protocol/ag-ui),
    For fresh self-hosted setup, set `INTELLIGENCE_API_URL` to that deployment's
    HTTPS API origin (or `http://localhost` for a local one) and run the helper
    without the two `npx` commands. It opens an isolated Chrome or Edge window for
-   your usual sign-in and project choice; install either browser first. It writes
+   your usual sign-in and project choice; install either browser first. For CLI-managed
+   local evaluation installs, it discovers the matching dashboard with the newest installed or
+   cached CopilotKit CLI and uses that dashboard for login and session requests. Discovery
+   runs offline with Bun, without downloading the CLI or requiring `npx` on your PATH.
+   If no CLI is available, manually hosted deployments use their API origin for sign-in. Complete the local auth
+   approval shown in the browser when prompted. The runtime API URL stays unchanged. It writes
    the API URL, the key and the container, not `INTELLIGENCE_GATEWAY_WS_URL`, so
    set that one to the same deployment yourself. Once `openbot` exists, the server assigns it
    as the default by itself unless [Admin → Automatic Learning](docs/automatic-learning.md)
