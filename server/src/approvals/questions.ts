@@ -67,6 +67,29 @@ export function listedQuestion(row: {
       }
     : null;
 }
+/**
+ * The person's questions still waiting on them.
+ *
+ * Unfinished, and not answered by a reply already accepted. A reply typed into a task's
+ * conversation answers the questions waiting there when it was taken: its queued turn names them
+ * in `questionIds`, and they are answered from that moment, not only once the turn has run and
+ * finished them. Without this an answered question would sit in the inbox until the turn ran,
+ * and answering it there would send a second answer.
+ */
+export function pendingPersonQuestion(owner: string) {
+  return and(
+    eq(workItems.kind, "person.question"),
+    sql`${workItems.payload}->>'actorId' = ${owner}`,
+    isNull(workItems.finishedAt),
+    sql`not exists (
+      select 1 from ${workItems} accepted_answer
+      where accepted_answer.kind = 'proactive.task'
+        and accepted_answer.payload->>'ownerUserId' = ${owner}
+        and accepted_answer.payload->>'followup' = 'true'
+        and accepted_answer.payload->'questionIds' @> jsonb_build_array(${workItems.key})
+    )`,
+  );
+}
 export type ApprovalQuestions = ReturnType<typeof createApprovalQuestions>;
 export function createApprovalQuestions(
   database: Database,
@@ -83,7 +106,7 @@ export function createApprovalQuestions(
       const rows = await database
         .select()
         .from(workItems)
-        .where(and(owned(owner), isNull(workItems.finishedAt)))
+        .where(pendingPersonQuestion(owner))
         .orderBy(desc(workItems.createdAt))
         .limit(100);
       return rows.map(listedQuestion).filter((row) => row !== null);
@@ -110,7 +133,14 @@ export function createApprovalQuestions(
           .for("update")
           .limit(1);
         if (!row) throw new ApprovalNotFoundError();
-        if (row.finishedAt)
+        // Read after the lock: under read committed this statement gets a fresh snapshot, so a
+        // reply accepted while the lock was being waited for counts as the answer it is.
+        const [pending] = await tx
+          .select({ key: workItems.key })
+          .from(workItems)
+          .where(and(pendingPersonQuestion(owner), eq(workItems.key, id)))
+          .limit(1);
+        if (!pending)
           throw new ApprovalRefusedError("You already answered this question.");
         await tx
           .insert(workItems)

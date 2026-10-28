@@ -1,9 +1,9 @@
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { createDatabase } from "../src/db/client";
 import { workItems } from "../src/db/schema";
-import { createWorkQueue } from "../src/work/queue";
+import { createWorkQueue, type SerialOrder } from "../src/work/queue";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
@@ -26,6 +26,20 @@ afterAll(async () => {
 beforeEach(async () => {
   await database.delete(workItems).where(eq(workItems.kind, kind));
 });
+
+async function liveKeys(taskId: string) {
+  const rows = await database
+    .select({ key: workItems.key })
+    .from(workItems)
+    .where(
+      and(
+        eq(workItems.kind, kind),
+        sql`${workItems.payload}->>'taskId' = ${taskId}`,
+        sql`${workItems.finishedAt} is null and ${workItems.leaseUntil} > now()`,
+      ),
+    );
+  return rows.map((row) => row.key);
+}
 
 describe("claiming durable work", () => {
   test("one replica takes a due item, and it comes back with what it is about", async () => {
@@ -255,6 +269,31 @@ describe("claiming durable work", () => {
   });
 
   /*
+   * Nobody else has it yet, and it is still not the old owner's: on its last attempt nothing will
+   * claim it again, so a late heartbeat, finish or release is all that could still change the row,
+   * and a serialised sibling may already be running in its place.
+   */
+  test("a lease that ran out is not its owner's to renew, finish or release", async () => {
+    await queue.offer({ kind, key: "bot-a" });
+    await queue.claim({ kind, owner: "replica-1", leaseMs: -1 });
+
+    const mine = { kind, key: "bot-a", owner: "replica-1" };
+    expect(await queue.renew({ ...mine, leaseMs: 30_000 })).toBe(false);
+    expect(await queue.finish(mine)).toBe(false);
+    expect(await queue.release({ ...mine, delayMs: 0 })).toBe(false);
+
+    const [row] = await database
+      .select()
+      .from(workItems)
+      .where(and(eq(workItems.kind, kind), eq(workItems.key, "bot-a")));
+    expect(row).toMatchObject({
+      claimedBy: "replica-1",
+      attempts: 1,
+      finishedAt: null,
+    });
+  });
+
+  /*
    * Two clocks pretending to be one.
    *
    * The lease was computed as `Date.now() + leaseMs` on the replica and compared against `now()` in
@@ -429,5 +468,430 @@ describe("offering at most so many under one prefix", () => {
       [1, 2, 3, 4, 5].map((n) => queue.offer({ kind, key: `${run}${n}` })),
     );
     expect(results.every((result) => result === "queued")).toBe(true);
+  });
+});
+
+describe("one at a time in a group", () => {
+  test("task replies survive a worker restart and concurrent claims keep each task in order", async () => {
+    for (const key of ["initial", "reply-1", "reply-2"])
+      await queue.offer({
+        kind,
+        key,
+        payload: { taskId: "task-a", text: key },
+      });
+    const [a, b] = await Promise.all([
+      queue.claim({ kind, owner: "a", leaseMs: 30_000, serialBy: "taskId" }),
+      queue.claim({ kind, owner: "b", leaseMs: 30_000, serialBy: "taskId" }),
+    ]);
+    expect([...a, ...b].map((item) => item.key)).toEqual(["initial"]);
+    const owner = a.length ? "a" : "b";
+    await queue.finish({ kind, key: "initial", owner });
+    // New process, same durable queue: no browser or prior worker keeps the replies alive.
+    const restarted = createWorkQueue(database);
+    for (const key of ["reply-1", "reply-2"]) {
+      const [next] = await restarted.claim({
+        kind,
+        owner: "restart",
+        leaseMs: 30_000,
+        serialBy: "taskId",
+      });
+      expect(next?.key).toBe(key);
+      expect(next?.payload.text).toBe(key);
+      expect(
+        await queue.claim({
+          kind,
+          owner: "other",
+          leaseMs: 30_000,
+          serialBy: "taskId",
+        }),
+      ).toEqual([]);
+      await restarted.finish({ kind, key, owner: "restart" });
+    }
+  });
+
+  test("a delayed older insertion cannot overlap a newer reply already running", async () => {
+    await queue.offer({ kind, key: "newer", payload: { taskId: "same-task" } });
+    expect(
+      await queue.claim({
+        kind,
+        owner: "first",
+        leaseMs: 30_000,
+        serialBy: "taskId",
+      }),
+    ).toHaveLength(1);
+    // An insert transaction can start earlier and commit after the newer row was claimed.
+    await database.insert(workItems).values({
+      kind,
+      key: "older",
+      payload: { taskId: "same-task" },
+      createdAt: new Date(Date.now() - 10_000),
+    });
+    await queue.offer({
+      kind,
+      key: "unrelated",
+      payload: { taskId: "another-task" },
+    });
+    // The blocked older row must not consume the only slot and starve another task.
+    expect(
+      (
+        await queue.claim({
+          kind,
+          owner: "second",
+          leaseMs: 30_000,
+          limit: 1,
+          serialBy: "taskId",
+        })
+      ).map((item) => item.key),
+    ).toEqual(["unrelated"]);
+    expect(
+      await queue.claim({
+        kind,
+        owner: "second",
+        leaseMs: 30_000,
+        serialBy: "taskId",
+      }),
+    ).toEqual([]);
+    await queue.finish({ kind, key: "newer", owner: "first" });
+    expect(
+      (
+        await queue.claim({
+          kind,
+          owner: "second",
+          leaseMs: 30_000,
+          serialBy: "taskId",
+        })
+      )[0]?.key,
+    ).toBe("older");
+  });
+
+  test("an expired final-attempt lease cannot revive after its next sibling starts", async () => {
+    const claim = { kind, leaseMs: 30_000, maxAttempts: 2, serialBy: "taskId" };
+    await queue.offer({ kind, key: "first", payload: { taskId: "same-task" } });
+    await queue.offer({ kind, key: "next", payload: { taskId: "same-task" } });
+    await queue.claim({ ...claim, owner: "original" });
+    await queue.release({ kind, key: "first", owner: "original", delayMs: 0 });
+    expect(await queue.claim({ ...claim, owner: "original" })).toMatchObject([
+      { key: "first", attempts: 2 },
+    ]);
+    expect(await liveKeys("same-task")).toEqual(["first"]);
+    expect(await queue.claim({ ...claim, owner: "replacement" })).toEqual([]);
+    expect(
+      await queue.renew({ kind, key: "first", owner: "original", leaseMs: -1 }),
+    ).toBe(true);
+    expect(await liveKeys("same-task")).toEqual([]);
+    expect(await queue.claim({ ...claim, owner: "replacement" })).toMatchObject(
+      [{ key: "next", attempts: 1 }],
+    );
+    expect(
+      await queue.renew({
+        kind,
+        key: "first",
+        owner: "original",
+        leaseMs: 30_000,
+      }),
+    ).toBe(false);
+    expect(await liveKeys("same-task")).toEqual(["next"]);
+    const [expired] = await database
+      .select()
+      .from(workItems)
+      .where(and(eq(workItems.kind, kind), eq(workItems.key, "first")));
+    expect(expired).toMatchObject({
+      claimedBy: "original",
+      attempts: 2,
+      finishedAt: null,
+    });
+    const [next] = await database
+      .select()
+      .from(workItems)
+      .where(and(eq(workItems.kind, kind), eq(workItems.key, "next")));
+    await queue.release({
+      kind,
+      key: "first",
+      owner: "original",
+      delayMs: 0,
+      unstarted: true,
+    });
+    const afterRefund = await database
+      .select()
+      .from(workItems)
+      .where(eq(workItems.kind, kind));
+    expect(afterRefund.find((row) => row.key === "first")).toEqual(expired);
+    expect(afterRefund.find((row) => row.key === "next")).toEqual(next);
+    await queue.finish({ kind, key: "next", owner: "replacement" });
+    expect(await queue.claim({ ...claim, owner: "later" })).toEqual([]);
+  });
+
+  test.each([1, 2])(
+    "an expired newer sibling lease allows the delayed older reply at maxAttempts %i",
+    async (maxAttempts) => {
+      await queue.offer({
+        kind,
+        key: "newer",
+        payload: { taskId: "same-task" },
+      });
+      await queue.claim({
+        kind,
+        owner: "first",
+        leaseMs: 30_000,
+        maxAttempts,
+        serialBy: "taskId",
+      });
+      await database.insert(workItems).values({
+        kind,
+        key: "older",
+        payload: { taskId: "same-task" },
+        createdAt: new Date(Date.now() - 10_000),
+      });
+      // A live sibling blocks even on its last attempt, regardless of insertion order.
+      expect(
+        await queue.claim({
+          kind,
+          owner: "second",
+          leaseMs: 30_000,
+          limit: 1,
+          maxAttempts,
+          serialBy: "taskId",
+        }),
+      ).toEqual([]);
+      await queue.renew({ kind, key: "newer", owner: "first", leaseMs: -1 });
+      expect(
+        (
+          await queue.claim({
+            kind,
+            owner: "second",
+            leaseMs: 30_000,
+            limit: 1,
+            maxAttempts,
+            serialBy: "taskId",
+          })
+        ).map((item) => item.key),
+      ).toEqual(["older"]);
+      expect(await liveKeys("same-task")).toEqual(["older"]);
+      expect(
+        await queue.renew({
+          kind,
+          key: "newer",
+          owner: "first",
+          leaseMs: 30_000,
+        }),
+      ).toBe(false);
+      expect(await liveKeys("same-task")).toEqual(["older"]);
+      expect(
+        await queue.renew({
+          kind,
+          key: "older",
+          owner: "second",
+          leaseMs: 30_000,
+        }),
+      ).toBe(true);
+      expect(await liveKeys("same-task")).toEqual(["older"]);
+    },
+  );
+
+  /*
+   * Two kinds in one order, as a conversation's own turns and the answers to questions asked in it
+   * can share one: each kind finds its group its own way, an older row of either kind keeps its
+   * place, and a row out of attempts by its own kind's cap stops holding the group.
+   */
+  test("kinds that share an order take turns by age, each by its own attempt cap", async () => {
+    const answers = `${kind}.answer`;
+    const order: SerialOrder = {
+      name: kind,
+      kinds: { [kind]: 2, [answers]: 1 },
+      groupOf: (row) =>
+        sql`case when ${row}.kind = ${answers} then ${row}.payload->'question'->>'taskId' else ${row}.payload->>'taskId' end`,
+    };
+    const keys = (items: { key: string }[]) => items.map((item) => item.key);
+    const claimTurn = () =>
+      queue.claim({
+        kind,
+        owner: "worker",
+        leaseMs: 30_000,
+        maxAttempts: 2,
+        serialBy: order,
+      });
+    const claimAnswer = () =>
+      queue.claim({
+        kind: answers,
+        owner: "answerer",
+        leaseMs: 30_000,
+        maxAttempts: 1,
+        serialBy: order,
+      });
+    const answer = (key: string) =>
+      queue.offer({
+        kind: answers,
+        key,
+        payload: { question: { taskId: "same-task" } },
+      });
+    try {
+      await answer("answer");
+      await queue.offer({
+        kind,
+        key: "turn",
+        payload: { taskId: "same-task" },
+      });
+      await queue.offer({
+        kind,
+        key: "elsewhere",
+        payload: { taskId: "another-task" },
+      });
+      // The older answer holds the turn back, and holds back nothing else.
+      expect(keys(await claimTurn())).toEqual(["elsewhere"]);
+      expect(await claimTurn()).toEqual([]);
+      // Running, it still does.
+      expect(keys(await claimAnswer())).toEqual(["answer"]);
+      expect(await claimTurn()).toEqual([]);
+      // Its one attempt failed. Out of attempts, it no longer holds the group.
+      await queue.release({
+        kind: answers,
+        key: "answer",
+        owner: "answerer",
+        delayMs: 0,
+        reason: "fetch failed",
+      });
+      expect(keys(await claimTurn())).toEqual(["turn"]);
+      // A running turn holds back an answer that arrives behind it, until it finishes.
+      await answer("later-answer");
+      expect(await claimAnswer()).toEqual([]);
+      await queue.finish({ kind, key: "turn", owner: "worker" });
+      expect(keys(await claimAnswer())).toEqual(["later-answer"]);
+    } finally {
+      await database.delete(workItems).where(eq(workItems.kind, answers));
+    }
+  });
+});
+
+describe("giving back a claim that never started", () => {
+  test("unstarted claims defer without spending attempts, and only their owner can refund once", async () => {
+    await queue.offer({ kind, key: "busy", payload: { messageId: "reply-1" } });
+    for (let conflict = 0; conflict < 4; conflict++) {
+      const [item] = await queue.claim({
+        kind,
+        owner: "worker",
+        leaseMs: 30_000,
+        maxAttempts: 2,
+      });
+      expect(item).toMatchObject({
+        attempts: 1,
+        payload: { messageId: "reply-1" },
+      });
+      expect(
+        await queue.release({
+          kind,
+          key: "busy",
+          owner: "stale-worker",
+          delayMs: 0,
+          unstarted: true,
+        }),
+      ).toBe(false);
+      expect(
+        await queue.release({
+          kind,
+          key: "busy",
+          owner: "worker",
+          delayMs: 0,
+          unstarted: true,
+        }),
+      ).toBe(true);
+      expect(
+        await queue.release({
+          kind,
+          key: "busy",
+          owner: "worker",
+          delayMs: 0,
+          unstarted: true,
+        }),
+      ).toBe(false);
+    }
+    const [delivered] = await queue.claim({
+      kind,
+      owner: "worker",
+      leaseMs: 30_000,
+      maxAttempts: 2,
+    });
+    expect(delivered?.attempts).toBe(1);
+    await queue.release({
+      kind,
+      key: "busy",
+      owner: "worker",
+      delayMs: 0,
+      reason: "provider failed",
+    });
+    const [retry] = await queue.claim({
+      kind,
+      owner: "worker",
+      leaseMs: 30_000,
+      maxAttempts: 2,
+    });
+    expect(retry?.attempts).toBe(2);
+    await queue.release({
+      kind,
+      key: "busy",
+      owner: "worker",
+      delayMs: 0,
+      unstarted: true,
+    });
+    const [deferred] = await database
+      .select()
+      .from(workItems)
+      .where(and(eq(workItems.kind, kind), eq(workItems.key, "busy")));
+    expect(deferred).toMatchObject({
+      attempts: 1,
+      lastError: "provider failed",
+    });
+    await queue.claim({
+      kind,
+      owner: "worker",
+      leaseMs: 30_000,
+      maxAttempts: 2,
+    });
+    await queue.release({
+      kind,
+      key: "busy",
+      owner: "worker",
+      delayMs: 0,
+      reason: "provider failed again",
+    });
+    expect(
+      await queue.claim({
+        kind,
+        owner: "worker",
+        leaseMs: 30_000,
+        maxAttempts: 2,
+      }),
+    ).toEqual([]);
+  });
+
+  test("a deferred claim keeps its backoff and cannot refund a replacement owner's attempt", async () => {
+    await queue.offer({ kind, key: "replacement" });
+    await queue.claim({ kind, owner: "old-worker", leaseMs: -1 });
+    await queue.claim({ kind, owner: "new-worker", leaseMs: 30_000 });
+    expect(
+      await queue.release({
+        kind,
+        key: "replacement",
+        owner: "old-worker",
+        delayMs: 0,
+        unstarted: true,
+      }),
+    ).toBe(false);
+    const [owned] = await database
+      .select()
+      .from(workItems)
+      .where(and(eq(workItems.kind, kind), eq(workItems.key, "replacement")));
+    expect(owned).toMatchObject({ claimedBy: "new-worker", attempts: 2 });
+    expect(
+      await queue.release({
+        kind,
+        key: "replacement",
+        owner: "new-worker",
+        delayMs: 60_000,
+        unstarted: true,
+      }),
+    ).toBe(true);
+    expect(
+      await queue.claim({ kind, owner: "next-worker", leaseMs: 30_000 }),
+    ).toEqual([]);
   });
 });
