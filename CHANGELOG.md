@@ -8,7 +8,7 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-**Before upgrading.** Nine things change for an existing deployment:
+**Before upgrading.** Ten things change for an existing deployment:
 - A hosted computer's browser is now headed by default. It uses a little more memory than headless
   did; set `COMPUTER_BROWSER_MODE=headless` (Helm: `computers.browserMode: headless`) to keep the old
   behaviour.
@@ -42,6 +42,17 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - On Helm's `shared` computer and the docker-compose `agent-computer`, each Bot's files now live in
   `computers/<Bot id>` on the workspace volume (below). Files saved before the upgrade stay at the
   root of the volume, where no Bot sees them; move them into a Bot's folder to give them back.
+
+- Migration `0066_lazy_dragon_man` adds a nullable `model_selection` column to
+  `intelligence_channel_mappings`; existing conversations keep the configured default.
+
+### Choose a model for a conversation
+
+Admin → Enterprise controls → Models → Allow model selection enables a small model shortlist for
+API-backed built-in Bots. It is off by default. When enabled, the selector sits beside Send, including
+before the first message, and remembers the choice for that person, Bot, and conversation. Turning
+the setting off uses the configured default again without deleting saved choices. Account-backed
+ChatGPT and Claude harnesses, external Bots, and group chats keep their existing model behavior.
 
 ### The audit log reads like a log
 

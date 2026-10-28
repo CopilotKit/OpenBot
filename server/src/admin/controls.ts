@@ -43,6 +43,7 @@ import type { Database } from "../db/client";
 import { agentProfiles, agents, auditEvents } from "../db/schema";
 import { createOtelEventExporter, type EventExporter } from "../telemetry/otel";
 import { scrubCommand } from "../telemetry/scrub";
+import type { WebBotAuth } from "../web-bot-auth";
 import {
   type Capability,
   type CapabilityRow,
@@ -58,7 +59,6 @@ import {
   type EnterpriseStore,
   type NetworkPolicyRow,
 } from "./settings-store";
-import type { WebBotAuth } from "../web-bot-auth";
 
 /** Action Recording keeps 90 days, as Grok Bot's does. */
 export const ACTION_RECORD_RETENTION_DAYS = 90;
@@ -82,6 +82,7 @@ export type EnterpriseDeps = {
   webBotAuth?: WebBotAuth;
   /** `provider/model` the built-in Bot runs on, for the model allowlist and usage view. */
   builtInModel?: string;
+  builtInApiModelGovernedAtRun?: boolean;
   /** Offboarding: ends sessions and deny-lists, and retires what a person granted. */
   people?: {
     revoke: (userId: string, by: string) => Promise<void>;
@@ -880,7 +881,8 @@ export function auditRoutineStore<T extends RoutineLike>(
  * Run now, responsibilities, follow-ups, group turns, delivery conversations and Slack, Teams and
  * SMS messages never cross it: they run through the shared headless turn runner, which asks here.
  * The allowlist is decided the way the gate decides it before a run: a built-in Bot runs on the
- * deployment's configured model, so that model is known; a remote Bot chooses its own and is
+ * effective model at construction when the run resolver is installed; otherwise this gate checks
+ * the deployment default. A remote Bot chooses its own model and is
  * checked only by what it streams. Fails closed when the controls cannot be read.
  */
 export async function headlessTurnRefusal(input: {
@@ -899,6 +901,8 @@ export async function headlessTurnRefusal(input: {
       .from(agents)
       .where(eq(agents.id, input.agentId))
       .limit(1);
+    if (row?.type === "built_in" && controls.deps.builtInApiModelGovernedAtRun)
+      return null;
     const model =
       row?.type === "built_in" ? controls.deps.builtInModel : undefined;
     if (!model || allowlist.models.includes(model)) return null;

@@ -29,6 +29,7 @@ export type EnterpriseSettings = {
   actionRecording: boolean;
   /** Stop computers nobody has used for this many days. 0 turns it off. */
   inactiveComputerDays: number;
+  modelSelectionEnabled: boolean;
   modelAllowlist: { enabled: boolean; models: string[] };
   mcpAllowlist: { enabled: boolean; servers: string[] };
 };
@@ -37,6 +38,7 @@ export const DEFAULT_ENTERPRISE_SETTINGS: EnterpriseSettings = {
   ssoRequired: false,
   actionRecording: false,
   inactiveComputerDays: 30,
+  modelSelectionEnabled: false,
   modelAllowlist: { enabled: false, models: [] },
   mcpAllowlist: { enabled: false, servers: [] },
 };
@@ -45,6 +47,7 @@ const SETTING_KEYS = {
   ssoRequired: "sso_required",
   actionRecording: "action_recording",
   inactiveComputerDays: "inactive_computer_days",
+  modelSelectionEnabled: "model_selection_enabled",
   modelAllowlist: "model_allowlist",
   mcpAllowlist: "mcp_allowlist",
 } as const satisfies Record<keyof EnterpriseSettings, string>;

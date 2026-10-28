@@ -9,6 +9,7 @@ import {
   type LoadInstructions,
   type LoadToolsForBot,
   type MarkAttachmentsSent,
+  type ResolveRunModel,
   type RuntimeModel,
   resolveRuntimeAgents,
   type SignRun,
@@ -40,6 +41,7 @@ export type ActorAgentResolver = {
 export type ActorAgentResolverDependencies = {
   loadNameForActor?: (actorId: string) => Promise<string | null>;
   loadAgents: LoadAgentsForActor;
+  resolveRunModelForActor?: (actor: AgentActor) => ResolveRunModel;
   model: RuntimeModel;
   resolveModelApiKey: () => Promise<string | null>;
   stallGuard?: StallGuard;
@@ -115,6 +117,7 @@ export function createActorAgentResolver(
       deps.markAttachmentsSentForActor?.(actor.id),
       deps.acquireLearnedSkills,
       deps.loadPersonalMemoryForActor?.(actor.id),
+      deps.resolveRunModelForActor?.(actor),
     ).then((agents) => {
       const loadName = deps.loadNameForActor;
       if (loadName) {

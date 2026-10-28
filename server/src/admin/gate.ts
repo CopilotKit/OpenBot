@@ -74,6 +74,11 @@ const RUNTIME_RUN: Rule = {
 
 export const GATED_ROUTES: Rule[] = [
   {
+    method: "PUT",
+    path: /^\/api\/channels\/[^/]+\/agents\/[^/]+\/model$/,
+    needs: async () => ["useBots"],
+  },
+  {
     method: ["POST", "PATCH"],
     path: /^\/api\/agents(\/[^/]+)?$/,
     needs: async (context) =>
@@ -234,6 +239,14 @@ async function governRun(
     builtIn = row?.type === "built_in";
   } catch {
     builtIn = false;
+  }
+  if (
+    builtIn &&
+    controls.deps.builtInApiModelGovernedAtRun &&
+    runtimeRun(context.req.path)?.action === "run"
+  ) {
+    await next();
+    return undefined;
   }
   const allowlist = controls.snapshot()?.settings.modelAllowlist;
   const isAllowed = (model: string) =>

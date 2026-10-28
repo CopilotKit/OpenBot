@@ -5,6 +5,7 @@ import {
 } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { stashFirstMessage } from "@/components/channels/transcript-messages";
+import { client } from "@/lib/client";
 import {
   createGroupMutationOptions,
   sendGroupMessageMutationOptions,
@@ -82,8 +83,27 @@ export function useStartChannel() {
   const createGroup = useMutation(createGroupMutationOptions(queryClient));
   const deleteChannel = useMutation(deleteChannelMutationOptions(queryClient));
 
-  const start = async (agentId: string, text: string) => {
+  const start = async (
+    agentId: string,
+    text: string,
+    model?: string | null,
+  ) => {
     const channel = await createChannel.mutateAsync([agentId]);
+    if (model) {
+      try {
+        await client(
+          `/api/channels/${encodeURIComponent(channel.id)}/agents/${encodeURIComponent(agentId)}/model`,
+          {
+            method: "PUT",
+            body: { model },
+          },
+        );
+      } catch (error) {
+        // Never send the first message with a model different from the chosen one.
+        await deleteChannel.mutateAsync(channel.id).catch(() => undefined);
+        throw error;
+      }
+    }
     queryClient.setQueryData(channelKeys.detail(channel.id), channel);
     stashFirstMessage(channel.id, text);
     await navigate({
@@ -126,7 +146,12 @@ export function useStartChannel() {
     startGroup,
     start,
     /** `start`, for a coworker the person chose: the choice is recorded first. */
-    startChosen: (agentId: string, text: string) =>
-      startWithChosen({ agentId, text, record: routeMessage, start }),
+    startChosen: (agentId: string, text: string, model?: string | null) =>
+      startWithChosen({
+        agentId,
+        text,
+        record: routeMessage,
+        start: (id, message) => start(id, message, model),
+      }),
   };
 }

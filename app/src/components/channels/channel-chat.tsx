@@ -6,20 +6,19 @@ import {
   useAgent,
   useCopilotKit,
 } from "@copilotkit/react-core/v2";
-import { observeApprovalAgent } from "@/lib/copilot/approval-context";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { HandoffResumeNotice } from "@/components/computer/handoff-resume-notice";
+import { ChannelWorkRows } from "@/components/channels/channel-work";
 import { attachmentModality } from "@/components/channels/chat-messages";
 import { toAgentOptions } from "@/components/channels/composer";
-import { ChannelWorkRows } from "@/components/channels/channel-work";
 import { ConversationView } from "@/components/channels/conversation-view";
-import { VoiceCallWidget } from "@/components/channels/voice-call-widget";
 import {
   seedMessage,
   takeFirstMessage,
   transcriptMessages,
 } from "@/components/channels/transcript-messages";
+import { VoiceCallWidget } from "@/components/channels/voice-call-widget";
+import { HandoffResumeNotice } from "@/components/computer/handoff-resume-notice";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { attachmentUrl } from "@/lib/channels/attachments";
 import {
@@ -32,6 +31,7 @@ import {
   channelKeys,
 } from "@/lib/channels/queries";
 import { useActiveBot } from "@/lib/copilot/active-bot";
+import { observeApprovalAgent } from "@/lib/copilot/approval-context";
 import { ConversationProvider } from "@/lib/copilot/conversation";
 import { afterMs, joinWithin } from "@/lib/copilot/join-thread";
 import { repairUnansweredToolCalls } from "@/lib/copilot/repair-history";
@@ -44,16 +44,17 @@ import {
   voiceContext,
   withVoiceContext,
 } from "@/lib/voice/agent-bridge";
-import { useVoiceCall } from "@/lib/voice/use-voice-call";
 import {
-  loadVoiceArchive,
   cachedVoiceArchive,
+  loadVoiceArchive,
   useVoiceArchive,
   voiceArchiveContext,
   withVoiceChats,
 } from "@/lib/voice/archive";
+import { useVoiceCall } from "@/lib/voice/use-voice-call";
 import { queryClient } from "@/query-client";
 import { newId } from "../../lib/new-id";
+import { ModelSelector } from "./model-selector";
 
 /**
  * How long a stalled thread join is worth waiting for before it is ended.
@@ -536,6 +537,7 @@ export function ChannelChat({
   }, [channel.id, channel.threadId, joinGatePromise, runtimeAgentId]);
 
   // Tool calls from this conversation act on this coworker's own computer.
+  const [modelBlocked, setModelBlocked] = useState(true);
   useActiveBot(runtimeAgentId);
 
   const skillCommands = useSkillCommands(runtimeAgentId);
@@ -1056,7 +1058,16 @@ export function ChannelChat({
              * middle of an answer: a second turn racing the first on one thread, with a fabricated
              * result stitched over a tool call that is still executing.
              */
-            pending={agent.isRunning || turnsInFlight > 0}
+            modelSelector={
+              <ModelSelector
+                channelId={channel.id}
+                agentId={runtimeAgentId}
+                disabled={agent.isRunning || turnsInFlight > 0 || restoring}
+                onBlockingChange={setModelBlocked}
+              />
+            }
+            submissionBlocked={modelBlocked}
+            pending={agent.isRunning || turnsInFlight > 0 || modelBlocked}
             /*
              * A channel outlives its turns, so it is the screen where waiting is worth offering. A
              * correction typed mid-answer is held here, in this tab, and runs as one follow-up turn the
