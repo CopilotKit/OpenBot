@@ -8,6 +8,8 @@ import {
 } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { cleanup, render } from "@testing-library/react";
+import { AbstractAvatar } from "@/components/agents/abstract-avatar";
+import AgentOrb, { type AIState } from "@/components/agents/orb/agent-orb";
 import {
   BotOrb,
   type BotOrbState,
@@ -574,5 +576,54 @@ describe("its eyes", () => {
     } finally {
       stop();
     }
+  });
+});
+
+describe("a Bot's face and OpenBot's mark", () => {
+  test("a Bot's avatar is named once and drawn as its orb", () => {
+    const view = render(
+      <AbstractAvatar name="Research desk" seed="research-desk" size={36} />,
+    );
+    const avatar = view.getByRole("img", { name: "Research desk" });
+    expect(view.queryAllByRole("img")).toHaveLength(1);
+    expect(avatar.style.width).toBe("36px");
+    const orb = orbOf(avatar);
+    expect(orb.getAttribute("aria-hidden")).toBe("true");
+    expect(orb.dataset.palette).toBe(orbPaletteFor("research-desk"));
+    expect(orb.style.width).toBe("36px");
+    expect(avatar.querySelector("canvas")).not.toBeNull();
+    expect(avatar.querySelector("svg")).toBeNull();
+  });
+
+  test("two Bots with different seeds can differ in colour, the same seed never does", () => {
+    const paletteOf = (seed: string) => {
+      const view = render(<AbstractAvatar name="Bot" seed={seed} />);
+      const palette = orbOf(view.container).dataset.palette;
+      cleanup();
+      return palette;
+    };
+    expect(paletteOf("research-desk")).not.toBe(paletteOf("release-notes"));
+    expect(paletteOf("research-desk")).toBe(paletteOf("research-desk"));
+  });
+
+  test("OpenBot's mark is violet and maps every state", () => {
+    const states: Record<AIState, BotOrbState> = {
+      idle: "idle",
+      listening: "listening",
+      thinking: "thinking",
+      streaming: "thinking",
+      done: "done",
+      error: "idle",
+    };
+    for (const [state, shown] of Object.entries(states)) {
+      const view = render(<AgentOrb size="64px" state={state as AIState} />);
+      const orb = orbOf(view.container);
+      expect(orb.dataset.palette).toBe("violet");
+      expect(orb.dataset.state).toBe(shown);
+      expect(orb.style.width).toBe("64px");
+      cleanup();
+    }
+    const view = render(<AgentOrb />);
+    expect(orbOf(view.container).style.width).toBe("192px");
   });
 });
