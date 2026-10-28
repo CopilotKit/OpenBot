@@ -267,7 +267,6 @@ function OrganizationStep() {
 
 const STEPS: Array<(onNext: () => void) => React.ReactNode> = [
   () => <WelcomeStep />,
-  (onNext) => <OnboardingNameStep onSaved={onNext} />,
   () => <ComputerUseStep />,
   () => <RosterStep />,
 ];
@@ -291,7 +290,7 @@ function RouteComponent() {
   const [ref, bounds] = useMeasure();
 
   /*
-   * The last three slides are for somebody evaluating OpenBot locally, never for an organization's people:
+   * The three local-evaluation slides are never shown to an organization's people:
    * the server says single-user mode, which an organization's deployment, always behind sign-in,
    * cannot be in. Until the answer arrives they are left out, so a slow or failed request never
    * shows an organization's employees a page about deploying OpenBot themselves.
@@ -301,14 +300,13 @@ function RouteComponent() {
    * evaluation licence, so every CLI evaluator, the person these slides are for, would never see them.
    */
   const { data: capabilities } = useQuery(deploymentCapabilitiesQueryOptions());
-  const steps = capabilities?.localEvaluation
-    ? [
-        ...STEPS,
-        () => <LocalStep />,
-        () => <AgentsStep />,
-        () => <OrganizationStep />,
-      ]
-    : STEPS;
+  const steps: Array<(onFinish: () => Promise<void>) => React.ReactNode> = [
+    ...STEPS,
+    ...(capabilities?.localEvaluation
+      ? [() => <LocalStep />, () => <AgentsStep />, () => <OrganizationStep />]
+      : []),
+    (onFinish) => <OnboardingNameStep onSaved={onFinish} />,
+  ];
   const last = step === steps.length - 1;
 
   const go = (to: number) => {
@@ -353,7 +351,10 @@ function RouteComponent() {
                   key={step}
                   variants={variants}
                 >
-                  {steps[step]?.(() => go(step + 1))}
+                  {steps[step]?.(async () => {
+                    await complete.mutateAsync(undefined);
+                    setLeaving(true);
+                  })}
                 </motion.div>
               </AnimatePresence>
 
@@ -364,34 +365,23 @@ function RouteComponent() {
               ) : null}
 
               <motion.div
-                className={`${step === 1 ? "mt-4" : "mt-20"} flex flex-col items-center justify-center max-w-xs gap-4 w-full mx-auto`}
+                className={`${last ? "mt-4" : "mt-20"} flex flex-col items-center justify-center max-w-xs gap-4 w-full mx-auto`}
                 layout
               >
-                {step !== 1 && (
+                {!last && (
                   <Button
                     className="w-full"
                     disabled={complete.isPending}
-                    onClick={() => {
-                      if (last) {
-                        complete.mutate(undefined, {
-                          onSuccess: () => setLeaving(true),
-                        });
-                      } else {
-                        go(step + 1);
-                      }
-                    }}
+                    onClick={() => go(step + 1)}
                     size="lg"
                   >
-                    {complete.isPending
-                      ? "Saving…"
-                      : last
-                        ? "Get started"
-                        : "Continue"}
+                    Continue
                   </Button>
                 )}
                 {step !== 0 && (
                   <Button
                     className="w-full"
+                    disabled={complete.isPending}
                     onClick={() => go(step - 1)}
                     variant="secondary"
                     size="lg"

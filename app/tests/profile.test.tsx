@@ -42,10 +42,10 @@ test("onboarding name step starts empty for a placeholder profile", () => {
     </QueryClientProvider>,
   );
   expect(
-    view.getByRole("heading", { name: "Hello, nice to meet you." }),
+    view.getByRole("heading", { name: "Let's get to it." }),
   ).toBeTruthy();
   expect(
-    view.getByRole("button", { name: "Continue" }).hasAttribute("disabled"),
+    view.getByRole("button", { name: "Get started" }).hasAttribute("disabled"),
   ).toBe(true);
 });
 
@@ -159,7 +159,7 @@ test("onboarding advances only after the name has been saved", async () => {
       />
     </QueryClientProvider>,
   );
-  fireEvent.click(view.getByRole("button", { name: "Continue" }));
+  fireEvent.click(view.getByRole("button", { name: "Get started" }));
   await waitFor(() =>
     expect(
       view.getByRole("button", { name: "Saving…" }).hasAttribute("disabled"),
@@ -185,7 +185,7 @@ test("onboarding stays on the name step when saving fails", async () => {
       />
     </QueryClientProvider>,
   );
-  fireEvent.click(view.getByRole("button", { name: "Continue" }));
+  fireEvent.click(view.getByRole("button", { name: "Get started" }));
   await view.findByRole("alert");
   expect(advances).toBe(0);
   expect((view.getByLabelText("Name") as HTMLInputElement).value).toBe("Sam");

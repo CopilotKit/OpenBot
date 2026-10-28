@@ -14,7 +14,7 @@ export function ProfileNameForm({
 }: {
   initialName?: string;
   firstRun?: boolean;
-  onSaved?: () => void;
+  onSaved?: () => void | Promise<void>;
 }) {
   const id = useId();
   const queryClient = useQueryClient();
@@ -32,7 +32,7 @@ export function ProfileNameForm({
         queryKey: authKeys.currentUser(),
         refetchType: "all",
       });
-      onSaved?.();
+      await onSaved?.();
     },
   });
   return (
@@ -72,7 +72,7 @@ export function ProfileNameForm({
         size={firstRun ? "lg" : "default"}
         disabled={!name.trim() || save.isPending}
       >
-        {save.isPending ? "Saving…" : firstRun ? "Continue" : "Save name"}
+        {save.isPending ? "Saving…" : firstRun ? "Get started" : "Save name"}
       </Button>
     </form>
   );
@@ -95,13 +95,17 @@ export function ProfileSettings() {
   );
 }
 
-export function OnboardingNameStep({ onSaved }: { onSaved: () => void }) {
+export function OnboardingNameStep({
+  onSaved,
+}: {
+  onSaved: () => void | Promise<void>;
+}) {
   const { data: user } = useQuery(currentUserQueryOptions());
   return (
     <div className="mx-auto flex w-full max-w-md flex-col items-center gap-6">
       <AgentOrb size="64px" state="listening" />
       <h1 className="text-center text-3xl font-semibold tracking-tight">
-        Hello, nice to meet you.
+        Let's get to it.
       </h1>
       <p className="text-center text-muted-foreground">
         What should we call you? You can change your name later in Settings.
