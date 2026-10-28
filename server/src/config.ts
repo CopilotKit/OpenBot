@@ -38,6 +38,11 @@ export type IntelligenceSettings = {
   gatewayWsUrl: string;
   apiKey: string;
   licenseToken?: string;
+  /**
+   * The gateway as the browser reaches it, when that is not where this server reaches it. See
+   * `INTELLIGENCE_BROWSER_GATEWAY_WS_URL` in `runtimeCapabilities`.
+   */
+  browserGatewayWsUrl?: string;
 };
 
 export type DockerComputerConfig = {
@@ -990,10 +995,26 @@ function runtimeCapabilities(environment: Environment): RuntimeCapabilities {
     );
   }
 
+  /*
+   * Optional, and only ever a second address for the same gateway. The browser opens the gateway
+   * itself, at the address `/info` gives it, so a server that reaches Intelligence somewhere the
+   * browser cannot follow names the browser's address here. The server in OpenBot Desktop's
+   * container does: it reaches local Intelligence at `host.docker.internal`, and the window on the
+   * host reaches the same gateway at `localhost`. Unset, the browser is given `gatewayWsUrl`, as
+   * before.
+   */
+  const browserGatewayWsUrl = url(
+    environment,
+    "INTELLIGENCE_BROWSER_GATEWAY_WS_URL",
+  );
+
   return {
     mode: "intelligence",
     durableHistory: true,
-    intelligence: settings as IntelligenceSettings,
+    intelligence: {
+      ...(settings as IntelligenceSettings),
+      ...(browserGatewayWsUrl ? { browserGatewayWsUrl } : {}),
+    },
   };
 }
 

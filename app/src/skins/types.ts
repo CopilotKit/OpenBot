@@ -1,17 +1,15 @@
+import type { SkinId } from "@openbot/shared/user-preferences";
 import type { ComponentType, ReactNode } from "react";
 
-/**
- * Every skin OpenBot ships. `openbot` is the default and is OpenBot exactly as it is without a
- * skin: no frame of its own, no tokens of its own.
+/*
+ * The ids live in `shared/` because the choice is saved on the person's account and the server
+ * checks it. They are re-exported here so a skin reads them from beside its own type.
  */
-export const SKIN_IDS = [
-  "openbot",
-  "openduet",
-  "opendots",
-  "openmuse",
-] as const;
-
-export type SkinId = (typeof SKIN_IDS)[number];
+export {
+  DEFAULT_SKIN,
+  SKIN_IDS,
+  type SkinId,
+} from "@openbot/shared/user-preferences";
 
 export type Skin = {
   id: SkinId;

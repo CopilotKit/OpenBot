@@ -9,10 +9,50 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { parse } from "yaml";
 
 function composeFile() {
   return readFileSync(
     join(import.meta.dir, "..", "docker-compose.yml"),
+    "utf8",
+  );
+}
+
+/** The file as Compose reads it before interpolation: every `${...}` is still text. */
+function composeServices() {
+  return (
+    parse(composeFile()) as {
+      services: Record<
+        string,
+        {
+          profiles?: string[];
+          image?: string;
+          build?: { context: string; dockerfile: string };
+          command?: string[];
+          env_file?: Array<{ path: string; required: boolean }>;
+          environment?: Record<string, string>;
+          depends_on?: Record<string, { condition: string }>;
+          restart?: string;
+          networks?: string[];
+          user?: string;
+          volumes?: Array<
+            | string
+            | {
+                type: string;
+                source: string;
+                target: string;
+                bind?: { create_host_path?: boolean };
+              }
+          >;
+        }
+      >;
+    }
+  ).services;
+}
+
+function serverDockerfile() {
+  return readFileSync(
+    join(import.meta.dir, "..", "server", "Dockerfile"),
     "utf8",
   );
 }
@@ -180,6 +220,8 @@ function runComposeConfig(env: Record<string, string>) {
       "/dev/null",
       "--profile",
       "harness",
+      "--profile",
+      "openbot",
       "config",
       "--format",
       "json",
@@ -239,6 +281,9 @@ test("publishes every service on a settable port with the documented default", (
     ["SUPERVISOR_PORT", "4500", "4300"],
     ["BOT_PORT", "4200", "4200"],
     ["LANGGRAPH_PORT", "4201", "4201"],
+    // One process behind both: the server serves the built app on its own port.
+    ["APP_PORT", "3010", "3001"],
+    ["SERVER_PORT", "3001", "3001"],
   ] as const;
 
   for (const [name, host, container] of published) {
@@ -269,6 +314,8 @@ test("publishes every service that holds a secret on loopback only", () => {
     "BOT_PORT",
     "LANGGRAPH_PORT",
     "PICKED_HARNESS_PORT",
+    "APP_PORT",
+    "SERVER_PORT",
   ]) {
     const published = [
       ...compose.matchAll(
@@ -475,7 +522,7 @@ test("builds the deployment image with Playwright's Chromium payload only", () =
       'bunx --bun "playwright@' +
         "$" +
         "{PLAYWRIGHT_VERSION}" +
-        '" install --with-deps chromium',
+        '" install --with-deps --no-shell chromium',
     );
     expect(dockerfile).not.toMatch(/\bnodejs\b|\bnpm\b/);
     expect(dockerfile).not.toMatch(
@@ -561,5 +608,155 @@ test("gives the selected harness the same governed callback as the framework Bot
     expect(config.services[service].extra_hosts).toContain(
       "host.docker.internal=host-gateway",
     );
+  }
+});
+
+/**
+ * OpenBot's own server and worker, for an installed OpenBot, and out of a developer's way.
+ *
+ * `scripts/start.sh` runs both on the host, so a plain `docker compose up -d` that also started them
+ * would put a second server on port 3001 and a second worker on the routines. The profile is what
+ * keeps that from happening; naming the service is still enough to start it.
+ */
+test("keeps OpenBot's own server and worker behind a profile", () => {
+  const services = composeServices();
+
+  for (const name of ["server", "worker"]) {
+    expect(services[name].profiles).toEqual(["openbot"]);
+  }
+});
+
+test("runs the server and the worker from the image migrations already use", () => {
+  const services = composeServices();
+
+  for (const name of ["server", "worker"]) {
+    expect(services[name].image).toBe(services.migrate.image);
+    expect(services[name].build).toEqual(services.migrate.build);
+    expect(services[name].depends_on?.migrate).toEqual({
+      condition: "service_completed_successfully",
+    });
+    // Restarted by Docker, because nothing on the host is watching them any more.
+    expect(services[name].restart).toBe("unless-stopped");
+  }
+  expect(services.worker.command).toEqual(["bun", "../worker/src/index.ts"]);
+});
+
+test("ships the worker in the server image", () => {
+  const dockerfile = serverDockerfile();
+
+  expect(dockerfile).toContain("COPY worker/src worker/src");
+  // The isolated install's link to `@openbot/shared`. Without it the worker's first import fails.
+  expect(dockerfile).toContain(
+    "COPY --from=deps /app/worker/node_modules worker/node_modules",
+  );
+});
+
+/**
+ * Every address the server is given names a service on its network.
+ *
+ * `.env` says `127.0.0.1` and `localhost`, which is right for a server on the host and means the
+ * container itself inside one. The settings in `environment:` win over that file, so these are what
+ * the server actually uses.
+ */
+test("gives the server container addresses, not the host's loopback", () => {
+  const server = composeServices().server;
+  const environment = server.environment ?? {};
+
+  expect(server.env_file).toEqual([{ path: "./.env", required: false }]);
+  expect(environment).toMatchObject({
+    PORT: "3001",
+    SERVER_PORT: "3001",
+    DATABASE_URL: "postgres://openbot:openbot@postgres:5432/openbot",
+    AGENT_COMPUTER_URL: "http://agent-computer:4100",
+    COMPUTER_SUPERVISOR_URL: "http://supervisor:4300",
+  });
+  for (const [name, value] of Object.entries(environment)) {
+    expect(`${name}=${value}`).not.toMatch(/localhost|127\.0\.0\.1|\[::1\]/);
+  }
+  // Production refuses `AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS`, which a local OpenBot needs.
+  expect(environment.NODE_ENV).toBe("");
+});
+
+test("puts the server beside the database and the Bots, and the worker beside the database only", () => {
+  const services = composeServices();
+
+  expect(services.server.networks).toEqual(["data", "default"]);
+  expect(services.worker.networks).toEqual(["data"]);
+  expect(Object.keys(services.worker.environment ?? {}).sort()).toEqual([
+    "DATABASE_URL",
+    "SERVER_INTERNAL_URL",
+    "WORKER_SHARED_SECRET",
+  ]);
+  expect(services.worker.environment?.SERVER_INTERNAL_URL).toBe(
+    "http://server:3001",
+  );
+});
+
+test("hands the desktop's host-access token to the server and nothing else", () => {
+  const holders = Object.entries(composeServices())
+    .filter(([, service]) =>
+      Object.keys(service.environment ?? {}).includes(
+        "OPENBOT_DESKTOP_HOST_TOKEN",
+      ),
+    )
+    .map(([name]) => name);
+
+  expect(holders).toEqual(["server"]);
+});
+
+test("addresses the server's Bots and endpoints from inside the network", () => {
+  const withBots = runComposeConfig({
+    MANAGED_AGENT_AG_UI_URL: "http://127.0.0.1:4201/ag-ui",
+    PICKED_HARNESS_URL: "http://127.0.0.1:4202/run",
+    PICKED_HARNESS_CONTAINER_URL: "http://agent-harness:4202/run",
+    OPENAI_BASE_URL: "http://127.0.0.1:3001/api/model-provider/v1",
+    OPENAI_CONTAINER_BASE_URL:
+      "http://host.docker.internal:3001/api/model-provider/v1",
+    INTELLIGENCE_GATEWAY_WS_URL: "ws://localhost:14401",
+    INTELLIGENCE_CONTAINER_GATEWAY_WS_URL: "ws://host.docker.internal:14401",
+  });
+  expect(withBots.services.server.environment).toMatchObject({
+    MANAGED_AGENT_AG_UI_URL: "http://agent-langgraph:4201/ag-ui",
+    PICKED_HARNESS_URL: "http://agent-harness:4202/run",
+    OPENAI_BASE_URL: "http://host.docker.internal:3001/api/model-provider/v1",
+    // The server's own way to the gateway, and the browser's, which is on the host.
+    INTELLIGENCE_GATEWAY_WS_URL: "ws://host.docker.internal:14401",
+    INTELLIGENCE_BROWSER_GATEWAY_WS_URL: "ws://localhost:14401",
+  });
+
+  // No managed Bot stays no managed Bot, and a remote harness keeps its own address.
+  const without = runComposeConfig({
+    MANAGED_AGENT_AG_UI_URL: "",
+    PICKED_HARNESS_URL: "https://agents.example/run",
+  });
+  expect(without.services.server.environment).toMatchObject({
+    MANAGED_AGENT_AG_UI_URL: "",
+    PICKED_HARNESS_URL: "https://agents.example/run",
+  });
+});
+
+/**
+ * A Google or xAI sign-in is a file the server renews itself, so it reaches the container as the
+ * folder it sits in: the renewal writes a sibling and renames it over the original.
+ */
+test("mounts the model sign-in folder into the server, and only there", () => {
+  const services = composeServices();
+  const server = services.server;
+
+  expect(server.volumes).toContainEqual({
+    type: "bind",
+    source: "./.openbot",
+    target: "/openbot",
+    bind: { create_host_path: false },
+  });
+  expect(server.environment?.OPENBOT_MODEL_OAUTH_FILE).toBe(
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: the unexpanded placeholder is what is asserted.
+    "${OPENBOT_MODEL_OAUTH_FILE:+/openbot/model-oauth.json}",
+  );
+  // biome-ignore lint/suspicious/noTemplateCurlyInString: the unexpanded placeholder is what is asserted.
+  expect(server.user).toBe("${OPENBOT_SERVER_USER:-1001:1001}");
+  for (const [name, service] of Object.entries(services)) {
+    if (name === "server") continue;
+    expect(JSON.stringify(service.volumes ?? [])).not.toContain(".openbot");
   }
 });
