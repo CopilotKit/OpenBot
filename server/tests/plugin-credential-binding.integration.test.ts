@@ -134,6 +134,7 @@ afterAll(async () => {
   await database
     .delete(credentials)
     .where(inArray(credentials.id, [ownCredentialId, otherCredentialId]));
+  await database.$client.close();
 });
 
 async function storedUrl(id: string) {

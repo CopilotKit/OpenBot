@@ -70,6 +70,7 @@ afterAll(async () => {
     .where(inArray(componentExclusions.componentName, names));
   await database.delete(components).where(inArray(components.name, names));
   await database.delete(agents).where(inArray(agents.id, [...fixtureAgentIds]));
+  await database.$client.close();
 });
 
 describe("deciding whether a Bot may use a component", () => {

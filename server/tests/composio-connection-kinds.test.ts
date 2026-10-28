@@ -904,6 +904,7 @@ afterEach(() => useComposioClient(null));
 
 afterAll(async () => {
   await clean();
+  await database.$client.close();
 });
 
 /** Every action Composio was asked to run, so "nothing reached the vendor" is an assertion. */

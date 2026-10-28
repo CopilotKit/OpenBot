@@ -99,6 +99,7 @@ afterAll(async () => {
         ["owner", "admin", "named", "newhire", "stranger"].map(id),
       ),
     );
+  await database.$client.close();
 });
 
 const call = (

@@ -4437,6 +4437,7 @@ afterAll(async () => {
     .where(eq(brokeredConnections.app, `sweep_witness_${suite}`));
   await database.delete(agents).where(eq(agents.id, "bot_helper"));
   await database.delete(users).where(eq(users.id, "user_leaver"));
+  await database.$client.close();
 });
 
 test("a Composio connection row survives the person being deleted", async () => {

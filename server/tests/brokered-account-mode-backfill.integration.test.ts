@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 import { eq, inArray, sql } from "drizzle-orm";
 import { createDatabase } from "../src/db/client";
 import { mcpServers, mcpTools } from "../src/db/schema";
@@ -174,4 +174,8 @@ describe("the account-mode backfill migration", () => {
       ListEmails: "Gmail.ListEmails",
     });
   });
+});
+
+afterAll(async () => {
+  await database.$client.close();
 });

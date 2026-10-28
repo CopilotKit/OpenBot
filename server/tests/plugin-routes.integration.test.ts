@@ -145,6 +145,7 @@ afterAll(async () => {
         ownCredentialId,
       ]),
     );
+  await database.$client.close();
 });
 
 async function serverRow() {

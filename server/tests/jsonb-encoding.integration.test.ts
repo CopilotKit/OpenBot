@@ -23,6 +23,7 @@ const agentId = `agent_jsonb_${suite}`;
 
 afterAll(async () => {
   await database.delete(agents).where(eq(agents.id, agentId));
+  await database.$client.close();
 });
 
 describe("what a jsonb column actually stores", () => {

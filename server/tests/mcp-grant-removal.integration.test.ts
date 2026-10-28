@@ -104,6 +104,7 @@ afterAll(async () => {
     .delete(mcpServers)
     .where(inArray(mcpServers.id, [serverId, keptServerId]));
   await database.delete(agents).where(eq(agents.id, botId));
+  await database.$client.close();
 });
 
 test("removing an app takes its grants with it, and adding it back grants nothing", async () => {

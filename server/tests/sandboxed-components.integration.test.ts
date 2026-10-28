@@ -39,6 +39,7 @@ afterAll(async () => {
     .delete(sandboxedComponents)
     .where(eq(sandboxedComponents.name, name));
   await database.delete(components).where(eq(components.name, name));
+  await database.$client.close();
 });
 
 describe("authoring a component without a rebuild", () => {

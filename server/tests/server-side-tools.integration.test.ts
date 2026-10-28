@@ -115,6 +115,7 @@ afterAll(async () => {
   await database.delete(agents).where(eq(agents.id, holderId));
   await database.delete(agents).where(eq(agents.id, strangerId));
   await mock.stop();
+  await database.$client.close();
 });
 
 describe("the tools a Bot is handed on the server", () => {

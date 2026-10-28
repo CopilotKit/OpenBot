@@ -84,6 +84,7 @@ afterAll(async () => {
   for (const id of created.splice(0)) {
     await database.delete(credentials).where(eq(credentials.id, id));
   }
+  await database.$client.close();
 });
 
 describe("a rotation the database refuses", () => {

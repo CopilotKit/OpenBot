@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { afterAll, expect, test } from "bun:test";
 import { createDatabase } from "../src/db/client";
 import { TEST_POOL } from "./support/database";
 
@@ -9,4 +9,8 @@ test("creates a typed database boundary without opening a query", () => {
   );
 
   expect(database.query.users).toBeDefined();
+});
+
+afterAll(async () => {
+  await database.$client.close();
 });

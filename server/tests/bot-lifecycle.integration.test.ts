@@ -229,6 +229,7 @@ afterAll(async () => {
   await database
     .delete(users)
     .where(inArray(users.id, [owner, other, `${prefix}-chooser`]));
+  await database.$client.close();
 });
 
 describe("pause", () => {

@@ -373,6 +373,7 @@ afterAll(async () => {
   await database
     .delete(users)
     .where(inArray(users.id, [person, other, admin, maker]));
+  await database.$client.close();
 });
 
 describe("what each app a Bot holds is, for the person asking", () => {
