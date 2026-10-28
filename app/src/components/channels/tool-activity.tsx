@@ -32,7 +32,11 @@ import {
   toolResultFailed,
 } from "@/lib/plugins/tool-result";
 import { readTeamBotConsent } from "@/lib/team-bots";
-import { browserStepDetails, isBrowserStep } from "./browser-activity";
+import {
+  browserOutcome,
+  browserStepDetails,
+  isBrowserStep,
+} from "./browser-activity";
 import type { VisibleChatItem } from "./chat-messages";
 import { ToolLine } from "./tool-line";
 
@@ -234,6 +238,10 @@ export type StepDetails = {
   refused: boolean;
   /** The person said no on its card. Their decision, not an issue. */
   declined: boolean;
+  /** A browser step cut off before it finished, by Stop or by its computer stopping. Not an issue. */
+  stopped: boolean;
+  /** A browser step a computer still starting turned away, so nothing was done yet. Not an issue. */
+  notYet: boolean;
   reason?: string;
   /** Pages a browser step opened, or a fetch read; zero for anything else. */
   pages: number;
@@ -297,6 +305,8 @@ export function stepDetails(step: ToolItem): StepDetails {
   );
   if (isBrowserStep(step)) {
     const browser = browserStepDetails(step);
+    // Read the way the computer pane's step log reads it, so the two never disagree.
+    const outcome = browserOutcome(step);
     const label = browser.label ?? "Used the browser";
     return {
       id: step.id,
@@ -305,10 +315,12 @@ export function stepDetails(step: ToolItem): StepDetails {
       plain: label,
       ...(browser.title ? { detail: browser.title } : {}),
       ...(browser.href ? { href: browser.href } : {}),
-      pending: browser.pending,
-      failed: browser.failed,
-      refused: false,
-      declined: false,
+      pending: outcome === "pending",
+      failed: outcome === "failed",
+      refused: outcome === "blocked",
+      declined: outcome === "declined",
+      stopped: outcome === "stopped",
+      notYet: outcome === "notYet",
       ...(browser.reason ? { reason: browser.reason } : {}),
       pages: browser.visited ? 1 : 0,
       inputs,
@@ -330,6 +342,8 @@ export function stepDetails(step: ToolItem): StepDetails {
     failed,
     refused,
     declined,
+    stopped: false,
+    notYet: false,
     inputs,
     ...(body && !own && !declined ? { output: body } : {}),
   };
@@ -399,7 +413,14 @@ export function stepDetails(step: ToolItem): StepDetails {
 
 /** It ran and it worked: the only kind of step a summary may say was done. */
 function isDone(step: StepDetails): boolean {
-  return !step.pending && !step.failed && !step.refused && !step.declined;
+  return (
+    !step.pending &&
+    !step.failed &&
+    !step.refused &&
+    !step.declined &&
+    !step.stopped &&
+    !step.notYet
+  );
 }
 
 function joinPhrases(phrases: string[]): string {
@@ -507,6 +528,7 @@ export const STEP_STATUS = {
   waiting: "Waiting for you",
   running: "In progress",
   stopped: "Not completed",
+  notYet: "Not done yet",
   declined: "Declined",
   blocked: "Blocked",
   failed: "Didn't work",
@@ -531,10 +553,14 @@ function StepStatus({
             : STEP_STATUS.stopped}
       </span>
     );
-  if (step.declined)
+  if (step.stopped || step.notYet || step.declined)
     return (
       <span className="shrink-0 text-muted-foreground">
-        {STEP_STATUS.declined}
+        {step.stopped
+          ? STEP_STATUS.stopped
+          : step.notYet
+            ? STEP_STATUS.notYet
+            : STEP_STATUS.declined}
       </span>
     );
   if (step.refused)
@@ -581,12 +607,18 @@ function StepRow({
       <StepStatus active={active} step={step} waiting={waiting} />
     </span>
   );
-  const reason =
-    step.failed && step.kind === "browser" ? (
-      <p className="mt-0.5 pl-6 text-status-problem">
-        {step.reason ?? "Couldn't finish this step."}
-      </p>
-    ) : null;
+  // Why a browser step did not work, or the boundary's own words for why it was refused.
+  const why =
+    step.kind !== "browser"
+      ? undefined
+      : step.failed
+        ? (step.reason ?? "Couldn't finish this step.")
+        : step.refused
+          ? step.reason
+          : undefined;
+  const reason = why ? (
+    <p className="mt-0.5 pl-6 text-status-problem">{why}</p>
+  ) : null;
   // A browser step says everything it has in its line. Anything else opens to what it was given
   // and what came back, which no other place in the transcript shows.
   if (step.kind === "browser" || (!step.inputs.length && !step.output))
