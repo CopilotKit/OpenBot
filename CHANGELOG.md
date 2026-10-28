@@ -162,6 +162,11 @@ changes for a deployment.
   holds still with reduced motion.
 - Each Bot's orb takes its colour and pattern from the Bot, so two Bots in one colour still look
   different. Violet is kept for OpenBot's own mark.
+- The sidebar takes the same look, with OpenBot's orb beside its name. A row lifts to a card under
+  the pointer and while it is open, and you can always see where the keyboard is. While a Bot is
+  working, its orb in the list shows it, and so does a still blue dot. Each conversation has a "…"
+  button with Pin and Delete, which used to be on right-click alone. ⌘K, or Ctrl+K, opens the
+  sidebar and puts you in its search box.
 
 ### Generated interfaces use A2UI 1.0
 

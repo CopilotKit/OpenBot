@@ -71,7 +71,7 @@ function setup() {
 test("loads preferences from the account and renders the saved emphasis", async () => {
   const { view } = setup();
   const agent = await view.findByText("General Assistant");
-  expect(agent.className).toContain("text-[0.9rem]");
+  expect(agent.className).toContain("type-sub");
   expect(requests).toEqual([
     { path: "/api/settings/preferences", method: "GET", body: undefined },
   ]);
@@ -116,9 +116,7 @@ test("successful writes update only the current account cache; failures preserve
     });
   await mutation.execute({ messageListEmphasis: "thread" });
   await waitFor(() =>
-    expect(view.getByText("Plan next week").className).toContain(
-      "text-[0.9rem]",
-    ),
+    expect(view.getByText("Plan next week").className).toContain("type-sub"),
   );
   expect(requests.at(-1)).toEqual({
     path: "/api/settings/preferences",
