@@ -1,5 +1,6 @@
 name: Documentation
 description: Something in the README or docs is wrong, unclear or missing.
+title: "📚 Documentation: "
 body:
   - type: input
     id: page

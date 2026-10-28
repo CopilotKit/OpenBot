@@ -1,5 +1,6 @@
 name: Feature request
 description: Suggest something OpenBot should do.
+title: "🚀 Feature Request: "
 body:
   - type: markdown
     attributes:

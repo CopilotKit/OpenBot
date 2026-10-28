@@ -1,5 +1,6 @@
 name: Bug report
 description: Something in OpenBot does not work the way it should.
+title: "🐛 Bug: "
 body:
   - type: markdown
     attributes:
