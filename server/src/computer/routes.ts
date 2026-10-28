@@ -514,7 +514,14 @@ export function createComputerRoutes(
    */
   routes.post("/:botId/control/release", (context) =>
     act(context, async (botId, actor, body) => {
-      const state = await gateway.releaseControl(botId, actor, handoffId(body));
+      let state: Awaited<ReturnType<typeof gateway.releaseControl>>;
+      try {
+        state = await gateway.releaseControl(botId, actor, handoffId(body));
+      } catch (error) {
+        // The computer may have handed it back though its answer never came (a timeout): what it says now decides.
+        await botBrowser?.wheelMayHaveReturned(botId);
+        throw error;
+      }
       await botBrowser?.wheelReturned(botId);
       return state;
     }),
@@ -522,7 +529,13 @@ export function createComputerRoutes(
 
   routes.post("/:botId/control/cancel", (context) =>
     act(context, async (botId, actor, body) => {
-      const state = await gateway.cancelControl(botId, actor, handoffId(body));
+      let state: Awaited<ReturnType<typeof gateway.cancelControl>>;
+      try {
+        state = await gateway.cancelControl(botId, actor, handoffId(body));
+      } catch (error) {
+        await botBrowser?.wheelMayHaveReturned(botId);
+        throw error;
+      }
       await botBrowser?.wheelReturned(botId);
       return state;
     }),

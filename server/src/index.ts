@@ -106,6 +106,7 @@ import { openbotAddress } from "./browser/address";
 import { botBrowserNetwork } from "./browser/bot-browser";
 import { personBrowserEgressPolicy } from "./browser/egress";
 import {
+  botRecordRefusal,
   directBrowserComputers,
   gatewayBrowserComputers,
   personBrowserPlace,
@@ -560,6 +561,9 @@ const computerProvider = config.computer
       },
     )
   : undefined;
+
+/** Why Record is refused in a Bot's browser here, or undefined where each Bot has a computer of its own. */
+const recordRefused = botRecordRefusal(computerProvider) ?? undefined;
 
 if (computerProvider?.warm) {
   void computerProvider.warm();
@@ -2627,6 +2631,8 @@ const app = createApp(
               ...(config.webBotAuth ? { webBotAuth: config.webBotAuth } : {}),
             }),
             singleUser: config.singleUser,
+            // Where every Bot shares one computer, Record is refused in all their browsers (browser/host.ts).
+            ...(recordRefused ? { recordRefused } : {}),
           },
         }
       : {}),

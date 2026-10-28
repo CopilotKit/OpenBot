@@ -15,7 +15,10 @@ import { createComputerGateway } from "../../server/src/computer/gateway";
 import type { PolicyStore } from "../../server/src/computer/policy-store";
 import type { ComputerProvider } from "../../server/src/computer/provider";
 import { createComputerRoutes } from "../../server/src/computer/routes";
-import { NOT_ITS_OWN_COMPUTER } from "../src/person-access";
+import {
+  NOT_ITS_OWN_COMPUTER,
+  NOT_ITS_OWN_COMPUTER_RECORD,
+} from "../src/person-access";
 
 /**
  * A Bot's browser worked by a person, through the computer itself: the real process, its token, its dispatcher, its
@@ -210,8 +213,10 @@ beforeAll(async () => {
     },
   });
   origin = `http://127.0.0.1:${site.port}`;
+  // A Bot's own computer, as a supervisor starts each container and a Sandbox each pod: Record runs only on one.
   computer = await startComputer("with-recorder", {
     OPENBOT_RECORDER_DIR: FIXTURE,
+    COMPUTER_BOT_ID: BOT,
   });
 }, 30_000);
 
@@ -287,7 +292,7 @@ describe.skipIf(!asked)(
     }, 60_000);
 
     test("refuses a person's browser id: on a computer Bots share before any route, on the person's own at the Bot's", async () => {
-      // A computer Bots share runs no person's browser at all (person-access.ts), so the id goes no further than that.
+      // A computer Bots run on runs no person's browser at all (person-access.ts), so the id goes no further than that.
       for (const [path, body] of [
         ["/bot-browser/state", undefined],
         ["/bot-browser/tabs", { action: "new" }],
@@ -313,6 +318,30 @@ describe.skipIf(!asked)(
           (await call(path, { body, botId: PERSON, on: own })).status,
         ]).toEqual([path, 400]);
     }, 30_000);
+
+    test("refuses Record on the computer every Bot shares, before the person's connection reaches the Bot's profile", async () => {
+      const shared = await startComputer("shared", {
+        OPENBOT_RECORDER_DIR: FIXTURE,
+      });
+      await takeWheel("user-1", shared);
+      const before = calls.length;
+      const refused = await start("user-1", "File an expense report", shared);
+      expect([refused.status, refused.json]).toEqual([
+        403,
+        { error: NOT_ITS_OWN_COMPUTER_RECORD },
+      ]);
+      // The Recorder there was never handed the connection, nor asked to record.
+      expect(calls.slice(before)).toEqual([]);
+      // The bar is still the person's while they hold the wheel.
+      expect(
+        (
+          await call("/bot-browser/navigate", {
+            body: { url: page("shared") },
+            on: shared,
+          })
+        ).status,
+      ).toBe(200);
+    }, 60_000);
 
     test("refuses the bar, Record and narration while the Bot holds the wheel", async () => {
       for (const [path, body] of [
@@ -882,6 +911,7 @@ describe.skipIf(!asked)(
     beforeAll(async () => {
       without = await startComputer("without-recorder", {
         OPENBOT_RECORDER_DIR: "",
+        COMPUTER_BOT_ID: "other-bot",
       });
     }, 30_000);
 

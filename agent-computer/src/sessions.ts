@@ -70,7 +70,7 @@ export type SessionsOptions = {
   /** Injected so a test can name the run it expects rather than match a uuid. */
   mintRun?: () => string;
   /** Told when the wheel leaves the person who held this Bot's browser (see `createControl`'s `onWheelLeft`). */
-  onWheelLeft?: (botId: string) => void;
+  onWheelLeft?: (botId: string) => Promise<unknown> | undefined;
 };
 
 /**

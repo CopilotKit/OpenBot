@@ -109,6 +109,14 @@ export function computerOwner(
 export const NOT_ITS_OWN_COMPUTER =
   "A person's own browser runs only on a computer of its own, and Bots run on this one. Give people's browsers their own computers (COMPUTER_SUPERVISOR_URL or a Sandbox), or OpenBot Desktop's.";
 
+/**
+ * Why Record is refused in a Bot's browser on the shared computer. Record hands the Recorder there a person's own
+ * connection, kept in the Bot's profile until Stop, and every other Bot here can run a shell as the same user and read
+ * it. Said to whoever runs OpenBot, as `NOT_ITS_OWN_COMPUTER` is; the server tells the person in its own words.
+ */
+export const NOT_ITS_OWN_COMPUTER_RECORD =
+  "Record in a Bot's browser runs only on a computer that Bot does not share, and every Bot runs on this one. Give each Bot its own computer (COMPUTER_SUPERVISOR_URL or a Sandbox).";
+
 /** Why anything but its own browser is refused on a person's computer. */
 export const ONLY_THE_PERSONS =
   "This computer runs a person's own browser. Nothing else runs on it.";

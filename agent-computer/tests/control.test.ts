@@ -4,6 +4,7 @@ import {
   ControlRequestError,
   createControl,
   HELP_REQUEST_TTL_MS,
+  RECORDING_ENDING,
   SnapshotRequiredError,
 } from "../src/control";
 
@@ -192,6 +193,7 @@ describe("who holds the wheel, for a Bot's browser's bar and Recorder", () => {
     const control = createControl(undefined, {
       onWheelLeft: () => {
         left += 1;
+        return undefined;
       },
     });
     const request = (toolCallId: string) =>
@@ -240,6 +242,48 @@ describe("who holds the wheel, for a Bot's browser's bar and Recorder", () => {
     request("call-3");
     control.interrupt("The computer stopped.");
     expect(left()).toBe(2);
+  });
+
+  test("the Bot stays out after a hand-back until the recording the wheel took with it has ended", async () => {
+    // A recording that is still stopping, behind a Record that was still starting when the person handed back.
+    let ended: () => void = () => {};
+    const control = createControl(undefined, {
+      onWheelLeft: () =>
+        new Promise<void>((resolve) => {
+          ended = resolve;
+        }),
+    });
+    const first = control.requestHelp("Take the wheel.", "call-1").request!;
+    await control.take(first.id, "user-1");
+    control.release(first.id);
+    expect(control.get().holder).toBe("bot");
+    expect(() => control.assertBotMayAct()).toThrow(RECORDING_ENDING);
+    expect(() => control.admitBotAction()).toThrow(ControlError);
+
+    ended();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(() => control.assertBotMayAct()).not.toThrow();
+    control.admitBotAction()();
+  });
+
+  test("an ending that fails still lets the Bot back in", async () => {
+    let failed: (error: Error) => void = () => {};
+    const control = createControl(undefined, {
+      onWheelLeft: () =>
+        new Promise<void>((_, reject) => {
+          failed = reject;
+        }),
+    });
+    const first = control.requestHelp("Take the wheel.", "call-1").request!;
+    await control.take(first.id, "user-1");
+    control.release(first.id);
+    expect(() => control.assertBotMayAct()).toThrow(RECORDING_ENDING);
+    failed(new Error("The Recorder did not answer."));
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(() => control.assertBotMayAct()).not.toThrow();
   });
 
   test("a take with nobody named lets nobody record, and a take naming nobody usable is refused", async () => {

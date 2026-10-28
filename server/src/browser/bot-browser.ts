@@ -82,7 +82,7 @@ const SENTENCES = {
   someoneElses:
     "Someone else is recording in this Bot's browser, so only they can do that.",
   tooMany:
-    "Too many connection codes were asked for at once. Wait a few minutes and try again.",
+    "Too many recordings were started at once. Wait a few minutes and try again.",
   notConnected: "The Recorder could not be connected. Try again.",
   noPerson: "This person could not be found. Try again.",
   notWeb: "Only web addresses open here.",
@@ -124,10 +124,22 @@ const BOT_BROWSER_ROUTE =
   /^\/api\/computers\/[^/]+\/browser\/(recording|tabs|navigate|narration|clear)$/;
 
 /**
+ * The computer routes that end a recording in the Bot's browser on the way (computer/routes.ts): a hand-back and a
+ * cancel answer once the recording has ended and the last of it is sent (up to the computer's 20 s send wait), and a
+ * stop or a reset close the browser, which ends it the same way. Each is one call to the computer, as the bar's are.
+ */
+const ENDS_A_RECORDING_ROUTE =
+  /^\/api\/computers\/[^/]+\/(control\/release|control\/cancel|computers\/stop|computers\/reset)$/;
+
+/**
  * How long OpenBot's server keeps a request to a Bot's browser's routes open, in seconds (http-server.ts applies it), or
- * undefined for any other path, and for the read, which answers within its budget and keeps Bun's own 10 s.
+ * undefined for any other path, and for the read, which answers within its budget and keeps Bun's own 10 s. The
+ * computer routes that end a recording on the way are kept open as long as the bar's, past the 10 s after which Bun
+ * would close them and the person would be told a hand-back that happened had failed.
  */
 export function botBrowserRequestSeconds(pathname: string): number | undefined {
+  if (ENDS_A_RECORDING_ROUTE.test(pathname))
+    return requestSecondsFor(BAR_BUDGET_MS);
   const route = BOT_BROWSER_ROUTE.exec(pathname)?.[1];
   if (!route) return undefined;
   return requestSecondsFor(
@@ -143,6 +155,12 @@ export function botBrowserRequestSeconds(pathname: string): number | undefined {
  * stands, and starts. The person's own browser gives an open (which does the same and launches a browser) as long.
  */
 const START_TIMEOUT_MS = 90_000;
+/**
+ * How long the computer may take to stop a recording: the Recorder stops, the last of the recording is waited for (the
+ * computer's SENDING_WAIT_MS, 20 s), and the Recorder is disconnected. Past the 45 s every other call has, so a slow
+ * Recorder still answers and its connection goes at once, rather than waiting to be found left behind.
+ */
+const STOP_TIMEOUT_MS = 90_000;
 /**
  * How old a connection must be before a reader may call it left behind while its person still holds the wheel: past
  * any start still under way. Younger, the computer may simply not have started the recording it was minted for yet.
@@ -232,6 +250,11 @@ export type BotBrowserRouteDeps = {
   };
   /** A single-user OpenBot: the one person is its admin, so a setup failure is theirs to see to. */
   singleUser?: boolean;
+  /**
+   * Why Record is refused in every Bot's browser here (browser/host.ts `botRecordRefusal`): its Bots share one computer.
+   * Absent where each Bot has a computer of its own.
+   */
+  recordRefused?: string;
 };
 
 export type BotBrowser = {
@@ -243,6 +266,12 @@ export type BotBrowser = {
    * the Bot acts again. Never throws.
    */
   wheelReturned(botId: string): Promise<void>;
+  /**
+   * A hand-back or a cancel whose answer did not arrive: it may have happened all the same. The computer is asked who
+   * holds the wheel now, and every connection no recording there can be using is revoked, as a read of the Bot's screen
+   * would. Never throws.
+   */
+  wheelMayHaveReturned(botId: string): Promise<void>;
 };
 
 /** The person holding the Bot's wheel, or null while the Bot holds it or nobody said who took it. */
@@ -273,12 +302,14 @@ const ranOut = (error: unknown) =>
 const CLOSED: BotBrowserState = { open: false, tabs: [] };
 
 /** A Bot's browser as one person sees it: whether the wheel and the recording are theirs, and of somebody else's
- * recording only that one is running. The last recording stopped there is shown only to the person it was: its title and
- * counts are theirs, and on a shared Bot the next person to open the screen must not read them. */
+ * recording only that one is running, never its count of steps or its microphone. The last recording stopped there is
+ * shown only to the person it was: its title and counts are theirs, and on a shared Bot the next person to open the
+ * screen must not read them. */
 function viewFor(
   userId: string,
   control: ComputerControlState | null,
   state: BotBrowserState | null,
+  recordRefused?: string,
 ): BotBrowserApiState {
   const { recorder: report, lastStoppedBy, ...shown } = state ?? CLOSED;
   const recordingIsMine = shown.recordingBy === userId;
@@ -292,17 +323,23 @@ function viewFor(
       title,
       startedAt,
       lastStopped,
+      actions,
+      voice,
       ...common
     } = report;
+    const shownToThem = recordingIsMine || !shown.recordingBy;
     recorder = {
       ...common,
-      ...(recordingIsMine || !shown.recordingBy
+      // Another person's recording is only running: how many steps it holds, and whether they are talking, are theirs.
+      actions: shownToThem ? actions : 0,
+      ...(shownToThem
         ? {
             ...(connected ? { userId: connected } : {}),
             ...(connectionId ? { connectionId } : {}),
             ...(recordingId ? { recordingId } : {}),
             ...(title ? { title } : {}),
             ...(startedAt ? { startedAt } : {}),
+            ...(voice ? { voice } : {}),
           }
         : {}),
       ...(lastIsMine && lastStopped ? { lastStopped } : {}),
@@ -314,6 +351,7 @@ function viewFor(
     ...(lastIsMine ? { lastStoppedBy } : {}),
     mine: heldBy(control) === userId,
     recordingIsMine,
+    ...(recordRefused ? { recordRefused } : {}),
   };
 }
 
@@ -546,7 +584,12 @@ export function createBotBrowser(deps: BotBrowserRouteDeps): BotBrowser {
     }
     if (taken.status < 200 || taken.status >= 300) return refused(taken);
     return Response.json(
-      viewFor(userId, wheel.control, stateOf(taken.body) ?? wheel.state),
+      viewFor(
+        userId,
+        wheel.control,
+        stateOf(taken.body) ?? wheel.state,
+        deps.recordRefused,
+      ),
     );
   }
 
@@ -586,6 +629,9 @@ export function createBotBrowser(deps: BotBrowserRouteDeps): BotBrowser {
     request: { title: string; language?: string },
   ): Promise<Response> {
     const { actor } = asker;
+    // Before the wheel or the computer is asked, and long before a connection is minted for a profile others can read.
+    if (deps.recordRefused)
+      return Response.json({ error: deps.recordRefused }, { status: 403 });
     const wheel = await withTheWheel(botId, actor.id);
     if (!wheel.ok) return wheel.response;
     // Whether something records there already is the computer's to say: a start on a guess could replace the
@@ -699,7 +745,12 @@ export function createBotBrowser(deps: BotBrowserRouteDeps): BotBrowser {
     if (answer.status < 200 || answer.status >= 300)
       return unmade(refused(answer));
     return Response.json(
-      viewFor(actor.id, wheel.control, stateOf(answer.body) ?? wheel.state),
+      viewFor(
+        actor.id,
+        wheel.control,
+        stateOf(answer.body) ?? wheel.state,
+        deps.recordRefused,
+      ),
     );
   }
 
@@ -744,6 +795,7 @@ export function createBotBrowser(deps: BotBrowserRouteDeps): BotBrowser {
     try {
       answer = await ask(base, botId, botBrowserComputerPaths.recording, {
         body: { action: "stop" } satisfies BotBrowserComputerRecordingRequest,
+        timeoutMs: STOP_TIMEOUT_MS,
       });
     } catch (error) {
       return failed(error);
@@ -756,7 +808,12 @@ export function createBotBrowser(deps: BotBrowserRouteDeps): BotBrowser {
     }
     if (!ended) return refused(answer);
     return Response.json(
-      viewFor(userId, seen.control, stateOf(answer.body) ?? seen.state),
+      viewFor(
+        userId,
+        seen.control,
+        stateOf(answer.body) ?? seen.state,
+        deps.recordRefused,
+      ),
     );
   }
 
@@ -803,7 +860,12 @@ export function createBotBrowser(deps: BotBrowserRouteDeps): BotBrowser {
     for (const connection of held) await revoke(connection, "ended");
     if (held.length > 0) await pushPolicy(botId, "cleared");
     return Response.json(
-      viewFor(actor.id, wheel.control, stateOf(answer.body) ?? CLOSED),
+      viewFor(
+        actor.id,
+        wheel.control,
+        stateOf(answer.body) ?? CLOSED,
+        deps.recordRefused,
+      ),
     );
   }
 
@@ -814,7 +876,12 @@ export function createBotBrowser(deps: BotBrowserRouteDeps): BotBrowser {
     if (seen.slow) return tooSlow();
     await settle(botId, seen);
     return context.json(
-      viewFor(context.var.actor.id, seen.control, seen.state),
+      viewFor(
+        context.var.actor.id,
+        seen.control,
+        seen.state,
+        deps.recordRefused,
+      ),
     );
   });
 
@@ -926,6 +993,9 @@ export function createBotBrowser(deps: BotBrowserRouteDeps): BotBrowser {
           }),
         );
       }
+    },
+    async wheelMayHaveReturned(botId) {
+      await settle(botId, await look(botId));
     },
   };
 }

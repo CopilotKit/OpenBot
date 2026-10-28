@@ -65,6 +65,8 @@ let actionsAfterStart = 7;
 let phrasesPassed = 0;
 /** The person's narration choice as their account keeps it: on, as for someone who chose it, unless a test says. */
 let narrationChoice: "on" | "off" | null = "on";
+/** What the server says in place of Record where every Bot shares one computer; unset where Record can run. */
+let recordRefused: string | undefined;
 
 function idle(extra?: Partial<LauncherState>): LauncherState {
   return {
@@ -119,6 +121,7 @@ function answer(): BotBrowserApiState {
     ...browser,
     mine: control.holder === "human" && control.heldBy === ME,
     recordingIsMine: browser.recordingBy === ME,
+    ...(recordRefused ? { recordRefused } : {}),
   };
 }
 
@@ -359,6 +362,7 @@ beforeEach(() => {
   actionsAfterStart = 7;
   phrasesPassed = 0;
   narrationChoice = "on";
+  recordRefused = undefined;
   socketsOpen = false;
   screenSent.length = 0;
   control = heldBy(null);
@@ -479,6 +483,22 @@ test("while the Bot holds the wheel the bar shows where the Bot is, read only, a
   await waitFor(() =>
     expect(address(dialog).value).toBe("https://expenses.example/receipts"),
   );
+  expect(writes()).toEqual([]);
+});
+
+test("where the Bots share one computer, the screen says why it cannot record, and offers no Record, while the bar still works", async () => {
+  recordRefused =
+    "This OpenBot can't record in a Bot's browser, because its Bots share one computer.";
+  control = heldBy(ME);
+  const { dialog } = await openScreen();
+  const panel = within(dialog.getByRole("region", { name: "Record a task" }));
+  expect(panel.getByText("Recording isn't available here")).toBeTruthy();
+  expect(panel.getByText(recordRefused)).toBeTruthy();
+  expect(panel.queryByRole("button", { name: "Record" })).toBeNull();
+  expect(panel.queryByRole("textbox", { name: "Task name" })).toBeNull();
+  expect(panel.queryByRole("switch", { name: "Narration" })).toBeNull();
+  // The bar is the person's while they hold the wheel, as anywhere else.
+  await waitFor(() => expect(address(dialog).readOnly).toBe(false));
   expect(writes()).toEqual([]);
 });
 

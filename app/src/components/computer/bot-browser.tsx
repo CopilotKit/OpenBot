@@ -1,5 +1,5 @@
 import type { BotBrowserApiState } from "@openbot/shared/bot-browser";
-import { IconPlayerStop } from "@tabler/icons-react";
+import { IconLock, IconPlayerStop } from "@tabler/icons-react";
 import { RECORDER_COLLECTS_SHORT } from "@openbot/shared/recorder-disclosure";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { type ReactNode, useId } from "react";
@@ -294,7 +294,34 @@ function useBotRecording(
  * asks the same question and reads the same answer): asked before their first recording, the microphone closed until
  * they say yes, and their speech turned into text on their own computer.
  */
-export function BotRecordPanel({
+export function BotRecordPanel(props: {
+  botId: string;
+  state: BotBrowserApiState;
+}) {
+  // Where the Bots share one computer, so another Bot could read the person's Recorder connection off the disk.
+  if (props.state.recordRefused)
+    return (
+      <section aria-label="Record a task">
+        <h2 className="font-semibold text-sm">Record a task</h2>
+        <PageRows className="mt-3">
+          <Item size="sm" role="status">
+            <ItemMedia variant="icon">
+              <IconLock className="text-muted-foreground" />
+            </ItemMedia>
+            <ItemContent>
+              <ItemTitle>Recording isn't available here</ItemTitle>
+              <ItemDescription className="line-clamp-none">
+                {props.state.recordRefused}
+              </ItemDescription>
+            </ItemContent>
+          </Item>
+        </PageRows>
+      </section>
+    );
+  return <RecordPanel {...props} />;
+}
+
+function RecordPanel({
   botId,
   state,
 }: {

@@ -534,9 +534,14 @@ someone records, so recording a task needs no extension and no Connect step.
   space, so every Bot you use learns from it, this one included.
 - **Only you are recorded, never the Bot.** Record works only while you hold control, and handing it
   back (or the Bot's request ending) stops the recording, with its last steps sent before the Recorder
-  disconnects. Taking control now records who took it, so on a shared Bot only that person can use the
-  bar or record, someone else's recording shows only that one is running, and nobody else sees its
-  name or counts.
+  disconnects; the Bot acts again only once the recording has ended. Taking control now records who
+  took it, so on a shared Bot only that person can use the bar or record, someone else's recording
+  shows only that one is running, and nobody else sees its name, its step count or its microphone.
+- **Record needs a computer the Bot does not share.** Where every Bot runs on one computer (Helm's
+  shared mode, or `AGENT_COMPUTER_URL` with no supervisor), Record is refused in every Bot's browser
+  and the panel says why: your Recorder connection would sit in the Bot's profile, where any other
+  Bot's shell could read it. The bar still works. The computer refuses it too. With a supervisor
+  (laptop, Desktop) or a Sandbox, each Bot has its own computer and Record works.
 - **One connection per recording.** Record mints a Recorder connection for the person who pressed it
   and Stop revokes it; Settings, Browsers lists it as "<Bot>'s browser" while it lives, and says
   "recording now" for any browser that is recording.

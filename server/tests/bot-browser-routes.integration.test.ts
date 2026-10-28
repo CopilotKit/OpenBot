@@ -38,6 +38,7 @@ import {
   botBrowserRequestSeconds,
   botBrowserNetwork,
 } from "../src/browser/bot-browser";
+import { botRecordRefusal, SHARED_COMPUTER_RECORD } from "../src/browser/host";
 import { personBrowserId } from "../src/browser/person";
 import { createComputerGateway } from "../src/computer/gateway";
 import {
@@ -115,6 +116,8 @@ const pushed = new Map<string, EgressPolicy[]>();
 const asked: string[] = [];
 /** How the computer answers the next start instead of starting, when a test says so. */
 let refuseNextStart: { status: number; error: string } | null = null;
+/** The next hand-back happens on the computer, but its answer never reaches OpenBot, as a timeout leaves it. */
+let loseNextRelease = false;
 /** How long the computer takes over the next request to each of its Bot's browser routes, when a test says so: a page
  * slow to load, the last of a recording slow to reach Intelligence. */
 const slowNext = new Map<string, number>();
@@ -265,6 +268,10 @@ const computer = Bun.serve({
         const { heldBy: _gone, ...control } = bot.control;
         bot.control = { ...control, holder: "bot" };
         endRecording(bot);
+        if (loseNextRelease) {
+          loseNextRelease = false;
+          return Response.json({ error: "Gateway timeout." }, { status: 504 });
+        }
         return Response.json(bot.control);
       }
     }
@@ -493,6 +500,16 @@ args[34] = {
   },
 };
 const app = createApp(...args);
+/** The same OpenBot where every Bot shares the one computer, as index.ts builds it: Record refused in every Bot's browser. */
+const refusingArgs = [...args] as typeof args;
+refusingArgs[34] = {
+  ...(args[34] as object),
+  botBrowser: {
+    ...(args[34] as { botBrowser: object }).botBrowser,
+    recordRefused: botRecordRefusal(sharedComputer) ?? undefined,
+  },
+} as never;
+const refusingApp = createApp(...refusingArgs);
 
 const call = (
   path: string,
@@ -740,6 +757,31 @@ describe("through OpenBot's own HTTP server", () => {
       expect(at(rest)).toBeLessThanOrEqual(255);
     expect(at("")).toBeUndefined();
     expect(botBrowserRequestSeconds("/api/browser/recording")).toBeUndefined();
+  });
+
+  test("a hand-back, a cancel, a stop and a reset wait for the recording they end, past Bun's 10 s", () => {
+    // Each waits on the computer for the recording in the Bot's browser to end and the last of it to be sent (20 s).
+    for (const rest of [
+      "/control/release",
+      "/control/cancel",
+      "/computers/stop",
+      "/computers/reset",
+    ]) {
+      const seconds = botBrowserRequestSeconds(
+        `/api/computers/${encodeURIComponent(BOT)}${rest}`,
+      );
+      expect((seconds ?? 0) * 1000).toBeGreaterThan(
+        CALL_BUDGET_MS + STATE_TIMEOUT_MS,
+      );
+      expect(seconds).toBeLessThanOrEqual(255);
+    }
+    // The other control routes answer at once, and keep Bun's own.
+    for (const rest of ["/control/take", "/control/request", "/control"])
+      expect(
+        botBrowserRequestSeconds(
+          `/api/computers/${encodeURIComponent(BOT)}${rest}`,
+        ),
+      ).toBeUndefined();
   });
 
   test("a slow page and a slow Stop are answered, never with an empty reply, and a stuck browser says so in seconds", async () => {
@@ -1105,6 +1147,77 @@ describe("recording in a Bot's browser", () => {
       via: BOT_BROWSER_VIA,
       reason: "ended",
     });
+  });
+
+  test("someone else's recording shows only that one is running: never its count of steps or its microphone", async () => {
+    const requestId = await takeWheel("ada");
+    expect((await record("ada", "Approve the invoice")).status).toBe(200);
+    const running = botOf(BOT).state.recorder as LauncherState;
+    botOf(BOT).state.recorder = { ...running, actions: 7, voice: "listening" };
+
+    const ada = await stateFor("ada");
+    expect(ada.recorder).toMatchObject({ actions: 7, voice: "listening" });
+    const ben = await stateFor("ben");
+    expect(ben.recordingBy).toBe(ada.recordingBy);
+    expect(ben.recorder?.phase).toBe("recording");
+    expect(ben.recorder?.actions).toBe(0);
+    expect(ben.recorder).not.toHaveProperty("voice");
+    expect(JSON.stringify(ben)).not.toContain("Approve the invoice");
+    await handBack("ada", requestId);
+  });
+
+  test("a hand-back whose answer never came still ends the recording's connection and the Bot's wider policy", async () => {
+    const requestId = await takeWheel("ada");
+    expect((await record("ada", "Send the reminder")).status).toBe(200);
+    expect(await held()).toHaveLength(1);
+    loseNextRelease = true;
+    const released = await call(
+      `/api/computers/${encodeURIComponent(BOT)}/control/release`,
+      { method: "POST", as: "ada", json: { requestId } },
+    );
+    expect(released.status).not.toBe(200);
+    // The computer handed it back all the same: nothing is left that the Bot could act with.
+    expect(botOf(BOT).control.holder).toBe("bot");
+    expect(await held()).toEqual([]);
+    expect(lastPushed()).toEqual(OWN_POLICY);
+  });
+
+  test("where Bots share one computer, Record is refused before a connection is minted, and the screen says why", async () => {
+    expect(botRecordRefusal(sharedComputer)).toBe(SHARED_COMPUTER_RECORD);
+    expect(botRecordRefusal({ isolation: "per-bot" })).toBeNull();
+    expect(botRecordRefusal(undefined)).toBeNull();
+
+    const requestId = await takeWheel("ada");
+    const startsBefore = asked.filter((line) =>
+      line.includes(botBrowserComputerPaths.recording),
+    ).length;
+    const refused = await refusingApp.request(
+      `http://openbot.test${browser("/recording")}`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          cookie: "test-session=ada",
+        },
+        body: JSON.stringify({ action: "start", title: "Pay the rent" }),
+      },
+    );
+    expect(refused.status).toBe(403);
+    expect(await refused.json()).toEqual({ error: SHARED_COMPUTER_RECORD });
+    expect(await held()).toEqual([]);
+    expect(
+      asked.filter((line) => line.includes(botBrowserComputerPaths.recording)),
+    ).toHaveLength(startsBefore);
+
+    const shown = (await (
+      await refusingApp.request(`http://openbot.test${browser()}`, {
+        headers: { cookie: "test-session=ada" },
+      })
+    ).json()) as BotBrowserApiState;
+    expect(shown.recordRefused).toBe(SHARED_COMPUTER_RECORD);
+    // Where each Bot has its own computer, nothing is said in place of Record.
+    expect(await stateFor("ada")).not.toHaveProperty("recordRefused");
+    await handBack("ada", requestId);
   });
 
   test("a start the computer refuses leaves no connection and no wider policy behind", async () => {

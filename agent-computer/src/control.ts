@@ -39,6 +39,8 @@ export const HUMAN_HAS_CONTROL =
   "A person has control or has been asked to take control. Wait for them to hand it back before acting.";
 export const TAKE_CONTROL_FIRST =
   "Take control before driving the computer yourself.";
+export const RECORDING_ENDING =
+  "A person's recording in this browser is still ending. Wait a moment before acting.";
 type Options = {
   store?: ControlStore;
   invalidateSnapshot?: () => void;
@@ -47,9 +49,10 @@ type Options = {
    * Told whenever the wheel leaves the person who held it: they hand it back, the request they took is cancelled, or
    * the computer interrupts it (a stop, a reset, the browser or the process starting again). A recording in a Bot's
    * browser is that person's alone and ends here (`shared/bot-browser.ts`). Called after the change is saved, and
-   * never awaited: the state machine does not wait on a browser.
+   * never awaited: the state machine does not wait on a browser. What it returns settles once that recording has
+   * ended, and until then no Bot action is admitted, so the Bot never acts into a recording that is still stopping.
    */
-  onWheelLeft?: () => void;
+  onWheelLeft?: () => Promise<unknown> | undefined;
 };
 
 /**
@@ -173,10 +176,36 @@ export function createControl(
     }
     return changed;
   }
+  /** Endings `onWheelLeft` started that have not settled: the Bot is not admitted while there are any. */
+  let ending = 0;
   function syncAdmission() {
-    if (active(current()) || data.holder === "human" || data.recoveryRequired)
+    if (
+      active(current()) ||
+      data.holder === "human" ||
+      data.recoveryRequired ||
+      ending > 0
+    )
       barrier.close();
     else barrier.open();
+  }
+  /**
+   * The wheel left the person: what ends with it is told, and the Bot stays out until it has ended. Counted before the
+   * admission is synced, so a release never opens it for even one action while a recording is still stopping (behind a
+   * Record that was still starting, as it may be).
+   */
+  function wheelLeft() {
+    const settled = options.onWheelLeft?.();
+    if (!settled) return;
+    ending += 1;
+    void settled
+      .then(
+        () => undefined,
+        () => undefined,
+      )
+      .then(() => {
+        ending -= 1;
+        syncAdmission();
+      });
   }
   function expire() {
     if (storageError) throw storageError;
@@ -273,8 +302,8 @@ export function createControl(
     secret = undefined;
     options.invalidateSnapshot?.();
     persist();
+    if (personHadIt) wheelLeft();
     syncAdmission();
-    if (personHadIt) options.onWheelLeft?.();
     return get();
   }
   // A persisted active request names a page in a previous process. Never call that completion.
@@ -442,8 +471,8 @@ export function createControl(
       secret = undefined;
       options.invalidateSnapshot?.();
       persist();
+      wheelLeft();
       syncAdmission();
-      options.onWheelLeft?.();
       return get();
     },
     cancel(requestId: string): ControlState {
@@ -454,9 +483,9 @@ export function createControl(
       const wasTaken = request.status === "taken";
       finish(request, "cancelled");
       persist();
-      syncAdmission();
       // The person keeps the page until they hand it back, but what they took it for is over.
-      if (wasTaken) options.onWheelLeft?.();
+      if (wasTaken) wheelLeft();
+      syncAdmission();
       return get();
     },
     interrupt,
@@ -485,6 +514,7 @@ export function createControl(
       expire();
       if (data.holder === "human" || active(current()) || data.recoveryRequired)
         throw new ControlError(HUMAN_HAS_CONTROL);
+      if (ending > 0) throw new ControlError(RECORDING_ENDING);
       if (browserMutation && data.resumeSnapshotRequired)
         throw new SnapshotRequiredError();
     },

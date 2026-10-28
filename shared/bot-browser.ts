@@ -134,8 +134,8 @@ export const botBrowserApiPaths = {
   /** POST `BrowserNavigateRequest`: answers `BotBrowserApiState`. 409 unless the caller holds the wheel. */
   navigate: (botId: string) =>
     `/api/computers/${encodeURIComponent(botId)}/browser/navigate`,
-  /** POST `BrowserRecordingRequest`: answers `BotBrowserApiState`. A start is 409 unless the caller holds the wheel; a
-   * stop is 409 unless the recording is the caller's. */
+  /** POST `BrowserRecordingRequest`: answers `BotBrowserApiState`. A start is 409 unless the caller holds the wheel,
+   * and 403 where Bots share one computer (`recordRefused`); a stop is 409 unless the recording is the caller's. */
   recording: (botId: string) =>
     `/api/computers/${encodeURIComponent(botId)}/browser/recording`,
   /** POST `BrowserNarrationRequest`. 409 unless the running recording is the caller's. */
@@ -152,6 +152,11 @@ export type BotBrowserApiState = BotBrowserState & {
   mine: boolean;
   /** Whether the running recording, if any, is the signed-in person's. Another person's shows only that one is running. */
   recordingIsMine: boolean;
+  /**
+   * Why Record cannot run in this Bot's browser here, said in place of Record: its Bots share one computer, where any
+   * other Bot could read the person's Recorder connection off the disk. Absent where Record can run.
+   */
+  recordRefused?: string;
 };
 
 /** The narration route's body is the person's browser's, unchanged. */

@@ -42,6 +42,7 @@ import {
 } from "./navigation";
 import {
   computerOwner,
+  NOT_ITS_OWN_COMPUTER_RECORD,
   PERSONS_OWN_BROWSER,
   personHoldsTheWheel,
   personMayUse,
@@ -356,6 +357,9 @@ const botBrowser = createBotBrowserHost({
   },
   forget: forgetClearedBrowser,
   navigationTimeoutMs: NAVIGATION_TIMEOUT_MS,
+  ...(OWNER.kind === "shared"
+    ? { recordRefused: NOT_ITS_OWN_COMPUTER_RECORD }
+    : {}),
 });
 
 /**

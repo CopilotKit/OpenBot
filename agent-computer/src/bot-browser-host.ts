@@ -66,6 +66,11 @@ export type BotBrowserHostOptions = {
   navigationTimeoutMs: number;
   /** `SENDING_WAIT_MS` unless a test needs the bound to run out sooner. */
   sendingWaitMs?: number;
+  /**
+   * Why Record is refused in every Bot's browser on this computer (person-access.ts `NOT_ITS_OWN_COMPUTER_RECORD`):
+   * it is the shared one. Absent on a computer started for one Bot.
+   */
+  recordRefused?: string;
 };
 
 /** Said to the person, through the server, for each refusal. */
@@ -84,6 +89,8 @@ const SENTENCES = {
     "The Recorder in this Bot's browser did not start, so it cannot record. Stop the Bot's computer and try again.",
   notStarted: "This Bot's browser could not be started. Try again.",
   notOpen: "This Bot's browser is not open.",
+  notConnected:
+    "The Recorder in this Bot's browser could not be connected. Try again.",
 } as const;
 
 function json(body: unknown, status = 200): Response {
@@ -316,11 +323,17 @@ export function createBotBrowserHost(options: BotBrowserHostOptions) {
       connection: input.connection,
       narration: "external",
     });
-    if (!connected.ok)
-      return json(
-        { error: `The Recorder could not be connected: ${connected.error}` },
-        502,
+    if (!connected.ok) {
+      // The Recorder's own words are for the log: the person is told what happened, in OpenBot's.
+      console.info(
+        JSON.stringify({
+          type: "computer-bot-recording-connect-failed",
+          botId,
+          reason: connected.error,
+        }),
       );
+      return json({ error: SENTENCES.notConnected }, 502);
+    }
     let started: Awaited<ReturnType<RecorderLauncher["record"]>>;
     try {
       // The Recorder records the tab in front, which is made the one the live screen shows first.
@@ -451,8 +464,12 @@ export function createBotBrowserHost(options: BotBrowserHostOptions) {
 
       if (recording?.ok) {
         const asked = recording.value;
-        if (asked.action === "start")
+        if (asked.action === "start") {
+          // Before the connection reaches a profile every Bot here could read.
+          if (options.recordRefused)
+            return json({ error: options.recordRefused }, 403);
           return await inTurn(botId, () => start(botId, asked));
+        }
         return await inTurn(botId, async () => {
           if (!recordingOf(botId))
             return json({ error: SENTENCES.notRecording }, 409);
@@ -498,10 +515,10 @@ export function createBotBrowserHost(options: BotBrowserHostOptions) {
     handle,
     /**
      * The wheel left the person who held it (`onWheelLeft`): their recording, if one runs, ends. In its turn, after a
-     * Record still starting, and without waiting: the control does not wait on a browser. `settled` waits for it.
+     * Record still starting. The control does not wait on it, but admits no Bot action until it settles.
      */
-    wheelLeft(botId: string): void {
-      void inTurn(botId, () => end(botId, "the wheel left the person"));
+    wheelLeft(botId: string): Promise<unknown> {
+      return inTurn(botId, () => end(botId, "the wheel left the person"));
     },
     /** The Bot's browser is closing: its recording ends while the Recorder can still be told. */
     async browserClosing(botId: string): Promise<void> {
