@@ -12,8 +12,10 @@ import { DesktopIllustration } from "@/components/computer/desktop-illustration"
 import { ComputerPlaceholder } from "@/components/computer/placeholder";
 import { SELF_HOST_URL } from "@/components/layout/self-host-banner";
 import { IllustrationFrame } from "@/components/onboarding/illustration-frame";
+import { IntroAnimation } from "@/components/onboarding/intro-animation";
 import { LaptopIllustration } from "@/components/onboarding/laptop-illustration";
 import { OrganizationFlow } from "@/components/onboarding/organization-flow";
+import { OnboardingNameStep } from "@/components/settings/profile";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { type AgentProfile, agentListQueryOptions } from "@/lib/agents/queries";
 import { currentUserQueryOptions, needsOnboarding } from "@/lib/auth/queries";
@@ -168,7 +170,7 @@ function RosterStep() {
 }
 
 /*
- * THE THREE SLIDES BELOW ARE FOR SOMEBODY TRYING OPENBOT ON THEIR OWN MACHINE, and only they see them
+ * These local-evaluation scenes are for somebody trying OpenBot on their own machine
  * (see `localEvaluation` in RouteComponent). They answer what that person is deciding: where their
  * data is, whether their own agents fit, and what taking it to their organization involves (OB-02 in
  * the product backlog). None of it is said to an organization's own people, who are past all three.
@@ -264,11 +266,39 @@ function OrganizationStep() {
   );
 }
 
-const STEPS: Array<() => React.ReactNode> = [
-  () => <WelcomeStep />,
-  () => <ComputerUseStep />,
-  () => <RosterStep />,
-];
+function Introduction({ localEvaluation }: { localEvaluation: boolean }) {
+  return (
+    <IntroAnimation
+      scenes={[
+        { id: "welcome", label: "Welcome", content: <WelcomeStep /> },
+        {
+          id: "computer",
+          label: "Each Bot has its own computer",
+          content: <ComputerUseStep />,
+        },
+        {
+          id: "roster",
+          label: "Pick a Bot or make your own",
+          content: <RosterStep />,
+        },
+        ...(localEvaluation
+          ? [
+              {
+                id: "local",
+                label: "It runs on your machine",
+                content: <LocalStep />,
+              },
+              {
+                id: "agents",
+                label: "Bring the agents you already have",
+                content: <AgentsStep />,
+              },
+            ]
+          : []),
+      ]}
+    />
+  );
+}
 
 /** A pane arrives from the side the journey is moving toward, and leaves out the other. */
 const variants = {
@@ -282,14 +312,16 @@ function RouteComponent() {
   const complete = useMutation(completeOnboardingMutationOptions(queryClient));
 
   // Browser state on purpose: the step is not persisted while the wizard is being designed.
-  const [step, setStep] = React.useState(0);
+  const [step, setStep] = React.useState<"intro" | "organization" | "name">(
+    "intro",
+  );
   const [direction, setDirection] = React.useState(1);
   // The way out: set once the completion is saved, it fades the whole page and then navigates.
   const [leaving, setLeaving] = React.useState(false);
   const [ref, bounds] = useMeasure();
 
   /*
-   * The last three slides are for somebody evaluating OpenBot locally, never for an organization's people:
+   * Local-evaluation content is never shown to an organization's people:
    * the server says single-user mode, which an organization's deployment, always behind sign-in,
    * cannot be in. Until the answer arrives they are left out, so a slow or failed request never
    * shows an organization's employees a page about deploying OpenBot themselves.
@@ -298,19 +330,17 @@ function RouteComponent() {
    * Intelligence entitlement, and the stack `copilotkit local` installs runs on an enterprise
    * evaluation licence, so every CLI evaluator, the person these slides are for, would never see them.
    */
-  const { data: capabilities } = useQuery(deploymentCapabilitiesQueryOptions());
-  const steps = capabilities?.localEvaluation
-    ? [
-        ...STEPS,
-        () => <LocalStep />,
-        () => <AgentsStep />,
-        () => <OrganizationStep />,
-      ]
-    : STEPS;
-  const last = step === steps.length - 1;
+  const {
+    data: capabilities,
+    error: capabilitiesError,
+    refetch: retryCapabilities,
+    isFetching: loadingCapabilities,
+  } = useQuery(deploymentCapabilitiesQueryOptions());
+  const localEvaluation = capabilities?.localEvaluation === true;
+  const last = step === "name";
 
-  const go = (to: number) => {
-    setDirection(to > step ? 1 : -1);
+  const go = (to: typeof step, forward: boolean) => {
+    setDirection(forward ? 1 : -1);
     setStep(to);
   };
 
@@ -351,9 +381,35 @@ function RouteComponent() {
                   key={step}
                   variants={variants}
                 >
-                  {steps[step]?.()}
+                  {step === "intro" && (
+                    <Introduction localEvaluation={localEvaluation} />
+                  )}
+                  {step === "organization" && <OrganizationStep />}
+                  {step === "name" && (
+                    <OnboardingNameStep
+                      onSaved={async () => {
+                        await complete.mutateAsync(undefined);
+                        setLeaving(true);
+                      }}
+                    />
+                  )}
                 </motion.div>
               </AnimatePresence>
+
+              {capabilitiesError && !capabilities ? (
+                <div className="mt-4 text-center">
+                  <p className="text-sm text-destructive" role="alert">
+                    We couldn't load your setup. Try again to continue.
+                  </p>
+                  <Button
+                    variant="ghost"
+                    disabled={loadingCapabilities}
+                    onClick={() => retryCapabilities()}
+                  >
+                    Try again
+                  </Button>
+                </div>
+              ) : null}
 
               {complete.error ? (
                 <p className="mt-4 text-destructive text-sm" role="alert">
@@ -362,33 +418,38 @@ function RouteComponent() {
               ) : null}
 
               <motion.div
-                className="mt-20 flex flex-col items-center justify-center max-w-xs gap-4 w-full mx-auto"
+                className={`${last ? "mt-4" : "mt-8"} flex flex-col items-center justify-center max-w-xs gap-4 w-full mx-auto`}
                 layout
               >
-                <Button
-                  className="w-full"
-                  disabled={complete.isPending}
-                  onClick={() => {
-                    if (last) {
-                      complete.mutate(undefined, {
-                        onSuccess: () => setLeaving(true),
-                      });
-                    } else {
-                      go(step + 1);
-                    }
-                  }}
-                  size="lg"
-                >
-                  {complete.isPending
-                    ? "Saving…"
-                    : last
-                      ? "Get started"
-                      : "Continue"}
-                </Button>
-                {step !== 0 && (
+                {!last && (
                   <Button
                     className="w-full"
-                    onClick={() => go(step - 1)}
+                    disabled={complete.isPending || !capabilities}
+                    onClick={() =>
+                      go(
+                        step === "intro" && localEvaluation
+                          ? "organization"
+                          : "name",
+                        true,
+                      )
+                    }
+                    size="lg"
+                  >
+                    Continue
+                  </Button>
+                )}
+                {step !== "intro" && (
+                  <Button
+                    className="w-full"
+                    disabled={complete.isPending}
+                    onClick={() =>
+                      go(
+                        step === "name" && localEvaluation
+                          ? "organization"
+                          : "intro",
+                        false,
+                      )
+                    }
                     variant="secondary"
                     size="lg"
                   >

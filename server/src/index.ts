@@ -191,6 +191,7 @@ import { createSignInNotifier, createSignInResumer } from "./passwords/resume";
 import { createSignInService } from "./passwords/service";
 import { createPasswordStore } from "./passwords/store";
 import { createOnboardingStore } from "./people/onboarding";
+import { createProfileStore } from "./people/profile";
 import { createPeopleStore } from "./people/store";
 import { createAccountModeSwitch } from "./plugins/account-mode";
 import { assertActivatable, providerDecision } from "./plugins/broker";
@@ -338,6 +339,7 @@ clearLearningRevisionFallback();
 // `serverPort` in config.ts for what `process.env.PORT ?? …` did with `PORT=` instead.
 const port = config.port;
 const database = createDatabase(config.databaseUrl);
+const profileStore = createProfileStore(database);
 // Every dispatch point asks this database whether its person paused the Bot. See agents/lifecycle.ts.
 configureBotLifecycle({ database });
 const learningSettingsStore = createLearningSettingsStore(
@@ -1746,6 +1748,10 @@ const actorAgentResolver = createActorAgentResolver({
       coordinationForActor(actorId, initiator, depth),
     ),
   loadInstructionsForActor,
+  loadNameForActor: async (actorId) => {
+    const profile = await profileStore.read(actorId);
+    return profile.needsName ? null : profile.name;
+  },
   loadAttachmentForActor,
   markAttachmentsSentForActor,
   // The runtime owns Learning. Resolve its reader only when a turn is built, after boot wiring.
@@ -2606,6 +2612,7 @@ const app = createApp(
 
   identityStore,
   identityGithubCallback,
+  profileStore,
 );
 
 startHttpServer({

@@ -34,6 +34,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
 
   return (
     <CopilotKitProvider
+      enableInspector={false}
       runtimeUrl="/api/copilotkit"
       credentials="include"
       {...a2uiProviderOptions(capabilities?.generativeUi)}

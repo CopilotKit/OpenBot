@@ -641,7 +641,7 @@ function AppConnectionPage() {
 
       {connection ? (
         <PageSection
-          description={`What you allowed, as ${entry.vendor} recorded it. This can be less than OpenBot asked for.`}
+          description={`Review the permissions recorded by ${entry.vendor}. They may include fewer permissions than OpenBot requested.`}
           title="Access"
         >
           <PageRows>

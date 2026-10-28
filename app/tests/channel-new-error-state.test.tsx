@@ -11,15 +11,20 @@ import {
   Outlet,
   RouterProvider,
 } from "@tanstack/react-router";
-import { cleanup, render, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { type AgentProfile, agentKeys } from "@/lib/agents/queries";
 import { Route as ChannelNewRoute } from "@/routes/_authed/_app/channel/new";
+import { settleReactWork } from "./settle-react-work";
 
 beforeAll(() => GlobalRegistrator.register());
 
 afterEach(() => cleanup());
 
-afterAll(() => GlobalRegistrator.unregister());
+afterAll(async () => {
+  await settleReactWork();
+  GlobalRegistrator.unregister();
+});
 
 function agent(
   overrides: Partial<AgentProfile> & { id: string },
@@ -267,4 +272,44 @@ test("/channel/new keeps a usable hidden detail when a background refetch fails"
 
   expect(view.queryByRole("alert")).toBeNull();
   await expectMessageComposerDisabled(view, false);
+});
+
+test("New Bot is a fixed action outside the auto-highlighted recipient options", async () => {
+  const view = renderChannelNew(queryClientWithAgents([GENERAL_ASSISTANT]));
+  const create = await view.findByRole("button", {
+    name: "New Bot Create a new Bot",
+  });
+  expect(view.queryByRole("option", { name: /New Bot/ })).toBeNull();
+  expect(create.hasAttribute("data-highlighted")).toBe(false);
+  const input = view.getByRole("combobox");
+  await userEvent.setup({ document }).type(input, "no matching recipient");
+  await view.findByText("No Bots found.");
+  expect(
+    view.getByRole("button", { name: "New Bot Create a new Bot" }),
+  ).toBeTruthy();
+  fireEvent.click(create);
+  expect(await view.findByRole("dialog", { name: "New Bot" })).toBeTruthy();
+});
+
+test("creating a Bot preserves existing recipients and selects the created Bot", async () => {
+  const query = queryClientWithAgents([GENERAL_ASSISTANT]);
+  query.setQueryData(
+    agentKeys.detail("created-bot"),
+    agent({ id: "created-bot", name: "Created Bot" }),
+  );
+  const view = renderChannelNew(query, "/channel/new?agent=general-assistant");
+  const input = await view.findByRole("combobox");
+  fireEvent.keyDown(input, { key: "ArrowDown" });
+  fireEvent.click(
+    await view.findByRole("button", { name: "New Bot Create a new Bot" }),
+  );
+  fireEvent.click(await view.findByRole("button", { name: "Finish creation" }));
+  await waitFor(() => {
+    expect(
+      view.getByRole("button", { name: "Remove General Assistant" }),
+    ).toBeTruthy();
+    expect(
+      view.getByRole("button", { name: "Remove Created Bot" }),
+    ).toBeTruthy();
+  });
 });

@@ -77,7 +77,7 @@ export function HandoffPanel({ agentId }: { agentId: string }) {
           </span>
         ) : null
       }
-      description="The Bots this one can ask for help. This doesn't change who can ask it. Their answers come back into the same conversation, under their name."
+      description="Choose which Bots this Bot can ask for help. Their answers appear in the same conversation under their own names. This does not change who can ask this Bot for help."
       title="Bots it can ask"
     >
       {/* Facts about the deployment rather than rows to act on, so said as sentences. */}
