@@ -14,7 +14,10 @@ import {
   type ComputerGuidance,
   PROVENANCE_GUIDANCE,
 } from "@openbot/shared/bot-prompt";
-import { defaultModelFor } from "@openbot/shared/model-providers";
+import {
+  defaultModelFor,
+  requiresResponsesApi,
+} from "@openbot/shared/model-providers";
 import {
   BuiltInAgentWithSaneHistory,
   CloningRemoteAgent,
@@ -256,6 +259,38 @@ export function runtimeModelForEnvironment(
     defaultModel:
       selectedModelApplies && selectedModel ? selectedModel : defaultModel,
   };
+}
+
+/**
+ * The OpenAI API the built-in Bots' model is called on, where `OPENAI_BASE_URL` points somewhere: `responses` when
+ * that model takes tools only there, and nothing otherwise. Returns what it set.
+ *
+ * The CopilotKit runtime decides by host since 1.79: OpenAI and Azure get the Responses API, and any other host gets
+ * Chat Completions, because most OpenAI-compatible servers serve only `/chat/completions`. A gateway or a proxy in
+ * front of OpenAI (LiteLLM, Portkey, a company's own proxy) is any other host, and on Chat Completions
+ * `gpt-5.6-terra`, the model the built-in Bots run on by default, refuses every function tool: every turn of every
+ * built-in Bot failed with "Function tools with reasoning_effort are not supported". The host cannot say which API a
+ * model takes, so the model decides where it has to (`requiresResponsesApi`), and every other model keeps the
+ * runtime's rule, so a server that serves only Chat Completions, or serves it better (Groq's `/responses` refuses
+ * tool calls), is asked as it always was.
+ *
+ * Set on the environment because `COPILOTKIT_OPENAI_API` is the runtime's own switch, read whenever a Bot's model is
+ * resolved, and a deployment runs its built-in Bots on one model, decided once at boot. An operator who set the
+ * switch has decided, and that stands, `chat` included.
+ */
+export function chooseOpenAIApi(
+  model: RuntimeModel,
+  environment: Record<string, string | undefined> = process.env,
+): "responses" | undefined {
+  if (
+    model.provider !== "openai" ||
+    environment.COPILOTKIT_OPENAI_API?.trim() ||
+    !environment.OPENAI_BASE_URL?.trim() ||
+    !requiresResponsesApi(model.defaultModel)
+  )
+    return undefined;
+  environment.COPILOTKIT_OPENAI_API = "responses";
+  return "responses";
 }
 
 type RuntimeAgentRow = {
