@@ -173,3 +173,19 @@ describe("OpenDots respects reduced motion", () => {
     expect(block).toMatch(/transition:\s*none;/);
   });
 });
+
+describe("OpenDots reaches OpenBot's pages only through their hooks", () => {
+  /*
+   * A selector that names one of OpenBot's Tailwind classes (`form.rounded-2xl`, `.sticky.top-0`)
+   * breaks without a test failing the day that page is restyled. Pages publish `data-slot` hooks
+   * for skins instead; the only class a selector here may name is the theme's own `.dark`.
+   */
+  test("no selector names a class other than .dark", () => {
+    const classes = [...css.matchAll(/[^{}]+\{/g)]
+      .map((match) => match[0].slice(0, -1).trim())
+      .filter((head) => !head.startsWith("@") && !head.startsWith("--"))
+      .flatMap((head) => head.match(/\.[a-zA-Z_][\w-]*/g) ?? [])
+      .filter((name) => name !== ".dark");
+    expect(classes).toEqual([]);
+  });
+});

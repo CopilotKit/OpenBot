@@ -10,7 +10,7 @@ export type Section =
   | "routines"
   | "memories"
   | "bots"
-  | "skills"
+  | "capabilities"
   | "connections"
   | "other";
 
@@ -113,7 +113,7 @@ export function parsePlace(
     return { section: "memories", label: "Memories", ownsWatch: false };
   }
   if (path.startsWith("/capabilities")) {
-    return { section: "skills", label: "Skills", ownsWatch: false };
+    return { section: "capabilities", label: "Capabilities", ownsWatch: false };
   }
   if (path.startsWith("/connections")) {
     return { section: "connections", label: "Connections", ownsWatch: false };

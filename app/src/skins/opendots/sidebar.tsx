@@ -1,18 +1,13 @@
 import {
-  IconAdjustmentsHorizontal,
   IconBook,
-  IconBox,
   IconClockHour3,
   IconDots,
-  IconLayoutGrid,
   IconLogout,
   IconMessageCircle,
   IconPin,
   IconPinnedOff,
-  IconPlug,
   IconPlus,
   IconSearch,
-  IconShieldLock,
   IconTrash,
   IconX,
 } from "@tabler/icons-react";
@@ -26,7 +21,6 @@ import {
   pinnedFirst,
 } from "@/components/app-sidebar/app-sidebar";
 import { ChannelPagination } from "@/components/app-sidebar/channel-pagination";
-import { BotsNavBadge } from "@/components/bot-profile/attention";
 import { DeleteConversationDialog } from "@/components/channels/delete-conversation-dialog";
 import { Button } from "@/components/ui/button";
 import {
@@ -47,6 +41,7 @@ import {
 } from "@/lib/channels/queries";
 import { appConfig } from "@/lib/generated/application-config";
 import { memoriesQueryOptions } from "@/lib/memory";
+import { useNavigationItems } from "@/lib/navigation";
 import { routinesQueryOptions } from "@/lib/routines/queries";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
@@ -171,6 +166,7 @@ function BotsSection({
 }) {
   const agents = useQuery(agentListQueryOptions());
   const dots = agents.data ? dotOrder(agents.data) : [];
+  const bots = useNavigationItems().find((item) => item.id === "bots");
   return (
     <section aria-label="Bots">
       <NavLabel
@@ -253,18 +249,19 @@ function BotsSection({
           })}
         </nav>
       )}
-      <Link
-        activeOptions={{ exact: true }}
-        activeProps={{ className: navItemActive, "aria-current": "page" }}
-        className={cn(navItem, "mt-[3px] py-2.5 text-(--opendots-dot-ink)")}
-        onClick={onNavigate}
-        to="/bots"
-      >
-        <IconLayoutGrid />
-        <span className="min-w-0 flex-1 truncate">All Bots</span>
-        {/* What waits on you across every Bot, as OpenBot's own sidebar shows it. */}
-        <BotsNavBadge />
-      </Link>
+      {bots ? (
+        // OpenBot's Bots destination, from the shared list, closing the list of Bots above it.
+        <Link
+          activeOptions={{ exact: true }}
+          activeProps={{ className: navItemActive, "aria-current": "page" }}
+          className={cn(navItem, "mt-[3px] py-2.5 text-(--opendots-dot-ink)")}
+          onClick={onNavigate}
+          to={bots.to}
+        >
+          <bots.icon />
+          <span className="min-w-0 flex-1 truncate">All {bots.label}</span>
+        </Link>
+      ) : null}
     </section>
   );
 }
@@ -484,11 +481,10 @@ function WorkspaceLinks({
   place: Place;
   onNavigate: () => void;
 }) {
-  const user = useQuery(currentUserQueryOptions());
   const routines = useQuery(routinesQueryOptions());
   const memories = useQuery(memoriesQueryOptions());
   // OpenDots keeps these rows in the chrome's olive ink; the row you are on only gains the tint.
-  const row = (section: Place["section"]) =>
+  const row = (section: string) =>
     cn(
       navItem,
       "text-(--opendots-dot-ink)",
@@ -498,11 +494,12 @@ function WorkspaceLinks({
   const current = (section: Place["section"]) =>
     place.section === section ? ("page" as const) : undefined;
   /*
-   * OpenDots' sidebar ends on three rows. Skills, Connections, Admin and the person's own menu are
-   * in the rail at desktop width, so they join these rows only in the phone drawer, where there is
-   * no rail.
+   * OpenDots' sidebar ends on a few rows. OpenBot's primary destinations and the person's own menu
+   * are in the rail at desktop width, so they join these rows only in the phone drawer, where there
+   * is no rail. Bots is the row under the list of Bots above.
    */
   const drawerOnly = "md:hidden";
+  const navigation = useNavigationItems().filter((item) => item.id !== "bots");
   return (
     <nav
       aria-label="Workspace"
@@ -530,39 +527,19 @@ function WorkspaceLinks({
         <span className="min-w-0 flex-1 truncate">Memories</span>
         <Count value={memories.data?.length} />
       </Link>
-      <Link
-        aria-current={current("skills")}
-        className={cn(row("skills"), drawerOnly)}
-        onClick={onNavigate}
-        to="/capabilities/skills"
-      >
-        <IconBox />
-        <span className="min-w-0 flex-1 truncate">Skills</span>
-      </Link>
-      <Link
-        aria-current={current("connections")}
-        className={cn(row("connections"), drawerOnly)}
-        onClick={onNavigate}
-        to="/connections"
-      >
-        <IconPlug />
-        <span className="min-w-0 flex-1 truncate">Connections</span>
-      </Link>
-      <Link className={row("other")} onClick={onNavigate} to="/settings">
-        <IconAdjustmentsHorizontal />
-        <span className="min-w-0 flex-1 truncate">Settings & setup</span>
-      </Link>
-      {/* Admin routes are server-guarded; the row is only for the people who can open them. */}
-      {user.data?.role === "admin" ? (
+      {/* OpenBot's own destinations, from the one list every frame reads. */}
+      {navigation.map((item) => (
         <Link
-          className={cn(row("other"), drawerOnly)}
+          aria-current={place.section === item.id ? "page" : undefined}
+          className={cn(row(item.id), item.section === "primary" && drawerOnly)}
+          key={item.id}
           onClick={onNavigate}
-          to="/admin"
+          to={item.to}
         >
-          <IconShieldLock />
-          <span className="min-w-0 flex-1 truncate">Admin</span>
+          <item.icon />
+          <span className="min-w-0 flex-1 truncate">{item.label}</span>
         </Link>
-      ) : null}
+      ))}
       <UserRow />
     </nav>
   );

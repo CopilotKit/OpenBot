@@ -21,6 +21,7 @@ import { cleanup, render, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AbstractAvatar } from "@/components/agents/abstract-avatar";
 import { appConfig } from "@/lib/generated/application-config";
+import { NAVIGATION, navigationFor } from "@/lib/navigation";
 import { queryClient } from "@/query-client";
 import { opendots } from "@/skins/opendots";
 import type { AgentProfileStore } from "../../server/src/agents/profile-store";
@@ -366,7 +367,7 @@ describe("OpenDots frame", () => {
       "/bots/cass",
       "/s/routines", // routines
       "/s/memories", // memory
-      "/capabilities/skills", // skills
+      "/capabilities", // skills and memory
       "/connections",
       "/settings", // the skin picker, approvals and reachability
     ]) {
@@ -401,7 +402,7 @@ describe("OpenDots frame", () => {
         "/bots",
         "/s/routines",
         "/s/memories",
-        "/capabilities/skills",
+        "/capabilities",
         "/connections",
         "/settings",
       ]) {
@@ -426,6 +427,50 @@ describe("OpenDots frame", () => {
       expect(chrome?.hasAttribute("data-opendots-chrome")).toBe(true);
     }
   });
+
+  test.each([
+    ["a member", person],
+    ["an admin", admin],
+  ])(
+    "the rail and sidebar draw OpenBot's own navigation list for %s",
+    async (_who, signedIn) => {
+      actor = signedIn;
+      const { view } = draw("/");
+      const expected = navigationFor(signedIn.role);
+      const rail = await view.findByRole("navigation", {
+        name: "Workspace navigation",
+      });
+      await waitFor(() =>
+        expect(
+          within(rail).queryByRole("link", { name: "Settings" }),
+        ).toBeTruthy(),
+      );
+      if (signedIn.role === "admin") {
+        await waitFor(() =>
+          expect(
+            within(rail).queryByRole("link", { name: "Admin" }),
+          ).toBeTruthy(),
+        );
+      }
+      // Every destination OpenBot's sidebar offers this person, under its own label, and no others.
+      for (const item of expected) {
+        expect(
+          within(rail)
+            .getByRole("link", { name: item.label })
+            .getAttribute("href"),
+        ).toBe(item.to);
+      }
+      const railDestinations = within(rail)
+        .getAllByRole("link")
+        .map((link) => link.getAttribute("href"))
+        .filter((href) => NAVIGATION.some((item) => item.to === href));
+      expect(railDestinations).toEqual(expected.map((item) => item.to));
+      const sidebar = view.getByRole("complementary", { name: "Sidebar" });
+      for (const item of expected) {
+        expect(hrefs(sidebar)).toContain(item.to);
+      }
+    },
+  );
 
   test("an administrator also reaches Admin", async () => {
     actor = admin;
@@ -453,7 +498,9 @@ describe("OpenDots frame", () => {
       // In the rail and in the sidebar, so collapsing the sidebar never hides it.
       expect(settings.length).toBe(2);
       expect(
-        view.getByRole("link", { name: "Open settings" }).getAttribute("href"),
+        within(view.getByRole("navigation", { name: "Workspace navigation" }))
+          .getByRole("link", { name: "Settings" })
+          .getAttribute("href"),
       ).toBe("/settings");
     },
   );

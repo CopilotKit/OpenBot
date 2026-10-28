@@ -1,17 +1,12 @@
 import {
-  IconAdjustmentsHorizontal,
-  IconBox,
   IconClockHour3,
   IconDeviceDesktop,
-  IconLayoutGrid,
   IconLayoutSidebar,
   IconLogout,
   IconMenu2,
   IconPlayerPause,
   IconPlayerPlay,
-  IconPlug,
   IconPlus,
-  IconShieldLock,
 } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
@@ -22,6 +17,7 @@ import {
 } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useState } from "react";
 import AgentOrb from "@/components/agents/orb/agent-orb";
+import { BotsNavBadge } from "@/components/bot-profile/attention";
 import { SelfHostBanner } from "@/components/layout/self-host-banner";
 import {
   DropdownMenu,
@@ -46,6 +42,7 @@ import { setBotPausedMutationOptions } from "@/lib/bot-lifecycle/mutations";
 import { botLifecycleQueryOptions } from "@/lib/bot-lifecycle/queries";
 import { useChannelEvents } from "@/lib/channels/use-channel-events";
 import { appConfig } from "@/lib/generated/application-config";
+import { type NavigationItem, useNavigationItems } from "@/lib/navigation";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
 import { ComputerPane } from "./computer-pane";
@@ -116,17 +113,48 @@ function RailUserMenu() {
 }
 
 /** The 48px strip at the far left: the brand, the sidebar toggle, and the few places used most. */
+/** One of OpenBot's destinations as a rail button, with the Bots badge on Bots. */
+function RailDestination({
+  item,
+  showBadge,
+}: {
+  item: NavigationItem;
+  showBadge: boolean;
+}) {
+  const Icon = item.icon;
+  return (
+    <RailTip label={item.label}>
+      <Link
+        aria-label={item.label}
+        className={cn(railButton, "relative")}
+        to={item.to}
+      >
+        <Icon />
+        {item.id === "bots" && showBadge ? (
+          // What waits on you across every Bot. OpenBot's own badge, which also sends the
+          // browser notification, so exactly one is ever mounted.
+          <span className="pointer-events-none absolute -top-1 -right-1 flex">
+            <BotsNavBadge />
+          </span>
+        ) : null}
+      </Link>
+    </RailTip>
+  );
+}
+
 function Rail({
   newChat,
   navCollapsed,
   onToggleNav,
+  showBadge,
 }: {
   newChat: LinkProps;
   navCollapsed: boolean;
   onToggleNav: () => void;
+  /** Whether the rail carries the Bots badge: at desktop width, where the rail is on screen. */
+  showBadge: boolean;
 }) {
-  const user = useQuery(currentUserQueryOptions());
-  const admin = user.data?.role === "admin";
+  const navigation = useNavigationItems();
   return (
     <nav
       aria-label="Workspace navigation"
@@ -158,11 +186,6 @@ function Rail({
           <IconPlus className="size-[19px]!" />
         </Link>
       </RailTip>
-      <RailTip label="All Bots">
-        <Link aria-label="All Bots" className={railButton} to="/bots">
-          <IconLayoutGrid />
-        </Link>
-      </RailTip>
       <RailTip label="Routines">
         <Link
           aria-label="Routines"
@@ -173,38 +196,18 @@ function Rail({
           <IconClockHour3 />
         </Link>
       </RailTip>
-      <RailTip label="Skills">
-        <Link
-          aria-label="Skills"
-          className={railButton}
-          to="/capabilities/skills"
-        >
-          <IconBox />
-        </Link>
-      </RailTip>
-      <RailTip label="Connections">
-        <Link aria-label="Connections" className={railButton} to="/connections">
-          <IconPlug />
-        </Link>
-      </RailTip>
+      {/* OpenBot's own destinations, from the one list every frame reads. */}
+      {navigation
+        .filter((item) => item.section === "primary")
+        .map((item) => (
+          <RailDestination item={item} key={item.id} showBadge={showBadge} />
+        ))}
       <div className="mt-auto flex flex-col items-center gap-3">
-        {/* Admin routes are server-guarded; the button is only for the people who can open them. */}
-        {admin ? (
-          <RailTip label="Admin">
-            <Link aria-label="Admin" className={railButton} to="/admin">
-              <IconShieldLock />
-            </Link>
-          </RailTip>
-        ) : null}
-        <RailTip label="Settings">
-          <Link
-            aria-label="Open settings"
-            className={railButton}
-            to="/settings"
-          >
-            <IconAdjustmentsHorizontal />
-          </Link>
-        </RailTip>
+        {navigation
+          .filter((item) => item.section === "account")
+          .map((item) => (
+            <RailDestination item={item} key={item.id} showBadge={false} />
+          ))}
         <RailUserMenu />
       </div>
     </nav>
@@ -374,6 +377,7 @@ export function OpenDotsFrame({ children }: { children: ReactNode }) {
         navCollapsed={navCollapsed}
         newChat={newChat}
         onToggleNav={() => setNavCollapsed((collapsed) => !collapsed)}
+        showBadge={!isMobile}
       />
       {isMobile ? (
         <>
@@ -386,6 +390,10 @@ export function OpenDotsFrame({ children }: { children: ReactNode }) {
             type="button"
           >
             <IconMenu2 />
+            {/* On a phone the rail is gone, so the Bots badge rides on the menu button. */}
+            <span className="pointer-events-none absolute -top-0.5 -right-0.5 flex">
+              <BotsNavBadge />
+            </span>
           </button>
           {/* OpenBot's own sheet: it traps focus, closes on Escape and on the scrim. */}
           <Sheet onOpenChange={setMobileOpen} open={mobileOpen}>
