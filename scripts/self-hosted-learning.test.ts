@@ -360,3 +360,34 @@ test("multiple stacks are matched by API origin, not selection or list order", a
     })),
   ).toBe(localDashboard);
 });
+
+test("unavailable CLI preserves a manually hosted loopback login", async () => {
+  expect(
+    await learningSessionOrigin(localApi, async () => ({
+      exitCode: 127,
+      stdout: "",
+    })),
+  ).toBe(localApi);
+});
+
+test.each([
+  "http://127.0.0.1:61860",
+  "http://[::1]:61860",
+  "http://LOCALHOST:61860/",
+])("matches loopback aliases: %s", async (origin) => {
+  expect(
+    await learningSessionOrigin(origin, async () => ({
+      exitCode: 0,
+      stdout: JSON.stringify(localStatus()),
+    })),
+  ).toBe(localDashboard);
+});
+
+test("matching preserves protocol and port", async () => {
+  expect(
+    await learningSessionOrigin("https://127.0.0.1:61860", async () => ({
+      exitCode: 0,
+      stdout: JSON.stringify(localStatus()),
+    })),
+  ).toBe("https://127.0.0.1:61860");
+});
