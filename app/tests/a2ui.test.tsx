@@ -2,14 +2,15 @@ import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { CopilotKitProvider } from "@copilotkit/react-core/v2";
 import {
   GenerativeUISurface,
+  standardUI,
   useGenerativeUIRuntime,
 } from "@copilotkit/react-core/v2/generative-ui";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { cleanup, render } from "@testing-library/react";
 import { useEffect } from "react";
 import {
-  A2UI_BASIC_COMPONENTS,
   generativeUiProviderOptions,
+  OMITTED_STANDARD_COMPONENTS,
   OPENBOT_UI,
   OPENBOT_UI_THEME,
 } from "@/lib/copilot/a2ui";
@@ -95,16 +96,41 @@ test("disabled and unresolved deployments do not send the catalog", () => {
   });
 });
 
-test("the catalog is the A2UI 1.0 basic components, without the gallery", () => {
+test("the catalog is the standard one, less the omitted components and without the gallery", () => {
   expect(OPENBOT_UI.id).toBe("openbot/ui@1");
-  // The same set the A2UI 0.9 basic catalog drew, under their A2UI names, and nothing else.
-  expect([...OPENBOT_UI.components.keys()].sort()).toEqual(
-    [...A2UI_BASIC_COMPONENTS].sort(),
+  const expected = Object.keys(standardUI.manifestComponents).filter(
+    (name) =>
+      !(OMITTED_STANDARD_COMPONENTS as readonly string[]).includes(name),
   );
-  expect(A2UI_BASIC_COMPONENTS).toHaveLength(18);
-  // The rest of the standard catalog stays out until an admin can see and govern it.
-  expect(OPENBOT_UI.components.has("Table")).toBe(false);
-  expect(OPENBOT_UI.components.has("LinkCard")).toBe(false);
+  expect([...OPENBOT_UI.components.keys()].sort()).toEqual(expected.sort());
+  expect(expected).toHaveLength(65);
+  // The A2UI 1.0 basic components, under their A2UI names.
+  for (const name of [
+    "Text",
+    "Image",
+    "Icon",
+    "Video",
+    "AudioPlayer",
+    "Row",
+    "Column",
+    "List",
+    "Card",
+    "Tabs",
+    "Divider",
+    "Modal",
+    "Button",
+    "CheckBox",
+    "TextField",
+    "DateTimeInput",
+    "ChoicePicker",
+    "Slider",
+  ])
+    expect(OPENBOT_UI.components.has(name)).toBe(true);
+  expect(OPENBOT_UI.components.has("Table")).toBe(true);
+  expect(OPENBOT_UI.components.has("Chart")).toBe(true);
+  // Map needs maplibre-gl; the other three send linked domains to Google's favicon service.
+  for (const name of ["Map", "Favicon", "LinkCard", "Citation"])
+    expect(OPENBOT_UI.components.has(name)).toBe(false);
   // The gallery components keep their separate per-Bot tool and grant path.
   expect(OPENBOT_UI.components.has("showTable")).toBe(false);
   expect(OPENBOT_UI.components.has("askForm")).toBe(false);
