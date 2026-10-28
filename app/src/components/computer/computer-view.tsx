@@ -1,6 +1,14 @@
 import type { BotBrowserApiState } from "@openbot/shared/bot-browser";
+import { IconEyeOff, IconLock, IconShieldCheck } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import {
+  type ReactNode,
+  type Ref,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+} from "react";
 import { createPortal } from "react-dom";
 import {
   botBrowserKeys,
@@ -311,6 +319,18 @@ type Props = {
   toolCallId?: string;
   /** How long to wait for a first frame before calling it a problem. Shortened by tests. */
   startupGraceMs?: number;
+  /**
+   * Take control is in the pane's header, so the bar under the screen says who has control and
+   * what went wrong, without a second button. The header asks for the full-size view through `ref`.
+   */
+  wheelInHeader?: boolean;
+  ref?: Ref<ComputerViewHandle>;
+};
+
+/** What a header holding the wheel can ask of the screen under it. */
+export type ComputerViewHandle = {
+  /** The readable full-size view, where a person who has just taken control drives. */
+  openFullSize: () => void;
 };
 
 export function ComputerView({
@@ -325,6 +345,8 @@ export function ComputerView({
   finished,
   toolCallId,
   startupGraceMs = STARTUP_GRACE_MS,
+  wheelInHeader = false,
+  ref,
 }: Props) {
   const [shot, setShot] = useState<Screenshot | null>(null);
   /**
@@ -338,6 +360,11 @@ export function ComputerView({
   const [expanded, setExpanded] = useState(false);
   /** The full-size view's live screen, which the bar hands the keyboard back to once an address goes. */
   const screen = useRef<LiveScreenHandle>(null);
+  useImperativeHandle(
+    ref,
+    () => ({ openFullSize: () => setExpanded(true) }),
+    [],
+  );
   const [streamProblem, setStreamProblem] = useState<string | null>(null);
   /** A dropped live stream being retried on its own. A badge, never the overlay. */
   const [reconnecting, setReconnecting] = useState(false);
@@ -375,6 +402,7 @@ export function ComputerView({
   const {
     control,
     busy: changingControl,
+    problem: controlProblem,
     change: changeControl,
     refresh: refreshControl,
     someoneElse,
@@ -632,6 +660,8 @@ export function ComputerView({
     : shot
       ? { base64: shot.base64, url: shot.url ?? "" }
       : null;
+  /** The site a secret is for, named in the password box. */
+  const secretHost = drawn?.url ? hostOf(drawn.url) : null;
   /** Whether there is a page to draw. A blank browser and an unreadable screen are both "no". */
   const showScreen = drawn !== null && !blankBrowser;
   /**
@@ -762,8 +792,12 @@ export function ComputerView({
           Audit records that a secret was supplied, not the value.
         */}
         {control?.secretWanted ? (
+          /*
+           * The password box: what the page wants, a masked field, and the promise that the value
+           * goes to the page and nowhere else. Said with the page's own host when there is one.
+           */
           <form
-            className="border-t bg-muted/40 px-3 py-2 text-sm"
+            className="border-t bg-card px-4 py-4 text-foreground"
             onSubmit={async (event) => {
               event.preventDefault();
               if (!secret || sendingSecret) return;
@@ -777,11 +811,24 @@ export function ComputerView({
               await refreshControl?.();
             }}
           >
-            <label className="block" htmlFor="openbot-secret">
-              <span className="font-medium">The Bot needs </span>
-              <span>{control.secretWanted}</span>
-            </label>
-            <div className="mt-1.5 flex gap-2">
+            <div className="flex items-center gap-3">
+              <span className="grid size-10 shrink-0 place-items-center rounded-[11px] bg-brand/10 text-brand">
+                <IconLock aria-hidden className="size-5" stroke={1.9} />
+              </span>
+              <label className="min-w-0" htmlFor="openbot-secret">
+                <span className="type-body block font-semibold">
+                  {secretHost ?? "The page"} needs {control.secretWanted}
+                </span>
+                <span className="type-sub block text-muted-foreground">
+                  Type it here and it goes into the page.
+                </span>
+              </label>
+            </div>
+            {/*
+              Ringed in the accent from the start, since this is what the Bot is waiting for, and
+              ringed again outside while the field has the caret, as every other field is.
+            */}
+            <div className="mt-3 flex h-12 items-center gap-2 rounded-2xl px-4 shadow-[inset_0_0_0_2px_var(--brand)] focus-within:ring-3 focus-within:ring-ring/50">
               <input
                 id="openbot-secret"
                 type="password"
@@ -791,23 +838,35 @@ export function ComputerView({
                 autoCorrect="off"
                 spellCheck={false}
                 placeholder="Never shown to the Bot"
-                className="min-w-0 flex-1 rounded-md border bg-background px-2 py-1 text-sm"
+                className="type-body min-w-0 flex-1 bg-transparent text-foreground outline-none placeholder:text-muted-foreground"
               />
+              <IconEyeOff
+                aria-hidden
+                className="size-5 shrink-0 text-muted-foreground"
+              />
+            </div>
+            <p className="type-sub mt-2 flex items-center gap-2 text-muted-foreground">
+              <IconShieldCheck
+                aria-hidden
+                className="size-[18px] shrink-0 text-status-done"
+              />
+              It goes straight to {secretHost ?? "the page"}.{" "}
+              {name ?? "The Bot"} never sees it.
+            </p>
+            {secretProblem ? (
+              <p className="type-sub mt-2 text-status-problem" role="alert">
+                {secretProblem}
+              </p>
+            ) : null}
+            <div className="mt-3 flex justify-end">
               <button
                 type="submit"
                 disabled={!secret || sendingSecret}
-                className="shrink-0 rounded-md bg-primary px-3 py-1 text-xs font-medium text-primary-foreground disabled:opacity-50"
+                className="type-sub h-11 shrink-0 rounded-full bg-primary px-5 font-semibold text-primary-foreground outline-none transition-[filter] hover:brightness-125 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card disabled:opacity-40 motion-reduce:transition-none"
               >
                 {sendingSecret ? "Sending…" : "Send to the page"}
               </button>
             </div>
-            <p className="mt-1 text-xs text-muted-foreground">
-              This goes straight to the page. It isn't shown in the
-              conversation, and the Bot never sees it.
-            </p>
-            {secretProblem ? (
-              <p className="mt-1 text-xs text-destructive">{secretProblem}</p>
-            ) : null}
           </form>
         ) : null}
 
@@ -824,10 +883,21 @@ export function ComputerView({
                       ? "Someone else has control."
                       : "The Bot has control."}
             </span>
-            <ComputerControlButton
-              computerId={computerId}
-              onTakeControl={() => setExpanded(true)}
-            />
+            {wheelInHeader ? null : (
+              <ComputerControlButton
+                computerId={computerId}
+                onTakeControl={() => setExpanded(true)}
+              />
+            )}
+            {/* The header's button has no room under it, so what went wrong is said here. */}
+            {wheelInHeader && controlProblem ? (
+              <span
+                className="basis-full text-xs text-destructive"
+                role="alert"
+              >
+                {controlProblem}
+              </span>
+            ) : null}
           </div>
         ) : null}
       </figure>

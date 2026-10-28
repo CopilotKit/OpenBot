@@ -2,6 +2,7 @@ import { IconSettings } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Navigate } from "@tanstack/react-router";
 import { motion, useReducedMotion } from "motion/react";
+import { useRef, useState } from "react";
 import { z } from "zod";
 import { AgentProfile } from "@/components/agents/agent-profile";
 import { BotPausedBanner } from "@/components/bot-profile/pause-banner";
@@ -13,12 +14,20 @@ import {
   ConversationPresenceProvider,
   ConversationStatusLine,
 } from "@/components/channels/conversation-presence";
-import { ComputerChatControls } from "@/components/computer/computer-controls";
-import { ComputerViewPanel } from "@/components/computer/computer-panel";
+import {
+  ComputerChatControls,
+  ComputerControlButton,
+} from "@/components/computer/computer-controls";
+import {
+  ComputerPaneTitle,
+  ComputerViewPanel,
+} from "@/components/computer/computer-panel";
+import type { ComputerViewHandle } from "@/components/computer/computer-view";
 import { useAutoWatchScreen } from "@/components/computer/use-auto-watch-screen";
 import { DetailPanel } from "@/components/layout/detail-panel";
 import { SidebarToggle } from "@/components/layout/sidebar-toggle";
 import { Button } from "@/components/ui/button";
+import { agentListQueryOptions } from "@/lib/agents/queries";
 import { useMarkOpenChannelRead } from "@/lib/channels/mark-read";
 import { type AgentChannel, channelQueryOptions } from "@/lib/channels/queries";
 
@@ -33,8 +42,8 @@ const EASE_OUT = [0.23, 1, 0.32, 1] as const;
 const HEADING_ENTRANCE_SECONDS = 0.18;
 const HEADING_ENTRANCE_OFFSET = "translateY(4px)";
 
-/** Shared detail pane width for the live screen view. */
-const SCREEN_PANEL_WIDTH = 400;
+/** The live screen's pane: wide enough for a readable screen and the steps under it. */
+const SCREEN_PANEL_WIDTH = 440;
 
 /** A conversation's Bot in its header: 40px, the smallest orb that is fully animated. */
 const HEADER_ORB_SIZE = 40;
@@ -72,6 +81,17 @@ function Conversation() {
   /** Channel routing currently supports one coworker. */
   const agentId = channel.data?.agentIds[0];
   /*
+   * The Bot's own name, for its computer. The conversation's name is what the conversation is about,
+   * and a screen badged "Q3 budget" says nothing about whose computer it is.
+   */
+  const botName = useQuery(agentListQueryOptions()).data?.find(
+    (agent) => agent.id === agentId,
+  )?.name;
+  /** Whether the pane would be a sheet over the conversation, as `DetailPanel` last measured. */
+  const [overlaying, setOverlaying] = useState(true);
+  /** The screen in the pane, which the header's Take control opens full size. */
+  const screen = useRef<ComputerViewHandle>(null);
+  /*
    * A group is on its way to its own route (`ChannelBody`) and keeps its small faces until then.
    * Anything else, a conversation still loading included, has room for one Bot's orb, so the header
    * does not grow once the conversation arrives.
@@ -81,11 +101,15 @@ function Conversation() {
 
   useMarkOpenChannelRead(channelId);
 
-  // Browser activity may auto-open the screen once per run unless this run was dismissed.
+  /*
+   * Browser activity may auto-open the screen once per run unless this run was dismissed, and only
+   * where it opens beside the conversation. On a narrow screen it lights the computer button.
+   */
   const autoWatch = useAutoWatchScreen({
     botId: agentId,
     watching: isWatching,
     busy: isSettingsOpen,
+    docked: !overlaying,
     open: () =>
       navigate({
         search: (previous) => ({
@@ -115,12 +139,35 @@ function Conversation() {
     <DetailPanel
       onClose={() => show(null)}
       open={(isSettingsOpen || isWatching) && agentId !== undefined}
-      detailWidth={isWatching ? SCREEN_PANEL_WIDTH : undefined}
-      title={isWatching ? "Computer" : undefined}
+      /*
+       * The screen's width unless the Bot's settings are open, closed included, so whether it would
+       * overlay is measured for the pane that opens by itself.
+       */
+      detailWidth={isSettingsOpen ? undefined : SCREEN_PANEL_WIDTH}
+      onOverlayChange={setOverlaying}
+      title={
+        isWatching && agentId !== undefined ? (
+          <ComputerPaneTitle agentId={agentId} name={botName} />
+        ) : undefined
+      }
+      actions={
+        isWatching && agentId !== undefined ? (
+          <ComputerControlButton
+            computerId={agentId}
+            inline
+            onTakeControl={() => screen.current?.openFullSize()}
+          />
+        ) : undefined
+      }
       detail={
         agentId === undefined ? null : isWatching ? (
           // Manual watch remains active even when there is no current browser action.
-          <ComputerViewPanel agentId={agentId} name={channel?.data?.name} />
+          <ComputerViewPanel
+            agentId={agentId}
+            name={botName}
+            screen={screen}
+            wheelInHeader
+          />
         ) : (
           <AgentProfile
             agentId={agentId}
@@ -197,6 +244,7 @@ function Conversation() {
               computerId={agentId}
               open={isWatching}
               onOpenChange={(open) => show(open ? "watch" : null)}
+              unseen={autoWatch.unseen}
             />
             <Button
               aria-label="This conversation's Bot"

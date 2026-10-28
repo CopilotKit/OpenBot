@@ -178,6 +178,12 @@ changes for a deployment.
   Searching the web" says which step the Bot is on, and "Needs you" says an approval is waiting there.
   A run that goes on after you allow something shows as working too. The message box is a rounded
   pill with larger buttons, and it says "Message" and the Bot's name until you type.
+- A Bot's computer opens in a wider pane beside the conversation. Its header shows the Bot's orb,
+  whose computer it is and Take control, with a dot while the conversation needs you. Under the
+  screen, every step the Bot took in its browser, approved clicks included, sits among the commands
+  it ran, newest last, marked done, waiting for you or didn't work. The pane opens by itself only
+  when it fits beside the conversation; on a narrow screen the computer button lights up instead.
+  The box for a password or a code names the site it goes to.
 
 ### Generated interfaces use A2UI 1.0
 

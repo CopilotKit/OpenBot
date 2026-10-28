@@ -499,6 +499,19 @@ function IconStack({ kinds }: { kinds: StepKind[] }) {
   );
 }
 
+/**
+ * How a step stands, beside its words, for any step that did not simply work. The computer pane's
+ * step log says the same words (`step-log.tsx`).
+ */
+export const STEP_STATUS = {
+  waiting: "Waiting for you",
+  running: "In progress",
+  stopped: "Not completed",
+  declined: "Declined",
+  blocked: "Blocked",
+  failed: "Didn't work",
+} as const;
+
 function StepStatus({
   step,
   active,
@@ -511,15 +524,29 @@ function StepStatus({
   if (step.pending)
     return (
       <span className="shrink-0 text-muted-foreground">
-        {waiting ? "Waiting for you" : active ? "In progress" : "Not completed"}
+        {waiting
+          ? STEP_STATUS.waiting
+          : active
+            ? STEP_STATUS.running
+            : STEP_STATUS.stopped}
       </span>
     );
   if (step.declined)
-    return <span className="shrink-0 text-muted-foreground">Declined</span>;
+    return (
+      <span className="shrink-0 text-muted-foreground">
+        {STEP_STATUS.declined}
+      </span>
+    );
   if (step.refused)
-    return <span className="shrink-0 text-status-problem">Blocked</span>;
+    return (
+      <span className="shrink-0 text-status-problem">
+        {STEP_STATUS.blocked}
+      </span>
+    );
   if (step.failed)
-    return <span className="shrink-0 text-status-needs">Didn't work</span>;
+    return (
+      <span className="shrink-0 text-status-needs">{STEP_STATUS.failed}</span>
+    );
   return null;
 }
 
@@ -611,7 +638,7 @@ function StepRow({
  * A held step has no result yet, the same as one still running or one a stopped turn left behind,
  * and only the inbox can tell them apart.
  */
-function useHeldForPerson(): ReadonlySet<string> {
+export function useHeldForPerson(): ReadonlySet<string> {
   const inbox = useQuery(approvalInboxOptions());
   return useMemo(
     () =>
