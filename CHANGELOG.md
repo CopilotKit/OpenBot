@@ -65,6 +65,18 @@ nothing changed. A deployment whose `OPENAI_BASE_URL` points at an OpenAI-compat
 than OpenAI or Azure now reaches `openai/...` models through Chat Completions; a gateway that only
 speaks the Responses API needs `COPILOTKIT_OPENAI_API=responses`.
 
+### Pick a skin: OpenDuet, OpenDots or OpenMuse
+
+Settings → Preferences → Skin changes how OpenBot looks for you, and nothing about what it does.
+Three skins draw the open-source templates' looks over OpenBot's own features: OpenDuet (one
+phone-width column with Chat and Tasks), OpenDots (a rail, a sidebar of Bots with their avatars, and
+the Bot's computer beside the chat) and OpenMuse (one Bot at the centre, with Chat, Activity, Ideas,
+Goals and Apps). Every skin keeps your deployment's name from `brand.yaml`, OpenBot's own mark and
+each Bot's own avatar; only the look changes. The choice is saved on your account, so it follows
+you to every device, and changes nothing for anybody else. The templates' own features that
+OpenBot has no server for, such as OpenDots' Spaces, OpenDuet's morning brief and OpenMuse's mail and
+calendar, are not part of the skins.
+
 ### The audit log reads like a log
 
 Admin → Audit fills the window and runs the table across the whole pane, with the title, the views

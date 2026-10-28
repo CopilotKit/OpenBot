@@ -11,6 +11,8 @@
         const dark = window.localStorage.getItem("openbot-theme") === "dark";
         document.documentElement.classList.toggle("dark", dark);
         document.documentElement.style.colorScheme = dark ? "dark" : "light";
+        const skin = window.localStorage.getItem("openbot-skin");
+        if (skin && skin !== "openbot") document.documentElement.dataset.skin = skin;
       } catch {}
     </script>
   </head>

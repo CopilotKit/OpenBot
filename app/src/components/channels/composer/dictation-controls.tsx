@@ -26,6 +26,7 @@ export function DictationButton({
   return (
     <Button
       aria-label="Dictate a message"
+      data-slot="composer-dictate"
       title={
         dictation.supported
           ? "Dictate a message"
@@ -119,6 +120,7 @@ function RecordingControls({
       <Button
         ref={cancel}
         aria-label="Cancel dictation"
+        data-slot="composer-dictate-cancel"
         title="Cancel dictation"
         size="icon"
         type="button"
@@ -190,6 +192,7 @@ function RecordingControls({
           <div className="flex shrink-0 items-center gap-2">
             <Button
               aria-label="Stop and transcribe"
+              data-slot="composer-dictate-stop"
               title="Stop and add to draft"
               disabled={!recording}
               size="icon"
