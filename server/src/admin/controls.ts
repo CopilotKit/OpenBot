@@ -99,7 +99,7 @@ export type EnterpriseDeps = {
    */
   recorders?: {
     holders: () => Promise<string[]>;
-    signOut: (userId: string, via: string) => Promise<void>;
+    signOut: (userId: string, ending: string) => Promise<void>;
   };
   env?: Record<string, string | undefined>;
 };

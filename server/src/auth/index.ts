@@ -190,7 +190,7 @@ export function createAuth(
      * before a sign-out, and before any live session of theirs is deleted. Throws when it could not, and then the
      * session is not ended either: see `endRecordersOrRefuse`.
      */
-    signOutRecorders?: (userId: string, via: string) => Promise<void>;
+    signOutRecorders?: (userId: string, ending: string) => Promise<void>;
   } = {},
 ) {
   const authConfig = config.auth;
@@ -277,10 +277,10 @@ export function createAuth(
    * left as it is and whoever was ending it is told: the person stays signed in and can sign out again. Answering
    * success would have left a Recorder recording as somebody who believes they signed out, for as long as it is used.
    */
-  const endRecordersOrRefuse = async (userId: string, via: string) => {
+  const endRecordersOrRefuse = async (userId: string, ending: string) => {
     if (!options.signOutRecorders) return;
     try {
-      await options.signOutRecorders(userId, via);
+      await options.signOutRecorders(userId, ending);
     } catch {
       throw new APIError("SERVICE_UNAVAILABLE", {
         message: SIGN_OUT_UNFINISHED,

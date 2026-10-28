@@ -7,10 +7,13 @@ import { reasonWithoutStatement } from "../db/query-failure";
 import type { RecorderConnectionStore } from "./connections";
 
 /**
- * Ends every Recorder connection a person holds because their sign-in here is ending, saying how (`via`): a sign-out,
+ * Ends every Recorder connection a person holds because their sign-in here is ending, saying how (`ending`): a sign-out,
  * sessions ended some other way, the person removed. Throws {@link RecorderSignOutFailed} when they could not be ended.
  */
-export type SignOutRecorders = (userId: string, via: string) => Promise<void>;
+export type SignOutRecorders = (
+  userId: string,
+  ending: string,
+) => Promise<void>;
 
 /**
  * A person's Recorder connections could not be ended, after every attempt. The sign-in that was ending must not end
@@ -48,12 +51,12 @@ export function createRecorderSignOut(deps: {
   pausesMs?: readonly number[];
 }): SignOutRecorders {
   const pauses = deps.pausesMs ?? RETRY_PAUSES_MS;
-  return async (userId, via) => {
+  return async (userId, ending) => {
     let failure: unknown;
     for (let attempt = 0; attempt <= pauses.length; attempt += 1) {
       if (attempt > 0) await pause(pauses[attempt - 1] ?? 0);
       try {
-        await deps.connections.revokeAll(userId, "signed_out", via);
+        await deps.connections.revokeAll(userId, "signed_out", ending);
         return;
       } catch (error) {
         failure = error;
@@ -64,7 +67,7 @@ export function createRecorderSignOut(deps: {
     console.error(
       JSON.stringify({
         type: "recorder-sign-out-failed",
-        via,
+        ending,
         attempts,
         error,
       }),
@@ -76,7 +79,7 @@ export function createRecorderSignOut(deps: {
           targetType: "person",
           targetId: userId,
           initiator: DEPLOYMENT_INITIATOR,
-          payload: { via, attempts, error },
+          payload: { ending, attempts, error },
         });
       } catch (rowError) {
         console.error(

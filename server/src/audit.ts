@@ -626,14 +626,14 @@ export const auditEventTypes = [
   "recorder.connect_refused",
   /*
    * A connection ended; payload `reason` is replaced (the same copy connected again), disconnected, revoked, signed_out
-   * (the person's sign-in here ended: payload `via` says how, a sign-out, sessions ended another way, the person
+   * (the person's sign-in here ended: payload `ending` says how, a sign-out, sessions ended another way, the person
    * removed, their organization ending the session it holds a copy of) or expired (its lifetime ran out: the deployment
    * ended it, payload `owner`). Written in the transaction that ends the connection, as `recorder.connected` is in the
    * one that makes it.
    */
   "recorder.revoked",
   /*
-   * A security row: a person's sign-in here was ending (payload `via`) and their Recorder connections could not be
+   * A security row: a person's sign-in here was ending (payload `ending`) and their Recorder connections could not be
    * ended, after `attempts` tries (payload `error`, the database's complaint, never the query). The sign-in did not end
    * either, and whoever was ending it was told: the person signing out, the administrator, the directory. Target the
    * person.

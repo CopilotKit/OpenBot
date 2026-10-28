@@ -73,8 +73,11 @@ const config = loadConfig({
   COPILOTKIT_LICENSE_TOKEN: "license-token",
   OPENBOT_ORGANIZATION_AUTH_URL: `http://127.0.0.1:${authorityPort}`,
 });
+const audits: AuditEventInput[] = [];
 const auditStore = {
-  insert: async (_event: AuditEventInput) => {},
+  insert: async (event: AuditEventInput) => {
+    audits.push(event);
+  },
 };
 const roleRepository = { rolesForUser: async () => ["user" as const] };
 
@@ -269,6 +272,18 @@ test("a session the organization ended, however it ended there, ends the Recorde
     .where(eq(recorderConnections.id, connection.id));
   expect(row?.revokedAt).not.toBeNull();
   expect(row?.sealed).toBeNull();
+  // On the trail as the person's sign-in ending, and how: at their organization.
+  expect(
+    audits.find(
+      (event) =>
+        event.eventType === "recorder.revoked" &&
+        event.targetId === connection.id,
+    )?.payload,
+  ).toEqual({
+    connectionId: connection.id,
+    reason: "signed_out",
+    ending: "organization",
+  });
   // Ended, not paused: the organization answering for that cookie again does not bring it back.
   answer = signedIn;
   pastTheCache();

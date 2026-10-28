@@ -191,7 +191,7 @@ test("signing out ends the person's Recorders first, and does not sign out when 
   });
   const app = "http://127.0.0.1:3010";
   const signOut = async (
-    signOutRecorders: (userId: string, via: string) => Promise<void>,
+    signOutRecorders: (userId: string, ending: string) => Promise<void>,
   ) => {
     const auth = createOrganizationAuth({
       authorityUrl: authority.url.origin,
@@ -220,8 +220,8 @@ test("signing out ends the person's Recorders first, and does not sign out when 
     );
   };
   try {
-    const signedOut = await signOut(async (userId, via) => {
-      happened.push(`Recorders of ${userId} ended by ${via}`);
+    const signedOut = await signOut(async (userId, ending) => {
+      happened.push(`Recorders of ${userId} ended by ${ending}`);
     });
     expect(signedOut.status).toBe(200);
     expect(signedOut.headers.get("set-cookie")).toContain("Max-Age=0");

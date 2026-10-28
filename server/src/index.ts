@@ -500,8 +500,8 @@ const signInAuditStore = createAuditStore(database);
  * still fails the sign-in does not end either (recorder/sign-out.ts). Called only once something ends, which comes after
  * the Recorder's wiring below exists.
  */
-const signOutRecorders = (userId: string, via: string) =>
-  recorderExtension.signOut(userId, via);
+const signOutRecorders = (userId: string, ending: string) =>
+  recorderExtension.signOut(userId, ending);
 // Its own const so the Recorder can re-check a stored session through `verifySessionQuietly`.
 const organizationAuth = config.organizationAuthUrl
   ? createOrganizationAuth({

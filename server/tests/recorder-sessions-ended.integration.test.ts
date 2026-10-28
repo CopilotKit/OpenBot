@@ -161,7 +161,7 @@ beforeAll(async () => {
     // As index.ts passes it.
     recorders: {
       holders: () => working.connections.holders(),
-      signOut: (userId, via) => recorder.signOut(userId, via),
+      signOut: (userId, ending) => recorder.signOut(userId, ending),
     },
   });
 });
@@ -224,7 +224,7 @@ test("removing somebody ends their browsers' Recorders with their sessions, and 
   expect(
     audits.find((event) => event.eventType === "recorder.sign_out_failed")
       ?.payload,
-  ).toMatchObject({ via: "person_removed", attempts: 3 });
+  ).toMatchObject({ ending: "person_removed", attempts: 3 });
   const [still] = await database
     .select({ revokedAt: recorderConnections.revokedAt })
     .from(recorderConnections)
@@ -247,7 +247,7 @@ test("removing somebody ends their browsers' Recorders with their sessions, and 
   ).toEqual({
     connectionId: chrome.connection.id,
     reason: "signed_out",
-    via: "person_removed",
+    ending: "person_removed",
   });
 });
 
@@ -302,5 +302,5 @@ test("turning SSO-required on ends the Recorders of the people it signs out, bef
         event.eventType === "recorder.revoked" &&
         event.targetId === theirs.connection.id,
     )?.payload,
-  ).toMatchObject({ reason: "signed_out", via: "sso_required" });
+  ).toMatchObject({ reason: "signed_out", ending: "sso_required" });
 });

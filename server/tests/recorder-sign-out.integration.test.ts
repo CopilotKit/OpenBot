@@ -69,7 +69,7 @@ const working = recorderWith();
 // As index.ts: the auth is built before the Recorder's wiring, and reaches it only once something ends.
 let recorder = working;
 const auth = createAuth(config, database, undefined, undefined, {
-  signOutRecorders: (userId, via) => recorder.signOut(userId, via),
+  signOutRecorders: (userId, ending) => recorder.signOut(userId, ending),
 });
 
 let app: ReturnType<typeof createApp>;
@@ -167,7 +167,11 @@ const endings = (...connectionIds: string[]) =>
         event.eventType === "recorder.revoked" &&
         connectionIds.includes(event.targetId ?? ""),
     )
-    .map((event) => [event.targetId, event.payload.reason, event.payload.via])
+    .map((event) => [
+      event.targetId,
+      event.payload.reason,
+      event.payload.ending,
+    ])
     .sort();
 
 test("signing out of OpenBot signs every Recorder connected as that person out, and nobody else's", async () => {
@@ -216,7 +220,7 @@ test("a sign-out whose Recorders cannot be ended does not happen: the person is 
       targetId: person,
       initiator: { kind: "deployment" },
       payload: {
-        via: "/sign-out",
+        ending: "/sign-out",
         attempts: 3,
         error: "the audit trail is unavailable",
       },
@@ -291,7 +295,7 @@ test("ending every session when the Recorders cannot be ended ends none, and say
   expect(
     audits.find((event) => event.eventType === "recorder.sign_out_failed")
       ?.payload,
-  ).toMatchObject({ via: "/revoke-sessions", attempts: 3 });
+  ).toMatchObject({ ending: "/revoke-sessions", attempts: 3 });
 });
 
 test("a session that ends by itself, or is found expired, does not sign the Recorder out", async () => {

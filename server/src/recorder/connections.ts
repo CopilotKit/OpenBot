@@ -65,7 +65,7 @@ export type SealedOrganizationSession = { sealed: string; expiresAt: Date };
 /**
  * Why a connection ended, as its `recorder.revoked` row says: `replaced` (the same copy connected again), `disconnected`
  * (its own Recorder's Disconnect), `revoked` (the person, from Settings, Browsers), `signed_out` (the person's sign-in
- * here ended: they signed out, their sessions were ended, they were removed; the row's `via` says how) or `expired`
+ * here ended: they signed out, their sessions were ended, they were removed; the row's `ending` says how) or `expired`
  * (its lifetime ran out).
  */
 export type RecorderRevokeReason =
@@ -157,7 +157,8 @@ export function createRecorderConnectionStore(
     transaction: Transaction,
     ended: Array<{ id: string; userId: string }>,
     reason: RecorderRevokeReason,
-    via?: string,
+    /** How the person's sign-in ended, for `signed_out`. */
+    ending?: string,
   ) {
     if (!auditFor || ended.length === 0) return;
     const auditStore = auditFor(transaction as unknown as Database);
@@ -173,7 +174,7 @@ export function createRecorderConnectionStore(
         payload: {
           connectionId: connection.id,
           reason,
-          ...(via ? { via } : {}),
+          ...(ending ? { ending } : {}),
           ...(reason === "expired" ? { owner: connection.userId } : {}),
         },
       });
@@ -381,7 +382,7 @@ export function createRecorderConnectionStore(
       userId: string,
       connectionId: string,
       reason: "disconnected" | "revoked" | "signed_out",
-      via?: string,
+      ending?: string,
     ): Promise<boolean> {
       return database.transaction(async (transaction) => {
         const revoked = await transaction
@@ -402,7 +403,7 @@ export function createRecorderConnectionStore(
             id: recorderConnections.id,
             userId: recorderConnections.userId,
           });
-        await auditRevoked(transaction, revoked, reason, via);
+        await auditRevoked(transaction, revoked, reason, ending);
         return revoked.length > 0;
       });
     },
@@ -418,7 +419,7 @@ export function createRecorderConnectionStore(
     async revokeAll(
       userId: string,
       reason: "signed_out",
-      via?: string,
+      ending?: string,
     ): Promise<string[]> {
       return database.transaction(async (transaction) => {
         await transaction
@@ -441,7 +442,7 @@ export function createRecorderConnectionStore(
             id: recorderConnections.id,
             userId: recorderConnections.userId,
           });
-        await auditRevoked(transaction, revoked, reason, via);
+        await auditRevoked(transaction, revoked, reason, ending);
         return revoked.map((connection) => connection.id);
       });
     },

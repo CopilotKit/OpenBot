@@ -120,7 +120,7 @@ export function createOrganizationAuth(options: {
    * the organization is asked to end their session. Throws when it could not, and then the sign-out does not happen:
    * see the sign-out route below.
    */
-  signOutRecorders?: (userId: string, via: string) => Promise<void>;
+  signOutRecorders?: (userId: string, ending: string) => Promise<void>;
 }): AuthService & {
   verifySessionQuietly: (
     cookieHeader: string,
