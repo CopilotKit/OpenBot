@@ -1518,7 +1518,6 @@ export function Composer({
              * the middle of that block rather than sitting on the line the person is typing. Empty,
              * the row is exactly a button tall, so centred and bottom are the same pixel.
              */}
-            {modelSelector}
             <div className="flex items-center gap-3">
               {attachmentsEnabled ? (
                 <Button
@@ -1568,6 +1567,11 @@ export function Composer({
                 dictation={dictation}
                 disabled={disabled || voiceCall?.active === true}
               />
+              {modelSelector ? (
+                <div className="min-w-0 max-w-[45%] self-end">
+                  {modelSelector}
+                </div>
+              ) : null}
               {primaryAction}
             </div>
           </DictationSurface>
@@ -1639,14 +1643,13 @@ export function Composer({
               ) : (
                 <div />
               )}
-
-              {modelSelector}
             </div>
             <div className="flex items-center gap-1">
               <DictationButton
                 dictation={dictation}
                 disabled={disabled || voiceCall?.active === true}
               />
+              {modelSelector}
               {primaryAction}
             </div>
           </div>
