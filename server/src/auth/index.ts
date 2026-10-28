@@ -4,7 +4,7 @@ import { expo } from "@better-auth/expo";
 import { scim } from "@better-auth/scim";
 import { sso } from "@better-auth/sso";
 import { betterAuth } from "better-auth";
-import { APIError } from "better-auth/api";
+import { APIError, createAuthMiddleware } from "better-auth/api";
 import { genericOAuth, okta } from "better-auth/plugins";
 import { eq, sql } from "drizzle-orm";
 import { createEnterpriseStore } from "../admin/settings-store";
@@ -12,7 +12,6 @@ import type { AuditEventInput, AuditStore } from "../audit";
 import { recordAuditEvent } from "../audit";
 import type { DeploymentConfig } from "../config";
 import type { Database } from "../db/client";
-import { reasonWithoutStatement } from "../db/query-failure";
 import {
   accounts,
   scimConnectionBindings,
@@ -29,6 +28,7 @@ import {
 } from "../db/schema";
 import { DOMAIN_REFUSAL_MESSAGE, emailDomainAllowed } from "./email-domain";
 import { encryptSsoConfig } from "./encrypt-sso-config";
+import { SIGN_OUT_UNFINISHED } from "./organization";
 import { applyConfiguredAdmin, isConfiguredAdmin, seedRole } from "./roles";
 import { recordProvisioned, scimOptions } from "./scim";
 
@@ -186,11 +186,11 @@ export function createAuth(
   auditStore?: AuditStore,
   options: {
     /**
-     * A person signed out, and their session is gone: what else they were signed in with ends too (their Recorder
-     * connections, index.ts). Its failure is logged and the sign-out still stands, as Better Auth's own sign-out
-     * stands when the session row cannot be deleted.
+     * Ends what else a person is signed in with here (their Recorder connections, index.ts) whenever their sign-in ends:
+     * before a sign-out, and before any live session of theirs is deleted. Throws when it could not, and then the
+     * session is not ended either: see `endRecordersOrRefuse`.
      */
-    onSignedOut?: (userId: string) => Promise<void>;
+    signOutRecorders?: (userId: string, via: string) => Promise<void>;
   } = {},
 ) {
   const authConfig = config.auth;
@@ -268,7 +268,46 @@ export function createAuth(
     }),
   ];
 
+  /*
+   * A person's sessions and their Recorder connections end together or not at all. They are one sign-in, and ending
+   * access here is never reported done while half of it stands: a removal ends sessions and deny-lists in one
+   * transaction (people/store.ts), a removed person's linked accounts are retired in one transaction with their rows
+   * (identity/retire.ts), and a connection ends exactly when its row is written (recorder/connections.ts). So when the
+   * Recorders cannot be ended (signOutRecorders has retried and written `recorder.sign_out_failed`), the session is
+   * left as it is and whoever was ending it is told: the person stays signed in and can sign out again. Answering
+   * success would have left a Recorder recording as somebody who believes they signed out, for as long as it is used.
+   */
+  const endRecordersOrRefuse = async (userId: string, via: string) => {
+    if (!options.signOutRecorders) return;
+    try {
+      await options.signOutRecorders(userId, via);
+    } catch {
+      throw new APIError("SERVICE_UNAVAILABLE", {
+        message: SIGN_OUT_UNFINISHED,
+      });
+    }
+  };
+
   return betterAuth({
+    /*
+     * A sign-out ends the Recorders before Better Auth ends the session, here rather than in the session's delete hook
+     * below: the sign-out route goes on when deleting the session throws (it logs, clears the cookie and answers
+     * success), so only a refusal made before it starts reaches the person. The session is the one the route itself
+     * would end, found the way it finds it (the signed cookie, then the row, expired or not).
+     */
+    hooks: {
+      before: createAuthMiddleware(async (context) => {
+        if (context.path !== "/sign-out" || !options.signOutRecorders) return;
+        const token = await context.getSignedCookie(
+          context.context.authCookies.sessionToken.name,
+          context.context.secret,
+        );
+        if (!token) return;
+        const found = await context.context.internalAdapter.findSession(token);
+        if (found)
+          await endRecordersOrRefuse(found.session.userId, "/sign-out");
+      }),
+    },
     user: {
       additionalFields: {
         preferences: {
@@ -560,21 +599,21 @@ export function createAuth(
         },
         delete: {
           /*
-           * Only a sign-out. Better Auth also deletes a session it finds expired, and one ended from another of the
-           * person's sessions; neither is the person signing out where they are.
+           * Every other way a live session ends: signing out everywhere (`/revoke-sessions`), ending one session or
+           * all the others (`/revoke-session`, `/revoke-other-sessions`), a password reset or change that signs out
+           * other sessions, the directory deactivating the person (SCIM), the identity provider's single logout,
+           * another account proving the address. Better Auth deletes sessions through this hook on every one of them.
+           * Before the delete, so a refusal leaves the session where it was and the caller is told. Not a sign-out,
+           * whose Recorders ended in the hook above, and not a session Better Auth finds expired and tidies away:
+           * nobody ended that one, and a Recorder lasts its own lifetime.
            */
-          after: async (session, context) => {
-            if (context?.path !== "/sign-out" || !options.onSignedOut) return;
-            try {
-              await options.onSignedOut(session.userId);
-            } catch (error) {
-              console.error(
-                JSON.stringify({
-                  type: "sign-out-follow-up-failed",
-                  error: reasonWithoutStatement(error),
-                }),
-              );
-            }
+          before: async (session, context) => {
+            if (context?.path === "/sign-out") return;
+            if (new Date(session.expiresAt).getTime() <= Date.now()) return;
+            await endRecordersOrRefuse(
+              session.userId,
+              context?.path ?? "sessions-ended",
+            );
           },
         },
       },

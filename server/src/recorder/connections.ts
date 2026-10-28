@@ -47,20 +47,26 @@ export type RecorderConnectionStore = ReturnType<
  * - `idle`: until it has gone this long unused, as a Better Auth session does. Better Auth moves a session's expiry to
  *   `expiresIn` from now each time it is used, so a session ends that long after its last use; a connection's last use
  *   is `last_used_at`, written at most once a minute.
- * - `absolute`: this long after it was made, whatever its use. Organization mode's: its connection carries a sealed copy
- *   of the organization session cookie, and the copy must not outlive the cookie it was taken from, whose Max-Age this is.
+ * - `organization`: until the organization session cookie it carries a sealed copy of expires, whatever its use: the
+ *   copy must not outlive the cookie it was taken from. That expiry is kept with the copy
+ *   (`organization_session_expires_at`). A connection made before it was kept has none, and lasts `ms` (the cookie's
+ *   Max-Age) from when it was made, which no cookie it could have copied outlived.
  * - `null`: never, where there is no session to take a lifetime from. A single-user OpenBot has no sign-in: every
  *   request to it is already its one person.
  */
 export type RecorderConnectionLifetime =
   | { kind: "idle"; ms: number }
-  | { kind: "absolute"; ms: number }
+  | { kind: "organization"; ms: number }
   | null;
+
+/** A sealed copy of the person's organization session cookie, and when that cookie expires (recorder/wiring.ts). */
+export type SealedOrganizationSession = { sealed: string; expiresAt: Date };
 
 /**
  * Why a connection ended, as its `recorder.revoked` row says: `replaced` (the same copy connected again), `disconnected`
- * (its own Recorder's Disconnect), `revoked` (the person, from Settings, Browsers), `signed_out` (the person signed out
- * of OpenBot) or `expired` (its lifetime ran out).
+ * (its own Recorder's Disconnect), `revoked` (the person, from Settings, Browsers), `signed_out` (the person's sign-in
+ * here ended: they signed out, their sessions were ended, they were removed; the row's `via` says how) or `expired`
+ * (its lifetime ran out).
  */
 export type RecorderRevokeReason =
   | "replaced"
@@ -129,12 +135,18 @@ export function createRecorderConnectionStore(
   const withinLifetime = (at: Date): SQL | undefined => {
     if (!lifetime) return undefined;
     const since = new Date(at.getTime() - lifetime.ms);
-    return lifetime.kind === "idle"
-      ? gt(
-          sql`coalesce(${recorderConnections.lastUsedAt}, ${recorderConnections.createdAt})`,
-          since,
-        )
-      : gt(recorderConnections.createdAt, since);
+    if (lifetime.kind === "idle")
+      return gt(
+        sql`coalesce(${recorderConnections.lastUsedAt}, ${recorderConnections.createdAt})`,
+        since,
+      );
+    return or(
+      gt(recorderConnections.organizationSessionExpiresAt, at),
+      and(
+        isNull(recorderConnections.organizationSessionExpiresAt),
+        gt(recorderConnections.createdAt, since),
+      ),
+    );
   };
   /** Not revoked, and within its lifetime. */
   const live = (at: Date) =>
@@ -145,6 +157,7 @@ export function createRecorderConnectionStore(
     transaction: Transaction,
     ended: Array<{ id: string; userId: string }>,
     reason: RecorderRevokeReason,
+    via?: string,
   ) {
     if (!auditFor || ended.length === 0) return;
     const auditStore = auditFor(transaction as unknown as Database);
@@ -160,6 +173,7 @@ export function createRecorderConnectionStore(
         payload: {
           connectionId: connection.id,
           reason,
+          ...(via ? { via } : {}),
           ...(reason === "expired" ? { owner: connection.userId } : {}),
         },
       });
@@ -177,7 +191,7 @@ export function createRecorderConnectionStore(
     async mintCode(
       userId: string,
       via: RecorderConnectVia,
-      organizationSession: string | null = null,
+      organizationSession: SealedOrganizationSession | null = null,
     ): Promise<ConnectCodeResponse | null> {
       const created = now();
       // Outside the lock, which is one person's: these rows are everybody's.
@@ -204,7 +218,8 @@ export function createRecorderConnectionStore(
           codeHash: digest(code),
           userId,
           via,
-          organizationSession,
+          organizationSession: organizationSession?.sealed ?? null,
+          organizationSessionExpiresAt: organizationSession?.expiresAt ?? null,
           createdAt: created,
           expiresAt,
         });
@@ -248,7 +263,11 @@ export function createRecorderConnectionStore(
         );
         const replaced = await transaction
           .update(recorderConnections)
-          .set({ revokedAt: at, organizationSession: null })
+          .set({
+            revokedAt: at,
+            organizationSession: null,
+            organizationSessionExpiresAt: null,
+          })
           .where(
             and(
               eq(recorderConnections.userId, consumed.userId),
@@ -272,6 +291,7 @@ export function createRecorderConnectionStore(
             extensionId: input.extensionId,
             installId: input.installId,
             organizationSession: consumed.organizationSession,
+            organizationSessionExpiresAt: consumed.organizationSessionExpiresAt,
             createdAt: at,
           })
           .returning();
@@ -360,12 +380,17 @@ export function createRecorderConnectionStore(
     async revoke(
       userId: string,
       connectionId: string,
-      reason: "disconnected" | "revoked",
+      reason: "disconnected" | "revoked" | "signed_out",
+      via?: string,
     ): Promise<boolean> {
       return database.transaction(async (transaction) => {
         const revoked = await transaction
           .update(recorderConnections)
-          .set({ revokedAt: now(), organizationSession: null })
+          .set({
+            revokedAt: now(),
+            organizationSession: null,
+            organizationSessionExpiresAt: null,
+          })
           .where(
             and(
               eq(recorderConnections.id, connectionId),
@@ -377,7 +402,7 @@ export function createRecorderConnectionStore(
             id: recorderConnections.id,
             userId: recorderConnections.userId,
           });
-        await auditRevoked(transaction, revoked, reason);
+        await auditRevoked(transaction, revoked, reason, via);
         return revoked.length > 0;
       });
     },
@@ -390,14 +415,22 @@ export function createRecorderConnectionStore(
      * The codes first: an exchange already under way holds its code, so deleting the codes waits for it, and the
      * connection it made is then there to be ended with the rest.
      */
-    async revokeAll(userId: string, reason: "signed_out"): Promise<string[]> {
+    async revokeAll(
+      userId: string,
+      reason: "signed_out",
+      via?: string,
+    ): Promise<string[]> {
       return database.transaction(async (transaction) => {
         await transaction
           .delete(recorderConnectCodes)
           .where(eq(recorderConnectCodes.userId, userId));
         const revoked = await transaction
           .update(recorderConnections)
-          .set({ revokedAt: now(), organizationSession: null })
+          .set({
+            revokedAt: now(),
+            organizationSession: null,
+            organizationSessionExpiresAt: null,
+          })
           .where(
             and(
               eq(recorderConnections.userId, userId),
@@ -408,9 +441,18 @@ export function createRecorderConnectionStore(
             id: recorderConnections.id,
             userId: recorderConnections.userId,
           });
-        await auditRevoked(transaction, revoked, reason);
+        await auditRevoked(transaction, revoked, reason, via);
         return revoked.map((connection) => connection.id);
       });
+    },
+
+    /** Everybody who holds a live connection now, each once: whose Recorders a sign-in ending for many people ends. */
+    async holders(): Promise<string[]> {
+      const rows = await database
+        .selectDistinct({ userId: recorderConnections.userId })
+        .from(recorderConnections)
+        .where(live(now()));
+      return rows.map((row) => row.userId);
     },
 
     /**
@@ -436,7 +478,11 @@ export function createRecorderConnectionStore(
           .for("update", { skipLocked: true });
         const expired = await transaction
           .update(recorderConnections)
-          .set({ revokedAt: at, organizationSession: null })
+          .set({
+            revokedAt: at,
+            organizationSession: null,
+            organizationSessionExpiresAt: null,
+          })
           .where(
             and(
               inArray(recorderConnections.id, due),

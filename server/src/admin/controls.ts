@@ -93,6 +93,14 @@ export type EnterpriseDeps = {
     restore: (userId: string) => Promise<void>;
   };
   initialAdminEmails?: readonly string[];
+  /**
+   * The people's browsers' Recorders (recorder/wiring.ts): who holds a live connection, and the sign-out that ends a
+   * person's. Turning SSO-required on ends them for the people it signs out. Absent where there is no Recorder.
+   */
+  recorders?: {
+    holders: () => Promise<string[]>;
+    signOut: (userId: string, via: string) => Promise<void>;
+  };
   env?: Record<string, string | undefined>;
 };
 
