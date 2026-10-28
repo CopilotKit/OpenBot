@@ -68,34 +68,35 @@ describe("naming a tool call", () => {
     });
   });
 
-  test("a brokered app never puts the broker on screen", () => {
+  test("a brokered app's action is named without any vendor's prefix", () => {
     // Composio is how this deployment reaches Gmail, which is plumbing: the reader asked their Bot
-    // about their email, not about which broker holds the grant. The app also names itself in every
-    // tool it publishes, so "Gmail fetch emails" already says which mailbox was read.
+    // about their email, not about which broker holds the grant. Composio also prefixes every tool
+    // with the app, so the app is dropped from the action and named once, beside it.
     expect(readToolName("mcp__composio-gmail__GMAIL_FETCH_EMAILS")).toEqual({
-      label: "Gmail fetch emails",
-    });
-    expect(readToolName("mcp__composio-slack__SLACK_SEND_EMAIL")).toEqual({
-      label: "Slack send email",
-    });
-  });
-
-  test("a brokered app the label does not name is kept, without its broker", () => {
-    // The app still belongs on screen when the action does not say it — but as the app, never as
-    // `composio-gmail`. This is what proves the prefix is stripped rather than the detail deleted.
-    expect(readToolName("mcp__composio-gmail__FETCH_EMAILS")).toEqual({
       label: "Fetch emails",
-      detail: "gmail",
+      detail: "Gmail",
     });
-  });
-
-  test("a brokered app named by the label's first word is still dropped", () => {
-    // Composio writes `<APP>_<VERB>_<NOUN>`, so the app leads and is never the verb. The rule that
-    // protects `posts`/`post_message` excludes the first word from the search, and applying it here
-    // would put "googlecalendar" beside a label that opens with it.
+    expect(readToolName("mcp__composio-airtable__AIRTABLE_LIST_BASES")).toEqual(
+      { label: "List bases", detail: "Airtable" },
+    );
     expect(
       readToolName("mcp__composio-googlecalendar__GOOGLECALENDAR_CREATE_EVENT"),
-    ).toEqual({ label: "Googlecalendar create event" });
+    ).toEqual({ label: "Create event", detail: "Googlecalendar" });
+  });
+
+  test("an action that does not lead with its app is kept whole, beside the app", () => {
+    expect(readToolName("mcp__composio-gmail__FETCH_EMAILS")).toEqual({
+      label: "Fetch emails",
+      detail: "Gmail",
+    });
+  });
+
+  test("an Arcade app is named as the app, never as arcade-", () => {
+    // Arcade already strips its toolkit from the action, so only the broker prefix is left to drop.
+    expect(readToolName("mcp__arcade-Gmail__ListEmails")).toEqual({
+      label: "List emails",
+      detail: "Gmail",
+    });
   });
 
   test("a component the app registered is left alone", () => {
@@ -146,5 +147,20 @@ describe("naming a tool call", () => {
       label: "List files",
       detail: "lists",
     });
+  });
+});
+
+describe("this deployment's own tools", () => {
+  test("show_app_access is named for what it is doing, then for what it did", () => {
+    expect(readToolName("show_app_access", true)).toEqual({
+      label: "Checking app access",
+    });
+    expect(readToolName("show_app_access")).toEqual({
+      label: "Checked app access",
+    });
+  });
+
+  test("any other bare name is left exactly as it is", () => {
+    expect(readToolName("run_command", true)).toEqual({ label: "run_command" });
   });
 });

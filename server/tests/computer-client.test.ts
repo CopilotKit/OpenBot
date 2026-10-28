@@ -197,7 +197,7 @@ describe("computer client", () => {
       throw new Error("connect ECONNREFUSED");
     });
     await expect(missing.navigate("https://example.com")).rejects.toThrow(
-      "The assistant's computer is not running.",
+      "The Bot's computer isn't running.",
     );
 
     const timedOut = clientWith(() => {
@@ -206,7 +206,7 @@ describe("computer client", () => {
       throw error;
     });
     await expect(timedOut.navigate("https://example.com")).rejects.toThrow(
-      "The assistant's computer did not respond in time.",
+      "The Bot's computer didn't respond in time.",
     );
 
     const badPage = clientWith(
@@ -556,6 +556,6 @@ describe("a person's Stop", () => {
 
     await expect(
       transport.post("http://computer", "bot-1", "/click", {}),
-    ).rejects.toThrow("The assistant's computer is not running.");
+    ).rejects.toThrow("The Bot's computer isn't running.");
   });
 });

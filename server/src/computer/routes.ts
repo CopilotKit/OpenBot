@@ -1,7 +1,8 @@
+import { downloadHeaders } from "@openbot/shared/file-download";
 import type { Context, MiddlewareHandler } from "hono";
 import { Hono } from "hono";
-import { downloadHeaders } from "@openbot/shared/file-download";
 import type { BotAccessCheck } from "../agents/profile-policy";
+import { ApprovalNeedsConversationError } from "../approvals/types";
 import type { AuditReader } from "../audit";
 import type { AppVariables } from "../auth/guards";
 import { requireAdmin } from "../auth/guards";
@@ -10,6 +11,7 @@ import {
   type ActionActor,
   ActionRefusedError,
   type ComputerGateway,
+  ComputerStillStartingError,
   ComputerUnavailableError,
   ElementNotFoundError,
   HandoffRequestError,
@@ -98,9 +100,36 @@ export function createComputerRoutes(
     return context.json(await gateway.status(botId));
   });
 
+  /**
+   * The frame a watcher polls for, and never the thing that wakes a computer.
+   *
+   * `screenshot` goes through `locate`, and `locate` resumes a suspended computer and waits for it.
+   * Called blind, opening the panel was enough to start a Bot's computer, every poll after that held
+   * a request open for the length of a cold start, and the first one to give up was drawn as "can't
+   * show the screen". The computer starts on the first thing a Bot does with it; looking at it is
+   * not that.
+   *
+   * So the status is asked first, which reads the provider's own record and touches nothing. A
+   * computer that is not ready answers 200 with `ready: false` and its state: an answer, not an
+   * error, because a computer that is asleep or starting is behaving normally and the panel draws
+   * it as such. Only an unreachable one is a fault, and the state says that too.
+   *
+   * There is a gap between the two calls, and a computer suspended inside it is woken by the
+   * screenshot. The culler suspends after a long idle, so landing in that gap needs a viewer polling
+   * at the exact moment of the suspend; the cost is one computer started early, never a wrong frame.
+   */
   routes.get("/:botId/screenshot", async (context) => {
+    const botId = context.req.param("botId");
     try {
-      return context.json(await gateway.screenshot(context.req.param("botId")));
+      const status = await gateway.status(botId);
+      if (status.state !== "ready") {
+        return context.json({
+          ready: false,
+          state: status.state,
+          ...(status.reason ? { reason: status.reason } : {}),
+        });
+      }
+      return context.json(await gateway.screenshot(botId));
     } catch (error) {
       return context.json(errorBody(error), statusFor(error));
     }
@@ -368,7 +397,7 @@ export function createComputerRoutes(
         actor,
         typeof body?.reason === "string" && body.reason.trim()
           ? body.reason.trim()
-          : "The assistant needs a person to continue.",
+          : "It can't continue without you.",
         typeof body?.toolCallId === "string" ? body.toolCallId : undefined,
       ),
     ),
@@ -732,7 +761,7 @@ export function createComputerRoutes(
       return context.json(
         {
           error:
-            "That rule could not be saved, so it has not been applied. The previous boundary is still in force.",
+            "Couldn't save that rule. The previous boundary still applies.",
         },
         503,
       );
@@ -994,6 +1023,21 @@ function errorBody(error: unknown): Record<string, unknown> {
     ...(error instanceof HandoffRequestError
       ? { controlRequestError: true }
       : {}),
+    /*
+     * A cold start that outlasted the wait. Marked so the browser can draw a wait rather than a
+     * failure, and tell the model the call was not performed and is worth repeating. Without the
+     * flag it reads as any other unavailable computer, which sends a person looking for an outage.
+     */
+    ...(error instanceof ComputerStillStartingError
+      ? { starting: true, notPerformed: true }
+      : {}),
+    /*
+     * A rule asks about this call and it came without the conversation the asking happens in. Marked
+     * so the browser sends the same call again through the approval route, which carries it.
+     */
+    ...(error instanceof ApprovalNeedsConversationError
+      ? { needsConversation: true, notPerformed: true }
+      : {}),
   };
 }
 
@@ -1017,6 +1061,8 @@ function statusFor(error: unknown): 400 | 403 | 404 | 409 | 413 | 500 | 503 {
   // another snapshot. Not 503, which says the computer is unavailable and sends an operator hunting a
   // container that is running perfectly.
   if (error instanceof ElementNotFoundError) return 409;
+  // Nothing is broken here either: the call has to come again with its conversation first.
+  if (error instanceof ApprovalNeedsConversationError) return 409;
   // A person holding the wheel, or a person driving before taking it. Nothing is broken; the caller
   // has to wait or take control first, and 409 is how both of those are already reported.
   if (

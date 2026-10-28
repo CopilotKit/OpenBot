@@ -82,12 +82,12 @@ export function SkillTools({
 
       {plugins.isPending ? null : plugins.error ? (
         <p className="text-destructive text-xs" role="alert">
-          Could not load the tools this deployment has.
+          Couldn't load the tools. Reload the page.
         </p>
       ) : servers.length === 0 ? (
         <p className="text-muted-foreground text-xs">
-          No connected server offers a tool yet. A skill can still be written —
-          most are instructions rather than tool use.
+          No app offers tools yet. You can still write the skill. Most skills
+          are only instructions.
         </p>
       ) : (
         <div className="flex flex-col gap-3">
@@ -143,7 +143,7 @@ export function SkillTools({
                 key={role.ref}
                 onClick={() => toggle(role.ref)}
                 size="sm"
-                title={`${role.ref} — on whichever research connector the Bot holds`}
+                title={`${role.ref}: uses whichever research app the Bot has`}
                 type="button"
                 variant={held.has(role.ref) ? "default" : "outline"}
               >
@@ -156,7 +156,7 @@ export function SkillTools({
 
       {elsewhere.length > 0 ? (
         <div className="flex flex-col gap-1.5">
-          <p className="text-muted-foreground text-xs">Not connected here</p>
+          <p className="text-muted-foreground text-xs">Not available here</p>
           <div className="flex flex-wrap gap-2">
             {elsewhere.map((ref) => (
               <Button
@@ -167,7 +167,7 @@ export function SkillTools({
                  * The whole ref, not a tool name. There is no server here to put it under, and the
                  * server id is the part that says which connector is missing.
                  */
-                title={`${ref} — no connected server offers this`}
+                title={`${ref}: no app here offers this`}
                 type="button"
                 variant="secondary"
               >
@@ -176,18 +176,15 @@ export function SkillTools({
             ))}
           </div>
           <p className="text-muted-foreground text-xs">
-            This skill names these, and no server connected here offers them —
-            because the connector has not been added, or was removed. They cost
-            nothing and load nothing until it exists. Click one to stop naming
-            it.
+            This skill asks for these, but no app here offers them. They do
+            nothing until an admin adds the app. Click one to remove it.
           </p>
         </div>
       ) : null}
 
       <p className="text-muted-foreground text-xs">
-        Picking this skill is what loads these tools for a turn. It does not
-        grant them — a Bot still only calls what it was granted, so naming a
-        tool here gives nobody access to it.
+        Using this skill loads these tools for that reply. It doesn't give
+        access. A Bot can only use tools it already has.
       </p>
     </Field>
   );

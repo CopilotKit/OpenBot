@@ -22,7 +22,8 @@ bash scripts/start.sh
 | `KEY_ENCRYPTION_KEY`          | Base64-encoded 32-byte key for encrypted stored credentials. Generate with `openssl rand -base64 32`. |
 | `INTELLIGENCE_API_URL`        | CopilotKit Intelligence API URL.                                                                      |
 | `INTELLIGENCE_GATEWAY_WS_URL` | CopilotKit Intelligence realtime gateway URL.                                                         |
-| `INTELLIGENCE_API_KEY`        | Runtime key for the Intelligence project.                                                             |
+| `CPK_INTELLIGENCE_API_KEY` | Runtime key written by the CopilotKit CLI. Preferred when non-empty. |
+| `INTELLIGENCE_API_KEY` | Legacy runtime key; used when `CPK_INTELLIGENCE_API_KEY` is empty or absent. |
 
 All five above stop server startup if missing. The three `INTELLIGENCE_` values are additionally
 checked as a set, so a partial set is refused as a misconfiguration rather than treated as
@@ -71,8 +72,8 @@ at `agent-langgraph` on a laptop.
 | `COMPOSIO_API_KEY`   | unset                              | One key for the whole deployment, for the broker that holds people's accounts for a few hundred apps. Unset, there is nothing to connect, nothing to grant and no Composio tool for a Bot to call; what remains is one row that goes nowhere, under **More apps** on the admin Plugins page, naming this variable. See [Composio](plugins/composio.md). |
 
 **`OPENBOT_GENERATIVE_UI`** enables generated interfaces by default: streamed HTML/CSS/JavaScript
-in a sandboxed iframe, and A2UI interfaces built from the SDK's declarative components. A2UI buttons
-send their named action and selected values back to the current conversation's Bot.
+in a sandboxed iframe, and A2UI 1.0 interfaces built from its 18 basic components. Their buttons send
+their named action and the values entered back to the current conversation's Bot.
 Set `OPENBOT_GENERATIVE_UI=false` or `0` to disable both. `true`, `1`, an empty value, or an unset
 value leave the capability on. The server configures both runtime renderers and reports the same
 setting through `/api/capabilities` to the browser.
@@ -492,10 +493,12 @@ number opted out, later messages show `opted_out` in the delivery history instea
 ## Linked accounts
 
 OpenBot keeps a record of a person's accounts at outside providers, such as their GitHub account
-or their Slack user. They appear under **Linked accounts** on `/settings/connected-accounts`, one
-card per account type: the person's link with a **Disconnect** button, or, where this deployment can
-link that type, a "Not linked" card with **Connect**. The section is hidden when nothing is linked,
-nothing can be linked and nothing failed to load. Disconnecting removes the link and revokes
+or their Slack user. Each provider is a row on `/connections`, beside the apps, listed when the
+person has linked it or this deployment can link it. The row opens the provider's own page
+(`/connections/github`, `/connections/slack`), whose **Your account** section shows the link with a
+**Disconnect** button, or **Connect** where it can be linked. GitHub's page also lists the
+repositories whose events can start a responsibility, and links to a Composio GitHub app where one is
+enabled, which is then left out of the list so GitHub appears once. Disconnecting removes the link and revokes
 OpenBot's stored copy of any token kept with it, and is audited. For GitHub, the grant itself stays
 at GitHub until the person revokes it under GitHub, Settings, Applications.
 
@@ -517,7 +520,7 @@ link is recorded in the audit trail.
 
 Slack is offered only where the OpenTag Slack webhook is set up (the pairing above, so
 `OPENTAG_SHARED_SECRET` must be set) and the server can redeem identity codes. The person clicks
-**Connect** on the Slack card, which shows a message of the form `link <code>`, and sends it to the
+**Connect** on Slack's page, which shows a message of the form `link <code>`, and sends it to the
 OpenBot app in a direct message within ten minutes. A code sent in a channel is refused and stays
 valid until it expires. Teams cannot be linked this way.
 
@@ -530,16 +533,16 @@ GitHub uses a GitHub App. Create one under GitHub Settings, Developer settings, 
 - A client secret, generated on the App's page.
 
 Then set `GITHUB_APP_CLIENT_ID` and `GITHUB_APP_CLIENT_SECRET`; set both or neither. People
-then use **Connect** on the GitHub card while signed in to OpenBot in the same browser. The GitHub
+then use **Connect** on GitHub's page while signed in to OpenBot in the same browser. The GitHub
 user token is stored encrypted with the link.
 
-After GitHub, the browser is sent back to `OPENBOT_APP_URL`, else the first `TRUSTED_ORIGINS` entry,
+After GitHub, the browser is sent back to GitHub's page under Connections, at `OPENBOT_APP_URL`, else the first `TRUSTED_ORIGINS` entry,
 else the public URL. Set `OPENBOT_APP_URL` when the app and the server are on different origins, as
 in local development (app on `3010`, server on `3001`); one origin needs nothing.
 
-Reachability codes and Linked accounts codes look alike, and Reachability's are checked first. A
+Reachability codes and account-link codes look alike, and Reachability's are checked first. A
 Reachability `link <code>` binds a conversation for delivery and is not recorded as a linked
-account; a `link <code>` from **Linked accounts** links the Slack user.
+account; a `link <code>` from Slack's page under Connections links the Slack user.
 
 ## Text messages and push notifications
 
@@ -626,6 +629,7 @@ is still the record.
 | `AGENT_COMPUTER_URL`                 | Shared computer URL. If absent, computer routes are not mounted.                          |
 | `COMPUTER_TOKEN`                     | Secret every computer request must present. The computer refuses to start without it.     |
 | `COMPUTER_MAX_BROWSERS`              | How many Bots may hold a running browser at once. `8` by default; the least recently used is closed past it. |
+| `COMPUTER_SEPARATE_WORKSPACES`       | `on` gives each Bot its own folder of files on a computer many Bots share, with its shell starting there. On for Helm's `shared` computer and the docker-compose `agent-computer`; off elsewhere. Files saved before it was on stay at the root of the volume. Commands can still read other folders: use `computers.mode: sandbox` to keep people apart. |
 | `COMPUTER_BROWSER_IDLE_MS`           | How long an untouched browser is kept. 30 minutes by default; `0` keeps them resident.    |
 | `COMPUTER_BROWSER_BACKEND`           | `managed` by default (full bundled Chromium); `local-chrome` opts into installed Chrome with dedicated profiles and a loopback API. |
 | `COMPUTER_BROWSER_MODE`              | Managed defaults to `headed` on Linux, which is every hosted computer (a container, a pod, the desktop app's engine): full Chromium on the computer's own Xvfb display. A computer run directly on macOS or Windows defaults to `headless`, where headed would open windows on the desktop. `headless` is full Chromium's new headless mode. Local Chrome requires `headed`. See [Getting past bot checks](#getting-past-bot-checks). |

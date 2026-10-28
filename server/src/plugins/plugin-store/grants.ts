@@ -13,18 +13,39 @@ import {
 export function grantMethods(context: StoreContext) {
   const { database, auditStore, toolsDeclaredBy } = context;
   return {
+    /**
+     * Give a Bot one thing, as an administrator or — `as: "owner"` — as the Bot's owner giving it one
+     * of their own apps. See `plugin_grants.granted_as` for what the difference decides.
+     *
+     * AN OWNER'S GRANT NEVER OVERWRITES AN ADMINISTRATOR'S. An administrator's grant of the same
+     * action already stands for a reason the owner did not give, and turning it into the owner's
+     * would also change whose account it uses. So the owner's insert does nothing on a conflict. An
+     * administrator granting over an owner's row makes it theirs: that is an administrator deciding.
+     */
     async grant(
       kind: PluginKind,
       ref: string,
       agentId: string,
       by: string,
+      as: "admin" | "owner" = "admin",
     ): Promise<void> {
-      await database
+      const insert = database
         .insert(pluginGrants)
-        .values({ kind, ref, agentId, grantedBy: by })
-        .onConflictDoUpdate({
+        .values({ kind, ref, agentId, grantedBy: by, grantedAs: as });
+      if (as === "owner") {
+        /*
+         * Nothing written, nothing in the trail. A row already there is an administrator's grant
+         * or the owner's own from before, and a `plugin_granted` row marked `owner` over an
+         * administrator's grant would tell a reader the owner had given what an administrator did.
+         */
+        const written = await insert
+          .onConflictDoNothing()
+          .returning({ ref: pluginGrants.ref });
+        if (written.length === 0) return;
+      } else
+        await insert.onConflictDoUpdate({
           target: [pluginGrants.kind, pluginGrants.ref, pluginGrants.agentId],
-          set: { grantedBy: by, updatedAt: new Date() },
+          set: { grantedBy: by, grantedAs: "admin", updatedAt: new Date() },
         });
 
       await recordAuditEvent(auditStore, {
@@ -37,8 +58,54 @@ export function grantMethods(context: StoreContext) {
           kind,
           ref,
           bot: agentId,
+          ...(as === "owner" ? { grantedAs: "owner" } : {}),
         },
       });
+    },
+
+    /**
+     * Take back what the Bot's owner gave it on one app: every grant on these server rows that the
+     * owner made, and none an administrator made. Answers the refs taken, each with its own trail
+     * row, as {@link revoke} writes one.
+     */
+    async revokeOwnerGrants(
+      serverIds: string[],
+      agentId: string,
+      by: string,
+    ): Promise<string[]> {
+      if (serverIds.length === 0) return [];
+      const owned = and(
+        eq(pluginGrants.kind, "mcp"),
+        eq(pluginGrants.agentId, agentId),
+        eq(pluginGrants.grantedAs, "owner"),
+      );
+      const refs = (
+        await database
+          .select({ ref: pluginGrants.ref })
+          .from(pluginGrants)
+          .where(owned)
+      )
+        .map((row) => row.ref)
+        .filter((ref) => serverIds.includes(ref.split("/")[0] ?? ""));
+      if (refs.length === 0) return [];
+      await database
+        .delete(pluginGrants)
+        .where(and(owned, inArray(pluginGrants.ref, refs)));
+      for (const ref of refs)
+        await recordAuditEvent(auditStore, {
+          eventType: "configuration.changed",
+          targetType: grantTargetType("mcp"),
+          targetId: ref,
+          payload: {
+            actor: by,
+            change: "plugin_revoked",
+            kind: "mcp",
+            ref,
+            bot: agentId,
+            grantedAs: "owner",
+          },
+        });
+      return refs;
     },
 
     async revoke(

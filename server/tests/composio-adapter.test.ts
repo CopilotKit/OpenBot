@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Composio, telemetry } from "@composio/core";
 import {
+  BrokerAccountGoneError,
   type BrokerConnection,
   BrokerRefusalError,
   BrokerUnconfiguredError,
@@ -141,7 +142,7 @@ const WHOLE_LISTING = 1000;
 const PAGES_BEFORE_REFUSING = 200;
 
 /** The page this deployment sends somebody back to once the consent screen is done with them. */
-const RETURN_URL = "https://openbot.test/settings/connected-accounts/x";
+const RETURN_URL = "https://openbot.test/connections/x";
 
 /**
  * What Composio answers a withdrawal it actually performed, returned by every double that performs
@@ -218,8 +219,210 @@ const BY_HAND_GMAIL = {
   status: "ENABLED",
 };
 
+/*
+ * THE VENDOR DOUBLES BELOW HONOUR THE QUERY THEY ARE HANDED, and that is half of what this file
+ * claims about every method that reads a listing.
+ *
+ * A double that hands back its rows whatever it was asked cannot tell a correct question from a
+ * wrong one. Every listing here used to be one: `connectedAccounts.list` answered `ca_1` to any
+ * person, any app and any set of statuses, and `authConfigs.list` answered gmail's config to a
+ * question about any app or about none. So the adapter asking about the WRONG PERSON, dropping a
+ * filter, or reading ANOTHER APP's configs passed every test that was not itself an assertion on
+ * the query's exact shape — and those were four tests, each of which pinned a query that happened
+ * to name `user_1` for both of the person's ids. `composio-grants-for.test.ts` and
+ * `arcade-adapter-connections.test.ts` closed the same blindness in their own files; this is that
+ * correction for the rest of the Composio adapter.
+ *
+ * So each listing double answers as the vendor does: a filter it is given narrows the rows, a
+ * filter it is NOT given does not — an account listing with no `userIds` is every person's, which
+ * is the defect at its worst — and every fixture carries rows the right question must leave out.
+ */
+
+/**
+ * The person every fixture here acts for, in the vendor's spelling.
+ *
+ * DIFFERENT FROM THE LOCAL `user_1` ON PURPOSE. `AccountRef` carries both, and every listing,
+ * link and creation goes out under `vendorUserId`; with the two spelled alike a call made under the
+ * local id read exactly like the right one.
+ */
+const VENDOR_USER = "composio_user_1";
+
+/** The vendor's account statuses, so a fixture naming one it does not publish is a type error. */
+type AccountStatus =
+  | "INITIALIZING"
+  | "INITIATED"
+  | "ACTIVE"
+  | "FAILED"
+  | "EXPIRED"
+  | "INACTIVE"
+  | "REVOKED";
+
+/**
+ * A connected account as Composio holds it: the row it would send, and the facts its listing is
+ * filtered on, kept apart so the routing facts cannot reach the adapter as fields of the row.
+ *
+ * Every fact defaults to this file's ordinary case — {@link VENDOR_USER}'s ACTIVE, private gmail
+ * account on {@link OUR_GMAIL} — so a fixture spells only the fact it is about. `page` is the page
+ * of the listing the row sits on, for the tests about reading every page.
+ */
+type HeldAccount = {
+  row: unknown;
+  userId?: string;
+  toolkit?: string;
+  status?: AccountStatus;
+  authConfigId?: string;
+  shared?: boolean;
+  page?: number;
+};
+
+/** What the adapter asked an account listing, as the tests below assert it by name. */
+type AccountQuery = {
+  userIds?: string[];
+  toolkitSlugs?: string[];
+  statuses?: string[];
+  accountType?: string;
+  authConfigIds?: string[];
+  limit?: number;
+  cursor?: string;
+};
+
+/**
+ * Accounts no question about {@link VENDOR_USER}'s gmail may return, whichever method is asking.
+ *
+ * One per filter the adapter is responsible for: somebody else's; one filed under the LOCAL id,
+ * which is a real vendor identity the moment anybody is ever given it; another app's; and a
+ * tombstone, which neither the gate nor the withdrawal counts. A listing that drops a filter, or
+ * asks under the wrong id, hands one of these back — and every test below then answers about it.
+ */
+const NOT_THIS_PERSONS_GMAIL: HeldAccount[] = [
+  { row: { id: "ca_somebody_else" }, userId: "composio_user_2" },
+  { row: { id: "ca_under_the_local_id" }, userId: "user_1" },
+  { row: { id: "ca_another_app" }, toolkit: "slack" },
+  { row: { id: "ca_tombstone" }, status: "REVOKED" },
+];
+
+/**
+ * And one the WITHDRAWAL may not reach although the gate counts it: this person's own account on a
+ * config an operator built by hand. `isConnected` asks of every config, so it is connected; `revoke`
+ * is scoped to configs this deployment made, so it is not this deployment's to delete.
+ */
+const ON_AN_OPERATORS_CONFIG: HeldAccount = {
+  row: { id: "ca_on_an_operators_config" },
+  authConfigId: BY_HAND_GMAIL.id,
+};
+
+/** Every account a question about {@link VENDOR_USER}'s gmail grants by THIS deployment must leave out. */
+const DECOYS: HeldAccount[] = [
+  ...NOT_THIS_PERSONS_GMAIL,
+  ON_AN_OPERATORS_CONFIG,
+];
+
+/**
+ * `connectedAccounts.list` as Composio answers it, with the queries it was asked.
+ *
+ * A filter that is present narrows; one that is absent does not, which is the vendor's own reading
+ * (`accountType` defaults to private accounts only). Pages are `page_<n>`, and a cursor is offered
+ * while any matching row sits on a later page.
+ */
+function accountListing(
+  held: HeldAccount[],
+  decoys: HeldAccount[] = DECOYS,
+): { list: (query: unknown) => Promise<unknown>; asked: AccountQuery[] } {
+  const asked: AccountQuery[] = [];
+  const list = async (query: unknown) => {
+    const q = query as AccountQuery;
+    asked.push(q);
+    const matching = [...held, ...decoys].filter(
+      (account) =>
+        (q.userIds === undefined ||
+          q.userIds.includes(account.userId ?? VENDOR_USER)) &&
+        (q.toolkitSlugs === undefined ||
+          q.toolkitSlugs.includes(account.toolkit ?? "gmail")) &&
+        (q.statuses === undefined ||
+          q.statuses.includes(account.status ?? "ACTIVE")) &&
+        (q.authConfigIds === undefined ||
+          q.authConfigIds.includes(account.authConfigId ?? OUR_GMAIL.id)) &&
+        (q.accountType === "ALL" || account.shared !== true),
+    );
+    const page = q.cursor === undefined ? 1 : Number(q.cursor.slice(5));
+    const later = matching.some((account) => (account.page ?? 1) > page);
+    return {
+      items: matching
+        .filter((account) => (account.page ?? 1) === page)
+        .map((account) => account.row),
+      nextCursor: later ? `page_${page + 1}` : null,
+    };
+  };
+  return { list, asked };
+}
+
+/** The ordinary case: these rows are {@link VENDOR_USER}'s ACTIVE gmail accounts on our config. */
+function heldAccounts(rows: unknown[]) {
+  return accountListing(rows.map((row) => ({ row }))).list;
+}
+
+/**
+ * Another app's config of ours, which a question about any other app must leave out.
+ *
+ * ITS ID SORTS FIRST, so an adapter that read the project's whole config listing — no `toolkit` —
+ * or another app's would take this one wherever it picks the first of ours.
+ */
+const OUR_SLACK = {
+  id: "ac_0_slack_ours",
+  name: "Slack (OpenBot)",
+  status: "ENABLED",
+};
+
+/**
+ * `authConfigs.list` as Composio answers it: scoped to the `toolkit` asked about, and the whole
+ * project's configs — {@link OUR_SLACK} among them — to a listing that names none.
+ */
+function configListing(toolkit: string, rows: unknown[]) {
+  const asked: unknown[] = [];
+  const byToolkit: Record<string, unknown[]> = {
+    slack: [OUR_SLACK],
+    [toolkit]: rows,
+  };
+  const list = async (query: unknown) => {
+    asked.push(query);
+    const named = (query as { toolkit?: string }).toolkit;
+    return {
+      items:
+        named === undefined
+          ? Object.values(byToolkit).flat()
+          : (byToolkit[named] ?? []),
+    };
+  };
+  return { list, asked };
+}
+
+/** One app's configs, for a double that does not need the queries back. */
+function configsOf(toolkit: string, rows: unknown[]) {
+  return configListing(toolkit, rows).list;
+}
+
+/**
+ * `tools.list` as Composio answers it: one app's actions to a listing naming that app, another
+ * app's to a listing naming that one, and every app's to a listing naming none.
+ */
+function actionsOf(toolkit: string, rows: unknown[]) {
+  const byToolkit: Record<string, unknown[]> = {
+    slack: [{ slug: "SLACK_SEND_MESSAGE", toolkit: { slug: "slack" } }],
+    [toolkit]: rows,
+  };
+  return async (query: unknown) => {
+    const named = (query as { toolkit_slug?: string }).toolkit_slug;
+    return {
+      items:
+        named === undefined
+          ? Object.values(byToolkit).flat()
+          : (byToolkit[named] ?? []),
+    };
+  };
+}
+
 /** That listing as a vendor double, since every withdrawing fixture below needs the same one. */
-const ourGmailConfig = async () => ({ items: [OUR_GMAIL] });
+const ourGmailConfig = configsOf("gmail", [OUR_GMAIL]);
 
 /**
  * The three sentences `authorize` can refuse with, told apart by the remedy each one prescribes.
@@ -343,24 +546,23 @@ describe("the page size this file is written against", () => {
 describe("listing an app's actions", () => {
   test("the caller's page reaches the vendor, so the vendor's default never applies", async () => {
     const asked: unknown[] = [];
+    const gmailActions = actionsOf("gmail", [
+      {
+        slug: "GMAIL_FETCH_EMAILS",
+        name: "Fetch emails",
+        description: "Fetch emails from Gmail.",
+        input_parameters: { type: "object", properties: {} },
+        tags: ["readOnlyHint"],
+        version: "20260903_00",
+        toolkit: { slug: "gmail" },
+      },
+    ]);
     const { actions } = buildComposioClient(
       fakeVendor({
         tools: {
           list: async (query: unknown) => {
             asked.push(query);
-            return {
-              items: [
-                {
-                  slug: "GMAIL_FETCH_EMAILS",
-                  name: "Fetch emails",
-                  description: "Fetch emails from Gmail.",
-                  input_parameters: { type: "object", properties: {} },
-                  tags: ["readOnlyHint"],
-                  version: "20260903_00",
-                  toolkit: { slug: "gmail" },
-                },
-              ],
-            };
+            return gmailActions(query);
           },
         },
       }),
@@ -487,6 +689,11 @@ describe("the app catalogue", () => {
         logo: "https://logos.composio.dev/gmail.png",
         categories: ["Productivity", "Email"],
         actionCount: 63,
+        // Composio measures none of the three, so each is an explicit null: "not measured", which is
+        // a different fact from "measured, and none" and must never be read through a `?? 0`.
+        classifiedCount: null,
+        permissionCount: null,
+        scopedActionCount: null,
         connection: NO_SCHEME,
       },
       {
@@ -496,6 +703,11 @@ describe("the app catalogue", () => {
         logo: null,
         categories: [],
         actionCount: 0,
+        // Composio measures none of the three, so each is an explicit null: "not measured", which is
+        // a different fact from "measured, and none" and must never be read through a `?? 0`.
+        classifiedCount: null,
+        permissionCount: null,
+        scopedActionCount: null,
         connection: NO_SCHEME,
       },
     ]);
@@ -531,6 +743,11 @@ describe("holding the catalogue", () => {
     logo: null,
     categories: [],
     actionCount: 63,
+    // Composio measures none of the three, so each is an explicit null: "not measured", which is
+    // a different fact from "measured, and none" and must never be read through a `?? 0`.
+    classifiedCount: null,
+    permissionCount: null,
+    scopedActionCount: null,
     connection: NO_SCHEME,
   };
 
@@ -602,6 +819,11 @@ describe("holding the catalogue", () => {
         logo: null,
         categories: [],
         actionCount: 12,
+        // Composio measures none of the three, so each is an explicit null: "not measured", which is
+        // a different fact from "measured, and none" and must never be read through a `?? 0`.
+        classifiedCount: null,
+        permissionCount: null,
+        scopedActionCount: null,
         connection: NO_SCHEME,
       },
     ]);
@@ -873,23 +1095,16 @@ describe("executing an action", () => {
 describe("beginning one person's connection", () => {
   test("the link carries the page this deployment sends them back to", async () => {
     const linked: unknown[] = [];
-    const listed: unknown[] = [];
+    const { list, asked: listed } = configListing("linear", [
+      {
+        id: "ac_this_deployments",
+        name: "Linear (OpenBot)",
+        status: "ENABLED",
+      },
+    ]);
     const { broker } = buildComposioClient(
       fakeVendor({
-        authConfigs: {
-          list: async (query: unknown) => {
-            listed.push(query);
-            return {
-              items: [
-                {
-                  id: "ac_this_deployments",
-                  name: "Linear (OpenBot)",
-                  status: "ENABLED",
-                },
-              ],
-            };
-          },
-        },
+        authConfigs: { list },
         connectedAccounts: {
           link: async (...call: unknown[]) => {
             linked.push(call);
@@ -900,10 +1115,13 @@ describe("beginning one person's connection", () => {
     );
 
     const begun = await broker.authorize({
-      account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+      account: {
+        holder: "person",
+        userId: "user_1",
+        vendorUserId: VENDOR_USER,
+      },
       toolkit: "linear",
-      returnUrl:
-        "https://openbot.test/settings/connected-accounts/composio-linear",
+      returnUrl: "https://openbot.test/connections/composio-linear",
     });
 
     // The config this deployment already holds for the app — and no `authConfigs.create`, which
@@ -914,16 +1132,17 @@ describe("beginning one person's connection", () => {
     ]);
     expect(linked).toEqual([
       [
-        "user_1",
+        VENDOR_USER,
         "ac_this_deployments",
         {
-          callbackUrl:
-            "https://openbot.test/settings/connected-accounts/composio-linear",
+          callbackUrl: "https://openbot.test/connections/composio-linear",
         },
       ],
     ]);
     expect(begun).toEqual({
       redirectUrl: "https://backend.composio.dev/s/a-link",
+      // Declared null: Composio's return leg is correlated by sealed state, not by a broker id.
+      authorizationId: null,
     });
   });
 
@@ -938,7 +1157,7 @@ describe("beginning one person's connection", () => {
     const linked: unknown[] = [];
     const { broker } = buildComposioClient(
       fakeVendor({
-        authConfigs: { list: async () => ({ items: [] }) },
+        authConfigs: { list: configsOf("linear", []) },
         connectedAccounts: {
           link: async (...call: unknown[]) => {
             linked.push(call);
@@ -949,10 +1168,13 @@ describe("beginning one person's connection", () => {
     );
 
     const refused = broker.authorize({
-      account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+      account: {
+        holder: "person",
+        userId: "user_1",
+        vendorUserId: VENDOR_USER,
+      },
       toolkit: "linear",
-      returnUrl:
-        "https://openbot.test/settings/connected-accounts/composio-linear",
+      returnUrl: "https://openbot.test/connections/composio-linear",
     });
 
     const refusal = await failureOf(refused);
@@ -998,7 +1220,7 @@ describe("telling this deployment's auth configs from anybody else's", () => {
     const linked: unknown[] = [];
     const { broker } = buildComposioClient(
       fakeVendor({
-        authConfigs: { list: async () => ({ items: MIXED }) },
+        authConfigs: { list: configsOf("linear", MIXED) },
         connectedAccounts: {
           link: async (...call: unknown[]) => {
             linked.push(call);
@@ -1009,9 +1231,13 @@ describe("telling this deployment's auth configs from anybody else's", () => {
     );
 
     await broker.authorize({
-      account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+      account: {
+        holder: "person",
+        userId: "user_1",
+        vendorUserId: VENDOR_USER,
+      },
       toolkit: "linear",
-      returnUrl: "https://openbot.test/settings/connected-accounts/x",
+      returnUrl: "https://openbot.test/connections/x",
     });
 
     // A connection is a lasting attachment to whatever config it was made against: scopes, tool
@@ -1019,9 +1245,9 @@ describe("telling this deployment's auth configs from anybody else's", () => {
     // the hand-made one is not a mistake a later call can correct.
     expect(linked).toEqual([
       [
-        "user_1",
+        VENDOR_USER,
         "ac_ours",
-        { callbackUrl: "https://openbot.test/settings/connected-accounts/x" },
+        { callbackUrl: "https://openbot.test/connections/x" },
       ],
     ]);
   });
@@ -1031,7 +1257,7 @@ describe("telling this deployment's auth configs from anybody else's", () => {
     const { broker } = buildComposioClient(
       fakeVendor({
         authConfigs: {
-          list: async () => ({ items: [BY_HAND] }),
+          list: configsOf("linear", [BY_HAND]),
         },
         connectedAccounts: {
           link: async (...call: unknown[]) => {
@@ -1043,9 +1269,13 @@ describe("telling this deployment's auth configs from anybody else's", () => {
     );
 
     const refused = broker.authorize({
-      account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+      account: {
+        holder: "person",
+        userId: "user_1",
+        vendorUserId: VENDOR_USER,
+      },
       toolkit: "linear",
-      returnUrl: "https://openbot.test/settings/connected-accounts/x",
+      returnUrl: "https://openbot.test/connections/x",
     });
 
     const refusal = await failureOf(refused);
@@ -1066,7 +1296,7 @@ describe("telling this deployment's auth configs from anybody else's", () => {
           // Both of ours go — leaving one behind would leave live grants — and the hand-made
           // one stands. The listing arrives spare-first, so the order asserted below is the sort's
           // and not the vendor's.
-          list: async () => ({ items: MIXED }),
+          list: configsOf("linear", MIXED),
           delete: async (...call: unknown[]) => {
             deleted.push(call);
           },
@@ -1098,7 +1328,7 @@ describe("telling this deployment's auth configs from anybody else's", () => {
     const { broker } = buildComposioClient(
       fakeVendor({
         authConfigs: {
-          list: async () => ({ items: MIXED }),
+          list: configsOf("linear", MIXED),
           delete: async (id: string) => {
             if (id === "ac_ours_spare") {
               throw new Error("Composio refused that one.");
@@ -1125,9 +1355,9 @@ describe("telling this deployment's auth configs from anybody else's", () => {
            * grants on it, same accounts connected against it; the one field that changed is the
            * only one this file writes and the only one it can recognise itself by.
            */
-          list: async () => ({
-            items: [{ id: "ac_ours", name: "Linear", status: "ENABLED" }],
-          }),
+          list: configsOf("linear", [
+            { id: "ac_ours", name: "Linear", status: "ENABLED" },
+          ]),
           delete: async (...call: unknown[]) => {
             deleted.push(call);
           },
@@ -1174,12 +1404,10 @@ describe("telling this deployment's auth configs from anybody else's", () => {
     const { broker } = buildComposioClient(
       fakeVendor({
         authConfigs: {
-          list: async () => ({
-            items: [
-              { id: "ac_theirs", name: "Linear", status: "ENABLED" },
-              { id: "ac_nameless", status: "ENABLED" },
-            ],
-          }),
+          list: configsOf("linear", [
+            { id: "ac_theirs", name: "Linear", status: "ENABLED" },
+            { id: "ac_nameless", status: "ENABLED" },
+          ]),
           delete: async (...call: unknown[]) => {
             deleted.push(call);
           },
@@ -1251,7 +1479,7 @@ describe("telling this deployment's auth configs from anybody else's", () => {
     const { broker } = buildComposioClient(
       fakeVendor({
         authConfigs: {
-          list: async () => ({ items: [OURS, OURS, OURS_SPARE] }),
+          list: configsOf("linear", [OURS, OURS, OURS_SPARE]),
           delete: async (id: string) => {
             if (id === "ac_ours_spare") {
               throw new Error("Composio refused that one.");
@@ -1363,9 +1591,10 @@ describe("telling this deployment's auth configs from anybody else's", () => {
     const { broker } = buildComposioClient(
       fakeVendor({
         authConfigs: {
-          list: async () => ({
-            items: [{ id: "ac_nameless", status: "ENABLED" }, OURS],
-          }),
+          list: configsOf("linear", [
+            { id: "ac_nameless", status: "ENABLED" },
+            OURS,
+          ]),
         },
         connectedAccounts: {
           link: async (...call: unknown[]) => {
@@ -1377,13 +1606,17 @@ describe("telling this deployment's auth configs from anybody else's", () => {
     );
 
     await broker.authorize({
-      account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+      account: {
+        holder: "person",
+        userId: "user_1",
+        vendorUserId: VENDOR_USER,
+      },
       toolkit: "linear",
       returnUrl: RETURN_URL,
     });
 
     expect(linked).toEqual([
-      ["user_1", "ac_ours", { callbackUrl: RETURN_URL }],
+      [VENDOR_USER, "ac_ours", { callbackUrl: RETURN_URL }],
     ]);
   });
 
@@ -1398,7 +1631,7 @@ describe("telling this deployment's auth configs from anybody else's", () => {
     const { broker } = buildComposioClient(
       fakeVendor({
         authConfigs: {
-          list: async () => ({ items: [{ id: "ac_nameless" }] }),
+          list: configsOf("linear", [{ id: "ac_nameless" }]),
         },
         connectedAccounts: {
           link: async (...call: unknown[]) => {
@@ -1411,7 +1644,11 @@ describe("telling this deployment's auth configs from anybody else's", () => {
 
     const refusal = await failureOf(
       broker.authorize({
-        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        account: {
+          holder: "person",
+          userId: "user_1",
+          vendorUserId: VENDOR_USER,
+        },
         toolkit: "linear",
         returnUrl: RETURN_URL,
       }),
@@ -1445,7 +1682,7 @@ describe("telling this deployment's auth configs from anybody else's", () => {
     const { broker } = buildComposioClient(
       fakeVendor({
         authConfigs: {
-          list: async () => ({ items: [{ id: "ac_nameless" }] }),
+          list: configsOf("linear", [{ id: "ac_nameless" }]),
           create: async (...call: unknown[]) => {
             created.push(call);
             return CREATED;
@@ -1486,7 +1723,7 @@ describe("telling this deployment's auth configs from anybody else's", () => {
     const { broker } = buildComposioClient(
       fakeVendor({
         authConfigs: {
-          list: async () => ({ items: [] }),
+          list: configsOf("linear", []),
           delete: async (...call: unknown[]) => {
             deleted.push(call);
           },
@@ -1505,11 +1742,9 @@ describe("telling this deployment's auth configs from anybody else's", () => {
         authConfigs: {
           // Disabled configs are asked for, because this listing is what decides whether to create.
           // A listing that omitted them would find nothing and create the split it exists to stop.
-          list: async () => ({
-            items: [
-              { id: "ac_ours", name: "Linear (OpenBot)", status: "DISABLED" },
-            ],
-          }),
+          list: configsOf("linear", [
+            { id: "ac_ours", name: "Linear (OpenBot)", status: "DISABLED" },
+          ]),
           create: async (...call: unknown[]) => {
             created.push(call);
           },
@@ -1531,11 +1766,9 @@ describe("telling this deployment's auth configs from anybody else's", () => {
     const { broker } = buildComposioClient(
       fakeVendor({
         authConfigs: {
-          list: async () => ({
-            items: [
-              { id: "ac_ours", name: "Linear (OpenBot)", status: "DISABLED" },
-            ],
-          }),
+          list: configsOf("linear", [
+            { id: "ac_ours", name: "Linear (OpenBot)", status: "DISABLED" },
+          ]),
         },
         connectedAccounts: {
           link: async (...call: unknown[]) => {
@@ -1547,9 +1780,13 @@ describe("telling this deployment's auth configs from anybody else's", () => {
     );
 
     const refused = broker.authorize({
-      account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+      account: {
+        holder: "person",
+        userId: "user_1",
+        vendorUserId: VENDOR_USER,
+      },
       toolkit: "linear",
-      returnUrl: "https://openbot.test/settings/connected-accounts/x",
+      returnUrl: "https://openbot.test/connections/x",
     });
 
     // Sending somebody to consent against a disabled config spends their consent and attaches
@@ -1579,12 +1816,10 @@ describe("telling this deployment's auth configs from anybody else's", () => {
     const { broker } = buildComposioClient(
       fakeVendor({
         authConfigs: {
-          list: async () => ({
-            items: [
-              { id: "ac_a", name: "Linear (OpenBot)", status: "DISABLED" },
-              { id: "ac_b", name: "Linear (OpenBot)", status: "PENDING" },
-            ],
-          }),
+          list: configsOf("linear", [
+            { id: "ac_a", name: "Linear (OpenBot)", status: "DISABLED" },
+            { id: "ac_b", name: "Linear (OpenBot)", status: "PENDING" },
+          ]),
         },
         connectedAccounts: {
           link: async (...call: unknown[]) => {
@@ -1598,7 +1833,11 @@ describe("telling this deployment's auth configs from anybody else's", () => {
 
     const refusal = await failureOf(
       broker.authorize({
-        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        account: {
+          holder: "person",
+          userId: "user_1",
+          vendorUserId: VENDOR_USER,
+        },
         toolkit: "linear",
         returnUrl: RETURN_URL,
       }),
@@ -1619,7 +1858,7 @@ describe("telling this deployment's auth configs from anybody else's", () => {
     const { broker } = buildComposioClient(
       fakeVendor({
         authConfigs: {
-          list: async () => ({ items: [BY_HAND] }),
+          list: configsOf("linear", [BY_HAND]),
           create: async (...call: unknown[]) => {
             created.push(call);
             return CREATED;
@@ -1665,7 +1904,7 @@ describe("the config each kind of app is enabled with", () => {
     const { broker } = buildComposioClient(
       fakeVendor({
         authConfigs: {
-          list: async () => ({ items: [] }),
+          list: configsOf("linear_mcp", []),
           create: async (...call: unknown[]) => {
             created.push(call);
             return CREATED;
@@ -1704,7 +1943,7 @@ describe("the config each kind of app is enabled with", () => {
     const { broker } = buildComposioClient(
       fakeVendor({
         authConfigs: {
-          list: async () => ({ items: [] }),
+          list: configsOf("perplexityai", []),
           create: async (...call: unknown[]) => {
             created.push(call);
             return CREATED;
@@ -1772,7 +2011,7 @@ describe("the config each kind of app is enabled with", () => {
     const { broker } = buildComposioClient(
       fakeVendor({
         authConfigs: {
-          list: async () => ({ items: [] }),
+          list: configsOf("docusign", []),
         },
       }),
     );
@@ -1818,7 +2057,7 @@ describe("withdrawing one person's grants", () => {
       fakeVendor({
         authConfigs: { list: ourGmailConfig },
         connectedAccounts: {
-          list: async () => ({ items: [{ id: "ca_1" }] }),
+          list: heldAccounts([{ id: "ca_1" }]),
           delete: async (...call: unknown[]) => {
             deleted.push(call);
             return WITHDRAWN;
@@ -1829,7 +2068,11 @@ describe("withdrawing one person's grants", () => {
 
     expect(
       await broker.revoke({
-        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        account: {
+          holder: "person",
+          userId: "user_1",
+          vendorUserId: VENDOR_USER,
+        },
         toolkit: "gmail",
       }),
     ).toBe(true);
@@ -1841,7 +2084,7 @@ describe("withdrawing one person's grants", () => {
       fakeVendor({
         authConfigs: { list: ourGmailConfig },
         connectedAccounts: {
-          list: async () => ({ items: [{ id: "ca_1" }] }),
+          list: heldAccounts([{ id: "ca_1" }]),
           // A 200 whose body says the account was not deleted. The flag went out, Composio read
           // the request and answered it — this is the vendor declining, not failing.
           delete: async () => ({ success: false }),
@@ -1860,7 +2103,11 @@ describe("withdrawing one person's grants", () => {
      */
     const refusal = await failureOf(
       broker.revoke({
-        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        account: {
+          holder: "person",
+          userId: "user_1",
+          vendorUserId: VENDOR_USER,
+        },
         toolkit: "gmail",
       }),
     );
@@ -1878,7 +2125,7 @@ describe("withdrawing one person's grants", () => {
       fakeVendor({
         authConfigs: { list: ourGmailConfig },
         connectedAccounts: {
-          list: async () => ({ items: [{ id: "ca_1" }] }),
+          list: heldAccounts([{ id: "ca_1" }]),
           /*
            * `success` IS REQUIRED IN THE DECLARATION AND ABSENT ON THIS WIRE, which is the shape
            * the check has to survive rather than the one it is for. `@composio/client` parses the
@@ -1892,7 +2139,11 @@ describe("withdrawing one person's grants", () => {
 
     const refusal = await failureOf(
       broker.revoke({
-        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        account: {
+          holder: "person",
+          userId: "user_1",
+          vendorUserId: VENDOR_USER,
+        },
         toolkit: "gmail",
       }),
     );
@@ -1926,7 +2177,7 @@ describe("withdrawing one person's grants", () => {
       fakeVendor({
         authConfigs: { list: ourGmailConfig },
         connectedAccounts: {
-          list: async () => ({ items: [{ id: "ca_1" }] }),
+          list: heldAccounts([{ id: "ca_1" }]),
           delete: async () => "deleted",
         },
       }),
@@ -1934,7 +2185,11 @@ describe("withdrawing one person's grants", () => {
 
     const refusal = await failureOf(
       broker.revoke({
-        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        account: {
+          holder: "person",
+          userId: "user_1",
+          vendorUserId: VENDOR_USER,
+        },
         toolkit: "gmail",
       }),
     );
@@ -1948,22 +2203,22 @@ describe("withdrawing one person's grants", () => {
   });
 
   test("the listing asks about every state a grant can be hiding in", async () => {
-    const asked: unknown[] = [];
+    // Nothing of this person's to withdraw — only the accounts every filter must leave out.
+    const { list, asked } = accountListing([]);
     const { broker } = buildComposioClient(
       fakeVendor({
         authConfigs: { list: ourGmailConfig },
-        connectedAccounts: {
-          list: async (query: unknown) => {
-            asked.push(query);
-            return { items: [] };
-          },
-        },
+        connectedAccounts: { list },
       }),
     );
 
     expect(
       await broker.revoke({
-        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        account: {
+          holder: "person",
+          userId: "user_1",
+          vendorUserId: VENDOR_USER,
+        },
         toolkit: "gmail",
       }),
     ).toBe(false);
@@ -1984,7 +2239,7 @@ describe("withdrawing one person's grants", () => {
      */
     expect(asked).toEqual([
       {
-        userIds: ["user_1"],
+        userIds: [VENDOR_USER],
         toolkitSlugs: ["gmail"],
         statuses: [
           "INITIALIZING",
@@ -2002,21 +2257,22 @@ describe("withdrawing one person's grants", () => {
   });
 
   test("being connected is a narrower question, and asked as one", async () => {
-    const asked: unknown[] = [];
+    // SHARED, so the `true` below is only reachable through `accountType: "ALL"`: the vendor's
+    // default is private accounts only, and a listing that dropped it would answer `false` here.
+    const { list, asked } = accountListing([
+      { row: { id: "ca_1" }, shared: true },
+    ]);
     const { broker } = buildComposioClient(
-      fakeVendor({
-        connectedAccounts: {
-          list: async (query: unknown) => {
-            asked.push(query);
-            return { items: [{ id: "ca_1" }] };
-          },
-        },
-      }),
+      fakeVendor({ connectedAccounts: { list } }),
     );
 
     expect(
       await broker.isConnected({
-        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        account: {
+          holder: "person",
+          userId: "user_1",
+          vendorUserId: VENDOR_USER,
+        },
         toolkit: "gmail",
       }),
     ).toBe(true);
@@ -2025,7 +2281,7 @@ describe("withdrawing one person's grants", () => {
     // but `accountType: "ALL"` all the same, because a shared account is a connected account.
     expect(asked).toEqual([
       {
-        userIds: ["user_1"],
+        userIds: [VENDOR_USER],
         toolkitSlugs: ["gmail"],
         statuses: ["ACTIVE"],
         accountType: "ALL",
@@ -2035,10 +2291,18 @@ describe("withdrawing one person's grants", () => {
   });
 
   test("nobody with no account for the app is answered no", async () => {
+    /*
+     * NOT AN EMPTY LISTING, WHICH ANSWERS `false` TO EVERY QUESTION, RIGHT OR WRONG. The vendor
+     * holds somebody else's gmail account, one filed under this person's LOCAL id, this person's
+     * account for another app, a revoked one and an expired one — and an adapter that asked about
+     * the wrong person, or dropped any filter, finds one of them and opens the gate.
+     */
+    const { list, asked } = accountListing(
+      [{ row: { id: "ca_expired" }, status: "EXPIRED" }],
+      NOT_THIS_PERSONS_GMAIL,
+    );
     const { broker } = buildComposioClient(
-      fakeVendor({
-        connectedAccounts: { list: async () => ({ items: [] }) },
-      }),
+      fakeVendor({ connectedAccounts: { list } }),
       () => 1_000_000,
     );
 
@@ -2050,10 +2314,16 @@ describe("withdrawing one person's grants", () => {
      */
     expect(
       await broker.isConnected({
-        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        account: {
+          holder: "person",
+          userId: "user_1",
+          vendorUserId: VENDOR_USER,
+        },
         toolkit: "gmail",
       }),
     ).toBe(false);
+    // And it was a question that was asked, rather than a `false` reached without one.
+    expect(asked.map((query) => query.userIds)).toEqual([[VENDOR_USER]]);
   });
 
   /**
@@ -2086,11 +2356,19 @@ describe("withdrawing one person's grants", () => {
     );
 
     await broker.isConnected({
-      account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+      account: {
+        holder: "person",
+        userId: "user_1",
+        vendorUserId: VENDOR_USER,
+      },
       toolkit: "gmail",
     });
     await broker.isConnected({
-      account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+      account: {
+        holder: "person",
+        userId: "user_1",
+        vendorUserId: VENDOR_USER,
+      },
       toolkit: "gmail",
     });
 
@@ -2103,9 +2381,7 @@ describe("withdrawing one person's grants", () => {
       fakeVendor({
         authConfigs: { list: ourGmailConfig },
         connectedAccounts: {
-          list: async () => ({
-            items: [{ id: "ca_1" }, { id: "ca_2" }, { id: "ca_3" }],
-          }),
+          list: heldAccounts([{ id: "ca_1" }, { id: "ca_2" }, { id: "ca_3" }]),
           delete: async (id: string) => {
             if (id === "ca_2") throw new Error("Composio refused that one.");
             deleted.push(id);
@@ -2116,7 +2392,11 @@ describe("withdrawing one person's grants", () => {
     );
 
     const refused = broker.revoke({
-      account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+      account: {
+        holder: "person",
+        userId: "user_1",
+        vendorUserId: VENDOR_USER,
+      },
       toolkit: "gmail",
     });
 
@@ -2131,7 +2411,7 @@ describe("withdrawing one person's grants", () => {
       fakeVendor({
         authConfigs: { list: ourGmailConfig },
         connectedAccounts: {
-          list: async () => ({ items: [{ id: "ca_1" }, { id: "ca_2" }] }),
+          list: heldAccounts([{ id: "ca_1" }, { id: "ca_2" }]),
           delete: async (id: string) => {
             if (id === "ca_2") throw new Error("Composio refused that one.");
             return WITHDRAWN;
@@ -2149,7 +2429,11 @@ describe("withdrawing one person's grants", () => {
      */
     await expect(
       broker.revoke({
-        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        account: {
+          holder: "person",
+          userId: "user_1",
+          vendorUserId: VENDOR_USER,
+        },
         toolkit: "gmail",
       }),
     ).rejects.toBeInstanceOf(BrokerRefusalError);
@@ -2176,9 +2460,7 @@ describe("withdrawing one person's grants", () => {
       fakeVendor({
         authConfigs: { list: ourGmailConfig },
         connectedAccounts: {
-          list: async () => ({
-            items: [{ id: "ca_1" }, { id: null }, { id: "ca_3" }],
-          }),
+          list: heldAccounts([{ id: "ca_1" }, { id: null }, { id: "ca_3" }]),
           delete: async (id: string) => {
             deleted.push(id);
             return WITHDRAWN;
@@ -2190,7 +2472,11 @@ describe("withdrawing one person's grants", () => {
 
     const failure = await failureOf(
       broker.revoke({
-        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        account: {
+          holder: "person",
+          userId: "user_1",
+          vendorUserId: VENDOR_USER,
+        },
         toolkit: "gmail",
       }),
     );
@@ -2234,12 +2520,10 @@ describe("withdrawing one person's grants", () => {
     const { broker } = buildComposioClient(
       fakeVendor({
         authConfigs: {
-          list: async () => ({
-            items: [{ id: "ac_gmail_nameless" }, OUR_GMAIL],
-          }),
+          list: configsOf("gmail", [{ id: "ac_gmail_nameless" }, OUR_GMAIL]),
         },
         connectedAccounts: {
-          list: async () => ({ items: [{ id: "ca_1" }] }),
+          list: heldAccounts([{ id: "ca_1" }]),
           delete: async (id: string) => {
             deleted.push(id);
             return WITHDRAWN;
@@ -2251,7 +2535,11 @@ describe("withdrawing one person's grants", () => {
 
     const failure = await failureOf(
       broker.revoke({
-        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        account: {
+          holder: "person",
+          userId: "user_1",
+          vendorUserId: VENDOR_USER,
+        },
         toolkit: "gmail",
       }),
     );
@@ -2302,18 +2590,20 @@ describe("withdrawing one person's grants", () => {
     const { broker } = buildComposioClient(
       fakeVendor({
         authConfigs: {
-          list: async () => ({
-            items: [{ id: "ac_gmail_nameless" }, OUR_GMAIL],
-          }),
+          list: configsOf("gmail", [{ id: "ac_gmail_nameless" }, OUR_GMAIL]),
         },
-        connectedAccounts: { list: async () => ({ items: [] }) },
+        connectedAccounts: { list: heldAccounts([]) },
       }),
       () => 1_000_000,
     );
 
     const failure = await failureOf(
       broker.revoke({
-        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        account: {
+          holder: "person",
+          userId: "user_1",
+          vendorUserId: VENDOR_USER,
+        },
         toolkit: "gmail",
       }),
     );
@@ -2343,14 +2633,18 @@ describe("withdrawing one person's grants", () => {
   test("an account the vendor described without an id still counts as connected", async () => {
     const { broker } = buildComposioClient(
       fakeVendor({
-        connectedAccounts: { list: async () => ({ items: [{}] }) },
+        connectedAccounts: { list: heldAccounts([{}]) },
       }),
       () => 1_000_000,
     );
 
     expect(
       await broker.isConnected({
-        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        account: {
+          holder: "person",
+          userId: "user_1",
+          vendorUserId: VENDOR_USER,
+        },
         toolkit: "gmail",
       }),
     ).toBe(true);
@@ -2375,20 +2669,19 @@ describe("withdrawing one person's grants", () => {
    * deleted everything it found answers this test's `true` just as confidently.
    */
   test("the withdrawal asks only about accounts on configs this deployment made", async () => {
-    const scoped: unknown[] = [];
     const deleted: string[] = [];
+    // {@link DECOYS} carries this person's own gmail account on the operator's config, so an
+    // unscoped question hands it back and the delete below names it.
+    const { list, asked } = accountListing([{ row: { id: "ca_1" } }]);
     const { broker } = buildComposioClient(
       fakeVendor({
         authConfigs: {
           // An operator's beside ours, which is the state the whole guard is about. Out of the
           // vendor's order, so a reader that took the first row would take the wrong one.
-          list: async () => ({ items: [BY_HAND_GMAIL, OUR_GMAIL] }),
+          list: configsOf("gmail", [BY_HAND_GMAIL, OUR_GMAIL]),
         },
         connectedAccounts: {
-          list: async (query: unknown) => {
-            scoped.push((query as { authConfigIds?: unknown }).authConfigIds);
-            return { items: [{ id: "ca_1" }] };
-          },
+          list,
           delete: async (id: string) => {
             deleted.push(id);
             return WITHDRAWN;
@@ -2399,14 +2692,18 @@ describe("withdrawing one person's grants", () => {
 
     expect(
       await broker.revoke({
-        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        account: {
+          holder: "person",
+          userId: "user_1",
+          vendorUserId: VENDOR_USER,
+        },
         toolkit: "gmail",
       }),
     ).toBe(true);
 
     // The operator's config is not in the question, so no account on it can be in the answer and
     // none of them can reach the delete.
-    expect(scoped).toEqual([[OUR_GMAIL.id]]);
+    expect(asked.map((query) => query.authConfigIds)).toEqual([[OUR_GMAIL.id]]);
     expect(deleted).toEqual(["ca_1"]);
   });
 
@@ -2426,12 +2723,16 @@ describe("withdrawing one person's grants", () => {
    */
   test("a person's accounts are not listed where Composio holds no config for the app", async () => {
     const { broker } = buildComposioClient(
-      fakeVendor({ authConfigs: { list: async () => ({ items: [] }) } }),
+      fakeVendor({ authConfigs: { list: configsOf("gmail", []) } }),
     );
 
     expect(
       await broker.revoke({
-        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        account: {
+          holder: "person",
+          userId: "user_1",
+          vendorUserId: VENDOR_USER,
+        },
         toolkit: "gmail",
       }),
     ).toBe(false);
@@ -2461,13 +2762,17 @@ describe("withdrawing one person's grants", () => {
   test("an app whose configs no longer carry this deployment's name is not a quiet disconnection", async () => {
     const { broker } = buildComposioClient(
       fakeVendor({
-        authConfigs: { list: async () => ({ items: [BY_HAND_GMAIL] }) },
+        authConfigs: { list: configsOf("gmail", [BY_HAND_GMAIL]) },
       }),
     );
 
     const refusal = await failureOf(
       broker.revoke({
-        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        account: {
+          holder: "person",
+          userId: "user_1",
+          vendorUserId: VENDOR_USER,
+        },
         toolkit: "gmail",
       }),
     );
@@ -2508,7 +2813,7 @@ describe("withdrawing one person's grants", () => {
         fakeVendor({
           authConfigs: { list: ourGmailConfig },
           connectedAccounts: {
-            list: async () => ({ items: [{ id: "ca_1" }] }),
+            list: heldAccounts([{ id: "ca_1" }]),
             delete: async (id: string) => {
               deleted.push(id);
               return answer;
@@ -2522,7 +2827,7 @@ describe("withdrawing one person's grants", () => {
           account: {
             holder: "person",
             userId: "user_1",
-            vendorUserId: "user_1",
+            vendorUserId: VENDOR_USER,
           },
           toolkit: "gmail",
         }),
@@ -2554,10 +2859,10 @@ describe("withdrawing one person's grants", () => {
       fakeVendor({
         authConfigs: { list: ourGmailConfig },
         connectedAccounts: {
-          list: async (query: unknown) =>
-            (query as { cursor?: string }).cursor === undefined
-              ? { items: [{ id: "ca_1" }], nextCursor: "page_2" }
-              : { items: [{ id: "ca_1" }], nextCursor: null },
+          list: accountListing([
+            { row: { id: "ca_1" }, page: 1 },
+            { row: { id: "ca_1" }, page: 2 },
+          ]).list,
           delete: async (id: string) => {
             if (deleted.includes(id)) {
               throw new Error(
@@ -2573,7 +2878,11 @@ describe("withdrawing one person's grants", () => {
 
     expect(
       await broker.revoke({
-        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        account: {
+          holder: "person",
+          userId: "user_1",
+          vendorUserId: VENDOR_USER,
+        },
         toolkit: "gmail",
       }),
     ).toBe(true);
@@ -2593,9 +2902,7 @@ describe("withdrawing one person's grants", () => {
       fakeVendor({
         authConfigs: { list: ourGmailConfig },
         connectedAccounts: {
-          list: async () => ({
-            items: [{ id: "ca_1" }, { id: "ca_1" }, { id: "ca_2" }],
-          }),
+          list: heldAccounts([{ id: "ca_1" }, { id: "ca_1" }, { id: "ca_2" }]),
           delete: async (id: string) => {
             if (id === "ca_2") throw new Error("Composio refused this one.");
             return WITHDRAWN;
@@ -2607,7 +2914,11 @@ describe("withdrawing one person's grants", () => {
 
     const failure = await failureOf(
       broker.revoke({
-        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        account: {
+          holder: "person",
+          userId: "user_1",
+          vendorUserId: VENDOR_USER,
+        },
         toolkit: "gmail",
       }),
     );
@@ -2632,7 +2943,7 @@ describe("withdrawing one person's grants", () => {
       fakeVendor({
         authConfigs: { list: ourGmailConfig },
         connectedAccounts: {
-          list: async () => ({ items: [{}, { id: "ca_refused" }] }),
+          list: heldAccounts([{}, { id: "ca_refused" }]),
           delete: refuse("this account's withdrawal"),
         },
       }),
@@ -2641,7 +2952,11 @@ describe("withdrawing one person's grants", () => {
 
     const failure = await failureOf(
       broker.revoke({
-        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        account: {
+          holder: "person",
+          userId: "user_1",
+          vendorUserId: VENDOR_USER,
+        },
         toolkit: "gmail",
       }),
     );
@@ -2675,12 +2990,10 @@ describe("withdrawing one person's grants", () => {
     const { broker } = buildComposioClient(
       fakeVendor({
         authConfigs: {
-          list: async () => ({
-            items: [
-              { id: "ac_theirs", name: "Gmail", status: "ENABLED" },
-              { id: "ac_nameless", status: "ENABLED" },
-            ],
-          }),
+          list: configsOf("gmail", [
+            { id: "ac_theirs", name: "Gmail", status: "ENABLED" },
+            { id: "ac_nameless", status: "ENABLED" },
+          ]),
         },
         connectedAccounts: {
           delete: async (id: string) => {
@@ -2694,7 +3007,11 @@ describe("withdrawing one person's grants", () => {
 
     const failure = await failureOf(
       broker.revoke({
-        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        account: {
+          holder: "person",
+          userId: "user_1",
+          vendorUserId: VENDOR_USER,
+        },
         toolkit: "gmail",
       }),
     );
@@ -2728,9 +3045,13 @@ describe("refusals a route can tell from an outage", () => {
 
     const error = await broker
       .authorize({
-        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        account: {
+          holder: "person",
+          userId: "user_1",
+          vendorUserId: VENDOR_USER,
+        },
         toolkit: "linear",
-        returnUrl: "https://openbot.test/settings/connected-accounts/x",
+        returnUrl: "https://openbot.test/connections/x",
       })
       .catch((raised: unknown) => raised);
 
@@ -2759,9 +3080,13 @@ describe("refusals a route can tell from an outage", () => {
 
     const error = await broker
       .authorize({
-        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        account: {
+          holder: "person",
+          userId: "user_1",
+          vendorUserId: VENDOR_USER,
+        },
         toolkit: "linear",
-        returnUrl: "https://openbot.test/settings/connected-accounts/x",
+        returnUrl: "https://openbot.test/connections/x",
       })
       .catch((raised: unknown) => raised);
 
@@ -2872,6 +3197,11 @@ describe("a catalogue that might be a fragment", () => {
         logo: null,
         categories: ["Productivity"],
         actionCount: 63,
+        // Composio measures none of the three, so each is an explicit null: "not measured", which is
+        // a different fact from "measured, and none" and must never be read through a `?? 0`.
+        classifiedCount: null,
+        permissionCount: null,
+        scopedActionCount: null,
         connection: NO_SCHEME,
       },
     ]);
@@ -3039,6 +3369,12 @@ describe("what a vendor failure becomes on its way out of the seam", () => {
         "Minting the link failed with nothing said. Nobody was sent anywhere and nothing was attached, so trying again is the whole of the advice.",
     },
     {
+      method: "grantsFor",
+      kind: "an outage",
+      because:
+        "The account listing did not answer. Nothing is granted or spent by asking what somebody holds, and the page this fills in has the route's own advice — the deployment's key, the vendor's status page — to show instead.",
+    },
+    {
       method: "isConnected",
       kind: "an outage",
       because:
@@ -3091,6 +3427,20 @@ describe("what a vendor failure becomes on its way out of the seam", () => {
   );
 
   /**
+   * The seam methods that REACH NO VENDOR, named here rather than quietly filtered.
+   *
+   * `authProviderOf` answers from the shape of Composio itself — a connection is made against an
+   * auth config and an auth config is per toolkit, so a toolkit IS its own auth provider — and it
+   * therefore asks nobody anything. A row in the table below would have to invent a vendor call for
+   * it to break on, which would assert something about the fake and nothing about the method.
+   *
+   * NAMING IT IS WHAT KEEPS THE COMPLETENESS TEST HONEST IN BOTH DIRECTIONS: the next method added
+   * to this seam is covered by the table or appears on this list on purpose, and the test below
+   * then checks that what is on this list genuinely dials nothing.
+   */
+  const DIALS_NOTHING = new Set<SeamMethod>(["authProviderOf"]);
+
+  /**
    * Every method of the seam, with the vendor call that decides its answer aimed at the throw.
    *
    * THE CALL THAT DECIDES RATHER THAN THE FIRST ONE. Several of these read a listing before they
@@ -3139,10 +3489,25 @@ describe("what a vendor failure becomes on its way out of the seam", () => {
           account: {
             holder: "person",
             userId: "user_1",
-            vendorUserId: "user_1",
+            vendorUserId: VENDOR_USER,
           },
           toolkit: "linear",
           returnUrl: RETURN_URL,
+        }),
+    },
+    {
+      // The account listing is the first of the three `grantsFor` reads, and the only one a
+      // failure here can reach: the config listing and the action listing come after it.
+      method: "grantsFor",
+      vendor: (raise) => ({ connectedAccounts: { list: raise } }),
+      ask: ({ broker }) =>
+        broker.grantsFor({
+          account: {
+            holder: "person",
+            userId: "user_1",
+            vendorUserId: VENDOR_USER,
+          },
+          toolkit: "gmail",
         }),
     },
     {
@@ -3153,7 +3518,7 @@ describe("what a vendor failure becomes on its way out of the seam", () => {
           account: {
             holder: "person",
             userId: "user_1",
-            vendorUserId: "user_1",
+            vendorUserId: VENDOR_USER,
           },
           toolkit: "gmail",
         }),
@@ -3166,7 +3531,7 @@ describe("what a vendor failure becomes on its way out of the seam", () => {
           account: {
             holder: "person",
             userId: "user_1",
-            vendorUserId: "user_1",
+            vendorUserId: VENDOR_USER,
           },
           toolkit: "gmail",
         }),
@@ -3178,7 +3543,7 @@ describe("what a vendor failure becomes on its way out of the seam", () => {
         // deployment's to end before it asks for any account at all.
         authConfigs: { list: ourGmailConfig },
         connectedAccounts: {
-          list: async () => ({ items: [{ id: "ca_1" }] }),
+          list: heldAccounts([{ id: "ca_1" }]),
           delete: raise,
         },
       }),
@@ -3187,7 +3552,7 @@ describe("what a vendor failure becomes on its way out of the seam", () => {
           account: {
             holder: "person",
             userId: "user_1",
-            vendorUserId: "user_1",
+            vendorUserId: VENDOR_USER,
           },
           toolkit: "gmail",
         }),
@@ -3215,7 +3580,7 @@ describe("what a vendor failure becomes on its way out of the seam", () => {
           account: {
             holder: "person",
             userId: "user_1",
-            vendorUserId: "user_1",
+            vendorUserId: VENDOR_USER,
           },
           toolkit: "linear",
           authScheme: "API_KEY",
@@ -3264,9 +3629,35 @@ describe("what a vendor failure becomes on its way out of the seam", () => {
     // projection arrives in this set, and the table that does not cover it fails here rather than
     // being the one door nobody thought to probe.
     const seam = buildComposioClient(fakeVendor({}));
+    // Methods only: `grantIsLocal` is a declared property of the broker, not a door to probe.
+    const methodsOf = (part: object) =>
+      Object.entries(part)
+        .filter(([, member]) => typeof member === "function")
+        .map(([name]) => name);
     expect(
-      [...Object.keys(seam.broker), ...Object.keys(seam.actions)].sort(),
+      [...methodsOf(seam.broker), ...methodsOf(seam.actions)]
+        .filter((name) => !DIALS_NOTHING.has(name as SeamMethod))
+        .sort(),
     ).toEqual(SEAM_CASES.map((seamCase) => seamCase.method).sort());
+    // Whatever is not a method must be acknowledged by name, so a new non-function member of the
+    // broker is a decision somebody makes rather than a thing the filter above silently drops.
+    expect(
+      Object.entries(seam.broker)
+        .filter(([, member]) => typeof member !== "function")
+        .map(([name]) => name),
+    ).toEqual(["grantIsLocal", "authorizations"]);
+  });
+
+  /**
+   * The other direction of {@link DIALS_NOTHING}: what is excused from the table must genuinely
+   * have nothing to fail at. The vendor here has no methods at all, so any call out of this seam
+   * would raise rather than answer.
+   */
+  test("a method excused from the table reaches no vendor at all", async () => {
+    const { broker } = buildComposioClient(fakeVendor({}));
+
+    expect([...DIALS_NOTHING]).toEqual(["authProviderOf"]);
+    expect(await broker.authProviderOf("gmail")).toBe("gmail");
   });
 
   for (const seamCase of SEAM_CASES) {
@@ -3364,7 +3755,11 @@ describe("each vendor condition reaches the reader as its own remedy", () => {
       () => 1_000_000,
     );
     return broker.authorize({
-      account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+      account: {
+        holder: "person",
+        userId: "user_1",
+        vendorUserId: VENDOR_USER,
+      },
       toolkit: "linear",
       returnUrl: RETURN_URL,
     });
@@ -3437,7 +3832,7 @@ describe("each vendor condition reaches the reader as its own remedy", () => {
     {
       name: "ComposioMultipleConnectedAccountsError",
       raisedBy: "connectedAccounts.link",
-      remedy: /disconnecting the account they already hold/,
+      remedy: /an account this person is already connected through/,
       ask: whileLinking,
     },
     {
@@ -3501,6 +3896,20 @@ describe("each vendor condition reaches the reader as its own remedy", () => {
       }
     });
   }
+
+  test("an account Composio no longer holds is raised as its own class, so a call can offer Reconnect", async () => {
+    const failure = await failureOf(
+      whileRunning(raising("ComposioConnectedAccountNotFoundError")),
+    );
+    expect(failure).toBeInstanceOf(BrokerAccountGoneError);
+    // Still an authored refusal, so every reader that prefers this deployment's sentence still does.
+    expect(failure).toBeInstanceOf(BrokerRefusalError);
+    // And nothing else is: the class is what the store acts on.
+    const other = await failureOf(
+      whileRunning(raising("ComposioRequestCancelledError")),
+    );
+    expect(other).not.toBeInstanceOf(BrokerAccountGoneError);
+  });
 
   /**
    * ONE VENDOR CLASS OVER EVERY WAY A FETCH CAN FAIL, which is a fact about the SDK rather than a
@@ -3593,9 +4002,7 @@ describe("what the delete loop keeps of the failures it meets", () => {
       fakeVendor({
         authConfigs: { list: ourGmailConfig },
         connectedAccounts: {
-          list: async () => ({
-            items: [{ id: "ca_1" }, { id: "ca_2" }, { id: "ca_3" }],
-          }),
+          list: heldAccounts([{ id: "ca_1" }, { id: "ca_2" }, { id: "ca_3" }]),
           delete: async (id: string) => {
             if (id !== "ca_1") throw new Error(`Composio refused ${id}.`);
             return WITHDRAWN;
@@ -3607,7 +4014,11 @@ describe("what the delete loop keeps of the failures it meets", () => {
 
     const failure = await failureOf(
       broker.revoke({
-        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        account: {
+          holder: "person",
+          userId: "user_1",
+          vendorUserId: VENDOR_USER,
+        },
         toolkit: "gmail",
       }),
     );
@@ -3627,7 +4038,7 @@ describe("what the delete loop keeps of the failures it meets", () => {
       fakeVendor({
         authConfigs: { list: ourGmailConfig },
         connectedAccounts: {
-          list: async () => ({ items: [{ id: "ca_1" }, { id: "ca_2" }] }),
+          list: heldAccounts([{ id: "ca_1" }, { id: "ca_2" }]),
           delete: async (id: string) => {
             if (id === "ca_2") throw new Error("Composio refused that one.");
             return WITHDRAWN;
@@ -3639,7 +4050,11 @@ describe("what the delete loop keeps of the failures it meets", () => {
 
     const failure = await failureOf(
       broker.revoke({
-        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        account: {
+          holder: "person",
+          userId: "user_1",
+          vendorUserId: VENDOR_USER,
+        },
         toolkit: "gmail",
       }),
     );
@@ -3669,9 +4084,7 @@ describe("what the delete loop keeps of the failures it meets", () => {
       fakeVendor({
         authConfigs: { list: ourGmailConfig },
         connectedAccounts: {
-          list: async () => ({
-            items: [{ id: "ca_1" }, { id: "ca_2" }, { id: "ca_3" }],
-          }),
+          list: heldAccounts([{ id: "ca_1" }, { id: "ca_2" }, { id: "ca_3" }]),
           delete: async (id: string) => {
             if (id === "ca_2") {
               throw new TypeError(
@@ -3688,7 +4101,11 @@ describe("what the delete loop keeps of the failures it meets", () => {
 
     const failure = await failureOf(
       broker.revoke({
-        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        account: {
+          holder: "person",
+          userId: "user_1",
+          vendorUserId: VENDOR_USER,
+        },
         toolkit: "gmail",
       }),
     );
@@ -3707,7 +4124,7 @@ describe("what the delete loop keeps of the failures it meets", () => {
     const { broker } = buildComposioClient(
       fakeVendor({
         authConfigs: {
-          list: async () => ({ items: [OURS, OURS_SPARE] }),
+          list: configsOf("linear", [OURS, OURS_SPARE]),
           delete: async (id: string) => {
             throw new Error(`Composio refused ${id}.`);
           },
@@ -3858,7 +4275,7 @@ describe("a vendor listing that is not the shape it is declared to be", () => {
           account: {
             holder: "person",
             userId: "user_1",
-            vendorUserId: "user_1",
+            vendorUserId: VENDOR_USER,
           },
           toolkit: "linear",
           returnUrl: RETURN_URL,
@@ -3909,7 +4326,7 @@ describe("a vendor listing that is not the shape it is declared to be", () => {
           account: {
             holder: "person",
             userId: "user_1",
-            vendorUserId: "user_1",
+            vendorUserId: VENDOR_USER,
           },
           toolkit: "gmail",
         }),
@@ -4016,18 +4433,16 @@ describe("a listing that arrived with a cursor still outstanding", () => {
   ];
 
   test("every page of this person's accounts is read, and every account on them withdrawn", async () => {
-    const asked: unknown[] = [];
     const deleted: string[] = [];
+    const { list, asked } = accountListing([
+      { row: { id: "ca_1" }, page: 1 },
+      { row: { id: "ca_2" }, page: 2 },
+    ]);
     const { broker } = buildComposioClient(
       fakeVendor({
         authConfigs: { list: ourGmailConfig },
         connectedAccounts: {
-          list: async (query: unknown) => {
-            asked.push(query);
-            return (query as { cursor?: string }).cursor === undefined
-              ? { items: [{ id: "ca_1" }], nextCursor: "page_2" }
-              : { items: [{ id: "ca_2" }], nextCursor: null };
-          },
+          list,
           delete: async (id: string) => {
             deleted.push(id);
             return WITHDRAWN;
@@ -4038,7 +4453,11 @@ describe("a listing that arrived with a cursor still outstanding", () => {
 
     expect(
       await broker.revoke({
-        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        account: {
+          holder: "person",
+          userId: "user_1",
+          vendorUserId: VENDOR_USER,
+        },
         toolkit: "gmail",
       }),
     ).toBe(true);
@@ -4051,7 +4470,7 @@ describe("a listing that arrived with a cursor still outstanding", () => {
     // where it left off — which is the half a reader cannot infer from the rows that came back.
     expect(asked).toEqual([
       {
-        userIds: ["user_1"],
+        userIds: [VENDOR_USER],
         toolkitSlugs: ["gmail"],
         statuses: REVOCABLE_STATUSES,
         accountType: "ALL",
@@ -4059,7 +4478,7 @@ describe("a listing that arrived with a cursor still outstanding", () => {
         limit: WHOLE_LISTING,
       },
       {
-        userIds: ["user_1"],
+        userIds: [VENDOR_USER],
         toolkitSlugs: ["gmail"],
         statuses: REVOCABLE_STATUSES,
         accountType: "ALL",
@@ -4074,10 +4493,8 @@ describe("a listing that arrived with a cursor still outstanding", () => {
     const { broker } = buildComposioClient(
       fakeVendor({
         connectedAccounts: {
-          list: async (query: unknown) =>
-            (query as { cursor?: string }).cursor === undefined
-              ? { items: [], nextCursor: "page_2" }
-              : { items: [{ id: "ca_2" }], nextCursor: null },
+          // Page one holds only the accounts this question must leave out.
+          list: accountListing([{ row: { id: "ca_2" }, page: 2 }]).list,
         },
       }),
     );
@@ -4087,7 +4504,11 @@ describe("a listing that arrived with a cursor still outstanding", () => {
     // tells the gate in `./access` that they may not act through one they can.
     expect(
       await broker.isConnected({
-        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        account: {
+          holder: "person",
+          userId: "user_1",
+          vendorUserId: VENDOR_USER,
+        },
         toolkit: "gmail",
       }),
     ).toBe(true);
@@ -4152,7 +4573,7 @@ describe("a listing that arrived with a cursor still outstanding", () => {
           account: {
             holder: "person",
             userId: "user_1",
-            vendorUserId: "user_1",
+            vendorUserId: VENDOR_USER,
           },
           toolkit: "gmail",
         }),
@@ -4185,7 +4606,11 @@ describe("a listing that arrived with a cursor still outstanding", () => {
 
     const failure = await failureOf(
       broker.isConnected({
-        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        account: {
+          holder: "person",
+          userId: "user_1",
+          vendorUserId: VENDOR_USER,
+        },
         toolkit: "gmail",
       }),
     );
@@ -4249,7 +4674,11 @@ describe("a listing that arrived with a cursor still outstanding", () => {
     );
 
     await broker.authorize({
-      account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+      account: {
+        holder: "person",
+        userId: "user_1",
+        vendorUserId: VENDOR_USER,
+      },
       toolkit: "linear",
       returnUrl: RETURN_URL,
     });
@@ -4257,7 +4686,7 @@ describe("a listing that arrived with a cursor still outstanding", () => {
     // Reading one page here answers "this deployment has no config for linear" and sends an
     // administrator to remove and re-add an app whose config is sitting on page two.
     expect(linked).toEqual([
-      ["user_1", "ac_ours", { callbackUrl: RETURN_URL }],
+      [VENDOR_USER, "ac_ours", { callbackUrl: RETURN_URL }],
     ]);
   });
 
@@ -4282,7 +4711,11 @@ describe("a listing that arrived with a cursor still outstanding", () => {
 
     const refusal = await failureOf(
       broker.revoke({
-        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        account: {
+          holder: "person",
+          userId: "user_1",
+          vendorUserId: VENDOR_USER,
+        },
         toolkit: "gmail",
       }),
     );
@@ -4356,7 +4789,7 @@ describe("a listing that arrived with a cursor still outstanding", () => {
           account: {
             holder: "person",
             userId: "user_1",
-            vendorUserId: "user_1",
+            vendorUserId: VENDOR_USER,
           },
           toolkit: "gmail",
         }),
@@ -4422,7 +4855,11 @@ describe("a listing that arrived with a cursor still outstanding", () => {
 
     const refusal = await failureOf(
       broker.revoke({
-        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        account: {
+          holder: "person",
+          userId: "user_1",
+          vendorUserId: VENDOR_USER,
+        },
         toolkit: "gmail",
       }),
     );
@@ -4472,7 +4909,11 @@ describe("a listing that arrived with a cursor still outstanding", () => {
 
     const refusal = await failureOf(
       broker.revoke({
-        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        account: {
+          holder: "person",
+          userId: "user_1",
+          vendorUserId: VENDOR_USER,
+        },
         toolkit: "gmail",
       }),
     );
@@ -4660,7 +5101,11 @@ describe("a vendor answer that is one object rather than a listing", () => {
      */
     const refusal = await failureOf(
       broker.authorize({
-        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        account: {
+          holder: "person",
+          userId: "user_1",
+          vendorUserId: VENDOR_USER,
+        },
         toolkit: "linear",
         returnUrl: RETURN_URL,
       }),
@@ -4969,7 +5414,7 @@ describe("what a malformed field of a row actually costs", () => {
     const { actions } = buildComposioClient(
       fakeVendor({
         tools: {
-          list: async () => ({ items: [{ slug: "GMAIL_FETCH_EMAILS" }] }),
+          list: actionsOf("gmail", [{ slug: "GMAIL_FETCH_EMAILS" }]),
         },
       }),
     );
@@ -5008,16 +5453,14 @@ describe("what a malformed field of a row actually costs", () => {
     const { actions } = buildComposioClient(
       fakeVendor({
         tools: {
-          list: async () => ({
-            items: [
-              {
-                slug: "GMAIL_FETCH_EMAILS",
-                description: null,
-                input_parameters: null,
-                version: null,
-              },
-            ],
-          }),
+          list: actionsOf("gmail", [
+            {
+              slug: "GMAIL_FETCH_EMAILS",
+              description: null,
+              input_parameters: null,
+              version: null,
+            },
+          ]),
         },
       }),
     );
@@ -5189,7 +5632,11 @@ describe("what a malformed field of a row actually costs", () => {
 
     const refusal = await failureOf(
       broker.authorize({
-        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        account: {
+          holder: "person",
+          userId: "user_1",
+          vendorUserId: VENDOR_USER,
+        },
         toolkit: "linear",
         returnUrl: RETURN_URL,
       }),
@@ -5240,7 +5687,11 @@ describe("what a malformed field of a row actually costs", () => {
 
     const refusal = await failureOf(
       broker.authorize({
-        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        account: {
+          holder: "person",
+          userId: "user_1",
+          vendorUserId: VENDOR_USER,
+        },
         toolkit: "linear",
         returnUrl: RETURN_URL,
       }),
@@ -5284,7 +5735,11 @@ describe("what a malformed field of a row actually costs", () => {
 
     const refusal = await failureOf(
       broker.authorize({
-        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        account: {
+          holder: "person",
+          userId: "user_1",
+          vendorUserId: VENDOR_USER,
+        },
         toolkit: "linear",
         returnUrl: RETURN_URL,
       }),
@@ -5317,7 +5772,11 @@ describe("what a malformed field of a row actually costs", () => {
 
     const refusal = await failureOf(
       broker.connectWithFields({
-        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        account: {
+          holder: "person",
+          userId: "user_1",
+          vendorUserId: VENDOR_USER,
+        },
         toolkit: "linear",
         authScheme: "API_KEY",
         values: { generic_api_key: "pplx-secret" },
@@ -5358,7 +5817,11 @@ describe("what a malformed field of a row actually costs", () => {
 
     const refusal = await failureOf(
       broker.authorize({
-        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        account: {
+          holder: "person",
+          userId: "user_1",
+          vendorUserId: VENDOR_USER,
+        },
         toolkit: "linear",
         returnUrl: RETURN_URL,
       }),
@@ -5396,7 +5859,11 @@ describe("what a malformed field of a row actually costs", () => {
     );
 
     await broker.authorize({
-      account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+      account: {
+        holder: "person",
+        userId: "user_1",
+        vendorUserId: VENDOR_USER,
+      },
       toolkit: "linear",
       returnUrl: RETURN_URL,
     });
@@ -5408,7 +5875,9 @@ describe("what a malformed field of a row actually costs", () => {
      * Connect and an administrator pressing Remove, who need not be answered by the same process,
      * container or build of ICU. This pair is the one that tells the two orders apart.
      */
-    expect(linked).toEqual([["user_1", "ac_B", { callbackUrl: RETURN_URL }]]);
+    expect(linked).toEqual([
+      [VENDOR_USER, "ac_B", { callbackUrl: RETURN_URL }],
+    ]);
   });
 
   test("a created config the answer does not name is reported as possibly standing", async () => {
@@ -5510,7 +5979,7 @@ describe("what a malformed field of a row actually costs", () => {
           account: {
             holder: "person",
             userId: "user_1",
-            vendorUserId: "user_1",
+            vendorUserId: VENDOR_USER,
           },
           toolkit: "linear",
           returnUrl: RETURN_URL,
@@ -5578,11 +6047,9 @@ describe("a field Composio padded with whitespace", () => {
     const { broker } = buildComposioClient(
       fakeVendor({
         authConfigs: {
-          list: async () => ({
-            items: [
-              { id: " ac_ours ", name: "Linear (OpenBot)", status: "ENABLED" },
-            ],
-          }),
+          list: configsOf("linear", [
+            { id: " ac_ours ", name: "Linear (OpenBot)", status: "ENABLED" },
+          ]),
           delete: async (...call: unknown[]) => {
             deleted.push(call);
           },
@@ -5603,7 +6070,7 @@ describe("a field Composio padded with whitespace", () => {
       fakeVendor({
         authConfigs: { list: ourGmailConfig },
         connectedAccounts: {
-          list: async () => ({ items: [{ id: " ca_1 " }] }),
+          list: heldAccounts([{ id: " ca_1 " }]),
           delete: async (...call: unknown[]) => {
             deleted.push(call);
             return WITHDRAWN;
@@ -5614,7 +6081,11 @@ describe("a field Composio padded with whitespace", () => {
 
     expect(
       await broker.revoke({
-        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        account: {
+          holder: "person",
+          userId: "user_1",
+          vendorUserId: VENDOR_USER,
+        },
         toolkit: "gmail",
       }),
     ).toBe(true);
@@ -5689,7 +6160,7 @@ describe("a field Composio padded with whitespace", () => {
   test("a padded consent page is the address this person is sent to, without the padding", async () => {
     const { broker } = buildComposioClient(
       fakeVendor({
-        authConfigs: { list: async () => ({ items: [OURS] }) },
+        authConfigs: { list: configsOf("linear", [OURS]) },
         connectedAccounts: {
           link: async () => ({
             redirectUrl: "  https://backend.composio.dev/s/a-link  ",
@@ -5700,13 +6171,19 @@ describe("a field Composio padded with whitespace", () => {
     );
 
     const begun = await broker.authorize({
-      account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+      account: {
+        holder: "person",
+        userId: "user_1",
+        vendorUserId: VENDOR_USER,
+      },
       toolkit: "linear",
       returnUrl: RETURN_URL,
     });
 
     expect(begun).toEqual({
       redirectUrl: "https://backend.composio.dev/s/a-link",
+      // Declared null: Composio's return leg is correlated by sealed state, not by a broker id.
+      authorizationId: null,
     });
   });
 
@@ -5722,7 +6199,7 @@ describe("a field Composio padded with whitespace", () => {
     const linked: unknown[] = [];
     const { broker } = buildComposioClient(
       fakeVendor({
-        authConfigs: { list: async () => ({ items: [OURS] }) },
+        authConfigs: { list: configsOf("linear", [OURS]) },
         connectedAccounts: {
           link: async (...call: unknown[]) => {
             linked.push(call);
@@ -5735,7 +6212,11 @@ describe("a field Composio padded with whitespace", () => {
 
     const refusal = await failureOf(
       broker.authorize({
-        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        account: {
+          holder: "person",
+          userId: "user_1",
+          vendorUserId: VENDOR_USER,
+        },
         toolkit: "linear",
         returnUrl: RETURN_URL,
       }),
@@ -5763,11 +6244,9 @@ describe("a field Composio padded with whitespace", () => {
     const { broker } = buildComposioClient(
       fakeVendor({
         authConfigs: {
-          list: async () => ({
-            items: [
-              { id: "ac_ours", name: "Linear (OpenBot)", status: " ENABLED " },
-            ],
-          }),
+          list: configsOf("linear", [
+            { id: "ac_ours", name: "Linear (OpenBot)", status: " ENABLED " },
+          ]),
         },
         connectedAccounts: {
           link: async (...call: unknown[]) => {
@@ -5780,16 +6259,22 @@ describe("a field Composio padded with whitespace", () => {
     );
 
     const begun = await broker.authorize({
-      account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+      account: {
+        holder: "person",
+        userId: "user_1",
+        vendorUserId: VENDOR_USER,
+      },
       toolkit: "linear",
       returnUrl: RETURN_URL,
     });
 
     expect(begun).toEqual({
       redirectUrl: "https://backend.composio.dev/s/a-link",
+      // Declared null: Composio's return leg is correlated by sealed state, not by a broker id.
+      authorizationId: null,
     });
     expect(linked).toEqual([
-      ["user_1", "ac_ours", { callbackUrl: RETURN_URL }],
+      [VENDOR_USER, "ac_ours", { callbackUrl: RETURN_URL }],
     ]);
   });
 
@@ -5799,11 +6284,9 @@ describe("a field Composio padded with whitespace", () => {
     const { broker } = buildComposioClient(
       fakeVendor({
         authConfigs: {
-          list: async () => ({
-            items: [
-              { id: "ac_ours", name: "Linear (OpenBot)", status: " ENABLED " },
-            ],
-          }),
+          list: configsOf("linear", [
+            { id: "ac_ours", name: "Linear (OpenBot)", status: " ENABLED " },
+          ]),
         },
         connectedAccounts: {
           create: async (body: unknown) => {
@@ -5816,7 +6299,11 @@ describe("a field Composio padded with whitespace", () => {
 
     expect(
       await broker.connectWithFields({
-        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        account: {
+          holder: "person",
+          userId: "user_1",
+          vendorUserId: VENDOR_USER,
+        },
         toolkit: "linear",
         authScheme: "API_KEY",
         values: { generic_api_key: "pplx-secret" },
@@ -5836,11 +6323,9 @@ describe("a field Composio padded with whitespace", () => {
     const { broker } = buildComposioClient(
       fakeVendor({
         authConfigs: {
-          list: async () => ({
-            items: [
-              { id: "ac_ours", name: "Linear (OpenBot)", status: " DISABLED " },
-            ],
-          }),
+          list: configsOf("linear", [
+            { id: "ac_ours", name: "Linear (OpenBot)", status: " DISABLED " },
+          ]),
         },
       }),
       () => 1_000_000,
@@ -5848,7 +6333,11 @@ describe("a field Composio padded with whitespace", () => {
 
     const refusal = await failureOf(
       broker.authorize({
-        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        account: {
+          holder: "person",
+          userId: "user_1",
+          vendorUserId: VENDOR_USER,
+        },
         toolkit: "linear",
         returnUrl: RETURN_URL,
       }),
@@ -6039,7 +6528,7 @@ describe("the key becoming a vendor, and which delete that vendor carries", () =
           account: {
             holder: "person",
             userId: "user_1",
-            vendorUserId: "user_1",
+            vendorUserId: VENDOR_USER,
           },
           toolkit: "gmail",
         }),
@@ -6097,7 +6586,10 @@ describe("the key becoming a vendor, and which delete that vendor carries", () =
     };
 
     const minted: unknown[][] = [];
-    let begun: { redirectUrl: string } | null = null;
+    let begun: {
+      redirectUrl: string;
+      authorizationId: string | null;
+    } | null = null;
     try {
       // The config listing is what carries the auth config's id to the link, so it answers with the
       // one this deployment made — the id that must arrive SECOND.
@@ -6112,7 +6604,11 @@ describe("the key becoming a vendor, and which delete that vendor carries", () =
 
       const { broker } = createComposioClient("never-dialled");
       begun = await broker.authorize({
-        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        account: {
+          holder: "person",
+          userId: "user_1",
+          vendorUserId: VENDOR_USER,
+        },
         toolkit: "gmail",
         returnUrl: RETURN_URL,
       });
@@ -6123,10 +6619,12 @@ describe("the key becoming a vendor, and which delete that vendor carries", () =
     // The person, then the config, then the callback — and the whole list rather than a field of
     // it, because the defect this is written for is an order and not a value.
     expect(minted).toEqual([
-      ["user_1", OUR_GMAIL.id, { callbackUrl: RETURN_URL }],
+      [VENDOR_USER, OUR_GMAIL.id, { callbackUrl: RETURN_URL }],
     ]);
     expect(begun).toEqual({
       redirectUrl: "https://backend.composio.dev/s/a-link",
+      // Declared null: Composio's return leg is correlated by sealed state, not by a broker id.
+      authorizationId: null,
     });
   });
 });
@@ -7759,7 +8257,7 @@ describe("connecting one person with the secret they typed", () => {
     const asked: unknown[] = [];
     const { broker } = buildComposioClient(
       fakeVendor({
-        authConfigs: { list: async () => ({ items: [OURS] }) },
+        authConfigs: { list: configsOf("linear", [OURS]) },
         connectedAccounts: {
           create: async (body: unknown) => {
             asked.push(body);
@@ -7771,7 +8269,11 @@ describe("connecting one person with the secret they typed", () => {
 
     expect(
       await broker.connectWithFields({
-        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        account: {
+          holder: "person",
+          userId: "user_1",
+          vendorUserId: VENDOR_USER,
+        },
         toolkit: "linear",
         authScheme: "API_KEY",
         values: { generic_api_key: TYPED_SECRET, subdomain: "acme" },
@@ -7789,7 +8291,7 @@ describe("connecting one person with the secret they typed", () => {
       {
         auth_config: { id: OURS.id },
         connection: {
-          user_id: "user_1",
+          user_id: VENDOR_USER,
           state: {
             authScheme: "API_KEY",
             val: {
@@ -7820,7 +8322,7 @@ describe("connecting one person with the secret they typed", () => {
     const asked: unknown[] = [];
     const { broker } = buildComposioClient(
       fakeVendor({
-        authConfigs: { list: async () => ({ items: [OURS] }) },
+        authConfigs: { list: configsOf("linear", [OURS]) },
         connectedAccounts: {
           create: async (body: unknown) => {
             asked.push(body);
@@ -7831,7 +8333,11 @@ describe("connecting one person with the secret they typed", () => {
     );
 
     await broker.connectWithFields({
-      account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+      account: {
+        holder: "person",
+        userId: "user_1",
+        vendorUserId: VENDOR_USER,
+      },
       toolkit: "linear",
       authScheme: "API_KEY",
       values: { generic_api_key: TYPED_SECRET, status: "INITIALIZING" },
@@ -7841,7 +8347,7 @@ describe("connecting one person with the secret they typed", () => {
       {
         auth_config: { id: OURS.id },
         connection: {
-          user_id: "user_1",
+          user_id: VENDOR_USER,
           state: {
             authScheme: "API_KEY",
             // The word this deployment sets, whatever arrived beside it under the same name.
@@ -7886,7 +8392,7 @@ describe("connecting one person with the secret they typed", () => {
 
     const { broker } = buildComposioClient(
       fakeVendor({
-        authConfigs: { list: async () => ({ items: [OURS] }) },
+        authConfigs: { list: configsOf("linear", [OURS]) },
         connectedAccounts: {
           create: async () => {
             throw raised;
@@ -7897,7 +8403,11 @@ describe("connecting one person with the secret they typed", () => {
 
     const refusal = await failureOf(
       broker.connectWithFields({
-        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        account: {
+          holder: "person",
+          userId: "user_1",
+          vendorUserId: VENDOR_USER,
+        },
         toolkit: "linear",
         authScheme: "API_KEY",
         values: { generic_api_key: TYPED_SECRET },
@@ -7921,14 +8431,18 @@ describe("connecting one person with the secret they typed", () => {
   test("a reply with no account id is refused rather than answered as a connection", async () => {
     const { broker } = buildComposioClient(
       fakeVendor({
-        authConfigs: { list: async () => ({ items: [OURS] }) },
+        authConfigs: { list: configsOf("linear", [OURS]) },
         connectedAccounts: { create: async () => ({ status: "ACTIVE" }) },
       }),
     );
 
     const refusal = await failureOf(
       broker.connectWithFields({
-        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        account: {
+          holder: "person",
+          userId: "user_1",
+          vendorUserId: VENDOR_USER,
+        },
         toolkit: "linear",
         authScheme: "API_KEY",
         values: { generic_api_key: TYPED_SECRET },
@@ -7951,13 +8465,17 @@ describe("connecting one person with the secret they typed", () => {
       fakeVendor({
         // The create is left at `fakeVendor`'s refusal, which is what says the value typed in went
         // nowhere: a call that was made would name itself here rather than answering.
-        authConfigs: { list: async () => ({ items: [BY_HAND] }) },
+        authConfigs: { list: configsOf("linear", [BY_HAND]) },
       }),
     );
 
     const refusal = await failureOf(
       broker.connectWithFields({
-        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        account: {
+          holder: "person",
+          userId: "user_1",
+          vendorUserId: VENDOR_USER,
+        },
         toolkit: "linear",
         authScheme: "API_KEY",
         values: { generic_api_key: TYPED_SECRET },
@@ -7990,11 +8508,9 @@ describe("connecting one person with the secret they typed", () => {
          * back with an account that cannot work.
          */
         authConfigs: {
-          list: async () => ({
-            items: [
-              { id: "ac_ours", name: "Linear (OpenBot)", status: "DISABLED" },
-            ],
-          }),
+          list: configsOf("linear", [
+            { id: "ac_ours", name: "Linear (OpenBot)", status: "DISABLED" },
+          ]),
         },
         connectedAccounts: {
           create: async (body: unknown) => {
@@ -8007,7 +8523,11 @@ describe("connecting one person with the secret they typed", () => {
 
     const refusal = await failureOf(
       broker.connectWithFields({
-        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        account: {
+          holder: "person",
+          userId: "user_1",
+          vendorUserId: VENDOR_USER,
+        },
         toolkit: "linear",
         authScheme: "API_KEY",
         values: { generic_api_key: TYPED_SECRET },
@@ -8038,12 +8558,10 @@ describe("connecting one person with the secret they typed", () => {
     const { broker } = buildComposioClient(
       fakeVendor({
         authConfigs: {
-          list: async () => ({
-            items: [
-              { id: "ac_a", name: "Linear (OpenBot)", status: "DISABLED" },
-              { id: "ac_b", name: "Linear (OpenBot)", status: "PENDING" },
-            ],
-          }),
+          list: configsOf("linear", [
+            { id: "ac_a", name: "Linear (OpenBot)", status: "DISABLED" },
+            { id: "ac_b", name: "Linear (OpenBot)", status: "PENDING" },
+          ]),
         },
         connectedAccounts: {
           create: async (body: unknown) => {
@@ -8056,7 +8574,11 @@ describe("connecting one person with the secret they typed", () => {
 
     const refusal = await failureOf(
       broker.connectWithFields({
-        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        account: {
+          holder: "person",
+          userId: "user_1",
+          vendorUserId: VENDOR_USER,
+        },
         toolkit: "linear",
         authScheme: "API_KEY",
         values: { generic_api_key: TYPED_SECRET },
@@ -8076,7 +8598,7 @@ describe("connecting one person with the secret they typed", () => {
     const { broker } = buildComposioClient(
       fakeVendor({
         authConfigs: {
-          list: async () => ({ items: [{ id: "ac_nameless" }] }),
+          list: configsOf("linear", [{ id: "ac_nameless" }]),
         },
         connectedAccounts: {
           create: async (body: unknown) => {
@@ -8089,7 +8611,11 @@ describe("connecting one person with the secret they typed", () => {
 
     const refusal = await failureOf(
       broker.connectWithFields({
-        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        account: {
+          holder: "person",
+          userId: "user_1",
+          vendorUserId: VENDOR_USER,
+        },
         toolkit: "linear",
         authScheme: "API_KEY",
         values: { generic_api_key: TYPED_SECRET },
@@ -8316,20 +8842,42 @@ describe("accounts named by holder", () => {
   const person = {
     holder: "person" as const,
     userId: "user_1",
-    vendorUserId: "user_1",
+    vendorUserId: VENDOR_USER,
   };
 
+  /**
+   * Accounts named the way a wrong question would find them, each carrying a name of its own so
+   * that the name an answer comes back with says which question was asked.
+   */
+  const NAMED_ELSEWHERE: HeldAccount[] = [
+    {
+      row: { id: "ca_person", data: { displayName: "a person's github" } },
+      toolkit: "github",
+    },
+    {
+      row: { id: "ca_local", data: { displayName: "under the local id" } },
+      userId: "user_1",
+      toolkit: "github",
+    },
+    {
+      row: { id: "ca_gmail", data: { displayName: "the deployment's gmail" } },
+      userId: deployment.vendorUserId,
+    },
+  ];
+
   test("the deployment's account is asked for under its vendor id, never a person's", async () => {
-    const asked: unknown[] = [];
-    const { broker } = buildComposioClient(
-      fakeVendor({
-        connectedAccounts: {
-          list: async (query: unknown) => {
-            asked.push(query);
-            return { items: [{ id: "ca_1" }] };
-          },
+    const { list, asked } = accountListing(
+      [
+        {
+          row: { id: "ca_1" },
+          userId: deployment.vendorUserId,
+          toolkit: "github",
         },
-      }),
+      ],
+      NAMED_ELSEWHERE,
+    );
+    const { broker } = buildComposioClient(
+      fakeVendor({ connectedAccounts: { list } }),
     );
     expect(
       await broker.isConnected({ account: deployment, toolkit: "github" }),
@@ -8339,43 +8887,77 @@ describe("accounts named by holder", () => {
     ]);
   });
 
+  /*
+   * NOT CONNECTED, WHILE THE VENDOR HOLDS A GITHUB ACCOUNT UNDER THIS PERSON'S LOCAL ID. The `false`
+   * is what tells a question asked under `userId` from one asked under `vendorUserId`: with the two
+   * spelled alike, as they were here, the assertion on `userIds` could not tell them apart either.
+   */
   test("a person's account is asked for under their vendor id", async () => {
-    const asked: unknown[] = [];
+    const { list, asked } = accountListing(
+      [],
+      NAMED_ELSEWHERE.filter((account) => account.userId === "user_1"),
+    );
     const { broker } = buildComposioClient(
-      fakeVendor({
-        connectedAccounts: {
-          list: async (query: unknown) => {
-            asked.push(query);
-            return { items: [] };
-          },
-        },
-      }),
+      fakeVendor({ connectedAccounts: { list } }),
     );
     expect(
       await broker.isConnected({ account: person, toolkit: "github" }),
     ).toBe(false);
-    expect(asked).toEqual([expect.objectContaining({ userIds: ["user_1"] })]);
+    expect(asked).toEqual([
+      expect.objectContaining({ userIds: [VENDOR_USER] }),
+    ]);
+  });
+
+  /*
+   * THE NAME IS READ OFF THIS PERSON'S ACCOUNT FOR THIS APP, which nothing here asked of a person.
+   * Every name test below is the deployment's; a person's name read under their local id, or off
+   * another app's account, is a name a settings page shows them for an account that is not theirs.
+   */
+  test("a person's account name is read off their own account for that app", async () => {
+    const { list, asked } = accountListing(
+      [
+        {
+          row: { id: "ca_mine", data: { displayName: "ada@example.test" } },
+          toolkit: "github",
+        },
+      ],
+      NAMED_ELSEWHERE.slice(1),
+    );
+    const { broker } = buildComposioClient(
+      fakeVendor({ connectedAccounts: { list } }),
+    );
+    expect(
+      await broker.accountName({ account: person, toolkit: "github" }),
+    ).toBe("ada@example.test");
+    expect(asked.map((query) => [query.userIds, query.toolkitSlugs])).toEqual([
+      [[VENDOR_USER], ["github"]],
+    ]);
   });
 
   test("only the display name leaves a listing that carries the account's tokens", async () => {
     const { broker } = buildComposioClient(
       fakeVendor({
         connectedAccounts: {
-          list: async () => ({
-            items: [
+          list: accountListing(
+            [
               {
-                id: "ca_1",
-                data: {
-                  displayName: "acme-bot",
-                  access_token: "gho_SECRET",
-                  refresh_token: "r_SECRET",
-                  client_secret: "cs_SECRET",
-                  id_token: "eyJ.SECRET",
+                row: {
+                  id: "ca_1",
+                  data: {
+                    displayName: "acme-bot",
+                    access_token: "gho_SECRET",
+                    refresh_token: "r_SECRET",
+                    client_secret: "cs_SECRET",
+                    id_token: "eyJ.SECRET",
+                  },
+                  state: { val: { access_token: "gho_SECRET" } },
                 },
-                state: { val: { access_token: "gho_SECRET" } },
+                userId: deployment.vendorUserId,
+                toolkit: "github",
               },
             ],
-          }),
+            NAMED_ELSEWHERE,
+          ).list,
         },
       }),
     );
@@ -8391,9 +8973,21 @@ describe("accounts named by holder", () => {
     const { broker } = buildComposioClient(
       fakeVendor({
         connectedAccounts: {
-          list: async () => ({
-            items: [{ id: "ca_1", data: { id_token: "eyJhbGciOi.e30.x" } }],
-          }),
+          // Beside a person's NAMED gmail account, so a question asked under anybody but the
+          // deployment's id answers with somebody's name rather than with none.
+          list: accountListing(
+            [
+              {
+                row: { id: "ca_1", data: { id_token: "eyJhbGciOi.e30.x" } },
+                userId: deployment.vendorUserId,
+              },
+            ],
+            [
+              {
+                row: { id: "ca_p", data: { displayName: "a person's gmail" } },
+              },
+            ],
+          ).list,
         },
       }),
     );
@@ -8403,7 +8997,11 @@ describe("accounts named by holder", () => {
   });
 
   test("an unconfigured broker names the provider it is missing", () => {
-    expect(new BrokerUnconfiguredError("Acme").message).toMatch(/Acme/);
-    expect(new BrokerUnconfiguredError().message).toMatch(/COMPOSIO_API_KEY/);
+    expect(new BrokerUnconfiguredError("arcade", "operator").message).toMatch(
+      /Arcade/,
+    );
+    expect(new BrokerUnconfiguredError("composio", "operator").message).toMatch(
+      /COMPOSIO_API_KEY/,
+    );
   });
 });

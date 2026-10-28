@@ -5,6 +5,7 @@ import { callComponentFunction } from "@/lib/components/queries";
 import { useActiveBotId } from "@/lib/copilot/active-bot";
 import { useConversation } from "@/lib/copilot/conversation";
 import type { GalleryComponent } from "@/lib/copilot/gallery-registry";
+import { keyedLookup } from "@/lib/lookup";
 import { GalleryFrame } from "./frame";
 import { seriesColour } from "./palette";
 
@@ -33,11 +34,19 @@ export const ActivityReportProps = z.object({
 
 type ActivityArgs = z.infer<typeof ActivityReportProps>;
 
-/** Which server-side function each report reads. Not the model's choice. */
-const FUNCTION_FOR: Record<string, string> = {
-  activity: "botActivity",
-  refusals: "recentRefusals",
-};
+/**
+ * Which server-side function each report reads. Not the model's choice.
+ *
+ * A Map, read through `keyedLookup`, because the key is a string somebody else chose: an object
+ * lookup answers `toString` or `constructor` with a member inherited from `Object.prototype`,
+ * which is truthy and so walks straight past the `functionName ?` guards below — handing a
+ * function to the grant check as the data function this component reads, and to
+ * `callComponentFunction` as a function name.
+ */
+const FUNCTION_FOR: ReadonlyMap<string, string> = new Map([
+  ["activity", "botActivity"],
+  ["refusals", "recentRefusals"],
+]);
 
 type ActivityRow = { bot: string; actions: number };
 type RefusalRow = {
@@ -61,7 +70,7 @@ export function ActivityReportCard({
   const conversation = useConversation();
   const [state, setState] = useState<State>({ status: "reading" });
 
-  const functionName = report ? FUNCTION_FOR[report] : undefined;
+  const functionName = report ? keyedLookup(FUNCTION_FOR, report) : undefined;
 
   useEffect(() => {
     // Nothing to read until the arguments have finished streaming in.
@@ -81,7 +90,7 @@ export function ActivityReportCard({
           : {
               status: "refused",
               reason:
-                result.reason ?? result.error ?? "That data could not be read.",
+                result.reason ?? result.error ?? "Couldn't read that data.",
             },
       );
     });
@@ -101,10 +110,7 @@ export function ActivityReportCard({
 
   if (state.status === "reading") {
     return (
-      <GalleryFrame
-        caption="Reading from this deployment"
-        title={title ?? "Report"}
-      >
+      <GalleryFrame caption="Reading from OpenBot" title={title ?? "Report"}>
         <p className="text-sm text-muted-foreground">Reading…</p>
       </GalleryFrame>
     );
@@ -174,7 +180,7 @@ function ActivityChart({
           </Button>
         ) : undefined
       }
-      caption={`Counted from this deployment's audit trail, last ${data.days} days`}
+      caption={`Counted from OpenBot's audit trail, last ${data.days} days`}
       title={title ?? "Bot activity"}
     >
       <ul className="flex flex-col gap-2">
@@ -217,7 +223,7 @@ function RefusalList({
     return (
       <GalleryFrame title={title ?? "Recent refusals"}>
         <p className="text-sm text-muted-foreground">
-          This deployment has refused nothing.
+          OpenBot hasn't refused anything.
         </p>
       </GalleryFrame>
     );
@@ -240,7 +246,7 @@ function RefusalList({
           </Button>
         ) : undefined
       }
-      caption="Read from this deployment's audit trail"
+      caption="Read from OpenBot's audit trail"
       title={title ?? "Recent refusals"}
     >
       <ul className="flex flex-col gap-2">
@@ -284,7 +290,9 @@ export const GALLERY: GalleryComponent[] = [
       "The report is on screen for the person, filled with figures read from this deployment. You were not given the figures.",
     reads: (args) => {
       const report = typeof args.report === "string" ? args.report : undefined;
-      const functionName = report ? FUNCTION_FOR[report] : undefined;
+      const functionName = report
+        ? keyedLookup(FUNCTION_FOR, report)
+        : undefined;
       return functionName ? [functionName] : [];
     },
   },

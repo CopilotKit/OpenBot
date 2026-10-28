@@ -73,7 +73,15 @@ export type SnapshotElement = {
   value?: string;
   disabled?: boolean;
   checked?: boolean;
+  /**
+   * A native dropdown's choices, by what each says. Its options carry no refs, so without this a Bot
+   * saw `combobox "Industry"` and nothing it could choose; it chooses by sending one of these as text.
+   */
+  options?: string[];
 };
+
+/** The most choices one dropdown reports, so a list of every country cannot crowd out the form. */
+const OPTION_LIMIT = 50;
 
 /** The descriptor half of an entry: everything before the colon. */
 type Descriptor = {
@@ -199,6 +207,17 @@ function toElement(
 
   if (descriptor.flags.has("disabled")) element.disabled = true;
 
+  // A native `<select>`: its value in the YAML is the list of its options, not text. The option marked
+  // `[selected]` is what the field shows, which is the value a person reads off it.
+  if (descriptor.role === "combobox" || descriptor.role === "listbox") {
+    const list = optionsOf(value);
+    if (list) {
+      element.options = list.options;
+      if (list.selected !== undefined && element.value === undefined)
+        element.value = list.selected;
+    }
+  }
+
   // Playwright emits `[checked]` only when something is checked, so absence is ambiguous on its own: a
   // Bot cannot tell an unticked box from a control that does not tick. Reported as false for the roles
   // that can be checked, and left off entirely for the ones that cannot.
@@ -216,6 +235,35 @@ function toElement(
   }
 
   return element;
+}
+
+/**
+ * The options listed under a dropdown, and which one is selected.
+ *
+ * Only options with no ref of their own: one with a ref is a custom listbox's option, already an
+ * element the Bot clicks, and listing it twice would offer two ways to do one thing.
+ */
+function optionsOf(
+  value: unknown,
+): { options: string[]; selected?: string } | null {
+  if (!Array.isArray(value)) return null;
+  const options: string[] = [];
+  let selected: string | undefined;
+  for (const child of value) {
+    const key =
+      typeof child === "string"
+        ? child
+        : child && typeof child === "object"
+          ? Object.keys(child)[0]
+          : undefined;
+    const descriptor = key ? parseDescriptor(key) : null;
+    if (descriptor?.role !== "option" || descriptor.flags.has("ref")) continue;
+    const name = cutAtCodeUnits(descriptor.name, 200);
+    if (descriptor.flags.has("selected") && selected === undefined)
+      selected = name;
+    if (options.length < OPTION_LIMIT) options.push(name);
+  }
+  return options.length ? { options, selected } : null;
 }
 
 /** Turn an aria snapshot into the flat element list the tool contract publishes. */

@@ -59,10 +59,15 @@ import {
   toolResultFailed,
 } from "@/lib/plugins/tool-result";
 import { readTeamBotConsent } from "@/lib/team-bots";
-import { readConnectPrompt } from "@openbot/shared/connect-prompt";
+import type { CardPlace } from "@/lib/copilot/carry-on";
+import {
+  readConnectPrompt,
+  SHOW_APP_ACCESS_TOOL,
+} from "@openbot/shared/connect-prompt";
 import { cn } from "@/lib/utils";
 import { VOICE_CHAT_ACTIVITY, type VoiceChatEntry } from "@/lib/voice/archive";
 import {
+  dropRepeatedAppCards,
   groupToolSteps,
   ToolActivity,
   useDrawnTool,
@@ -74,7 +79,7 @@ import {
   toVisibleChatItems,
 } from "./chat-messages";
 import type { QueuedMessage } from "./composer";
-import { ConnectAppCard } from "./connect-app-card";
+import { AppAccessCard } from "./app-access-card";
 import { TeamBotConsentCard } from "./team-bot-consent";
 import { ToolRenderBoundary } from "./tool-boundary";
 import { ToolLine } from "./tool-line";
@@ -102,6 +107,12 @@ type ChatTranscriptProps = {
    * be told, and only the thing that ended the turn knows which one happened.
    */
   stopped?: string;
+  /**
+   * Work this conversation is waiting on that is not this tab's run: a Bot it asked, a routine.
+   * Drawn in the same slot as `Thinking`, under the last thing said, because that is where the
+   * answer will appear.
+   */
+  working?: React.ReactNode;
 };
 
 /** One shared empty array, so a screen without a queue does not hand down a new one per render. */
@@ -1297,12 +1308,15 @@ const TranscriptToolCall = memo(function TranscriptToolCall({
   name,
   args,
   result,
+  latest,
 }: {
   delay: number;
   toolCallId: string;
   name: string;
   args: string;
   result?: string;
+  /** Nothing said or queued since this call, and the Bot is not working. See `CardPlace`. */
+  latest: boolean;
 }) {
   const renderToolCall = useRenderToolCall();
   const toolCall = useMemo(
@@ -1340,7 +1354,13 @@ const TranscriptToolCall = memo(function TranscriptToolCall({
          * What was called, shimmering until its result arrives, and then the server's own words
          * drawn the way a Bot's prose is drawn.
          */}
-        {drawn ?? <ServerToolLine name={name} result={result} />}
+        {drawn ?? (
+          <ServerToolLine
+            name={name}
+            place={{ toolCallId, latest }}
+            result={result}
+          />
+        )}
       </ToolRenderBoundary>
     </Arriving>
   );
@@ -1351,9 +1371,21 @@ const TranscriptToolCall = memo(function TranscriptToolCall({
  *
  * Named from the reader's side: what was done, against which server, with the server's own words
  * behind a disclosure. The identifier the model was offered never reaches the screen.
+ *
+ * Exported for its tests, which draw it without the CopilotKit provider `TranscriptToolCall` needs.
  */
-function ServerToolLine({ name, result }: { name: string; result?: string }) {
-  const { label, detail } = readToolName(name);
+export function ServerToolLine({
+  name,
+  result,
+  place,
+}: {
+  name: string;
+  result?: string;
+  /** Where this call sits in the conversation, for an app card that may carry the task on. */
+  place?: CardPlace;
+}) {
+  const running = result === undefined;
+  const { label, detail } = readToolName(name, running);
   /*
    * A refusal is not a result, and must not read like one.
    *
@@ -1374,20 +1406,36 @@ function ServerToolLine({ name, result }: { name: string; result?: string }) {
   // A Team Bot asking to use this person's own account draws its consent card, not the sentence.
   const consent = refused ? readTeamBotConsent(body) : null;
   if (consent) return <TeamBotConsentCard {...consent} />;
-  // An app this person has not connected draws the connect button, not the name of a screen.
-  const connect = refused ? readConnectPrompt(body) : null;
-  if (connect) return <ConnectAppCard {...connect} />;
+  /*
+   * An app this call could not use draws a card with the step that fixes it, not the name of a
+   * screen: a refusal carrying the marker, or the answer of the one tool whose whole job is to put
+   * that card on screen. Only that tool's ordinary answer is read for a marker — any other result
+   * is somebody else's text, and a card must not be conjured out of it.
+   */
+  const card = refused
+    ? readConnectPrompt(body)
+    : name === SHOW_APP_ACCESS_TOOL
+      ? readConnectPrompt(answer)
+      : null;
+  if (card) return <AppAccessCard place={place} prompt={card} />;
+  /*
+   * THAT TOOL'S OTHER ANSWERS ARE FOR THE MODEL. An app nobody can name comes back as plain text
+   * telling the Bot to say so plainly and not to browse to it — an instruction, which read by the
+   * person looks like the Bot being told off in front of them. The line still says the check
+   * happened; the Bot's own reply says what it found.
+   */
+  const shown = name === SHOW_APP_ACCESS_TOOL ? undefined : body;
   return (
     <ToolLine
       {...(detail ? { detail } : {})}
       label={label}
       refused={refused}
       failed={failed}
-      running={result === undefined}
+      running={running}
     >
-      {body ? (
+      {shown ? (
         <Streamdown components={markdownComponents}>
-          {forDisplay(body)}
+          {forDisplay(shown)}
         </Streamdown>
       ) : null}
     </ToolLine>
@@ -1410,6 +1458,32 @@ export function isPersonSentMessage(
   text: string,
 ): boolean {
   return role === "user" && readFiring(text) === null;
+}
+
+/**
+ * WHERE THE CONVERSATION HAS GOT TO, for an app card that may carry its task on once the app is
+ * ready (see `lib/copilot/carry-on.ts`): the index from which a row is still the latest thing, or
+ * past the end when none is.
+ *
+ * A card is the latest thing while nothing has been said to the Bot since it, nothing is queued, and
+ * the Bot is not working: past that, the conversation has moved on, and an older task is not picked
+ * up again underneath it. ANY USER TURN COUNTS, a routine firing included — unlike the scroll
+ * machinery's `isPersonSentMessage`. A firing is not the person speaking, but it is a new task the
+ * Bot has answered, and "please carry on" sent after it would land on the routine's work rather than
+ * on the task the card interrupted. Exported so it can be checked without mounting anything.
+ */
+export function latestFrom(
+  items: readonly TranscriptItem[],
+  { busy, queued }: { busy: boolean; queued: number },
+): number {
+  if (busy || queued > 0) return items.length;
+  return (
+    items.findLastIndex(
+      (item) =>
+        (item.kind === "text" && item.role === "user") ||
+        item.kind === "attachments",
+    ) + 1
+  );
 }
 
 /**
@@ -1520,6 +1594,7 @@ export function ChatTranscript({
   queued = EMPTY_QUEUE,
   restoring = false,
   stopped,
+  working,
 }: ChatTranscriptProps) {
   const isDrawn = useDrawnTool();
   /*
@@ -1532,7 +1607,10 @@ export function ChatTranscript({
    * cost was markdown parsing and chart SVGs, and those are skipped by the memoised children below,
    * which is where the 25x came from. This runs per render and is not worth guarding.
    */
-  const items = groupToolSteps(toVisibleChatItems(messages), isDrawn);
+  const items = groupToolSteps(
+    dropRepeatedAppCards(toVisibleChatItems(messages)),
+    isDrawn,
+  );
 
   /*
    * ONLY WHILE THERE IS NOTHING ELSE TO LOOK AT. Once a reply starts streaming, or a tool line
@@ -1569,6 +1647,9 @@ export function ChatTranscript({
         item.kind === "attachments",
     )?.id ?? null;
   useSmoothSendScroll(viewportRef, newestUserMessageId);
+
+  /* Which tool calls are still the latest thing, for an app card: see `latestFrom`. */
+  const latestIndex = latestFrom(items, { busy, queued: queued.length });
 
   /* One rule for both kinds of row — see `anchorRowIds`, which is where it is written down. */
   const anchorRows = anchorRowIds(items);
@@ -1660,6 +1741,7 @@ export function ChatTranscript({
               ) : waitingOnFirstToken ? (
                 <Thinking />
               ) : null}
+              {working}
               {queued.map((message) => (
                 <Queued
                   attachments={message.attachments}
@@ -1691,6 +1773,7 @@ export function ChatTranscript({
                   <TranscriptToolCall
                     args={item.toolCall.function.arguments}
                     delay={delays.delayFor(item.id, index, items.length)}
+                    latest={index >= latestIndex}
                     name={item.toolCall.function.name}
                     result={item.result}
                     toolCallId={item.toolCall.id}

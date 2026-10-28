@@ -659,6 +659,14 @@ const credentialsStub: CredentialSecretReader & CredentialStore = {
 let brokerAsks: string[] = [];
 
 const broker: ConnectedAppBroker = {
+  // This stub stands in for Composio, whose grant is held locally; see `ConnectedAppBroker.grantIsLocal`.
+  grantIsLocal: true,
+  // Nothing here asks what auth provider a connection is held under.
+  authProviderOf: async () => null,
+  // Nothing here reads either member; both are declared because the seam requires a broker to
+  // SAY what it runs — see `ConnectedAppBroker.authorizations`.
+  authorizations: null,
+  grantsFor: async () => [],
   listApps: async () => {
     throw new Error("nothing here lists the catalogue");
   },
@@ -667,7 +675,10 @@ const broker: ConnectedAppBroker = {
   },
   authorize: async (request) => {
     brokerAsks.push(`authorize:${request.toolkit}`);
-    return { redirectUrl: `https://composio.test/${request.toolkit}/consent` };
+    return {
+      redirectUrl: `https://composio.test/${request.toolkit}/consent`,
+      authorizationId: null,
+    };
   },
   isConnected: async (request) => {
     brokerAsks.push(
@@ -709,6 +720,7 @@ const broker: ConnectedAppBroker = {
 };
 
 const store = createPluginStore({
+  brokerProvider: "composio",
   database,
   auditStore: createAuditStore(database),
   broker,
@@ -749,7 +761,7 @@ const connectApp = new Hono().route(
       encryptionKey: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
       personHasAccess: async () => true,
     },
-    { broker },
+    { broker, provider: "composio" },
   ),
 );
 
@@ -802,6 +814,7 @@ async function publishProbe(serverId: string): Promise<void> {
   await database.insert(mcpTools).values({
     serverId,
     name: PROBE_ACTION,
+    vendorName: PROBE_ACTION,
     description: "Says who the key belongs to.",
     effect: "read",
     version: PROBE_VERSION,
@@ -1589,7 +1602,7 @@ const SCHEME_CONSUMERS: Consumer<SchemeKind>[] = [
           const pressed = await connectPress(APP.unreadable.id);
           expect(pressed.status).toBe(400);
           expect(String(pressed.payload.error)).toMatch(
-            /cannot tell how .* connects/,
+            /can't tell how .* connects/,
           );
 
           /*

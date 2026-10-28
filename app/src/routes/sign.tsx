@@ -12,7 +12,9 @@ import {
   signInWith,
   signInWithEmailDomain,
 } from "@/lib/auth/client";
+import { resumeUrlFor, verifierPathFor } from "@/lib/auth/resume";
 import { appConfig } from "@/lib/generated/application-config";
+import { searchTextEntry } from "@/lib/search-text";
 import {
   type AuthProviderId,
   authProvidersQueryOptions,
@@ -26,12 +28,43 @@ const ENTRANCE_STAGGER_SECONDS = 0.08;
 const ENTRANCE_OFFSET = "translateY(12px)";
 
 export const Route = createFileRoute("/sign")({
-  beforeLoad: async ({ context }) => {
+  /*
+   * `?flow_id=` is the handle a brokered authorization arrived with, sent here when its session had
+   * lapsed. It is a value to carry back, never a place to go: see `resumeUrlFor`.
+   *
+   * READ AS TEXT WHATEVER THE ROUTER PARSED IT INTO, which is what `searchText` is for: a handle
+   * made of digits arrives here as a number and a JSON-shaped one as an object, so a `typeof`
+   * guard would drop the correlation for whichever handles the vendor's generator happens to emit
+   * — working in testing and losing the return leg's binding in production.
+   *
+   * The key is omitted rather than set to undefined, for the reason the connected-accounts screen
+   * gives for `?connected=`: present-but-undefined makes `search` a required prop on every Link to
+   * this route, which is a lot of ripple for a parameter only the verifier sets.
+   */
+  validateSearch: (search: Record<string, unknown>): { flow_id?: string } =>
+    searchTextEntry("flow_id", search.flow_id),
+  beforeLoad: async ({ context, search }) => {
     const user = await context.queryClient.ensureQueryData(
       currentUserQueryOptions(),
     );
     if (user) {
-      throw redirect({ to: "/" });
+      /*
+       * Signed in already, so the handle has nowhere to be lost between here and the verifier.
+       *
+       * `href` rather than `to` because the verifier is an API path, not a router route — and
+       * `reloadDocument` because of what follows from that. A redirect the router is left to
+       * handle is a navigation INSIDE the app: it resolves the href against the route tree, finds
+       * nothing (there is no route for `/api/…`, and there cannot be — the verifier is served by
+       * the server, not this build), and `__root.tsx` sends an address it does not know home. The
+       * person who was part-way through connecting an app would be dropped on the home screen with
+       * the authorization they started abandoned and nothing said about it, because no request for
+       * the verifier was ever made. `reloadDocument` makes this a document navigation, which is
+       * the only kind that leaves the app and therefore the only kind that arrives.
+       */
+      const verifier = verifierPathFor(search.flow_id);
+      throw verifier
+        ? redirect({ href: verifier, reloadDocument: true })
+        : redirect({ to: "/" });
     }
     // Loaded here so the screen paints with its buttons rather than painting empty and then
     // growing them, which reads as "no providers" for exactly as long as the request takes.
@@ -41,6 +74,7 @@ export const Route = createFileRoute("/sign")({
 });
 
 function SignScreen() {
+  const { flow_id: flowId } = Route.useSearch();
   // Which provider is being opened, rather than whether one is: with three buttons, a single
   // boolean would put "Opening…" on all of them.
   const [opening, setOpening] = useState<AuthProviderId | "sso" | null>(null);
@@ -61,12 +95,16 @@ function SignScreen() {
     setOpening("sso");
 
     try {
-      await signInWithEmailDomain(email);
+      await signInWithEmailDomain(
+        email,
+        undefined,
+        resumeUrlFor(window.location.origin, flowId),
+      );
     } catch (caughtError) {
       setError(
         caughtError instanceof Error
           ? caughtError.message
-          : "No identity provider is registered for that address.",
+          : "No company sign-in is set up for that address.",
       );
       setOpening(null);
     }
@@ -77,12 +115,16 @@ function SignScreen() {
     setOpening(provider);
 
     try {
-      await signInWith(provider);
+      await signInWith(
+        provider,
+        undefined,
+        resumeUrlFor(window.location.origin, flowId),
+      );
     } catch (caughtError) {
       setError(
         caughtError instanceof Error
           ? caughtError.message
-          : `Could not start ${providerName(provider)} sign-in.`,
+          : `Couldn't open ${providerName(provider)} sign-in. Try again.`,
       );
       setOpening(null);
     }
@@ -163,14 +205,15 @@ function SignScreen() {
         >
           {options?.ssoRequired ? (
             <p className="mb-3 text-center text-sm text-muted-foreground">
-              Your organization requires single sign-on.
+              Your organization requires you to sign in with your company
+              account.
             </p>
           ) : null}
           {providers.length > 0 && !options?.ssoRequired ? (
             providerButtons
           ) : options?.sso || options?.ssoRequired ? null : (
             <p className="text-center text-sm text-muted-foreground">
-              No sign-in provider is configured for this deployment.
+              Sign-in isn't set up yet. An admin has to set it up first.
             </p>
           )}
           {/*
@@ -213,7 +256,7 @@ function SignScreen() {
           {options?.ssoRequired && providers.length > 0 ? (
             <details className="mt-4 text-sm">
               <summary className="cursor-pointer text-center text-muted-foreground">
-                Administrator sign-in
+                Admin sign-in
               </summary>
               <div className="mt-3">{providerButtons}</div>
             </details>

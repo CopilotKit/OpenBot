@@ -68,7 +68,7 @@ describe("POST /api/route text cap", () => {
 
   test("accepts a message at the cap boundary", async () => {
     const calls: unknown[] = [];
-    // Empty roster -> 409 "No coworker is available.", which still proves the text passed the
+    // Empty roster -> 409 "No Bot is available.", which still proves the text passed the
     // cap and reached the router path.
     const response = await app(calls).request("http://openbot.test/", {
       method: "POST",

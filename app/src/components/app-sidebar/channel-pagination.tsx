@@ -65,7 +65,7 @@ export function ChannelPagination({ query, scrollRoot, searching }: Props) {
     <div ref={sentinel} className="px-2 py-3 text-center">
       {isFetchNextPageError ? (
         <p role="alert" className="mb-2 text-xs text-muted-foreground">
-          Could not load older conversations.
+          Couldn't load older conversations.
         </p>
       ) : null}
       <Button
@@ -78,7 +78,7 @@ export function ChannelPagination({ query, scrollRoot, searching }: Props) {
         {isFetchingNextPage
           ? "Loading older conversations…"
           : isFetchNextPageError
-            ? "Retry loading older conversations"
+            ? "Try again"
             : "Load older conversations"}
       </Button>
     </div>

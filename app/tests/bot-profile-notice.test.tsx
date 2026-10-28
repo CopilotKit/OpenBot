@@ -96,7 +96,7 @@ test("whoever manages the Bot is told its Shared-app calls are refused", async (
   serving();
   const view = draw(BOT);
   expect(
-    await view.findByText(/Gmail calls from this Bot are refused/),
+    await view.findByText(/can't use the shared Gmail account/),
   ).toBeTruthy();
 });
 
@@ -104,7 +104,7 @@ test("someone who cannot manage the Bot is not shown the warning", async () => {
   serving();
   const view = draw({ ...BOT, canManage: false, mine: false });
   await new Promise((resolve) => setTimeout(resolve, 100));
-  expect(view.queryByText(/calls from this Bot are refused/)).toBeNull();
+  expect(view.queryByText(/can't use the shared .* account until/)).toBeNull();
 });
 
 test("the Message row shows the chevron every row that goes somewhere carries", async () => {

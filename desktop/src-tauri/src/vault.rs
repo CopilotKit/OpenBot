@@ -31,6 +31,7 @@ pub fn is_secret(key: &str) -> bool {
         key,
         // Somebody's own credentials, pasted or signed in for.
         "INTELLIGENCE_API_KEY"
+            | "CPK_INTELLIGENCE_API_KEY"
             | "OPENAI_API_KEY"
             | "ANTHROPIC_API_KEY"
             | "CLAUDE_CODE_OAUTH_TOKEN"
@@ -1451,6 +1452,7 @@ mod tests {
     fn every_credential_is_named_and_nothing_else_is() {
         for key in [
             "INTELLIGENCE_API_KEY",
+            "CPK_INTELLIGENCE_API_KEY",
             "OPENAI_API_KEY",
             "ANTHROPIC_API_KEY",
             "CLAUDE_CODE_OAUTH_TOKEN",

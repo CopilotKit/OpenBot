@@ -35,6 +35,14 @@ const ACTOR = `remote-handoff-actor-${suite}`;
 const ALL = [REMOTE, BUILT_IN, OTHER_REMOTE];
 
 const broker: ConnectedAppBroker = {
+  // This stub stands in for Composio, whose grant is held locally; see `ConnectedAppBroker.grantIsLocal`.
+  grantIsLocal: true,
+  // Nothing here asks what auth provider a connection is held under.
+  authProviderOf: async () => null,
+  // Nothing here reads either member; both are declared because the seam requires a broker to
+  // SAY what it runs — see `ConnectedAppBroker.authorizations`.
+  authorizations: null,
+  grantsFor: async () => [],
   listApps: async () => [],
   ensureAuthConfig: async () => undefined,
   deleteAuthConfig: async () => undefined,
@@ -48,6 +56,7 @@ const broker: ConnectedAppBroker = {
 
 const auditStore = createAuditStore(database);
 const store = createPluginStore({
+  brokerProvider: "composio",
   database,
   auditStore,
   credentials: {

@@ -87,7 +87,7 @@ export function NewResponsibilityDialog({
         <DialogHeader>
           <DialogTitle>New responsibility</DialogTitle>
           <DialogDescription>
-            A lasting goal, worked on in the conversation you pick.
+            An ongoing goal. The Bot works on it in the conversation you pick.
           </DialogDescription>
         </DialogHeader>
         <DialogBody className="mt-4 overflow-y-auto">
@@ -251,10 +251,7 @@ export function NewResponsibilityDialog({
                   {source === "github" && (
                     <FieldDescription>
                       Events come from the repositories you connected in{" "}
-                      <Link to="/settings/connected-accounts">
-                        Settings → Connected accounts
-                      </Link>
-                      .
+                      <Link to="/connections">Connections</Link>.
                     </FieldDescription>
                   )}
                 </Field>

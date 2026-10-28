@@ -10,7 +10,12 @@ import { useCallback, useContext, useMemo, useSyncExternalStore } from "react";
 import { Streamdown } from "streamdown";
 import { PendingApprovals } from "@/components/approvals/inline-approval";
 import { markdownComponents } from "@/lib/markdown";
-import { humanise, readToolName } from "@/lib/plugins/tool-name";
+import {
+  connectorName,
+  humanise,
+  ownToolLabel,
+  readToolName,
+} from "@/lib/plugins/tool-name";
 import {
   asText,
   forDisplay,
@@ -18,7 +23,10 @@ import {
   toolResultFailed,
 } from "@/lib/plugins/tool-result";
 import { readTeamBotConsent } from "@/lib/team-bots";
-import { readConnectPrompt } from "@openbot/shared/connect-prompt";
+import {
+  readConnectPrompt,
+  SHOW_APP_ACCESS_TOOL,
+} from "@openbot/shared/connect-prompt";
 import { researchRoleOfTool } from "@openbot/shared/research";
 import { browserStepDetails, isBrowserStep } from "./browser-activity";
 import type { VisibleChatItem } from "./chat-messages";
@@ -78,6 +86,12 @@ function foldable(item: ToolItem, isDrawn: (name: string) => boolean): boolean {
   if (isBrowserStep(item)) return true;
   const name = item.toolCall.function.name;
   if (!name.startsWith("mcp__") && isDrawn(name)) return false;
+  /*
+   * The app-access card is drawn from a server tool's answer, so no renderer registers it and the
+   * registry cannot say so. Never folded — not even while its answer is still on the way, or the
+   * card would land inside a group and then jump out of it.
+   */
+  if (name === SHOW_APP_ACCESS_TOOL) return false;
   return !asksThePerson(item.result);
 }
 
@@ -116,7 +130,7 @@ export function useDrawnTool(): (name: string) => boolean {
  * Whether this refusal is a question for the person rather than a line about what a Bot did.
  *
  * Both of these draw a card with something to press — a Team Bot asking to act as them, and an app
- * they have not connected — and neither may sit behind a disclosure for the same reason: a question
+ * they cannot use yet (not connected, lost at the vendor, or a team account nobody connected) — and neither may sit behind a disclosure for the same reason: a question
  * nobody can see is a conversation that has stopped without saying so.
  */
 function asksThePerson(result: string | undefined): boolean {
@@ -125,6 +139,42 @@ function asksThePerson(result: string | undefined): boolean {
   if (!answer.startsWith(REFUSAL_MARKER)) return false;
   const body = answer.slice(REFUSAL_MARKER.length).trim();
   return readTeamBotConsent(body) !== null || readConnectPrompt(body) !== null;
+}
+
+/** The app a tool item draws a card for, or null when it draws none. */
+function cardApp(item: ToolItem): string | null {
+  if (item.result === undefined) return null;
+  const answer = asText(item.result);
+  const prompt = answer.startsWith(REFUSAL_MARKER)
+    ? readConnectPrompt(answer.slice(REFUSAL_MARKER.length).trim())
+    : item.toolCall.function.name === SHOW_APP_ACCESS_TOOL
+      ? readConnectPrompt(answer)
+      : null;
+  return prompt?.serverId ?? null;
+}
+
+/**
+ * One card per app per turn.
+ *
+ * A refused call already draws the app's card, and a Bot told to show the card for an app it cannot
+ * use often calls `show_app_access` for the same app straight after, which drew the same card again.
+ * The refused call is kept, because it is what the Bot did; a later `show_app_access` for an app
+ * whose card that turn already drew is dropped. A person's next message starts a new turn.
+ */
+export function dropRepeatedAppCards(
+  items: readonly VisibleChatItem[],
+): VisibleChatItem[] {
+  const drawn = new Set<string>();
+  return items.filter((item) => {
+    if (item.kind === "text" && item.role === "user") drawn.clear();
+    if (item.kind !== "tool") return true;
+    const app = cardApp(item);
+    if (app === null) return true;
+    const repeat =
+      drawn.has(app) && item.toolCall.function.name === SHOW_APP_ACCESS_TOOL;
+    drawn.add(app);
+    return !repeat;
+  });
 }
 
 type StepKind = "search" | "fetch" | "browser" | "connector" | "tool";
@@ -187,15 +237,6 @@ function hostOf(url: string): string {
   }
 }
 
-/** "google-drive" as "Google Drive". */
-function connectorName(key: string): string {
-  return key
-    .split(/[-_]/)
-    .filter(Boolean)
-    .map((word) => word[0]?.toUpperCase() + word.slice(1))
-    .join(" ");
-}
-
 /** A value from a tool's arguments, short enough for one line. */
 function inputValue(value: unknown): string {
   const text = typeof value === "string" ? value : JSON.stringify(value);
@@ -228,17 +269,25 @@ export function stepDetails(step: ToolItem): StepDetails {
   const answer = step.result === undefined ? undefined : asText(step.result);
   const refused = answer?.startsWith(REFUSAL_MARKER) ?? false;
   const body = refused ? answer?.slice(REFUSAL_MARKER.length).trim() : answer;
+  // This deployment's own tools answer the model, not the person; see `ServerToolLine`.
+  const own = ownToolLabel(name) !== null;
   const outcome = {
     id: step.id,
     pending: step.result === undefined,
     failed: !refused && toolResultFailed(step.result),
     refused,
     inputs,
-    ...(body ? { output: body } : {}),
+    ...(body && !own ? { output: body } : {}),
   };
-  // Not a connector: a tool an external agent runs itself. Named in words, never as an identifier.
+  // Not a connector: one of this deployment's own tools, or one an external agent runs itself.
+  // Named in words, never as an identifier.
   if (!name.startsWith("mcp__"))
-    return { ...outcome, kind: "tool", label: humanise(name), pages: 0 };
+    return {
+      ...outcome,
+      kind: "tool",
+      label: ownToolLabel(name, outcome.pending) ?? humanise(name),
+      pages: 0,
+    };
 
   const [, server = "", ...rest] = name.split("__");
   const role = researchRoleOfTool(server, rest.join("__"));
@@ -409,7 +458,7 @@ function StepRow({ step, active }: { step: StepDetails; active: boolean }) {
   const reason =
     step.failed && step.kind === "browser" ? (
       <p className="mt-0.5 pl-6 text-destructive">
-        {step.reason ?? "This step could not be completed."}
+        {step.reason ?? "Couldn't finish this step."}
       </p>
     ) : null;
   // A browser step says everything it has in its line. Anything else opens to what it was given

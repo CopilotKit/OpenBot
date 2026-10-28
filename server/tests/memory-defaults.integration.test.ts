@@ -38,6 +38,9 @@ const plugins = createPluginStore({
   auditStore: createAuditStore(database),
   credentials: createCredentialStore(database),
   encryptionKey: Buffer.alloc(32, 7).toString("base64"),
+  // This suite's apps are `composio://` rows with `provenance: "composio"`, and the store has no
+  // default for this: it dispatches the toolkit read on it, so the fixtures name their own broker.
+  brokerProvider: "composio",
   policy: () => ({ mode: "enforce", deny: [], allow: ["true"] }),
   callVendor: async () => ({ text: "[]", isError: false }),
 });
@@ -150,30 +153,35 @@ beforeAll(async () => {
     {
       serverId: app,
       name: "LINEAR_GET_ISSUE",
+      vendorName: "LINEAR_GET_ISSUE",
       effect: "read",
       inputSchema: { type: "object", required: ["id"] },
     },
     {
       serverId: app,
       name: "LINEAR_LIST_LABELS",
+      vendorName: "LINEAR_LIST_LABELS",
       effect: "read",
       inputSchema: { type: "object" },
     },
     {
       serverId: app,
       name: "LINEAR_CREATE_ISSUE",
+      vendorName: "LINEAR_CREATE_ISSUE",
       effect: "write",
       inputSchema: { type: "object" },
     },
     {
       serverId: app,
       name: "LINEAR_LIST_ISSUES",
+      vendorName: "LINEAR_LIST_ISSUES",
       effect: "read",
       inputSchema: { type: "object" },
     },
     {
       serverId: unconnected,
       name: "NOTES_LIST",
+      vendorName: "NOTES_LIST",
       effect: "read",
       inputSchema: { type: "object" },
     },

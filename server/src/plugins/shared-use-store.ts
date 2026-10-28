@@ -20,7 +20,7 @@ import {
   teamBotPublications,
   users,
 } from "../db/schema";
-import { toolkitOf } from "./composio";
+import { BROKERED_PROFILE, type BrokerProvider, toolkitOfFor } from "./access";
 import {
   type ActorFacts,
   type ApprovalMember,
@@ -73,12 +73,38 @@ export type SharedUseGate = (input: {
 const sameApproval = (left: SharedUseApproval, right: SharedUseApproval) =>
   covers(left, right) && covers(right, left);
 
-export function createSharedUseStore(database: Database) {
+/**
+ * The url scheme a broker's apps live at, read from the one record that holds it.
+ *
+ * DERIVED HERE AS `${provider}://` UNTIL {@link BROKERED_PROFILE} BECAME REACHABLE. That derivation
+ * was right about every scheme there is and still a second source of truth: the store mints its rows
+ * from the record, this read them back from a rule, and nothing held the two in step beyond the
+ * happy fact that a broker's scheme is its own name. A third broker that spelled its scheme any
+ * other way would have had its rows written at one address and looked for at another, silently, in
+ * the gate that decides who may use a shared account. One table, one spelling.
+ */
+const schemeOf = (provider: BrokerProvider) =>
+  BROKERED_PROFILE[provider].scheme;
+
+/**
+ * `provider` IS REQUIRED, with no default, for the reason `PluginStoreOptions.brokerProvider` is:
+ * this store has to read urls with the same parser, at the same scheme, as the store whose gate
+ * consults the approvals filed here. A default would let the two disagree silently, which is the
+ * failed-open shape the canonical-url rule below exists to prevent. The caller passes the one value
+ * the plugin store is given.
+ */
+export function createSharedUseStore(
+  database: Database,
+  provider: BrokerProvider,
+) {
   const roles = createRoleRepository(database);
+  const scheme = schemeOf(provider);
+  const appOfUrl = (url: string) => toolkitOfFor(provider, url);
+  const canonicalUrlOf = (toolkit: string) => `${scheme}${toolkit}`;
 
   /*
    * EVERY ROW AT AN APP'S CANONICAL URL, LOWEST ID FIRST — THE ANSWERING ROW IS THE HEAD. Several
-   * `mcp_servers` rows may point at one `composio://<toolkit>` url (the url has no unique index,
+   * `mcp_servers` rows may point at one `<scheme><toolkit>` url (the url has no unique index,
    * deliberately), and the store's `brokeredAppRowsAt` names the row that answers for the app as
    * the first one SQL's `order by id` yields at that url. This is the same rule spelled with the
    * same `order by`, so the deployment's collation decides here exactly as it decides there — a
@@ -86,19 +112,19 @@ export function createSharedUseStore(database: Database) {
    * than imported because the store's helper is a closure inside `createStore`, and this store is
    * built from the database alone.
    *
-   * "AT THE URL" MEANS THE CANONICAL ONE, `composio://${toolkitOf(url)}`, NOT THE DIALLED ROW'S OWN
-   * url string. `toolkitOf` (`./composio`) trims whitespace and a trailing slash before it reads
-   * the slug, so a row stored as `composio://github/` or `composio://github ` names the toolkit
-   * `github` exactly as `composio://github` does — and the store's own gate (`brokeredAppRow`,
+   * "AT THE URL" MEANS THE CANONICAL ONE, `${scheme}${appOfUrl(url)}`, NOT THE DIALLED ROW'S OWN
+   * url string. `appOfUrl` (the active provider's own parser, via `toolkitOfFor`) trims whitespace and a trailing slash before it reads
+   * the slug, so a row stored as `<scheme>github/` or `<scheme>github ` names the toolkit
+   * `github` exactly as `<scheme>github` does — and the store's own gate (`brokeredAppRow`,
    * `accountRefFor`) only ever looks rows up at the trimmed, canonical address. Grouping by the raw
    * stored url instead, as this used to, made such a row an app of its own: an approval granted or
    * read through it could never be found by the gate, which asks at the canonical url and nowhere
    * else. So THIS is "the same rule" the comment above claims — same `order by`, same address the
    * gate itself resolves to.
    *
-   * A row whose url is not `composio://` at all, or whose slug `toolkitOf` cannot parse, is an app
+   * A row whose url is not at the provider's scheme at all, or whose slug `appOfUrl` cannot parse, is an app
    * of its own and is the only row in its answer — the same two cases the store's own gate lets
-   * stand rather than refuses (`accountRefFor` reads `toolkitOf` only for a `composio` provenance,
+   * stand rather than refuses (`accountRefFor` reads `appOfUrl` only for a row provenanced at the active provider,
    * and a null result there is read as "not brokered", not as a refusal).
    *
    * NO ROW AT THE CANONICAL URL is answered by falling back to the dialled `serverId` itself, which
@@ -122,9 +148,9 @@ export function createSharedUseStore(database: Database) {
       .where(eq(mcpServers.id, serverId))
       .limit(1);
     const url = row?.url ?? null;
-    const toolkit = url ? toolkitOf(url) : null;
+    const toolkit = url ? appOfUrl(url) : null;
     if (!toolkit) return { appId: serverId, url, ids: [serverId] };
-    const canonical = `composio://${toolkit}`;
+    const canonical = canonicalUrlOf(toolkit);
     const siblings = await database
       .select({ id: mcpServers.id })
       .from(mcpServers)
@@ -148,14 +174,17 @@ export function createSharedUseStore(database: Database) {
     return (await rowsOfApp(serverId)).appId;
   }
 
-  async function approvalFor(
-    botId: string,
-    anyServerId: string,
-  ): Promise<SharedUseApproval | null> {
-    const serverId = await appIdOf(anyServerId);
+  /** The approval row for this Bot at the app, whoever set it, and whether it may be read now. */
+  async function storedApproval(botId: string, serverId: string) {
     const [row] = await database
-      .select()
+      .select({
+        audience: sharedUseApprovals.audience,
+        outsideInput: sharedUseApprovals.outsideInput,
+        approvedAs: sharedUseApprovals.approvedAs,
+        ownersDecide: sql<boolean>`coalesce(${mcpServers.ownerGrants} = 'any' and ${mcpServers.accountMode} = 'shared', false)`,
+      })
       .from(sharedUseApprovals)
+      .leftJoin(mcpServers, eq(mcpServers.id, sharedUseApprovals.serverId))
       .where(
         and(
           eq(sharedUseApprovals.agentId, botId),
@@ -163,7 +192,36 @@ export function createSharedUseStore(database: Database) {
         ),
       )
       .limit(1);
+    return row ?? null;
+  }
+
+  /**
+   * Who set the audience this Bot holds at the app — `admin` (a null from an older replica is
+   * one), `owner`, or null where there is none.
+   */
+  async function approvalSource(
+    botId: string,
+    anyServerId: string,
+  ): Promise<"admin" | "owner" | null> {
+    const row = await storedApproval(botId, await appIdOf(anyServerId));
     if (!row) return null;
+    return row.approvedAs === "owner" ? "owner" : "admin";
+  }
+
+  /*
+   * AN OWNER'S AUDIENCE COUNTS ONLY WHILE OWNERS DECIDE. One set by an owner's grant is withdrawn
+   * when an administrator stops letting owners give the app, but a row that outlived that — a
+   * replica that switched the rule without withdrawing, a delete that failed — must not keep the
+   * team account open. So it is read as no approval unless the app's rule is `any` now.
+   */
+  async function approvalFor(
+    botId: string,
+    anyServerId: string,
+  ): Promise<SharedUseApproval | null> {
+    const serverId = await appIdOf(anyServerId);
+    const row = await storedApproval(botId, serverId);
+    if (!row) return null;
+    if (row.approvedAs === "owner" && !row.ownersDecide) return null;
     const members = await database
       .select({
         kind: sharedUseApprovalMembers.kind,
@@ -188,8 +246,11 @@ export function createSharedUseStore(database: Database) {
     serverId: string;
     approval: SharedUseApproval;
     by: string;
+    /** Who is setting it. Only {@link approveOwnerGrant} says `owner`. */
+    as?: "admin" | "owner";
   }) {
     const serverId = await appIdOf(input.serverId);
+    const approvedAs = input.as ?? "admin";
     await database.transaction(async (tx) => {
       await tx
         .insert(sharedUseApprovals)
@@ -199,6 +260,7 @@ export function createSharedUseStore(database: Database) {
           audience: input.approval.audience,
           outsideInput: input.approval.outsideInput,
           approvedBy: input.by,
+          approvedAs,
         })
         .onConflictDoUpdate({
           target: [sharedUseApprovals.agentId, sharedUseApprovals.serverId],
@@ -206,6 +268,7 @@ export function createSharedUseStore(database: Database) {
             audience: input.approval.audience,
             outsideInput: input.approval.outsideInput,
             approvedBy: input.by,
+            approvedAs,
             approvedAt: new Date(),
           },
         });
@@ -272,6 +335,73 @@ export function createSharedUseStore(database: Database) {
     await database
       .delete(sharedUseApprovals)
       .where(inArray(sharedUseApprovals.serverId, ids));
+  }
+
+  /**
+   * A Bot's owner gave it a Shared app whose rule lets owners decide: the audience that grant sets,
+   * written and answered, or null where it sets none.
+   *
+   * WHO, EXACTLY THE PEOPLE WHO CAN USE THE BOT NOW. The Bot's exposure as it stands — its owner
+   * for a private Bot, its published audience for a Team Bot — and never outside input: an email
+   * or a webhook steering the team account is not somebody who can use the Bot, and stays an
+   * administrator's to approve. It is a snapshot, as an administrator's approval is: publishing the
+   * Bot further later is caught by the gate and asked of an administrator, the way every widening is.
+   *
+   * NEVER OVER AN APPROVAL ALREADY THERE. An administrator's stands for a reason the owner did not
+   * give, narrower or wider, and the owner's own from before is already this. Nothing is written
+   * unless the app's answering row is Shared and its rule is `any` now, read here rather than
+   * trusted from the caller.
+   */
+  async function approveOwnerGrant(input: {
+    botId: string;
+    serverId: string;
+    by: string;
+  }): Promise<SharedUseApproval | null> {
+    const serverId = await appIdOf(input.serverId);
+    const [app] = await database
+      .select({
+        accountMode: mcpServers.accountMode,
+        ownerGrants: mcpServers.ownerGrants,
+      })
+      .from(mcpServers)
+      .where(eq(mcpServers.id, serverId))
+      .limit(1);
+    if (app?.accountMode !== "shared" || app.ownerGrants !== "any") return null;
+    if (await storedApproval(input.botId, serverId)) return null;
+    const approval: SharedUseApproval = {
+      ...exposureOf(await botFacts(input.botId)),
+      outsideInput: false,
+    };
+    await setApproval({
+      botId: input.botId,
+      serverId,
+      approval,
+      by: input.by,
+      as: "owner",
+    });
+    return approval;
+  }
+
+  /**
+   * Withdraw the audiences owners' grants set at an app — for one Bot, or every Bot — and none an
+   * administrator set. Answers the Bots withdrawn from, so each can be written to the trail.
+   */
+  async function withdrawOwnerApprovals(input: {
+    serverId: string;
+    botId?: string;
+  }): Promise<string[]> {
+    const { ids } = await rowsOfApp(input.serverId);
+    const withdrawn = await database
+      .delete(sharedUseApprovals)
+      .where(
+        and(
+          inArray(sharedUseApprovals.serverId, ids),
+          eq(sharedUseApprovals.approvedAs, "owner"),
+          ...(input.botId ? [eq(sharedUseApprovals.agentId, input.botId)] : []),
+        ),
+      )
+      .returning({ botId: sharedUseApprovals.agentId });
+    return [...new Set(withdrawn.map((row) => row.botId))];
   }
 
   async function sourcesOf(responsibilityId: string): Promise<string[]> {
@@ -371,9 +501,9 @@ export function createSharedUseStore(database: Database) {
    * url to its answering row, and the mode, the title and the id returned are that row's. A Bot
    * holding tools through two rows at one url holds one app and is listed once.
    *
-   * "ITS URL" IS THE CANONICAL ONE A GRANTED ROW RESOLVES TO THROUGH `toolkitOf`, same as
+   * "ITS URL" IS THE CANONICAL ONE A GRANTED ROW RESOLVES TO THROUGH `appOfUrl`, same as
    * `rowsOfApp` above, and not the row's own stored url compared by prefix. A granted row stored as
-   * `composio://github/` is the toolkit `github` exactly as `composio://github` is, and grouping it
+   * `<scheme>github/` is the toolkit `github` exactly as `<scheme>github` is, and grouping it
    * by its raw url instead left it unmatched against the answering row at the trimmed address — so
    * a Bot holding the app only through such a row was listed under a row of its own, or dropped,
    * rather than under the one row the gate actually answers for the app.
@@ -395,13 +525,13 @@ export function createSharedUseStore(database: Database) {
       .select({ id: mcpServers.id, url: mcpServers.url })
       .from(mcpServers)
       .where(inArray(mcpServers.id, serverIds));
-    const toolkitOfRow = (url: string | null) => (url ? toolkitOf(url) : null);
+    const toolkitOfRow = (url: string | null) => (url ? appOfUrl(url) : null);
     const canonicalUrls = [
       ...new Set(
         granted
           .map((row) => toolkitOfRow(row.url))
           .filter((toolkit): toolkit is string => !!toolkit)
-          .map((toolkit) => `composio://${toolkit}`),
+          .map(canonicalUrlOf),
       ),
     ];
     const atUrls =
@@ -421,7 +551,7 @@ export function createSharedUseStore(database: Database) {
         granted.map((row) => {
           const toolkit = toolkitOfRow(row.url);
           if (!toolkit) return row.id;
-          return answeringAt.get(`composio://${toolkit}`) ?? row.id;
+          return answeringAt.get(canonicalUrlOf(toolkit)) ?? row.id;
         }),
       ),
     ];
@@ -442,25 +572,25 @@ export function createSharedUseStore(database: Database) {
    * to contain `_` and `%`, which a LIKE would read as wildcards and match a neighbouring app's
    * grants by.
    *
-   * "ANY ROW AT ITS URL" HAS TO MEAN EVERY ROW `toolkitOf` RESOLVES TO THE SAME TOOLKIT, NOT ONLY
+   * "ANY ROW AT ITS URL" HAS TO MEAN EVERY ROW `appOfUrl` RESOLVES TO THE SAME TOOLKIT, NOT ONLY
    * THE ONES `rowsOfApp` FOUND AT THE EXACT CANONICAL URL. `rowsOfApp`'s `ids` already covers the
    * canonical rows plus the row actually dialled, but a grant can be made through a THIRD row —
-   * neither the dialled one nor stored at the trimmed address, e.g. `composio://<toolkit>/` sitting
+   * neither the dialled one nor stored at the trimmed address, e.g. `<scheme><toolkit>/` sitting
    * elsewhere in the table — and that row never surfaces from an exact `eq` on the canonical url. So
-   * every `composio://` row is read once here and matched in JavaScript by `toolkitOf`, which is the
+   * every row at the provider's scheme is read once here and matched in JavaScript by `appOfUrl`, which is the
    * one place that defines what "the same toolkit" means.
    */
   async function botsHolding(serverId: string): Promise<string[]> {
     const { ids, url } = await rowsOfApp(serverId);
-    const toolkit = url ? toolkitOf(url) : null;
+    const toolkit = url ? appOfUrl(url) : null;
     let allIds = ids;
     if (toolkit) {
-      const composioRows = await database
+      const schemeRows = await database
         .select({ id: mcpServers.id, url: mcpServers.url })
         .from(mcpServers)
-        .where(sql`${mcpServers.url} like 'composio://%'`);
-      const matching = composioRows
-        .filter((row) => row.url && toolkitOf(row.url) === toolkit)
+        .where(sql`${mcpServers.url} like ${`${scheme}%`}`);
+      const matching = schemeRows
+        .filter((row) => row.url && appOfUrl(row.url) === toolkit)
         .map((row) => row.id);
       allIds = [...new Set([...ids, ...matching])];
     }
@@ -650,10 +780,38 @@ export function createSharedUseStore(database: Database) {
     return row;
   }
 
+  /**
+   * Whether the gate would let this person's own chat with this Bot reach the app's team account —
+   * the same approval, owner and audience test the gate makes for a person-started run, and nothing
+   * it does after refusing. For a screen saying what a call would meet; the gate still decides
+   * every call.
+   */
+  async function admitsPerson(input: {
+    botId: string;
+    serverId: string;
+    actorId: string;
+  }): Promise<boolean> {
+    const approval = await approvalFor(input.botId, input.serverId);
+    if (!approval) return false;
+    const facts = await botFacts(input.botId);
+    return admits(
+      approval,
+      facts.ownerUserId,
+      await actorFacts(input.actorId),
+      {
+        outside: false,
+      },
+    );
+  }
+
   return {
     appIdOf,
     approvalFor,
+    approvalSource,
+    admitsPerson,
     setApproval,
+    approveOwnerGrant,
+    withdrawOwnerApprovals,
     deleteApprovalsFor,
     botFacts,
     actorFacts,
@@ -677,7 +835,7 @@ export function createSharedUseGate(
   audit: AuditStore,
 ): SharedUseGate {
   return async ({ botId, serverId, title, actorId, initiator }) => {
-    const message = `This Bot is reachable by more people than an administrator approved for the shared ${title} account. An administrator has been asked to approve it.`;
+    const message = `This Bot reaches more people than an admin approved for the shared ${title} account. An admin has been asked to approve it.`;
     const steering = await steeringOf(initiator, store.sourcesOf);
     /*
      * A RUN WHOSE STEERING CANNOT BE TOLD IS REFUSED WITHOUT A REQUEST. No approval an administrator

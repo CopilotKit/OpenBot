@@ -19,9 +19,14 @@ mock.module("@copilotkit/react-core/v2", () => ({
   ),
 }));
 
-mock.module("@/lib/copilot/active-bot", () => ({
-  useActiveBot: () => undefined,
-}));
+/*
+ * `@/lib/copilot/active-bot` IS NOT MOCKED, though the route calls `useActiveBot`. Drawn without an
+ * `ActiveBotProvider`, as these tests draw it, the real hook finds no holder and does nothing — which
+ * is all the mock that used to be here did. And a module mock is not this file's to keep: bun cannot
+ * take one back off, so a replacement exporting only `useActiveBot` stood in for the whole module in
+ * every file walked into the same process, and `useDeclaredBotId` — the app-access card's fallback
+ * for a refusal that names no Bot — stopped existing there.
+ */
 
 mock.module("@/lib/copilot/bot-thread", () => ({
   useBotThread: (agentId: string) => {

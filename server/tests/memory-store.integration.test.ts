@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
+import { connectAppRefusal } from "@openbot/shared/connect-prompt";
 import { and, eq, inArray } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import { createCredentialStore } from "../src/credentials";
@@ -11,7 +12,7 @@ import { mcpServers, mcpTools } from "../src/db/schema/plugins";
 import { createMemoryIngestion } from "../src/memory/ingestion";
 import { createMemoryStore } from "../src/memory/store";
 import { MemoryNotFoundError, MemoryRefusedError } from "../src/memory/types";
-import { createPluginStore } from "../src/plugins/store";
+import { createPluginStore, PluginRefusedError } from "../src/plugins/store";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
@@ -25,8 +26,11 @@ const ref = `${server}/read_documents`;
 let vendorText =
   '[{"id":"doc1","text":"Project launch is Tuesday","title":"Roadmap"}]';
 let vendorError = false;
+/** Thrown by the vendor instead of answering, when set: how a refused call reaches a sync. */
+let vendorThrows: Error | null = null;
 const calls: { actorId?: string; botId?: string }[] = [];
 const plugins = createPluginStore({
+  brokerProvider: "composio",
   database,
   auditStore: createAuditStore(database),
   credentials: createCredentialStore(database),
@@ -34,6 +38,7 @@ const plugins = createPluginStore({
   policy: () => ({ mode: "enforce", deny: [], allow: ["true"] }),
   callVendor: async (connection) => {
     calls.push(connection);
+    if (vendorThrows) throw vendorThrows;
     return { text: vendorText, isError: vendorError };
   },
 });
@@ -82,12 +87,14 @@ beforeAll(async () => {
     {
       serverId: server,
       name: "read_documents",
+      vendorName: "read_documents",
       effect: "read",
       inputSchema: {},
     },
     {
       serverId: server,
       name: "write_document",
+      vendorName: "write_document",
       effect: "write",
       inputSchema: {},
     },
@@ -248,6 +255,31 @@ test("vendor failure hides stale source facts and records a visible error", asyn
   ).toBe(false);
   expect((await store.getSource(owner, value.id)).syncStatus).toBe("error");
   vendorError = false;
+});
+test("a refusal carrying an app card is said for the sources page, not stored raw", async () => {
+  const value = await source();
+  vendorThrows = new PluginRefusedError(
+    connectAppRefusal({
+      serverId: server,
+      title: "Docs",
+      message:
+        "Your Docs account is no longer connected at the vendor. Reconnect it and ask again.",
+      reason: "reconnect",
+    }),
+    null,
+  );
+  try {
+    await expect(ingestion.sync(owner, value.id)).rejects.toBeInstanceOf(
+      PluginRefusedError,
+    );
+    const { syncError } = await store.getSource(owner, value.id);
+    expect(syncError).toBe(
+      "Your Docs account needs reconnecting. Reconnect it under Connections, then sync again.",
+    );
+    expect(syncError).not.toContain("[connect-app]");
+  } finally {
+    vendorThrows = null;
+  }
 });
 test("source leases prevent competing connector calls", async () => {
   const value = await source();

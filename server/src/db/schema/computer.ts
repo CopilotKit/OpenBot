@@ -12,6 +12,7 @@ import {
   text,
   timestamp,
 } from "drizzle-orm/pg-core";
+import type { RuleLabel } from "../../computer/policy";
 import { jsonb } from "./json";
 
 /**
@@ -35,6 +36,11 @@ export const actionPolicy = pgTable("action_policy", {
   mode: text("mode").notNull(),
   deny: text("deny").array().notNull(),
   allow: text("allow").array().notNull(),
+  /** Each rule's name and description, keyed by its text. Display only; see `ActionPolicy.labels`. */
+  labels: jsonb("labels")
+    .$type<Record<string, RuleLabel>>()
+    .notNull()
+    .default({}),
   /** Who last changed it, for the Admin page and the trail. */
   updatedBy: text("updated_by"),
   updatedAt: timestamp("updated_at", { withTimezone: true })

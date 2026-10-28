@@ -1,11 +1,9 @@
 import {
   IconArrowLeft,
   IconBell,
-  IconBrain,
   IconChecks,
   IconKey,
   IconLayoutGrid,
-  IconPlug,
   IconSettings,
 } from "@tabler/icons-react";
 import { Link, type LinkOptions } from "@tanstack/react-router";
@@ -53,21 +51,6 @@ const ITEMS: {
     title: "Approvals",
     icon: IconChecks,
     linkOptions: { to: "/settings/approvals" },
-  },
-  {
-    /* What your Bots know about you, across all of them. */
-    title: "Memory",
-    icon: IconBrain,
-    linkOptions: { to: "/settings/memory" },
-  },
-  {
-    /*
-     * The same subject as Admin's Plugins, from the other side: there an administrator decides what
-     * this deployment may reach at all, here you decide what it may reach as you.
-     */
-    title: "Connected accounts",
-    icon: IconPlug,
-    linkOptions: { to: "/settings/connected-accounts" },
   },
   {
     /* Logins saved from a Bot's private sign-in form. */

@@ -142,20 +142,18 @@ test("a failed roster on / reports the failure and explains the disabled compose
 
   expect(
     await view.findByText(
-      "Agents shared with you couldn't be loaded.",
+      "Couldn't load the Bots shared with you.",
       {},
       HOME_FIND_TIMEOUT,
     ),
   ).toBeTruthy();
-  expect(
-    view.queryByText("Nobody has shared an agent with you yet."),
-  ).toBeNull();
+  expect(view.queryByText("Nobody has shared a Bot with you yet.")).toBeNull();
 
   // The composer goes `disabled={!fallback}` on the very same failure, with nothing on screen
   // saying why unless this alert renders.
   expect(
     await view.findByText(
-      "Your coworkers couldn't be loaded, so there's no one to send this to yet.",
+      "Couldn't load your Bots, so there's no one to send this to. Reload the page.",
       {},
       HOME_FIND_TIMEOUT,
     ),
@@ -181,18 +179,18 @@ test("a failed REFETCH on / keeps the roster and does not disclaim the composer"
   // evidence that the composer is not the disabled, nothing-to-send-to state its alert describes.
   expect(
     await view.findByText(
-      "Sent to the coworker it is for.",
+      "OpenBot picks the right Bot.",
       { exact: false },
       HOME_FIND_TIMEOUT,
     ),
   ).toBeTruthy();
   expect(
     view.queryByText(
-      "Your coworkers couldn't be loaded, so there's no one to send this to yet.",
+      "Couldn't load your Bots, so there's no one to send this to. Reload the page.",
     ),
   ).toBeNull();
   expect(
-    view.queryByText("Agents shared with you couldn't be loaded."),
+    view.queryByText("Couldn't load the Bots shared with you."),
   ).toBeNull();
 });
 
@@ -213,19 +211,19 @@ test("a failed REFETCH on / with explore empty shows it as empty, not broken", a
 
   expect(
     await view.findByText(
-      "Nobody has shared an agent with you yet.",
+      "Nobody has shared a Bot with you yet.",
       {},
       HOME_FIND_TIMEOUT,
     ),
   ).toBeTruthy();
   expect(
-    view.queryByText("Agents shared with you couldn't be loaded."),
+    view.queryByText("Couldn't load the Bots shared with you."),
   ).toBeNull();
   // `agents` loaded (it holds "Mine Agent"), so `fallback` falls back to it and the composer is
   // enabled — the alert claiming a load failure must not appear beside that working composer.
   expect(
     view.queryByText(
-      "Your coworkers couldn't be loaded, so there's no one to send this to yet.",
+      "Couldn't load your Bots, so there's no one to send this to. Reload the page.",
     ),
   ).toBeNull();
 });

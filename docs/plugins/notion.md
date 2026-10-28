@@ -12,7 +12,7 @@ Setting it up takes two people, and neither can do the other's half:
 | Who               | Does                                       | Where                        |
 | ----------------- | ------------------------------------------- | ----------------------------- |
 | An administrator  | Enables the connector                       | `/admin/plugins/notion`        |
-| Each person       | Consents with their own Notion account      | `/settings/connected-accounts` |
+| Each person       | Consents with their own Notion account      | `/connections` |
 
 There is deliberately no endpoint for an administrator to connect an account on somebody's behalf.
 
@@ -62,7 +62,7 @@ audit row.
 
 ## What each person does
 
-At `/settings/connected-accounts`, Notion appears once an administrator has enabled it. Open it and
+At `/connections`, Notion appears once an administrator has enabled it. Open it and
 press **Connect**. That leaves OpenBot for Notion's own consent screen — the arrow on the button says
 so — where the pages and databases to share are chosen, and returns to the same page, which then
 reads **Connected**.

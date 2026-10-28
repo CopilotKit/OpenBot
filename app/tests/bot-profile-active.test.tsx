@@ -118,7 +118,11 @@ test("a paused Bot's Active switch is off, and the row says it is paused", async
   const view = draw(BOT);
   const control = await view.findByRole("switch", { name: "Active" });
   expect(checked(control)).toBe(false);
-  expect(await view.findByText(/^Paused\. No routine/)).toBeTruthy();
+  expect(
+    await view.findByText(
+      /^Paused\. Nothing runs for you until you turn it back on\./,
+    ),
+  ).toBeTruthy();
 });
 
 test("switching a running Bot off pauses it", async () => {

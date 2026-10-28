@@ -86,7 +86,11 @@ describe("Shared account requests", () => {
     ).toBeTruthy();
     expect(view.getByText("Now: Only its owner")).toBeTruthy();
     expect(view.getByText("Asked: Everyone, and outside input")).toBeTruthy();
-    expect(view.getByText(/A call was refused/)).toBeTruthy();
+    expect(
+      view.getByText(
+        "An action was blocked. This Bot reaches more people than approved.",
+      ),
+    ).toBeTruthy();
   });
 
   test("approving posts once", async () => {

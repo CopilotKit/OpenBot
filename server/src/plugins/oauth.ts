@@ -132,7 +132,7 @@ export function connectedAccountsUrlFor(
     }
   }
 
-  const base = `${origin}/settings/connected-accounts`;
+  const base = `${origin}/connections`;
 
   /*
    * Success returns to the account, not the list.

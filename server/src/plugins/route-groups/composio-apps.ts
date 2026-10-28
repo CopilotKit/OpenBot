@@ -1,22 +1,25 @@
 import { requireAdmin } from "../../auth/guards";
 import { reasonWithoutStatement } from "../../db/query-failure";
+import { BROKERED_PROFILE } from "../access";
 import {
   type BrokerApp,
   BrokerUnconfiguredError,
   brokerSentence,
 } from "../broker";
-import { toolkitOf, vendorSentence } from "../composio";
+import { vendorSentence } from "../composio";
 import {
   CatalogueEntryUnknownError,
   CustomServerRefusedError,
   deploymentFaultSentence,
   isDeploymentFault,
   PluginRefusedError,
+  type ServerRecord,
 } from "../store";
 import {
   brokerRefusal,
-  DIRECTORY_UNAVAILABLE,
+  directoryUnavailable,
   type PluginRouteContext,
+  withVendorDeadline,
 } from "./context";
 
 /** Browsing Composio's directory and enabling an app out of it. */
@@ -25,6 +28,9 @@ export function mountComposioAppRoutes({
   store,
   requireUser,
   composio,
+  activeProvider,
+  activeVendor,
+  appOfUrl,
   actorEmail,
 }: PluginRouteContext) {
   /**
@@ -44,8 +50,9 @@ export function mountComposioAppRoutes({
    * {@link BrokerUnconfiguredError}'s own message is what is sent rather than a sentence written
    * here.
    *
-   * `enabled` comes off `toolkitOf(url)` and never off the row's id. The url is where the
-   * transport reads which app a call is against, so it is the only reading that decides anything;
+   * `enabled` comes off `appOfUrl(url)` — the active broker's own parser — and never off the
+   * row's id. The url is where the transport reads which app a call is against, so it is the only
+   * reading that decides anything;
    * the id names the row — `composio-linear` — and reading one as the other would quietly work
    * until somebody renamed a row. `serverUrls` hands over the urls and nothing else, which is that
    * property made structural: there is no id here to read by mistake.
@@ -61,18 +68,24 @@ export function mountComposioAppRoutes({
 
     if (!composio) {
       return context.json(
-        { error: new BrokerUnconfiguredError().message },
+        {
+          error: new BrokerUnconfiguredError(activeProvider, "operator")
+            .message,
+        },
         503,
       );
     }
 
     let directory: BrokerApp[];
     try {
-      directory = await composio.broker.listApps();
+      directory = await withVendorDeadline(() => composio.broker.listApps());
     } catch (error) {
       // The vendor's own sentence where there is one, because "invalid api key" is the diagnosis
       // and a 500 is not. See {@link brokerRefusal} for what is kept out of the answer.
-      const refusal = brokerRefusal(error, DIRECTORY_UNAVAILABLE);
+      const refusal = brokerRefusal(
+        error,
+        directoryUnavailable(activeProvider),
+      );
       return context.json({ error: refusal.error }, refusal.status);
     }
     /*
@@ -121,7 +134,7 @@ export function mountComposioAppRoutes({
 
     const enabled = new Set(
       urls
-        .map((url) => toolkitOf(url))
+        .map((url) => appOfUrl(url))
         .filter((toolkit): toolkit is string => toolkit !== null),
     );
     return context.json({
@@ -146,13 +159,6 @@ export function mountComposioAppRoutes({
     const forbidden = requireAdmin(context);
     if (forbidden) return forbidden;
 
-    if (!composio) {
-      return context.json(
-        { error: new BrokerUnconfiguredError().message },
-        503,
-      );
-    }
-
     const body = (await context.req.json().catch(() => null)) as {
       slug?: unknown;
     } | null;
@@ -168,174 +174,224 @@ export function mountComposioAppRoutes({
      * about that, so the narrowing answers with `undefined` rather than a second sentence.
      */
     const slug = typeof body?.slug === "string" ? body.slug.trim() : undefined;
-    let directory: BrokerApp[] = [];
-    if (slug) {
-      try {
-        directory = await composio.broker.listApps();
-      } catch (error) {
-        /*
-         * The same failure the directory route answers, in the same words, because it is the same
-         * call. Unhandled it was the worst 500 of the three: an administrator pressing Add on a
-         * deployment whose key is wrong was told nothing at all, on the one screen where the key
-         * had just been set.
-         */
-        const refusal = brokerRefusal(error, DIRECTORY_UNAVAILABLE);
-        return context.json({ error: refusal.error }, refusal.status);
-      }
-    }
-    const app = directory.find((candidate) => candidate.slug === slug);
-    if (!app) {
-      return context.json(
-        {
-          error: slug
-            ? `${slug} is not an app Composio lists for this deployment.`
-            : "An app is required.",
-        },
-        400,
-      );
-    }
-
-    /*
-     * AN APP THIS DEPLOYMENT CANNOT CONNECT IS NOT AN APP TO ADD, and the GET half above is not
-     * enough on its own: it hides every `unsupported` app from the picker, so nobody presses Add on
-     * one, but this route validates against the unfiltered `directory` — so a request that names
-     * one by hand arrives here past that filter.
-     *
-     * WHAT IT WOULD REACH IS A STORE METHOD THAT RECORDS A MISLEADING ROW. `schemeFor` writes
-     * `null` on `auth_scheme` for an unsupported connection, and a null there is read everywhere
-     * else as "not a brokered row at all" — so the row enabling would write is one whose recorded
-     * kind contradicts what it is.
-     *
-     * A SECOND GUARD RATHER THAN A REPLACEMENT: the adapter keeps its own refusal, and the two
-     * catch different things. This one stops a CALLER OF THIS ROUTE reaching a store method that
-     * would write that row — which is a fact about `addBrokeredApp`, and holds for whatever broker
-     * is behind it, including one that would happily create the config. The adapter's stops ANY
-     * caller at all — this route, a script, a future path — from reaching the vendor for an app
-     * this deployment has nowhere to hold an OAuth client for. Neither subsumes the other, and the
-     * store itself still has no guard, which is precisely why the cheap one here is worth having.
-     *
-     * The derivation's own `reason` is the sentence, because it names what is missing for this app
-     * rather than for unsupported apps in general. 503 because this is a refusal this deployment
-     * authored — the same status `brokerRefusal` gives an authored refusal raised a layer down, and
-     * for the same reading: the brokered surface is unavailable for this app until somebody here
-     * changes something, rather than unavailable because a third party is down. Not the 400 above,
-     * which says the app does not exist; this one does exist, and this deployment cannot drive it.
-     */
-    if (app.connection.kind === "unsupported") {
-      return context.json({ error: app.connection.reason }, 503);
-    }
-
-    try {
-      const server = await store.addBrokeredApp({
-        slug: app.slug,
-        title: app.name,
-        logo: app.logo,
-        by: actorEmail(context),
-        // Off the directory entry the administrator chose, never derived a second time here: a
-        // second derivation is a second answer, which is the one thing `BrokerConnection` exists to
-        // prevent. It decides what config the store creates at the vendor, and what the row records.
-        connection: app.connection,
-      });
-      return context.json({ server }, 201);
-    } catch (error) {
-      // The same mapping the add routes above make, for the same reason: a refusal an
-      // administrator can correct comes back as itself rather than as a 500.
-      if (
-        error instanceof CustomServerRefusedError ||
-        error instanceof PluginRefusedError
-      ) {
-        return context.json({ error: error.message }, 400);
-      }
-      // And, as on those routes, enabling refreshes before it answers, so every fault
-      // `refreshTools` raises arrives here as well. Its sentence blames nobody and names the row,
-      // which is the honest answer whichever side of the insert the fault arrived on.
-      if (isDeploymentFault(error)) {
-        return context.json({ error: deploymentFaultSentence(error) }, 409);
-      }
-      /*
-       * THE ONE REFUSAL THIS ROUTE CAN ONLY MEET AFTER THE ROW IS COMMITTED, and the only one its
-       * three sibling add routes map and it did not.
-       *
-       * CRITERION. A failure thrown after `addBrokeredApp` has written and audited the row is not
-       * reported as an app that was not enabled, and is not reported as Composio's doing.
-       *
-       * WHERE IT ARRIVES FROM. `addBrokeredApp` creates the auth config, inserts the row and files
-       * its `configuration.changed` entry, and only THEN refreshes and reads the row back out of
-       * `listServers` — raising this when it is not there, as `requireServer` does one call
-       * deeper. Every one of those steps has already committed by then.
-       *
-       * WHAT IT USED TO BE ANSWERED WITH. Nothing caught it, so it fell through to the broker tail
-       * below and an administrator was told "Slack could not be enabled, and Composio said nothing
-       * about why. Try again, and check this deployment's Composio key if it persists." That is
-       * wrong three times over: the app WAS enabled, Composio had no part in the step that failed,
-       * and the one thing the reader now holds — a row on their Plugins page — went unmentioned
-       * while they were sent to check a key that is fine.
-       *
-       * 409 RATHER THAN THE 400 ITS SIBLINGS GIVE THIS CLASS, because it is not the same fact
-       * wearing the same class. On the add routes above, an unknown key is a caller naming a
-       * server this deployment will not connect to, which is a malformed request. Here the row was
-       * written and this deployment cannot see it: two of its own reads disagree, and the request
-       * cannot be answered until one of them changes — the reading the refresh route's own 409
-       * spells out. The message is written here rather than passed through, because
-       * {@link CatalogueEntryUnknownError}'s own sentence is the one for the other case.
-       */
-      if (error instanceof CatalogueEntryUnknownError) {
-        return context.json(
-          {
-            error: `${app.name} was added, and then could not be read back out of this deployment's own servers — so the row and its trail entry stand, and what is on this page may be missing it. Reload the Plugins page: if ${app.name} is there it is enabled and there is nothing to redo, and if it is not, adding it again is safe.`,
-          },
-          409,
-        );
-      }
-      /*
-       * THE SAME MAPPING THE DIRECTORY READ ABOVE MAKES, FOR THE SAME REASON, and its absence here
-       * is what left an administrator with nothing. Composio's own sentence — "Default auth config
-       * not found for toolkit linear_mcp. Composio does not have managed credentials for this
-       * toolkit." — travelled as an unhandled throw, so the route answered a bodyless 500 and the
-       * browser fell back to its own "That app could not be added". Everything that explains the
-       * failure existed; nothing carried it the last step.
-       */
-      /*
-       * WHAT THE MAPPING COST, PUT BACK. A throw used to reach Hono's default handler, which is a
-       * bad answer and a good log: the administrator got a bodyless 500, but the stack was printed
-       * where an operator could find it. Catching everything fixed the answer and silenced the log,
-       * and the failure that needs the log most is the one left here — not a refusal this
-       * deployment authored, which `brokerSentence` names and `isDeploymentFault` already took one
-       * branch above, and not a sentence Composio wrote, which `vendorSentence` reaches for. Both
-       * null is a fault nobody has explained, most often a programmer error on this side, and it
-       * would otherwise leave only the generic "Composio said nothing about why" in a browser
-       * nobody is reading a console from.
-       *
-       * The same shape and the same restraint as the connection-not-recorded log below: the slug,
-       * because it is the app an operator is about to be asked about; what the person was told, so
-       * the console line and the support request can be matched up; and the error read through
-       * {@link reasonWithoutStatement}, never spread, logged as an object or reached into. No key,
-       * no vendor response, no request body, and no statement — the two sentence tests below do not
-       * exclude a query failure, they are the branch one arrives in.
-       *
-       * AND THE NAME ON IT IS TRUE OF EVERY FAILURE THAT STILL REACHES IT. The two branches above
-       * take the whole of what `addBrokeredApp` can raise once the row is committed — the shelf,
-       * and the read-back that could not find it — so what is left arrives from the steps before
-       * the insert, where nothing was written and the app really was not enabled. The generic
-       * sentence below names Composio for the same reason: the one call in front of the insert is
-       * `ensureAuthConfig`, which is a call to the vendor.
-       */
-      if (brokerSentence(error) === null && vendorSentence(error) === null) {
-        console.error(
-          JSON.stringify({
-            type: "composio-app-not-enabled",
-            slug: app.slug,
-            note: "Enabling a brokered app failed for a reason neither this deployment nor Composio put a sentence to. The administrator was answered 502 with the generic sentence.",
-            error: reasonWithoutStatement(error),
-          }),
-        );
-      }
-
-      const refusal = brokerRefusal(
-        error,
-        `${app.name} could not be enabled, and Composio said nothing about why. Try again, and check this deployment's Composio key if it persists.`,
-      );
-      return context.json({ error: refusal.error }, refusal.status);
-    }
+    const outcome = await enableComposioApp(
+      { store, composio, activeProvider, activeVendor },
+      slug,
+      actorEmail(context),
+    );
+    return outcome.ok
+      ? context.json({ server: outcome.server }, 201)
+      : context.json({ error: outcome.error }, outcome.status);
   });
+}
+
+/** What enabling one Composio app answered: the row it wrote, or the refusal and its status. */
+export type EnableOutcome =
+  | { ok: true; server: ServerRecord }
+  | { ok: false; error: string; status: 400 | 409 | 502 | 503 };
+
+/**
+ * Enable one app of Composio's catalogue, by slug: the body of `POST /composio/apps`, and what
+ * approving a person's request to switch an app on runs.
+ *
+ * ONE FUNCTION FOR BOTH DOORS, so an app switched on from the request inbox is checked against
+ * the live directory, refused when this deployment cannot drive it, and mapped to the same
+ * sentences as one switched on from the picker. The caller decides who may call it; both callers
+ * are administrator-only.
+ */
+export async function enableComposioApp(
+  {
+    store,
+    composio,
+    activeProvider,
+    activeVendor,
+  }: Pick<
+    PluginRouteContext,
+    "store" | "composio" | "activeProvider" | "activeVendor"
+  >,
+  slug: string | undefined,
+  by: string,
+): Promise<EnableOutcome> {
+  if (!composio) {
+    return {
+      ok: false,
+      error: new BrokerUnconfiguredError(activeProvider, "operator").message,
+      status: 503,
+    };
+  }
+  let directory: BrokerApp[] = [];
+  if (slug) {
+    try {
+      directory = await withVendorDeadline(() => composio.broker.listApps());
+    } catch (error) {
+      /*
+       * The same failure the directory route answers, in the same words, because it is the same
+       * call. Unhandled it was the worst 500 of the three: an administrator pressing Add on a
+       * deployment whose key is wrong was told nothing at all, on the one screen where the key
+       * had just been set.
+       */
+      return {
+        ok: false,
+        ...brokerRefusal(error, directoryUnavailable(activeProvider)),
+      };
+    }
+  }
+  const app = directory.find((candidate) => candidate.slug === slug);
+  if (!app) {
+    return {
+      ok: false,
+      error: slug
+        ? `${slug} is not an app ${BROKERED_PROFILE[activeProvider].vendor} lists for this deployment.`
+        : "An app is required.",
+      status: 400,
+    };
+  }
+
+  /*
+   * AN APP THIS DEPLOYMENT CANNOT CONNECT IS NOT AN APP TO ADD, and the GET half above is not
+   * enough on its own: it hides every `unsupported` app from the picker, so nobody presses Add on
+   * one, but this route validates against the unfiltered `directory` — so a request that names
+   * one by hand arrives here past that filter.
+   *
+   * WHAT IT WOULD REACH IS A STORE METHOD THAT RECORDS A MISLEADING ROW. `schemeFor` writes
+   * `null` on `auth_scheme` for an unsupported connection, and a null there is read everywhere
+   * else as "not a brokered row at all" — so the row enabling would write is one whose recorded
+   * kind contradicts what it is.
+   *
+   * A SECOND GUARD RATHER THAN A REPLACEMENT: the adapter keeps its own refusal, and the two
+   * catch different things. This one stops a CALLER OF THIS ROUTE reaching a store method that
+   * would write that row — which is a fact about `addBrokeredApp`, and holds for whatever broker
+   * is behind it, including one that would happily create the config. The adapter's stops ANY
+   * caller at all — this route, a script, a future path — from reaching the vendor for an app
+   * this deployment has nowhere to hold an OAuth client for. Neither subsumes the other, and the
+   * store itself still has no guard, which is precisely why the cheap one here is worth having.
+   *
+   * The derivation's own `reason` is the sentence, because it names what is missing for this app
+   * rather than for unsupported apps in general. 503 because this is a refusal this deployment
+   * authored — the same status `brokerRefusal` gives an authored refusal raised a layer down, and
+   * for the same reading: the brokered surface is unavailable for this app until somebody here
+   * changes something, rather than unavailable because a third party is down. Not the 400 above,
+   * which says the app does not exist; this one does exist, and this deployment cannot drive it.
+   */
+  if (app.connection.kind === "unsupported") {
+    return { ok: false, error: app.connection.reason, status: 503 };
+  }
+
+  try {
+    const server = await store.addBrokeredApp({
+      slug: app.slug,
+      title: app.name,
+      logo: app.logo,
+      by,
+      // Off the directory entry the administrator chose, never derived a second time here: a
+      // second derivation is a second answer, which is the one thing `BrokerConnection` exists to
+      // prevent. It decides what config the store creates at the vendor, and what the row records.
+      connection: app.connection,
+    });
+    return { ok: true, server };
+  } catch (error) {
+    // The same mapping the add routes above make, for the same reason: a refusal an
+    // administrator can correct comes back as itself rather than as a 500.
+    if (
+      error instanceof CustomServerRefusedError ||
+      error instanceof PluginRefusedError
+    ) {
+      return { ok: false, error: error.message, status: 400 };
+    }
+    // And, as on those routes, enabling refreshes before it answers, so every fault
+    // `refreshTools` raises arrives here as well. Its sentence blames nobody and names the row,
+    // which is the honest answer whichever side of the insert the fault arrived on.
+    if (isDeploymentFault(error)) {
+      return {
+        ok: false,
+        error: deploymentFaultSentence(error),
+        status: 409,
+      };
+    }
+    /*
+     * THE ONE REFUSAL THIS ROUTE CAN ONLY MEET AFTER THE ROW IS COMMITTED, and the only one its
+     * three sibling add routes map and it did not.
+     *
+     * CRITERION. A failure thrown after `addBrokeredApp` has written and audited the row is not
+     * reported as an app that was not enabled, and is not reported as Composio's doing.
+     *
+     * WHERE IT ARRIVES FROM. `addBrokeredApp` creates the auth config, inserts the row and files
+     * its `configuration.changed` entry, and only THEN refreshes and reads the row back out of
+     * `listServers` — raising this when it is not there, as `requireServer` does one call
+     * deeper. Every one of those steps has already committed by then.
+     *
+     * WHAT IT USED TO BE ANSWERED WITH. Nothing caught it, so it fell through to the broker tail
+     * below and an administrator was told "Slack could not be enabled, and Composio said nothing
+     * about why. Try again, and check this deployment's Composio key if it persists." That is
+     * wrong three times over: the app WAS enabled, Composio had no part in the step that failed,
+     * and the one thing the reader now holds — a row on their Plugins page — went unmentioned
+     * while they were sent to check a key that is fine.
+     *
+     * 409 RATHER THAN THE 400 ITS SIBLINGS GIVE THIS CLASS, because it is not the same fact
+     * wearing the same class. On the add routes above, an unknown key is a caller naming a
+     * server this deployment will not connect to, which is a malformed request. Here the row was
+     * written and this deployment cannot see it: two of its own reads disagree, and the request
+     * cannot be answered until one of them changes — the reading the refresh route's own 409
+     * spells out. The message is written here rather than passed through, because
+     * {@link CatalogueEntryUnknownError}'s own sentence is the one for the other case.
+     */
+    if (error instanceof CatalogueEntryUnknownError) {
+      return {
+        ok: false,
+        error: `${app.name} was added, and then could not be read back out of this deployment's own servers — so the row and its trail entry stand, and what is on this page may be missing it. Reload the Plugins page: if ${app.name} is there it is enabled and there is nothing to redo, and if it is not, adding it again is safe.`,
+        status: 409,
+      };
+    }
+    /*
+     * THE SAME MAPPING THE DIRECTORY READ ABOVE MAKES, FOR THE SAME REASON, and its absence here
+     * is what left an administrator with nothing. Composio's own sentence — "Default auth config
+     * not found for toolkit linear_mcp. Composio does not have managed credentials for this
+     * toolkit." — travelled as an unhandled throw, so the route answered a bodyless 500 and the
+     * browser fell back to its own "That app could not be added". Everything that explains the
+     * failure existed; nothing carried it the last step.
+     */
+    /*
+     * WHAT THE MAPPING COST, PUT BACK. A throw used to reach Hono's default handler, which is a
+     * bad answer and a good log: the administrator got a bodyless 500, but the stack was printed
+     * where an operator could find it. Catching everything fixed the answer and silenced the log,
+     * and the failure that needs the log most is the one left here — not a refusal this
+     * deployment authored, which `brokerSentence` names and `isDeploymentFault` already took one
+     * branch above, and not a sentence Composio wrote, which `vendorSentence` reaches for. Both
+     * null is a fault nobody has explained, most often a programmer error on this side, and it
+     * would otherwise leave only the generic "Composio said nothing about why" in a browser
+     * nobody is reading a console from.
+     *
+     * The same shape and the same restraint as the connection-not-recorded log below: the slug,
+     * because it is the app an operator is about to be asked about; what the person was told, so
+     * the console line and the support request can be matched up; and the error read through
+     * {@link reasonWithoutStatement}, never spread, logged as an object or reached into. No key,
+     * no vendor response, no request body, and no statement — the two sentence tests below do not
+     * exclude a query failure, they are the branch one arrives in.
+     *
+     * AND THE NAME ON IT IS TRUE OF EVERY FAILURE THAT STILL REACHES IT. The two branches above
+     * take the whole of what `addBrokeredApp` can raise once the row is committed — the shelf,
+     * and the read-back that could not find it — so what is left arrives from the steps before
+     * the insert, where nothing was written and the app really was not enabled. The generic
+     * sentence below names Composio for the same reason: the one call in front of the insert is
+     * `ensureAuthConfig`, which is a call to the vendor.
+     */
+    if (brokerSentence(error) === null && vendorSentence(error) === null) {
+      console.error(
+        JSON.stringify({
+          type: "composio-app-not-enabled",
+          slug: app.slug,
+          note: `Enabling a brokered app failed for a reason neither this deployment nor ${activeVendor} put a sentence to. The administrator was answered 502 with the generic sentence.`,
+          error: reasonWithoutStatement(error),
+        }),
+      );
+    }
+
+    return {
+      ok: false,
+      ...brokerRefusal(
+        error,
+        `${app.name} could not be enabled, and ${activeVendor} said nothing about why. Try again, and check this deployment's ${activeVendor} key if it persists.`,
+      ),
+    };
+  }
 }

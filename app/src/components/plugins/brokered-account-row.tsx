@@ -18,12 +18,17 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import {
+  type PluginsProvider,
+  brokeredKeyMissing,
+} from "@/lib/plugins/provider-vocabulary";
+import {
   type BrokerField,
   brokeredConnectionFieldsMutationOptions,
   confirmBrokeredConnectionMutationOptions,
   connectAccountMutationOptions,
   connectBrokeredWithFieldsMutationOptions,
   disconnectBrokeredMutationOptions,
+  invalidatePlugins,
   recheckBrokeredConnectionMutationOptions,
 } from "@/lib/plugins/mutations";
 
@@ -165,6 +170,22 @@ export type BrokeredAccount = {
    * below can do anything but fail.
    */
   configured: boolean;
+  /**
+   * Whether the broker grants ONE ACTION AT A TIME, which is whether a whole-app Connect exists.
+   *
+   * READ OFF THE DECLARED CAPABILITY AND NEVER OFF THE VENDOR'S NAME — the same rule, and the same
+   * server-computed field, the grant list is drawn on. `provider === "arcade"` would key the button
+   * on a different fact from the route behind it, and the two must not be able to disagree.
+   *
+   * THE ROW WITHHOLDS `Connect` WHERE THIS IS TRUE, AND NOTHING ELSE. A per-action broker has no
+   * whole-app consent to mint — the adapter refuses an authorization with no action on it — so the
+   * button could only ever reach the vendor's refusal, which is the state this closes: somebody
+   * pressed it, was told "an authorization needs the action it is for", and had no way to tell from
+   * the screen that the thing they wanted was the list underneath. `Disconnect` is NOT withheld:
+   * per-action authorizations still add up to one account at the vendor, and ending it is a real
+   * act this row is the only offer of.
+   */
+  authorizesPerAction: boolean;
   /** See {@link BrokeredAccountKind}. Derived here so no branch below re-asks. */
   kind: BrokeredAccountKind;
   /** Leave for the vendor's consent screen. */
@@ -271,6 +292,8 @@ export function useBrokeredAccount(input: {
    * from and never how an app connects. Null where the app is not brokered at all.
    */
   authScheme: string | null;
+  /** See {@link BrokeredAccount.authorizesPerAction}. The server's computed capability, passed in. */
+  authorizesPerAction: boolean;
   /** Which screen the vendor's callback puts somebody down on. */
   returnTo: "settings" | "admin";
   /**
@@ -284,6 +307,7 @@ export function useBrokeredAccount(input: {
   const queryClient = useQueryClient();
   const {
     authScheme,
+    authorizesPerAction,
     brokered,
     checkable,
     configured,
@@ -375,9 +399,19 @@ export function useBrokeredAccount(input: {
      * shown to this person in their own browser; there is deliberately nothing here that could
      * complete it for them, and nothing about being an administrator changes that.
      */
-    onSuccess: (authorizationUrl) => {
+    onSuccess: (start) => {
       forgetConfirmation();
       forgetRecheck();
+      /*
+       * ALREADY CONNECTED, AND NOTHING TO LEAVE FOR. The vendor held this account and this
+       * deployment had no row for it, so the route recorded it on this press. The held answers
+       * were just dropped, so the row falls back to the recorded one, and the refetch is what
+       * brings that row in.
+       */
+      if (start !== null && "connected" in start) {
+        void invalidatePlugins(queryClient);
+        return;
+      }
       /*
        * NO URL IS AN ANSWER, NOT A URL TO FOLLOW.
        *
@@ -394,13 +428,13 @@ export function useBrokeredAccount(input: {
        * would leave nobody any reason to correct it — and the sentence names the one act that ends
        * the state, which is a reload against a deployment whose app has caught up.
        */
-      if (authorizationUrl === null) {
+      if (start === null) {
         report(
-          "This app is connected with a key you hold rather than through a consent screen, so there was no page to send you to and nothing was connected. Reload this page and press Connect again.",
+          "This app connects with a key, not a sign-in page, so nothing was connected. Reload the page and press Connect again.",
         );
         return;
       }
-      window.location.href = authorizationUrl;
+      window.location.href = start.authorizationUrl;
     },
   });
 
@@ -611,6 +645,9 @@ export function useBrokeredAccount(input: {
      * offered or withheld for an instant, not a sentence anybody is told.
      */
     checkable,
+    /* Passed straight through: it is the server's answer about the app, and nothing pressed here
+       can make a broker start or stop granting per action. */
+    authorizesPerAction,
     recheck: () => {
       report(null);
       recheck.mutate(serverId);
@@ -685,17 +722,19 @@ function accountSentence(input: {
   connectedDescription: string;
   disconnectedDescription: string;
   disconnectedReassurance: string | undefined;
+  provider: PluginsProvider;
 }): string {
   const {
     account,
     connectedDescription,
     disconnectedDescription,
     disconnectedReassurance,
+    provider,
     title,
   } = input;
 
   if (!account.configured) {
-    return "Set COMPOSIO_API_KEY on this deployment. Without it there is no broker to reach, so this account can be neither connected nor ended from here. The app stays enabled and every grant on its tools still stands.";
+    return brokeredKeyMissing(provider);
   }
 
   if (account.kind === "no-auth") {
@@ -703,13 +742,13 @@ function accountSentence(input: {
      * Neither screen's own sentence fits: both are about an account, and there is none to have.
      * Capitalised because this is the one position the name opens a sentence in.
      */
-    return `${title.charAt(0).toUpperCase()}${title.slice(1)} needs no account. A Bot granted these tools can use it as it is.`;
+    return `${title.charAt(0).toUpperCase()}${title.slice(1)} doesn't need an account. Bots that have it can use it as it is.`;
   }
 
   if (account.kind === "fields") {
     if (account.connected) {
       if (account.verified && account.verifiedAt) {
-        return `Connected with a key you provided, last checked ${formatDate(account.verifiedAt)}.`;
+        return `Connected with your key. Last checked ${formatDate(account.verifiedAt)}.`;
       }
       /*
        * A CHECK WAS SPENT AND DID NOT COME BACK CLEAN, and the account it was spent in is still
@@ -735,7 +774,7 @@ function accountSentence(input: {
        * is worth a second press rather than a second connection.
        */
       if (account.probe && !account.verified) {
-        return `A check against ${title} was made with your key and did not come back clean — that may be the key, and it may be ${title} itself. The account still stands at Composio, so press Re-check to try again, or disconnect it here and connect again with a fresh key.`;
+        return `Your key didn't pass a check with ${title}. That may be the key, or ${title} itself. Your account is still connected. Press Re-check to try again, or disconnect and connect with a new key.`;
       }
       /*
        * NOTHING WAS SPENT ON IT, WHICH IS A FACT ABOUT THE CHECK AND ABOUT THE APP AT THE TIME. The
@@ -756,7 +795,7 @@ function accountSentence(input: {
        * today.
        */
       if (account.probe === null) {
-        return `Connected with a key you provided. It was accepted without being checked against ${title}, which published nothing safe to try a key on at the time — that is about the app, not about your key.`;
+        return `Connected with your key. It hasn't been checked with ${title}. At the time, ${title} had no safe way to check a key. That's about the app, not your key.`;
       }
       /*
        * AND NOTHING HAS SAID WHICH, which is no longer the page load: the connections read carries
@@ -766,7 +805,7 @@ function accountSentence(input: {
        * two things a record can say; this is what stands where there is no record, and it must not
        * borrow either.
        */
-      return `Connected with a key you provided. It was accepted without being checked against ${title}.`;
+      return `Connected with your key. It hasn't been checked with ${title}.`;
     }
     /*
      * WHAT DISCONNECTING DID NOT DO. The account ends at Composio and the key does not end
@@ -775,7 +814,7 @@ function accountSentence(input: {
      * have live, so the row names the step this deployment cannot take for them.
      */
     if (account.disconnected) {
-      return `Removed from Composio. Your key still works at ${title} — rotate it there if you meant to end its access.`;
+      return `Disconnected. Your key still works at ${title}. Change it there to stop all access.`;
     }
     /*
      * NOT THE SCREEN'S OWN SENTENCE, which is written for the kind that leaves: one of the two says
@@ -788,7 +827,7 @@ function accountSentence(input: {
      * way this app is connected, and a row that replaced the whole line took it away with the trip
      * it was right to drop.
      */
-    const asked = `This app is connected with a key you already hold, not a trip to ${title}'s consent screen. Connect asks for it.`;
+    const asked = `${title.charAt(0).toUpperCase()}${title.slice(1)} connects with a key you already have. Connect asks for it.`;
     return disconnectedReassurance
       ? `${asked} ${disconnectedReassurance}`
       : asked;
@@ -800,7 +839,7 @@ function accountSentence(input: {
    * mail is an argument, not a branch — see this file's opening comment.
    */
   return account.connected
-    ? `Connected through ${title}'s consent screen. ${connectedDescription}`
+    ? `Signed in with ${title}. ${connectedDescription}`
     : disconnectedDescription;
 }
 
@@ -818,6 +857,7 @@ export function BrokeredAccountRow({
   disconnectedReassurance,
   heading,
   notice,
+  provider,
   title,
 }: {
   account: BrokeredAccount;
@@ -849,6 +889,13 @@ export function BrokeredAccountRow({
    * that it is shared, say — which holds regardless of which of those two is showing.
    */
   notice?: string;
+  /**
+   * Which broker's name the sentences that name one use. A NAME, never a key or a capability.
+   *
+   * Required, never defaulted: a default would say one broker's name on a deployment running the
+   * other, so every screen passes the provider it was told.
+   */
+  provider: PluginsProvider;
   /**
    * The app's own name, for the sentences that name it.
    *
@@ -896,6 +943,7 @@ export function BrokeredAccountRow({
               connectedDescription,
               disconnectedDescription,
               disconnectedReassurance,
+              provider,
               title,
             })}
           </ItemDescription>
@@ -981,6 +1029,23 @@ export function BrokeredAccountRow({
                   Disconnect
                 </Button>
               </>
+            ) : account.authorizesPerAction ? (
+              /*
+               * A value and nothing to press, the same layout the missing key draws above and for
+               * the same reason given there: a button that cannot work is worse than no button.
+               *
+               * NOT A DISABLED `Connect`. A greyed button says "not yet", and announces a step
+               * somebody is missing — but there is no later state in which a per-action broker
+               * grows a whole-app consent, so the step it names does not exist. What this person
+               * wants is the action list, and the sentence beside this row sends them to it.
+               *
+               * IT SAYS THE MECHANISM AND NOT A STATE. "Approved per action" is true before anybody
+               * has approved anything and stays true after all of it is approved; the account's own
+               * state is the branch above, which this one is reached only by failing.
+               */
+              <span className="text-muted-foreground text-xs">
+                Approved per action
+              </span>
             ) : (
               /* The arrow says this leaves OpenBot for the vendor's consent page. It does. */
               <Button
@@ -1054,7 +1119,7 @@ export function BrokeredAccountRow({
               />
             ) : account.requestingFields ? (
               <p className="text-muted-foreground text-sm">
-                Asking the app what it needs…
+                Checking what the app needs…
               </p>
             ) : (
               /*
@@ -1066,8 +1131,7 @@ export function BrokeredAccountRow({
                * on a second open and not only on a first.
                */
               <p className="text-muted-foreground text-sm">
-                That app could not be asked what it needs. Close this and try
-                again.
+                Couldn't find out what this app needs. Close this and try again.
               </p>
             )}
             {/*

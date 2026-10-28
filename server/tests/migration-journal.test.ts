@@ -16,6 +16,14 @@ import { readdir, readFile } from "node:fs/promises";
  * and the only symptom was an integration test failing with `relation "skill_tools" does not exist`.
  *
  * Nothing else in the build would have caught that, which is why this is a test rather than a note.
+ *
+ * WHAT THIS FILE CANNOT SEE, so that nobody reads it as covering more than it does: every check
+ * here reads ONE journal and asks whether it agrees with itself. The same swallowing happens
+ * between journals — a merge that renumbers a branch's migrations gives the migrations it merged in
+ * a `when` older than the stamp a pre-merge database has already recorded, and those are skipped on
+ * that database while this file, and a fresh database, and CI, all stay green. That half lives in
+ * `migration-reach.test.ts` and in the guard it tests, which runs against the database rather than
+ * against the folder, because it is the only place the evidence exists.
  */
 
 type Entry = { idx: number; tag: string; when: number };
@@ -37,6 +45,8 @@ type Snapshot = {
       name: string;
       columns?: Record<string, SnapshotColumn>;
       indexes?: Record<string, unknown>;
+      /** The predicate, not merely the name: see {@link checkDisagreements}. */
+      checkConstraints?: Record<string, { name: string; value: string }>;
     }
   >;
 };
@@ -142,6 +152,205 @@ test("column declarations exclude the cast on a quoted JSON default", () => {
     type: "jsonb",
     notNull: true,
   });
+});
+
+/**
+ * The text between a `(` and the `)` that closes it, with nested parentheses and quoted strings
+ * kept whole.
+ *
+ * A CHECK body cannot be matched by a regular expression, because every interesting one ends in
+ * `IN ('a', 'b')` and the paren that closes the list is not the paren that closes the check. A
+ * lazy `\(.*?\)` therefore truncates exactly the predicates whose roster is the thing worth
+ * guarding. `open` is the index OF the opening paren.
+ */
+const balanced = (sql: string, open: number): string => {
+  let depth = 0;
+  for (let at = open; at < sql.length; at += 1) {
+    const character = sql[at];
+    if (character === "'") {
+      // A postgres string literal, in which parens mean nothing. '' inside one is an escaped quote,
+      // and falls out of this loop for free: it closes and immediately reopens.
+      at += 1;
+      while (at < sql.length && sql[at] !== "'") at += 1;
+      continue;
+    }
+    if (character === "(") depth += 1;
+    else if (character === ")") {
+      depth -= 1;
+      if (depth === 0) return sql.slice(open + 1, at);
+    }
+  }
+  return sql.slice(open + 1);
+};
+
+/** Two spellings of one predicate are one predicate; only the whitespace is free to differ. */
+const normalised = (expression: string) =>
+  expression.trim().replace(/\s+/g, " ");
+
+type Check = { table: string; name: string; value: string };
+
+/**
+ * Every CHECK the migration declares, in both spellings postgres allows.
+ *
+ * `generate` writes them inline inside `CREATE TABLE` for a new table and as `ALTER TABLE ... ADD
+ * CONSTRAINT` for an existing one, so a reader of only one spelling is blind to half the
+ * migrations in the folder — and `0057` is in the half that would have been missed.
+ */
+const checksIn = (sql: string): Check[] => {
+  const found: Check[] = [];
+
+  for (const match of sql.matchAll(
+    /ALTER TABLE "([^"]+)" ADD CONSTRAINT "([^"]+)" CHECK\s*\(/gi,
+  )) {
+    const open = match.index + match[0].length - 1;
+    found.push({
+      table: match[1]!,
+      name: match[2]!,
+      value: normalised(balanced(sql, open)),
+    });
+  }
+
+  for (const table of sql.matchAll(
+    /CREATE TABLE (?:IF NOT EXISTS )?"([^"]+)"\s*\(/gi,
+  )) {
+    const body = balanced(sql, table.index + table[0].length - 1);
+    for (const match of body.matchAll(/CONSTRAINT "([^"]+)" CHECK\s*\(/gi)) {
+      const open = match.index + match[0].length - 1;
+      found.push({
+        table: table[1]!,
+        name: match[1]!,
+        value: normalised(balanced(body, open)),
+      });
+    }
+  }
+
+  return found;
+};
+
+/** Constraints the migration drops by name, whatever kind they are; only checks are asked about. */
+const constraintsDropped = (sql: string) =>
+  quoted(
+    sql,
+    /ALTER TABLE "([^"]+)" DROP CONSTRAINT (?:IF EXISTS )?"([^"]+)"/gi,
+  ).map(([table, name]) => `${table}.${name}`);
+
+const checksOf = (snapshot: Snapshot, table: string) =>
+  new Map(
+    Object.values(tableIn(snapshot, table)?.checkConstraints ?? {}).map(
+      (check) => [check.name, normalised(check.value)],
+    ),
+  );
+
+/**
+ * What the migration does to the CHECK constraints, against what the snapshots say happened.
+ *
+ * THE NAME IS NOT THE PREDICATE, and a CHECK is nothing but its predicate. Widening a roster —
+ * `IN ('composio', 'arcade')` grown one more member — leaves the constraint present, named the
+ * same, and refusing every value anybody wrote a test about, so a test that inserts a junk row and
+ * reads back the name of what refused it stays green through the mutation. The snapshot beside the
+ * migration is the only artifact that records the predicate itself, and until this check existed
+ * nothing compared the two: the pair could disagree about what the database is allowed to hold and
+ * every test in this file went on agreeing.
+ *
+ * Read in both directions, like the tables above. A snapshot that records a predicate no statement
+ * writes leaves `generate` diffing against a constraint no database has; a statement no snapshot
+ * records has the next `generate` re-emit it, and `ADD CONSTRAINT` is not conditional.
+ */
+const checkDisagreements = (
+  sql: string,
+  before: Snapshot,
+  after: Snapshot,
+  droppedTables: string[],
+) => {
+  const added = checksIn(sql);
+  const dropped = new Set(constraintsDropped(sql));
+  const problems: string[] = [];
+  const tables = new Set([
+    ...tableNames(before),
+    ...tableNames(after),
+    ...added.map((check) => check.table),
+  ]);
+
+  for (const table of tables) {
+    const was = checksOf(before, table);
+    const is = checksOf(after, table);
+    const writes = new Map(
+      added
+        .filter((check) => check.table === table)
+        .map((check) => [check.name, check.value]),
+    );
+
+    for (const [name, value] of is)
+      if (was.get(name) !== value && writes.get(name) !== value)
+        problems.push(
+          was.has(name)
+            ? `the snapshot changes CHECK "${name}" on "${table}", the migration never writes that predicate`
+            : `the snapshot adds CHECK "${name}" on "${table}", the migration never adds that predicate`,
+        );
+
+    for (const [name, value] of writes)
+      if (is.get(name) !== value)
+        problems.push(
+          `the migration adds CHECK "${name}" on "${table}", the snapshot does not record that predicate`,
+        );
+
+    for (const [name, value] of was)
+      if (
+        is.get(name) !== value &&
+        !dropped.has(`${table}.${name}`) &&
+        !droppedTables.includes(table)
+      )
+        problems.push(
+          `the snapshot ${is.has(name) ? "changes" : "drops"} CHECK "${name}" on "${table}", the migration never drops it`,
+        );
+
+    for (const name of was.keys())
+      if (dropped.has(`${table}.${name}`) && is.get(name) === was.get(name))
+        problems.push(
+          `the migration drops CHECK "${name}" on "${table}", the snapshot still has it unchanged`,
+        );
+  }
+
+  return problems;
+};
+
+test("a CHECK body is read past the parentheses of its own roster", () => {
+  expect(
+    checksIn(
+      `ALTER TABLE "t" ADD CONSTRAINT "t_check" CHECK ("t"."c" IN ('a', 'b'));`,
+    ),
+  ).toEqual([{ table: "t", name: "t_check", value: `"t"."c" IN ('a', 'b')` }]);
+});
+
+test("a CHECK declared inside CREATE TABLE is read as the table's own", () => {
+  expect(
+    checksIn(
+      `CREATE TABLE "t" (\n\t"c" text NOT NULL,\n\tCONSTRAINT "t_check" CHECK ("t"."c" IN ('a'))\n);`,
+    ),
+  ).toEqual([{ table: "t", name: "t_check", value: `"t"."c" IN ('a')` }]);
+});
+
+test("a widened roster disagrees with the snapshot that records the narrow one", () => {
+  const snapshot = (value: string): Snapshot => ({
+    tables: {
+      "public.t": {
+        name: "t",
+        checkConstraints: { t_check: { name: "t_check", value } },
+      },
+    },
+  });
+
+  expect(
+    checkDisagreements(
+      `ALTER TABLE "t" DROP CONSTRAINT "t_check";--> statement-breakpoint\nALTER TABLE "t" ADD CONSTRAINT "t_check" CHECK ("t"."c" IN ('a', 'b', 'c'));`,
+      snapshot(`"t"."c" IN ('a')`),
+      snapshot(`"t"."c" IN ('a', 'b')`),
+      [],
+    ),
+  ).toEqual([
+    `the snapshot changes CHECK "t_check" on "t", the migration never writes that predicate`,
+    `the migration adds CHECK "t_check" on "t", the snapshot does not record that predicate`,
+  ]);
 });
 
 const everyIndexName = (snapshot: Snapshot) =>
@@ -291,6 +500,8 @@ const disagreements = (sql: string, before: Snapshot, after: Snapshot) => {
       problems.push(
         `the migration drops index "${index}", the snapshot still has it`,
       );
+
+  problems.push(...checkDisagreements(sql, before, after, dropped));
 
   return problems;
 };

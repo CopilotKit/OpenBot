@@ -10,7 +10,12 @@ import {
   mcpServers,
   mcpTools,
 } from "../src/db/schema";
-import type { ConnectedAppBroker } from "../src/plugins/broker";
+import { readConnectPrompt } from "@openbot/shared/connect-prompt";
+import { auditEvents } from "../src/db/schema";
+import {
+  BrokerAccountGoneError,
+  type ConnectedAppBroker,
+} from "../src/plugins/broker";
 import { useComposioClient } from "../src/plugins/composio";
 import { createPluginStore } from "../src/plugins/store";
 import { expectOnlyRefusal } from "./helpers/refusals";
@@ -32,10 +37,21 @@ const duplicate = `zz-dup-${suite}`;
 
 const revoked: string[] = [];
 const broker: ConnectedAppBroker = {
+  // This stub stands in for Composio, whose grant is held locally; see `ConnectedAppBroker.grantIsLocal`.
+  grantIsLocal: true,
+  // Nothing here asks what auth provider a connection is held under.
+  authProviderOf: async () => null,
+  // Nothing here reads either member; both are declared because the seam requires a broker to
+  // SAY what it runs — see `ConnectedAppBroker.authorizations`.
+  authorizations: null,
+  grantsFor: async () => [],
   listApps: async () => [],
   ensureAuthConfig: async () => "standing",
   deleteAuthConfig: async () => {},
-  authorize: async () => ({ redirectUrl: "https://vendor.example/consent" }),
+  authorize: async () => ({
+    redirectUrl: "https://vendor.example/consent",
+    authorizationId: null,
+  }),
   isConnected: async () => true,
   revoke: async ({ account }) => {
     revoked.push(account.vendorUserId);
@@ -52,6 +68,7 @@ const credentialsStub = {} as never;
 
 function freshStore() {
   return createPluginStore({
+    brokerProvider: "composio",
     database,
     auditStore: createAuditStore(database),
     credentials: credentialsStub,
@@ -80,6 +97,7 @@ async function seedShared(
   await database.insert(mcpTools).values({
     serverId: app,
     name: "GITHUB_LIST_ISSUES",
+    vendorName: "GITHUB_LIST_ISSUES",
     description: "List issues.",
     effect: "read",
     version: "1",
@@ -181,6 +199,12 @@ describe("a shared app", () => {
         (error: Error) => error.message,
       );
     expectOnlyRefusal(said, "sharedNotConnected", "Team GitHub");
+    // And it carries the card, which asks an administrator rather than offering Connect.
+    expect(readConnectPrompt(said)).toMatchObject({
+      serverId: app,
+      title: "Team GitHub",
+      reason: "shared",
+    });
   });
 
   test("offboarding the admin who connected it leaves it in place", async () => {
@@ -223,6 +247,101 @@ describe("a shared app", () => {
     expect(rows).toEqual([{ connectedBy: "admin-b" }]);
   });
 
+  /*
+   * THE SUPERSEDE IS CONDITIONAL, AND THAT IS ITS OWN GUARD. A confirm or re-check that names no
+   * administrator must not blank out the one an earlier connect recorded.
+   */
+  test("a write that names no administrator keeps the one already recorded", async () => {
+    const store = freshStore();
+    await store.recordBrokeredConnection({
+      toolkit: app,
+      account: { holder: "deployment", vendorUserId: VENDOR_ID },
+      connectedBy: "admin-a",
+      verified: true,
+      probeAction: null,
+    });
+    await store.recordBrokeredConnection({
+      toolkit: app,
+      account: { holder: "deployment", vendorUserId: VENDOR_ID },
+      verified: false,
+      probeAction: null,
+    });
+    const rows = await database
+      .select({ connectedBy: brokeredConnections.connectedBy })
+      .from(brokeredConnections)
+      .where(eq(brokeredConnections.app, app));
+    expect(rows).toEqual([{ connectedBy: "admin-a" }]);
+  });
+
+  /*
+   * THE ROW NAMES THE IDENTITY THE LATEST CONNECTION WAS MADE UNDER. Calls go out under the row's
+   * `vendor_user_id`, so a reconnect under a new identity that rewrote the verdict and kept the old
+   * id sent every later call to the account the verdict was not about.
+   */
+  test.each(["deployment", "person"] as const)(
+    "a %s reconnect under a NEW vendor identity moves the row to it",
+    async (holder) => {
+      const store = freshStore();
+      const as = (vendorUserId: string) =>
+        holder === "deployment"
+          ? { holder, vendorUserId }
+          : { holder, userId: asker, vendorUserId };
+      await store.recordBrokeredConnection({
+        toolkit: app,
+        account: as(`old-${suite}`),
+        connectedBy: "admin-a",
+        verified: true,
+        probeAction: null,
+      });
+      await store.recordBrokeredConnection({
+        toolkit: app,
+        account: as(`new-${suite}`),
+        connectedBy: "admin-b",
+        verified: true,
+        probeAction: null,
+      });
+      const rows = await database
+        .select({ vendorUserId: brokeredConnections.vendorUserId })
+        .from(brokeredConnections)
+        .where(eq(brokeredConnections.app, app));
+      expect(rows).toEqual([{ vendorUserId: `new-${suite}` }]);
+    },
+  );
+
+  /*
+   * AND A RE-CHECK NEVER RE-POINTS IT. The `only` branch records a check of a connection that
+   * exists; it is not evidence of a grant under any identity, so it may not move the row's. Nor
+   * may it stamp its verdict on the row: a probe of ANOTHER identity says nothing about the account
+   * this row holds, so it finds no row of its own and writes nothing — `accountRow` matches the
+   * deployment's identity as well as its holder.
+   */
+  test("a re-check write under another identity leaves the row alone", async () => {
+    const store = freshStore();
+    await store.recordBrokeredConnection({
+      toolkit: app,
+      account: { holder: "deployment", vendorUserId: VENDOR_ID },
+      connectedBy: "admin-a",
+      verified: true,
+      probeAction: null,
+    });
+    const { wrote } = await store.recordBrokeredConnection({
+      toolkit: app,
+      account: { holder: "deployment", vendorUserId: `other-${suite}` },
+      verified: false,
+      probeAction: "GITHUB_LIST_ISSUES",
+      only: "a row that is still there",
+    });
+    expect(wrote).toBe(false);
+    const rows = await database
+      .select({
+        vendorUserId: brokeredConnections.vendorUserId,
+        verified: brokeredConnections.verified,
+      })
+      .from(brokeredConnections)
+      .where(eq(brokeredConnections.app, app));
+    expect(rows).toEqual([{ vendorUserId: VENDOR_ID, verified: true }]);
+  });
+
   test("removing the app revokes the deployment account too", async () => {
     const store = freshStore();
     await seedShared(store, true);
@@ -234,6 +353,7 @@ describe("a shared app", () => {
     const events: { eventType: string; payload: Record<string, unknown> }[] =
       [];
     const store = createPluginStore({
+      brokerProvider: "composio",
       database,
       auditStore: { insert: async (event) => void events.push(event as never) },
       credentials: credentialsStub,
@@ -266,6 +386,7 @@ describe("a shared app", () => {
 
   test("with no audience gate configured, a shared call is refused rather than allowed", async () => {
     const store = createPluginStore({
+      brokerProvider: "composio",
       database,
       auditStore: createAuditStore(database),
       credentials: credentialsStub,
@@ -282,7 +403,7 @@ describe("a shared app", () => {
         botId: bot,
         actorId: asker,
       }),
-    ).rejects.toThrow(/cannot check who may use it/);
+    ).rejects.toThrow(/can't check who may use it/);
   });
 });
 
@@ -357,6 +478,7 @@ describe("a duplicate row at an app's url", () => {
     await database.insert(mcpTools).values({
       serverId: duplicate,
       name: "GITHUB_LIST_ISSUES",
+      vendorName: "GITHUB_LIST_ISSUES",
       description: "List issues.",
       effect: "read",
       version: "1",
@@ -374,6 +496,7 @@ describe("a duplicate row at an app's url", () => {
     const events: { eventType: string; payload: Record<string, unknown> }[] =
       [];
     const store = createPluginStore({
+      brokerProvider: "composio",
       database,
       auditStore: { insert: async (event) => void events.push(event as never) },
       credentials: credentialsStub,
@@ -419,6 +542,7 @@ describe("a duplicate row at an app's url", () => {
     const events: { eventType: string; payload: Record<string, unknown> }[] =
       [];
     const store = createPluginStore({
+      brokerProvider: "composio",
       database,
       auditStore: { insert: async (event) => void events.push(event as never) },
       credentials: credentialsStub,
@@ -473,6 +597,7 @@ describe("a duplicate row at an app's url", () => {
   test("asks the approval gate under the app's id for a write granted through it", async () => {
     const gateSaw: { toolRef: string; scope: string }[] = [];
     const store = createPluginStore({
+      brokerProvider: "composio",
       database,
       auditStore: createAuditStore(database),
       credentials: credentialsStub,
@@ -494,6 +619,7 @@ describe("a duplicate row at an app's url", () => {
     await database.insert(mcpTools).values({
       serverId: duplicate,
       name: "GITHUB_CREATE_ISSUE",
+      vendorName: "GITHUB_CREATE_ISSUE",
       description: "Create an issue.",
       effect: "write",
       version: "1",
@@ -537,5 +663,121 @@ describe("a duplicate row at an app's url", () => {
       { id: app, accountMode: "personal" },
       { id: duplicate, accountMode: "shared" },
     ]);
+  });
+});
+
+/*
+ * THE ACCOUNT GONE AT THE VENDOR. Nothing on this deployment's rows knows it happened, so the call
+ * that meets it is the only place the person can be told: refused with the app card, `reconnect`
+ * for their own account and `shared` for the team's, stamped with when — and audited once, as the
+ * failure it is.
+ */
+describe("an account the vendor no longer holds", () => {
+  const gone = () =>
+    useComposioClient({
+      listActions: async () => [],
+      execute: async () => {
+        throw new BrokerAccountGoneError(
+          "Composio holds no connected account for this person and team-gh, so GITHUB_LIST_ISSUES was not run.",
+        );
+      },
+    });
+
+  /** Who still holds a row at the app, by holder. */
+  const rowsFor = async (holder: "person" | "deployment") =>
+    (
+      await database
+        .select({ userId: brokeredConnections.userId })
+        .from(brokeredConnections)
+        .where(
+          and(
+            eq(brokeredConnections.app, app),
+            eq(brokeredConnections.holder, holder),
+          ),
+        )
+    ).map((row) => row.userId);
+
+  /* Counted before and after: the trail is not cleaned between tests, which share the app id. */
+  const failures = async () =>
+    (
+      await database
+        .select({ eventType: auditEvents.eventType })
+        .from(auditEvents)
+        .where(eq(auditEvents.targetId, `${app}/GITHUB_LIST_ISSUES`))
+    ).filter((row) => row.eventType === "mcp.call_failed").length;
+
+  test("on a Shared app: refused with a card saying an administrator has to connect it again", async () => {
+    const store = freshStore();
+    await seedShared(store, true);
+    gone();
+    const already = await failures();
+    const before = Date.now();
+    const said = await store
+      .callTool({
+        ref: `${app}/GITHUB_LIST_ISSUES`,
+        args: {},
+        botId: bot,
+        actorId: asker,
+      })
+      .then(
+        () => "called",
+        (error: Error) => error.message,
+      );
+    const prompt = readConnectPrompt(said);
+    expect(prompt).toMatchObject({
+      serverId: app,
+      title: "Team GitHub",
+      reason: "shared",
+    });
+    expect(prompt?.message).toContain("Ask an admin to reconnect it");
+    expect(Date.parse(prompt?.at ?? "")).toBeGreaterThanOrEqual(before - 1000);
+    expect(await failures()).toBe(already + 1);
+    // The team account's row is gone with the account, so every screen reads it as not connected.
+    expect(await rowsFor("deployment")).toEqual([]);
+  });
+
+  test("on a personal app: refused with a card offering Reconnect", async () => {
+    const store = freshStore();
+    await seedShared(store, false);
+    await database
+      .update(mcpServers)
+      .set({ accountMode: "personal", sharedVendorUserId: null })
+      .where(eq(mcpServers.id, app));
+    await database.insert(brokeredConnections).values([
+      {
+        provider: "composio",
+        app,
+        holder: "person",
+        userId: asker,
+        vendorUserId: `vendor-${asker}`,
+      },
+      // Somebody else's account at the same app, which the vendor still holds.
+      {
+        provider: "composio",
+        app,
+        holder: "person",
+        userId: admin,
+        vendorUserId: `vendor-${admin}`,
+      },
+    ]);
+    gone();
+    const said = await store
+      .callTool({
+        ref: `${app}/GITHUB_LIST_ISSUES`,
+        args: {},
+        botId: bot,
+        actorId: asker,
+      })
+      .then(
+        () => "called",
+        (error: Error) => error.message,
+      );
+    expect(readConnectPrompt(said)).toMatchObject({
+      serverId: app,
+      reason: "reconnect",
+    });
+    expect(said).toContain("Reconnect it and ask again");
+    // Only the asker's row goes, so Connect on their card starts a fresh connection.
+    expect(await rowsFor("person")).toEqual([admin]);
   });
 });

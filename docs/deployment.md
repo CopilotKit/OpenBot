@@ -181,6 +181,26 @@ against an empty database. The script uses the migrator inside `drizzle-orm`, wh
 dependency, and keeps the same journal, so a database migrated by either is migrated. It is what
 this image's own start-up path and the Helm chart's migration Job both run.
 
+**If a migration run refuses with "the migrator only runs migrations stamped after the row it
+reads"**, this database has recorded a migration stamped later than one it is now being asked to
+apply, and nothing has been applied. The migrator decides what to run by comparing journal
+timestamps against the newest timestamp in `drizzle.__drizzle_migrations` and nothing else, so a
+migration stamped below that mark would be walked past and the run reported as a success over the
+tables it should have created. The refusal names every migration in that position.
+
+It happens when a database ran a branch's migrations before that branch was merged: merging renumbers
+and restamps the branch's migrations to sit after the ones it merged in, and those merged-in
+migrations are older than the stamp the database already holds. Development, preview and reused CI
+databases are where it is met.
+
+Recreate the database from empty if it is disposable. If it is not, apply each named migration's SQL
+by hand and record it, which leaves the high-water mark where it is and lets the next run proceed:
+
+```sql
+insert into drizzle.__drizzle_migrations (hash, created_at)
+values ('<sha256 of server/drizzle/<tag>.sql>', <that entry's "when" in meta/_journal.json>);
+```
+
 ## Replicas
 
 The page snapshot a Bot resolves element references against lives in Postgres, so a second replica
@@ -218,8 +238,9 @@ which makes them the shortest path from nothing to a running deployment.
 
 **The browser images carry only the Chromium browser family.** The all-in-one Dockerfile and the
 published `agent-computer` Dockerfile both build from Ubuntu and run Playwright's pinned
-`install --with-deps chromium` path, so Firefox and WebKit are never introduced into the final image
-layers. Keep that Playwright version matched to `agent-computer/package.json`; changing one without
+`install --with-deps --no-shell chromium` path, so Firefox and WebKit are never introduced into the
+final image layers. `--no-shell` leaves out Playwright's separate headless shell: every launch names a
+Chromium channel, and Playwright runs the full browser for a named channel even when headless. Keep that Playwright version matched to `agent-computer/package.json`; changing one without
 the other can make the browser protocol and executable revision diverge. The images keep the
 baseline Node command-line tools (`node`, `npm`, and `npx`) from the official Node 24.18.1 image.
 Measured as local zstd OCI layer descriptors against the previous Playwright-base `agent-computer`

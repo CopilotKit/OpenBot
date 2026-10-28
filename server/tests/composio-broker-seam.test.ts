@@ -5,6 +5,7 @@ import {
   brokerReturnUrl,
   brokerSentence,
 } from "../src/plugins/broker";
+import { createComposioClient } from "../src/plugins/composio-adapter";
 
 /**
  * The broker seam's three decisions, asserted with no network and no database.
@@ -23,7 +24,7 @@ import {
 
 describe("brokerSentence", () => {
   test("reports the unconfigured deployment in the error's own words", () => {
-    const error = new BrokerUnconfiguredError();
+    const error = new BrokerUnconfiguredError("composio", "operator");
 
     expect(error.message).toContain("COMPOSIO_API_KEY");
     expect(brokerSentence(error)).toBe(error.message);
@@ -44,26 +45,35 @@ describe("brokerSentence", () => {
  * unvalidated environment string, so `string` really is the strongest promise it can make and the
  * check belongs here rather than in the type.
  *
- * Each refusal is asserted by the half of its sentence that only it says. Both name
- * `OPENBOT_APP_URL`, because both are fixed there, so a test that asked only for the setting would
- * pass just as well if the two branches collapsed into one — and they are two different mistakes:
- * an address nobody built, and a configured one that cannot work.
+ * Each refusal is asserted by the half of its sentence that only it says, because they are two
+ * different mistakes — an address nobody built, and a configured one that cannot work — and a test
+ * that asked only for what both say would pass just as well if the branches collapsed into one.
+ *
+ * WHICH SENTENCE EACH READER GETS IS PINNED IN `broker-return-url-voice.test.ts` AND NOT HERE. This
+ * file is about which addresses are refused; that one is about whose vocabulary the refusal is
+ * written in — a person's, naming no vendor and no variable, and an operator's, naming both.
  */
 describe("brokerReturnUrl", () => {
   test("refuses an address that was never built", () => {
-    expect(() => brokerReturnUrl("")).toThrow(/built no address/);
-    expect(() => brokerReturnUrl("   ")).toThrow(/built no address/);
-    expect(() => brokerReturnUrl("")).toThrow(BrokerReturnUrlError);
+    expect(() => brokerReturnUrl("", "composio")).toThrow(
+      /no address to bring you back to/,
+    );
+    expect(() => brokerReturnUrl("   ", "composio")).toThrow(
+      /no address to bring you back to/,
+    );
+    expect(() => brokerReturnUrl("", "composio")).toThrow(BrokerReturnUrlError);
   });
 
   test("refuses an address no browser could come back through", () => {
     for (const unusable of [
-      "openbot.example.com/settings/connected-accounts/x",
-      "localhost:3001/settings/connected-accounts/x",
-      "/settings/connected-accounts/x",
+      "openbot.example.com/connections/x",
+      "localhost:3001/connections/x",
+      "/connections/x",
       "javascript:alert(1)",
     ]) {
-      expect(() => brokerReturnUrl(unusable)).toThrow(/not a web address/);
+      expect(() => brokerReturnUrl(unusable, "composio")).toThrow(
+        /isn't a web address/,
+      );
     }
   });
 
@@ -84,32 +94,35 @@ describe("brokerReturnUrl", () => {
    * that the message is safe to show them — so the address must be absent from it as a whole and
    * in its parts, and the value asked about has to be one no sentence here mentions for its own
    * reasons.
+   *
+   * THE SETTING IS NO LONGER ASKED OF THIS SENTENCE, because this is the one the ROUTE ANSWERS and
+   * the route is `requireUser`: `OPENBOT_APP_URL` is an operator's remedy, and the assertion that
+   * an operator is still given it lives on `operatorMessage` in the voice test.
    */
-  test("says which setting fixes it, and never quotes the address", () => {
-    const address =
-      "openbot-tenant-42.internal.corp/settings/connected-accounts/9f3c";
+  test("never quotes the address it refused", () => {
+    const address = "openbot-tenant-42.internal.corp/connections/9f3c";
 
     let thrown: unknown;
     try {
-      brokerReturnUrl(address);
+      brokerReturnUrl(address, "composio");
     } catch (error) {
       thrown = error;
     }
 
     const sentence = brokerSentence(thrown);
-    expect(sentence).toContain("OPENBOT_APP_URL");
+    expect(sentence).not.toBeNull();
     expect(sentence).not.toContain(address);
     expect(sentence).not.toContain("openbot-tenant-42.internal.corp");
-    expect(sentence).not.toContain("/settings/connected-accounts/9f3c");
+    expect(sentence).not.toContain("/connections/9f3c");
   });
 
   test("hands back the address a configured deployment built", () => {
     expect(
-      brokerReturnUrl("https://openbot.test/settings/connected-accounts/x"),
-    ).toBe("https://openbot.test/settings/connected-accounts/x");
-    expect(brokerReturnUrl("http://localhost:3001/admin/plugins/x")).toBe(
-      "http://localhost:3001/admin/plugins/x",
-    );
+      brokerReturnUrl("https://openbot.test/connections/x", "composio"),
+    ).toBe("https://openbot.test/connections/x");
+    expect(
+      brokerReturnUrl("http://localhost:3001/admin/plugins/x", "composio"),
+    ).toBe("http://localhost:3001/admin/plugins/x");
   });
 
   /**
@@ -129,17 +142,108 @@ describe("brokerReturnUrl", () => {
    * trimmed would pass the first half of this table and strand somebody on the second.
    */
   test("hands back the address it checked rather than the padding around it", () => {
-    const intended = "https://openbot.test/settings/connected-accounts/x";
+    const intended = "https://openbot.test/connections/x";
 
     for (const disguised of [
-      " https://openbot.test/settings/connected-accounts/x",
-      "https://openbot.test/settings/connected-accounts/x\n",
-      "\thttps://openbot.test/settings/connected-accounts/x ",
-      "https://openbot\n.test/settings/connected-accounts/x",
-      "https://openbot.test/settings/\tconnected-accounts/x",
-      "https://openbot.test/settings\r/connected-accounts/x",
+      " https://openbot.test/connections/x",
+      "https://openbot.test/connections/x\n",
+      "\thttps://openbot.test/connections/x ",
+      "https://openbot\n.test/connections/x",
+      "https://openbot.test/conn\tections/x",
+      "https://openbot.test/connections\r/x",
     ]) {
-      expect(brokerReturnUrl(disguised)).toBe(intended);
+      expect(brokerReturnUrl(disguised, "composio")).toBe(intended);
     }
+  });
+});
+
+/**
+ * `grantIsLocal` is a DECLARED PROPERTY of the broker, read off the object and never derived from
+ * a vendor's name. Composio holds the grant in this deployment, so it declares true — which is the
+ * behaviour it always had, made explicit.
+ */
+describe("grantIsLocal", () => {
+  test("Composio declares that its grant is held by this deployment", () => {
+    expect(createComposioClient("never-dialled").broker.grantIsLocal).toBe(
+      true,
+    );
+  });
+
+  /**
+   * `authorizations` is the same kind of value one field along: a DECLARED capability, read with a
+   * presence test — `if (!broker.authorizations)` — and never with a vendor name. Composio runs no
+   * correlated, pollable authorization flow, and saying so is not the same as leaving the field
+   * out: an omission would make the field optional in practice, which is the failed-open shape
+   * `grantIsLocal` exists to close.
+   */
+  test("Composio declares no correlated authorization flow", () => {
+    expect(createComposioClient("never-dialled").broker.authorizations).toBe(
+      null,
+    );
+  });
+
+  /**
+   * THE STUB IS INSTALLED BEFORE THE CLIENT IS CONSTRUCTED, AND THAT ORDER IS THE WHOLE TEST.
+   *
+   * `@composio/client` binds its transport once, in its constructor — `this.fetch = options.fetch
+   * ?? Shims.getDefaultFetch()` (`client.mjs:122`), and `getDefaultFetch` returns whatever
+   * `globalThis.fetch` is at that moment. This file used to construct the client on the line above
+   * the assignment, so the SDK held the real `fetch` and the stub below governed nothing: every run
+   * of this case reached `https://backend.composio.dev/api/v3.1/auth_configs` over the network, and
+   * the test passed anyway because the vendor's refusal of an unknown key also fails to mention
+   * `action`. Constructing after the assignment is what makes the stub the transport.
+   *
+   * `server/scripts/test-network-guard.ts` is the floor under this, and the two are not
+   * alternatives: the guard turns a call that escapes into a failure, and this ordering is what
+   * keeps the case asserting what it is about rather than tripping the guard.
+   */
+  test("a broker handed an action it cannot use ignores it rather than throwing", async () => {
+    const original = globalThis.fetch;
+    // No network: an empty config listing, so `authorize` stops at its own refusal for having no
+    // config to connect against. What is asserted is that `action` was not what stopped it.
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ items: [] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      })) as unknown as typeof fetch;
+    try {
+      const { broker } = createComposioClient("never-dialled");
+      const attempt = await broker
+        .authorize({
+          account: { holder: "person", userId: "u", vendorUserId: "u" },
+          toolkit: "linear",
+          returnUrl: "https://openbot.test/connections/x",
+          action: "LINEAR_CREATE_ISSUE",
+        })
+        .then(
+          () => "resolved",
+          (error: unknown) => (error instanceof Error ? error.message : ""),
+        );
+      expect(attempt).not.toMatch(/action/i);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+});
+
+/**
+ * `authProviderOf` is the third declared value on this seam, and Composio's answer is a REAL one.
+ *
+ * A Composio connection is made against an auth config, and an auth config is per toolkit — so the
+ * toolkit IS its own auth provider there, and the set of apps sharing a connection with it is
+ * consequently always empty. That is the truth about Composio rather than a degradation of it, the
+ * same "degenerate is not absent" `grantsFor` already turns on. A throw would be the alternative,
+ * and it would force a presence test into every consumer and a provider branch into a disconnect
+ * path.
+ */
+describe("authProviderOf", () => {
+  test("Composio answers the toolkit itself, dialling nothing", async () => {
+    const { broker } = createComposioClient("never-dialled");
+
+    expect(await broker.authProviderOf("gmail")).toBe("gmail");
+    // Case carried through untouched, as every toolkit spelling on this seam is.
+    expect(await broker.authProviderOf("GoogleCalendar")).toBe(
+      "GoogleCalendar",
+    );
   });
 });

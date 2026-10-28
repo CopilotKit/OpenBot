@@ -1,6 +1,12 @@
-import { BrokerRefusalError, type ComposioBroker } from "../broker";
+import {
+  BrokerRefusalError,
+  type ComposioBroker,
+  type GrantState,
+} from "../broker";
+import { type ComposioActions, LISTING_LIMIT } from "../composio";
 import {
   askVendor,
+  configIdOf,
   everyRefusal,
   named,
   sent,
@@ -11,18 +17,130 @@ import {
   withdrawableAccounts,
   withdrawalDeclined,
 } from "../composio-vendor";
+import type { AccountRef } from "../shared-accounts";
 import type { ClientContext } from "./context";
 import { CONFIG_SUFFIX, CONNECTED, REVOCABLE, STATUSES_NAMED } from "./model";
 
-/** Sending a person to consent, asking whether they are connected, and revoking. */
-export function consentMethods(context: ClientContext) {
+/**
+ * Sending a person to consent, asking whether they are connected and what they hold, and revoking.
+ *
+ * `actions` is the same client's action seam, read by {@link ComposioBroker.grantsFor} for the
+ * actions it reports a grant over.
+ */
+export function consentMethods(
+  context: ClientContext,
+  actions: ComposioActions,
+) {
   const { vendor, accountsFor, configsFor, askForEach } = context;
   return {
+    // Composio's grant is held by this deployment. Its existing behaviour, declared; see
+    // {@link ConnectedAppBroker.grantIsLocal} for why this is a property and not a comparison.
+    grantIsLocal: true,
+    // Composio runs no correlated, pollable authorization flow: it mints nothing to poll, and its
+    // return leg is an OAuth callback with state, handled in `oauth.ts` and never through this
+    // seam. Declared rather than omitted; see {@link ConnectedAppBroker.authorizations}.
+    authorizations: null,
+    /**
+     * The toolkit itself, WHICH IS AN ANSWER AND NOT A STUB.
+     *
+     * A Composio connection is made against an auth config, and an auth config is per toolkit. So
+     * there is no auth provider standing behind several toolkits here the way Arcade's `google`
+     * stands behind `Gmail` and `GoogleCalendar`: the toolkit IS its own auth provider, and the set
+     * of apps sharing a connection with it is consequently ALWAYS EMPTY. That is the truth about
+     * Composio rather than a degradation of it — {@link ConnectedAppBroker.grantsFor}'s "degenerate
+     * is not absent", one member along.
+     *
+     * SO IT DOES NOT THROW, and the reason is what a throw would cost the callers: every consumer
+     * of the sibling computation would need a presence test around this call, and the disconnect
+     * path would carry a provider branch — which is the vendor-name comparison this seam exists to
+     * keep out of permission and revocation code.
+     *
+     * No network: the answer is a property of how Composio is shaped, so nothing is asked.
+     */
+    authProviderOf: async (toolkit: string) => toolkit,
+    /**
+     * What this person holds at this app, said once per action because that is what Composio knows.
+     *
+     * DEGENERATE AND NOT ABSENT, which is why this is implemented rather than thrown. An auth
+     * config fixes its scope set when it is created and a connection is made against the config,
+     * so there is exactly one answer for the toolkit: either this person has an account on it or
+     * they have not, and the scopes are the config's. Reporting that answer once per action is the
+     * honest rendering of a toolkit-wide grant through {@link GrantState}, which is this
+     * deployment's vocabulary rather than any vendor's row shape. The alternative — a throw —
+     * would make one seam member answer two different questions depending on who implemented it,
+     * which is the defect this file already carried at {@link ComposioBroker.accountName}.
+     *
+     * THE STATE IS MEASURED OVER EVERY CONFIG, AS {@link ComposioBroker.isConnected}'S IS. The two
+     * are the same read-only question — can this person act through the app — and the call that
+     * runs an action names the person and the toolkit, not the account, so an account on an
+     * operator's hand-made config is one they act through. Measuring this one over our configs
+     * alone would answer `needs-consent` to somebody the gate lets through, and send them to
+     * consent to an app they already use. Only {@link ComposioBroker.revoke}, which ACTS on what it
+     * finds, is scoped to ours.
+     *
+     * SO THE SCOPES ARE THE CONFIGS THIS PERSON'S ACCOUNTS WERE MINTED AGAINST, WHICH NEED NOT BE
+     * OURS. A config fixes its scope set when it is created and every account on it holds exactly
+     * that set, so an `authorized` answer carries the scopes of the configs the counted accounts
+     * sit on — every one of them, which is why the listing is read to the end rather than stopped at
+     * the first row. This used to carry THIS DEPLOYMENT'S scopes whatever the account sat on, which
+     * paired `authorized` with a scope set the person never granted. A `needs-consent` answer
+     * carries our configs' scopes instead, because those are the configs a consent from here is
+     * minted against: it describes what they would be asked for.
+     *
+     * AN ACCOUNT WHOSE CONFIG CANNOT BE NAMED, OR IS NOT AMONG THE CONFIGS THAT COULD BE READ,
+     * LENDS NO SCOPES — neither its own, which nothing here can read, nor ours, which it does not
+     * hold. The names are deduplicated and ordered so that two readings of one unchanged deployment
+     * are one answer.
+     */
+    async grantsFor({
+      toolkit,
+      account,
+    }: {
+      toolkit: string;
+      account: AccountRef;
+    }): Promise<GrantState[]> {
+      const connected = await accountsFor(
+        account.vendorUserId,
+        toolkit,
+        CONNECTED,
+      );
+      const state = connected.length > 0 ? "authorized" : "needs-consent";
+
+      const { held, ours } = await configsFor(toolkit);
+      const mintedOn = new Set(
+        connected.map(configIdOf).filter((id) => id !== null),
+      );
+      const granting =
+        state === "authorized"
+          ? held.filter((config) => mintedOn.has(config.id))
+          : ours;
+      const scopes = [
+        ...new Set(granting.flatMap((config) => config.scopes)),
+      ].sort();
+
+      const published = await actions.listActions(toolkit, {
+        limit: LISTING_LIMIT,
+      });
+      // A fresh array per entry: one shared list would let a caller mutating its first grant's
+      // scopes rewrite every other grant in the answer. An authorized entry is always `held`: it is
+      // authorized only because this person holds an account, which is a consent they gave.
+      return published.map(
+        (action): GrantState =>
+          state === "authorized"
+            ? {
+                action: action.slug,
+                state,
+                scopes: [...scopes],
+                authorization: "held",
+              }
+            : { action: action.slug, state, scopes: [...scopes] },
+      );
+    },
     async authorize({
       account,
       toolkit,
       returnUrl,
-    }): Promise<{ redirectUrl: string }> {
+    }): Promise<{ redirectUrl: string; authorizationId: string | null }> {
       const userId = account.vendorUserId;
       /*
        * THE CONFIG THIS DEPLOYMENT ALREADY MADE, AND NO SECOND ONE MADE HERE.
@@ -219,7 +337,10 @@ export function consentMethods(context: ClientContext) {
        * route refuses a second connection before it ever reaches this method, and that refusal is
        * the sentence a person reads; this is the same rule one layer further down, where the
        * vendor is the only party that can still see an account this deployment's rows have lost
-       * track of. `toolkits.authorize` passed `allowMultiple: true` unconditionally — the SDK
+       * track of. What it raises there is {@link BrokerAccountHeldError}, and the route answers
+       * that by recording the account the vendor holds, so the person who pressed Connect is
+       * connected through it and is not told to disconnect an account their page never showed.
+       * `toolkits.authorize` passed `allowMultiple: true` unconditionally — the SDK
        * calls it a "magic function" for exactly that — which is the opposite of what this
        * deployment wants.
        *
@@ -291,7 +412,11 @@ export function consentMethods(context: ClientContext) {
           `Composio began a connection to ${toolkit} but answered with no page to visit, so there is nothing to send ${whose(account)} to. An app that is connected by entering a credential rather than by visiting a page cannot be connected from here.`,
         );
       }
-      return { redirectUrl: page };
+      // DECLARED NULL, NOT COMPOSIO'S CONNECTION-REQUEST ID. Composio's return leg never comes
+      // through this seam: it lands in `oauth.ts`, correlated by sealed state this deployment
+      // minted, not by an id the broker handed back. The connection-request id would put a value
+      // with a DIFFERENT MEANING behind the same member — the `accountName` defect again.
+      return { redirectUrl: page, authorizationId: null };
     },
 
     async isConnected({ account, toolkit }): Promise<boolean> {
@@ -578,5 +703,14 @@ export function consentMethods(context: ClientContext) {
        */
       return ids.length > 0;
     },
-  } satisfies Pick<ComposioBroker, "authorize" | "isConnected" | "revoke">;
+  } satisfies Pick<
+    ComposioBroker,
+    | "grantIsLocal"
+    | "authorizations"
+    | "authProviderOf"
+    | "grantsFor"
+    | "authorize"
+    | "isConnected"
+    | "revoke"
+  >;
 }

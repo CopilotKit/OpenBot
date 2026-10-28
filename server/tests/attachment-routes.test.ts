@@ -1326,7 +1326,7 @@ describe("POST /:channelId/attachments", () => {
 
     expect(response.status).toBe(415);
     const { error } = (await response.json()) as { error: string };
-    expect(error).toBe("'archive' is not a file type this app can read.");
+    expect(error).toBe("'archive' isn't a file type OpenBot can read.");
   });
 });
 
@@ -2012,7 +2012,7 @@ describe("GET /:id", () => {
       "application/json",
     );
     expect((await result.fetched.json()) as { error: string }).toEqual({
-      error: "That attachment could not be read just now. Try again.",
+      error: "Couldn't open that attachment. Try again.",
     });
     // Both reads are written down, naming the row and the asker, because that is what it would take
     // to act on either.
@@ -3198,8 +3198,8 @@ describe("markAttachmentsSent", () => {
     // A sentence somebody can act on, naming the file and saying the turn did not run — this leaves
     // through the run as an AG-UI error and is shown to the person who was waiting.
     expect((raised as Error).message).toContain(id);
-    expect((raised as Error).message).toContain("was not run");
-    expect((raised as Error).message).toContain("attach the file again");
+    expect((raised as Error).message).toContain("wasn't sent");
+    expect((raised as Error).message).toContain("Attach the files again");
     // And named for whoever has to act on it from the other side. Every consequence of a missing
     // stamp is about a specific person and a specific row.
     expect(logged.join(" ")).toContain(memberId);

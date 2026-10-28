@@ -113,7 +113,7 @@ test("duplicating opens the copy", async () => {
   );
 });
 
-test("a Bot an administrator assigned to you reads as pinned and cannot be hidden or unpinned", () => {
+test("a Bot an admin assigned to you reads as pinned and cannot be hidden or unpinned", () => {
   const view = draw({
     ...BOT,
     mine: false,
@@ -132,7 +132,7 @@ test("a Bot an administrator assigned to you reads as pinned and cannot be hidde
       hidden.getAttribute("aria-disabled") === "true",
   ).toBe(true);
   expect(
-    view.getAllByText(/Assigned to you by an administrator/).length,
+    view.getAllByText(/An admin assigned it to you/).length,
   ).toBeGreaterThan(0);
 });
 

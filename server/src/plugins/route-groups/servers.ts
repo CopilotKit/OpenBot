@@ -2,7 +2,7 @@ import { requireAdmin } from "../../auth/guards";
 import { reasonWithoutStatement } from "../../db/query-failure";
 import { brokerSentence, schemeKind } from "../broker";
 import { CATALOGUE } from "../catalogue";
-import { toolkitOf, vendorSentence } from "../composio";
+import { vendorSentence } from "../composio";
 import { redirectUriFor } from "../oauth";
 import { asAccountMode } from "../shared-accounts";
 import { asSharedUseApproval, type SharedUseApproval } from "../shared-use";
@@ -22,6 +22,9 @@ export function mountServerRoutes({
   connect,
   composio,
   shared,
+  activeProvider,
+  activeVendor,
+  appOfUrl,
   actorEmail,
   skillActor,
 }: PluginRouteContext) {
@@ -61,6 +64,46 @@ export function mountServerRoutes({
        * screen needs is whether to draw the app directory, which is a yes or a no.
        */
       composioConfigured: Boolean(composio),
+      /*
+       * Whether this deployment's broker authorizes ONE ACTION AT A TIME, as a declared capability.
+       *
+       * A PRESENCE TEST ON A VALUE THE BROKER DECLARED, computed from the same expression the two
+       * routes that run that flow gate on — `/servers/:id/authorize` and the `/arcade/verify`
+       * return leg both read `composio.broker.authorizations`. The screen that draws the per-action
+       * grant list used to gate on `provider === "arcade"` instead, so the screen and the routes
+       * keyed on different facts: a broker named arcade reached with `authorizations` null would
+       * have drawn the list and 503'd every Authorize press. See {@link
+       * ConnectedAppBroker.authorizations} and `store.ts`'s gate comment, which records a defect of
+       * exactly that shape.
+       *
+       * A capability, never a name: what the screen asks is what the broker can DO, and two
+       * providers are free to share an answer. `provider` beside it stays a NAME and answers a
+       * different question — which vendor to put in copy.
+       *
+       * False on Composio, whose auth config fixes one state for a whole toolkit, so every Composio
+       * render is unchanged.
+       */
+      authorizesPerAction: Boolean(composio?.broker.authorizations),
+      /*
+       * WHICH vendor brokers this deployment's apps, as a name.
+       *
+       * Handed in with the broker, never read off it: the broker declares what it can do, not who
+       * it is, and a name sniffed from it would be the comparison the store argues against.
+       *
+       * A screen that FILTERS by brokered-ness needs no provider name. One provider holds rows at a
+       * time, so a predicate over a row's provenance is enough. A screen that NAMES a vendor
+       * ("Browse Composio", the `/admin/plugins/composio` route, the key's setting, "Reached
+       * through Composio") cannot derive that name from a row, and this is the only thing that
+       * answers it. It is separate from `composioConfigured`, which asks whether the directory can
+       * be browsed at all.
+       *
+       * A NAME, never a key and never a capability. The Plugins page is reachable by any signed-in
+       * person, so nothing about the vendor key (its presence, shape or anything derived from it)
+       * travels with this. Composio when no broker is configured, so that deployment is unchanged —
+       * read from {@link activeProvider}, which is also what the brokered reads below parse with, so
+       * the name this page shows and the parser those routes use cannot come apart.
+       */
+      provider: activeProvider,
       servers: await store.listServers(),
       // Scoped: the deployment's skills plus this person's own. An administrator sees them all.
       skills: await store.listSkills(skillActor(context)),
@@ -358,7 +401,7 @@ export function mountServerRoutes({
           JSON.stringify({
             type: "mcp-server-not-removed",
             server: serverId,
-            note: "Removing a server failed for a reason neither this deployment nor Composio put a sentence to. The administrator was answered 502 with the generic sentence, and the server row is still there.",
+            note: `Removing a server failed for a reason neither this deployment nor ${activeVendor} put a sentence to. The administrator was answered 502 with the generic sentence, and the server row is still there.`,
             error: reasonWithoutStatement(error),
           }),
         );
@@ -366,12 +409,36 @@ export function mountServerRoutes({
 
       const refusal = brokerRefusal(
         error,
-        "Removing this app did not finish, and neither this deployment nor Composio said why, so the app is still here rather than gone with grants of its own left live at the vendor. Press Remove again: every account is withdrawn at Composio before anything here is deleted, so repeating it is safe and asks only for what is left. Check this deployment's Composio key if it persists.",
+        `Removing this app did not finish, and neither this deployment nor ${activeVendor} said why, so the app is still here rather than gone with grants of its own left live at the vendor. Press Remove again: every account is withdrawn at ${activeVendor} before anything here is deleted, so repeating it is safe and asks only for what is left. Check this deployment's ${activeVendor} key if it persists.`,
       );
       return context.json({ error: refusal.error }, refusal.status);
     }
-    if (wasShared)
-      await shared?.modes.forgetRule(serverId, context.var.actor.id);
+    /*
+     * THE SAME SHAPE AS THE MINT'S RECORD-AFTER-THE-FACT BELOW, AND GUARDED FOR THE SAME REASON.
+     * `removeServer` has already returned, which means every account was withdrawn AT THE VENDOR
+     * and every row here is gone — none of it undoable, and none of it repeatable either: a second
+     * Remove finds no app. Unhandled, a fault tidying up the one leftover ask-before-write rule
+     * answered that completed removal with a bodyless 500, so the administrator was told the
+     * removal failed and had no press left to make.
+     *
+     * SO THE ANSWER STAYS `ok`, BECAUSE THE REMOVAL REALLY DID HAPPEN, and the leftover is named on
+     * the console instead: a revoked-rule row that outlives the app it guarded, which an
+     * administrator can retire from the rules screen and which grants nobody anything meanwhile.
+     */
+    if (wasShared) {
+      try {
+        await shared?.modes.forgetRule(serverId, context.var.actor.id);
+      } catch (error) {
+        console.error(
+          JSON.stringify({
+            type: "shared-rule-not-forgotten",
+            server: serverId,
+            note: "An app was removed, at the vendor and here, and its ask-before-write rule could not be retired afterwards. The administrator was answered ok, because the removal is done and cannot be repeated; the rule is still standing.",
+            error: reasonWithoutStatement(error),
+          }),
+        );
+      }
+    }
     return context.json({ ok: true });
   });
 
@@ -398,7 +465,7 @@ export function mountServerRoutes({
       return context.json({ error: "Choose personal or shared." }, 400);
     const serverId = context.req.param("id");
     const row = await store.serverAddress(serverId);
-    if (!row || !toolkitOf(row.url)) {
+    if (!row || !appOfUrl(row.url)) {
       return context.json(
         { error: "That app is not reached through a broker." },
         400,

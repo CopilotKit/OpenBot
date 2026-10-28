@@ -47,6 +47,7 @@ import {
   type ComposioResult,
   useComposioClient,
 } from "../src/plugins/composio";
+import { actionOf } from "../src/plugins/composio-vendor";
 import { redirectUriFor } from "../src/plugins/oauth";
 import type { AccountRef } from "../src/plugins/shared-accounts";
 import {
@@ -64,6 +65,7 @@ import {
   unlistedAdvertisedTools,
 } from "../src/plugins/store";
 import { grantedTools, REFUSAL_MARKER } from "../src/plugins/tools";
+import fileActions from "./fixtures/composio-file-actions.json";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
@@ -160,6 +162,7 @@ const credentialsStub = {
 };
 
 const store = createPluginStore({
+  brokerProvider: "composio",
   database,
   auditStore: createAuditStore(database),
   credentials: credentialsStub,
@@ -435,7 +438,12 @@ beforeAll(async () => {
     .onConflictDoNothing();
   await database
     .insert(mcpTools)
-    .values({ serverId, name: toolName, description: "Search files." })
+    .values({
+      serverId,
+      name: toolName,
+      vendorName: toolName,
+      description: "Search files.",
+    })
     .onConflictDoNothing();
   /*
    * A second tool on the SAME server, granted to nobody.
@@ -450,6 +458,7 @@ beforeAll(async () => {
     .values({
       serverId,
       name: siblingToolName,
+      vendorName: siblingToolName,
       description: "A tool on the same server that nobody was granted.",
     })
     .onConflictDoNothing();
@@ -632,7 +641,7 @@ describe("the policy is asked as well as the grant", () => {
         botId: holderId,
         actorId,
       }),
-    ).rejects.toThrow("credential material");
+    ).rejects.toThrow("a password or key");
 
     const rows = await auditRowsFor(ref, holderId, actorId);
     const rejected = rows.filter(
@@ -1177,6 +1186,7 @@ describe("a grant on a tool the vendor no longer lists", () => {
       .values({
         serverId,
         name: withdrawnName,
+        vendorName: withdrawnName,
         description: "Listed by the vendor when the grant was made.",
       })
       .onConflictDoNothing();
@@ -1332,6 +1342,7 @@ describe("refresh token rotation", () => {
   };
 
   const rotationStore = createPluginStore({
+    brokerProvider: "composio",
     database,
     auditStore: createAuditStore(database),
     credentials: vault,
@@ -1362,6 +1373,7 @@ describe("refresh token rotation", () => {
    */
   function replica(exchange: (refreshToken: string) => Promise<AccessToken>) {
     return createPluginStore({
+      brokerProvider: "composio",
       database,
       auditStore: createAuditStore(database),
       credentials: vault,
@@ -1542,6 +1554,7 @@ describe("refresh token rotation", () => {
       .values({
         serverId: rotationServerId,
         name: rotationToolName,
+        vendorName: rotationToolName,
         description: "Search pages.",
       })
       .onConflictDoNothing();
@@ -1865,7 +1878,7 @@ describe("refresh token rotation", () => {
      */
     const UNREADABLE_PLAINTEXT = `secret_notJsonClient${suite}`;
     /** What the person and the trail are told instead, which is the operator's signal. */
-    const UNUSABLE = "Notion has no usable OAuth client for this deployment.";
+    const UNUSABLE = "Notion needs connecting again.";
 
     /** The client the suite registered, restored after each test repoints the server. */
     let registeredClientId: string | null = null;
@@ -2412,6 +2425,7 @@ describe("a dynamic client the vendor has evicted", () => {
   };
 
   const dynamicStore = createPluginStore({
+    brokerProvider: "composio",
     database,
     auditStore: createAuditStore(database),
     credentials: vault,
@@ -2433,6 +2447,7 @@ describe("a dynamic client the vendor has evicted", () => {
    * complete a consent flow.
    */
   const storeWithNoRedirect = createPluginStore({
+    brokerProvider: "composio",
     database,
     auditStore: createAuditStore(database),
     credentials: vault,
@@ -2600,6 +2615,7 @@ describe("a dynamic client the vendor has evicted", () => {
       .values({
         serverId: dynamicServerId,
         name: dynamicToolName,
+        vendorName: dynamicToolName,
         description: "Search pages.",
       })
       .onConflictDoNothing();
@@ -2666,7 +2682,7 @@ describe("a dynamic client the vendor has evicted", () => {
      * usable one — only a new consent under the client that now exists.
      */
     await expect(call()).rejects.toThrow(
-      "Notion no longer recognises this deployment's OAuth client",
+      "Notion needs connecting again, so this wasn't done.",
     );
 
     /*
@@ -2709,7 +2725,7 @@ describe("a dynamic client the vendor has evicted", () => {
     issue = () => ({ clientId: "dyn-3", clientSecret: "" });
 
     await expect(call()).rejects.toThrow(
-      "Notion no longer recognises this deployment's OAuth client",
+      "Notion needs connecting again, so this wasn't done.",
     );
     expect(registrations.length).toBe(1);
     expect(exchanges).toEqual([
@@ -2775,7 +2791,7 @@ describe("a dynamic client the vendor has evicted", () => {
       );
 
     await expect(call()).rejects.toThrow(
-      "Notion no longer recognises this deployment's OAuth client",
+      "Notion needs connecting again, so this wasn't done.",
     );
 
     expect(offered).toEqual([EVICTED.clientId]);
@@ -2795,12 +2811,29 @@ describe("a dynamic client the vendor has evicted", () => {
         "invalid_grant",
       );
 
-    await expect(call()).rejects.toThrow("invalid_grant");
+    // A withdrawn grant is the person's to fix by connecting again: the refusal draws the card that
+    // says so, rather than folding the vendor's code into a tool error.
+    const refusal = await call().catch((error: unknown) => error);
+    expect(refusal).toBeInstanceOf(PluginRefusedError);
+    expect(readConnectPrompt((refusal as Error).message)).toMatchObject({
+      serverId: dynamicServerId,
+      reason: "reconnect",
+    });
 
-    // A withdrawn grant is the person's to fix by connecting again. Minting a client for it would
-    // leave a spare client behind and still refuse.
+    // Minting a client for it would leave a spare client behind and still refuse.
     expect(registrations).toEqual([]);
     expect(offered).toEqual([EVICTED.clientId]);
+
+    // And the connection now reads as withdrawn, which is Reconnect on every screen.
+    const [connection] = await dynamicStore.connectionsFor(dynamicUserId);
+    expect(connection).toMatchObject({
+      serverId: dynamicServerId,
+      revoked: true,
+    });
+    // The next call is refused before anything is presented to the vendor again.
+    offered.length = 0;
+    await expect(call()).rejects.toBeInstanceOf(PluginRefusedError);
+    expect(offered).toEqual([]);
   });
 
   /**
@@ -2885,6 +2918,7 @@ describe("a dynamic client the vendor has evicted", () => {
    * a stub asserting the value the real code is assumed to produce.
    */
   const storeWithRealRegistration = createPluginStore({
+    brokerProvider: "composio",
     database,
     auditStore: createAuditStore(database),
     credentials: vault,
@@ -3306,6 +3340,186 @@ describe("a dynamic client the vendor has evicted", () => {
   });
 
   /**
+   * A name the model API would refuse costs that one action, not the whole listing.
+   *
+   * CRITERION. A listing with one dotted name among valid ones stores the valid ones, stamps the
+   * refresh, and names the dotted one in `skippedTools`, which the app's page draws as a warning —
+   * and NOT in `lastError`, which the Plugins list draws as a failure that, for a server that keeps
+   * listing the name, would never clear.
+   *
+   * REASON. The MCP spec allows a dot in a tool name, and `storableTools` used to refuse the whole
+   * listing over one. A custom server with a single such action then stored nothing on its add and
+   * kept whatever it had on every refresh after, frozen, with the one sentence about it the only
+   * sign anything had happened.
+   */
+  test("a dotted MCP tool name is skipped and named, and the rest are stored", async () => {
+    await putClient(EVICTED);
+    await connect();
+    accepted = new Set([EVICTED.clientId]);
+
+    await withMockedNotionListing(
+      dynamicServerId,
+      [
+        {
+          name: "notion-fetch",
+          description: "An ordinary name.",
+          inputSchema: { type: "object", properties: {} },
+        },
+        {
+          name: "notion.export",
+          description: "A name the MCP spec allows and a model API refuses.",
+          inputSchema: { type: "object", properties: {} },
+        },
+        {
+          name: "notion-create-pages",
+          description: "Another ordinary name.",
+          inputSchema: { type: "object", properties: {} },
+        },
+      ],
+      async () => {
+        expect(
+          await dynamicStore.refreshTools(dynamicServerId, dynamicUserId),
+        ).toEqual({ tools: 2 });
+
+        const rows = await database
+          .select({ name: mcpTools.name })
+          .from(mcpTools)
+          .where(eq(mcpTools.serverId, dynamicServerId))
+          .orderBy(asc(mcpTools.name));
+        expect(rows.map((row) => row.name)).toEqual([
+          "notion-create-pages",
+          "notion-fetch",
+        ]);
+
+        const [server] = await database
+          .select({
+            lastError: mcpServers.lastError,
+            skippedTools: mcpServers.skippedTools,
+            toolsRefreshedAt: mcpServers.toolsRefreshedAt,
+          })
+          .from(mcpServers)
+          .where(eq(mcpServers.id, dynamicServerId));
+        // Something was learned, so the refresh is stamped and is no failure — and the one thing
+        // not learned is said where the administrator who pressed Refresh will read it.
+        expect(server?.toolsRefreshedAt).not.toBeNull();
+        expect(server?.lastError).toBeNull();
+        expect(server?.skippedTools).toEqual(["notion.export"]);
+
+        // And the page's read hands it on.
+        const listed = (await dynamicStore.listServers()).find(
+          (entry) => entry.id === dynamicServerId,
+        );
+        expect(listed?.skippedTools).toEqual(["notion.export"]);
+      },
+    );
+  });
+
+  /**
+   * The warning is about the last refresh, so a clean one takes it away.
+   *
+   * CRITERION. After a refresh that skipped a name, a refresh whose listing has no such name leaves
+   * `skippedTools` empty, and the page's read hands on an empty list.
+   *
+   * REASON. The warning is drawn whenever the list is non-empty. A clean refresh that kept the old
+   * names would leave the app's page warning about an action the vendor no longer lists, for good.
+   */
+  test("a clean refresh after one that skipped a name clears the warning", async () => {
+    await putClient(EVICTED);
+    await connect();
+    accepted = new Set([EVICTED.clientId]);
+
+    const ordinary = {
+      name: "notion-fetch",
+      description: "An ordinary name.",
+      inputSchema: { type: "object", properties: {} },
+    };
+    await withMockedNotionListing(
+      dynamicServerId,
+      [
+        ordinary,
+        {
+          name: "notion.export",
+          description: "A name the MCP spec allows and a model API refuses.",
+          inputSchema: { type: "object", properties: {} },
+        },
+      ],
+      async () => {
+        await dynamicStore.refreshTools(dynamicServerId, dynamicUserId);
+      },
+    );
+    await withMockedNotionListing(dynamicServerId, [ordinary], async () => {
+      expect(
+        await dynamicStore.refreshTools(dynamicServerId, dynamicUserId),
+      ).toEqual({ tools: 1 });
+    });
+
+    const [server] = await database
+      .select({ skippedTools: mcpServers.skippedTools })
+      .from(mcpServers)
+      .where(eq(mcpServers.id, dynamicServerId));
+    expect(server?.skippedTools).toBeNull();
+    const listed = (await dynamicStore.listServers()).find(
+      (entry) => entry.id === dynamicServerId,
+    );
+    expect(listed?.skippedTools).toEqual([]);
+  });
+
+  /**
+   * A listing where NOTHING survives is the empty answer by another route, and is kept like one.
+   *
+   * CRITERION. Held actions are not deleted when every name the vendor listed was skipped; the
+   * skipped names are reported and the held count is returned.
+   *
+   * REASON. Before skipping, a wholly unofferable listing threw and kept what was held. Skipping
+   * without this would turn that into a replace with nothing — the same deletion the empty-listing
+   * guard exists to prevent, arriving through a vendor that renamed everything.
+   */
+  test("a listing whose every name is skipped keeps the actions already held", async () => {
+    await putClient(EVICTED);
+    await connect();
+    accepted = new Set([EVICTED.clientId]);
+
+    await withMockedNotionListing(
+      dynamicServerId,
+      [
+        {
+          name: "notion.fetch",
+          description: "Renamed, and unofferable as renamed.",
+          inputSchema: { type: "object", properties: {} },
+        },
+      ],
+      async () => {
+        await database
+          .delete(mcpTools)
+          .where(eq(mcpTools.serverId, dynamicServerId));
+        await database.insert(mcpTools).values({
+          serverId: dynamicServerId,
+          name: "notion-fetch",
+          vendorName: "notion-fetch",
+          description: "Held from an earlier listing.",
+        });
+
+        expect(
+          await dynamicStore.refreshTools(dynamicServerId, dynamicUserId),
+        ).toEqual({ tools: 1 });
+
+        const rows = await database
+          .select({ name: mcpTools.name })
+          .from(mcpTools)
+          .where(eq(mcpTools.serverId, dynamicServerId));
+        expect(rows.map((row) => row.name)).toEqual(["notion-fetch"]);
+
+        const [server] = await database
+          .select({ lastError: mcpServers.lastError })
+          .from(mcpServers)
+          .where(eq(mcpServers.id, dynamicServerId));
+        expect(server?.lastError).toContain('"notion.fetch"');
+        expect(server?.lastError).toContain("kept");
+      },
+    );
+  });
+
+  /**
    * What a failed refresh writes into `lastError`, and how much of it.
    *
    * The column is drawn on the admin page and parts of the sentence come from a vendor, so it is not
@@ -3368,7 +3582,7 @@ describe("a dynamic client the vendor has evicted", () => {
     });
     /** What the operator must be told instead: the credential named, and nothing else claimed. */
     const UNUSABLE =
-      "Notion has no usable OAuth client for this deployment. Connect Notion again in Settings: the deployment registers itself with the vendor on the next connect.";
+      "Notion needs connecting again. Reconnect it on Connections and ask again.";
 
     /**
      * Plant arbitrary stored bytes as this server's client, the way {@link putClient} plants a real
@@ -4061,6 +4275,7 @@ async function freshStore(options: { broker?: ComposioBroker } = {}) {
   };
 
   const store = createPluginStore({
+    brokerProvider: "composio",
     database,
     auditStore,
     credentials: credentialsStub,
@@ -4119,6 +4334,7 @@ async function seedComposioGmail(
   await database.insert(mcpTools).values({
     serverId: "gmail",
     name: "GMAIL_FETCH_EMAILS",
+    vendorName: "GMAIL_FETCH_EMAILS",
     description: "Fetch emails.",
     effect: "read",
     version: options.version === undefined ? "20260903_00" : options.version,
@@ -5025,6 +5241,7 @@ test("an action's effect, destructive marker and version round-trip", async () =
     {
       serverId: "gmail",
       name: "GMAIL_FETCH_EMAILS",
+      vendorName: "GMAIL_FETCH_EMAILS",
       description: "Fetch emails.",
       effect: "read",
       destructive: false,
@@ -5033,6 +5250,7 @@ test("an action's effect, destructive marker and version round-trip", async () =
     {
       serverId: "gmail",
       name: "GMAIL_DELETE_MESSAGE",
+      vendorName: "GMAIL_DELETE_MESSAGE",
       description: "Delete a message.",
       effect: "write",
       destructive: true,
@@ -5080,6 +5298,7 @@ test("an action listed before these columns existed reads as unclassified and un
   await database.insert(mcpTools).values({
     serverId: "notion",
     name: "notion-fetch",
+    vendorName: "notion-fetch",
     description: "Fetch a page.",
   });
 
@@ -5633,6 +5852,7 @@ describe("a row that resolves to two servers at once", () => {
     await database.insert(mcpTools).values({
       serverId: "notion",
       name: "notion-fetch",
+      vendorName: "notion-fetch",
       description: "Fetch a page.",
     });
     await database.insert(agents).values({
@@ -5798,6 +6018,66 @@ test("a catalogue entry declaring the broker's transport is refused, not dialled
     credential: "person-oauth",
     reachedAs: "person",
     toolkit: null,
+  });
+});
+
+/**
+ * A COMPOSIO ACTION WHOSE ONLY FILE IS OPTIONAL IS RECORDED, WITHOUT THE FILE.
+ *
+ * The listing used to drop every action with a `file_uploadable` parameter in it, so a refresh of
+ * Gmail recorded 59 of its 63 actions and never GMAIL_SEND_EMAIL, GMAIL_CREATE_EMAIL_DRAFT,
+ * GMAIL_REPLY_TO_THREAD or GMAIL_UPDATE_DRAFT: no row to grant, so no Bot could send, draft or
+ * reply. The rows below are Composio's own (`fixtures/composio-file-actions.json`), mapped through
+ * `actionOf` exactly as the adapter maps a page, and what is asserted is the row a grant points at
+ * and a model is shown.
+ */
+describe("a Composio action whose only file is optional", () => {
+  test("is recorded with its version and without the attachment a model cannot fill in", async () => {
+    const { store, database } = await freshStore();
+    useComposioClient({
+      listActions: async () =>
+        fileActions.gmail.map((row, position) =>
+          actionOf(structuredClone(row), position, "gmail"),
+        ),
+      execute: async () => vendorAnswered(),
+    });
+    await seedComposioGmail(database, store);
+
+    expect(await store.refreshTools("gmail", "admin_user")).toEqual({
+      tools: 5,
+    });
+
+    const stored = await database
+      .select({
+        name: mcpTools.name,
+        inputSchema: mcpTools.inputSchema,
+        version: mcpTools.version,
+      })
+      .from(mcpTools)
+      .where(eq(mcpTools.serverId, "gmail"))
+      .orderBy(asc(mcpTools.name));
+
+    expect(stored.map((row) => row.name)).toEqual([
+      "GMAIL_CREATE_EMAIL_DRAFT",
+      "GMAIL_FETCH_EMAILS",
+      "GMAIL_REPLY_TO_THREAD",
+      "GMAIL_SEND_EMAIL",
+      "GMAIL_UPDATE_DRAFT",
+    ]);
+    // Callable: the version Composio published, which a call has to send back.
+    expect(new Set(stored.map((row) => row.version))).toEqual(
+      new Set(["20261018_00"]),
+    );
+    const send = stored.find((row) => row.name === "GMAIL_SEND_EMAIL")
+      ?.inputSchema as { properties?: Record<string, unknown> } | undefined;
+    const properties = Object.keys(send?.properties ?? {});
+    expect(properties).not.toContain("attachment");
+    expect(properties).toContain("recipient_email");
+    expect(properties).toContain("body");
+    // No staging descriptor in any row a model is shown.
+    expect(JSON.stringify(stored.map((row) => row.inputSchema))).not.toContain(
+      "file_uploadable",
+    );
   });
 });
 
@@ -6151,6 +6431,7 @@ describe("a listing this database would not have taken", () => {
     });
 
     const failing = createPluginStore({
+      brokerProvider: "composio",
       database: refusing,
       auditStore: { insert: async () => {} },
       credentials: credentialsStub,
@@ -6286,6 +6567,7 @@ describe("a query of this deployment's own that failed", () => {
       },
     });
     const failing = createPluginStore({
+      brokerProvider: "composio",
       database: refusing,
       auditStore: { insert: async () => {} },
       credentials: credentialsStub,
@@ -6416,6 +6698,7 @@ describe("a query of this deployment's own that failed", () => {
      * throw is classify it, which is the property.
      */
     const failing = createPluginStore({
+      brokerProvider: "composio",
       database,
       auditStore: {
         insert: async (event) => {
@@ -6570,6 +6853,7 @@ test("an app with nothing recorded against it can be refreshed to no actions at 
 test("an audit write that fails is not recorded as the vendor misbehaving", async () => {
   const database = await freshDatabase();
   const failing = createPluginStore({
+    brokerProvider: "composio",
     database,
     auditStore: {
       insert: async (event) => {
@@ -6648,6 +6932,14 @@ test("enabling an app writes a brokered row, and asks for its auth config first"
     throw new Error(`enabling an app asked the broker to ${what}`);
   };
   const broker: ComposioBroker = {
+    // This stub stands in for Composio, whose grant is held locally; see `ConnectedAppBroker.grantIsLocal`.
+    grantIsLocal: true,
+    // Nothing here asks what auth provider a connection is held under.
+    authProviderOf: async () => null,
+    // Nothing here reads either member; both are declared because the seam requires a
+    // broker to SAY what it runs — see `ConnectedAppBroker.authorizations`.
+    authorizations: null,
+    grantsFor: unasked("read grants"),
     listApps: unasked("list the catalogue"),
     ensureAuthConfig: async (config) => {
       asked.push(config);
@@ -6668,6 +6960,12 @@ test("enabling an app writes a brokered row, and asks for its auth config first"
     authorize: unasked("begin somebody's connection"),
     isConnected: unasked("check somebody's connection"),
     revoke: unasked("withdraw somebody's grant"),
+    // Enabling an app draws no connect form, connects nobody and undoes no account. All three are
+    // declared so the stub is a `ConnectedAppBroker` rather than a partial one, and all three fail
+    // if reached.
+    connectionFields: unasked("read an app's connection fields"),
+    connectWithFields: unasked("connect somebody with typed fields"),
+    revokeAccount: unasked("undo one account"),
     accountName: async () => null,
   };
 
@@ -6821,6 +7119,15 @@ function brokerSpy(answers: {
   return {
     order,
     broker: {
+      // This stub stands in for Composio, whose grant is held locally; see `ConnectedAppBroker.grantIsLocal`.
+      grantIsLocal: true,
+      // A broker that does not say what auth provider a connection is held under, which is what
+      // the sibling resolution has to treat as "we do not know" rather than as "none".
+      authProviderOf: async () => null,
+      // Nothing here reads either member; both are declared because the seam requires a
+      // broker to SAY what it runs — see `ConnectedAppBroker.authorizations`.
+      authorizations: null,
+      grantsFor: unasked("read grants"),
       listApps: unasked("list the catalogue"),
       ensureAuthConfig: asked(
         "ensureAuthConfig",
@@ -7767,6 +8074,7 @@ test("a destructive action says so in the list the screens read", async () => {
   await database.insert(mcpTools).values({
     serverId: "gmail",
     name: "GMAIL_DELETE_MESSAGE",
+    vendorName: "GMAIL_DELETE_MESSAGE",
     description: "Delete a message.",
     effect: "write",
     destructive: true,
@@ -7848,6 +8156,7 @@ describe("a vault read that fails on a query of this deployment's own", () => {
    * left it somewhere else cannot decide whether this call gets as far as the vault.
    */
   const faultStore = createPluginStore({
+    brokerProvider: "composio",
     database,
     auditStore: createAuditStore(database),
     credentials: createCredentialStore(
@@ -7911,6 +8220,7 @@ describe("a vault read that fails on a query of this deployment's own", () => {
     await database.insert(mcpTools).values({
       serverId: faultServerId,
       name: faultToolName,
+      vendorName: faultToolName,
       description: "Do something.",
     });
     await faultStore.grant("mcp", faultRef, faultBotId, "admin@openbot.local");

@@ -89,7 +89,7 @@ test("shows loading and read errors without enabling a save", async () => {
   expect((await view.findByRole("alert")).textContent).toBe(
     "Storage unavailable",
   );
-  expect(view.getByRole("button", { name: "Retry" })).toBeTruthy();
+  expect(view.getByRole("button", { name: "Try again" })).toBeTruthy();
 });
 
 test("successful writes update only the current account cache; failures preserve saved values", async () => {
@@ -99,6 +99,7 @@ test("successful writes update only the current account cache; failures preserve
   client.setQueryData(bobKey, {
     messageListEmphasis: "agent",
     selfHostBannerDismissed: false,
+    skin: "opendots",
   });
   const mutation = client
     .getMutationCache()
@@ -108,6 +109,7 @@ test("successful writes update only the current account cache; failures preserve
       preferences: {
         messageListEmphasis: "thread",
         selfHostBannerDismissed: false,
+        skin: "openbot",
       },
     });
   await mutation.execute({ messageListEmphasis: "thread" });
@@ -124,6 +126,7 @@ test("successful writes update only the current account cache; failures preserve
   expect(client.getQueryData<UserPreferences>(bobKey)).toEqual({
     messageListEmphasis: "agent",
     selfHostBannerDismissed: false,
+    skin: "opendots",
   });
   response = async () =>
     Response.json({ error: "Could not save" }, { status: 500 });
@@ -134,5 +137,9 @@ test("successful writes update only the current account cache; failures preserve
     client.getQueryData<UserPreferences>(
       userPreferencesQueryOptions("alice").queryKey,
     ),
-  ).toEqual({ messageListEmphasis: "thread", selfHostBannerDismissed: false });
+  ).toEqual({
+    messageListEmphasis: "thread",
+    selfHostBannerDismissed: false,
+    skin: "openbot",
+  });
 });

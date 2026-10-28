@@ -246,8 +246,8 @@ export function RuleForm({
           <DialogHeader>
             <DialogTitle>{label}</DialogTitle>
             <DialogDescription>
-              * matches anything, so mcp/gmail/* is every Gmail tool and a
-              target of *.example.com is every page on that site.
+              Use * to match anything. mcp/gmail/* means every Gmail tool. A
+              target of *.example.com means every page on that site.
             </DialogDescription>
           </DialogHeader>
           <DialogBody className="mt-4">

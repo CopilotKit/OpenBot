@@ -92,6 +92,7 @@ let toolWasAlreadyAdvertised = false;
 const credentialIds: string[] = [];
 
 const store = createPluginStore({
+  brokerProvider: "composio",
   database,
   auditStore: createAuditStore(database),
   credentials: {
@@ -283,7 +284,12 @@ beforeAll(async () => {
     .onConflictDoNothing();
   await database
     .insert(mcpTools)
-    .values({ serverId, name: toolName, description: "Search files." })
+    .values({
+      serverId,
+      name: toolName,
+      vendorName: toolName,
+      description: "Search files.",
+    })
     .onConflictDoNothing();
 
   // The Bot holds the tool throughout. Everything here is about the person, not the grant.
@@ -417,7 +423,9 @@ describe("a person who has connected", () => {
 
     await expect(
       store.callTool({ ref, args: {}, botId, actorId: askerId }),
-    ).rejects.toThrow(/OAuth client/);
+    ).rejects.toThrow(
+      /isn't set up yet, so this can't be done\. Ask an admin to finish setting it up\./,
+    );
   });
 
   test("goes out with their own token and nobody else's", async () => {

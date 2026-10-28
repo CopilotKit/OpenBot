@@ -325,3 +325,64 @@ describe("parseDescriptor", () => {
     expect(parseDescriptor("   ")).toBeNull();
   });
 });
+
+/**
+ * Captured from `ariaSnapshot({ mode: "ai" })` in this package's Playwright: two native `<select>`s
+ * and a custom listbox. A native select's options carry no refs, so they used to be dropped and a Bot
+ * saw `combobox "Industry"` with nothing it could choose and no way to tell what it was set to.
+ */
+const DROPDOWNS = `- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - text: Industry
+    - combobox "Industry" [ref=e3]:
+      - option "Select an industry" [selected]
+      - option "Logistics"
+      - option "Retail"
+  - generic [ref=e4]:
+    - text: Stage
+    - combobox "Stage" [ref=e5]:
+      - option "Prospect" [selected]
+      - option "Qualified"
+  - listbox "Owner" [ref=e6]:
+    - option "Alex" [ref=e7]`;
+
+describe("parseAriaSnapshot, dropdowns", () => {
+  test("a native select reports its options and the one it shows", () => {
+    const { elements } = parseAriaSnapshot(DROPDOWNS);
+    expect(elements.find((element) => element.ref === "e3")).toEqual({
+      ref: "e3",
+      role: "combobox",
+      name: "Industry",
+      options: ["Select an industry", "Logistics", "Retail"],
+      value: "Select an industry",
+    });
+    expect(elements.find((element) => element.ref === "e5")?.value).toBe(
+      "Prospect",
+    );
+  });
+
+  test("a custom listbox's options stay elements of their own, listed once", () => {
+    const { elements } = parseAriaSnapshot(DROPDOWNS);
+    expect(elements.find((element) => element.ref === "e6")).toEqual({
+      ref: "e6",
+      role: "listbox",
+      name: "Owner",
+    });
+    expect(elements.find((element) => element.ref === "e7")).toEqual({
+      ref: "e7",
+      role: "option",
+      name: "Alex",
+    });
+  });
+
+  test("a very long list is cut to fifty choices", () => {
+    const many = Array.from(
+      { length: 120 },
+      (_, index) => `      - option "Country ${index}"`,
+    ).join("\n");
+    const { elements } = parseAriaSnapshot(
+      `- combobox "Country" [ref=e9]:\n${many}`,
+    );
+    expect(elements[0]?.options).toHaveLength(50);
+  });
+});

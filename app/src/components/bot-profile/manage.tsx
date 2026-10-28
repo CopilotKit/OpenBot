@@ -82,22 +82,21 @@ function ResetDialog({
         <DialogHeader>
           <DialogTitle>Reset {agent.name}?</DialogTitle>
           <DialogDescription>
-            This deletes what {agent.name} has with you, and only with you.
-            Nobody else's conversations or data are touched. It cannot be
-            undone.
+            This deletes what {agent.name} has with you. Other people's
+            conversations and data stay. You can't undo this.
           </DialogDescription>
         </DialogHeader>
         <DialogBody className="mt-4 overflow-y-auto">
           {plan.isPending ? null : plan.error ? (
             <p className="text-destructive text-sm" role="alert">
-              Could not count what a reset would delete.
+              Couldn't check what a reset would delete. Try again.
             </p>
           ) : reset.isSuccess ? (
             <p className="text-sm">Done. {agent.name} starts fresh with you.</p>
           ) : (
             <div className="grid gap-2 text-sm">
               {lines.length === 0 ? (
-                <p>There is nothing of yours to delete.</p>
+                <p>There's nothing of yours to delete.</p>
               ) : (
                 <>
                   <p>This will delete:</p>
@@ -116,7 +115,7 @@ function ResetDialog({
                 </p>
               ) : null}
               <p className="text-muted-foreground">
-                Your own memories, the ones you told a Bot directly, are kept.
+                Memories you told a Bot yourself are kept.
               </p>
             </div>
           )}
@@ -193,10 +192,10 @@ export function ManageSection({
             <ItemTitle>Pinned</ItemTitle>
             <ItemDescription>
               {assigned
-                ? "Assigned to you by an administrator, so it stays at the top of your Bots list."
+                ? "An admin assigned it to you. It stays at the top of your Bots list."
                 : agent.pinned
-                  ? "At the top of your Bots list. Nobody else's list changes."
-                  : "Keep it at the top of your Bots list. Nobody else's list changes."}
+                  ? "At the top of your Bots list. Only your list changes."
+                  : "Keep it at the top of your Bots list. Only your list changes."}
             </ItemDescription>
           </ItemContent>
           <ItemActions>
@@ -219,10 +218,10 @@ export function ManageSection({
             <ItemTitle>Hidden</ItemTitle>
             <ItemDescription>
               {assigned
-                ? "Assigned to you by an administrator, so it cannot be hidden."
+                ? "An admin assigned it to you. You can't hide it."
                 : agent.hidden
-                  ? "Folded under Hidden on your Bots list. Nobody else's list changes."
-                  : "Take it off your Bots list. Nobody else's list changes."}
+                  ? "Under Hidden on your Bots list. Only your list changes."
+                  : "Take it off your Bots list. Only your list changes."}
             </ItemDescription>
           </ItemContent>
           <ItemActions>
@@ -256,7 +255,7 @@ export function ManageSection({
           <ItemContent>
             <ItemTitle>Duplicate</ItemTitle>
             <ItemDescription>
-              A copy of your own, with no key and no conversations.
+              Make your own copy. Its conversations and keys aren't copied.
             </ItemDescription>
           </ItemContent>
         </Item>
@@ -272,7 +271,7 @@ export function ManageSection({
             <ItemTitle>Reset</ItemTitle>
             <ItemDescription>
               Delete your conversations with it, what it remembers for you, and
-              its scheduled work. You see what will go first.
+              its scheduled work. You'll see the list first.
             </ItemDescription>
           </ItemContent>
           <ItemActions>
@@ -294,7 +293,7 @@ export function ManageSection({
               <ItemContent>
                 <ItemTitle>Delete</ItemTitle>
                 <ItemDescription>
-                  For everyone. This cannot be undone.
+                  Deletes it for everyone. You can't undo this.
                 </ItemDescription>
               </ItemContent>
               <ItemActions>
@@ -309,7 +308,9 @@ export function ManageSection({
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Delete {agent.name}?</DialogTitle>
-            <DialogDescription>This cannot be undone.</DialogDescription>
+            <DialogDescription>
+              It's deleted for everyone. You can't undo this.
+            </DialogDescription>
           </DialogHeader>
           {remove.error ? (
             <DialogBody className="mt-4">

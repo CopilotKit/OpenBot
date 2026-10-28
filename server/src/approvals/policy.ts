@@ -103,7 +103,9 @@ const SAFETY_REQUIREMENTS: readonly {
     id: "payments",
     reason: "Paying, purchasing or moving money is always done by the person.",
     pattern:
-      /payment|\bpay(ing)?\b|pay[-_ ]?now|checkout|purchase|place[-_ ]?order|buy[-_ ]?now|\bwire\b|bank[-_ ]?transfer|transfer[-_ ]?(money|funds)|send[-_ ]?money|credit[-_ ]?card|card[-_ ]?number|\bcvv\b|\biban\b|routing[-_ ]?number|billing/i,
+      // A wire of money, not a news wire: "Business Wire" is where press releases go out, so a Bot
+      // filling in where its research came from would otherwise hand that typing to the person.
+      /payment|\bpay(ing)?\b|pay[-_ ]?now|checkout|purchase|place[-_ ]?order|buy[-_ ]?now|(?<!\b(business|news|press)[-_ ]?)\bwire\b|bank[-_ ]?transfer|transfer[-_ ]?(money|funds)|send[-_ ]?money|credit[-_ ]?card|card[-_ ]?number|\bcvv\b|\biban\b|routing[-_ ]?number|billing/i,
   },
 ];
 
@@ -134,10 +136,20 @@ export function safetyRequirement(
 ): { id: string; reason: string } | undefined {
   if (candidate.effect === "read") return undefined;
   if (NOT_ACCOUNT_ACTIONS.test(candidate.toolRef)) return undefined;
+  // What a Bot types is content, as reading a checkout page is not paying: a CRM note about a
+  // customer's purchase orders is not a purchase. The field it types into and the page it is on
+  // say what the action is ("Card number", ".../checkout", "New password"), so they are read.
+  const args =
+    candidate.toolRef === "computer_type" &&
+    candidate.args !== null &&
+    typeof candidate.args === "object" &&
+    !Array.isArray(candidate.args)
+      ? { ...(candidate.args as Record<string, unknown>), text: undefined }
+      : candidate.args;
   const words = [
     candidate.toolRef,
     candidate.scope,
-    flatten(candidate.args),
+    flatten(args),
     flatten(candidate.target),
   ].join(" ");
   const hit = SAFETY_REQUIREMENTS.find((entry) => entry.pattern.test(words));

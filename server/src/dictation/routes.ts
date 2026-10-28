@@ -24,13 +24,15 @@ export function createDictationRoutes(
         return context.json({ error: "Invalid dictation request." }, 403);
       }
       if (!provider)
-        return context.json({ error: "Dictation is not configured." }, 503);
+        return context.json(
+          { error: "Dictation isn't set up yet. Ask an admin to turn it on." },
+          503,
+        );
       const actorId = context.var.actor.id;
       if (active.has(actorId) || active.size >= 8) {
         return context.json(
           {
-            error:
-              "A transcription is already in progress. Please retry shortly.",
+            error: "A transcription is already running. Try again in a moment.",
           },
           429,
         );
@@ -71,7 +73,10 @@ export function createDictationRoutes(
         );
       }
       if (!provider)
-        return context.json({ error: "Dictation is not configured." }, 503);
+        return context.json(
+          { error: "Dictation isn't set up yet. Ask an admin to turn it on." },
+          503,
+        );
       const signal = AbortSignal.any([
         context.req.raw.signal,
         AbortSignal.timeout(DICTATION_TIMEOUT_MS),
@@ -92,7 +97,7 @@ export function createDictationRoutes(
         if (signal.aborted) {
           return context.json(
             {
-              error: "Transcription timed out or was cancelled. Please retry.",
+              error: "Transcription timed out or was cancelled. Try again.",
             },
             504,
           );
@@ -102,7 +107,7 @@ export function createDictationRoutes(
             error:
               error instanceof TranscriptionError
                 ? error.message
-                : "The transcription service could not be reached. Please retry.",
+                : "Couldn't reach the transcription service. Try again.",
           },
           502,
         );

@@ -5,7 +5,10 @@ import type { AbstractAgent, RunAgentInput } from "@ag-ui/client";
 import { HttpAgent } from "@ag-ui/client";
 import { LLMock } from "@copilotkit/aimock";
 import { BuiltInAgent } from "@copilotkit/runtime/v2";
-import { PROVENANCE_GUIDANCE } from "@openbot/shared/bot-prompt";
+import {
+  computerGuidance,
+  PROVENANCE_GUIDANCE,
+} from "@openbot/shared/bot-prompt";
 import { defaultModelFor } from "@openbot/shared/model-providers";
 import { EMPTY, lastValueFrom } from "rxjs";
 import { z } from "zod";
@@ -17,6 +20,7 @@ import {
   buildAgents,
   builtInAgentConfiguration,
   createRequestAgents,
+  generativeUiMiddlewares,
   type LoadInstructions,
   registeredAgentFromRow,
   resolveRuntimeAgents,
@@ -987,7 +991,7 @@ function fakeAgUiEndpoint() {
  * A Bot is told what it holds, not only handed it.
  *
  * A tool array tells a model a tool exists. It does not say the tool is the right way to reach that
- * system, and it competes with `COMPUTER_GUIDANCE`: a page of emphatic prose about the browser that
+ * system, and it competes with `computerGuidance`: a page of emphatic prose about the browser that
  * every Bot gets whether or not it has a single connector, and that mentions connectors nowhere.
  *
  * The browser prose won. A Bot holding four Google Drive tools browsed to drive.google.com, met a
@@ -1069,6 +1073,53 @@ describe("what a Bot is told it holds", () => {
     );
   });
 
+  /*
+   * THE CARD TOOL. Every Bot holds `show_app_access`, and the sentences that used to end on "an
+   * administrator can grant it" now tell the Bot to call it — which puts a card with Request access
+   * in front of the person, where the sentence put the name of a role.
+   */
+  const card = { name: "show_app_access" } as never;
+
+  test("tells a Bot to show the card for a connected vendor it holds nothing for", () => {
+    const guidance = grantedToolGuidance([card], ["composio-gmail"])
+      .toLowerCase()
+      .replace(/\s+/g, " ");
+    expect(guidance).toContain("composio-gmail");
+    expect(guidance).toContain("you hold none of their tools");
+    expect(guidance).toContain("call show_app_access with its name");
+    expect(guidance).not.toContain(
+      "administrator can grant it on that connector",
+    );
+    expect(guidance).toContain("do not browse to its website");
+  });
+
+  test("tells a Bot to show the card for an app this deployment does not connect at all", () => {
+    const guidance = grantedToolGuidance([card])
+      .toLowerCase()
+      .replace(/\s+/g, " ");
+    expect(guidance).toContain("not named here at all");
+    expect(guidance).toContain("show_app_access");
+    expect(guidance).toContain("ask an administrator");
+  });
+
+  test("never lists the card tool as a system the Bot can reach", () => {
+    // Listed beside the vendors, it would read as one more system reached "as the person asking".
+    const guidance = grantedToolGuidance([...drive, card]);
+    expect(guidance).not.toMatch(/^- .*show_app_access/m);
+    expect(guidance).toContain("search_files");
+    expect(grantedToolGuidance([card])).not.toContain(
+      "You can reach these systems directly",
+    );
+  });
+
+  test("a Bot not offered the card is still told to name the administrator, as before", () => {
+    const guidance = grantedToolGuidance([], ["google-drive"])
+      .toLowerCase()
+      .replace(/\s+/g, " ");
+    expect(guidance).toContain("administrator can grant it on that connector");
+    expect(guidance).not.toContain("show_app_access");
+  });
+
   test("says nothing at all when the Bot holds nothing", () => {
     // A deployment with no connectors must not be told about connectors it does not have.
     expect(grantedToolGuidance([])).toBe("");
@@ -1086,7 +1137,7 @@ describe("what a Bot is told it holds", () => {
       { provider: "openai", defaultModel: "gpt-5.6-terra" },
       "openai-secret",
       drive,
-      "BROWSER GUIDANCE HERE",
+      () => "BROWSER GUIDANCE HERE",
     ).prompt as string;
 
     // Order is the fix, not merely presence: the grants have to land before the browser prose.
@@ -1094,6 +1145,88 @@ describe("what a Bot is told it holds", () => {
     expect(prompt.indexOf("google-drive")).toBeLessThan(
       prompt.indexOf("BROWSER GUIDANCE HERE"),
     );
+  });
+});
+
+/**
+ * Whether the browser leaves searching to a search tool, decided by what this run holds.
+ *
+ * "search for X" in a demo made a Bot drive its browser to a search engine. The guidance has two
+ * wordings, and which one a built-in Bot gets has to follow the tools it is built with, including a
+ * narrowed run that was not offered the search tool it was granted.
+ */
+describe("what a built-in Bot is told about searching", () => {
+  const promptHolding = (
+    tools: { name: string; ref: string }[],
+    guidance: typeof computerGuidance | null = computerGuidance,
+  ) => {
+    const configuration = builtInAgentConfiguration(
+      {
+        id: "general-assistant",
+        name: "General Assistant",
+        type: "built_in",
+        systemPrompt: "Be helpful.",
+      },
+      { provider: "openai", defaultModel: "gpt-5.6-terra" },
+      "openai-secret",
+      tools as never[],
+      guidance ?? undefined,
+    );
+    return String((configuration as { prompt?: unknown }).prompt);
+  };
+  const card = { name: "show_app_access", ref: "app-access/show_app_access" };
+  const exaSearch = {
+    name: "mcp__exa__web_search_exa",
+    ref: "exa/web_search_exa",
+  };
+  const exaFetch = {
+    name: "mcp__exa__web_fetch_exa",
+    ref: "exa/web_fetch_exa",
+  };
+
+  test.each([
+    ["a provider's pair", [card, exaSearch, exaFetch]],
+    ["a search tool alone", [card, exaSearch]],
+    [
+      "another provider",
+      [
+        card,
+        {
+          name: "mcp__firecrawl__firecrawl_search",
+          ref: "firecrawl/firecrawl_search",
+        },
+      ],
+    ],
+  ])("holding %s, it is told to search with it", (_, tools) => {
+    const prompt = promptHolding(tools);
+    expect(prompt).toContain(computerGuidance({ search: true }));
+    expect(prompt).not.toContain(computerGuidance({ search: false }));
+  });
+
+  test.each([
+    ["nothing", []],
+    ["only the card", [card]],
+    ["a reader with no search", [card, exaFetch]],
+    [
+      "a tool called search that finds no sources",
+      [
+        card,
+        {
+          name: "mcp__google-drive__search_files",
+          ref: "google-drive/search_files",
+        },
+      ],
+    ],
+  ])("holding %s, it is told never to search in the browser", (_, tools) => {
+    const prompt = promptHolding(tools);
+    expect(prompt).toContain(computerGuidance({ search: false }));
+    expect(prompt).not.toContain(computerGuidance({ search: true }));
+  });
+
+  test("a deployment with no computer is told about neither", () => {
+    const prompt = promptHolding([card, exaSearch], null);
+    expect(prompt).toContain("Be helpful.");
+    expect(prompt).not.toContain("computer_navigate");
   });
 });
 
@@ -1230,7 +1363,7 @@ describe("a person's standing instructions", () => {
       model,
       "openai-secret",
       [{ name: "mcp__google-drive__search_files" }] as never[],
-      "Computer guidance.",
+      () => "Computer guidance.",
       [],
       "Write in British English.",
     ).prompt as string;
@@ -2536,5 +2669,21 @@ describe("where an attachment reaches the model, and where it deliberately does 
       (messages[4] as { content?: { source?: unknown }[] }).content?.[0]
         ?.source,
     ).toMatchObject({ type: "data" });
+  });
+});
+
+describe("generativeUiMiddlewares", () => {
+  test("a deployment that opted out refuses render_ui whatever the browser sends", () => {
+    // Omitted, the runtime would apply it to any run that carries a catalog.
+    expect(generativeUiMiddlewares(false).generativeUI).toBe(false);
+  });
+
+  test("a deployment that opted in applies render_ui to every run", () => {
+    expect(generativeUiMiddlewares(true).generativeUI).toBe(true);
+  });
+
+  test("the A2UI 0.9 middleware is off either way", () => {
+    expect(generativeUiMiddlewares(true).a2ui).toEqual({ enabled: false });
+    expect(generativeUiMiddlewares(false).a2ui).toEqual({ enabled: false });
   });
 });

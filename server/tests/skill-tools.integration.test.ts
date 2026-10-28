@@ -29,6 +29,7 @@ const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const policy: ActionPolicy = { mode: "enforce", deny: [], allow: ["true"] };
 
 const store = createPluginStore({
+  brokerProvider: "composio",
   database,
   auditStore: createAuditStore(database),
   credentials: { readSecret: async () => null },
@@ -70,10 +71,16 @@ beforeAll(async () => {
   await database
     .insert(mcpTools)
     .values([
-      { serverId: server, name: "search", description: "Find things." },
+      {
+        serverId: server,
+        name: "search",
+        vendorName: "search",
+        description: "Find things.",
+      },
       {
         serverId: server,
         name: "delete_everything",
+        vendorName: "delete_everything",
         description: "Do not.",
       },
     ])

@@ -35,6 +35,16 @@ jobs:
       - run: bun run format:check
       - run: bun run lint
       - run: bun run typecheck
+      # `typecheck` is `bun run --filter '*' typecheck`, and each workspace's `tsc --noEmit` reads
+      # its own tsconfig, none of which includes a test tree. The suite is therefore the one part
+      # of this repository that no type-checker has ever read: bun erases types rather than
+      # checking them, so a test could pass an options object where a connection string belongs,
+      # or import a type from a path that does not exist and silently get `any`, and every check
+      # here stayed green. This reads `server/tests` under the server's own compiler options and
+      # fails on any error that is not in `server/tests/typecheck-baseline.txt` — the errors that
+      # were already there when the check was turned on. New ones are new defects.
+      - name: server/tests types (baselined)
+        run: bun run typecheck:tests
       - name: Desktop version tracks the release version
         run: bun desktop/scripts/desktop-version.ts check
       # The chart's default image tag is its appVersion, and a release must move both together. They
@@ -122,14 +132,15 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun install --frozen-lockfile
         working-directory: agent-computer
-      - run: bunx playwright install --with-deps chromium
+      # `--no-shell` as the image does, so the headless run below proves nothing needs the shell.
+      - run: bunx playwright install --with-deps --no-shell chromium
         working-directory: agent-computer
       # Headless here: these launch through the profile path without the computer's own X server.
       # The headless run of the Web Bot Auth test is also the one that checks the user agent fix.
       - run: >-
           bun test tests/sign-in.test.ts tests/session-cookies.test.ts tests/follows-popup.test.ts
           tests/demonstration-live.test.ts tests/webrtc-proxy.test.ts tests/web-bot-auth-browser.test.ts
-          tests/handoff-page-restore.test.ts
+          tests/handoff-page-restore.test.ts tests/enter-text.test.ts
         working-directory: agent-computer
         env:
           OPENBOT_COMPUTER_BROWSER: '1'
@@ -349,9 +360,12 @@ jobs:
       # pinned by the desktop lockfile rather than the root one.
       - run: bun install --frozen-lockfile
         working-directory: desktop
-      # Not the db:migrate script: that one loads ../.env, which does not exist in CI. DATABASE_URL
-      # comes from the job env instead, which drizzle.config.ts already reads.
-      - run: bunx drizzle-kit migrate --config=drizzle.config.ts
+      # The same migrator a deployment runs, rather than `drizzle-kit migrate`: it is the one that
+      # refuses a database holding a stamp newer than the migrations it is about to walk past
+      # (server/src/db/migration-reach.ts), and a CI database that is ever reused rather than
+      # recreated is one of the places that can happen. Not the db:migrate script, which loads
+      # ../.env; that file does not exist in CI, and DATABASE_URL comes from the job env instead.
+      - run: bun scripts/migrate.ts
         working-directory: server
       # A passing job must include the expected test floor. Import-time failures can otherwise skip
       # files before their tests are registered.
@@ -381,7 +395,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0

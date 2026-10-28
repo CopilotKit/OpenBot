@@ -30,6 +30,7 @@ const server = `${prefix}-connector`;
 const ref = `${server}/list_issues`;
 const auditStore = createAuditStore(database);
 const plugins = createPluginStore({
+  brokerProvider: "composio",
   database,
   auditStore,
   credentials: createCredentialStore(database),
@@ -70,6 +71,7 @@ beforeAll(async () => {
   await database.insert(mcpTools).values({
     serverId: server,
     name: "list_issues",
+    vendorName: "list_issues",
     effect: "read",
     inputSchema: {},
   });
@@ -262,6 +264,48 @@ test("suggestions are delivered once, listed to their owner, and resolved once",
       (row) => row.id === suggestion.id,
     ),
   ).toBe(false);
+});
+
+test("a run's history is its open and recently dismissed titles, and a finished run supersedes the rest", async () => {
+  const setting = await proactive.create(
+    owner,
+    { ...settingInput, agentId: secondBot },
+    `${prefix}-history`,
+  );
+  const add = (runId: string, title: string) =>
+    proactive.addSuggestion({
+      ownerUserId: owner,
+      agentId: secondBot,
+      settingId: setting.id,
+      runId,
+      title,
+      detail: `${title}.`,
+      sourceApp: null,
+      sourceRef: null,
+      sourceLink: null,
+    });
+  const earlier = randomUUID();
+  await add(earlier, "Reply to Sam");
+  await add(earlier, "Reply to Sam");
+  const dropped = await add(earlier, "Archive old tickets");
+  await proactive.resolveSuggestion(owner, dropped.id, "dismissed");
+  expect(await proactive.history(setting.id)).toEqual({
+    open: ["Reply to Sam"],
+    dismissed: ["Archive old tickets"],
+  });
+
+  const latest = randomUUID();
+  const kept = await add(latest, "Reply to Sam");
+  await proactive.supersede(setting.id, latest);
+  const open = (await proactive.suggestions(owner)).filter(
+    (row) => row.settingId === setting.id,
+  );
+  expect(open.map((row) => row.id)).toEqual([kept.id]);
+  // The person's dismissal is untouched; only what was still open is superseded.
+  expect(await proactive.history(setting.id)).toEqual({
+    open: ["Reply to Sam"],
+    dismissed: ["Archive old tickets"],
+  });
 });
 
 test("Bot-formed memories carry provenance, await review, and never come back once forgotten", async () => {

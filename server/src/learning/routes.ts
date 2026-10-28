@@ -62,7 +62,7 @@ export function createLearningRoutes(
     return new Response(
       JSON.stringify({
         error:
-          "Learning settings could not be accessed. Try again or contact your administrator.",
+          "Couldn't load learning settings. Try again, or ask an admin if it keeps happening.",
       }),
       { status: 503, headers: { "content-type": "application/json" } },
     );

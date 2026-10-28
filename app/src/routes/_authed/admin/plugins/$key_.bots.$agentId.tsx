@@ -1,3 +1,10 @@
+import {
+  IconListDetails,
+  IconPlugOff,
+  IconRobot,
+  IconSearch,
+  IconTool,
+} from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useParams } from "@tanstack/react-router";
 import * as React from "react";
@@ -12,6 +19,7 @@ import {
   SharedApprovalFields,
   sharedSectionSentence,
 } from "@/components/plugins/shared-approval-fields";
+import { SkippedToolsNotice } from "@/components/plugins/skipped-tools-notice";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -204,10 +212,12 @@ function RouteComponent() {
     return (
       <PageShell
         backButton={{ label: "Plugins", linkProps: { to: "/admin/plugins" } }}
-        description="This deployment has not enabled an app by that name."
+        description="No app with that name is turned on."
         title={appTitle}
       >
-        <PageEmpty>There is nothing here to grant.</PageEmpty>
+        <PageEmpty icon={IconPlugOff} title="This app is off">
+          Nothing to give a Bot here.
+        </PageEmpty>
       </PageShell>
     );
   }
@@ -226,7 +236,7 @@ function RouteComponent() {
         title="Plugins"
       >
         <p className="mt-12 text-destructive text-sm" role="alert">
-          Plugins could not be loaded.
+          Couldn't load plugins. Reload the page.
         </p>
       </PageShell>
     );
@@ -248,11 +258,11 @@ function RouteComponent() {
     return (
       <PageShell
         backButton={back}
-        description="This deployment has no Bot by that name, so there is nobody to grant these actions to."
+        description="There is no Bot with that name."
         title="Not a Bot"
       >
-        <PageEmpty>
-          It may have been deleted since this page was opened.
+        <PageEmpty icon={IconRobot} title="Bot not found">
+          It may have been deleted after you opened this page.
         </PageEmpty>
       </PageShell>
     );
@@ -334,7 +344,7 @@ function RouteComponent() {
             <ItemContent>
               <ItemTitle className="font-mono text-xs">{tool.name}</ItemTitle>
               <ItemDescription>
-                {tool.description || "This action came with no description."}
+                {tool.description || "This action has no description."}
               </ItemDescription>
             </ItemContent>
             <ItemActions>
@@ -408,7 +418,7 @@ function RouteComponent() {
   return (
     <PageShell
       backButton={back}
-      description={`Which of ${appTitle}'s actions ${botName} may call. Every call is decided again when it happens, so switching one off takes effect on the next one.`}
+      description={`Which ${appTitle} actions ${botName} can call. Turning one off applies from the next call.`}
       title={`${botName} and ${appTitle}`}
     >
       {error ? (
@@ -417,10 +427,11 @@ function RouteComponent() {
         </p>
       ) : null}
 
+      <SkippedToolsNotice names={server.skippedTools ?? []} />
+
       {server.tools.length === 0 ? (
-        <PageEmpty>
-          {server.lastError ??
-            `${appTitle} lists no actions. Refresh its tools to ask again.`}
+        <PageEmpty icon={IconTool} title="No actions listed">
+          {server.lastError ?? "Refresh its tools to check again."}
         </PageEmpty>
       ) : (
         <>
@@ -443,7 +454,7 @@ function RouteComponent() {
           {ungranted.length > 0 ? (
             <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
               <p className="text-muted-foreground text-xs">
-                {`This Bot would then hold ${wouldHold} ${
+                {`This Bot would then have ${wouldHold} ${
                   wouldHold === 1 ? "tool" : "tools"
                 } from this app.`}
               </p>
@@ -465,15 +476,18 @@ function RouteComponent() {
           <PageSection
             description={
               sharedSectionSentence("read", shared) ??
-              "These only read. A boundary written about writes does not apply to them."
+              "These only read. Boundaries about writes don't apply to them."
             }
             title="Reads"
           >
             {reads.length === 0 ? (
-              <PageEmpty>
+              <PageEmpty
+                icon={needle ? IconSearch : IconListDetails}
+                title={needle ? "No matches" : "No read-only actions"}
+              >
                 {needle
                   ? `Nothing that only reads matches "${search.trim()}".`
-                  : `${appTitle} offers nothing that only reads.`}
+                  : `${appTitle} has no read-only actions.`}
               </PageEmpty>
             ) : (
               rows(reads)
@@ -483,15 +497,18 @@ function RouteComponent() {
           <PageSection
             description={
               sharedSectionSentence("write", shared) ??
-              "These change something at the vendor. A boundary written about writes applies to them, and each call is refused when one matches."
+              "These change something at the vendor. Boundaries about writes apply to them."
             }
             title="Changes things"
           >
             {writes.length === 0 ? (
-              <PageEmpty>
+              <PageEmpty
+                icon={needle ? IconSearch : IconListDetails}
+                title={needle ? "No matches" : "No actions that change things"}
+              >
                 {needle
                   ? `Nothing that changes things matches "${search.trim()}".`
-                  : `${appTitle} offers nothing that changes anything.`}
+                  : `${appTitle} has no actions that change things.`}
               </PageEmpty>
             ) : (
               rows(writes)
@@ -541,7 +558,7 @@ function RouteComponent() {
                   onClick={() => void confirmSharedGrant()}
                   size="sm"
                 >
-                  {grantingShared ? "Granting…" : "Let it in"}
+                  {grantingShared ? "Allowing…" : "Allow"}
                 </Button>
               </DialogFooter>
             </DialogContent>

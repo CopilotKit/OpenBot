@@ -34,13 +34,51 @@ export type ActionPolicy = {
   mode: PolicyMode;
   deny: string[];
   allow: string[];
+  /** Each rule's name and what it stops, keyed by the rule's text. Display only. */
+  labels?: Record<string, RuleLabel>;
+};
+
+export type RuleLabel = { name: string; description: string };
+
+/**
+ * Where one Bot's computer is in its life, as the server's provider reports it.
+ *
+ * `absent` is a computer that is not running: never started, or put to sleep after a quiet spell.
+ * Either way it starts on the Bot's next computer action, so it is not a fault. `starting` is on its
+ * way up. `unreachable` is the only one that is something wrong.
+ */
+export type ComputerState = "absent" | "starting" | "ready" | "unreachable";
+
+export type ComputerStatus = {
+  botId: string;
+  state: ComputerState;
+  /** Set when `state` is `unreachable`. Written for an admin, so not shown on a screen anybody can open. */
+  reason?: string;
 };
 
 export const computerKeys = {
   all: ["computers"] as const,
   fleet: () => ["computers", "fleet"] as const,
   policy: () => ["computers", "policy"] as const,
+  status: (botId: string) => ["computers", "status", botId] as const,
 };
+
+/**
+ * One Bot's computer's state, read without waking it.
+ *
+ * The status route reads the provider's own record of the computer and never dials it, which is what
+ * makes it safe to poll while somebody is watching a computer start: asking for a screenshot instead
+ * went through the path that resumes a sleeping computer, so looking was enough to start it.
+ */
+export function computerStatusQueryOptions(botId: string) {
+  return queryOptions({
+    queryKey: computerKeys.status(botId),
+    queryFn: (): Promise<ComputerStatus> =>
+      client(`/api/computers/${encodeURIComponent(botId)}/status`, {
+        fallback: "Couldn't check the computer.",
+      }).then((response) => response.json()),
+  });
+}
 
 /**
  * The deployment-wide fleet route.

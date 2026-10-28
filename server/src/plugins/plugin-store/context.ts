@@ -14,26 +14,37 @@ import {
   mcpServers,
   mcpTools,
   mcpUserCredentials,
+  pendingAuthorizations,
   pluginGrants,
   skillTools,
 } from "../../db/schema";
-import { accessFor, type ServerAccess } from "../access";
+import {
+  accessFor,
+  BROKERED_PROFILE,
+  type BrokerProvider,
+  type ServerAccess,
+  toolkitOfFor,
+} from "../access";
 import { type Decides, type SchemeKind, schemeKind } from "../broker";
 import { type CatalogueEntry, catalogueEntry } from "../catalogue";
-import { toolkitOf } from "../composio";
 import { registerDynamicClient } from "../oauth";
 import {
   type AccountAnswer,
   type AccountMode,
   type AccountRef,
   accountFor,
+  personAccount,
 } from "../shared-accounts";
 import {
+  type BrokeredDisconnectReason,
   CatalogueEntryUnknownError,
   CLIENT_REREGISTRATION_BACKOFF_MS,
+  type ConnectionFootprint,
   CustomServerRefusedError,
+  connectionSiblings,
   exchangeRefreshTokenOverHttp,
   INVALID_CLIENT,
+  INVALID_GRANT,
   isUsableClient,
   type OAuthClient,
   PluginInvariantError,
@@ -64,6 +75,12 @@ export function createStoreContext(options: PluginStoreOptions) {
   // No default, unlike the seams above: there is no real implementation in this tree to fall back
   // to, and a deployment with no Composio key is supposed to have no broker. See `./broker`.
   const broker = options.broker;
+  /*
+   * The broker this store is for: every read of `brokered_connections`, every `provenance` test and
+   * the connection writer below read THIS rather than each re-deciding. Taken as given, never
+   * defaulted — see {@link PluginStoreOptions.brokerProvider} for why there is no fallback here.
+   */
+  const brokerProvider: BrokerProvider = options.brokerProvider;
 
   /*
    * One exchange at a time per (server, person). A rotating vendor invalidates the refresh
@@ -245,7 +262,7 @@ export function createStoreContext(options: PluginStoreOptions) {
       .limit(1);
     if (!dialled)
       return {
-        refusal: `${serverId} is not an app this deployment has added.`,
+        refusal: `OpenBot has no app called ${serverId}.`,
       };
     /*
      * THE NAME IS THE DIALLED ROW'S; THE ACCOUNT IS THE APP'S.
@@ -266,11 +283,13 @@ export function createStoreContext(options: PluginStoreOptions) {
      * so only a removal racing this read gets here, and it is refused as the missing row is above.
      */
     const toolkit =
-      dialled.provenance === "composio" ? toolkitOf(dialled.url) : null;
+      dialled.provenance === brokerProvider
+        ? toolkitOfFor(brokerProvider, dialled.url)
+        : null;
     const app = toolkit ? await brokeredAppRow(toolkit) : null;
     if (toolkit && !app)
       return {
-        refusal: `${serverId} is not an app this deployment has added.`,
+        refusal: `OpenBot has no app called ${serverId}.`,
       };
     const row = app
       ? {
@@ -300,8 +319,12 @@ export function createStoreContext(options: PluginStoreOptions) {
         return {
           refusal: `${row.title} runs in the account of the person asking, and this run is not attributed to anybody.`,
         };
+      /*
+       * The actor's id is both the local id and the vendor id, deliberately and for both
+       * providers. See {@link personAccount} for why, before changing it.
+       */
       return {
-        ref: { holder: "person", userId: actorId, vendorUserId: actorId },
+        ref: personAccount(actorId),
         title: row.title,
         mode: "personal",
         appId,
@@ -320,20 +343,83 @@ export function createStoreContext(options: PluginStoreOptions) {
     };
   }
 
-  /** The WHERE clause for one account's row, by holder. */
+  /**
+   * The WHERE clause for one account's row, by holder.
+   *
+   * THE DEPLOYMENT HALF MATCHES THE IDENTITY TOO. There is one deployment row per app, but not one
+   * deployment identity per app over time: every switch to Shared mints a new one. Matched on the
+   * holder alone, an act aimed at a RETIRED identity landed on the CURRENT one's row — a consent
+   * begun under Shared identity A, the app flipped Shared → Personal → Shared (minting B) and B
+   * connected, and the admin's return then withdrew A at the vendor, correctly, and deleted B's row
+   * here, so the app read as disconnected while B stood live at Arcade. A person's row needs no
+   * such clause: their vendor id is their user id ({@link personAccount}).
+   */
   const accountRow = (toolkit: string, account: AccountRef) =>
     account.holder === "person"
       ? and(
-          eq(brokeredConnections.provider, "composio"),
+          eq(brokeredConnections.provider, brokerProvider),
           eq(brokeredConnections.app, toolkit),
           eq(brokeredConnections.holder, "person"),
           eq(brokeredConnections.userId, account.userId),
         )
       : and(
-          eq(brokeredConnections.provider, "composio"),
+          eq(brokeredConnections.provider, brokerProvider),
           eq(brokeredConnections.app, toolkit),
           eq(brokeredConnections.holder, "deployment"),
+          eq(brokeredConnections.vendorUserId, account.vendorUserId),
         );
+
+  /**
+   * The one statement behind `failAuthorizationAttempt`, `markAuthorizationUnreconciled` and
+   * `markAuthorizationWithdrawn`, so the three verdicts cannot drift into three row shapes.
+   * `completed_at` is truncated to milliseconds for the reason `claimAuthorizationAttempt`
+   * truncates `created_at`.
+   *
+   * CONDITIONAL ON `completed_at IS NULL`, EXACTLY AS THE COMPLETION ABOVE IS, BECAUSE A SETTLED
+   * ATTEMPT IS A RECORD AND NOT A DRAFT. Without that condition this UPDATE matched on
+   * `(actor_id, auth_id)` alone, and `(actor_id, auth_id)` does not stop naming a row when the row
+   * settles: a return leg that completed is still holding the `ar_...` a second leg will match on.
+   * So a slow or retried FAILURE callback arriving behind a SUCCESSFUL completion rewrote
+   * `outcome = 'completed'` as `outcome = 'failed'` and re-stamped `completed_at`, and the attempt
+   * then said the person's authorization failed while the grant was live at the vendor, the
+   * `brokered_connections` row was written and `mcp.account_connected` was on the trail. The trail
+   * and the attempt disagreed about what happened, and the attempt was the one that was wrong.
+   *
+   * THE OLD COMMENT HERE ARGUED THE ASYMMETRY WAS THE POINT, on the grounds that "a second one
+   * re-stamping the same verdict grants nothing to anybody". That is true of the case it imagined —
+   * `failed` over `failed` — and says nothing about the case that actually happens, which is a
+   * verdict over a DIFFERENT and already-final one. Completion is not the only write that must
+   * happen once; it is the only one that was treated that way.
+   *
+   * FIRST TERMINAL VERDICT WINS, AND A LATE ONE IS REFUSED RATHER THAN APPLIED. `false` now means
+   * one of three things — no attempt under that actor, an attempt holding a different `auth_id`,
+   * or an attempt that has already settled — and all three are "this call did not close anything",
+   * which is the only distinction a caller has ever acted on. Nothing is lost to the person on the
+   * losing leg: their own request still ends in the refusal redirect it would have ended in anyway.
+   * What this deployment cannot yet SAY is that two legs of one authorization disagreed; there is
+   * no audit event type for it and inventing one is wider than this change. Recording the true
+   * outcome is strictly better than recording the false one, which is what the alternative was.
+   */
+  const closeAuthorizationAttempt = async (
+    input: { actorId: string; authId: string },
+    outcome: "failed" | "unreconciled" | "withdrawn",
+  ) => {
+    const written = await database
+      .update(pendingAuthorizations)
+      .set({
+        completedAt: sql`date_trunc('milliseconds', now())`,
+        outcome,
+      })
+      .where(
+        and(
+          eq(pendingAuthorizations.actorId, input.actorId),
+          eq(pendingAuthorizations.authId, input.authId),
+          isNull(pendingAuthorizations.completedAt),
+        ),
+      )
+      .returning({ actorId: pendingAuthorizations.actorId });
+    return written.length > 0;
+  };
 
   /**
    * The token one call goes out with, and whose it is — decided from `access.credential`, so that
@@ -433,7 +519,7 @@ export function createStoreContext(options: PluginStoreOptions) {
        */
       if (!access.toolkit) {
         throw new PluginInvariantError(
-          `${row.id} resolves to a brokered credential with no Composio app in its url.`,
+          `${row.id} resolves to a brokered credential with no ${BROKERED_PROFILE[brokerProvider].vendor} app in its url.`,
         );
       }
 
@@ -521,6 +607,54 @@ export function createStoreContext(options: PluginStoreOptions) {
           `${row.title} changed how it is shared while this call was being checked, so it was not called. Ask again.`,
           null,
         );
+      /*
+       * A ROW IS ONLY REQUIRED WHERE THIS DEPLOYMENT IS THE ONE HOLDING THE GRANT.
+       *
+       * CRITERION. Whether a brokered call has to find a `brokered_connections` row first is the
+       * broker's DECLARED {@link ConnectedAppBroker.grantIsLocal} — never a `provider === "arcade"`
+       * comparison, never a test of the row's provenance column, never a look at its url. The
+       * question is "where does the grant live", the field answers exactly that question, and the
+       * vendor's name is not an answer to it.
+       *
+       * REASON. The gate just below and its `none` exemption above once keyed on DIFFERENT things,
+       * and the exemption failed OPEN: a duplicate row recording `NO_AUTH` at a key app's url
+       * skipped the per-person gate entirely, and the deployment's own key ran a call for somebody
+       * who had connected nothing. A vendor's name compared inside a check whose vocabulary is
+       * about permission is that same shape — two answers to one question with nothing forcing them
+       * to agree, and a third broker would mean finding every such comparison by hand. A declared
+       * property is checkable against every adapter, reads the same as the `listNeedsCredential`
+       * beside it, and a third provider answers it by existing or fails to type-check.
+       *
+       * WHY THE ROW IS NOT REQUIRED WHERE THE GRANT IS THE VENDOR'S. Such a broker checks per
+       * action, on every call, at the vendor. A local row demanding to exist first would be a
+       * second, weaker copy of that check — and it is the copy that forces a Connect button, which
+       * forces an arbitrary first consent before anybody knows which action they want. Here the
+       * call proceeds and the vendor's own typed refusal is the authoritative answer.
+       *
+       * ONLY A PRECONDITION IS REMOVED; THE IDENTITY IS UNCHANGED. The id returned is
+       * `resolved.ref.vendorUserId` — the very value the branch below returns out of the row —
+       * derived by {@link accountRefFor} from the session's actor and the app's own mode, Personal
+       * or Shared, exactly as before. The model cannot name an identity, nothing about whose
+       * account a call runs in changes here, and the Shared case still goes out as the deployment.
+       *
+       * AND THE PROPERTY IS ONLY EVER READ ABOUT THAT BROKER'S OWN ROWS, which is not a vendor-name
+       * comparison sneaking back in — it is the question of WHOSE declaration this is.
+       *
+       * CRITERION. A brokered row is governed by the broker it was minted at. Where that is not the
+       * configured one, no declaration of the configured broker's applies to it, and the local gate
+       * stands — which refuses, because a row of the other broker's can have no connection row here.
+       *
+       * REASON. `access.transport` is the row's provenance (see `accessFor`) and `broker` is whatever
+       * this deployment is configured with, and the two are not always the same vendor: a deployment
+       * that has switched broker still holds the other's rows. Read off the active broker alone, the
+       * waiver crossed over to them — on an Arcade deployment, a left-over Composio app was called
+       * with no connection row of any kind, exempted by a per-action check at a vendor that has never
+       * heard of it, on a deployment that cannot connect, check or disconnect it at all. The
+       * `grantIsLocal` argument is about where THIS broker's grants live; it says nothing about
+       * somebody else's.
+       */
+      if (broker && !broker.grantIsLocal && access.transport === brokerProvider)
+        return { vendorUserId: resolved.ref.vendorUserId };
       const [connected] = await database
         .select({ vendorUserId: brokeredConnections.vendorUserId })
         .from(brokeredConnections)
@@ -528,13 +662,22 @@ export function createStoreContext(options: PluginStoreOptions) {
         .limit(1);
       if (!connected) {
         /*
-         * Only the personal half carries a connect prompt. A Shared app's account belongs to the
-         * deployment, so the person reading this cannot connect it however clearly they are asked —
-         * a card offering them the button would be an invitation to a refusal.
+         * BOTH HALVES CARRY A PROMPT, AND ONLY ONE OF THEM OFFERS A CONNECT BUTTON. A Shared app's
+         * account belongs to the deployment, so the person reading this cannot connect it however
+         * clearly they are asked — a card offering them that button would be an invitation to a
+         * refusal. What the card draws is decided by the app's state for this person, read when it
+         * is drawn: for a missing team account that is Request access, which files the request an
+         * administrator answers by connecting it. The sentence stays for the model and for a reader
+         * with no card. `reason: "shared"` is only a hint; see `ConnectReason`.
          */
         throw new PluginRefusedError(
           resolved.ref.holder === "deployment"
-            ? `${row.title} is shared across this deployment and no account is connected to it yet. Ask an administrator to connect it.`
+            ? connectAppRefusal({
+                serverId: row.id,
+                title: row.title,
+                message: `${row.title} uses a shared account, and nobody has connected it yet. Ask an admin to connect it.`,
+                reason: "shared",
+              })
             : connectAppRefusal({
                 serverId: row.id,
                 title: row.title,
@@ -555,7 +698,7 @@ export function createStoreContext(options: PluginStoreOptions) {
       const token = row.credentialId
         ? await secretFor(
             row.credentialId,
-            `${row.id} needs a credential this deployment no longer holds. An administrator has to add it again.`,
+            `${row.id} is missing its key, so this can't be done. Ask an admin to add it again.`,
           )
         : undefined;
       return { token };
@@ -646,11 +789,11 @@ export function createStoreContext(options: PluginStoreOptions) {
      * no step to take, which is worse than saying nothing.
      */
     const noClient = registrationUrl
-      ? `${title} has no OAuth client for this deployment, so this cannot be called. Connect ${title} again in Settings: the deployment registers itself with the vendor when somebody connects.`
-      : `${title} has no OAuth client registered for this deployment, so this cannot be called. An administrator has to add one.`;
+      ? `${title} needs connecting again, so this can't be done. Reconnect it on Connections and ask again.`
+      : `${title} isn't set up yet, so this can't be done. Ask an admin to finish setting it up.`;
     const unusableClient = registrationUrl
-      ? `${title} has no usable OAuth client for this deployment. Connect ${title} again in Settings: the deployment registers itself with the vendor on the next connect.`
-      : `${title} has no usable OAuth client for this deployment. An administrator has to add one again.`;
+      ? `${title} needs connecting again. Reconnect it on Connections and ask again.`
+      : `${title} isn't set up correctly. Ask an admin to set it up again.`;
     /**
      * What to say when the vendor has forgotten the client this person's grant was issued under.
      *
@@ -664,7 +807,7 @@ export function createStoreContext(options: PluginStoreOptions) {
      * refuses — and one that only ever appears to work against a vendor whose acceptance would
      * itself be the vulnerability. A new consent is the only thing that produces a usable grant.
      */
-    const clientReplaced = `${title} no longer recognises this deployment's OAuth client, so this cannot be called. The deployment has registered itself again — connect ${title} again in Settings.`;
+    const clientReplaced = `${title} needs connecting again, so this wasn't done. Reconnect it on Connections and ask again.`;
 
     if (!row.credentialId) {
       // The person did their part; the deployment has not. Refused before anything queues, because
@@ -795,6 +938,8 @@ export function createStoreContext(options: PluginStoreOptions) {
        * token it had read on the way in would present the one the first replica just spent, which is
        * the very double-spend this exists to prevent.
        */
+      /** The credential whose refresh token went to the vendor, once one has. */
+      let presented: string | null = null;
       try {
         return await database.transaction(async (transaction) => {
           const [current] = await transaction
@@ -852,6 +997,7 @@ export function createStoreContext(options: PluginStoreOptions) {
             locked.encryptedValue,
           );
 
+          presented = current.credentialId;
           const minted = await exchangeRefreshToken({
             tokenUrl,
             client: stored.client,
@@ -885,6 +1031,31 @@ export function createStoreContext(options: PluginStoreOptions) {
           return { token: minted.accessToken };
         });
       } catch (error) {
+        /*
+         * THE VENDOR DISOWNED THE GRANT, NOT THE CLIENT. A refresh token answered `invalid_grant`
+         * will never be honoured again, and until now nothing here wrote that down: the connection
+         * read as connected on every screen, and every call came back as the same folded tool
+         * error. Revoked here — after the transaction, for the reason the recovery below gives — the
+         * connection reads as withdrawn, which is Reconnect on the Bot page and on the card this
+         * refusal draws, and the consent that fixes it replaces the credential as any reconnect does.
+         */
+        if (
+          error instanceof TokenRefusedError &&
+          error.code === INVALID_GRANT &&
+          presented
+        ) {
+          await credentials.revoke(presented);
+          throw new PluginRefusedError(
+            connectAppRefusal({
+              serverId: row.id,
+              title,
+              message: `Your ${title} access was withdrawn at the vendor, so this was not done. Reconnect it and ask again.`,
+              reason: "reconnect",
+              at: new Date().toISOString(),
+            }),
+            null,
+          );
+        }
         /*
          * Outside the transaction, so the row lock is already released and the vault read this does
          * is not a second connection held behind this one's.
@@ -1424,7 +1595,7 @@ export function createStoreContext(options: PluginStoreOptions) {
     if (!existing) return;
     if (accessFor(existing, null).credential !== "brokered") return;
     throw new CustomServerRefusedError(
-      `${serverId} is a Composio app this deployment has enabled, and people may have connected their accounts to it. Remove the app first — which ends those accounts at Composio — and the name is then free.`,
+      `${serverId} is ${brokerProvider === "arcade" ? "an" : "a"} ${BROKERED_PROFILE[brokerProvider].vendor} app this deployment has enabled, and people may have connected their accounts to it. Remove the app first — which ends those accounts at ${BROKERED_PROFILE[brokerProvider].vendor} — and the name is then free.`,
     );
   }
 
@@ -1461,7 +1632,10 @@ export function createStoreContext(options: PluginStoreOptions) {
      * with it, so the audience gate decides on and keys its approval by the row that answers rather
      * than the one that was dialled. Null for every row that is not a brokered app.
      */
-    const toolkit = row.provenance === "composio" ? toolkitOf(row.url) : null;
+    const toolkit =
+      row.provenance === brokerProvider
+        ? toolkitOfFor(brokerProvider, row.url)
+        : null;
     const app = toolkit ? await brokeredAppRow(toolkit) : null;
     const access = accessFor(
       app
@@ -1526,7 +1700,7 @@ export function createStoreContext(options: PluginStoreOptions) {
   async function brokeredAppRow(
     toolkit: string,
   ): Promise<BrokeredAppRow | null> {
-    const url = `composio://${toolkit}`;
+    const url = `${BROKERED_PROFILE[brokerProvider].scheme}${toolkit}`;
     return (await brokeredAppRowsAt([url])).get(url) ?? null;
   }
 
@@ -1594,6 +1768,276 @@ export function createStoreContext(options: PluginStoreOptions) {
     return schemeKind(await brokeredAppScheme(toolkit));
   }
 
+  /**
+   * THE ONE PLACE THAT ASKS THE BROKER FOR AN AUTH PROVIDER, and so the only place that knows how
+   * many it could not get. {@link connectionSiblings} says what the answers imply; this is the
+   * question asked of the rows this deployment holds, with its one extra fact: HOW MANY APPS ON
+   * THE ASKING IDENTITY WENT UNANSWERED.
+   *
+   * THE COUNT EXISTS BECAUSE THE RULE IS ASYMMETRIC ON PURPOSE. An app the broker cannot answer for
+   * is left out rather than guessed at — naming an app that will not be touched trains people to
+   * dismiss the warning that matters (D26). But under-naming is not free: somebody presses
+   * Disconnect and loses an app nobody warned them about, and a deployment whose resolver fails
+   * systematically would do it silently and for ever. So the number is surfaced, an integer and
+   * never names, for whoever reads the trail.
+   *
+   * Counted over the OTHER apps on the asking identity: the asking app's own row is not a sibling
+   * candidate. If the asking app itself is unanswered, nothing is resolvable and every other app on
+   * the identity is unanswered with it.
+   */
+  async function resolveSiblings(
+    input: {
+      toolkit: string;
+      account: AccountRef;
+    },
+    /**
+     * ONE CALL'S MEMO OF `authProviderOf`, PASSED IN BY A CALLER THAT RESOLVES OVER MANY ACCOUNTS.
+     *
+     * Resolving an auth provider is a live vendor call with no cache of its own on Arcade
+     * (`arcade-adapter`'s `authProviderOf` lists the toolkit's tools every time); on Composio it is
+     * the toolkit name and costs nothing. A caller that walks every PERSON who connected an app —
+     * {@link removeServer} — would otherwise ask the vendor for the same handful of toolkits once
+     * per person and again once per app that person holds, which is unbounded in the number of
+     * people and times out partway through a removal that has already revoked at the vendor.
+     *
+     * A toolkit's auth provider cannot change inside one removal, so answering the second ask from
+     * the first is semantically identical — the same argument the identity pre-filter above makes
+     * for its `where`. The memo holds the PROMISE, so two resolutions of one toolkit share one
+     * in-flight call rather than racing into two.
+     *
+     * ITS LIFETIME IS ONE CALL AND IT IS THEN DISCARDED. Omitted, every resolution is asked for
+     * fresh, which is what a single-account caller wants; nothing here is a process-lifetime cache,
+     * which would be a different design with an invalidation question this one does not have.
+     */
+    memo?: Map<string, Promise<string | null>>,
+  ): Promise<{ siblings: string[]; unanswered: number }> {
+    if (!broker) return { siblings: [], unanswered: 0 };
+    const vendor = broker;
+    const authProviderOf = (toolkit: string): Promise<string | null> => {
+      if (!memo) return vendor.authProviderOf(toolkit);
+      const asked = memo.get(toolkit);
+      if (asked) return asked;
+      const asking = vendor.authProviderOf(toolkit);
+      memo.set(toolkit, asking);
+      return asking;
+    };
+    const authProvider = await authProviderOf(input.toolkit);
+    const held = await database
+      .select({
+        app: brokeredConnections.app,
+        vendorUserId: brokeredConnections.vendorUserId,
+      })
+      .from(brokeredConnections)
+      .where(
+        and(
+          eq(brokeredConnections.provider, brokerProvider),
+          eq(brokeredConnections.vendorUserId, input.account.vendorUserId),
+        ),
+      );
+    if (!authProvider) {
+      const others = new Set(
+        held.map((row) => row.app).filter((app) => app !== input.toolkit),
+      );
+      return { siblings: [], unanswered: others.size };
+    }
+    const footprints: ConnectionFootprint[] = [];
+    const unanswered = new Set<string>();
+    for (const row of held) {
+      const rowProvider = await authProviderOf(row.app);
+      if (rowProvider) footprints.push({ ...row, authProvider: rowProvider });
+      else if (row.app !== input.toolkit) unanswered.add(row.app);
+    }
+    return {
+      siblings: connectionSiblings(
+        {
+          app: input.toolkit,
+          vendorUserId: input.account.vendorUserId,
+          authProvider,
+        },
+        footprints,
+      ),
+      unanswered: unanswered.size,
+    };
+  }
+
+  /**
+   * WHETHER A CONSENT REVOKE AT THE VENDOR REACHES THIS APP AT ALL — the one spelling of rule 1,
+   * which every judgement below about a KEY app asks rather than comparing a kind itself.
+   *
+   * A key is a credential of this deployment's own; no withdrawal at the vendor ends it. So a key
+   * app is never an app a revoke ENDED (its row stands, and no trail row names an ender for it),
+   * and never one whose trail row may say a vendor was ASKED to withdraw it. `!== "key"` keeps the
+   * reading every caller already made: an app whose scheme cannot be read, or that has no account,
+   * is reported as reached, which is the claim that cannot be too weak (see
+   * {@link disconnectBrokered}'s roster).
+   */
+  async function consentRevokeReaches(app: string): Promise<boolean> {
+    return (await brokeredAppKind(app)) !== "key";
+  }
+
+  /**
+   * WHAT THE TRAIL SAYS WAS ASKED OF THE VENDOR ABOUT THE APP AN ACT WAS ABOUT — the one spelling
+   * of `vendorRevocationRequested` that is computed rather than constant.
+   *
+   * `answered` is the caller's own reading of what the vendor said: {@link disconnectBrokered}'s
+   * `ended`, {@link removeServer}'s per-account answer, {@link retireConnectionsFor}'s own answer
+   * or-ed with "a sibling's ask ended it". For a KEY app that reading is not the claim — whatever
+   * the vendor answered, it did not withdraw a key it never held — so the field is `false`. Three
+   * writers decided that three ways (round 2, A5c and L5-a): only the first said `false`.
+   *
+   * IN TWO STEPS, READ THEN ANSWER: the app's kind is read when this is called and the claim is
+   * made when the vendor's answer is handed to what it returns. Every writer reads the kind BEFORE
+   * its revoke goes out — so a failed read leaves the act before anything was asked of the vendor —
+   * and that order is kept rather than moved behind the revoke for the helper's convenience.
+   *
+   * Answers the payload fragment rather than the boolean so that no writer computes the field
+   * itself: a writer spreads this, and the guard in `sole-definition.test.ts` holds that to one
+   * home.
+   */
+  async function vendorRevocationClaim(
+    app: string,
+  ): Promise<(answered: boolean) => { vendorRevocationRequested: boolean }> {
+    const reaches = await consentRevokeReaches(app);
+    return (answered) => ({ vendorRevocationRequested: reaches && answered });
+  }
+
+  /**
+   * WHICH OF A REVOKE'S SIBLINGS THAT REVOKE ENDED — rules 1 and 2 of {@link clearEndedSiblings},
+   * as a JUDGEMENT with no write attached, so that a caller who needs the answer without the delete
+   * asks the same question rather than walking the set itself.
+   *
+   * {@link clearEndedSiblings} deletes and files what this answers (and adds rule 3, which is about
+   * a row and so belongs to the delete). {@link retireConnectionsFor} needs only the answer: it has
+   * already revoked every app the person holds and deletes them as its own acts, and what it needs
+   * from the siblings is which of its rows to annotate with `endedWith`. It used to walk the set
+   * itself with rule 2 and without rule 1, and so filed a KEY app as ended by an OAuth sibling's
+   * revoke (round 2, A5b) — trail-only, which is why no audit of the rows caught it.
+   *
+   * Deduplicated, the asking app excluded, in {@link resolveSiblings}' order.
+   */
+  async function siblingsEndedBy(input: {
+    siblings: readonly string[];
+    /** The app whose revoke this is. Never in the answer — it has its own row. */
+    endedWith: string;
+    /** What that revoke ANSWERED. Rule 2. */
+    revoked: boolean;
+  }): Promise<string[]> {
+    if (!input.revoked) return [];
+    const ended: string[] = [];
+    for (const app of new Set(input.siblings)) {
+      if (app === input.endedWith) continue;
+      if (!(await consentRevokeReaches(app))) continue;
+      ended.push(app);
+    }
+    return ended;
+  }
+
+  /**
+   * THE LOCAL ROWS ONE REVOKE'S CASCADE ENDS, AND THE THREE RULES THAT DECIDE WHICH — in ONE place,
+   * because they were in two and the two disagreed about all three.
+   *
+   * WHAT A CASCADE IS. {@link resolveSiblings} answers which other apps share the connection the
+   * caller's single revoke withdrew; where a connection is keyed `(identity, auth provider)` —
+   * Arcade — that one ask ended them too, so their rows here would otherwise go on claiming
+   * accounts the vendor no longer holds. This is the write that ends them, and it is the ONLY
+   * thing in this file that deletes a row for an app NOBODY ASKED ABOUT. That is why the rules are
+   * a function rather than a convention: a row deleted here is a grant somebody still holds at the
+   * vendor and can no longer reach from this deployment, and the cost of getting it wrong is not
+   * symmetric with the cost of leaving a row standing.
+   *
+   * RULE 1 — AN APP THIS DEPLOYMENT HOLDS A KEY FOR IS NOT WHAT THAT REVOKE ENDED, so its row
+   * stands and the trail says nothing about it. The withdrawal ended an OAuth connection; a key is
+   * a credential of this deployment's own and no consent revoke at the vendor reaches it. Deleting
+   * it destroys a credential nothing withdrew and leaves a LIVE account with no local row to reach
+   * it; recording it claims a vendor ended something it never held — the reading
+   * {@link disconnectBrokered} writes `vendorRevocationRequested: false` for, there on an act that
+   * really was about that app. The scheme is read off `mcp_servers`, which this never deletes from.
+   *
+   * RULE 2 — ONLY FROM A REVOKE THAT ANSWERED TRUE (`revoked`). `false` means nothing was found to
+   * withdraw, or the auth provider could not be resolved, and the vendor was not shown to have
+   * ended ANYTHING; a sibling's row is then left standing rather than claimed gone on the strength
+   * of an answer nobody got. It is a parameter and not a caller's discipline because a caller's
+   * discipline is exactly what one of the two callers did not keep.
+   *
+   * RULE 3 — ONLY A ROW THAT WAS ACTUALLY HERE GETS A TRAIL ROW (`if (!deleted) continue`). These
+   * rows exist to explain why an app's connection VANISHED from this deployment's records, and an
+   * app that had no row here had nothing to explain. A sibling resolved on this identity but held
+   * by somebody else — {@link resolveSiblings} reads the identity, {@link accountRow} the holder —
+   * is exactly that case, and it used to get a row saying it had been disconnected.
+   *
+   * THE ONLY SPELLING OF THESE RULES. Three acts cascade a revoke onto its siblings —
+   * {@link disconnectBrokered}, {@link clearWithdrawnAccount} and {@link removeServer} — and all
+   * three call this. {@link removeServer}'s loop was the oldest spelling and kept only 2 and 3 for
+   * itself, deleting a KEY sibling's row on a removal; routing it here closed that (round 2, A5a).
+   * A fourth cascade belongs here too, not beside it. Rules 1 and 2 themselves are
+   * {@link siblingsEndedBy}'s, which this asks and which {@link retireConnectionsFor} asks for the
+   * one thing it needs without the delete — the `endedWith` it files — so the judgement about which
+   * siblings a revoke ended has one home whether or not a row is deleted on it (round 2, K5).
+   *
+   * `vendorRevocationRequested` IS TRUE ON EVERY ROW THIS WRITES AND IS NOT A GUESS: rule 2 says a
+   * revoke answered true, and that ask ended the siblings with the app it named. `false` means "no
+   * vendor was asked", which is the one thing none of these rows may say. `endedWith` names the app
+   * that asked — the only thing that tells a reader why a connection they never touched is gone —
+   * and `unansweredSiblings` qualifies that claim, beside it and nowhere else.
+   *
+   * IT ASKS NOTHING OF ANY VENDOR. The caller revoked, before it called this; see each caller.
+   *
+   * Answers the apps it actually cleared, which is what {@link clearWithdrawnAccount} returns and
+   * what a caller needs in order to say what went.
+   */
+  async function clearEndedSiblings(input: {
+    /** {@link resolveSiblings}' answer for `endedWith`. Deduplicated here; order is its own. */
+    siblings: readonly string[];
+    account: AccountRef;
+    /** The app whose revoke this cascade belongs to. Never cleared here — it has its own row. */
+    endedWith: string;
+    /** What that revoke ANSWERED. Rule 2. */
+    revoked: boolean;
+    /** {@link resolveSiblings}' count, an integer and never names. */
+    unanswered: number;
+    by: string;
+    /**
+     * The trail's one word for why, from the closed set the writers of this event use. Wider than
+     * any one caller's own `reason`, so {@link removeServer} passes `mcp_server_removed` through
+     * the same parameter the other two pass theirs.
+     */
+    reason: BrokeredDisconnectReason;
+  }): Promise<string[]> {
+    // Rules 1 and 2, and the dedupe, are {@link siblingsEndedBy}'s; rule 3 is the delete's.
+    const ended = await siblingsEndedBy(input);
+    const cleared: string[] = [];
+    for (const app of ended) {
+      // `returning` because whether a row was here is the whole of rule 3, and a delete that
+      // answered nothing would leave the two cases indistinguishable.
+      const [deleted] = await database
+        .delete(brokeredConnections)
+        .where(accountRow(app, input.account))
+        .returning({ app: brokeredConnections.app });
+      if (!deleted) continue;
+      cleared.push(app);
+      await recordAuditEvent(auditStore, {
+        eventType: "mcp.account_disconnected",
+        targetType: "mcp_server",
+        targetId: app,
+        payload: {
+          actor: input.by,
+          server: app,
+          // Whose account this was, which is not always who ended it; named as the deployment
+          // where there is no person behind it.
+          owner:
+            input.account.holder === "person"
+              ? input.account.userId
+              : "deployment",
+          reason: input.reason,
+          vendorRevocationRequested: true,
+          unansweredSiblings: input.unanswered,
+          endedWith: input.endedWith,
+        },
+      });
+    }
+    return cleared;
+  }
+
   return {
     options,
     database,
@@ -1631,6 +2075,13 @@ export function createStoreContext(options: PluginStoreOptions) {
     brokeredAppRowsAt,
     brokeredAppScheme,
     brokeredAppKind,
+    brokerProvider,
+    closeAuthorizationAttempt,
+    resolveSiblings,
+    consentRevokeReaches,
+    vendorRevocationClaim,
+    siblingsEndedBy,
+    clearEndedSiblings,
   };
 }
 

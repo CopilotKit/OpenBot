@@ -41,7 +41,7 @@ import {
   botLifecycleQueryOptions,
 } from "@/lib/bot-lifecycle/queries";
 import { queryClient } from "@/query-client";
-import { BotActivitySections } from "./activity";
+import { BotActivityGlance } from "./activity";
 import { BotPausedBanner } from "./pause-banner";
 
 const NOTIFY_LABEL: Record<BotNotify, string> = {
@@ -80,7 +80,7 @@ export function BotProfile({
       <div className="mt-6 flex items-center gap-3">
         <AbstractAvatar name={agent.name} seed={agent.avatarSeed} size={40} />
         <div className="min-w-0">
-          <p className="truncate font-medium">{agent.title}</p>
+          {agent.title && <p className="truncate font-medium">{agent.title}</p>}
           <p className="line-clamp-2 text-muted-foreground text-sm">
             {agent.roleDescription}
           </p>
@@ -102,7 +102,7 @@ export function BotProfile({
         ) : null}
         {lifecycle.isPending ? null : lifecycle.error ? (
           <p className="mt-4 text-destructive text-sm" role="alert">
-            Could not load this Bot's state.
+            Couldn't load this Bot's settings. Reload the page.
           </p>
         ) : (
           <PageRows>
@@ -116,7 +116,7 @@ export function BotProfile({
                 <ItemTitle>Active</ItemTitle>
                 <ItemDescription>
                   {lifecycle.data.paused
-                    ? "Paused. No routine, responsibility, hand-off or follow-up starts for you, and what was running has stopped."
+                    ? "Paused. Nothing runs for you until you turn it back on."
                     : "Runs its routines, responsibilities, hand-offs and follow-ups for you."}
                 </ItemDescription>
               </ItemContent>
@@ -222,7 +222,7 @@ export function BotProfile({
         )}
       </PageSection>
 
-      <BotActivitySections agentId={agent.id} />
+      <BotActivityGlance agentId={agent.id} />
       {settings}
       {manage}
     </>

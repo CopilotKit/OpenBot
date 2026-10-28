@@ -6,7 +6,10 @@ import {
   CopilotRuntime,
 } from "@copilotkit/runtime/v2";
 import { createCopilotHonoHandler } from "@copilotkit/runtime/v2/hono";
-import { PROVENANCE_GUIDANCE } from "@openbot/shared/bot-prompt";
+import {
+  type ComputerGuidance,
+  PROVENANCE_GUIDANCE,
+} from "@openbot/shared/bot-prompt";
 import { defaultModelFor } from "@openbot/shared/model-providers";
 import {
   BuiltInAgentWithSaneHistory,
@@ -65,7 +68,7 @@ import {
   SELECTION_FLOOR,
   selectTools,
 } from "./plugins/selection";
-import { grantedToolGuidance } from "./plugins/tools";
+import { grantedToolGuidance, holdsWebSearch } from "./plugins/tools";
 import { UNTRUSTED_GUIDANCE } from "./untrusted-content";
 
 /**
@@ -375,8 +378,11 @@ export function builtInAgentConfiguration(
    * what its hands are. Absent leaves the role alone, which is right for a deployment with no
    * computer configured, where the browser routes are not mounted and a Bot promised a browser would
    * be promising something that does not exist.
+   *
+   * Worded for the tools passed here, which are what this run is offered: whether one of them finds
+   * sources decides whether the browser is told to leave searching to it or never to search at all.
    */
-  computerGuidance?: string,
+  computerGuidance?: ComputerGuidance,
   /**
    * Vendors this deployment connects to, whether or not this Bot holds any of their tools.
    *
@@ -445,7 +451,9 @@ export function builtInAgentConfiguration(
       ...(grantedToolGuidance(tools, connectedVendors)
         ? [grantedToolGuidance(tools, connectedVendors)]
         : []),
-      ...(computerGuidance ? [computerGuidance] : []),
+      ...(computerGuidance
+        ? [computerGuidance({ search: holdsWebSearch(tools) })]
+        : []),
       ...(learnedSkills?.catalog ? [learnedSkills.catalog] : []),
     ].join("\n\n"),
     ...(planModel ? {} : { apiKey: apiKey ?? undefined }),
@@ -501,7 +509,7 @@ export async function buildAgents(
   loadTools: LoadToolsForBot = async () => [],
   signRun?: SignRun,
   /** What every built-in Bot is told about the computer. Absent means this deployment has none. */
-  computerGuidance?: string,
+  computerGuidance?: ComputerGuidance,
   /**
    * Which vendors this deployment connects to. Asked once per build rather than per Bot, because it
    * is a fact about the deployment; what differs per Bot is which of them it holds.
@@ -847,7 +855,7 @@ async function buildAgent(
   stallGuard: StallGuard | undefined,
   loadTools: LoadToolsForBot,
   signRun?: SignRun,
-  computerGuidance?: string,
+  computerGuidance?: ComputerGuidance,
   connectedVendors: readonly string[] = [],
   selection?: ToolSelection,
   agentFetch?: AgentFetch,
@@ -1285,7 +1293,7 @@ function remoteAgentWithStandingRole(
    * the same reason the tools are, so switching a connector on reaches the next run.
    *
    * The remote path needs this more than the built-in one, not less. A framework Bot is handed the
-   * tools as an offer and decides for itself what to call, with `COMPUTER_GUIDANCE` as its whole
+   * tools as an offer and decides for itself what to call, with `computerGuidance` as its whole
    * prompt — a page about the browser that mentions connectors nowhere. That is the Bot that browsed
    * to drive.google.com holding four Drive tools.
    *
@@ -1566,7 +1574,7 @@ export async function resolveRuntimeAgents(
   stallGuard?: StallGuard,
   loadTools?: LoadToolsForBot,
   signRun?: SignRun,
-  computerGuidance?: string,
+  computerGuidance?: ComputerGuidance,
   loadVendors?: () => Promise<readonly string[]>,
   selection?: ToolSelection,
   agentFetch?: AgentFetch,
@@ -1686,6 +1694,21 @@ export function createRequestAgents(
 }
 
 /**
+ * The runtime half of a Bot drawing an A2UI 1.0 interface (`render_ui`).
+ *
+ * Both settings are explicit, because left out each is decided by the browser. `generativeUI`
+ * omitted applies to any run whose request carries a catalog, so `false` is what keeps a stale or
+ * hand-built client from switching a deployment's opt-out back on. `true` is safe on a run without
+ * one: the middleware passes it through untouched.
+ *
+ * The older A2UI middleware stays off either way: it streams A2UI 0.9 surfaces, and the browser no
+ * longer registers the catalog that drew them.
+ */
+export function generativeUiMiddlewares(enabled: boolean) {
+  return { generativeUI: enabled, a2ui: { enabled: false } } as const;
+}
+
+/**
  * Mount the CopilotKit endpoint onto the host Hono app.
  *
  * `agents` is a factory rather than a fixed map so a Bot registered while the server is running is
@@ -1748,6 +1771,7 @@ export function mountCopilotRuntime(
       new IntelligenceKnowingANewThread({
         apiUrl: intelligence.apiUrl,
         wsUrl: intelligence.gatewayWsUrl,
+        browserWsUrl: intelligence.browserGatewayWsUrl,
         apiKey: intelligence.apiKey,
         getLearningContainerId: async ({
           agentId,
@@ -1808,9 +1832,7 @@ export function mountCopilotRuntime(
      * has; see DeploymentConfig.generativeUi.
      */
     ...(config.generativeUi ? { openGenerativeUI: true } : {}),
-    // A browser catalog enables the public A2UI middleware/tool. Explicitly disable it on the
-    // server too, so stale clients cannot reactivate a deployment's generative UI opt-out.
-    a2ui: { enabled: config.generativeUi },
+    ...generativeUiMiddlewares(config.generativeUi),
     // `identifyUser` is the Intelligence projection of the same person `identifyActor` returns:
     // one resolver decides both whose threads these are and whose coworkers exist.
     agents: createRequestAgents(identifyActor, resolver) as never,

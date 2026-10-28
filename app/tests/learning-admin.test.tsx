@@ -157,7 +157,7 @@ test.each([
   [
     { enabled: true, defaultTarget: null, agents: {} },
     { state: "not_entitled" },
-    "plan does not include Learning",
+    "plan doesn't include Learning",
   ],
 ] as const)(
   "the page says what automatic assignment found (%#)",

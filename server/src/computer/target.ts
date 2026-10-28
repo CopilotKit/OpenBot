@@ -271,7 +271,7 @@ export function checkNavigationTarget(
     return {
       allowed: false,
       reason:
-        "That address holds this deployment's own cloud credentials, so the assistant is never allowed to open it.",
+        "That address holds OpenBot's own cloud keys, so the Bot can never open it.",
     };
   }
 
@@ -290,7 +290,7 @@ export function checkNavigationTarget(
     return {
       allowed: false,
       reason:
-        "That address is inside this deployment's own network, so the assistant is not allowed to open it.",
+        "That address is inside OpenBot's own network, so the Bot can't open it.",
     };
   }
 
