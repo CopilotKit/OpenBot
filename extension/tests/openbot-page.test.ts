@@ -309,6 +309,12 @@ beforeEach(async () => {
     extensionId: EXTENSION_ID,
     manifestVersion: "0.3.0",
   });
+  // OpenBot Desktop runs on this computer, and its native host confirms the address its OpenBot answers on
+  // (recorder_host.rs `address`): that is what makes OpenBot's page there one the Recorder connects with no click.
+  fake.native.reply = (message) =>
+    (message as { type?: string }).type === "address"
+      ? { ok: true, openbotUrl: gateway.httpUrl }
+      : { ok: false, error: "unknown-message" };
   fake.offscreen.onDocumentCreated.addListener(() => {
     setTimeout(runDocument, 0);
   });

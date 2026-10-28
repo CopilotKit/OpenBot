@@ -818,3 +818,41 @@ test("a test that sets its own chrome replaces the fake, and uninstall leaves no
   expect("chrome" in globalThis).toBe(false);
   fake = installChromeFake();
 });
+
+test("code one browser's listener ran keeps that browser after another is installed, as one Chrome's extension never reaches another's", async () => {
+  // A test's service worker still finishing its last Stop when the next test installed its browser closed that test's
+  // document through the `chrome` it then saw (held-steps.test.ts).
+  const first = fake;
+  const later = Promise.withResolvers<void>();
+  chrome.runtime.onMessage.addListener(() => {
+    void later.promise.then(async () => {
+      await chrome.storage.local.set({ wrote: "the first browser's worker" });
+      if (await chrome.offscreen.hasDocument())
+        await chrome.offscreen.closeDocument();
+    });
+  });
+  await chrome.offscreen.createDocument({
+    url: "offscreen.html",
+    reasons: ["LOCAL_STORAGE"],
+    justification: "test",
+  });
+  await fake.sendFromPage({ type: "page.state" });
+  first.uninstall();
+  const next = installChromeFake();
+  await chrome.offscreen.createDocument({
+    url: "offscreen.html",
+    reasons: ["LOCAL_STORAGE"],
+    justification: "test",
+  });
+  later.resolve();
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  expect(first.storage.local.get("wrote")).toBe("the first browser's worker");
+  expect(next.storage.local.get("wrote")).toBeUndefined();
+  expect({ first: first.offscreen.open, next: next.offscreen.open }).toEqual({
+    first: false,
+    next: true,
+  });
+  // A test's own code, which no browser's listener ran, sees the browser installed last.
+  expect(chrome).toBe(next.apis["service-worker"]);
+  fake = next;
+});

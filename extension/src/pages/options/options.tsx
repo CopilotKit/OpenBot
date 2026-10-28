@@ -2,9 +2,13 @@ import type { RecorderConnectVia } from "@openbot/shared/recorder-api";
 import {
   IconBuildingSkyscraper,
   IconLink,
+  IconMicrophone,
+  IconMicrophoneOff,
   IconPlugConnectedX,
   IconUser,
+  IconWorldOff,
 } from "@tabler/icons-react";
+import { Fragment } from "react";
 import { useEffect, useState } from "react";
 import {
   PageEmpty,
@@ -29,6 +33,7 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
+import { Switch } from "@/components/ui/switch";
 import type { PageStateResponse } from "../../protocol/messages";
 import { Page } from "../ui/page";
 import { ask as askBackground } from "../ui/runtime";
@@ -45,7 +50,8 @@ function plural(count: number, one: string, many: string) {
   return `${count} ${count === 1 ? one : many}`;
 }
 
-/** The Recorder's one settings page: which OpenBot this browser is connected to, and how to disconnect it. */
+/** The Recorder's one settings page: which OpenBot this browser is connected to, and how to disconnect it; whether the
+ * person narrates their recordings; and the sites they keep out of them, each with Record again. */
 export function Options({ deps }: { deps?: Partial<OptionsDeps> }) {
   const ask = deps?.ask ?? askBackground;
   const [state, setState] = useState<PageStateResponse | null>(null);
@@ -65,6 +71,24 @@ export function Options({ deps }: { deps?: Partial<OptionsDeps> }) {
       live = false;
     };
   }, [ask]);
+
+  /** A change of narration or of the sites left out, then the state again, so the page shows what the Recorder kept. */
+  const change = async (
+    message:
+      | { type: "page.narration"; on: boolean }
+      | { type: "page.site"; site: string; recorded: boolean },
+  ) => {
+    const response = await ask(message);
+    if (!response.ok) {
+      setError(response.error);
+      return;
+    }
+    setError(null);
+    const fresh = await ask<PageStateResponse | { ok: false; error: string }>({
+      type: "page.state",
+    });
+    if (fresh.ok && "state" in fresh) setState(fresh);
+  };
 
   const disconnect = async () => {
     const response = await ask({ type: "page.disconnect" });
@@ -155,6 +179,80 @@ export function Options({ deps }: { deps?: Partial<OptionsDeps> }) {
             {error}
           </p>
         ) : null}
+      </PageSection>
+      <PageSection
+        title="Narration"
+        description="Whether the Recorder listens to you while you record and adds what you say to your steps as text. Your browser turns it into text on your own computer."
+      >
+        <PageRows>
+          <Item size="sm">
+            <ItemMedia variant="icon">
+              {state.narration === "on" ? (
+                <IconMicrophone />
+              ) : (
+                <IconMicrophoneOff />
+              )}
+            </ItemMedia>
+            <ItemContent>
+              <ItemTitle>Narration</ItemTitle>
+              <ItemDescription>
+                {state.narration === "on"
+                  ? "On. The Recorder listens while you record."
+                  : state.narration === "off"
+                    ? "Off. The Recorder does not open your microphone."
+                    : "Not chosen yet. The Recorder does not open your microphone."}
+              </ItemDescription>
+            </ItemContent>
+            <ItemActions>
+              <Switch
+                aria-label="Narration"
+                checked={state.narration === "on"}
+                onCheckedChange={(on) =>
+                  void change({ type: "page.narration", on })
+                }
+              />
+            </ItemActions>
+          </Item>
+        </PageRows>
+      </PageSection>
+      <PageSection
+        title="Sites not recorded"
+        description="Nothing you do on these sites is recorded, in any tab. Each recorded tab has a button that adds its site here."
+      >
+        {state.excludedSites.length === 0 ? (
+          <PageEmpty>
+            No sites are left out yet. While you record, choose Don't record on
+            a tab's recording mark to leave its site out.
+          </PageEmpty>
+        ) : (
+          <PageRows>
+            {state.excludedSites.map((site, index) => (
+              <Fragment key={site}>
+                {index > 0 ? <Separator /> : null}
+                <Item size="sm">
+                  <ItemMedia variant="icon">
+                    <IconWorldOff />
+                  </ItemMedia>
+                  <ItemContent>
+                    <ItemTitle>{site}</ItemTitle>
+                  </ItemContent>
+                  <ItemActions>
+                    <Button
+                      aria-label={`Record ${site} again`}
+                      size="sm"
+                      variant="ghost"
+                      onClick={() =>
+                        void change({ type: "page.site", site, recorded: true })
+                      }
+                    >
+                      Record again
+                    </Button>
+                  </ItemActions>
+                </Item>
+              </Fragment>
+            ))}
+          </PageRows>
+        )}
       </PageSection>
       {policy.openbotUrl ? (
         <PageSection

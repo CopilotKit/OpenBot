@@ -1,5 +1,6 @@
 import type { BackgroundToContent } from "../protocol/messages";
 import { startEventCapture } from "./collector";
+import { showIndicator } from "./indicator";
 import { createSensitivityTracker } from "./masking-context";
 import { showNotice } from "./notice";
 import { contentHello, createContentPort } from "./port";
@@ -51,6 +52,35 @@ function startContentScript() {
     notice = null;
   };
 
+  // The recording mark, in the top frame alone: from the tab's first step until Stop, whatever the frame captures.
+  let mark: ReturnType<typeof showIndicator> | null = null;
+  const removeMark = () => {
+    mark?.remove();
+    mark = null;
+  };
+  const onMark = (
+    message: Extract<BackgroundToContent, { type: "background.capture" }>,
+  ) => {
+    if (window !== window.top) return;
+    if (message.site === undefined) {
+      removeMark();
+      return;
+    }
+    const view = {
+      site: message.site,
+      excluded: message.excluded === true,
+      ...(message.narrating !== undefined
+        ? { narrating: message.narrating }
+        : {}),
+    };
+    if (mark) mark.update(view);
+    else
+      mark = showIndicator({
+        view,
+        choose: (recorded) => port.post({ type: "content.site", recorded }),
+      });
+  };
+
   const onNotice = (
     message: Extract<BackgroundToContent, { type: "background.notice" }>,
   ) => {
@@ -65,12 +95,16 @@ function startContentScript() {
   };
 
   // The extension was updated or removed under this page: nothing captured here can reach it any more.
-  port.onOrphaned(stopCapture);
+  port.onOrphaned(() => {
+    stopCapture();
+    removeMark();
+  });
   if (flags.__openbotRecorderActive) startCapture();
   port.onMessage((message) => {
     if (message.type === "background.capture") {
       if (message.active) startCapture();
       else stopCapture();
+      onMark(message);
     } else onNotice(message);
   });
 }

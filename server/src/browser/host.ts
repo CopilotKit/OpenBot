@@ -1,4 +1,6 @@
 import {
+  BROWSER_ABSENCES,
+  type BrowserAbsence,
   type BrowserWindow,
   isPersonBrowserId,
 } from "@openbot/shared/openbot-browser";
@@ -7,22 +9,84 @@ import {
   type EgressPolicy,
   pushEgressPolicy,
 } from "../computer/policy-network";
-import type { ComputerProvider } from "../computer/provider";
-import type { BrowserComputers } from "./routes";
+import { type ComputerProvider, ProviderError } from "../computer/provider";
+import type { BrowserComputers, BrowserRouteDeps } from "./routes";
+
+/**
+ * What the person is told where a browser of their own cannot run here: every Bot shares the one computer.
+ *
+ * A PERSON'S BROWSER RUNS ONLY ON A COMPUTER OF ITS OWN. On the shared computer it would sit beside every Bot's
+ * browser, in the container where a Bot may run a shell, and its profile holds what the person signed in to by hand: a
+ * prompt-injected Bot could read their cookies off the disk. A supervisor's container and a Sandbox are made for the one
+ * computer named, so the person's browser is alone there; OpenBot Desktop's host-side computer runs people's browsers
+ * and no Bot. The computer refuses it too (agent-computer's `person-access.ts`), so neither can be talked into it alone.
+ */
+export const SHARED_COMPUTER =
+  "This OpenBot can't open a browser of your own, because its Bots share one computer.";
+
+/**
+ * Why a person's browser cannot run on these computers, or null where it can: on OpenBot Desktop's host-side computer
+ * (`browserUrl`), or on a provider that gives every computer named its own (`per-bot`). Null too where there is no
+ * provider at all, which says nothing about sharing: the routes have no computers then, and say so their own way.
+ */
+export function personBrowserRefusal(
+  provider: Pick<ComputerProvider, "isolation"> | undefined,
+  browserUrl: string | undefined,
+): string | null {
+  if (browserUrl || !provider) return null;
+  return provider.isolation === "per-bot" ? null : SHARED_COMPUTER;
+}
+
+/**
+ * Where the browser routes find people's browsers here, and what the person is told about it: no computers, and why,
+ * where their Bots share one computer (`personBrowserRefusal`); otherwise `computers`, with OpenBot Desktop's reason
+ * for not running the person's own Chrome or Edge (`absent`) where it gave one. The server and the tests of its routes
+ * both build the routes' half from this, so the two cannot disagree about where a person's browser may run.
+ */
+export function personBrowserPlace(input: {
+  provider: Pick<ComputerProvider, "isolation"> | undefined;
+  browserUrl: string | undefined;
+  absent?: BrowserAbsence;
+  computers: () => BrowserComputers;
+}): Pick<BrowserRouteDeps, "computers" | "note"> {
+  const refusal = personBrowserRefusal(input.provider, input.browserUrl);
+  if (refusal) return { note: refusal };
+  return {
+    computers: input.computers(),
+    ...(input.absent ? { note: BROWSER_ABSENCES[input.absent] } : {}),
+  };
+}
 
 /**
  * The computer provider, with each person's browser found where it runs.
  *
- * Unset `browserUrl`: a person's browser is a computer like a Bot's, named for the person (browser/person.ts), so the
- * provider already carries it, on the shared computer, in a supervisor's container or in a Sandbox. Set, it is the one
- * computer OpenBot Desktop runs on the person's own machine (`OPENBOT_BROWSER_URL`, its host-side local Chrome computer),
- * while Bots' computers stay where they were. Wrapped here, under the policy push, so every way a computer is reached
- * (the browser routes, the live screen, the network policy pushed on the way) reaches the same one.
+ * Unset `browserUrl`: a person's browser is a computer like a Bot's, named for the person (browser/person.ts), so a
+ * provider that gives each computer its own (a supervisor's container, a Sandbox) already carries it. The one shared
+ * computer does not: there a person's browser is refused at `locate`, which every way of reaching it goes through, and
+ * is never reported running. Set, it is the one computer OpenBot Desktop runs on the person's own machine
+ * (`OPENBOT_BROWSER_URL`, its host-side local Chrome computer), while Bots' computers stay where they were. Wrapped
+ * here, under the policy push, so every way a computer is reached (the browser routes, the live screen, the network
+ * policy pushed on the way) reaches the same one.
  */
 export function withPersonBrowsers(
   provider: ComputerProvider,
   browserUrl: string | undefined,
 ): ComputerProvider {
+  const refusal = personBrowserRefusal(provider, browserUrl);
+  if (refusal)
+    return Object.assign(Object.create(provider) as ComputerProvider, {
+      locate: (botId: string) =>
+        isPersonBrowserId(botId)
+          ? Promise.reject(new ProviderError(refusal))
+          : provider.locate(botId),
+      // Absent rather than unreachable: nothing of the person's runs here, and nothing is going to.
+      status: (botId: string) =>
+        isPersonBrowserId(botId)
+          ? Promise.resolve({ botId, state: "absent" as const })
+          : provider.status(botId),
+      sessionOf: async (botId: string) =>
+        isPersonBrowserId(botId) ? undefined : provider.sessionOf?.(botId),
+    });
   if (!browserUrl) return provider;
   return Object.assign(Object.create(provider) as ComputerProvider, {
     locate: (botId: string) =>

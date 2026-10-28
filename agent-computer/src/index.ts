@@ -41,9 +41,11 @@ import {
   type PagePurpose,
 } from "./navigation";
 import {
+  computerOwner,
   PERSONS_OWN_BROWSER,
   personHoldsTheWheel,
   personMayUse,
+  refusedHere,
 } from "./person-access";
 import { createProfiles, numberFromEnv, VIEWPORT } from "./profiles";
 import { createRealBrowserHost, isRealBrowserPath } from "./real-browser";
@@ -133,6 +135,8 @@ if (!COMPUTER_TOKEN) {
 setDefaultAutoSelectFamily(false);
 
 const RUNTIME = browserRuntimeFromEnv(process.env);
+/** Whose this computer is, which decides whether a person's browser may run on it. See person-access.ts. */
+const OWNER = computerOwner(process.env);
 const BROWSER_MODE = RUNTIME.mode;
 /*
  * The display this process was started on, kept before the virtual one replaces it. A person's
@@ -838,6 +842,18 @@ serve<StreamData>({
     if (!isOpenPath(url.pathname) && !isPlainBotId(botId)) {
       return json({ error: "That is not a usable bot id." }, 400);
     }
+    // A person's browser only on a computer of its own, and nothing else on one: before the id reaches a profile, a
+    // policy or a shell. The live screen names its browser in the query, which is the one it would show. See
+    // person-access.ts.
+    const refused = isOpenPath(url.pathname)
+      ? null
+      : refusedHere(
+          OWNER,
+          url.pathname === "/stream"
+            ? botIdOf(request, url.searchParams.get("bot"))
+            : botId,
+        );
+    if (refused) return json({ error: refused.error }, refused.status);
     // The admin network policy, pushed by the server on every change; applied without a restart.
     // The deployment's Web Bot Auth key rides the same push (see `web-bot-auth.ts`).
     if (url.pathname === "/egress-policy" && request.method === "PUT") {

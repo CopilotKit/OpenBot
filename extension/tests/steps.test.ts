@@ -640,6 +640,8 @@ test("a page change queued behind a step that leaves just as its title is due st
       from: "",
     },
   });
+  // The person moves to another tab: the page they were visiting here is over, and goes out.
+  h.steps.entered(2);
   h.advance(STEP_TIMING.redirectMs);
   await flushPromises();
   expect(lookups).toBe(1);
@@ -844,6 +846,8 @@ test("page changes the page makes one after another, with no step between them, 
       "replace",
     ),
   );
+  // The person moves to another tab: the page they were visiting here is over, and goes out.
+  h.steps.entered(2);
   h.advance(
     STEP_TIMING.horizonMs + STEP_TIMING.settleMs + STEP_TIMING.redirectMs,
   );
@@ -877,6 +881,8 @@ test("a step of the person's between two page changes, or a gap longer than the 
       "https://crm.example.test/contacts/9001/notes",
     ),
   );
+  // The person moves to another tab: the page they were visiting here is over, and goes out.
+  h.steps.entered(2);
   h.advance(30_000);
   await flushPromises();
   h.advance(1);
@@ -904,6 +910,8 @@ test("a reload or a step back is the person's own page change, never folded into
     1,
     change(START + 600, "https://crm.example.test/deals/43", "", "traverse"),
   );
+  // The person moves to another tab: the page they were visiting here is over, and goes out.
+  h.steps.entered(2);
   h.advance(30_000);
   await flushPromises();
   h.advance(1);
@@ -1034,6 +1042,8 @@ test("an address the person types into the address bar is a page change of its o
       ["from_address_bar"],
     ),
   );
+  // The person moves to another tab: the page they were visiting here is over, and goes out.
+  h.steps.entered(2);
   h.advance(30_000);
   await flushPromises();
   h.advance(1);
@@ -1095,6 +1105,8 @@ test("a redirect folded into the page change before it keeps how that change beg
       "client_redirect",
     ]),
   );
+  // The person moves to another tab: the page they were visiting here is over, and goes out.
+  h.steps.entered(2);
   h.advance(30_000);
   await flushPromises();
   h.advance(1);
@@ -1104,4 +1116,147 @@ test("a redirect folded into the page change before it keeps how that change beg
     transitionType: "auto_bookmark",
     transitionQualifiers: [],
   });
+});
+
+// ---- A visit: a page the person arrived on and has not acted on ---------------------------------------------------
+//
+// End-to-end run 1 of the review fixes: the person opened example.org while recording, looked at it for about 6 s and
+// pressed "Don't record example.org" on the mark, yet its arrival (address and title) had reached Intelligence: a page
+// change was held only for its redirect wait, 2 s, so it left before they could leave the site out.
+
+const BANK = "https://online.bank.example/accounts";
+const said = (at: number, text: string): CapturedEvent => ({
+  type: "CUSTOM",
+  name: "transcript",
+  timestamp: at,
+  value: { text },
+});
+const agentEvent = (at: number): CapturedEvent => ({
+  type: "CUSTOM",
+  name: "agent.run",
+  timestamp: at,
+  value: { streamId: "s-1" },
+});
+const sentNames = (sent: CapturedEvent[]) => sent.map((event) => event.name);
+
+test("a page the person has arrived on but not acted on is held for as long as they stay on it, with all that came after it; their first step there sends it first, with its own time", async () => {
+  const h = harness({
+    pageOf: async () => ({ url: BANK, title: "Accounts" }),
+  });
+  h.steps.navigation(1, change(START, BANK));
+  // Said while they look at it, and an assistant answering in another tab: both after the arrival.
+  h.steps.transcript(1, said(START + 3_000, "this is the balance"));
+  h.steps.place(2, agentEvent(START + 4_000));
+  h.advance(STEP_TIMING.redirectMs);
+  await flushPromises();
+  h.advance(10 * 60_000);
+  expect(h.sent).toEqual([]);
+  // Their first step there: the arrival goes first, at its own time, then what came after it, then the step.
+  h.steps.step(1, click(h.now, "Statements", { url: BANK }));
+  h.advance(STEP_TIMING.horizonMs + STEP_TIMING.settleMs);
+  expect(sentNames(h.sent)).toEqual([
+    "navigation",
+    "transcript",
+    "agent.run",
+    "click",
+  ]);
+  expect(h.sent[0]).toMatchObject({
+    timestamp: START,
+    value: { to: BANK, page: { url: BANK, title: "Accounts" } },
+  });
+  const times = h.sent.map((event) => event.timestamp);
+  expect(times).toEqual([...times].sort((a, b) => a - b));
+});
+
+test("leaving the site out at any moment of the visit drops all of it, and the narration placed after it still goes", async () => {
+  const h = harness({
+    pageOf: async () => ({ url: BANK, title: "Accounts" }),
+  });
+  h.steps.navigation(1, change(START, BANK));
+  // The page settles on another of its own pages, and its assistant streams: the same visit.
+  h.steps.navigation(
+    1,
+    change(START + 5_000, "https://online.bank.example/accounts/7"),
+  );
+  h.steps.place(1, agentEvent(START + 5_500));
+  h.steps.transcript(1, said(START + 5_800, "just checking"));
+  h.advance(6_000);
+  await flushPromises();
+  h.advance(1);
+  expect(h.sent).toEqual([]);
+  // "Don't record bank.example", 6 s in.
+  h.steps.dropTab(1);
+  h.advance(30_000);
+  expect(sentNames(h.sent)).toEqual(["transcript"]);
+  expect(JSON.stringify(h.sent)).not.toContain("bank.example");
+});
+
+test("a visit is over when the person moves to another tab, the tab moves to another site or closes, or the recording stops; another page of the same site is the same visit", async () => {
+  const lookups = { pageOf: async () => null };
+  const to = (event: CapturedEvent) => (event.value as { to?: string }).to;
+
+  // Another tab: the page they left goes out.
+  const moved = harness(lookups);
+  moved.steps.navigation(1, change(START, BANK));
+  moved.advance(STEP_TIMING.redirectMs);
+  await flushPromises();
+  moved.steps.entered(1);
+  expect(moved.sent).toEqual([]);
+  moved.steps.entered(2);
+  expect(moved.sent.map(to)).toEqual([BANK]);
+
+  // The tab closes.
+  const closed = harness(lookups);
+  closed.steps.navigation(1, change(START, BANK));
+  closed.advance(STEP_TIMING.redirectMs);
+  await flushPromises();
+  closed.steps.left(2);
+  expect(closed.sent).toEqual([]);
+  closed.steps.left(1);
+  expect(closed.sent.map(to)).toEqual([BANK]);
+
+  // Another page of the site stays in the visit; a page of another site ends it, and starts a visit of its own.
+  const browsed = harness(lookups);
+  browsed.steps.navigation(1, change(START, BANK));
+  browsed.steps.navigation(
+    1,
+    change(START + 5_000, "https://www.bank.example/help", "", "traverse"),
+  );
+  browsed.advance(STEP_TIMING.redirectMs + 5_000);
+  await flushPromises();
+  expect(browsed.sent).toEqual([]);
+  browsed.steps.navigation(
+    1,
+    change(START + 9_000, "https://news.example.org/", "", "traverse"),
+  );
+  browsed.advance(STEP_TIMING.redirectMs);
+  await flushPromises();
+  expect(browsed.sent.map(to)).toEqual([BANK, "https://www.bank.example/help"]);
+
+  // The recording stops.
+  const stopped = harness(lookups);
+  stopped.steps.navigation(1, change(START, BANK));
+  stopped.advance(STEP_TIMING.redirectMs);
+  await flushPromises();
+  stopped.steps.flush();
+  expect(stopped.sent.map(to)).toEqual([BANK]);
+});
+
+test("a visit held when the service worker stops is still a visit in the one that takes it up", async () => {
+  const first = harness({ pageOf: async () => null });
+  first.steps.navigation(1, change(START, BANK));
+  first.advance(STEP_TIMING.redirectMs);
+  await flushPromises();
+  const snapshot = first.steps.snapshot();
+  if (!snapshot) throw new Error("nothing held");
+  const second = harness({ pageOf: async () => null });
+  second.advance(first.now - START);
+  second.steps.restore(JSON.parse(JSON.stringify(snapshot)));
+  second.advance(60_000);
+  await flushPromises();
+  second.advance(1);
+  expect(second.sent).toEqual([]);
+  second.steps.dropTab(1);
+  second.steps.flush();
+  expect(second.sent).toEqual([]);
 });

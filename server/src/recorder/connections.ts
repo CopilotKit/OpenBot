@@ -8,7 +8,24 @@ import {
   type RecorderConnection,
   type RecorderConnectVia,
 } from "@openbot/shared/recorder-api";
-import { and, asc, count, eq, gt, isNull, lte, or } from "drizzle-orm";
+import {
+  and,
+  asc,
+  count,
+  eq,
+  gt,
+  inArray,
+  isNull,
+  lte,
+  or,
+  type SQL,
+  sql,
+} from "drizzle-orm";
+import {
+  type AuditStore,
+  DEPLOYMENT_INITIATOR,
+  recordAuditEvent,
+} from "../audit";
 import type { Database } from "../db/client";
 import {
   recorderConnectCodes,
@@ -23,6 +40,34 @@ const LIVE_CODES_PER_PERSON = 10;
 export type RecorderConnectionStore = ReturnType<
   typeof createRecorderConnectionStore
 >;
+
+/**
+ * How long a connection lasts, taken from the session it stands in for (recorder/wiring.ts decides which):
+ *
+ * - `idle`: until it has gone this long unused, as a Better Auth session does. Better Auth moves a session's expiry to
+ *   `expiresIn` from now each time it is used, so a session ends that long after its last use; a connection's last use
+ *   is `last_used_at`, written at most once a minute.
+ * - `absolute`: this long after it was made, whatever its use. Organization mode's: its connection carries a sealed copy
+ *   of the organization session cookie, and the copy must not outlive the cookie it was taken from, whose Max-Age this is.
+ * - `null`: never, where there is no session to take a lifetime from. A single-user OpenBot has no sign-in: every
+ *   request to it is already its one person.
+ */
+export type RecorderConnectionLifetime =
+  | { kind: "idle"; ms: number }
+  | { kind: "absolute"; ms: number }
+  | null;
+
+/**
+ * Why a connection ended, as its `recorder.revoked` row says: `replaced` (the same copy connected again), `disconnected`
+ * (its own Recorder's Disconnect), `revoked` (the person, from Settings, Browsers), `signed_out` (the person signed out
+ * of OpenBot) or `expired` (its lifetime ran out).
+ */
+export type RecorderRevokeReason =
+  | "replaced"
+  | "disconnected"
+  | "revoked"
+  | "signed_out"
+  | "expired";
 
 /** A live connection with what its Recorder last said it was doing, and when that arrived; both null until it has said. */
 export type ReportingConnection = RecorderConnection & {
@@ -48,46 +93,137 @@ function connectionView(row: ConnectionRow): RecorderConnection {
   };
 }
 
+/** A transaction, for the statements that take a lock or write their audit row inside it. */
+type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
+
+/**
+ * A transaction-scoped advisory lock, so the writes it guards take turns on every replica: Postgres holds it, and
+ * releases it when the transaction ends, committed or not. Keyed as identity/store.ts keys its own.
+ */
+async function lock(transaction: Transaction, key: string) {
+  await transaction.execute(
+    sql`select pg_advisory_xact_lock(hashtextextended(${key}, 0))`,
+  );
+}
+
 export function createRecorderConnectionStore(
   database: Database,
-  options: { now?: () => Date } = {},
+  options: {
+    now?: () => Date;
+    /** How long a connection lasts; absent, as `null`. */
+    lifetime?: RecorderConnectionLifetime;
+    /**
+     * Where a connection's `recorder.connected` and `recorder.revoked` rows go, given the transaction that makes the
+     * change: index.ts passes `createAuditStore` over it, so a connection is made, or ended, exactly when its row is
+     * written, and a row that cannot be written undoes the change and fails the request (as approvals and identity
+     * links are written). Absent, no rows are written: a test of the store alone.
+     */
+    auditFor?: (executor: Database) => AuditStore;
+  } = {},
 ) {
   const now = options.now ?? (() => new Date());
+  const lifetime = options.lifetime ?? null;
+  const auditFor = options.auditFor;
+
+  /** The condition a connection must meet at `at` to be within its lifetime; undefined when it has none. */
+  const withinLifetime = (at: Date): SQL | undefined => {
+    if (!lifetime) return undefined;
+    const since = new Date(at.getTime() - lifetime.ms);
+    return lifetime.kind === "idle"
+      ? gt(
+          sql`coalesce(${recorderConnections.lastUsedAt}, ${recorderConnections.createdAt})`,
+          since,
+        )
+      : gt(recorderConnections.createdAt, since);
+  };
+  /** Not revoked, and within its lifetime. */
+  const live = (at: Date) =>
+    and(isNull(recorderConnections.revokedAt), withinLifetime(at));
+
+  /** One `recorder.revoked` row for each connection ended, in the transaction that ended them. */
+  async function auditRevoked(
+    transaction: Transaction,
+    ended: Array<{ id: string; userId: string }>,
+    reason: RecorderRevokeReason,
+  ) {
+    if (!auditFor || ended.length === 0) return;
+    const auditStore = auditFor(transaction as unknown as Database);
+    for (const connection of ended) {
+      await recordAuditEvent(auditStore, {
+        eventType: "recorder.revoked",
+        targetType: "recorder_connection",
+        targetId: connection.id,
+        // An expiry is the deployment ending it; every other reason is something the person did.
+        ...(reason === "expired"
+          ? { initiator: DEPLOYMENT_INITIATOR }
+          : { actorUserId: connection.userId }),
+        payload: {
+          connectionId: connection.id,
+          reason,
+          ...(reason === "expired" ? { owner: connection.userId } : {}),
+        },
+      });
+    }
+  }
+
   return {
-    /** Null when this person already holds {@link LIVE_CODES_PER_PERSON} unexpired codes. Every expired code, and the
-     * sealed organization session it held, is deleted first. */
+    /**
+     * Null when this person already holds {@link LIVE_CODES_PER_PERSON} unexpired codes. Every expired code, and the
+     * sealed organization session it held, is deleted first.
+     *
+     * One person's mints take turns, on every replica, behind a lock on that person: counting and then inserting is a
+     * cap only when nobody else of theirs can count between the two.
+     */
     async mintCode(
       userId: string,
       via: RecorderConnectVia,
       organizationSession: string | null = null,
     ): Promise<ConnectCodeResponse | null> {
       const created = now();
+      // Outside the lock, which is one person's: these rows are everybody's.
       await database
         .delete(recorderConnectCodes)
         .where(lte(recorderConnectCodes.expiresAt, created));
-      const [live] = await database
-        .select({ codes: count() })
-        .from(recorderConnectCodes)
-        .where(eq(recorderConnectCodes.userId, userId));
-      if ((live?.codes ?? 0) >= LIVE_CODES_PER_PERSON) return null;
-      const code = secretWithPrefix(RECORDER_CODE_PREFIX);
-      const expiresAt = new Date(
-        created.getTime() + RECORDER_CONNECT_CODE_TTL_MS,
-      );
-      await database.insert(recorderConnectCodes).values({
-        codeHash: digest(code),
-        userId,
-        via,
-        organizationSession,
-        createdAt: created,
-        expiresAt,
+      return database.transaction(async (transaction) => {
+        await lock(transaction, `recorder-codes\u001f${userId}`);
+        const [live] = await transaction
+          .select({ codes: count() })
+          .from(recorderConnectCodes)
+          .where(
+            and(
+              eq(recorderConnectCodes.userId, userId),
+              gt(recorderConnectCodes.expiresAt, created),
+            ),
+          );
+        if ((live?.codes ?? 0) >= LIVE_CODES_PER_PERSON) return null;
+        const code = secretWithPrefix(RECORDER_CODE_PREFIX);
+        const expiresAt = new Date(
+          created.getTime() + RECORDER_CONNECT_CODE_TTL_MS,
+        );
+        await transaction.insert(recorderConnectCodes).values({
+          codeHash: digest(code),
+          userId,
+          via,
+          organizationSession,
+          createdAt: created,
+          expiresAt,
+        });
+        return { code, expiresAt: expiresAt.toISOString() };
       });
-      return { code, expiresAt: expiresAt.toISOString() };
     },
 
-    /** Consumes the code atomically (it is deleted, with the sealed organization session it held) and, in the same
-     * transaction, revokes this person's older live connection with the same `installId` (the same copy connecting again,
-     * Decision 18). Null when the code is unknown, expired or already used. */
+    /**
+     * Consumes the code atomically (it is deleted, with the sealed organization session it held) and, in the same
+     * transaction, revokes this person's older live connection with the same `installId` (the same copy connecting
+     * again, Decision 18) and writes `recorder.connected`, with `recorder.revoked` for the one it replaced. Null when the
+     * code is unknown, expired or already used. Throws when the connection or its row could not be written; then nothing
+     * changed, the code included, and it can be tried again.
+     *
+     * Two exchanges for the same person and copy at once (a double click, a retry, two replicas) take turns behind a lock
+     * on that pair, so the second sees the first's connection and replaces it, as the same copy connecting again. Without
+     * the turn both found no older connection and both inserted, and the second broke
+     * `recorder_connections_live_install_idx` (one live connection per person and copy) and answered a 500.
+     */
     async exchange(input: {
       code: string;
       label: string;
@@ -106,7 +242,11 @@ export function createRecorderConnectionStore(
           )
           .returning();
         if (!consumed) return null;
-        const [replaced] = await transaction
+        await lock(
+          transaction,
+          `recorder-install\u001f${consumed.userId}\u001f${input.installId}`,
+        );
+        const replaced = await transaction
           .update(recorderConnections)
           .set({ revokedAt: at, organizationSession: null })
           .where(
@@ -116,7 +256,10 @@ export function createRecorderConnectionStore(
               isNull(recorderConnections.revokedAt),
             ),
           )
-          .returning({ id: recorderConnections.id });
+          .returning({
+            id: recorderConnections.id,
+            userId: recorderConnections.userId,
+          });
         const token = secretWithPrefix(RECORDER_TOKEN_PREFIX);
         const [connection] = await transaction
           .insert(recorderConnections)
@@ -133,11 +276,28 @@ export function createRecorderConnectionStore(
           })
           .returning();
         if (!connection) throw new Error("The connection was not stored.");
+        const made = connectionView(connection);
+        if (auditFor) {
+          await recordAuditEvent(auditFor(transaction as unknown as Database), {
+            eventType: "recorder.connected",
+            targetType: "recorder_connection",
+            targetId: made.id,
+            actorUserId: consumed.userId,
+            payload: {
+              connectionId: made.id,
+              via: made.via,
+              extensionId: made.extensionId,
+              installId: made.installId,
+              label: made.label,
+            },
+          });
+        }
+        await auditRevoked(transaction, replaced, "replaced");
         return {
           token,
-          connection: connectionView(connection),
+          connection: made,
           userId: consumed.userId,
-          replaced: replaced?.id ?? null,
+          replaced: replaced[0]?.id ?? null,
         };
       });
     },
@@ -147,12 +307,7 @@ export function createRecorderConnectionStore(
       const rows = await database
         .select()
         .from(recorderConnections)
-        .where(
-          and(
-            eq(recorderConnections.userId, userId),
-            isNull(recorderConnections.revokedAt),
-          ),
-        )
+        .where(and(eq(recorderConnections.userId, userId), live(now())))
         .orderBy(asc(recorderConnections.createdAt));
       return rows.map(connectionView);
     },
@@ -165,12 +320,7 @@ export function createRecorderConnectionStore(
       const rows = await database
         .select()
         .from(recorderConnections)
-        .where(
-          and(
-            eq(recorderConnections.userId, userId),
-            isNull(recorderConnections.revokedAt),
-          ),
-        )
+        .where(and(eq(recorderConnections.userId, userId), live(now())))
         .orderBy(asc(recorderConnections.createdAt));
       return rows.map((row) => ({
         ...connectionView(row),
@@ -202,36 +352,118 @@ export function createRecorderConnectionStore(
       return reported.length > 0;
     },
 
-    /** A revoked connection keeps no organization session: nothing may ask the organization for it again. */
-    async revoke(userId: string, connectionId: string): Promise<boolean> {
-      const revoked = await database
-        .update(recorderConnections)
-        .set({ revokedAt: now(), organizationSession: null })
-        .where(
-          and(
-            eq(recorderConnections.id, connectionId),
-            eq(recorderConnections.userId, userId),
-            isNull(recorderConnections.revokedAt),
-          ),
-        )
-        .returning({ id: recorderConnections.id });
-      return revoked.length > 0;
+    /**
+     * Ends one of this person's live connections, with its `recorder.revoked` row in the same transaction. A revoked
+     * connection keeps no organization session: nothing may ask the organization for it again. False when it is not
+     * this person's live connection.
+     */
+    async revoke(
+      userId: string,
+      connectionId: string,
+      reason: "disconnected" | "revoked",
+    ): Promise<boolean> {
+      return database.transaction(async (transaction) => {
+        const revoked = await transaction
+          .update(recorderConnections)
+          .set({ revokedAt: now(), organizationSession: null })
+          .where(
+            and(
+              eq(recorderConnections.id, connectionId),
+              eq(recorderConnections.userId, userId),
+              isNull(recorderConnections.revokedAt),
+            ),
+          )
+          .returning({
+            id: recorderConnections.id,
+            userId: recorderConnections.userId,
+          });
+        await auditRevoked(transaction, revoked, reason);
+        return revoked.length > 0;
+      });
     },
 
-    /** sha256(token) lookup of a live connection; touches last_used_at at most once a minute. */
+    /**
+     * Ends every connection this person holds, as signing out of OpenBot does: each browser's Recorder is signed out
+     * with them. Their unused connect codes go too, with any sealed organization session in them, so none minted before
+     * the sign-out makes a connection after it. Returns the connections it ended.
+     *
+     * The codes first: an exchange already under way holds its code, so deleting the codes waits for it, and the
+     * connection it made is then there to be ended with the rest.
+     */
+    async revokeAll(userId: string, reason: "signed_out"): Promise<string[]> {
+      return database.transaction(async (transaction) => {
+        await transaction
+          .delete(recorderConnectCodes)
+          .where(eq(recorderConnectCodes.userId, userId));
+        const revoked = await transaction
+          .update(recorderConnections)
+          .set({ revokedAt: now(), organizationSession: null })
+          .where(
+            and(
+              eq(recorderConnections.userId, userId),
+              isNull(recorderConnections.revokedAt),
+            ),
+          )
+          .returning({
+            id: recorderConnections.id,
+            userId: recorderConnections.userId,
+          });
+        await auditRevoked(transaction, revoked, reason);
+        return revoked.map((connection) => connection.id);
+      });
+    },
+
+    /**
+     * Ends every connection whose lifetime has run out, and the sealed organization session it held. A connection past
+     * its lifetime already resolves to nobody (`resolve`); this is what removes the copy of a session that nothing will
+     * ask for again, and says so in the trail. Returns how many it ended.
+     *
+     * It passes over a row somebody else holds (`skip locked`): a sign-out or a reconnect ending the same connection
+     * gets it, and the sweep neither waits for them nor, taking its rows in another order, deadlocks with them. Two
+     * replicas sweeping at once take different rows, so each is ended, and written, once.
+     */
+    async expire(): Promise<number> {
+      const at = now();
+      const within = withinLifetime(at);
+      if (!within) return 0;
+      return database.transaction(async (transaction) => {
+        const due = transaction
+          .select({ id: recorderConnections.id })
+          .from(recorderConnections)
+          .where(
+            and(isNull(recorderConnections.revokedAt), sql`not (${within})`),
+          )
+          .for("update", { skipLocked: true });
+        const expired = await transaction
+          .update(recorderConnections)
+          .set({ revokedAt: at, organizationSession: null })
+          .where(
+            and(
+              inArray(recorderConnections.id, due),
+              isNull(recorderConnections.revokedAt),
+            ),
+          )
+          .returning({
+            id: recorderConnections.id,
+            userId: recorderConnections.userId,
+          });
+        await auditRevoked(transaction, expired, "expired");
+        return expired.length;
+      });
+    },
+
+    /**
+     * sha256(token) lookup of a live connection within its lifetime; touches last_used_at at most once a minute, which is
+     * what keeps an `idle` lifetime going while the Recorder is used.
+     */
     async resolve(token: string) {
+      const at = now();
       const [row] = await database
         .select()
         .from(recorderConnections)
-        .where(
-          and(
-            eq(recorderConnections.tokenHash, digest(token)),
-            isNull(recorderConnections.revokedAt),
-          ),
-        )
+        .where(and(eq(recorderConnections.tokenHash, digest(token)), live(at)))
         .limit(1);
       if (!row) return null;
-      const at = now();
       await database
         .update(recorderConnections)
         .set({ lastUsedAt: at })

@@ -28,6 +28,11 @@ import { type ChromeFake, installChromeFake } from "./support/chrome-fake";
 
 type Exchange = { code: string; label: string; installId: string };
 const user = { id: "u1", name: "Ada", email: "ada@example.test" };
+/** Another person on the same OpenBot: a code ending `_bea` is hers, and exchanges for her own token. */
+const bea = { id: "u2", name: "Bea", email: "bea@example.test" };
+/** What a site's server can answer an exchange with, in the Recorder's own Connect page if it were shown. */
+const HOSTILE =
+  "Your Recorder is out of date. Install the new one from https://evil.example.test/recorder.crx.";
 
 let server: ReturnType<typeof Bun.serve>;
 /**
@@ -88,10 +93,16 @@ async function openbot(request: Request): Promise<Response> {
     exchanges.push(body);
     await holdIfAsked(url.pathname);
     if (body.code === "obc_expired")
-      return Response.json(
-        { error: "That code has expired. Connect again from OpenBot." },
-        { status: 400 },
-      );
+      return Response.json({ error: HOSTILE }, { status: 400 });
+    const refused = /^obc_refused_(\d{3})$/.exec(body.code);
+    if (refused)
+      return Response.json({ error: HOSTILE }, { status: Number(refused[1]) });
+    if (body.code.endsWith("_bea"))
+      return Response.json({
+        token: "obr_bea",
+        connection: { id: "c2" },
+        user: bea,
+      });
     return Response.json({
       token: "obr_fixture",
       connection: { id: "c1" },
@@ -134,6 +145,16 @@ const openTab = async (url: string) => {
   return id;
 };
 const deps = () => ({ openTab, readPolicy: async () => policy });
+/** OpenBot Desktop's native host on this computer, answering `address` with `openbotUrl` (null: no OpenBot Desktop,
+ * as when its host is not installed), as recorder_host.rs answers it. */
+function desktopAnswers(openbotUrl: string | null): void {
+  fake.native.reply = openbotUrl
+    ? (message) =>
+        (message as { type?: string }).type === "address"
+          ? { ok: true, openbotUrl }
+          : { ok: false, error: "unknown-message" }
+    : null;
+}
 const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
 
 beforeEach(() => {
@@ -193,12 +214,7 @@ function holdAnswer(path: string): {
 
 test("a web connect is confirmed on the extension's own page and exchanged at the sender's origin", async () => {
   const answer = await connect("obc_abc");
-  expect(answer).toEqual({
-    ok: true,
-    version: "0.2.0",
-    installId: await installIdFor(origin),
-    awaitingConfirmation: true,
-  });
+  expect(answer).toEqual({ ok: true, awaitingConfirmation: true });
   expect(opened).toEqual([
     "chrome-extension://abcdefghijklmnopabcdefghijklmnop/connect.html",
   ]);
@@ -312,18 +328,34 @@ test("the same origin asking again after five minutes still reuses its open conn
   });
 });
 
-test("an expired code shows the server's sentence and stores nothing", async () => {
-  await connect("obc_expired");
-  const answer = await handleConnectionMessage({
-    type: "page.connect.decide",
-    approve: true,
-    label: "x",
-    origin,
-  });
-  expect(answer).toEqual({
-    ok: false,
-    error: "That code has expired. Connect again from OpenBot.",
-  });
+test("a code OpenBot refuses shows the Recorder's own sentence on the Connect page, never the text the site's server sent, and stores nothing", async () => {
+  for (const [code, sentence] of [
+    [
+      "obc_expired",
+      "This connect request has expired or was already used. Choose Connect this browser in OpenBot again.",
+    ],
+    [
+      "obc_refused_403",
+      "This OpenBot does not accept this copy of the Recorder. Ask whoever runs it to add it.",
+    ],
+    [
+      "obc_refused_429",
+      "OpenBot is taking too many connect requests just now. Try again in a few minutes.",
+    ],
+    ["obc_refused_500", "OpenBot could not connect this browser. Try again."],
+    ["obc_refused_418", "OpenBot could not connect this browser. Try again."],
+  ] as const) {
+    clock += 30 * 1000;
+    await connect(code);
+    const answer = await handleConnectionMessage({
+      type: "page.connect.decide",
+      approve: true,
+      label: "x",
+      origin,
+    });
+    expect(answer).toEqual({ ok: false, error: sentence });
+    expect(JSON.stringify(answer)).not.toContain("evil");
+  }
   expect(await readLocal("connection")).toBeUndefined();
 });
 
@@ -465,6 +497,54 @@ test("rejecting clears the pending connect and exchanges nothing", async () => {
   expect(exchanges).toEqual([]);
 });
 
+const connectStatus = (from = origin) =>
+  handleExternalConnect(
+    { type: "openbot.connect.status" },
+    { origin: from },
+    deps(),
+  );
+
+test("the page that asked to connect hears at once that the person cancelled on the Connect page, or closed it, and no other site hears anything", async () => {
+  // End-to-end run 1 of the review fixes: after Cancel on the Connect page, OpenBot's Settings went on saying "Confirm
+  // in the OpenBot Recorder tab that opened." for up to five minutes, as nothing told it the person had cancelled.
+  expect(await connectStatus()).toEqual({ ok: true, connect: "none" });
+  await connect("obc_abc");
+  expect(await connectStatus()).toEqual({ ok: true, connect: "waiting" });
+  // Another site learns nothing of this one's request.
+  expect(await connectStatus("https://other.example.test")).toEqual({
+    ok: true,
+    connect: "none",
+  });
+  await handleConnectionMessage({
+    type: "page.connect.decide",
+    approve: false,
+    label: "x",
+    origin,
+  });
+  expect(await connectStatus()).toEqual({ ok: true, connect: "cancelled" });
+  expect(await connectStatus("https://other.example.test")).toEqual({
+    ok: true,
+    connect: "none",
+  });
+
+  // Asked again, it waits again; the person closes the Connect tab without choosing.
+  await connect("obc_def");
+  expect(await connectStatus()).toEqual({ ok: true, connect: "waiting" });
+  await chrome.tabs.remove(42);
+  expect(await connectStatus()).toEqual({ ok: true, connect: "closed" });
+
+  // Asked again and approved: nothing waits, and the ping says connected.
+  await connect("obc_ghi");
+  await handleConnectionMessage({
+    type: "page.connect.decide",
+    approve: true,
+    label: "x",
+    origin,
+  });
+  expect(await connectStatus()).toEqual({ ok: true, connect: "none" });
+  expect(exchanges.map((exchange) => exchange.code)).toEqual(["obc_ghi"]);
+});
+
 const OUT_OF_DATE =
   "This page is out of date. Close it and choose Connect this browser in OpenBot again.";
 
@@ -553,10 +633,14 @@ test("an approve still exchanging when another origin replaces the stale pending
     openbotUrl: origin,
     token: "obr_fixture",
   });
-  // ...and the other origin's connect tab still has its pending connect to show.
+  // ...and the other origin's connect tab still has its pending connect to show, which would now replace this one.
   expect(
     await handleConnectionMessage({ type: "page.connect.pending" }),
-  ).toEqual({ ok: true, pending: { origin: other, via: "web" } });
+  ).toEqual({
+    ok: true,
+    pending: { origin: other, via: "web" },
+    replaces: { origin, email: user.email },
+  });
   expect(await readSession("pendingConnect")).toMatchObject({
     code: "obc_b",
     tabId: 42,
@@ -848,11 +932,12 @@ test("an install with no OpenBot Desktop to answer connects nothing and opens no
   expect(followedUp).toEqual([]);
 });
 
-test("the connect answer, the connected origin's ping and the exchange carry this copy's install id for that origin", async () => {
-  const answer = await connect("obc_i");
-  expect(answer).toMatchObject({
+test("the exchange and the connected origin's ping carry this copy's install id for that origin, and the connect answer before the person approves carries none", async () => {
+  // Any site can ask to connect: until the person approves it, its answer says nothing of this copy. The install id is
+  // stable for this copy and that origin, so a site that only asked would otherwise know this browser again.
+  expect(await connect("obc_i")).toEqual({
     ok: true,
-    installId: await installIdFor(origin),
+    awaitingConfirmation: true,
   });
   await handleConnectionMessage({
     type: "page.connect.decide",
@@ -883,28 +968,33 @@ test("a policy whose address is unusable refuses with policy-invalid", async () 
   expect(opened).toEqual([]);
 });
 
-test("a website that is not this copy's OpenBot learns nothing from a ping", async () => {
+test("a website that is not this copy's OpenBot learns nothing from a ping, a site with a connect waiting for the person included, until it is connected", async () => {
   const tracker = { origin: "https://tracker.example.test" };
-  expect(
-    await handleExternalConnect({ type: "openbot.ping" }, tracker, deps()),
-  ).toEqual({ ok: true });
-  expect(
-    await handleExternalConnect({ type: "openbot.ping" }, { origin }, deps()),
-  ).toEqual({ ok: true });
-  await connect("obc_a");
-  expect(
-    await handleExternalConnect({ type: "openbot.ping" }, { origin }, deps()),
-  ).toMatchObject({
+  const ping = (from: { origin: string }) =>
+    handleExternalConnect({ type: "openbot.ping" }, from, deps());
+  expect(await ping(tracker)).toEqual({ ok: true });
+  expect(await ping({ origin })).toEqual({ ok: true });
+  // A site that asked to connect is still any site until the person approves it.
+  await connect("obc_a", tracker.origin);
+  expect(await ping(tracker)).toEqual({ ok: true });
+  // The person closes the tracker's Connect page; OpenBot asks.
+  fake.tabs.delete(41);
+  await connect("obc_b");
+  expect(await ping({ origin })).toEqual({ ok: true });
+  clock += 6 * 60 * 1000;
+  expect(await ping({ origin })).toEqual({ ok: true });
+  await handleConnectionMessage({
+    type: "page.connect.decide",
+    approve: true,
+    label: "x",
+    origin,
+  });
+  expect(await ping({ origin })).toEqual({
     ok: true,
     version: "0.2.0",
+    installId: await installIdFor(origin),
   });
-  expect(
-    await handleExternalConnect({ type: "openbot.ping" }, tracker, deps()),
-  ).toEqual({ ok: true });
-  clock += 6 * 60 * 1000;
-  expect(
-    await handleExternalConnect({ type: "openbot.ping" }, { origin }, deps()),
-  ).toEqual({ ok: true });
+  expect(await ping(tracker)).toEqual({ ok: true });
 });
 
 test("an ordinary run of connects (connect, connect again, again after Disconnect, again after a revoke, and a couple of retries) is never refused", async () => {
@@ -1388,33 +1478,46 @@ test("a pin elsewhere that lands while the code is exchanged keeps the connectio
 
 // ---- Trusted OpenBots: no Connect page (shared/recorder-page.ts TrustedConnectRule) ----------
 
-test("only the organization's pinned OpenBot and OpenBot Desktop's loopback address are trusted to connect with no Connect page", () => {
+test("only the organization's pinned OpenBot and the exact address OpenBot Desktop confirms are trusted to connect with no Connect page", () => {
   const none = { ...policy };
   const pinned = (openbotUrl: string) => ({ ...policy, openbotUrl });
-  for (const [rules, address, rule] of [
-    [none, "http://127.0.0.1:3010", "loopback-desktop"],
-    [none, "http://[::1]:3010", "loopback-desktop"],
-    [none, "https://openbot.acme.test", null],
+  const desktop = "http://127.0.0.1:3010";
+  for (const [rules, address, confirmed, rule] of [
+    [none, desktop, desktop, "loopback-desktop"],
+    [none, "http://[::1]:3010", "http://[::1]:3010", "loopback-desktop"],
+    // Any other program can serve a page on a loopback port: one OpenBot Desktop did not confirm keeps the click.
+    [none, desktop, null, null],
+    [none, "http://127.0.0.1:8888", desktop, null],
+    [none, "http://[::1]:3010", desktop, null],
+    [none, desktop, "http://[::1]:3010", null],
+    [none, "https://openbot.acme.test", desktop, null],
     // https on a loopback IP is not OpenBot Desktop's local stack, which serves plain http.
-    [none, "https://127.0.0.1:3010", null],
-    [none, "http://localhost:3010", null],
-    [none, "http://openbot.acme.test", null],
-    [none, "null", null],
+    [none, "https://127.0.0.1:3010", "https://127.0.0.1:3010", null],
+    [none, "http://localhost:3010", "http://localhost:3010", null],
+    [none, "http://openbot.acme.test", desktop, null],
+    [none, "null", desktop, null],
     [
       pinned("https://openbot.acme.test"),
       "https://openbot.acme.test",
+      null,
       "policy-pinned",
     ],
-    [pinned("https://openbot.acme.test"), "https://other.acme.test", null],
+    [
+      pinned("https://openbot.acme.test"),
+      "https://other.acme.test",
+      null,
+      null,
+    ],
     // A pin elsewhere keeps even OpenBot Desktop's address out.
-    [pinned("https://openbot.acme.test"), "http://127.0.0.1:3010", null],
-    [pinned("http://127.0.0.1:3010"), "http://127.0.0.1:3010", "policy-pinned"],
-    [{ ...policy, openbotUrlInvalid: true }, "http://127.0.0.1:3010", null],
+    [pinned("https://openbot.acme.test"), desktop, desktop, null],
+    [pinned(desktop), desktop, null, "policy-pinned"],
+    [{ ...policy, openbotUrlInvalid: true }, desktop, desktop, null],
   ] as const)
-    expect(trustedConnectRule(rules, address)).toBe(rule);
+    expect(trustedConnectRule(rules, address, confirmed)).toBe(rule);
 });
 
 test("OpenBot Desktop's own page on its loopback address connects with no Connect page, as an approved Connect connects", async () => {
+  desktopAnswers(loopback);
   await writeLocal("notice", { kind: "signed-out", at: 1, reason: "revoked" });
   const answer = await connect("obc_desktop_page", loopback);
   expect(answer).toEqual({
@@ -1425,6 +1528,8 @@ test("OpenBot Desktop's own page on its loopback address connects with no Connec
   });
   expect(opened).toEqual([]);
   expect(await readSession("pendingConnect")).toBeUndefined();
+  // OpenBot Desktop's native host confirmed this address; nothing was minted to confirm it.
+  expect(fake.native.sent).toEqual([{ type: "address" }]);
   // Exchanged at the origin Chrome reported, under this copy's install id for it and the browser's own name.
   expect(exchanges).toEqual([
     {
@@ -1470,13 +1575,12 @@ test("the OpenBot the organization's policy pins connects with no Connect page",
 });
 
 test("a third-party https site still gets the Connect page and nothing is exchanged until the person approves it", async () => {
+  desktopAnswers(loopback);
   // Not pinned by the organization, and not OpenBot Desktop's: https on a loopback IP is a site like any other.
   for (const site of [origin, `https://127.0.0.1:${server.port}`]) {
     clock += 6 * 60 * 1000;
     expect(await connect(`obc_${site.length}`, site)).toEqual({
       ok: true,
-      version: "0.2.0",
-      installId: await installIdFor(site),
       awaitingConfirmation: true,
     });
     expect(await readSession("pendingConnect")).toMatchObject({
@@ -1490,6 +1594,7 @@ test("a third-party https site still gets the Connect page and nothing is exchan
 });
 
 test("a trusted OpenBot's code OpenBot refuses, or an OpenBot that does not answer, stores nothing, opens nothing and says why", async () => {
+  desktopAnswers(loopback);
   expect(await connect("obc_expired", loopback)).toEqual({
     ok: false,
     error: "exchange-refused",
@@ -1497,6 +1602,7 @@ test("a trusted OpenBot's code OpenBot refuses, or an OpenBot that does not answ
   const closed = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: openbot });
   const gone = closed.url.origin;
   await closed.stop(true);
+  desktopAnswers(gone);
   expect(await connect("obc_d", gone)).toEqual({
     ok: false,
     error: "openbot-unreachable",
@@ -1507,6 +1613,7 @@ test("a trusted OpenBot's code OpenBot refuses, or an OpenBot that does not answ
 });
 
 test("a trusted OpenBot's connect closes a Connect page another site left open, so approving it cannot replace this connection", async () => {
+  desktopAnswers(loopback);
   expect(await connect("obc_w", "https://a.example.test")).toMatchObject({
     awaitingConfirmation: true,
   });
@@ -1527,6 +1634,7 @@ test("a trusted OpenBot's connect closes a Connect page another site left open, 
 });
 
 test("a pin elsewhere that lands while a trusted OpenBot's code is exchanged keeps the connection out and revokes its new token", async () => {
+  desktopAnswers(loopback);
   const exchange = holdAnswer("/api/recorder/connections");
   const connecting = connect("obc_desktop_page", loopback);
   await exchange.arrived;
@@ -1540,7 +1648,10 @@ test("a pin elsewhere that lands while a trusted OpenBot's code is exchanged kee
 });
 
 test("a trusted OpenBot asking to connect over and over is held to the same limit as any site", async () => {
+  desktopAnswers(loopback);
   for (let i = 1; i <= 10; i++) {
+    // Connected to nothing each time, as a trusted OpenBot only connects with no Connect page then.
+    fake.storage.local.delete("connection");
     expect(await connect(`obc_${i}`, loopback)).toMatchObject({
       ok: true,
       connected: true,
@@ -1553,4 +1664,183 @@ test("a trusted OpenBot asking to connect over and over is held to the same limi
     retryAfterMs: 5 * 60 * 1000,
   });
   expect(exchanges).toHaveLength(10);
+});
+
+// ---- Blocker 1 of the code-owner review on #858: a loopback page is OpenBot Desktop's only when Desktop says so, and
+// no connection is ever replaced without the Connect page --------------------------------------------------------------
+
+test("a page on a loopback port that OpenBot Desktop did not confirm gets the Connect page, whatever serves it, and nothing is exchanged until the person approves it", async () => {
+  const elsewhere = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch: openbot,
+  });
+  try {
+    for (const [why, answer] of [
+      // No OpenBot Desktop on this computer: its native host is not installed.
+      ["no host", () => desktopAnswers(null)],
+      // OpenBot Desktop runs its OpenBot on another port: this page is a dev server, a notebook, any local app.
+      ["another port", () => desktopAnswers(elsewhere.url.origin)],
+      // OpenBot Desktop from before the address message.
+      [
+        "older host",
+        () => {
+          fake.native.reply = () => ({ ok: false, error: "unknown-message" });
+        },
+      ],
+    ] as const) {
+      answer();
+      clock += 6 * 60 * 1000;
+      expect(await connect(`obc_${why.length}`, loopback)).toEqual({
+        ok: true,
+        awaitingConfirmation: true,
+      });
+      expect(await readSession("pendingConnect")).toMatchObject({
+        origin: loopback,
+        via: "web",
+      });
+    }
+    expect(exchanges).toEqual([]);
+    expect(await currentConnection()).toBeNull();
+    expect(opened).toHaveLength(1);
+  } finally {
+    await elsewhere.stop(true);
+  }
+});
+
+test("a trusted OpenBot asking while this browser is connected goes through the Connect page, which names the connection it replaces, and nothing is exchanged before the click", async () => {
+  desktopAnswers(loopback);
+  await connected("obr_old");
+  expect(await connect("obc_desktop_page_bea", loopback)).toEqual({
+    ok: true,
+    awaitingConfirmation: true,
+  });
+  // The organization's pinned OpenBot, asking again as another person, is asked about too.
+  policy = { ...policy, openbotUrl: origin };
+  clock += 6 * 60 * 1000;
+  fake.tabs.delete(41);
+  expect(await connect("obc_pinned_bea")).toEqual({
+    ok: true,
+    awaitingConfirmation: true,
+  });
+  expect(exchanges).toEqual([]);
+  expect(await currentConnection()).toMatchObject({ token: "obr_old", user });
+  expect(
+    await handleConnectionMessage({ type: "page.connect.pending" }),
+  ).toEqual({
+    ok: true,
+    pending: { origin, via: "web" },
+    replaces: { origin, email: user.email },
+  });
+});
+
+test("approving a Connect page that replaces another OpenBot's or another person's connection stops what still uses it, then revokes its token at its OpenBot", async () => {
+  const events: string[] = [];
+  const losses: ConnectionLoss[] = [];
+  const watched = {
+    ...deps(),
+    connectionLost: async (loss: ConnectionLoss) => {
+      losses.push(loss);
+      events.push(`lost ${loss.connection.token}`);
+    },
+  };
+  const approve = () =>
+    handleConnectionMessage(
+      { type: "page.connect.decide", approve: true, label: "x", origin },
+      watched,
+    );
+  const revoked = (token: string) =>
+    hits.filter(
+      (hit) =>
+        hit === `DELETE /api/recorder/connections/current Bearer ${token}`,
+    ).length;
+  const recordRevokes = () => {
+    for (const token of ["obr_old", "obr_fixture"])
+      if (
+        revoked(token) > events.filter((e) => e === `revoked ${token}`).length
+      )
+        events.push(`revoked ${token}`);
+  };
+
+  // Another person on the same OpenBot.
+  await connected("obr_old");
+  const ada = await currentConnection();
+  if (!ada) throw new Error("Not connected");
+  await handleExternalConnect(
+    { type: "openbot.connect", code: "obc_x_bea" },
+    { origin },
+    watched,
+  );
+  expect(await approve()).toEqual({ ok: true });
+  recordRevokes();
+  expect(await currentConnection()).toMatchObject({
+    token: "obr_bea",
+    user: bea,
+  });
+  expect(losses).toEqual([{ kind: "replaced", connection: ada }]);
+  // The controller heard first, so nothing still sending with the old token meets its revocation.
+  expect(events).toEqual(["lost obr_old", "revoked obr_old"]);
+
+  // The same person on the same OpenBot is this copy connecting again: OpenBot revoked the old token at the exchange
+  // (one live connection per person and install id), and the recording goes on under the new one.
+  clock += 6 * 60 * 1000;
+  await connected("obr_old");
+  hits.length = 0;
+  losses.length = 0;
+  await handleExternalConnect(
+    { type: "openbot.connect", code: "obc_y" },
+    { origin },
+    watched,
+  );
+  expect(await approve()).toEqual({ ok: true });
+  expect(losses).toEqual([]);
+  expect(revoked("obr_old")).toBe(0);
+});
+
+test("a connection that lands while a trusted OpenBot's code is exchanged is never replaced: the new token is revoked and the page told to try again", async () => {
+  desktopAnswers(loopback);
+  const exchange = holdAnswer("/api/recorder/connections");
+  const connecting = connect("obc_desktop_page", loopback);
+  await exchange.arrived;
+  await connected("obr_old");
+  exchange.release();
+  expect(await connecting).toEqual({ ok: false, error: "busy" });
+  expect(await currentConnection()).toMatchObject({ token: "obr_old" });
+  expect(hits).toContain(
+    "DELETE /api/recorder/connections/current Bearer obr_fixture",
+  );
+  expect(hits).not.toContain(
+    "DELETE /api/recorder/connections/current Bearer obr_old",
+  );
+});
+
+test("a connection OpenBot Desktop makes in place of another person's stops what still uses the old one, then revokes it", async () => {
+  await writeLocal("connection", {
+    openbotUrl: origin,
+    token: "obr_bea",
+    connectionId: "c2",
+    user: bea,
+    via: "web",
+    connectedAt: clock,
+  });
+  const losses: ConnectionLoss[] = [];
+  expect(
+    await connectThroughDesktop({
+      askDesktop: async () => ({ openbotUrl: loopback, code: "obc_d" }),
+      openTab,
+      readPolicy: async () => policy,
+      connectionLost: async (loss) => {
+        losses.push(loss);
+      },
+    }),
+  ).toEqual({ connected: true });
+  expect(losses).toEqual([
+    {
+      kind: "replaced",
+      connection: expect.objectContaining({ token: "obr_bea", user: bea }),
+    },
+  ]);
+  expect(hits).toContain(
+    "DELETE /api/recorder/connections/current Bearer obr_bea",
+  );
 });

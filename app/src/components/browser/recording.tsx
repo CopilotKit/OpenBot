@@ -25,6 +25,7 @@ import {
 } from "@/lib/browser/mutations";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
+import type { NarrationChoice } from "./narration-choice";
 
 /** The language narration is heard in: the person's own browser's. */
 export function narrationLanguage(): string {
@@ -63,15 +64,26 @@ const phraseCount = (phrases: number) =>
 /**
  * Record and Stop for the person's browser, from the Recorder's own report in `state`.
  *
+ * Record asks the person whether to narrate when they have never said (`choice`), in a dialog whose answer records and
+ * is kept, and tells the Recorder the answer with every recording, so it opens a microphone only for a person who chose
+ * to narrate. `answered` hears the answer on the person's click, where narration in the page needs it.
+ *
  * `beforeStop` runs first on Stop. On a screen it hands over the phrase being said, so the last thing the person said
  * is in the recording before it ends.
  */
 export function useRecording(
   state: BrowserApiState,
-  beforeStop?: () => Promise<void>,
+  choice: NarrationChoice,
+  options: {
+    beforeStop?: () => Promise<void>;
+    answered?: (narrate: boolean) => void;
+  } = {},
 ) {
+  const { beforeStop, answered } = options;
   const [title, setTitle] = useState("");
   const [finishing, setFinishing] = useState(false);
+  /** The narration question is on screen, for the task named when Record was pressed. */
+  const [asking, setAsking] = useState(false);
   const start = useMutation(startBrowserRecordingMutationOptions(queryClient));
   const stop = useMutation(stopBrowserRecordingMutationOptions(queryClient));
   const recorder = state.recorder;
@@ -87,6 +99,14 @@ export function useRecording(
   const waiting = !state.open
     ? "Your browser is closed. Open it to record."
     : null;
+
+  function begin(name: string, narrate: boolean) {
+    stop.reset();
+    start.mutate(
+      { title: name, language: narrationLanguage(), narrate },
+      { onSuccess: () => setTitle("") },
+    );
+  }
 
   return {
     phase,
@@ -116,11 +136,23 @@ export function useRecording(
     record() {
       const name = title.trim();
       if (!name) return;
-      stop.reset();
-      start.mutate(
-        { title: name, language: narrationLanguage() },
-        { onSuccess: () => setTitle("") },
-      );
+      if (choice.narration === null) {
+        setAsking(true);
+        return;
+      }
+      begin(name, choice.narration === "on");
+    },
+    /** The narration question, while it is asked: its dialog's props. */
+    question: {
+      open: asking,
+      onAnswer(narrate: boolean) {
+        setAsking(false);
+        choice.choose(narrate);
+        answered?.(narrate);
+        const name = title.trim();
+        if (name) begin(name, narrate);
+      },
+      onClose: () => setAsking(false),
     },
     async stop() {
       start.reset();
@@ -158,9 +190,13 @@ export function stoppedRecording(
 export type Stopped = NonNullable<ReturnType<typeof stoppedRecording>>;
 
 /** What a recording holds, which the person can go by next time: the browser's own pages (a new tab, its settings)
- * are never recorded. */
+ * and the sites they leave out are never recorded (@openbot/shared/recorder-disclosure says it in full). */
 const WHAT_IT_RECORDS =
-  "The Recorder records your clicks, typing and the pages you open on websites, in every tab you use while it records.";
+  "The Recorder records the pages you open on websites and what you do there, with what each step saves, AI assistant conversations and your narration, in every tab you use while it records, except sites you leave out.";
+
+/** What Record does, said before it is pressed: everything a recording holds, as the disclosure says it. */
+export const RECORDING_DESCRIPTION =
+  "Do the task in your browser as you always would. The Recorder records every tab you use until you stop, and each tab shows that it is: the pages and what is on them, your clicks and typing, what each step saves, AI assistant conversations, and your narration when it's on. Passwords, card numbers, email addresses and tokens are masked first.";
 
 /** What a saved recording held: its actions, and its narrated phrases when there were any. */
 function heldIn(stopped: Stopped): string {

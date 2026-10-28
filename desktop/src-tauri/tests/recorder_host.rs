@@ -380,6 +380,10 @@ fn the_host_answers_as_chrome_asks_and_exits_when_its_input_closes() {
         host.ask(json!({ "type": "handoff" })),
         json!({ "ok": false, "error": "not-installed" })
     );
+    assert_eq!(
+        host.ask(json!({ "type": "address" })),
+        json!({ "ok": false, "error": "not-installed" })
+    );
     let status = host.close();
     assert!(status.success(), "{status:?}");
 }
@@ -397,6 +401,10 @@ fn another_extension_is_refused_a_handoff() {
     assert_eq!(
         host.ask(json!({ "type": "ping" })),
         json!({ "ok": false, "available": false, "error": "origin-not-allowed" })
+    );
+    assert_eq!(
+        host.ask(json!({ "type": "address" })),
+        json!({ "ok": false, "error": "origin-not-allowed" })
     );
     assert!(host.close().success());
 }
@@ -473,6 +481,12 @@ fn the_test_app_address_reaches_only_a_debug_binary() {
                 http("201 Created", "", MINTED)
             }
         });
+        // The address is the one the Recorder trusts a page's connect from; asking it dials nothing, so the app's first
+        // request below is still the ping's.
+        assert_eq!(
+            host.ask(json!({ "type": "address" })),
+            json!({ "ok": true, "openbotUrl": url })
+        );
         assert_eq!(
             host.ask(json!({ "type": "ping" })),
             json!({ "ok": true, "available": true })
@@ -500,6 +514,10 @@ fn the_test_app_address_reaches_only_a_debug_binary() {
         );
         assert_eq!(
             host.ask(json!({ "type": "handoff" })),
+            json!({ "ok": false, "error": "not-installed" })
+        );
+        assert_eq!(
+            host.ask(json!({ "type": "address" })),
             json!({ "ok": false, "error": "not-installed" })
         );
         listener.set_nonblocking(true).unwrap();

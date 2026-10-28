@@ -134,7 +134,7 @@ const SECTIONS: {
       {
         title: "Enterprise controls",
         description:
-          "Roles and groups, required SSO, SCIM, network policy, MCP and model allowlists, Action Recording.",
+          "Roles and groups, required SSO, SCIM, Skill sharing, network policy, MCP and model allowlists, Action Recording.",
         icon: IconShieldCheck,
         linkOptions: { to: "/admin/enterprise" },
       },

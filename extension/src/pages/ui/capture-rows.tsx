@@ -197,13 +197,17 @@ export type VoiceActions = {
   onMute: (muted: boolean) => void;
   /** Opens the setup page, offered when the browser has not let the Recorder use the microphone. */
   onAllowMicrophone: () => void;
+  /** Downloads the language the browser has to have on the computer before it can turn speech into text there, on the
+   * person's click, and turns voice on: it starts once the language is there. */
+  onDownload?: (language: string) => void;
 };
 
 /** What the Voice row says under its title: that it listens, or why it does not. */
 function voiceLine(voice: VoiceCapture): string {
   switch (voice.state) {
     case "starting":
-      return "Starting the microphone";
+      // While the browser downloads the language, why voice has not started yet.
+      return voice.reason ?? "Starting the microphone";
     case "listening":
       return "Listening";
     case "muted":
@@ -272,6 +276,21 @@ export function VoiceRow({
         <ItemFooter className="justify-end">
           <Button size="sm" variant="ghost" onClick={actions.onAllowMicrophone}>
             Allow microphone
+          </Button>
+        </ItemFooter>
+      ) : null}
+      {actions?.onDownload &&
+      voice.problem === "speech-pack" &&
+      voice.language ? (
+        <ItemFooter className="justify-end">
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() =>
+              voice.language && actions.onDownload?.(voice.language)
+            }
+          >
+            Download
           </Button>
         </ItemFooter>
       ) : null}

@@ -38,7 +38,7 @@ import { join } from "node:path";
 import { type BrowserContext, chromium, type Page } from "playwright";
 import { isPersonBrowserId } from "../../shared/openbot-browser";
 import { profileDirectoryFor } from "./bot-id";
-import { chooseEvictions, chooseIdle } from "./browser-eviction";
+import { chooseEvictions, chooseIdle, keptOpen } from "./browser-eviction";
 import { type BrowserRuntime, browserRuntimeFromEnv } from "./browser-runtime";
 import { egressFor, egressLabel } from "./egress";
 import { numberFromEnv, settleWithin } from "./env";
@@ -398,6 +398,8 @@ export function createProfiles(
 
   /** One running browser per Bot, up to {@link MAX_LIVE_BROWSERS}. */
   const live = new Map<string, LiveBrowser>();
+  /** A person's native window: the idle sweep leaves it and the cap takes it last. See `keptOpen`. */
+  const stays = keptOpen(personWindow(runtime));
   /** Launches in flight, so a cold computer is started once however many callers ask at once. */
   const starting = new Map<string, Promise<Page>>();
   /** Closes and resets in flight, so a Bot's browser is never reopened from a profile being closed or deleted. */
@@ -462,7 +464,7 @@ export function createProfiles(
     for (const botId of chooseEvictions(
       live.entries(),
       MAX_LIVE_BROWSERS,
-      isPersonBrowserId,
+      stays,
     )) {
       await evict(botId, "the cap on running browsers was reached");
     }
@@ -479,7 +481,7 @@ export function createProfiles(
       live.entries(),
       IDLE_TIMEOUT_MS,
       Date.now(),
-      isPersonBrowserId,
+      stays,
     )) {
       await evict(botId, "it had been idle");
     }
@@ -558,7 +560,9 @@ export function createProfiles(
    *
    * It is closed when the person closes it. Quitting the browser ends the context, and closing the
    * last window ends it too: on macOS Chrome keeps running with no window, and a browser nobody can
-   * see is one the person closed. It is not closed by the idle sweep, and goes last at the cap.
+   * see is one the person closed. A native window is not closed by the idle sweep, and goes last at
+   * the cap; a cloud browser, which the person reaches only through the Browser page, closes when
+   * nobody has touched it for as long as a Bot's would (`keptOpen`).
    *
    * A window is a window whatever it shows. One left on one of the Recorder's own pages (its
    * options, say) is still the person's browser on the screen: it is open, it is not closed under

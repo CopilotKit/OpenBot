@@ -475,6 +475,8 @@ test("a narrated recording reaches Intelligence in time order: each phrase goes 
     };
   };
   const [first, second, third] = [phrase(0), phrase(1), phrase(2)];
+  // The person chose to narrate their recordings.
+  fake.storage.local.set("narration", "on");
   const trajectoryId = await record(
     first.startedAt - 2_000,
     "Find order 1043 and refund it",
@@ -577,6 +579,8 @@ test("a narrated recording reaches Intelligence in time order: each phrase goes 
 test("Stop while a phrase is being said: the phrase goes in ahead of the steps taken while it was said, then the outcome", async () => {
   // The last phrase of a recording is the one the person is saying as they click Stop: it ends only when Stop asks the
   // speech service for it, after the steps taken while it was said were held.
+  // The person chose to narrate their recordings.
+  fake.storage.local.set("narration", "on");
   const trajectoryId = await record(
     rows.archiveClick.timestamp - 4_000,
     "Archive order 1043",
@@ -969,3 +973,165 @@ for (const { moment, stopAt, linked, ...when } of [
     );
     expect(asked.length).toBeLessThanOrEqual(1);
   }, 30_000);
+
+test("a site the person glances at mid-recording and leaves out on its mark 6 s later never reaches Intelligence, not even its arrival", async () => {
+  // End-to-end run 1 of the review fixes (trajectory 24b97d1c): the person opened example.org while recording, waited
+  // about 6 s and pressed "Don't record example.org" on the mark. Its arrival (address and title) had already reached
+  // Intelligence: a page change was held only for its 2 s redirect wait.
+  const click = rows.archiveClick;
+  const trajectoryId = await record(
+    click.timestamp - 7_000,
+    "Archive order 1043, with a glance elsewhere",
+  );
+  const shop = contentPort();
+  await advanceTo(click.timestamp);
+  shop.postMessage({ type: "content.event", event: click });
+  await advanceTo(click.timestamp + 5_000);
+
+  // A new tab, straight to the site: the recording follows it from its first page.
+  const glance = "https://example.org/";
+  const tab = fake.person.openTab({ url: glance, title: "Example Domain" });
+  const tabId = tab.id as number;
+  await until(
+    () =>
+      (fake.storage.session.get("recorder") as { tabIds?: number[] })?.tabIds
+        ?.length === 2,
+    "the new tab followed",
+  );
+  const mark = fake.connectFrom(PORT_CONTENT, {
+    id: EXTENSION_ID,
+    tab: { id: tabId } as chrome.tabs.Tab,
+    frameId: 0,
+    url: glance,
+  });
+  mark.postMessage({ type: "content.hello", top: true, url: glance });
+  await until(
+    () =>
+      mark.messages.some(
+        (message) =>
+          (message as { type?: string; site?: string }).site === "example.org",
+      ),
+    "the mark on the page",
+  );
+  // They look at it for 6 s without acting, then press Don't record example.org.
+  await advanceTo(clock + 6_000);
+  mark.postMessage({ type: "content.site", recorded: false });
+  await until(
+    () =>
+      JSON.stringify(fake.storage.local.get("excludedSites")) ===
+      '["example.org"]',
+    "the site left out",
+  );
+
+  // Back to the shop: they act again and stop.
+  fake.person.switchTo(7);
+  await advanceTo(clock + 1_000);
+  const notify = { ...rows.notifyClick, timestamp: clock };
+  shop.postMessage({ type: "content.event", event: notify });
+  await advanceTo(clock + 5_000);
+  expect(await page({ type: "page.stop" })).toEqual({ ok: true });
+  await until(
+    () => names(trajectoryId).filter((name) => name === "outcome").length === 2,
+    "the recording stopped",
+  );
+
+  expect(names(trajectoryId)).toEqual([
+    "recording.started",
+    "outcome",
+    "navigation",
+    "click",
+    "click",
+    "outcome",
+  ]);
+  expect(JSON.stringify(sent(trajectoryId))).not.toContain("example.org");
+  expect(JSON.stringify(sent(trajectoryId))).not.toContain("Example Domain");
+  const times = sent(trajectoryId).map((event) => event.timestamp);
+  expect(times).toEqual([...times].sort((a, b) => a - b));
+}, 20_000);
+
+test("a browser's service worker still finishing its last Stop never closes the next browser's document, so a restart there never opens a second one", async () => {
+  // A full test run (and its gate's test:ci) lost a click of "Chrome stops the service worker 300 ms after a click":
+  // the test before it ended while its recording's drain was still finishing, and that browser's service worker, once
+  // Intelligence acknowledged the last events, closed its document through the `chrome` the next test had installed,
+  // closing that test's document. After its service worker restarted, recovery found no document and opened a second
+  // one, and two documents streamed the same trajectory, so rows reached Intelligence out of order or after the outcome.
+  const click = rows.archiveClick;
+  const first = { fake, gateway, documents };
+  await record(click.timestamp - 3_000, "The recording the last test stops");
+  const before = contentPort();
+  await advanceTo(click.timestamp);
+  before.postMessage({ type: "content.event", event: click });
+  await advanceTo(click.timestamp + 5_000);
+  // Intelligence acknowledges the last events a moment late, so the drain finishes after the next browser recorded.
+  gateway.delayNextAck(1_500);
+  expect(await page({ type: "page.stop" })).toEqual({ ok: true });
+
+  // The next browser, as the next test installs it.
+  gateway = await startFakeGateway({ extraRoutes: route });
+  globals.indexedDB = new IDBFactory();
+  databaseName = `held-steps-${Date.now()}-${databaseCounter++}`;
+  documents = [];
+  network = null;
+  fake = installChromeFake({
+    extensionId: EXTENSION_ID,
+    manifestVersion: "0.3.0",
+  });
+  fake.offscreen.onDocumentCreated.addListener(() => {
+    setTimeout(runDocument, 0);
+  });
+  fake.storage.local.set("connection", {
+    openbotUrl: gateway.httpUrl,
+    token: "obr_one",
+    connectionId: "c-obr_one",
+    user: ada,
+    via: "web",
+    connectedAt: 0,
+  });
+  startWorker();
+  try {
+    const trajectoryId = await record(
+      click.timestamp + 60_000,
+      "The recording the next test makes",
+    );
+    expect(fake.offscreen.open).toBe(true);
+    // The first browser's drain finishes and its service worker closes its own document, never this one.
+    await until(
+      () => !first.fake.offscreen.open || !fake.offscreen.open,
+      "a document closed",
+    );
+    expect({
+      first: first.fake.offscreen.open,
+      next: fake.offscreen.open,
+    }).toEqual({
+      first: false,
+      next: true,
+    });
+    // This browser's service worker restarts a second later: its document is still there, so none is opened beside it.
+    await advanceTo(clock + 1_000);
+    await restartWorker();
+    const after = contentPort();
+    clock += 1_000;
+    after.postMessage({
+      type: "content.event",
+      event: { ...rows.notifyClick, timestamp: clock },
+    });
+    await advanceTo(clock + 5_000);
+    expect(await page({ type: "page.stop" })).toEqual({ ok: true });
+    await until(
+      () =>
+        names(trajectoryId).filter((name) => name === "outcome").length === 2,
+      "the next recording stopped",
+    );
+    expect(fake.offscreen.created).toHaveLength(1);
+    expect(names(trajectoryId)).toEqual([
+      "recording.started",
+      "outcome",
+      "navigation",
+      "click",
+      "outcome",
+    ]);
+  } finally {
+    for (const timers of first.documents) timers.quit();
+    await first.gateway.stop();
+  }
+}, 30_000);

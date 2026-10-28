@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -337,8 +338,13 @@ async def test_anthropic_selection_reaches_anthropic_boundary_without_openai_key
     assert result["messages"][0].content == "anthropic proof"
     assert "OPENAI_API_KEY" not in os.environ
     assert captured[0]["url"] == "http://127.0.0.1:4311/v1/messages"
-    assert captured[0]["headers"]["x-api-key"] == "sk-ant-openbot-ci"
-    assert captured[0]["headers"]["anthropic-version"] == "2023-06-01"
+    # Anthropic's SDK sends the key as `x-api-key` up to 1.x and as `Authorization: Bearer` from
+    # 2.x; either is the key reaching Anthropic, which is what this test is about.
+    bearer = captured[0]["headers"].get("authorization") or ""
+    key = captured[0]["headers"].get("x-api-key") or bearer.removeprefix("Bearer ") or None
+    assert key == "sk-ant-openbot-ci"
+    # The Messages API version is dated, and the SDK picks it: 1.x sends 2023-06-01, 2.x a later date.
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", captured[0]["headers"]["anthropic-version"])
     assert captured[0]["body"]["model"] == request_model
     assert captured[0]["body"]["messages"] == [
         {"role": "user", "content": "Say hello."}

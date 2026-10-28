@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import type { RecorderState } from "../../protocol/messages";
+import { KEPT_FOR_PERSON_DAYS } from "../../shared/limits";
 import {
   CaptureRows,
   SendingLearningRow,
@@ -180,7 +181,7 @@ function keptCounts(kept: NonNullable<RecorderState["kept"]>) {
 function keptSentence(kept: NonNullable<RecorderState["kept"]>): string {
   const { counts, verb } = keptCounts(kept);
   return kept.waitingFor
-    ? `${counts} by ${kept.waitingFor.name} ${verb} kept in this browser. Connect this browser to OpenBot again as ${kept.waitingFor.name} to send them.`
+    ? `${counts} by ${kept.waitingFor.name} ${verb} kept in this browser for up to ${KEPT_FOR_PERSON_DAYS} days. Connect this browser to OpenBot again as ${kept.waitingFor.name} to send them.`
     : `${counts} ${verb} kept in this browser: ${stripCaptureStatus(kept.reason)}`;
 }
 

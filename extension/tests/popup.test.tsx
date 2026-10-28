@@ -15,7 +15,7 @@ import { voiceSentence } from "../src/offscreen/voice";
 import { desktopSentence } from "../src/pages/popup/desktop-sentence";
 import { Popup } from "../src/pages/popup/popup";
 import { stripCaptureStatus } from "../src/pages/ui/capture-rows";
-import { DISCLOSURE } from "../src/pages/ui/disclosure";
+import { DISCLOSURE_SHORT } from "../src/pages/ui/disclosure";
 import {
   IDLE_STATE,
   type PageResponse,
@@ -24,6 +24,7 @@ import {
   type RecorderState,
 } from "../src/protocol/messages";
 import { type ChromeFake, installChromeFake } from "./support/chrome-fake";
+import { fakeSpeech, onDeviceModel } from "./support/fake-speech";
 
 beforeAll(() => GlobalRegistrator.register());
 afterEach(cleanup);
@@ -81,6 +82,9 @@ function stateResponse(
     } as PageStateResponse["me"],
     policy: { openbotUrl: null, invalid: false },
     notice: null,
+    // A person who chose to narrate, on the setup page or here.
+    narration: "on",
+    excludedSites: [],
     ...rest,
   };
 }
@@ -97,6 +101,8 @@ function setup(
     microphone?: PermissionState | null;
     /** What the service worker does with a message before it answers, for the next page.state to show. */
     onAsk?: (message: PageToBackground) => void;
+    /** The browser's speech recognition; the fake's by default. */
+    Recognition?: unknown;
   } = {},
 ) {
   const sent: PageToBackground[] = [];
@@ -122,6 +128,7 @@ function setup(
           tabId === 7 ? (options.pageLanguage ?? null) : null,
         browserLanguage: () => options.browserLanguage ?? "en-GB",
         microphoneState: async () => options.microphone ?? null,
+        Recognition: options.Recognition ?? fakeSpeech().Recognition,
       }}
     />,
   );
@@ -281,7 +288,7 @@ test("connected and idle shows the person, the host, the form copy and Record di
   const { findByText, getByText, getByRole } = setup(stateResponse());
   await findByText("Ada Lovelace");
   expect(getByText("openbot.example.test")).toBeTruthy();
-  expect(getByText(DISCLOSURE)).toBeTruthy();
+  expect(getByText(DISCLOSURE_SHORT)).toBeTruthy();
   expect(
     (getByRole("button", { name: "Record" }) as HTMLButtonElement).disabled,
   ).toBe(true);
@@ -293,16 +300,16 @@ test("the Record form says what the Recorder collects and where it goes, before 
     stateResponse(),
   );
   const title = await findByLabelText("What are you about to do?");
-  const disclosure = getByText(DISCLOSURE);
+  const disclosure = getByText(DISCLOSURE_SHORT);
+  // All of what a recording holds: a step's save carries its request and answer, an AG-UI page its conversation.
   for (const said of [
     "every tab you use",
-    "the pages you open and what is on them",
+    "the pages and what is on them",
     "your clicks and typing",
     "what each step saves",
-    "what you say",
-    "Passwords and secrets are masked in your browser first",
-    "your organization's own Intelligence through your organization's OpenBot",
-    "only while you record",
+    "AI assistant conversations",
+    "your narration when it is on",
+    "Passwords, card numbers, email addresses and tokens are masked in your browser first",
   ])
     expect(disclosure.textContent).toContain(said);
   // It sits with the title, above Record, in the order a person reads them.
@@ -316,6 +323,68 @@ test("the Record form says what the Recorder collects and where it goes, before 
       Node.DOCUMENT_POSITION_FOLLOWING,
   ).toBeTruthy();
   expect(sent.some((message) => message.type === "page.record")).toBe(false);
+});
+
+test("before the first recording the form asks whether to narrate, and Record waits for the answer", async () => {
+  // Nobody chose yet: the Recorder opens no microphone until they do.
+  const chosen: boolean[] = [];
+  const view = setup(stateResponse({ narration: null }), {
+    onAsk: (message) => {
+      if (message.type === "page.narration") chosen.push(message.on);
+    },
+  });
+  await userEvent.type(
+    await view.findByLabelText("What are you about to do?"),
+    "Refund an order",
+  );
+  expect(view.getByText("Narrate while you record?")).toBeTruthy();
+  expect(
+    (view.getByRole("button", { name: "Record" }) as HTMLButtonElement)
+      .disabled,
+  ).toBe(true);
+  fireEvent.click(view.getByRole("button", { name: "Don't narrate" }));
+  await waitFor(() =>
+    expect(view.sent).toContainEqual({ type: "page.narration", on: false }),
+  );
+  expect(chosen).toEqual([false]);
+});
+
+test("Narrate, on its click, asks the browser for its speech recognition in the person's language and keeps the choice", async () => {
+  // Chrome answers downloadable for a language this origin has not asked for; only a click may ask.
+  const model = onDeviceModel({ "en-GB": "downloadable" });
+  const speech = fakeSpeech(model);
+  document.addEventListener(
+    "click",
+    () => {
+      model.activation = true;
+    },
+    { capture: true, once: true },
+  );
+  const view = setup(stateResponse({ narration: null }), {
+    Recognition: speech.Recognition,
+    microphone: "granted",
+  });
+  fireEvent.click(await view.findByRole("button", { name: "Narrate" }));
+  await waitFor(() =>
+    expect(view.sent).toContainEqual({ type: "page.narration", on: true }),
+  );
+  expect(model.installs).toEqual(["en-GB"]);
+  expect(model.languages.get("en-GB")).toBe("downloading");
+  // The microphone was allowed already: no setup page opens.
+  expect(fake.opened).toEqual([]);
+});
+
+test("once chosen, the form shows narration as a switch the person can change before any recording", async () => {
+  const view = setup(stateResponse({ narration: "off" }));
+  const toggle = await view.findByRole("switch", { name: "Narration" });
+  expect(toggle.getAttribute("aria-checked")).toBe("false");
+  expect(
+    view.getByText("Off. The Recorder does not open your microphone."),
+  ).toBeTruthy();
+  fireEvent.click(toggle);
+  await waitFor(() =>
+    expect(view.sent).toContainEqual({ type: "page.narration", on: true }),
+  );
 });
 
 test("the popup has no Bot picker: only the title and Record, and Record needs just a title", async () => {
@@ -600,7 +669,7 @@ test("a signed-out notice with kept recordings says they are kept and sent on re
     }),
   );
   await findByText(
-    "Your recordings are kept in this browser and sent when you connect again.",
+    "Your recordings are kept in this browser for up to 7 days and sent when you connect again.",
   );
 });
 
@@ -736,6 +805,49 @@ test("a microphone the browser refused says so in a plain sentence and offers th
   expect(
     network.queryByRole("button", { name: "Allow microphone" }),
   ).toBeNull();
+});
+
+test("a language the browser has still to download offers Download, which asks for it on that click and turns voice on", async () => {
+  const model = onDeviceModel({ "de-DE": "downloadable" });
+  const speech = fakeSpeech(model);
+  const view = setup(
+    voiceRecording({
+      state: "failed",
+      problem: "speech-pack",
+      reason: voiceSentence("speech-pack", "de-DE"),
+      language: "de-DE",
+    }),
+    { Recognition: speech.Recognition },
+  );
+  await view.findByText(voiceSentence("speech-pack", "de-DE"));
+  document.addEventListener(
+    "click",
+    () => {
+      model.activation = true;
+    },
+    { capture: true, once: true },
+  );
+  fireEvent.click(view.getByRole("button", { name: "Download" }));
+  await waitFor(() =>
+    expect(view.sent).toContainEqual({ type: "page.voice", muted: false }),
+  );
+  expect(model.installs).toEqual(["de-DE"]);
+  expect(model.languages.get("de-DE")).toBe("downloading");
+});
+
+test("while the browser downloads the language, the Voice row says voice starts when it is ready", async () => {
+  const view = setup(
+    voiceRecording({
+      state: "starting",
+      reason:
+        "Chrome is downloading its German (Germany) speech recognition to your computer. Voice starts when it is ready.",
+    }),
+  );
+  expect(
+    await view.findByText(
+      "Chrome is downloading its German (Germany) speech recognition to your computer. Voice starts when it is ready.",
+    ),
+  ).toBeTruthy();
 });
 
 test("Stop and Start over send page.stop and page.restart", async () => {
@@ -1281,7 +1393,7 @@ test("kept events waiting on a sign-out name the person and how to send them", a
     stateResponse({ state: { kept: WAITING(2, 40), draining: 2 } }),
   );
   await findByText(
-    "40 events from 2 recordings by Ada Lovelace are kept in this browser. Connect this browser to OpenBot again as Ada Lovelace to send them.",
+    "40 events from 2 recordings by Ada Lovelace are kept in this browser for up to 7 days. Connect this browser to OpenBot again as Ada Lovelace to send them.",
   );
 });
 
@@ -1289,15 +1401,15 @@ test("the waiting sentence agrees with one event, and leaves out an event count 
   const cases = [
     [
       WAITING(1, 1),
-      "1 event from 1 recording by Ada Lovelace is kept in this browser. Connect this browser to OpenBot again as Ada Lovelace to send them.",
+      "1 event from 1 recording by Ada Lovelace is kept in this browser for up to 7 days. Connect this browser to OpenBot again as Ada Lovelace to send them.",
     ],
     [
       WAITING(1, 0),
-      "1 recording by Ada Lovelace is kept in this browser. Connect this browser to OpenBot again as Ada Lovelace to send them.",
+      "1 recording by Ada Lovelace is kept in this browser for up to 7 days. Connect this browser to OpenBot again as Ada Lovelace to send them.",
     ],
     [
       WAITING(2, 0),
-      "2 recordings by Ada Lovelace are kept in this browser. Connect this browser to OpenBot again as Ada Lovelace to send them.",
+      "2 recordings by Ada Lovelace are kept in this browser for up to 7 days. Connect this browser to OpenBot again as Ada Lovelace to send them.",
     ],
   ] as const;
   for (const [kept, sentence] of cases) {
@@ -1318,7 +1430,7 @@ test("signed out with recordings kept, the popup says how to send them and Disca
       state: {
         ...STOPPED,
         error:
-          "This browser was disconnected from OpenBot. Your recording stopped, and everything in it is kept in this browser until you connect again.",
+          "This browser was disconnected from OpenBot. Your recording stopped, and everything in it is kept in this browser for 7 days, until you connect again.",
         kept: WAITING(1, 12),
         draining: 1,
       },
@@ -1326,7 +1438,7 @@ test("signed out with recordings kept, the popup says how to send them and Disca
   );
   await findByText("Connect the Recorder to OpenBot");
   await findByText(
-    "12 events from 1 recording by Ada Lovelace are kept in this browser. Connect this browser to OpenBot again as Ada Lovelace to send them.",
+    "12 events from 1 recording by Ada Lovelace are kept in this browser for up to 7 days. Connect this browser to OpenBot again as Ada Lovelace to send them.",
   );
   // Nothing can send while signed out: no sent row, no sending row.
   expect(queryByText("Sent to Intelligence")).toBeNull();
@@ -1355,7 +1467,7 @@ test("signed out, a Start-over drain that is not kept shows only the kept row: n
     }),
   );
   await findByText(
-    "12 events from 1 recording by Ada Lovelace are kept in this browser. Connect this browser to OpenBot again as Ada Lovelace to send them.",
+    "12 events from 1 recording by Ada Lovelace are kept in this browser for up to 7 days. Connect this browser to OpenBot again as Ada Lovelace to send them.",
   );
   expect(queryByText(SENDING)).toBeNull();
   expect(queryByText("Learning capture")).toBeNull();

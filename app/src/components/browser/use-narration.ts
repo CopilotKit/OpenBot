@@ -1,3 +1,4 @@
+import { installOnDeviceSpeech } from "@openbot/shared/on-device-speech";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { type NarrationPost, sendNarration } from "@/lib/browser/mutations";
 import {
@@ -16,7 +17,8 @@ export type LostNarration = { error: string | null };
 
 /**
  * The person's narration while a recording runs in the browser the page shows: listening from when `listening` turns
- * on, and a mute that lasts across recordings. Everything the Recorder needs to place what they say among their steps
+ * on, but only for a person who chose to narrate (`chosen`, their preference, which the page asks for before their
+ * first recording); a mute lasts across recordings, and starts as their choice says. Everything the Recorder needs to place what they say among their steps
  * goes to it in the order it happened: that a phrase began (its first words came back), the phrase once it is final,
  * and that they stopped speaking. One post at a time, each after the last has been answered, because a phrase that
  * overtook the word that it began would leave the Recorder holding the person's steps for a phrase already placed.
@@ -27,14 +29,21 @@ export type LostNarration = { error: string | null };
 export function useNarration({
   listening,
   language,
+  chosen,
   deps,
 }: {
   listening: boolean;
   language: string;
+  /** Whether the person chose to narrate: the microphone stays closed unless they did. */
+  chosen: boolean;
   /** The browser's own recognition and clock unless a test gives others. */
   deps?: NarrationDeps;
 }) {
-  const [muted, setMuted] = useState(false);
+  const [muted, setMuted] = useState(!chosen);
+  // The choice arrives with the person's preferences, after the page first draws, and changes when they make it.
+  useEffect(() => {
+    setMuted(!chosen);
+  }, [chosen]);
   const [status, setStatus] = useState<NarrationStatus | null>(null);
   const [lost, setLost] = useState<LostNarration | null>(null);
   const session = useRef<Narration | null>(null);
@@ -100,11 +109,23 @@ export function useNarration({
   const stopped = status?.state === "failed" && status.problem !== "network";
   const on = !muted && !stopped;
 
-  /** Turns narration on or off. On after a failure tries again: the person was never muted, so muting alone would not. */
-  const setOn = useCallback((next: boolean) => {
-    setMuted(!next);
-    if (next) session.current?.mute(false);
-  }, []);
+  /**
+   * Turns narration on or off. On after a failure tries again: the person was never muted, so muting alone would not. On
+   * is always the person's click, the one thing that may ask the browser to download the language for recognition on
+   * their computer (@openbot/shared/on-device-speech), so it asks then; narration waits for the download.
+   */
+  const setOn = useCallback(
+    (next: boolean) => {
+      if (next)
+        void installOnDeviceSpeech(
+          (depsNow.current ?? browserNarrationDeps()).Recognition,
+          language,
+        );
+      setMuted(!next);
+      if (next) session.current?.mute(false);
+    },
+    [language],
+  );
 
   return { supported, on, setOn, status, lost, finish };
 }

@@ -4,6 +4,7 @@ import { serve } from "bun";
 import { computerAccessCheck } from "./agents/computer-access";
 import type { AgentProfileStore } from "./agents/profile-store";
 import type { OpenBotRole } from "./auth/roles";
+import { browserRequestSeconds } from "./browser/routes";
 import { websocket as channelSocket } from "./channels/socket";
 import type { ComputerGateway } from "./computer/gateway";
 import { streamPathBotId } from "./computer/stream-path";
@@ -99,6 +100,10 @@ export function startHttpServer(deps: {
       }
       if (url.pathname === "/api/voice/calls") server.timeout(request, 30);
       if (url.pathname === "/api/voice/sessions") server.timeout(request, 30);
+      // The person's browser's routes wait on its computer for longer than Bun's 10 s: a cold open, a slow page. Kept
+      // open for each route's own budget, so its answer, or its sentence, reaches the person (browser/routes.ts).
+      const browserSeconds = browserRequestSeconds(url.pathname);
+      if (browserSeconds !== undefined) server.timeout(request, browserSeconds);
       const streamBotId = streamPathBotId(url.pathname);
       if (
         streamBotId !== null &&

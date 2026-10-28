@@ -12,6 +12,7 @@ import type { AuditEventInput, AuditStore } from "../audit";
 import { recordAuditEvent } from "../audit";
 import type { DeploymentConfig } from "../config";
 import type { Database } from "../db/client";
+import { reasonWithoutStatement } from "../db/query-failure";
 import {
   accounts,
   scimConnectionBindings,
@@ -183,6 +184,14 @@ export function createAuth(
    * write below is guarded and its failure is logged rather than raised.
    */
   auditStore?: AuditStore,
+  options: {
+    /**
+     * A person signed out, and their session is gone: what else they were signed in with ends too (their Recorder
+     * connections, index.ts). Its failure is logged and the sign-out still stands, as Better Auth's own sign-out
+     * stands when the session row cannot be deleted.
+     */
+    onSignedOut?: (userId: string) => Promise<void>;
+  } = {},
 ) {
   const authConfig = config.auth;
   if (!authConfig) {
@@ -549,7 +558,37 @@ export function createAuth(
             });
           },
         },
+        delete: {
+          /*
+           * Only a sign-out. Better Auth also deletes a session it finds expired, and one ended from another of the
+           * person's sessions; neither is the person signing out where they are.
+           */
+          after: async (session, context) => {
+            if (context?.path !== "/sign-out" || !options.onSignedOut) return;
+            try {
+              await options.onSignedOut(session.userId);
+            } catch (error) {
+              console.error(
+                JSON.stringify({
+                  type: "sign-out-follow-up-failed",
+                  error: reasonWithoutStatement(error),
+                }),
+              );
+            }
+          },
+        },
       },
     },
   });
+}
+
+/**
+ * How long a session here lasts unused, in milliseconds: Better Auth's `session.expiresIn` as this instance resolved it.
+ * OpenBot sets none, so it is Better Auth's own default, and it is read rather than restated so the two cannot drift.
+ * Better Auth moves a session's expiry to this long from now whenever it is used (at most once per `updateAge`).
+ */
+export async function sessionLifetimeMs(
+  auth: ReturnType<typeof createAuth>,
+): Promise<number> {
+  return (await auth.$context).sessionConfig.expiresIn * 1_000;
 }

@@ -546,6 +546,8 @@ test("the password typed on checkout, searched for on the shop's home page, is m
     url: search,
     transitionType: "form_submit",
   });
+  // The person moves to another tab: the search page they arrived on, with no step there, goes out.
+  fake?.person.openTab();
   const changes = () =>
     streamed().filter(
       (event) =>

@@ -28,7 +28,7 @@ import { createLearningSharingStore } from "../src/learning/sharing";
 import { createRecorderExtension } from "../src/recorder/wiring";
 import { createRequestActor } from "../src/request-actor";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
-import { testEnvironment } from "./support/environment";
+import { SESSION_LIFETIME_MS, testEnvironment } from "./support/environment";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const prefix = `recorder-scope-${randomUUID()}`;
@@ -73,6 +73,7 @@ const recorder = createRecorderExtension({
     state: async () => ({ state: "unassigned", containerId: null }),
     kick: () => {},
   },
+  sessionLifetimeMs: SESSION_LIFETIME_MS,
   auditStore,
 });
 
@@ -136,6 +137,7 @@ args[34] = {
     store: createLearningSharingStore(database),
     skillsOf: async () => ({ skills: [] }),
     invalidate: () => {},
+    sharingAllowed: async () => true,
   },
   approvals: {} as never,
   demonstrations: {

@@ -44,6 +44,8 @@ export function startBrowserRecordingMutationOptions(queryClient: QueryClient) {
     mutationFn: async (variables: {
       title: string;
       language?: string;
+      /** Whether the person narrates this recording, as they chose: the Recorder opens a microphone only when true. */
+      narrate?: boolean;
     }): Promise<BrowserApiState> =>
       (
         await client(browserApiPaths.recording, {
@@ -52,6 +54,9 @@ export function startBrowserRecordingMutationOptions(queryClient: QueryClient) {
             action: "start",
             title: variables.title,
             ...(variables.language ? { language: variables.language } : {}),
+            ...(variables.narrate !== undefined
+              ? { narrate: variables.narrate }
+              : {}),
           },
           fallback: "Couldn't start recording. Try again.",
         })

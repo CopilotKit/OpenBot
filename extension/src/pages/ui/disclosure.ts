@@ -6,10 +6,12 @@
  * https://developer.chrome.com/docs/webstore/program-policies/user-data-faq
  * https://developer.chrome.com/docs/webstore/program-policies/limited-use
  *
- * One sentence set, so the two pages never say different things. It names what a recording holds (every step in every
- * tab used, what is on the page, typing with secrets masked first, what a step saves, narration) and where it goes.
+ * The sentences are OpenBot's own (@openbot/shared/recorder-disclosure), so the Recorder and OpenBot's Settings, Browsers
+ * never say different things: the lead says when it records and where it goes, the list (RecorderCollectsRows) what a
+ * recording holds, and the short form fits under the Record form's task name.
  */
-export const DISCLOSURE_TITLE = "What the Recorder collects";
-
-export const DISCLOSURE =
-  "When you press Record, the Recorder records each step you take in every tab you use until you stop: the pages you open and what is on them, your clicks and typing, what each step saves, and what you say as you go. Passwords and secrets are masked in your browser first. It all goes to your organization's own Intelligence through your organization's OpenBot, only while you record, and is used only for your organization's Skills, evaluations and insights.";
+export {
+  RECORDER_COLLECTS_SHORT as DISCLOSURE_SHORT,
+  RECORDER_DISCLOSURE as DISCLOSURE,
+  RECORDER_DISCLOSURE_TITLE as DISCLOSURE_TITLE,
+} from "@openbot/shared/recorder-disclosure";

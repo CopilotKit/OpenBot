@@ -206,6 +206,28 @@ function disabledFeatures(switches: string[]): string[] {
   return last ? last.slice("--disable-features=".length).split(",") : [];
 }
 
+/**
+ * The browser's own process, found by the profile it runs on: the one with no `--type`, which its renderers, GPU and
+ * utility processes all have. That process answers DevTools, so stopping it is a browser that does not answer.
+ */
+async function browserProcess(profile: string): Promise<number> {
+  const listing = Bun.spawnSync(["ps", "-axo", "pid=,command="]);
+  const found = listing.stdout
+    .toString()
+    .split("\n")
+    .filter(
+      (line) =>
+        line.includes(`--user-data-dir=${profile}`) &&
+        !line.includes("--type="),
+    )
+    .map((line) => Number.parseInt(line.trim(), 10));
+  if (found.length !== 1)
+    throw new Error(
+      `Expected one browser on ${profile}, found ${found.length}.`,
+    );
+  return found[0] as number;
+}
+
 /** A port nothing listens on, so a page there is refused. */
 async function closedPort(): Promise<number> {
   const probe = Bun.serve({
@@ -372,7 +394,10 @@ for (const variant of VARIANTS) {
     });
 
     test("refuses an open that is not the contract's", async () => {
-      expect((await api("/browser/open", {})).status).toBe(400);
+      // No connection at all is the contract's (an open that leaves the Recorder its own); a misnamed one is not.
+      expect(
+        (await api("/browser/open", { connections: CONNECTION })).status,
+      ).toBe(400);
       expect(
         (
           await api("/browser/open", {
@@ -812,6 +837,55 @@ for (const variant of VARIANTS) {
       expect(await worker()).toBeDefined();
     }, 60_000);
 
+    /*
+     * A browser that stops answering DevTools: in the end-to-end run a key forwarded to the person's Chromium on macOS
+     * left its main thread spinning, and the state route waited for it as long as OpenBot did, 45 s, after OpenBot's own
+     * server had closed the person's request with an empty reply at 10. The Browser page had nothing to show and no
+     * sentence, and the sidebar lost its Browser button. Stopped here with SIGSTOP, which is the same browser from
+     * outside: alive, connected, and silent.
+     */
+    test("a browser that stops answering is said to be, within seconds, and is shown again once it answers", async () => {
+      expect(
+        (await api("/browser/open", { connection: CONNECTION })).status,
+      ).toBe(200);
+      const pid = await browserProcess(join(root, PERSON));
+      const warned = spyOn(console, "warn");
+      process.kill(pid, "SIGSTOP");
+      try {
+        const asking = Date.now();
+        const silent = await fetch(
+          `http://127.0.0.1:${server.port}/browser/state`,
+          {
+            headers: { "x-openbot-bot-id": PERSON },
+            // Well short of OpenBot's own server closing the person's request, at 10 s.
+            signal: AbortSignal.timeout(8_000),
+          },
+        );
+        expect(silent.status).toBe(504);
+        expect(await silent.json()).toEqual({
+          error: "The browser did not answer within 5 s.",
+        });
+        expect(Date.now() - asking).toBeLessThan(7_000);
+        // Asked again while it is still silent: the same answer, and said once in the log, not once a second.
+        expect((await api("/browser/state")).status).toBe(504);
+        const said = warned.mock.calls.filter((call) =>
+          String(call[0]).includes("computer-browser-not-answering"),
+        );
+        expect(said).toHaveLength(1);
+      } finally {
+        process.kill(pid, "SIGCONT");
+        warned.mockRestore();
+      }
+      const back = await until(async () => {
+        const answer = await api("/browser/state");
+        return answer.status === 200
+          ? (answer.json as BrowserState)
+          : undefined;
+      }, "the browser to answer again");
+      expect(back.open).toBe(true);
+      expect(back.tabs.length).toBeGreaterThan(0);
+    }, 60_000);
+
     test("launches with the Recorder and nothing that makes it a test browser", async () => {
       const person = profiles.person(PERSON);
       if (!person) throw new Error("The browser should be open.");
@@ -1086,6 +1160,37 @@ for (const variant of VARIANTS) {
       const reopened = await api("/browser/open", { connection: CONNECTION });
       expect(reopened.status).toBe(200);
       expect((reopened.json as BrowserState).recorder?.connected).toBe(true);
+    }, 60_000);
+
+    /*
+     * OpenBot keeps a connection that stands rather than making one at every open: in the end-to-end run each visit to
+     * the Browser page revoked the browser's connection and made another, a `recorder.revoked` and a `recorder.connected`
+     * row each time. So an open that brings no connection leaves the Recorder holding its own, and says which it holds
+     * (`recorder.connectionId`), for OpenBot to decide whether it stands.
+     */
+    test("an open that brings no connection leaves the Recorder the one it holds, open, and closed and opened again", async () => {
+      const held = {
+        connected: true,
+        userId: "user-1",
+        connectionId: "connection-1",
+      };
+      expect(
+        (await api("/browser/open", { connection: CONNECTION })).status,
+      ).toBe(200);
+      const connects = callsFor("connect").length;
+
+      const again = await api("/browser/open", {});
+      expect(again.status).toBe(200);
+      expect((again.json as BrowserState).recorder).toMatchObject(held);
+
+      // Closed, then opened with no connection: the Recorder kept its own in the profile, as it keeps it in its storage.
+      expect((await api("/browser/close", {})).status).toBe(200);
+      const relaunched = await api("/browser/open", {});
+      expect(relaunched.status).toBe(200);
+      expect((relaunched.json as BrowserState).open).toBe(true);
+      expect((relaunched.json as BrowserState).recorder).toMatchObject(held);
+      // Never handed a connection by either.
+      expect(callsFor("connect")).toHaveLength(connects);
     }, 60_000);
 
     test("stays open while its one window shows a page of the Recorder's own, and opening it again relaunches nothing", async () => {
@@ -1433,6 +1538,11 @@ describe.skipIf(!asked)("among Bots' browsers on one computer", () => {
     const built = await harness(VARIANTS[0]!.runtime, root, "cap");
     profiles = built.profiles;
     server = serve(built.host);
+    await open();
+  }, 60_000);
+
+  /** The person opens their cloud browser, as the Browser page does. */
+  async function open() {
     const opening = await fetch(
       `http://127.0.0.1:${server.port}/browser/open`,
       {
@@ -1442,7 +1552,7 @@ describe.skipIf(!asked)("among Bots' browsers on one computer", () => {
       },
     );
     expect(opening.status).toBe(200);
-  }, 60_000);
+  }
 
   afterAll(async () => {
     for (const [name, value] of Object.entries(saved)) {
@@ -1454,20 +1564,28 @@ describe.skipIf(!asked)("among Bots' browsers on one computer", () => {
     if (root) await rm(root, { recursive: true, force: true });
   }, 60_000);
 
-  test("the idle sweep closes a Bot's browser and never the person's", async () => {
+  /*
+   * A cloud browser, shown on the Browser page, takes the Bots' own rule. The code-owner review found it exempt: an
+   * abandoned Browser tab kept a root, sandbox-less Chromium running for ever, and the cap closed Bots' browsers first.
+   */
+  test("the cap closes whichever browser was used longest ago, the person's cloud browser among them", async () => {
+    // The person's browser is the least recently used of the three, and the cap is two.
+    await profiles.page("bot-first");
+    await profiles.page("bot-second");
+    expect(profiles.isLive(PERSON)).toBe(false);
+    expect(profiles.isLive("bot-first")).toBe(true);
+    expect(profiles.isLive("bot-second")).toBe(true);
+  }, 60_000);
+
+  test("the idle sweep closes a person's cloud browser nobody has touched, as it closes a Bot's", async () => {
+    await open();
     await profiles.page("bot-idle");
     await wait(20);
     await profiles.sweepIdleNow();
     expect(profiles.isLive("bot-idle")).toBe(false);
+    expect(profiles.isLive(PERSON)).toBe(false);
+    // Opened again from the same profile, as a Bot's browser starts again where it left off.
+    await open();
     expect(profiles.isLive(PERSON)).toBe(true);
-  }, 60_000);
-
-  test("the cap closes Bots' browsers before the person's", async () => {
-    // The person's browser is the least recently used of the three, and the cap is two.
-    await profiles.page("bot-first");
-    await profiles.page("bot-second");
-    expect(profiles.isLive(PERSON)).toBe(true);
-    expect(profiles.isLive("bot-first")).toBe(false);
-    expect(profiles.isLive("bot-second")).toBe(true);
   }, 60_000);
 });

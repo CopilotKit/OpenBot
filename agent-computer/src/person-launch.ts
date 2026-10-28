@@ -55,8 +55,34 @@ export function personWindow(runtime: BrowserRuntime): BrowserWindow {
 }
 
 /**
- * Where each browser installs, matching Playwright's own stable-channel lookup, so the browser this
- * finds is the one `channel` then launches. Never an executable from a request.
+ * The commands each browser's Linux packages put on the PATH, in the order they are tried: the
+ * stable channel's own name first, then the one every channel's package links.
+ */
+export const LINUX_LAUNCHERS: Record<InstalledBrowser, readonly string[]> = {
+  chrome: ["google-chrome-stable", "google-chrome"],
+  msedge: ["microsoft-edge-stable", "microsoft-edge"],
+};
+
+/**
+ * Where each browser installs, in the order it is looked for. Never an executable from a request.
+ *
+ * macOS and Windows: Playwright's own stable-channel locations, which are where the browsers'
+ * installers put them.
+ *
+ * Linux: where Google's and Microsoft's own packages install them on every distribution (their .deb
+ * and .rpm put the browser in `/opt` and link a launcher into `/usr/bin`, and the AUR builds follow
+ * them), then the launcher on the PATH, for a distribution that keeps the browser somewhere of its
+ * own (NixOS keeps it in the Nix store, behind a wrapper on the PATH). A launcher is the browser's
+ * own script, which hands every argument and the DevTools pipe on to the browser it starts. A
+ * native window is started from this path itself rather than through Playwright's channel (see
+ * `native-browser.ts`), so a browser found this way is one that opens.
+ *
+ * Never a Flatpak or a Snap. The Flatpak builds of Chrome and Edge are community wrappers that run
+ * the browser in a sandbox with no access to the folders it would need here (its profile, and the
+ * Recorder in the deployment), and their exported launchers (`com.google.Chrome`) are not on the
+ * list above. Neither browser is published as a Snap; the Snap Store's browser is Chromium. OpenBot
+ * Desktop says so to the person when that is all a machine has.
+ * https://github.com/flathub/com.google.Chrome
  */
 export function browserExecutableCandidates(
   browser: InstalledBrowser,
@@ -67,10 +93,24 @@ export function browserExecutableCandidates(
     return browser === "chrome"
       ? ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"]
       : ["/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"];
-  if (platform === "linux")
-    return browser === "chrome"
-      ? ["/opt/google/chrome/chrome"]
-      : ["/opt/microsoft/msedge/msedge"];
+  if (platform === "linux") {
+    const packaged =
+      browser === "chrome"
+        ? "/opt/google/chrome/chrome"
+        : "/opt/microsoft/msedge/msedge";
+    // Absolute folders only: an empty or relative PATH entry means the folder this process runs in.
+    const folders = (env.PATH ?? "")
+      .split(":")
+      .filter((folder) => posix.isAbsolute(folder));
+    return [
+      ...new Set([
+        packaged,
+        ...folders.flatMap((folder) =>
+          LINUX_LAUNCHERS[browser].map((name) => posix.join(folder, name)),
+        ),
+      ]),
+    ];
+  }
   if (platform === "win32") {
     const suffix =
       browser === "chrome"
@@ -146,7 +186,7 @@ export async function installedBrowserAt(
   return null;
 }
 
-export const NO_INSTALLED_BROWSER = `Neither ${NAMES.chrome} nor ${NAMES.msedge} was found in its standard installation location. Install one of them to open a browser here.`;
+export const NO_INSTALLED_BROWSER = `Neither ${NAMES.chrome} nor ${NAMES.msedge} was found in its standard installation location. Install one of them (not as a Flatpak or a Snap) to open a browser here.`;
 
 /**
  * Playwright's own Chromium switches (playwright-core 1.62.1, `chromiumSwitches.ts`, plus what its

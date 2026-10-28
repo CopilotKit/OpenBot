@@ -14,6 +14,7 @@ import { extensionIdFromOrigin } from "@openbot/shared/recorder-extension";
 import { Hono, type MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { type AuditStore, DEPLOYMENT_INITIATOR } from "../audit";
+import { reasonWithoutStatement } from "../db/query-failure";
 import type { AppVariables, AuthenticatedActor } from "../auth/guards";
 import { recorderAudit, recorderConnected } from "./connected";
 import type { RecorderConnectionStore } from "./connections";
@@ -60,6 +61,27 @@ export function createRecorderRoutes(deps: RecorderRouteDeps) {
   const routes = new Hono<{ Variables: RecorderVariables }>();
   const audit = recorderAudit(deps.auditStore);
 
+  /** Ends the connection with its row (connections.ts); `failed` when either could not be written, and then neither was. */
+  async function revokeWithRow(
+    userId: string,
+    connectionId: string,
+    reason: "disconnected" | "revoked",
+  ): Promise<boolean | "failed"> {
+    try {
+      return await deps.connections.revoke(userId, connectionId, reason);
+    } catch (error) {
+      console.error(
+        JSON.stringify({
+          type: "recorder-revoke-failed",
+          reason,
+          // A failed query's message carries the values bound to it: never logged.
+          error: reasonWithoutStatement(error),
+        }),
+      );
+      return "failed";
+    }
+  }
+
   routes.post(
     "/connect-codes",
     deps.requireUser,
@@ -84,6 +106,12 @@ export function createRecorderRoutes(deps: RecorderRouteDeps) {
         sealed,
       );
       if (!minted) {
+        await audit({
+          eventType: "recorder.connect_refused",
+          targetType: "recorder_connection",
+          actorUserId: context.var.actor.id,
+          payload: { reason: "too_many_codes", via: body.data.via },
+        });
         return context.json(
           {
             error:
@@ -108,7 +136,7 @@ export function createRecorderRoutes(deps: RecorderRouteDeps) {
         eventType: "recorder.connect_refused",
         targetType: "recorder_connection",
         initiator: DEPLOYMENT_INITIATOR,
-        payload: { origin: origin ?? null },
+        payload: { reason: "origin", origin: origin ?? null },
       });
       return context.json(
         { error: "Only the OpenBot Recorder extension can finish connecting." },
@@ -124,13 +152,39 @@ export function createRecorderRoutes(deps: RecorderRouteDeps) {
         400,
       );
     }
-    const made = await deps.connections.exchange({
-      code: body.data.code,
-      label: body.data.label,
-      installId: body.data.installId,
-      extensionId,
-    });
+    let made: Awaited<ReturnType<RecorderConnectionStore["exchange"]>>;
+    try {
+      made = await deps.connections.exchange({
+        code: body.data.code,
+        label: body.data.label,
+        installId: body.data.installId,
+        extensionId,
+      });
+    } catch (error) {
+      // The connection and its row are written together, so neither was: the code still stands, to be tried again.
+      console.error(
+        JSON.stringify({
+          type: "recorder-connect-failed",
+          error: reasonWithoutStatement(error),
+        }),
+      );
+      return context.json(
+        { error: "This browser could not be connected. Try again." },
+        500,
+      );
+    }
     if (!made) {
+      // Unknown, expired and already used look the same here: a used or expired code is deleted.
+      await audit({
+        eventType: "recorder.connect_refused",
+        targetType: "recorder_connection",
+        initiator: DEPLOYMENT_INITIATOR,
+        payload: {
+          reason: "code",
+          extensionId,
+          installId: body.data.installId,
+        },
+      });
       return context.json(
         {
           error:
@@ -139,7 +193,7 @@ export function createRecorderRoutes(deps: RecorderRouteDeps) {
         400,
       );
     }
-    await recorderConnected({ made, audit, onConnected: deps.onConnected });
+    recorderConnected({ userId: made.userId, onConnected: deps.onConnected });
     const user = await deps.user(made.userId);
     if (!user) {
       return context.json(
@@ -169,19 +223,23 @@ export function createRecorderRoutes(deps: RecorderRouteDeps) {
     deps.requireRecorder,
     async (context) => {
       const connectionId = context.var.recorderConnectionId;
-      if (
-        !connectionId ||
-        !(await deps.connections.revoke(context.var.actor.id, connectionId))
-      ) {
+      if (!connectionId) {
         return context.json({ error: "This browser is not connected." }, 404);
       }
-      await audit({
-        eventType: "recorder.revoked",
-        targetType: "recorder_connection",
-        targetId: connectionId,
-        actorUserId: context.var.actor.id,
-        payload: { connectionId, reason: "disconnected" },
-      });
+      const revoked = await revokeWithRow(
+        context.var.actor.id,
+        connectionId,
+        "disconnected",
+      );
+      if (revoked === "failed") {
+        return context.json(
+          { error: "This browser could not be disconnected. Try again." },
+          500,
+        );
+      }
+      if (!revoked) {
+        return context.json({ error: "This browser is not connected." }, 404);
+      }
       return context.body(null, 204);
     },
   );
@@ -194,16 +252,19 @@ export function createRecorderRoutes(deps: RecorderRouteDeps) {
     const revoking = (await deps.connections.list(userId)).find(
       (connection) => connection.id === connectionId,
     );
-    if (!revoking || !(await deps.connections.revoke(userId, connectionId))) {
+    if (!revoking) {
       return context.json({ error: "That connection was not found." }, 404);
     }
-    await audit({
-      eventType: "recorder.revoked",
-      targetType: "recorder_connection",
-      targetId: connectionId,
-      actorUserId: userId,
-      payload: { connectionId, reason: "revoked" },
-    });
+    const revoked = await revokeWithRow(userId, connectionId, "revoked");
+    if (revoked === "failed") {
+      return context.json(
+        { error: "That browser could not be disconnected. Try again." },
+        500,
+      );
+    }
+    if (!revoked) {
+      return context.json({ error: "That connection was not found." }, 404);
+    }
     await deps.onRevoked?.(userId, revoking);
     return context.body(null, 204);
   });

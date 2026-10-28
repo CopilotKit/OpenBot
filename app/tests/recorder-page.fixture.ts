@@ -1,6 +1,8 @@
 import { RECORDER_EXTENSION_ID } from "@openbot/shared/recorder-extension";
 import {
+  RECORDER_CONNECT_STATUS,
   RECORDER_PAGE_MESSAGES,
+  type RecorderConnectWait,
   type RecorderPageResult,
   type RecorderPageState,
   recorderPageMessageSchema,
@@ -17,7 +19,10 @@ import {
  * - `openbot.state` tells a page that is not the connected OpenBot `{ connected: false }` and nothing more.
  * - `openbot.record` and `openbot.stop` answer `RecorderPageResult`; a refusal carries the Recorder's own sentence.
  * - `openbot.connect` connects a trusted OpenBot with no Connect page, answering `connected: true`, and leaves any
- *   other awaiting the person's Connect click (`confirm`), answering `awaitingConfirmation`, as the Recorder does.
+ *   other awaiting the person's Connect click (`confirm`), answering `awaitingConfirmation` and nothing about itself,
+ *   as the Recorder does.
+ * - `openbot.connect.status` says where that connect has got to: waiting, cancelled on the Connect page (`cancel`),
+ *   that tab closed without a choice (`closeTab`), or none.
  * - Chrome answers an id with no extension behind it with `lastError` set and no answer, and answers asynchronously.
  *
  * `older` stands for a Recorder from before this contract: it knows ping and connect and refuses the rest.
@@ -31,6 +36,8 @@ export class FakeRecorder {
   older = false;
   /** A connect waiting for the person's Connect click on the Recorder's page. */
   awaitingConfirmation = false;
+  /** Where the last connect from this page has got to, as `openbot.connect.status` answers it. */
+  private connectWait: RecorderConnectWait = "none";
   /** What `openbot.connect` is refused with, when it is. */
   refuseConnect: string | null = null;
   /** What `openbot.record` is refused with, when it is: the Recorder's own sentence ("Record from OpenBot's own tab."
@@ -55,6 +62,21 @@ export class FakeRecorder {
     if (!this.awaitingConfirmation) return;
     this.awaitingConfirmation = false;
     this.connected = true;
+    this.connectWait = "none";
+  }
+
+  /** The person clicked Cancel on the Recorder's Connect page. */
+  cancel() {
+    if (!this.awaitingConfirmation) return;
+    this.awaitingConfirmation = false;
+    this.connectWait = "cancelled";
+  }
+
+  /** The person closed the Recorder's Connect page without choosing. */
+  closeTab() {
+    if (!this.awaitingConfirmation) return;
+    this.awaitingConfirmation = false;
+    this.connectWait = "closed";
   }
 
   state(): RecorderPageState {
@@ -78,6 +100,8 @@ export class FakeRecorder {
         : { ok: true };
     if (type === "openbot.connect") return this.connect(raw);
     if (this.older) return { ok: false, error: "invalid" };
+    if (type === RECORDER_CONNECT_STATUS)
+      return { ok: true, connect: this.connectWait };
     const message = recorderPageMessageSchema.safeParse(raw);
     if (!message.success) return { ok: false, error: "invalid" };
     switch (message.data.type) {
@@ -104,13 +128,10 @@ export class FakeRecorder {
         connected: true,
       };
     }
+    // Nothing about the Recorder while its Connect page waits: any site can ask to connect.
     this.awaitingConfirmation = true;
-    return {
-      ok: true,
-      version: "1.0.0",
-      installId: "c".repeat(32),
-      awaitingConfirmation: true,
-    };
+    this.connectWait = "waiting";
+    return { ok: true, awaitingConfirmation: true };
   }
 
   private record(title: string): RecorderPageResult {

@@ -935,10 +935,10 @@ const ALLOW: Allowed[] = [
   },
   {
     file: "server/tests/enterprise-controls.integration.test.ts",
-    line: 59,
+    line: 61,
     shape: "e",
     finding: "NEW (round 2 did not find this)",
-    why: "const stopped: string[] = []; — pushed to at :65, cleared at :718, read nowhere; the `.stopped` at :704 and :720 is the response's own field",
+    why: "const stopped: string[] = []; is pushed to at :68, cleared at :723 and read nowhere; the `.stopped` at :709 and :725 is the response's own field",
   },
   {
     file: "server/tests/arcade-vendor-error-engine.test.ts",

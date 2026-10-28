@@ -8,8 +8,14 @@ import {
 } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { RECORDER_COLLECTS } from "@openbot/shared/recorder-disclosure";
 import { SetupPage, type SetupPageDeps } from "../src/pages/setup/setup-page";
 import { DISCLOSURE } from "../src/pages/ui/disclosure";
+import {
+  fakeSpeech,
+  type OnDeviceModel,
+  onDeviceModel,
+} from "./support/fake-speech";
 
 beforeAll(() => GlobalRegistrator.register());
 afterEach(cleanup);
@@ -34,6 +40,10 @@ type Options = {
   /** What each getUserMedia call throws (a DOMException name), or null to hand back a stream. */
   refusals?: (string | null)[];
   edge?: boolean;
+  /** The person's narration choice as the Recorder keeps it: on, as for someone who chose it, unless a test says. */
+  narration?: "on" | "off" | null;
+  /** What the browser can recognise on the computer; null for one with no on-device recognition at all. */
+  onDevice?: OnDeviceModel | null;
 };
 
 function setup(options: Options = {}) {
@@ -53,9 +63,23 @@ function setup(options: Options = {}) {
     microphoneState: async () =>
       (states.length > 1 ? states.shift() : states[0]) ?? null,
     isEdge: () => options.edge ?? false,
+    Recognition: fakeSpeech(
+      options.onDevice === undefined
+        ? onDeviceModel({ "en-US": "installed" }, { unmasked: true })
+        : options.onDevice,
+    ).Recognition,
+    language: () => "en-US",
+    narration: async () =>
+      options.narration === undefined ? "on" : options.narration,
+    setNarration: async (on) => {
+      choices.push(on);
+    },
+    downloadPollMs: 10,
   };
+  const choices: boolean[] = [];
   return {
     calls,
+    choices,
     stopped: () => stopped,
     ...render(<SetupPage deps={deps} />),
   };
@@ -72,12 +96,19 @@ test("says what the Recorder collects and where it goes, first, whatever the bro
     const title = getByText("What the Recorder collects");
     const disclosure = getByText(DISCLOSURE);
     expect(disclosure.textContent).toContain("When you press Record");
+    // Where it goes: straight to the organization's own Intelligence, with OpenBot's pass, never through OpenBot.
     expect(disclosure.textContent).toContain(
-      "Passwords and secrets are masked in your browser first.",
+      "What you record goes straight from your browser to your organization's own Intelligence, with a pass from your organization's OpenBot. OpenBot is told that you are recording, the task's name, when it started and how many steps it has, and when you record in a browser shown inside OpenBot, your narration passes through it to the Recorder without being stored. Your recordings are used only for your organization's Skills, evaluations and insights.",
     );
-    expect(disclosure.textContent).toContain(
-      "It all goes to your organization's own Intelligence through your organization's OpenBot, only while you record, and is used only for your organization's Skills, evaluations and insights.",
-    );
+    // Then everything a recording holds, the saves and AI assistant conversations among them, before the microphone.
+    for (const { title: held, description } of RECORDER_COLLECTS) {
+      expect(getByText(held)).toBeTruthy();
+      expect(getByText(description)).toBeTruthy();
+    }
+    expect(
+      getByText(/the request it sent and the answer that came back/),
+    ).toBeTruthy();
+    expect(getByText(/including the messages you send/)).toBeTruthy();
     // The first thing on the page, as its heading, above everything about the microphone: end-to-end run 8 found it
     // under "Allow the microphone" and its explanation.
     expect(getByRole("heading", { level: 1 }).textContent).toBe(
@@ -87,9 +118,9 @@ test("says what the Recorder collects and where it goes, first, whatever the bro
       `What the Recorder collects${DISCLOSURE}`,
     );
     for (const microphone of [
-      getByText("Allow the microphone"),
-      getByText(/^Talk through what you do while you record\./),
-      getByText("Microphone"),
+      getByText("Narration", { selector: "h2" }),
+      getByText(/^Talk through what you do while you record,/),
+      await findByText("Microphone"),
     ])
       expect(
         title.compareDocumentPosition(microphone) &
@@ -100,22 +131,114 @@ test("says what the Recorder collects and where it goes, first, whatever the bro
   }
 });
 
-test("says what happens to the words and how to answer the prompt", async () => {
-  const { getByText, findByText } = setup();
-  expect(getByText("Allow the microphone")).toBeTruthy();
-  expect(getByText(/sends only the text to Intelligence/)).toBeTruthy();
-  expect(getByText(/keeps no recording of your voice/)).toBeTruthy();
-  expect(getByText(/choose Allow while visiting the site/)).toBeTruthy();
-  await findByText(/^Allowed\./);
+test("says the words are turned into text on the person's own computer, and how to answer the prompt", async () => {
+  // A prompt answered for this visit only: the page still says how to answer it.
+  const { getByText, findByText } = setup({ states: ["prompt", "prompt"] });
+  expect(getByText("Narration", { selector: "h2" })).toBeTruthy();
+  expect(
+    getByText(
+      /Your browser turns your words into text on your own computer: your voice never leaves it, and the Recorder keeps no recording of it\./,
+    ),
+  ).toBeTruthy();
+  expect(
+    await findByText(
+      "Chrome turns your American English speech into text on your computer. Your voice never leaves it.",
+    ),
+  ).toBeTruthy();
+  expect(await findByText(/choose Allow while visiting the site/)).toBeTruthy();
+  await findByText(/^Allowed for this visit only,/);
+});
+
+test("with no choice made, nothing is asked for until the person chooses, and Not now keeps the microphone closed", async () => {
+  const view = setup({ narration: null });
+  expect(
+    await view.findByText(
+      "Choose whether the Recorder listens to you while you record. You can change it before any recording.",
+    ),
+  ).toBeTruthy();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(view.calls).toEqual([]);
+  fireEvent.click(view.getByRole("button", { name: "Not now" }));
+  expect(view.choices).toEqual([false]);
+  expect(
+    await view.findByText("Off. The Recorder never opens your microphone."),
+  ).toBeTruthy();
+  expect(view.calls).toEqual([]);
+  expect(
+    view
+      .getByRole("switch", { name: "Narration" })
+      .getAttribute("aria-checked"),
+  ).toBe("false");
+});
+
+test("Turn on narration asks, on that one click, for the speech recognition and the microphone", async () => {
+  // Chrome answers downloadable for any language this origin has not asked for yet, and downloads only on a click.
+  const model = onDeviceModel({ "en-US": "downloadable" });
+  document.addEventListener(
+    "click",
+    () => {
+      model.activation = true;
+    },
+    { capture: true, once: true },
+  );
+  const view = setup({ narration: null, onDevice: model });
+  fireEvent.click(
+    await view.findByRole("button", { name: "Turn on narration" }),
+  );
+  expect(view.choices).toEqual([true]);
+  expect(model.installs).toEqual(["en-US"]);
+  expect(
+    await view.findByText(
+      "Downloading Chrome's American English speech recognition to your computer",
+    ),
+  ).toBeTruthy();
+  await view.findByText(/^Allowed\./);
+  expect(view.calls).toEqual([
+    `getUserMedia ${JSON.stringify({ audio: true })}`,
+  ]);
+  // Asked again while it downloads; once it is on the computer the row says so.
+  model.finishDownloads();
+  expect(
+    await view.findByText(
+      "Chrome turns your American English speech into text on your computer. Your voice never leaves it.",
+    ),
+  ).toBeTruthy();
+});
+
+test("a language still to be downloaded offers Download; a browser that cannot keep speech on the computer says so", async () => {
+  const model = onDeviceModel({ "en-US": "downloadable" });
+  const pack = setup({ onDevice: model });
+  await pack.findByText(
+    "Chrome has to download its American English speech recognition to your computer first. Choose Download.",
+  );
+  model.activation = true;
+  fireEvent.click(pack.getByRole("button", { name: "Download" }));
+  expect(model.installs).toEqual(["en-US"]);
+  pack.unmount();
+
+  const none = setup({ onDevice: null });
+  expect(
+    await none.findByText(
+      "This version of Chrome cannot turn speech into text on your computer, so the Recorder cannot narrate here. It still records.",
+    ),
+  ).toBeTruthy();
+  none.unmount();
+
+  const welsh = setup({ onDevice: onDeviceModel({ "fr-FR": "installed" }) });
+  expect(
+    await welsh.findByText(
+      "Chrome cannot turn American English speech into text on your computer, so the Recorder cannot narrate here. It still records.",
+    ),
+  ).toBeTruthy();
 });
 
 test("in Edge, whose prompt shows only Block and Allow, it says to choose Allow", async () => {
-  const { getByText, findByText } = setup({
+  const { findByText } = setup({
     states: ["prompt", "prompt"],
     edge: true,
   });
   expect(
-    getByText(
+    await findByText(
       "When Edge asks, choose Allow: the Recorder listens from a page you do not see, which can use only a lasting grant.",
     ),
   ).toBeTruthy();

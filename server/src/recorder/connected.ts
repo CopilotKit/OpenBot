@@ -1,8 +1,13 @@
-import type { RecorderConnection } from "@openbot/shared/recorder-api";
 import { type AuditStore, recordAuditEvent } from "../audit";
+import { reasonWithoutStatement } from "../db/query-failure";
 
-/** A Recorder audit row, written without ever failing the request that made it: a trail that could not be written is
- * logged, and the connection the person asked for still stands. */
+/**
+ * A Recorder refusal's audit row (`recorder.connect_refused`). The refusal is decided before the row is written and
+ * stands either way, since nothing was granted, so a row that could not be written does not change the answer: it is
+ * logged, naming the event, where an operator reads failures. The rows for a connection made or ended are not written
+ * here: they go in the transaction that makes the change (connections.ts), so a change whose row cannot be written does
+ * not happen.
+ */
 export type RecorderAudit = (
   event: Parameters<typeof recordAuditEvent>[1],
 ) => Promise<void>;
@@ -17,7 +22,8 @@ export function recorderAudit(
             JSON.stringify({
               type: "recorder-audit-write-failed",
               eventType: event.eventType,
-              error: String(error),
+              // A failed query's message carries the values bound to it: never logged.
+              error: reasonWithoutStatement(error),
             }),
           );
         })
@@ -26,34 +32,15 @@ export function recorderAudit(
 
 /**
  * What follows every new Recorder connection, however it was made (Connect this browser's exchange, or OpenBot opening
- * the person's own OpenBot browser): `recorder.connected` with how it was made, the person's Learning space made in
- * the background, and `recorder.revoked` for the older connection of the same copy it replaced.
+ * the person's own OpenBot browser), once its rows are written with it: the person's Learning space made in the
+ * background.
  */
-export async function recorderConnected(input: {
-  made: {
-    connection: RecorderConnection;
-    userId: string;
-    replaced: string | null;
-  };
-  audit: RecorderAudit;
+export function recorderConnected(input: {
+  userId: string;
   onConnected?: (userId: string) => void;
-}): Promise<void> {
-  const { made, audit } = input;
-  await audit({
-    eventType: "recorder.connected",
-    targetType: "recorder_connection",
-    targetId: made.connection.id,
-    actorUserId: made.userId,
-    payload: {
-      connectionId: made.connection.id,
-      via: made.connection.via,
-      extensionId: made.connection.extensionId,
-      installId: made.connection.installId,
-      label: made.connection.label,
-    },
-  });
+}): void {
   try {
-    input.onConnected?.(made.userId);
+    input.onConnected?.(input.userId);
   } catch (error) {
     // Making the person's Learning space is a nicety here: the capture pass makes it too. Never fatal to connecting.
     console.error(
@@ -62,14 +49,5 @@ export async function recorderConnected(input: {
         error: String(error),
       }),
     );
-  }
-  if (made.replaced) {
-    await audit({
-      eventType: "recorder.revoked",
-      targetType: "recorder_connection",
-      targetId: made.replaced,
-      actorUserId: made.userId,
-      payload: { connectionId: made.replaced, reason: "replaced" },
-    });
   }
 }

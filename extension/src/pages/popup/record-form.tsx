@@ -8,12 +8,14 @@ import { PageSection } from "@/components/layout/page-parts";
 import { Button } from "@/components/ui/button";
 import {
   Field,
+  FieldContent,
   FieldDescription,
   FieldGroup,
   FieldLabel,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { DISCLOSURE } from "../ui/disclosure";
+import { Switch } from "@/components/ui/switch";
+import { DISCLOSURE_SHORT } from "../ui/disclosure";
 
 const LEARNING_SENTENCES: Partial<Record<LearningSpaceState["state"], string>> =
   {
@@ -40,7 +42,9 @@ export function learningSentence(learning: LearningSpaceState): string | null {
 const TITLE_MAX = 120;
 
 /**
- * The title and Record. Every recording goes into the person's own Learning space, so there is nothing to pick.
+ * The title, narration and Record. Every recording goes into the person's own Learning space, so there is nothing to
+ * pick. Narration is the person's own choice, made once and kept: until they made it (on the setup page, or here) the
+ * form asks before its first recording, and the Recorder opens no microphone; after, a switch shows it and changes it.
  * Deviation from openbot-screen-layout: the title `Input` sits in a `Field` inside the section rather than as a summary
  * row that opens a dialog, because a toolbar popup is one short form whose only job is to name and press Record, and a
  * dialog over a 384px popup would hide the very button it serves.
@@ -52,6 +56,8 @@ export function RecordForm({
   learningShown = null,
   microphoneBlocked = false,
   onAllowMicrophone,
+  narration = null,
+  onNarration,
 }: {
   /** The person's own Learning space, once OpenBot said; null until then, and nothing is warned about. */
   learning?: LearningSpaceState | null;
@@ -63,11 +69,16 @@ export function RecordForm({
    * the setup page, since a recording would go on without narration. */
   microphoneBlocked?: boolean;
   onAllowMicrophone?: () => void;
+  /** Whether the person narrates their recordings; null until they chose. */
+  narration?: "on" | "off" | null;
+  /** The person's choice, on their click. */
+  onNarration?: (on: boolean) => void;
 }) {
   const [title, setTitle] = useState("");
   const warning = learning ? learningSentence(learning) : null;
   const sentence = warning === learningShown ? null : warning;
-  const ready = title.trim() !== "" && !busy;
+  // Nothing records before the person said whether it may listen to them.
+  const ready = title.trim() !== "" && !busy && narration !== null;
   return (
     <PageSection>
       <form
@@ -89,12 +100,59 @@ export function RecordForm({
               onChange={(event) => setTitle(event.target.value)}
             />
             {/* The store's prominent disclosure, read before Record collects anything (ui/disclosure.ts). */}
-            <FieldDescription>{DISCLOSURE}</FieldDescription>
+            <FieldDescription>{DISCLOSURE_SHORT}</FieldDescription>
             {sentence ? (
               <FieldDescription role="status">{sentence}</FieldDescription>
             ) : null}
           </Field>
-          {microphoneBlocked && onAllowMicrophone ? (
+          {narration === null ? (
+            <Field>
+              <FieldLabel>Narrate while you record?</FieldLabel>
+              <FieldDescription>
+                The Recorder listens to you and adds what you say to your steps
+                as text, turned into text on your own computer. You choose once,
+                and can change it before any recording.
+              </FieldDescription>
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => onNarration?.(false)}
+                >
+                  Don't narrate
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => onNarration?.(true)}
+                >
+                  <IconMicrophone data-icon="inline-start" />
+                  Narrate
+                </Button>
+              </div>
+            </Field>
+          ) : (
+            <Field orientation="horizontal">
+              <FieldContent>
+                <FieldLabel htmlFor="recorder-narration">Narration</FieldLabel>
+                <FieldDescription>
+                  {narration === "on"
+                    ? "The Recorder listens while you record."
+                    : "Off. The Recorder does not open your microphone."}
+                </FieldDescription>
+              </FieldContent>
+              {/* Named by its label's text too: the switch is a span with role="switch", which `htmlFor` cannot name. */}
+              <Switch
+                aria-label="Narration"
+                id="recorder-narration"
+                checked={narration === "on"}
+                onCheckedChange={(on) => onNarration?.(on)}
+              />
+            </Field>
+          )}
+          {narration === "on" && microphoneBlocked && onAllowMicrophone ? (
             <Button
               type="button"
               variant="link"

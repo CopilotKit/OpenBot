@@ -6,6 +6,7 @@ import {
   IconKey,
   IconNetwork,
   IconPlug,
+  IconShare,
   IconShieldLock,
   IconTerminal2,
   IconToggleRight,
@@ -295,6 +296,37 @@ function EnterpriseSections({
             </ItemContent>
             <ItemActions>
               <IconChevronRight className="size-4 text-muted-foreground" />
+            </ItemActions>
+          </Item>
+        </PageRows>
+      </PageSection>
+
+      <PageSection
+        description="Each person's recordings teach Skills in their own Learning space, and those Skills reach the Bots that person uses. A shared Skill puts its person's recorded and narrated text in front of everybody's Bots."
+        title="Learning"
+      >
+        <PageRows>
+          <Item size="sm">
+            <ItemMedia variant="icon">
+              <IconShare />
+            </ItemMedia>
+            <ItemContent>
+              <ItemTitle>Skill sharing</ItemTitle>
+              <ItemDescription className="line-clamp-none">
+                {settings.skillSharing
+                  ? "People may open their Skills to every Bot in Settings, Learning."
+                  : "Off. Each person's Skills reach only the Bots they use, even Skills they opened before."}
+              </ItemDescription>
+            </ItemContent>
+            <ItemActions>
+              <Switch
+                aria-label="Skill sharing"
+                checked={settings.skillSharing}
+                disabled={saving}
+                onCheckedChange={(checked) =>
+                  onSetting("skillSharing", checked)
+                }
+              />
             </ItemActions>
           </Item>
         </PageRows>

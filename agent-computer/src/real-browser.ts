@@ -38,6 +38,7 @@ import {
 import type { BrowserRuntime } from "./browser-runtime";
 import {
   browserExecutableCandidates,
+  LINUX_LAUNCHERS as LAUNCHERS_ON_THE_PATH,
   type PersonDisplay,
   personBrowserEnv,
   runnable,
@@ -359,10 +360,15 @@ export function createRealBrowserHost(options: RealBrowserHostOptions) {
       return;
     }
     if (platform === "linux") {
-      const launcher = posix.join(
-        posix.dirname(found.executable),
-        LINUX_LAUNCHERS[found.browser],
-      );
+      // Found as the launcher on the PATH itself (a distribution that keeps the browser elsewhere), it is the launcher.
+      const launcher = LAUNCHERS_ON_THE_PATH[found.browser].includes(
+        posix.basename(found.executable),
+      )
+        ? found.executable
+        : posix.join(
+            posix.dirname(found.executable),
+            LINUX_LAUNCHERS[found.browser],
+          );
       if (!(await exists(launcher)))
         throw new Error(`${launcher} is not there to start.`);
       /*

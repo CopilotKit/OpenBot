@@ -968,12 +968,26 @@ pub const MINTED: [&str; 6] = [
 /// earlier run wrote outlives the answer that implied it: `BOT_MODEL` once asked OpenAI for a model
 /// an earlier endpoint had named, and `OPENBOT_BROWSER_URL` would send the person to a browser that
 /// no longer runs.
-pub const REMOVED_WHEN_UNSET: [&str; 4] = [
+pub const REMOVED_WHEN_UNSET: [&str; 5] = [
     "BOT_PROVIDER",
     "BOT_MODEL",
     "AGENT_BOT_MODEL",
     crate::local_browser::BROWSER_URL_ENV,
+    crate::local_browser::BROWSER_ABSENT_ENV,
 ];
+
+/// Tell the server why this machine runs no browser of the person's own (`BROWSER_ABSENT_ENV`), so
+/// the app can say it to them in a sentence of their own rather than leave it in Desktop's log.
+/// Nothing where a browser runs, and [`REMOVED_WHEN_UNSET`] then takes out what an earlier Start
+/// wrote: a Chrome installed since is no longer explained away.
+pub fn explain_browser_absence(
+    settings: &mut BTreeMap<String, String>,
+    absent: Option<crate::local_browser::Absent>,
+) {
+    if let Some(code) = absent.and_then(crate::local_browser::Absent::code) {
+        settings.insert(crate::local_browser::BROWSER_ABSENT_ENV.into(), code.into());
+    }
+}
 
 const PUBLISHED: [&str; 4] = [
     "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
@@ -1710,6 +1724,47 @@ HTTPS_PROXY=http://proxy:8080
         run(None);
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(!text.contains("OPENBOT_BROWSER_URL"), "{text}");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// No browser of the person's own on this machine: the server is told why, so the app can say
+    /// it, and a later Start that finds one takes the reason out again.
+    #[test]
+    fn why_there_is_no_browser_is_written_and_taken_out_once_there_is_one() {
+        use crate::local_browser::{Absent, Product, BROWSER_ABSENT_ENV};
+        let dir = temp_root("env-browser-absent");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = env_at(&dir);
+        let run = |browser: Option<u16>, absent: Option<Absent>| {
+            let mut settings = compose(
+                &intelligence(),
+                &Model::default(),
+                &engine_status(None),
+                &Ports {
+                    browser,
+                    ..Ports::default()
+                },
+                &pinned(),
+                None,
+                &BTreeMap::new(),
+            );
+            explain_browser_absence(&mut settings, absent);
+            let purge: BTreeMap<String, String> = REMOVED_WHEN_UNSET
+                .iter()
+                .filter(|key| !settings.contains_key(**key))
+                .map(|key| (key.to_string(), String::new()))
+                .collect();
+            write(&path, &settings, &purge).unwrap();
+            std::fs::read_to_string(&path).unwrap()
+        };
+        let flatpak = run(None, Some(Absent::FlatpakOnly(Product::Chrome)));
+        assert_eq!(value_of(&flatpak, BROWSER_ABSENT_ENV), "flatpak-chrome");
+        assert!(!flatpak.contains("OPENBOT_BROWSER_URL"), "{flatpak}");
+        let found = run(Some(4107), None);
+        assert!(!found.contains(BROWSER_ABSENT_ENV), "{found}");
+        // A release from before the browser has nothing to explain.
+        let old = run(None, Some(Absent::NotInRelease));
+        assert!(!old.contains(BROWSER_ABSENT_ENV), "{old}");
         std::fs::remove_dir_all(dir).unwrap();
     }
 

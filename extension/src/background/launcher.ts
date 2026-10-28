@@ -224,7 +224,9 @@ export function createLauncher(
     const stopped = lastStopped(state);
     return {
       connected: connection !== null,
-      ...(connection ? { userId: connection.user.id } : {}),
+      ...(connection
+        ? { userId: connection.user.id, connectionId: connection.connectionId }
+        : {}),
       phase: state.phase,
       ...(state.recordingId ? { recordingId: state.recordingId } : {}),
       ...(state.title ? { title: state.title } : {}),
@@ -364,6 +366,8 @@ export function createLauncher(
           !(typeof input.tabId === "number" && Number.isInteger(input.tabId))
         )
           return refuse(SENTENCES.invalid);
+        if (input.narrate !== undefined && typeof input.narrate !== "boolean")
+          return refuse(SENTENCES.invalid);
         if (!(await currentConnection())) return refuse(SENTENCES.notConnected);
         const tabId =
           typeof input.tabId === "number"
@@ -385,6 +389,10 @@ export function createLauncher(
               title: input.title.trim(),
               tabId,
               language,
+              // Whether the person narrates, as OpenBot's own Record form asked them.
+              ...(typeof input.narrate === "boolean"
+                ? { narrate: input.narrate }
+                : {}),
             },
             {},
           ),

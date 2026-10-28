@@ -7,6 +7,12 @@
  * API below; an offscreen document sees only what Chrome gives one: chrome.runtime with messaging, getURL and id.
  * `globalThis.chrome` is the surface of the context the running code belongs to: code started inside `runAs` keeps
  * that context through everything it awaits or schedules, and a listener runs in the context it was added in.
+ *
+ * And of the browser it belongs to. Code a fake's listener ran, or `runAs` started, keeps that fake through everything
+ * it awaits or schedules, after the fake is uninstalled and another installed too: a service worker or a document of
+ * one test that still finishes its work (a Stop's drain, which closes its document) does it in its own browser, as in
+ * Chrome, where one browser's extension never reaches another's. Code that belongs to none (a test's own) sees the fake
+ * installed last.
  */
 
 import { AsyncLocalStorage, AsyncResource } from "node:async_hooks";
@@ -184,15 +190,27 @@ type FakeEvent = {
   clear(): void;
 };
 
+/** One installed fake: the `chrome` its code sees. */
+type Installation = { chrome(): typeof chrome };
+/** The fake the running code belongs to (see the file's header). */
+const belongsTo = new AsyncLocalStorage<Installation>();
+
 /** A listener runs in the context it was added in, whoever dispatches: the service worker posting on a port does not
- * make the document's listener service-worker code. */
-function createEvent(name: string | null, calls: string[]): FakeEvent {
+ * make the document's listener service-worker code. It runs as code of the fake whose event it is (`owner`). */
+function createEvent(
+  name: string | null,
+  calls: string[],
+  owner: Installation,
+): FakeEvent {
   const listeners = new Map<Listener, Listener>();
   return {
     addListener(listener) {
       if (name) calls.push(`${name}.addListener`);
       if (!listeners.has(listener))
-        listeners.set(listener, AsyncResource.bind(listener));
+        listeners.set(
+          listener,
+          belongsTo.run(owner, () => AsyncResource.bind(listener)),
+        );
     },
     removeListener(listener) {
       if (name) calls.push(`${name}.removeListener`);
@@ -258,12 +276,13 @@ function createPortPair(
   name: string,
   sender: chrome.runtime.MessageSender,
   calls: string[],
+  owner: Installation,
 ) {
   const makeEnd = (): PortEnd => ({
     name,
     messages: [],
-    onMessage: createEvent(null, calls),
-    onDisconnect: createEvent(null, calls),
+    onMessage: createEvent(null, calls, owner),
+    onDisconnect: createEvent(null, calls, owner),
     disconnected: false,
     disconnectFired: false,
     postMessage() {},
@@ -314,10 +333,13 @@ export function installChromeFake(
   const manifestVersion = options.manifestVersion ?? "0.0.0";
   const defaultContext = options.context ?? "service-worker";
   const contextOf = new AsyncLocalStorage<ChromeContext>();
+  const installation: Installation = {
+    chrome: () => surfaces[contextOf.getStore() ?? defaultContext],
+  };
   const calls: string[] = [];
   const events: FakeEvent[] = [];
   const event = (name: string): FakeEvent => {
-    const created = createEvent(name, calls);
+    const created = createEvent(name, calls, installation);
     events.push(created);
     return created;
   };
@@ -344,7 +366,7 @@ export function installChromeFake(
   });
 
   const openPort = (name: string, sender: chrome.runtime.MessageSender) => {
-    const pair = createPortPair(name, sender, calls);
+    const pair = createPortPair(name, sender, calls, installation);
     if (!runtimeEvents.onConnect.hasListeners()) {
       // Nobody is listening for connections: Chrome disconnects the connecting end.
       queueMicrotask(() => {
@@ -370,7 +392,8 @@ export function installChromeFake(
     },
     // Filled in below, once both surfaces exist.
     apis: {} as Record<ChromeContext, typeof chrome>,
-    runAs: (context, work) => contextOf.run(context, work),
+    runAs: (context, work) =>
+      belongsTo.run(installation, () => contextOf.run(context, work)),
     calls,
     storage: {
       local: new Map(),
@@ -974,8 +997,16 @@ export function installChromeFake(
       },
       sendMessage: (message: unknown) =>
         sendMessageFrom(message, documentSender()),
-      onMessage: createEvent("offscreen.runtime.onMessage", calls),
-      onConnect: createEvent("offscreen.runtime.onConnect", calls),
+      onMessage: createEvent(
+        "offscreen.runtime.onMessage",
+        calls,
+        installation,
+      ),
+      onConnect: createEvent(
+        "offscreen.runtime.onConnect",
+        calls,
+        installation,
+      ),
     },
   };
   const surfaces: Record<ChromeContext, typeof chrome> = {
@@ -987,7 +1018,7 @@ export function installChromeFake(
   Object.defineProperty(globalThis, "chrome", {
     configurable: true,
     enumerable: true,
-    get: () => surfaces[contextOf.getStore() ?? defaultContext],
+    get: () => (belongsTo.getStore() ?? installation).chrome(),
     // A test that sets its own `chrome` replaces the fake.
     set(value: unknown) {
       Object.defineProperty(globalThis, "chrome", {

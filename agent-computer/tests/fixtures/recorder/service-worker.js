@@ -44,7 +44,12 @@ function stateOf(now) {
   const { tabId: _recorded, ...recording } = now.recording ?? {};
   return {
     connected: Boolean(now.connection),
-    ...(now.connection ? { userId: now.connection.user.id } : {}),
+    ...(now.connection
+      ? {
+          userId: now.connection.user.id,
+          connectionId: now.connection.connectionId,
+        }
+      : {}),
     phase: now.recording ? "recording" : "idle",
     ...recording,
     actions: 0,

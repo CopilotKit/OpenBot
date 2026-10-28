@@ -1,11 +1,12 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type {
   BrowserState,
   LauncherConnection,
 } from "../../shared/openbot-browser";
+import { NOT_ITS_OWN_COMPUTER, ONLY_THE_PERSONS } from "../src/person-access";
 
 /**
  * A person's browser through the computer itself: the real process, its token, its dispatcher and
@@ -88,9 +89,15 @@ let computer: Computer;
 
 function call(
   path: string,
-  options: { body?: unknown; botId?: string; token?: string } = {},
+  options: {
+    body?: unknown;
+    botId?: string;
+    token?: string;
+    /** Another computer than the person's own. */
+    on?: Computer;
+  } = {},
 ) {
-  return fetch(`${computer.base}${path}`, {
+  return fetch(`${(options.on ?? computer).base}${path}`, {
     method: options.body === undefined ? "GET" : "POST",
     headers: {
       "content-type": "application/json",
@@ -132,8 +139,10 @@ beforeAll(async () => {
       );
     },
   });
+  // Started for the person's browser alone, as a supervisor starts the container it makes for it.
   computer = await startComputer("with-recorder", {
     OPENBOT_RECORDER_DIR: FIXTURE,
+    COMPUTER_BOT_ID: PERSON,
   });
 }, 30_000);
 
@@ -154,14 +163,18 @@ describe.skipIf(!asked)("a person's browser on the computer", () => {
     expect((await call("/browser/state", { token: "wrong" })).status).toBe(401);
   });
 
-  test("takes only a person's browser id", async () => {
-    // With no id at all the computer falls back to its own default, which is a Bot's.
-    for (const botId of ["", "shared", "sales-bot"]) {
+  test("takes only its own person's browser id: no Bot's, and nobody else's", async () => {
+    for (const botId of [
+      "shared",
+      "sales-bot",
+      "person-00000000000000000000000000000000",
+    ]) {
       const response = await call("/browser/open", {
         body: { connection: connection() },
         botId,
       });
-      expect(response.status).toBe(400);
+      expect(response.status).toBe(403);
+      expect(await response.json()).toEqual({ error: ONLY_THE_PERSONS });
     }
   });
 
@@ -278,6 +291,7 @@ describe.skipIf(!asked)("a person's browser on the computer", () => {
   test("a computer without a built Recorder refuses to open one, and says why", async () => {
     const without = await startComputer("without-recorder", {
       OPENBOT_RECORDER_DIR: "",
+      COMPUTER_BOT_ID: PERSON,
     });
     const response = await fetch(`${without.base}/browser/open`, {
       method: "POST",
@@ -323,6 +337,7 @@ describe("a person's browser on a computer whose browser is not installed", () =
         PROFILES_DIR: join(dir, "profiles"),
         WORKSPACE_DIR: join(dir, "workspace"),
         OPENBOT_RECORDER_DIR: FIXTURE,
+        COMPUTER_BOT_ID: PERSON,
         // Where Playwright looks for its browsers: an empty folder, as an image built without them is.
         PLAYWRIGHT_BROWSERS_PATH: join(dir, "browsers"),
       },
@@ -394,6 +409,84 @@ describe("a person's browser on a computer whose browser is not installed", () =
   }, 30_000);
 });
 
+/**
+ * Where a person's browser may run at all, as the running computer decides it from how it was started. A Bot on the
+ * computer every Bot shares may run a shell as the same user the browser's profile belongs to, so a person's browser
+ * runs only on a computer of its own: one started for it (`COMPUTER_BOT_ID`, as a supervisor or a Sandbox starts each),
+ * or one started for people's browsers alone (`COMPUTER_PEOPLE_ONLY`, OpenBot Desktop's). Refused before anything is
+ * launched, so no browser starts and this runs everywhere.
+ */
+describe("a person's browser on a computer that is not its own", () => {
+  let dir = "";
+  /** The computers this block starts, which it stops itself: the file's own teardown runs only with a browser. */
+  let first = 0;
+  beforeAll(async () => {
+    dir = await mkdtemp(join(tmpdir(), "openbot-person-placement-"));
+    root ||= dir;
+    first = computers.length;
+  });
+  afterAll(async () => {
+    for (const running of computers.splice(first)) {
+      running.child.kill();
+      await running.child.exited;
+    }
+    if (dir) await rm(dir, { recursive: true, force: true });
+  }, 30_000);
+
+  const open = (on: Computer, botId = PERSON) =>
+    call("/browser/open", {
+      body: { connection: connection() },
+      botId,
+      on,
+    });
+
+  test("is refused on the computer every Bot shares, before its profile, policy or live screen exist", async () => {
+    const shared = await startComputer("shared", {
+      OPENBOT_RECORDER_DIR: FIXTURE,
+      PROFILES_DIR: join(dir, "shared", "profiles"),
+    });
+    const opening = await open(shared);
+    expect(opening.status).toBe(503);
+    expect(await opening.json()).toEqual({ error: NOT_ITS_OWN_COMPUTER });
+    for (const path of ["/browser/state", "/egress-policy", "/run"])
+      expect((await call(path, { on: shared })).status).toBe(503);
+    expect(
+      (await fetch(`${shared.base}/stream?token=${TOKEN}&bot=${PERSON}`))
+        .status,
+    ).toBe(503);
+    expect(await readdir(join(dir, "shared", "profiles"))).toEqual([]);
+    // A Bot's computer, started for that Bot, refuses it as well.
+    const bots = await startComputer("a-bot", {
+      OPENBOT_RECORDER_DIR: FIXTURE,
+      COMPUTER_BOT_ID: "sales-bot",
+    });
+    expect((await open(bots)).status).toBe(503);
+    // Bots are served on both as before: who holds the wheel is a Bot's to read.
+    for (const on of [shared, bots])
+      expect((await call("/control", { botId: "sales-bot", on })).status).toBe(
+        200,
+      );
+  }, 30_000);
+
+  test("on OpenBot Desktop's computer, which runs people's browsers and no Bot, a Bot is refused", async () => {
+    const desktop = await startComputer("people-only", {
+      OPENBOT_RECORDER_DIR: FIXTURE,
+      COMPUTER_PEOPLE_ONLY: "on",
+    });
+    for (const botId of ["sales-bot", "shared"]) {
+      const asked = await call("/exec", {
+        body: { command: "cat /profiles/*/Default/Cookies" },
+        botId,
+        on: desktop,
+      });
+      expect(asked.status).toBe(403);
+      expect(await asked.json()).toEqual({ error: ONLY_THE_PERSONS });
+    }
+    // The person's own routes go on to the browser host, which says the browser is not open yet.
+    expect((await call("/browser/state", { on: desktop })).status).toBe(200);
+  }, 30_000);
+});
+
 describe.skipIf(!online)(
   "the open internet through the computer's egress filter",
   () => {
@@ -426,14 +519,21 @@ describe.skipIf(!online)(
     }, 90_000);
 
     test("a Bot's browser loads Google", async () => {
+      // On a computer of the Bot's: the person's runs nothing else.
+      const on = await startComputer("live-network-bot", {});
       const answer = await loads(
         await call("/navigate", {
           body: { url: "https://www.google.com/" },
           botId: "live-network-bot",
+          on,
         }),
       );
       expect(answer.url).toStartWith("https://www.google.com");
-      await call("/computers/stop", { body: {}, botId: "live-network-bot" });
+      await call("/computers/stop", {
+        body: {},
+        botId: "live-network-bot",
+        on,
+      });
     }, 90_000);
   },
 );

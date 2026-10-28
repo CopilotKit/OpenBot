@@ -1,3 +1,4 @@
+import { installOnDeviceSpeech } from "@openbot/shared/on-device-speech";
 import type { LearningSpaceState } from "@openbot/shared/recorder-api";
 import { IconAlertTriangle } from "@tabler/icons-react";
 import { useCallback, useEffect, useState } from "react";
@@ -29,6 +30,8 @@ type PopupDeps = {
   pageLanguage: (tabId: number) => Promise<string | null>;
   browserLanguage: () => string;
   microphoneState: () => Promise<PermissionState | null>;
+  /** The browser's speech recognition, which downloads a language for on-device recognition on the person's click. */
+  Recognition: unknown;
 };
 
 /** The active tab; in the e2e variant only, the tab named by RECORDER_E2E_TARGET_TAB (Playwright cannot click the toolbar). */
@@ -65,6 +68,15 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
   const [readMicrophone] = useState(
     () => deps?.microphoneState ?? defaultMicrophoneState,
   );
+  const Recognition =
+    deps && "Recognition" in deps
+      ? deps.Recognition
+      : (globalThis as { SpeechRecognition?: unknown }).SpeechRecognition;
+  /** On the person's click, while it still counts: the browser downloads (or unmasks) a language for recognition on
+   * their own computer only on one (@openbot/shared/on-device-speech). Not waited for: the Voice row says while it
+   * downloads, and voice starts once it is there. */
+  const getSpeech = (language: string) =>
+    void installOnDeviceSpeech(Recognition, language);
   const [view, setView] = useState<PageStateResponse | null>(null);
   const [learning, setLearning] = useState<LearningSpaceState | null>(null);
   const [desktop, setDesktop] = useState(false);
@@ -219,6 +231,7 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
         await readPageLanguage(tab),
         browserLanguage(),
       );
+      if (view.narration === "on") getSpeech(language);
       const answer = await ask({
         type: "page.record",
         title,
@@ -236,6 +249,15 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
 
   // Only ever on the person's click: the setup page asks for the microphone on a tab they can see.
   const allowMicrophone = () => openTab(chrome.runtime.getURL("setup.html"));
+
+  /** The person's choice to narrate, kept for every recording. On asks for the speech recognition of their own language
+   * on this click, and for the microphone where the browser has not allowed it (on the setup page: a popup cannot show
+   * the browser's prompt). */
+  const chooseNarration = async (on: boolean) => {
+    if (on) getSpeech(narrationLanguage(null, browserLanguage()));
+    await act({ type: "page.narration", on });
+    if (on && microphone !== "granted") allowMicrophone();
+  };
 
   const shownError = error ?? state.error ?? null;
   return (
@@ -258,6 +280,11 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
             voice: {
               onMute: (muted) => act({ type: "page.voice", muted }),
               onAllowMicrophone: allowMicrophone,
+              // The language the browser has to download, on this click, then voice on: it starts once it is there.
+              onDownload: (language) => {
+                getSpeech(language);
+                void act({ type: "page.voice", muted: false });
+              },
             },
           }}
         />
@@ -270,6 +297,8 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
           learningShown={afterStopLearningSentence(state, true)}
           microphoneBlocked={microphone === "denied" || microphone === "prompt"}
           onAllowMicrophone={allowMicrophone}
+          narration={view.narration}
+          onNarration={(on) => void chooseNarration(on)}
         />
       ) : null}
       {shownError ? <ErrorLine message={shownError} /> : null}

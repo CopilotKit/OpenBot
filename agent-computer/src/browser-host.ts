@@ -55,6 +55,43 @@ const NOT_OPENED = "Your browser could not be opened. Try again.";
 const VISIBILITY_MS = 1_000;
 
 /**
+ * How long the browser has to say what it is showing before the state route answers that it is not answering.
+ *
+ * A browser that answers at all answers this in milliseconds: the end-to-end run measured 2 to 19 ms. One whose main
+ * thread is stuck never answers DevTools at all, and the route used to wait for it for as long as its caller did:
+ * OpenBot gave up after 45 s, after its own server had already closed the person's request with an empty reply at 10.
+ * The Browser page asks every second, and then had no browser to show and no sentence, and the sidebar lost its Browser
+ * button. Bounded well under OpenBot's own wait for this route (server/src/browser/routes.ts, STATE_TIMEOUT_MS), so the
+ * person hears it from here, where it is known that the browser is open and not answering.
+ */
+export const STATE_ANSWER_MS = 5_000;
+/**
+ * How long the state waits for the Recorder's own report. Within {@link STATE_ANSWER_MS}: a Recorder still starting, or
+ * busy, is left out of the answer rather than making a browser that answers look like one that does not. The page asks
+ * again a second later, and a Recorder that has started by then is in that answer.
+ */
+const RECORDER_REPORT_MS = 3_000;
+
+/** What the state route answers, for OpenBot's log, when the browser did not answer in time. */
+export const NOT_ANSWERING = `The browser did not answer within ${STATE_ANSWER_MS / 1000} s.`;
+
+/** The work's value if it settles within `ms`, else nothing; it is left running, and a rejection is the caller's. */
+async function within<T>(
+  work: Promise<T>,
+  ms: number,
+): Promise<{ value: T } | undefined> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<undefined>((resolve) => {
+    timer = setTimeout(() => resolve(undefined), ms);
+  });
+  try {
+    return await Promise.race([work.then((value) => ({ value })), late]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
  * Where Chromium's error page lives. A tab whose page did not load shows it, and Playwright reports
  * the error page's own address, `chrome-error://chromewebdata/`, as the tab's. The tab itself still
  * names the address that failed, as a browser's address bar does: DevTools' target for the tab says
@@ -105,7 +142,8 @@ type Opening = {
   /** Settles when the last open to arrive has finished, so the next waits for it. */
   turn: Promise<unknown>;
   pending: number;
-  newest: BrowserOpenRequest["connection"];
+  /** None while no open among them brought one: each then leaves the Recorder the connection it holds. */
+  newest?: NonNullable<BrowserOpenRequest["connection"]>;
 };
 
 export function createBrowserHost(options: BrowserHostOptions) {
@@ -237,18 +275,53 @@ export function createBrowserHost(options: BrowserHostOptions) {
   const stateOf = async (
     browser: OpenPersonBrowser,
     recorder?: LauncherState,
+    reportWithinMs?: number,
   ): Promise<BrowserState> => {
     // The Recorder's own report, when it answers. A Recorder that is starting or busy leaves it out
-    // rather than failing the whole answer: the tabs are still worth showing.
-    const report =
-      recorder ?? (await browser.launcher.state().catch(() => undefined));
+    // rather than failing the whole answer: the tabs are still worth showing. Asked beside the tabs,
+    // and, where the caller says, for no longer than that.
+    const ask = (): Promise<LauncherState | undefined> => {
+      const asked = browser.launcher.state().catch(() => undefined);
+      return reportWithinMs === undefined
+        ? asked
+        : within(asked, reportWithinMs).then((answer) => answer?.value);
+    };
+    const [report, tabs] = await Promise.all([
+      recorder ?? ask(),
+      tabsOf(browser),
+    ]);
     return {
       open: true,
       browser: browser.product,
       window: browser.window,
       ...(report ? { recorder: report } : {}),
-      tabs: await tabsOf(browser),
+      tabs,
     };
+  };
+
+  /**
+   * The state the state route answers: the browser's own, asked once however often it is asked meanwhile. The page asks
+   * every second, and a browser that does not answer would otherwise gather one unanswered question a second for as
+   * long as it does not.
+   */
+  const asking = new WeakMap<BrowserContext, Promise<BrowserState>>();
+  /** The browsers last found not answering, so the log says when one stops answering rather than every second. */
+  const notAnswering = new WeakSet<BrowserContext>();
+  const currentState = (browser: OpenPersonBrowser): Promise<BrowserState> => {
+    const pending = asking.get(browser.context);
+    if (pending) return pending;
+    const asked = (async () => {
+      await followNativeTabs(browser);
+      return stateOf(browser, undefined, RECORDER_REPORT_MS);
+    })();
+    asking.set(browser.context, asked);
+    void asked
+      .finally(() => {
+        if (asking.get(browser.context) === asked)
+          asking.delete(browser.context);
+      })
+      .catch(() => undefined);
+    return asked;
   };
 
   const closedState: BrowserState = { open: false, tabs: [] };
@@ -343,13 +416,13 @@ export function createBrowserHost(options: BrowserHostOptions) {
     const parsed = parseBody(browserOpenRequestSchema, body);
     if (!parsed.ok) return failed("request", 400, parsed.error);
 
-    const opening = openings.get(botId) ?? {
+    const brought = parsed.value.connection;
+    const opening: Opening = openings.get(botId) ?? {
       turn: Promise.resolve(),
       pending: 0,
-      newest: parsed.value.connection,
     };
     openings.set(botId, opening);
-    opening.newest = parsed.value.connection;
+    if (brought) opening.newest = brought;
     opening.pending += 1;
     const done = () => {
       opening.pending -= 1;
@@ -397,17 +470,29 @@ export function createBrowserHost(options: BrowserHostOptions) {
     // Already open: the window comes to the front and nothing new opens.
     if (wasOpen && browser.window === "native") await putInFront(browser, page);
 
+    /*
+     * An open that brought no connection, with none from another open waiting either, hands the Recorder nothing: it
+     * keeps the connection it holds, which the state this answers names (`recorder.connectionId`). OpenBot opens so
+     * when it holds a connection that stands for this browser, and connects it with a new one only if the Recorder
+     * turns out not to hold that one.
+     */
+    const connection = opening.newest;
+    if (!connection) {
+      try {
+        return json(await stateOf(browser));
+      } catch (error) {
+        return failed("state", 502, NOT_OPENED, messageOf(error));
+      }
+    }
+
     // Who hears the person: the Recorder itself in a native window, the app's page in a hosted one.
     const narration: Narration =
       browser.window === "native" ? "own" : "external";
     let connected: Awaited<ReturnType<typeof browser.launcher.connect>>;
     try {
-      // Every open, not only the first: idempotent, and the connection the server sent last is the
-      // one the Recorder should hold.
-      connected = await browser.launcher.connect({
-        connection: opening.newest,
-        narration,
-      });
+      // Every open that brings one, not only the first: idempotent, and the connection the server sent
+      // last is the one the Recorder should hold.
+      connected = await browser.launcher.connect({ connection, narration });
     } catch (error) {
       connected = {
         ok: false,
@@ -508,8 +593,27 @@ export function createBrowserHost(options: BrowserHostOptions) {
     const browser = profiles.person(botId);
     if (pathname === browserComputerPaths.state) {
       if (!browser) return json(closedState);
-      await followNativeTabs(browser);
-      return json(await stateOf(browser));
+      /*
+       * A browser that does not answer in time is said to be open and not answering, as a 504 with a sentence, and the
+       * question is left running for the next ask to join. There is no rule here that closes or restarts one: a browser
+       * that answers again is shown again, and closing it is the person's (`/browser/close`) or the idle sweep's.
+       */
+      const answered = await within(currentState(browser), STATE_ANSWER_MS);
+      if (!answered) {
+        if (!notAnswering.has(browser.context)) {
+          notAnswering.add(browser.context);
+          console.warn(
+            JSON.stringify({
+              type: "computer-browser-not-answering",
+              botId,
+              ms: STATE_ANSWER_MS,
+            }),
+          );
+        }
+        return json({ error: NOT_ANSWERING }, 504);
+      }
+      notAnswering.delete(browser.context);
+      return json(answered.value);
     }
     if (!browser) return json({ error: BROWSER_NOT_OPEN }, 409);
 

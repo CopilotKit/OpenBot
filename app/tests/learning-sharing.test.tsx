@@ -40,6 +40,7 @@ beforeEach(() => {
   failWrite = false;
   answer = {
     mode: "closed",
+    sharingAllowed: true,
     skills: [
       { name: "refund-order", description: "Refunds an order.", open: false },
       { name: "close-ticket", description: "Closes a ticket.", open: true },
@@ -194,7 +195,7 @@ test("under The Skills I choose, each Skill in your space has a switch that open
 });
 
 test("a space with no Skills yet says so plainly", async () => {
-  answer = { mode: "choose", skills: [] };
+  answer = { mode: "choose", sharingAllowed: true, skills: [] };
   const view = draw();
   await view.findByText(
     "No Skills learned from your recordings yet. Once there are, each one you open here reaches every Bot.",
@@ -203,7 +204,12 @@ test("a space with no Skills yet says so plainly", async () => {
 });
 
 test("Skills Intelligence did not deliver show a plain unavailable line, and the choice still works", async () => {
-  answer = { mode: "choose", skills: null, unavailable: "unavailable" };
+  answer = {
+    mode: "choose",
+    sharingAllowed: true,
+    skills: null,
+    unavailable: "unavailable",
+  };
   const view = draw();
   await view.findByText(
     "Couldn't read your Skills from Intelligence just now. Your choice above still applies to them.",
@@ -219,10 +225,57 @@ test("Skills Intelligence did not deliver show a plain unavailable line, and the
 });
 
 test("Automatic Learning off says no Skills are learned", async () => {
-  answer = { mode: "choose", skills: null, unavailable: "off" };
+  answer = {
+    mode: "choose",
+    sharingAllowed: true,
+    skills: null,
+    unavailable: "off",
+  };
   const view = draw();
   await view.findByText(
     "An admin has turned off Automatic Learning, so no Skills are learned from your recordings.",
+  );
+});
+
+test("until an admin turns on Skill sharing, it says so plainly and only Only my Bots can be chosen", async () => {
+  answer = { ...answer, sharingAllowed: false };
+  const view = draw();
+  await view.findByText(
+    "An admin hasn't turned on sharing Skills with every Bot, so only the Bots you use draw on yours.",
+  );
+  expect(choice(view, "Only my Bots").hasAttribute("disabled")).toBe(false);
+  for (const title of ["Everyone's Bots", "The Skills I choose"]) {
+    expect(choice(view, title).hasAttribute("disabled")).toBe(true);
+    fireEvent.click(choice(view, title));
+  }
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(sent).toEqual([]);
+});
+
+test("a choice made before sharing was turned off says it applies again, and an open Skill can be closed but none opened", async () => {
+  answer = { ...answer, mode: "choose", sharingAllowed: false };
+  const view = draw();
+  await view.findByText(
+    "An admin hasn't turned on sharing Skills with every Bot, so only the Bots you use draw on yours. Your choice below applies again if an admin turns it on.",
+  );
+  const refund = view.getByRole("switch", {
+    name: "Open refund-order to everyone",
+  });
+  const close = view.getByRole("switch", {
+    name: "Open close-ticket to everyone",
+  });
+  expect(refund.hasAttribute("data-disabled")).toBe(true);
+  expect(close.hasAttribute("data-disabled")).toBe(false);
+  fireEvent.click(refund);
+  fireEvent.click(close);
+  await waitFor(() =>
+    expect(sent).toEqual([
+      {
+        path: "/api/settings/learning/skills/close-ticket",
+        method: "PUT",
+        body: { open: false },
+      },
+    ]),
   );
 });
 

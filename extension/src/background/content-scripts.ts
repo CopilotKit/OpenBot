@@ -10,20 +10,24 @@ function markRecordingActive(recordingId: string): void {
     recordingId;
 }
 
-/** The active flag, then content.js, both as soon as possible; every frame of the tab when `frameIds` is absent. */
+/** The active flag, then content.js, both as soon as possible; every frame of the tab when `frameIds` is absent. A frame
+ * that must not capture (`active: false`, a site the person keeps out of their recordings) gets content.js alone, which
+ * captures nothing until its port says to and shows the tab's recording mark. */
 export async function injectRecordingScripts(
   tabId: number,
   recordingId: string,
   frameIds?: number[],
+  options: { active?: boolean } = {},
 ): Promise<void> {
   const target =
     frameIds === undefined ? { tabId, allFrames: true } : { tabId, frameIds };
-  await chrome.scripting.executeScript({
-    target,
-    func: markRecordingActive,
-    args: [recordingId],
-    injectImmediately: true,
-  });
+  if (options.active !== false)
+    await chrome.scripting.executeScript({
+      target,
+      func: markRecordingActive,
+      args: [recordingId],
+      injectImmediately: true,
+    });
   await chrome.scripting.executeScript({
     target,
     files: ["content.js"],

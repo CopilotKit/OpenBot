@@ -35,11 +35,31 @@ const PING_TIMEOUT_MS = 3_000;
  * deadline (DEADLINES in recorder_host.rs); the extension waits a little longer. */
 const HANDOFF_TIMEOUT_MS = 8_000;
 
+/** The host answers an address within its own 7 s deadline (DEADLINES in recorder_host.rs): it runs the handoff's
+ * ownership checks, without the request for a code. The extension waits a little longer, as it does for a handoff. */
+const ADDRESS_TIMEOUT_MS = 8_000;
+
 /** A ping that mints nothing. */
 export async function desktopAvailable(
   timeoutMs = PING_TIMEOUT_MS,
 ): Promise<boolean> {
   return (await ask({ type: "ping" }, timeoutMs))?.available === true;
+}
+
+/**
+ * The address OpenBot Desktop's own OpenBot answers on, on this computer, as its native host confirms it once that
+ * deployment's own processes are proved to hold its ports. Null when there is no OpenBot Desktop here, it runs no
+ * OpenBot, or it did not answer (an OpenBot Desktop from before this message answers `unknown-message`). It mints
+ * nothing and carries nothing secret. Any program on this computer can serve a page on a loopback port, so this, and
+ * never the page's own address, is what makes a loopback page OpenBot Desktop's.
+ */
+export async function desktopAddress(
+  timeoutMs = ADDRESS_TIMEOUT_MS,
+): Promise<string | null> {
+  const reply = await ask({ type: "address" }, timeoutMs);
+  return reply?.ok === true && typeof reply.openbotUrl === "string"
+    ? reply.openbotUrl
+    : null;
 }
 
 /** The host's handoff, or why there is none. A good ping does not promise a good handoff: the ping is cheap, and only

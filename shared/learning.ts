@@ -119,6 +119,9 @@ export type PersonalLearnedSkill = {
 /** Settings, Learning: the person's sharing choice and the Skills in their own space. */
 export type PersonalLearningSharing = {
   mode: LearningSharingMode;
+  /** Whether an administrator lets people open their Skills to every Bot. While it is false only `closed` takes effect:
+   * a choice made before stays saved, and applies again once it is true. */
+  sharingAllowed: boolean;
   /** The Skills published in the person's own space, read the way a run reads them (none yet is an empty list), or null
    * when they could not be read, and then `unavailable` says why. */
   skills: PersonalLearnedSkill[] | null;

@@ -10,6 +10,7 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import type { RecorderState } from "../../protocol/messages";
+import { KEPT_FOR_PERSON_DAYS } from "../../shared/limits";
 import type { RecorderNotice } from "../../shared/storage";
 
 const SIGNED_OUT = {
@@ -56,8 +57,8 @@ export function Notices({
             </ItemTitle>
             {waiting ? (
               <ItemDescription className="line-clamp-none">
-                Your recordings are kept in this browser and sent when you
-                connect again.
+                Your recordings are kept in this browser for up to{" "}
+                {KEPT_FOR_PERSON_DAYS} days and sent when you connect again.
               </ItemDescription>
             ) : null}
           </ItemContent>

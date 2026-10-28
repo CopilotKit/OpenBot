@@ -214,6 +214,58 @@ describe("finding the person's own browsers", () => {
     expect(await installedRealBrowsers({}, "darwin", at([]))).toEqual([]);
   });
 
+  /*
+   * The code-owner review: on Linux only `/opt/google/chrome` and `/opt/microsoft/msedge` were looked in, so a browser
+   * a distribution keeps anywhere else was never found. Google's and Microsoft's own packages use `/opt` on every
+   * distribution; NixOS keeps the browser in its store, behind the vendor's launcher name on the PATH. A Flatpak's
+   * exported launcher and the Snap Store's Chromium are not the person's Chrome or Edge, and cannot open here.
+   */
+  test("on Linux, the vendors' own packages first, then the browser's launcher on the PATH, and never a Flatpak or a Snap", async () => {
+    const at = (files: string[]) => async (path: string) =>
+      files.includes(path);
+    const nixos = {
+      PATH: "/run/wrappers/bin:/home/pat/.nix-profile/bin:/run/current-system/sw/bin",
+    };
+    const nixChrome = "/run/current-system/sw/bin/google-chrome-stable";
+    const nixEdge = "/home/pat/.nix-profile/bin/microsoft-edge";
+    expect(
+      await installedRealBrowsers(nixos, "linux", at([nixChrome, nixEdge])),
+    ).toEqual([
+      { browser: "chrome", executable: nixChrome },
+      { browser: "msedge", executable: nixEdge },
+    ]);
+    // A vendor package links its launcher onto the PATH too, and is found where the browser itself is.
+    expect(
+      await installedRealBrowsers(
+        { PATH: "/usr/bin" },
+        "linux",
+        at([LINUX_CHROME, "/usr/bin/google-chrome-stable"]),
+      ),
+    ).toEqual([{ browser: "chrome", executable: LINUX_CHROME }]);
+    const flatpakAndSnap = {
+      PATH: "/var/lib/flatpak/exports/bin:/home/pat/.local/share/flatpak/exports/bin:/snap/bin:/usr/bin",
+    };
+    expect(
+      await installedRealBrowsers(
+        flatpakAndSnap,
+        "linux",
+        at([
+          "/var/lib/flatpak/exports/bin/com.google.Chrome",
+          "/home/pat/.local/share/flatpak/exports/bin/com.microsoft.Edge",
+          "/snap/bin/chromium",
+        ]),
+      ),
+    ).toEqual([]);
+    // A PATH entry that is not a folder anybody named is not looked in.
+    expect(
+      await installedRealBrowsers(
+        { PATH: ":bin:." },
+        "linux",
+        at(["google-chrome", "bin/google-chrome", "./google-chrome"]),
+      ),
+    ).toEqual([]);
+  });
+
   test("answers the browsers installed, and runs nothing", async () => {
     const { ran, call } = hostOn("darwin", { files: [MAC_EDGE] });
     const response = await call(realBrowserComputerPaths.installed);
@@ -406,6 +458,25 @@ describe("bringing the person's browser forward, and opening the store page in i
         file: "/bin/sh",
         args: ["-c", LINUX_HANDOFF, "openbot-real-browser", chromeLauncher],
         env: shown,
+      },
+    ]);
+  });
+
+  test("Linux: a browser found by its launcher on the PATH is started by that launcher", async () => {
+    const nixChrome = "/run/current-system/sw/bin/google-chrome-stable";
+    const { ran, call } = hostOn("linux", {
+      files: [nixChrome],
+      env: { PATH: "/run/current-system/sw/bin", DISPLAY: ":99" },
+    });
+    expect(
+      (await call(realBrowserComputerPaths.front, { browser: "chrome" }))
+        .status,
+    ).toBe(200);
+    expect(ran).toEqual([
+      {
+        file: "/bin/sh",
+        args: ["-c", LINUX_HANDOFF, "openbot-real-browser", nixChrome],
+        env: { PATH: "/run/current-system/sw/bin", DISPLAY: ":0" },
       },
     ]);
   });
@@ -757,13 +828,17 @@ beforeAll(async () => {
   if (!canRunLocal) return;
   root = await mkdtemp(join(tmpdir(), "openbot-real-browser-computer-"));
   [local, managed] = await Promise.all([
+    // OpenBot Desktop's: people's browsers and no Bot.
     startComputer("local", {
       COMPUTER_BROWSER_BACKEND: "local-chrome",
       COMPUTER_BROWSER_MODE: "headed",
+      COMPUTER_PEOPLE_ONLY: "on",
     }),
+    // A computer in a container, started for the person's browser alone, as a supervisor starts one.
     startComputer("managed", {
       COMPUTER_BROWSER_BACKEND: "managed",
       COMPUTER_BROWSER_MODE: "headless",
+      COMPUTER_BOT_ID: PERSON,
     }),
   ]);
 }, 30_000);
@@ -804,6 +879,7 @@ describe.skipIf(!canRunLocal)(
     });
 
     test("refuses a Bot's id, and every request it cannot carry out as asked", async () => {
+      // A Bot never reaches the routes at all: the computer runs people's browsers alone.
       expect(
         (
           await callOn(local, realBrowserComputerPaths.front, {
@@ -811,7 +887,7 @@ describe.skipIf(!canRunLocal)(
             botId: "shared",
           })
         ).status,
-      ).toBe(400);
+      ).toBe(403);
       for (const [path, body] of [
         [
           realBrowserComputerPaths.front,

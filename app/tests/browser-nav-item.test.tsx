@@ -76,6 +76,7 @@ let nextOpen:
   | { refuse: string }
   | { held: Promise<void> }
   | { real: RealBrowserOpenResponse }
+  | { shownAs: BrowserWindow }
   | null = null;
 
 const recorderIdle = (window: BrowserWindow): LauncherState => ({
@@ -166,8 +167,13 @@ async function server(path: string, init?: RequestInit): Promise<Response> {
     if (answer && "refuse" in answer)
       return Response.json({ error: answer.refuse }, { status: 503 });
     if (answer && "real" in answer) return Response.json(answer.real);
-    if (answer) await answer.held;
-    const shows = state.shows ?? "screen";
+    if (answer && "held" in answer) await answer.held;
+    // Where the browser that opened shows, which is not always where the state said it would: OpenBot Desktop opens a
+    // browser in the page where it finds no Chrome or Edge.
+    const shows =
+      answer && "shownAs" in answer
+        ? answer.shownAs
+        : (state.shows ?? "screen");
     // Brought to the front when it is open already, as it is.
     if (!state.open) state = openState(shows);
     return Response.json({
@@ -284,6 +290,20 @@ test("on OpenBot Desktop the Browser button opens the person's own window in one
   expect(router.state.location.pathname).toBe("/");
   expect(visited).not.toContain("/browser");
   expect(view.getByText("Home")).toBeTruthy();
+});
+
+test("on OpenBot Desktop, a click that opened a browser in the page takes the person to it", async () => {
+  // The end-to-end run: "Opening…" for seconds, then the person left on Home while their browser opened on the Browser
+  // page they could not see.
+  const { view, router } = draw();
+  const button = await view.findByRole("button", { name: "Browser" });
+  nextOpen = { shownAs: "screen" };
+  const user = userEvent.setup({ document });
+  await user.click(button);
+  await waitFor(() => expect(router.state.location.pathname).toBe("/browser"));
+  expect(await view.findByText("The Browser page")).toBeTruthy();
+  expect(opens()).toBe(1);
+  expect(toasts()).toEqual([]);
 });
 
 test("on OpenBot Desktop the keyboard opens the window as a button does: Tab to it, then Enter or Space", async () => {

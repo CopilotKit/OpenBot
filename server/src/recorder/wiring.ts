@@ -5,14 +5,20 @@ import type {
 import { eq } from "drizzle-orm";
 import type { AuditStore } from "../audit";
 import type { AuthenticatedActor, RoleRepository } from "../auth/guards";
-import { ORGANIZATION_SESSION_COOKIE } from "../auth/organization";
+import {
+  ORGANIZATION_SESSION_COOKIE,
+  ORGANIZATION_SESSION_MAX_AGE_SECONDS,
+} from "../auth/organization";
 import type { DeploymentConfig } from "../config";
 import { decryptSecret, encryptSecret } from "../credentials";
 import type { Database } from "../db/client";
 import { users } from "../db/schema";
 import type { PersonalLearningSpaces } from "../learning/personal-space";
 import type { PeopleStore } from "../people/store";
-import { createRecorderConnectionStore } from "./connections";
+import {
+  createRecorderConnectionStore,
+  type RecorderConnectionLifetime,
+} from "./connections";
 import { allowedExtensionIds } from "./extension-origins";
 import {
   createRecorderResolver,
@@ -52,6 +58,17 @@ function cookieValue(header: string, name: string): string | undefined {
   return undefined;
 }
 
+/** Better Auth's session lifetime, which a deployment that signs people in through it must say: a connection with no
+ * lifetime would never end. */
+function betterAuthLifetime(ms: number | undefined): number {
+  if (ms === undefined || !Number.isFinite(ms) || ms <= 0) {
+    throw new Error(
+      "The Recorder needs Better Auth's session lifetime to bound its connections.",
+    );
+  }
+  return ms;
+}
+
 /**
  * Every piece of Recorder wiring `index.ts` would otherwise hold, so tests build exactly what `index.ts` builds
  * (`index.ts` cannot be imported by a test: it loads the config and starts the server at top level).
@@ -71,6 +88,18 @@ export function createRecorderExtension(deps: {
   /** Each person's own Learning space, which every recording they make joins. */
   personalSpaces: PersonalLearningSpaces;
   auditStore: AuditStore;
+  /**
+   * How long a Better Auth session lasts here unused, in milliseconds (auth/index.ts `sessionLifetimeMs`, read from the
+   * auth instance): a Recorder connection lasts as long. Required where people sign in through Better Auth; single-user
+   * and organization mode take their lifetime from elsewhere.
+   */
+  sessionLifetimeMs?: number;
+  /**
+   * Where a connection's own rows go, given the transaction that makes or ends it (connections.ts): index.ts passes
+   * `createAuditStore` over it. Absent, `auditStore` as it is: a test's own, which keeps a row whether or not the
+   * transaction commits.
+   */
+  auditFor?: (executor: Database) => AuditStore;
 }): RecorderExtensionDeps & {
   /** The capture pass, for `mountCopilotRuntime`: its gate (an onBeforeHandler hook) and its Learning space selector. */
   trajectoryCapture: {
@@ -79,9 +108,23 @@ export function createRecorderExtension(deps: {
   };
 } {
   const { config, database, organizationAuth } = deps;
-  const connections = createRecorderConnectionStore(database);
   const trajectoryBindings = createTrajectoryBindingStore(database);
   const { personalSpaces } = deps;
+
+  /*
+   * A connection is a sign-in of its own, so it lasts as the person's sign-in here does. Better Auth's session ends once
+   * it has gone unused for its `expiresIn`; an organization session is a cookie that ends at its Max-Age, and the
+   * connection carries a sealed copy of it, which must not outlive the cookie. A single-user OpenBot has no sign-in.
+   */
+  const lifetime: RecorderConnectionLifetime = config.singleUser
+    ? null
+    : organizationAuth
+      ? { kind: "absolute", ms: ORGANIZATION_SESSION_MAX_AGE_SECONDS * 1_000 }
+      : { kind: "idle", ms: betterAuthLifetime(deps.sessionLifetimeMs) };
+  const connections = createRecorderConnectionStore(database, {
+    lifetime,
+    auditFor: deps.auditFor ?? (() => deps.auditStore),
+  });
 
   const mode: RecorderMode = config.singleUser
     ? { kind: "single-user" }

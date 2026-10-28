@@ -12,8 +12,18 @@ import {
   IconX,
 } from "@tabler/icons-react";
 import { useMutation } from "@tanstack/react-query";
-import { useRef, useState } from "react";
-import { LiveScreen } from "@/components/computer/live-screen";
+import {
+  type KeyboardEvent,
+  type RefObject,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+} from "react";
+import {
+  LiveScreen,
+  type LiveScreenHandle,
+} from "@/components/computer/live-screen";
 import { SidebarToggle } from "@/components/layout/sidebar-toggle";
 import { Button } from "@/components/ui/button";
 import {
@@ -29,6 +39,7 @@ import {
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
 import { NarrationNotice, NarrationSwitch } from "./narration";
+import { NarrationChoiceDialog, useNarrationChoice } from "./narration-choice";
 import {
   narrationLanguage,
   RecordingBar,
@@ -91,14 +102,25 @@ export function ScreenBrowser({
   reopening: boolean;
 }) {
   const language = narrationLanguage();
+  const choice = useNarrationChoice();
   const narration = useNarration({
     listening: state.recorder?.phase === "recording",
     language,
+    chosen: choice.narration === "on",
   });
-  const recording = useRecording(state, narration.finish);
+  const recording = useRecording(state, choice, {
+    beforeStop: narration.finish,
+    // A yes on the narration question is the person's click: narration turns on with it, asking the browser for its
+    // speech recognition on their computer while the click still counts.
+    answered: (narrate) => {
+      if (narrate) narration.setOn(true);
+    },
+  });
   const tabs = useMutation(browserTabsMutationOptions(queryClient));
   const navigate = useMutation(navigateBrowserMutationOptions(queryClient));
   const active = state.tabs.find((tab) => tab.active);
+  const ids = useId();
+  const screen = useRef<LiveScreenHandle>(null);
   // The refusal of whatever the person asked last: an older one (a tab that would not close) never hides a newer one
   // (Record refused) in the one line there is for them.
   const failure = latest([
@@ -119,10 +141,24 @@ export function ScreenBrowser({
           <h1 className="truncate text-sm tracking-tight">Browser</h1>
         </div>
         <RecordingBar recording={recording}>
-          <NarrationSwitch narration={narration} />
+          <NarrationSwitch
+            narration={narration}
+            recording={recording.phase !== "idle"}
+            onChange={(on) => {
+              narration.setOn(on);
+              choice.choose(on);
+            }}
+          />
         </RecordingBar>
       </div>
+      {/* On OpenBot Desktop, why this is a browser in the page rather than the person's own Chrome or Edge. */}
+      {state.note ? (
+        <p className="border-b border-border px-3 py-2 text-muted-foreground text-sm">
+          {state.note}
+        </p>
+      ) : null}
       <NarrationNotice narration={narration} language={language} />
+      <NarrationChoiceDialog {...recording.question} />
       {recording.stopped ? <StoppedNotice stopped={recording.stopped} /> : null}
       {failure ? (
         <p
@@ -133,43 +169,134 @@ export function ScreenBrowser({
         </p>
       ) : null}
       <TabStrip
+        ids={ids}
         tabs={state.tabs}
         disabled={!state.open}
         onActivate={(tabId) => tabs.mutate({ action: "activate", tabId })}
-        onClose={(tabId) => tabs.mutate({ action: "close", tabId })}
+        onClose={(tabId, closed) =>
+          tabs.mutate(
+            { action: "close", tabId },
+            closed ? { onSuccess: closed } : undefined,
+          )
+        }
         onNew={() => tabs.mutate({ action: "new" })}
       />
-      <AddressBar
-        // A new tab, or switching to one, starts the bar again from that tab's own address.
-        key={active?.id ?? "none"}
-        address={shownAddress(active)}
-        disabled={!state.open || !active}
-        onGo={(url) => navigate.mutate({ url })}
-        onMove={(action) => navigate.mutate({ action })}
-      />
-      <Screen
-        computerId={computerId}
-        open={state.open}
-        reopen={reopen}
-        reopening={reopening}
-      />
+      {/* The selected tab's panel: what the tab strip's tabs control, named by the tab that shows. */}
+      <div
+        aria-label={active ? undefined : "Browser"}
+        aria-labelledby={active ? tabId(ids, active.id) : undefined}
+        className="flex min-h-0 flex-1 flex-col"
+        id={panelId(ids)}
+        role="tabpanel"
+      >
+        <AddressBar
+          // A new tab, or switching to one, starts the bar again from that tab's own address.
+          key={active?.id ?? "none"}
+          address={shownAddress(active)}
+          disabled={!state.open || !active}
+          onGo={(url) => {
+            navigate.mutate({ url });
+            // Away to the page, as Chrome's address bar does: the next keys are for the page that opens.
+            screen.current?.focus();
+          }}
+          onMove={(action) => navigate.mutate({ action })}
+        />
+        <Screen
+          computerId={computerId}
+          notAnswering={state.problem}
+          open={state.open}
+          reopen={reopen}
+          reopening={reopening}
+          screen={screen}
+        />
+      </div>
     </div>
   );
 }
 
+const tabId = (ids: string, id: string) => `${ids}-tab-${id}`;
+const panelId = (ids: string) => `${ids}-panel`;
+
+/**
+ * The browser's tabs, as WAI-ARIA tabs (https://www.w3.org/WAI/ARIA/apg/patterns/tabs/): one stop in the Tab order,
+ * the tab that shows, and the arrow keys, Home and End to move between them. Moving does not switch the browser's tab,
+ * since that is a request to the computer: Enter or Space does, as a click does (the pattern's manual activation, for
+ * tabs whose panel takes a moment to show). Delete closes the focused tab, the pattern's key for a tab that can be
+ * closed. Every tab controls the one panel below, the address bar and the screen of the tab that shows.
+ *
+ * Each tab's close button is the mouse's way to the same Delete, outside the accessibility tree: a tab list owns tabs
+ * alone, and a button inside a tab is lost to it.
+ *
+ * Delete on the tab that shows puts the focus on the tab the browser shows next, which only the browser knows: its
+ * computer brings forward the person's newest tab (agent-computer's profiles.ts, `retarget`), not the neighbour the
+ * pattern suggests. Focus went to the neighbour while another tab showed, so Enter there switched the browser again.
+ * Delete on another tab leaves the one that shows as it is, and the focus moves to a neighbour, as the pattern has it.
+ */
 function TabStrip({
+  ids,
   tabs,
   disabled,
   onActivate,
   onClose,
   onNew,
 }: {
+  ids: string;
   tabs: BrowserTab[];
   disabled: boolean;
   onActivate: (tabId: string) => void;
-  onClose: (tabId: string) => void;
+  /** `closed` hears the browser's answer: its tabs after the close. */
+  onClose: (
+    tabId: string,
+    closed?: (answer: { tabs: BrowserTab[] }) => void,
+  ) => void;
   onNew: () => void;
 }) {
+  const buttons = useRef(new Map<string, HTMLButtonElement>());
+  const selected = tabs.find((tab) => tab.active) ?? tabs[0];
+  const focusAt = (index: number) => {
+    const tab = tabs[(index + tabs.length) % tabs.length];
+    if (tab) buttons.current.get(tab.id)?.focus();
+  };
+  /** The tab the focus goes to once it is drawn: the one the browser shows after a close, which can be a new one. */
+  const focusNext = useRef<string | null>(null);
+  const focusWhenDrawn = () => {
+    const button = focusNext.current
+      ? buttons.current.get(focusNext.current)
+      : undefined;
+    if (!button) return;
+    focusNext.current = null;
+    button.focus();
+  };
+  // biome-ignore lint/correctness/useExhaustiveDependencies: each new set of tabs may draw the one waiting for the focus.
+  useEffect(focusWhenDrawn, [tabs]);
+  const onKeyDown = (event: KeyboardEvent, index: number, tab: BrowserTab) => {
+    const keys: Record<string, () => void> = {
+      ArrowRight: () => focusAt(index + 1),
+      ArrowLeft: () => focusAt(index - 1),
+      Home: () => focusAt(0),
+      End: () => focusAt(tabs.length - 1),
+      Delete: () => {
+        if (disabled) return;
+        if (tab.active) {
+          // The browser says which tab it shows now, and the focus goes there.
+          onClose(tab.id, (answer) => {
+            focusNext.current =
+              answer.tabs.find((each) => each.active)?.id ?? null;
+            focusWhenDrawn();
+          });
+          return;
+        }
+        // Focus goes to the tab after it, or the one before when it was the last, before it goes.
+        if (tabs.length > 1)
+          focusAt(index === tabs.length - 1 ? index - 1 : index + 1);
+        onClose(tab.id);
+      },
+    };
+    const act = keys[event.key];
+    if (!act) return;
+    event.preventDefault();
+    act();
+  };
   return (
     <div className="flex min-w-0 items-center gap-1 border-b border-border px-2 py-1.5">
       <div
@@ -177,7 +304,7 @@ function TabStrip({
         className="flex min-w-0 items-center gap-1 overflow-x-auto"
         role="tablist"
       >
-        {tabs.map((tab) => {
+        {tabs.map((tab, index) => {
           const name = tabName(tab);
           return (
             <div
@@ -188,24 +315,35 @@ function TabStrip({
               )}
             >
               <button
+                aria-controls={panelId(ids)}
+                aria-keyshortcuts="Delete"
                 aria-selected={tab.active}
-                className="min-w-0 flex-1 truncate py-1 pr-1 pl-2.5 text-left text-[0.8rem]"
+                className="min-w-0 flex-1 truncate rounded-lg py-1 pr-1 pl-2.5 text-left text-[0.8rem] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
                 disabled={disabled}
+                id={tabId(ids, tab.id)}
                 onClick={() => {
                   if (!tab.active) onActivate(tab.id);
                 }}
+                onKeyDown={(event) => onKeyDown(event, index, tab)}
+                ref={(element) => {
+                  if (element) buttons.current.set(tab.id, element);
+                  else buttons.current.delete(tab.id);
+                }}
                 role="tab"
+                tabIndex={tab.id === selected?.id ? 0 : -1}
                 title={tab.url}
                 type="button"
               >
                 {name}
               </button>
               <Button
-                aria-label={`Close ${name}`}
+                aria-hidden="true"
                 className="mr-0.5"
                 disabled={disabled}
                 onClick={() => onClose(tab.id)}
                 size="icon-xs"
+                tabIndex={-1}
+                title={`Close ${name}`}
                 variant="ghost"
               >
                 <IconX />
@@ -253,7 +391,7 @@ function AddressBar({
         const url = addressFrom(draft ?? address);
         if (!url) return;
         setDraft(null);
-        // Away to the page, as Chrome's address bar does: the next click in it selects the address to type over.
+        // Away from the bar, as Chrome's address bar goes: the next click in it selects the address to type over.
         input.current?.blur();
         onGo(url);
       }}
@@ -313,14 +451,19 @@ function AddressBar({
  */
 function Screen({
   computerId,
+  notAnswering,
   open,
   reopen,
   reopening,
+  screen,
 }: {
   computerId: string;
+  /** Why there is nothing to show: the browser is there and not answering (`BrowserApiState.problem`). */
+  notAnswering?: string;
   open: boolean;
   reopen: () => void;
   reopening: boolean;
+  screen: RefObject<LiveScreenHandle | null>;
 }) {
   const [problem, setProblem] = useState<string | null>(null);
   const [retryKey, setRetryKey] = useState(0);
@@ -343,12 +486,21 @@ function Screen({
             <LiveScreen
               computerId={computerId}
               driving
-              label="Your browser. Click and type here."
+              label="Your browser. Click it to type into it, and press Escape to leave it."
               onProblem={setProblem}
+              ref={screen}
               retryKey={retryKey}
             />
           ) : null}
-          {!open ? (
+          {notAnswering ? (
+            // Not "closed", and nothing to press: opening it again would wait on the same browser. It comes back here
+            // by itself once it answers, since the page asks every second.
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-4 text-center text-sm">
+              <span className="text-destructive" role="alert">
+                {notAnswering}
+              </span>
+            </div>
+          ) : !open ? (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-4 text-center text-muted-foreground text-sm">
               <span>Your browser is closed.</span>
               <Button disabled={reopening} onClick={reopen} size="sm">

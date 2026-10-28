@@ -1638,7 +1638,88 @@ pub fn stop_host_children(
         children,
         Path::new("powershell"),
         Path::new("taskkill"),
+        WINDOWS_BROWSER_CLOSE_PATIENCE,
     )
+}
+
+/// How long the person's browser is given to close on Windows before its tree is ended, as on Unix
+/// ([`BROWSER_CLOSE_PATIENCE`]): Chrome closes its windows in about a second, and the person is
+/// waiting on Stop or Quit.
+#[cfg(any(not(unix), test))]
+const WINDOWS_BROWSER_CLOSE_PATIENCE: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// The browsers the person's browser computer started, by the name Windows runs each from.
+#[cfg(any(not(unix), test))]
+const WINDOWS_BROWSERS: [&str; 2] = ["chrome.exe", "msedge.exe"];
+
+/// Ask the person's browser to close on Windows before anything is ended, as Unix does with
+/// SIGTERM ([`close_local_browser_first`]).
+///
+/// Every host process on Windows is ended with `taskkill /T /F`, which is `TerminateProcess` on the
+/// whole tree: right for a server and wrong for a browser holding somebody's logins, which killed
+/// mid-write says it did not shut down correctly the next time it opens and offers back pages the
+/// person had closed. Windows has no SIGTERM to send the computer instead, so the browser itself is
+/// asked, the way Windows asks any program to close: `taskkill` without `/F` posts `WM_CLOSE` to
+/// its windows, as their close button does, and Chrome and Edge then shut down cleanly. Chromium's
+/// own tooling quits Chrome on Windows exactly so, posting `WM_CLOSE` to each window and ending it
+/// by force only if it is still there after a wait.
+/// <https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/taskkill>
+/// <https://chromium.googlesource.com/chromium/src.git/+/74.0.3702.1/chrome/test/mini_installer/quit_chrome.py>
+///
+/// Only a browser the held computer started (its direct child, found in a fresh inventory) is
+/// asked, never one found by name: the person's everyday Chrome is nobody's child here and stays
+/// open. Never the computer itself or its console, which have no window to close. Whatever still
+/// runs after `patience` is ended the ordinary way, so this never weakens the guarantee below it,
+/// and an inventory or a `taskkill` that fails only means it goes straight to that.
+#[cfg(any(not(unix), test))]
+fn close_local_browser_windows_first(
+    children: &mut [(&str, std::process::Child)],
+    powershell: &Path,
+    taskkill: &Path,
+    patience: std::time::Duration,
+) {
+    let deadline = std::time::Instant::now() + patience;
+    let Some(computer) = children.iter_mut().find_map(|(name, child)| {
+        (*name == LOCAL_BROWSER && matches!(child.try_wait(), Ok(None))).then(|| child.id())
+    }) else {
+        return;
+    };
+    let browsers_of = |processes: &[WindowsProcess]| -> Vec<u32> {
+        processes
+            .iter()
+            .filter(|process| {
+                process.parent_process_id == computer
+                    && process.executable_path.as_deref().is_some_and(|path| {
+                        let file = path.rsplit(['\\', '/']).next().unwrap_or(path);
+                        WINDOWS_BROWSERS
+                            .iter()
+                            .any(|browser| file.eq_ignore_ascii_case(browser))
+                    })
+            })
+            .map(|process| process.process_id)
+            .collect()
+    };
+    let Ok(snapshot) = windows_processes_with(powershell) else {
+        return;
+    };
+    let browsers = browsers_of(&snapshot);
+    if browsers.is_empty() {
+        return;
+    }
+    for pid in &browsers {
+        // Not `/F` and not `/T`: the windows are asked to close, and the browser ends its own children.
+        let _ = command(taskkill).args(["/PID", &pid.to_string()]).output();
+    }
+    while std::time::Instant::now() < deadline {
+        let Ok(now) = windows_processes_with(powershell) else {
+            return;
+        };
+        let left = browsers_of(&now);
+        if !browsers.iter().any(|pid| left.contains(pid)) {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
 }
 
 #[cfg(any(not(unix), test))]
@@ -1647,7 +1728,9 @@ fn stop_windows_host_children_with(
     children: &mut [(&str, std::process::Child)],
     powershell: &Path,
     taskkill: &Path,
+    browser_patience: std::time::Duration,
 ) -> Result<usize, Problem> {
+    close_local_browser_windows_first(children, powershell, taskkill, browser_patience);
     let mut held = Vec::new();
     for (name, child) in children.iter_mut() {
         if child
@@ -4619,6 +4702,7 @@ fn main() {
             &mut children,
             &fixture.command("powershell"),
             &fixture.command("taskkill"),
+            WINDOWS_BROWSER_CLOSE_PATIENCE,
         );
         let alive = children[0].1.try_wait().unwrap().is_none();
         children[0].1.kill().unwrap();
@@ -4664,6 +4748,7 @@ fn main() {
                 &mut children,
                 &fixture.command("powershell"),
                 &fixture.command("taskkill"),
+                WINDOWS_BROWSER_CLOSE_PATIENCE,
             );
             let alive = children[0].1.try_wait().unwrap().is_none();
             children[0].1.kill().unwrap();
@@ -4674,6 +4759,151 @@ fn main() {
             assert!(!fixture.log().contains("taskkill\t"));
             std::fs::remove_dir_all(root).unwrap();
         }
+    }
+
+    /// The inventory a Windows machine gives while the person's browser runs: the held computer,
+    /// its console, and the browser it started, as Win32_Process lists them.
+    fn windows_browser_inventory(computer: u32, with_browser: bool) -> String {
+        let mut rows = vec![
+            serde_json::json!({
+                "ProcessId": computer, "ParentProcessId": std::process::id(),
+                "ExecutablePath": r"C:\Users\person\.bun\bin\bun.exe",
+                "CommandLine": "bun --no-env-file src/index.ts", "CreationDate": "/Date(2000)/"
+            }),
+            serde_json::json!({
+                "ProcessId": 9200, "ParentProcessId": computer,
+                "ExecutablePath": r"C:\Windows\System32\conhost.exe",
+                "CommandLine": "conhost.exe 0xffffffff -ForceV1", "CreationDate": "/Date(2001)/"
+            }),
+            // The person's everyday Chrome, which is nobody's child here.
+            serde_json::json!({
+                "ProcessId": 9300, "ParentProcessId": 4,
+                "ExecutablePath": r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+                "CommandLine": "chrome.exe", "CreationDate": "/Date(1500)/"
+            }),
+        ];
+        if with_browser {
+            rows.push(serde_json::json!({
+                "ProcessId": 9100, "ParentProcessId": computer,
+                "ExecutablePath": r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+                "CommandLine": "chrome.exe --remote-debugging-pipe", "CreationDate": "/Date(2002)/"
+            }));
+        }
+        serde_json::to_string(&rows).unwrap()
+    }
+
+    /// The code-owner review: Windows ended the person's browser with `taskkill /T /F` while Unix
+    /// asks it to close and waits. Now its windows are asked to close first (no `/F`), and the tree
+    /// is ended only once it has gone. Never the person's everyday Chrome, nor the console.
+    #[cfg(unix)]
+    #[test]
+    fn windows_asks_the_persons_browser_to_close_before_its_tree_is_ended() {
+        if crate::test_support::isolated_process(
+            "stack::tests::windows_asks_the_persons_browser_to_close_before_its_tree_is_ended",
+        ) {
+            return;
+        }
+        let root = temp_root("windows-browser-close");
+        std::fs::create_dir_all(root.join(".logs")).unwrap();
+        let fixture = CleanupCommandFixture::new(&root);
+        // Each stand-in run once first: macOS checks a freshly built executable on its first run.
+        fixture.scenario("warm-up");
+        for name in ["powershell", "taskkill"] {
+            let _ = Command::new(fixture.command(name)).output();
+        }
+        fixture.scenario("browser-close");
+        let computer = Command::new("/bin/sleep").arg("60").spawn().unwrap();
+        let pid = computer.id();
+        std::fs::write(
+            root.join("synthetic-inventory.json"),
+            windows_browser_inventory(pid, true),
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("synthetic-inventory-closed.json"),
+            windows_browser_inventory(pid, false),
+        )
+        .unwrap();
+        let mut children = vec![(LOCAL_BROWSER, computer)];
+        let started = std::time::Instant::now();
+        let result = stop_windows_host_children_with(
+            &root,
+            &mut children,
+            &fixture.command("powershell"),
+            &fixture.command("taskkill"),
+            WINDOWS_BROWSER_CLOSE_PATIENCE,
+        );
+        let waited = started.elapsed();
+        children[0].1.kill().unwrap();
+        children[0].1.wait().unwrap();
+        assert_eq!(result.unwrap(), 1);
+        assert!(waited < WINDOWS_BROWSER_CLOSE_PATIENCE, "{waited:?}");
+        let taskkills: Vec<String> = fixture
+            .log()
+            .lines()
+            .filter(|line| line.starts_with("taskkill\t"))
+            .map(str::to_string)
+            .collect();
+        assert_eq!(
+            taskkills,
+            [
+                "taskkill\t/PID 9100".to_string(),
+                format!("taskkill\t/PID {pid} /T /F")
+            ]
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// A browser that does not close in time is ended with its tree, so Stop waits on it for no
+    /// longer than its patience and never leaves it running.
+    #[cfg(unix)]
+    #[test]
+    fn windows_waits_for_a_browser_that_will_not_close_only_so_long() {
+        if crate::test_support::isolated_process(
+            "stack::tests::windows_waits_for_a_browser_that_will_not_close_only_so_long",
+        ) {
+            return;
+        }
+        let root = temp_root("windows-browser-stubborn");
+        std::fs::create_dir_all(root.join(".logs")).unwrap();
+        let fixture = CleanupCommandFixture::new(&root);
+        // Run each stand-in once first: macOS checks a freshly built executable on its first run,
+        // which takes seconds, and the wait measured below is the browser's alone.
+        fixture.scenario("warm-up");
+        for name in ["powershell", "taskkill"] {
+            let _ = Command::new(fixture.command(name)).output();
+        }
+        fixture.scenario("browser-stubborn");
+        let computer = Command::new("/bin/sleep").arg("60").spawn().unwrap();
+        let pid = computer.id();
+        std::fs::write(
+            root.join("synthetic-inventory.json"),
+            windows_browser_inventory(pid, true),
+        )
+        .unwrap();
+        let mut children = vec![(LOCAL_BROWSER, computer)];
+        let patience = std::time::Duration::from_millis(300);
+        let started = std::time::Instant::now();
+        let result = stop_windows_host_children_with(
+            &root,
+            &mut children,
+            &fixture.command("powershell"),
+            &fixture.command("taskkill"),
+            patience,
+        );
+        let waited = started.elapsed();
+        children[0].1.kill().unwrap();
+        children[0].1.wait().unwrap();
+        assert_eq!(result.unwrap(), 1);
+        assert!(waited >= patience, "{waited:?}");
+        assert!(waited < std::time::Duration::from_secs(5), "{waited:?}");
+        let log = fixture.log();
+        assert!(log.contains("taskkill\t/PID 9100\n"), "{log}");
+        assert!(
+            log.contains(&format!("taskkill\t/PID {pid} /T /F")),
+            "{log}"
+        );
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     fn ipv6_loopback_listener() -> Option<std::net::TcpListener> {
@@ -5196,6 +5426,19 @@ fn main() {
             println!("  TCP    127.0.0.1:45124        0.0.0.0:0              LISTENING       9002");
         },
         ("taskkill", "held-refusal") => { eprintln!("synthetic held cleanup refused"); std::process::exit(5); },
+        // The person's browser: its windows asked to close (`taskkill` without `/F`), after which an inventory no
+        // longer lists it. A stubborn one ignores the request and is still listed.
+        ("powershell", "browser-close" | "browser-stubborn") => {
+            let closed = std::path::Path::new(&root).join("browser-closed").exists();
+            let file = if closed { "synthetic-inventory-closed.json" } else { "synthetic-inventory.json" };
+            print!("{}", std::fs::read_to_string(std::path::Path::new(&root).join(file)).unwrap());
+        }
+        ("taskkill", "browser-close") => {
+            if !args.iter().any(|arg| arg == "/F") {
+                std::fs::write(std::path::Path::new(&root).join("browser-closed"), "").unwrap();
+            }
+        }
+        ("taskkill", "browser-stubborn") => {},
         ("powershell", "inventory-fail") => {
             print!("synthetic partial inventory that must not be trusted");
             std::process::exit(17);
@@ -7855,7 +8098,8 @@ fn main() {
     let mut said: Vec<String> = std::env::args().skip(1).collect();
     for name in ["COMPUTER_TOKEN", "COMPUTER_BROWSER_BACKEND", "COMPUTER_BROWSER_MODE", "PORT",
         "PROFILES_DIR", "WORKSPACE_DIR", "OPENBOT_RECORDER_DIR", "COMPUTER_BROWSER_IDLE_MS",
-        "INTELLIGENCE_API_KEY", "OPENBOT_DESKTOP_HOST_TOKEN", "KEY_ENCRYPTION_KEY"] {
+        "COMPUTER_PEOPLE_ONLY", "INTELLIGENCE_API_KEY", "OPENBOT_DESKTOP_HOST_TOKEN",
+        "KEY_ENCRYPTION_KEY"] {
         said.push(format!("{name}={}", std::env::var(name).unwrap_or_else(|_| "<unset>".into())));
     }
     std::fs::write("said.txt", said.join("\n")).unwrap();
@@ -7926,6 +8170,9 @@ fn main() {
                     root.join("extension").join("dist").display()
                 ),
                 "COMPUTER_BROWSER_IDLE_MS=0".into(),
+                // Desktop's computer runs people's browsers and no Bot, and says so, or the computer
+                // refuses to run a person's browser at all.
+                "COMPUTER_PEOPLE_ONLY=on".into(),
                 "INTELLIGENCE_API_KEY=<unset>".into(),
                 "OPENBOT_DESKTOP_HOST_TOKEN=<unset>".into(),
                 "KEY_ENCRYPTION_KEY=<unset>".into(),
@@ -7985,7 +8232,8 @@ fn main() {
 
     /// The person's browser exactly as Desktop gets it there: this commit's tree as GitHub's tag
     /// tarball carries it, laid out by `deployment::unpack`, installed by `install_dependencies`,
-    /// its Recorder built by `preparation::build_recorder`, the browser decided by
+    /// its Recorder built here (installation copies the release's prebuilt one out of its computer
+    /// image, `preparation::place_recorder`, and this commit has no published image), the browser decided by
     /// `local_browser::find` against this machine's real Chrome and Edge, spawned by
     /// `spawn_host_process`, asked for `/health` with the computer token, and stopped by
     /// `stop_host_children`. No browser is opened. Only the home folder is a scratch one, so the
@@ -8022,7 +8270,12 @@ fn main() {
         assert!(tarball.status.success());
         crate::deployment::unpack(&root, &tarball.stdout).unwrap();
         install_dependencies(&root, &bun).unwrap();
-        crate::preparation::build_recorder(&root, &bun).unwrap();
+        let built = Command::new(&bun)
+            .current_dir(root.join("extension"))
+            .args(["run", "build"])
+            .status()
+            .unwrap();
+        assert!(built.success());
         crate::env::write(
             &root.join(".env"),
             &crate::env::Ports {

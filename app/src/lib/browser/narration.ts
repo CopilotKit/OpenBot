@@ -7,9 +7,19 @@
  *
  * It is the browser's own speech recognition (`SpeechRecognition`, or the `webkitSpeechRecognition` Chrome and Safari
  * still answer to), continuous and with interim results, which is what lets a phrase be timed from its first words
- * rather than from when it was finished. Chrome sends the audio to its speech service; nothing here keeps any audio,
- * and only the words of each final phrase, and when a phrase began, leave the page. Firefox has no speech recognition, and the page says so.
+ * rather than from when it was finished. It runs on the person's own computer or not at all: Chrome sends the audio to
+ * its speech service unless a recognition sets `processLocally`, so every recognition here sets it, and the browser is
+ * asked first whether it can recognise the language on the device (@openbot/shared/on-device-speech). Where it cannot
+ * (Firefox, Safari, an older Chrome, a language it has no model for), narration is off and the page says why; where the
+ * language is still to be downloaded, turning narration on downloads it (a click is the only thing that may), and
+ * narration waits for it. Nothing here keeps any audio, and only the words of each final phrase, and when a phrase
+ * began, leave the page.
  */
+import {
+  keepOnDevice,
+  type OnDeviceSpeech,
+  onDeviceSpeech,
+} from "@openbot/shared/on-device-speech";
 
 type RecognitionAlternative = { readonly transcript: string };
 type RecognitionResult = {
@@ -128,6 +138,10 @@ export class PhraseClock {
 export type NarrationProblem =
   /** No speech recognition in this browser. */
   | "unsupported"
+  /** Speech recognition, but none that stays on the person's computer. */
+  | "on-device"
+  /** The language has to be downloaded to the computer first, which only the person's click may start. */
+  | "speech-pack"
   /** The person, or the browser, refused the microphone. */
   | "not-allowed"
   | "no-microphone"
@@ -139,6 +153,8 @@ export type NarrationProblem =
 
 export type NarrationStatus =
   | { state: "starting" }
+  /** The browser is downloading the language to the computer: narration starts once it is there. */
+  | { state: "downloading" }
   | { state: "listening" }
   | { state: "muted" }
   | { state: "failed"; problem: NarrationProblem };
@@ -180,6 +196,8 @@ export type Narration = {
 
 /** How long a stop waits for the speech service to hand over the phrase in progress (it took 53 ms in a real run). */
 export const FLUSH_MS = 1_500;
+/** How often a language being downloaded for on-device recognition is asked about again. */
+export const DOWNLOAD_POLL_MS = 3_000;
 /** Chrome ends a recognition by itself after a silence or its own time limit; one that ends sooner than this is
  * restarted with a growing delay, never in a tight loop. */
 const QUICK_END_MS = 2_000;
@@ -235,6 +253,45 @@ export function startNarration(
     status({ state: "failed", problem });
   }
 
+  /** Why narration cannot start from what the browser said of on-device recognition, or null when it can (or will). */
+  const onDeviceProblem = (local: OnDeviceSpeech): NarrationProblem | null =>
+    local === "unsupported"
+      ? "on-device"
+      : local === "unavailable"
+        ? "language"
+        : local === "downloadable"
+          ? "speech-pack"
+          : null;
+
+  /** Listening that is wanted from now: once the browser says it can keep the language on this computer, after waiting
+   * out a download under way. A mute, a stop or a failure meanwhile ends the wait (`opening`). */
+  let opening = 0;
+  async function begin() {
+    const attempt = ++opening;
+    const wanted = () => attempt === opening && !closed && !muted && !failed;
+    if (!deps.Recognition) {
+      fail("unsupported");
+      return;
+    }
+    for (;;) {
+      const local = await onDeviceSpeech(deps.Recognition, options.language);
+      if (!wanted()) return;
+      const problem = onDeviceProblem(local);
+      if (problem) {
+        fail(problem);
+        return;
+      }
+      if (local === "available") break;
+      status({ state: "downloading" });
+      await new Promise<void>((resolve) => {
+        restartTimer = deps.timers.set(resolve, DOWNLOAD_POLL_MS);
+      });
+      restartTimer = null;
+      if (!wanted()) return;
+    }
+    listen();
+  }
+
   function listen() {
     restartTimer = null;
     if (closed || muted || failed) return;
@@ -254,6 +311,8 @@ export function startNarration(
     recognition.continuous = true;
     recognition.interimResults = true;
     recognition.maxAlternatives = 1;
+    // On this computer or not at all: without it, Chrome streams the audio to its speech service.
+    keepOnDevice(recognition);
     let networkError = false;
     recognition.onstart = () => {
       if (recognition === current && !muted) status({ state: "listening" });
@@ -363,7 +422,7 @@ export function startNarration(
   if (muted) status({ state: "muted" });
   else {
     status({ state: "starting" });
-    listen();
+    void begin();
   }
 
   return {
@@ -372,6 +431,8 @@ export function startNarration(
       if (next) {
         if (muted) return;
         muted = true;
+        // A wait for a download ends with the mute.
+        opening += 1;
         void finish();
         status({ state: "muted" });
         return;
@@ -389,7 +450,7 @@ export function startNarration(
         recognition.abort();
         reportSpeaking();
       }
-      listen();
+      void begin();
     },
     async stop() {
       if (closed) return;

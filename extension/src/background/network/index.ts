@@ -30,6 +30,9 @@ export type NetworkCaptureDeps = {
   /** The OpenBot the recording's passes come from: its own calls are never a step's, and the AG-UI capture follows only its
    * chat with a Bot. Null once nothing records. */
   openbotUrl(): string | null;
+  /** Whether a page the capture may attach to is one it records: a website, and not one the person keeps out of their
+   * recordings. `isRecordablePage` when absent. */
+  recordable?(url: string): boolean;
   /** A call that passed the screens, masked: for the steps to tell which they caused and which saved something. */
   call(call: StepCall): void;
   /** A write in flight (debugger only), from its start until `call` had it or it was screened out. */
@@ -161,6 +164,7 @@ export function createNetworkCapture(
   options: { fallback?: PageFallback } = {},
 ): NetworkCapture {
   const { fallback } = options;
+  const recordable = deps.recordable ?? isRecordablePage;
   const repeats = createRepeatMemory();
   const tabs = new Map<number, TabState>();
   /** Each followed tab's main frame id (its page target's id), read once from Chrome when a document request needs it. */
@@ -402,7 +406,7 @@ export function createNetworkCapture(
     let refusal: string | null = null;
     for (const { tabId, url } of list) {
       tabs.set(tabId, "waiting");
-      if (!isRecordablePage(url)) continue;
+      if (!recordable(url)) continue;
       const refused = await attach(tabId);
       if (refused) {
         tabs.set(tabId, "refused");
@@ -466,7 +470,7 @@ export function createNetworkCapture(
         return;
       }
       tabs.set(tabId, "waiting");
-      if (isRecordablePage(url)) await attachLater(tabId);
+      if (recordable(url)) await attachLater(tabId);
     },
 
     async onCommitted(tabId, frameId, url) {
@@ -475,11 +479,7 @@ export function createNetworkCapture(
         if (tabs.has(tabId)) await fallback?.onCommitted(tabId, frameId);
         return;
       }
-      if (
-        frameId === 0 &&
-        tabs.get(tabId) === "waiting" &&
-        isRecordablePage(url)
-      )
+      if (frameId === 0 && tabs.get(tabId) === "waiting" && recordable(url))
         await attachLater(tabId);
     },
 

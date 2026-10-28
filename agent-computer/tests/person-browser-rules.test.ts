@@ -14,7 +14,13 @@ import {
   RECORDER_EXTENSION_ID,
   RECORDER_NATIVE_HOST,
 } from "../../shared/recorder-extension";
-import { personMayUse } from "../src/person-access";
+import {
+  computerOwner,
+  NOT_ITS_OWN_COMPUTER,
+  ONLY_THE_PERSONS,
+  personMayUse,
+  refusedHere,
+} from "../src/person-access";
 import {
   copyNativeMessagingHosts,
   defaultNativeMessagingHosts,
@@ -22,7 +28,9 @@ import {
   PLAYWRIGHT_DEFAULTS_A_PERSON_DOES_NOT_GET,
   personBrowserEnv,
   personLaunchOptions,
+  browserExecutableCandidates,
   personNativeLaunch,
+  runnable,
 } from "../src/person-launch";
 import {
   extensionIdFromKey,
@@ -134,6 +142,36 @@ describe("finding the built Recorder", () => {
     expect(
       isRecorderSetupPage("chrome-extension://abcdefghijklmnop/setup.html", id),
     ).toBe(false);
+  });
+});
+
+describe("finding the person's browser on Linux", () => {
+  let dir = "";
+  afterEach(async () => {
+    if (dir) await rm(dir, { recursive: true, force: true });
+    dir = "";
+  });
+
+  test("the launcher on the PATH is looked for after the vendor's package, and only one that runs counts", async () => {
+    // NixOS's shape: no /opt, the vendor's launcher name on the PATH.
+    dir = await mkdtemp(join(tmpdir(), "openbot-linux-path-"));
+    const edge = join(dir, "microsoft-edge");
+    await writeFile(edge, "#!/bin/sh\nexec true\n", { mode: 0o755 });
+    // Not executable: a file that happens to have the name.
+    await writeFile(join(dir, "google-chrome"), "", { mode: 0o644 });
+    // After the vendor's own package, which this machine may or may not have.
+    expect(
+      browserExecutableCandidates("msedge", { PATH: dir }, "linux"),
+    ).toEqual([
+      "/opt/microsoft/msedge/msedge",
+      join(dir, "microsoft-edge-stable"),
+      edge,
+    ]);
+    expect(await runnable(edge, "linux")).toBe(true);
+    expect(await runnable(join(dir, "google-chrome"), "linux")).toBe(false);
+    expect(await runnable(join(dir, "microsoft-edge-stable"), "linux")).toBe(
+      false,
+    );
   });
 });
 
@@ -422,6 +460,65 @@ describe("what a person's browser id may reach", () => {
       "/human/secret",
     ])
       expect(personMayUse(path)).toBe(false);
+  });
+});
+
+describe("which computer a person's browser may run on", () => {
+  const PERSON = "person-0123456789abcdef0123456789abcdef";
+  const OTHER = "person-fedcba9876543210fedcba9876543210";
+
+  test("how each deployment starts its computers says whose they are", () => {
+    // Compose's and the chart's shared computer, and the all-in-one image's: nothing set.
+    expect(computerOwner({})).toEqual({ kind: "shared" });
+    expect(computerOwner({ COMPUTER_BOT_ID: "" })).toEqual({ kind: "shared" });
+    // A supervisor's container and a Sandbox's pod, for a Bot and for a person.
+    expect(computerOwner({ COMPUTER_BOT_ID: "invoice-collector" })).toEqual({
+      kind: "one",
+      id: "invoice-collector",
+    });
+    expect(computerOwner({ COMPUTER_BOT_ID: PERSON })).toEqual({
+      kind: "one",
+      id: PERSON,
+    });
+    // OpenBot Desktop's host-side computer.
+    expect(computerOwner({ COMPUTER_PEOPLE_ONLY: "on" })).toEqual({
+      kind: "people",
+    });
+    expect(computerOwner({ COMPUTER_PEOPLE_ONLY: "off" })).toEqual({
+      kind: "shared",
+    });
+  });
+
+  test("never beside Bots: not on the shared computer, and not on a Bot's", () => {
+    for (const owner of [
+      computerOwner({}),
+      computerOwner({ COMPUTER_BOT_ID: "invoice-collector" }),
+    ]) {
+      expect(refusedHere(owner, PERSON)).toEqual({
+        status: 503,
+        error: NOT_ITS_OWN_COMPUTER,
+      });
+      expect(refusedHere(owner, "invoice-collector")).toBeNull();
+      expect(refusedHere(owner, "shared")).toBeNull();
+    }
+  });
+
+  test("on a computer of its own, and nothing else there", () => {
+    const own = computerOwner({ COMPUTER_BOT_ID: PERSON });
+    expect(refusedHere(own, PERSON)).toBeNull();
+    for (const id of [OTHER, "invoice-collector", "shared"])
+      expect(refusedHere(own, id)).toEqual({
+        status: 403,
+        error: ONLY_THE_PERSONS,
+      });
+    const desktop = computerOwner({ COMPUTER_PEOPLE_ONLY: "on" });
+    expect(refusedHere(desktop, PERSON)).toBeNull();
+    expect(refusedHere(desktop, OTHER)).toBeNull();
+    for (const id of ["invoice-collector", "shared"])
+      expect(refusedHere(desktop, id)).toEqual({
+        status: 403,
+        error: ONLY_THE_PERSONS,
+      });
   });
 });
 

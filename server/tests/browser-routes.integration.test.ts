@@ -5,11 +5,12 @@
 // (shared/openbot-browser.ts): slice 1 builds the real ones.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  BROWSER_ABSENCES,
   type BrowserApiState,
   type BrowserOpenResponse,
   type BrowserState,
@@ -19,6 +20,7 @@ import {
   browserRecordingRequestSchema,
   browserTabsRequestSchema,
   isPersonBrowserId,
+  type LauncherConnection,
   type LauncherState,
 } from "@openbot/shared/openbot-browser";
 import {
@@ -27,6 +29,7 @@ import {
 } from "@openbot/shared/recorder-api";
 import { RECORDER_EXTENSION_ID } from "@openbot/shared/recorder-extension";
 import { eq, inArray } from "drizzle-orm";
+import { NOT_ITS_OWN_COMPUTER } from "../../agent-computer/src/person-access";
 import { NO_INSTALLED_BROWSER } from "../../agent-computer/src/person-launch";
 import { createApp } from "../src/app";
 import type { AuditEventInput } from "../src/audit";
@@ -37,10 +40,19 @@ import { openbotAddress } from "../src/browser/address";
 import { personBrowserEgressPolicy } from "../src/browser/egress";
 import {
   gatewayBrowserComputers,
+  personBrowserPlace,
+  personBrowserRefusal,
+  SHARED_COMPUTER,
   withPersonBrowsers,
 } from "../src/browser/host";
 import { personBrowserId } from "../src/browser/person";
-import { CALL_TIMEOUT_MS } from "../src/browser/routes";
+import {
+  browserRequestSeconds,
+  CALL_BUDGET_MS,
+  CALL_TIMEOUT_MS,
+  OPEN_BUDGET_MS,
+  STATE_TIMEOUT_MS,
+} from "../src/browser/routes";
 import { createComputerGateway } from "../src/computer/gateway";
 import { withPolicyPushOnWake } from "../src/computer/policy-network";
 import {
@@ -51,11 +63,15 @@ import { loadConfig } from "../src/config";
 import { decryptSecret } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
 import { users } from "../src/db/schema/core";
-import { recorderConnections } from "../src/db/schema/recorder";
+import {
+  recorderConnectCodes,
+  recorderConnections,
+} from "../src/db/schema/recorder";
 import { startHttpServer } from "../src/http-server";
+import { createRecorderConnectionStore } from "../src/recorder/connections";
 import { createRecorderExtension } from "../src/recorder/wiring";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
-import { testEnvironment } from "./support/environment";
+import { SESSION_LIFETIME_MS, testEnvironment } from "./support/environment";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const prefix = `browser-routes-${randomUUID()}`;
@@ -86,6 +102,8 @@ const AUTHORITY_PORT = 7763;
 const NOTHING_PORT = 7764;
 /** The real computer one test runs, on a port of its own. */
 const REAL_COMPUTER_PORT = 7815;
+/** The real shared computer another runs. */
+const SHARED_COMPUTER_PORT = 7816;
 /** What the person is told when their browser cannot open for OpenBot's own setup. */
 const NOT_SET_UP =
   "Your browser can't open right now. Ask an admin to check OpenBot's setup.";
@@ -103,6 +121,12 @@ type Opened = {
   recordedUnder?: string;
 };
 const browsers = new Map<string, Opened>();
+/**
+ * The connection each browser's Recorder keeps in its profile, as the Recorder keeps it in `chrome.storage.local`: it
+ * outlives the browser being closed, and a browser opened again with no new connection starts out holding it. Until
+ * the Recorder forgets it (a disconnect).
+ */
+const recorderKeeps = new Map<string, LauncherConnection>();
 const policies = new Map<string, unknown>();
 /** Every request the computer took, as `<method> <path> <browser>`. */
 const asked: string[] = [];
@@ -114,10 +138,20 @@ let slowNextNavigation:
   | { ms: number; status: number; error: string }
   | { never: Promise<void> }
   | null = null;
+/** How long the computer takes over the next open, when a test says so: a cold computer launching a browser. */
+let slowNextOpen: number | null = null;
 /** How the computer answers the next disconnect instead of telling the Recorder, when a test says so: with `status`, as
  * a computer with no such route answers; or not until `never` settles. */
 let refuseNextDisconnect: { status: number } | { never: Promise<void> } | null =
   null;
+/**
+ * How the computer answers the state while a test says the person's browser is not answering: as the real one does
+ * (agent-computer's browser-host.ts), a 504 with its sentence once the browser has not answered in 5 s; or, for a
+ * computer that is itself stuck, not until `never` settles.
+ */
+let silentState: { answers: true } | { never: Promise<void> } | null = null;
+/** What the real computer answers when the browser did not answer (agent-computer's NOT_ANSWERING). */
+const COMPUTER_NOT_ANSWERING = "The browser did not answer within 5 s.";
 /** The window an open shows its browser in: a screen (hosted OpenBot) unless a test opens a native one (Desktop). */
 let openAs: "screen" | "native" = "screen";
 /**
@@ -173,6 +207,13 @@ const computer = Bun.serve<{ bot: string }>({
     const closed: BrowserState = { open: false, tabs: [] };
     switch (url.pathname) {
       case "/browser/state":
+        if (opened && silentState && "never" in silentState) {
+          await silentState.never;
+        } else if (opened && silentState)
+          return Response.json(
+            { error: COMPUTER_NOT_ANSWERING },
+            { status: 504 },
+          );
         return Response.json(opened?.state ?? closed);
       case "/browser/open": {
         if (refuseNextOpen) {
@@ -183,9 +224,18 @@ const computer = Bun.serve<{ bot: string }>({
         const parsed = browserOpenRequestSchema.safeParse(body);
         if (!parsed.success)
           return Response.json({ error: "Bad request." }, { status: 400 });
-        if (confirmOpens) {
+        if (slowNextOpen !== null) {
+          const ms = slowNextOpen;
+          slowNextOpen = null;
+          await Bun.sleep(ms);
+        }
+        const brought = parsed.data.connection;
+        // An open that brings no connection hands the Recorder nothing: an open browser is as it was, and a closed one
+        // opens with its Recorder holding what it kept (agent-computer's browser-host.ts).
+        if (!brought && opened) return Response.json(opened.state);
+        if (brought && confirmOpens) {
           await Bun.sleep(confirmOpens.askMs);
-          if ((await confirmOpens.me(parsed.data.connection.token)) === 401)
+          if ((await confirmOpens.me(brought.token)) === 401)
             return Response.json(
               {
                 error:
@@ -194,23 +244,29 @@ const computer = Bun.serve<{ bot: string }>({
               { status: 502 },
             );
         }
+        const holds = brought ?? recorderKeeps.get(id);
+        if (brought) recorderKeeps.set(id, brought);
         const native = openAs === "native";
+        const narration = native
+          ? { narration: "own" as const, voice: "off" as const }
+          : { narration: "external" as const };
         const next: Opened = {
-          connection: parsed.data.connection,
+          connection: holds,
           narrated: [],
           state: {
             open: true,
             browser: native ? "chrome" : "chromium",
             window: openAs,
-            recorder: {
-              connected: true,
-              userId: parsed.data.connection.user.id,
-              phase: "idle",
-              actions: 0,
-              ...(native
-                ? { narration: "own" as const, voice: "off" as const }
-                : { narration: "external" as const }),
-            },
+            recorder: holds
+              ? {
+                  connected: true,
+                  userId: holds.user.id,
+                  connectionId: holds.connectionId,
+                  phase: "idle",
+                  actions: 0,
+                  ...narration,
+                }
+              : { connected: false, phase: "idle", actions: 0, ...narration },
             tabs: [
               { id: "t1", url: "about:blank", title: "New Tab", active: true },
             ],
@@ -316,6 +372,7 @@ const computer = Bun.serve<{ bot: string }>({
             { error: "This browser is not open. Open it first." },
             { status: 409 },
           );
+        recorderKeeps.delete(id);
         opened.state.recorder = {
           connected: false,
           phase: "idle",
@@ -382,10 +439,12 @@ function build(
     computers?: false;
     /** The token the browser routes call the computer with, in place of the right one. */
     token?: string;
-    /** The Bots' computer provider, in place of the shared stand-in computer. */
+    /** The Bots' computer provider, in place of the stand-in computer as a computer of each one's own. */
     provider?: ComputerProvider;
     /** How long the browser routes wait for the computer, in place of their own deadline. */
     callTimeoutMs?: number;
+    /** Each browser route's budget, in place of its own. */
+    budgetMs?: { open?: number; call?: number };
   } = {},
 ) {
   const base = {
@@ -415,14 +474,7 @@ function build(
     gatewayUrl: config.runtime.intelligence.gatewayWsUrl,
   });
   const provider = withPolicyPushOnWake(
-    withPersonBrowsers(
-      options.provider ??
-        createSharedComputerProvider({
-          baseUrl: `http://127.0.0.1:${COMPUTER_PORT}`,
-          token: COMPUTER_TOKEN,
-        }),
-      config.browser?.url,
-    ),
+    withPersonBrowsers(options.provider ?? ownComputers(), config.browser?.url),
     {
       policyForBot: async (botId) =>
         isPersonBrowserId(botId) ? personPolicy : undefined,
@@ -442,6 +494,7 @@ function build(
     roleRepository,
     peopleStore: { isRevoked: async () => false },
     personalSpaces,
+    sessionLifetimeMs: SESSION_LIFETIME_MS,
     auditStore,
   });
   const args = [config] as unknown as Parameters<typeof createApp>;
@@ -450,14 +503,16 @@ function build(
   args[7] = gateway;
   args[8] = {} as never;
   args[12] = auditStore;
+  const place = personBrowserPlace({
+    provider,
+    browserUrl: config.browser?.url,
+    ...(config.browserAbsent ? { absent: config.browserAbsent } : {}),
+    computers: () => gatewayBrowserComputers(gateway, config.browser?.url),
+  });
   args[34] = {
     recorder,
     browser: {
-      ...(options.computers === false
-        ? {}
-        : {
-            computers: gatewayBrowserComputers(gateway, config.browser?.url),
-          }),
+      ...(options.computers === false ? {} : place),
       token: options.token ?? COMPUTER_TOKEN,
       recorder,
       openbotUrl: openbotAddress(config),
@@ -465,12 +520,28 @@ function build(
       ...(options.callTimeoutMs
         ? { callTimeoutMs: options.callTimeoutMs }
         : {}),
+      ...(options.budgetMs ? { budgetMs: options.budgetMs } : {}),
     },
   };
   return { app: createApp(...args), gateway, config };
 }
 
 type OpenBot = ReturnType<typeof build>;
+
+/**
+ * The stand-in computer as a provider that gives every computer named its own, as a supervisor or a Sandbox does: where
+ * a person's browser may run. The same calls as the shared provider's, which is how the stand-in is reached.
+ */
+function ownComputers(): ComputerProvider {
+  return {
+    ...createSharedComputerProvider({
+      baseUrl: `http://127.0.0.1:${COMPUTER_PORT}`,
+      token: COMPUTER_TOKEN,
+    }),
+    name: "docker",
+    isolation: "per-bot",
+  };
+}
 
 const call = (
   { app }: OpenBot,
@@ -658,6 +729,46 @@ describe("opening a person's own browser", () => {
     }
   });
 
+  test("on OpenBot Desktop with no Chrome or Edge it can open, the state says why in a sentence for the person", async () => {
+    // The code-owner review: with Chrome or Edge somewhere OpenBot Desktop did not look, or installed only as a Flatpak,
+    // the reason was only in Desktop's log. Desktop now names it to the server, which says it to the person.
+    const flatpak = build({ OPENBOT_BROWSER_ABSENT: "flatpak-chrome" });
+    expect(
+      await (await call(flatpak, "/api/browser", { as: "ben" })).json(),
+    ).toEqual({
+      available: true,
+      shows: "screen",
+      note: BROWSER_ABSENCES["flatpak-chrome"],
+      computerId: personBrowserId(ben.id),
+      open: false,
+      tabs: [],
+    } satisfies BrowserApiState);
+    expect(BROWSER_ABSENCES["flatpak-chrome"]).toBe(
+      "OpenBot can't open the Flatpak version of Google Chrome, so install Chrome from google.com/chrome to use your own browser.",
+    );
+    // With no computers for it at all, the same sentence is why it cannot open.
+    const nothing = build(
+      { OPENBOT_BROWSER_ABSENT: "no-chrome-or-edge" },
+      { computers: false },
+    );
+    expect(
+      await (await call(nothing, "/api/browser", { as: "ben" })).json(),
+    ).toMatchObject({ available: false });
+    // A name this server does not know, and a browser that does run, explain nothing.
+    for (const environment of [
+      { OPENBOT_BROWSER_ABSENT: "a-reason-from-a-newer-desktop" },
+      {
+        OPENBOT_BROWSER_ABSENT: "no-chrome-or-edge",
+        OPENBOT_BROWSER_URL: `http://127.0.0.1:${NOTHING_PORT}`,
+      },
+    ])
+      expect(
+        await (
+          await call(build(environment), "/api/browser", { as: "ben" })
+        ).json(),
+      ).not.toHaveProperty("note");
+  });
+
   test("OpenBot Desktop's host-side computer carries people's browsers, while Bots' computers stay where they are", async () => {
     const bots = {
       name: "docker",
@@ -788,9 +899,53 @@ describe("opening a person's own browser", () => {
     });
   });
 
-  test("a second open replaces the first token instead of adding a connection", async () => {
+  test("opening it again keeps the connection that stands: no new token, and nothing on the trail", async () => {
+    // The end-to-end run: every open, and many a Record, revoked the browser's connection and made another, a
+    // `recorder.revoked` and a `recorder.connected` row each time.
     await open(openbot, "ada");
     const first = handed(ada.id);
+    const trail = () =>
+      audits.filter(
+        (event) =>
+          (event.eventType === "recorder.connected" ||
+            event.eventType === "recorder.revoked") &&
+          event.actorUserId === ada.id,
+      ).length;
+    const rows = trail();
+
+    // Again while it is open, and again after it was closed: its Recorder kept the connection in its profile.
+    await open(openbot, "ada");
+    await call(openbot, "/api/browser/close", { method: "POST", as: "ada" });
+    const reopened = await open(openbot, "ada");
+    expect(reopened.narration).toBe("external");
+    expect(handed(ada.id).token).toBe(first.token);
+    expect(trail()).toBe(rows);
+    expect(
+      (
+        await call(openbot, "/api/recorder/me", {
+          headers: bearer(first.token),
+        })
+      ).status,
+    ).toBe(200);
+    const unrevoked = (
+      await database
+        .select()
+        .from(recorderConnections)
+        .where(eq(recorderConnections.userId, ada.id))
+    ).filter((row) => row.revokedAt === null);
+    expect(unrevoked.map((row) => row.id)).toEqual([first.connectionId]);
+  });
+
+  test("a Recorder that does not hold the connection that stands is handed a new one, which replaces it", async () => {
+    await open(openbot, "ada");
+    const first = handed(ada.id);
+    // The Recorder in the open browser holds some other connection than the one OpenBot holds for it.
+    const opened = browsers.get(personBrowserId(ada.id));
+    if (!opened?.state.recorder) throw new Error("Ada's browser is open.");
+    opened.state.recorder = {
+      ...opened.state.recorder,
+      connectionId: "another-connection",
+    };
     await open(openbot, "ada");
     const second = handed(ada.id);
     expect(second.token).not.toBe(first.token);
@@ -809,17 +964,12 @@ describe("opening a person's own browser", () => {
         })
       ).status,
     ).toBe(200);
-    const live = await database
-      .select({ id: recorderConnections.id })
-      .from(recorderConnections)
-      .where(eq(recorderConnections.userId, ada.id));
     const unrevoked = (
       await database
         .select()
         .from(recorderConnections)
         .where(eq(recorderConnections.userId, ada.id))
     ).filter((row) => row.revokedAt === null);
-    expect(live.length).toBeGreaterThan(1);
     expect(unrevoked.map((row) => row.id)).toEqual([second.connectionId]);
     expect(
       audits.find(
@@ -828,6 +978,30 @@ describe("opening a person's own browser", () => {
           event.targetId === first.connectionId,
       )?.payload,
     ).toEqual({ connectionId: first.connectionId, reason: "replaced" });
+  });
+
+  test("a connection that no longer stands is not kept: the next open makes a new one", async () => {
+    await open(openbot, "ada");
+    const first = handed(ada.id);
+    // Disconnected in Settings, Browsers, which also tells the browser to forget it.
+    expect(
+      (
+        await call(openbot, `/api/recorder/connections/${first.connectionId}`, {
+          method: "DELETE",
+          as: "ada",
+        })
+      ).status,
+    ).toBe(204);
+    await open(openbot, "ada");
+    const next = handed(ada.id);
+    expect(next.token).not.toBe(first.token);
+    expect(
+      audits.filter(
+        (event) =>
+          event.eventType === "recorder.connected" &&
+          event.targetId === next.connectionId,
+      ),
+    ).toHaveLength(1);
   });
 
   test("the OpenBot browser's connection is disconnected from Settings, Browsers like any other", async () => {
@@ -1032,6 +1206,8 @@ describe("opening a person's own browser", () => {
           PROFILES_DIR: join(dir, "profiles"),
           WORKSPACE_DIR: join(dir, "workspace"),
           OPENBOT_RECORDER_DIR: join(dir, "recorder"),
+          // Started for Ada's browser alone, as a supervisor starts the container it makes for it.
+          COMPUTER_BOT_ID: personBrowserId(ada.id),
         },
         stdout: "pipe",
         stderr: "pipe",
@@ -1053,10 +1229,13 @@ describe("opening a person's own browser", () => {
       const onRealComputer = build(
         {},
         {
-          provider: createSharedComputerProvider({
-            baseUrl: base,
-            token: COMPUTER_TOKEN,
-          }),
+          provider: {
+            ...createSharedComputerProvider({
+              baseUrl: base,
+              token: COMPUTER_TOKEN,
+            }),
+            isolation: "per-bot",
+          },
         },
       );
       const { result, warned } = await logged(() =>
@@ -1103,6 +1282,107 @@ describe("opening a person's own browser", () => {
     } finally {
       realComputer.kill();
       await realComputer.exited;
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("the computer refuses a person's browser on itself where Bots run, whatever the server was told", async () => {
+    // Blocker 3, the computer's half: a server configured to think the shared computer is a computer of its own (a
+    // provider that says per-bot, a stray OPENBOT_BROWSER_URL) still cannot open a person's browser beside Bots.
+    const dir = await mkdtemp(join(tmpdir(), "openbot-shared-computer-"));
+    await Promise.all(
+      ["profiles", "workspace"].map((name) => mkdir(join(dir, name))),
+    );
+    const sharedComputer = Bun.spawn(
+      [process.execPath, "--no-env-file", "src/index.ts"],
+      {
+        cwd: fileURLToPath(new URL("../../agent-computer", import.meta.url)),
+        // The shared computer: started for nobody in particular, as compose and the chart's shared mode start it.
+        env: {
+          HOME: process.env.HOME,
+          PATH: process.env.PATH,
+          TMPDIR: tmpdir(),
+          COMPUTER_TOKEN,
+          PORT: String(SHARED_COMPUTER_PORT),
+          PROFILES_DIR: join(dir, "profiles"),
+          WORKSPACE_DIR: join(dir, "workspace"),
+          OPENBOT_RECORDER_DIR: join(dir, "recorder"),
+        },
+        stdout: "pipe",
+        stderr: "pipe",
+      },
+    );
+    try {
+      const base = `http://127.0.0.1:${SHARED_COMPUTER_PORT}`;
+      const deadline = Date.now() + 20_000;
+      while (
+        !(await fetch(`${base}/health`).then(
+          (response) => response.ok,
+          () => false,
+        ))
+      ) {
+        if (Date.now() > deadline || sharedComputer.exitCode !== null)
+          throw new Error("The computer did not start.");
+        await Bun.sleep(100);
+      }
+      const misled = build(
+        {},
+        {
+          provider: {
+            ...createSharedComputerProvider({
+              baseUrl: base,
+              token: COMPUTER_TOKEN,
+            }),
+            isolation: "per-bot",
+          },
+        },
+      );
+      const { result, warned } = await logged(() =>
+        call(misled, "/api/browser/open", { method: "POST", as: "ada" }),
+      );
+      expect(result.status).toBe(503);
+      expect(await result.json()).toEqual({ error: NOT_SET_UP });
+      expect(
+        warned
+          .map((line) => JSON.parse(line) as Record<string, unknown>)
+          .filter((line) => line.type === "browser-computer-failed"),
+      ).toEqual([
+        {
+          type: "browser-computer-failed",
+          path: "/browser/open",
+          status: 503,
+          error: NOT_ITS_OWN_COMPUTER,
+        },
+      ]);
+      // Every route of the person's, the live screen's included, is refused before it reaches a profile.
+      for (const path of ["/browser/state", "/egress-policy", "/control"]) {
+        const asked = await fetch(`${base}${path}`, {
+          headers: {
+            "x-openbot-computer-token": COMPUTER_TOKEN,
+            "x-openbot-bot-id": personBrowserId(ada.id),
+          },
+        });
+        expect(asked.status).toBe(503);
+      }
+      const stream = await fetch(
+        `${base}/stream?token=${COMPUTER_TOKEN}&bot=${personBrowserId(ada.id)}`,
+      );
+      expect(stream.status).toBe(503);
+      expect(await readdir(join(dir, "profiles"))).toEqual([]);
+      // A Bot is served there as before.
+      expect(
+        (
+          await fetch(`${base}/control`, {
+            headers: {
+              "x-openbot-computer-token": COMPUTER_TOKEN,
+              "x-openbot-bot-id": "agent_7",
+            },
+          })
+        ).status,
+      ).toBe(200);
+    } finally {
+      sharedComputer.kill();
+      await sharedComputer.exited;
       await rm(dir, { recursive: true, force: true });
     }
   });
@@ -1172,6 +1452,44 @@ describe("opening a person's own browser", () => {
         })
       ).status,
     ).toBe(200);
+  });
+
+  test("a person who already holds ten unused codes is told to wait, and the refusal is on the trail", async () => {
+    const codes = createRecorderConnectionStore(database);
+    // No connection of Ben's stands, so his open has to make one.
+    await codes.revokeAll(ben.id, "signed_out");
+    try {
+      for (let index = 0; index < 10; index += 1) {
+        expect(await codes.mintCode(ben.id, "web")).not.toBeNull();
+      }
+      const refused = await call(openbot, "/api/browser/open", {
+        method: "POST",
+        as: "ben",
+      });
+      expect(refused.status).toBe(429);
+      expect(await refused.json()).toEqual({
+        error:
+          "Too many connection codes were asked for at once. Wait a few minutes and try again.",
+      });
+      expect(
+        audits.filter(
+          (event) =>
+            event.eventType === "recorder.connect_refused" &&
+            event.actorUserId === ben.id,
+        ),
+      ).toEqual([
+        {
+          eventType: "recorder.connect_refused",
+          targetType: "recorder_connection",
+          actorUserId: ben.id,
+          payload: { reason: "too_many_codes", via: "openbot-browser" },
+        },
+      ]);
+    } finally {
+      await database
+        .delete(recorderConnectCodes)
+        .where(eq(recorderConnectCodes.userId, ben.id));
+    }
   });
 
   test("each person reaches only their own browser", async () => {
@@ -1405,14 +1723,135 @@ describe("a slow page, and a browser that cannot be reached", () => {
     }
   });
 
+  test("each route keeps the person's request open for its own waits, past Bun's 10 s", () => {
+    // An open and a Record wait for a computer to wake and a browser to launch; the rest for the computer's own answer.
+    // Each is kept open for its budget and the state read that may follow it, and the state keeps Bun's 10 s, which its
+    // own bound answers well within.
+    for (const [path, budget] of [
+      ["/api/browser/open", OPEN_BUDGET_MS],
+      ["/api/browser/recording", OPEN_BUDGET_MS],
+      ["/api/browser/tabs", CALL_BUDGET_MS],
+      ["/api/browser/navigate", CALL_BUDGET_MS],
+      ["/api/browser/narration", CALL_BUDGET_MS],
+      ["/api/browser/close", CALL_BUDGET_MS],
+    ] as const) {
+      const seconds = browserRequestSeconds(path) ?? 0;
+      expect(seconds * 1000).toBeGreaterThan(budget + STATE_TIMEOUT_MS);
+      // Under the largest idle timeout Bun.serve takes.
+      expect(seconds).toBeLessThanOrEqual(255);
+    }
+    expect(CALL_BUDGET_MS).toBeGreaterThan(CALL_TIMEOUT_MS);
+    expect(browserRequestSeconds("/api/browser")).toBeUndefined();
+    expect(STATE_TIMEOUT_MS).toBeLessThan(10_000);
+  });
+
+  test("a slow open and a slow page answer through OpenBot's own server, never with an empty reply", async () => {
+    // Bun.serve closes a request that has sent nothing for 10 s, and these waited on the computer for up to 45 s, or 90
+    // for an open: a cold open or a slow page reached the person as an empty reply, and the app said only its fallback.
+    await call(openbot, "/api/browser/close", { method: "POST", as: "ada" });
+    const server = startHttpServer({
+      port: SERVER_PORT,
+      config: openbot.config,
+      resolveRequestActor: async () => {
+        throw new Error("Only the live screen asks this.");
+      },
+      agentProfileStore: { get: async () => null } as never,
+      computerGateway: openbot.gateway,
+      demonstrationStore: {} as never,
+      demonstrationRecorder: {} as never,
+      app: openbot.app,
+    });
+    const post = (path: string, json?: unknown) =>
+      fetch(`http://127.0.0.1:${SERVER_PORT}${path}`, {
+        method: "POST",
+        headers: {
+          cookie: "test-session=ada",
+          ...(json === undefined ? {} : { "content-type": "application/json" }),
+        },
+        ...(json === undefined ? {} : { body: JSON.stringify(json) }),
+        signal: AbortSignal.timeout(30_000),
+      });
+    try {
+      slowNextOpen = 12_000;
+      const opened = await post("/api/browser/open");
+      expect(opened.status).toBe(200);
+      expect(await opened.json()).toMatchObject({
+        ok: true,
+        computerId: personBrowserId(ada.id),
+        window: "screen",
+      });
+
+      slowNextNavigation = {
+        ms: 12_000,
+        status: 502,
+        error: "en.wikipedia.org did not load in time.",
+      };
+      const { result: navigated } = await logged(() =>
+        post("/api/browser/navigate", { url: "https://en.wikipedia.org" }),
+      );
+      expect(navigated.status).toBe(502);
+      expect(await navigated.json()).toEqual({
+        error: "en.wikipedia.org did not load in time.",
+      });
+    } finally {
+      slowNextOpen = null;
+      slowNextNavigation = null;
+      await server.stop(true);
+    }
+  }, 60_000);
+
+  test("a route whose budget runs out says the browser is taking too long, and leaves nothing waiting", async () => {
+    // The budget is every wait's in the route: finding the computer, and each call to it.
+    const SLOW =
+      "Your browser is taking too long to answer. The page may still be loading.";
+    let wake = () => {};
+    const asleep = new Promise<string>((resolve) => {
+      wake = () => resolve(`http://127.0.0.1:${COMPUTER_PORT}`);
+    });
+    const waking = build(
+      {},
+      {
+        budgetMs: { open: 400, call: 300 },
+        provider: {
+          ...ownComputers(),
+          // A computer that is still waking, and takes longer than any route has.
+          locate: () => asleep,
+        },
+      },
+    );
+    try {
+      const asking = Date.now();
+      const { result: navigated, warned } = await logged(() =>
+        call(waking, "/api/browser/navigate", {
+          method: "POST",
+          as: "ada",
+          json: { url: "https://example.com" },
+        }),
+      );
+      expect(navigated.status).toBe(504);
+      expect(await navigated.json()).toEqual({ error: SLOW });
+      expect(Date.now() - asking).toBeLessThan(5_000);
+      expect(typesOf(warned)).toContain("browser-computer-slow");
+
+      const opened = await call(waking, "/api/browser/open", {
+        method: "POST",
+        as: "ada",
+      });
+      expect(opened.status).toBe(504);
+      expect(await opened.json()).toEqual({ error: SLOW });
+    } finally {
+      wake();
+    }
+  });
+
   test("a computer nothing answers on reads as unreachable, at error level", async () => {
     const nowhere = `http://127.0.0.1:${NOTHING_PORT}`;
     const gone = build(
       {},
       {
         provider: {
-          name: "shared",
-          isolation: "shared",
+          name: "docker",
+          isolation: "per-bot",
           locate: async () => nowhere,
           status: async (botId: string) => ({
             botId,
@@ -1437,6 +1876,95 @@ describe("a slow page, and a browser that cannot be reached", () => {
     });
     expect(typesOf(failed)).toEqual(["browser-computer-unreachable"]);
   });
+});
+
+describe("a browser that is open and not answering", () => {
+  /** What the person is told, on an OpenBot with sign-in. */
+  const NOT_ANSWERING =
+    "Your browser isn't answering. If it doesn't come back soon, ask an admin for help.";
+  /** How many requests the computer took that start with `line` (`<method> <path>`). */
+  const timesAsked = (line: string) =>
+    asked.filter((entry) => entry.startsWith(line)).length;
+
+  test("the state says so in a sentence, the Browser button stays, and it shows again once the browser answers", async () => {
+    await open(openbot, "ada");
+    silentState = { answers: true };
+    try {
+      const { result: asked, warned } = await logged(() =>
+        call(openbot, "/api/browser", { as: "ada" }),
+      );
+      // Not logged as a failure at every ask: the page asks every second, and the computer says it once.
+      expect(typesOf(warned)).toEqual([]);
+      expect(asked.status).toBe(200);
+      expect(await asked.json()).toMatchObject({
+        available: true,
+        shows: "screen",
+        computerId: personBrowserId(ada.id),
+        problem: NOT_ANSWERING,
+      });
+      // Record is told the same at once, and never reaches the browser to wait on it.
+      const recordsBefore = timesAsked("POST /browser/recording");
+      const record = await call(openbot, "/api/browser/recording", {
+        method: "POST",
+        as: "ada",
+        json: { action: "start", title: "Pay the invoice" },
+      });
+      expect(record.status).toBe(504);
+      expect(await record.json()).toEqual({ error: NOT_ANSWERING });
+      expect(timesAsked("POST /browser/recording")).toBe(recordsBefore);
+    } finally {
+      silentState = null;
+    }
+    const back = (await (
+      await call(openbot, "/api/browser", { as: "ada" })
+    ).json()) as BrowserApiState;
+    expect(back.open).toBe(true);
+    expect(back.problem).toBeUndefined();
+  });
+
+  test("a computer that does not answer at all still gets the person an answer, before OpenBot's own server would close the request", async () => {
+    // The end-to-end run: the state waited 45 s, Bun.serve closed the person's request with an empty reply at 10, the
+    // Browser page had nothing to say and the sidebar lost its Browser button.
+    await open(openbot, "ada");
+    let release = () => {};
+    silentState = {
+      never: new Promise<void>((resolve) => {
+        release = resolve;
+      }),
+    };
+    const server = startHttpServer({
+      port: SERVER_PORT,
+      config: openbot.config,
+      resolveRequestActor: async () => {
+        throw new Error("Only the live screen asks this.");
+      },
+      agentProfileStore: { get: async () => null } as never,
+      computerGateway: openbot.gateway,
+      demonstrationStore: {} as never,
+      demonstrationRecorder: {} as never,
+      app: openbot.app,
+    });
+    try {
+      const asking = Date.now();
+      const { result: asked, warned } = await logged(() =>
+        fetch(`http://127.0.0.1:${SERVER_PORT}/api/browser`, {
+          headers: { cookie: "test-session=ada" },
+          signal: AbortSignal.timeout(15_000),
+        }),
+      );
+      expect(asked.status).toBe(200);
+      expect(await asked.json()).toMatchObject({
+        available: true,
+        problem: NOT_ANSWERING,
+      });
+      expect(Date.now() - asking).toBeLessThan(10_000);
+      expect(typesOf(warned)).toContain("browser-computer-slow");
+    } finally {
+      release();
+      silentState = null;
+      await server.stop(true);
+    }
+  }, 30_000);
 });
 
 describe("Record after the OpenBot browser is disconnected", () => {
@@ -1598,8 +2126,8 @@ describe("Record after the OpenBot browser is disconnected", () => {
       {},
       {
         provider: {
-          name: "shared",
-          isolation: "shared",
+          name: "docker",
+          isolation: "per-bot",
           locate: async () => `http://127.0.0.1:${NOTHING_PORT}`,
           status: async (botId: string) => ({
             botId,
@@ -1807,11 +2335,17 @@ describe("who hears the person, as every answer says it", () => {
     test(`a ${window === "screen" ? "hosted" : "Desktop"} browser's Recorder is reported with the window's narration, signed in or out`, async () => {
       openAs = window;
       try {
+        // Closed first, so it opens in this window: an open browser keeps the window it has.
+        await call(openbot, "/api/browser/close", {
+          method: "POST",
+          as: "ada",
+        });
         const opened = await open(openbot, "ada");
         expect(opened.narration).toBe(expected[window].narration);
         const signedIn: LauncherState = {
           connected: true,
           userId: ada.id,
+          connectionId: handed(ada.id).connectionId,
           phase: "idle",
           actions: 0,
           ...expected[window],
@@ -1847,6 +2381,95 @@ describe("who hears the person, as every answer says it", () => {
         openAs = "screen";
       }
     });
+});
+
+describe("a person's browser where every Bot shares one computer", () => {
+  // Blocker 3 of the code-owner review: with OPENBOT_BROWSER_URL unset, a person's browser ran on the shared computer,
+  // in the container where Bots may run a shell, so a prompt-injected Bot could read the person's cookies off its disk.
+  test("is refused through every route before anything reaches the computer, and the state says why", async () => {
+    const shared = build(
+      {},
+      {
+        provider: createSharedComputerProvider({
+          baseUrl: `http://127.0.0.1:${COMPUTER_PORT}`,
+          token: COMPUTER_TOKEN,
+        }),
+      },
+    );
+    const computerId = personBrowserId(ben.id);
+    const connections = async () =>
+      (
+        await database
+          .select({ id: recorderConnections.id })
+          .from(recorderConnections)
+          .where(eq(recorderConnections.userId, ben.id))
+      ).length;
+    const minted = await connections();
+    const before = asked.length;
+
+    // The app hides the Browser button, and the Browser page says why in the person's words.
+    expect(
+      await (await call(shared, "/api/browser", { as: "ben" })).json(),
+    ).toEqual({
+      available: false,
+      note: SHARED_COMPUTER,
+      computerId,
+      open: false,
+      tabs: [],
+    } satisfies BrowserApiState);
+    const opening = await call(shared, "/api/browser/open", {
+      method: "POST",
+      as: "ben",
+    });
+    expect(opening.status).toBe(503);
+    expect(await opening.json()).toEqual({ error: SHARED_COMPUTER });
+    const routes: [string, unknown][] = [
+      ["/api/browser/recording", { action: "start", title: "Pay a bill" }],
+      ["/api/browser/navigate", { url: "https://example.com" }],
+      ["/api/browser/tabs", { action: "new" }],
+      ["/api/browser/close", undefined],
+    ];
+    for (const [path, json] of routes) {
+      const refused = await call(shared, path, {
+        method: "POST",
+        as: "ben",
+        json,
+      });
+      expect(refused.status).toBe(503);
+      expect(await refused.json()).toEqual({ error: SHARED_COMPUTER });
+    }
+
+    // The computer routes reach a computer through the gateway, whose provider refuses a person's browser outright.
+    const control = await call(shared, `/api/computers/${computerId}/control`, {
+      as: "ben",
+    });
+    expect(control.status).toBeGreaterThanOrEqual(400);
+    await expect(shared.gateway.locate(computerId)).rejects.toThrow(
+      SHARED_COMPUTER,
+    );
+    expect(await shared.gateway.status(computerId)).toMatchObject({
+      state: "absent",
+    });
+
+    // Nothing of the person's reached the shared computer, not even their network policy, and no Recorder connection
+    // was minted for a browser that cannot open.
+    expect(
+      asked.slice(before).filter((line) => line.endsWith(computerId)),
+    ).toEqual([]);
+    expect(await connections()).toBe(minted);
+    // A Bot's computer there is reached as before.
+    expect(await shared.gateway.locate("agent_7")).toMatch(
+      `http://127.0.0.1:${COMPUTER_PORT}`,
+    );
+  });
+
+  test("a computer of each one's own, and OpenBot Desktop's host-side computer, still run it", () => {
+    const shared = { isolation: "shared" } as const;
+    const own = { isolation: "per-bot" } as const;
+    expect(personBrowserRefusal(shared, undefined)).toBe(SHARED_COMPUTER);
+    expect(personBrowserRefusal(own, undefined)).toBeNull();
+    expect(personBrowserRefusal(shared, "http://127.0.0.1:4101")).toBeNull();
+  });
 });
 
 describe("a person's browser on the computer routes and the live screen", () => {
@@ -2064,6 +2687,26 @@ describe("a single-user OpenBot, where the person is its admin", () => {
     );
     expect(multi.status).toBe(503);
     expect(await multi.json()).toEqual({ error: NOT_SET_UP });
+  });
+
+  test("a browser that is not answering tells the single person what they can do themselves", async () => {
+    const single = desktop();
+    await call(single, "/api/browser/open", {
+      method: "POST",
+      headers: WINDOW,
+    });
+    silentState = { answers: true };
+    try {
+      expect(
+        await (await call(single, "/api/browser", { headers: WINDOW })).json(),
+      ).toMatchObject({
+        available: true,
+        problem:
+          "Your browser isn't answering. If it doesn't come back soon, quit OpenBot and open it again.",
+      });
+    } finally {
+      silentState = null;
+    }
   });
 
   test("with no address the Recorder would connect to, the single person is told the same, and the setting is in the log", async () => {

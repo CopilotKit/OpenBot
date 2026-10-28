@@ -80,6 +80,7 @@ function setup({
   const preferences: UserPreferences = {
     messageListEmphasis: "thread",
     selfHostBannerDismissed: dismissed,
+    narration: null,
   };
   client.setQueryData(
     userPreferencesQueryOptions("alice").queryKey,

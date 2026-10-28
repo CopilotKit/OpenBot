@@ -172,6 +172,71 @@ test("organization identity and current role come from the authority; expiry and
   }
 });
 
+test("signing out ends what else the person was signed in with, once the organization has signed them out", async () => {
+  const signedOutAt: string[] = [];
+  const authority = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch(request) {
+      const path = new URL(request.url).pathname;
+      if (path === "/api/me") return Response.json({ user: employee });
+      if (path === "/api/auth/sign-out") {
+        signedOutAt.push("authority");
+        return Response.json({ success: true });
+      }
+      return new Response(null, { status: 404 });
+    },
+  });
+  const app = "http://127.0.0.1:3010";
+  const signOut = async (onSignedOut: (userId: string) => Promise<void>) => {
+    const auth = createOrganizationAuth({
+      authorityUrl: authority.url.origin,
+      materializeUser: async (user) => user,
+      onSignedOut,
+    });
+    const start = await auth.handler(
+      new Request(`${app}/api/auth/organization/session`, {
+        method: "POST",
+        headers: { origin: app, "content-type": "application/json" },
+        body: JSON.stringify({
+          cookie: "better-auth.session_token=fixture-session",
+        }),
+      }),
+    );
+    const { ticket } = await start.json();
+    const consumed = await auth.handler(
+      new Request(`${app}/api/auth/organization/session?ticket=${ticket}`),
+    );
+    const cookie = consumed.headers.get("set-cookie")?.split(";")[0] ?? "";
+    return auth.handler(
+      new Request(`${app}/api/auth/sign-out`, {
+        method: "POST",
+        headers: { origin: app, cookie },
+      }),
+    );
+  };
+  try {
+    const ended: string[] = [];
+    const response = await signOut(async (userId) => {
+      signedOutAt.push("here");
+      ended.push(userId);
+    });
+    expect(response.status).toBe(200);
+    expect(ended).toEqual([employee.id]);
+    // Only after the organization accepted the sign-out.
+    expect(signedOutAt).toEqual(["authority", "here"]);
+
+    // What follows failing never undoes the sign-out the organization already made.
+    const failing = await signOut(async () => {
+      throw new Error("the database is unavailable");
+    });
+    expect(failing.status).toBe(200);
+    expect(failing.headers.get("set-cookie")).toContain("Max-Age=0");
+  } finally {
+    authority.stop(true);
+  }
+});
+
 test("organization sessions reject cross-origin delivery, malformed authority and authority redirects", async () => {
   expect(() =>
     createOrganizationAuth({

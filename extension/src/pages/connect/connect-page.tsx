@@ -1,4 +1,10 @@
-import { IconChevronRight, IconServer, IconTag } from "@tabler/icons-react";
+import {
+  IconChevronRight,
+  IconReplace,
+  IconServer,
+  IconTag,
+} from "@tabler/icons-react";
+import { RECORDER_DESTINATION } from "@openbot/shared/recorder-disclosure";
 import { useEffect, useState } from "react";
 import { PageRows, PageSection } from "@/components/layout/page-parts";
 import { Button } from "@/components/ui/button";
@@ -27,16 +33,20 @@ import { Page } from "../ui/page";
 import { ask } from "../ui/runtime";
 
 type Pending = { origin: string; via: "web" | "desktop" };
+/** The connection this browser has now, which approving replaces. */
+type Replaces = { origin: string; email: string };
 type Phase =
   | { kind: "loading" }
   | { kind: "none" }
   | { kind: "error"; message: string }
-  | { kind: "ready"; pending: Pending }
+  | { kind: "ready"; pending: Pending; replaces?: Replaces }
   | { kind: "connected"; name: string }
   | { kind: "cancelled" };
 
+/** Who asked. Any site can ask to connect, so a web request is said to come from a page at the address shown, never
+ * from OpenBot: confirming that it is OpenBot is what the person is asked to do. */
 const SOURCE = {
-  web: "You asked from OpenBot in this browser.",
+  web: "A page at this address in this browser asked to connect.",
   desktop: "OpenBot Desktop on this computer asked.",
 } as const;
 
@@ -59,7 +69,11 @@ export function ConnectPage() {
       if (!answer.ok) {
         setPhase({ kind: "error", message: answer.error });
       } else if ("pending" in answer && answer.pending) {
-        setPhase({ kind: "ready", pending: answer.pending });
+        setPhase({
+          kind: "ready",
+          pending: answer.pending,
+          ...(answer.replaces ? { replaces: answer.replaces } : {}),
+        });
       } else {
         setPhase({ kind: "none" });
       }
@@ -99,7 +113,7 @@ export function ConnectPage() {
   return (
     <Page
       title="Connect this browser to OpenBot"
-      description="Confirm this is your OpenBot. It signs this browser in and hands out each capture pass. What you record goes to Intelligence, not to OpenBot."
+      description={`Confirm this is your OpenBot. It signs this browser in. ${RECORDER_DESTINATION}`}
       width="prose"
     >
       {phase.kind === "ready" ? (
@@ -118,6 +132,28 @@ export function ConnectPage() {
                 </ItemContent>
               </Item>
               <Separator />
+              {/* Connecting here ends the connection this browser has now, so the page says which one before the click. */}
+              {phase.replaces ? (
+                <>
+                  <Item size="sm">
+                    <ItemMedia variant="icon">
+                      <IconReplace />
+                    </ItemMedia>
+                    <ItemContent>
+                      <ItemTitle>
+                        This replaces your connection to{" "}
+                        <span className="font-mono">
+                          {phase.replaces.origin}
+                        </span>
+                      </ItemTitle>
+                      <ItemDescription>
+                        Connected there as {phase.replaces.email}.
+                      </ItemDescription>
+                    </ItemContent>
+                  </Item>
+                  <Separator />
+                </>
+              ) : null}
               <Item
                 size="sm"
                 render={

@@ -23,7 +23,7 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import { cleanup, render, waitFor, within } from "@testing-library/react";
+import { act, cleanup, render, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { type ReactNode, StrictMode } from "react";
 import { BrowserPage } from "@/components/browser/browser-page";
@@ -34,6 +34,12 @@ import {
   STOPPED_MID_PHRASE,
   speechEvent,
 } from "./browser-narration.fixture";
+import {
+  everyLanguage,
+  type OnDeviceModel,
+  onDeviceModel,
+  withOnDevice,
+} from "./on-device-speech.fixture";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -64,6 +70,10 @@ let actionsAfterStart = 7;
 let phrasesHeard = 0;
 /** Phrases the page passed the Recorder in the recording now running (a hosted browser's narration). */
 let phrasesPassed = 0;
+/** The person's narration choice as their preferences keep it: on, as for someone who chose it, unless a test says. */
+let narrationChoice: "on" | "off" | null = "on";
+/** While set, opening the browser waits for it, as a browser that takes seconds to launch does. */
+let opening: Promise<void> | null = null;
 
 function nativeState(): BrowserApiState {
   return {
@@ -128,6 +138,27 @@ async function server(path: string, init?: RequestInit): Promise<Response> {
   const refusal = refusals[path];
   if (refusal && method === "POST")
     return Response.json({ error: refusal }, { status: 409 });
+  if (path === "/api/me")
+    return Response.json({
+      user: {
+        id: "ada",
+        email: "ada@example.com",
+        role: "user",
+        onboarding: null,
+      },
+    });
+  if (path === "/api/settings/preferences") {
+    // As the server's own route takes it: one preference at a time, merged into the rest.
+    if (method === "PATCH" && body && "narration" in body)
+      narrationChoice = body.narration;
+    return Response.json({
+      preferences: {
+        messageListEmphasis: "thread",
+        selfHostBannerDismissed: false,
+        narration: narrationChoice,
+      },
+    });
+  }
   if (path === browserApiPaths.state && method === "GET") {
     if (stateFails)
       return Response.json({ error: "Unavailable" }, { status: 500 });
@@ -135,6 +166,7 @@ async function server(path: string, init?: RequestInit): Promise<Response> {
   }
   if (path === browserApiPaths.open && method === "POST") {
     if (body !== undefined) return refuse();
+    await opening;
     state = { ...state, open: true };
     return Response.json(openAnswer);
   }
@@ -179,9 +211,28 @@ async function server(path: string, init?: RequestInit): Promise<Response> {
     return Response.json({ ok: true });
   }
   if (path === browserApiPaths.tabs && method === "POST") {
-    return browserTabsRequestSchema.safeParse(body).success
-      ? Response.json(state)
-      : refuse();
+    const request = browserTabsRequestSchema.safeParse(body);
+    if (!request.success) return refuse();
+    // A close, as the computer makes one: the tab goes, and when it was the one in front the person's newest tab comes
+    // forward (agent-computer's profiles.ts, `retarget`). An activate brings the tab forward.
+    if (request.data.action === "close") {
+      const closing = request.data.tabId;
+      const left = state.tabs.filter((tab) => tab.id !== closing);
+      const front = state.tabs.find((tab) => tab.id === closing)?.active
+        ? left.at(-1)?.id
+        : left.find((tab) => tab.active)?.id;
+      state = {
+        ...state,
+        tabs: left.map((tab) => ({ ...tab, active: tab.id === front })),
+      };
+    } else if (request.data.action === "activate") {
+      const front = request.data.tabId;
+      state = {
+        ...state,
+        tabs: state.tabs.map((tab) => ({ ...tab, active: tab.id === front })),
+      };
+    }
+    return Response.json(state);
   }
   if (path === browserApiPaths.navigate && method === "POST") {
     return browserNavigateRequestSchema.safeParse(body).success
@@ -207,6 +258,35 @@ class QuietSocket {
   close() {}
 }
 
+/**
+ * The live screen's socket to a browser that is there: it opens, and keeps what the page sends it. The screen takes
+ * input only once its socket is open, so only with this one does the page meet the keyboard as a person's does.
+ */
+class LiveSocket {
+  static latest: LiveSocket | undefined;
+  static readonly OPEN = 1;
+  readyState = LiveSocket.OPEN;
+  onopen: (() => void) | null = null;
+  onclose: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  onmessage: ((event: { data: unknown }) => void) | null = null;
+  readonly sent: Record<string, unknown>[] = [];
+  constructor(_url: string) {
+    LiveSocket.latest = this;
+    queueMicrotask(() => this.onopen?.());
+  }
+  send(payload: string) {
+    this.sent.push(JSON.parse(payload) as Record<string, unknown>);
+  }
+  close() {
+    this.readyState = 3;
+  }
+}
+
+/** What a screen reader calls the person's browser on the Browser page. */
+const SCREEN =
+  "Your browser. Click it to type into it, and press Escape to leave it.";
+
 const originalFetch = global.fetch;
 const originalSocket = globalThis.WebSocket;
 const speechGlobals = globalThis as {
@@ -222,6 +302,8 @@ beforeEach(() => {
   actionsAfterStart = 7;
   phrasesHeard = 0;
   phrasesPassed = 0;
+  narrationChoice = "on";
+  opening = null;
   state = nativeState();
   openAnswer = answerFor("native");
   QuietSocket.urls = [];
@@ -266,7 +348,12 @@ test("on OpenBot Desktop the page opens the browser once, says it is a window on
   expect(
     view.getByText("Open in its own window on your desktop."),
   ).toBeTruthy();
-  expect(view.getByText(/The Recorder hears your microphone/)).toBeTruthy();
+  // The person's narration choice, which the next Record passes on to the Recorder in their browser.
+  expect(
+    await view.findByText(
+      /^On\. The Recorder in your browser listens to your microphone while you record/,
+    ),
+  ).toBeTruthy();
   // Strict mode runs the opening effect twice; the browser is still opened once.
   expect(opens()).toBe(1);
   // No live screen: the browser is its own window.
@@ -294,6 +381,8 @@ test("on OpenBot Desktop Record starts a recording named for the task, which sho
         action: "start",
         title: "Submit an expense report",
         language: navigator.language,
+        // The person chose to narrate: the Recorder opens the microphone for this recording.
+        narrate: true,
       },
     }),
   );
@@ -369,8 +458,8 @@ test("Stop on a recording that held no actions says nothing was recorded and why
     await recordAndStop(view, "Look up Ada Lovelace");
     expect(await stopSays(view)).toBe(
       shape === "native"
-        ? "Look up Ada LovelaceNothing was recorded. The Recorder records your clicks, typing and the pages you open on websites, in every tab you use while it records."
-        : "Nothing was recorded in “Look up Ada Lovelace”. The Recorder records your clicks, typing and the pages you open on websites, in every tab you use while it records.",
+        ? "Look up Ada LovelaceNothing was recorded. The Recorder records the pages you open on websites and what you do there, with what each step saves, AI assistant conversations and your narration, in every tab you use while it records, except sites you leave out."
+        : "Nothing was recorded in “Look up Ada Lovelace”. The Recorder records the pages you open on websites and what you do there, with what each step saves, AI assistant conversations and your narration, in every tab you use while it records, except sites you leave out.",
     );
     expect(view.queryByText(/Saved/)).toBeNull();
   }
@@ -406,8 +495,8 @@ test("after a reload the page says what the last recording held as the Recorder 
       [
         { actions: 0, phrases: 0 },
         shape === "native"
-          ? "Look up Ada LovelaceNothing was recorded. The Recorder records your clicks, typing and the pages you open on websites, in every tab you use while it records."
-          : "Nothing was recorded in “Look up Ada Lovelace”. The Recorder records your clicks, typing and the pages you open on websites, in every tab you use while it records.",
+          ? "Look up Ada LovelaceNothing was recorded. The Recorder records the pages you open on websites and what you do there, with what each step saves, AI assistant conversations and your narration, in every tab you use while it records, except sites you leave out."
+          : "Nothing was recorded in “Look up Ada Lovelace”. The Recorder records the pages you open on websites and what you do there, with what each step saves, AI assistant conversations and your narration, in every tab you use while it records, except sites you leave out.",
       ],
       [
         { actions: 1, phrases: 2 },
@@ -494,9 +583,7 @@ test("on hosted OpenBot the page is the browser: its tabs, its address and its l
   state = screenState();
   openAnswer = answerFor("screen");
   const view = draw(<BrowserPage />);
-  const screen = await view.findByLabelText(
-    "Your browser. Click and type here.",
-  );
+  const screen = await view.findByLabelText(SCREEN);
   expect(screen.tagName).toBe("CANVAS");
   // Strict mode opens and closes one first; every socket is to the person's own browser.
   expect(QuietSocket.urls.length).toBeGreaterThan(0);
@@ -509,18 +596,25 @@ test("on hosted OpenBot the page is the browser: its tabs, its address and its l
   expect(first?.textContent).toBe("Example Domain");
   expect(first?.getAttribute("aria-selected")).toBe("true");
   expect(second?.textContent).toBe("New tab");
-  const address = view.getByRole("textbox", { name: "Address" });
+  // The tab that shows controls the panel below, which it names: the address bar and the screen are in it.
+  const panel = view.getByRole("tabpanel", { name: "Example Domain" });
+  expect(first?.getAttribute("aria-controls")).toBe(panel.id);
+  const address = within(panel).getByRole("textbox", { name: "Address" });
   expect((address as HTMLInputElement).value).toBe("https://example.com/");
 
   const user = userEvent.setup({ document });
   if (second) await user.click(second);
   await user.click(view.getByRole("button", { name: "New tab" }));
-  await user.click(view.getByRole("button", { name: "Close Example Domain" }));
+  // Delete closes the focused tab; its close button is the mouse's way to the same thing.
+  first?.focus();
+  await user.keyboard("{Delete}");
   await user.click(view.getByRole("button", { name: "Back" }));
   await user.click(view.getByRole("button", { name: "Reload" }));
-  await user.clear(address);
-  await user.type(address, "openbot.ai{Enter}");
-  await user.type(address, "how to file an expense report{Enter}");
+  // The bar of the tab that shows now: switching tabs starts it again from that tab's own address.
+  const bar = view.getByRole("textbox", { name: "Address" });
+  await user.clear(bar);
+  await user.type(bar, "openbot.ai{Enter}");
+  await user.type(bar, "how to file an expense report{Enter}");
   await waitFor(() =>
     expect(
       writes.filter((write) => write.path !== "/api/browser/open"),
@@ -679,8 +773,10 @@ test("on hosted OpenBot narration that cannot hear the person shows its switch o
     const view = draw(<BrowserPage />);
     const user = userEvent.setup({ document });
     const toggle = await view.findByRole("switch", { name: "Narration" });
-    // Before a recording narration is on, as nothing has failed yet.
-    expect(toggle.getAttribute("aria-checked")).toBe("true");
+    // Before a recording narration is on, as the person chose and nothing has failed yet.
+    await waitFor(() =>
+      expect(toggle.getAttribute("aria-checked")).toBe("true"),
+    );
     await user.type(
       view.getByRole("textbox", { name: "Task name" }),
       "Submit an expense report",
@@ -784,9 +880,9 @@ test("on hosted OpenBot a refused Record is shown even after a tab that would no
   refusals = { [browserApiPaths.tabs]: "There is no such tab." };
   const view = draw(<BrowserPage />);
   const user = userEvent.setup({ document });
-  await user.click(
-    await view.findByRole("button", { name: "Close Example Domain" }),
-  );
+  // Delete closes the focused tab, the tabs pattern's key for it.
+  (await view.findByRole("tab", { name: "Example Domain" })).focus();
+  await user.keyboard("{Delete}");
   expect((await view.findByRole("alert")).textContent).toBe(
     "There is no such tab.",
   );
@@ -823,9 +919,10 @@ test("on OpenBot Desktop the narration row says what the Recorder hears, as it r
     }) satisfies BrowserApiState["recorder"];
   state = { ...nativeState(), recorder: recorder("off") };
   const view = draw(<BrowserPage />);
+  // While nothing records, the row is the person's choice.
   expect(
     await view.findByText(
-      "On. The Recorder hears your microphone while you record, so say what you're doing as you go.",
+      "On. The Recorder in your browser listens to your microphone while you record, and turns your speech into text on your computer.",
     ),
   ).toBeTruthy();
   for (const [voice, sentence] of [
@@ -871,6 +968,464 @@ test("on hosted OpenBot in a browser with no speech recognition, the page says n
   );
 });
 
+// ---- Narration only by the person's choice, on their own computer (the code owner's review) -----------------------
+
+const preferenceWrites = () =>
+  writes.filter((write) => write.path === "/api/settings/preferences");
+const starts = () =>
+  writes.filter(
+    (write) =>
+      write.path === browserApiPaths.recording &&
+      (write.body as { action?: string }).action === "start",
+  );
+
+test("Record asks whether to narrate before the first recording, keeps the answer, and tells the Recorder, on OpenBot Desktop", async () => {
+  narrationChoice = null;
+  const view = draw(<BrowserPage />);
+  const user = userEvent.setup({ document });
+  expect(
+    await view.findByText(
+      "Not chosen yet. Record asks before your first recording, and the microphone stays closed until you say yes.",
+    ),
+  ).toBeTruthy();
+  await user.type(
+    await view.findByRole("textbox", { name: "Task name" }),
+    "Submit an expense report",
+  );
+  await user.click(view.getByRole("button", { name: "Record" }));
+  const question = await view.findByRole("dialog", {
+    name: "Narrate while you record?",
+  });
+  expect(starts()).toEqual([]);
+  expect(question.textContent).toContain(
+    "Your browser turns your speech into text on your own computer.",
+  );
+  await user.click(
+    within(question).getByRole("button", { name: "Record without narration" }),
+  );
+  await waitFor(() => expect(starts()).toHaveLength(1));
+  // The answer is kept, and the Recorder opens no microphone for this recording.
+  expect(preferenceWrites()).toEqual([
+    {
+      path: "/api/settings/preferences",
+      method: "PATCH",
+      body: { narration: "off" },
+    },
+  ]);
+  expect(starts()[0]?.body).toMatchObject({ narrate: false });
+  expect(view.queryByRole("dialog")).toBeNull();
+});
+
+test("on hosted OpenBot a yes to the narration question listens, on the person's computer, and the bar says it is listening", async () => {
+  narrationChoice = null;
+  state = screenState();
+  openAnswer = answerFor("screen");
+  const recognitions = installChrome();
+  const view = draw(<BrowserPage />);
+  const user = userEvent.setup({ document });
+  // Nobody chose yet: the switch is off, and nothing listens.
+  const toggle = await view.findByRole("switch", { name: "Narration" });
+  expect(toggle.getAttribute("aria-checked")).toBe("false");
+  await user.type(
+    view.getByRole("textbox", { name: "Task name" }),
+    "Submit an expense report",
+  );
+  await user.click(view.getByRole("button", { name: "Record" }));
+  const question = await view.findByRole("dialog", {
+    name: "Narrate while you record?",
+  });
+  expect(recognitions).toHaveLength(0);
+  await user.click(
+    within(question).getByRole("button", { name: "Record with narration" }),
+  );
+  await waitFor(() => expect(recognitions.at(-1)?.heard).toBe(true));
+  expect(recognitions.at(-1)?.processLocally).toBe(true);
+  expect(preferenceWrites().map((write) => write.body)).toEqual([
+    { narration: "on" },
+  ]);
+  expect(starts()[0]?.body).toMatchObject({ narrate: true });
+  // An open microphone is said in so many words beside the switch.
+  expect((await view.findByText("Listening")).getAttribute("role")).toBe(
+    "status",
+  );
+});
+
+test("on hosted OpenBot a person who chose not to narrate is never listened to, and turning the switch on keeps the new choice", async () => {
+  narrationChoice = "off";
+  state = screenState();
+  openAnswer = answerFor("screen");
+  const recognitions = installChrome();
+  const view = draw(<BrowserPage />);
+  const user = userEvent.setup({ document });
+  await user.type(
+    await view.findByRole("textbox", { name: "Task name" }),
+    "Submit an expense report",
+  );
+  await user.click(view.getByRole("button", { name: "Record" }));
+  await waitFor(() => expect(starts()).toHaveLength(1));
+  // No question: they answered it before. No microphone either.
+  expect(view.queryByRole("dialog")).toBeNull();
+  expect(starts()[0]?.body).toMatchObject({ narrate: false });
+  await settleReactWork();
+  expect(recognitions).toHaveLength(0);
+  expect(view.queryByText("Listening")).toBeNull();
+
+  await user.click(view.getByRole("switch", { name: "Narration" }));
+  await waitFor(() => expect(recognitions.at(-1)?.heard).toBe(true));
+  expect(preferenceWrites().map((write) => write.body)).toEqual([
+    { narration: "on" },
+  ]);
+});
+
+test("on hosted OpenBot a language still to be downloaded is asked for on the switch's click, and narration waits for it", async () => {
+  state = screenState();
+  openAnswer = answerFor("screen");
+  // Chrome answers downloadable for a language this page has not asked for yet, and downloads only on a click.
+  const model = onDeviceModel({ [navigator.language]: "downloadable" });
+  const recognitions = installChrome(model);
+  const view = draw(<BrowserPage />);
+  const user = userEvent.setup({ document });
+  await user.type(
+    await view.findByRole("textbox", { name: "Task name" }),
+    "Submit an expense report",
+  );
+  await user.click(view.getByRole("button", { name: "Record" }));
+  expect(
+    await view.findByText(
+      /^Your browser has to download its .+ speech recognition to your computer first\. Turn narration on to download it\./,
+    ),
+  ).toBeTruthy();
+  expect(recognitions).toHaveLength(0);
+  const toggle = view.getByRole("switch", { name: "Narration" });
+  expect(toggle.getAttribute("aria-checked")).toBe("false");
+  document.addEventListener(
+    "click",
+    () => {
+      model.activation = true;
+    },
+    { capture: true, once: true },
+  );
+  await user.click(toggle);
+  expect(model.installs).toEqual([navigator.language]);
+  expect(
+    await view.findByText(
+      /^Your browser is downloading its .+ speech recognition to your computer\. Narration starts when it's ready\./,
+    ),
+  ).toBeTruthy();
+  expect(recognitions).toHaveLength(0);
+  model.finishDownloads();
+  await waitFor(() => expect(recognitions.at(-1)?.heard).toBe(true), {
+    timeout: 5_000,
+  });
+}, 15_000);
+
+test("on hosted OpenBot a browser that cannot keep speech on the computer never listens, and says why", async () => {
+  state = screenState();
+  openAnswer = answerFor("screen");
+  const recognitions = installChrome(null);
+  const view = draw(<BrowserPage />);
+  const user = userEvent.setup({ document });
+  await user.type(
+    await view.findByRole("textbox", { name: "Task name" }),
+    "Submit an expense report",
+  );
+  await user.click(view.getByRole("button", { name: "Record" }));
+  expect(
+    await view.findByText(
+      "This browser can't turn speech into text on your computer, and OpenBot sends your voice nowhere else, so narration is off. Recording still works.",
+    ),
+  ).toBeTruthy();
+  expect(recognitions).toHaveLength(0);
+});
+
+test("the tab strip is WAI-ARIA tabs: one stop in the Tab order, arrows, Home and End move between tabs, Enter switches", async () => {
+  state = {
+    ...screenState(),
+    tabs: [
+      {
+        id: "tab-1",
+        url: "https://example.com/",
+        title: "Example Domain",
+        active: true,
+      },
+      {
+        id: "tab-2",
+        url: "https://docs.example.com/",
+        title: "Docs",
+        active: false,
+      },
+      {
+        id: "tab-3",
+        url: "https://mail.example.com/",
+        title: "Mail",
+        active: false,
+      },
+    ],
+  };
+  openAnswer = answerFor("screen");
+  const view = draw(<BrowserPage />);
+  const user = userEvent.setup({ document });
+  const [first, second, third] = within(
+    await view.findByRole("tablist", { name: "Tabs" }),
+  ).getAllByRole("tab");
+  // Only the tab that shows is in the Tab order.
+  expect(
+    [first, second, third].map((tab) => tab?.getAttribute("tabindex")),
+  ).toEqual(["0", "-1", "-1"]);
+  first?.focus();
+  await user.keyboard("{ArrowRight}");
+  expect(document.activeElement).toBe(second as Element);
+  await user.keyboard("{End}");
+  expect(document.activeElement).toBe(third as Element);
+  await user.keyboard("{ArrowRight}");
+  expect(document.activeElement).toBe(first as Element);
+  await user.keyboard("{ArrowLeft}");
+  expect(document.activeElement).toBe(third as Element);
+  await user.keyboard("{Home}");
+  expect(document.activeElement).toBe(first as Element);
+  // Moving switches nothing: a switch is a request to the computer, so it waits for Enter.
+  expect(writes.filter((write) => write.path === browserApiPaths.tabs)).toEqual(
+    [],
+  );
+  await user.keyboard("{ArrowRight}{Enter}");
+  await waitFor(() =>
+    expect(
+      writes.filter((write) => write.path === browserApiPaths.tabs),
+    ).toEqual([
+      {
+        path: browserApiPaths.tabs,
+        method: "POST",
+        body: { action: "activate", tabId: "tab-2" },
+      },
+    ]),
+  );
+});
+
+/*
+ * The same keys with the live screen connected, as it is for a person: the end-to-end run found that none of them did
+ * anything. The screen took every key on the window that was not aimed at a text field, so the tabs never heard their
+ * arrows, Home, End or Delete, no button took Enter or Space, and Tab left nothing; the keys went to the person's
+ * browser instead. Now the screen takes the keyboard only once it is clicked, and Escape gives it back.
+ */
+test("with the live screen connected, the page's controls keep their keys, and the screen takes them once clicked", async () => {
+  state = {
+    ...screenState(),
+    tabs: [
+      {
+        id: "tab-1",
+        url: "https://example.com/",
+        title: "Example Domain",
+        active: true,
+      },
+      {
+        id: "tab-2",
+        url: "https://docs.example.com/",
+        title: "Docs",
+        active: false,
+      },
+      {
+        id: "tab-3",
+        url: "https://mail.example.com/",
+        title: "Mail",
+        active: false,
+      },
+    ],
+  };
+  openAnswer = answerFor("screen");
+  globalThis.WebSocket = LiveSocket as unknown as typeof WebSocket;
+  const view = draw(<BrowserPage />);
+  const user = userEvent.setup({ document });
+  const screen = await view.findByLabelText(SCREEN);
+  await waitFor(() =>
+    expect(screen.getAttribute("data-connected")).toBe("true"),
+  );
+  const [first, second, third] = within(
+    view.getByRole("tablist", { name: "Tabs" }),
+  ).getAllByRole("tab");
+
+  first?.focus();
+  await user.keyboard("{ArrowRight}");
+  expect(document.activeElement).toBe(second as Element);
+  await user.keyboard("{End}");
+  expect(document.activeElement).toBe(third as Element);
+  await user.keyboard("{Home}");
+  expect(document.activeElement).toBe(first as Element);
+  await user.keyboard("{ArrowLeft}");
+  expect(document.activeElement).toBe(third as Element);
+  // Enter switches to the focused tab, and Delete closes it: the focus goes to the tab the browser shows next.
+  await user.keyboard("{Enter}");
+  await waitFor(() =>
+    expect(third?.getAttribute("aria-selected")).toBe("true"),
+  );
+  await user.keyboard("{Delete}");
+  await waitFor(() => expect(document.activeElement).toBe(second as Element));
+  // Tab leaves the strip for the next control, which Space presses.
+  await user.tab();
+  expect(document.activeElement).toBe(
+    view.getByRole("button", { name: "New tab" }),
+  );
+  await user.keyboard(" ");
+  await waitFor(() =>
+    expect(
+      writes.filter((write) => write.path === browserApiPaths.tabs),
+    ).toEqual([
+      {
+        path: browserApiPaths.tabs,
+        method: "POST",
+        body: { action: "activate", tabId: "tab-3" },
+      },
+      {
+        path: browserApiPaths.tabs,
+        method: "POST",
+        body: { action: "close", tabId: "tab-3" },
+      },
+      { path: browserApiPaths.tabs, method: "POST", body: { action: "new" } },
+    ]),
+  );
+  // None of it reached the person's browser.
+  const socket = LiveSocket.latest as LiveSocket;
+  expect(socket.sent).toEqual([]);
+
+  // A click on the screen gives it the keyboard: what is typed next goes to the page on it, with no second click.
+  await user.click(screen);
+  expect(document.activeElement).toBe(screen);
+  await user.keyboard("a{ArrowLeft}");
+  expect(socket.sent.map((message) => [message.event, message.key])).toEqual([
+    ["down", "a"],
+    ["up", "a"],
+    ["down", "ArrowLeft"],
+    ["up", "ArrowLeft"],
+  ]);
+  // Escape gives the keyboard back to the page, and is not sent.
+  await user.keyboard("{Escape}");
+  expect(document.activeElement).not.toBe(screen);
+  await user.keyboard("b");
+  expect(socket.sent).toHaveLength(4);
+
+  // An address typed into the bar goes to the page that opens, as Chrome's address bar does: the screen has the keys.
+  const address = view.getByRole("textbox", { name: "Address" });
+  await user.clear(address);
+  await user.type(address, "openbot.ai{Enter}");
+  expect(document.activeElement).toBe(screen);
+});
+
+/** What the server says of a person's browser that is there and not answering, on an OpenBot with sign-in. */
+const NOT_ANSWERING =
+  "Your browser isn't answering. If it doesn't come back soon, ask an admin for help.";
+
+test("Delete on the tab that shows puts the focus on the tab the browser shows next, not on its neighbour", async () => {
+  // The computer brings the person's newest tab forward when the one in front closes. The strip put the focus on the
+  // closed tab's neighbour, so it sat on one tab while the browser showed another, and Enter switched it again.
+  state = {
+    ...screenState(),
+    tabs: [
+      {
+        id: "tab-1",
+        url: "https://example.com/",
+        title: "Example Domain",
+        active: true,
+      },
+      {
+        id: "tab-2",
+        url: "https://docs.example.com/",
+        title: "Docs",
+        active: false,
+      },
+      {
+        id: "tab-3",
+        url: "https://mail.example.com/",
+        title: "Mail",
+        active: false,
+      },
+    ],
+  };
+  openAnswer = answerFor("screen");
+  const view = draw(<BrowserPage />);
+  const user = userEvent.setup({ document });
+  const [first] = within(
+    await view.findByRole("tablist", { name: "Tabs" }),
+  ).getAllByRole("tab");
+  first?.focus();
+  await user.keyboard("{Delete}");
+  await waitFor(() =>
+    expect(
+      within(view.getByRole("tablist", { name: "Tabs" }))
+        .getAllByRole("tab")
+        .map((tab) => tab.textContent),
+    ).toEqual(["Docs", "Mail"]),
+  );
+  const mail = view.getByRole("tab", { name: "Mail" });
+  await waitFor(() => expect(document.activeElement).toBe(mail));
+  expect(mail.getAttribute("aria-selected")).toBe("true");
+  expect(mail.getAttribute("tabindex")).toBe("0");
+
+  // Delete on a tab that does not show leaves the one that does, and the focus goes to its neighbour.
+  view.getByRole("tab", { name: "Docs" }).focus();
+  await user.keyboard("{Delete}");
+  await waitFor(() => expect(document.activeElement).toBe(mail));
+});
+
+test("a browser that stops answering is said to, where it would be shown, and comes back by itself once it answers", async () => {
+  // The end-to-end run: the person's browser stopped answering, and the page went blank with nothing said.
+  state = screenState();
+  openAnswer = answerFor("screen");
+  const view = draw(<BrowserPage />);
+  await view.findByLabelText(SCREEN);
+  state = {
+    ...screenState(),
+    open: false,
+    tabs: [],
+    problem: NOT_ANSWERING,
+  };
+  // The next of the page's reads, which it makes every second.
+  await act(() => queryClient.invalidateQueries());
+  expect(await view.findByText(NOT_ANSWERING)).toBeTruthy();
+  // Not "closed", and nothing to open: opening it again would wait on the same browser.
+  expect(view.queryByText("Your browser is closed.")).toBeNull();
+  expect(view.queryByRole("button", { name: "Open it again" })).toBeNull();
+  state = screenState();
+  await act(() => queryClient.invalidateQueries());
+  expect(await view.findByLabelText(SCREEN)).toBeTruthy();
+  await waitFor(() => expect(view.queryByText(NOT_ANSWERING)).toBeNull());
+});
+
+test("arriving while the browser is not answering, the page says so rather than staying empty", async () => {
+  state = { ...screenState(), open: false, tabs: [], problem: NOT_ANSWERING };
+  // The open is refused with the same sentence, as the server answers it.
+  refusals = { [browserApiPaths.open]: NOT_ANSWERING };
+  const view = draw(<BrowserPage />);
+  expect(await view.findByText(NOT_ANSWERING)).toBeTruthy();
+  expect(view.getAllByText(NOT_ANSWERING)).toHaveLength(1);
+  expect(view.getByRole("button", { name: "Try again" })).toBeTruthy();
+});
+
+test("on OpenBot Desktop a window that is not answering says so in its row", async () => {
+  state = { ...nativeState(), problem: NOT_ANSWERING };
+  const view = draw(<BrowserPage />);
+  expect(await view.findByText("Google Chrome")).toBeTruthy();
+  expect(view.getByText(NOT_ANSWERING)).toBeTruthy();
+  expect(
+    view.queryByText("Open in its own window on your desktop."),
+  ).toBeNull();
+});
+
+test("while the browser opens, the page shows no loading placeholder, then the browser itself", async () => {
+  // The data-access rule: no loading text, spinner or skeleton; what arrives is the answer.
+  let launched = () => {};
+  opening = new Promise<void>((resolve) => {
+    launched = resolve;
+  });
+  const view = draw(<BrowserPage />);
+  expect(await view.findByRole("heading", { name: "Browser" })).toBeTruthy();
+  await waitFor(() => expect(opens()).toBe(1));
+  await settleReactWork();
+  expect(view.queryByText(/Opening/)).toBeNull();
+  expect(view.queryByRole("status")).toBeNull();
+  expect(view.queryByText("Google Chrome")).toBeNull();
+  launched();
+  expect(await view.findByText("Google Chrome")).toBeTruthy();
+});
+
 test("where OpenBot cannot run a browser for the person, the page says so and opens nothing", async () => {
   state = { ...nativeState(), available: false, open: false };
   const view = draw(<BrowserPage />);
@@ -882,12 +1437,35 @@ test("where OpenBot cannot run a browser for the person, the page says so and op
   expect(opens()).toBe(0);
 });
 
+test("where the server says why there is no browser of the person's own, the page says that instead", async () => {
+  // Every Bot shares one computer here, which is no place for a person's browser (the code-owner review's blocker 3).
+  const why =
+    "This OpenBot can't open a browser of your own, because its Bots share one computer.";
+  state = { ...screenState(), available: false, open: false, note: why };
+  const view = draw(<BrowserPage />);
+  expect(await view.findByText(why)).toBeTruthy();
+  expect(opens()).toBe(0);
+});
+
+test("on OpenBot Desktop with no Chrome or Edge it can open, the browser in the page says why", async () => {
+  // Chrome installed only as a Flatpak, which used to be said only in Desktop's log.
+  const why =
+    "OpenBot can't open the Flatpak version of Google Chrome, so install Chrome from google.com/chrome to use your own browser.";
+  state = { ...screenState(), note: why };
+  openAnswer = answerFor("screen");
+  const view = draw(<BrowserPage />);
+  await view.findByLabelText(SCREEN);
+  expect(view.getByText(why)).toBeTruthy();
+});
+
 /**
  * Chrome's speech recognition, as `webkitSpeechRecognition`: once listening it sends what Chrome sent in the recorded
  * run up to the moment Stop was pressed, and on stop() what it sent after, the final phrase then the end. One stopped
  * before it heard anything (as strict mode's first, discarded effect is) just ends, as Chrome's does.
  */
-function installChrome() {
+/** Chrome's recognition, with what it can recognise on the computer (every language unless a test says; null for a
+ * Chrome with no on-device recognition). */
+function installChrome(onDevice: OnDeviceModel | null = everyLanguage()) {
   const recognitions: ChromeRecognition[] = [];
   const stopAt =
     STOPPED_MID_PHRASE.find((event) => event.type === "stop")?.at ?? 0;
@@ -906,6 +1484,7 @@ function installChrome() {
     onresult: Recognition["onresult"] = null;
     onerror: Recognition["onerror"] = null;
     onend: Recognition["onend"] = null;
+    processLocally?: boolean;
     started = false;
     heard = false;
     #listening: ReturnType<typeof setTimeout> | undefined;
@@ -933,7 +1512,9 @@ function installChrome() {
       queueMicrotask(() => this.onend?.());
     }
   }
-  speechGlobals.webkitSpeechRecognition = ChromeRecognition;
+  // Chrome answers to both names, with the same recognition; its on-device side is on it (on-device-speech.fixture.ts).
+  speechGlobals.SpeechRecognition = speechGlobals.webkitSpeechRecognition =
+    onDevice ? withOnDevice(ChromeRecognition, onDevice) : ChromeRecognition;
   return recognitions;
 }
 
@@ -943,7 +1524,7 @@ function installChrome() {
  * (`audio-capture`), or a speech service it cannot reach (`network`). With no `error` it listens, and `listening`
  * counts the recognitions that did.
  */
-function installRefusingChrome() {
+function installRefusingChrome(onDevice: OnDeviceModel = everyLanguage()) {
   const chrome: { error: string | null; listening: number } = {
     error: null,
     listening: 0,
@@ -979,6 +1560,7 @@ function installRefusingChrome() {
       queueMicrotask(() => this.onend?.());
     }
   }
-  speechGlobals.webkitSpeechRecognition = RefusingRecognition;
+  speechGlobals.SpeechRecognition = speechGlobals.webkitSpeechRecognition =
+    withOnDevice(RefusingRecognition, onDevice);
   return chrome;
 }

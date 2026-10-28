@@ -1,6 +1,7 @@
 /**
  * The 50-action notice, drawn in the page. A page cannot load the extension's stylesheet into its own document, so the
- * colours are copied from app/src/theme.css (`:root` and `.dark`) and a test keeps them equal. The shadow root is open
+ * colours are copied from app/src/theme.css (`:root` and `.dark`) and a test keeps them equal. The recording mark
+ * (indicator.ts) draws with the same ones. The shadow root is open
  * so the end-to-end test can drive it, which means a page script can reach the buttons too: every handler acts only on
  * trusted events.
  */
@@ -16,7 +17,9 @@ export const NOTICE_TOKENS = {
     "--border": "oklch(0.922 0 0)",
     "--primary": "oklch(0.205 0 0)",
     "--primary-foreground": "oklch(0.985 0 0)",
+    "--secondary": "oklch(0.97 0 0)",
     "--muted-foreground": "oklch(0.5 0 0)",
+    "--destructive": "oklch(0.577 0.245 27.325)",
     "--ring": "oklch(0.708 0 0)",
   },
   dark: {
@@ -27,16 +30,18 @@ export const NOTICE_TOKENS = {
     "--border": "oklch(1 0 0 / 10%)",
     "--primary": "oklch(0.922 0 0)",
     "--primary-foreground": "oklch(0.205 0 0)",
+    "--secondary": "oklch(0.269 0 0)",
     "--muted-foreground": "oklch(0.708 0 0)",
+    "--destructive": "oklch(0.704 0.191 22.216)",
     "--ring": "oklch(0.556 0 0)",
   },
 } as const;
 
-const RADIUS = "0.5rem";
+export const RADIUS = "0.5rem";
 
 type Choice = "stop" | "restart" | "continue";
 
-function declarations(tokens: Record<string, string>): string {
+export function declarations(tokens: Record<string, string>): string {
   return Object.entries(tokens)
     .map(([name, value]) => `${name}: ${value};`)
     .join(" ");

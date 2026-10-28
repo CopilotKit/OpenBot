@@ -273,10 +273,18 @@ function openOrder(): void {
 
 /** Starts a recording through the launcher at `at` and resolves with its trajectory once its start reached
  * Intelligence. */
-async function record(at: number, title: string): Promise<string> {
+async function record(
+  at: number,
+  title: string,
+  options: { narrate?: boolean } = {},
+): Promise<string> {
   clock = at;
   openOrder();
-  const started = await launcher().record({ action: "start", title });
+  const started = await launcher().record({
+    action: "start",
+    title,
+    ...options,
+  });
   expect(started).toMatchObject({
     ok: true,
     state: { phase: "recording", title, actions: 0 },
@@ -375,9 +383,11 @@ test("connect stores the connection as an approved Connect does, with no Connect
       via: "openbot-browser",
     },
   });
+  // With the connection it holds by id, which OpenBot keeps rather than making another at every open.
   expect(await launcher().state()).toEqual({
     connected: true,
     userId: ada.id,
+    connectionId: connection().connectionId,
     phase: "idle",
     actions: 0,
     narration: "external",
@@ -849,7 +859,8 @@ test("speaking is refused while nothing records and in a browser that hears its 
   });
   // A page that heard the person stop as the recording ended says so after it: there is nothing to hold.
   expect(await launcher().speaking({ since: null })).toEqual({ ok: true });
-  await record(clock, "Own voice");
+  // OpenBot's Record form asked the person, and they chose to narrate.
+  await record(clock, "Own voice", { narrate: true });
   await until(() => speech.instances.length === 1, "the speech recognition");
   expect(await launcher().speaking({ since: clock - 500 })).toEqual({
     ok: false,
@@ -870,7 +881,8 @@ test("speaking is refused while nothing records and in a browser that hears its 
 test("the Recorder says whether it hears the person: off while nothing records, listening, muted, or unavailable when the microphone is refused", async () => {
   await launcher().connect({ connection: connection(), narration: "own" });
   expect((await launcher().state()).voice).toBe("off");
-  await record(clock, "Own voice");
+  // OpenBot's Record form asked the person, and they chose to narrate.
+  await record(clock, "Own voice", { narrate: true });
   await until(() => speech.instances.length === 1, "the speech recognition");
   speech.instances[0]?.begin();
   await until(
@@ -1001,23 +1013,26 @@ test("Stop counts a recording's actions and its phrases both", async () => {
 
 test("a recording the Recorder hears itself counts the phrases its own recogniser placed", async () => {
   await launcher().connect({ connection: connection(), narration: "own" });
-  const trajectoryId = await record(clock, "Say it out loud");
+  const trajectoryId = await record(clock, "Say it out loud", {
+    narrate: true,
+  });
   await until(() => speech.instances.length === 1, "the speech recognition");
   const listening = speech.instances[0];
   listening?.begin();
   listening?.say([["opening the first order", true]]);
   await settle();
-  // Placed among the steps the service worker holds, which go once their wait is up.
   await advanceTo(clock + 5_000);
-  await until(
-    () => names(trajectoryId).includes("transcript"),
-    "the phrase in Intelligence",
-  );
+  // Placed among the steps the service worker holds, after the page the recording started on: the person has not acted
+  // there, so both go when the recording stops.
   const stopped = await launcher().record({ action: "stop" });
   expect(stopped).toMatchObject({
     ok: true,
     state: { phase: "idle", lastStopped: { actions: 0, phrases: 1 } },
   });
+  await until(
+    () => names(trajectoryId).includes("transcript"),
+    "the phrase in Intelligence",
+  );
 }, 15_000);
 
 test("a recording a sign-out stops leaves what it held too", async () => {
@@ -1089,6 +1104,10 @@ test("a phrase passed in is masked as the Recorder's own are: a value typed into
   expect(await say("my pin is", clock - 1_000)).toEqual({ ok: true });
   expect(await say("4815", clock - 100)).toEqual({ ok: true });
   await advanceTo(click.timestamp);
+  // The phrases wait behind the page the recording started on, which the person has not acted on, until they stop.
+  expect(await launcher().record({ action: "stop" })).toMatchObject({
+    ok: true,
+  });
   await until(
     () =>
       names(trajectoryId).filter((name) => name === "transcript").length === 3,
@@ -1113,7 +1132,7 @@ test("narrate is refused while nothing records, in a browser that hears its own 
     ok: false,
     error: "Nothing is being recorded.",
   });
-  await record(clock, "Own voice");
+  await record(clock, "Own voice", { narrate: true });
   // The Recorder hears this browser's microphone itself, as in any browser.
   await until(() => speech.instances.length === 1, "the speech recognition");
   expect(await launcher().narrate(phrase)).toEqual({

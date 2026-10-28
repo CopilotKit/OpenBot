@@ -6,15 +6,16 @@ import {
   RECORDER_SIGNED_OUT,
 } from "@openbot/shared/recorder-api";
 import { RECORDER_EXTENSION_ID } from "@openbot/shared/recorder-extension";
-import { inArray } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { createApp } from "../src/app";
 import type { AuditEventInput } from "../src/audit";
 import { loadConfig } from "../src/config";
 import { createDatabase } from "../src/db/client";
 import { users } from "../src/db/schema/core";
+import { recorderConnections } from "../src/db/schema/recorder";
 import { createRecorderExtension } from "../src/recorder/wiring";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
-import { testEnvironment } from "./support/environment";
+import { SESSION_LIFETIME_MS, testEnvironment } from "./support/environment";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const prefix = `recorder-routes-${randomUUID()}`;
@@ -38,7 +39,11 @@ type Harness = ReturnType<typeof build>;
 
 function build(
   extra: Record<string, string | undefined> = {},
-  options: { kickThrows?: boolean } = {},
+  options: {
+    kickThrows?: boolean;
+    /** The trail refuses every row written with a connection (connections.ts writes them in its transaction). */
+    auditFails?: boolean;
+  } = {},
 ) {
   const config = loadConfig(
     testEnvironment({
@@ -74,7 +79,17 @@ function build(
         if (options.kickThrows) throw new Error("credential store down");
       },
     },
+    sessionLifetimeMs: SESSION_LIFETIME_MS,
     auditStore,
+    ...(options.auditFails
+      ? {
+          auditFor: () => ({
+            insert: async () => {
+              throw new Error("the audit trail is unavailable");
+            },
+          }),
+        }
+      : {}),
   });
   /*
    * createApp is positional. Placed by index rather than after a spread of `undefined`s, whose
@@ -197,6 +212,76 @@ describe("connecting", () => {
       error:
         "Too many connection codes were asked for at once. Wait a few minutes and try again.",
     });
+    // A refusal like any other of the Recorder's: on the trail, as the person's.
+    expect(
+      h.audits.filter((a) => a.eventType === "recorder.connect_refused"),
+    ).toEqual([
+      {
+        eventType: "recorder.connect_refused",
+        targetType: "recorder_connection",
+        actorUserId: busy,
+        payload: { reason: "too_many_codes", via: "web" },
+      },
+    ]);
+  });
+
+  test("a code that is unknown, expired or already used is refused on the trail", async () => {
+    const h = build();
+    const unknown = await call(h, "/api/recorder/connections", {
+      method: "POST",
+      headers: { origin: ORIGIN },
+      json: { code: `obc_${"A".repeat(43)}`, label: "x", installId: INSTALL },
+    });
+    expect(unknown.status).toBe(400);
+    const refusals = h.audits.filter(
+      (a) => a.eventType === "recorder.connect_refused",
+    );
+    expect(refusals).toEqual([
+      {
+        eventType: "recorder.connect_refused",
+        targetType: "recorder_connection",
+        initiator: { kind: "deployment" },
+        payload: {
+          reason: "code",
+          extensionId: RECORDER_EXTENSION_ID,
+          installId: INSTALL,
+        },
+      },
+    ]);
+    // Never the code itself.
+    expect(JSON.stringify(refusals)).not.toContain("AAAA");
+  });
+
+  test("a connection whose row cannot be written is not made, and the person is told to try again", async () => {
+    const h = build({}, { auditFails: true });
+    const minted = await call(h, "/api/recorder/connect-codes", {
+      method: "POST",
+      headers: COOKIE,
+      json: { via: "web" },
+    });
+    const { code } = (await minted.json()) as { code: string };
+    const failed = await call(h, "/api/recorder/connections", {
+      method: "POST",
+      headers: { origin: ORIGIN },
+      json: { code, label: "Chrome on macOS", installId: "9".repeat(32) },
+    });
+    expect(failed.status).toBe(500);
+    expect(await failed.json()).toEqual({
+      error: "This browser could not be connected. Try again.",
+    });
+    const listed = (await (
+      await call(h, "/api/recorder/connections", { headers: COOKIE })
+    ).json()) as { connections: { installId: string }[] };
+    expect(listed.connections.map((c) => c.installId)).not.toContain(
+      "9".repeat(32),
+    );
+    // The code was not spent: with the trail back, the same code connects.
+    const done = await call(build(), "/api/recorder/connections", {
+      method: "POST",
+      headers: { origin: ORIGIN },
+      json: { code, label: "Chrome on macOS", installId: "9".repeat(32) },
+    });
+    expect(done.status).toBe(201);
   });
 
   test("a body over 2 KiB is refused", async () => {
@@ -314,6 +399,63 @@ describe("connecting", () => {
 });
 
 describe("using the bearer", () => {
+  test("a disconnect whose row cannot be written does not happen, and the person is told to try again", async () => {
+    const made = await connect(build(), "6".repeat(32));
+    const broken = build({}, { auditFails: true });
+    const fromSettings = await call(
+      broken,
+      `/api/recorder/connections/${made.connection.id}`,
+      { method: "DELETE", headers: COOKIE },
+    );
+    expect(fromSettings.status).toBe(500);
+    expect(await fromSettings.json()).toEqual({
+      error: "That browser could not be disconnected. Try again.",
+    });
+    const fromTheRecorder = await call(
+      broken,
+      "/api/recorder/connections/current",
+      { method: "DELETE", headers: bearer(made.token) },
+    );
+    expect(fromTheRecorder.status).toBe(500);
+    expect(await fromTheRecorder.json()).toEqual({
+      error: "This browser could not be disconnected. Try again.",
+    });
+    // Still connected: neither disconnect happened without its row.
+    expect(
+      (await call(build(), "/api/recorder/me", { headers: bearer(made.token) }))
+        .status,
+    ).toBe(200);
+  });
+
+  test("a connection unused for as long as a session lasts is signed out, and one used within it stands", async () => {
+    const h = build();
+    const made = await connect(h, "5".repeat(32));
+    const me = () =>
+      call(h, "/api/recorder/me", { headers: bearer(made.token) });
+    const lastUsedAgo = async (ms: number) => {
+      const at = new Date(Date.now() - ms);
+      await database
+        .update(recorderConnections)
+        .set({ createdAt: at, lastUsedAt: at })
+        .where(eq(recorderConnections.id, made.connection.id));
+    };
+    await lastUsedAgo(SESSION_LIFETIME_MS - 60_000);
+    expect((await me()).status).toBe(200);
+    await lastUsedAgo(SESSION_LIFETIME_MS + 60_000);
+    const expired = await me();
+    expect(expired.status).toBe(401);
+    expect(await expired.json()).toMatchObject({
+      code: RECORDER_SIGNED_OUT,
+      reason: "revoked",
+    });
+    const listed = (await (
+      await call(h, "/api/recorder/connections", { headers: COOKIE })
+    ).json()) as { connections: { id: string }[] };
+    expect(listed.connections.map((c) => c.id)).not.toContain(
+      made.connection.id,
+    );
+  });
+
   test("me, the person's own Learning space and the connections list", async () => {
     const h = build();
     const made = await connect(h, "1".repeat(32));

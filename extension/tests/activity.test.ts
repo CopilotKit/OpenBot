@@ -47,7 +47,7 @@ const ORDER = "http://127.0.0.1:7420/orders/1043";
 const DESKTOP_TOKEN = "obr_desktop-connection";
 const LAUNCHER_TOKEN = "obr_openbot-browser";
 const SIGNED_OUT =
-  "This browser was disconnected from OpenBot. Your recording stopped, and everything in it is kept in this browser until you connect again.";
+  "This browser was disconnected from OpenBot. Your recording stopped, and everything in it is kept in this browser for 7 days, until you connect again.";
 
 type Globals = { indexedDB?: IDBFactory; IDBKeyRange?: unknown };
 const globals = globalThis as unknown as Globals;

@@ -3,7 +3,10 @@ import {
   type RecorderMe,
   recorderPaths,
 } from "@openbot/shared/recorder-api";
-import type { TrustedConnectRule } from "@openbot/shared/recorder-page";
+import {
+  RECORDER_CONNECT_STATUS,
+  type TrustedConnectRule,
+} from "@openbot/shared/recorder-page";
 import type {
   ExternalResponse,
   ExternalToBackground,
@@ -32,22 +35,31 @@ import {
   writeSession,
 } from "../shared/storage";
 import type { DesktopHandoff, DesktopRefusal } from "./native-host";
-import { askDesktopForHandoff, desktopAvailable } from "./native-host";
+import {
+  askDesktopForHandoff,
+  desktopAddress,
+  desktopAvailable,
+} from "./native-host";
 
 /** A connection that ended without the person's Disconnect, for the recording controller (index.ts wires it in): OpenBot
- * answered the keep-alive signed out (nothing is forgotten yet), or the organization's policy moved the Recorder away
- * from the connection's OpenBot (it is forgotten already). */
+ * answered the keep-alive signed out (nothing is forgotten yet), the organization's policy moved the Recorder away from
+ * the connection's OpenBot (it is forgotten already), or a connection to another OpenBot, or for another person,
+ * replaced it (`endReplaced`: it is replaced already, and its token is revoked once the controller has stopped using
+ * it). */
 export type ConnectionLoss =
   | {
       kind: "signed-out";
       reason: "revoked" | "removed" | "organization";
       connection: ConnectionRecord;
     }
-  | { kind: "policy"; connection: ConnectionRecord };
+  | { kind: "policy"; connection: ConnectionRecord }
+  | { kind: "replaced"; connection: ConnectionRecord };
 
 type ConnectionDeps = {
   askDesktop: () => Promise<DesktopHandoff | DesktopRefusal | null>;
   desktopAvailable: () => Promise<boolean>;
+  /** OpenBot Desktop's own OpenBot address, as its native host confirms it (native-host.ts `desktopAddress`). */
+  desktopAddress: () => Promise<string | null>;
   readPolicy: () => Promise<RecorderPolicy>;
   openTab: (url: string) => Promise<number | undefined>; // the new tab's id, kept in pendingConnect.tabId
   /** Stops what the lost connection still has running: the live recording and whatever the document sends with its
@@ -64,6 +76,25 @@ const OUT_OF_DATE =
   "This page is out of date. Close it and choose Connect this browser in OpenBot again.";
 const POLICY_REFUSED =
   "Your organization's Recorder policy does not allow this OpenBot. Ask your IT team.";
+/**
+ * What the Connect page says when OpenBot did not take the code, by what OpenBot answered. Always the Recorder's own
+ * sentence and never the text in OpenBot's answer: the site that asked to connect is any site at all until the person
+ * approves it, and the Connect page is the Recorder's own, so a sentence from that site's server would speak in the
+ * Recorder's voice (telling the person to install something, say).
+ */
+const EXCHANGE_REFUSED: Record<number, string> = {
+  400: "This connect request has expired or was already used. Choose Connect this browser in OpenBot again.",
+  403: "This OpenBot does not accept this copy of the Recorder. Ask whoever runs it to add it.",
+  429: "OpenBot is taking too many connect requests just now. Try again in a few minutes.",
+};
+const EXCHANGE_FAILED = "OpenBot could not connect this browser. Try again.";
+const UNREACHABLE = "OpenBot did not answer. Try again.";
+/** Nothing about this copy: any site can ask to connect, and until the person approves it on the Connect page that site
+ * is any site. Its version and its install id for that origin go to it once it is connected (`ping`). */
+const AWAITING_CONFIRMATION: ExternalResponse = {
+  ok: true,
+  awaitingConfirmation: true,
+};
 /** Web connects one OpenBot origin may ask for in any ten minutes: enough that an ordinary run (connect, connect again,
  * again after a Disconnect or a revoke, a retry or two) never meets it, while a page asking over and over is held off. */
 const CONNECT_WINDOW_MS = 10 * 60 * 1000;
@@ -78,6 +109,7 @@ const DESKTOP_EXCHANGE_WAIT_MS = 10_000;
 const defaultDeps: ConnectionDeps = {
   askDesktop: askDesktopForHandoff,
   desktopAvailable,
+  desktopAddress,
   readPolicy,
   openTab: async (url) => (await chrome.tabs.create({ url })).id,
   connectionLost: async (loss) => {
@@ -208,9 +240,19 @@ export async function handleConnectionMessage(
   switch (message.type) {
     case "page.connect.pending": {
       const pending = await readSession("pendingConnect");
+      // Approving replaces whatever this browser is connected to now, so the Connect page names it.
+      const connection = pending ? await currentConnection() : null;
       return {
         ok: true,
         pending: pending ? { origin: pending.origin, via: pending.via } : null,
+        ...(connection
+          ? {
+              replaces: {
+                origin: connection.openbotUrl,
+                email: connection.user.email,
+              },
+            }
+          : {}),
       };
     }
     case "page.connect.decide": {
@@ -221,7 +263,7 @@ export async function handleConnectionMessage(
       if (pending && message.origin !== pending.origin)
         return { ok: false, error: OUT_OF_DATE };
       if (message.approve) return approve(pending, message.label, resolved);
-      if (pending) await clearPendingConnect(pending);
+      if (pending) await clearPendingConnect(pending, { cancelled: true });
       return { ok: true };
     }
     case "page.disconnect": {
@@ -268,13 +310,14 @@ async function approve(
       },
     );
   } catch (error) {
-    // The server's own sentence, or a plain one: a network failure's message ("Failed to fetch") means nothing here.
+    // The Recorder's own sentence for what OpenBot answered (EXCHANGE_REFUSED), or a plain one: a network failure's
+    // message ("Failed to fetch") means nothing here.
     return {
       ok: false,
       error:
         error instanceof OpenBotError
-          ? error.message
-          : "OpenBot did not answer. Try again.",
+          ? (EXCHANGE_REFUSED[error.status] ?? EXCHANGE_FAILED)
+          : UNREACHABLE,
     };
   }
   const connection: ConnectionRecord = {
@@ -286,21 +329,51 @@ async function approve(
     connectedAt: Date.now(),
   };
   // Checked again in the job that stores it: a pin that landed during the exchange keeps it out, and the token OpenBot
-  // just made is revoked there.
+  // just made is revoked there. The connection it replaces is read in the same job.
   const stored = await serially(async () => {
-    if (!allowsOpenBot(await deps.readPolicy(), pending.origin)) return false;
+    if (!allowsOpenBot(await deps.readPolicy(), pending.origin)) return null;
+    const replaced = await currentConnection();
     await writeLocal("connection", connection);
-    return true;
+    return { replaced };
   });
   if (!stored) {
     await clearPendingConnect(pending);
     await revoke(connection);
     return { ok: false, error: POLICY_REFUSED };
   }
+  await endReplaced(stored.replaced, connection, deps);
   await clearPendingConnect(pending);
   if ((await readLocal("notice"))?.kind === "signed-out")
     await removeLocal("notice");
   return { ok: true };
+}
+
+/**
+ * What a connection that replaced another does about the one it replaced (`previous`, read in the queued job that stored
+ * `next`). The same person on the same OpenBot is this copy connecting again: OpenBot revoked the old token itself at the
+ * exchange (one live connection per person and install id), and a recording of theirs goes on under the new token
+ * (`connected`, then the recording controller's adoptConnection). Another person, or another OpenBot, lost their
+ * connection: the recording controller stops what still runs with its token and keeps everything for them, as a
+ * sign-out keeps it (`connectionLost`), then the old token is revoked at its own OpenBot, so no live token is left that
+ * this browser no longer holds. In that order, so nothing still sending with the old token meets its revocation first.
+ */
+async function endReplaced(
+  previous: ConnectionRecord | null,
+  next: ConnectionRecord,
+  deps: ConnectionDeps,
+): Promise<void> {
+  if (!previous || previous.token === next.token) return;
+  if (
+    previous.openbotUrl === next.openbotUrl &&
+    previous.user.id === next.user.id
+  )
+    return;
+  await deps
+    .connectionLost({ kind: "replaced", connection: previous })
+    .catch((error) =>
+      console.error("Recorder: ending a replaced connection failed", error),
+    );
+  await revoke(previous);
 }
 
 /**
@@ -353,12 +426,22 @@ export async function connectFromLauncher(
 /** A decision clears only the pending connect it read when it arrived. Approve's exchange runs outside the queue, so
  * a connect never waits on OpenBot's answer, and a decision can wait in the queue behind a connect or Desktop's
  * connect: either way another origin may have replaced the pending connect by now, and that newer one, with its open
- * tab, is left alone. The check and the clear are one queued job, so no connect lands between them. */
-function clearPendingConnect(decided: PendingConnect): Promise<void> {
+ * tab, is left alone. The check and the clear are one queued job, so no connect lands between them. A Cancel is kept
+ * for the origin that asked, so its page hears it (`connectStatus`). */
+function clearPendingConnect(
+  decided: PendingConnect,
+  how: { cancelled?: true } = {},
+): Promise<void> {
   return serially(async () => {
     const stored = await readSession("pendingConnect");
-    if (stored?.origin === decided.origin && stored.code === decided.code)
-      await removeSession("pendingConnect");
+    if (stored?.origin !== decided.origin || stored.code !== decided.code)
+      return;
+    await removeSession("pendingConnect");
+    if (how.cancelled)
+      await writeSession("cancelledConnect", {
+        origin: decided.origin,
+        at: Date.now(),
+      });
   });
 }
 
@@ -393,6 +476,7 @@ export async function handleExternalConnect(
   const resolved = withDefaults(deps);
   const origin = sender.origin;
   if (message.type === "openbot.ping") return ping(origin);
+  if (message.type === RECORDER_CONNECT_STATUS) return connectStatus(origin);
   if (message.type !== "openbot.connect")
     return { ok: false, error: "invalid" };
   if (!origin) return { ok: false, error: "invalid" };
@@ -404,28 +488,43 @@ export async function handleExternalConnect(
   if (policy.openbotUrl && !sameOrigin(policy.openbotUrl, checked.origin))
     return { ok: false, error: "pinned-elsewhere" };
 
-  // A trusted OpenBot connects with no Connect page; every other site keeps the one Connect click.
-  if (trustedConnectRule(policy, checked.origin) !== null)
-    return trustedConnect(checked.origin, message.code, resolved);
+  // A trusted OpenBot connects with no Connect page, and only while this browser is connected to nothing: replacing a
+  // connection (to another OpenBot, or for another person) always asks the person on the Connect page, which names the
+  // connection it replaces. Every other site keeps the one Connect click. Only an http origin can be OpenBot Desktop's
+  // (its local stack serves plain http on a loopback address), so only then is OpenBot Desktop asked for its address.
+  if ((await currentConnection()) === null) {
+    const desktop =
+      policy.openbotUrl !== checked.origin &&
+      new URL(checked.origin).protocol === "http:"
+        ? await resolved.desktopAddress()
+        : null;
+    if (trustedConnectRule(policy, checked.origin, desktop) !== null)
+      return trustedConnect(checked.origin, message.code, resolved);
+  }
   return serially(() => webConnect(checked.origin, message.code, resolved));
 }
 
 /**
  * Which `openbot.connect` the Recorder takes with no Connect page (shared/recorder-page.ts, David 2026-10-22: "only for
  * trusted OpenBots"): one from the OpenBot the organization's policy pins (`policy-pinned`), or from OpenBot Desktop's
- * own address on this computer (`loopback-desktop`). The Recorder takes http only on a loopback IP with a port (the
- * address rule, normaliseOpenBotOrigin), so an http origin that passes the rule is an OpenBot running on this computer,
- * as OpenBot Desktop's local stack is; https on a loopback IP is not that, and keeps the click. Null for every other
- * origin, and for one the policy does not allow.
+ * own address on this computer (`loopback-desktop`). OpenBot Desktop's address is `desktop`, the one its native host
+ * confirmed (native-host.ts `desktopAddress`), and only that exact origin is trusted: any program on this computer, a
+ * dev server or a notebook among them, can serve a page on a loopback port, so a loopback origin alone proves nothing.
+ * https on a loopback IP is never OpenBot Desktop's local stack, which serves plain http. Null for every other origin,
+ * for one the policy does not allow, and for every loopback origin when OpenBot Desktop confirmed none.
  */
 export function trustedConnectRule(
   policy: RecorderPolicy,
   origin: string,
+  desktop: string | null,
 ): TrustedConnectRule | null {
   const checked = normaliseOpenBotOrigin(origin);
   if (!checked.ok || !allowsOpenBot(policy, checked.origin)) return null;
   if (policy.openbotUrl === checked.origin) return "policy-pinned";
-  return new URL(checked.origin).protocol === "http:"
+  if (new URL(checked.origin).protocol !== "http:" || desktop === null)
+    return null;
+  const confirmed = normaliseOpenBotOrigin(desktop);
+  return confirmed.ok && confirmed.origin === checked.origin
     ? "loopback-desktop"
     : null;
 }
@@ -456,11 +555,13 @@ async function countConnect(
 
 /**
  * A trusted OpenBot's connect (`trustedConnectRule`), with no Connect page: the person is already in that OpenBot,
- * signed in, asking. Otherwise it is what an approved Connect is, as OpenBot Desktop's connect is: counted against the
- * same limit; its code exchanged at the origin Chrome reported, under this copy's install id for it and the browser's own
- * name; the connection stored in a queued job that checks the policy again (a token it keeps out is revoked); a Connect
- * page still open closed, since approving it would replace this connection; and the signed-out notice gone. The router
- * then does an approved Connect's follow-up, as the answer says it connected.
+ * signed in, asking, and this browser is connected to nothing. Otherwise it is what an approved Connect is, as OpenBot
+ * Desktop's connect is: counted against the same limit; its code exchanged at the origin Chrome reported, under this
+ * copy's install id for it and the browser's own name; the connection stored in a queued job that checks the policy
+ * again and that nothing was connected meanwhile (a token either keeps out is revoked: a connection that landed during
+ * the exchange is never replaced without the Connect page, and the page asking again gets that page); a Connect page
+ * still open closed, since approving it would replace this connection; and the signed-out notice gone. The router then
+ * does an approved Connect's follow-up, as the answer says it connected.
  */
 async function trustedConnect(
   origin: string,
@@ -500,19 +601,22 @@ async function trustedConnect(
     via: "web",
     connectedAt: Date.now(),
   };
-  const stored = await serially(async () => {
-    if (!allowsOpenBot(await deps.readPolicy(), origin)) return false;
+  const kept = await serially(async (): Promise<ExternalResponse | null> => {
+    if (!allowsOpenBot(await deps.readPolicy(), origin))
+      return { ok: false, error: "pinned-elsewhere" };
+    if ((await currentConnection()) !== null)
+      return { ok: false, error: "busy" };
     await writeLocal("connection", connection);
     const pending = await readSession("pendingConnect");
     if (pending) {
       await closeConnectTab(pending.tabId);
       await removeSession("pendingConnect");
     }
-    return true;
+    return null;
   });
-  if (!stored) {
+  if (kept) {
     await revoke(connection);
-    return { ok: false, error: "pinned-elsewhere" };
+    return kept;
   }
   if ((await readLocal("notice"))?.kind === "signed-out")
     await removeLocal("notice");
@@ -544,7 +648,7 @@ async function webConnect(
         requestedAt: now,
       });
       await chrome.tabs.update(pending.tabId as number, { active: true });
-      return awaitingConfirmationAnswer(origin);
+      return AWAITING_CONFIRMATION;
     }
     if (now - pending.requestedAt < PENDING_MAX_AGE_MS)
       return { ok: false, error: "busy" };
@@ -557,37 +661,60 @@ async function webConnect(
     requestedAt: now,
   };
   await writeSession("pendingConnect", next);
+  // A new request from the origin that cancelled before is waiting again.
+  if ((await readSession("cancelledConnect"))?.origin === origin)
+    await removeSession("cancelledConnect");
   const tabId = await deps.openTab(connectUrl());
   if (tabId !== undefined)
     await writeSession("pendingConnect", { ...next, tabId });
-  return awaitingConfirmationAnswer(origin);
+  return AWAITING_CONFIRMATION;
 }
 
-async function awaitingConfirmationAnswer(
-  origin: string,
-): Promise<ExternalResponse> {
-  return {
-    ok: true,
-    version: chrome.runtime.getManifest().version,
-    installId: await installIdFor(origin),
-    awaitingConfirmation: true,
-  };
-}
-
-/** Version and install id only to the connected origin or the origin of a connect flow still pending (Decision 22). */
+/**
+ * Version and install id only to the connected origin (Decision 22): every other site hears the same bare answer, a
+ * site with a connect waiting for the person's click included. The install id is stable for this copy and that origin,
+ * so handing it to a site that only asked would let that site know this browser again after its cookies are cleared.
+ *
+ * Even the bare answer says the Recorder is here, and so does Chrome itself, to every page `externally_connectable`
+ * lets in: a page that sends a message to an id with no extension behind it, or to one that does not let that page in,
+ * hears "Could not establish connection. Receiving end does not exist." (Chromium's message_service.cc does that on
+ * purpose, so a page it refuses cannot tell), while a page an installed extension lets in hears an answer, or "The
+ * message port closed before a response was received." when it gives none (both seen in Chrome 151). The Recorder lets
+ * in every page, since any OpenBot, at any address, may ask to connect: silence would hide nothing, and OpenBot's own
+ * page, which a Recorder not yet connected to it must answer, would be left reading Chrome's error text.
+ */
 async function ping(origin: string | undefined): Promise<ExternalResponse> {
   if (!origin) return { ok: true };
   const connection = await currentConnection();
-  const pending = await readSession("pendingConnect");
-  const known =
-    connection?.openbotUrl === origin ||
-    (pending?.origin === origin &&
-      Date.now() - pending.requestedAt < PENDING_MAX_AGE_MS);
-  if (!known) return { ok: true };
+  if (connection?.openbotUrl !== origin) return { ok: true };
   return {
     ok: true,
     version: chrome.runtime.getManifest().version,
     installId: await installIdFor(origin),
+  };
+}
+
+/**
+ * Where the asking origin's own web connect has got to (shared/recorder-page.ts `RecorderConnectWait`), for the page that
+ * waits on it: its Connect page open, cancelled there, or closed without a choice. Read from what the Recorder already
+ * keeps, asked of Chrome only for whether that tab is still open; it says nothing of any other origin's request, nor of
+ * this copy, so it tells a site no more than it caused itself.
+ */
+async function connectStatus(
+  origin: string | undefined,
+): Promise<ExternalResponse> {
+  const checked = origin ? normaliseOpenBotOrigin(origin) : null;
+  if (!checked?.ok) return { ok: true, connect: "none" };
+  const pending = await readSession("pendingConnect");
+  if (pending?.via === "web" && pending.origin === checked.origin)
+    return {
+      ok: true,
+      connect: (await tabIsOpen(pending.tabId)) ? "waiting" : "closed",
+    };
+  const cancelled = await readSession("cancelledConnect");
+  return {
+    ok: true,
+    connect: cancelled?.origin === checked.origin ? "cancelled" : "none",
   };
 }
 
@@ -723,7 +850,9 @@ async function desktopConnect(
     await revoke(connection);
     return refused(keptOut);
   }
+  const replaced = await currentConnection();
   await writeLocal("connection", connection);
+  await endReplaced(replaced, connection, deps);
   // A Connect page still open would replace this connection if the person approved it: it closes, and nothing is pending.
   const pending = await readSession("pendingConnect");
   if (pending) {

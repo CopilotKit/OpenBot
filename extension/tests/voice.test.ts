@@ -8,6 +8,8 @@ import {
 } from "@openbot/shared/recorder-masking";
 import {
   browserName,
+  DOWNLOAD_POLL_MS,
+  downloadingSentence,
   FLUSH_MS,
   NO_WORDS_MS,
   NO_WORDS_SENTENCE,
@@ -20,6 +22,8 @@ import {
   type FakeTrack,
   fakeMicrophone,
   fakeSpeech,
+  type OnDeviceModel,
+  onDeviceModel,
 } from "./support/fake-speech";
 
 const START = 1_800_000_000_000;
@@ -101,10 +105,13 @@ function setup(
     microphone?: () => Promise<void>;
     digests?: Set<string>;
     browser?: string;
+    /** What the browser can recognise on the computer (the fake's default: every language, downloaded); null for a
+     * browser with no on-device recognition at all. */
+    onDevice?: OnDeviceModel | null;
   } = {},
 ) {
   const clock = virtualClock();
-  const speech = fakeSpeech();
+  const speech = fakeSpeech(options.onDevice);
   const microphone = fakeMicrophone(options.microphone);
   const s: Setup = {
     clock,
@@ -156,8 +163,8 @@ describe("voice", () => {
     expect(recognition.lang).toBe("de-DE");
     expect(recognition.continuous).toBe(true);
     expect(recognition.interimResults).toBe(true);
-    // The browser's own recognition with its defaults: nothing is forced onto the device.
-    expect(recognition.processLocally).toBeUndefined();
+    // On this computer or not at all: without it Chrome streams the audio to its speech service.
+    expect(recognition.processLocally).toBe(true);
     recognition.begin();
     expect(s.last()).toEqual({ state: "listening" });
   });
@@ -515,6 +522,89 @@ describe("voice", () => {
     await unplugged.clock.advance(0);
     unplugged.tracks[0]?.onended?.();
     expect(unplugged.last()?.problem).toBe("no-microphone");
+  });
+
+  test("a browser that cannot recognise speech on the computer never opens the microphone, and says why", async () => {
+    // An older Chrome, or a Chromium without on-device recognition: it would send the audio to a speech service.
+    const s = setup({ onDevice: null });
+    await s.clock.advance(0);
+    expect(s.last()).toEqual({
+      state: "failed",
+      problem: "on-device",
+      reason:
+        "This version of Chrome cannot turn speech into text on your computer, and the Recorder sends no voice anywhere else. Recording goes on without your voice.",
+    });
+    expect(s.constraints).toHaveLength(0);
+    expect(s.speech.instances).toHaveLength(0);
+  });
+
+  test("a language the computer cannot recognise on the device turns voice off before the microphone opens", async () => {
+    const s = setup({
+      language: "cy-GB",
+      onDevice: onDeviceModel({ "en-US": "installed" }, { unmasked: true }),
+    });
+    await s.clock.advance(0);
+    expect(s.last()).toEqual({
+      state: "failed",
+      problem: "language",
+      reason:
+        "Chrome cannot turn Welsh (UK) speech into text on your computer. Recording goes on without your voice.",
+    });
+    expect(s.constraints).toHaveLength(0);
+  });
+
+  test("a language still to be downloaded asks for the person's Download, and listens once it is on the computer", async () => {
+    // As Chrome answers for any language this origin has not installed yet: downloadable, even when it is there.
+    const model = onDeviceModel({ "en-US": "downloadable" });
+    const s = setup({ onDevice: model });
+    await s.clock.advance(0);
+    expect(s.last()).toEqual({
+      state: "failed",
+      problem: "speech-pack",
+      reason:
+        "Chrome has to download its American English speech recognition to your computer first. Choose Download, then voice turns on. Recording goes on without your voice.",
+      language: "en-US",
+    });
+    expect(s.constraints).toHaveLength(0);
+
+    // The popup's Download, on the person's click, then voice on again: it waits for the download, saying so.
+    model.activation = true;
+    const installed = s.speech.Recognition as unknown as {
+      install(options: object): Promise<boolean>;
+    };
+    const done = installed.install({
+      langs: ["en-US"],
+      processLocally: true,
+    });
+    s.voice.mute(false);
+    await s.clock.advance(0);
+    expect(s.last()).toEqual({
+      state: "starting",
+      reason: downloadingSentence("en-US"),
+    });
+    expect(s.constraints).toHaveLength(0);
+    await s.clock.advance(DOWNLOAD_POLL_MS);
+    expect(s.constraints).toHaveLength(0);
+
+    model.finishDownloads();
+    expect(await done).toBe(true);
+    await s.clock.advance(DOWNLOAD_POLL_MS);
+    expect(s.constraints).toHaveLength(1);
+    const recognition = s.recognition();
+    expect(recognition.processLocally).toBe(true);
+    recognition.begin();
+    expect(s.last()).toEqual({ state: "listening" });
+  });
+
+  test("the browser refuses a download nobody clicked for", async () => {
+    const model = onDeviceModel({ "en-US": "downloadable" });
+    const speech = fakeSpeech(model);
+    const install = (
+      speech.Recognition as unknown as {
+        install(options: object): Promise<boolean>;
+      }
+    ).install({ langs: ["en-US"], processLocally: true });
+    await expect(install).rejects.toThrow("Requires a user gesture.");
   });
 
   test("a speech service out of reach says so and tries again with a growing delay", async () => {

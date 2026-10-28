@@ -13,6 +13,7 @@ import {
   type BrowserState,
   browserOpenRequestSchema,
   isPersonBrowserId,
+  type LauncherConnection,
   type LauncherState,
   type RealBrowser,
   type RealBrowserOpenResponse,
@@ -34,6 +35,7 @@ import { openbotAddress } from "../src/browser/address";
 import { personBrowserEgressPolicy } from "../src/browser/egress";
 import {
   gatewayBrowserComputers,
+  personBrowserPlace,
   withPersonBrowsers,
 } from "../src/browser/host";
 import { personBrowserId } from "../src/browser/person";
@@ -50,7 +52,7 @@ import { recorderConnections } from "../src/db/schema/recorder";
 import { createRecorderConnectionStore } from "../src/recorder/connections";
 import { createRecorderExtension } from "../src/recorder/wiring";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
-import { testEnvironment } from "./support/environment";
+import { SESSION_LIFETIME_MS, testEnvironment } from "./support/environment";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const prefix = `browser-real-${randomUUID()}`;
@@ -76,7 +78,9 @@ const PUBLISHED = {
 /** Every request the computer took, as `<method> <path>`, with the body of each real-browser POST. */
 const asked: { line: string; body?: unknown }[] = [];
 /** The OpenBot browsers it has open, by person browser id. */
-const browsers = new Map<string, BrowserState & { token: string }>();
+const browsers = new Map<string, BrowserState & { token?: string }>();
+/** The connection each browser's Recorder keeps in its profile, which outlives the browser being closed. */
+const recorderKeeps = new Map<string, LauncherConnection>();
 /** The person's own browsers installed on this computer, as `GET /browser/real` lists them. */
 let installed: RealBrowser[] = ["chrome", "msedge"];
 /** How the next real-browser route answers instead, when a test says so. */
@@ -151,21 +155,43 @@ const computer = Bun.serve({
         const parsed = browserOpenRequestSchema.safeParse(body);
         if (!parsed.success)
           return Response.json({ error: "Bad request." }, { status: 400 });
+        const brought = parsed.data.connection;
+        // An open that brings no connection hands the Recorder nothing: an open browser is as it was, and a closed one
+        // opens with its Recorder holding what it kept (agent-computer's browser-host.ts).
+        const open = browsers.get(id);
+        if (!brought && open) {
+          const { token: _token, ...state } = open;
+          return Response.json(state);
+        }
+        const holds = brought ?? recorderKeeps.get(id);
+        if (brought) recorderKeeps.set(id, brought);
         const state: BrowserState = {
           open: true,
           browser: "chrome",
           window: "native",
-          recorder: {
-            connected: true,
-            userId: parsed.data.connection.user.id,
-            phase: "idle",
-            actions: 0,
-            narration: "own",
-            voice: "off",
-          },
+          recorder: holds
+            ? {
+                connected: true,
+                userId: holds.user.id,
+                connectionId: holds.connectionId,
+                phase: "idle",
+                actions: 0,
+                narration: "own",
+                voice: "off",
+              }
+            : {
+                connected: false,
+                phase: "idle",
+                actions: 0,
+                narration: "own",
+                voice: "off",
+              },
           tabs: [],
         };
-        browsers.set(id, { ...state, token: parsed.data.connection.token });
+        browsers.set(id, {
+          ...state,
+          ...(holds ? { token: holds.token } : {}),
+        });
         return Response.json(state);
       }
       case "/browser/close":
@@ -198,15 +224,16 @@ const better = {
 };
 
 /**
- * One OpenBot: hosted (people's browsers on the Bots' computers, shown as a screen), or OpenBot Desktop (`desktop`:
- * people's browsers on its host-side computer, `OPENBOT_BROWSER_URL`, as windows on the person's own desktop).
+ * One OpenBot: hosted (people's browsers on computers of their own beside the Bots', as a supervisor or a Sandbox gives
+ * them, shown as a screen), or OpenBot Desktop (`desktop`: people's browsers on its host-side computer,
+ * `OPENBOT_BROWSER_URL`, as windows on the person's own desktop).
  */
 function build(
   options: {
     desktop?: boolean | string;
     singleUser?: boolean;
     storeIds?: { chrome?: string; edge?: string };
-    /** The Bots' computer provider, in place of the shared stand-in computer. */
+    /** The Bots' computer provider, in place of the stand-in computer as a computer of each one's own. */
     provider?: ComputerProvider;
   } = {},
 ) {
@@ -244,11 +271,14 @@ function build(
   });
   const provider = withPolicyPushOnWake(
     withPersonBrowsers(
-      options.provider ??
-        createSharedComputerProvider({
+      options.provider ?? {
+        ...createSharedComputerProvider({
           baseUrl: computerUrl,
           token: COMPUTER_TOKEN,
         }),
+        name: "docker",
+        isolation: "per-bot",
+      },
       config.browser?.url,
     ),
     {
@@ -270,6 +300,7 @@ function build(
     roleRepository,
     peopleStore: { isRevoked: async () => false },
     personalSpaces,
+    sessionLifetimeMs: SESSION_LIFETIME_MS,
     auditStore,
   });
   const args = [config] as unknown as Parameters<typeof createApp>;
@@ -281,7 +312,11 @@ function build(
   args[34] = {
     recorder,
     browser: {
-      computers: gatewayBrowserComputers(gateway, config.browser?.url),
+      ...personBrowserPlace({
+        provider,
+        browserUrl: config.browser?.url,
+        computers: () => gatewayBrowserComputers(gateway, config.browser?.url),
+      }),
       token: COMPUTER_TOKEN,
       recorder,
       openbotUrl: openbotAddress(config),
@@ -515,7 +550,9 @@ describe("a Recorder tells OpenBot what it is recording", () => {
       label: "Google Chrome on macOS",
     });
     const store = createRecorderConnectionStore(database);
-    expect(await store.revoke(ada.id, chrome.connection.id)).toBe(true);
+    expect(await store.revoke(ada.id, chrome.connection.id, "revoked")).toBe(
+      true,
+    );
     expect(
       await store.reportActivity(
         ada.id,
@@ -635,7 +672,7 @@ describe("the red dot follows any of the person's Recorders", () => {
     expect(opened.status).toBe(200);
     const computerId = personBrowserId(cy.id);
     const browser = browsers.get(computerId);
-    if (!browser) throw new Error("the browser did not open");
+    if (!browser?.token) throw new Error("the browser did not open connected");
     const everyday = await connect(openbot, "cy", {
       via: "desktop",
       label: "Google Chrome on macOS",

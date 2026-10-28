@@ -12,7 +12,11 @@ import {
   parseExternalMessage,
   parsePageConnectDecide,
 } from "../protocol/messages";
-import { handleConnectionMessage, handleExternalConnect } from "./connection";
+import {
+  type ConnectionLoss,
+  handleConnectionMessage,
+  handleExternalConnect,
+} from "./connection";
 import {
   answerOpenBotPage,
   isOpenBotPageMessage,
@@ -36,6 +40,8 @@ type RouterDeps = RouterHandlers &
   OpenBotPageControls & {
     connected(): Promise<void>;
     disconnected(): Promise<void>;
+    /** The recording controller's, for a connection an approved Connect (or OpenBot Desktop's connect) replaces. */
+    connectionLost(loss: ConnectionLoss): Promise<void>;
   };
 
 const CONNECTION_TYPES = new Set<string>([
@@ -55,6 +61,8 @@ const RECORDING_TYPES = new Set<string>([
   "page.notice.dismiss",
   "page.kept.discard",
   "page.voice",
+  "page.narration",
+  "page.site",
 ]);
 
 const UNKNOWN: PageResponse = { ok: false, error: "Unknown request." };
@@ -90,7 +98,11 @@ async function routePage(
       : (raw as PageToBackground);
   if (message === null) return UNKNOWN;
   if (CONNECTION_TYPES.has(type)) {
-    const answer = await handleConnectionMessage(message);
+    // A connection a Connect approves in place of another person's, or another OpenBot's, ends the old one in the
+    // recording controller first: what still runs with its token stops, kept for its person.
+    const answer = await handleConnectionMessage(message, {
+      connectionLost: deps.connectionLost,
+    });
     if (answer === undefined) return UNKNOWN;
     // The follow-up runs after the connection changed: never fail the page on it. OpenBot Desktop's connect, with no
     // Connect page, is an approved Connect too.

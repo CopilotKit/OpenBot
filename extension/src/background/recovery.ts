@@ -1,6 +1,7 @@
 // Finishes what a browser restart or a service-worker restart cut short (Task 9's Recovery, Review Focus 3): a recording
 // the browser closed on is sent to Intelligence with an interrupted outcome, a Stop is finished, a live recording picks
-// up again, and every drain of the connected person is sent; drains of anyone else wait for their person (Decision 19).
+// up again, and every drain of the connected person is sent; drains of anyone else wait for their person (Decision 19),
+// for at most KEPT_FOR_PERSON_MS.
 import { readLocal } from "../shared/storage";
 import { hasOffscreenDocument } from "./offscreen-document";
 import { type RecordingRecovery, recordingRecovery } from "./recording";
@@ -65,4 +66,6 @@ async function recover(recording: RecordingRecovery): Promise<void> {
   // The document that held the drains is gone: a new one recovers them from the outbox.
   if (!hadDocument && ((await readLocal("drains")) ?? []).length > 0)
     await recording.sendDrains();
+  // Last, so the phases above see the document as the restart left it: what has waited too long for its person goes.
+  await recording.expireWaiting();
 }

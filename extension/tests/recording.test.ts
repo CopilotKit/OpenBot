@@ -11,6 +11,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   type LearningSpaceState,
+  RECORDER_AUTHORITY_UNAVAILABLE,
   RECORDER_SIGNED_OUT,
   recorderActivitySchema,
 } from "@openbot/shared/recorder-api";
@@ -60,11 +61,13 @@ const bea = { id: "p2", name: "Bea", email: "bea@example.test" };
 const DEAL = "https://crm.example.test/deals/42";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const SIGNED_OUT =
-  "This browser was disconnected from OpenBot. Your recording stopped, and everything in it is kept in this browser until you connect again.";
+  "This browser was disconnected from OpenBot. Your recording stopped, and everything in it is kept in this browser for 7 days, until you connect again.";
 const ORGANIZATION_SIGNED_OUT =
-  "Your organization sign-in ended. Your recording stopped, and everything in it is kept in this browser until you connect again.";
+  "Your organization sign-in ended. Your recording stopped, and everything in it is kept in this browser for 7 days, until you connect again.";
 const POLICY_MOVED =
-  "Your organization moved the Recorder to another OpenBot. Your recording stopped, and everything in it is kept in this browser.";
+  "Your organization moved the Recorder to another OpenBot. Your recording stopped, and everything in it is kept in this browser for 7 days.";
+const REPLACED =
+  "This browser was connected to another OpenBot or person. Your recording stopped, and everything in it is kept in this browser for 7 days, until you connect again.";
 
 const event = (name: string, value: unknown): CapturedEvent => ({
   type: "CUSTOM",
@@ -92,6 +95,8 @@ const openbot = {
   holds: {} as Partial<Record<HeldRoute, Promise<void>>>,
   me: { status: 200, body: {} as object },
   learning: { state: "assigned", containerId: "space-1" } as LearningSpaceState,
+  /** While set, OpenBot refuses the Learning space with this answer. */
+  learningRefusal: null as { status: number; body: object } | null,
   /** Every report of what the Recorder is doing, as OpenBot received it. */
   activity: [] as unknown[],
 };
@@ -100,6 +105,7 @@ const meBody = {
   connectionId: "c-obr_one",
 };
 const CONNECTING = new Set([
+  "POST /api/recorder/connections",
   "GET /api/recorder/me",
   "GET /api/recorder/learning",
   "DELETE /api/recorder/connections/current",
@@ -111,6 +117,7 @@ function resetOpenBot() {
   openbot.revoked = new Set();
   openbot.holds = {};
   openbot.me = { status: 200, body: meBody };
+  openbot.learningRefusal = null;
   openbot.activity = [];
 }
 
@@ -145,7 +152,14 @@ beforeAll(() => {
         );
       }
       if (route === "GET /api/recorder/learning")
-        return signedOut() ?? Response.json({ learning: openbot.learning });
+        return (
+          signedOut() ??
+          (openbot.learningRefusal
+            ? Response.json(openbot.learningRefusal.body, {
+                status: openbot.learningRefusal.status,
+              })
+            : Response.json({ learning: openbot.learning }))
+        );
       if (route === "POST /api/recorder/activity") {
         openbot.activity.push(await request.json());
         return signedOut() ?? new Response(null, { status: 204 });
@@ -154,6 +168,12 @@ beforeAll(() => {
         if (openbot.holds.disconnect) await openbot.holds.disconnect;
         return new Response(null, { status: 204 });
       }
+      // A connect code is always Bea's here: the person who connects this browser in place of whoever it was connected as.
+      if (route === "POST /api/recorder/connections")
+        return Response.json(
+          { token: "obr_bea", connection: { id: "c-obr_bea" }, user: bea },
+          { status: 201 },
+        );
       return Response.json({ error: "Not found." }, { status: 404 });
     },
   });
@@ -540,6 +560,7 @@ async function startRecording(input: {
   title: string;
   tabId: number;
   language?: string;
+  narrate?: boolean;
 }): Promise<string> {
   if (!fake.tabs.has(input.tabId))
     fake.tabs.set(input.tabId, {
@@ -660,6 +681,8 @@ function useVariant(value: string) {
 // ---- Record ------------------------------------------------------------------------------------
 
 test("Record opens the document and starts a new trajectory for the picked Bot, telling OpenBot nothing", async () => {
+  // The person chose to narrate (the setup page, or the Record form).
+  fake.storage.local.set("narration", "on");
   const id = await startRecording({
     title: "Update deal",
     tabId: 7,
@@ -684,7 +707,7 @@ test("Record opens the document and starts a new trajectory for the picked Bot, 
     startedAt: now,
     allowedIntelligenceUrls: null,
     version: "0.3.0",
-    // Every recording narrates, in the page's language.
+    // A person who chose to narrate narrates every recording, in the page's language.
     voice: { language: "de-DE", muted: false },
   });
   expect(start.session.trajectoryId).not.toBe(id);
@@ -728,6 +751,43 @@ test("Record opens the document and starts a new trajectory for the picked Bot, 
     capture: { intelligence: "connecting", network: "debugger" },
   });
   expect(fake.badge).toEqual({ text: "REC", color: "#e7000b" });
+});
+
+test("the microphone stays closed until the person chooses to narrate, and OpenBot's own Record can ask for it", async () => {
+  // Nobody chose yet: the recording starts muted, and its Voice row says so.
+  const first = await startRecording({ title: "T", tabId: 7 });
+  const start = (recordingId: string) =>
+    sentToDocument("offscreen.start").find(
+      (message) =>
+        message.type === "offscreen.start" &&
+        message.session.recordingId === recordingId,
+    );
+  const opened = start(first);
+  if (opened?.type !== "offscreen.start") throw new Error("No start");
+  expect(opened.session.voice).toEqual({ language: "en-US", muted: true });
+  expect((await state()).capture.voice).toEqual({ state: "muted" });
+  await page({ type: "page.stop" });
+  await until(async () => (await state()).phase === "idle", "idle");
+
+  // Chosen off: still closed.
+  expect(await page({ type: "page.narration", on: false })).toEqual({
+    ok: true,
+  });
+  expect(fake.storage.local.get("narration")).toBe("off");
+  const second = await startRecording({ title: "T", tabId: 7 });
+  const off = start(second);
+  if (off?.type !== "offscreen.start") throw new Error("No start");
+  expect(off.session.voice?.muted).toBe(true);
+  await page({ type: "page.stop" });
+  await until(async () => (await state()).phase === "idle", "idle");
+
+  // OpenBot's own Record form asked the person, and they said yes: that recording narrates.
+  const third = await startRecording({ title: "T", tabId: 7, narrate: true });
+  const asked = start(third);
+  if (asked?.type !== "offscreen.start") throw new Error("No start");
+  expect(asked.session.voice?.muted).toBe(false);
+  // Its answer is for that recording only: the person's own choice in the Recorder stays as they made it.
+  expect(fake.storage.local.get("narration")).toBe("off");
 });
 
 test("Record copies the person's own Learning space, as OpenBot last described it", async () => {
@@ -1273,11 +1333,16 @@ test("Start over while Record still injects the content script waits for Record,
       type: "background.capture",
       active: true,
       recordingId: start.session.recordingId,
+      // The tab's recording mark: its site, and that the Recorder does not hear the person (nobody chose to narrate).
+      site: "example.test",
+      narrating: false,
     },
     {
       type: "background.capture",
       active: true,
       recordingId: rotate.recordingId,
+      site: "example.test",
+      narrating: false,
     },
   ]);
   expect(network.calls).toEqual([`start 7 ${DEAL}`]);
@@ -1621,6 +1686,8 @@ test("Start over sends the recording it leaves to Intelligence with a failed out
     type: "background.capture",
     active: true,
     recordingId: fresh,
+    site: "example.test",
+    narrating: false,
   });
   doc?.postMessage({ type: "offscreen.done", recordingId: old });
   await until(() => drains().length === 0, "the old one goes once sent");
@@ -1653,6 +1720,8 @@ test("Start over while the document's port reconnects moves the document to the 
     type: "background.capture",
     active: true,
     recordingId: rotate.recordingId,
+    site: "example.test",
+    narrating: false,
   });
 });
 
@@ -2395,7 +2464,7 @@ test("Disconnect clears a sentence that says everything is kept until you connec
 
 test("connecting again clears the sentence that the stopped recording waits for a connection, so the popup no longer says both sent and kept", async () => {
   // Run 6: after the person connected the browser again, the popup said "Sent to Intelligence" above "This browser was
-  // disconnected from OpenBot ... kept in this browser until you connect again".
+  // disconnected from OpenBot ... kept in this browser for 7 days, until you connect again".
   fake.tabs.set(7, { id: 7, url: "chrome://newtab/" } as chrome.tabs.Tab);
   const id = await record();
   doc?.postMessage({
@@ -2578,6 +2647,85 @@ test("a policy that moves the Recorder away stops the recording, halts the docum
     },
     { recordingId: second, kept: { waitingForReconnect: true } },
   ]);
+});
+
+test("a Connect approved as another person stops the live recording, halts the old token's streams, keeps everything for its person, then revokes the old token", async () => {
+  fake.tabs.set(7, { id: 7, url: "chrome://newtab/" } as chrome.tabs.Tab);
+  const first = await record();
+  await page({ type: "page.stop" });
+  const second = await record();
+  const document = doc;
+  // Every sentence the popup was shown, as the state changed under it.
+  const stoppedWith: (string | undefined)[] = [];
+  chrome.storage.onChanged.addListener((changes, area) => {
+    const recorder = changes.recorder?.newValue as RecorderState | undefined;
+    if (area === "session" && recorder?.error) stoppedWith.push(recorder.error);
+  });
+  // OpenBot's page asks to connect this browser; this browser is connected already, so the person is asked.
+  expect(
+    await fake.sendExternal(
+      { type: "openbot.connect", code: "obc_bea" },
+      { origin },
+    ),
+  ).toEqual({ ok: true, awaitingConfirmation: true });
+  expect(await page({ type: "page.connect.pending" })).toEqual({
+    ok: true,
+    pending: { origin, via: "web" },
+    replaces: { origin, email: ada.email },
+  });
+  expect(
+    await page({
+      type: "page.connect.decide",
+      approve: true,
+      label: "Chrome",
+      origin,
+    }),
+  ).toEqual({ ok: true });
+  expect(storedConnection()).toMatchObject({ token: "obr_bea", user: bea });
+  expect(sentToDocument("offscreen.halt", document)).toEqual([
+    { type: "offscreen.halt", token: "obr_one" },
+  ]);
+  expect(sentToDocument("offscreen.stop", document).at(-1)).toEqual({
+    type: "offscreen.stop",
+    outcome: "failed",
+    reason: "disconnected",
+  });
+  // The stop said why; the connect's follow-up then cleared that sentence, as any connect does, and the kept row says
+  // what waits, for whom, and why.
+  expect(stoppedWith).toContain(REPLACED);
+  expect(await state()).toMatchObject({
+    phase: "idle",
+    kept: {
+      recordings: 2,
+      reason: "This browser was connected to another OpenBot or person.",
+      waitingFor: { name: "Ada", recordings: 2 },
+    },
+  });
+  expect((await state()).error).toBeUndefined();
+  expect(network.running.size).toBe(0);
+  expect(sentToDocument("offscreen.discard", document)).toEqual([]);
+  expect(drains()).toMatchObject([
+    {
+      recordingId: first,
+      userId: ada.id,
+      kept: {
+        waitingForReconnect: true,
+        reason: "This browser was connected to another OpenBot or person.",
+      },
+    },
+    {
+      recordingId: second,
+      userId: ada.id,
+      kept: { waitingForReconnect: true },
+    },
+  ]);
+  // Ada's token is revoked at her OpenBot once nothing uses it, so no live token is left that this browser lost.
+  const revokes = openbot.calls.filter(
+    (call) =>
+      call.method === "DELETE" &&
+      call.path === "/api/recorder/connections/current",
+  );
+  expect(revokes.map((call) => call.auth)).toEqual(["Bearer obr_one"]);
 });
 
 test("Record refuses a connection whose OpenBot the policy no longer allows, and starts nothing", async () => {
@@ -2821,6 +2969,7 @@ test("sensitive digests live in storage.session only, reach the page masking, an
 });
 
 test("a Record without a usable language narrates in the browser's, else English", async () => {
+  fake.storage.local.set("narration", "on");
   await startRecording({
     title: "T",
     tabId: 7,
@@ -2918,6 +3067,8 @@ test("a content script that says hello learns whether to capture", async () => {
     type: "background.capture",
     active: true,
     recordingId: id,
+    site: "example.test",
+    narrating: false,
   });
   expect(other.messages[0]).toEqual({
     type: "background.capture",
@@ -3017,6 +3168,8 @@ test("a tab the person switches to mid-recording is followed from then: its page
     type: "background.capture",
     active: true,
     recordingId: id,
+    site: "example.test",
+    narrating: false,
   });
   port.postMessage({
     type: "content.event",
@@ -3245,6 +3398,8 @@ test("a tab the Record tab opens is followed as before, from the opener's page, 
   await until(async () => (await state()).tabIds.length === 2, "followed");
   fake.tabs.set(tabId, { ...opened, url: REPORT });
   fake.webNavigation.commit({ tabId, frameId: 0, url: REPORT });
+  // The person goes back to the tab that opened it: the page they looked at there is a visit that is over, and goes out.
+  fake.person.switchTo(7);
   await until(
     () =>
       forwardedEvents().some(
@@ -3442,6 +3597,8 @@ test("only a followed tab's top frame becomes a page-change step, once per addre
     transitionType: "reload",
   });
   fake.webNavigation.commit({ tabId: 7, frameId: 0, url: "about:blank" });
+  // The person moves to a new tab: the pages they visited in this one, with no step there, go out.
+  fake.person.openTab();
   await until(() => navigations().length === 3, "three page changes");
   await settle();
   const events = navigations();
@@ -3485,6 +3642,8 @@ test("an address recorded before is recorded again in the next recording and aft
   const navigateTo = async (url: string) => {
     const before = visits(url);
     fake.webNavigation.commit({ tabId: 7, frameId: 0, url });
+    // The person moves to another tab, so the page they visited goes out.
+    fake.person.openTab();
     await until(() => visits(url) === before + 1, `the navigation to ${url}`);
   };
   await record();
@@ -3505,6 +3664,8 @@ test("the collector's page event is never recorded: the tab's start and its page
     type: "content.event",
     event: event("page", { url: DEAL, route: "/deals/42", title: "Deal 42" }),
   });
+  // The person moves to another tab: the page the recording started on, which they did not act on, goes out.
+  fake.person.openTab();
   const forwarded = () =>
     sentToDocument("offscreen.event").map((m) =>
       m.type === "offscreen.event" ? m.event : null,
@@ -3613,6 +3774,34 @@ test("page.state answers with the connection, me and the policy address, fetchin
   expect(meCalls()).toHaveLength(2);
   expect(await page({ type: "page.notice.dismiss" })).toEqual({ ok: true });
   expect(fake.storage.local.get("notice")).toBeUndefined();
+});
+
+test("a refusal from OpenBot reaches the popup in the Recorder's own sentence, never the text OpenBot sent", async () => {
+  const hostile =
+    "Your Recorder is out of date. Install the new one from https://evil.example.test.";
+  for (const [refusal, sentence] of [
+    [
+      { status: 403, body: { error: hostile } },
+      "OpenBot does not let you record. Ask whoever runs it.",
+    ],
+    [
+      {
+        status: 503,
+        body: { error: hostile, code: RECORDER_AUTHORITY_UNAVAILABLE },
+      },
+      "Your organization could not answer. Try again in a moment.",
+    ],
+    [
+      { status: 500, body: { error: hostile } },
+      "OpenBot did not answer. Try again.",
+    ],
+  ] as const) {
+    openbot.learningRefusal = refusal;
+    expect(await page({ type: "page.learning" })).toEqual({
+      ok: false,
+      error: sentence,
+    });
+  }
 });
 
 test("page.learning reads the person's own Learning space", async () => {
@@ -4395,4 +4584,162 @@ test("the page hook's word that the page runs CopilotKit (its runtime answered t
     error: "invalid",
   });
   expect(network.pageAgent).toHaveLength(1);
+});
+
+// ---- Sites the person leaves out (review: a recording follows every tab the person uses) -------
+//
+// A glance at a bank or a mailbox mid-recording went into it: every followed tab now shows a recording mark from its
+// first step, and one click on it leaves that site out of every recording.
+
+test("one click on a tab's recording mark leaves its site out: what it still held is dropped, and nothing more of it is recorded", async () => {
+  const id = await record();
+  const port = contentPort(7);
+  port.postMessage({ type: "content.hello", top: true, url: DEAL });
+  await until(() => captureMessages(port).length > 0, "the mark");
+  // The mark from the tab's first step: its site, and that the Recorder does not hear the person.
+  expect(captureMessages(port).at(-1)).toEqual({
+    type: "background.capture",
+    active: true,
+    recordingId: id,
+    site: "example.test",
+    narrating: false,
+  });
+  // A click the steps still hold when the person presses Don't record example.test on the mark.
+  port.postMessage({
+    type: "content.event",
+    event: contentEvent({ step: "click", from: 7 }),
+  });
+  await until(async () => (await state()).actions === 1, "the click");
+  port.postMessage({ type: "content.site", recorded: false });
+  await until(
+    () => fake.storage.local.get("excludedSites") !== undefined,
+    "the site is kept out",
+  );
+  expect(fake.storage.local.get("excludedSites")).toEqual(["example.test"]);
+  // The tab stops capturing, and its mark says it is not recording the site.
+  expect(captureMessages(port).at(-1)).toEqual({
+    type: "background.capture",
+    active: false,
+    site: "example.test",
+    narrating: false,
+    excluded: true,
+  });
+  // Its Threads go with it, so nothing of the page's AG-UI is linked to later.
+  expect(agents.at(-1)?.navigated).toContain(7);
+
+  // Anything more from the tab is dropped: a step from a script that had not heard yet, a save, the page's AG-UI.
+  port.postMessage({
+    type: "content.event",
+    event: contentEvent({ step: "click", from: 7 }),
+  });
+  network.deps?.call({
+    tabId: 7,
+    startedAt: now,
+    endedAt: now,
+    method: "POST",
+    url: "https://crm.example.test/api/deals/42",
+  });
+  network.deps?.agent({
+    kind: "runtime",
+    tabId: 7,
+    at: now,
+    url: "https://crm.example.test/api/copilotkit/info",
+  } as never);
+  await settle();
+  expect(agents.at(-1)?.observed).toEqual([]);
+  // A page on the site is not one the network capture attaches to.
+  expect(network.deps?.recordable?.(DEAL)).toBe(false);
+  expect(network.deps?.recordable?.("https://other.test/")).toBe(true);
+
+  await page({ type: "page.stop" });
+  await until(async () => (await state()).phase !== "recording", "stopped");
+  // Stop sends everything the steps held: none of it is the tab's start or its clicks.
+  expect(
+    forwardedEvents().filter(
+      (recorded) => recorded.name === "click" || recorded.name === "navigation",
+    ),
+  ).toEqual([]);
+});
+
+test("a site left out stays out of later recordings, and one click on the mark records it again", async () => {
+  // Left out in an earlier recording; a later service worker reads the list.
+  fake.storage.local.set("excludedSites", ["example.test"]);
+  fake.restartServiceWorker();
+  handlers = installRecording(doubles());
+  installRouter(handlers);
+  const id = await record();
+  // The tab's script is injected without the flag that starts capture at once: on this site it only shows the mark.
+  expect(injectedInto(7).map((injection) => injection.files ?? "flag")).toEqual(
+    [["content.js"]],
+  );
+  const port = contentPort(7);
+  port.postMessage({ type: "content.hello", top: true, url: DEAL });
+  await until(() => captureMessages(port).length > 0, "the mark");
+  expect(captureMessages(port).at(-1)).toMatchObject({
+    active: false,
+    site: "example.test",
+    excluded: true,
+  });
+  port.postMessage({
+    type: "content.event",
+    event: contentEvent({ step: "click", from: 7 }),
+  });
+  await settle();
+  expect((await state()).actions).toBe(0);
+  expect(
+    (await page({ type: "page.state" })) as { excludedSites?: string[] },
+  ).toMatchObject({ excludedSites: ["example.test"] });
+
+  // Record it: the tab captures again, and its network capture attaches now rather than at its next page.
+  port.postMessage({ type: "content.site", recorded: true });
+  await until(
+    () => fake.storage.local.get("excludedSites") === undefined,
+    "recorded again",
+  );
+  expect(captureMessages(port).at(-1)).toEqual({
+    type: "background.capture",
+    active: true,
+    recordingId: id,
+    site: "example.test",
+    narrating: false,
+  });
+  expect(network.calls).toContain(`onCommitted 7 0 ${DEAL}`);
+  port.postMessage({
+    type: "content.event",
+    event: contentEvent({ step: "click", from: 7 }),
+  });
+  await until(async () => (await state()).actions === 1, "the click");
+  await page({ type: "page.stop" });
+  await until(
+    () => forwardedEvents().some((recorded) => recorded.name === "click"),
+    "the click is sent",
+  );
+  // The tab's start was on a site left out, so it is no step; the click after the person recorded it again is.
+  expect(
+    forwardedEvents()
+      .filter((recorded) => (recorded.value as { tab?: number }).tab === 1)
+      .map((recorded) => recorded.name),
+  ).toEqual(["click"]);
+});
+
+test("the options page leaves a site out or records it again; a page that is not a website is refused", async () => {
+  expect(
+    await page({ type: "page.site", site: "bank.example", recorded: false }),
+  ).toEqual({ ok: true });
+  expect(
+    await page({ type: "page.site", site: "mail.example", recorded: false }),
+  ).toEqual({ ok: true });
+  expect(fake.storage.local.get("excludedSites")).toEqual([
+    "bank.example",
+    "mail.example",
+  ]);
+  expect(
+    await page({ type: "page.site", site: "bank.example", recorded: true }),
+  ).toEqual({ ok: true });
+  expect(fake.storage.local.get("excludedSites")).toEqual(["mail.example"]);
+  for (const site of ["", "chrome://settings", "mail.example/inbox", 42])
+    expect(
+      await page({ type: "page.site", site, recorded: false }),
+    ).toMatchObject({ ok: false });
+  expect(fake.storage.local.get("excludedSites")).toEqual(["mail.example"]);
 });

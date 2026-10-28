@@ -52,6 +52,8 @@ function stateResponse(
     me: null,
     policy: { openbotUrl: null, invalid: false },
     notice: null,
+    narration: null,
+    excludedSites: [],
     ...rest,
   };
 }
@@ -212,4 +214,44 @@ test("not connected shows the not-connected copy and no Disconnect", async () =>
   );
   await findByText(/This browser is not connected to OpenBot/);
   expect(queryByRole("button", { name: "Disconnect" })).toBeNull();
+});
+
+test("the sites left out are listed, each with Record again, and none says how to leave one out", async () => {
+  const none = setup(stateResponse());
+  expect(
+    await none.findByText(
+      "No sites are left out yet. While you record, choose Don't record on a tab's recording mark to leave its site out.",
+    ),
+  ).toBeTruthy();
+  none.unmount();
+
+  const { findByRole, getByText, sent } = setup(
+    stateResponse({ excludedSites: ["bank.example", "mail.example"] }),
+  );
+  fireEvent.click(
+    await findByRole("button", { name: "Record bank.example again" }),
+  );
+  expect(getByText("mail.example")).toBeTruthy();
+  await waitFor(() =>
+    expect(sent).toContainEqual({
+      type: "page.site",
+      site: "bank.example",
+      recorded: true,
+    }),
+  );
+});
+
+test("narration shows the person's choice and changes it", async () => {
+  const { findByRole, getByText, sent } = setup(
+    stateResponse({ narration: null }),
+  );
+  const toggle = await findByRole("switch", { name: "Narration" });
+  expect(toggle.getAttribute("aria-checked")).toBe("false");
+  expect(
+    getByText("Not chosen yet. The Recorder does not open your microphone."),
+  ).toBeTruthy();
+  fireEvent.click(toggle);
+  await waitFor(() =>
+    expect(sent).toContainEqual({ type: "page.narration", on: true }),
+  );
 });

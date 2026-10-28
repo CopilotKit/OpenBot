@@ -99,6 +99,7 @@ test("successful writes update only the current account cache; failures preserve
   client.setQueryData(bobKey, {
     messageListEmphasis: "agent",
     selfHostBannerDismissed: false,
+    narration: null,
   });
   const mutation = client
     .getMutationCache()
@@ -108,6 +109,7 @@ test("successful writes update only the current account cache; failures preserve
       preferences: {
         messageListEmphasis: "thread",
         selfHostBannerDismissed: false,
+        narration: null,
       },
     });
   await mutation.execute({ messageListEmphasis: "thread" });
@@ -124,6 +126,7 @@ test("successful writes update only the current account cache; failures preserve
   expect(client.getQueryData<UserPreferences>(bobKey)).toEqual({
     messageListEmphasis: "agent",
     selfHostBannerDismissed: false,
+    narration: null,
   });
   response = async () =>
     Response.json({ error: "Could not save" }, { status: 500 });
@@ -134,5 +137,9 @@ test("successful writes update only the current account cache; failures preserve
     client.getQueryData<UserPreferences>(
       userPreferencesQueryOptions("alice").queryKey,
     ),
-  ).toEqual({ messageListEmphasis: "thread", selfHostBannerDismissed: false });
+  ).toEqual({
+    messageListEmphasis: "thread",
+    selfHostBannerDismissed: false,
+    narration: null,
+  });
 });

@@ -34,7 +34,7 @@ import { createRecorderExtension } from "../src/recorder/wiring";
 import { createRequestActor } from "../src/request-actor";
 import { skillSnapshot } from "./fixtures/learned-skills";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
-import { testEnvironment } from "./support/environment";
+import { SESSION_LIFETIME_MS, testEnvironment } from "./support/environment";
 
 /*
  * The capture pass end to end, through the app index.ts builds: the Recorder's routes, the runtime mounted with the
@@ -113,6 +113,7 @@ const recorder = createRecorderExtension({
     },
     log: () => {},
   }),
+  sessionLifetimeMs: SESSION_LIFETIME_MS,
   auditStore,
 });
 

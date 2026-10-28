@@ -67,6 +67,8 @@ function runtime(
           people: {
             containerFor: space,
             openSkills: typeof open === "function" ? open : async () => open,
+            // An administrator has turned on Skill sharing; the switch itself is learning-sharing.integration.test.ts's.
+            sharingAllowed: () => true,
           },
         }),
     ...(options.personalWaitMs === undefined

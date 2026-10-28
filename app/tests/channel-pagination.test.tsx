@@ -168,6 +168,7 @@ function renderSidebar() {
   queryClient.setQueryData(userPreferencesQueryOptions("user").queryKey, {
     messageListEmphasis: "thread",
     selfHostBannerDismissed: false,
+    narration: null,
   });
   queryClient.setQueryData(authKeys.currentUser(), {
     id: "user",
@@ -228,6 +229,7 @@ test("message emphasis updates mounted rows from the account preferences cache",
     clients[0]?.setQueryData(userPreferencesQueryOptions("user").queryKey, {
       messageListEmphasis: "agent",
       selfHostBannerDismissed: false,
+      narration: null,
     }),
   );
   await waitFor(() => expect(agent.className).toContain("text-[0.9rem]"));

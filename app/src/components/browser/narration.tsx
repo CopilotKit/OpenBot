@@ -3,6 +3,7 @@ import { IconMicrophone, IconMicrophoneOff } from "@tabler/icons-react";
 import { useId } from "react";
 import {
   Item,
+  ItemActions,
   ItemContent,
   ItemDescription,
   ItemMedia,
@@ -10,6 +11,7 @@ import {
 } from "@/components/ui/item";
 import { Switch } from "@/components/ui/switch";
 import type { NarrationProblem } from "@/lib/browser/narration";
+import type { NarrationChoice } from "./narration-choice";
 import type { NarrationControls } from "./use-narration";
 
 const GOES_ON = "Recording still works.";
@@ -41,6 +43,10 @@ export function narrationProblemSentence(
   switch (problem) {
     case "unsupported":
       return `Narration isn't available in this browser, so what you say isn't recorded. ${GOES_ON}`;
+    case "on-device":
+      return `This browser can't turn speech into text on your computer, and OpenBot sends your voice nowhere else, so narration is off. ${GOES_ON}`;
+    case "speech-pack":
+      return `Your browser has to download its ${languageName(language)} speech recognition to your computer first. Turn narration on to download it. ${GOES_ON}`;
     case "not-allowed":
       return `OpenBot can't use your microphone, so narration is off. Allow the microphone for this site, then turn narration on again. ${GOES_ON}`;
     case "no-microphone":
@@ -48,10 +54,15 @@ export function narrationProblemSentence(
     case "service":
       return `This browser's speech recognition is off or unavailable, so narration is off. ${GOES_ON}`;
     case "language":
-      return `This browser can't turn ${languageName(language)} speech into text, so narration is off. ${GOES_ON}`;
+      return `This browser can't turn ${languageName(language)} speech into text on your computer, so narration is off. ${GOES_ON}`;
     case "network":
       return "Can't reach this browser's speech service. Narration tries again in a moment.";
   }
+}
+
+/** What the person is told while their browser downloads the narration's language: narration starts by itself. */
+export function downloadingSentence(language: string): string {
+  return `Your browser is downloading its ${languageName(language)} speech recognition to your computer. Narration starts when it's ready.`;
 }
 
 /** What the Desktop narration row says, from the Recorder's own report of whether it hears the person. */
@@ -69,16 +80,57 @@ function nativeNarrationSentence(voice: LauncherState["voice"]): string {
   }
 }
 
+/** The narration row on OpenBot Desktop while nothing records: the person's choice, which the next Record passes on. */
+function narrationChoiceSentence(narration: NarrationChoice["narration"]) {
+  switch (narration) {
+    case "on":
+      return "On. The Recorder in your browser listens to your microphone while you record, and turns your speech into text on your computer.";
+    case "off":
+      return "Off. The Recorder doesn't open your microphone.";
+    case null:
+      return "Not chosen yet. Record asks before your first recording, and the microphone stays closed until you say yes.";
+  }
+}
+
 /**
- * The narration row on OpenBot Desktop. The Recorder in the person's own browser hears their microphone itself, so
- * there is nothing to switch here: the row says what the Recorder reports, read every second with the rest of the
+ * The narration row on OpenBot Desktop. While nothing records it is the person's choice, a switch that takes effect at
+ * once: the next Record tells the Recorder in their browser whether to open the microphone. While a recording runs, the
+ * Recorder hears the microphone itself, so the row says what it reports, read every second with the rest of the
  * browser's state, so a microphone that is muted or cannot be heard shows here while the person records.
  */
 export function NativeNarrationRow({
   voice,
+  choice,
+  recording,
 }: {
   voice: LauncherState["voice"];
+  choice: NarrationChoice;
+  /** A recording is running (or starting, or stopping). */
+  recording: boolean;
 }) {
+  if (!recording) {
+    const on = choice.narration === "on";
+    return (
+      <Item size="sm">
+        <ItemMedia variant="icon">
+          {on ? <IconMicrophone /> : <IconMicrophoneOff />}
+        </ItemMedia>
+        <ItemContent>
+          <ItemTitle>Narration</ItemTitle>
+          <ItemDescription className="line-clamp-none">
+            {narrationChoiceSentence(choice.narration)}
+          </ItemDescription>
+        </ItemContent>
+        <ItemActions>
+          <Switch
+            aria-label="Narration"
+            checked={on}
+            onCheckedChange={choice.choose}
+          />
+        </ItemActions>
+      </Item>
+    );
+  }
   const hearing = voice !== "muted" && voice !== "unavailable";
   return (
     <Item size="sm">
@@ -108,21 +160,42 @@ export function NativeNarrationRow({
 
 /**
  * Narration on and off, for the bar above a browser shown in the page. A switch, because it takes effect at once:
- * off stops listening after the phrase being said, on listens again (and tries again after a failure). It shows the
- * state narration is in, so a narration that failed reads off, as the notice under the bar says.
+ * off stops listening after the phrase being said, on listens again (and tries again after a failure). It is the
+ * person's choice, so `onChange` keeps it as well. It shows the state narration is in, so a narration that failed reads
+ * off, as the notice under the bar says; while a recording runs and the page hears the person, it says Listening beside
+ * it, so an open microphone is never something to guess at.
  */
 export function NarrationSwitch({
   narration,
+  recording,
+  onChange,
 }: {
   narration: NarrationControls;
+  /** A recording is running: the switch says whether the page is listening now. */
+  recording: boolean;
+  onChange: (on: boolean) => void;
 }) {
   const id = useId();
   const labelId = useId();
   if (!narration.supported) return null;
   const on = narration.on;
+  const listening = recording && narration.status?.state === "listening";
   const Icon = on ? IconMicrophone : IconMicrophoneOff;
   return (
     <span className="flex shrink-0 items-center gap-2 text-sm">
+      {listening ? (
+        <span
+          className="inline-flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400"
+          role="status"
+        >
+          {/* Decorative: the word beside it says it is live. */}
+          <span
+            aria-hidden="true"
+            className="size-1.5 shrink-0 rounded-full bg-emerald-500 motion-safe:animate-pulse"
+          />
+          Listening
+        </span>
+      ) : null}
       <Icon aria-hidden="true" className="size-4 text-muted-foreground" />
       <label htmlFor={id} id={labelId} className="text-muted-foreground">
         Narration
@@ -132,7 +205,7 @@ export function NarrationSwitch({
         aria-labelledby={labelId}
         id={id}
         checked={on}
-        onCheckedChange={narration.setOn}
+        onCheckedChange={onChange}
       />
     </span>
   );
@@ -154,9 +227,11 @@ export function NarrationNotice({
     ? narrationProblemSentence("unsupported", language)
     : narration.status?.state === "failed"
       ? narrationProblemSentence(narration.status.problem, language)
-      : narration.lost
-        ? lostNarrationSentence(narration.lost.error)
-        : null;
+      : narration.status?.state === "downloading"
+        ? downloadingSentence(language)
+        : narration.lost
+          ? lostNarrationSentence(narration.lost.error)
+          : null;
   if (!sentence) return null;
   return (
     <p

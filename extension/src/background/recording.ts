@@ -10,9 +10,11 @@
 // IndexedDB outbox.
 import {
   type LearningSpaceState,
+  RECORDER_AUTHORITY_UNAVAILABLE,
   type RecorderLearningResponse,
   type RecorderMe,
   recorderPaths,
+  TRAJECTORY_GATE_REFUSALS,
 } from "@openbot/shared/recorder-api";
 import {
   type CapturedEvent,
@@ -37,7 +39,11 @@ import type {
 } from "../protocol/messages";
 import { IDLE_STATE, parseOffscreenSignedOut } from "../protocol/messages";
 import { hasHostPermission } from "../shared/host-access";
-import { RECORDER_ACTION_NOTICE_AT } from "../shared/limits";
+import {
+  KEPT_FOR_PERSON_DAYS,
+  KEPT_FOR_PERSON_MS,
+  RECORDER_ACTION_NOTICE_AT,
+} from "../shared/limits";
 import { OpenBotError, openbotJson } from "../shared/openbot-client";
 import { isRecordablePage } from "../shared/origin";
 import {
@@ -46,6 +52,7 @@ import {
   type RecorderPolicy,
   readPolicy,
 } from "../shared/policy";
+import { isExcludedSite, siteOf } from "../shared/sites";
 import { narrationLanguage } from "../shared/speech-language";
 import {
   type ConnectionRecord,
@@ -123,7 +130,8 @@ export type RecordingDeps = {
 
 /** Called by the router after Task 8's handler answered: `connected` after a successful `page.connect.decide` (web or Desktop),
  * `disconnected` after `page.disconnect` (the person's own Disconnect). `connectionLost` is connection.ts's: the
- * keep-alive's signed-out answer, or the organization's policy moving the Recorder away from the connection's OpenBot. */
+ * keep-alive's signed-out answer, the organization's policy moving the Recorder away from the connection's OpenBot, or a
+ * connection to another OpenBot, or for another person, replacing it. */
 type ConnectionEvents = {
   connected(): Promise<void>;
   disconnected(): Promise<void>;
@@ -166,6 +174,8 @@ export type RecordingRecovery = {
   /** offscreen.recover for every drain of the connected person. Drains of anyone else wait for their person to connect
    * again. */
   sendDrains(): Promise<void>;
+  /** Deletes, unsent, every recording that has waited for its person longer than KEPT_FOR_PERSON_MS. */
+  expireWaiting(): Promise<void>;
   /** Asks the open document to report on one drain again: answers it sent before that recording reached the drains were
    * held in the memory of the service worker that stopped. */
   recoverDrain(recordingId: string): Promise<void>;
@@ -233,6 +243,7 @@ export function heldEvents(
 
 const SENTENCES = {
   noConnection: "Connect this browser to OpenBot first.",
+  badSite: "That is not a website the Recorder can leave out.",
   // The install grants website access; only the person's own Site access setting can withhold it afterwards.
   noAccess:
     "Site access is off for OpenBot Recorder. Open your browser's Extensions page, choose Details on OpenBot Recorder and set Site access to On all sites.",
@@ -246,28 +257,31 @@ const SENTENCES = {
   documentFailed: "The Recorder could not start recording. Try again.",
   restartUnreachable:
     "The Recorder could not start over just now. Your recording goes on; try again in a moment.",
-  signedOut:
-    "This browser was disconnected from OpenBot. Your recording stopped, and everything in it is kept in this browser until you connect again.",
-  organizationSignedOut:
-    "Your organization sign-in ended. Your recording stopped, and everything in it is kept in this browser until you connect again.",
-  policyMoved:
-    "Your organization moved the Recorder to another OpenBot. Your recording stopped, and everything in it is kept in this browser.",
+  signedOut: `This browser was disconnected from OpenBot. Your recording stopped, and everything in it is kept in this browser for ${KEPT_FOR_PERSON_DAYS} days, until you connect again.`,
+  organizationSignedOut: `Your organization sign-in ended. Your recording stopped, and everything in it is kept in this browser for ${KEPT_FOR_PERSON_DAYS} days, until you connect again.`,
+  policyMoved: `Your organization moved the Recorder to another OpenBot. Your recording stopped, and everything in it is kept in this browser for ${KEPT_FOR_PERSON_DAYS} days.`,
   policyRefused:
     "Your organization's Recorder policy does not allow this OpenBot. Ask your IT team.",
+  replaced: `This browser was connected to another OpenBot or person. Your recording stopped, and everything in it is kept in this browser for ${KEPT_FOR_PERSON_DAYS} days, until you connect again.`,
   keptSignedOut: "This browser was disconnected from OpenBot.",
   keptOrganization: "Your organization sign-in ended.",
   keptPolicy: "Your organization moved the Recorder to another OpenBot.",
+  keptReplaced: "This browser was connected to another OpenBot or person.",
+  authorityUnavailable: TRAJECTORY_GATE_REFUSALS.authorityUnavailable.message,
+  forbidden: "OpenBot does not let you record. Ask whoever runs it.",
 } as const;
 
 type SignedOutReason = "revoked" | "removed" | "organization";
-/** Why a connection went without the person's Disconnect: OpenBot signed it out, or the policy moved the Recorder. */
-type LostReason = SignedOutReason | "policy";
+/** Why a connection went without the person's Disconnect: OpenBot signed it out, the policy moved the Recorder, or the
+ * person connected this browser to another OpenBot, or as another person, on the Connect page. */
+type LostReason = SignedOutReason | "policy" | "replaced";
 
 /** The sentences that say a stopped recording is kept until something happens: a Disconnect discards it, so they go. */
 const KEPT_SENTENCES: readonly string[] = [
   SENTENCES.signedOut,
   SENTENCES.organizationSignedOut,
   SENTENCES.policyMoved,
+  SENTENCES.replaced,
 ];
 
 const stoppedSentence = (reason: LostReason): string =>
@@ -275,14 +289,18 @@ const stoppedSentence = (reason: LostReason): string =>
     ? SENTENCES.organizationSignedOut
     : reason === "policy"
       ? SENTENCES.policyMoved
-      : SENTENCES.signedOut;
+      : reason === "replaced"
+        ? SENTENCES.replaced
+        : SENTENCES.signedOut;
 
 const keptSentence = (reason: LostReason): string =>
   reason === "organization"
     ? SENTENCES.keptOrganization
     : reason === "policy"
       ? SENTENCES.keptPolicy
-      : SENTENCES.keptSignedOut;
+      : reason === "replaced"
+        ? SENTENCES.keptReplaced
+        : SENTENCES.keptSignedOut;
 
 /** Record found the policy no longer allows the connection's OpenBot (connection.ts forgets it in a moment). */
 const POLICY_REFUSED = new Error("The policy does not allow this OpenBot.");
@@ -548,8 +566,14 @@ const signedOutReason = (error: unknown): SignedOutReason | null =>
     ? (error.body?.reason ?? "revoked")
     : null;
 
-const sentenceFor = (error: unknown, fallback: string): string =>
-  error instanceof OpenBotError ? error.message : fallback;
+/** What the popup says when OpenBot refused a request: the Recorder's own sentence for what OpenBot answered, never the
+ * text in its answer, which the popup would show in the Recorder's own voice. */
+const sentenceFor = (error: unknown, fallback: string): string => {
+  if (!(error instanceof OpenBotError)) return fallback;
+  if (error.body?.code === RECORDER_AUTHORITY_UNAVAILABLE)
+    return SENTENCES.authorityUnavailable;
+  return error.status === 403 ? SENTENCES.forbidden : fallback;
+};
 
 const ownedBy = (drain: DrainRecord, connection: ConnectionRecord): boolean =>
   drain.userId === connection.user.id &&
@@ -598,6 +622,13 @@ export function installRecording(
   /** A tab a followed tab opened, until its first page change is recorded: the opener's top page when Chrome said it
    * opened it (webNavigation.onCreatedNavigationTarget), which that page change comes from. */
   const openers = new Map<number, string>();
+  /** The sites the person keeps out of every recording (sites.ts): read when this worker starts, and changed only here
+   * (`setSiteRecorded`). Nothing in a tab on one is recorded: not its steps, not what they save, not its AG-UI. */
+  let excludedSites: ReadonlySet<string> = new Set();
+  const excludedUrl = (url: string | undefined | null) =>
+    isExcludedSite(url, excludedSites);
+  /** Whether a tab the recording follows shows a site the person keeps out. */
+  const excludedTab = (tabId: number) => excludedUrl(state.topUrls[tabId]);
 
   /** The event with the tab's number in the recording, the Recorder's own field `tab`: 1 for the tab the recording
    * started in, then 2, 3 in the order tabs join, so an agent can tell a multi-tab task's tabs apart. Never Chrome's tab
@@ -682,6 +713,13 @@ export function installRecording(
     lastPersist = persisted;
     if (before.phase !== state.phase || before.actions !== state.actions)
       void showBadge(state).catch(report("updating the badge"));
+    // The recording mark in each followed tab says whether the Recorder hears the person: it changes with the voice.
+    if (
+      before.phase === "recording" &&
+      state.phase === "recording" &&
+      narratingIn(before) !== narratingIn(state)
+    )
+      tellFollowedTabs({ topFrameOnly: true });
     if (
       before.phase !== state.phase ||
       before.recordingId !== state.recordingId
@@ -741,6 +779,7 @@ export function installRecording(
   /** What a previous service worker left in storage.session: recovery finishes it (recovery.ts). */
   let loadedPhase: RecorderState["phase"] = "idle";
   const ready = (async () => {
+    excludedSites = new Set((await readLocal("excludedSites")) ?? []);
     const stored = await readSession("recorder");
     if (stored) state = stored;
     loadedPhase = state.phase;
@@ -1453,7 +1492,7 @@ export function installRecording(
 
   /** The page a tab is on when a recording starts in it: its first step. */
   function startStep(tabId: number, url: string): void {
-    if (!/^https?:/i.test(url)) return;
+    if (!/^https?:/i.test(url) || excludedUrl(url)) return;
     const to = scrubUrl(url, { digests });
     steps?.navigation(
       tabId,
@@ -1475,14 +1514,20 @@ export function installRecording(
 
   const networkDeps: NetworkCaptureDeps = {
     openbotUrl: () => live?.openbotUrl ?? null,
+    // A tab on a site the person keeps out stays unattached until it reaches another site; one already attached when it
+    // moved there has every call and AG-UI observation dropped here, as one to the site from another tab is.
+    recordable: (url) => isRecordablePage(url) && !excludedUrl(url),
     call: (call) => {
-      if (live) steps?.call(call);
+      if (live && !excludedTab(call.tabId) && !excludedUrl(call.url))
+        steps?.call(call);
     },
-    writeStarted: (id, tabId, startedAt) =>
-      steps?.writeStarted(id, tabId, startedAt),
+    writeStarted: (id, tabId, startedAt) => {
+      if (!excludedTab(tabId)) steps?.writeStarted(id, tabId, startedAt);
+    },
     writeEnded: (id) => steps?.writeEnded(id),
     agent: (observation) => {
-      if (live) agentEvents?.observe(observation);
+      if (live && !excludedTab(observation.tabId))
+        agentEvents?.observe(observation);
     },
     status: (mode, reason) => {
       networkMode = mode;
@@ -1570,6 +1615,10 @@ export function installRecording(
       const policy = await deps.readPolicy();
       if (attempt.cancelled) throw CANCELLED;
       if (!allowsOpenBot(policy, connection.openbotUrl)) throw POLICY_REFUSED;
+      // The microphone opens only for a person who chose to narrate: OpenBot says so with the Record it passes on (its
+      // own Record form asked them), anything else goes by the choice made in the Recorder, and none yet is no.
+      const narrate =
+        message.narrate ?? (await readLocal("narration")) === "on";
       const session: StreamSession = {
         recordingId,
         title,
@@ -1579,11 +1628,11 @@ export function installRecording(
         startedAt,
         allowedIntelligenceUrls: policy.allowedIntelligenceUrls,
         version: chrome.runtime.getManifest().version,
-        // Every recording narrates: the person mutes it in the popup if they want to. A browser with no microphone of
-        // its own is narrated from outside instead (`external`), and the document listens to nothing.
+        // A recording the person does not narrate starts muted: the popup's Voice row turns it on. A browser with no
+        // microphone of its own is narrated from outside instead (`external`), and the document listens to nothing.
         ...(connection.narration === "external"
           ? { narration: { language } }
-          : { voice: { language, muted: false } }),
+          : { voice: { language, muted: !narrate } }),
       };
       if (import.meta.env.RECORDER_VARIANT === "e2e") {
         const items = await chrome.storage.local.get(
@@ -1631,14 +1680,25 @@ export function installRecording(
           intelligence: "connecting",
           network: "off",
           // Narration from outside has no row of the Recorder's own: whoever passes it in shows it.
-          ...(session.voice ? { voice: { state: "starting" as const } } : {}),
+          ...(session.voice
+            ? {
+                voice: {
+                  state: session.voice.muted
+                    ? ("muted" as const)
+                    : ("starting" as const),
+                },
+              }
+            : {}),
         },
       });
       injected = true;
       openSteps(recordingId);
       startStep(tabId, url ?? "");
-      // A page the Recorder may not read refuses the script; its first commit to a website injects it.
-      await injectRecordingScripts(tabId, recordingId).catch(() => undefined);
+      // A page the Recorder may not read refuses the script; its first commit to a website injects it. On a site the
+      // person keeps out, the script only shows the mark saying so.
+      await injectRecordingScripts(tabId, recordingId, undefined, {
+        active: !excludedUrl(url),
+      }).catch(() => undefined);
       // The capture owns the fallback: it alone starts, extends, resumes and stops it.
       capture = deps.createNetworkCapture(networkDeps, {
         fallback: deps.createPageFallback(),
@@ -1646,11 +1706,7 @@ export function installRecording(
       network = capture;
       networkMode = await capture.start(tabId, url ?? "");
       dispatch({ type: "capture", capture: { network: networkMode } });
-      postToContentPorts([tabId], {
-        type: "background.capture",
-        active: true,
-        recordingId,
-      });
+      postToContentPorts([tabId], captureFor(tabId));
       return { ok: true };
     } catch (error) {
       // Roll back in reverse.
@@ -1781,8 +1837,11 @@ export function installRecording(
         : {
             type: "offscreen.stop",
             outcome: "failed",
+            // Only OpenBot signs a connection out; a policy move and a replaced connection disconnect it here.
             reason:
-              mode.kind === "disconnect" || mode.reason === "policy"
+              mode.kind === "disconnect" ||
+              mode.reason === "policy" ||
+              mode.reason === "replaced"
                 ? "disconnected"
                 : "signed-out",
           };
@@ -1927,7 +1986,8 @@ export function installRecording(
 
   // ---- Signed out ----------------------------------------------------------------------------
 
-  /** Every drain `belongs` picks waits for its person to connect this browser again; nothing is discarded (Decision 19). */
+  /** Every drain `belongs` picks waits for its person to connect this browser again; nothing is discarded (Decision 19),
+   * until it has waited KEPT_FOR_PERSON_MS (`expireWaiting`). A drain already waiting keeps when it began to. */
   async function markWaiting(
     belongs: (drain: DrainRecord) => boolean,
     reason: LostReason,
@@ -1942,12 +2002,31 @@ export function installRecording(
                 reason: keptSentence(reason),
                 parked: true,
                 events: drain.kept?.events ?? 0,
-                at: deps.now(),
+                at: drain.kept?.waitingForReconnect
+                  ? drain.kept.at
+                  : deps.now(),
                 waitingForReconnect: true,
               },
             },
       ),
     );
+  }
+
+  /** A recording waits for its person at most KEPT_FOR_PERSON_MS: one that has waited longer is deleted unsent, its
+   * events in the document's outbox with it, as the person's own discard deletes it (marked first, so a restart that
+   * interrupts the clearing finishes it). Run at every service-worker start (recovery.ts), which the 12-hour keep-alive
+   * alarm alone makes at least twice a day. */
+  async function expireWaiting(): Promise<void> {
+    const now = deps.now();
+    const expired = ((await readLocal("drains")) ?? [])
+      .filter(
+        (drain) =>
+          !drain.discarding &&
+          drain.kept?.waitingForReconnect === true &&
+          now - drain.kept.at >= KEPT_FOR_PERSON_MS,
+      )
+      .map((drain) => drain.recordingId);
+    await discardDrains(expired);
   }
 
   /** No stream in the document sends with a lost connection's token any more: a socket still streaming stops now,
@@ -2027,18 +2106,18 @@ export function installRecording(
     await markWaiting((drain) => ownedBy(drain, connection), reason);
   }
 
-  /** The organization's policy moved the Recorder away from this connection's OpenBot (connection.ts forgot it): the
-   * live recording that used it stops, the document stops sending with its token, and everything is kept for its person
-   * on that OpenBot, as a sign-out keeps it. */
-  async function policyMoved(connection: ConnectionRecord): Promise<void> {
+  /** The organization's policy moved the Recorder away from this connection's OpenBot (connection.ts forgot it), or a
+   * connection to another OpenBot, or for another person, replaced it (connection.ts `endReplaced`, which revokes its
+   * token next): the live recording that used it stops, the document stops sending with its token, and everything is
+   * kept for its person on that OpenBot, as a sign-out keeps it. */
+  async function connectionEnded(
+    connection: ConnectionRecord,
+    reason: "policy" | "replaced",
+  ): Promise<void> {
     haltStreams(connection.token);
     if (live && live.token === connection.token && state.phase === "recording")
-      await stopRecording({
-        kind: "signed-out",
-        reason: "policy",
-        forgot: true,
-      });
-    else await markWaiting((drain) => ownedBy(drain, connection), "policy");
+      await stopRecording({ kind: "signed-out", reason, forgot: true });
+    else await markWaiting((drain) => ownedBy(drain, connection), reason);
   }
 
   /** A new policy goes to the document at once, and into the stored session a reopened document starts from. */
@@ -2151,11 +2230,7 @@ export function installRecording(
       { type: "background.notice", show: false, actions: 0 },
       { topFrameOnly: true },
     );
-    postToContentPorts(state.tabIds, {
-      type: "background.capture",
-      active: true,
-      recordingId,
-    });
+    tellFollowedTabs();
   }
 
   // ---- Voice ---------------------------------------------------------------------------------
@@ -2442,6 +2517,7 @@ export function installRecording(
     resumeRecording: afterReady(resumeRecording),
     finishDiscards: afterReady(finishDiscards),
     sendDrains: afterReady(() => sendDrains({ recovering: true })),
+    expireWaiting: afterReady(expireWaiting),
     recoverDrain: afterReady(recoverDrain),
   };
 
@@ -2508,6 +2584,8 @@ export function installRecording(
         invalid: policy.openbotUrlInvalid,
       },
       notice,
+      narration: (await readLocal("narration")) ?? null,
+      excludedSites: [...excludedSites].sort(),
     };
   }
 
@@ -2557,20 +2635,98 @@ export function installRecording(
 
   // ---- Content scripts and navigation --------------------------------------------------------
 
-  function tellPort(port: chrome.runtime.Port, active: boolean): void {
+  /** Whether the Recorder hears the person in this state, for the recording marks: null where it does not hear them
+   * itself (narration passed in from outside, or none). */
+  function narratingIn(at: RecorderState): boolean | null {
+    const voice = at.capture.voice?.state;
+    if (voice === undefined) return null;
+    return voice === "starting" || voice === "listening";
+  }
+
+  /** What a frame of the tab is told: whether it captures, and, for a followed tab, what its recording mark says. A frame
+   * on a site the person keeps out (`frameUrl`), or in a tab that shows one, captures nothing. */
+  function captureFor(tabId: number, frameUrl?: string): BackgroundToContent {
+    const followed =
+      state.phase === "recording" &&
+      live !== null &&
+      state.tabIds.includes(tabId);
+    if (!followed) return { type: "background.capture", active: false };
+    const site = siteOf(state.topUrls[tabId]);
+    const narrating = narratingIn(state);
+    const mark = {
+      ...(site !== null ? { site } : {}),
+      ...(narrating !== null ? { narrating } : {}),
+    };
+    if (excludedTab(tabId) || excludedUrl(frameUrl))
+      return {
+        type: "background.capture",
+        active: false,
+        ...mark,
+        ...(excludedTab(tabId) ? { excluded: true } : {}),
+      };
+    return {
+      type: "background.capture",
+      active: true,
+      recordingId: state.recordingId,
+      ...mark,
+    };
+  }
+
+  function tellPort(port: chrome.runtime.Port, frameUrl?: string): void {
+    const tabId = port.sender?.tab?.id;
     try {
       port.postMessage(
-        active
-          ? {
-              type: "background.capture",
-              active: true,
-              recordingId: state.recordingId,
-            }
-          : { type: "background.capture", active: false },
+        tabId === undefined
+          ? { type: "background.capture", active: false }
+          : captureFor(tabId, frameUrl),
       );
     } catch {
       // The frame went away.
     }
+  }
+
+  /** Tells every followed tab again what it captures and what its mark says (an exclusion, Start over, the voice). */
+  function tellFollowedTabs(options: { topFrameOnly?: boolean } = {}): void {
+    for (const tabId of state.tabIds)
+      postToContentPorts([tabId], captureFor(tabId), options);
+  }
+
+  /**
+   * The person's click on a tab's recording mark (`content.site`) or the options page (`page.site`): the site is left out
+   * of every recording from now on, or recorded again. Leaving it out drops what the steps still hold from each tab on
+   * it, the whole visit the person has not acted on yet included (steps.ts), so nothing of it that has not left yet ever
+   * does, and tells those tabs to stop capturing; recording it again tells them to capture, and lets a tab that never
+   * attached its network capture there attach it now.
+   */
+  async function setSiteRecorded(
+    site: string,
+    recorded: boolean,
+  ): Promise<PageResponse> {
+    if (siteOf(`https://${site}/`) !== site)
+      return { ok: false, error: SENTENCES.badSite };
+    const next = new Set(excludedSites);
+    if (recorded) next.delete(site);
+    else next.add(site);
+    excludedSites = next;
+    await serially(() =>
+      next.size > 0
+        ? writeLocal("excludedSites", [...next].sort())
+        : removeLocal("excludedSites"),
+    );
+    if (state.phase !== "recording" || !live) return { ok: true };
+    for (const tabId of state.tabIds) {
+      const top = state.topUrls[tabId];
+      if (siteOf(top) !== site) continue;
+      if (!recorded) {
+        steps?.dropTab(tabId);
+        agentEvents?.tabNavigated(tabId);
+      } else if (top)
+        void network
+          ?.onCommitted(tabId, 0, top)
+          .catch(report("following a site recorded again"));
+      postToContentPorts([tabId], captureFor(tabId));
+    }
+    return { ok: true };
   }
 
   /** A sensitive value's digest, from a content script or from the masking here: every later step, save, agent event and
@@ -2604,7 +2760,7 @@ export function installRecording(
       tabId !== undefined &&
       state.tabIds.includes(tabId);
     if (message.type === "content.hello") {
-      tellPort(port, followed);
+      tellPort(port, message.url);
       // The 50-action notice is still open: a page the tab moved to shows it again, as the one it left did.
       if (followed && message.top && state.noticeOpen)
         try {
@@ -2621,11 +2777,25 @@ export function installRecording(
     if (state.phase !== "recording" || tabId === undefined) return;
     if (!followed) {
       // Only a tab that navigated away from a recording and back can still hold a running script.
-      tellPort(port, false);
+      tellPort(port);
       return;
     }
     switch (message.type) {
+      case "content.site": {
+        // The site the tab shows, as the service worker knows it: a page never names the site it leaves out.
+        const site = siteOf(state.topUrls[tabId]);
+        if (site !== null && port.sender?.frameId === 0)
+          void setSiteRecorded(site, message.recorded).catch(
+            report("leaving a site out of the recording"),
+          );
+        return;
+      }
       case "content.event": {
+        // Nothing from a site the person keeps out: the frame is told again to stop capturing.
+        if (excludedTab(tabId) || excludedUrl(port.sender?.url)) {
+          tellPort(port, port.sender?.url);
+          return;
+        }
         // A page load is recorded as the tab's page change, from the service worker.
         if ((message.event as CapturedEvent)?.name === "page") return;
         // Masked again with every digest of the recording: what was typed into a sensitive field on another page, in
@@ -2665,15 +2835,20 @@ export function installRecording(
   ): void {
     const { tabId, url } = details;
     // A tab's first page change after a followed tab opened it comes from the opener's page, never from its own address.
-    const event = navigationEvent(
-      details,
-      kind,
-      openers.get(tabId) ?? (state.topUrls[tabId] || undefined),
-      { digests },
-    );
+    const before = openers.get(tabId) ?? (state.topUrls[tabId] || undefined);
+    // Nothing of a site the person keeps out, not even as where a page change came from: a page change from one, or a
+    // tab one opened, is recorded as one from nowhere.
+    const from =
+      before !== undefined && !excludedUrl(before) ? before : undefined;
+    const event = navigationEvent(details, kind, from, { digests });
     dispatch({ type: "page", tabId, url });
     if (!/^https?:/i.test(url)) return;
     openers.delete(tabId);
+    // A site the person keeps out: no step. The next page change from here is recorded as one from nowhere.
+    if (excludedUrl(url)) {
+      recordedNavigations.delete(tabId);
+      return;
+    }
     const reload =
       (event.value as { navigationType?: string }).navigationType === "reload";
     if (!reload && recordedNavigations.get(tabId) === url) return;
@@ -2713,10 +2888,11 @@ export function installRecording(
     if (kind !== "commit") return;
     // A new document in the top frame: the page's Threads went with the old one.
     if (frameId === 0) agentEvents?.tabNavigated(tabId);
-    // The script's own guard makes a repeat harmless; a frame Chrome refuses (an opaque sandboxed one) is skipped.
-    void injectRecordingScripts(tabId, live.recordingId, [frameId]).catch(
-      () => undefined,
-    );
+    // The script's own guard makes a repeat harmless; a frame Chrome refuses (an opaque sandboxed one) is skipped. On a
+    // site the person keeps out it captures nothing, and in the top frame shows the mark saying so.
+    void injectRecordingScripts(tabId, live.recordingId, [frameId], {
+      active: !excludedTab(tabId) && !excludedUrl(url),
+    }).catch(() => undefined);
     void network
       ?.onCommitted(tabId, frameId, url)
       .catch(report("following a navigation"));
@@ -2785,18 +2961,16 @@ export function installRecording(
     if (url !== null) {
       recordedNavigations.set(tabId, url);
       startStep(tabId, url);
-      void injectRecordingScripts(tabId, recordingId).catch(() => undefined);
+      void injectRecordingScripts(tabId, recordingId, undefined, {
+        active: !excludedUrl(url),
+      }).catch(() => undefined);
     }
     void network
       ?.addTab(tabId, url ?? "")
       .catch(report("following a tab the person used"));
     // A script still in the tab from an earlier recording is not injected again: it is told to capture, and shown the
     // 50-action notice if it is open, as a new script is when it says hello.
-    postToContentPorts([tabId], {
-      type: "background.capture",
-      active: true,
-      recordingId,
-    });
+    postToContentPorts([tabId], captureFor(tabId));
     if (state.noticeOpen)
       postToContentPorts(
         [tabId],
@@ -2809,10 +2983,24 @@ export function installRecording(
       );
   }
 
+  /** The person is now on this tab: the page they were visiting in another tab is one they left (steps.ts). */
+  function movedTo(tabId: number): void {
+    if (state.phase !== "recording" || !live) return;
+    steps?.entered(tabId);
+    usedTab(tabId);
+  }
+
   chrome.tabs.onActivated.addListener(({ tabId }) => {
     void ready
-      .then(() => usedTab(tabId))
+      .then(() => movedTo(tabId))
       .catch(report("following a tab the person used"));
+  });
+  chrome.tabs.onRemoved.addListener((tabId) => {
+    void ready
+      .then(() => {
+        if (state.phase === "recording" && live) steps?.left(tabId);
+      })
+      .catch(report("ending the visit of a tab that closed"));
   });
   chrome.tabs.onCreated.addListener((tab) => {
     const { id } = tab;
@@ -2828,7 +3016,7 @@ export function installRecording(
       .then(async () => {
         if (state.phase !== "recording") return;
         const [tab] = await chrome.tabs.query({ active: true, windowId });
-        if (tab?.id !== undefined) usedTab(tab.id);
+        if (tab?.id !== undefined) movedTo(tab.id);
       })
       .catch(report("following the window the person moved to"));
   });
@@ -2884,6 +3072,20 @@ export function installRecording(
           return discardKept();
         case "page.voice":
           return setVoice(message.muted);
+        case "page.narration":
+          if (typeof message.on !== "boolean")
+            return { ok: false, error: "Unknown request." };
+          await serially(() =>
+            writeLocal("narration", message.on ? "on" : "off"),
+          );
+          return { ok: true };
+        case "page.site":
+          if (
+            typeof message.site !== "string" ||
+            typeof message.recorded !== "boolean"
+          )
+            return { ok: false, error: SENTENCES.badSite };
+          return setSiteRecorded(message.site, message.recorded);
         default:
           return { ok: false, error: "Unknown request." };
       }
@@ -2906,7 +3108,10 @@ export function installRecording(
         !network ||
         tabId === undefined ||
         !state.tabIds.includes(tabId) ||
-        networkMode !== "page"
+        networkMode !== "page" ||
+        // Nothing from a site the person keeps out, in its own tab or framed in another.
+        excludedTab(tabId) ||
+        excludedUrl(sender.url)
       )
         return { ok: false, error: "not-recording" };
       if (message.type === "recorder.page-agent") {
@@ -2994,7 +3199,8 @@ export function installRecording(
     async connectionLost(loss) {
       await ready;
       const { connection } = loss;
-      if (loss.kind === "policy") await policyMoved(connection);
+      if (loss.kind === "policy" || loss.kind === "replaced")
+        await connectionEnded(connection, loss.kind);
       else
         await handleSignedOut(
           loss.reason,

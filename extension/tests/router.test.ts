@@ -31,6 +31,7 @@ let handlers: RouterHandlers & {
   current(): Promise<RecorderState>;
   connected(): Promise<void>;
   disconnected(): Promise<void>;
+  connectionLost(): Promise<void>;
 };
 let id: string;
 let restore: (() => void)[];
@@ -57,6 +58,9 @@ beforeEach(() => {
     },
     disconnected: async () => {
       seen.order.push("disconnected");
+    },
+    connectionLost: async () => {
+      seen.order.push("connectionLost");
     },
   };
 });

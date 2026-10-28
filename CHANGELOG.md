@@ -383,9 +383,30 @@ hands out each capture pass; it receives nothing that is recorded.
   goes on with the Skills it has. Admin → Automatic Learning off, or a Bot excluded there, still
   means no learned Skills at all.
 - **Settings → Learning** chooses who else's Bots use a person's Skills: only their own (the
-  default), every Bot in the deployment, or the Skills they open one by one. Runs read what is
+  default), every Bot in the deployment, or the Skills they open one by one, and only Skills in
+  their own space can be opened. Opening Skills to others needs **Admin → Enterprise controls →
+  Skill sharing**, off by default: while it is off nobody can open their Skills, runs offer nobody
+  another person's, and each person's choice is kept for when it is turned on. Runs read what is
   open from memory, refreshed at once on the replica that saved a change and within 30 seconds on
   the others.
+- **What the Recorder collects is said before the first Connect** (Settings → Browsers, the
+  Recorder's setup page, the Browser page and its Record form): your steps, what each step saves
+  (the request and its answer), the conversation with an AG-UI agent on the page (your own messages
+  too) and your narration, masked in your browser first.
+- **Narration is off until you choose it**, asked before your first recording and remembered, and it
+  is transcribed on your own computer only (Chrome's on-device speech recognition, with the language
+  downloaded once on your click); where on-device recognition is not available, narration stays off
+  and the page says why.
+- **Every recorded tab shows that it is being recorded**, from its first step, with one click to leave
+  that site out of recordings; a left-out site records nothing, and the Recorder's options list the
+  sites left out. A page you have only looked at is held while you stay on its site, and sent when you
+  act there, move to another tab or stop, so leaving a site out at any point in a visit sends nothing
+  of it.
+- **A Recorder's connection ends** when you sign out of OpenBot, or after it goes unused for as long as
+  an OpenBot sign-in lasts; a recording kept for a person who never connects again is deleted unsent
+  after 7 days. A page on your own computer is trusted to connect without a click only at OpenBot
+  Desktop's own address, as its native host confirms it, and connecting to another OpenBot or as
+  another person always asks you first, saying which connection it replaces.
 - **Intelligence must allow trajectories:** the `trajectories` licence feature,
   `FF_LEARNING_TRAJECTORIES=true`, a realtime gateway that can ask Intelligence whether an
   organization may capture, and an `INTELLIGENCE_GATEWAY_WS_URL` that people's browsers can reach.
@@ -427,8 +448,11 @@ extensions, password manager and logins, not a separate copy.
   records, and the dot goes out 90 seconds after a browser stops reporting.
 - **The Recorder says what it collects** first on its setup page (above its request for your microphone)
   and on its Record form, before anything is recorded: every step in every tab you use until you stop, what is on those pages, your clicks and
-  typing (secrets masked in your browser first), what each step saves and what you say, all going to
-  your organization's own Intelligence through your organization's OpenBot.
+  typing (secrets masked in your browser first), what each step saves and what you say, all going
+  straight from your browser to your organization's own Intelligence, with a pass from your
+  organization's OpenBot, which is told that you are recording, the task's name, when it started and
+  how many steps it holds; when you record in a browser shown inside OpenBot, your narration passes
+  through it to the Recorder without being stored.
 - Migration `0067_recorder_activity` adds two nullable columns to `recorder_connections` (each
   Recorder's latest activity). Nothing existing changes.
 
@@ -450,7 +474,7 @@ you stay where you are in OpenBot; record with the Recorder's button in that win
 hosted OpenBot the click takes you to the browser in the page. While a recording runs, the Browser
 button shows a red dot; hover it for the recording's name and how long it has run. Name a task and press Record; the page shows the recording's name, how long it has run and
 how many actions it holds, and after Stop it says what was saved to your Learning space (for example
-"7 actions and 1 narrated phrase"), or that nothing was recorded, and says the same after a reload. Only what you do is recorded. When
+"7 actions and 1 narrated phrase"), or that nothing was recorded, and says the same after a reload. Nothing a Bot does is recorded. When
 your browser cannot open because of how OpenBot is set up, OpenBot tells you to ask an admin (on
 single-user OpenBot, such as OpenBot Desktop, to quit and reopen OpenBot), the message stays until you
 close it, and the reason is in the server's and the computer's logs.
@@ -460,25 +484,33 @@ close it, and the reason is in the server's and the computer's logs.
   OpenBot starts it itself rather than through Playwright, so tabs behind the one in front behave as
   background tabs, and OpenBot follows the tab you are on. It is an everyday browser: install your password manager from the Chrome Web Store (a password manager's
   link to its desktop app works, such as 1Password's), or sign in to Chrome and sync brings your
-  extensions, bookmarks and passwords; saved passwords use the system keychain. The Recorder hears your
-  microphone itself, with no prompt, and the page shows whether it is listening, muted or cannot hear.
+  extensions, bookmarks and passwords; saved passwords use the system keychain. Once you turn narration
+  on, the Recorder hears your microphone itself, and the page shows whether it is listening, muted or
+  cannot hear.
   Desktop runs this browser as a fourth process beside the server, app and worker, only where Chrome or
-  Edge is installed. Installation builds the Recorder into your OpenBot folder (a new Recorder step of a
-  few seconds), existing installations download their OpenBot files once more after updating, and Stop
+  Edge is installed. Installation copies the Recorder, prebuilt, out of the release's computer image into
+  your OpenBot folder, existing installations download their OpenBot files once more after updating, and Stop
   and Quit let the browser close cleanly first. Chrome's extensions page lists the Recorder as an
   extension it cannot verify, because it is not installed from the Chrome Web Store.
 - **On hosted OpenBot** the browser is the computer's Chromium, shown in the page with tabs, an address
   bar, back, forward and reload, and you click and type in it straight away. Only the Recorder is
-  allowed in it. While you record, the page transcribes your narration with your own browser's speech
-  recognition (Firefox has none, and the page says so; the narration switch reads off whenever it
-  cannot hear you), and each phrase is placed before the steps you took while saying it. It reaches the open web, and OpenBot and the Intelligence gateway on their own
+  allowed in it. It runs only on a computer of its own (each person's own, as the supervisor and the
+  sandbox give one): where Bots share one computer, which can run commands, the Browser button is
+  hidden and the Browser page says why. While you record with narration on, the page transcribes it
+  with your own browser's on-device speech recognition (Firefox has none, and the page says so; the
+  narration switch reads off whenever it cannot hear you), and each phrase is placed before the steps
+  you took while saying it. It reaches the open web, and OpenBot and the Intelligence gateway on their own
   ports, never anything else inside the deployment.
 - **Only you** can see or use your browser, admins included. It appears in Settings → Browsers as your
   OpenBot browser and can be disconnected there, which signs out the Recorder in it at once (a recording
   in progress stops and is kept, and goes to Intelligence when you next record). Each open replaces its
   previous connection, and Record after a Disconnect connects it again first.
-- A person's browser is never closed for being idle, and is the last to close when the computer's
-  browser cap is reached.
+- A person's hosted browser closes after going idle as a Bot's does, and the computer's browser cap
+  closes the least recently used first; OpenBot Desktop's own window is never closed for being idle.
+- On Linux, OpenBot Desktop also finds Chrome and Edge on the `PATH` (Flatpak builds cannot hold the
+  Recorder and are not used), and the Browser page says why when there is none. On Windows, Stop and
+  Quit ask the browser to close before ending it. Uninstalling on Windows, and removing the Linux
+  package, deletes the OpenBot browser's profile and the Recorder's files.
 - `OPENBOT_RECORDER_DIR` on a computer is the built Recorder it puts in a person's browser; the computer
   image sets it, and without it the computer still serves Bots and refuses to open a person's browser,
   saying why. `OPENBOT_BROWSER_URL` on the server runs people's browsers on a separate computer

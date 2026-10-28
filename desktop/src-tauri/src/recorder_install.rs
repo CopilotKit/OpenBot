@@ -1057,6 +1057,117 @@ mod tests {
             "Delete \"$LOCALAPPDATA\\{}\"",
             relative.join("\\")
         )));
+        // The code-owner review: the person's browser profile survived uninstall, and the folder
+        // holding the manifest was removed only when empty (RMDir without /r). Each of Desktop's
+        // folders now goes with all it holds: the manifest's, and the browser's whole data root.
+        let folder = relative[..relative.len() - 1].join("\\");
+        assert!(
+            uninstall.contains(&format!("RMDir /r \"$LOCALAPPDATA\\{folder}\"")),
+            "{uninstall}"
+        );
+        let data = crate::local_browser::data_root(Os::Windows, Path::new("/home/a"), &|name| {
+            (name == "LOCALAPPDATA").then(|| local.clone().into_os_string())
+        });
+        let data: Vec<String> = data
+            .strip_prefix(&local)
+            .unwrap()
+            .components()
+            .map(|part| part.as_os_str().to_string_lossy().into_owned())
+            .collect();
+        assert!(
+            uninstall.contains(&format!("RMDir /r \"$LOCALAPPDATA\\{}\"", data.join("\\"))),
+            "{uninstall}"
+        );
+    }
+
+    /// The code-owner review: on Linux nothing was removed on uninstall. The .deb's and the .rpm's
+    /// removal script takes away, in each person's home and as that person, the browser's data root
+    /// and every browser's host manifest, exactly where the code writes them, and on an upgrade
+    /// nothing. Run here against a home laid out as Desktop leaves it, with `getent` and `runuser`
+    /// standing in as their Linux selves answer.
+    #[cfg(unix)]
+    #[test]
+    fn uninstalling_on_linux_removes_the_browser_profile_and_every_manifest() {
+        let config: Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        for package in ["deb", "rpm"] {
+            assert_eq!(
+                config["bundle"]["linux"][package]["postRemoveScript"], "./linux/remove.sh",
+                "{package}"
+            );
+        }
+        let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("linux/remove.sh");
+        let scratch = crate::test_support::temp_root("linux-uninstall");
+        let home = scratch.join("home/ada");
+        let system = scratch.join("var/lib/daemon");
+        let dirs = UserDirs::at(&home);
+        let data_root = crate::local_browser::data_root(Os::Linux, &home, &|_| None);
+        let mut left = vec![data_root.join("profiles/person-0123/Default/Cookies")];
+        for browser in BROWSERS {
+            left.push(host_manifest_location(Os::Linux, browser, dirs));
+        }
+        // The person's own things beside them, and a system account's, which stay.
+        let theirs = [
+            home.join(".config/google-chrome/Default/Bookmarks"),
+            home.join(".config/google-chrome/NativeMessagingHosts/com.1password.json"),
+            home.join(".local/share/openbot/deployment/docker-compose.yml"),
+            system.join(".local/share/openbot/local-computer/profiles/x"),
+        ];
+        let bin = scratch.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let tool = |name: &str, body: String| {
+            use std::os::unix::fs::PermissionsExt;
+            let path = bin.join(name);
+            std::fs::write(&path, body).unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        };
+        // `getent passwd`, as a machine with root, a system account, one person and nobody lists it.
+        tool(
+            "getent",
+            format!(
+                "#!/bin/sh\n[ \"$1\" = passwd ] || exit 2\nprintf '%s\\n' 'root:x:0:0:root:/root:/bin/sh' 'daemon:x:999:999::{}:/usr/sbin/nologin' 'ada:x:1000:1000:Ada:{}:/bin/bash' 'nobody:x:65534:65534::/nonexistent:/usr/sbin/nologin'\n",
+                system.display(),
+                home.display()
+            ),
+        );
+        // `runuser -u NAME -- COMMAND...`, writing down whom it ran as.
+        tool(
+            "runuser",
+            format!(
+                "#!/bin/sh\n[ \"$1\" = -u ] || exit 2\necho \"$2\" >> '{}'\nshift 2\n[ \"$1\" = -- ] || exit 2\nshift\nexec \"$@\"\n",
+                scratch.join("ran-as").display()
+            ),
+        );
+        let run = |argument: &str| {
+            for file in left.iter().chain(theirs.iter()) {
+                std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+                std::fs::write(file, "x").unwrap();
+            }
+            let status = std::process::Command::new("/bin/sh")
+                .arg(&script)
+                .arg(argument)
+                .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+                .status()
+                .unwrap();
+            assert!(status.success(), "{argument}");
+        };
+        for upgrade in ["upgrade", "1", "failed-upgrade"] {
+            run(upgrade);
+            assert!(left.iter().all(|file| file.exists()), "{upgrade}");
+        }
+        for removal in ["remove", "purge", "0"] {
+            run(removal);
+            for file in &left {
+                assert!(!file.exists(), "{removal}: {}", file.display());
+            }
+            assert!(!data_root.exists(), "{removal}");
+            for file in &theirs {
+                assert!(file.exists(), "{removal}: {}", file.display());
+            }
+        }
+        // Only as the person, never as root or a system account.
+        let ran_as = std::fs::read_to_string(scratch.join("ran-as")).unwrap();
+        assert!(ran_as.lines().all(|name| name == "ada"), "{ran_as}");
+        std::fs::remove_dir_all(scratch).unwrap();
     }
 
     #[test]

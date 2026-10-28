@@ -6,8 +6,8 @@
 //! from the host may be at most 1 MB. The browser closes the host's stdin when it is done with it.
 //! <https://developer.chrome.com/docs/extensions/develop/concepts/native-messaging>
 //!
-//! The host answers two messages, each within its own deadline ([`DEADLINES`]), which sits below the time the extension
-//! waits for the answer, so the extension always hears why instead of giving up.
+//! The host answers three messages, each within its own deadline ([`DEADLINES`]), which sits below the time the
+//! extension waits for the answer, so the extension always hears why instead of giving up.
 //!
 //! `ping` says, cheaply, whether a connect would work now: an OpenBot is installed, its app answers on its port, and in
 //! organization mode Desktop holds a sign-in for the organization. It reads two files and asks the app one question. It
@@ -16,6 +16,11 @@
 //! `handoff` makes sure the deployment's own processes hold its ports, hands the organization sign-in over in
 //! organization mode, asks that OpenBot for a one-time connect code and returns it with the OpenBot's address, so the
 //! Recorder can connect without the person typing either.
+//!
+//! `address` says which address this computer's OpenBot answers on, after the same ownership checks a handoff makes, and
+//! mints nothing. The Recorder takes a connect from a page with no Connect click only when the page's origin is exactly
+//! this address: any other program on this computer can serve a page on a loopback port, and only the host knows which
+//! one is OpenBot Desktop's.
 //!
 //! Every reply carries `ok`. `ok: false` comes with `error`, one of the stable codes of [`Refusal`]. Neither a code nor
 //! any cookie is ever written to a log.
@@ -105,6 +110,7 @@ pub struct HostEnvironment {
 pub struct Deadlines {
     pub ping: Duration,
     pub handoff: Duration,
+    pub address: Duration,
 }
 
 /// The extension waits 3 s for a ping and 8 s for a handoff, counted from when it asks Chrome, so the time Chrome takes
@@ -112,10 +118,13 @@ pub struct Deadlines {
 /// reply: a ping about 3 ms (the earlier ping, which ran the handoff's ownership checks, about 175 ms), and a handoff
 /// about 175 ms in either mode, nearly all of it the two `lsof` ownership checks of about 80 ms each. The first start
 /// of a freshly built binary took about 0.5 s. On Windows those ownership checks run PowerShell and netstat, twice (not
-/// timed here), and only the handoff runs them. Each deadline leaves a second of the extension's wait for a slow start.
+/// timed here), and only the handoff and the address run them. Each deadline leaves a second of the extension's wait for
+/// a slow start. The address runs the handoff's ownership checks without its request for a code, so it has the
+/// handoff's deadline, and the extension waits 8 s for it too.
 pub const DEADLINES: Deadlines = Deadlines {
     ping: Duration::from_millis(2_000),
     handoff: Duration::from_millis(7_000),
+    address: Duration::from_millis(7_000),
 };
 
 /// How long a ping waits for the app on each loopback. A running app answers in milliseconds, and a closed port is
@@ -243,6 +252,18 @@ fn ping(origin_allowed: bool, env: &HostEnvironment) -> Result<(), Refusal> {
     (env.signed_in)()
 }
 
+/// The address this computer's OpenBot answers on, once its own processes are proved to hold its ports (`app_url`). It
+/// sends nothing to the app beyond those checks, and mints nothing.
+fn address(origin_allowed: bool, env: &HostEnvironment) -> Result<String, Refusal> {
+    if !origin_allowed {
+        return Err(Refusal::OriginNotAllowed);
+    }
+    if !(env.installed)() {
+        return Err(Refusal::NotInstalled);
+    }
+    (env.app_url)().ok_or(Refusal::NotRunning)
+}
+
 fn handoff(
     origin_allowed: bool,
     env: &HostEnvironment,
@@ -299,12 +320,16 @@ fn handoff(
     }
 }
 
-/// Answers one message, however long that takes. "ping" never mints anything.
+/// Answers one message, however long that takes. Only "handoff" mints anything.
 fn handle(message: &Value, origin_allowed: bool, env: &HostEnvironment, client: &Client) -> Value {
     match message.get("type").and_then(Value::as_str) {
         Some("ping") => ping_reply(ping(origin_allowed, env)),
         Some("handoff") => match handoff(origin_allowed, env, client) {
             Ok((app_url, code)) => json!({ "ok": true, "openbotUrl": app_url, "code": code }),
+            Err(refusal) => refused(refusal),
+        },
+        Some("address") => match address(origin_allowed, env) {
+            Ok(app_url) => json!({ "ok": true, "openbotUrl": app_url }),
             Err(refusal) => refused(refusal),
         },
         _ => refused(Refusal::UnknownMessage),
@@ -323,6 +348,7 @@ fn answer(
     let (kind, deadline) = match message.get("type").and_then(Value::as_str) {
         Some("ping") => ("ping", deadlines.ping),
         Some("handoff") => ("handoff", deadlines.handoff),
+        Some("address") => ("address", deadlines.address),
         _ => return refused(Refusal::UnknownMessage),
     };
     let failed = |refusal| {
@@ -1047,6 +1073,56 @@ mod tests {
     }
 
     #[test]
+    fn address_answers_the_owned_app_url_and_mints_nothing() {
+        let (url, listener) = fake_app();
+        let (environment, asked) = environment(running(&url));
+        assert_eq!(
+            ask(json!({ "type": "address" }), true, &environment),
+            json!({ "ok": true, "openbotUrl": url })
+        );
+        // The ownership checks behind `app_url` ran; nothing asked the app for a code or handed over a sign-in.
+        assert_eq!(asked.app_url.load(Ordering::SeqCst), 1);
+        assert_untouched(&listener);
+        assert!(asked.cookies().is_empty());
+    }
+
+    #[test]
+    fn address_says_why_there_is_none_and_asks_a_foreign_origin_nothing() {
+        let (url, listener) = fake_app();
+        let cases = [
+            (false, running(&url), "origin-not-allowed", 0),
+            (
+                true,
+                Computer {
+                    installed: false,
+                    ..running(&url)
+                },
+                "not-installed",
+                0,
+            ),
+            (
+                true,
+                Computer {
+                    app_url: None,
+                    ..running(&url)
+                },
+                "not-running",
+                1,
+            ),
+        ];
+        for (origin_allowed, computer, code, checks) in cases {
+            let (environment, asked) = environment(computer);
+            assert_eq!(
+                ask(json!({ "type": "address" }), origin_allowed, &environment),
+                not(code)
+            );
+            assert_eq!(asked.app_url.load(Ordering::SeqCst), checks, "{code}");
+            assert!(asked.cookies().is_empty(), "{code}");
+        }
+        assert_untouched(&listener);
+    }
+
+    #[test]
     fn an_unknown_message_is_answered_without_touching_anything() {
         let (url, listener) = fake_app();
         let (environment, asked) = environment(running(&url));
@@ -1091,6 +1167,7 @@ mod tests {
             &[
                 json!({ "type": "ping" }),
                 json!({ "type": "handoff" }),
+                json!({ "type": "address" }),
                 json!({ "type": "connect" }),
             ],
             &environment,
@@ -1101,6 +1178,7 @@ mod tests {
             replies,
             [
                 unavailable("not-installed"),
+                not("not-installed"),
                 not("not-installed"),
                 not("unknown-message")
             ]
@@ -1125,12 +1203,14 @@ mod tests {
         let deadlines = Deadlines {
             ping: Duration::from_millis(100),
             handoff: Duration::from_millis(150),
+            address: Duration::from_millis(150),
         };
         let started = Instant::now();
         let (status, replies) = serve_all(
             &[
                 json!({ "type": "ping" }),
                 json!({ "type": "handoff" }),
+                json!({ "type": "address" }),
                 json!({ "type": "connect" }),
             ],
             &Arc::new(slow),
@@ -1146,6 +1226,7 @@ mod tests {
             replies,
             [
                 unavailable("timed-out"),
+                not("timed-out"),
                 not("timed-out"),
                 not("unknown-message")
             ]
@@ -1172,10 +1253,15 @@ mod tests {
 
     #[test]
     fn each_deadline_leaves_a_second_of_the_extensions_wait() {
-        // extension/src/background/native-host.ts: PING_TIMEOUT_MS and HANDOFF_TIMEOUT_MS.
-        let (extension_ping, extension_handoff) = (Duration::from_secs(3), Duration::from_secs(8));
+        // extension/src/background/native-host.ts: PING_TIMEOUT_MS, HANDOFF_TIMEOUT_MS and ADDRESS_TIMEOUT_MS.
+        let (extension_ping, extension_handoff, extension_address) = (
+            Duration::from_secs(3),
+            Duration::from_secs(8),
+            Duration::from_secs(8),
+        );
         assert!(DEADLINES.ping + Duration::from_secs(1) <= extension_ping);
         assert!(DEADLINES.handoff + Duration::from_secs(1) <= extension_handoff);
+        assert!(DEADLINES.address + Duration::from_secs(1) <= extension_address);
         // Two probes, one per loopback, fit in a ping.
         assert!(PING_PROBE_PATIENCE * 2 < DEADLINES.ping);
     }

@@ -29,18 +29,22 @@ test("database defaults and writes survive a new store and remain scoped to the 
   expect(await store.read(alice)).toEqual({
     messageListEmphasis: "thread",
     selfHostBannerDismissed: false,
+    narration: null,
   });
   expect(await store.patch(alice, { messageListEmphasis: "agent" })).toEqual({
     messageListEmphasis: "agent",
     selfHostBannerDismissed: false,
+    narration: null,
   });
   expect(await createUserPreferencesStore(database).read(alice)).toEqual({
     messageListEmphasis: "agent",
     selfHostBannerDismissed: false,
+    narration: null,
   });
   expect(await store.read(bob)).toEqual({
     messageListEmphasis: "thread",
     selfHostBannerDismissed: false,
+    narration: null,
   });
 });
 
@@ -67,4 +71,15 @@ test("missing users do not appear successfully saved", async () => {
   await expect(
     store.patch(id, { messageListEmphasis: "agent" }),
   ).rejects.toThrow("could not be saved");
+});
+
+test("the narration choice is kept in the database beside the others", async () => {
+  const id = await person();
+  expect((await store.read(id)).narration).toBe(null);
+  await store.patch(id, { narration: "on" });
+  expect(await createUserPreferencesStore(database).read(id)).toEqual({
+    messageListEmphasis: "thread",
+    selfHostBannerDismissed: false,
+    narration: "on",
+  });
 });

@@ -16,6 +16,7 @@ import {
   recorderState,
 } from "../src/background/recording";
 import { recoverInterruptedRecording } from "../src/background/recovery";
+import { KEPT_FOR_PERSON_MS } from "../src/shared/limits";
 import { installRouter } from "../src/background/router";
 import {
   type BackgroundToOffscreen,
@@ -456,6 +457,61 @@ test("a drain of another person waits for that person and nothing of it is sent;
     },
   ]);
   expect(openbot.calls).toEqual([]);
+});
+
+test("a recording that has waited for its person longer than OpenBot keeps anyone signed in is deleted unsent at the next start, its outbox with it, and one within that time waits on", async () => {
+  await restartBrowser();
+  const waiting = (id: string, since: number) =>
+    storedDrain(id, bea, {
+      startedAt: since - 60_000,
+      kept: {
+        reason: KEPT_SIGNED_OUT,
+        parked: true,
+        events: 3,
+        at: since,
+        waitingForReconnect: true,
+      },
+    });
+  const expired = waiting("rec-old", now - KEPT_FOR_PERSON_MS);
+  const fresh = waiting("rec-new", now - KEPT_FOR_PERSON_MS + 60_000);
+  // The connected person's own kept recording is tried again, however old: the popup offers to discard it.
+  const own = storedDrain("rec-ada", ada, {
+    startedAt: now - 30 * 24 * 60 * 60 * 1000,
+    kept: {
+      reason: "Learning capture is off on this Intelligence.",
+      parked: true,
+      events: 12,
+      at: now - 30 * 24 * 60 * 60 * 1000,
+    },
+  });
+  fake.storage.local.set("drains", [expired, fresh, own]);
+  startWorker();
+  await recoverInterruptedRecording();
+
+  expect(drains()).toEqual([fresh, own]);
+  expect(sentToDocument("offscreen.discard")).toEqual([
+    { type: "offscreen.discard", recordingIds: ["rec-old"] },
+  ]);
+  const [recover] = sentToDocument("offscreen.recover");
+  expect(
+    recover?.type === "offscreen.recover" &&
+      recover.drains.map((drain) => drain.recordingId),
+  ).toEqual(["rec-ada"]);
+  expect((await recorderState()).kept?.waitingFor).toEqual({
+    name: "Bea",
+    recordings: 1,
+  });
+  expect(openbot.calls).toEqual([]);
+
+  // A day later the other one has waited as long, and goes at the next start too.
+  await restartBrowser();
+  now += 24 * 60 * 60 * 1000;
+  startWorker();
+  await recoverInterruptedRecording();
+  expect(drains().map((drain) => drain.recordingId)).toEqual(["rec-ada"]);
+  expect(sentToDocument("offscreen.discard")).toEqual([
+    { type: "offscreen.discard", recordingIds: ["rec-new"] },
+  ]);
 });
 
 test("after a browser restart with nobody connected, the interrupted recording waits for its person and goes when they connect", async () => {

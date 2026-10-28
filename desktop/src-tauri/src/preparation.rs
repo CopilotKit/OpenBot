@@ -164,8 +164,8 @@ fn fingerprint(root: &Path) -> Result<String, Problem> {
         PathBuf::from("docker-compose.yml"),
         PathBuf::from(DEPENDENCIES),
     ];
-    // A release with the person's browser is installed only with its Recorder built, so a build
-    // that has gone missing sends Start back to Installation rather than starting a browser with no
+    // A release with the person's browser is installed only with its Recorder in place, so one that
+    // has gone missing sends Start back to Installation rather than starting a browser with no
     // Recorder to load.
     if local_browser::in_release(root) {
         files.push(recorder_manifest());
@@ -249,48 +249,98 @@ pub fn install_dependencies_if_needed(
     Ok(bun)
 }
 
-/// Build the Recorder into the deployment, for the person's browser to load.
+/// The published image the Recorder is copied out of: the computer's, which carries the built
+/// Recorder at [`IMAGE_RECORDER`] for every person's browser it opens (`agent-computer/Dockerfile`).
+pub const RECORDER_IMAGE: &str = "agent-computer";
+
+/// Where the computer image keeps the built Recorder.
+pub const IMAGE_RECORDER: &str = "/recorder";
+
+/// Put the Recorder into the deployment, for the person's browser to load.
 ///
-/// Built here, from the release's own source, rather than shipped beside it. That is what the
-/// deployment already does with the one other thing it builds for a host process: the app builds
-/// `app/dist` from the tagged source on first serve (`app/scripts/serve-or-build.ts`). The release
-/// publishes nothing else beside its tarball but the image manifest, the tarball is source by
-/// design, and the Recorder is three Vite builds from packages the install has already fetched, a
-/// few seconds in all. Built from the same tag, it cannot disagree with the server it connects to.
+/// PREBUILT, NEVER BUILT HERE. The release's own computer image carries the Recorder its CI built
+/// from the same tag (`agent-computer/Dockerfile` builds it and keeps only `extension/dist`), and
+/// installation has just pulled that image, digest-pinned from the release's manifest. So the
+/// Recorder is copied out of it: what every hosted person's browser loads, byte for byte, and
+/// nothing is compiled on the person's machine. It used to be three Vite builds run here with the
+/// installation's Bun, which the code-owner review rightly asked to ship prebuilt.
 ///
-/// Every installation builds it again, since an upgrade lays new source over the old build.
-pub fn build_recorder(root: &Path, bun: &Path) -> Result<(), Problem> {
+/// Copied out of a container that is created and never started (`create --pull=never`, so a
+/// missing image is an error rather than a download nobody asked for), into a folder beside the
+/// old copy, which replaces it only once the new one is whole. Every installation copies it again,
+/// since an upgrade lays new source over the old one.
+pub fn place_recorder(root: &Path, address: &Address) -> Result<(), Problem> {
     if !local_browser::in_release(root) {
         return Ok(());
     }
+    let image = deployment::reference(root, RECORDER_IMAGE).map_err(|detail| {
+        Problem::with(
+            "OpenBot could not set up the Recorder for its browser. Try again.",
+            detail,
+        )
+    })?;
+    place_recorder_with(root, &image, &mut |args| {
+        address.command().args(args).output()
+    })
+}
+
+/// [`place_recorder`], with the engine command it runs given, so a test can stand in for it.
+pub fn place_recorder_with(
+    root: &Path,
+    image: &str,
+    engine: &mut dyn FnMut(&[&str]) -> std::io::Result<std::process::Output>,
+) -> Result<(), Problem> {
     let failed = |detail: String| {
         Problem::with(
-            "OpenBot could not build the Recorder for its browser. Try again.",
+            "OpenBot could not set up the Recorder for its browser. Try again.",
             detail,
         )
     };
-    let output = crate::quiet::command(bun)
-        .current_dir(root.join("extension"))
-        .args(["run", "build"])
-        // The release build, whatever the environment says. The end-to-end variant is for tests.
-        .env_remove("RECORDER_BUILD_VARIANT")
-        .output()
-        .map_err(|error| failed(format!("could not run the Recorder's build: {error}")))?;
-    if !output.status.success() {
-        let said = if output.stderr.is_empty() {
-            &output.stdout
-        } else {
-            &output.stderr
-        };
-        return Err(failed(crate::quiet::said(said)));
-    }
-    if !root.join(recorder_manifest()).is_file() {
+    let run = |engine: &mut dyn FnMut(&[&str]) -> std::io::Result<std::process::Output>,
+               args: &[&str]|
+     -> Result<String, Problem> {
+        let output = engine(args)
+            .map_err(|error| failed(format!("could not run the engine's {}: {error}", args[0])))?;
+        if !output.status.success() {
+            return Err(failed(format!(
+                "the engine's {} failed: {}",
+                args[0],
+                crate::quiet::said(&output.stderr)
+            )));
+        }
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    };
+    let target = root.join(local_browser::RECORDER_DIST);
+    let fresh = target.with_extension("new");
+    let _ = std::fs::remove_dir_all(&fresh);
+    std::fs::create_dir_all(&fresh)
+        .map_err(|error| failed(format!("{}: {error}", fresh.display())))?;
+    let container = run(engine, &["create", "--pull=never", image])?;
+    let copied = run(
+        engine,
+        &[
+            "cp",
+            &format!("{container}:{IMAGE_RECORDER}/."),
+            &fresh.to_string_lossy(),
+        ],
+    );
+    // Never left behind, whatever the copy did. It never ran, so there is nothing to stop.
+    let removed = run(engine, &["rm", "--force", &container]);
+    copied?;
+    removed?;
+    if !fresh.join("manifest.json").is_file() {
+        let _ = std::fs::remove_dir_all(&fresh);
         return Err(failed(format!(
-            "the build finished without writing {}",
-            recorder_manifest().display()
+            "{image} has no Recorder at {IMAGE_RECORDER}"
         )));
     }
-    Ok(())
+    match std::fs::remove_dir_all(&target) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(failed(format!("{}: {error}", target.display()))),
+    }
+    std::fs::rename(&fresh, &target)
+        .map_err(|error| failed(format!("{}: {error}", target.display())))
 }
 
 pub fn dependencies_ready(root: &Path) -> Result<PathBuf, Problem> {
@@ -467,12 +517,6 @@ fn main() {
         println!("{}", std::fs::read_to_string(version).unwrap_or_else(|_| "1.4.3".into()));
         return;
     }
-    if args == ["run", "build"] {
-        assert_eq!(std::env::var_os("RECORDER_BUILD_VARIANT"), None);
-        std::fs::create_dir_all("dist").unwrap();
-        std::fs::write("dist/manifest.json", "{}").unwrap();
-        return;
-    }
     assert_eq!(args, ["install", "--frozen-lockfile", "--ignore-scripts"]);
     let previous = std::fs::read_to_string("installs").unwrap_or_default();
     writeln!(std::fs::OpenOptions::new().create(true).append(true).open("installs").unwrap(), "install").unwrap();
@@ -638,10 +682,10 @@ fn main() {
     }
 
     /// A release with the person's browser: its computer's packages are installed from their own
-    /// lockfile, and it is not installed until its Recorder is built. A build that goes missing
-    /// afterwards sends Start back to Installation, which builds it again.
+    /// lockfile, and it is not installed until its Recorder is in place. One that goes missing
+    /// afterwards sends Start back to Installation, which puts it there again.
     #[test]
-    fn a_release_with_the_browser_is_installed_only_with_its_recorder_built() {
+    fn a_release_with_the_browser_is_installed_only_with_its_recorder_in_place() {
         let f = Fixture::new();
         std::fs::create_dir_all(f.root.join("shared")).unwrap();
         std::fs::write(f.root.join(local_browser::CONTRACT), "export {};\n").unwrap();
@@ -666,7 +710,8 @@ fn main() {
             .expect_err("no Recorder, no installation");
         assert!(unbuilt.said.contains("Finish installing"), "{unbuilt:?}");
 
-        build_recorder(&f.root, &f.bun).unwrap();
+        let image = ComputerImage::with_recorder();
+        place_recorder_with(&f.root, COMPUTER, &mut image.engine()).unwrap();
         complete_with(&f.root, None, images(), |_| Ok(())).unwrap();
         require_with(&f.root, None, |_| Ok(())).unwrap();
 
@@ -676,19 +721,236 @@ fn main() {
         assert!(gone.said.contains("Finish installing"), "{gone:?}");
 
         // A changed lockfile for the computer is a changed installation, as the root's is.
-        build_recorder(&f.root, &f.bun).unwrap();
+        place_recorder_with(&f.root, COMPUTER, &mut image.engine()).unwrap();
         complete_with(&f.root, None, images(), |_| Ok(())).unwrap();
         std::fs::write(f.root.join("agent-computer/bun.lock"), "changed-lock").unwrap();
         assert!(require_with(&f.root, None, |_| Ok(())).is_err());
     }
 
-    /// Releases before the browser have nothing to build and no computer to install for.
+    /// Releases before the browser have no Recorder to put in place and no computer to install for.
     #[test]
-    fn an_older_release_builds_nothing_and_installs_only_its_workspace() {
+    fn an_older_release_places_nothing_and_installs_only_its_workspace() {
         let f = Fixture::new();
-        build_recorder(&f.root, &f.bun).unwrap();
+        // `place_recorder` asks nothing of the engine or the manifest for a release without the browser.
+        let address = Address::new(crate::engine::Engine::Docker, None);
+        place_recorder(&f.root, &address).unwrap();
         assert!(!f.root.join(local_browser::RECORDER_DIST).exists());
         assert_eq!(stack::dependency_directories(&f.root), [""]);
+    }
+
+    /// The release's computer image, digest-pinned, as the manifest names it.
+    const COMPUTER: &str = "ghcr.io/copilotkit/openbot-agent-computer@sha256:0123";
+
+    /// A process's result, as the engine's command line leaves it.
+    fn exited(code: i32, stdout: &str, stderr: &str) -> std::process::Output {
+        #[cfg(unix)]
+        use std::os::unix::process::ExitStatusExt;
+        #[cfg(windows)]
+        use std::os::windows::process::ExitStatusExt;
+        #[cfg(unix)]
+        let status = std::process::ExitStatus::from_raw(code << 8);
+        #[cfg(windows)]
+        let status = std::process::ExitStatus::from_raw(code as u32);
+        std::process::Output {
+            status,
+            stdout: stdout.as_bytes().to_vec(),
+            stderr: stderr.as_bytes().to_vec(),
+        }
+    }
+
+    /// The engine with the release's computer image pulled, answering `create`, `cp` and `rm` as
+    /// Docker's and Podman's command lines do: `create` prints the new container's id, `cp` of
+    /// `<id>:/recorder/.` copies the folder's contents into the destination, and `rm` of a
+    /// container that does not exist fails. Every command is written down.
+    struct ComputerImage {
+        recorder: Option<PathBuf>,
+        fail_copy: bool,
+        ran: std::rc::Rc<std::cell::RefCell<Vec<Vec<String>>>>,
+    }
+
+    impl ComputerImage {
+        fn with_recorder() -> Self {
+            let recorder = crate::test_support::temp_root("image-recorder");
+            std::fs::create_dir_all(recorder.join("background")).unwrap();
+            std::fs::write(
+                recorder.join("manifest.json"),
+                r#"{"name":"OpenBot Recorder"}"#,
+            )
+            .unwrap();
+            std::fs::write(recorder.join("background/index.js"), "prebuilt();").unwrap();
+            Self {
+                recorder: Some(recorder),
+                fail_copy: false,
+                ran: Default::default(),
+            }
+        }
+
+        fn failing_copy(mut self) -> Self {
+            self.fail_copy = true;
+            self
+        }
+
+        fn engine(&self) -> impl FnMut(&[&str]) -> std::io::Result<std::process::Output> + '_ {
+            let mut created: Option<String> = None;
+            move |args: &[&str]| {
+                self.ran
+                    .borrow_mut()
+                    .push(args.iter().map(|arg| arg.to_string()).collect());
+                Ok(match args {
+                    ["create", "--pull=never", image] if *image == COMPUTER => {
+                        created = Some("c0ffee".into());
+                        exited(0, "c0ffee\n", "")
+                    }
+                    ["create", ..] => exited(125, "", "Error: No such image"),
+                    ["cp", from, to]
+                        if Some(format!("{}:/recorder/.", "c0ffee")) == Some(from.to_string())
+                            && created.is_some() =>
+                    {
+                        if self.fail_copy {
+                            return Ok(exited(1, "", "Error: copy failed"));
+                        }
+                        match &self.recorder {
+                            Some(recorder) => copy_tree(recorder, Path::new(to)),
+                            None => {
+                                return Ok(exited(
+                                    1,
+                                    "",
+                                    "Error: Could not find the file /recorder in container c0ffee",
+                                ))
+                            }
+                        }
+                        exited(0, "", "")
+                    }
+                    ["rm", "--force", id] if created.as_deref() == Some(*id) => {
+                        created = None;
+                        exited(0, "c0ffee\n", "")
+                    }
+                    _ => exited(1, "", "unexpected engine command"),
+                })
+            }
+        }
+    }
+
+    impl Drop for ComputerImage {
+        fn drop(&mut self) {
+            if let Some(recorder) = &self.recorder {
+                let _ = std::fs::remove_dir_all(recorder);
+            }
+        }
+    }
+
+    fn copy_tree(from: &Path, to: &Path) {
+        std::fs::create_dir_all(to).unwrap();
+        for entry in std::fs::read_dir(from).unwrap() {
+            let entry = entry.unwrap();
+            let target = to.join(entry.file_name());
+            if entry.file_type().unwrap().is_dir() {
+                copy_tree(&entry.path(), &target);
+            } else {
+                std::fs::copy(entry.path(), target).unwrap();
+            }
+        }
+    }
+
+    /// The code-owner review: the Recorder was built with `bun run build` on the person's machine
+    /// during installation. It is copied out of the release's computer image instead, prebuilt,
+    /// replacing whatever an earlier installation left, and the container it came out of is gone.
+    #[test]
+    fn the_recorder_comes_prebuilt_out_of_the_releases_computer_image() {
+        let f = Fixture::new();
+        let dist = f.root.join(local_browser::RECORDER_DIST);
+        // An earlier installation's copy, with a file the new one no longer has.
+        std::fs::create_dir_all(&dist).unwrap();
+        std::fs::write(dist.join("stale.js"), "old").unwrap();
+        let image = ComputerImage::with_recorder();
+        place_recorder_with(&f.root, COMPUTER, &mut image.engine()).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dist.join("background/index.js")).unwrap(),
+            "prebuilt();"
+        );
+        assert!(dist.join("manifest.json").is_file());
+        assert!(!dist.join("stale.js").exists());
+        assert!(!dist.with_extension("new").exists());
+        let fresh = dist.with_extension("new").to_string_lossy().into_owned();
+        assert_eq!(
+            *image.ran.borrow(),
+            [
+                vec!["create", "--pull=never", COMPUTER],
+                vec!["cp", "c0ffee:/recorder/.", fresh.as_str()],
+                vec!["rm", "--force", "c0ffee"],
+            ]
+        );
+    }
+
+    /// The copy through the real engine's command line, out of a real image that keeps a Recorder
+    /// at `/recorder` as the computer image does, and the container it made gone afterwards.
+    ///
+    /// ```sh
+    /// OPENBOT_LIVE_RECORDER_IMAGE=<image> cargo test --lib live_the_recorder -- --ignored
+    /// ```
+    #[test]
+    #[ignore = "creates a container from an image on this machine's Docker engine"]
+    fn live_the_recorder_is_copied_out_of_a_real_image() {
+        let image = std::env::var("OPENBOT_LIVE_RECORDER_IMAGE").unwrap();
+        let f = Fixture::new();
+        let address = Address::new(crate::engine::Engine::Docker, None);
+        let before = address
+            .command()
+            .args(["ps", "--all", "--quiet"])
+            .output()
+            .unwrap()
+            .stdout;
+        place_recorder_with(&f.root, &image, &mut |args| {
+            address.command().args(args).output()
+        })
+        .unwrap();
+        assert!(f
+            .root
+            .join(local_browser::RECORDER_DIST)
+            .join("manifest.json")
+            .is_file());
+        let after = address
+            .command()
+            .args(["ps", "--all", "--quiet"])
+            .output()
+            .unwrap()
+            .stdout;
+        assert_eq!(before, after, "the container it copied from is gone");
+    }
+
+    /// An image with no Recorder in it, or a copy that fails, leaves the earlier copy as it was and
+    /// no container behind, and says so.
+    #[test]
+    fn an_image_without_the_recorder_leaves_the_last_one_and_no_container() {
+        let f = Fixture::new();
+        let dist = f.root.join(local_browser::RECORDER_DIST);
+        std::fs::create_dir_all(&dist).unwrap();
+        std::fs::write(dist.join("manifest.json"), "earlier").unwrap();
+        for image in [
+            ComputerImage {
+                recorder: None,
+                fail_copy: false,
+                ran: Default::default(),
+            },
+            ComputerImage::with_recorder().failing_copy(),
+        ] {
+            let problem = place_recorder_with(&f.root, COMPUTER, &mut image.engine())
+                .expect_err("no Recorder, no installation");
+            assert!(problem.said.contains("Recorder"), "{problem:?}");
+            assert_eq!(
+                image.ran.borrow().last().unwrap(),
+                &vec!["rm", "--force", "c0ffee"]
+            );
+            assert_eq!(
+                std::fs::read_to_string(dist.join("manifest.json")).unwrap(),
+                "earlier"
+            );
+        }
+        // A missing image is never pulled: it is an error.
+        let image = ComputerImage::with_recorder();
+        let problem = place_recorder_with(&f.root, "some-other-image", &mut image.engine())
+            .expect_err("only the release's image");
+        assert!(problem.detail.unwrap().contains("No such image"));
     }
 
     #[test]

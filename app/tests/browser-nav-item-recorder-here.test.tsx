@@ -241,6 +241,10 @@ test("with the Recorder here and connected, one click opens a popover where Reco
   await user.click(button);
   const dialog = await view.findByRole("dialog", { name: "Record a task" });
   expect(button.getAttribute("aria-expanded")).toBe("true");
+  // It says what a recording holds before Record is pressed, the saves and AI assistant conversations among it.
+  expect(dialog.textContent).toContain(
+    "What you do in this browser goes into your own Learning space, in every tab you use, until you stop: your steps, what each step saves, AI assistant conversations, and your narration when it's on.",
+  );
   // Focus goes to the task name, ready to type.
   await waitFor(() =>
     expect(document.activeElement?.getAttribute("aria-label")).toBe(
@@ -333,7 +337,7 @@ test("Record and Stop from the keyboard: Tab to the button, Enter opens the popo
     ),
   );
   expect(view.getByRole("status").textContent).toBe(
-    "Nothing was recorded in “Book the flight”. The Recorder records your clicks, typing and the pages you open on websites, in every tab you use while it records.",
+    "Nothing was recorded in “Book the flight”. The Recorder records the pages you open on websites and what you do there, with what each step saves, AI assistant conversations and your narration, in every tab you use while it records, except sites you leave out.",
   );
 });
 
@@ -460,6 +464,33 @@ test("with the Recorder here but not connected, one click connects it as Setting
     "Approve the leave{Enter}",
   );
   await view.findByRole("dialog", { name: "Approve the leave" });
+}, 10_000);
+
+test("a Cancel on the Recorder's Connect page reaches the popover within a second, which says so and offers Connect again", async () => {
+  // End-to-end run 1 of the review fixes: after Cancel, OpenBot went on saying "Confirm in the OpenBot Recorder tab that
+  // opened." for up to five minutes.
+  const recorder = new FakeRecorder();
+  inBrowser("chrome", [recorder]);
+  const { view } = draw();
+  const user = userEvent.setup({ document });
+  await user.click(await view.findByRole("button", { name: "Browser" }));
+  await view.findByText("Confirm in the OpenBot Recorder tab that opened.");
+  recorder.cancel();
+  await view.findByText(
+    "You cancelled in the OpenBot Recorder tab. Nothing was connected.",
+    {},
+    { timeout: 1500 },
+  );
+  // Connect again asks the Recorder again, and waits on its Connect page afresh.
+  await user.click(view.getByRole("button", { name: "Connect this browser" }));
+  await view.findByText("Confirm in the OpenBot Recorder tab that opened.");
+  expect(sent(recorder, "openbot.connect").length).toBe(2);
+  recorder.closeTab();
+  await view.findByText(
+    "The OpenBot Recorder tab closed before you confirmed. Nothing was connected.",
+    {},
+    { timeout: 1500 },
+  );
 }, 10_000);
 
 test("for a trusted OpenBot the one click connects the Recorder with no Connect page, and the popover opens on Record", async () => {

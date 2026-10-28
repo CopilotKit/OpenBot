@@ -20,8 +20,18 @@ export type PersonalLearningRouteDeps = {
   >;
   /** Tells this replica's open-Skill index to read again; other replicas see the change within its TTL. */
   invalidate: () => void;
+  /**
+   * Whether an administrator lets people open their Skills to every Bot (Admin, Enterprise controls, Skill sharing),
+   * read fresh for every change. Off, opening is refused and closing is not: a person can always take their Skills
+   * back to their own Bots.
+   */
+  sharingAllowed: () => Promise<boolean>;
   auditStore?: AuditStore;
 };
+
+/** What a person reads when they try to open their Skills while an administrator has not allowed it. */
+const SHARING_OFF =
+  "An admin hasn't turned on sharing Skills with every Bot, so your Skills stay with your own Bots.";
 
 const smallBody = bodyLimit({
   maxSize: 2 * 1024,
@@ -48,21 +58,28 @@ export function createPersonalLearningRoutes(
 
   routes.get("/", async (context) => {
     const userId = context.var.actor.id;
-    const [sharing, read] = await Promise.all([
+    const [sharing, read, sharingAllowed] = await Promise.all([
       deps.store.read(userId),
       deps.skillsOf(userId),
+      deps.sharingAllowed(),
     ]);
     const opened = new Set(sharing.openSkills);
     const answer: PersonalLearningSharing =
       "skills" in read
         ? {
             mode: sharing.mode,
+            sharingAllowed,
             skills: read.skills.map((skill) => ({
               ...skill,
               open: opened.has(skill.name),
             })),
           }
-        : { mode: sharing.mode, skills: null, unavailable: read.unavailable };
+        : {
+            mode: sharing.mode,
+            sharingAllowed,
+            skills: null,
+            unavailable: read.unavailable,
+          };
     return context.json(answer);
   });
 
@@ -75,6 +92,10 @@ export function createPersonalLearningRoutes(
         { error: "Choose closed, open or choose for your Skills." },
         400,
       );
+    }
+    // Closing is always allowed; opening to every Bot waits for an administrator.
+    if (body.mode !== "closed" && !(await deps.sharingAllowed())) {
+      return context.json({ error: SHARING_OFF }, 403);
     }
     const userId = context.var.actor.id;
     const { from, to } = await deps.store.setMode(userId, body.mode);
@@ -102,7 +123,41 @@ export function createPersonalLearningRoutes(
         400,
       );
     }
+    if (body.open && !(await deps.sharingAllowed())) {
+      return context.json({ error: SHARING_OFF }, 403);
+    }
     const userId = context.var.actor.id;
+    /*
+     * Only a Skill the person has. Opening is checked against the Skills published in their own space, read the way a
+     * run reads them, so nobody can open a name in advance for a Skill they do not have yet. Closing also accepts a
+     * name they opened earlier that has since left their space, so an entry can always be taken back.
+     */
+    const [read, sharing] = await Promise.all([
+      deps.skillsOf(userId),
+      body.open ? undefined : deps.store.read(userId),
+    ]);
+    const theirs =
+      ("skills" in read && read.skills.some((skill) => skill.name === name)) ||
+      (sharing?.openSkills.includes(name) ?? false);
+    if (!theirs) {
+      if ("skills" in read)
+        return context.json({ error: "You have no Skill by that name." }, 404);
+      return read.unavailable === "off"
+        ? context.json(
+            {
+              error:
+                "An admin has turned off Automatic Learning, so you have no Skills to change.",
+            },
+            409,
+          )
+        : context.json(
+            {
+              error:
+                "Couldn't check your Skills with Intelligence just now, so nothing changed. Try again.",
+            },
+            503,
+          );
+    }
     const changed = await deps.store.setSkillOpen(userId, name, body.open);
     deps.invalidate();
     if (changed) {

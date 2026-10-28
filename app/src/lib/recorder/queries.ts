@@ -3,13 +3,21 @@ import { recorderPaths } from "@openbot/shared/recorder-api";
 import { queryOptions } from "@tanstack/react-query";
 import { BROWSER_CLOSED_POLL_MS, BROWSER_POLL_MS } from "@/lib/browser/queries";
 import { client } from "@/lib/client";
-import { findRecorderHere, type RecorderHere } from "./bridge";
+import {
+  askConnectWait,
+  type ConnectWait,
+  findRecorderHere,
+  type RecorderHere,
+} from "./bridge";
 
 export const recorderKeys = {
   all: ["recorder"] as const,
   connections: () => ["recorder", "connections"] as const,
   /** The Recorder in the browser OpenBot is open in. Asked of the browser, never of the server. */
   here: () => ["recorder", "here"] as const,
+  /** Where one connect, by when it started, has got to on the Recorder's Connect page. Asked of the browser too. */
+  connectWait: (id: string, since: number) =>
+    ["recorder", "connect-wait", { id, since }] as const,
 };
 
 /**
@@ -74,5 +82,23 @@ export const recorderHereQueryOptions = (
       hereInterval(query.state.data, options?.awaiting ?? false),
     // Unlike the app's server reads (query-client.ts), asked again whenever the person comes back to the tab: it costs
     // no request, and it is how the button finds a Recorder they have just added, connected, or pressed Record in.
+    refetchOnWindowFocus: true,
+  });
+
+/** How often a page waiting on the Recorder's Connect page asks where its connect has got to. */
+const CONNECT_WAIT_POLL_MS = 1000;
+
+/**
+ * Where the connect this page started at `since` has got to on the Recorder `id`'s Connect page (`askConnectWait`):
+ * asked every second while the page waits, and again the moment the person comes back to this tab, which is when they
+ * will have pressed Cancel there or closed it, so the page says so at once rather than when the request runs out. Keyed
+ * by when the connect started, so what was said of an earlier one is never read for the next.
+ */
+export const recorderConnectWaitQueryOptions = (id: string, since: number) =>
+  queryOptions({
+    queryKey: recorderKeys.connectWait(id, since),
+    queryFn: (): Promise<ConnectWait> => askConnectWait(id),
+    refetchInterval: CONNECT_WAIT_POLL_MS,
+    // Asking costs no request, unlike the app's server reads (query-client.ts).
     refetchOnWindowFocus: true,
   });

@@ -9,6 +9,7 @@ import type { CapturedEvent } from "@openbot/shared/recorder-masking";
 import type { AgentSnapshot } from "../background/agent/events";
 import type { StepSnapshot } from "../background/steps";
 import type { RecorderState, StreamSession } from "../protocol/messages";
+import { normaliseSites } from "./sites";
 export type ConnectionRecord = {
   openbotUrl: string;
   token: string;
@@ -83,6 +84,11 @@ type LocalState = {
   notice?: RecorderNotice;
   /** When the organization-session keep-alive last reached OpenBot (Decision 2, Task 8). */
   lastKeepAliveAt?: number;
+  /** Whether the person narrates their recordings, as they chose on the setup page or in the Record form: the Recorder
+   * opens the microphone only when it is `on`. Absent until they chose, which leaves it closed. */
+  narration?: "on" | "off";
+  /** The sites the person keeps out of every recording (sites.ts), sorted: nothing in a tab on one is recorded. */
+  excludedSites?: string[];
 };
 export type PendingConnect = {
   origin: string;
@@ -110,6 +116,9 @@ type SessionState = {
   typedSecrets?: [number, string[]][];
   /** openbot.connect requests per origin in the last 10 minutes (timestamps), for Decision 22's limit (Task 8). */
   connectRequests?: Record<string, number[]>;
+  /** The last web connect the person cancelled on the Connect page, so the page that asked hears so
+   * (`openbot.connect.status`); gone once that origin asks to connect again. */
+  cancelledConnect?: { origin: string; at: number };
   /** The setup tab the install opened (setup.ts), so the launcher's connection can close it: a browser OpenBot opened
    * has its microphone granted already and is never shown a setup step. */
   setupTabId?: number;
@@ -208,6 +217,11 @@ function checked<K extends keyof LocalState>(
     return (isDrainRecord(value) ? value : undefined) as LocalState[K];
   if (key === "heldSteps")
     return (isHeldSteps(value) ? value : undefined) as LocalState[K];
+  if (key === "narration")
+    return (
+      value === "on" || value === "off" ? value : undefined
+    ) as LocalState[K];
+  if (key === "excludedSites") return normaliseSites(value) as LocalState[K];
   return value as LocalState[K];
 }
 

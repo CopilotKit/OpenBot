@@ -1292,3 +1292,22 @@ test("the verification code a sign-in posts, and the code an OAuth callback carr
     message: "No pending sign-in",
   });
 });
+
+test("a tab on a site the person keeps out of their recordings is never attached to, until it reaches another site", async () => {
+  await capture.stop();
+  capture = createNetworkCapture(
+    {
+      ...captureDeps(),
+      recordable: (url: string) => !url.startsWith("https://bank.example.test"),
+    },
+    { fallback },
+  );
+  expect(await capture.start(7, "https://bank.example.test/accounts")).toBe(
+    "waiting",
+  );
+  expect(fake.debugger.attached).toEqual([]);
+  await capture.onCommitted(7, 0, "https://bank.example.test/transfers");
+  expect(fake.debugger.attached).toEqual([]);
+  await capture.onCommitted(7, 0, "https://crm.example.test/deals");
+  expect(fake.debugger.attached).toEqual([{ tabId: 7 }]);
+});

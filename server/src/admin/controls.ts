@@ -125,6 +125,22 @@ export function enterpriseControls(): EnterpriseControls | undefined {
   return installed;
 }
 
+/**
+ * Skill sharing (Admin, Enterprise controls): whether people may open their Skills to every Bot. Off until the
+ * controls have read it, like every switch here. For a person's change, read fresh from the database.
+ */
+export async function skillSharingAllowed(): Promise<boolean> {
+  return (await installed?.store.settings())?.skillSharing === true;
+}
+
+/**
+ * The same switch for a run, from the snapshot: every replica refreshes it the moment an administrator saves
+ * (LISTEN/NOTIFY), so a run pays no query for it.
+ */
+export function skillSharingInSnapshot(): boolean {
+  return installed?.snapshot()?.settings.skillSharing === true;
+}
+
 function refusal(matched: string, reason: string): PolicyDecision {
   return {
     allowed: false,

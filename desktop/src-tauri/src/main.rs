@@ -493,7 +493,7 @@ async fn prepare_installation(
             "Preparing the app's dependencies.",
             None,
         );
-        let bun = preparation::install_dependencies_if_needed(&root, || {
+        preparation::install_dependencies_if_needed(&root, || {
             report_running(
                 &handle,
                 "dependencies",
@@ -515,17 +515,6 @@ async fn prepare_installation(
             true,
             "The app's dependencies are installed.",
         );
-        if local_browser::in_release(&root) {
-            attempt.require_current()?;
-            report_running(
-                &handle,
-                "recorder",
-                "Building the Recorder for OpenBot's browser.",
-                None,
-            );
-            preparation::build_recorder(&root, &bun)?;
-            report(&handle, "recorder", true, "The Recorder is built.");
-        }
         report_running(
             &handle,
             "images",
@@ -571,6 +560,18 @@ async fn prepare_installation(
                 images.len()
             ),
         );
+        // Out of the computer image just downloaded, where the release's own build put it.
+        if local_browser::in_release(&root) {
+            attempt.require_current()?;
+            report_running(
+                &handle,
+                "recorder",
+                "Adding the Recorder to OpenBot's browser.",
+                None,
+            );
+            preparation::place_recorder(&root, &address)?;
+            report(&handle, "recorder", true, "The Recorder is ready.");
+        }
         report_running(&handle, "installation", "Finishing installation.", None);
         attempt.require_current()?;
         preparation::complete(&root, harness.as_ref(), images, &address)?;
@@ -1461,21 +1462,22 @@ async fn start_stack_inner<R: tauri::Runtime>(
         /*
          * The person's own browser, where this machine can run one. Decided at every start from
          * what is installed now, so a Chrome installed since the last start is found and one
-         * removed is no longer pointed at. Its absence is not a failure: OpenBot runs without it
-         * and the app hides its Browser button.
+         * removed is no longer pointed at. Its absence is not a failure: OpenBot runs without it,
+         * and the server is told why, so the app can tell the person rather than leave the reason
+         * in this log.
          */
-        let local_browser = match local_browser::for_this_person(&root) {
+        let (local_browser, browser_absent) = match local_browser::for_this_person(&root) {
             Ok(browser) => {
                 eprintln!(
                     "[browser] {} at {}",
                     browser.product.name(),
                     browser.executable.display()
                 );
-                Some(browser)
+                (Some(browser), None)
             }
             Err(absent) => {
                 eprintln!("[browser] none: {}", absent.said());
-                None
+                (None, Some(absent))
             }
         };
         let ours = stack::ports_we_already_publish(&found, &root);
@@ -1512,6 +1514,7 @@ async fn start_stack_inner<R: tauri::Runtime>(
         if let Some(authority) = organization_auth_url {
             settings.insert("OPENBOT_ORGANIZATION_AUTH_URL".into(), authority);
         }
+        openbot_env::explain_browser_absence(&mut settings, browser_absent);
         seed_learning_default(
             &root,
             &mut settings,

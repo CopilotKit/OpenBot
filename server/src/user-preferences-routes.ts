@@ -12,6 +12,7 @@ const preferencesPatch = z
   .strictObject({
     messageListEmphasis: z.enum(["agent", "thread"]).optional(),
     selfHostBannerDismissed: z.boolean().optional(),
+    narration: z.enum(["on", "off"]).optional(),
   })
   .refine((patch) => Object.keys(patch).length > 0);
 
@@ -44,7 +45,7 @@ export function userPreferencesRoutes(
       return context.json(
         {
           error:
-            "Choose agent or thread for message list emphasis, or true or false for the self-host banner.",
+            "Choose agent or thread for message list emphasis, true or false for the self-host banner, or on or off for narration.",
         },
         400,
       );

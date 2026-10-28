@@ -1,3 +1,4 @@
+import { reasonWithoutStatement } from "../db/query-failure";
 import {
   clearDesktopConnectionFailure,
   recordDesktopConnectionFailure,
@@ -7,7 +8,11 @@ import type { AuthenticatedActor, AuthService } from "./guards";
 export const ORGANIZATION_SESSION_COOKIE = "openbot.organization-session";
 const COOKIE = ORGANIZATION_SESSION_COOKIE;
 const HANDOFF_PATH = "/api/auth/organization/session";
-const COOKIE_AGE = 7 * 24 * 60 * 60;
+/** How long the organization session cookie lasts, in seconds: its Max-Age, set once at the handoff and never renewed,
+ * so a person signs in to their organization again after this. A Recorder connection made in organization mode lasts no
+ * longer (recorder/wiring.ts), since it carries a sealed copy of this cookie. */
+export const ORGANIZATION_SESSION_MAX_AGE_SECONDS = 7 * 24 * 60 * 60;
+const COOKIE_AGE = ORGANIZATION_SESSION_MAX_AGE_SECONDS;
 export class AuthorityUnavailable extends Error {}
 
 /** Explicit customer OpenBot authority, never inferred from an Intelligence endpoint. */
@@ -71,6 +76,11 @@ function sessionCookie(value: unknown): value is string {
 export function createOrganizationAuth(options: {
   authorityUrl: string;
   materializeUser: (user: AuthenticatedActor) => Promise<AuthenticatedActor>;
+  /**
+   * The person signed out here, and the organization accepted it: what else they were signed in with ends too (their
+   * Recorder connections, index.ts). Its failure is logged and the sign-out still stands.
+   */
+  onSignedOut?: (userId: string) => Promise<void>;
 }): AuthService & {
   verifySessionQuietly: (
     cookieHeader: string,
@@ -272,7 +282,11 @@ export function createOrganizationAuth(options: {
         ) {
           if (!allowedOrigin()) return json({ error: "Origin refused." }, 403);
           const cookie = cookieFrom(request.headers);
+          let signedOut: string | null = null;
           if (cookie) {
+            // Who is signing out, asked before the session ends: afterwards the organization no longer says.
+            const before = await verifyAtAuthority(cookie);
+            if (before.kind === "actor") signedOut = before.actor.id;
             try {
               const response = await fetch(`${authority}/api/auth/sign-out`, {
                 method: "POST",
@@ -291,6 +305,18 @@ export function createOrganizationAuth(options: {
               return json(
                 { error: "The organization could not be reached to sign out." },
                 503,
+              );
+            }
+          }
+          if (signedOut) {
+            try {
+              await options.onSignedOut?.(signedOut);
+            } catch (error) {
+              console.error(
+                JSON.stringify({
+                  type: "organization-sign-out-follow-up-failed",
+                  error: reasonWithoutStatement(error),
+                }),
               );
             }
           }

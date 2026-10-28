@@ -158,7 +158,9 @@ test("the notice's colours are OpenBot's", () => {
       "--border",
       "--primary",
       "--primary-foreground",
+      "--secondary",
       "--muted-foreground",
+      "--destructive",
       "--ring",
     ].sort(),
   );

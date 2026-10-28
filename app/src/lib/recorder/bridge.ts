@@ -3,7 +3,9 @@ import {
   recorderStorePage,
 } from "@openbot/shared/recorder-extension";
 import {
+  RECORDER_CONNECT_STATUS,
   RECORDER_PAGE_MESSAGES,
+  type RecorderConnectWait,
   type RecorderPageMessage,
   type RecorderPageResult,
   type RecorderPageState,
@@ -138,6 +140,23 @@ export async function sendConnectCode(
 /** How long a connect request waits for the person to confirm it in the Recorder's tab. */
 export const CONFIRM_WINDOW_MS = 5 * 60_000;
 
+/** Where this page's own connect has got to on the Recorder's Connect page (shared/recorder-page.ts), or `unknown` where
+ * the Recorder did not say: one from before it could, which the page goes on waiting for, as it always did. */
+export type ConnectWait = RecorderConnectWait | "unknown";
+
+const connectWaitSchema = z.object({
+  ok: z.literal(true),
+  connect: z.enum(["waiting", "cancelled", "closed", "none"]),
+}) satisfies z.ZodType<{ ok: true; connect: RecorderConnectWait }>;
+
+/** Asks the Recorder `id` where the connect this page asked for has got to (`openbot.connect.status`). */
+export async function askConnectWait(id: string): Promise<ConnectWait> {
+  const answer = connectWaitSchema.safeParse(
+    await ask(id, { type: RECORDER_CONNECT_STATUS }),
+  );
+  return answer.success ? answer.data.connect : "unknown";
+}
+
 const CONNECT_REFUSALS: Record<string, string> = {
   "not-https": "The Recorder only connects to OpenBot over HTTPS.",
   "pinned-elsewhere": "Your organization set the Recorder to another OpenBot.",
@@ -265,13 +284,21 @@ function askWithin(
   });
 }
 
-/** Where the person adds the Recorder to this browser, while its store page there is published. */
-function absentHere(): RecorderHere {
+/** Where the person adds the Recorder to the browser this page is open in: its store there and its page in that store,
+ * or null where it has no published store page (another browser, or a store it is not in yet). */
+export function recorderStorePageHere(): {
+  store: RecorderStore;
+  page: string;
+} | null {
   const store = recorderStoreHere();
   const id = store ? RECORDER_STORE_IDS[store] : undefined;
-  return store && id
-    ? { kind: "absent", store, page: recorderStorePage(store, id) }
-    : { kind: "unreachable" };
+  return store && id ? { store, page: recorderStorePage(store, id) } : null;
+}
+
+/** Where the person adds the Recorder to this browser, while its store page there is published. */
+function absentHere(): RecorderHere {
+  const here = recorderStorePageHere();
+  return here ? { kind: "absent", ...here } : { kind: "unreachable" };
 }
 
 /**

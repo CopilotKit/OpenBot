@@ -27,7 +27,9 @@ export type LearnedSkillInvocation = {
 };
 /**
  * The learned Skills one run of `agentId` may use. With `userId`, the person the run is for: their own Learning space's
- * Skills and every Skill another person opened join the Bot's own (`mergeLearnedSkills`).
+ * Skills and, while an administrator allows Skill sharing, every Skill another person opened join the Bot's own
+ * (`mergeLearnedSkills`). Callers never pass `userId` themselves: `agents/agent-resolver.ts` binds the person a Bot is
+ * built for, and every path that builds one (a chat turn, a routine, a channel, a hop) goes through it.
  */
 export type AcquireLearnedSkills = (
   agentId: string,
@@ -192,6 +194,12 @@ export type PersonalSkillSources = {
   containerFor(userId: string): string;
   /** Everyone's opened Skills, from the in-memory index (learning/sharing.ts), never read per person per run. */
   openSkills(): Promise<readonly OpenSkillSource[]>;
+  /**
+   * Whether an administrator lets people open their Skills to every Bot (Admin, Enterprise controls, Skill sharing).
+   * Asked on every run, before the index: while it is off, a Skill somebody opened reaches no other person's Bot, and
+   * their choice is kept for when it is on again. A gate that cannot be read counts as off.
+   */
+  sharingAllowed(): boolean | Promise<boolean>;
 };
 
 /** The longest a run waits for a person's or an opened space before going on without it. Its refresh carries on. */
@@ -287,7 +295,7 @@ export function createLearningRuntime(options: {
     if (!people) return { opened: [] };
     let sources: readonly OpenSkillSource[] = [];
     try {
-      sources = await people.openSkills();
+      if (await people.sharingAllowed()) sources = await people.openSkills();
     } catch {
       console.warn(JSON.stringify({ type: "learning-open-skills-unread" }));
     }

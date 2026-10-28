@@ -140,7 +140,8 @@ function IdleHere({
         <PopoverTitle>Record a task</PopoverTitle>
         <PopoverDescription>
           What you do in this browser goes into your own Learning space, in
-          every tab you use, until you stop.
+          every tab you use, until you stop: your steps, what each step saves,
+          AI assistant conversations, and your narration when it's on.
         </PopoverDescription>
       </PopoverHeader>
       {stopped ? (
@@ -183,12 +184,15 @@ function IdleHere({
 }
 
 /** Where connecting the Recorder in this browser has got to. `idle`: no connect is under way (the Recorder stopped
- * being connected here while the popover was open, after a Disconnect in Settings, Browsers). */
+ * being connected here while the popover was open, after a Disconnect in Settings, Browsers). `cancelled` and
+ * `closed`: the person pressed Cancel on the Recorder's Connect page, or closed it. */
 export type ConnectProgress =
   | { state: "idle" }
   | { state: "sending" }
   | { state: "awaiting" }
   | { state: "expired" }
+  | { state: "cancelled" }
+  | { state: "closed" }
   | { state: "failed"; message: string };
 
 function connectSentence(progress: ConnectProgress): string {
@@ -201,10 +205,23 @@ function connectSentence(progress: ConnectProgress): string {
       return "Confirm in the OpenBot Recorder tab that opened.";
     case "expired":
       return "The request expired. Try again.";
+    case "cancelled":
+      return "You cancelled in the OpenBot Recorder tab. Nothing was connected.";
+    case "closed":
+      return "The OpenBot Recorder tab closed before you confirmed. Nothing was connected.";
     case "failed":
       return progress.message;
   }
 }
+
+/** The states the person can connect again from: a fresh Connect after nothing happened, Try again after a failure. */
+const CONNECT_AGAIN: Partial<Record<ConnectProgress["state"], string>> = {
+  idle: "Connect this browser",
+  cancelled: "Connect this browser",
+  closed: "Connect this browser",
+  failed: "Try again",
+  expired: "Try again",
+};
 
 /**
  * The popover while the Recorder in this browser is being connected to this OpenBot, which the first click on the
@@ -230,11 +247,9 @@ export function ConnectHerePanel({
           {connectSentence(progress)}
         </PopoverDescription>
       </PopoverHeader>
-      {progress.state === "idle" ||
-      progress.state === "failed" ||
-      progress.state === "expired" ? (
+      {CONNECT_AGAIN[progress.state] ? (
         <Button onClick={connect} size="sm" variant="outline">
-          {progress.state === "idle" ? "Connect this browser" : "Try again"}
+          {CONNECT_AGAIN[progress.state]}
         </Button>
       ) : null}
     </>

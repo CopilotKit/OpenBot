@@ -6,4 +6,5 @@
 @import "../../../../app/src/theme.css";
 @source "../../../../app/src/components/ui";
 @source "../../../../app/src/components/layout/page-parts.tsx";
+@source "../../../../app/src/components/recorder";
 @source "../";

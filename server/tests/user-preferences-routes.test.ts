@@ -53,6 +53,7 @@ test("preferences default to thread and persist separately for each authenticate
     preferences: {
       messageListEmphasis: "thread",
       selfHostBannerDismissed: false,
+      narration: null,
     },
   });
   const saved = await alice.request(
@@ -64,12 +65,14 @@ test("preferences default to thread and persist separately for each authenticate
     preferences: {
       messageListEmphasis: "agent",
       selfHostBannerDismissed: false,
+      narration: null,
     },
   });
   expect(await (await appFor("bob").request(path)).json()).toEqual({
     preferences: {
       messageListEmphasis: "thread",
       selfHostBannerDismissed: false,
+      narration: null,
     },
   });
 });
@@ -79,6 +82,8 @@ test.each([
   null,
   { selfHostBannerDismissed: "yes" },
   { messageListEmphasis: "invalid" },
+  { narration: "always" },
+  { narration: null },
   { messageListEmphasis: "agent", userId: "bob" },
 ])("rejects invalid or extra preference fields: %j", async (body) => {
   const { appFor, state } = fixture();
@@ -114,12 +119,40 @@ test("saves the self-host banner dismissal without touching message list emphasi
     preferences: {
       messageListEmphasis: "agent",
       selfHostBannerDismissed: true,
+      narration: null,
     },
   });
   expect(await (await appFor("bob").request(path)).json()).toEqual({
     preferences: {
       messageListEmphasis: "thread",
       selfHostBannerDismissed: false,
+      narration: null,
     },
   });
+});
+
+test("keeps the person's narration choice without touching the others, and starts with none made", async () => {
+  // The Browser page asks before the first recording, and the microphone stays closed until it is answered.
+  const { appFor } = fixture();
+  const alice = appFor("alice");
+  expect((await (await alice.request(path)).json()).preferences.narration).toBe(
+    null,
+  );
+  await alice.request(path, patch({ messageListEmphasis: "agent" }));
+  const saved = await alice.request(path, patch({ narration: "on" }));
+  expect(saved.status).toBe(200);
+  expect(await (await appFor("alice").request(path)).json()).toEqual({
+    preferences: {
+      messageListEmphasis: "agent",
+      selfHostBannerDismissed: false,
+      narration: "on",
+    },
+  });
+  await alice.request(path, patch({ narration: "off" }));
+  expect(
+    (await (await appFor("alice").request(path)).json()).preferences.narration,
+  ).toBe("off");
+  expect(
+    (await (await appFor("bob").request(path)).json()).preferences.narration,
+  ).toBe(null);
 });

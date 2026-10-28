@@ -3,7 +3,7 @@ import type { RecorderActivity } from "@openbot/shared/recorder-api";
 import type { RecorderPageState } from "@openbot/shared/recorder-page";
 import { IconBrowser } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useState } from "react";
 import {
   Popover,
@@ -28,6 +28,7 @@ import {
 } from "@/lib/recorder/mutations";
 import {
   recorderConnectionsQueryOptions,
+  recorderConnectWaitQueryOptions,
   recorderHereQueryOptions,
 } from "@/lib/recorder/queries";
 import { queryClient } from "@/query-client";
@@ -154,6 +155,11 @@ export function storeOpenedSentence(browser: RealBrowser): string {
  * further click, and when the server refuses, its sentence is a toast, because the person stays wherever they were in
  * OpenBot and the button has no page of its own to say it on.
  *
+ * Unless what opened is a browser in the page after all (`window: "screen"`): OpenBot Desktop opens one where it finds
+ * no Chrome or Edge to use. Its window is the Browser page, so the click takes the person there, as a hosted OpenBot's
+ * button does; left where they were, they saw "Opening…" and then nothing, with the browser open on a page they could
+ * not see.
+ *
  * Opening is busy (`aria-busy`), not disabled: the click handler ignores a click while it opens, and the row keeps its
  * full contrast and the keyboard's focus. The sidebar draws `aria-disabled` at half opacity, and the seventh end-to-end
  * run found "Opening…" too faint to read that way.
@@ -164,6 +170,7 @@ export function storeOpenedSentence(browser: RealBrowser): string {
  */
 function OpenWindowButton({ activity }: { activity?: RecorderActivity }) {
   const open = useMutation(openBrowserMutationOptions(queryClient));
+  const navigate = useNavigate();
   const recording = useRecordingLabel(activity);
   const opening = open.isPending;
   return (
@@ -175,6 +182,10 @@ function OpenWindowButton({ activity }: { activity?: RecorderActivity }) {
         open.mutate(undefined, {
           onSuccess: (answer) => {
             toast.close(REFUSED_TOAST);
+            if ("window" in answer && answer.window === "screen") {
+              void navigate({ to: "/browser" });
+              return;
+            }
             if ("opened" in answer && answer.opened === "store")
               toast.add({
                 // One at a time: a second click replaces the note rather than stacking another under it.
@@ -221,6 +232,12 @@ export function storeTabSentence(store: RecorderStore): string {
   return `The OpenBot Recorder's page is open in a new tab. Add it to ${STORE_NAMES[store]} to record from OpenBot.`;
 }
 
+/** The short note that waits in OpenBot for a person who opened the Recorder's store page in a new tab: one at a time,
+ * so a second click replaces it rather than stacking another under it. Settings, Browsers says the same. */
+export function noteStoreTabOpened(store: RecorderStore): void {
+  toast.add({ id: STORE_TOAST, title: storeTabSentence(store), type: "info" });
+}
+
 /**
  * Chrome or Edge with no Recorder in it: a link to the Recorder's store page there, in a new tab, because it goes
  * somewhere (a link opens it from the keyboard as from the mouse, and no popup blocker stops it). The new tab takes the
@@ -242,14 +259,7 @@ function StorePageLink({
       render={
         <a
           href={url}
-          onClick={() =>
-            toast.add({
-              // One at a time: a second click replaces the note rather than stacking another under it.
-              id: STORE_TOAST,
-              title: storeTabSentence(store),
-              type: "info",
-            })
-          }
+          onClick={() => noteStoreTabOpened(store)}
           rel="noopener noreferrer"
           target="_blank"
         />
@@ -326,14 +336,29 @@ function RecorderHereButton({
   const record = useMutation(recordHereMutationOptions(queryClient));
   const stop = useMutation(stopHereMutationOptions(queryClient));
   const [expired, setExpired] = useState(false);
+  // The person pressed Cancel on the Recorder's Connect page, or closed it, as the Recorder said when asked.
+  const [ended, setEnded] = useState<"cancelled" | "closed" | null>(null);
   const connected = here.kind === "connected";
-  const progress = connected ? null : connectProgress(connect, expired);
+  const progress = connected
+    ? null
+    : ended
+      ? { state: ended }
+      : connectProgress(connect, expired);
   const awaiting = progress?.state === "awaiting";
   // Asked every 2 s while the person confirms the connect in the Recorder's own tab, as Settings, Browsers asks.
   useQuery({
     ...recorderHereQueryOptions(ids, { awaiting }),
     enabled: awaiting,
   });
+  // And where that connect has got to there, so a Cancel or the tab closed ends the wait at once, with Connect back.
+  const wait = useQuery({
+    ...recorderConnectWaitQueryOptions(here.id, connect.submittedAt),
+    enabled: awaiting,
+  });
+  useEffect(() => {
+    if (awaiting && (wait.data === "cancelled" || wait.data === "closed"))
+      setEnded(wait.data);
+  }, [awaiting, wait.data]);
 
   useEffect(() => {
     if (!awaiting) return;
@@ -347,10 +372,12 @@ function RecorderHereButton({
     if (!connected) return;
     reset();
     setExpired(false);
+    setEnded(null);
   }, [connected, reset]);
 
   function startConnect() {
     setExpired(false);
+    setEnded(null);
     connect.mutate(here.id);
   }
 

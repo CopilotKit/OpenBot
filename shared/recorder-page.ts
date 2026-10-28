@@ -55,8 +55,23 @@ export type RecorderPageResult =
   | { ok: false; error: string };
 
 /**
+ * Where a connect a page asked for has got to (`openbot.connect.status`), asked while it waits for the person on the
+ * Recorder's Connect page, so it can say at once that they cancelled or closed that tab rather than wait out the five
+ * minutes a request lasts. Any page may ask, as any page may ask to connect, and the answer is only ever about the
+ * connect from the origin that asks: nothing about this copy, its connection, or another site's request.
+ * - `waiting`: the Connect page for it is open, and the person has not chosen.
+ * - `cancelled`: the person pressed Cancel there.
+ * - `closed`: the person closed that tab without choosing.
+ * - `none`: nothing is waiting for this origin (it connected, another site's request took its place, or it never asked).
+ */
+export const RECORDER_CONNECT_STATUS = "openbot.connect.status";
+export type RecorderConnectWait = "waiting" | "cancelled" | "closed" | "none";
+
+/**
  * Which `openbot.connect` requests the Recorder accepts with no Connect page (David, 2026-10-22: "only for trusted
  * OpenBots"): an origin the organization's policy pins (`OpenBotUrl`), or OpenBot Desktop's own loopback address on this
- * computer. Every other site still gets the one Connect click, so no site can quietly take the Recorder for itself.
+ * computer, exactly as OpenBot Desktop's native host confirms it (any program can serve a page on a loopback port), and
+ * either only while the Recorder is connected to nothing: replacing a connection always goes through the Connect page.
+ * Every other site still gets the one Connect click, so no site can quietly take the Recorder for itself.
  */
 export type TrustedConnectRule = "policy-pinned" | "loopback-desktop";

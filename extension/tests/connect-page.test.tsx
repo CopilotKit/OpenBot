@@ -7,6 +7,10 @@ import {
   test,
 } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import {
+  RECORDER_DESTINATION,
+  RECORDER_DISCLOSURE,
+} from "@openbot/shared/recorder-disclosure";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ConnectPage } from "../src/pages/connect/connect-page";
@@ -66,18 +70,57 @@ afterEach(() => {
 test("shows the origin and the default name", async () => {
   const { findByText, getByText } = render(<ConnectPage />);
   expect((await findByText(ORIGIN)).className).toContain("font-mono");
-  expect(getByText("You asked from OpenBot in this browser.")).toBeTruthy();
+  // Any site can ask, so the page never says the request came from OpenBot.
+  expect(
+    getByText("A page at this address in this browser asked to connect."),
+  ).toBeTruthy();
   expect(getByText("Google Chrome on macOS")).toBeTruthy();
 });
 
-test("the page says OpenBot signs the browser in and hands out passes, and recordings go to Intelligence", async () => {
+test("a connect that would replace this browser's connection says so before the click, naming that OpenBot and the person", async () => {
+  pendingAnswer = {
+    ok: true,
+    pending: { origin: ORIGIN, via: "web" },
+    replaces: {
+      origin: "https://other.example.test",
+      email: "ada@example.test",
+    },
+  };
+  const { findByText, getByText, container } = render(<ConnectPage />);
+  await findByText(ORIGIN);
+  expect(container.textContent).toContain(
+    "This replaces your connection to https://other.example.test",
+  );
+  expect((await findByText("https://other.example.test")).className).toContain(
+    "font-mono",
+  );
+  expect(getByText("Connected there as ada@example.test.")).toBeTruthy();
+});
+
+test("a connect that replaces nothing says nothing about replacing", async () => {
+  const { findByText, container } = render(<ConnectPage />);
+  await findByText(ORIGIN);
+  expect(container.textContent).not.toContain("replaces");
+});
+
+test("the page says OpenBot signs the browser in, and that recordings go straight to the organization's own Intelligence with OpenBot's pass, as the disclosure says", async () => {
   const { findByText, container } = render(<ConnectPage />);
   await findByText(ORIGIN);
   expect(
     await findByText(
-      "Confirm this is your OpenBot. It signs this browser in and hands out each capture pass. What you record goes to Intelligence, not to OpenBot.",
+      "Confirm this is your OpenBot. It signs this browser in. What you record goes straight from your browser to your organization's own Intelligence, with a pass from your organization's OpenBot. OpenBot is told that you are recording, the task's name, when it started and how many steps it has, and when you record in a browser shown inside OpenBot, your narration passes through it to the Recorder without being stored.",
     ),
   ).toBeTruthy();
+  expect(container.ownerDocument.body.textContent).toContain(
+    RECORDER_DESTINATION,
+  );
+  // The disclosure says the same, and neither says the recording passes through OpenBot, which it never does.
+  expect(RECORDER_DISCLOSURE).toContain(RECORDER_DESTINATION);
+  for (const said of [
+    RECORDER_DISCLOSURE,
+    container.ownerDocument.body.textContent,
+  ])
+    expect(said).not.toMatch(/through (your organization's )?OpenBot/i);
   expect(container.ownerDocument.body.textContent).not.toMatch(
     /save (your )?recordings/i,
   );

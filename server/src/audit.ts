@@ -617,9 +617,18 @@ export const auditEventTypes = [
    * the token or the code; the label is the person's own name for the browser.
    */
   "recorder.connected",
-  /* A connection attempt from an origin that is not the Recorder's. Payload: the origin offered. */
+  /*
+   * A connection refused before it was made; payload `reason`: `origin`, an origin that is not the Recorder's (payload
+   * `origin`, the one offered); `code`, a connect code that is unknown, expired or already used (payload `extensionId`
+   * and `installId`, never the code); or `too_many_codes`, the person already holding ten unused codes (payload `via`).
+   * A row that cannot be written is logged and the refusal stands.
+   */
   "recorder.connect_refused",
-  /* A connection ended; payload `reason` is replaced (the same copy connected again), disconnected or revoked. */
+  /*
+   * A connection ended; payload `reason` is replaced (the same copy connected again), disconnected, revoked, signed_out
+   * (the person signed out of OpenBot) or expired (its lifetime ran out: the deployment ended it, payload `owner`).
+   * Written in the transaction that ends the connection, as `recorder.connected` is in the one that makes it.
+   */
   "recorder.revoked",
   /*
    * The capture pass (the runtime's trajectory/connect) turned a caller away: an id that is not a UUID, no

@@ -31,6 +31,14 @@
 // page, `from` the address the chain began at. A reload, a step back or forward, or an address the person typed or
 // picked in the browser is never the page's: it starts a step of its own.
 //
+// A page the person arrives on and has not acted on yet is a visit: it stays held for as long as they stay on its site,
+// and so does everything after it, since nothing leaves ahead of what came before it. The visit ends, and what it held
+// goes out with its own times, at the person's first step (there or in another tab), when they move to another tab,
+// when a page of another site arrives in the tab, when the tab closes, or when the recording stops. Until then, leaving
+// the site out (`dropTab`) drops all of it: a glance at a bank or a mailbox while recording never leaves the browser if
+// the person leaves its site out before they act or move on. A redirect the page makes is the same visit, wherever it
+// goes on the way.
+//
 // The person's narration is placed the same way: a phrase's transcript is stamped with the phrase's start, but exists
 // only once the phrase ends, seconds later. While a phrase is being spoken (`hold`), nothing from its start on leaves
 // until its transcript is placed, or `speechCapMs` after its start at most, so it goes in ahead of the steps taken while
@@ -45,6 +53,7 @@ import {
   REDACTED,
   trimEvent,
 } from "@openbot/shared/recorder-masking";
+import { siteOf } from "../shared/sites";
 
 export const STEP_TIMING = {
   /** A call starting this long after a step is the step's. */
@@ -340,6 +349,9 @@ type Pending = {
   /** A page change: when its chain's last page change came, and which lookup of its page counts. */
   lastHop?: number;
   lookup?: number;
+  /** A page change the person has not acted on, on a site they have not left: held, with all that came after it, until
+   * the visit ends. */
+  visiting?: true;
 };
 
 /** One held item as a snapshot keeps it: its timers are set again when it is restored. `open` marks its tab's page
@@ -520,8 +532,9 @@ export function createStepAssembler(options: {
 
   function isReady(step: Pending, at: number): boolean {
     if (step.placed) return true;
-    // A page change is ready once its page was looked up, `redirectMs` after its chain's last page change.
-    if (!step.owner) return !step.waitingForPage;
+    // A page change is ready once its page was looked up, `redirectMs` after its chain's last page change, and the
+    // person's visit to it is over.
+    if (!step.owner) return !step.waitingForPage && !step.visiting;
     if (step.waitingForPage) return false;
     if (at < readyAt(step)) return false;
     if (at >= step.closeAt + tune.inflightCapMs) return true;
@@ -665,10 +678,30 @@ export function createStepAssembler(options: {
     changed();
   }
 
+  /** Ends the visits `ends` picks: what each held goes out in its place, once the rest of it is ready. */
+  function endVisits(ends: (held: Pending) => boolean): void {
+    let any = false;
+    for (const held of queue)
+      if (held.visiting && ends(held)) {
+        delete held.visiting;
+        any = true;
+      }
+    if (any) pump();
+  }
+
+  /** The site a held page change went to. */
+  const siteOfChange = (held: Pending): string | null => {
+    const to = stepValue(held.event).to;
+    return siteOf(typeof to === "string" ? to : null);
+  };
+
   function prune(at: number): void {
+    // Only a step of the person's owns calls: a visit held for minutes keeps none of the calls made meanwhile.
     const oldest = Math.min(
       at - 2 * 60_000,
-      ...queue.map((step) => step.at - tune.leadMs),
+      ...queue
+        .filter((step) => step.owner)
+        .map((step) => step.at - tune.leadMs),
     );
     for (const [tabId, list] of calls) {
       const kept = list.filter((call) => call.startedAt >= oldest);
@@ -731,6 +764,9 @@ export function createStepAssembler(options: {
       if (ended) return;
       // A page change after this one is the person's doing, never a redirect of the one before.
       openChange.delete(tabId);
+      // The person acted: the page they arrived on goes out ahead of their first step there, and a page in another tab
+      // is one they have left, since a person acts only on the page in front of them.
+      endVisits(() => true);
       const at = event.timestamp;
       const previous = lastOwner(tabId);
       const echo =
@@ -819,11 +855,29 @@ export function createStepAssembler(options: {
         values: [],
         waitingForPage: true,
         lastHop: event.timestamp,
+        visiting: true,
       };
+      // A page on the site the person is visiting in the tab is more of the same visit, held with it; one on another
+      // site ends that visit, since they left its site.
+      const site = siteOfChange(step);
+      endVisits((held) => held.tabId === tabId && siteOfChange(held) !== site);
       queue.push(step);
       openChange.set(tabId, step);
       step.pageTimer = timers.set(() => fetchPage(step), tune.redirectMs);
       changed();
+    },
+
+    /** The person moved to this tab (they switched to it, or brought its window to the front): a visit in any other tab
+     * is over. */
+    entered(tabId: number): void {
+      if (ended) return;
+      endVisits((held) => held.tabId !== tabId);
+    },
+
+    /** The tab closed: its visit is over. */
+    left(tabId: number): void {
+      if (ended) return;
+      endVisits((held) => held.tabId === tabId);
     },
 
     /** An event that is not a step (the agent's side): it leaves after every step held from before its time and
@@ -949,6 +1003,23 @@ export function createStepAssembler(options: {
       typed.clear();
       inflight.clear();
       openChange.clear();
+      changed();
+    },
+
+    /** The person kept the tab's site out of the recording: everything still held from the tab (its steps and page
+     * changes, and the agent's events placed for it) is dropped and never sent, with the calls and typing it kept. A
+     * phrase's transcript stays: it is the person's narration, placed in the recording's first tab whichever tab they
+     * spoke over. */
+    dropTab(tabId: number): void {
+      if (ended) return;
+      for (let index = queue.length - 1; index >= 0; index--) {
+        const held = queue[index];
+        if (held?.tabId !== tabId || held.speech) continue;
+        if (held.timer !== undefined) timers.clear(held.timer);
+        if (held.pageTimer !== undefined) timers.clear(held.pageTimer);
+        queue.splice(index, 1);
+      }
+      this.forgetTab(tabId);
       changed();
     },
 

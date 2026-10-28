@@ -17,6 +17,8 @@
 import type { ComputerControlState } from "../../shared/computer-control";
 import {
   browserComputerPaths,
+  isPersonBrowserId,
+  PEOPLE_ONLY_ENV,
   realBrowserComputerPaths,
 } from "../../shared/openbot-browser";
 
@@ -72,4 +74,59 @@ export function personHoldsTheWheel(since: string): ComputerControlState {
     resumeSnapshotRequired: false,
     recoveryRequired: false,
   };
+}
+
+/**
+ * Whose this computer is, from how it was started.
+ *
+ * A PERSON'S BROWSER RUNS ONLY ON A COMPUTER OF ITS OWN. Beside Bots it would share their container, where a Bot may
+ * run a shell (`/exec`) as the same user, and its profile holds what the person signed in to by hand: a
+ * prompt-injected Bot could read `/profiles/person-<hex>/Default/Cookies` straight off the disk. So the computer
+ * decides this for itself, from what it was started with, as well as the server deciding where to send the person:
+ *
+ *   - `people`: OpenBot Desktop's host-side computer (`COMPUTER_PEOPLE_ONLY=on`), which runs people's own browsers and
+ *     no Bot.
+ *   - `one`: a computer started for one id (`COMPUTER_BOT_ID`), which is how a supervisor starts each container and a
+ *     Sandbox each pod. Started for a person's browser, it runs that browser and nothing else.
+ *   - `shared`: neither, the one computer every Bot without its own reaches. No person's browser runs there.
+ */
+export type ComputerOwner =
+  | { kind: "people" }
+  | { kind: "one"; id: string }
+  | { kind: "shared" };
+
+export function computerOwner(
+  env: Record<string, string | undefined>,
+): ComputerOwner {
+  if (env[PEOPLE_ONLY_ENV]?.trim().toLowerCase() === "on")
+    return { kind: "people" };
+  const id = env.COMPUTER_BOT_ID?.trim();
+  return id ? { kind: "one", id } : { kind: "shared" };
+}
+
+/** Why a person's browser is refused on a computer Bots run on. Said to whoever runs OpenBot: the server tells the
+ * person their browser cannot open and who can see to it. */
+export const NOT_ITS_OWN_COMPUTER =
+  "A person's own browser runs only on a computer of its own, and Bots run on this one. Give people's browsers their own computers (COMPUTER_SUPERVISOR_URL or a Sandbox), or OpenBot Desktop's.";
+
+/** Why anything but its own browser is refused on a person's computer. */
+export const ONLY_THE_PERSONS =
+  "This computer runs a person's own browser. Nothing else runs on it.";
+
+/**
+ * What this computer refuses an id, before the id reaches anything: a person's browser anywhere but a computer of its
+ * own (503, as for any browser this computer cannot run), and anything but the person's on a computer that is theirs
+ * (403). Null when the id may go on. A Bot's computer takes Bots as it always has.
+ */
+export function refusedHere(
+  owner: ComputerOwner,
+  botId: string,
+): { status: 403 | 503; error: string } | null {
+  const person = isPersonBrowserId(botId);
+  if (owner.kind === "people")
+    return person ? null : { status: 403, error: ONLY_THE_PERSONS };
+  if (owner.kind === "one" && isPersonBrowserId(owner.id))
+    return botId === owner.id ? null : { status: 403, error: ONLY_THE_PERSONS };
+  // The shared computer, or a Bot's: a person's browser would sit beside Bots there.
+  return person ? { status: 503, error: NOT_ITS_OWN_COMPUTER } : null;
 }

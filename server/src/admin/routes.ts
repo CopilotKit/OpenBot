@@ -96,6 +96,7 @@ const settingInputs: {
     enabled: z.boolean(),
     servers: z.array(SERVER).max(500),
   }),
+  skillSharing: z.boolean(),
 };
 
 export function createEnterpriseAdminRoutes(

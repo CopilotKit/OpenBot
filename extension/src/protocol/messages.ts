@@ -6,6 +6,8 @@ import type {
 import type { CapturedEvent } from "@openbot/shared/recorder-masking";
 import { MAX_TIMESTAMP_MS } from "@openbot/shared/recorder-masking";
 import {
+  RECORDER_CONNECT_STATUS,
+  type RecorderConnectWait,
   type RecorderPageResult,
   type RecorderPageState,
   recorderPageMessageSchema,
@@ -42,11 +44,18 @@ export type VoiceCapture = {
   reason?: string;
   heard?: string;
   problem?: VoiceProblem;
+  /** For `speech-pack`: the language the browser has to download, which the popup's Download asks for. */
+  language?: string;
 };
+/** `on-device`: this browser cannot recognise speech on the person's computer at all. `speech-pack`: it can, once the
+ * narration's language is downloaded, which takes the person's click. `language`: it cannot recognise this language on
+ * the computer. Recognition never leaves the computer (offscreen/voice.ts), so each of these turns voice off. */
 export type VoiceProblem =
   | "microphone"
   | "no-microphone"
   | "no-recognition"
+  | "on-device"
+  | "speech-pack"
   | "service"
   | "network"
   | "language";
@@ -139,10 +148,26 @@ const contentToBackgroundSchema = z.discriminatedUnion("type", [
       choice: z.enum(["stop", "restart", "continue"]),
     })
     .strict(),
+  // The person's click on the recording mark in a tab: leave the site the tab shows out of every recording, or record it
+  // again. The service worker takes the site from the tab, never from the page.
+  z.object({ type: z.literal("content.site"), recorded: z.boolean() }).strict(),
 ]);
 export type ContentToBackground = z.infer<typeof contentToBackgroundSchema>;
+/**
+ * `background.capture` says whether a frame captures, and, for a tab the recording follows, what its recording mark
+ * shows (content/indicator.ts): `site` is the site the tab shows, `excluded` that the person keeps it out of their
+ * recordings (nothing there is captured), and `narrating` whether the Recorder hears them now (absent where it does not
+ * hear them itself). Without `site`, no mark: nothing is being recorded in the tab.
+ */
 export type BackgroundToContent =
-  | { type: "background.capture"; active: boolean; recordingId?: string }
+  | {
+      type: "background.capture";
+      active: boolean;
+      recordingId?: string;
+      site?: string;
+      excluded?: boolean;
+      narrating?: boolean;
+    }
   | { type: "background.notice"; show: boolean; actions: number };
 
 export type StreamSession = {
@@ -270,9 +295,16 @@ export type PageToBackground =
       /** The narration's language: the page's own, else the browser's (the service worker's browser language when
        * absent or unusable). */
       language?: string;
+      /** Whether the person narrates this recording, when whoever started it asked them (OpenBot's own Record form, by
+       * the launcher). Absent: the choice they made in the Recorder, and no microphone until they made one. */
+      narrate?: boolean;
     }
   | { type: "page.stop" }
   | { type: "page.voice"; muted: boolean }
+  /** The person's choice to narrate their recordings, or not: kept for every later recording. */
+  | { type: "page.narration"; on: boolean }
+  /** A site left out of every recording, or recorded again (the options page). */
+  | { type: "page.site"; site: string; recorded: boolean }
   | { type: "page.restart" }
   | { type: "page.notice"; choice: "stop" | "restart" | "continue" }
   | { type: "page.notice.dismiss" }
@@ -294,10 +326,19 @@ export type PageStateResponse = {
   me: RecorderMe | null;
   policy: { openbotUrl: string | null; invalid: boolean };
   notice: RecorderNotice | null;
+  /** Whether the person narrates their recordings; null until they chose. */
+  narration: "on" | "off" | null;
+  /** The sites the person keeps out of every recording, sorted. */
+  excludedSites: string[];
 };
 export type PageResponse =
   | PageStateResponse
-  | { ok: true; pending: { origin: string; via: "web" | "desktop" } | null }
+  | {
+      ok: true;
+      pending: { origin: string; via: "web" | "desktop" } | null;
+      /** The connection approving it replaces, when this browser is connected: its OpenBot and the person it is for. */
+      replaces?: { origin: string; email: string };
+    }
   | { ok: true; learning: LearningSpaceState }
   | { ok: true; available: boolean }
   | { ok: true; connected: true } // OpenBot Desktop connected this browser, with no Connect page
@@ -357,6 +398,8 @@ const externalToBackgroundSchema = z.discriminatedUnion("type", [
       code: z.string().startsWith("obc_").max(80),
     })
     .strict(),
+  // Where the asking origin's own connect has got to (shared/recorder-page.ts).
+  z.object({ type: z.literal(RECORDER_CONNECT_STATUS) }).strict(),
   // From the MAIN-world fallback (Task 18), masked and trimmed to fit one event in the page; accepted only from a
   // recorded tab.
   z.object({ type: z.literal("recorder.page-network"), event }).strict(),
@@ -374,14 +417,18 @@ const externalToBackgroundSchema = z.discriminatedUnion("type", [
 export type ExternalToBackground = z.infer<typeof externalToBackgroundSchema>;
 export type ExternalResponse =
   | { ok: true } // a ping from any origin this copy is not connected to (Decision 22)
+  // A connect waiting for the person's click on the Connect page. Nothing about this copy goes with it: any site can
+  // ask to connect, and it learns this copy's version and its install id for it only once the person approves.
+  | { ok: true; awaitingConfirmation: true }
+  // Where the asking origin's own connect has got to: nothing about this copy goes with it either.
+  | { ok: true; connect: RecorderConnectWait }
   | {
       ok: true;
       version: string;
       installId: string;
-      awaitingConfirmation?: boolean;
       /** A trusted OpenBot's connect (connection.ts `trustedConnectRule`): connected now, with no Connect page. */
       connected?: true;
-    } // the connected origin's ping, a pending connect's origin, and the connect answer; installId = installIdFor(sender.origin)
+    } // the connected origin's ping, and a trusted OpenBot's connect; installId = installIdFor(sender.origin)
   | {
       ok: false;
       error:

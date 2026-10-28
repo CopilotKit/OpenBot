@@ -1,14 +1,25 @@
 // The person's narration, transcribed in this browser with the Web Speech API while they record. It runs in the offscreen
 // document, which lasts the whole recording (the popup closes when it loses focus). Chrome lets an offscreen document use
 // speech recognition and the microphone once the extension's own origin holds a lasting microphone grant, which the
-// setup page asks for on a visible tab when the Recorder is installed; without one, both fail at once as not allowed, since an offscreen document
-// cannot show a prompt. The microphone is opened with getUserMedia and its track handed to the recognizer, so a missing
-// grant or a missing device is told apart from a speech-service failure. It is the browser's own speech recognition with
-// its defaults: no model is downloaded, bundled or forced on the device. Only the words leave: each final phrase becomes one
-// masked `transcript` event in the recording, and no audio is kept. Interim words only update the popup, masked the same
-// way. A browser that hears speech but hands back no words (every phrase empty) says so in the popup after a while.
+// setup page asks for on a visible tab when the person turns narration on; without one, both fail at once as not allowed,
+// since an offscreen document cannot show a prompt. The microphone is opened with getUserMedia and its track handed to the
+// recognizer, so a missing grant or a missing device is told apart from a speech-service failure.
+//
+// Recognition runs on this computer or not at all. Chrome's speech recognition sends the audio to a speech service unless
+// the recognition sets `processLocally`, so every recognition here sets it, and before the microphone opens the browser
+// is asked whether it can recognise the narration's language on the device (@openbot/shared/on-device-speech): where it
+// cannot, narration is off and the popup says why in one sentence; where the language is still to be downloaded, which
+// takes the person's click (the popup's Download, the setup page, or the Record button), it says so; while it downloads,
+// it waits for it. Only the words leave: each final phrase becomes one masked `transcript` event in the recording, and no
+// audio is kept. Interim words only update the popup, masked the same way. A browser that hears speech but hands back no
+// words (every phrase empty) says so in the popup after a while.
 //
 // Nothing here may use a chrome.* API: an offscreen document has only runtime messaging.
+import {
+  keepOnDevice,
+  type OnDeviceSpeech,
+  onDeviceSpeech,
+} from "@openbot/shared/on-device-speech";
 import type { CapturedEvent } from "@openbot/shared/recorder-masking";
 import type { VoiceCapture, VoiceProblem } from "../protocol/messages";
 
@@ -103,6 +114,8 @@ const HEARD_MAX = 160;
 export const NO_WORDS_MS = 20_000;
 export const NO_WORDS_SENTENCE =
   "This browser is not turning your speech into words. Recording carries on without narration.";
+/** How often a language being downloaded for on-device recognition is asked about again. */
+export const DOWNLOAD_POLL_MS = 3_000;
 
 const GOES_ON = "Recording goes on without your voice.";
 
@@ -130,12 +143,39 @@ export function voiceSentence(
       return `No microphone was found, or another app is using it. ${GOES_ON}`;
     case "no-recognition":
       return `This browser cannot turn speech into text. ${GOES_ON}`;
+    case "on-device":
+      return `This version of ${browser} cannot turn speech into text on your computer, and the Recorder sends no voice anywhere else. ${GOES_ON}`;
+    case "speech-pack":
+      return `${browser} has to download its ${languageName(language)} speech recognition to your computer first. Choose Download, then voice turns on. ${GOES_ON}`;
     case "service":
       return `${browser}'s speech recognition is turned off or not available here. ${GOES_ON}`;
     case "network":
       return `${browser}'s speech service cannot be reached. Recording goes on, and voice tries again in a moment.`;
     case "language":
-      return `${browser} cannot turn ${languageName(language)} speech into text. ${GOES_ON}`;
+      return `${browser} cannot turn ${languageName(language)} speech into text on your computer. ${GOES_ON}`;
+  }
+}
+
+/** What the Voice row says while the language downloads: voice starts by itself once it is there. */
+export function downloadingSentence(
+  language: string,
+  browser = "Chrome",
+): string {
+  return `${browser} is downloading its ${languageName(language)} speech recognition to your computer. Voice starts when it is ready.`;
+}
+
+/** Why voice cannot start from what the browser said of on-device recognition, or null when it can (or soon will). */
+function onDeviceProblem(local: OnDeviceSpeech): VoiceProblem | null {
+  switch (local) {
+    case "available":
+    case "downloading":
+      return null;
+    case "downloadable":
+      return "speech-pack";
+    case "unavailable":
+      return "language";
+    case "unsupported":
+      return "on-device";
   }
 }
 
@@ -303,6 +343,8 @@ export function startVoice(options: VoiceOptions, deps: VoiceDeps): Voice {
       state: "failed",
       problem,
       reason: voiceSentence(problem, language, options.browser),
+      // The popup's Download asks for this language.
+      ...(problem === "speech-pack" ? { language } : {}),
     });
   }
 
@@ -443,6 +485,8 @@ export function startVoice(options: VoiceOptions, deps: VoiceDeps): Voice {
     recognition.continuous = true;
     recognition.interimResults = true;
     recognition.maxAlternatives = 1;
+    // On this computer or not at all: without it, Chrome streams the audio to its speech service.
+    keepOnDevice(recognition);
     let networkError = false;
     recognition.onstart = () => {
       if (listening.recognition !== recognition) return;
@@ -506,6 +550,34 @@ export function startVoice(options: VoiceOptions, deps: VoiceDeps): Voice {
     }
   }
 
+  /** Whether the narration's language can be recognised on this computer: true once it can, after waiting out a download
+   * under way; false when it cannot (voice failed, saying why) or the opening is no longer wanted. */
+  async function onDevice(opening: number): Promise<boolean> {
+    const wanted = () => opening === generation && !closed && !muted;
+    let told = false;
+    for (;;) {
+      const local = await onDeviceSpeech(deps.Recognition, language);
+      if (!wanted()) return false;
+      const problem = onDeviceProblem(local);
+      if (problem) {
+        fail(problem);
+        return false;
+      }
+      if (local === "available") return true;
+      if (!told) {
+        told = true;
+        status({
+          state: "starting",
+          reason: downloadingSentence(language, options.browser),
+        });
+      }
+      await new Promise<void>((resolve) =>
+        deps.timers.set(resolve, DOWNLOAD_POLL_MS),
+      );
+      if (!wanted()) return false;
+    }
+  }
+
   async function begin(): Promise<void> {
     const opening = ++generation;
     failed = false;
@@ -517,6 +589,8 @@ export function startVoice(options: VoiceOptions, deps: VoiceDeps): Voice {
       fail("no-recognition");
       return;
     }
+    // Before the microphone opens: a browser that cannot keep the speech on this computer never hears it.
+    if (!(await onDevice(opening))) return;
     let stream: MediaStream;
     try {
       stream = await deps.getUserMedia({

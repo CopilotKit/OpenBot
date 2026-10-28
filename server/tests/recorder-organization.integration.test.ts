@@ -16,7 +16,10 @@ import { RECORDER_EXTENSION_ID } from "@openbot/shared/recorder-extension";
 import { eq } from "drizzle-orm";
 import { createApp } from "../src/app";
 import type { AuditEventInput } from "../src/audit";
-import { createOrganizationAuth } from "../src/auth/organization";
+import {
+  createOrganizationAuth,
+  ORGANIZATION_SESSION_MAX_AGE_SECONDS,
+} from "../src/auth/organization";
 import { organizationUserStore } from "../src/auth/organization-store";
 import { loadConfig } from "../src/config";
 import { createDatabase } from "../src/db/client";
@@ -293,4 +296,26 @@ test("the stored organization session is sealed, never the raw cookie", async ()
   expect(row?.sealed).not.toContain(value);
   expect(row?.sealed).not.toContain("better-auth.session_token");
   expect(row?.sealed).not.toContain(cookie);
+});
+
+test("a connection lasts no longer than the organization session cookie it carries a copy of, however much it is used", async () => {
+  const cookie = await organizationCookie();
+  const { token, connection } = await connect(cookie, "d".repeat(32));
+  const me = () => call("/api/recorder/me", { headers: bearer(token) });
+  expect((await me()).status).toBe(200);
+  // Made a minute short of the cookie's Max-Age ago, and used just now: it still stands. On the real clock, which the
+  // store reads: `Date.now` is skewed here for the guard's cache.
+  const madeAgo = async (ms: number) => {
+    await database
+      .update(recorderConnections)
+      .set({ createdAt: new Date(realNow() - ms), lastUsedAt: new Date() })
+      .where(eq(recorderConnections.id, connection.id));
+  };
+  await madeAgo(ORGANIZATION_SESSION_MAX_AGE_SECONDS * 1_000 - 60_000);
+  expect((await me()).status).toBe(200);
+  // A minute past it: the browser that held the cookie no longer would, and nor does the connection.
+  await madeAgo(ORGANIZATION_SESSION_MAX_AGE_SECONDS * 1_000 + 60_000);
+  const expired = await me();
+  expect(expired.status).toBe(401);
+  expect(await expired.json()).toMatchObject({ code: RECORDER_SIGNED_OUT });
 });

@@ -630,10 +630,11 @@ is still the record.
 | ------------------------------------ | ----------------------------------------------------------------------------------------- |
 | `AGENT_COMPUTER_URL`                 | Shared computer URL. If absent, computer routes are not mounted.                          |
 | `COMPUTER_TOKEN`                     | Secret every computer request must present. The computer refuses to start without it.     |
-| `COMPUTER_MAX_BROWSERS`              | How many Bots may hold a running browser at once. `8` by default; the least recently used is closed past it. A person's browser counts toward it and is closed only when no Bot's browser is left to close. |
+| `COMPUTER_MAX_BROWSERS`              | How many Bots may hold a running browser at once. `8` by default; the least recently used is closed past it. A person's browser in a native window (OpenBot Desktop) counts toward it and is closed only when no Bot's browser is left to close; a person's cloud browser is ranked by use like a Bot's. |
 | `COMPUTER_SEPARATE_WORKSPACES`       | `on` gives each Bot its own folder of files on a computer many Bots share, with its shell starting there. On for Helm's `shared` computer and the docker-compose `agent-computer`; off elsewhere. Files saved before it was on stay at the root of the volume. Commands can still read other folders: use `computers.mode: sandbox` to keep people apart. |
-| `COMPUTER_BROWSER_IDLE_MS`           | How long an untouched browser is kept. 30 minutes by default; `0` keeps them resident. A person's browser is never closed for being idle. |
+| `COMPUTER_BROWSER_IDLE_MS`           | How long an untouched browser is kept. 30 minutes by default; `0` keeps them resident. A person's cloud browser takes the same rule: the Browser page touches it every second while it is open, so it closes once nobody is on that page. A person's native window (OpenBot Desktop) is never closed for being idle. |
 | `OPENBOT_RECORDER_DIR`               | The built OpenBot Recorder (`extension/dist` after `bun run build`), absolute. Every person's browser the computer opens has it loaded and connected; without it, or pointed at anything that is not a built Recorder, the computer still serves Bots and refuses to open a person's browser, saying why. The computer image sets it to the Recorder it carries. |
+| `COMPUTER_PEOPLE_ONLY`               | `on` for a computer that runs people's own browsers and no Bot (OpenBot Desktop sets it on its host-side computer); it refuses every Bot. A person's browser runs only on a computer of its own: this one, or one started for it alone (`COMPUTER_BOT_ID`, as the supervisor and a Sandbox start each computer). The shared computer refuses it, and so does the server, whose Browser page says why, because a Bot's shell there could read the person's logins off the disk. |
 | `COMPUTER_BROWSER_BACKEND`           | `managed` by default (full bundled Chromium); `local-chrome` opts into installed Chrome with dedicated profiles and a loopback API. |
 | `COMPUTER_BROWSER_MODE`              | Managed defaults to `headed` on Linux, which is every hosted computer (a container, a pod, the desktop app's engine): full Chromium on the computer's own Xvfb display. A computer run directly on macOS or Windows defaults to `headless`, where headed would open windows on the desktop. `headless` is full Chromium's new headless mode. Local Chrome requires `headed`. See [Getting past bot checks](#getting-past-bot-checks). |
 | `WEB_BOT_AUTH`                       | `on` or `off`. Unset means off. `on` needs an https public URL. See [Web Bot Auth](#web-bot-auth). |
@@ -763,17 +764,29 @@ worker, to run the person's own browser: their installed Google Chrome, or Micro
 Chrome is missing, as a window on their desktop with the OpenBot Recorder already in it. Nothing
 above needs doing. Desktop gives it a loopback port of its own (`BROWSER_PORT`, 4101 when free), the
 computer token the stack already shares, the default data root above, and `OPENBOT_RECORDER_DIR`
-pointing at the Recorder that installation builds into the deployment (`extension/dist`). It points
+pointing at the Recorder that installation copies into the deployment (`extension/dist`) out of the
+release's own computer image, prebuilt, and `COMPUTER_PEOPLE_ONLY=on`. It points
 the server at it with `OPENBOT_BROWSER_URL=http://127.0.0.1:<port>`. Bots' own computers stay with
 the supervisor; only the person's browser runs here. It starts and stops with the rest of OpenBot,
-is restarted the way the other processes are, and on macOS and Linux is asked to close its browser
-before Stop or Quit takes the rest down.
+is restarted the way the other processes are, and its browser is asked to close before Stop or Quit
+takes the rest down (SIGTERM to the computer on macOS and Linux, `taskkill` without `/F` to the
+browser's windows on Windows), and ended only if it has not closed within ten seconds.
 
-It runs only when Chrome or Edge is installed in its standard location (the paths Playwright
-launches: `/Applications` on macOS, `/opt/google/chrome` or `/opt/microsoft/msedge` on Linux,
-`Program Files` or the user's `AppData\Local` on Windows) and the deployment's release includes the
-OpenBot Browser. Otherwise `OPENBOT_BROWSER_URL` is not set and the app hides its Browser button.
-Desktop checks again at every Start, so a browser installed later is found. The helper above and
+It runs only when Chrome or Edge is installed where it looks (`/Applications` on macOS;
+`Program Files` or the user's `AppData\Local` on Windows; on Linux `/opt/google/chrome` or
+`/opt/microsoft/msedge`, where Google's and Microsoft's own packages put them on every distribution,
+then `google-chrome-stable`, `google-chrome`, `microsoft-edge-stable` or `microsoft-edge` on the
+`PATH`, as NixOS has them) and the deployment's release includes the OpenBot Browser. The Flatpak
+builds of Chrome and Edge run sandboxed away from the profile and the Recorder and cannot be used,
+and neither browser is published as a Snap. Otherwise `OPENBOT_BROWSER_URL` is not set, Desktop
+sets `OPENBOT_BROWSER_ABSENT` to the reason, and the app says it to the person in one sentence.
+Desktop checks again at every Start, so a browser installed later is found.
+
+Uninstalling OpenBot Desktop removes the browser's data root (the profile the person signed in to)
+and the Recorder's native messaging host manifests: the Windows uninstaller does, and so do the
+.deb and .rpm packages' removal scripts, for each person and as that person. An app removed by
+dragging it to the Trash on macOS, or an AppImage deleted, runs nothing on the way out, so there
+those files stay until removed by hand. The helper above and
 Desktop use the same data root, so stop one before starting the other: Chrome lets one browser at a
 time use a profile.
 

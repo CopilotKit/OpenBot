@@ -28,7 +28,13 @@ import { browserStateQueryOptions } from "@/lib/browser/queries";
 import { queryClient } from "@/query-client";
 import { ScreenBrowser } from "./browser-screen";
 import { NativeNarrationRow } from "./narration";
-import { RecordingRow, StoppedRow, useRecording } from "./recording";
+import { NarrationChoiceDialog, useNarrationChoice } from "./narration-choice";
+import {
+  RECORDING_DESCRIPTION,
+  RecordingRow,
+  StoppedRow,
+  useRecording,
+} from "./recording";
 
 const TITLE = "Browser";
 const DESCRIPTION =
@@ -61,10 +67,12 @@ export function BrowserPage() {
     );
   }
   if (!state.data.available) {
+    // Why, where the server can say: its Bots share one computer, say, which is no place for a browser of the person's.
     return (
       <PageShell title={TITLE}>
         <PageEmpty>
-          OpenBot isn't set up to run a browser for you. Ask an admin.
+          {state.data.note ??
+            "OpenBot isn't set up to run a browser for you. Ask an admin."}
         </PageEmpty>
       </PageShell>
     );
@@ -89,21 +97,24 @@ function OpenedBrowser({ state }: { state: BrowserApiState }) {
   const opened: BrowserOpenResponse | RealBrowserOpenResponse | undefined =
     reopen.data ?? open.data;
   if (!opened) {
+    // A browser that is there and not answering says so while it is asked to open, rather than leaving the page empty.
+    const said = state.problem ?? open.error?.message;
     return (
       <PageShell title={TITLE} description={DESCRIPTION}>
-        {open.error ? (
+        {/* While it opens, nothing: OpenBot draws no loading placeholder (openbot-data-access), and what arrives is the
+            browser itself. */}
+        {said ? (
           <div className="mt-6 flex flex-col items-start gap-3">
             <p className="text-destructive text-sm" role="alert">
-              {open.error.message}
+              {said}
             </p>
-            <Button onClick={() => open.mutate()} size="sm" variant="outline">
-              Try again
-            </Button>
+            {open.error ? (
+              <Button onClick={() => open.mutate()} size="sm" variant="outline">
+                Try again
+              </Button>
+            ) : null}
           </div>
-        ) : (
-          // Feedback for something being done, as a pressed button says Saving: launching a browser takes seconds.
-          <PageEmpty>Opening your browser…</PageEmpty>
-        )}
+        ) : null}
       </PageShell>
     );
   }
@@ -147,7 +158,8 @@ function NativeBrowser({
   reopening: boolean;
   reopenError: Error | null;
 }) {
-  const recording = useRecording(state);
+  const choice = useNarrationChoice();
+  const recording = useRecording(state, choice);
   return (
     <PageShell title={TITLE} description={DESCRIPTION}>
       <PageSection title="Your browser">
@@ -159,9 +171,10 @@ function NativeBrowser({
             <ItemContent>
               <ItemTitle>{PRODUCT_NAMES[product]}</ItemTitle>
               <ItemDescription>
-                {state.open
-                  ? "Open in its own window on your desktop."
-                  : "Closed."}
+                {state.problem ??
+                  (state.open
+                    ? "Open in its own window on your desktop."
+                    : "Closed.")}
               </ItemDescription>
             </ItemContent>
             <ItemActions>
@@ -182,10 +195,7 @@ function NativeBrowser({
           </p>
         ) : null}
       </PageSection>
-      <PageSection
-        title="Record a task"
-        description="Do the task in your browser as you always would. Only what you do is recorded."
-      >
+      <PageSection title="Record a task" description={RECORDING_DESCRIPTION}>
         <PageRows>
           <RecordingRow recording={recording} />
           {recording.stopped ? (
@@ -195,7 +205,11 @@ function NativeBrowser({
             </>
           ) : null}
           <Separator />
-          <NativeNarrationRow voice={state.recorder?.voice} />
+          <NativeNarrationRow
+            voice={state.recorder?.voice}
+            choice={choice}
+            recording={recording.phase !== "idle"}
+          />
         </PageRows>
         {recording.error ? (
           <p className="mt-2 text-destructive text-sm" role="alert">
@@ -203,6 +217,7 @@ function NativeBrowser({
           </p>
         ) : null}
       </PageSection>
+      <NarrationChoiceDialog {...recording.question} />
     </PageShell>
   );
 }

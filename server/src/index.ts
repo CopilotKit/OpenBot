@@ -16,6 +16,8 @@ import {
   guardDeliveryStore,
   guardHostAccess,
   installEnterpriseControls,
+  skillSharingAllowed,
+  skillSharingInSnapshot,
 } from "./admin/controls";
 import {
   CoworkerUnavailableError,
@@ -68,7 +70,7 @@ import {
   recordAuditEvent,
 } from "./audit";
 import { startRetentionSweeps } from "./audit-retention";
-import { createAuth } from "./auth";
+import { createAuth, sessionLifetimeMs } from "./auth";
 import { DEV_ACTOR, initializeDevActorUser } from "./auth/dev-actor";
 import type { AuthService } from "./auth/guards";
 import { createRoleRepository } from "./auth/guards";
@@ -105,6 +107,7 @@ import { personBrowserEgressPolicy } from "./browser/egress";
 import {
   directBrowserComputers,
   gatewayBrowserComputers,
+  personBrowserPlace,
   withPersonBrowsers,
 } from "./browser/host";
 import { createComputerGateway } from "./computer/gateway";
@@ -488,23 +491,33 @@ const identityProviderStore = createIdentityProviderStore(database);
  * store that receives those rows has to exist before anything can sign in.
  */
 const signInAuditStore = createAuditStore(database);
+/*
+ * Signing out of OpenBot signs the person's browsers' Recorders out with them: every connection they hold ends. Called
+ * on a sign-out, which comes after the Recorder's wiring below exists.
+ */
+const signOutRecorders = async (userId: string) => {
+  await recorderExtension.connections.revokeAll(userId, "signed_out");
+};
 // Its own const so the Recorder can re-check a stored session through `verifySessionQuietly`.
 const organizationAuth = config.organizationAuthUrl
   ? createOrganizationAuth({
       authorityUrl: config.organizationAuthUrl,
       materializeUser: organizationUserStore(database),
+      onSignedOut: signOutRecorders,
     })
   : undefined;
-const auth: AuthService | undefined =
-  organizationAuth ??
-  (config.auth
+// Its own const so the Recorder's connections can last as long as one of its sessions does.
+const betterAuth =
+  !organizationAuth && config.auth
     ? createAuth(
         config,
         database,
         (email) => peopleStore.isRevoked(email),
         signInAuditStore,
+        { onSignedOut: signOutRecorders },
       )
-    : undefined);
+    : undefined;
+const auth: AuthService | undefined = organizationAuth ?? betterAuth;
 const { resolveRequestActor, identifyUser, identifyActor } = createRequestActor(
   {
     singleUser: config.singleUser,
@@ -1279,7 +1292,29 @@ const recorderExtension = createRecorderExtension({
   peopleStore,
   personalSpaces: personalLearningSpaces,
   auditStore: bootAuditStore,
+  ...(betterAuth
+    ? { sessionLifetimeMs: await sessionLifetimeMs(betterAuth) }
+    : {}),
+  // A connection is made or ended exactly when its row is written: both in one transaction.
+  auditFor: (executor) => createAuditStore(executor),
 });
+/*
+ * Connections whose lifetime has run out already resolve to nobody; this ends them for good, with the sealed
+ * organization session any of them still held, and writes their rows. Every replica runs it, and each row is ended once.
+ */
+const recorderExpirySweep = repeatAfterEach(async () => {
+  try {
+    await recorderExtension.connections.expire();
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        type: "recorder-expiry-sweep-error",
+        error: error instanceof Error ? error.name : "UnknownError",
+        timestamp: new Date().toISOString(),
+      }),
+    );
+  }
+}, 60_000);
 const demonstrationStore = createDemonstrationStore(database);
 const demonstrationRecorder = createDemonstrationRecorder({
   store: demonstrationStore,
@@ -1771,6 +1806,7 @@ const copilotRuntime = mountCopilotRuntime(
     personalSkills: {
       containerFor: personalLearningSpaces.containerFor,
       openSkills: () => openSkillIndex.sources(),
+      sharingAllowed: skillSharingInSnapshot,
     },
     trajectoryCapture: recorderExtension.trajectoryCapture,
   },
@@ -2560,19 +2596,29 @@ const app = createApp(
       recorder: demonstrationRecorder,
     },
     recorder: recorderExtension,
-    // Only where a person's browser can run: OpenBot Desktop's host-side computer, or the computers Bots run on.
+    // Only where a person's browser can run: OpenBot Desktop's host-side computer, or computers Bots run on that give
+    // each its own. Where every Bot shares one, the routes have no computers and say why (browser/host.ts).
     ...(computerGateway || config.browser
       ? {
           browser: {
-            computers: computerGateway
-              ? gatewayBrowserComputers(computerGateway, config.browser?.url)
-              : directBrowserComputers({
-                  browserUrl: (config.browser as { url: string }).url,
-                  policy: personBrowserPolicy,
-                  ...(config.browser?.token
-                    ? { token: config.browser.token }
-                    : {}),
-                }),
+            ...personBrowserPlace({
+              provider: computerProvider,
+              browserUrl: config.browser?.url,
+              ...(config.browserAbsent ? { absent: config.browserAbsent } : {}),
+              computers: () =>
+                computerGateway
+                  ? gatewayBrowserComputers(
+                      computerGateway,
+                      config.browser?.url,
+                    )
+                  : directBrowserComputers({
+                      browserUrl: (config.browser as { url: string }).url,
+                      policy: personBrowserPolicy,
+                      ...(config.browser?.token
+                        ? { token: config.browser.token }
+                        : {}),
+                    }),
+            }),
             ...((config.computer?.token ?? config.browser?.token)
               ? { token: config.computer?.token ?? config.browser?.token }
               : {}),
@@ -2589,6 +2635,7 @@ const app = createApp(
         copilotRuntime.learning?.personalSkills(userId) ??
         Promise.resolve({ unavailable: "unavailable" as const }),
       invalidate: () => openSkillIndex.invalidate(),
+      sharingAllowed: skillSharingAllowed,
     },
     delivery: {
       authenticated: {
@@ -2680,6 +2727,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
     approvalSweep.stop();
     personResponseSweep.stop();
     groupSweep.stop();
+    recorderExpirySweep.stop();
     for (const sweep of deliverySweeps) sweep.stop();
     void Promise.allSettled([
       channelActivityListener.stop(),
