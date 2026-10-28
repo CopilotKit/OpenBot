@@ -9,7 +9,6 @@ import { lastValueFrom, of, toArray } from "rxjs";
 import {
   NameContextMiddleware,
   PROFILE_CONTEXT,
-  PROFILE_GUIDANCE_ID,
 } from "../src/people/name-context";
 
 class CaptureAgent extends AbstractAgent {
@@ -63,9 +62,7 @@ test("repeated runs replace the profile, reflect edits, and remove cleared names
     middleware.run(agent.requests[0]!, agent).pipe(toArray()),
   );
   const updated = agent.requests[1]!;
-  expect(
-    updated.messages.filter((m) => m.id === PROFILE_GUIDANCE_ID),
-  ).toHaveLength(0);
+  expect(updated.messages).toEqual(input().messages);
   expect(
     updated.context.filter((c) => c.description === PROFILE_CONTEXT),
   ).toEqual([

@@ -14,6 +14,7 @@ import { SELF_HOST_URL } from "@/components/layout/self-host-banner";
 import { IllustrationFrame } from "@/components/onboarding/illustration-frame";
 import { LaptopIllustration } from "@/components/onboarding/laptop-illustration";
 import { OrganizationFlow } from "@/components/onboarding/organization-flow";
+import { OnboardingNameStep } from "@/components/settings/profile";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { type AgentProfile, agentListQueryOptions } from "@/lib/agents/queries";
 import { currentUserQueryOptions, needsOnboarding } from "@/lib/auth/queries";
@@ -264,8 +265,9 @@ function OrganizationStep() {
   );
 }
 
-const STEPS: Array<() => React.ReactNode> = [
+const STEPS: Array<(onNext: () => void) => React.ReactNode> = [
   () => <WelcomeStep />,
+  (onNext) => <OnboardingNameStep onSaved={onNext} />,
   () => <ComputerUseStep />,
   () => <RosterStep />,
 ];
@@ -351,7 +353,7 @@ function RouteComponent() {
                   key={step}
                   variants={variants}
                 >
-                  {steps[step]?.()}
+                  {steps[step]?.(() => go(step + 1))}
                 </motion.div>
               </AnimatePresence>
 
@@ -362,10 +364,10 @@ function RouteComponent() {
               ) : null}
 
               <motion.div
-                className="mt-20 flex flex-col items-center justify-center max-w-xs gap-4 w-full mx-auto"
+                className={`${step === 1 ? "mt-4" : "mt-20"} flex flex-col items-center justify-center max-w-xs gap-4 w-full mx-auto`}
                 layout
               >
-                <Button
+                {step !== 1 && <Button
                   className="w-full"
                   disabled={complete.isPending}
                   onClick={() => {
@@ -384,7 +386,7 @@ function RouteComponent() {
                     : last
                       ? "Get started"
                       : "Continue"}
-                </Button>
+                </Button>}
                 {step !== 0 && (
                   <Button
                     className="w-full"

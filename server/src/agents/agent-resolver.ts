@@ -118,8 +118,11 @@ export function createActorAgentResolver(
     ).then((agents) => {
       const loadName = deps.loadNameForActor;
       if (loadName) {
-        for (const agent of Object.values(agents)) {
-          agent.use(new NameContextMiddleware(() => loadName(actor.id)));
+        for (const registeredAgent of registered) {
+          if (registeredAgent.type !== "built_in") continue;
+          agents[registeredAgent.id]?.use(
+            new NameContextMiddleware(() => loadName(actor.id)),
+          );
         }
       }
       return agents;

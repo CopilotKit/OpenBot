@@ -3,12 +3,6 @@ import { useId, useState } from "react";
 import AgentOrb from "@/components/agents/orb/agent-orb";
 import { PageSection } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { authKeys, currentUserQueryOptions } from "@/lib/auth/queries";
 import { client } from "@/lib/client";
@@ -16,9 +10,11 @@ import { client } from "@/lib/client";
 export function ProfileNameForm({
   initialName = "",
   firstRun = false,
+  onSaved,
 }: {
   initialName?: string;
   firstRun?: boolean;
+  onSaved?: () => void;
 }) {
   const id = useId();
   const queryClient = useQueryClient();
@@ -31,15 +27,17 @@ export function ProfileNameForm({
         body: { name },
         fallback: "Your name could not be saved",
       }),
-    onSuccess: () =>
-      queryClient.invalidateQueries({
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({
         queryKey: authKeys.currentUser(),
         refetchType: "all",
-      }),
+      });
+      onSaved?.();
+    },
   });
   return (
     <form
-      className="flex flex-col gap-3"
+      className="flex w-full flex-col gap-3"
       onSubmit={(event) => {
         event.preventDefault();
         if (name.trim() && !save.isPending) save.mutate(name.trim());
@@ -70,7 +68,8 @@ export function ProfileNameForm({
       )}
       <Button
         type="submit"
-        className="self-start"
+        className={firstRun ? "mt-6 w-full max-w-xs self-center" : "self-start"}
+        size={firstRun ? "lg" : "default"}
         disabled={!name.trim() || save.isPending}
       >
         {save.isPending ? "Saving…" : firstRun ? "Continue" : "Save name"}
@@ -96,21 +95,14 @@ export function ProfileSettings() {
   );
 }
 
-export function FirstRunNamePrompt() {
+export function OnboardingNameStep({ onSaved }: { onSaved: () => void }) {
   const { data: user } = useQuery(currentUserQueryOptions());
-  if (!user?.needsName) return null;
   return (
-    <Dialog open>
-      <DialogContent showCloseButton={false} className="gap-6 p-8">
-        <AgentOrb size="64px" state="listening" />
-        <DialogTitle className="text-3xl font-semibold tracking-tight">
-          Hello, nice to meet you.
-        </DialogTitle>
-        <DialogDescription>
-          What should we call you? You can change your name later in Settings.
-        </DialogDescription>
-        <ProfileNameForm firstRun />
-      </DialogContent>
-    </Dialog>
+    <div className="mx-auto flex w-full max-w-md flex-col items-center gap-6">
+      <AgentOrb size="64px" state="listening" />
+      <h1 className="text-center text-3xl font-semibold tracking-tight">Hello, nice to meet you.</h1>
+      <p className="text-center text-muted-foreground">What should we call you? You can change your name later in Settings.</p>
+      <ProfileNameForm initialName={user?.needsName ? "" : (user?.name ?? "")} firstRun onSaved={onSaved} />
+    </div>
   );
 }

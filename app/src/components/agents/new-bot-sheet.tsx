@@ -87,7 +87,11 @@ export function NewBotSheet({
   );
 }
 
-/** Details come first; custom agents then choose a framework and verify their endpoint. */
+/**
+ * Details come first; custom agents then choose a framework and verify their endpoint.
+ * Advancing from the endpoint also tests it, so there is no separate Test action to forget.
+ * Each new step focuses its heading to announce the transition before entering its fields.
+ */
 const STEPS = ["about", "runtime", "endpoint"] as const;
 const CONNECTION_OPTIONS = [
   ...WEB_HARNESSES.filter((harness) => harness.id === "byo-url"),
@@ -154,7 +158,8 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
   const [visibility, setVisibility] = useState<Visibility>("private");
   /** Run it here unless the person picks otherwise: the answer that needs nothing set up. */
   const [runtime, setRuntime] = useState<Runtime | null>({ kind: "builtin" });
-  const [custom, setCustom] = useState(false);
+  const [customSelected, setCustom] = useState(false);
+  const custom = customSelected || !builtInAvailable;
   const [endpoint, setEndpoint] = useState("");
   const [key, setKey] = useState("");
   /** Whether Continue was pressed on the address, which is when its error becomes worth showing. */

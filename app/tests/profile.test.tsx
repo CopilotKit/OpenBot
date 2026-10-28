@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
-  FirstRunNamePrompt,
+  OnboardingNameStep,
   ProfileNameForm,
 } from "@/components/settings/profile";
 import { authKeys } from "@/lib/auth/queries";
@@ -35,10 +35,10 @@ function client(needsName = true) {
   return query;
 }
 
-test("asks existing users without a name even when onboarding is completed", () => {
+test("onboarding name step starts empty for a placeholder profile", () => {
   const view = render(
     <QueryClientProvider client={client()}>
-      <FirstRunNamePrompt />
+      <OnboardingNameStep onSaved={() => {}} />
     </QueryClientProvider>,
   );
   expect(
@@ -49,12 +49,13 @@ test("asks existing users without a name even when onboarding is completed", () 
   ).toBe(true);
 });
 
-test("does not ask again when a saved name is present", () => {
+test("onboarding name step preserves a saved name when revisited", () => {
   const view = render(
     <QueryClientProvider client={client(false)}>
-      <FirstRunNamePrompt />
+      <OnboardingNameStep onSaved={() => {}} />
     </QueryClientProvider>,
   );
+  expect((view.getByLabelText("Name") as HTMLInputElement).value).toBe("Sam");
   expect(view.queryByRole("dialog")).toBeNull();
 });
 
@@ -138,4 +139,54 @@ test("a profile refetch does not overwrite an unsaved draft", async () => {
   expect((view.getByLabelText("Name") as HTMLInputElement).value).toBe(
     "Sam Julien",
   );
+});
+
+test("onboarding advances only after the name has been saved", async () => {
+  let finishSave: (response: Response) => void = () => {};
+  const response = new Promise<Response>((resolve) => {
+    finishSave = resolve;
+  });
+  globalThis.fetch = Object.assign(async () => response, {
+    preconnect: originalFetch.preconnect,
+  });
+  let advances = 0;
+  const view = render(
+    <QueryClientProvider client={client(false)}>
+      <OnboardingNameStep
+        onSaved={() => {
+          advances += 1;
+        }}
+      />
+    </QueryClientProvider>,
+  );
+  fireEvent.click(view.getByRole("button", { name: "Continue" }));
+  await waitFor(() =>
+    expect(
+      view.getByRole("button", { name: "Saving…" }).hasAttribute("disabled"),
+    ).toBe(true),
+  );
+  expect(advances).toBe(0);
+  finishSave(Response.json({ profile: { name: "Sam", needsName: false } }));
+  await waitFor(() => expect(advances).toBe(1));
+});
+
+test("onboarding stays on the name step when saving fails", async () => {
+  globalThis.fetch = Object.assign(
+    async () => Response.json({ error: "Save failed" }, { status: 500 }),
+    { preconnect: originalFetch.preconnect },
+  );
+  let advances = 0;
+  const view = render(
+    <QueryClientProvider client={client(false)}>
+      <OnboardingNameStep
+        onSaved={() => {
+          advances += 1;
+        }}
+      />
+    </QueryClientProvider>,
+  );
+  fireEvent.click(view.getByRole("button", { name: "Continue" }));
+  await view.findByRole("alert");
+  expect(advances).toBe(0);
+  expect((view.getByLabelText("Name") as HTMLInputElement).value).toBe("Sam");
 });

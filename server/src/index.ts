@@ -333,6 +333,7 @@ clearLearningRevisionFallback();
 // `serverPort` in config.ts for what `process.env.PORT ?? …` did with `PORT=` instead.
 const port = config.port;
 const database = createDatabase(config.databaseUrl);
+const profileStore = createProfileStore(database);
 // Every dispatch point asks this database whether its person paused the Bot. See agents/lifecycle.ts.
 configureBotLifecycle({ database });
 const learningSettingsStore = createLearningSettingsStore(
@@ -1718,7 +1719,7 @@ const actorAgentResolver = createActorAgentResolver({
     ),
   loadInstructionsForActor,
   loadNameForActor: async (actorId) => {
-    const profile = await createProfileStore(database).read(actorId);
+    const profile = await profileStore.read(actorId);
     return profile.needsName ? null : profile.name;
   },
   loadAttachmentForActor,
@@ -2581,7 +2582,7 @@ const app = createApp(
 
   identityStore,
   identityGithubCallback,
-  createProfileStore(database),
+  profileStore,
 );
 
 startHttpServer({

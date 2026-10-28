@@ -1,4 +1,6 @@
-import { describe, expect, test } from "bun:test";
+import { AbstractAgent } from "@ag-ui/client";
+import { NameContextMiddleware } from "../src/people/name-context";
+import { describe, expect, spyOn, test } from "bun:test";
 import { BuiltInAgent } from "@copilotkit/runtime/v2";
 import { createActorAgentResolver } from "../src/agents/agent-resolver";
 import type { AuditInitiator } from "../src/audit";
@@ -174,3 +176,46 @@ async function rejectionMessage(run: () => Promise<unknown>) {
   }
   throw new Error("Expected the run to reject.");
 }
+
+test("profile context is attached only to built-in agents for web and individual resolution", async () => {
+  const use = spyOn(AbstractAgent.prototype, "use");
+  try {
+    const resolver = createActorAgentResolver({
+      loadAgents: async () => [
+        { id: "local", name: "Local", type: "built_in", systemPrompt: "Help." },
+        {
+          id: "custom",
+          name: "Custom",
+          type: "remote_ag_ui",
+          endpoint: "https://custom.test/ag-ui",
+        },
+      ],
+      model: { provider: "openai", defaultModel: "unused" },
+      resolveModelApiKey: async () => "synthetic-key",
+      loadNameForActor: async () => "Sam",
+    });
+    const actor = { id: "person", role: "user" as const };
+    await resolver.resolveAgentsForActor(actor);
+    expect(
+      use.mock.calls.filter((call) =>
+        call.some((middleware) => middleware instanceof NameContextMiddleware),
+      ),
+    ).toHaveLength(1);
+    use.mockClear();
+    await resolver.resolveAgentForActor(actor, "custom");
+    expect(
+      use.mock.calls
+        .flat()
+        .some((middleware) => middleware instanceof NameContextMiddleware),
+    ).toBe(false);
+    use.mockClear();
+    await resolver.resolveAgentForActor(actor, "local");
+    expect(
+      use.mock.calls
+        .flat()
+        .filter((middleware) => middleware instanceof NameContextMiddleware),
+    ).toHaveLength(1);
+  } finally {
+    use.mockRestore();
+  }
+});
