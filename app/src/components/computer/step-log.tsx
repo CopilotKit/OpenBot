@@ -15,7 +15,7 @@
  */
 import { IconCircleCheck, IconClock, IconX } from "@tabler/icons-react";
 import { type ReactNode, useSyncExternalStore } from "react";
-import { browserStepDetails } from "@/components/channels/browser-activity";
+import { browserOutcome } from "@/components/channels/browser-activity";
 import {
   type ConversationStep,
   useConversationStatus,
@@ -32,7 +32,6 @@ import {
   type ComputerActivity,
   subscribeToActivity,
 } from "@/lib/computers/activity";
-import { toolResultDeclined } from "@/lib/plugins/tool-result";
 import { cn } from "@/lib/utils";
 import {
   ACTIVITY_LABELS,
@@ -51,12 +50,6 @@ export type StepState =
   | "declined"
   | "blocked"
   | "failed";
-
-/** The status words, as the conversation's step rows say them, and a tool line's "not done yet". */
-const WORDS: Record<Exclude<StepState, "done">, string> = {
-  ...STEP_STATUS,
-  notYet: "Not done yet",
-};
 
 export type StepLogEntry =
   | {
@@ -80,39 +73,23 @@ export type StepLogEntry =
       activity: ComputerActivity;
     };
 
-function outcomeOf(result: string | undefined): Record<string, unknown> {
-  try {
-    const parsed: unknown = JSON.parse(result ?? "");
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
-      : {};
-  } catch {
-    return {};
-  }
-}
-
 /**
  * A browser step's state. One held on its approval card is waiting for the person, whatever its
  * result says yet. One with no result, or only the note that it went to the card, is running while
- * the Bot is on the turn it belongs to, and otherwise was cut off. One with a result is told apart
- * much as its line in the conversation tells it: the person declined it, somebody pressed Stop, a
- * boundary refused it, the computer was still starting, it did not work, or it worked.
+ * the Bot is on the turn it belongs to, and otherwise was cut off. One with a result is read by
+ * `browserOutcome`, the same reading its line in the conversation uses: the person declined it,
+ * somebody pressed Stop, a boundary refused it, the computer was still starting, it did not work,
+ * or it worked.
  */
 function browserState(
   step: ConversationStep,
   { working, held }: { working: boolean; held: ReadonlySet<string> },
 ): StepState {
-  const { item } = step;
-  if (held.has(item.toolCall.id)) return "waiting";
-  const outcome = outcomeOf(item.result);
-  if (item.result === undefined || outcome.waiting === true)
+  if (held.has(step.item.toolCall.id)) return "waiting";
+  const outcome = browserOutcome(step.item);
+  if (outcome === "pending")
     return working && step.latest ? "running" : "stopped";
-  if (toolResultDeclined(item.result)) return "declined";
-  // Cut off, like a call that never got its result: nothing went wrong with the page.
-  if (outcome.stopped === true) return "stopped";
-  if (outcome.refused === true) return "blocked";
-  if (outcome.ok === false && outcome.starting === true) return "notYet";
-  return browserStepDetails(item).failed ? "failed" : "done";
+  return outcome;
 }
 
 /**
@@ -206,7 +183,7 @@ function StepRow({
         <span className="type-caption ml-auto flex shrink-0 items-baseline gap-2">
           {entry.status === "done" ? null : (
             <span className={cn("font-medium", toneOf(entry.status))}>
-              {WORDS[entry.status]}
+              {STEP_STATUS[entry.status]}
             </span>
           )}
           {/*
