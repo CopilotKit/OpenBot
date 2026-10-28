@@ -152,6 +152,8 @@ test("each app is named by its own name and says it is ready, with its tools", a
   const gmail = await row(view, "composio-gmail");
   expect(gmail.getByText("Gmail")).toBeTruthy();
   expect(gmail.getByText(/^Ready to use\./)).toBeTruthy();
+  // What each tool does, never what it did.
+  expect(gmail.getByText(/Send your email, Read your email$/)).toBeTruthy();
   expect(gmail.getByText("2 tools")).toBeTruthy();
   expect(view.queryByText(/Composio Gmail/)).toBeNull();
   expect(gmail.queryByRole("button")).toBeNull();

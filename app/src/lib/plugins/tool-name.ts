@@ -22,9 +22,19 @@ export type ToolName = {
   detail?: string;
 };
 
-export function readToolName(name: string, running = false): ToolName {
-  const own = ownToolLabel(name, running);
-  if (own) return { label: own };
+/**
+ * How a call stands, for the words it is named in: still running ("Searching your email"), done
+ * ("Searched your email"), or neither (`"plain"`: "Search your email"), for a call that was refused,
+ * failed or declined, so its line never says something happened that did not.
+ */
+export type ToolState = boolean | "plain";
+
+export function readToolName(
+  name: string,
+  running: ToolState = false,
+): ToolName {
+  const own = ownToolLabel(name, running === true);
+  if (own) return { label: running === "plain" ? humanise(name) : own };
   const parts = name.split("__");
   if (parts.length < 3 || parts[0] !== "mcp") return { label: name };
 
@@ -38,7 +48,22 @@ export function readToolName(name: string, running = false): ToolName {
    * their answer. Which provider is granted is an administrator's fact, on the Bot's access page.
    */
   const role = researchRoleOfTool(server, tool);
-  if (role) return { label: RESEARCH_ROLE_LABELS[role] };
+  if (role)
+    return {
+      label:
+        running === true ? RESEARCH_RUNNING[role] : RESEARCH_ROLE_LABELS[role],
+    };
+  /*
+   * The person's own mail and calendar are named for what happened to them, whichever app reached
+   * them, with the app beside the words so two mailboxes are still told apart. See `personalAction`
+   * for which calls qualify.
+   */
+  const personal = personalAction(server, tool);
+  if (personal)
+    return {
+      label: PERSONAL_WORDS[personal][stateOf(running)],
+      detail: connectorName(server),
+    };
   /*
    * A BROKERED APP IS NAMED ONCE, AS THE APP, BESIDE THE ACTION. Composio publishes
    * `<APP>_<VERB>_<NOUN>`, so its app leads every action and reads as a vendor's prefix
@@ -110,6 +135,105 @@ const OWN_TOOLS: Record<string, { running: string; done: string }> = {
     done: "Checked app access",
   },
 };
+
+/** Research while it runs. Done, or refused, it keeps `RESEARCH_ROLE_LABELS`. */
+const RESEARCH_RUNNING = {
+  search: "Searching the web",
+  fetch: "Reading web pages",
+} as const;
+
+type PersonalAction =
+  | "searchEmail"
+  | "readEmail"
+  | "sendEmail"
+  | "checkCalendar";
+type PersonalState = "running" | "done" | "plain";
+
+const PERSONAL_WORDS: Record<PersonalAction, Record<PersonalState, string>> = {
+  searchEmail: {
+    running: "Searching your email",
+    done: "Searched your email",
+    plain: "Search your email",
+  },
+  readEmail: {
+    running: "Reading your email",
+    done: "Read your email",
+    plain: "Read your email",
+  },
+  sendEmail: {
+    running: "Sending your email",
+    done: "Sent your email",
+    plain: "Send your email",
+  },
+  checkCalendar: {
+    running: "Checking your calendar",
+    done: "Checked your calendar",
+    plain: "Check your calendar",
+  },
+};
+
+function stateOf(running: ToolState): PersonalState {
+  return running === "plain" ? "plain" : running ? "running" : "done";
+}
+
+/**
+ * A call to the person's own mail or calendar named for what happened to them, or null for any
+ * other call, which keeps its app's own name. A summary uses this to say "searched your email"
+ * rather than count a connector.
+ */
+export function personToolLabel(
+  name: string,
+  state: PersonalState = "done",
+): string | null {
+  const parts = name.split("__");
+  if (parts.length < 3 || parts[0] !== "mcp") return null;
+  const action = personalAction(parts[1] ?? "", parts.slice(2).join("__"));
+  return action ? PERSONAL_WORDS[action][state] : null;
+}
+
+/*
+ * WHICH CALLS ARE THE PERSON'S MAIL OR CALENDAR, BY THEIR WORDS, FOR ANY APP. A mail app is one the
+ * server names (`composio-gmail`, `arcade-Outlook`) or the tool leads with (`gmail_search_messages`
+ * on a server called `google-workspace`); a calendar is a calendar app, or a mail app's events.
+ *
+ * Only what can be said truthfully is renamed. A call that changes something (a draft, a label, a
+ * new event) keeps its own name, because "sent your email" for a draft or "checked your calendar"
+ * for a new event would say what did not happen; so does a mail app's call that is not about mail
+ * (contacts, labels, the profile). The rest are named for looking, reading or sending.
+ */
+const MAIL_APPS = ["gmail", "outlook", "mail", "email", "inbox"];
+const CALENDAR_APPS = ["calendar", "googlecalendar", "gcal"];
+const CALENDAR_WORDS = ["calendar", "calendars", "event", "events"];
+const MAIL_WORDS = [
+  ...["email", "emails", "mail", "mails", "inbox"],
+  ...["message", "messages", "thread", "threads"],
+];
+const CHANGES = [
+  ...["create", "update", "delete", "remove", "add", "move", "trash"],
+  ...["modify", "patch", "insert", "archive", "mark", "draft", "drafts"],
+];
+const SENDS = ["send", "reply", "forward"];
+const LOOKS = ["search", "list", "find", "query"];
+const READS = ["read", "get", "fetch"];
+
+function personalAction(server: string, tool: string): PersonalAction | null {
+  const appWords = wordsOf(brokeredApp(server) ?? server);
+  const toolWords = wordsOf(tool);
+  const leading = toolWords[0] ?? "";
+  const has = (words: string[], any: string[]) =>
+    any.some((word) => words.includes(word));
+  const mailApp = has(appWords, MAIL_APPS) || MAIL_APPS.includes(leading);
+  const calendarApp =
+    has(appWords, CALENDAR_APPS) || CALENDAR_APPS.includes(leading);
+  if (!(mailApp || calendarApp) || has(toolWords, CHANGES)) return null;
+  if (calendarApp || has(toolWords, CALENDAR_WORDS))
+    return has(toolWords, [...LOOKS, ...READS]) ? "checkCalendar" : null;
+  if (has(toolWords, SENDS)) return "sendEmail";
+  if (!has(toolWords, MAIL_WORDS)) return null;
+  if (has(toolWords, LOOKS)) return "searchEmail";
+  if (has(toolWords, READS)) return "readEmail";
+  return null;
+}
 
 /** One of this deployment's own tools in words, or null for any other name. */
 export function ownToolLabel(name: string, running = false): string | null {

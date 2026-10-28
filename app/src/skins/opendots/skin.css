@@ -201,12 +201,24 @@
   line-height: 1.75;
 }
 
-/* A Bot's message is plain prose on the canvas, a shade softer than the ink. */
+/*
+ * A Bot's message is plain prose on the canvas, a shade softer than the ink. OpenBot draws each of
+ * a Bot's thoughts in a bubble of its own, so the bubble's fill, padding, corners and cap come off.
+ */
+:root[data-skin="opendots"]
+  [data-opendots-main]
+  [data-slot="bubble"][data-align="start"][data-variant="ghost"] {
+  max-width: 100%;
+}
+
 :root[data-skin="opendots"]
   [data-opendots-main]
   [data-slot="bubble"][data-align="start"][data-variant="ghost"]
   > [data-slot="bubble-content"] {
   color: var(--opendots-assistant-ink);
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
   font-size: 14px;
   line-height: 1.75;
 }
