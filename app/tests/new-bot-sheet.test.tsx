@@ -178,9 +178,13 @@ test("unavailable hosting still permits the custom path", async () => {
   ).toBe(true);
   await user.type(view.getByLabelText("Name"), "External");
   expect(
-    view.getByRole("button", { name: /^Connect a custom agent/ }).getAttribute("aria-pressed"),
+    view
+      .getByRole("button", { name: /^Connect a custom agent/ })
+      .getAttribute("aria-pressed"),
   ).toBe("true");
-  expect(view.getByRole("button", { name: "Continue" }).hasAttribute("disabled")).toBe(false);
+  expect(
+    view.getByRole("button", { name: "Continue" }).hasAttribute("disabled"),
+  ).toBe(false);
   await user.click(view.getByRole("button", { name: "Continue" }));
   expect(view.getByRole("button", { name: /LangGraph/ })).toBeTruthy();
 });

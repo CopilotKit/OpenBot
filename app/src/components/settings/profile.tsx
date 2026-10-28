@@ -100,9 +100,17 @@ export function OnboardingNameStep({ onSaved }: { onSaved: () => void }) {
   return (
     <div className="mx-auto flex w-full max-w-md flex-col items-center gap-6">
       <AgentOrb size="64px" state="listening" />
-      <h1 className="text-center text-3xl font-semibold tracking-tight">Hello, nice to meet you.</h1>
-      <p className="text-center text-muted-foreground">What should we call you? You can change your name later in Settings.</p>
-      <ProfileNameForm initialName={user?.needsName ? "" : (user?.name ?? "")} firstRun onSaved={onSaved} />
+      <h1 className="text-center text-3xl font-semibold tracking-tight">
+        Hello, nice to meet you.
+      </h1>
+      <p className="text-center text-muted-foreground">
+        What should we call you? You can change your name later in Settings.
+      </p>
+      <ProfileNameForm
+        initialName={user?.needsName ? "" : (user?.name ?? "")}
+        firstRun
+        onSaved={onSaved}
+      />
     </div>
   );
 }

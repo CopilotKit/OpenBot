@@ -90,7 +90,6 @@ export function NewBotSheet({
 /**
  * Details come first; custom agents then choose a framework and verify their endpoint.
  * Advancing from the endpoint also tests it, so there is no separate Test action to forget.
- * Each new step focuses its heading to announce the transition before entering its fields.
  */
 const STEPS = ["about", "runtime", "endpoint"] as const;
 const CONNECTION_OPTIONS = [
@@ -593,7 +592,9 @@ const VISIBILITY_OPTIONS: Array<{
 
 /**
  * Shared details for both hosting paths. Name is required; instructions are optional.
- * Connected app choices stay in the parent flow while navigating between screens.
+ * Visibility sits alongside the name because it does not need a separate screen.
+ * Connected apps are selected initially and only shown when some can be granted.
+ * These choices stay in the parent flow while navigating between screens.
  */
 function AboutStep({
   apps,
@@ -727,7 +728,9 @@ const OPTION_CLASSES =
 
 /**
  * Choose a custom framework and advance immediately to its connection settings.
- * The heading receives focus when arriving or returning from the endpoint screen.
+ * The heading receives focus on arrival so keyboard and screen-reader users land on the
+ * new question rather than the control on the previous screen. The sheet body scrolls;
+ * an inner scroller would give this list a second scrollbar.
  */
 function RuntimeStep({
   runtime,
@@ -779,7 +782,7 @@ function RuntimeStep({
  * connecting, but nothing below differs by framework: every one of them is an AG-UI address and is
  * stored the same way.
  *
- * The address takes focus on arrival rather than the heading, as the name does on the last step: it
+ * The address takes focus on arrival rather than the heading, as the name does on the first step: it
  * is the one thing this step asks for, and its label says what it is.
  *
  * Whether it answers is checked when Continue is pressed, by the server rather than the browser,

@@ -40,8 +40,7 @@ export class NameContextMiddleware extends Middleware {
             ...input,
             context: [
               ...input.context.filter(
-                (entry) =>
-                  entry.description !== PROFILE_CONTEXT,
+                (entry) => entry.description !== PROFILE_CONTEXT,
               ),
               ...(valid
                 ? [

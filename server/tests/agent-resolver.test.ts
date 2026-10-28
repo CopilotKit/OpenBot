@@ -1,4 +1,7 @@
-import { AbstractAgent } from "@ag-ui/client";
+import { AbstractAgent, HttpAgent, type RunAgentInput } from "@ag-ui/client";
+import { EMPTY } from "rxjs";
+import { standingRoleMessage } from "../src/copilot";
+import { PROFILE_CONTEXT } from "../src/people/name-context";
 import { NameContextMiddleware } from "../src/people/name-context";
 import { describe, expect, spyOn, test } from "bun:test";
 import { BuiltInAgent } from "@copilotkit/runtime/v2";
@@ -188,6 +191,12 @@ test("profile context is attached only to built-in agents for web and individual
           name: "Custom",
           type: "remote_ag_ui",
           endpoint: "https://custom.test/ag-ui",
+          standingMessage: standingRoleMessage({
+            id: "custom",
+            name: "Custom",
+            roleDescription: "Help with tasks.",
+            title: "Custom agent",
+          }),
         },
       ],
       model: { provider: "openai", defaultModel: "unused" },
@@ -217,5 +226,69 @@ test("profile context is attached only to built-in agents for web and individual
     ).toHaveLength(1);
   } finally {
     use.mockRestore();
+  }
+});
+
+test("runs carry the name only to built-in agents, including cloned agents", async () => {
+  const captured: RunAgentInput[] = [];
+  const capture = (input: RunAgentInput) => {
+    captured.push(input);
+    return EMPTY;
+  };
+  const builtIn = spyOn(BuiltInAgent.prototype, "run").mockImplementation(
+    capture,
+  );
+  const remote = spyOn(HttpAgent.prototype, "run").mockImplementation(capture);
+  const reads: string[] = [];
+  try {
+    const custom = {
+      id: "custom",
+      name: "Custom",
+      type: "remote_ag_ui" as const,
+      roleDescription: "Help with tasks.",
+      title: "Custom agent",
+    };
+    const resolver = createActorAgentResolver({
+      loadAgents: async () => [
+        { id: "local", name: "Local", type: "built_in", systemPrompt: "Help." },
+        {
+          ...custom,
+          endpoint: "https://custom.test/ag-ui",
+          standingMessage: standingRoleMessage(custom),
+        },
+      ],
+      model: { provider: "openai", defaultModel: "unused" },
+      resolveModelApiKey: async () => "synthetic-key",
+      loadNameForActor: async (id) => {
+        reads.push(id);
+        return "Sam";
+      },
+    });
+    const actor = { id: "person", role: "user" as const };
+    for (const agentId of ["local", "custom"]) {
+      const agent = await resolver.resolveAgentForActor(actor, agentId);
+      for (const instance of [agent, agent.clone()]) {
+        instance.messages = [
+          { id: "question", role: "user", content: "Hello" },
+        ];
+        await instance.runAgent();
+      }
+    }
+    expect(captured).toHaveLength(4);
+    for (const input of captured.slice(0, 2)) {
+      expect(input.context).toContainEqual({
+        description: PROFILE_CONTEXT,
+        value: JSON.stringify({ name: "Sam" }),
+      });
+    }
+    for (const input of captured.slice(2)) {
+      expect(
+        input.context.some((entry) => entry.description === PROFILE_CONTEXT),
+      ).toBe(false);
+    }
+    expect(reads).toEqual(["person", "person"]);
+  } finally {
+    builtIn.mockRestore();
+    remote.mockRestore();
   }
 });

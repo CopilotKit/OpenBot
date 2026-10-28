@@ -180,7 +180,7 @@ function RouteComponent() {
           {/* Allow max-w to constrain the popup even though its anchor is full-width. */}
           <ComboboxContent
             anchor={anchor}
-            className="min-w-0 max-w-lg"
+            className="flex min-w-0 max-w-lg flex-col"
             sideOffset={12}
           >
             <div className="shrink-0 border-b p-1">
@@ -198,12 +198,14 @@ function RouteComponent() {
               </button>
             </div>
             <ComboboxEmpty>No Bots found.</ComboboxEmpty>
-            <ComboboxList>
+            <ComboboxList className="min-h-0">
               {(item: AgentProfile) => (
                 <ComboboxItem key={item.id} value={item} className="h-10">
                   <ChannelAvatar participantIds={[item.id]} size={24} />
                   {item.name}
-                  <span className="truncate text-muted-foreground ml-1">{item.title}</span>
+                  <span className="truncate text-muted-foreground ml-1">
+                    {item.title}
+                  </span>
                 </ComboboxItem>
               )}
             </ComboboxList>
@@ -215,17 +217,23 @@ function RouteComponent() {
         onClose={() => setCreatingBot(false)}
         onCreated={(agentId) => {
           setCreatingBot(false);
-          void queryClient.fetchQuery(agentQueryOptions(agentId)).then((profile) => {
-            setPicked((current) => {
-              const existing = current ?? selected;
-              return existing.some((bot) => bot.id === profile.id)
-                ? existing
-                : [...existing, profile];
+          void queryClient
+            .fetchQuery(agentQueryOptions(agentId))
+            .then((profile) => {
+              setPicked((current) => {
+                const existing = current ?? selected;
+                return existing.some((bot) => bot.id === profile.id)
+                  ? existing
+                  : [...existing, profile];
+              });
+              if (selected.length === 0)
+                void navigate({ replace: true, search: { agent: agentId } });
+            })
+            .catch(() => {
+              setError(
+                "Your Bot was created, but could not be selected. Choose it from the recipient list.",
+              );
             });
-            if (selected.length === 0) void navigate({ replace: true, search: { agent: agentId } });
-          }).catch(() => {
-            setError("Your Bot was created, but could not be selected. Choose it from the recipient list.");
-          });
         }}
       />
       <ConversationView

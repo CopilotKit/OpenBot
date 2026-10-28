@@ -367,26 +367,28 @@ function RouteComponent() {
                 className={`${step === 1 ? "mt-4" : "mt-20"} flex flex-col items-center justify-center max-w-xs gap-4 w-full mx-auto`}
                 layout
               >
-                {step !== 1 && <Button
-                  className="w-full"
-                  disabled={complete.isPending}
-                  onClick={() => {
-                    if (last) {
-                      complete.mutate(undefined, {
-                        onSuccess: () => setLeaving(true),
-                      });
-                    } else {
-                      go(step + 1);
-                    }
-                  }}
-                  size="lg"
-                >
-                  {complete.isPending
-                    ? "Saving…"
-                    : last
-                      ? "Get started"
-                      : "Continue"}
-                </Button>}
+                {step !== 1 && (
+                  <Button
+                    className="w-full"
+                    disabled={complete.isPending}
+                    onClick={() => {
+                      if (last) {
+                        complete.mutate(undefined, {
+                          onSuccess: () => setLeaving(true),
+                        });
+                      } else {
+                        go(step + 1);
+                      }
+                    }}
+                    size="lg"
+                  >
+                    {complete.isPending
+                      ? "Saving…"
+                      : last
+                        ? "Get started"
+                        : "Continue"}
+                  </Button>
+                )}
                 {step !== 0 && (
                   <Button
                     className="w-full"
