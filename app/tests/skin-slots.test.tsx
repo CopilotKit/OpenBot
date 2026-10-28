@@ -19,6 +19,10 @@ import {
 } from "@tanstack/react-router";
 import { cleanup, render, waitFor } from "@testing-library/react";
 import { Composer } from "@/components/channels/composer/composer";
+import {
+  DictationButton,
+  DictationSurface,
+} from "@/components/channels/composer/dictation-controls";
 import { ConversationView } from "@/components/channels/conversation-view";
 import { DetailPanel } from "@/components/layout/detail-panel";
 import { PageShell } from "@/components/layout/page-shell";
@@ -291,6 +295,9 @@ test("no app-level hook reuses a name the ui primitives give themselves", async 
     "composer-attach",
     "composer-send",
     "composer-stop",
+    "composer-dictate",
+    "composer-dictate-cancel",
+    "composer-dictate-stop",
     "composer-column",
     "conversation-header",
     "detail-pane",
@@ -300,4 +307,47 @@ test("no app-level hook reuses a name the ui primitives give themselves", async 
     "page-title",
   ];
   expect(hooks.filter((hook) => primitives.has(hook))).toEqual([]);
+});
+
+test("the dictation buttons carry their hooks while idle and while recording", () => {
+  const session = {
+    start: () => undefined,
+    stop: () => undefined,
+    cancel: () => undefined,
+    retry: () => undefined,
+  };
+  const idle = render(
+    <DictationButton
+      dictation={
+        { available: true, supported: true, busy: false, session } as never
+      }
+      disabled={false}
+    />,
+  );
+  expect(
+    idle.container.querySelector('[data-slot="composer-dictate"]'),
+  ).not.toBeNull();
+  cleanup();
+  const recording = render(
+    <DictationSurface
+      canSend
+      dictation={
+        {
+          available: true,
+          supported: true,
+          busy: true,
+          state: { phase: "recording", seconds: 3, canRetry: false },
+          session,
+        } as never
+      }
+    >
+      <span />
+    </DictationSurface>,
+  );
+  expect(
+    recording.container.querySelector('[data-slot="composer-dictate-cancel"]'),
+  ).not.toBeNull();
+  expect(
+    recording.container.querySelector('[data-slot="composer-dictate-stop"]'),
+  ).not.toBeNull();
 });
