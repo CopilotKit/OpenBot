@@ -457,6 +457,14 @@ changes for a deployment.
   whether it connected, failed or was cancelled there. A connection started from Connections or an
   app's admin page comes back where it did before.
 
+### The sidebar and a conversation, made easier to read
+
+- In the sidebar, OpenBot's orb sits beside its name. A row lifts to a card under the pointer and
+  while it is open, and you can always see where the keyboard is. While a Bot is working, its orb in
+  the list shows it, and so does a still blue dot. Each conversation has a "…" button with Pin and
+  Delete, which used to be on right-click alone. ⌘K, or Ctrl+K, opens the sidebar and puts you in
+  its search box.
+
 ### Generated interfaces use A2UI 1.0
 
 With generative UI on, a Bot builds an interface from CopilotKit's standard catalog on A2UI 1.0
