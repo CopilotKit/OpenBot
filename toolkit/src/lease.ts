@@ -23,6 +23,20 @@ export function isLockConflict(error: unknown): boolean {
 }
 
 /**
+ * The lock was refused when the turn first asked for it, so the turn has not run.
+ *
+ * The same 409 from the platform later on can follow a tool call or a model's spend; only this one
+ * is safe to put back on the queue without counting it as an attempt. The platform's error is kept
+ * as the cause.
+ */
+export class ThreadLockBusyError extends Error {
+  override name = "ThreadLockBusyError";
+  constructor(cause: unknown) {
+    super("The conversation is busy with another turn.", { cause });
+  }
+}
+
+/**
  * No renewal has succeeded for nearly as long as the lock lives, so it will have lapsed before the
  * next one could land, whatever the reason was.
  */

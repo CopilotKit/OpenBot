@@ -44,7 +44,11 @@ afterAll(async () => {
       .delete(workItems)
       .where(
         and(
-          inArray(workItems.kind, ["person.question", "person.response"]),
+          inArray(workItems.kind, [
+            "person.question",
+            "person.response",
+            "proactive.task",
+          ]),
           inArray(workItems.key, keys),
         ),
       );
@@ -103,6 +107,51 @@ test("the question's initiator survives being asked and answered", async () => {
     kind: "responsibility",
     id: responsibility.id,
   });
+});
+
+/*
+ * A reply typed into the conversation answers what was waiting there when it was accepted, before
+ * its turn has run. The inbox must not offer the same question again, or answering it there would
+ * send a second answer to the same thing.
+ */
+test("a question a reply already answered is neither listed nor answered again", async () => {
+  const answered = randomUUID();
+  const waiting = randomUUID();
+  const reply = randomUUID();
+  const theirs = randomUUID();
+  keys.push(answered, waiting, reply, theirs);
+  await database.insert(workItems).values([
+    { kind: "person.question", key: answered, payload: question() },
+    { kind: "person.question", key: waiting, payload: question() },
+    {
+      kind: "proactive.task",
+      key: reply,
+      payload: { ownerUserId: owner, followup: true, questionIds: [answered] },
+    },
+    // Somebody else's reply naming the waiting question answers nothing of this person's.
+    {
+      kind: "proactive.task",
+      key: theirs,
+      payload: {
+        ownerUserId: `${prefix}-other`,
+        followup: true,
+        questionIds: [waiting],
+      },
+    },
+  ]);
+  const listed = (await questions.list(owner)).map((entry) => entry.id);
+  expect(listed).toContain(waiting);
+  expect(listed).not.toContain(answered);
+  await expect(questions.respond(owner, answered, "Ramen.")).rejects.toThrow(
+    "You already answered this question.",
+  );
+  const responses = await database
+    .select({ key: workItems.key })
+    .from(workItems)
+    .where(
+      and(eq(workItems.kind, "person.response"), eq(workItems.key, answered)),
+    );
+  expect(responses).toEqual([]);
 });
 
 test("an answer to a responsibility's question resumes it with its own tools, run and initiator", async () => {

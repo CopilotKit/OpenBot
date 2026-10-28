@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { isLockConflict, keepLease, LockLapsedError } from "../src/lease";
+import {
+  isLockConflict,
+  keepLease,
+  LockLapsedError,
+  ThreadLockBusyError,
+} from "../src/lease";
 
 function platformError(status: number): Error {
   const error = new Error(`Intelligence platform error ${status}`);
@@ -21,6 +26,18 @@ describe("isLockConflict", () => {
       false,
     );
     expect(isLockConflict(undefined)).toBe(false);
+  });
+});
+
+describe("ThreadLockBusyError", () => {
+  test("names a refused first acquisition and keeps the platform's answer as its cause", () => {
+    const conflict = platformError(409);
+    const busy = new ThreadLockBusyError(conflict);
+    expect(busy).toBeInstanceOf(Error);
+    expect(busy.name).toBe("ThreadLockBusyError");
+    expect(busy.cause).toBe(conflict);
+    // Not the platform's error itself, so nothing that stops on a lost lock mistakes it for one.
+    expect(isLockConflict(busy)).toBe(false);
   });
 });
 
