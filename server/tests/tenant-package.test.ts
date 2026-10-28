@@ -1,5 +1,8 @@
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
+import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { and, eq } from "drizzle-orm";
 import { createAgentProfileStore } from "../src/agents/profile-store";
@@ -1100,6 +1103,42 @@ describe("expanding a package file against the environment", () => {
  * cases below are the ones that decide whether that is safe to seed.
  */
 describe("skills a package ships", () => {
+  test("editing only skills.yaml changes the loaded package checksum", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "openbot-skills-checksum-"));
+    try {
+      await cp(
+        fileURLToPath(new URL("../../examples/fintech", import.meta.url)),
+        directory,
+        { recursive: true },
+      );
+      const skillsPath = join(directory, "skills.yaml");
+      const original = await readFile(skillsPath, "utf8");
+      const before = await loadTenantPackage(directory);
+      expect((await loadTenantPackage(directory)).checksum).toBe(
+        before.checksum,
+      );
+
+      await writeFile(
+        skillsPath,
+        `${original}\n  - slug: checksum-fixture\n    title: Checksum fixture\n    summary: Added instruction.\n    instructions: Read the revised policy.\n`,
+        "utf8",
+      );
+      const after = await loadTenantPackage(directory);
+      expect(after.skills).toHaveLength(before.skills.length + 1);
+      expect(after.skills.at(-1)?.instructions).toBe(
+        "Read the revised policy.",
+      );
+      expect(after.checksum).not.toBe(before.checksum);
+
+      await writeFile(skillsPath, original, "utf8");
+      expect((await loadTenantPackage(directory)).checksum).toBe(
+        before.checksum,
+      );
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   const base = {
     brand: "tenant: { id: fintech, product_name: Ledgerline }",
     agents:

@@ -8,7 +8,7 @@
  *   - CAST PAST THE TYPE. `{ … } as unknown as ConnectedAppBroker` or `{} as ConnectedAppBroker`
  *     makes a stub that omits `revoke` and `revokeAccount` compile. The compiler's guarantee is
  *     gone exactly as it was when a broken `import type` degraded the type to `any` (round-2 C8).
- *     `broker-stub-ratchet.test.ts` stops new casts; this factory is what to write instead.
+ *     Use this factory instead so missing methods remain type errors.
  *   - A PLAUSIBLE DEFAULT. `revokeAccount: async () => {}` type-checks and answers "done" for a
  *     revoke that never happened. A test can then pass on a fiction, and the revoke seam is the
  *     one this PR's Claim 2 is about.

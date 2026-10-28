@@ -3,6 +3,7 @@ import { seal } from "../src/auth/signed-value";
 import type { CatalogueAuth } from "../src/plugins/catalogue";
 import {
   authorizationUrlFor,
+  challengeFor,
   connectedAccountsUrlFor,
   createVerifier,
   readConnectState,
@@ -218,6 +219,15 @@ describe("PKCE", () => {
 
   test("two verifiers are not the same", () => {
     expect(createVerifier()).not.toBe(createVerifier());
+  });
+
+  test("derives the S256 challenge from the verifier", () => {
+    // RFC 7636 Appendix B: https://www.rfc-editor.org/rfc/rfc7636#appendix-B
+    const verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
+    const challenge = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
+    expect(challengeFor(verifier)).toBe(challenge);
+    // Also reject an implementation that always returns the published example.
+    expect(challengeFor("a".repeat(43))).not.toBe(challenge);
   });
 });
 

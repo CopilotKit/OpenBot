@@ -489,6 +489,14 @@ test("enables pgvector before creating vector columns", () => {
   expect(firstVectorColumn).toBeGreaterThan(extension);
 });
 
+test("runs the server migrator after PostgreSQL becomes healthy", () => {
+  const services = composeServices();
+  expect(services.migrate.command).toEqual(["bun", "scripts/migrate.ts"]);
+  expect(services.migrate.depends_on?.postgres).toEqual({
+    condition: "service_healthy",
+  });
+});
+
 test("builds the deployment image with Playwright's Chromium payload only", () => {
   for (const dockerfile of [rootDockerfile(), agentComputerDockerfile()]) {
     expect(dockerfile).toContain(

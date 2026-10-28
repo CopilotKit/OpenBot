@@ -14,6 +14,7 @@ import {
   ChatTranscript,
   LightboxPicture,
   sameAttachmentRow,
+  TranscriptAttachments,
 } from "@/components/channels/chat-transcript";
 import type { QueuedMessage } from "@/components/channels/composer";
 import { attachmentUrl } from "@/lib/channels/attachments";
@@ -802,6 +803,13 @@ test("a row that actually changed does not compare equal", () => {
       { attachments: ONE_FILE, delay: 0.04 },
     ),
   ).toBe(false);
+});
+
+// A correct comparator only protects attachment identity if the rendered row uses it.
+test("the row of tiles is memoised with that comparison", () => {
+  expect(
+    (TranscriptAttachments as unknown as { compare?: unknown }).compare,
+  ).toBe(sameAttachmentRow);
 });
 
 /*

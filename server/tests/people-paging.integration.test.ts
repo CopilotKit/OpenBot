@@ -154,6 +154,47 @@ describe("reading the people in a deployment", () => {
     expect(result.people.length).toBeGreaterThan(0);
   });
 
+  test("search treats underscores and percent signs as literal characters", async () => {
+    const underscore = await person(0, new Date(), "Ninety_ Percent");
+    await person(1, new Date(), "NinetyX Percent");
+    const percent = await person(2, new Date(), "Ninety% Percent");
+
+    for (const [search, wanted] of [
+      ["Ninety_ Percent", underscore],
+      ["Ninety% Percent", percent],
+    ]) {
+      const result = await store.list({ search, limit: 10 });
+      expect(result.people.map((one) => one.id)).toEqual([wanted]);
+    }
+  });
+
+  test("caps an oversized page at 200 and leaves the rest reachable", async () => {
+    const base = Date.now();
+    const people = Array.from({ length: 201 }, (_, index) => ({
+      id: `${PREFIX}cap-${String(index).padStart(3, "0")}`,
+      email: `${PREFIX}cap-${index}@openbot.test`,
+      name: `Page cap fixture ${index}`,
+      emailVerified: true,
+      lastSignedInAt: new Date(base - index * 1000),
+    }));
+    ids.push(...people.map((one) => one.id));
+    await database.insert(users).values(people);
+
+    const first = await store.list({ search: `${PREFIX}cap-`, limit: 100_000 });
+    expect(first.people.map((one) => one.id)).toEqual(
+      people.slice(0, 200).map((one) => one.id),
+    );
+    if (!first.nextCursor)
+      throw new Error("Expected a cursor for the 201st person.");
+    const last = await store.list({
+      search: `${PREFIX}cap-`,
+      limit: 100_000,
+      cursor: first.nextCursor,
+    });
+    expect(last.people.map((one) => one.id)).toEqual([people[200]?.id]);
+    expect(last.nextCursor).toBeNull();
+  });
+
   test("finding one person does not read the deployment", async () => {
     const base = Date.now();
     const wanted = await person(0, new Date(base));
