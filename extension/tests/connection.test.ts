@@ -1028,6 +1028,27 @@ test("an origin that asks to connect over and over is throttled with the time le
   expect((await connect("obc_13")).ok).toBe(true);
 });
 
+test("a loopback page asking to connect over and over starts OpenBot Desktop's native host no more often than the limit lets it connect", async () => {
+  // Asking OpenBot Desktop for its address starts its native host, which looks for OpenBot's port with lsof or netstat.
+  // The request was counted only after that, so any page on a loopback port could have it started as often as it liked.
+  desktopAnswers("http://127.0.0.1:3010");
+  const asked = () =>
+    fake.native.sent.filter(
+      (message) => (message as { type?: string }).type === "address",
+    ).length;
+  for (let i = 1; i <= 10; i++) {
+    expect((await connect(`obc_${i}`, loopback)).ok).toBe(true);
+    clock += 1_000;
+  }
+  expect(asked()).toBe(10);
+  for (let i = 11; i <= 30; i++)
+    expect(await connect(`obc_${i}`, loopback)).toMatchObject({
+      ok: false,
+      error: "throttled",
+    });
+  expect(asked()).toBe(10);
+});
+
 test("twelve connects in one tick from one origin open one tab, and the limit throttles the other two", async () => {
   const site = "https://a.example.test";
   const answers = await Promise.all(
