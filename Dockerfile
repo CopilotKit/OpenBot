@@ -31,11 +31,12 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 COPY --from=node-toolchain /usr/local /usr/local
 COPY --from=bun-toolchain /usr/local/bin/bun /usr/local/bin/bun
+# `--no-shell` and the bunx cache: see agent-computer/Dockerfile, which installs the same browser.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates curl unzip xz-utils \
   && ln -s bun /usr/local/bin/bunx \
-  && bunx --bun "playwright@${PLAYWRIGHT_VERSION}" install --with-deps chromium \
-  && rm -rf /root/.cache /tmp/* /var/lib/apt/lists/* \
+  && bunx --bun "playwright@${PLAYWRIGHT_VERSION}" install --with-deps --no-shell chromium \
+  && rm -rf /root/.cache /root/.bun /usr/local/install/cache /tmp/* /var/lib/apt/lists/* \
   # PINNED, BECAUSE THE CHART NAMES THESE NUMBERS. `computers.podSecurityContext` runs a computer
   # pod as 1001, and without `--uid` that is only where these happen to land today: `ubuntu:24.04`
   # ships its own `ubuntu` user at 1000, so the next two are 1001 and 1002. Let the base add one

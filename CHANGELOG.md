@@ -176,6 +176,14 @@ the field, the page and the button: a card number field, a checkout page or a ne
 still goes to you, whatever is typed. A news wire (business, news or press wire) on a link or button
 no longer counts as wiring money; wiring money still does.
 
+### A page visit an approval rule covers now asks you
+
+With an approval rule that asks before a Bot opens, reads or scrolls a page, the Bot was told the
+action "was not started from a conversation that can ask you", did nothing, and said it could not get
+an approval in this chat. The visit now waits on the approval card in the conversation, like a click
+or a command does: Allow once opens the page and the Bot carries on, Deny tells the Bot it was
+declined. Page visits no rule asks about still go straight to the computer.
+
 ### A Bot's browser step is no longer refused while it is being saved
 
 Before your browser runs a click or a typed entry for a Bot, the server checks it against the copy
@@ -201,6 +209,17 @@ When a click, typed entry or key press the Bot made in its browser failed, the B
 the spot: the step showed "Didn't work" and the Bot said nothing more. The failure now reaches the
 Bot like any other result, so it can take a fresh snapshot, try another way, or tell you what
 stopped it. A refused step reads as a refusal the Bot can explain.
+
+### The computer image is about a fifth smaller to download
+
+The `openbot-agent-computer` image carried two copies of Chromium: the full browser it runs, and
+Playwright's separate headless shell, which it never starts. Every launch names a Chromium channel,
+and Playwright runs the full browser for a named channel even with `COMPUTER_BROWSER_MODE=headless`.
+The image now installs only the full browser and drops the package cache left from installing it.
+The download falls from 537 MB to about 423 MB on arm64 and from 520 MB to about 411 MB on amd64.
+Unpacked, the image is about 375 MB smaller on arm64 and 296 MB smaller on amd64. The all-in-one `openbot` image installs the same browser the same way and shrinks by about
+as much. The browser and its behaviour are unchanged. On a desktop install the computer is the
+largest image, so a first install and each upgrade download less.
 
 ### A Bot can send, draft and reply in Gmail
 
