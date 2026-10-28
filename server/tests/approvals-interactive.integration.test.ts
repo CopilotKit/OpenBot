@@ -24,6 +24,7 @@ import { auditEvents } from "../src/db/schema";
 import { users } from "../src/db/schema/core";
 import { workItems } from "../src/db/schema/work";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { botSeat } from "../src/computer/computer-key";
 
 /**
  * The interactive path, over HTTP: a person's own chat asks the browser to click, the browser posts
@@ -44,9 +45,9 @@ const clicks: unknown[] = [];
 const gateway = createComputerGateway({
   provider: {
     name: "test",
-    isolation: "per-bot",
+    isolation: "per-person",
     locate: async () => "http://computer:4100",
-    status: async (id) => ({ botId: id, state: "ready" }),
+    status: async (seat) => ({ botId: seat.botId, state: "ready" }),
     list: async () => [],
     stop: async () => ({ wasRunning: true }),
     reset: async () => ({ cleared: true }),
@@ -69,7 +70,7 @@ const gateway = createComputerGateway({
 const run = (snapshot: ApprovalContinuation, actorId: string, bot = botId) => {
   const tool = createHeadlessComputerTools({
     gateway,
-    botId: bot,
+    seat: botSeat(bot),
     actor: { id: actorId, userId: actorId, initiator: { kind: "person" } },
   }).find((candidate) => candidate.definition.name === snapshot.toolName);
   if (!tool) throw new Error("no tool");

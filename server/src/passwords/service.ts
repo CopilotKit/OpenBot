@@ -41,7 +41,10 @@ export type SignInService = ReturnType<typeof createSignInService>;
 
 export type SignInServiceDependencies = {
   store: PasswordStore;
-  gateway: Pick<ComputerGateway, "signIn" | "signInCode" | "requestHelp">;
+  gateway: Pick<
+    ComputerGateway,
+    "signIn" | "signInCode" | "requestHelp" | "seatFor"
+  >;
   /** The deployment's KEY_ENCRYPTION_KEY, the same one `credentials.ts` encrypts under. */
   encryptionKey: string;
   auditStore?: AuditStore;
@@ -308,10 +311,13 @@ export function createSignInService(deps: SignInServiceDependencies) {
     // its login page, when only the whole login again can help.
     let back: "code_required" | "pending" = "code_required";
     try {
-      result = await gateway.signInCode(claimed.botId, {
-        origin: claimed.origin,
-        code,
-      });
+      result = await gateway.signInCode(
+        await gateway.seatFor(claimed.botId, claimed.ownerUserId),
+        {
+          origin: claimed.origin,
+          code,
+        },
+      );
       if (result.error) failure = scrub(result.error, [code]);
       else if (!result.submitted)
         failure = "The verification code could not be submitted.";
@@ -413,11 +419,14 @@ export function createSignInService(deps: SignInServiceDependencies) {
     let result: SignInFillResult | undefined;
     let failure: string | undefined;
     try {
-      result = await gateway.signIn(claimed.botId, {
-        origin: claimed.origin,
-        ...(credential.username ? { username: credential.username } : {}),
-        password: credential.password,
-      });
+      result = await gateway.signIn(
+        await gateway.seatFor(claimed.botId, claimed.ownerUserId),
+        {
+          origin: claimed.origin,
+          ...(credential.username ? { username: credential.username } : {}),
+          password: credential.password,
+        },
+      );
       if (result.error) failure = scrub(result.error, secrets);
       else if (!result.submitted)
         failure = "The sign-in form could not be submitted.";
@@ -678,7 +687,8 @@ export function createSignInService(deps: SignInServiceDependencies) {
           409,
         );
       const state = await gateway.requestHelp(
-        request.botId,
+        // The person the sign-in is for, whose computer the Bot is on.
+        await gateway.seatFor(request.botId, request.ownerUserId),
         actor,
         `Sign in to ${request.origin}${request.reason ? `: ${request.reason}` : ""}`,
         request.toolCallId ?? undefined,

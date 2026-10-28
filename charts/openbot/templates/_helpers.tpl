@@ -718,6 +718,9 @@ This pod overrides the command to run the browser process alone, so it never rea
 that the all-in-one image uses to drop to `pwuser` and to set `HOME=/home/pwuser`. Both are
 therefore set here instead. See `computers.podSecurityContext` in values.yaml for why the uid is
 1001 and what is deliberately NOT set alongside it.
+
+`COMPUTER_SEPARATE_WORKSPACES` is on because a Sandbox is one person's computer and carries every
+Bot they use: each keeps a folder of its own there, as each keeps a browser profile of its own.
 */}}
 {{- define "openbot.sandboxPodTemplate" -}}
 {{- $computerEnv := include "openbot.computerEnv" . | fromJsonArray -}}
@@ -743,6 +746,7 @@ therefore set here instead. See `computers.podSecurityContext` in values.yaml fo
             (dict "name" "PROFILES_DIR" "value" "/profiles")
             (dict "name" "HOME" "value" "/home/pwuser")
             (dict "name" "BUN_INSTALL" "value" "/home/pwuser/.bun")
+            (dict "name" "COMPUTER_SEPARATE_WORKSPACES" "value" "on")
             (dict "name" "COMPUTER_TOKEN" "valueFrom" (dict "secretKeyRef" (dict
               "name" (default (include "openbot.secretName" .) .Values.computers.existingTokenSecret)
               "key" "computer-token"))))

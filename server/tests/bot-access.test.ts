@@ -4,6 +4,11 @@ import { Hono } from "hono";
 import { computerAccessCheck } from "../src/agents/computer-access";
 import type { AppVariables } from "../src/auth/guards";
 import { createComponentRoutes } from "../src/components/routes";
+import {
+  type ComputerSeat,
+  computerKeyText,
+  personSeat,
+} from "../src/computer/computer-key";
 import { createComputerRoutes } from "../src/computer/routes";
 import { createPluginRoutes } from "../src/plugins/routes";
 
@@ -44,25 +49,27 @@ describe("the computer surface", () => {
   function app(actorId: string, role: "user" | "admin" = "user") {
     const reached: string[] = [];
     const gateway = {
-      resetComputer: async (botId: string) => {
-        reached.push(`reset:${botId}`);
+      seatFor: async (botId: string, personId: string) =>
+        personSeat(personId, botId),
+      resetComputer: async (seat: ComputerSeat) => {
+        reached.push(`reset:${seat.botId}`);
         return { cleared: true };
       },
-      updateComputer: async (botId: string) => {
-        reached.push(`update:${botId}`);
+      updateComputer: async (seat: ComputerSeat) => {
+        reached.push(`update:${seat.botId}`);
         return { updated: true, wasRunning: true };
       },
-      read: async (botId: string) => {
-        reached.push(`read:${botId}`);
+      read: async (seat: ComputerSeat) => {
+        reached.push(`read:${seat.botId}`);
         return { text: "a page" };
       },
-      screenshot: async (botId: string) => {
-        reached.push(`screenshot:${botId}`);
+      screenshot: async (seat: ComputerSeat) => {
+        reached.push(`screenshot:${seat.botId}`);
         return { image: "" };
       },
-      status: async (botId: string) => {
-        reached.push(`status:${botId}`);
-        return { botId, state: "ready" };
+      status: async (seat: ComputerSeat) => {
+        reached.push(`status:${seat.botId}`);
+        return { botId: seat.botId, state: "ready" };
       },
     } as never;
 
@@ -172,11 +179,13 @@ describe("a Team Bot's computer", () => {
     const reached: string[] = [];
     const record =
       (name: string) =>
-      async (botId: string, ..._rest: unknown[]) => {
-        reached.push(`${name}:${botId}`);
+      async (seat: ComputerSeat, ..._rest: unknown[]) => {
+        reached.push(`${name}:${seat.botId}`);
         return { ok: true };
       };
     const gateway = {
+      seatFor: async (botId: string, personId: string) =>
+        personSeat(personId, botId),
       navigate: record("navigate"),
       screenshot: record("screenshot"),
       read: record("read"),
@@ -255,12 +264,14 @@ describe("a path that starts with a deployment route", () => {
     const reached: string[] = [];
     const asked: string[] = [];
     const gateway = {
-      status: async (botId: string) => {
-        reached.push(`status:${botId}`);
-        return { botId, state: "ready" };
+      seatFor: async (botId: string, personId: string) =>
+        personSeat(personId, botId),
+      status: async (seat: ComputerSeat) => {
+        reached.push(`status:${seat.botId}`);
+        return { botId: seat.botId, state: "ready" };
       },
-      screenshot: async (botId: string) => {
-        reached.push(`screenshot:${botId}`);
+      screenshot: async (seat: ComputerSeat) => {
+        reached.push(`screenshot:${seat.botId}`);
         return { image: "" };
       },
       computers: async () => [],
@@ -506,5 +517,40 @@ describe("components, which a Bot answers with", () => {
 
     expect(response.status).toBe(404);
     expect(touched).toEqual([]);
+  });
+});
+
+/**
+ * A public Bot is everybody's Bot, and nobody's computer.
+ *
+ * Passing the guard on a public Bot used to hand over the one computer that Bot had, signed in as
+ * whoever used it last. Each person now reaches their own seat on it.
+ */
+describe("two people on one public Bot", () => {
+  test("each reaches their own computer, never the other's", async () => {
+    const reached: string[] = [];
+    const gateway = {
+      seatFor: async (botId: string, personId: string) =>
+        personSeat(personId, botId),
+      status: async (seat: ComputerSeat) => {
+        reached.push(`${computerKeyText(seat.key)}/${seat.botId}`);
+        return { botId: seat.botId, state: "ready" };
+      },
+      screenshot: async () => ({ image: "" }),
+    } as never;
+    for (const person of ["ada", "bo"]) {
+      const routes = createComputerRoutes(
+        gateway,
+        { get: () => ({ mode: "enforce", deny: [], allow: [] }) } as never,
+        signedIn(person),
+        // Public: everyone may use it.
+        async () => true,
+      );
+      const response = await new Hono()
+        .route("/api/computers", routes)
+        .request("http://t/api/computers/pub-bot/screenshot");
+      expect(response.status).toBe(200);
+    }
+    expect(reached).toEqual(["person:ada/pub-bot", "person:bo/pub-bot"]);
   });
 });

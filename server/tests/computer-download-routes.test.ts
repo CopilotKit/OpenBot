@@ -12,6 +12,7 @@ import {
 } from "../src/computer/gateway";
 import type { PolicyStore } from "../src/computer/policy-store";
 import { createComputerRoutes } from "../src/computer/routes";
+import { personSeat } from "../src/computer/computer-key";
 
 const member: AuthenticatedActor = {
   id: "user-1",
@@ -43,12 +44,14 @@ function gatewayThatReturns(name: string, bytes: Uint8Array) {
     path: string;
   }> = [];
   const gateway = {
+    seatFor: async (botId: string, personId: string) =>
+      personSeat(personId, botId),
     downloadFile: async (
-      botId: string,
+      seat: { botId: string },
       actor: { id: string },
       input: { path: string },
     ) => {
-      calls.push({ botId, actorId: actor.id, path: input.path });
+      calls.push({ botId: seat.botId, actorId: actor.id, path: input.path });
       return {
         body: bytes,
         bytes: bytes.byteLength,
@@ -141,6 +144,8 @@ describe("the public computer file download route", () => {
     ["an unexpected failure", new Error("Boom."), 500],
   ])("maps %s to %i", async (_name, error, status) => {
     const gateway = {
+      seatFor: async (botId: string, personId: string) =>
+        personSeat(personId, botId),
       downloadFile: async () => {
         throw error;
       },

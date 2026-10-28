@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { ComputerStillStartingError } from "../src/computer/client";
+import { botSeat, personSeat } from "../src/computer/computer-key";
 import {
   createSandboxComputerProvider,
   sandboxNameFor,
@@ -52,10 +53,10 @@ describe("telling one run of a Bot's computer from the next", () => {
   test("changes across a resume even when the node and address do not", async () => {
     const before = await providerWith(
       running("2026-08-24T23:14:04Z", "node-a", "192.168.49.27"),
-    ).sessionOf?.("knowledge");
+    ).sessionOf?.(botSeat("knowledge"));
     const after = await providerWith(
       running("2026-08-25T00:40:04Z", "node-a", "192.168.49.27"),
-    ).sessionOf?.("knowledge");
+    ).sessionOf?.(botSeat("knowledge"));
 
     expect(before).toBeDefined();
     expect(after).toBeDefined();
@@ -64,8 +65,8 @@ describe("telling one run of a Bot's computer from the next", () => {
 
   test("is the same while one run keeps serving", async () => {
     const sandbox = running("2026-08-25T00:40:04Z", "node-a", "192.168.49.27");
-    expect(await providerWith(sandbox).sessionOf?.("knowledge")).toBe(
-      await providerWith(sandbox).sessionOf?.("knowledge"),
+    expect(await providerWith(sandbox).sessionOf?.(botSeat("knowledge"))).toBe(
+      await providerWith(sandbox).sessionOf?.(botSeat("knowledge")),
     );
   });
 
@@ -77,7 +78,7 @@ describe("telling one run of a Bot's computer from the next", () => {
       status: { conditions: [{ type: "Suspended", status: "True" }] },
     };
     expect(
-      await providerWith(suspended).sessionOf?.("knowledge"),
+      await providerWith(suspended).sessionOf?.(botSeat("knowledge")),
     ).toBeUndefined();
   });
 
@@ -90,7 +91,7 @@ describe("telling one run of a Bot's computer from the next", () => {
     await providerWith(
       running("2026-08-25T00:40:04Z", "n", "1.2.3.4"),
       seen,
-    ).sessionOf?.("knowledge");
+    ).sessionOf?.(botSeat("knowledge"));
     expect(seen.every((call) => call.startsWith("GET "))).toBe(true);
   });
 
@@ -101,7 +102,9 @@ describe("telling one run of a Bot's computer from the next", () => {
       spec: { operatingMode: "Suspended" },
       status: { conditions: [{ type: "Suspended", status: "True" }] },
     };
-    const status = await providerWith(suspended, seen).status("knowledge");
+    const status = await providerWith(suspended, seen).status(
+      botSeat("knowledge"),
+    );
 
     expect(status.state).toBe("absent");
     expect(seen.every((call) => call.startsWith("GET "))).toBe(true);
@@ -141,7 +144,9 @@ describe("a computer that takes longer than the wait to start", () => {
     const warn = console.warn;
     console.warn = () => undefined;
     try {
-      const failure = await provider.locate("general").catch((error) => error);
+      const failure = await provider
+        .locate(botSeat("general"))
+        .catch((error) => error);
       expect(failure).toBeInstanceOf(ComputerStillStartingError);
       expect(failure.message).toContain("not performed");
     } finally {
@@ -165,7 +170,9 @@ describe("a computer that takes longer than the wait to start", () => {
     const warn = console.warn;
     console.warn = () => undefined;
     try {
-      const failure = await provider.locate("general").catch((error) => error);
+      const failure = await provider
+        .locate(botSeat("general"))
+        .catch((error) => error);
       expect(failure).toBeInstanceOf(ComputerStillStartingError);
     } finally {
       console.warn = warn;
@@ -174,7 +181,7 @@ describe("a computer that takes longer than the wait to start", () => {
 
   test("status calls one on its way up starting, without touching it", async () => {
     const seen: string[] = [];
-    const status = await providerWith(booting, seen).status("general");
+    const status = await providerWith(booting, seen).status(botSeat("general"));
     expect(status.state).toBe("starting");
     expect(seen.every((call) => call.startsWith("GET "))).toBe(true);
   });
@@ -223,9 +230,9 @@ describe("the credential a sandbox call carries", () => {
       }) as unknown as typeof fetch,
     });
 
-    await provider.status("bot-1");
+    await provider.status(botSeat("bot-1"));
     current = "rotated";
-    await provider.status("bot-1");
+    await provider.status(botSeat("bot-1"));
 
     expect(sent).toEqual(["Bearer first", "Bearer rotated"]);
   });
@@ -352,7 +359,7 @@ describe("a computer on an older image", () => {
     const cluster = fakeCluster({ mode: "Suspended", image: "old" });
     const volumes = cluster.state.volumeClaimTemplates;
 
-    await providerOn(cluster, "new").locate("general");
+    await providerOn(cluster, "new").locate(botSeat("general"));
 
     expect(cluster.state.pod).toBe("new");
     expect(cluster.state.mode).toBe("Running");
@@ -369,7 +376,7 @@ describe("a computer on an older image", () => {
 
   test("waking one that is already current changes only its mode", async () => {
     const cluster = fakeCluster({ mode: "Suspended", image: "same" });
-    await providerOn(cluster, "same").locate("general");
+    await providerOn(cluster, "same").locate(botSeat("general"));
     expect(cluster.patches).toEqual([
       {
         contentType: "application/merge-patch+json",
@@ -380,7 +387,7 @@ describe("a computer on an older image", () => {
 
   test("one that is running mid-task is never restarted by being used", async () => {
     const cluster = fakeCluster({ mode: "Running", image: "old" });
-    await providerOn(cluster, "new").locate("general");
+    await providerOn(cluster, "new").locate(botSeat("general"));
     expect(cluster.patches).toHaveLength(0);
     expect(cluster.state.pod).toBe("old");
   });
@@ -400,9 +407,9 @@ describe("updating a computer on request", () => {
     const volumes = cluster.state.volumeClaimTemplates;
     const provider = providerOn(cluster, "new");
 
-    const result = await provider.update("general");
+    const result = await provider.update(botSeat("general").key);
     expect(result).toMatchObject({ updated: true, wasRunning: true });
-    await provider.restarting("general");
+    await provider.restarting(botSeat("general").key);
 
     expect(cluster.state.pod).toBe("new");
     expect(cluster.state.mode).toBe("Running");
@@ -423,22 +430,24 @@ describe("updating a computer on request", () => {
     const cluster = fakeCluster({ mode: "Suspended", image: "old" });
     const provider = providerOn(cluster, "new");
 
-    expect(await provider.update("general")).toMatchObject({
+    expect(await provider.update(botSeat("general").key)).toMatchObject({
       updated: true,
       wasRunning: false,
     });
-    expect(provider.restarting("general")).toBeUndefined();
+    expect(provider.restarting(botSeat("general").key)).toBeUndefined();
     expect(cluster.state.mode).toBe("Suspended");
     expect(cluster.state.pod).toBeUndefined();
 
     // And the next use wakes it on the new image without a second template write.
-    await provider.locate("general");
+    await provider.locate(botSeat("general"));
     expect(cluster.state.pod).toBe("new");
   });
 
   test("one already on the current image is left alone", async () => {
     const cluster = fakeCluster({ mode: "Running", image: "same" });
-    expect(await providerOn(cluster, "same").update("general")).toMatchObject({
+    expect(
+      await providerOn(cluster, "same").update(botSeat("general").key),
+    ).toMatchObject({
       updated: false,
     });
     expect(cluster.patches).toHaveLength(0);
@@ -454,9 +463,91 @@ describe("updating a computer on request", () => {
       fetchImpl: (async () =>
         new Response("null", { status: 404 })) as unknown as typeof fetch,
     });
-    expect(await provider.update("general")).toEqual({
+    expect(await provider.update(botSeat("general").key)).toEqual({
       updated: false,
       wasRunning: false,
     });
+  });
+});
+
+/**
+ * One Sandbox per person, and per isolated Bot.
+ *
+ * The regression: a Sandbox was named for the Bot alone, so a public Bot's one Sandbox, and the
+ * logins in its volume, were everybody's.
+ */
+describe("whose computer a Sandbox is", () => {
+  test("two people on one public Bot get two Sandboxes", () => {
+    const ada = sandboxNameFor(personSeat("ada", "pub-bot").key);
+    const bo = sandboxNameFor(personSeat("bo", "pub-bot").key);
+    expect(ada).not.toBe(bo);
+    expect(ada.startsWith("person-")).toBe(true);
+  });
+
+  test("one person's two Bots share that person's Sandbox", () => {
+    expect(sandboxNameFor(personSeat("ada", "sales").key)).toBe(
+      sandboxNameFor(personSeat("ada", "notes").key),
+    );
+  });
+
+  test("an isolated Bot keeps the Sandbox every Bot's computer had before", () => {
+    // Same name as before computers were per person, so its existing volume and logins carry on.
+    expect(sandboxNameFor(botSeat("knowledge").key)).toBe(
+      sandboxNameFor("knowledge"),
+    );
+    expect(sandboxNameFor({ kind: "person", personId: "knowledge" })).not.toBe(
+      sandboxNameFor("knowledge"),
+    );
+  });
+
+  test("a person's Sandbox is created for them, and listed as theirs", async () => {
+    const created: unknown[] = [];
+    let exists = false;
+    const provider = createSandboxComputerProvider({
+      namespace: "openbot",
+      template: { podTemplate: { spec: { containers: [] } } },
+      idleAfterMs: 60_000,
+      apiServer: "https://kubernetes.default",
+      token: "t",
+      locateWaitMs: 50,
+      resumeTimeoutMs: 50,
+      fetchImpl: (async (url: string | URL | Request, init?: RequestInit) => {
+        const method = init?.method ?? "GET";
+        if (method === "POST") {
+          created.push(JSON.parse(String(init?.body)));
+          exists = true;
+          return Response.json({});
+        }
+        if (new URL(String(url)).pathname.endsWith("/sandboxes")) {
+          return Response.json({ items: created });
+        }
+        if (!exists) return new Response("", { status: 404 });
+        return Response.json({
+          ...(created[0] as object),
+          status: {
+            serviceFQDN: "person-ada.openbot.svc.cluster.local",
+            conditions: [{ type: "Ready", status: "True" }],
+          },
+        });
+      }) as unknown as typeof fetch,
+    });
+
+    expect(await provider.locate(personSeat("ada", "sales"))).toBe(
+      "http://person-ada.openbot.svc.cluster.local:4100",
+    );
+    expect(created).toHaveLength(1);
+    expect(
+      (created[0] as { metadata: { annotations: Record<string, string> } })
+        .metadata.annotations,
+    ).toEqual({
+      "openbot.dev/person-id": "ada",
+      "openbot.dev/computer": "person:ada",
+    });
+    // A second Bot of Ada's reaches the same Sandbox and creates nothing.
+    await provider.locate(personSeat("ada", "notes"));
+    expect(created).toHaveLength(1);
+    expect((await provider.list()).map((computer) => computer.key)).toEqual([
+      { kind: "person", personId: "ada" },
+    ]);
   });
 });

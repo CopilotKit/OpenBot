@@ -165,11 +165,20 @@ export type ComputerTransportOptions = {
   fetchImpl?: typeof fetch;
 };
 
+/**
+ * Which seat on the computer a request is for.
+ *
+ * The Bot alone on a computer of one person's own (or an isolated Bot's), where each Bot is a seat;
+ * the Bot and the person on the computer many people share, where the seat is the pair. A string is
+ * the Bot alone.
+ */
+export type SeatAddress = string | { botId: string; personId?: string };
+
 /** Internal HTTP interface used only by ComputerGateway. */
 export interface ComputerTransport {
   call<T>(
     baseUrl: string,
-    botId: string,
+    botId: SeatAddress,
     path: string,
     init?: RequestInit,
     caller?: AbortSignal,
@@ -178,7 +187,7 @@ export interface ComputerTransport {
   ): Promise<T>;
   post<T>(
     baseUrl: string,
-    botId: string,
+    botId: SeatAddress,
     path: string,
     payload: unknown,
     caller?: AbortSignal,
@@ -187,17 +196,27 @@ export interface ComputerTransport {
   ): Promise<T>;
   navigate(
     baseUrl: string,
-    botId: string,
+    botId: SeatAddress,
     url: string,
     toolCallId?: string,
   ): Promise<NavigateResult>;
   download(
     baseUrl: string,
-    botId: string,
+    botId: SeatAddress,
     path: string,
     caller?: AbortSignal,
     timeoutMs?: number,
   ): Promise<ComputerDownload>;
+}
+
+/** The headers that name a seat to the computer. See {@link SeatAddress}. */
+export function seatHeaders(seat: SeatAddress): Record<string, string> {
+  const { botId, personId } =
+    typeof seat === "string" ? { botId: seat, personId: undefined } : seat;
+  return {
+    "x-openbot-bot-id": botId,
+    ...(personId ? { "x-openbot-person-id": personId } : {}),
+  };
 }
 
 /**
@@ -214,7 +233,7 @@ export function createComputerTransport(
 
   async function request(
     baseUrl: string,
-    botId: string,
+    botId: SeatAddress,
     path: string,
     init?: RequestInit,
     caller?: AbortSignal,
@@ -240,7 +259,7 @@ export function createComputerTransport(
         ...init,
         headers: {
           ...(init?.headers as Record<string, string> | undefined),
-          "x-openbot-bot-id": botId,
+          ...seatHeaders(botId),
           ...(options.token
             ? { "x-openbot-computer-token": options.token }
             : {}),
@@ -273,7 +292,7 @@ export function createComputerTransport(
 
   async function call<T>(
     baseUrl: string,
-    botId: string,
+    botId: SeatAddress,
     path: string,
     init?: RequestInit,
     caller?: AbortSignal,
@@ -299,7 +318,7 @@ export function createComputerTransport(
 
   async function download(
     baseUrl: string,
-    botId: string,
+    botId: SeatAddress,
     path: string,
     caller?: AbortSignal,
     timeoutMs?: number,
@@ -337,7 +356,7 @@ export function createComputerTransport(
 
   function post<T>(
     baseUrl: string,
-    botId: string,
+    botId: SeatAddress,
     path: string,
     payload: unknown,
     caller?: AbortSignal,
@@ -359,7 +378,7 @@ export function createComputerTransport(
 
   async function navigate(
     baseUrl: string,
-    botId: string,
+    botId: SeatAddress,
     url: string,
     toolCallId?: string,
   ): Promise<NavigateResult> {

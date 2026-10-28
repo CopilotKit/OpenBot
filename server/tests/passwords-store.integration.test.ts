@@ -8,6 +8,7 @@ import { savedLogins, signInRequests } from "../src/db/schema/passwords";
 import { createSignInService } from "../src/passwords/service";
 import { createPasswordStore } from "../src/passwords/store";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { personSeat } from "../src/computer/computer-key";
 
 /**
  * The Postgres store behind the private sign-in form, against a real database: every read is the
@@ -26,6 +27,7 @@ const service = createSignInService({
   encryptionKey: Buffer.alloc(32, 3).toString("base64"),
   auditStore: { insert: async (event) => void audit.push(event) },
   gateway: {
+    seatFor: async (botId, personId) => personSeat(personId, botId),
     signIn: async () => {
       await new Promise<void>((resolve) => {
         releaseFill = resolve;
@@ -118,6 +120,7 @@ test("a request waiting on its verification code is stored, listed, and then sig
     store,
     encryptionKey: Buffer.alloc(32, 3).toString("base64"),
     gateway: {
+      seatFor: async (botId, personId) => personSeat(personId, botId),
       signIn: async () => ({
         submitted: true,
         passwordFieldVisible: false,

@@ -4,8 +4,8 @@ import { clearActivity } from "./activity";
 import { type ActionPolicy, computerKeys } from "./queries";
 
 /**
- * Stopping frees the container; resetting also deletes the browser profile; updating moves the
- * computer onto the current image and keeps the profile.
+ * Stopping frees the container; resetting also deletes the browser profiles on it; updating moves
+ * the computer onto the current image and keeps the profiles.
  */
 export type ComputerAction = "stop" | "reset" | "update";
 
@@ -19,23 +19,33 @@ function invalidateComputers(queryClient: QueryClient) {
   return queryClient.invalidateQueries({ queryKey: computerKeys.all });
 }
 
+/**
+ * An administrator stopping, resetting or updating one computer from the list.
+ *
+ * Named by whose computer it is, not by a Bot: the computer on the list is somebody else's, and the
+ * Bot routes act on the asker's own. `botId` names one seat on a shared computer.
+ */
 export function setComputerStateMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (variables: {
-      botId: string;
+      computer: string;
+      botId?: string;
       action: ComputerAction;
     }) => {
-      await client(
-        `/api/computers/${encodeURIComponent(variables.botId)}/computers/${variables.action}`,
-        {
-          method: "POST",
-          fallback: `The computer could not be ${PAST[variables.action]}.`,
+      await client("/api/computers/fleet", {
+        method: "POST",
+        body: {
+          action: variables.action,
+          computer: variables.computer,
+          ...(variables.botId ? { botId: variables.botId } : {}),
         },
-      );
+        fallback: `The computer could not be ${PAST[variables.action]}.`,
+      });
     },
     /** A reset deletes the profile those commands ran on; a stop keeps it, so only reset forgets. */
     onSuccess: (_result, variables) => {
-      if (variables.action === "reset") clearActivity(variables.botId);
+      if (variables.action === "reset" && variables.botId)
+        clearActivity(variables.botId);
       return invalidateComputers(queryClient);
     },
   });

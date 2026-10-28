@@ -38,6 +38,7 @@ import { createTurnRunner } from "@openbot/toolkit/run-turn";
 import { createTeamBots } from "../src/team-bots/team-bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { serverTurnAdmission } from "../src/agents/turn-admission";
+import { computerKeyText } from "../src/computer/computer-key";
 
 /**
  * The enterprise controls against a real PostgreSQL, through the same seams production uses: the
@@ -59,17 +60,17 @@ const bot = `ent-bot-${suite}`;
 const stopped: string[] = [];
 const provider: ComputerProvider = {
   name: "fake",
-  isolation: "per-bot",
+  isolation: "per-person",
   locate: async () => "http://unused",
-  status: async (botId) => ({ botId, state: "ready" }),
-  stop: async (botId) => {
-    stopped.push(botId);
+  status: async (seat) => ({ botId: seat.botId, state: "ready" }),
+  stop: async (target) => {
+    stopped.push(computerKeyText(target.key));
     return { wasRunning: true };
   },
   reset: async () => ({ cleared: false }),
   list: async () => [
     {
-      botId: bot,
+      key: { kind: "bot", botId: bot },
       status: "running",
       url: "",
       startedAt: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString(),
@@ -700,11 +701,18 @@ describe("network policy", () => {
 
 describe("offboarding", () => {
   test("terminating a member's computers stops their Bots and is audited", async () => {
+    stopped.length = 0;
     const response = await asAdmin.request(
       `/api/admin/enterprise/people/${member.id}/terminate-computers`,
       { method: "POST" },
     );
-    expect((await response.json()).stopped).toEqual([bot]);
+    // Their own computer, which every Bot they used runs on, and the computer of the Bot they own,
+    // which would be its own were it isolated.
+    expect((await response.json()).stopped).toEqual([
+      `person:${member.id}`,
+      `bot:${bot}`,
+    ]);
+    expect(stopped).toEqual([`person:${member.id}`, `bot:${bot}`]);
     const [row] = await database
       .select()
       .from(auditEvents)
@@ -720,7 +728,7 @@ describe("offboarding", () => {
   test("the inactive sweep stops a computer idle past the window", async () => {
     stopped.length = 0;
     const result = await controls.terminateInactiveComputers();
-    expect(result?.stopped).toEqual([bot]);
+    expect(result?.stopped).toEqual([`bot:${bot}`]);
   });
 });
 

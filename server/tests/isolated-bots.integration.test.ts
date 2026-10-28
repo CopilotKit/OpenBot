@@ -9,6 +9,10 @@ import {
 } from "../src/admin/controls";
 import { createEnterpriseAdminRoutes } from "../src/admin/routes";
 import { runsIsolated } from "../src/agents/isolation";
+import {
+  botOwnership,
+  createComputerSeatResolver,
+} from "../src/computer/computer-key";
 import { createAgentProfileStore } from "../src/agents/profile-store";
 import { createAgentRoutes } from "../src/agents/routes";
 import { createAuditStore } from "../src/audit";
@@ -442,6 +446,54 @@ describe("whether it is in effect", () => {
             eq(capabilitySettings.scopeId, group),
           ),
         );
+    }
+  });
+
+  /*
+   * The computer key, read from the same verdict. An isolated Bot is one computer everybody who uses
+   * it shares; withdrawing the switch puts it on each person's own computer from its next run, and
+   * nobody has to edit the Bot.
+   */
+  test("the computer it runs on follows the verdict, and falls back to each person's when revoked", async () => {
+    const agent = await createBot(owner, `Seat ${suite}`, {
+      isolated: true,
+      visibility: "public",
+    });
+    const seats = createComputerSeatResolver({
+      runsIsolated: (botId) => runsIsolated(database, botId),
+      bot: botOwnership(database),
+      canIsolate: true,
+    });
+    const own = {
+      botId: agent.id,
+      key: { kind: "bot" as const, botId: agent.id },
+    };
+    expect(await seats.seatFor(agent.id, owner.id)).toEqual(own);
+    expect(await seats.seatFor(agent.id, colleague.id)).toEqual(own);
+
+    await setSwitch(false);
+    try {
+      expect(await seats.seatFor(agent.id, owner.id)).toEqual({
+        botId: agent.id,
+        key: { kind: "person", personId: owner.id },
+      });
+      expect(await seats.seatFor(agent.id, colleague.id)).toEqual({
+        botId: agent.id,
+        key: { kind: "person", personId: colleague.id },
+      });
+      // A provider that cannot make a computer for one Bot never hands one out, whatever the flag.
+      await setSwitch(null);
+      const shared = createComputerSeatResolver({
+        runsIsolated: (botId) => runsIsolated(database, botId),
+        bot: botOwnership(database),
+        canIsolate: false,
+      });
+      expect((await shared.seatFor(agent.id, colleague.id)).key).toEqual({
+        kind: "person",
+        personId: colleague.id,
+      });
+    } finally {
+      await setSwitch(null);
     }
   });
 

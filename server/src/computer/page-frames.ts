@@ -4,7 +4,7 @@
  * Written where the navigation happens, which is the one moment the screen is certainly showing the
  * page that was asked for, and read back when somebody reopens the conversation that asked for it.
  */
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, or, sql } from "drizzle-orm";
 import type { Database } from "../db/client";
 import { computerPageFrame } from "../db/schema";
 
@@ -58,10 +58,12 @@ export type PageFrameStore = {
     toolCallId: string,
   ) => Promise<{ url: string; title: string | null; frame: string } | null>;
   /**
-   * Everything kept for one computer. Returns how many went.
+   * Everything kept for one seat, or for every seat on one computer. Returns how many went.
    *
    * Called when a profile is wiped, because "every login the Bot had is gone" is not true while
-   * pictures of the signed-in pages are still readable from the transcript.
+   * pictures of the signed-in pages are still readable from the transcript. Given a computer
+   * (`person:<id>`) it takes every seat filed under it (`person:<id>/<bot>`), which is what wiping a
+   * person's whole computer wipes.
    */
   clear: (computerId: string) => Promise<number>;
   /**
@@ -131,7 +133,12 @@ export function createPageFrameStore(database: Database): PageFrameStore {
     async clear(computerId) {
       const gone = await database
         .delete(computerPageFrame)
-        .where(eq(computerPageFrame.computerId, computerId))
+        .where(
+          or(
+            eq(computerPageFrame.computerId, computerId),
+            sql`starts_with(${computerPageFrame.computerId}, ${`${computerId}/`})`,
+          ),
+        )
         .returning({ url: computerPageFrame.url });
       return gone.length;
     },

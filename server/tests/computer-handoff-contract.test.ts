@@ -35,9 +35,9 @@ function fixture(
   const requests: { path: string; init?: RequestInit }[] = [];
   const provider: ComputerProvider = {
     name: "fixture",
-    isolation: "per-bot",
+    isolation: "per-person",
     locate: async () => "http://agent-computer:4100",
-    status: async (botId) => ({ botId, state: "ready" }),
+    status: async (seat) => ({ botId: seat.botId, state: "ready" }),
     stop: async () => ({ wasRunning: true }),
     reset: async () => ({ cleared: true }),
     list: async () => [],

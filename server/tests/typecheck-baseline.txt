@@ -80,7 +80,6 @@ server/tests/composio-connections.test.ts: error TS2769: No overload matches thi
 server/tests/computer-client.test.ts: error TS2769: No overload matches this call.
 server/tests/computer-download-routes.test.ts: error TS2345: Argument of type '(actor: AuthenticatedActor, botId: string) => Promise<boolean>' is not assignable to parameter of type 'BotAccessCheck'.
 server/tests/computer-gateway.test.ts: error TS2353: Object literal may only specify known properties, and 'text' does not exist in type 'WriteFileInput'.
-server/tests/computer-gateway.test.ts: error TS2554: Expected 1 arguments, but got 3.
 server/tests/computer-gateway.test.ts: error TS2769: No overload matches this call.
 server/tests/computer-policy.test.ts: error TS2322: Type '{ tool: { name: string; }; bot: { id: string; }; page: { url: string; host: string; }; actor: { id: string; }; element?: { ref: string; role: string; name: string; type?: string; } | undefined; ... 5 more ...; initiator?: { ...; } | undefined; }' is not assignable to type 'PolicyContext'.
 server/tests/computer-policy.test.ts: error TS2345: Argument of type '{ tool: { name: string; }; bot: { id: string; }; actor: { id: string; }; page: { url: string; host: string; }; intent: "activate"; key: string; element: { ref: string; role: string; name: string; type: string; }; file: { ...; }; command: string; mcp: { ...; }; }' is not assignable to parameter of type 'PolicyContext'.
