@@ -28,6 +28,8 @@ export function ConversationView({
   agents = [],
   commands,
   channelId,
+  modelSelector,
+  submissionBlocked = false,
   disabled = false,
   pending = false,
   autoFocus = false,
@@ -55,6 +57,8 @@ export function ConversationView({
    * first send — which leaves the composer exactly as it behaved before attachments existed.
    */
   channelId?: string;
+  modelSelector?: ReactNode;
+  submissionBlocked?: boolean;
   disabled?: boolean;
   /**
    * A turn is in flight: the Bot has been asked something and has not come back yet.
@@ -441,6 +445,7 @@ export function ConversationView({
       <div className="max-w-2xl mx-auto w-full px-0 pb-4 shrink-0">
         {notice}
         <Composer
+          modelSelector={modelSelector}
           agents={agents}
           autoFocus={autoFocus}
           {...(channelId ? { channelId } : {})}
@@ -451,7 +456,7 @@ export function ConversationView({
           disabled={disabled}
           droppedAttachments={droppedAttachments}
           onQueue={
-            queueWhileBusy
+            queueWhileBusy && !submissionBlocked
               ? (draft) => {
                   submit(draft, true);
                 }

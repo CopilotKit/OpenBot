@@ -185,6 +185,12 @@ export function standingRoleMessage(
   };
 }
 
+export type ResolveRunModel = (
+  agentId: string,
+  input: RunAgentInput,
+  signal: AbortSignal,
+) => Promise<RuntimeModel>;
+
 export type RuntimeModel = {
   provider: "openai" | "anthropic";
   defaultModel: string;
@@ -550,6 +556,7 @@ export async function buildAgents(
   markAttachmentsSent?: MarkAttachmentsSent,
   acquireLearnedSkills?: AcquireLearnedSkills,
   loadPersonalMemory?: LoadPersonalMemory,
+  resolveRunModel?: ResolveRunModel,
 ): Promise<Record<string, AbstractAgent>> {
   let vendors: readonly string[] = [];
   try {
@@ -606,6 +613,7 @@ export async function buildAgents(
           loadAttachment,
           markAttachmentsSent,
           acquireLearnedSkills,
+          resolveRunModel,
         );
         if (loadPersonalMemory)
           built.use(new PersonalMemoryMiddleware(agent.id, loadPersonalMemory));
@@ -868,6 +876,7 @@ async function buildAgent(
   /** How this run records that those files were sent. See {@link buildAgents}. */
   markAttachmentsSent?: MarkAttachmentsSent,
   acquireLearnedSkills?: AcquireLearnedSkills,
+  resolveRunModel?: ResolveRunModel,
 ): Promise<AbstractAgent> {
   if (agent.type === "unavailable") {
     return new UnavailableAgent(agent);
@@ -984,11 +993,12 @@ async function buildAgent(
     input?: RunAgentInput,
     signal?: AbortSignal,
     learnedSkills?: LearnedSkillInvocation,
+    runModel: RuntimeModel = model,
   ) =>
     new BuiltInAgentWithSaneHistory(
       builtInAgentConfiguration(
         agent,
-        model,
+        runModel,
         apiKey,
         tools,
         computerGuidance,
@@ -1022,13 +1032,24 @@ async function buildAgent(
     );
 
   const whole = withTools(granted);
-  if (!narrowing && !handoff && !model.plan && !acquireLearnedSkills)
+  if (
+    !narrowing &&
+    !handoff &&
+    !model.plan &&
+    !acquireLearnedSkills &&
+    !resolveRunModel
+  )
     return whole;
 
   return new RunBuiltAgent(
     { agentId: agent.id, description: agent.name },
     whole,
     async (input, signal) => {
+      const runModel =
+        !model.plan && resolveRunModel
+          ? await resolveRunModel(agent.id, input, signal)
+          : model;
+      signal.throwIfAborted();
       const learnedSkills = await acquireLearnedSkills?.(agent.id, signal);
       signal.throwIfAborted();
       if (
@@ -1056,12 +1077,13 @@ async function buildAgent(
       const tools = passing.length > 0 ? [...offered, ...passing] : offered;
       // Nothing added and nothing narrowed means nothing to rebuild, and reusing the agent already
       // built for this request keeps that path allocation-for-allocation what it was.
-      return !model.plan &&
+      return !resolveRunModel &&
+        !model.plan &&
         !learnedSkills &&
         tools.length === granted.length &&
         passing.length === 0
         ? whole
-        : withTools(tools, input, signal, learnedSkills);
+        : withTools(tools, input, signal, learnedSkills, runModel);
     },
   );
 }
@@ -1612,6 +1634,7 @@ export async function resolveRuntimeAgents(
   markAttachmentsSent?: MarkAttachmentsSent,
   acquireLearnedSkills?: AcquireLearnedSkills,
   loadPersonalMemory?: LoadPersonalMemory,
+  resolveRunModel?: ResolveRunModel,
 ): Promise<Record<string, AbstractAgent>> {
   const all = await loadAgents();
   if (all.length === 0) {
@@ -1648,6 +1671,7 @@ export async function resolveRuntimeAgents(
     markAttachmentsSent,
     acquireLearnedSkills,
     loadPersonalMemory,
+    resolveRunModel,
   );
 }
 

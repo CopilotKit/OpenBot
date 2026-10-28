@@ -1,20 +1,24 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { AbstractAgent } from "@ag-ui/client";
+import { createTurnRunner } from "@openbot/toolkit/run-turn";
 import { and, eq, inArray, like } from "drizzle-orm";
 import { Hono } from "hono";
 import { EMPTY } from "rxjs";
 import {
   type EnterpriseControls,
   guardDeliveryStore,
+  headlessTurnRefusal,
   installEnterpriseControls,
 } from "../src/admin/controls";
 import { createEnterpriseGate } from "../src/admin/gate";
 import { createEnterpriseAdminRoutes } from "../src/admin/routes";
 import { createHandoffDelivery } from "../src/agents/handoff-delivery";
+import { serverTurnAdmission } from "../src/agents/turn-admission";
 import { addAuditTap, createAuditStore, recordAuditEvent } from "../src/audit";
 import { createAuth } from "../src/auth";
 import type { AppVariables } from "../src/auth/guards";
+import { governResolvedModel } from "../src/channels/model-selection";
 import type { ComputerProvider } from "../src/computer/provider";
 import type { DeploymentConfig } from "../src/config";
 import { createDatabase } from "../src/db/client";
@@ -34,10 +38,8 @@ import {
   teamBotPublications,
   users,
 } from "../src/db/schema";
-import { createTurnRunner } from "@openbot/toolkit/run-turn";
 import { createTeamBots } from "../src/team-bots/team-bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
-import { serverTurnAdmission } from "../src/agents/turn-admission";
 
 /**
  * The enterprise controls against a real PostgreSQL, through the same seams production uses: the
@@ -879,4 +881,71 @@ describe("SCIM 2.0 through Better Auth", () => {
       .where(eq(revokedAccess.email, scimEmail));
     expect(after).toEqual([]);
   });
+});
+
+test("resolved model governance checks overrides once while suggest retains default checks", async () => {
+  const actor = { id: member.id, role: "user" as const };
+  controls.deps.builtInApiModelGovernedAtRun = true;
+  try {
+    await put(asAdmin, "/api/admin/enterprise/settings/modelAllowlist", {
+      value: { enabled: true, models: ["openai/gpt-6-luna"] },
+    });
+    expect(
+      await headlessTurnRefusal({ ownerUserId: member.id, agentId: bot }),
+    ).toBeNull();
+    const response = await asMember.request(
+      `/api/copilotkit/agent/${bot}/run`,
+      {
+        method: "POST",
+        body: JSON.stringify({ threadId: "selected", runId: "selected-run" }),
+        headers: { "content-type": "application/json" },
+      },
+    );
+    expect(response.status).toBe(200);
+    await governResolvedModel(
+      actor,
+      bot,
+      { threadId: "selected", runId: "selected-run" },
+      { provider: "openai", defaultModel: "gpt-6-luna" },
+    );
+    const rows = await database
+      .select()
+      .from(modelUsage)
+      .where(eq(modelUsage.runId, "selected-run"));
+    expect(rows.map((row) => [row.model, row.allowed])).toEqual([
+      ["openai/gpt-6-luna", true],
+    ]);
+    const suggest = await asMember.request(
+      `/api/copilotkit/agent/${bot}/suggest`,
+      {
+        method: "POST",
+        body: "{}",
+        headers: { "content-type": "application/json" },
+      },
+    );
+    expect(suggest.status).toBe(403);
+    await put(asAdmin, "/api/admin/enterprise/settings/modelAllowlist", {
+      value: { enabled: true, models: ["openai/gpt-test"] },
+    });
+    await expect(
+      governResolvedModel(
+        actor,
+        bot,
+        { threadId: "selected", runId: "refused-run" },
+        { provider: "openai", defaultModel: "gpt-6-luna" },
+      ),
+    ).rejects.toThrow();
+    const refused = await database
+      .select()
+      .from(modelUsage)
+      .where(eq(modelUsage.runId, "refused-run"));
+    expect(refused.map((row) => [row.model, row.allowed])).toEqual([
+      ["openai/gpt-6-luna", false],
+    ]);
+  } finally {
+    controls.deps.builtInApiModelGovernedAtRun = false;
+    await put(asAdmin, "/api/admin/enterprise/settings/modelAllowlist", {
+      value: { enabled: false, models: [] },
+    });
+  }
 });

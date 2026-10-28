@@ -2670,3 +2670,230 @@ describe("where an attachment reaches the model, and where it deliberately does 
     ).toMatchObject({ type: "data" });
   });
 });
+
+describe("conversation model run boundary", () => {
+  test("resolves once per run, ignores forwarded model props, and keeps concurrent models separate", async () => {
+    const recorder = new LLMock();
+    const oldBase = process.env.OPENAI_BASE_URL;
+    let calls = 0;
+    const model = { provider: "openai" as const, defaultModel: "gpt-5.5" };
+    try {
+      process.env.OPENAI_BASE_URL = await recorder.start();
+      recorder.onMessage(/.*/, { content: "Selected model answered." });
+      const resolver = createActorAgentResolver({
+        loadAgents: async () => [
+          {
+            id: "bot",
+            name: "Bot",
+            type: "built_in",
+            systemPrompt: "Be helpful.",
+          },
+        ],
+        model,
+        resolveModelApiKey: async () => "synthetic-key",
+        resolveRunModelForActor: (actor) => async (_agent, input) => {
+          expect(actor.id).toBe("verified");
+          calls++;
+          return {
+            ...model,
+            defaultModel:
+              input.threadId === "channel-one" ? "gpt-6.1-sol" : "gpt-6-luna",
+          };
+        },
+      });
+      const agent = await resolver.resolveAgentForActor(
+        { id: "verified", role: "user" },
+        "bot",
+      );
+      await Promise.all(
+        ["channel-one", "channel-two"].map(async (threadId) => {
+          const clone = agent.clone();
+          clone.threadId = threadId;
+          clone.addMessage({
+            id: threadId,
+            role: "user",
+            content: "Reply please.",
+          });
+          await clone.runAgent({
+            forwardedProps: {
+              model: "injected",
+              provider: "anthropic",
+              apiKey: "injected",
+            },
+          });
+          expect(clone.messages.at(-1)?.role).toBe("assistant");
+        }),
+      );
+      expect(calls).toBe(2);
+      expect(
+        recorder
+          .getRequests()
+          .map((r) => (r.body as { model: string }).model)
+          .sort(),
+      ).toEqual(["gpt-6-luna", "gpt-6.1-sol"].sort());
+      expect(model.defaultModel).toBe("gpt-5.5");
+    } finally {
+      if (oldBase === undefined) delete process.env.OPENAI_BASE_URL;
+      else process.env.OPENAI_BASE_URL = oldBase;
+      await recorder.stop();
+    }
+  });
+});
+
+test("curated Anthropic models stream through the shipped adapter", async () => {
+  const recorder = new LLMock();
+  const old = process.env.ANTHROPIC_BASE_URL;
+  try {
+    process.env.ANTHROPIC_BASE_URL = `${await recorder.start()}/v1`;
+    recorder.onMessage(/.*/, { content: "Anthropic fixture answered." });
+    for (const selected of ["claude-sonnet-5-5", "claude-haiku-5-5"]) {
+      const resolver = createActorAgentResolver({
+        loadAgents: async () => [
+          {
+            id: "bot",
+            name: "Bot",
+            type: "built_in",
+            systemPrompt: "Be helpful.",
+          },
+        ],
+        model: { provider: "anthropic", defaultModel: "claude-sonnet-5-5" },
+        resolveModelApiKey: async () => "synthetic",
+        resolveRunModelForActor: () => async () => ({
+          provider: "anthropic",
+          defaultModel: selected,
+        }),
+      });
+      const agent = await resolver.resolveAgentForActor(
+        { id: "test", role: "user" },
+        "bot",
+      );
+      agent.addMessage({ id: selected, role: "user", content: "Reply." });
+      await agent.runAgent();
+      expect(agent.messages.at(-1)).toMatchObject({
+        role: "assistant",
+        content: "Anthropic fixture answered.",
+      });
+    }
+    expect(
+      recorder.getRequests().map((r) => (r.body as { model: string }).model),
+    ).toEqual(["claude-sonnet-5-5", "claude-haiku-5-5"]);
+  } finally {
+    if (old === undefined) delete process.env.ANTHROPIC_BASE_URL;
+    else process.env.ANTHROPIC_BASE_URL = old;
+    await recorder.stop();
+  }
+});
+
+for (const [provider, selected] of [
+  ["openai", "gpt-6.1-sol"],
+  ["openai", "gpt-6-luna"],
+  ["anthropic", "claude-sonnet-5-5"],
+  ["anthropic", "claude-haiku-5-5"],
+] as const) {
+  test(`selected ${selected} stays fixed through a tool continuation`, async () => {
+    const recorder = new LLMock();
+    const envKey =
+      provider === "openai" ? "OPENAI_BASE_URL" : "ANTHROPIC_BASE_URL";
+    const previous = process.env[envKey];
+    let saved: string = selected;
+    let resolved = 0;
+    let executed = 0;
+    try {
+      const url = await recorder.start();
+      process.env[envKey] = provider === "anthropic" ? `${url}/v1` : url;
+      recorder.onToolResult("lookup-call", { content: "The tool finished." });
+      recorder.onMessage(/.*/, {
+        toolCalls: [{ id: "lookup-call", name: "lookup", arguments: {} }],
+      });
+      const resolver = createActorAgentResolver({
+        model: { provider, defaultModel: "default" },
+        loadAgents: async () => [
+          {
+            id: "bot",
+            name: "Bot",
+            type: "built_in",
+            systemPrompt: "Use lookup once.",
+          },
+        ],
+        resolveModelApiKey: async () => "synthetic",
+        resolveRunModelForActor: () => async () => {
+          resolved++;
+          return { provider, defaultModel: saved };
+        },
+        loadToolsForActor: () => async () => [
+          {
+            name: "lookup",
+            description: "Look up a fact",
+            ref: "test/lookup",
+            parameters: z.object({}),
+            execute: async () => {
+              executed++;
+              saved = "changed-during-run";
+              return "Found.";
+            },
+          },
+        ],
+      });
+      const agent = await resolver.resolveAgentForActor(
+        { id: "test", role: "user" },
+        "bot",
+      );
+      agent.addMessage({ id: "ask", role: "user", content: "Look it up." });
+      await agent.runAgent();
+      expect(executed).toBe(1);
+      expect(resolved).toBe(1);
+      expect(
+        recorder.getRequests().map((r) => (r.body as { model: string }).model),
+      ).toEqual([selected, selected]);
+      expect(agent.messages.at(-1)).toMatchObject({
+        role: "assistant",
+        content: "The tool finished.",
+      });
+    } finally {
+      if (previous === undefined) delete process.env[envKey];
+      else process.env[envKey] = previous;
+      await recorder.stop();
+    }
+  });
+}
+
+test("cancelling during model resolution stops before the provider is called", async () => {
+  let entered!: () => void;
+  const started = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  let release!: () => void;
+  const waiting = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let observedSignal: AbortSignal | undefined;
+  const provider = spyOn(BuiltInAgent.prototype, "run").mockReturnValue(EMPTY);
+  try {
+    const resolver = createActorAgentResolver({
+      model: { provider: "openai", defaultModel: "gpt-6-luna" },
+      loadAgents: async () => [
+        { id: "bot", name: "Bot", type: "built_in", systemPrompt: "Test" },
+      ],
+      resolveModelApiKey: async () => "synthetic",
+      resolveRunModelForActor: () => async (_id, _input, signal) => {
+        observedSignal = signal;
+        entered();
+        await waiting;
+        return { provider: "openai", defaultModel: "gpt-6-luna" };
+      },
+    });
+    const agent = (
+      await resolver.resolveAgentForActor({ id: "test", role: "user" }, "bot")
+    ).clone();
+    const running = agent.runAgent();
+    await started;
+    agent.abortRun();
+    release();
+    await running;
+    expect(observedSignal?.aborted).toBe(true);
+    expect(provider).not.toHaveBeenCalled();
+  } finally {
+    release?.();
+    provider.mockRestore();
+  }
+});
