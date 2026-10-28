@@ -12,7 +12,8 @@ import { z } from "zod";
 export const RECORDER_PAGE_MESSAGES = {
   /** What the Recorder is doing, for this OpenBot: `RecorderPageState`. */
   state: "openbot.state",
-  /** Start recording `title`, from the tab that asked; the recording follows every tab the person uses. */
+  /** Start recording `title`, from the tab that asked; the recording follows every tab the person uses. `narrate` is the
+   * person's narration choice as OpenBot keeps it on their account; absent, the choice they made in the Recorder. */
   record: "openbot.record",
   /** Stop the live recording. */
   stop: "openbot.stop",
@@ -24,6 +25,7 @@ export const recorderPageMessageSchema = z.discriminatedUnion("type", [
     .object({
       type: z.literal(RECORDER_PAGE_MESSAGES.record),
       title: z.string().trim().min(1).max(200),
+      narrate: z.boolean().optional(),
     })
     .strict(),
   z.object({ type: z.literal(RECORDER_PAGE_MESSAGES.stop) }).strict(),

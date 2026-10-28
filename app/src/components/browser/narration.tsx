@@ -81,7 +81,9 @@ function nativeNarrationSentence(voice: LauncherState["voice"]): string {
 }
 
 /** The narration row on OpenBot Desktop while nothing records: the person's choice, which the next Record passes on. */
-function narrationChoiceSentence(narration: NarrationChoice["narration"]) {
+function narrationChoiceSentence(
+  narration: Exclude<NarrationChoice["narration"], undefined>,
+) {
   switch (narration) {
     case "on":
       return "On. The Recorder in your browser listens to your microphone while you record, and turns your speech into text on your computer.";
@@ -110,6 +112,8 @@ export function NativeNarrationRow({
 }) {
   if (!recording) {
     const on = choice.narration === "on";
+    // Not known yet (the preferences still loading, or unreadable): nothing said, and nothing to switch.
+    const known = choice.narration !== undefined;
     return (
       <Item size="sm">
         <ItemMedia variant="icon">
@@ -117,14 +121,17 @@ export function NativeNarrationRow({
         </ItemMedia>
         <ItemContent>
           <ItemTitle>Narration</ItemTitle>
-          <ItemDescription className="line-clamp-none">
-            {narrationChoiceSentence(choice.narration)}
-          </ItemDescription>
+          {choice.narration !== undefined ? (
+            <ItemDescription className="line-clamp-none">
+              {narrationChoiceSentence(choice.narration)}
+            </ItemDescription>
+          ) : null}
         </ItemContent>
         <ItemActions>
           <Switch
             aria-label="Narration"
             checked={on}
+            disabled={!known}
             onCheckedChange={choice.choose}
           />
         </ItemActions>

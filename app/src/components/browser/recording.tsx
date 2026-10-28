@@ -133,14 +133,17 @@ export function useRecording(
       : stop.error
         ? stop.submittedAt
         : 0,
-    record() {
+    async record() {
       const name = title.trim();
       if (!name) return;
-      if (choice.narration === null) {
+      // Asked only of a person who never chose: a choice the page has not heard yet is read first.
+      const narration = await choice.read();
+      if (narration === null) {
         setAsking(true);
         return;
       }
-      begin(name, choice.narration === "on");
+      // Unreadable: recorded without narration, the microphone closed, and the choice left as it is.
+      begin(name, narration === "on");
     },
     /** The narration question, while it is asked: its dialog's props. */
     question: {
@@ -331,7 +334,7 @@ export function RecordingRow({ recording }: { recording: Recording }) {
           aria-label="Record a task"
           onSubmit={(event) => {
             event.preventDefault();
-            recording.record();
+            void recording.record();
           }}
         />
       }
@@ -404,7 +407,7 @@ export function RecordingBar({
       className="flex min-w-0 items-center gap-2"
       onSubmit={(event) => {
         event.preventDefault();
-        recording.record();
+        void recording.record();
       }}
     >
       <Input
