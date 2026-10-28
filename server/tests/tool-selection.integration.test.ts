@@ -500,10 +500,7 @@ describe("a built-in Bot", () => {
         }
       )?.messages ?? []
     )
-      /*
-       * Chat Completions carries the prompt of a reasoning model such as gpt-5.5 as a `developer`
-       * message, where the Responses API the runtime used before 1.78 arrived here as `system`.
-       */
+      // Chat Completions carries a gpt-5 model's instructions as a developer message, not system.
       .filter(
         (message) => message.role === "system" || message.role === "developer",
       )

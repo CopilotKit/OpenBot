@@ -22,7 +22,8 @@ bash scripts/start.sh
 | `KEY_ENCRYPTION_KEY`          | Base64-encoded 32-byte key for encrypted stored credentials. Generate with `openssl rand -base64 32`. |
 | `INTELLIGENCE_API_URL`        | CopilotKit Intelligence API URL.                                                                      |
 | `INTELLIGENCE_GATEWAY_WS_URL` | CopilotKit Intelligence realtime gateway URL.                                                         |
-| `INTELLIGENCE_API_KEY`        | Runtime key for the Intelligence project.                                                             |
+| `CPK_INTELLIGENCE_API_KEY` | Runtime key written by the CopilotKit CLI. Preferred when non-empty. |
+| `INTELLIGENCE_API_KEY` | Legacy runtime key; used when `CPK_INTELLIGENCE_API_KEY` is empty or absent. |
 
 All five above stop server startup if missing. The three `INTELLIGENCE_` values are additionally
 checked as a set, so a partial set is refused as a misconfiguration rather than treated as
@@ -71,8 +72,8 @@ at `agent-langgraph` on a laptop.
 | `COMPOSIO_API_KEY`   | unset                              | One key for the whole deployment, for the broker that holds people's accounts for a few hundred apps. Unset, there is nothing to connect, nothing to grant and no Composio tool for a Bot to call; what remains is one row that goes nowhere, under **More apps** on the admin Plugins page, naming this variable. See [Composio](plugins/composio.md). |
 
 **`OPENBOT_GENERATIVE_UI`** enables generated interfaces by default: streamed HTML/CSS/JavaScript
-in a sandboxed iframe, and A2UI interfaces built from the SDK's declarative components. A2UI buttons
-send their named action and selected values back to the current conversation's Bot.
+in a sandboxed iframe, and A2UI 1.0 interfaces built from its 18 basic components. Their buttons send
+their named action and the values entered back to the current conversation's Bot.
 Set `OPENBOT_GENERATIVE_UI=false` or `0` to disable both. `true`, `1`, an empty value, or an unset
 value leave the capability on. The server configures both runtime renderers and reports the same
 setting through `/api/capabilities` to the browser.

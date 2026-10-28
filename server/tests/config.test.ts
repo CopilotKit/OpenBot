@@ -51,6 +51,25 @@ const {
 } = baseEnvironment;
 
 describe("deployment configuration", () => {
+  test.each([undefined, "", "stale-legacy-key"])(
+    "uses the CLI runtime key with legacy value %s",
+    (legacy) => {
+      const config = loadConfig({
+        ...baseEnvironment,
+        INTELLIGENCE_API_KEY: legacy,
+        CPK_INTELLIGENCE_API_KEY: "  cpk-current-project  ",
+      });
+      expect(config.runtime.intelligence.apiKey).toBe("cpk-current-project");
+    },
+  );
+
+  test("an empty CLI key preserves legacy-only deployments", () => {
+    expect(
+      loadConfig({ ...baseEnvironment, CPK_INTELLIGENCE_API_KEY: "  " }).runtime
+        .intelligence.apiKey,
+    ).toBe("tenant-api-key");
+  });
+
   test("organization authority disables the standalone actor without requiring local provider secrets", () => {
     const config = loadConfig({
       ...withoutSignIn,
@@ -113,7 +132,7 @@ describe("deployment configuration", () => {
     delete environment[name];
 
     expect(() => loadConfig(environment)).toThrow(
-      `CopilotKit Intelligence is required and is not configured. Missing: ${name}`,
+      `CopilotKit Intelligence is required and is not configured. Missing: ${name === "INTELLIGENCE_API_KEY" ? "CPK_INTELLIGENCE_API_KEY (or INTELLIGENCE_API_KEY)" : name}`,
     );
   });
 

@@ -304,6 +304,13 @@ function requiredString(value: unknown, name: string): string {
   return value;
 }
 
+function agentTitle(value: unknown): string {
+  if (typeof value !== "string" || value.trim().length > 120) {
+    throw new Error("agent.title must be text of 120 characters or fewer");
+  }
+  return value.trim();
+}
+
 function stringArray(value: unknown, name: string): string[] {
   if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
     throw new Error(`${name} must be an array of strings`);
@@ -413,7 +420,7 @@ function parseAgents(
       {
         id,
         name: requiredString(agent.name, "agent.name"),
-        title: requiredString(agent.title, "agent.title"),
+        title: agentTitle(agent.title),
         roleDescription: requiredString(
           agent.role_description,
           "agent.role_description",

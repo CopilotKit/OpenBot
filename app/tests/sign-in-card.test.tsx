@@ -72,34 +72,28 @@ function serving(open: (typeof signInRequest)[]) {
 }
 
 type Renderer = ComponentType<Record<string, unknown>>;
-type Kept = {
-  core?: ReturnType<typeof useCopilotKit>["copilotkit"];
-  renderer?: Renderer;
-  handler?: (args: unknown, context: unknown) => Promise<unknown>;
-};
+type Handler = (args: unknown, context: unknown) => Promise<unknown>;
 
 /**
- * Hands the test the provider's core, and nothing else.
- *
- * What the SDK kept is read from the core when the test asks (`keep`), never during this render.
- * Registering a tool re-renders nothing that only calls `useCopilotKit`: before runtime 1.79 the
- * provider's config effect fired `onHeadersChanged` each time it re-ran, which redrew every caller
- * as a side effect, and 1.79 made an unchanged header record a no-op. A read here would hold
- * whatever was registered when this last drew, which is nothing.
+ * Read from the SDK when asked, not when Capture renders: the provider does not re-render its
+ * consumers when a tool is added, so a read at render time sees the registry before the tool did.
  */
-function Capture({ kept }: { kept: Kept }) {
-  kept.core = useCopilotKit().copilotkit;
-  return null;
+class Registry {
+  copilotkit?: ReturnType<typeof useCopilotKit>["copilotkit"];
+  get renderer() {
+    return this.copilotkit?.renderToolCalls.find(
+      (candidate) => candidate.name === "computer_request_sign_in",
+    )?.render as Renderer | undefined;
+  }
+  get handler() {
+    return this.copilotkit?.getTool({ toolName: "computer_request_sign_in" })
+      ?.handler as Handler | undefined;
+  }
 }
 
-function keep(kept: Kept) {
-  const entry = kept.core?.renderToolCalls.find(
-    (candidate) => candidate.name === "computer_request_sign_in",
-  );
-  kept.renderer = entry?.render as Renderer | undefined;
-  kept.handler = kept.core?.getTool({
-    toolName: "computer_request_sign_in",
-  })?.handler as Kept["handler"];
+function Capture({ kept }: { kept: Registry }) {
+  kept.copilotkit = useCopilotKit().copilotkit;
+  return null;
 }
 
 function Providers({
@@ -121,17 +115,14 @@ test("the waiting card offers the private sign-in once the request exists", asyn
   const queries = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
-  const kept: Kept = {};
+  const kept = new Registry();
   const tree = render(
     <Providers queries={queries}>
       <SignInTool />
       <Capture kept={kept} />
     </Providers>,
   );
-  await waitFor(() => {
-    keep(kept);
-    expect(kept.handler).toBeDefined();
-  });
+  await waitFor(() => expect(kept.handler).toBeDefined());
 
   // The chat draws the call as soon as it streams in, before the handler has opened the request.
   const Kept = kept.renderer as Renderer;

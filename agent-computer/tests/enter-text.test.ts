@@ -40,8 +40,7 @@ let browser: Browser;
 beforeAll(async () => {
   if (!asked) return;
   const { chromium } = await import("playwright");
-  // The build the computer launches and CI installs (`playwright install --no-shell chromium`).
-  // Playwright's default here is the separate headless shell, which is no longer on the runner.
+  // Match the computer image: full Chromium is installed without the headless shell.
   browser = await chromium.launch({ channel: "chromium" });
 });
 

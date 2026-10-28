@@ -60,12 +60,13 @@ export function parseAgentInput(
   );
   if (typeof name !== "string") return name;
 
-  const title = boundedText(
-    input.title,
-    120,
-    "Title must be text between 1 and 120 characters.",
-  );
-  if (typeof title !== "string") return title;
+  if (typeof input.title !== "string" || input.title.trim().length > 120) {
+    return {
+      ok: false,
+      error: "Title must be text of 120 characters or fewer.",
+    };
+  }
+  const title = input.title.trim();
 
   const roleDescription = boundedText(
     input.roleDescription,

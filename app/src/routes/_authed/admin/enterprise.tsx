@@ -124,7 +124,7 @@ function EnterprisePage() {
 
   return (
     <PageShell
-      description="What members can use, how Bot computers reach the network, and what is recorded. Every change shows in Audit."
+      description="Manage member permissions, network access for Bot computers, and recording settings. All changes appear in Audit."
       title="Enterprise controls"
     >
       {failure ? (
@@ -333,7 +333,7 @@ function EnterpriseSections({
       </PageSection>
 
       <PageSection
-        description="Where Bot computers can connect. Changes reach running computers within seconds, without a restart. A group policy replaces the organization's unless it is locked."
+        description="Control where Bot computers can connect. Changes apply within seconds without a restart. Group policies override the organization’s policy unless it is locked."
         title="Network"
       >
         <PageRows>
@@ -621,7 +621,7 @@ function EnterpriseSections({
         />
       ) : null}
       <ListDialog
-        description="One model per line, as provider/model, for example openai/gpt-5.6-terra."
+        description="Enter one model per line as provider/model, for example openai/gpt-5.6-terra."
         initial={settings.modelAllowlist.models}
         onClose={() => setModelsOpen(false)}
         onSave={(models) =>

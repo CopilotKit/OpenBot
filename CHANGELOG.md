@@ -8,7 +8,7 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-**Before upgrading.** Twelve things change for an existing deployment:
+**Before upgrading.** Fourteen things change for an existing deployment:
 - A hosted computer's browser is now headed by default. It uses a little more memory than headless
   did; set `COMPUTER_BROWSER_MODE=headless` (Helm: `computers.browserMode: headless`) to keep the old
   behaviour.
@@ -56,6 +56,40 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - On Helm's `shared` computer and the docker-compose `agent-computer`, each Bot's files now live in
   `computers/<Bot id>` on the workspace volume (below). Files saved before the upgrade stay at the
   root of the volume, where no Bot sees them; move them into a Bot's folder to give them back.
+- With `OPENAI_BASE_URL` set to a host that is not OpenAI or Azure, `openai/...` models now use the
+  Chat Completions API rather than the Responses API (below). Set `COPILOTKIT_OPENAI_API=responses`
+  to keep the old behaviour.
+- Interfaces a Bot drew before the upgrade (A2UI 0.9 surfaces) no longer draw when a conversation is
+  reopened; the messages around them stay. New ones use A2UI 1.0 (below).
+
+### Generated interfaces use A2UI 1.0
+
+With generative UI on, a Bot builds an interface from the A2UI 1.0 basic components instead of the
+A2UI 0.9 ones. It's the same set of 18: text, images, icons, video, audio, rows, columns, lists,
+cards, tabs, dividers, dialogs, buttons, checkboxes, text fields, date pickers, choice pickers and
+sliders. They now take OpenBot's colours, radii and font, in light and dark. The gallery components a
+Bot is granted are unchanged. `OPENBOT_GENERATIVE_UI=false` still switches it all off, on the server
+as well as in the browser.
+
+### CopilotKit 1.83
+
+OpenBot now runs on CopilotKit 1.83.0 (`@copilotkit/runtime` and `react-core`, from 1.77.0) and
+AG-UI 1.0.2 (`@ag-ui/core` and `@ag-ui/client`, from 1.0.1). A managed Intelligence project needs
+nothing changed. A deployment whose `OPENAI_BASE_URL` points at an OpenAI-compatible gateway rather
+than OpenAI or Azure now reaches `openai/...` models through Chat Completions; a gateway that only
+speaks the Responses API needs `COPILOTKIT_OPENAI_API=responses`.
+
+### Pick a skin: OpenDuet, OpenDots or OpenMuse
+
+Settings → Preferences → Skin changes how OpenBot looks for you, and nothing about what it does.
+Three skins draw the open-source templates' looks over OpenBot's own features: OpenDuet (one
+phone-width column with Chat and Tasks), OpenDots (a rail, a sidebar of Bots with their avatars, and
+the Bot's computer beside the chat) and OpenMuse (one Bot at the centre, with Chat, Activity, Ideas,
+Goals and Apps). Every skin keeps your deployment's name from `brand.yaml`, OpenBot's own mark and
+each Bot's own avatar; only the look changes. The choice is saved on your account, so it follows
+you to every device, and changes nothing for anybody else. The templates' own features that
+OpenBot has no server for, such as OpenDots' Spaces, OpenDuet's morning brief and OpenMuse's mail and
+calendar, are not part of the skins.
 
 ### The audit log reads like a log
 

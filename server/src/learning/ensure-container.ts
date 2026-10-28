@@ -23,6 +23,7 @@
  * server also makes each person's own Learning space with the same credential (`createLearningContainer`,
  * called by learning/personal-space.ts).
  */
+import { intelligenceApiKey } from "@openbot/shared/intelligence-key";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -589,8 +590,11 @@ export async function ensureLearningContainer(
 async function jobMain() {
   const environment = process.env;
   const apiUrl = intelligenceApiOrigin(environment.INTELLIGENCE_API_URL ?? "");
-  const apiKey = environment.INTELLIGENCE_API_KEY?.trim();
-  if (!apiKey) throw new Error("INTELLIGENCE_API_KEY is required.");
+  const apiKey = intelligenceApiKey(environment);
+  if (!apiKey)
+    throw new Error(
+      "CPK_INTELLIGENCE_API_KEY (or INTELLIGENCE_API_KEY) is required.",
+    );
   const token = environment.INTELLIGENCE_SERVICE_TOKEN?.trim();
   const projectId = environment.INTELLIGENCE_PROJECT_ID?.trim();
   if (Boolean(token) !== Boolean(projectId))
