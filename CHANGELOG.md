@@ -133,6 +133,16 @@ again when they come back to the end or press the arrow. A rail beside a convers
 per turn: hovering one previews what was asked and answered, and choosing it goes there. Nothing
 changes for a deployment.
 
+### OpenBot has a new look
+
+- Every screen uses a new visual system: cool neutral greys, one purple accent for focus,
+  selection and links, four status colours, frosted chrome and new motion. Text now follows the
+  browser's own size, so it is a little larger than before.
+- Dark mode follows the system by default. Settings → General → Appearance offers System, Light and
+  Dark, kept in this browser. Someone who had turned the old dark switch on stays dark.
+- Every Bot, and OpenBot's own mark, is an orb with eyes, in a colour picked from the Bot, that blinks
+  and follows the pointer. It holds still with reduced motion.
+
 ### Generated interfaces use A2UI 1.0
 
 With generative UI on, a Bot builds an interface from the A2UI 1.0 basic components instead of the
