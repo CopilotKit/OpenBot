@@ -494,6 +494,14 @@ someone records, so recording a task needs no extension and no Connect step.
   Skills already saved from it stay, as ordinary skills; its recordings stay in the database, unread.
 - When you take control yourself, the line under the screen no longer repeats your own request back as
   if you had said it.
+- **What you type while you hold control stays yours.** After you hand back, the Bot reads a field you
+  filled as "filled in by the person", never its value, in its page snapshot, its page text and its
+  screenshots; a field you only tabbed through keeps the Bot's own value.
+- **A Bot's request for help shows in the conversation**, with its reason and Take control, and folds
+  into one line once answered. After you hand back, the Bot is told what you did and carries on, saying
+  what it does next; if it still stops without a word, the card says so and offers Carry on.
+- Leaving a conversation while you hold a Bot's control no longer leaves it blank: the Bot's reply after
+  you hand back shows when you return, with no "A browser task is paused" notice.
 
 ### Your own browser, opened from OpenBot, with the Recorder already in it
 
