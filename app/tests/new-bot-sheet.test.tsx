@@ -175,12 +175,22 @@ test("unavailable hosting still permits the custom path", async () => {
   const { view, user } = await opened();
   await settle();
   expect(view.queryByRole("button", { name: /^Run here/ })).toBeNull();
+  expect(
+    view.queryByRole("button", { name: /^Connect a custom agent/ }),
+  ).toBeNull();
+  expect(
+    view.getByRole("button", { name: "Continue" }).hasAttribute("disabled"),
+  ).toBe(true);
   await user.type(view.getByLabelText("Name"), "External");
   expect(
     view.getByRole("button", { name: "Continue" }).hasAttribute("disabled"),
   ).toBe(false);
   await user.click(view.getByRole("button", { name: "Continue" }));
-  expect(view.getByRole("button", { name: /LangGraph/ })).toBeTruthy();
+  const framework = view.getByRole("button", { name: /LangGraph/ });
+  expect(framework.hasAttribute("aria-pressed")).toBe(false);
+  expect(view.queryByRole("button", { name: "Continue" })).toBeNull();
+  await user.click(framework);
+  expect(await view.findByLabelText("Agent address")).toBeTruthy();
 });
 
 test("Create fills in what was left blank, then hands over", async () => {
@@ -197,7 +207,7 @@ test("Create fills in what was left blank, then hands over", async () => {
   expect(creates).toHaveLength(1);
   expect(creates[0]).toMatchObject({
     name: "Expense Review",
-    title: "Assistant",
+    title: "",
     visibility: "private",
     endpoint: "",
   });
@@ -239,7 +249,7 @@ test("checks the connection then creates with its saved name and key", async () 
     name: "Expense Review",
     endpoint: "https://agent.example.com/ag-ui",
     auth: { header: "Authorization", value: "Bearer secret" },
-    title: "LangGraph",
+    title: "",
   });
 });
 
@@ -251,7 +261,7 @@ test("preserves every entry across back navigation and hosting switches", async 
     view
       .getByRole("button", { name: /LangGraph/ })
       .getAttribute("aria-pressed"),
-  ).toBe("true");
+  ).toBeNull();
   await user.click(view.getByRole("button", { name: "Back" }));
   expect((view.getByLabelText("Name") as HTMLInputElement).value).toBe(
     "Expense Review",

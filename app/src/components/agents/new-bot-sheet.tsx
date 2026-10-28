@@ -100,14 +100,13 @@ type Step = (typeof STEPS)[number];
 /**
  * Where the Bot runs: on this deployment, or behind a framework somebody hosts.
  *
- * Which framework is kept so Back returns to it still chosen, and so a Bot made without a title can
- * be given one. Every framework is reached the same way and stored the same way — an AG-UI address —
+ * The framework is kept for its connection instructions and default role description. Every framework is reached the same way and stored the same way — an AG-UI address —
  * so the server never hears which was picked.
  */
 type Runtime = { kind: "builtin" } | { kind: "managed"; harness: string };
 
-/** What a created Bot is called beneath its name when the person gave it no title. */
-function defaultTitle(runtime: Runtime): string {
+/** Framework name used in default custom-agent instructions. */
+function frameworkName(runtime: Runtime): string {
   if (runtime.kind === "builtin") return "Assistant";
   if (runtime.harness === "byo-url") return "AG-UI agent";
   return (
@@ -127,7 +126,7 @@ function defaultInstructions(name: string, runtime: Runtime): string {
   if (runtime.kind === "builtin") {
     return `You are ${name}. Help the people you work with on whatever they bring you, clearly and briefly.`;
   }
-  return `Connected from ${defaultTitle(runtime)}.`;
+  return `Connected from ${frameworkName(runtime)}.`;
 }
 
 /**
@@ -228,7 +227,7 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
     const agent = await createAgent.mutateAsync(
       agentInputFrom({
         name: name.trim(),
-        title: defaultTitle(chosen),
+        title: "",
         roleDescription:
           instructions.trim() || defaultInstructions(name.trim(), chosen),
         visibility,
@@ -387,7 +386,6 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
                   setRuntime(chosen);
                   go("endpoint");
                 }}
-                runtime={runtime}
               />
             ) : (
               <EndpointStep
@@ -436,7 +434,7 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
           </Button>
         )}
         <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
-          {step === "about" && (
+          {step === "about" && builtInAvailable && (
             <Button
               type="button"
               variant="outline"
@@ -703,13 +701,7 @@ const OPTION_CLASSES =
  * new question rather than the control on the previous screen. The sheet body scrolls;
  * an inner scroller would give this list a second scrollbar.
  */
-function RuntimeStep({
-  runtime,
-  onChoose,
-}: {
-  runtime: Runtime | null;
-  onChoose: (runtime: Runtime) => void;
-}) {
+function RuntimeStep({ onChoose }: { onChoose: (runtime: Runtime) => void }) {
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => heading.current?.focus(), []);
 
@@ -725,9 +717,6 @@ function RuntimeStep({
 
       {CONNECTION_OPTIONS.map((harness) => (
         <button
-          aria-pressed={
-            runtime?.kind === "managed" && runtime.harness === harness.id
-          }
           className={OPTION_CLASSES}
           key={harness.id}
           onClick={() => onChoose({ kind: "managed", harness: harness.id })}
