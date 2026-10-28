@@ -80,10 +80,11 @@ const SHADCN_TOKEN =
 
 /*
  * The roles shadcn has no name for: the brand for links and selection, the two status colours
- * beside `--success` and `--destructive`, the finger-sized target, and the glass and shadows.
+ * beside `--success` and `--destructive`, the finger-sized target, a bubble's radius, and the glass
+ * and shadows.
  */
 const OPENBOT_TOKEN =
-  /^--(brand|status-(needs|working)|target|glass(-edge)?|shadow-(float|card|raised|glass))$/;
+  /^--(brand|status-(needs|working)|target|radius-bubble|glass(-edge)?|shadow-(float|card|raised|glass))$/;
 
 const theme = read("../src/theme.css");
 const THEMES = [
@@ -147,7 +148,9 @@ describe("default look tokens", () => {
     const [, dark] = THEMES[1];
     const missing = [...light.keys()].filter(
       (token) =>
-        OPENBOT_TOKEN.test(token) && token !== "--target" && !dark.has(token),
+        OPENBOT_TOKEN.test(token) &&
+        !["--target", "--radius-bubble"].includes(token) &&
+        !dark.has(token),
     );
     expect(missing).toEqual([]);
     expect(light.get("--target")).toBe("44px");
@@ -232,6 +235,48 @@ describe("contrast", () => {
         const ratio = contrast(color, mix(color, soft?.share ?? 1, card));
         expect({ status, clears: ratio >= 4.5 }).toEqual({
           status,
+          clears: true,
+        });
+      }
+    },
+  );
+});
+
+/*
+ * A conversation's bubbles: a Bot's is the secondary grey, the person's a share of the ring mixed into
+ * the card, as theme.css registers them.
+ */
+describe("bubbles", () => {
+  const user = theme.match(
+    /--color-bubble-user:\s*color-mix\(\s*in oklab,\s*var\((--[\w-]+)\)\s+(\d+)%,\s*var\(--card\)\s*\)/,
+  );
+
+  test("a Bot's bubble is the secondary fill, the person's a tint mixed into the card", () => {
+    expect(theme).toMatch(/--color-bubble:\s*var\(--secondary\);/);
+    expect(user?.[1]).toBe("--ring");
+  });
+
+  test.each(THEMES)(
+    "%s: a message's words clear 4.5:1 on its bubble",
+    (_, tokens) => {
+      const bot = oklab(tokens.get("--secondary"));
+      const mine = mix(
+        oklab(tokens.get(user?.[1] ?? "")),
+        Number(user?.[2]) / 100,
+        oklab(tokens.get("--card")),
+      );
+      for (const [ink, bubble, ground] of [
+        // A Bot's markdown: its words, its quotes and its links.
+        ["--foreground", "bot", bot],
+        ["--muted-foreground", "bot", bot],
+        ["--brand", "bot", bot],
+        // The person's words are drawn as typed, in one colour.
+        ["--foreground", "user", mine],
+      ] as const) {
+        const ratio = contrast(oklab(tokens.get(ink)), ground);
+        expect({ ink, bubble, clears: ratio >= 4.5 }).toEqual({
+          ink,
+          bubble,
           clears: true,
         });
       }

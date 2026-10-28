@@ -72,6 +72,12 @@
   --shadow-card: 0 0 0 1px var(--border), 0 6px 18px -12px rgb(1 5 7 / 18%);
   --shadow-raised: 0 0 0 1px var(--border), 0 10px 26px -14px rgb(1 5 7 / 20%);
   --shadow-glass: var(--glass-edge), var(--shadow-float);
+  /*
+   * A conversation's bubbles have one radius on every corner and no tail. It sits in Tailwind's
+   * `--radius-*` namespace like the shadows above, so it is not registered either: use it as
+   * `rounded-(--radius-bubble)`.
+   */
+  --radius-bubble: 1.25rem;
 }
 
 .dark {
@@ -242,6 +248,12 @@ body {
     var(--destructive) 10%,
     var(--card)
   );
+  /*
+   * A conversation's bubbles: a Bot's in the secondary grey, a shade darker than the page, the
+   * person's in a tint of the ring's periwinkle mixed into the card.
+   */
+  --color-bubble: var(--secondary);
+  --color-bubble-user: color-mix(in oklab, var(--ring) 14%, var(--card));
 }
 
 /*

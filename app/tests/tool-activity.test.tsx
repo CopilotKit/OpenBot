@@ -46,6 +46,9 @@ const fetch = (urls: string[], id = "fetch") =>
 // The names this app draws itself, as CopilotKit's renderer registry would list them.
 const drawn = (name: string) =>
   name === "showBarChart" || name === "computer_request_help";
+/** A client that never asks the server, so a test's cache is the only answer. */
+const idle = () =>
+  new QueryClient({ defaultOptions: { queries: { enabled: false } } });
 const text = (id: string): VisibleChatItem => ({
   kind: "text",
   id,
@@ -133,6 +136,79 @@ test("a tool step is named in words and counted as tools", () => {
       ].map(stepDetails),
     ),
   ).toBe("Searched the web and used 2 tools");
+});
+
+test("a summary names what happened to the person's own things, not the connector", () => {
+  const gw = (id: string, tool: string) =>
+    call(id, `mcp__google-workspace__${tool}`, {}, '"{}"');
+  expect(
+    summarise(
+      [gw("a", "gmail_search_messages"), gw("b", "calendar_list_events")].map(
+        stepDetails,
+      ),
+    ),
+  ).toBe("Searched your email and checked your calendar");
+  expect(
+    summarise(
+      [gw("a", "gmail_search_messages"), gw("c", "gmail_search_messages")].map(
+        stepDetails,
+      ),
+    ),
+  ).toBe("Searched your email");
+  // Through any app that reached them, beside anything else it did.
+  expect(
+    summarise(
+      [
+        call("f", "mcp__composio-gmail__GMAIL_FETCH_EMAILS", {}, '"x"'),
+        call("l", "mcp__composio-gmail__GMAIL_LIST_LABELS", {}, '"x"'),
+      ].map(stepDetails),
+    ),
+  ).toBe("Read your email and used Gmail");
+  // A connector with no words of its own is still named by the app it reached.
+  expect(
+    summarise(
+      [call("d", "mcp__google-drive__search_files", {}, '"x"')].map(
+        stepDetails,
+      ),
+    ),
+  ).toBe("Used Google Drive");
+});
+
+test("a summary never says a send happened before it did, or after it was refused or declined", () => {
+  const read = call("r", "mcp__composio-gmail__GMAIL_FETCH_EMAILS", {}, '"{}"');
+  const send = (result?: string) =>
+    call("s", "mcp__composio-gmail__GMAIL_SEND_EMAIL", {}, result);
+  // No result yet: it is going, not gone.
+  const waiting = [read, send()].map(stepDetails);
+  expect(summarise(waiting)).toBe("Read your email");
+  expect(waiting[1]?.label).toBe("Sending your email");
+  expect(waiting[1]?.plain).toBe("Send your email");
+  // Refused.
+  const refused = [read, send("Refused. The person said no.")].map(stepDetails);
+  expect(summarise(refused)).toBe("Read your email");
+  expect(refused[1]?.label).toBe("Send your email");
+  // Declined on its card by the person: not sent, not named as sent, and not called blocked.
+  const declined = [
+    read,
+    send(
+      "The person declined this action when you asked for their approval, so it was not done.",
+    ),
+  ].map(stepDetails);
+  expect(declined[1]).toMatchObject({ declined: true, refused: false });
+  expect(declined[1]?.label).toBe("Send your email");
+  expect(declined[1]?.output).toBeUndefined();
+  expect(summarise(declined)).toBe("Read your email");
+  // A search that failed is not "searched"; with nothing done, the line names what it tried.
+  const failed = [
+    call(
+      "f",
+      "mcp__google-workspace__gmail_search_messages",
+      {},
+      "Model tried to call unavailable tool 'mcp__google-workspace__gmail_search_messages'.",
+    ),
+  ].map(stepDetails);
+  expect(failed[0]?.failed).toBe(true);
+  expect(summarise(failed)).toBe("Search your email");
 });
 
 test("the tools CopilotKit has a renderer for are the ones the app draws", () => {
@@ -276,7 +352,7 @@ test("a brokered app is summarised as the app, never with its broker's name", ()
   ]);
   expect(
     summarise(
-      [call("a", "mcp__arcade-Gmail__ListEmails", {}, '"x"')].map(stepDetails),
+      [call("a", "mcp__arcade-Gmail__ListLabels", {}, '"x"')].map(stepDetails),
     ),
   ).toBe("Used Gmail");
 });
@@ -300,6 +376,125 @@ test("a refusal and a failure each count as an issue on the folded line", () => 
   expect(view.getByText("Didn't work")).toBeDefined();
 });
 
+test("a group where nothing worked never shows a done mark", () => {
+  const view = render(
+    <QueryClientProvider client={idle()}>
+      <ToolActivity
+        active={false}
+        group={{
+          kind: "tools",
+          id: "a",
+          steps: [
+            search(
+              "a",
+              JSON.stringify("That tool could not be called: timeout"),
+            ),
+            search("b", JSON.stringify("Refused. Not allowed here.")),
+          ],
+        }}
+      />
+    </QueryClientProvider>,
+  );
+  const summary = view.container.querySelector("summary");
+  expect(summary?.textContent).toContain("Search the web, didn't work");
+  expect(summary?.textContent).not.toContain("Searched");
+  expect(summary?.querySelector(".text-status-done")).toBeNull();
+});
+
+test("a group that did its work shows it done, with any issue beside it", () => {
+  const view = render(
+    <QueryClientProvider client={idle()}>
+      <ToolActivity
+        active={false}
+        group={{
+          kind: "tools",
+          id: "a",
+          steps: [
+            search(),
+            search("b", JSON.stringify("Refused. Not allowed here.")),
+          ],
+        }}
+      />
+    </QueryClientProvider>,
+  );
+  const summary = view.container.querySelector("summary");
+  expect(summary?.textContent).toContain("Searched the web");
+  expect(summary?.textContent).toContain("1 issue");
+  expect(summary?.querySelector(".text-status-done")).not.toBeNull();
+});
+
+test("a declined step says so, and is not counted as an issue", () => {
+  const view = render(
+    <QueryClientProvider client={idle()}>
+      <ToolActivity
+        active={false}
+        group={{
+          kind: "tools",
+          id: "a",
+          steps: [
+            search(),
+            call(
+              "s",
+              "mcp__composio-gmail__GMAIL_SEND_EMAIL",
+              {},
+              JSON.stringify(
+                "The person declined this action when you asked for their approval, so it was not done.",
+              ),
+            ),
+          ],
+        }}
+      />
+    </QueryClientProvider>,
+  );
+  expect(view.getByText("Declined")).toBeDefined();
+  expect(view.queryByText("Blocked")).toBeNull();
+  expect(view.queryByText(/issue/)).toBeNull();
+  expect(view.getByText("Send your email")).toBeDefined();
+});
+
+test("a step held on its approval card waits for the person, named for what it would do", () => {
+  const client = idle();
+  client.setQueryData(["approvals"], {
+    enabled: true,
+    requests: [
+      {
+        id: "approval-1",
+        status: "pending",
+        createdAt: new Date(0).toISOString(),
+        action: {
+          botId: "b",
+          toolRef: "composio-gmail/GMAIL_SEND_EMAIL",
+          effect: "send",
+          scope: "sam@example.com",
+          threadId: "t",
+          toolCallId: "s",
+          args: {},
+          target: {},
+        },
+      },
+    ],
+    rules: [],
+    teamRules: [],
+    questions: [],
+  });
+  const view = render(
+    <QueryClientProvider client={client}>
+      <ToolActivity
+        active={false}
+        group={{
+          kind: "tools",
+          id: "a",
+          steps: [search(), call("s", "mcp__composio-gmail__GMAIL_SEND_EMAIL")],
+        }}
+      />
+    </QueryClientProvider>,
+  );
+  expect(view.getByText("Waiting for you")).toBeDefined();
+  expect(view.queryByText("Not completed")).toBeNull();
+  expect(view.getByText("Send your email")).toBeDefined();
+  expect(view.queryByText("Sending your email")).toBeNull();
+});
+
 test("while running, the line names the step in progress; opened, a step shows its inputs", () => {
   const group: ToolGroup = {
     kind: "tools",
@@ -314,7 +509,7 @@ test("while running, the line names the step in progress; opened, a step shows i
       <ToolActivity group={group} active />
     </QueryClientProvider>,
   );
-  expect(view.getByText("Read web pages…")).toBeDefined();
+  expect(view.getByText("Reading web pages…")).toBeDefined();
   fireEvent.click(view.getAllByText("Search the web")[0] as HTMLElement);
   expect(view.getByText("query")).toBeDefined();
   expect(view.getAllByText("top 5 GDP 2025").length).toBeGreaterThan(0);
