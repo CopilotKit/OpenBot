@@ -1,22 +1,12 @@
 import {
-  IconBell,
-  IconBolt,
-  IconBox,
-  IconBrain,
-  IconCalendarRepeat,
-  IconHandStop,
   IconHome,
   IconLogout,
   IconMessageCircle,
   IconPin,
   IconPinFilled,
   IconPinnedOff,
-  IconPlug,
   IconPlus,
   IconSearch,
-  IconSettings,
-  IconShieldLock,
-  IconTargetArrow,
   IconTrash,
   IconUsersGroup,
 } from "@tabler/icons-react";
@@ -41,6 +31,7 @@ import {
   channelListQueryOptions,
 } from "@/lib/channels/queries";
 import { appConfig } from "@/lib/generated/application-config";
+import { useNavigationItems } from "@/lib/navigation";
 import { relativeTime } from "@/lib/relative-time";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
@@ -66,6 +57,7 @@ export function MenuSheet({ onClose }: { onClose: () => void }) {
   const channels = useInfiniteQuery(channelListQueryOptions());
   const navigate = useNavigate();
   const signOut = useMutation(signOutMutationOptions(queryClient));
+  const navigation = useNavigationItems();
   const [search, setSearch] = useState("");
   const body = useRef<HTMLDivElement>(null);
   const searching = search.trim().length > 0;
@@ -100,7 +92,7 @@ export function MenuSheet({ onClose }: { onClose: () => void }) {
             render={<Link onClick={onClose} to="/channel/new" />}
             small
           >
-            Group chat
+            New group
           </MuseLinkButton>
         </div>
         <label className="relative block">
@@ -147,90 +139,20 @@ export function MenuSheet({ onClose }: { onClose: () => void }) {
         <Divider className="my-1.5" />
         <div>
           <LinkRow
-            detail="Start a conversation with any Bot"
             icon={IconHome}
             render={<Link onClick={onClose} to="/" />}
             title="Home"
           />
-          <LinkRow
-            detail="Yours, shared with you, and your team's"
-            icon={IconBolt}
-            render={<Link onClick={onClose} to="/bots" />}
-            title="Bots"
-          />
-          {bot ? (
+          {/* OpenBot's own destinations, from the one list its sidebar draws. */}
+          {navigation.map((item) => (
             <LinkRow
-              detail={`What ${bot.name} keeps doing for you`}
-              icon={IconTargetArrow}
-              render={
-                <Link
-                  onClick={onClose}
-                  params={{ agentId: bot.id }}
-                  to="/bots/$agentId/responsibilities"
-                />
-              }
-              tint="green"
-              title="Responsibilities"
+              icon={item.icon}
+              key={item.id}
+              render={<Link onClick={onClose} to={item.to} />}
+              tint={item.section === "account" ? "plain" : "sky"}
+              title={item.label}
             />
-          ) : null}
-          <LinkRow
-            detail="What your Bots do on a schedule"
-            icon={IconCalendarRepeat}
-            render={<Link onClick={onClose} to="/routines" />}
-            tint="green"
-            title="Routines"
-          />
-          <LinkRow
-            detail="What your Bots know how to do"
-            icon={IconBox}
-            render={<Link onClick={onClose} to="/capabilities/skills" />}
-            tint="lavender"
-            title="Skills"
-          />
-          <LinkRow
-            detail="What your Bots remember about you"
-            icon={IconBrain}
-            render={<Link onClick={onClose} to="/capabilities/memory" />}
-            tint="lavender"
-            title="Memory"
-          />
-          <LinkRow
-            detail="The accounts your Bots use as you"
-            icon={IconPlug}
-            render={<Link onClick={onClose} to="/connections" />}
-            tint="orange"
-            title="Connections"
-          />
-          <LinkRow
-            detail="What your Bots ask you before they act"
-            icon={IconHandStop}
-            render={<Link onClick={onClose} to="/settings/approvals" />}
-            tint="orange"
-            title="Approvals"
-          />
-          <LinkRow
-            detail="Where your Bots reach you"
-            icon={IconBell}
-            render={<Link onClick={onClose} to="/settings/notifications" />}
-            tint="orange"
-            title="Reachability"
-          />
-          <LinkRow
-            detail="Theme, skin and preferences"
-            icon={IconSettings}
-            render={<Link onClick={onClose} to="/settings" />}
-            tint="plain"
-            title="Settings"
-          />
-          {user.data?.role === "admin" ? (
-            <LinkRow
-              detail="People, Bots and policy for everyone here"
-              icon={IconShieldLock}
-              render={<Link onClick={onClose} to="/admin" />}
-              tint="plain"
-              title="Admin"
-            />
-          ) : null}
+          ))}
         </div>
         <MuseButton
           className="self-start"

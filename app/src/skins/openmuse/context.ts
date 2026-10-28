@@ -6,6 +6,8 @@ export type MuseSheetKind = "menu" | "notifications" | "bots";
 export type MuseContextValue = {
   /** The Bot at the centre of the frame, or undefined while the roster loads or when there is none. */
   bot: AgentProfile | undefined;
+  /** The signed-in person, whose choice of centre Bot this browser remembers. */
+  userId: string | undefined;
   openSheet: (sheet: MuseSheetKind) => void;
 };
 

@@ -1,9 +1,4 @@
-import {
-  IconArrowUpRight,
-  IconChevronRight,
-  type IconProps,
-  IconX,
-} from "@tabler/icons-react";
+import { IconChevronRight, type IconProps, IconX } from "@tabler/icons-react";
 import * as React from "react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
@@ -49,7 +44,7 @@ export function museButtonClass({
 }: MuseButtonLook = {}) {
   return cn(
     buttonVariants({ variant: "secondary" }),
-    "h-auto min-h-[42px] gap-2 rounded-full border-0 px-[17px] py-2.5 font-semibold text-[14px] shadow-none active:translate-y-0 active:scale-[0.98] [&_svg]:size-[15px]",
+    "h-auto min-h-[42px] gap-2 rounded-full border-0 px-[17px] py-2.5 font-semibold text-[14px] shadow-none active:translate-y-0 active:scale-[0.98] motion-reduce:transition-none motion-reduce:active:scale-100 [&_svg]:size-[15px]",
     primary
       ? "bg-primary text-primary-foreground hover:bg-[var(--openmuse-primary-hover)]"
       : "bg-secondary text-secondary-foreground hover:bg-[var(--openmuse-pressed)]",
@@ -126,7 +121,7 @@ export function RoundButton({
     <button
       aria-label={label}
       className={cn(
-        "relative flex size-11 shrink-0 items-center justify-center rounded-full bg-card text-foreground outline-none transition-colors hover:bg-[var(--openmuse-pressed)] focus-visible:ring-3 focus-visible:ring-ring/50",
+        "relative flex size-11 shrink-0 items-center justify-center rounded-full bg-card text-foreground outline-none transition-colors hover:bg-[var(--openmuse-pressed)] focus-visible:ring-3 focus-visible:ring-ring/50 motion-reduce:transition-none",
         className,
       )}
       type="button"
@@ -135,48 +130,6 @@ export function RoundButton({
       <Icon className="size-5" stroke={1.8} />
       {children}
     </button>
-  );
-}
-
-export function MuseCard({ className, ...props }: React.ComponentProps<"div">) {
-  return (
-    <div
-      className={cn("rounded-[23px] bg-card p-5 text-foreground", className)}
-      {...props}
-    />
-  );
-}
-
-const CHIP_TINTS = {
-  plain: "bg-[var(--openmuse-chip)]",
-  sky: "bg-[var(--openmuse-sky)]",
-  green: "bg-[var(--openmuse-green)]",
-  lavender: "bg-[var(--openmuse-lavender)]",
-  orange: "bg-[var(--openmuse-orange)]",
-  danger: "bg-[var(--openmuse-danger-tint)] text-destructive",
-} as const;
-
-export type ChipTint = keyof typeof CHIP_TINTS;
-
-export function MuseChip({
-  children,
-  tint = "plain",
-  className,
-}: {
-  children: React.ReactNode;
-  tint?: ChipTint;
-  className?: string;
-}) {
-  return (
-    <span
-      className={cn(
-        "inline-flex shrink-0 items-center self-start rounded-full px-2.5 py-1 font-semibold text-[10px] text-muted-foreground leading-none",
-        CHIP_TINTS[tint],
-        className,
-      )}
-    >
-      {children}
-    </span>
   );
 }
 
@@ -277,47 +230,6 @@ export function LinkRow({
   );
 }
 
-export function SectionHeading({
-  title,
-  action,
-  className,
-}: {
-  title: string;
-  action?: React.ReactNode;
-  className?: string;
-}) {
-  return (
-    <div
-      className={cn("mb-[19px] flex items-center justify-between", className)}
-    >
-      <h2 className={museText.heading}>{title}</h2>
-      {action}
-    </div>
-  );
-}
-
-/** "See all" beside a heading: OpenMuse's small text link with its up-right arrow. */
-export function HeadingLink({
-  children,
-  render,
-}: {
-  children: React.ReactNode;
-  render: React.ReactElement;
-}) {
-  return (
-    <Item
-      className="w-auto flex-nowrap gap-[5px] border-0 p-0 text-[11px] text-foreground [a]:hover:bg-transparent [a]:hover:underline"
-      render={render}
-    >
-      {children}
-      <IconArrowUpRight
-        aria-hidden="true"
-        className="size-[13px] text-muted-foreground"
-      />
-    </Item>
-  );
-}
-
 export function MuseEmpty({
   icon,
   title,
@@ -394,13 +306,13 @@ export function MuseSheet({
     <Dialog onOpenChange={(open) => !open && onClose()} open>
       <DialogContent
         className={cn(
-          "openmuse-sheet gap-0 overflow-hidden border border-border bg-background p-0 text-foreground shadow-none",
+          "openmuse-sheet gap-0 overflow-hidden border border-border bg-background p-0 text-foreground shadow-none motion-reduce:transition-none",
           // A phone: pinned to the bottom edge, full width, square at the bottom.
           "top-auto bottom-0 left-0 max-h-[94svh] w-full max-w-none translate-x-0 translate-y-0 rounded-[26px] rounded-b-none pb-3",
           // Wider: centred, OpenMuse's 790px card.
           "min-[600px]:top-1/2 min-[600px]:bottom-auto min-[600px]:left-1/2 min-[600px]:w-[calc(100%-40px)] min-[600px]:max-w-[790px] min-[600px]:-translate-x-1/2 min-[600px]:-translate-y-1/2 min-[600px]:rounded-[26px] min-[600px]:pb-0",
         )}
-        overlayClassName="bg-[var(--openmuse-scrim)] supports-backdrop-filter:backdrop-blur-none"
+        overlayClassName="bg-[var(--openmuse-scrim)] supports-backdrop-filter:backdrop-blur-none motion-reduce:transition-none"
         showCloseButton={false}
       >
         <span
@@ -428,57 +340,6 @@ export function MuseSheet({
         </div>
       </DialogContent>
     </Dialog>
-  );
-}
-
-/** OpenMuse's text field: a label above a 45px rounded input, or a taller box for prose. */
-export function MuseField({
-  label,
-  value,
-  onChange,
-  placeholder,
-  multiline = false,
-  bare = false,
-  className,
-}: {
-  label: string;
-  value: string;
-  onChange: (
-    event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
-  ) => void;
-  placeholder?: string;
-  multiline?: boolean;
-  /** No margin of its own, for a field that sits in a container that already spaces its children. */
-  bare?: boolean;
-  className?: string;
-}) {
-  const field = cn(
-    "w-full rounded-[19px] border border-border bg-card px-4 py-3 text-[16px] text-foreground outline-none placeholder:text-muted-foreground focus-visible:border-[var(--openmuse-focus)]",
-    multiline ? "min-h-[120px] resize-y" : "min-h-[45px]",
-    className,
-  );
-  return (
-    // biome-ignore lint/a11y/noLabelWithoutControl: the control is the label's child.
-    <label className={cn("flex flex-col gap-[7px]", !bare && "mb-4")}>
-      <span className="font-semibold text-[11px] text-foreground leading-[17px]">
-        {label}
-      </span>
-      {multiline ? (
-        <textarea
-          className={field}
-          onChange={onChange}
-          placeholder={placeholder}
-          value={value}
-        />
-      ) : (
-        <input
-          className={field}
-          onChange={onChange}
-          placeholder={placeholder}
-          value={value}
-        />
-      )}
-    </label>
   );
 }
 

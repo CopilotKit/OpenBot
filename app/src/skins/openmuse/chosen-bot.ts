@@ -1,29 +1,42 @@
 import { useSyncExternalStore } from "react";
 
 /*
- * Which Bot the person put at the centre of OpenMuse. A per-browser preference, like the skin itself:
- * it lives in localStorage and nowhere else, so choosing a Bot here changes nothing on the server.
+ * Which Bot each person put at the centre of the frame. Kept in this browser, and kept per signed-in
+ * person: the key carries their user id, so the next person on a shared machine starts from OpenBot's
+ * own default Bot rather than the last person's choice. Choosing a Bot changes nothing on the server.
  */
-export const CHOSEN_BOT_KEY = "openmuse-bot";
-
-function read(): string | null {
-  try {
-    return window.localStorage.getItem(CHOSEN_BOT_KEY);
-  } catch {
-    return null;
-  }
+export function chosenBotKey(userId: string): string {
+  return `openmuse-bot:${userId}`;
 }
 
-let current: string | null = typeof window === "undefined" ? null : read();
+const choices = new Map<string, string | null>();
 const listeners = new Set<() => void>();
 
-export function chooseBot(id: string) {
-  if (current === id) return;
-  current = id;
-  // localStorage throws in some privacy modes; the choice still holds for this visit.
+function read(userId: string): string | null {
+  if (!choices.has(userId)) {
+    let stored: string | null = null;
+    // localStorage throws in some privacy modes; the frame then starts from the default Bot.
+    try {
+      stored = window.localStorage.getItem(chosenBotKey(userId));
+    } catch {}
+    choices.set(userId, stored);
+  }
+  return choices.get(userId) ?? null;
+}
+
+export function chooseBot(userId: string, agentId: string) {
+  if (read(userId) === agentId) return;
+  choices.set(userId, agentId);
+  // The choice still holds for this visit when the browser refuses to store it.
   try {
-    window.localStorage.setItem(CHOSEN_BOT_KEY, id);
+    window.localStorage.setItem(chosenBotKey(userId), agentId);
   } catch {}
+  for (const listener of listeners) listener();
+}
+
+/** Forgets every choice read into memory, as a new page load would. */
+export function forgetChosenBots() {
+  choices.clear();
   for (const listener of listeners) listener();
 }
 
@@ -34,10 +47,11 @@ function subscribe(listener: () => void) {
   };
 }
 
-export function useChosenBotId(): string | null {
+/** The Bot this person chose, or null before they choose one or while nobody is known yet. */
+export function useChosenBotId(userId: string | undefined): string | null {
   return useSyncExternalStore(
     subscribe,
-    () => current,
+    () => (userId ? read(userId) : null),
     () => null,
   );
 }

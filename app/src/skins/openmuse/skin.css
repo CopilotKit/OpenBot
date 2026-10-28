@@ -48,6 +48,7 @@
   --openmuse-font:
     -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto,
     Helvetica, Arial, sans-serif;
+  --font-sans: var(--openmuse-font);
   --openmuse-accent: #1473c8;
   --openmuse-blue: #c8e7ff;
   --openmuse-sky: #edf7fd;
@@ -125,6 +126,7 @@
   --openmuse-font:
     -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto,
     Helvetica, Arial, sans-serif;
+  --font-sans: var(--openmuse-font);
   --openmuse-accent: #6fb6f0;
   --openmuse-blue: #2a5576;
   --openmuse-sky: #13242e;
@@ -164,20 +166,17 @@
 }
 
 /*
- * OpenMuse is set in the device's own system font. OpenBot sets Inter on `html` through a layered
- * utility, which this unlayered rule outranks; `.font-sans` and `.font-heading` name Inter directly,
- * so they are pointed back at the same stack.
+ * OpenMuse is set in the device's own system font. `--font-sans` above is the token OpenBot's
+ * headings read; the page itself takes it here, because OpenBot names Inter on `html` directly.
  */
-:root[data-skin="openmuse"],
-:root[data-skin="openmuse"] .font-sans,
-:root[data-skin="openmuse"] .font-heading {
-  font-family: var(--openmuse-font);
+:root[data-skin="openmuse"] {
+  font-family: var(--font-sans);
 }
 
 /*
- * OpenBot's own pages, worn the OpenMuse way. These reach only into the frame's stage and only by
- * the attributes OpenBot's components already publish (`data-slot`, ARIA labels), so nothing about
- * the components changes; only how they look inside OpenMuse.
+ * OpenBot's own pages, worn the OpenMuse way. Every rule below reaches OpenBot's components only
+ * through the `data-slot` hooks they publish for this, so restyling a component inside OpenBot cannot
+ * silently break the skin.
  */
 
 /* OpenMuse's buttons are pills. */
@@ -186,7 +185,7 @@
 }
 
 /* Page titles at OpenMuse's 25px, semibold and tight. */
-:root[data-skin="openmuse"] .openmuse-stage header > div > h1 {
+:root[data-skin="openmuse"] .openmuse-stage [data-slot="page-title"] {
   font-size: 25px;
   font-weight: 600;
   letter-spacing: -0.7px;
@@ -232,11 +231,24 @@
 }
 
 /* A conversation's own header row carries no rule beneath it; the frame above already separates. */
-:root[data-skin="openmuse"]
-  .openmuse-stage
-  [class~="sticky"][class~="border-b"] {
+:root[data-skin="openmuse"] .openmuse-stage [data-slot="conversation-header"] {
   border-bottom-color: transparent;
   padding-inline: 0;
+}
+
+/* With the computer or settings beside it on a wide screen, the conversation takes OpenBot's own layout. */
+@media (min-width: 1100px) {
+  :root[data-skin="openmuse"]
+    .openmuse-frame[data-openmuse-tab="chat"]
+    .openmuse-stage[data-openmuse-width="page"] {
+    padding-inline: 0;
+  }
+
+  :root[data-skin="openmuse"]
+    .openmuse-stage[data-openmuse-width="page"]
+    [data-slot="conversation-header"] {
+    padding-inline: 12px;
+  }
 }
 
 /* The person's words: OpenMuse's pale-blue bubble with its tucked corner. */
@@ -265,7 +277,7 @@
 }
 
 /* The composer: OpenMuse's white pill with a soft shadow, a "+" on the left and a round send. */
-:root[data-skin="openmuse"] .openmuse-stage form:has([aria-label="Message"]) {
+:root[data-skin="openmuse"] .openmuse-stage [data-slot="composer"] {
   min-height: 62px;
   padding: 8px;
   border: 1px solid var(--openmuse-composer-border);
@@ -276,60 +288,51 @@
 
 :root[data-skin="openmuse"]
   .openmuse-stage
-  form:has([aria-label="Message"]):focus-within {
+  [data-slot="composer"]:focus-within {
   border-color: var(--openmuse-focus);
   box-shadow: 0 4px 20px var(--openmuse-composer-shadow);
 }
 
-:root[data-skin="openmuse"] .openmuse-stage form [aria-label="Message"],
-:root[data-skin="openmuse"] .openmuse-stage form .prompt-area-container {
+:root[data-skin="openmuse"] .openmuse-stage [data-slot="composer-input"] > * {
   font-size: 17px;
   line-height: 24px;
 }
 
-:root[data-skin="openmuse"] .openmuse-stage form [aria-label="Attach a file"],
-:root[data-skin="openmuse"] .openmuse-stage form [aria-label="Send message"],
-:root[data-skin="openmuse"] .openmuse-stage form [aria-label="Stop the Bot"],
-:root[data-skin="openmuse"]
-  .openmuse-stage
-  form
-  [aria-label="Dictate a message"] {
+:root[data-skin="openmuse"] .openmuse-stage [data-slot="composer-attach"],
+:root[data-skin="openmuse"] .openmuse-stage [data-slot="composer-send"],
+:root[data-skin="openmuse"] .openmuse-stage [data-slot="composer-stop"] {
   width: 44px;
   height: 44px;
   border-radius: 9999px;
   align-self: flex-end;
 }
 
-:root[data-skin="openmuse"]
-  .openmuse-stage
-  form
-  [aria-label="Attach a file"]
-  svg {
+:root[data-skin="openmuse"] .openmuse-stage [data-slot="composer-attach"] svg {
   width: 24px;
   height: 24px;
   stroke-width: 1.5;
 }
 
-:root[data-skin="openmuse"] .openmuse-stage form [aria-label="Send message"],
-:root[data-skin="openmuse"] .openmuse-stage form [aria-label="Stop the Bot"] {
+:root[data-skin="openmuse"] .openmuse-stage [data-slot="composer-send"],
+:root[data-skin="openmuse"] .openmuse-stage [data-slot="composer-stop"] {
   background: var(--primary);
   color: var(--primary-foreground);
 }
 
 :root[data-skin="openmuse"]
   .openmuse-stage
-  form
-  [aria-label="Send message"]:disabled {
+  [data-slot="composer-send"]:disabled {
   background: var(--openmuse-send-idle);
   color: var(--openmuse-quiet);
   opacity: 1;
 }
 
-:root[data-skin="openmuse"]
-  .openmuse-stage
-  form
-  [aria-label="Send message"]
-  svg {
+:root[data-skin="openmuse"] .openmuse-stage [data-slot="composer-send"] svg {
   width: 22px;
   height: 22px;
+}
+
+/* A row that opens something reads from its start, as every other row does. */
+:root[data-skin="openmuse"] .openmuse-stage button[data-slot="item"] {
+  text-align: start;
 }

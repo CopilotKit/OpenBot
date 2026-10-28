@@ -51,20 +51,36 @@ export function mainChannel(
   );
 }
 
-/** Which tab a path belongs to. Every OpenBot page lives under one, so the bar never goes blank. */
-export function tabFor(pathname: string): MuseTab {
+/**
+ * The tab whose own screen this path is, or null on any other OpenBot page. Chat is the conversation
+ * routes; Apps is OpenBot's Connections, the apps a Bot uses as you. A Bot's page, Routines,
+ * Capabilities and the rest light no tab, because they are not that tab's screen.
+ */
+export function tabFor(pathname: string): MuseTab | null {
   if (pathname === "/s/activity") return "activity";
   if (pathname === "/s/ideas") return "ideas";
   if (pathname === "/s/goals") return "goals";
+  if (pathname === "/connections" || pathname.startsWith("/connections/")) {
+    return "apps";
+  }
   if (
     pathname === "/" ||
-    pathname.startsWith("/channel") ||
-    pathname.startsWith("/group") ||
-    pathname === "/bot"
+    pathname === "/channel" ||
+    pathname.startsWith("/channel/") ||
+    pathname.startsWith("/group/")
   ) {
     return "chat";
   }
-  return "apps";
+  return null;
+}
+
+/**
+ * Whether the page stays in OpenMuse's 760px column on a wide screen. A tab's own screen does. Every
+ * other OpenBot page, and a conversation with its Bot's computer or settings open beside it, gets
+ * OpenBot's own width, so its wide layouts and side panels have the room they were built for.
+ */
+export function inColumn(pathname: string, sidePanelOpen: boolean): boolean {
+  return tabFor(pathname) !== null && !sidePanelOpen;
 }
 
 const plural = (count: number, word: string) =>
@@ -103,7 +119,7 @@ export function statusLine(input: {
     return `Working on ${working.summary?.trim() || working.name}…`;
   }
   if (attention?.paused) return "Paused";
-  return "Here when you need me";
+  return "Ready when you are";
 }
 
 /** Approvals and questions the person has not answered yet, across every Bot. */
@@ -113,31 +129,4 @@ export function waitingOnYou(inbox: ApprovalInboxData | undefined) {
   );
   const questions = inbox?.questions ?? [];
   return { requests, questions, count: requests.length + questions.length };
-}
-
-/** A tool reference as a person would say it: `computer_open_url` is "open url". */
-export function actionPhrase(toolRef: string): string {
-  return toolRef.replace(/^computer_|^host\//, "").replaceAll("_", " ");
-}
-
-const APPROVAL_STATUS: Record<string, string> = {
-  pending: "Waiting",
-  approved: "Approved",
-  denied: "Denied",
-  consumed: "Done",
-  completed: "Done",
-};
-
-export function approvalStatus(status: string): string {
-  return APPROVAL_STATUS[status] ?? status.replace(/_/g, " ");
-}
-
-/** OpenMuse picks an emoji for an idea from what it is about. The same rules, on OpenBot's titles. */
-export function ideaEmoji(title: string): string {
-  if (/document|permission|form/i.test(title)) return "📋";
-  if (/money|spend|saving|budget|invoice|price|cost|bill/i.test(title))
-    return "💸";
-  if (/goal|plan|training/i.test(title)) return "👟";
-  if (/dinner|table|lunch|coffee/i.test(title)) return "🍽️";
-  return "💡";
 }
