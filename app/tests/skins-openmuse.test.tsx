@@ -30,6 +30,7 @@ import type { BotActivity, BotAttention } from "@/lib/bot-lifecycle/queries";
 import type { ChannelSummary } from "@/lib/channels/queries";
 import { appConfig } from "@/lib/generated/application-config";
 import type { MemoryRecord } from "@/lib/memory";
+import { navigationFor } from "@/lib/navigation";
 import type { PluginsPage } from "@/lib/plugins/queries";
 import type { ProactiveSetting, ProactiveSuggestion } from "@/lib/proactive";
 import type { ResponsibilityRecord } from "@/lib/responsibilities";
@@ -747,17 +748,13 @@ describe("every OpenBot surface stays reachable", () => {
     [/^Main chat/, "/channel/c-muse"],
     [/^New chat$/, "/channel/new?agent=picked-harness"],
     [/^New group$/, "/channel/new"],
-    [/^Home/, "/"],
-    [/^Bots/, "/bots"],
-    [/^Responsibilities/, "/bots/picked-harness/responsibilities"],
-    [/^Routines/, "/routines"],
-    [/^Skills/, "/capabilities/skills"],
-    [/^Memory/, "/capabilities/memory"],
-    [/^Connections/, "/connections"],
-    [/^Approvals/, "/settings/approvals"],
-    [/^Notifications/, "/settings/notifications"],
-    [/^Settings/, "/settings"],
-    [/^Admin/, "/admin"],
+    [/^Home$/, "/"],
+    // OpenBot's own destinations, from the shared navigation list its sidebar draws.
+    [/^Bots$/, "/bots"],
+    [/^Capabilities$/, "/capabilities"],
+    [/^Connections$/, "/connections"],
+    [/^Admin$/, "/admin"],
+    [/^Settings$/, "/settings"],
   ];
 
   test("the menu reaches every surface, every conversation and every group", async () => {
@@ -784,12 +781,29 @@ describe("every OpenBot surface stays reachable", () => {
     ).toBe("/group/g-team");
   });
 
+  test.each(["admin", "user"] as const)(
+    "the menu draws OpenBot's whole navigation list for a %s",
+    async (role) => {
+      serve({ role });
+      renderAt("/s/goals");
+      const menu = within(await openMenu());
+      await menu.findByRole("link", { name: /^Settings$/ });
+      for (const item of navigationFor(role)) {
+        expect(
+          menu
+            .getByRole("link", { name: new RegExp(`^${item.label}$`) })
+            .getAttribute("href"),
+        ).toBe(item.to);
+      }
+    },
+  );
+
   test("Admin is offered only to administrators", async () => {
     serve({ role: "user" });
     renderAt("/s/activity");
     const menu = within(await openMenu());
-    await menu.findByRole("link", { name: /^Settings/ });
-    expect(menu.queryByRole("link", { name: /^Admin/ })).toBeNull();
+    await menu.findByRole("link", { name: /^Settings$/ });
+    expect(menu.queryByRole("link", { name: /^Admin$/ })).toBeNull();
   });
 
   test.each([
@@ -804,7 +818,7 @@ describe("every OpenBot surface stays reachable", () => {
     serve();
     const router = renderAt(path);
     const menu = within(await openMenu());
-    const settings = await menu.findByRole("link", { name: /^Settings/ });
+    const settings = await menu.findByRole("link", { name: /^Settings$/ });
     expect(settings.getAttribute("href")).toBe("/settings");
     fireEvent.click(settings);
     await waitFor(() =>
