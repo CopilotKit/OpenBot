@@ -28,7 +28,6 @@
     "@tanstack/react-router": "^1.170.27",
     "@tanstack/react-table": "^9.3.1",
     "better-auth": "^1.6.27",
-    "boring-avatars": "^2.0.4",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "embla-carousel-react": "^8.6.0",
