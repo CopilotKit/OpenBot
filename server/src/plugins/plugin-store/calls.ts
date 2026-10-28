@@ -14,7 +14,7 @@ import {
   pluginGrants,
   vendorNameOf,
 } from "../../db/schema";
-import { classifyTool, tokenHeaderFor } from "../catalogue";
+import { classifyTool, tokenHeaderForServer } from "../catalogue";
 import { VERSION_ARG } from "../composio";
 import { inspectToolArguments } from "../content-governance";
 import { shareTargetOf } from "../share-target";
@@ -484,7 +484,7 @@ export function callMethods(context: StoreContext) {
           {
             url: effectiveUrl(row, entry),
             token,
-            tokenHeader: tokenHeaderFor(entry),
+            tokenHeader: tokenHeaderForServer(entry, row.tokenHeader),
             actorId: vendorUserId ?? input.credentialActorId ?? input.actorId,
             botId: input.botId,
           },

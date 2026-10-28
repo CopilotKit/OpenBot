@@ -471,6 +471,24 @@ export function tokenHeaderFor(
     : undefined;
 }
 
+/**
+ * The header a call to one row's server sends its deployment token in, when it is not
+ * `Authorization`.
+ *
+ * A catalogue entry is authoritative wherever one exists: its header is the reviewed one, and a
+ * value stored on the row — which `addServer` never writes — cannot override it. A custom server
+ * has no entry, so the row's own stored header is the only one there is; null there means the
+ * `Authorization: Bearer` default `withClient` applies. That fallback is what lets a server added
+ * by URL reach a vendor that reads its key from a header of its own, as Composio's consumer
+ * endpoint reads `x-consumer-api-key` (issue #817).
+ */
+export function tokenHeaderForServer(
+  entry: CatalogueEntry | null,
+  rowTokenHeader: string | null,
+): string | undefined {
+  return entry ? tokenHeaderFor(entry) : (rowTokenHeader ?? undefined);
+}
+
 export function catalogueEntry(key: string): CatalogueEntry | null {
   return BY_KEY.get(key) ?? null;
 }

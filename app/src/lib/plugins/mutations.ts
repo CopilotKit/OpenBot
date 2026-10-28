@@ -47,6 +47,11 @@ export type CustomServerInput = {
   url: string;
   token?: string;
   credentialId?: string;
+  /**
+   * The header the deployment token travels in, when it is not `Authorization`. Absent
+   * leaves a stored header alone; an empty string clears it back to the default.
+   */
+  tokenHeader?: string;
 };
 
 /** Which kinds of plugin a grant can be about. */

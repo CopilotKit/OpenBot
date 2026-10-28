@@ -218,6 +218,7 @@ export function mountServerRoutes({
       title?: unknown;
       url?: unknown;
       credentialId?: unknown;
+      tokenHeader?: unknown;
     } | null;
     if (
       typeof body?.id !== "string" ||
@@ -243,6 +244,19 @@ export function mountServerRoutes({
         400,
       );
     }
+    // The same shape guard for the token header, with one difference: an empty string is a
+    // meaningful value here — it clears a stored header back to the default — so only a
+    // non-string is refused at the edge, and the header-name validation itself lives in the
+    // store, where it is refused as a `CustomServerRefusedError` below.
+    if (
+      body.tokenHeader !== undefined &&
+      typeof body.tokenHeader !== "string"
+    ) {
+      return context.json(
+        { error: "A token header must be a string." },
+        400,
+      );
+    }
 
     try {
       const server = await store.addCustomServer({
@@ -252,6 +266,10 @@ export function mountServerRoutes({
         credentialId:
           typeof body.credentialId === "string"
             ? body.credentialId.trim()
+            : undefined,
+        tokenHeader:
+          typeof body.tokenHeader === "string"
+            ? body.tokenHeader
             : undefined,
         by: actorEmail(context),
       });

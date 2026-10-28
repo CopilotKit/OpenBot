@@ -120,6 +120,12 @@ export type ServerRecord = {
   docsUrl: string;
   /** `first-party` or `custom`. Shown wherever the server is, never inferred by a reader. */
   provenance: string;
+  /**
+   * The header this server's deployment token travels in, when it is not `Authorization`.
+   * Only a custom server ever carries one — a curated entry names its header in the catalogue,
+   * which is authoritative — and null means the `Authorization: Bearer` default.
+   */
+  tokenHeader: string | null;
   hasCredential: boolean;
   toolsRefreshedAt: string | null;
   lastError: string | null;

@@ -93,6 +93,31 @@ export const mcpServers = pgTable(
       onDelete: "restrict",
     }),
     /**
+     * The header this server's deployment token travels in, when it is not `Authorization`.
+     *
+     * NULL MEANS THE DEFAULT, and the default is `Authorization: Bearer <token>` — see
+     * `withClient` in `plugins/mcp.ts`. A vendor that reads its key from a header of its own, as
+     * Composio's consumer endpoint reads `x-consumer-api-key`, names it here, and the token is
+     * sent in it exactly as stored.
+     *
+     * ONLY A CUSTOM SERVER READS THIS COLUMN. A curated entry names its header in the catalogue
+     * (`CatalogueAuth.header`, resolved by `tokenHeaderFor`), and the catalogue is authoritative
+     * wherever an entry exists — see `tokenHeaderForServer`. So a row written by `addServer` never
+     * carries a value here, and a value written by hand onto a curated row changes nothing a call
+     * does. The column exists because a server added by URL has no catalogue entry to name a header
+     * in, and without one it could only ever be reached as Bearer — which is what kept a custom
+     * server pointed at Composio's consumer endpoint from connecting at all (issue #817).
+     *
+     * VALIDATED AS AN RFC 7230 FIELD-NAME TOKEN AT THE STORE BOUNDARY, not here: a CHECK
+     * constraint cannot spell the tchar set, and a header name reaches raw HTTP, so a value with
+     * whitespace or a control character in it must never be stored. `resolveTokenHeader` in
+     * `plugins/plugin-store/servers.ts` is that check.
+     *
+     * Nullable for the reason `docs/development.md` gives under Migrations: a replica from before
+     * this column writes rows without it.
+     */
+    tokenHeader: text("token_header"),
+    /**
      * How this app connects, as it was resolved when somebody enabled it.
      *
      * Recorded rather than re-derived, because the catalogue is somebody else's and a vendor that
