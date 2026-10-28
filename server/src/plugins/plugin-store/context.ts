@@ -1891,8 +1891,7 @@ export function createStoreContext(options: PluginStoreOptions) {
    * and that order is kept rather than moved behind the revoke for the helper's convenience.
    *
    * Answers the payload fragment rather than the boolean so that no writer computes the field
-   * itself: a writer spreads this, and the guard in `sole-definition.test.ts` holds that to one
-   * home.
+   * itself: a writer spreads this to keep the claim's definition in one place.
    */
   async function vendorRevocationClaim(
     app: string,

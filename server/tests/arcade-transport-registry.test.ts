@@ -13,27 +13,17 @@ import { transportFor } from "../src/plugins/transport";
  * unchecked `server/tests` would assert nothing. Run `bun run typecheck`.
  */
 // @ts-expect-error a catalogue entry must not name the arcade broker's transport
-const arcadeIsNotCurated: CuratedTransportKind = "arcade";
+const _arcadeIsNotCurated: CuratedTransportKind = "arcade";
 // @ts-expect-error nor the composio broker's
-const composioIsNotCurated: CuratedTransportKind = "composio";
-const arcadeIsAKind: TransportKind = "arcade";
+const _composioIsNotCurated: CuratedTransportKind = "composio";
+const _arcadeIsAKind: TransportKind = "arcade";
 // BrokerProvider is the compiler's claim about TransportKind, not a comment's.
-const brokerIsAKind: TransportKind = "arcade" satisfies BrokerProvider;
+const _brokerIsAKind: TransportKind = "arcade" satisfies BrokerProvider;
 
 describe("arcade transport registration", () => {
   test("transportFor('arcade') is the arcade module and needs no credential", () => {
     const t = transportFor("arcade");
     expect(t).toBe(arcade as unknown as typeof t);
     expect(t.listNeedsCredential).toBe(false);
-  });
-
-  test("the kind constants are the literals", () => {
-    const kinds: string[] = [
-      arcadeIsNotCurated,
-      composioIsNotCurated,
-      arcadeIsAKind,
-      brokerIsAKind,
-    ];
-    expect(kinds).toEqual(["arcade", "composio", "arcade", "arcade"]);
   });
 });

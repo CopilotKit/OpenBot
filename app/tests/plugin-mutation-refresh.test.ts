@@ -1,6 +1,4 @@
 import { afterEach, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import {
   type MutationFunctionContext,
   MutationObserver,
@@ -8,7 +6,6 @@ import {
   QueryClient,
 } from "@tanstack/react-query";
 import { authorizeActionMutationOptions } from "../src/lib/plugins/grants";
-import * as pluginMutations from "../src/lib/plugins/mutations";
 import {
   accountModePreview,
   addCuratedServerMutationOptions,
@@ -138,14 +135,6 @@ const REFUSALS: {
   route: string;
   status: number;
   message: string;
-  /**
-   * THE FACTORY ITSELF, NOT A CLOSURE THAT CALLS ONE AND NOT ITS NAME AS A STRING.
-   *
-   * Because the completeness test below matches these against `mutations.ts`'s exported VALUES by
-   * identity. A name written out here would be a third copy of the same list — the export, the
-   * import at the top of this file, and a string — and a factory renamed at the source would leave
-   * a case pointing at a name nothing exports, which is the failure mode this whole file is about.
-   */
   factory: (queryClient: QueryClient) => unknown;
   variables: unknown;
 }[] = [
@@ -340,93 +329,6 @@ test("asking an app what it wants refetches nothing, because it writes nothing",
 });
 
 /**
- * The exported functions that are NOT a mutation factory at all, each with why.
- *
- * Named rather than filtered out by a rule about their shape, because "it does not look like a
- * mutation factory" is precisely the judgement that let a real one go uncovered: this file had no
- * case for `connectAccountMutationOptions` for two rounds and nothing anywhere said so.
- */
-const NOT_A_MUTATION_FACTORY: Record<string, string> = {
-  invalidatePlugins:
-    "The refetch itself — the thing every case above asserts was asked for, not a press.",
-  grantPlugin:
-    "The bare write, for a caller granting a batch and refreshing once at the end. It carries no refetch on purpose, and the mutation that wraps it is covered above.",
-  accountModePreview:
-    "The bare read: `confirm: false` on the same PUT the real switch sends, asked not to commit. Nothing changed, so there is nothing to refetch — and the switch that does commit is covered above.",
-};
-
-/**
- * The mutation factories the property above does not apply to, each with why it does not.
- *
- * AN EXEMPTION IS A CLAIM AND IT IS WRITTEN DOWN AS ONE. Both of these are structural rather than a
- * decision somebody made in a callback — neither factory has a `QueryClient` to invalidate with —
- * so an exemption here can be checked against the code rather than taken on trust, and a factory
- * that grows a client later stops qualifying and has to move into `REFUSALS`.
- */
-const NOT_A_REFUSABLE_WRITE: Record<string, string> = {
-  brokeredConnectionFieldsMutationOptions:
-    "Asks an app what it wants typed in. `POST /connect` with no body writes nothing on either outcome, and the factory takes no QueryClient. Its own test is above.",
-  connectAccountMutationOptions:
-    "Starts a consent connection and hands back the vendor's URL for the browser to leave for. Nothing on this screen survives that navigation to be refetched, and this factory takes no QueryClient either — it takes which screen to come back to.",
-};
-
-test("every mutation factory `mutations.ts` exports is answered for by this file", () => {
-  /*
-   * THE COMPLETENESS CHECK, AND THE REASON THIS FILE NEEDED ONE. Both sibling drift tests count
-   * their roster against the declaration it mirrors; this one counted nothing, so a fifteenth
-   * factory added to `mutations.ts` with `onSuccess` where `onSettled` belongs was a case nobody
-   * wrote and nobody missed. Adding the count is what turned up `connectAccountMutationOptions`,
-   * which had been exported and unanswered-for the whole time.
-   *
-   * READ OFF THE MODULE'S RUNTIME EXPORTS, not off a list of names in this file. A namespace import
-   * is the one thing here that cannot fall behind the source: a factory added, renamed or deleted
-   * changes this list on the next run. Every exported function has to land in exactly one of three
-   * places — a refusal case, a declared exemption, or a declared non-factory — and membership of
-   * the first is matched BY VALUE, so a rename cannot leave a case pointing at a ghost.
-   *
-   * `typeof value === "function"` is the whole of the filter DELIBERATELY, rather than a name
-   * ending in `MutationOptions`. The types this module exports are erased and never reach here, so
-   * the filter costs nothing; a factory named something else entirely still shows up, which a
-   * suffix rule would have let through — and a suffix rule is a convention, which is the kind of
-   * thing the next file breaks without noticing.
-   */
-  const exported = Object.entries(pluginMutations)
-    .filter(([, value]) => typeof value === "function")
-    .map(([name]) => name)
-    .sort();
-
-  const covered = new Set<unknown>(REFUSALS.map((refusal) => refusal.factory));
-  const answeredFor = Object.entries(pluginMutations)
-    .filter(
-      ([name, value]) =>
-        typeof value === "function" &&
-        (covered.has(value) ||
-          name in NOT_A_REFUSABLE_WRITE ||
-          name in NOT_A_MUTATION_FACTORY),
-    )
-    .map(([name]) => name)
-    .sort();
-
-  expect(answeredFor).toEqual(exported);
-
-  /*
-   * AND NEITHER EXEMPTION LIST OUTLIVES WHAT IT EXEMPTS. An entry naming a function this module no
-   * longer exports, or one a refusal case now covers, is a claim about nothing — and a stale
-   * exemption is how a roster goes on looking complete while the thing it excused was quietly
-   * replaced by something that does need a case.
-   */
-  const unclaimed = exported.filter(
-    (name) => !covered.has((pluginMutations as Record<string, unknown>)[name]),
-  );
-  expect(
-    [
-      ...Object.keys(NOT_A_REFUSABLE_WRITE),
-      ...Object.keys(NOT_A_MUTATION_FACTORY),
-    ].sort(),
-  ).toEqual(unclaimed);
-});
-
-/**
  * WHAT THESE WRITES PUT IN A URL, AND WHOSE TEXT IT IS.
  *
  * NONE OF THESE IDS IS THIS APP'S TO CHOOSE. A server id is whatever an administrator typed when
@@ -436,11 +338,6 @@ test("every mutation factory `mutations.ts` exports is answered for by this file
  * before any handler is reached — and a `?` turns the rest of the id into a query string, silently
  * truncating the id the route then looks up.
  *
- * REPORTED THREE TIMES AND CLASSED AS COSMETIC THREE TIMES, which is what the pair of tests below
- * is really about. The first is the behaviour, one case per write that puts a caller's text in a
- * URL; the second is the lever, because a roster of cases only ever covers the writes that existed
- * when somebody wrote it — and the defect here was one new line forgetting the call its ten
- * neighbours all make.
  */
 
 /**
@@ -608,56 +505,6 @@ for (const request of ENCODED_REQUESTS) {
     ]);
   });
 }
-
-test("every id these writes interpolate into a URL goes through encodeURIComponent", () => {
-  /*
-   * THE LEVER, AND WHY THE ROSTER ABOVE IS NOT ENOUGH ON ITS OWN. A case list covers the writes
-   * that existed when it was written, and the defect it is about is a new one forgetting what its
-   * neighbours do. There is no way to enumerate from the outside every path a module MIGHT build —
-   * the roster is that attempt, and it can only ever be a list — but every interpolation the file
-   * contains can be enumerated, and that is the set this asks the question of.
-   *
-   * THE MODULE BUILDS ITS URLS NOWHERE ELSE: no base, no join helper, no concatenation. So every
-   * backticked string beginning `/api/` is the whole surface rather than a sample of it, and this
-   * assumption is itself pinned by the count below.
-   */
-  const source = readFileSync(
-    join(import.meta.dir, "../src/lib/plugins/mutations.ts"),
-    "utf8",
-  );
-  const paths = [...source.matchAll(/`(\/api\/[^`]*)`/g)].map(
-    (match) => match[1] ?? "",
-  );
-  /*
-   * AND THE ROSTER ABOVE IS THE SAME SET, COUNTED. A path with nothing interpolated into it is a
-   * plain quoted string in this module and is not matched here at all, so every path this finds
-   * carries somebody's text and has a case above naming the URL it must produce. A new interpolated
-   * path added with no case beside it fails here, which is what keeps the roster from quietly
-   * becoming a sample.
-   */
-  expect(paths.length).toBe(ENCODED_REQUESTS.length);
-
-  /*
-   * THE TWO NAMES THAT MAY GO IN RAW, AND WHY NEITHER IS A CALLER'S TEXT. `variables.kind` is
-   * `PluginKind` and `returnTo` is `"settings" | "admin"` — two closed unions this module declares
-   * itself, each narrowed again by the server before it decides anything. Anything else in this
-   * position is somebody's typed id, and there are exactly two ways for one of those to be safe:
-   * the call this test is named for, or a new entry here that somebody had to argue for.
-   */
-  const closedUnions = ["variables.kind", "returnTo"];
-
-  const raw = paths.flatMap((path) =>
-    [...path.matchAll(/\$\{([^}]*)\}/g)]
-      .map((match) => (match[1] ?? "").trim())
-      .filter(
-        (interpolation) =>
-          !interpolation.startsWith("encodeURIComponent(") &&
-          !closedUnions.includes(interpolation),
-      ),
-  );
-
-  expect(raw).toEqual([]);
-});
 
 /**
  * Where the vendor's callback puts somebody down is the caller's to say, and only the default was

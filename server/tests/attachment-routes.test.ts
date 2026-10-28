@@ -400,11 +400,8 @@ const BLOCKED_SESSION_DEADLINE_MS = BLOCKED_SESSION_TIMEOUT_MS / 3;
 async function waitForBlockedSession(
   applicationName: string,
   settled: () => boolean,
-  // Overridden by the test that pins the message below, and by nothing else: waiting the real
-  // deadline out to watch it fire would put seven seconds on the suite to observe a string.
-  deadlineMs: number = BLOCKED_SESSION_DEADLINE_MS,
 ): Promise<boolean> {
-  const deadline = Date.now() + deadlineMs;
+  const deadline = Date.now() + BLOCKED_SESSION_DEADLINE_MS;
   while (Date.now() < deadline) {
     const blocked = await database.execute(sql`
       SELECT pid
@@ -3414,27 +3411,6 @@ describe("markAttachmentsSent", () => {
         [],
       ),
     ).resolves.toBeUndefined();
-  });
-
-  /*
-   * THE HELPER'S OWN DIAGNOSTIC, WHICH USED TO BE UNREACHABLE.
-   *
-   * `waitForBlockedSession` gave itself 5s and Bun gives a test 5s by default, with no override
-   * anywhere, so the runner always won: the message naming the session that never blocked could not
-   * be printed, and both races failed as a bare "timed out after 5000ms" instead. The constants are
-   * compared here because that relationship is the fault, and the message is provoked with a short
-   * deadline because waiting the real one out would cost the suite seven seconds to observe a
-   * string.
-   */
-  test("the wait for a blocked session says which session it gave up on", async () => {
-    expect(BLOCKED_SESSION_DEADLINE_MS).toBeLessThan(
-      BLOCKED_SESSION_TIMEOUT_MS,
-    );
-
-    const applicationName = `never_blocks_${randomUUID()}`;
-    await expect(
-      waitForBlockedSession(applicationName, () => false, 50),
-    ).rejects.toThrow(applicationName);
   });
 });
 

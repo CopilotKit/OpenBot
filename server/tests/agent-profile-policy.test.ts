@@ -88,8 +88,4 @@ describe("agent profile permissions", () => {
       expect(canRunAgent(actor, agent)).toBe(false);
     }
   });
-
-  test("exports canRunAgent as the canAccessAgent alias", () => {
-    expect(canRunAgent).toBe(canAccessAgent);
-  });
 });

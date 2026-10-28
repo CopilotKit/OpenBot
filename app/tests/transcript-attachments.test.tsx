@@ -805,11 +805,7 @@ test("a row that actually changed does not compare equal", () => {
   ).toBe(false);
 });
 
-/*
- * And that it is the comparison the row is actually memoised WITH — a correct function nobody
- * passed to `memo` buys nothing, and that is precisely the state this row was in. `compare` is the
- * field `React.memo` keeps its comparator in.
- */
+// A correct comparator only protects attachment identity if the rendered row uses it.
 test("the row of tiles is memoised with that comparison", () => {
   expect(
     (TranscriptAttachments as unknown as { compare?: unknown }).compare,
