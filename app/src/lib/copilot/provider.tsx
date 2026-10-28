@@ -2,9 +2,8 @@ import { CopilotKitProvider } from "@copilotkit/react-core/v2";
 import { useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
-import { a2uiProviderOptions } from "./a2ui";
+import { generativeUiProviderOptions } from "./a2ui";
 import { SignInTool } from "./sign-in-tool";
-import "./a2ui.css";
 import { ActiveBotProvider } from "./active-bot";
 import { BotTools } from "./bot-tools";
 import { ComputerTools } from "./computer-tools";
@@ -34,9 +33,10 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
 
   return (
     <CopilotKitProvider
+      enableInspector={false}
       runtimeUrl="/api/copilotkit"
       credentials="include"
-      {...a2uiProviderOptions(capabilities?.generativeUi)}
+      {...generativeUiProviderOptions(capabilities?.generativeUi)}
       /*
        * Passed only when this deployment actually has the capability, and this is the load-bearing
        * part rather than a tidiness. The SDK reads generative UI as on when EITHER the runtime says

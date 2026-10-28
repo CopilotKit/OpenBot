@@ -169,10 +169,7 @@ test("the New Bot sheet does not create from the Enter that confirms a composed 
     <NewBotSheet onClose={() => {}} onCreated={() => {}} open />,
   );
 
-  // Run it here is chosen when the sheet opens, so Continue goes straight to the name.
-  await act(async () => {
-    fireEvent.click(await view.findByRole("button", { name: "Continue" }));
-  });
+  // The details screen opens first, with Run here selected by default.
   const name = await view.findByLabelText("Name");
   await type(name, "経費");
 

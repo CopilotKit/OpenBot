@@ -253,6 +253,20 @@ describe("a seeded Mastra Bot", () => {
 });
 
 describe("tenant YAML validation", () => {
+  test("accepts explicit blank agent titles and preserves trimmed text", () => {
+    for (const title of ["", "   ", " Existing title "]) {
+      const parsed = validateTenantPackage({
+        brand: "tenant: { id: fintech, product_name: Ledgerline }",
+        agents: `agents: [{ id: knowledge, name: Knowledge, title: ${JSON.stringify(title)}, role_description: Answer company questions., type: built-in, system_prompt: Answer from knowledge. }]`,
+        channels: "channels: []",
+        model:
+          "model: { provider: openai, credential_secret_ref: openai-key, default_model: gpt-5.6-terra }",
+        knowledge: "sources: []",
+        themeCss: "",
+      });
+      expect(parsed.agents[0]?.title).toBe(title.trim());
+    }
+  });
   test("rejects an agent without a title", () => {
     expect(() =>
       validateTenantPackage({
@@ -265,7 +279,7 @@ describe("tenant YAML validation", () => {
         knowledge: "sources: []",
         themeCss: "",
       }),
-    ).toThrow("agent.title must be a non-empty string");
+    ).toThrow("agent.title must be text of 120 characters or fewer");
   });
 
   test("rejects an agent without a role description", () => {

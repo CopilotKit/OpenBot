@@ -596,10 +596,11 @@ pub fn compose(
         "INTELLIGENCE_GATEWAY_WS_URL".into(),
         intelligence.gateway_ws_url.trim().to_string(),
     );
-    env.insert(
-        "INTELLIGENCE_API_KEY".into(),
-        intelligence.api_key.trim().to_string(),
-    );
+    // Explicit desktop selection must override a CLI key left in the checkout's .env.
+    // Supply both names for consumers that still read the legacy variable directly.
+    for key in ["CPK_INTELLIGENCE_API_KEY", "INTELLIGENCE_API_KEY"] {
+        env.insert(key.into(), intelligence.api_key.trim().to_string());
+    }
 
     /*
      * MINTED ONCE PER DEPLOYMENT, NOT ONCE PER START.
@@ -1441,6 +1442,42 @@ HTTPS_PROXY=http://proxy:8080
         assert_eq!(env["INTELLIGENCE_API_KEY"], "key-with-a-trailing-space");
         // Unchanged, and the reason the other three now match it.
         assert_eq!(env["OPENAI_API_KEY"], "sk-model");
+    }
+
+    #[test]
+    fn desktop_project_selection_replaces_and_purges_a_previous_cli_key() {
+        let dir = temp_root("env-cli-project-selection");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(".env");
+        std::fs::write(
+            &path,
+            "CPK_INTELLIGENCE_API_KEY=cpk-old-cli-project\nINTELLIGENCE_API_KEY=cpk-old-legacy\nCUSTOM=keep-me\n",
+        )
+        .unwrap();
+        let selected = Intelligence {
+            api_url: "https://selected.example".into(),
+            gateway_ws_url: "wss://selected.example".into(),
+            api_key: " cpk-desktop-project ".into(),
+        };
+        let (settings, secrets) = crate::vault::split(compose(
+            &selected,
+            &Model::default(),
+            &engine_status(None),
+            &Ports::default(),
+            &pinned(),
+            None,
+            &BTreeMap::new(),
+        ));
+        for key in ["CPK_INTELLIGENCE_API_KEY", "INTELLIGENCE_API_KEY"] {
+            assert_eq!(secrets[key], "cpk-desktop-project");
+            assert!(!settings.contains_key(key));
+        }
+        write(&path, &settings, &secrets).unwrap();
+        let saved = std::fs::read_to_string(&path).unwrap();
+        assert!(!saved.contains("INTELLIGENCE_API_KEY="));
+        assert!(saved.contains("CUSTOM=keep-me"));
+        assert!(saved.contains("INTELLIGENCE_API_URL=https://selected.example"));
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

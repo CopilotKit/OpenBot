@@ -611,7 +611,7 @@ const ALLOW: Allowed[] = [
   },
   {
     file: "server/tests/agent-endpoint.test.ts",
-    line: 483,
+    line: 498,
     shape: "b",
     finding: "NEW (round 2 did not find this)",
     why: "expect(forwarded.forwardedProps?.openbotRun).toBeUndefined();",
@@ -795,14 +795,14 @@ const ALLOW: Allowed[] = [
   },
   {
     file: "server/tests/tenant-package.test.ts",
-    line: 358,
+    line: 372,
     shape: "b",
     finding: "NEW (round 2 did not find this)",
     why: "expect(tenantPackage.agents[1]?.avatarSeed).toBeUndefined();",
   },
   {
     file: "server/tests/tool-selection.integration.test.ts",
-    line: 871,
+    line: 868,
     shape: "b",
     finding: "NEW (round 2 did not find this)",
     why: "expect(run?.forwardedProps?.openbotRun).toBeUndefined();",

@@ -95,7 +95,7 @@ function PeoplePage() {
 
   return (
     <PageShell
-      description="Everybody who has signed in. Admins can open these screens. Everybody else talks to Bots."
+      description="Manage access for people who have signed in. Only admins can access the Admin pages."
       title="People"
     >
       <PageSection
