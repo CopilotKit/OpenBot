@@ -57,11 +57,18 @@ import {
 } from "./request-validation";
 import { type InputMessage, startScreencast } from "./screencast";
 import {
+  HIDDEN_FIELD_SELECTOR,
+  hiddenValues,
+  inputFills,
+  keyFills,
+  MASKED_VALUE,
   markElementSecret,
+  markPersonFilled,
   maskSensitiveValues,
+  PERSON_FILLED_ATTRIBUTE,
+  PERSON_FILLED_VALUE,
   SECRET_ATTRIBUTE,
-  SENSITIVE_FIELD_SELECTOR,
-  sensitiveRefs,
+  unmarkPersonFilled,
 } from "./secret-masking";
 import { type BotSession, createSessions } from "./sessions";
 import {
@@ -461,14 +468,38 @@ async function restoreHandoffPage(botId: string): Promise<void> {
 async function readablePageText(
   target: Page,
 ): Promise<{ text: string; truncated: boolean }> {
-  const raw = await target.evaluate(() => {
-    const clone = document.body?.cloneNode(true) as HTMLElement | undefined;
-    if (!clone) return "";
-    for (const node of clone.querySelectorAll("script, style, noscript, svg")) {
-      node.remove();
-    }
-    return clone.innerText ?? "";
-  });
+  const raw = await target.evaluate(
+    (hidden) => {
+      const clone = document.body?.cloneNode(true) as HTMLElement | undefined;
+      if (!clone) return "";
+      for (const node of clone.querySelectorAll(
+        "script, style, noscript, svg",
+      )) {
+        node.remove();
+      }
+      /*
+       * An editor's words are page text, where a field's value is not, so an editor a secret was typed
+       * into, or a person filled in while they held the wheel, says it holds something and not what
+       * (see secret-masking.ts).
+       */
+      for (const { selector, instead } of hidden)
+        for (const node of clone.querySelectorAll(selector))
+          if (
+            !(node instanceof HTMLInputElement) &&
+            !(node instanceof HTMLTextAreaElement) &&
+            !(node instanceof HTMLSelectElement)
+          )
+            node.textContent = instead;
+      return clone.innerText ?? "";
+    },
+    [
+      { selector: `[${SECRET_ATTRIBUTE}]`, instead: MASKED_VALUE },
+      {
+        selector: `[${PERSON_FILLED_ATTRIBUTE}]:not([${SECRET_ATTRIBUTE}])`,
+        instead: PERSON_FILLED_VALUE,
+      },
+    ],
+  );
 
   const collapsed = raw.replace(/\n{3,}/g, "\n\n").trim();
   return {
@@ -521,10 +552,11 @@ async function snapshotPage(
     url: target.url(),
     title,
     truncated: parsed.truncated,
-    // A password field's value is in the aria snapshot in plain text. See secret-masking.ts.
+    // A password field's value is in the aria snapshot in plain text, and so is anything a person
+    // typed while they held the wheel. See secret-masking.ts.
     elements: maskSensitiveValues(
       parsed.elements,
-      await sensitiveRefs(target, parsed.elements),
+      await hiddenValues(target, parsed.elements),
     ),
   };
 }
@@ -611,6 +643,29 @@ const SCREEN_NO_LONGER_LIVE =
 /** How often the cast checks that it is still showing the page the Bot is on. */
 const FOLLOW_INTERVAL_MS = 1_000;
 
+/**
+ * After a person's input on a Bot's screen lands: the field it filled is theirs, and the Bot reads only
+ * that it was filled (see secret-masking.ts). A person's own browser has no Bot reading it. Never fails
+ * the input, which has landed: a field that could not be marked is said in the log.
+ */
+async function notePersonFilled(
+  botId: string,
+  fills: "typed" | "chose" | null,
+): Promise<void> {
+  if (!fills || isPersonBrowserId(botId)) return;
+  try {
+    await markPersonFilled(await currentPage(botId), fills === "typed");
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        type: "computer-person-filled-not-marked",
+        botId,
+        error: String(error),
+      }),
+    );
+  }
+}
+
 /** What a live-screen socket carries: the Bot whose screen it is showing. */
 type StreamData = {
   botId: string;
@@ -685,6 +740,7 @@ async function applyInput(
   session.humanInputs += 1;
   try {
     await standing.cast.send(message);
+    await notePersonFilled(ws.data.botId, inputFills(message));
   } catch (error) {
     // Reported rather than swallowed. A dispatch that fails means the person's input did nothing,
     // and they must not be left believing it landed.
@@ -1140,9 +1196,22 @@ serve<StreamData>({
         }
         try {
           const target = await currentPage(botId);
-          return json(
-            await performHumanInput(target, url.pathname, body ?? {}),
+          const done = await performHumanInput(
+            target,
+            url.pathname,
+            body ?? {},
           );
+          await notePersonFilled(
+            botId,
+            url.pathname === "/human/type"
+              ? "typed"
+              : url.pathname === "/human/key" && typeof body?.key === "string"
+                ? keyFills(body.key)
+                : url.pathname === "/human/click"
+                  ? "chose"
+                  : null,
+          );
+          return json(done);
         } catch (error) {
           return json({ error: describe(error, "That did not work.") }, 502);
         }
@@ -1297,10 +1366,11 @@ serve<StreamData>({
       if (url.pathname === "/screenshot" && request.method === "GET") {
         try {
           const target = await currentPage(botId);
-          // Sensitive fields are masked in the picture the Bot is handed. See secret-masking.ts.
+          // Sensitive fields, and fields a person filled while they held the wheel, are masked in the
+          // picture the Bot is handed. See secret-masking.ts.
           const buffer = await target.screenshot({
             type: "png",
-            mask: [target.locator(SENSITIVE_FIELD_SELECTOR)],
+            mask: [target.locator(HIDDEN_FIELD_SELECTOR)],
           });
           const size = target.viewportSize() ?? { width: 1280, height: 800 };
           return json({
@@ -1717,6 +1787,10 @@ async function performAction(
     // this box" means. Typing into a field a previous attempt half-filled otherwise appends, and the
     // form ends up with "AlicAlice" in it. A dropdown is chosen from instead (see enterText).
     await enterText(field, body.text, acting);
+    // The Bot's own value now, whoever filled the field before.
+    await field
+      .evaluate(unmarkPersonFilled, PERSON_FILLED_ATTRIBUTE)
+      .catch(() => undefined);
     if (body.submit === true) {
       await field.press("Enter", acting);
     }

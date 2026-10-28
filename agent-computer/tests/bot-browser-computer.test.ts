@@ -172,6 +172,12 @@ beforeAll(async () => {
           '<!doctype html><title>none</title><input autofocus><script>const seen=[];const show=e=>{seen.push(e.type.slice(3)+":"+e.key);document.title=seen.join(" ")};addEventListener("keydown",e=>{const until=Date.now()+20;while(Date.now()<until){}show(e)});addEventListener("keyup",show)</script>',
           { headers: { "content-type": "text/html; charset=utf-8" } },
         );
+      // A form a Bot fills part of and hands to a person for the rest: a field, a dropdown and an editor.
+      if (url.pathname === "/contact")
+        return new Response(
+          '<!doctype html><title>Contact</title><label>Name <input name="name"></label><label>Telephone <input name="tel"></label><label>Size <select name="size"><option>Small</option><option>Large</option></select></label><div role="textbox" aria-label="Notes" contenteditable="true"></div>',
+          { headers: { "content-type": "text/html; charset=utf-8" } },
+        );
       const name = url.pathname.split("/").at(-1) || "home";
       return new Response(
         `<!doctype html><title>${name}</title><label>Amount <input name="amount" autofocus></label>`,
@@ -188,7 +194,7 @@ beforeAll(async () => {
 afterAll(async () => {
   if (!asked) return;
   for (const running of computers) {
-    for (const botId of [BOT, "other-bot", "source-bot"])
+    for (const botId of [BOT, "other-bot", "source-bot", "typed-bot"])
       await call("/computers/stop", { body: {}, botId, on: running }).catch(
         () => undefined,
       );
@@ -589,6 +595,134 @@ describe.skipIf(!asked)("a person's keys on a Bot's live screen", () => {
         botId,
       });
     }
+  }, 60_000);
+});
+
+describe.skipIf(!asked)("what a person types while they hold the wheel", () => {
+  type Snapshot = {
+    snapshotId: number;
+    elements: { ref: string; role: string; name: string; value?: string }[];
+  };
+  const snapshot = async (botId: string) =>
+    (await call<Snapshot>("/snapshot", { body: {}, botId })).json;
+  const field = (taken: Snapshot, name: string) =>
+    taken.elements.find((element) => element.name === name);
+  const FILLED = "[hidden: filled in by the person]";
+
+  test("reaches the Bot as filled, never as what was typed, in its snapshot and its page text, until the Bot types there itself", async () => {
+    // The run that found it: after a help step the Bot's next snapshot read `textbox "Telephone": 555-0100`, though
+    // the person took over so they could enter what the Bot must not be told.
+    const botId = "typed-bot";
+    expect(
+      (await call("/navigate", { body: { url: `${origin}/contact` }, botId }))
+        .status,
+    ).toBe(200);
+    // The Bot fills the name itself: its own value, which it goes on reading.
+    const before = await snapshot(botId);
+    const name = field(before, "Name");
+    if (!name) throw new Error("The form should have a Name field.");
+    expect(
+      (
+        await call("/type", {
+          body: {
+            ref: name.ref,
+            snapshotId: before.snapshotId,
+            text: "Ada Lovelace",
+          },
+          botId,
+        })
+      ).status,
+    ).toBe(200);
+
+    const asked = await call<ComputerControlState>("/control/request", {
+      body: { reason: "Enter the telephone number." },
+      botId,
+    });
+    const requestId = asked.json.request?.id;
+    await call("/control/take", { body: { requestId, by: "user-1" }, botId });
+    const socket = new WebSocket(
+      `${computer.base.replace("http:", "ws:")}/stream?bot=${botId}&token=${TOKEN}`,
+    );
+    const errors: string[] = [];
+    const casting = new Promise<void>((resolve) => {
+      socket.addEventListener("message", (event) => {
+        const message = JSON.parse(String(event.data)) as {
+          type: string;
+          error?: string;
+        };
+        if (message.type === "frame") resolve();
+        if (message.type === "error") errors.push(message.error ?? "");
+      });
+    });
+    const key = (key: string, code: string, windowsVirtualKeyCode: number) => {
+      for (const event of ["down", "up"])
+        socket.send(
+          JSON.stringify({
+            type: "key",
+            event,
+            key,
+            code,
+            windowsVirtualKeyCode,
+          }),
+        );
+    };
+    try {
+      await casting;
+      // From the name the Bot filled, on through the form as a person would: Tab, type, Tab, choose, Tab, type.
+      key("Tab", "Tab", 9);
+      socket.send(JSON.stringify({ type: "text", text: "555-0100" }));
+      key("Tab", "Tab", 9);
+      key("ArrowDown", "ArrowDown", 40);
+      key("Tab", "Tab", 9);
+      socket.send(JSON.stringify({ type: "text", text: "call after six" }));
+      // Landed once the editor holds something, as the page's text says it either way.
+      const deadline = Date.now() + 10_000;
+      for (;;) {
+        const text = (await call<{ text: string }>("/read", { botId })).json
+          .text;
+        if (text.includes("call after six") || text.includes(FILLED)) break;
+        if (Date.now() > deadline)
+          throw new Error("The person's typing did not land.");
+        await Bun.sleep(50);
+      }
+      expect(errors).toEqual([]);
+    } finally {
+      socket.close();
+    }
+    expect(
+      (await call("/control/release", { body: { requestId }, botId })).status,
+    ).toBe(200);
+
+    // Back with the Bot: it reads that the person filled each, and never what with.
+    const after = await snapshot(botId);
+    expect(field(after, "Name")?.value).toBe("Ada Lovelace");
+    expect(field(after, "Telephone")?.value).toBe(FILLED);
+    expect(field(after, "Size")?.value).toBe(FILLED);
+    expect(JSON.stringify(after)).not.toContain("555-0100");
+    const read = (await call<{ text: string }>("/read", { botId })).json.text;
+    expect(read).toContain(FILLED);
+    expect(read).not.toContain("call after six");
+    expect(read).not.toContain("555-0100");
+    expect((await call("/screenshot", { botId })).status).toBe(200);
+
+    // The Bot typing into a field the person filled makes the value its own again.
+    const telephone = field(after, "Telephone");
+    if (!telephone) throw new Error("The form should have a Telephone field.");
+    expect(
+      (
+        await call("/type", {
+          body: {
+            ref: telephone.ref,
+            snapshotId: after.snapshotId,
+            text: "020 7946 0000",
+          },
+          botId,
+        })
+      ).status,
+    ).toBe(200);
+    expect(field(await snapshot(botId), "Telephone")?.value).toBe(
+      "020 7946 0000",
+    );
   }, 60_000);
 });
 
