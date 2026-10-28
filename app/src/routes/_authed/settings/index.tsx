@@ -16,17 +16,30 @@ import {
   ItemDescription,
   ItemTitle,
 } from "@/components/ui/item";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
-import { Switch } from "@/components/ui/switch";
 import { formatHotkey, HOTKEYS } from "@/lib/hotkeys/hotkeys";
+import { THEME_PREFERENCES, type ThemePreference } from "@/lib/theme";
 import { SkinPicker } from "@/skins/skin-picker";
 
 export const Route = createFileRoute("/_authed/settings/")({
   component: RouteComponent,
 });
 
+const APPEARANCE: Record<ThemePreference, string> = {
+  system: "System",
+  light: "Light",
+  dark: "Dark",
+};
+
 function RouteComponent() {
-  const { dark, setDark } = useTheme();
+  const { preference, setPreference } = useTheme();
 
   /*
    * The measurements that used to be written out here now live in `PageShell`, which Skills, Admin
@@ -44,19 +57,32 @@ function RouteComponent() {
       <ProfileSettings />
       <PageSection title="General">
         <PageRows>
+          {/* Three choices, so a select like the message list's below, not a switch. */}
           <Item size="sm">
             <ItemContent>
-              <ItemTitle>Dark theme</ItemTitle>
+              <ItemTitle>Appearance</ItemTitle>
               <ItemDescription>
-                Use the dark appearance across OpenBot.
+                System follows your device's light or dark setting.
               </ItemDescription>
             </ItemContent>
             <ItemActions>
-              <Switch
-                aria-label="Dark theme"
-                checked={dark}
-                onCheckedChange={setDark}
-              />
+              <Select
+                value={preference}
+                onValueChange={(value) => {
+                  if (value) setPreference(value);
+                }}
+              >
+                <SelectTrigger aria-label="Appearance">
+                  <SelectValue>{APPEARANCE[preference]}</SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {THEME_PREFERENCES.map((choice) => (
+                    <SelectItem key={choice} value={choice}>
+                      {APPEARANCE[choice]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </ItemActions>
           </Item>
           <Separator />
