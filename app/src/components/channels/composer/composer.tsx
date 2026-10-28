@@ -1345,6 +1345,7 @@ export function Composer({
     <Button
       aria-label="Stop the Bot"
       className={actionClassName}
+      data-slot="composer-stop"
       data-testid="composer-stop"
       onClick={onStop}
       size="icon"
@@ -1374,6 +1375,7 @@ export function Composer({
     <Button
       aria-label={sendLabel}
       className={actionClassName}
+      data-slot="composer-send"
       disabled={!canSend}
       size="icon"
       type="submit"
@@ -1479,6 +1481,7 @@ export function Composer({
         {tooManyStagedNotice}
         <form
           aria-busy={isBusy}
+          data-slot="composer"
           className={cn(
             /*
              * `py-3` IS LOAD-BEARING ONCE THE TEXT WRAPS. On one line `min-h-14` and the controls
@@ -1520,6 +1523,7 @@ export function Composer({
                 <Button
                   aria-label="Attach a file"
                   className="self-end"
+                  data-slot="composer-attach"
                   // The button stays, and stays labelled: a conversation that cannot take another
                   // message has not lost the ability to attach, it has lost the message. Swapping it
                   // for the "unavailable" placeholder would say the wrong thing about why.
@@ -1543,23 +1547,26 @@ export function Composer({
                   <IconPlus className="size-5" />
                 </Button>
               )}
-              <PromptArea
-                aria-label="Message"
-                className={cn(
-                  "min-w-0 flex-1 border-0 bg-transparent p-0 text-sm shadow-none",
-                  editorClassName,
-                )}
-                disabled={disabled}
-                maxHeight={COMPACT_MAX_HEIGHT_PX}
-                minHeight={COMPACT_MIN_HEIGHT_PX}
-                onChange={handleChange}
-                onImagePaste={canAttach ? stagePastedImage : undefined}
-                onSubmit={submitDraft}
-                placeholder="Ask anything"
-                ref={promptAreaRef}
-                triggers={triggers}
-                value={value}
-              />
+              {/* The slot is ours: `PromptArea` passes no attribute through to its own box. */}
+              <div className="min-w-0 flex-1" data-slot="composer-input">
+                <PromptArea
+                  aria-label="Message"
+                  className={cn(
+                    "w-full border-0 bg-transparent p-0 text-sm shadow-none",
+                    editorClassName,
+                  )}
+                  disabled={disabled}
+                  maxHeight={COMPACT_MAX_HEIGHT_PX}
+                  minHeight={COMPACT_MIN_HEIGHT_PX}
+                  onChange={handleChange}
+                  onImagePaste={canAttach ? stagePastedImage : undefined}
+                  onSubmit={submitDraft}
+                  placeholder="Ask anything"
+                  ref={promptAreaRef}
+                  triggers={triggers}
+                  value={value}
+                />
+              </div>
               <DictationButton
                 dictation={dictation}
                 disabled={disabled || voiceCall?.active === true}
@@ -1585,6 +1592,7 @@ export function Composer({
       <form
         aria-busy={isBusy}
         className="overflow-hidden rounded-2xl border border-border bg-card"
+        data-slot="composer"
         onSubmit={handleFormSubmit}
       >
         <DictationSurface
@@ -1600,23 +1608,25 @@ export function Composer({
               images={images}
               onRemove={discardAttachment}
             />
-            <PromptArea
-              aria-label="Message"
-              autoGrow
-              className={cn(
-                "w-full border-0 bg-transparent p-0 text-sm shadow-none",
-                editorClassName,
-              )}
-              disabled={disabled}
-              maxHeight={MAX_HEIGHT_PX}
-              onChange={handleChange}
-              onImagePaste={canAttach ? stagePastedImage : undefined}
-              onSubmit={submitDraft}
-              placeholder="Ask anything"
-              ref={promptAreaRef}
-              triggers={triggers}
-              value={value}
-            />
+            <div data-slot="composer-input">
+              <PromptArea
+                aria-label="Message"
+                autoGrow
+                className={cn(
+                  "w-full border-0 bg-transparent p-0 text-sm shadow-none",
+                  editorClassName,
+                )}
+                disabled={disabled}
+                maxHeight={MAX_HEIGHT_PX}
+                onChange={handleChange}
+                onImagePaste={canAttach ? stagePastedImage : undefined}
+                onSubmit={submitDraft}
+                placeholder="Ask anything"
+                ref={promptAreaRef}
+                triggers={triggers}
+                value={value}
+              />
+            </div>
           </div>
 
           <div className="flex items-center justify-between">
@@ -1624,6 +1634,7 @@ export function Composer({
               <Button
                 aria-label="Attach a file"
                 className="size-7 rounded-full p-0"
+                data-slot="composer-attach"
                 disabled={disabled}
                 onClick={() => fileInputRef.current?.click()}
                 type="button"
