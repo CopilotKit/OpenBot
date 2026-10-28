@@ -37,6 +37,17 @@ function allowedModels(): readonly string[] | undefined {
     ? snapshot.settings.modelAllowlist.models
     : undefined;
 }
+export function modelSelectionEnabled(): boolean {
+  const controls = enterpriseControls();
+  if (!controls) return true;
+  const snapshot = controls.snapshot();
+  if (!snapshot)
+    throw new ModelSelectionError(
+      "Couldn't check model access. Try again.",
+      503,
+    );
+  return snapshot.settings.modelSelectionEnabled;
+}
 export function createChannelModelStore(deps: {
   database: Database;
   model: RuntimeModel;
@@ -85,6 +96,7 @@ export function createChannelModelStore(deps: {
     if (!row || !agent)
       throw new ModelSelectionError("Couldn't find that conversation.", 404);
     const selectable =
+      modelSelectionEnabled() &&
       rows.length === 1 &&
       agent.type === "built_in" &&
       directModelConnection(model, await deps.resolveApiKey());
@@ -94,6 +106,7 @@ export function createChannelModelStore(deps: {
     state: { saved: SavedModelSelection | null; selectable: boolean },
     agentId: string,
   ): ConversationModel {
+    if (!modelSelectionEnabled()) state = { saved: null, selectable: false };
     const options = state.selectable
       ? modelOptions(model, allowedModels())
       : [];
@@ -113,6 +126,22 @@ export function createChannelModelStore(deps: {
     };
   }
   const store = {
+    async readOptions(actor: AgentActor, agentId: string) {
+      const agent = (await deps.loadAgents(actor)).find(
+        (a) => a.id === agentId,
+      );
+      if (!agent) throw new ModelSelectionError("Couldn't find that Bot.", 404);
+      return representation(
+        {
+          saved: null,
+          selectable:
+            modelSelectionEnabled() &&
+            agent.type === "built_in" &&
+            directModelConnection(model, await deps.resolveApiKey()),
+        },
+        agentId,
+      );
+    },
     async read(actor: AgentActor, channelId: string, agentId: string) {
       return representation(
         await authorized(database, actor, channelId, agentId),
@@ -134,6 +163,11 @@ export function createChannelModelStore(deps: {
           .for("update");
         const state = await authorized(tx, actor, channelId, agentId, true);
         if (selected !== null) {
+          if (!modelSelectionEnabled())
+            throw new ModelSelectionError(
+              "Model selection is disabled by your admin.",
+              403,
+            );
           if (!state.selectable)
             throw new ModelSelectionError(unavailableModel, 409);
           if (!modelOptions(model).some((m) => m.id === selected))
@@ -184,7 +218,7 @@ export function createChannelModelStore(deps: {
         mapping.channelId,
         agentId,
       );
-      if (!state.saved) return model;
+      if (!modelSelectionEnabled() || !state.saved) return model;
       if (!state.selectable || state.saved.agentId !== agentId)
         throw new ModelSelectionError(unavailableModel, 409);
       // Policy is enforced below against the effective model, with one usage record.
@@ -238,6 +272,18 @@ export function createChannelModelRoutes(
   requireUser: MiddlewareHandler<{ Variables: AppVariables }>,
 ) {
   const routes = new Hono<{ Variables: AppVariables }>();
+  routes.get("/model-options/:agentId", requireUser, async (c) => {
+    try {
+      return c.json({
+        model: await store.readOptions(c.var.actor, c.req.param("agentId")),
+      });
+    } catch (error) {
+      if (error instanceof ModelSelectionError)
+        return c.json({ error: error.message }, error.status);
+      console.error({ error: "model_options_request_failed" });
+      return c.json({ error: "Couldn't load models. Try again." }, 503);
+    }
+  });
   routes.on(
     ["GET", "PUT"],
     "/:channelId/agents/:agentId/model",

@@ -18,7 +18,10 @@ import { serverTurnAdmission } from "../src/agents/turn-admission";
 import { addAuditTap, createAuditStore, recordAuditEvent } from "../src/audit";
 import { createAuth } from "../src/auth";
 import type { AppVariables } from "../src/auth/guards";
-import { governResolvedModel } from "../src/channels/model-selection";
+import {
+  createChannelModelStore,
+  governResolvedModel,
+} from "../src/channels/model-selection";
 import type { ComputerProvider } from "../src/computer/provider";
 import type { DeploymentConfig } from "../src/config";
 import { createDatabase } from "../src/db/client";
@@ -28,7 +31,11 @@ import {
   agents,
   auditEvents,
   capabilitySettings,
+  channelAgents,
+  channelMemberships,
+  channels,
   enterpriseSettings,
+  intelligenceChannelMappings,
   modelUsage,
   networkPolicies,
   revokedAccess,
@@ -947,5 +954,54 @@ test("resolved model governance checks overrides once while suggest retains defa
     await put(asAdmin, "/api/admin/enterprise/settings/modelAllowlist", {
       value: { enabled: false, models: [] },
     });
+  }
+});
+
+test("admin can disable selection while preserving saved choices and enforcing the default", async () => {
+  const path = "/api/admin/enterprise/settings/modelSelectionEnabled";
+  expect((await put(asMember, path, { value: false })).status).toBe(403);
+  expect(controls.snapshot()?.settings.modelSelectionEnabled).toBe(true);
+  const actor = { id: member.id, role: "user" as const };
+  const id = `model-toggle-${suite}`;
+  const base = { provider: "openai" as const, defaultModel: "gpt-test" };
+  const store = createChannelModelStore({
+    database,
+    model: base,
+    resolveApiKey: async () => "test",
+    loadAgents: async () => [
+      { id: bot, name: "Test", type: "built_in", systemPrompt: "Test" },
+    ],
+  });
+  await database
+    .insert(channels)
+    .values({ id, name: "Test", description: "Test" });
+  await database.insert(channelAgents).values({ channelId: id, agentId: bot });
+  await database
+    .insert(channelMemberships)
+    .values({ channelId: id, userId: member.id });
+  await database
+    .insert(intelligenceChannelMappings)
+    .values({ channelId: id, userId: member.id, threadId: id });
+  try {
+    expect((await store.readOptions(actor, bot)).selectable).toBe(true);
+    await store.write(actor, id, bot, "gpt-6-luna");
+    expect((await put(asAdmin, path, { value: false })).status).toBe(200);
+    expect((await store.readOptions(actor, bot)).selectable).toBe(false);
+    expect(await store.read(actor, id, bot)).toMatchObject({
+      selectable: false,
+      selectedModel: null,
+      selectionUnavailable: false,
+    });
+    await expect(store.write(actor, id, bot, "gpt-6.1-sol")).rejects.toThrow(
+      "disabled by your admin",
+    );
+    expect(await store.readForRun(actor, bot, id)).toEqual(base);
+    expect((await put(asAdmin, path, { value: true })).status).toBe(200);
+    expect((await store.readForRun(actor, bot, id)).defaultModel).toBe(
+      "gpt-6-luna",
+    );
+  } finally {
+    await put(asAdmin, path, { value: true });
+    await database.delete(channels).where(eq(channels.id, id));
   }
 });

@@ -47,6 +47,7 @@ export type EnterpriseSettings = {
   ssoRequired: boolean;
   actionRecording: boolean;
   inactiveComputerDays: number;
+  modelSelectionEnabled: boolean;
   modelAllowlist: { enabled: boolean; models: string[] };
   mcpAllowlist: { enabled: boolean; servers: string[] };
 };

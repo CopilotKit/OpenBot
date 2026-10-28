@@ -12,6 +12,7 @@ import {
   toFieldChange,
 } from "@/components/channels/compose-state";
 import { ConversationView } from "@/components/channels/conversation-view";
+import { ModelSelector } from "@/components/channels/model-selector";
 import { seedMessage } from "@/components/channels/transcript-messages";
 import { SidebarToggle } from "@/components/layout/sidebar-toggle";
 import {
@@ -65,6 +66,8 @@ function RouteComponent() {
     agentListQueryOptions(),
   );
 
+  const [draftModel, setDraftModel] = useState<string | null>(null);
+  const [modelBlocked, setModelBlocked] = useState(true);
   const [error, setError] = useState<string | null>(null);
   // Optimistic seed shown before the first channel record exists.
   const [sent, setSent] = useState<Message | null>(null);
@@ -142,6 +145,10 @@ function RouteComponent() {
           onValueChange={(next: AgentProfile[], details) => {
             const kept = toFieldChange(selected, next, details.reason);
             setPicked(kept);
+            setDraftModel(null);
+            if (kept.length !== 1) setModelBlocked(false);
+            else if (selected.length !== 1 || kept[0].id !== selected[0].id)
+              setModelBlocked(true);
             // The first Bot stays in the URL so a reload keeps the conversation's recipient; the
             // rest of a group lives in the page. Not a separate navigation history entry.
             void navigate({
@@ -237,6 +244,19 @@ function RouteComponent() {
         }}
       />
       <ConversationView
+        modelSelector={
+          !group && recipients[0] ? (
+            <ModelSelector
+              key={recipients[0].id}
+              agentId={recipients[0].id}
+              disabled={pending || sent !== null}
+              draftModel={draftModel}
+              onDraftChange={setDraftModel}
+              onBlockingChange={setModelBlocked}
+            />
+          ) : undefined
+        }
+        submissionBlocked={!group && modelBlocked}
         // Choosing a coworker answers the "To:" field, so the message is what remains: the caret
         // lands in the composer the moment a recipient exists, whether picked here or in the URL.
         autoFocus
@@ -280,7 +300,7 @@ function RouteComponent() {
           try {
             // Recorded, then started: a coworker picked here is as much a choice as an `@` on the
             // home screen, and the trail has to say so for both.
-            await startChosen(recipient.id, draft.text);
+            await startChosen(recipient.id, draft.text, draftModel);
           } catch (caught) {
             // Preserve the unsent draft when channel creation fails.
             setSent(null);
@@ -292,7 +312,7 @@ function RouteComponent() {
             throw caught;
           }
         }}
-        pending={pending}
+        pending={pending || (!group && modelBlocked)}
       />
     </div>
   );

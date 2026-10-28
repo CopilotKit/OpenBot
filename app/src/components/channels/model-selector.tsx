@@ -13,15 +13,21 @@ export function ModelSelector({
   agentId,
   disabled,
   onBlockingChange,
+  draftModel = null,
+  onDraftChange,
 }: {
-  channelId: string;
+  channelId?: string;
+  draftModel?: string | null;
+  onDraftChange?: (model: string | null) => void;
   agentId: string;
   disabled: boolean;
   onBlockingChange: (blocked: boolean) => void;
 }) {
   const cache = useQueryClient();
   const queryKey = ["conversation-model", channelId, agentId];
-  const path = `/api/channels/${encodeURIComponent(channelId)}/agents/${encodeURIComponent(agentId)}/model`;
+  const path = channelId
+    ? `/api/channels/${encodeURIComponent(channelId)}/agents/${encodeURIComponent(agentId)}/model`
+    : `/api/channels/model-options/${encodeURIComponent(agentId)}`;
   const query = useQuery({
     queryKey,
     queryFn: ({ signal }) =>
@@ -46,7 +52,20 @@ export function ModelSelector({
     onError: () =>
       onBlockingChange(!query.data || query.data.selectionUnavailable),
   });
-  const data = query.data;
+  const data =
+    query.data && !channelId && query.data.selectable
+      ? {
+          ...query.data,
+          selectedModel: draftModel,
+          selectionUnavailable:
+            draftModel !== null &&
+            !query.data.options.some((option) => option.id === draftModel),
+        }
+      : query.data;
+  useEffect(() => {
+    if (!channelId && query.data && !query.data.selectable)
+      onDraftChange?.(null);
+  }, [channelId, query.data, onDraftChange]);
   const blocked = !data || mutation.isPending || !!data.selectionUnavailable;
   useEffect(() => {
     onBlockingChange(blocked);
@@ -85,8 +104,13 @@ export function ModelSelector({
         }}
         onValueChange={(value) => {
           if (value === null) return;
+          const selected = value === "__default" ? null : value;
+          if (!channelId) {
+            onDraftChange?.(selected);
+            return;
+          }
           onBlockingChange(true);
-          mutation.mutate(value === "__default" ? null : value);
+          mutation.mutate(selected);
         }}
       >
         <SelectTrigger

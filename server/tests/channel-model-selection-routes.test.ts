@@ -17,6 +17,7 @@ const dto = {
 };
 function app(overrides: Partial<ChannelModelStore> = {}) {
   const store: ChannelModelStore = {
+    readOptions: async () => dto,
     read: async () => dto,
     write: async (_actor, _channel, _agent, model) => ({
       ...dto,
@@ -89,4 +90,15 @@ test("returns authorization, eligibility and policy refusals; hides storage erro
   }).request(path);
   expect(result.status).toBe(503);
   expect(await result.text()).not.toContain("credential");
+});
+
+test("pre-conversation options use the authenticated actor", async () => {
+  const response = await app({
+    readOptions: async (actor, agent) => {
+      expect(actor.id).toBe("verified");
+      expect(agent).toBe("bot");
+      return dto;
+    },
+  }).request("/api/channels/model-options/bot");
+  expect(response.status).toBe(200);
 });

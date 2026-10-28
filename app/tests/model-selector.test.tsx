@@ -9,6 +9,7 @@ import {
   render,
   waitFor,
 } from "@testing-library/react";
+import { useState } from "react";
 import { ConversationView } from "@/components/channels/conversation-view";
 import { ModelSelector } from "@/components/channels/model-selector";
 import { settleReactWork } from "./settle-react-work";
@@ -111,7 +112,9 @@ test("save failures preserve previous model and release the sending block", asyn
     onBlockingChange: (value) => blocked.push(value),
   });
   await waitFor(() => expect(view.getByRole("combobox")).toBeTruthy());
-  await act(async () => fireEvent.click(view.getByRole("combobox")));
+  await act(async () =>
+    fireEvent.keyDown(view.getByRole("combobox"), { key: "ArrowDown" }),
+  );
   await waitFor(() =>
     expect(view.getByRole("option", { name: "GPT-6 Luna" })).toBeTruthy(),
   );
@@ -163,4 +166,48 @@ test("a blocked preference preserves editor text and prevents queued submission"
   await settleReactWork();
   expect(sent).toBe(0);
   expect(editor.textContent).toContain("Keep this draft");
+});
+
+test("a new conversation selects locally without writing an unsaved channel", async () => {
+  fetchMock = spyOn(globalThis, "fetch").mockResolvedValue(respond());
+  function Draft() {
+    const [model, setModel] = useState<string | null>(null);
+    return (
+      <ModelSelector
+        agentId="bot"
+        disabled={false}
+        draftModel={model}
+        onDraftChange={setModel}
+        onBlockingChange={() => {}}
+      />
+    );
+  }
+  const cache = new QueryClient({
+    defaultOptions: { queries: { retry: false, gcTime: 0 } },
+  });
+  const view = render(
+    <QueryClientProvider client={cache}>
+      <Draft />
+    </QueryClientProvider>,
+  );
+  await waitFor(() => expect(view.getByRole("combobox")).toBeTruthy());
+  await act(async () =>
+    fireEvent.keyDown(view.getByRole("combobox"), { key: "ArrowDown" }),
+  );
+  await waitFor(() =>
+    expect(view.getByRole("option", { name: "GPT-6 Luna" })).toBeTruthy(),
+  );
+  await act(async () =>
+    fireEvent.keyDown(view.getByRole("option", { name: "GPT-6 Luna" }), {
+      key: "Enter",
+    }),
+  );
+  await waitFor(() =>
+    expect(view.getByRole("combobox").textContent).toContain("GPT-6 Luna"),
+  );
+  expect(
+    fetchMock.mock.calls.every(
+      ([, init]: Parameters<typeof fetch>) => init?.method !== "PUT",
+    ),
+  ).toBe(true);
 });

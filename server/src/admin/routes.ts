@@ -88,6 +88,7 @@ const settingInputs: {
   ssoRequired: z.boolean(),
   actionRecording: z.boolean(),
   inactiveComputerDays: z.number().int().min(0).max(3650),
+  modelSelectionEnabled: z.boolean(),
   modelAllowlist: z.strictObject({
     enabled: z.boolean(),
     models: z.array(MODEL).max(500),

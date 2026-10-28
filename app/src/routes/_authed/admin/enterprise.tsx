@@ -441,10 +441,31 @@ function EnterpriseSections({
       </PageSection>
 
       <PageSection
-        description={`The built-in Bot runs on ${data.builtInModel ?? "the deployment's configured model"}. A remote Bot chooses its own, and the model it reports is recorded.`}
+        description={`Built-in Bots default to ${data.builtInModel ?? "the deployment's configured model"}. A remote Bot chooses its own, and the model it reports is recorded.`}
         title="Models"
       >
         <PageRows>
+          <Item size="sm">
+            <ItemContent>
+              <ItemTitle>Allow model selection</ItemTitle>
+              <ItemDescription>
+                Let people choose a model for built-in Bots in each
+                conversation. When off, Bots use the deployment's configured
+                default.
+              </ItemDescription>
+            </ItemContent>
+            <ItemActions>
+              <Switch
+                aria-label="Allow model selection"
+                checked={settings.modelSelectionEnabled}
+                disabled={saving}
+                onCheckedChange={(enabled) =>
+                  onSetting("modelSelectionEnabled", enabled)
+                }
+              />
+            </ItemActions>
+          </Item>
+          <Separator />
           <Item size="sm">
             <ItemMedia variant="icon">
               <IconShieldLock />
