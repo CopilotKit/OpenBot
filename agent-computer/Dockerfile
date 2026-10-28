@@ -15,11 +15,15 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 COPY --from=node-toolchain /usr/local /usr/local
 COPY --from=bun-toolchain /usr/local/bin/bun /usr/local/bin/bun
+# `--no-shell`: every launch names a Chromium channel (`browser-runtime.ts`), and Playwright runs
+# the full build for a named channel even when headless, so the headless shell is never started. It
+# was 340 MB unpacked and about 106 MB of every download. The bunx package cache goes too: Bun
+# writes it under both BUN_INSTALL and the home directory, 35 MB the image never reads.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates curl unzip xz-utils \
   && ln -s bun /usr/local/bin/bunx \
-  && bunx --bun "playwright@${PLAYWRIGHT_VERSION}" install --with-deps chromium \
-  && rm -rf /root/.cache /tmp/* /var/lib/apt/lists/*
+  && bunx --bun "playwright@${PLAYWRIGHT_VERSION}" install --with-deps --no-shell chromium \
+  && rm -rf /root/.cache /root/.bun /usr/local/install/cache /tmp/* /var/lib/apt/lists/*
 
 WORKDIR /app
 # The lockfile as well as the manifest: `--frozen-lockfile` with no lockfile present resolves afresh

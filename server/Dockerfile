@@ -1,8 +1,13 @@
-# The API and the app it serves, in one image.
+# The API, the app it serves, and the routines worker, in one image.
 #
 # ONE IMAGE ON PURPOSE. There is no CORS anywhere in the server, so the app must reach `/api` on its
 # own origin. Shipping them together means a deployment needs one service and no path rules, and the
 # two halves cannot end up disagreeing about which host they are on.
+#
+# The worker rides along for a smaller version of the same reason: it is the server's own routine
+# sweep (`server/src/routines/sweep.ts`) in a loop, importing the server's source rather than a copy
+# of it, so a worker built from another commit would be sweeping with somebody else's rules. One
+# image runs either process; the command decides which.
 #
 # Multi-stage so the build's dependencies do not ship. Non-root because nothing here needs to be.
 
@@ -53,11 +58,20 @@ COPY --from=deps /app/package.json package.json
 COPY --from=deps /app/bun.lock bun.lock
 COPY --from=deps /app/server/node_modules server/node_modules
 COPY --from=deps /app/toolkit/node_modules toolkit/node_modules
+# The worker's own `node_modules` holds one thing, the link to `@openbot/shared`, and without it the
+# first import in `worker/src/env.ts` fails. The install is isolated: each workspace resolves through
+# the folder beside its own manifest, so the server's copy of that link is no use to the worker.
+COPY --from=deps /app/worker/node_modules worker/node_modules
 
 COPY server server
 COPY shared shared
 COPY toolkit toolkit
 COPY examples examples
+# Its source and manifest, not its tests. Run it with `bun ../worker/src/index.ts` from the working
+# directory below; it reaches the server's source by relative import, so it needs `server/` beside
+# it, which is already here.
+COPY worker/package.json worker/package.json
+COPY worker/src worker/src
 
 # The built app, served by the process below. `APP_DIST_DIR` is what turns that on, so an image
 # without this layer is still a working API.

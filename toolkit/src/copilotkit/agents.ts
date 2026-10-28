@@ -337,11 +337,35 @@ export class UnavailableAgent extends AbstractAgent {
  * the instance that owns those fields. The authentication observer separately binds methods to
  * that original instance, so it preserves this override and its private-field receiver.
  *
- * `getThreadMessages` is the only override. `handleGetThreadMessages` in the runtime calls it and
+ * `getThreadMessages` is one override. `handleGetThreadMessages` in the runtime calls it and
  * returns `Response.json` of whatever comes back, so an empty history here is the `{ messages: [] }`
  * the browser expects and a 200 instead of a 500.
+ *
+ * `ɵgetClientWsUrl` is the other, and only when `browserWsUrl` is given. That address is the one
+ * the runtime sends the browser in `/info`, and the browser opens it itself, so it has to be the
+ * gateway as the browser can reach it. A server in a container reaches local Intelligence at
+ * `host.docker.internal`, which a browser on the host cannot resolve, while the browser's
+ * `localhost` is, inside the container, the container. Everything the server opens itself, the
+ * runner and channel sockets, stays on `wsUrl`.
  */
 export class IntelligenceKnowingANewThread extends CopilotKitIntelligence {
+  readonly #browserClientWsUrl: string | undefined;
+
+  constructor(
+    config: ConstructorParameters<typeof CopilotKitIntelligence>[0] & {
+      browserWsUrl?: string;
+    },
+  ) {
+    const { browserWsUrl, ...platform } = config;
+    super(platform);
+    const browser = browserWsUrl?.trim();
+    this.#browserClientWsUrl = browser ? clientSocket(browser) : undefined;
+  }
+
+  override ɵgetClientWsUrl(): string {
+    return this.#browserClientWsUrl ?? super.ɵgetClientWsUrl();
+  }
+
   override getThreadMessages(
     params: Parameters<CopilotKitIntelligence["getThreadMessages"]>[0],
   ) {
@@ -349,4 +373,18 @@ export class IntelligenceKnowingANewThread extends CopilotKitIntelligence {
       messages: [],
     });
   }
+}
+
+/**
+ * The gateway's client socket, from any of the three addresses the platform names it by.
+ *
+ * The rule the runtime applies to `wsUrl` (`deriveClientWsUrl`, which it does not export), so a
+ * browser address written the way the server's is lands on the same path.
+ */
+function clientSocket(wsUrl: string): string {
+  const base = wsUrl.replace(/\/$/, "");
+  for (const socket of ["/client", "/runner", "/channels"]) {
+    if (base.endsWith(socket)) return `${base.slice(0, -socket.length)}/client`;
+  }
+  return `${base}/client`;
 }
