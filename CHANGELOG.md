@@ -8,7 +8,7 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-**Before upgrading.** Ten things change for an existing deployment:
+**Before upgrading.** Eleven things change for an existing deployment:
 - A hosted computer's browser is now headed by default. It uses a little more memory than headless
   did; set `COMPUTER_BROWSER_MODE=headless` (Helm: `computers.browserMode: headless`) to keep the old
   behaviour.
@@ -45,6 +45,17 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - With `OPENAI_BASE_URL` set to a host that is not OpenAI or Azure, `openai/...` models now use the
   Chat Completions API rather than the Responses API (below). Set `COPILOTKIT_OPENAI_API=responses`
   to keep the old behaviour.
+- Interfaces a Bot drew before the upgrade (A2UI 0.9 surfaces) no longer draw when a conversation is
+  reopened; the messages around them stay. New ones use the standard catalog (below).
+
+### Bots draw from CopilotKit's standard components
+
+With generative UI on, a Bot builds an interface from CopilotKit's standard catalog: 68 components
+for layout, text, inputs, tables, charts, media and composites such as link and entity cards,
+including the A2UI 1.0 basic components under their A2UI names. They take OpenBot's colours, radii
+and font, in light and dark. Map is left out, because it needs a map library OpenBot does not ship.
+The gallery components a Bot is granted are unchanged. `OPENBOT_GENERATIVE_UI=false` still switches
+it all off, on the server as well as in the browser.
 
 ### CopilotKit 1.83
 
