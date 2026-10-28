@@ -1,6 +1,10 @@
 import type { Message } from "@ag-ui/core";
 import { researchRoleOfTool } from "@openbot/shared/research";
-import { toVisibleChatItems } from "@/components/channels/chat-messages";
+import { isBrowserStep } from "@/components/channels/browser-activity";
+import {
+  toVisibleChatItems,
+  type VisibleChatItem,
+} from "@/components/channels/chat-messages";
 import {
   connectorName,
   ownToolLabel,
@@ -102,14 +106,7 @@ export function stepFor(
 ): string | null {
   if (!working) return null;
   const items = toVisibleChatItems(messages);
-  // The turn began at the person's last message: their words, or files sent without any.
-  const turn = items.slice(
-    items.findLastIndex(
-      (item) =>
-        item.kind === "attachments" ||
-        (item.kind === "text" && item.role === "user"),
-    ) + 1,
-  );
+  const turn = items.slice(turnStart(items));
   const running = turn
     .flatMap((item) =>
       item.kind === "tool" &&
@@ -123,4 +120,39 @@ export function stepFor(
     )
     .findLast((phrase) => phrase !== null);
   return running ?? THINKING;
+}
+
+/** Where the turn the Bot is on began: after the person's last message, their words or files. */
+function turnStart(items: readonly VisibleChatItem[]): number {
+  return (
+    items.findLastIndex(
+      (item) =>
+        item.kind === "attachments" ||
+        (item.kind === "text" && item.role === "user"),
+    ) + 1
+  );
+}
+
+/** One browser step in a conversation, as the transcript has it. */
+export type BrowserStep = {
+  item: Extract<VisibleChatItem, { kind: "tool" }>;
+  /** It is in the turn the Bot is on, so without a result it may still be running. */
+  latest: boolean;
+};
+
+/**
+ * The browser steps a conversation's Bot took, oldest first, for the computer pane's step log.
+ *
+ * READ FROM THE MESSAGES, BECAUSE NOTHING ELSE SEES THEM ALL. A click or a typed field the person
+ * has to approve runs on the server once they allow it, and never reaches a browser handler that
+ * could note it down; its call and its result are in the conversation either way.
+ */
+export function browserSteps(messages: readonly Message[]): BrowserStep[] {
+  const items = toVisibleChatItems(messages);
+  const start = turnStart(items);
+  return items.flatMap((item, index) =>
+    item.kind === "tool" && isBrowserStep(item)
+      ? [{ item, latest: index >= start }]
+      : [],
+  );
 }
