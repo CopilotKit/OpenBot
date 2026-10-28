@@ -38,7 +38,7 @@ export const DEFAULT_ENTERPRISE_SETTINGS: EnterpriseSettings = {
   ssoRequired: false,
   actionRecording: false,
   inactiveComputerDays: 30,
-  modelSelectionEnabled: true,
+  modelSelectionEnabled: false,
   modelAllowlist: { enabled: false, models: [] },
   mcpAllowlist: { enabled: false, servers: [] },
 };

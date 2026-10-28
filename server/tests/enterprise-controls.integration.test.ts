@@ -960,7 +960,7 @@ test("resolved model governance checks overrides once while suggest retains defa
 test("admin can disable selection while preserving saved choices and enforcing the default", async () => {
   const path = "/api/admin/enterprise/settings/modelSelectionEnabled";
   expect((await put(asMember, path, { value: false })).status).toBe(403);
-  expect(controls.snapshot()?.settings.modelSelectionEnabled).toBe(true);
+  expect(controls.snapshot()?.settings.modelSelectionEnabled).toBe(false);
   const actor = { id: member.id, role: "user" as const };
   const id = `model-toggle-${suite}`;
   const base = { provider: "openai" as const, defaultModel: "gpt-test" };
@@ -983,6 +983,8 @@ test("admin can disable selection while preserving saved choices and enforcing t
     .insert(intelligenceChannelMappings)
     .values({ channelId: id, userId: member.id, threadId: id });
   try {
+    expect((await store.readOptions(actor, bot)).selectable).toBe(false);
+    expect((await put(asAdmin, path, { value: true })).status).toBe(200);
     expect((await store.readOptions(actor, bot)).selectable).toBe(true);
     await store.write(actor, id, bot, "gpt-6-luna");
     expect((await put(asAdmin, path, { value: false })).status).toBe(200);
@@ -1001,7 +1003,7 @@ test("admin can disable selection while preserving saved choices and enforcing t
       "gpt-6-luna",
     );
   } finally {
-    await put(asAdmin, path, { value: true });
+    await put(asAdmin, path, { value: false });
     await database.delete(channels).where(eq(channels.id, id));
   }
 });
