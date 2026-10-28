@@ -55,6 +55,15 @@ you to every device, and changes nothing for anybody else. The templates' own fe
 OpenBot has no server for, such as OpenDots' Spaces, OpenDuet's morning brief and OpenMuse's mail and
 calendar, are not part of the skins.
 
+### The audit log reads like a log
+
+Admin → Audit fills the window and runs the table across the whole pane, with the title, the views
+and the search held in place while only the rows scroll. Each row shows the full date and time and a
+mark for what happened, with blocked rows tinted red and actions that did not happen tinted amber.
+The newest come first, and a press on When turns the order round. A search box and Outcome, Bot and
+Started by buttons narrow the events already loaded, and the count says how many of them match. A
+row about a Bot (a message routed to it, say) now names it under Bot.
+
 ### Each Bot on a shared computer has its own files
 
 A computer that serves many Bots kept one folder of files for all of them, so a note one Bot saved
@@ -173,6 +182,14 @@ moving money is always done by the person" and the step handed back to you. Typi
 the field, the page and the button: a card number field, a checkout page or a new password field
 still goes to you, whatever is typed. A news wire (business, news or press wire) on a link or button
 no longer counts as wiring money; wiring money still does.
+
+### A page visit an approval rule covers now asks you
+
+With an approval rule that asks before a Bot opens, reads or scrolls a page, the Bot was told the
+action "was not started from a conversation that can ask you", did nothing, and said it could not get
+an approval in this chat. The visit now waits on the approval card in the conversation, like a click
+or a command does: Allow once opens the page and the Bot carries on, Deny tells the Bot it was
+declined. Page visits no rule asks about still go straight to the computer.
 
 ### A Bot's browser step is no longer refused while it is being saved
 

@@ -3,6 +3,7 @@
  * for durable threads and memory. Configuration the product cannot function without belongs at the
  * boot boundary.
  */
+import { intelligenceApiKey } from "@openbot/shared/intelligence-key";
 import {
   isLearningContainerId,
   type LearningTarget,
@@ -977,14 +978,14 @@ function runtimeCapabilities(environment: Environment): RuntimeCapabilities {
   const settings = {
     apiUrl: url(environment, "INTELLIGENCE_API_URL"),
     gatewayWsUrl: url(environment, "INTELLIGENCE_GATEWAY_WS_URL"),
-    apiKey: optional(environment, "INTELLIGENCE_API_KEY"),
+    apiKey: intelligenceApiKey(environment),
     licenseToken: optional(environment, "COPILOTKIT_LICENSE_TOKEN"),
   };
 
   const missing = Object.entries({
     INTELLIGENCE_API_URL: settings.apiUrl,
     INTELLIGENCE_GATEWAY_WS_URL: settings.gatewayWsUrl,
-    INTELLIGENCE_API_KEY: settings.apiKey,
+    "CPK_INTELLIGENCE_API_KEY (or INTELLIGENCE_API_KEY)": settings.apiKey,
   })
     .filter(([, value]) => !value)
     .map(([name]) => name);

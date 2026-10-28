@@ -351,17 +351,20 @@ describe("start.sh Learning container check", () => {
    * The server assigns `openbot` once it exists, but its runtime key cannot create it. start.sh asks
    * the setup helper, without a browser or a prompt, to make sure it exists, and relays its last line.
    */
-  test("runs the non-interactive check when a key is set and nothing is assigned", async () => {
-    const result = await runStartWithStaleServerProbe(401, {
-      settings: { INTELLIGENCE_API_KEY: "cpk-synthetic" },
-    });
+  test.each(["INTELLIGENCE_API_KEY", "CPK_INTELLIGENCE_API_KEY"])(
+    "runs the non-interactive check when %s is set",
+    async (keyName) => {
+      const result = await runStartWithStaleServerProbe(401, {
+        settings: { [keyName]: "cpk-synthetic" },
+      });
 
-    expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain(
-      "LEARNING-CHECK scripts/setup-learning.ts --non-interactive",
-    );
-    expect(result.stdout).not.toContain("noise");
-  });
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain(
+        "LEARNING-CHECK scripts/setup-learning.ts --non-interactive",
+      );
+      expect(result.stdout).not.toContain("noise");
+    },
+  );
 
   test.each([
     [
