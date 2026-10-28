@@ -1,13 +1,15 @@
-import Avatar from "boring-avatars";
 import { memo } from "react";
+import { BotOrb } from "@/components/agents/orb/bot-orb";
+import { orbPaletteFor } from "@/components/agents/orb/bot-orb-draw";
 import { cn } from "@/lib/utils";
 
 /**
  * Memoized roster avatar. Row updates usually change preview/timestamp only, and
  * `use-channel-events` preserves participant id arrays for unchanged rows.
  *
- * `size-full` opts the generated SVG out of ancestor icon selectors such as
- * `[&_svg:not([class*='size-'])]:size-4`.
+ * Each face is the Bot's orb, in the colour its id picks: the same colour `AbstractAvatar` draws
+ * from the seed, which is the id unless a tenant package sets one. Clipped to its circle, so its glow
+ * never spills into the row.
  *
  * `typing` overlays a working indicator at the bottom-right — three bouncing dots, so a channel
  * whose agent is mid-turn reads as busy from the roster without moving the row's layout.
@@ -23,7 +25,9 @@ export const ChannelAvatar = memo(function ChannelAvatar({
 }) {
   const avatar =
     participantIds.length === 1 ? (
-      <Avatar className="size-full" name={participantIds[0]} size={size} />
+      <span className="block size-full overflow-hidden rounded-full">
+        <BotOrb palette={orbPaletteFor(participantIds[0])} size={size} />
+      </span>
     ) : (
       <GroupFaces participantIds={participantIds} size={size} />
     );
@@ -97,7 +101,7 @@ function GroupFaces({
               WebkitMaskComposite: "source-in",
             }}
           >
-            <Avatar className="size-full" name={id} size={diameter} />
+            <BotOrb palette={orbPaletteFor(id)} size={diameter} />
           </div>
         );
       })}
