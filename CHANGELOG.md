@@ -173,6 +173,11 @@ changes for a deployment.
   failed or declined by you is named for what it would have done ("Send your email"), and one held on
   its approval card says it is waiting for you. Mail and calendar steps, through any app, are named
   for what happened to yours ("Searched your email").
+- A conversation with one Bot shows that Bot's orb in its header. The orb works while the Bot does,
+  watches while you type, and smiles when an answer lands. Under the conversation's name, "Working ·
+  Searching the web" says which step the Bot is on, and "Needs you" says an approval is waiting there.
+  A run that goes on after you allow something shows as working too. The message box is a rounded
+  pill with larger buttons, and it says "Message" and the Bot's name until you type.
 
 ### Generated interfaces use A2UI 1.0
 

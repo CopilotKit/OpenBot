@@ -8,6 +8,11 @@ import { BotPausedBanner } from "@/components/bot-profile/pause-banner";
 import { ChannelAvatar } from "@/components/channels/avatar";
 import { ChannelChat } from "@/components/channels/channel-chat";
 import { ConversationActions } from "@/components/channels/conversation-actions";
+import {
+  ConversationOrb,
+  ConversationPresenceProvider,
+  ConversationStatusLine,
+} from "@/components/channels/conversation-presence";
 import { ComputerChatControls } from "@/components/computer/computer-controls";
 import { ComputerViewPanel } from "@/components/computer/computer-panel";
 import { useAutoWatchScreen } from "@/components/computer/use-auto-watch-screen";
@@ -31,12 +36,32 @@ const HEADING_ENTRANCE_OFFSET = "translateY(4px)";
 /** Shared detail pane width for the live screen view. */
 const SCREEN_PANEL_WIDTH = 400;
 
+/** A conversation's Bot in its header: 40px, the smallest orb that is fully animated. */
+const HEADER_ORB_SIZE = 40;
+
 export const Route = createFileRoute("/_authed/_app/channel/$channelId")({
   validateSearch: chatSearchSchema,
   component: RouteComponent,
 });
 
+/**
+ * The conversation's presence wraps everything on the route, so its header and the pane beside it
+ * read the same conversation; `ChannelChat` reports into it.
+ */
 function RouteComponent() {
+  const { channelId } = Route.useParams();
+  const channel = useQuery(channelQueryOptions(channelId));
+  return (
+    <ConversationPresenceProvider
+      channelId={channelId}
+      threadId={channel.data?.threadId}
+    >
+      <Conversation />
+    </ConversationPresenceProvider>
+  );
+}
+
+function Conversation() {
   const { channelId } = Route.useParams();
   const { settings, watch } = Route.useSearch();
   const channel = useQuery(channelQueryOptions(channelId));
@@ -46,6 +71,13 @@ function RouteComponent() {
   const isWatching = watch === true;
   /** Channel routing currently supports one coworker. */
   const agentId = channel.data?.agentIds[0];
+  /*
+   * A group is on its way to its own route (`ChannelBody`) and keeps its small faces until then.
+   * Anything else, a conversation still loading included, has room for one Bot's orb, so the header
+   * does not grow once the conversation arrives.
+   */
+  const group =
+    channel.data !== undefined && channel.data.agentIds.length !== 1;
 
   useMarkOpenChannelRead(channelId);
 
@@ -123,31 +155,42 @@ function RouteComponent() {
                 ease: EASE_OUT,
               }}
             >
-              <ChannelAvatar
-                participantIds={channel.data?.agentIds ?? []}
-                size={22}
-              />
+              {group ? (
+                <ChannelAvatar
+                  participantIds={channel.data?.agentIds ?? []}
+                  size={22}
+                />
+              ) : (
+                <ConversationOrb
+                  participantIds={channel.data?.agentIds ?? []}
+                  size={HEADER_ORB_SIZE}
+                />
+              )}
             </motion.div>
-            <motion.span
-              animate={
-                prefersReducedMotion
-                  ? { opacity: 1 }
-                  : { opacity: 1, transform: "translateY(0px)" }
-              }
-              className="min-w-0 text-sm tracking-tight truncate"
-              initial={
-                prefersReducedMotion
-                  ? { opacity: 0 }
-                  : { opacity: 0, transform: HEADING_ENTRANCE_OFFSET }
-              }
-              key={`name:${channel.data?.name ?? channelId}`}
-              transition={{
-                duration: HEADING_ENTRANCE_SECONDS,
-                ease: EASE_OUT,
-              }}
-            >
-              {channel.data?.name ?? "Channel"}
-            </motion.span>
+            {/* The name, and under it what the Bot is doing. At rest the name sits level with the orb. */}
+            <div className="flex min-w-0 flex-col pl-1">
+              <motion.span
+                animate={
+                  prefersReducedMotion
+                    ? { opacity: 1 }
+                    : { opacity: 1, transform: "translateY(0px)" }
+                }
+                className="min-w-0 type-sub font-medium truncate"
+                initial={
+                  prefersReducedMotion
+                    ? { opacity: 0 }
+                    : { opacity: 0, transform: HEADING_ENTRANCE_OFFSET }
+                }
+                key={`name:${channel.data?.name ?? channelId}`}
+                transition={{
+                  duration: HEADING_ENTRANCE_SECONDS,
+                  ease: EASE_OUT,
+                }}
+              >
+                {channel.data?.name ?? "Channel"}
+              </motion.span>
+              {group ? null : <ConversationStatusLine />}
+            </div>
           </div>
           <div className="flex flex-row gap-1.5">
             <ComputerChatControls
