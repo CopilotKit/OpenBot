@@ -316,7 +316,7 @@ function RouteComponent() {
   return (
     <PageShell
       className="@container"
-      description="The apps and accounts your Bots use as you. Open one to connect it or change it."
+      description="Connect your accounts so Bots can use apps on your behalf."
       title="Connections"
     >
       {/*

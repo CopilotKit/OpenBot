@@ -23,6 +23,8 @@ export function isSkinId(value: unknown): value is SkinId {
 }
 
 export type UserPreferences = {
+  /** Set by profile saves so choosing a name finishes the first-run prompt. */
+  profileNameSet?: boolean;
   messageListEmphasis: MessageListEmphasis;
   /** Whether this person closed the banner offering help self-hosting OpenBot. */
   selfHostBannerDismissed: boolean;

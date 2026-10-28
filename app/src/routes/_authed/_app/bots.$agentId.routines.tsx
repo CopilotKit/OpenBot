@@ -11,7 +11,7 @@ function RoutinesPage() {
   return (
     <BotSubpage
       agentId={agentId}
-      description="What this Bot does for you on a schedule. Turn one off, run it now, or delete it."
+      description="Manage this Bot’s scheduled routines. Turn a routine off, run it now, or delete it."
       title="Routines"
     >
       {(agent) => <RoutinesList agentId={agent.id} />}

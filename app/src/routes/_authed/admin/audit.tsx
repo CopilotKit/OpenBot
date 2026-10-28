@@ -119,7 +119,7 @@ function AuditPage() {
      * because a log is scanned across and rows of prose would make every entry a paragraph.
      */
     <PageShell
-      description="Every action a Bot took, and every one this deployment's policy refused."
+      description="Review Bot actions and actions blocked by this deployment’s policy."
       title="Audit"
       width="full"
     >
