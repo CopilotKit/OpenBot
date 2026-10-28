@@ -505,8 +505,8 @@ const connectStatus = (from = origin) =>
   );
 
 test("the page that asked to connect hears at once that the person cancelled on the Connect page, or closed it, and no other site hears anything", async () => {
-  // End-to-end run 1 of the review fixes: after Cancel on the Connect page, OpenBot's Settings went on saying "Confirm
-  // in the OpenBot Recorder tab that opened." for up to five minutes, as nothing told it the person had cancelled.
+  // After a Cancel on the Connect page, OpenBot's Settings used to go on saying "Confirm in the OpenBot Recorder tab that
+  // opened." for up to five minutes, as nothing told it the person had cancelled.
   expect(await connectStatus()).toEqual({ ok: true, connect: "none" });
   await connect("obc_abc");
   expect(await connectStatus()).toEqual({ ok: true, connect: "waiting" });
@@ -1715,8 +1715,9 @@ test("a trusted OpenBot asking to connect over and over is held to the same limi
   expect(exchanges).toHaveLength(10);
 });
 
-// ---- Blocker 1 of the code-owner review on #858: a loopback page is OpenBot Desktop's only when Desktop says so, and
-// no connection is ever replaced without the Connect page --------------------------------------------------------------
+// ---- A loopback page is OpenBot Desktop's only when Desktop says so, and no connection is ever replaced without the
+// Connect page: any program on this computer can serve a page on a loopback port, and one that connected with no click
+// would receive the person's next recordings ---------------------------------------------------------------------------
 
 test("a page on a loopback port that OpenBot Desktop did not confirm gets the Connect page, whatever serves it, and nothing is exchanged until the person approves it", async () => {
   const elsewhere = Bun.serve({

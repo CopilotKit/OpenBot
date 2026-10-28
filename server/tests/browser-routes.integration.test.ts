@@ -730,8 +730,8 @@ describe("opening a person's own browser", () => {
   });
 
   test("on OpenBot Desktop with no Chrome or Edge it can open, the state says why in a sentence for the person", async () => {
-    // The code-owner review: with Chrome or Edge somewhere OpenBot Desktop did not look, or installed only as a Flatpak,
-    // the reason was only in Desktop's log. Desktop now names it to the server, which says it to the person.
+    // With Chrome or Edge somewhere OpenBot Desktop did not look, or installed only as a Flatpak, the reason used to be
+    // only in Desktop's log. Desktop now names it to the server, which says it to the person.
     const flatpak = build({ OPENBOT_BROWSER_ABSENT: "flatpak-chrome" });
     expect(
       await (await call(flatpak, "/api/browser", { as: "ben" })).json(),
@@ -1287,8 +1287,9 @@ describe("opening a person's own browser", () => {
   });
 
   test("the computer refuses a person's browser on itself where Bots run, whatever the server was told", async () => {
-    // Blocker 3, the computer's half: a server configured to think the shared computer is a computer of its own (a
-    // provider that says per-bot, a stray OPENBOT_BROWSER_URL) still cannot open a person's browser beside Bots.
+    // The computer's half of keeping a person's browser off the computer Bots share: a server configured to think the
+    // shared computer is a computer of its own (a provider that says per-bot, a stray OPENBOT_BROWSER_URL) still cannot
+    // open a person's browser beside Bots.
     const dir = await mkdtemp(join(tmpdir(), "openbot-shared-computer-"));
     await Promise.all(
       ["profiles", "workspace"].map((name) => mkdir(join(dir, name))),
@@ -2384,8 +2385,8 @@ describe("who hears the person, as every answer says it", () => {
 });
 
 describe("a person's browser where every Bot shares one computer", () => {
-  // Blocker 3 of the code-owner review: with OPENBOT_BROWSER_URL unset, a person's browser ran on the shared computer,
-  // in the container where Bots may run a shell, so a prompt-injected Bot could read the person's cookies off its disk.
+  // With OPENBOT_BROWSER_URL unset, a person's browser used to run on the shared computer, in the container where Bots
+  // may run a shell, so a prompt-injected Bot could read the person's cookies off its disk.
   test("is refused through every route before anything reaches the computer, and the state says why", async () => {
     const shared = build(
       {},

@@ -978,7 +978,8 @@ test("on hosted OpenBot in a browser with no speech recognition, the page says n
   );
 });
 
-// ---- Narration only by the person's choice, on their own computer (the code owner's review) -----------------------
+// ---- Narration only by the person's choice, on their own computer: a microphone is opened for nobody who did not ask
+// for it, and what they say is turned into text without leaving it ---------------------------------------------------
 
 const preferenceWrites = () =>
   writes.filter((write) => write.path === "/api/settings/preferences");
@@ -1496,7 +1497,8 @@ test("where OpenBot cannot run a browser for the person, the page says so and op
 });
 
 test("where the server says why there is no browser of the person's own, the page says that instead", async () => {
-  // Every Bot shares one computer here, which is no place for a person's browser (the code-owner review's blocker 3).
+  // Every Bot shares one computer here, which is no place for a person's browser: a Bot's shell there could read the
+  // cookies in its profile (server/src/browser/host.ts).
   const why =
     "This OpenBot can't open a browser of your own, because its Bots share one computer.";
   state = { ...screenState(), available: false, open: false, note: why };

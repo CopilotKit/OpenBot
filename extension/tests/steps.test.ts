@@ -1120,9 +1120,9 @@ test("a redirect folded into the page change before it keeps how that change beg
 
 // ---- A visit: a page the person arrived on and has not acted on ---------------------------------------------------
 //
-// End-to-end run 1 of the review fixes: the person opened example.org while recording, looked at it for about 6 s and
-// pressed "Don't record example.org" on the mark, yet its arrival (address and title) had reached Intelligence: a page
-// change was held only for its redirect wait, 2 s, so it left before they could leave the site out.
+// A person opens example.org while recording, looks at it for about 6 s and presses "Don't record example.org" on the
+// mark. Its arrival (address and title) used to have reached Intelligence by then: a page change was held only for its
+// redirect wait, 2 s, so it left before they could leave the site out.
 
 const BANK = "https://online.bank.example/accounts";
 const said = (at: number, text: string): CapturedEvent => ({

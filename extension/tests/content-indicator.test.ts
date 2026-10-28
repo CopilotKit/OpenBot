@@ -163,8 +163,7 @@ test("the mark sits above the page, in OpenBot's colours, and removes itself", (
 
 // ---- Where the mark hangs ------------------------------------------------------------------------------------------
 //
-// End-to-end run 1 of the review fixes: on OpenBot's own tab the mark, then bottom-left, covered the sidebar's account
-// row. What a person can use along the edges of OpenBot's home page, measured in Chromium 151 (headless, 2026-10-27,
+// On OpenBot's own tab the mark, when it hung bottom-left, covered the sidebar's account row. What a person can use along the edges of OpenBot's home page, measured in Chromium 151 (headless, 2026-10-27,
 // the self-host bar shown, as a new install shows it), at the sizes of a laptop and a desktop screen.
 
 type Usable = { what: string; tag: "a" | "button" | "input"; box: Box };

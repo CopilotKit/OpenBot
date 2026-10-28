@@ -4586,7 +4586,7 @@ test("the page hook's word that the page runs CopilotKit (its runtime answered t
   expect(network.pageAgent).toHaveLength(1);
 });
 
-// ---- Sites the person leaves out (review: a recording follows every tab the person uses) -------
+// ---- Sites the person leaves out: a recording follows every tab the person uses ----------------
 //
 // A glance at a bank or a mailbox mid-recording went into it: every followed tab now shows a recording mark from its
 // first step, and one click on it leaves that site out of every recording.

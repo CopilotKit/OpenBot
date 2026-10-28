@@ -975,9 +975,9 @@ for (const { moment, stopAt, linked, ...when } of [
   }, 30_000);
 
 test("a site the person glances at mid-recording and leaves out on its mark 6 s later never reaches Intelligence, not even its arrival", async () => {
-  // End-to-end run 1 of the review fixes (trajectory 24b97d1c): the person opened example.org while recording, waited
-  // about 6 s and pressed "Don't record example.org" on the mark. Its arrival (address and title) had already reached
-  // Intelligence: a page change was held only for its 2 s redirect wait.
+  // The person opens example.org while recording, waits about 6 s and presses "Don't record example.org" on the mark.
+  // Its arrival (address and title) used to have reached Intelligence already: a page change was held only for its 2 s
+  // redirect wait.
   const click = rows.archiveClick;
   const trajectoryId = await record(
     click.timestamp - 7_000,

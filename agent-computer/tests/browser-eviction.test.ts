@@ -207,9 +207,9 @@ describe("a person's browser among Bots' browsers", () => {
 /**
  * Which person's browser that is: a native window on the person's own desktop, never a cloud one.
  *
- * The code-owner review found every person's browser exempt, the cloud one included: an abandoned
- * Browser tab kept a root, sandbox-less Chromium running for ever, and when the cap was reached it
- * closed the Bots' browsers first. A cloud browser is touched every second while anybody is on its
+ * Every person's browser used to be exempt, the cloud one included: an abandoned Browser tab kept a
+ * root, sandbox-less Chromium running for ever, and when the cap was reached it closed the Bots'
+ * browsers first. A cloud browser is touched every second while anybody is on its
  * page, so it takes the Bots' own rule.
  */
 describe("a person's cloud browser among Bots' browsers", () => {

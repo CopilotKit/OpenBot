@@ -544,8 +544,8 @@ test("with the Recorder here but not connected, one click connects it as Setting
 }, 10_000);
 
 test("a Cancel on the Recorder's Connect page reaches the popover within a second, which says so and offers Connect again", async () => {
-  // End-to-end run 1 of the review fixes: after Cancel, OpenBot went on saying "Confirm in the OpenBot Recorder tab that
-  // opened." for up to five minutes.
+  // After a Cancel, OpenBot used to go on saying "Confirm in the OpenBot Recorder tab that opened." for up to five
+  // minutes: nothing told it the person had cancelled.
   const recorder = new FakeRecorder();
   inBrowser("chrome", [recorder]);
   const { view } = draw();

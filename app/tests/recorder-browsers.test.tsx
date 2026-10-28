@@ -229,8 +229,8 @@ for (const [how, sentence] of [
   ],
 ] as const)
   test(`once the person ${how === "cancelled" ? "cancels on" : "closes"} the Connect page, the row says so within a second, with Connect back`, async () => {
-    // End-to-end run 1 of the review fixes: after Cancel, Settings went on saying "Confirm in the OpenBot Recorder tab
-    // that opened." for up to five minutes.
+    // After a Cancel, Settings used to go on saying "Confirm in the OpenBot Recorder tab that opened." for up to five
+    // minutes: nothing told it the person had cancelled.
     recorder = {
       ping: { ok: true },
       connect: { ok: true, awaitingConfirmation: true },

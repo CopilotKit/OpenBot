@@ -263,7 +263,8 @@ pub const IMAGE_RECORDER: &str = "/recorder";
 /// installation has just pulled that image, digest-pinned from the release's manifest. So the
 /// Recorder is copied out of it: what every hosted person's browser loads, byte for byte, and
 /// nothing is compiled on the person's machine. It used to be three Vite builds run here with the
-/// installation's Bun, which the code-owner review rightly asked to ship prebuilt.
+/// installation's Bun: a build tool run on every person's machine at install, and a Recorder that
+/// could differ from the hosted one.
 ///
 /// Copied out of a container that is created and never started (`create --pull=never`, so a
 /// missing image is an error rather than a download nobody asked for), into a folder beside the
@@ -852,8 +853,8 @@ fn main() {
         }
     }
 
-    /// The code-owner review: the Recorder was built with `bun run build` on the person's machine
-    /// during installation. It is copied out of the release's computer image instead, prebuilt,
+    /// The Recorder used to be built with `bun run build` on the person's machine during
+    /// installation. It is copied out of the release's computer image instead, prebuilt,
     /// replacing whatever an earlier installation left, and the container it came out of is gone.
     #[test]
     fn the_recorder_comes_prebuilt_out_of_the_releases_computer_image() {
