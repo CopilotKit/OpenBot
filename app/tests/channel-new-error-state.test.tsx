@@ -1,6 +1,12 @@
-import "./channel-new-error-state.fixture";
-
-import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  expect,
+  spyOn,
+  test,
+} from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
@@ -13,13 +19,48 @@ import {
 } from "@tanstack/react-router";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import * as NewBotSheetModule from "@/components/agents/new-bot-sheet";
+import * as SidebarToggleModule from "@/components/layout/sidebar-toggle";
 import { type AgentProfile, agentKeys } from "@/lib/agents/queries";
 import { Route as ChannelNewRoute } from "@/routes/_authed/_app/channel/new";
+import {
+  NewBotCreationStub,
+  SidebarToggleStub,
+} from "./channel-new-error-state.fixture";
 import { settleReactWork } from "./settle-react-work";
 
 beforeAll(() => GlobalRegistrator.register());
 
-afterEach(() => cleanup());
+// The shared preload supplies the Vite-only marks module before importing the real sheet.
+// Namespace spies can be restored; mock.module would leak these handoff stubs into later suites.
+const realNewBotSheet = NewBotSheetModule.NewBotSheet;
+const realSidebarToggle = SidebarToggleModule.SidebarToggle;
+let restoreComponents = () => {};
+
+beforeEach(() => {
+  const newBotSheetSpy = spyOn(
+    NewBotSheetModule,
+    "NewBotSheet",
+  ).mockImplementation(NewBotCreationStub);
+  const sidebarToggleSpy = spyOn(
+    SidebarToggleModule,
+    "SidebarToggle",
+  ).mockImplementation(SidebarToggleStub);
+  restoreComponents = () => {
+    newBotSheetSpy.mockRestore();
+    sidebarToggleSpy.mockRestore();
+  };
+});
+
+afterEach(() => {
+  try {
+    cleanup();
+  } finally {
+    restoreComponents();
+    expect(NewBotSheetModule.NewBotSheet).toBe(realNewBotSheet);
+    expect(SidebarToggleModule.SidebarToggle).toBe(realSidebarToggle);
+  }
+});
 
 afterAll(async () => {
   await settleReactWork();

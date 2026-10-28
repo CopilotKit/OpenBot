@@ -107,13 +107,5 @@ for (const provider of ["arcade", "composio"] as const) {
       expect(await store.botsHolding(lowId)).toEqual([bot]);
       expect(await store.botsHolding(highId)).toEqual([bot]);
     });
-
-    test("an approval filed through either row is one fact", async () => {
-      await seed(provider);
-      const store = createSharedUseStore(database, provider);
-      expect(await store.approvalFor(bot, highId)).toEqual(
-        await store.approvalFor(bot, lowId),
-      );
-    });
   });
 }

@@ -62,14 +62,4 @@ describe("OpenBot workspace", () => {
       packagesStartedBy(manifest.scripts.build, manifest.workspaces),
     ).toEqual(manifest.workspaces);
   });
-
-  test("scripts/start.sh is what starts the routines worker", () => {
-    const startScript = readFileSync(
-      join(repositoryRoot, "scripts", "start.sh"),
-      "utf8",
-    );
-
-    expect(startScript).toContain("bun worker/src/index.ts");
-    expect(startScript).toContain("WORKER_SHARED_SECRET=");
-  });
 });

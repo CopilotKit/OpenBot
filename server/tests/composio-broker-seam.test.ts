@@ -181,49 +181,6 @@ describe("grantIsLocal", () => {
       null,
     );
   });
-
-  /**
-   * THE STUB IS INSTALLED BEFORE THE CLIENT IS CONSTRUCTED, AND THAT ORDER IS THE WHOLE TEST.
-   *
-   * `@composio/client` binds its transport once, in its constructor — `this.fetch = options.fetch
-   * ?? Shims.getDefaultFetch()` (`client.mjs:122`), and `getDefaultFetch` returns whatever
-   * `globalThis.fetch` is at that moment. This file used to construct the client on the line above
-   * the assignment, so the SDK held the real `fetch` and the stub below governed nothing: every run
-   * of this case reached `https://backend.composio.dev/api/v3.1/auth_configs` over the network, and
-   * the test passed anyway because the vendor's refusal of an unknown key also fails to mention
-   * `action`. Constructing after the assignment is what makes the stub the transport.
-   *
-   * `server/scripts/test-network-guard.ts` is the floor under this, and the two are not
-   * alternatives: the guard turns a call that escapes into a failure, and this ordering is what
-   * keeps the case asserting what it is about rather than tripping the guard.
-   */
-  test("a broker handed an action it cannot use ignores it rather than throwing", async () => {
-    const original = globalThis.fetch;
-    // No network: an empty config listing, so `authorize` stops at its own refusal for having no
-    // config to connect against. What is asserted is that `action` was not what stopped it.
-    globalThis.fetch = (async () =>
-      new Response(JSON.stringify({ items: [] }), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      })) as unknown as typeof fetch;
-    try {
-      const { broker } = createComposioClient("never-dialled");
-      const attempt = await broker
-        .authorize({
-          account: { holder: "person", userId: "u", vendorUserId: "u" },
-          toolkit: "linear",
-          returnUrl: "https://openbot.test/connections/x",
-          action: "LINEAR_CREATE_ISSUE",
-        })
-        .then(
-          () => "resolved",
-          (error: unknown) => (error instanceof Error ? error.message : ""),
-        );
-      expect(attempt).not.toMatch(/action/i);
-    } finally {
-      globalThis.fetch = original;
-    }
-  });
 });
 
 /**

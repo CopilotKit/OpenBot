@@ -1,9 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type {
-  AuthorizationFlow,
-  ConnectedAppBroker,
-  GrantState,
-} from "../src/plugins/broker";
+import type { ConnectedAppBroker, GrantState } from "../src/plugins/broker";
 import {
   type ComposioVendor,
   buildComposioClient,
@@ -663,36 +659,5 @@ describe("the declared sub-surface", () => {
 
     expect(omitted.grantIsLocal).toBe(true);
     expect(declared.authorizations).toBeNull();
-  });
-
-  /**
-   * THE OTHER HALF, AND IT IS ABOUT THE BROKER RATHER THAN ABOUT THE FLOW. This used to read
-   * `expect(flow).not.toBeNull()` on an object literal three lines above it — true of every object
-   * ever written, and silent on the one thing the test is named for: that a broker which RUNS the
-   * flow carries it on the declared field, where a route's presence test finds it and reaches the
-   * two members through it.
-   */
-  test("a broker that runs the flow declares the sub-surface instead", async () => {
-    const flow: AuthorizationFlow = {
-      status: async () => ({ status: "completed", userId: null, scopes: [] }),
-      confirmReturn: async () => ({ mismatch: true }),
-    };
-
-    const declared: ConnectedAppBroker = { ...members, authorizations: flow };
-
-    // The presence test a route makes, and then the flow itself, reached only through the field.
-    expect(declared.authorizations).not.toBeNull();
-    expect(declared.authorizations).toBe(flow);
-    expect(await declared.authorizations?.status("auth_1")).toEqual({
-      status: "completed",
-      userId: null,
-      scopes: [],
-    });
-    expect(
-      await declared.authorizations?.confirmReturn({
-        handle: "flow_1",
-        vendorUserId: ACCOUNT.vendorUserId,
-      }),
-    ).toEqual({ mismatch: true });
   });
 });

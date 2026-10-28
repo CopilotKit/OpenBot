@@ -66,7 +66,7 @@ test("minimal-PATH child uses an existing npm cache offline without exposing cre
   });
 });
 
-test("installed CLI wins over cache; otherwise newest cached version wins deterministically", async () => {
+test("newest available CLI wins even when an older version is installed", async () => {
   await fixture(async (root, install) => {
     await install(join(root, ".npm/_npx/z/node_modules/copilotkit"), "4.9.0");
     await install(
@@ -84,13 +84,10 @@ test("installed CLI wins over cache; otherwise newest cached version wins determ
     expect(
       await localCliEntrypoint(root, { PATH: minimalPath }, root, []),
     ).toBe(latest);
-    const installed = await install(
-      join(root, "node_modules/copilotkit"),
-      "4.8.0",
-    );
+    await install(join(root, "node_modules/copilotkit"), "4.8.0");
     expect(
       await localCliEntrypoint(root, { PATH: minimalPath }, root, []),
-    ).toBe(installed);
+    ).toBe(latest);
   });
 });
 
@@ -152,5 +149,121 @@ test("cancellation terminates discovery and timeout is a runtime failure", async
         })
       ).exitCode,
     ).toBe(1);
+  });
+});
+
+test.each(["4.11.0", "4.10.0"])(
+  "installed CLI wins against cached 4.10.0 when its version is %s",
+  async (version) => {
+    await fixture(async (root, install) => {
+      await install(
+        join(root, ".npm/_npx/cache/node_modules/copilotkit"),
+        "4.10.0",
+      );
+      const installed = await install(
+        join(root, "node_modules/copilotkit"),
+        version,
+      );
+      expect(
+        await localCliEntrypoint(root, { PATH: minimalPath }, root, []),
+      ).toBe(installed);
+    });
+  },
+);
+
+test("equal cached versions use a deterministic path tie-breaker", async () => {
+  await fixture(async (root, install) => {
+    await install(join(root, ".npm/_npx/z/node_modules/copilotkit"), "4.10.0");
+    const first = await install(
+      join(root, ".npm/_npx/a/node_modules/copilotkit"),
+      "4.10.0",
+    );
+    expect(
+      await localCliEntrypoint(root, { PATH: minimalPath }, root, []),
+    ).toBe(first);
+  });
+});
+
+test.each([true, false])(
+  "Windows default npm cache uses local app data (configured: %s)",
+  async (configured) => {
+    await fixture(async (root, install) => {
+      const local = configured
+        ? join(root, "custom-local")
+        : join(root, "AppData/Local");
+      const expected = await install(
+        join(local, "npm-cache/_npx/cache/node_modules/copilotkit"),
+      );
+      await install(
+        join(root, ".npm/_npx/wrong/node_modules/copilotkit"),
+        "99.0.0",
+      );
+      expect(
+        await localCliEntrypoint(
+          root,
+          { PATH: minimalPath, ...(configured ? { LOCALAPPDATA: local } : {}) },
+          root,
+          [],
+          "win32",
+        ),
+      ).toBe(expected);
+    });
+  },
+);
+
+test.each(["npm_config_cache", "NPM_CONFIG_CACHE"])(
+  "Windows respects explicit %s cache override",
+  async (key) => {
+    await fixture(async (root, install) => {
+      const explicit = join(root, "override");
+      const expected = await install(
+        join(explicit, "_npx/cache/node_modules/copilotkit"),
+      );
+      await install(
+        join(
+          root,
+          "AppData/Local/npm-cache/_npx/default/node_modules/copilotkit",
+        ),
+        "99.0.0",
+      );
+      expect(
+        await localCliEntrypoint(
+          root,
+          {
+            PATH: minimalPath,
+            NPM_CONFIG_CACHE: join(root, "unused"),
+            [key]: explicit,
+          },
+          root,
+          [],
+          "win32",
+        ),
+      ).toBe(expected);
+    });
+  },
+);
+
+test("a stale global installation cannot shadow a newer cached CLI", async () => {
+  await fixture(async (root, install) => {
+    const globalRoot = join(root, "global/copilotkit");
+    await install(globalRoot, "4.8.0");
+    const cached = await install(
+      join(root, ".npm/_npx/cache/node_modules/copilotkit"),
+      "4.10.0",
+    );
+    expect(
+      await localCliEntrypoint(root, { PATH: minimalPath }, root, [globalRoot]),
+    ).toBe(cached);
+  });
+});
+
+test("newest installed CLI wins across local and global installations", async () => {
+  await fixture(async (root, install) => {
+    await install(join(root, "node_modules/copilotkit"), "4.8.0");
+    const globalRoot = join(root, "global/copilotkit");
+    const global = await install(globalRoot, "4.11.0");
+    expect(
+      await localCliEntrypoint(root, { PATH: minimalPath }, root, [globalRoot]),
+    ).toBe(global);
   });
 });

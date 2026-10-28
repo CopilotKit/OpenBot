@@ -23,6 +23,7 @@ export async function localCliEntrypoint(
     "/opt/homebrew/lib/node_modules/copilotkit",
     "/usr/local/lib/node_modules/copilotkit",
   ],
+  platform: NodeJS.Platform = process.platform,
 ): Promise<string | undefined> {
   const entry = async (root: string) => {
     try {
@@ -72,29 +73,37 @@ export async function localCliEntrypoint(
       .filter(Boolean)
       .map((bin) => join(dirname(bin), "lib/node_modules/copilotkit")),
   ];
+  const candidates: { path: string; version: string; installed: boolean }[] =
+    [];
   for (const root of installed) {
     const found = await entry(root);
-    if (found) return found.path;
+    if (found) candidates.push({ ...found, installed: true });
   }
   // npm's npx cache is a complete installation with its dependency graph. Bun's raw
   // package cache is not, so only Bun's installed global package is considered above.
   const cacheRoot = join(
     environment.npm_config_cache ??
       environment.NPM_CONFIG_CACHE ??
-      join(home, ".npm"),
+      (platform === "win32"
+        ? join(
+            environment.LOCALAPPDATA ?? join(home, "AppData/Local"),
+            "npm-cache",
+          )
+        : join(home, ".npm")),
     "_npx",
   );
-  const cached: { path: string; version: string }[] = [];
   const names = await readdir(cacheRoot).catch(() => [] as string[]);
   for (const name of names.sort()) {
     const found = await entry(join(cacheRoot, name, "node_modules/copilotkit"));
-    if (found) cached.push(found);
+    if (found) candidates.push({ ...found, installed: false });
   }
-  cached.sort(
+  candidates.sort(
     (a, b) =>
-      Bun.semver.order(b.version, a.version) || a.path.localeCompare(b.path),
+      Bun.semver.order(b.version, a.version) ||
+      Number(b.installed) - Number(a.installed) ||
+      a.path.localeCompare(b.path),
   );
-  return cached[0]?.path;
+  return candidates[0]?.path;
 }
 
 /** Execute the installed CLI with Desktop's already-resolved Bun, even with Finder's PATH. */

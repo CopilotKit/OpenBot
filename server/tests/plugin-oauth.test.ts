@@ -221,14 +221,13 @@ describe("PKCE", () => {
     expect(createVerifier()).not.toBe(createVerifier());
   });
 
-  test("a challenge is the S256 of the verifier, not the verifier", () => {
-    // `plain` would make the challenge worthless: anybody who intercepted the authorization request
-    // would hold the value needed to redeem the code.
-    const verifier = "a".repeat(43);
-    const challenge = challengeFor(verifier);
-    expect(challenge).not.toBe(verifier);
-    expect(challenge).toMatch(/^[A-Za-z0-9\-_]+$/);
+  test("derives the S256 challenge from the verifier", () => {
+    // RFC 7636 Appendix B: https://www.rfc-editor.org/rfc/rfc7636#appendix-B
+    const verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
+    const challenge = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
     expect(challengeFor(verifier)).toBe(challenge);
+    // Also reject an implementation that always returns the published example.
+    expect(challengeFor("a".repeat(43))).not.toBe(challenge);
   });
 });
 
