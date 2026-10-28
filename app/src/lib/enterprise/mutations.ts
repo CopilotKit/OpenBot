@@ -1,5 +1,6 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
 import { client } from "@/lib/client";
+import { agentKeys } from "@/lib/agents/queries";
 import {
   type CapabilityKey,
   type EgressRule,
@@ -29,7 +30,15 @@ export function setCapabilityMutationOptions(queryClient: QueryClient) {
         fallback: FALLBACK,
       });
     },
-    onSuccess: () => invalidateEnterprise(queryClient),
+    /*
+     * A Bot's profile says whether its computer of its own is in effect, which is decided from its
+     * owner's "Isolated Bots" switch, so a switch changing is a change to Bots as well.
+     */
+    onSuccess: () =>
+      Promise.all([
+        invalidateEnterprise(queryClient),
+        queryClient.invalidateQueries({ queryKey: agentKeys.all }),
+      ]),
   });
 }
 
