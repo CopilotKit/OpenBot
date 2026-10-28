@@ -188,11 +188,11 @@ itself when the dialog changes something.
 
 ## Units
 
-The root is the browser's 16px, so Tailwind's spacing, sizes and widths are their documented values
-(`p-4` is 16px, `max-w-3xl` is 768px) and land on its 4px grid. Text is the exception: `styles.css`
-sets every `--text-*` to Tailwind's default times 15/16, so `text-sm` is 13.125px and body text is
-15px. That is the scale this app has always read at; do not size text in px or rem by hand to match
-the docs.
+The root is the browser's 16px, so Tailwind's spacing, sizes, widths and text sizes are their
+documented values (`p-4` is 16px, `max-w-3xl` is 768px, `text-sm` is 14px) and land on its 4px grid.
+Text used to be the exception, on a 15px scale of its own; it is not any more. Where a screen needs one
+of the named sizes, use the five `type-*` utilities in `theme.css`; do not size text in px or rem by
+hand.
 
 Even so, never hardcode a pixel constant derived from a Tailwind token, and never compute a ratio
 from one. Measure the element — `offsetWidth`, `clientWidth`, a `ResizeObserver` — and scale from what
