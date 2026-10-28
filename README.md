@@ -99,7 +99,7 @@ A Bot is any endpoint speaking [AG-UI](https://github.com/ag-ui-protocol/ag-ui),
    HTTPS API origin (or `http://localhost` for a local one) and run the helper
    without the two `npx` commands. It opens an isolated Chrome or Edge window for
    your usual sign-in and project choice; install either browser first. For CLI-managed
-   local evaluation installs, it discovers the matching dashboard with the installed or
+   local evaluation installs, it discovers the matching dashboard with the newest installed or
    cached CopilotKit CLI and uses that dashboard for login and session requests. Discovery
    runs offline with Bun, without downloading the CLI or requiring `npx` on your PATH.
    If no CLI is available, manually hosted deployments use their API origin for sign-in. Complete the local auth
