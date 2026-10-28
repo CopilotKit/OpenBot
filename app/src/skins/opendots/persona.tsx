@@ -17,7 +17,7 @@ export function CoworkerPersona({ botId }: { botId: string }) {
   if (!bot) return null;
   return (
     <div
-      className="pointer-events-none absolute inset-x-0 top-[73px] z-[1] flex justify-center px-6 max-[700px]:top-16"
+      className="pointer-events-none absolute inset-x-0 top-[73px] z-[1] flex justify-center px-6 max-md:top-16"
       data-opendots-persona
     >
       <div className="flex max-w-[420px] flex-col items-center text-center">

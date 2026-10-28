@@ -21,6 +21,7 @@ import { cleanup, render, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AbstractAvatar } from "@/components/agents/abstract-avatar";
 import { appConfig } from "@/lib/generated/application-config";
+import { NAVIGATION, navigationFor } from "@/lib/navigation";
 import { queryClient } from "@/query-client";
 import { opendots } from "@/skins/opendots";
 import type { AgentProfileStore } from "../../server/src/agents/profile-store";
@@ -364,9 +365,9 @@ describe("OpenDots frame", () => {
       "/bots/ada", // each Bot's own pages
       "/bots/brook",
       "/bots/cass",
-      "/s/activity", // routines
+      "/s/routines", // routines
       "/s/memories", // memory
-      "/capabilities/skills", // skills
+      "/capabilities", // skills and memory
       "/connections",
       "/settings", // the skin picker, approvals and reachability
     ]) {
@@ -376,6 +377,100 @@ describe("OpenDots frame", () => {
     expect(links).not.toContain("/admin");
     expect(view.getByRole("button", { name: "Sign out" })).toBeTruthy();
   });
+
+  test("on a phone the sidebar is a drawer, and every surface is in it", async () => {
+    const viewport = (
+      window as unknown as {
+        happyDOM: {
+          setViewport: (size: { width: number; height: number }) => void;
+        };
+      }
+    ).happyDOM;
+    viewport.setViewport({ width: 390, height: 844 });
+    try {
+      const { view, user } = draw("/");
+      const menu = await view.findByRole("button", { name: "Open navigation" });
+      // The drawer is shut until asked for, so the page has the screen.
+      expect(view.queryByRole("navigation", { name: "Your Bots" })).toBeNull();
+      await user.click(menu);
+      const drawer = await view.findByRole("dialog");
+      await within(drawer).findByText("Planning the Lisbon trip");
+      const links = hrefs(drawer);
+      for (const href of [
+        "/channel/new",
+        "/channel/trip",
+        "/bots",
+        "/s/routines",
+        "/s/memories",
+        "/capabilities",
+        "/connections",
+        "/settings",
+      ]) {
+        expect(links).toContain(href);
+      }
+      expect(
+        within(drawer).getByRole("button", { name: "Sign out" }),
+      ).toBeTruthy();
+    } finally {
+      viewport.setViewport({ width: 1024, height: 768 });
+    }
+  });
+
+  test("the frame's chrome is marked, so reduced motion can still it", async () => {
+    const { view } = draw("/");
+    await view.findByRole("navigation", { name: "Your Bots" });
+    for (const chrome of [
+      view.getByRole("navigation", { name: "Workspace navigation" }),
+      view.getByRole("complementary", { name: "Sidebar" }),
+      view.getByRole("navigation", { name: "Breadcrumb" }).closest("header"),
+    ]) {
+      expect(chrome?.hasAttribute("data-opendots-chrome")).toBe(true);
+    }
+  });
+
+  test.each([
+    ["a member", person],
+    ["an admin", admin],
+  ])(
+    "the rail and sidebar draw OpenBot's own navigation list for %s",
+    async (_who, signedIn) => {
+      actor = signedIn;
+      const { view } = draw("/");
+      const expected = navigationFor(signedIn.role);
+      const rail = await view.findByRole("navigation", {
+        name: "Workspace navigation",
+      });
+      await waitFor(() =>
+        expect(
+          within(rail).queryByRole("link", { name: "Settings" }),
+        ).toBeTruthy(),
+      );
+      if (signedIn.role === "admin") {
+        await waitFor(() =>
+          expect(
+            within(rail).queryByRole("link", { name: "Admin" }),
+          ).toBeTruthy(),
+        );
+      }
+      // Every destination OpenBot's sidebar offers this person, under its own label, and no others.
+      for (const item of expected) {
+        expect(
+          within(rail)
+            .getByRole("link", { name: item.label })
+            .getAttribute("href"),
+        ).toBe(item.to);
+      }
+      const railDestinations = within(rail)
+        .getAllByRole("link")
+        .map((link) => link.getAttribute("href"))
+        .filter((href) => NAVIGATION.some((item) => item.to === href));
+      expect(railDestinations).toEqual(expected.map((item) => item.to));
+      const sidebar = view.getByRole("complementary", { name: "Sidebar" });
+      for (const item of expected) {
+        expect(hrefs(sidebar)).toContain(item.to);
+      }
+    },
+  );
 
   test("an administrator also reaches Admin", async () => {
     actor = admin;
@@ -388,7 +483,7 @@ describe("OpenDots frame", () => {
     "/channel/trip",
     "/group/standup",
     "/bots/ada/setup",
-    "/s/activity",
+    "/s/routines",
     "/connections",
   ])(
     "Settings is reachable on %s, even when nothing else loads",
@@ -403,7 +498,9 @@ describe("OpenDots frame", () => {
       // In the rail and in the sidebar, so collapsing the sidebar never hides it.
       expect(settings.length).toBe(2);
       expect(
-        view.getByRole("link", { name: "Open settings" }).getAttribute("href"),
+        within(view.getByRole("navigation", { name: "Workspace navigation" }))
+          .getByRole("link", { name: "Settings" })
+          .getAttribute("href"),
       ).toBe("/settings");
     },
   );
@@ -466,17 +563,15 @@ describe("OpenDots frame", () => {
 });
 
 describe("OpenDots screens", () => {
-  test("Scheduled & activity is OpenBot's routines list under OpenDots' heading", async () => {
-    const Screen = opendots.screens?.activity;
-    if (!Screen) throw new Error("OpenDots has no activity screen");
+  test("Routines is OpenBot's routines list under OpenDots' heading", async () => {
+    const Screen = opendots.screens?.routines;
+    if (!Screen) throw new Error("OpenDots has no routines screen");
     const view = render(
       <QueryClientProvider client={queryClient}>
         <Screen />
       </QueryClientProvider>,
     );
-    expect(
-      view.getByRole("heading", { name: "A little follow-through." }),
-    ).toBeTruthy();
+    expect(view.getByRole("heading", { name: "Routines" })).toBeTruthy();
     expect(await view.findByText("No routines yet")).toBeTruthy();
   });
 
