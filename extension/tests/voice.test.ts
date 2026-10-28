@@ -547,8 +547,9 @@ describe("voice", () => {
     expect(s.last()).toEqual({
       state: "failed",
       problem: "language",
-      reason:
-        "Chrome cannot turn Welsh (UK) speech into text on your computer. Recording goes on without your voice.",
+      // The language's English name, as this runtime's ICU data spells it ("Welsh (UK)" in one, "Welsh (United
+      // Kingdom)" in another): the sentence is what is pinned, not one ICU's name for the region.
+      reason: `Chrome cannot turn ${new Intl.DisplayNames(["en"], { type: "language" }).of("cy-GB")} speech into text on your computer. Recording goes on without your voice.`,
     });
     expect(s.constraints).toHaveLength(0);
   });
