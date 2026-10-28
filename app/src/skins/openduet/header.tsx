@@ -17,6 +17,7 @@ import {
 } from "@/lib/channels/queries";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { appConfig } from "@/lib/generated/application-config";
+import { useNavigationItems } from "@/lib/navigation";
 import { cn } from "@/lib/utils";
 import { IconMenuShort } from "./icons";
 import { DISC, FOCUS } from "./kit";
@@ -26,7 +27,6 @@ import {
   pressOrbWhenReady,
   useComposerPresence,
 } from "./orb-dictation";
-import { SETTINGS_LINK } from "./places";
 
 /** The header's side discs: 46px, past the 44px a finger needs. */
 const SIDE = 46;
@@ -93,6 +93,8 @@ export function TabHeader({
   main: HTMLElement | null;
 }) {
   const { data: user } = useQuery(currentUserQueryOptions());
+  // Settings, from OpenBot's one navigation list, behind the person's initial.
+  const settings = useNavigationItems().find((item) => item.id === "settings");
   const capabilities = useQuery(deploymentCapabilitiesQueryOptions());
   const canDictate = capabilities.data?.transcription === true;
   const presence = useComposerPresence(main);
@@ -156,7 +158,7 @@ export function TabHeader({
           aria-label={label}
           aria-pressed={canDictate ? presence.recording : undefined}
           className={cn(
-            "pointer-events-auto grid shrink-0 place-items-center rounded-full transition-transform active:scale-95",
+            "pointer-events-auto grid shrink-0 place-items-center rounded-full transition-transform active:scale-95 motion-reduce:transition-none motion-reduce:active:scale-100",
             FOCUS,
           )}
           onClick={press}
@@ -169,8 +171,8 @@ export function TabHeader({
         <DoingPill line={doingLine(working, conversation.work)} />
       </div>
       <Link
-        {...SETTINGS_LINK}
         aria-label="Your settings"
+        to={settings?.to ?? "/settings"}
         className={cn(DISC, "pointer-events-auto mt-2")}
         style={{ width: SIDE, height: SIDE }}
       >
@@ -194,7 +196,7 @@ function DoingPill({ line }: { line: string | null }) {
     <div aria-live="polite" className="flex h-6 max-w-full justify-center">
       <p
         aria-hidden={shown ? undefined : true}
-        className="openduet-glass openduet-type-caption flex h-6 max-w-full items-center rounded-full px-2.5 font-semibold text-openduet-ink shadow-openduet-glass transition-opacity duration-200 data-[shown=false]:opacity-0"
+        className="openduet-glass openduet-type-caption flex h-6 max-w-full items-center rounded-full px-2.5 font-semibold text-openduet-ink shadow-openduet-glass transition-opacity duration-200 data-[shown=false]:opacity-0 motion-reduce:transition-none"
         data-shown={shown}
       >
         <span className="tool-line-running truncate">{held}</span>
@@ -203,24 +205,76 @@ function DoingPill({ line }: { line: string | null }) {
   );
 }
 
+/** What a page drawn under the chrome says about itself. */
+export type PageFacts = {
+  /** The page's own title, from its `page-title` hook. */
+  title: string | null;
+  /** Where the page's own back link goes, and what it calls it, when the page has one. */
+  back: { href: string; label: string } | null;
+};
+
 /**
- * The chrome for a page opened over the app: a back disc on the left, the page's name in a glass
- * pill in the middle, and nothing on the right. No menu, no avatar and no tab bar, so a page reads
- * as somewhere you came to and go back from. Back goes back through history when there is any, and
- * to Chat otherwise.
+ * Read the page's title and its own back link, for the chrome to show in their place. Only read:
+ * the page is OpenBot's, rendered by React, and nothing here writes to it. The back link sits in the
+ * bar `PageShell` draws above the scroller that holds the page's header.
  */
-export function PageHeader({ title }: { title: string | null }) {
+export function readPageFacts(root: ParentNode): PageFacts {
+  const header = root.querySelector('[data-slot="page-header"]');
+  const title =
+    root.querySelector('[data-slot="page-title"]')?.textContent?.trim() || null;
+  const bar = header?.parentElement?.parentElement?.previousElementSibling;
+  const link = bar?.querySelector<HTMLAnchorElement>("a[href]");
+  const href = link?.getAttribute("href");
+  return {
+    title,
+    back: href ? { href, label: link?.textContent?.trim() ?? "" } : null,
+  };
+}
+
+function usePageFacts(root: HTMLElement | null): PageFacts {
+  const [facts, setFacts] = useState<PageFacts>({ title: null, back: null });
+  useEffect(() => {
+    if (!root) return;
+    const read = () =>
+      setFacts((before) => {
+        const now = readPageFacts(root);
+        return now.title === before.title &&
+          now.back?.href === before.back?.href &&
+          now.back?.label === before.back?.label
+          ? before
+          : now;
+      });
+    read();
+    const observer = new MutationObserver(read);
+    observer.observe(root, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+    });
+    return () => observer.disconnect();
+  }, [root]);
+  return facts;
+}
+
+/**
+ * The chrome for a page opened over the app: a back disc on the left, the page's title in a glass
+ * pill in the middle, and nothing on the right. No menu, no avatar and no tab bar, so a page reads
+ * as somewhere you came to and go back from. Back goes where the page's own back link goes when it
+ * has one (a Bot's page goes to Bots), back through history otherwise, and to Chat with neither.
+ */
+export function PageHeader({ main }: { main: HTMLElement | null }) {
   const router = useRouter();
-  const navigate = useNavigate();
   const canGoBack = useCanGoBack();
+  const { title, back } = usePageFacts(main);
   return (
-    <header className="relative z-20 flex h-[72px] shrink-0 items-start gap-2 bg-openduet-surface px-4 pt-3">
+    <header className="relative z-20 flex h-[72px] shrink-0 items-start gap-2 px-4 pt-3">
       <button
-        aria-label="Back"
+        aria-label={back?.label ? `Back to ${back.label}` : "Back"}
         className={DISC}
         onClick={() => {
-          if (canGoBack) router.history.back();
-          else void navigate({ to: "/" });
+          if (back) void router.navigate({ href: back.href });
+          else if (canGoBack) router.history.back();
+          else void router.navigate({ to: "/" });
         }}
         style={{ width: SIDE, height: SIDE }}
         type="button"
@@ -230,7 +284,7 @@ export function PageHeader({ title }: { title: string | null }) {
       <div className="flex min-w-0 flex-1 justify-center">
         {title ? (
           <div className="openduet-glass flex h-[46px] min-w-0 max-w-full items-center justify-center rounded-full px-4 shadow-openduet-glass">
-            {/* The page's own heading is kept for screen readers; this is what the eye reads. */}
+            {/* The page's own title stays for screen readers; this is what the eye reads. */}
             <p
               aria-hidden
               className="openduet-type-sub max-w-full truncate font-semibold text-openduet-ink"

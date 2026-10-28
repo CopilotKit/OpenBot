@@ -7,7 +7,11 @@ import {
   DictationSurface,
 } from "@/components/channels/composer/dictation-controls";
 import type { DictationState } from "@/lib/dictation/session";
-import { pressOrb, useComposerPresence } from "@/skins/openduet/orb-dictation";
+import {
+  EDITOR_SELECTOR,
+  pressOrb,
+  useComposerPresence,
+} from "@/skins/openduet/orb-dictation";
 import { settleReactWork } from "./settle-react-work";
 
 /*
@@ -139,4 +143,15 @@ test("a Stop the composer shows only for a moment does not make the orb think", 
   }
   expect([...seen]).toEqual(["false"]);
   host.remove();
+});
+
+/*
+ * The orb finds the composer by OpenBot's `composer-input` hook, and puts the caret in its editor
+ * where it cannot dictate. This holds that selector to the real composer's editor.
+ */
+test("the orb finds the real composer's editor by its hook", () => {
+  const view = render(<Composer compact onSubmit={() => {}} />);
+  const editor = view.container.querySelector(EDITOR_SELECTOR);
+  expect(editor).not.toBeNull();
+  expect(editor?.getAttribute("aria-label")).toBe("Message");
 });

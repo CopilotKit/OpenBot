@@ -1,6 +1,11 @@
 import type { LinkOptions } from "@tanstack/react-router";
 
 /*
+ * The skin's own places: its tabs, the column each path gets, and its Tasks screen. Where else a
+ * person can go is OpenBot's one navigation list (`lib/navigation.ts`), which the menu draws.
+ */
+
+/*
  * Where things are in OpenDuet's frame, as plain data, so the frame, the menu and the tests read
  * one list. Nothing here is a new route: every path is one OpenBot already serves, or the skin's own
  * screen at `/s/<key>`.
@@ -9,8 +14,6 @@ import type { LinkOptions } from "@tanstack/react-router";
 /** The skin's own screen, served by OpenBot's `/s/$screen`. */
 export const TASKS_SCREEN = "tasks";
 export const TASKS_PATH = `/s/${TASKS_SCREEN}`;
-/** The Tasks section a link can open on, by hash. */
-export const RESPONSIBILITIES_HASH = "responsibilities";
 
 export type OpenDuetTab = "chat" | "tasks";
 
@@ -39,42 +42,26 @@ export function isSkinScreen(pathname: string): boolean {
   return pathname.startsWith("/s/");
 }
 
-export type ManagePlace = {
-  label: string;
-  /** Where the menu row goes. */
-  link: LinkOptions;
-  /** Only for administrators; the server guards the page either way. */
-  adminOnly?: boolean;
-};
-
 /**
- * The pages a person sets their Bots up on and comes back to rarely, under Manage in the menu.
- *
- * Each goes where OpenBot serves that thing today. Responsibilities are listed across every Bot on
- * Tasks (each opens its Bot's own page); approval rules and how Bots reach you are in OpenBot's
- * Settings; Skills and Memory are Capabilities' two tabs.
+ * How wide the frame's column is. `phone` holds Chat and Tasks to a phone's width. `pane` is a
+ * conversation with its Bot's details or computer open: the phone column plus OpenBot's 400px pane
+ * beside it (`DetailPanel` lays the pane out beside the conversation once there is room for both).
+ * `page` is every other page, at the width OpenBot gave it.
  */
-export const MANAGE_PLACES: ManagePlace[] = [
-  { label: "Bots", link: { to: "/bots" } },
-  { label: "Connections", link: { to: "/connections" } },
-  { label: "Skills", link: { to: "/capabilities/skills" } },
-  { label: "Memory", link: { to: "/capabilities/memory" } },
-  { label: "Routines", link: { to: "/routines" } },
-  {
-    label: "Responsibilities",
-    link: {
-      to: "/s/$screen",
-      params: { screen: TASKS_SCREEN },
-      hash: RESPONSIBILITIES_HASH,
-    },
-  },
-  { label: "Approvals", link: { to: "/settings/approvals" } },
-  { label: "Notifications", link: { to: "/settings/notifications" } },
-  { label: "Admin", link: { to: "/admin" }, adminOnly: true },
-];
+export type OpenDuetColumn = "phone" | "pane" | "page";
 
-/** Settings is never folded away: it holds the skin picker, so a skin can always be switched back. */
-export const SETTINGS_LINK = { to: "/settings" } satisfies LinkOptions;
+export function columnFor(
+  pathname: string,
+  search: Record<string, unknown> = {},
+): OpenDuetColumn {
+  const tab = tabForPath(pathname);
+  if (!tab) return "page";
+  if (tab === "chat" && (search.watch === true || search.settings === true))
+    return "pane";
+  return "phone";
+}
+
+/** The Tasks tab, at the skin's own screen. */
 export const TASKS_LINK = {
   to: "/s/$screen",
   params: { screen: TASKS_SCREEN },
