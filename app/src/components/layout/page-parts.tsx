@@ -15,31 +15,27 @@ import {
  * and its control side by side. Sentences are held to `max-w-prose` (around 65 characters) inside it,
  * which is where reading stays comfortable, so the column widening does not stretch them.
  *
- * `wide` exists for one page. An audit log is a table you scan, and forcing it into the prose column
- * would wrap every row. It is not a licence for anything else to be wide.
+ * `full` exists for one page. An audit log is a table you scan, and forcing it into the prose column
+ * would wrap every row. The page is exactly the window's height and does not scroll: the title sits
+ * at the pane's left edge, lined up with the table's first column rather than centred above a table
+ * that is not, and the children fill what is left, so the table can be the one thing that scrolls.
+ * It is not a licence for anything else to be wide. It is no column, so `PageShell` draws it itself.
  */
-export type ShellWidth = "prose" | "wide";
-
-const WIDTHS: Record<ShellWidth, string> = {
-  prose: "max-w-3xl",
-  wide: "max-w-5xl",
-};
+export type ShellWidth = "prose" | "full";
 
 /**
- * The scroller and the centred column every configuration screen sits in, without the bar. The bar
- * needs the router, so `PageShell` draws it and passes `bar` to say whether it did; this file
+ * The scroller and the centred `prose` column every configuration screen sits in, without the bar. The
+ * bar needs the router, so `PageShell` draws it and passes `bar` to say whether it did; this file
  * imports nothing from the router so the extension can render the same column.
  */
 export function PageColumn({
   bar,
   children,
   className,
-  width = "prose",
 }: {
   bar: boolean;
   children: React.ReactNode;
   className?: string;
-  width?: ShellWidth;
 }) {
   return (
     <>
@@ -78,7 +74,7 @@ export function PageColumn({
             "[&>header+*]:mt-8 [&>header+nav]:mt-6 [&>header+nav+*]:mt-8",
             // Without a bar above it the heading keeps the full original space.
             bar ? "pt-8" : "pt-12",
-            WIDTHS[width],
+            "max-w-3xl",
             className,
           )}
         >

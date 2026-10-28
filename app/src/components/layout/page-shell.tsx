@@ -1,6 +1,7 @@
 import { IconChevronLeft } from "@tabler/icons-react";
 import { Link, type LinkProps } from "@tanstack/react-router";
 import type * as React from "react";
+import { cn } from "@/lib/utils";
 import { Button } from "../ui/button";
 import { PageColumn, PageHeader, type ShellWidth } from "./page-parts";
 import { SidebarToggle, useSidebarToggleVisible } from "./sidebar-toggle";
@@ -60,24 +61,48 @@ export function PageShell({
   const showToggle = useSidebarToggleVisible();
   const bar = showToggle || !!backButton;
 
+  const header = (
+    <PageHeader title={title} action={action} description={description} />
+  );
+
+  const barRow = bar ? (
+    <div className="max-w-7xl w-full h-14 flex items-center gap-1 px-3">
+      {showToggle ? <SidebarToggle /> : null}
+      {!!backButton && (
+        <Button
+          variant="ghost"
+          render={(props) => <Link {...backButton.linkProps} {...props} />}
+        >
+          <IconChevronLeft />
+          {backButton.label}
+        </Button>
+      )}
+    </div>
+  ) : null;
+
+  if (width === "full") {
+    return (
+      /*
+       * One viewport, never scrolls. `min-w-0` lets a table wider than the pane scroll inside its own
+       * container instead of pushing the page sideways.
+       */
+      <div className="flex h-dvh min-w-0 flex-col overflow-hidden">
+        {barRow}
+        <div className={cn("shrink-0 px-4", bar ? "pt-8" : "pt-12")}>
+          {header}
+        </div>
+        <div className={cn("mt-6 flex min-h-0 flex-1 flex-col", className)}>
+          {children}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <>
-      {bar ? (
-        <div className="max-w-7xl w-full h-14 flex items-center gap-1 px-3">
-          {showToggle ? <SidebarToggle /> : null}
-          {!!backButton && (
-            <Button
-              variant="ghost"
-              render={(props) => <Link {...backButton.linkProps} {...props} />}
-            >
-              <IconChevronLeft />
-              {backButton.label}
-            </Button>
-          )}
-        </div>
-      ) : null}
-      <PageColumn width={width} bar={bar} className={className}>
-        <PageHeader title={title} action={action} description={description} />
+      {barRow}
+      <PageColumn bar={bar} className={className}>
+        {header}
         {children}
       </PageColumn>
     </>
