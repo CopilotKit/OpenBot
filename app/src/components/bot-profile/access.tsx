@@ -344,7 +344,7 @@ function Granted({ agentId, mine }: { agentId: string; mine: boolean }) {
   const count = states.length + rest.length + skills.length;
   return (
     <PageSection
-      description="The apps and skills this Bot can use, and whether each app is ready for you. It can't use anything else."
+      description="Review this Bot’s available apps and skills, and check which apps are ready to use. The Bot cannot use apps or skills outside this list."
       title="What it can use"
     >
       {apps.error ? (

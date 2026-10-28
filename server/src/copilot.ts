@@ -1694,6 +1694,21 @@ export function createRequestAgents(
 }
 
 /**
+ * The runtime half of a Bot drawing an A2UI 1.0 interface (`render_ui`).
+ *
+ * Both settings are explicit, because left out each is decided by the browser. `generativeUI`
+ * omitted applies to any run whose request carries a catalog, so `false` is what keeps a stale or
+ * hand-built client from switching a deployment's opt-out back on. `true` is safe on a run without
+ * one: the middleware passes it through untouched.
+ *
+ * The older A2UI middleware stays off either way: it streams A2UI 0.9 surfaces, and the browser no
+ * longer registers the catalog that drew them.
+ */
+export function generativeUiMiddlewares(enabled: boolean) {
+  return { generativeUI: enabled, a2ui: { enabled: false } } as const;
+}
+
+/**
  * Mount the CopilotKit endpoint onto the host Hono app.
  *
  * `agents` is a factory rather than a fixed map so a Bot registered while the server is running is
@@ -1817,9 +1832,7 @@ export function mountCopilotRuntime(
      * has; see DeploymentConfig.generativeUi.
      */
     ...(config.generativeUi ? { openGenerativeUI: true } : {}),
-    // A browser catalog enables the public A2UI middleware/tool. Explicitly disable it on the
-    // server too, so stale clients cannot reactivate a deployment's generative UI opt-out.
-    a2ui: { enabled: config.generativeUi },
+    ...generativeUiMiddlewares(config.generativeUi),
     // `identifyUser` is the Intelligence projection of the same person `identifyActor` returns:
     // one resolver decides both whose threads these are and whose coworkers exist.
     agents: createRequestAgents(identifyActor, resolver) as never,

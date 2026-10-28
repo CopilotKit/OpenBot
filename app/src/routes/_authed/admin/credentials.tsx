@@ -44,7 +44,7 @@ function CredentialsPage() {
           Add credential
         </Button>
       }
-      description="Keys and tokens for this deployment. OpenBot never shows a secret after it is saved."
+      description="Manage this deployment’s keys and tokens. Saved secrets cannot be viewed again."
       title="Credentials"
     >
       <PageSection title="Saved credentials">
