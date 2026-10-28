@@ -98,7 +98,12 @@ A Bot is any endpoint speaking [AG-UI](https://github.com/ag-ui-protocol/ag-ui),
    For fresh self-hosted setup, set `INTELLIGENCE_API_URL` to that deployment's
    HTTPS API origin (or `http://localhost` for a local one) and run the helper
    without the two `npx` commands. It opens an isolated Chrome or Edge window for
-   your usual sign-in and project choice; install either browser first. It writes
+   your usual sign-in and project choice; install either browser first. For CLI-managed
+   local evaluation installs, it discovers the matching dashboard with the installed or
+   cached CopilotKit CLI and uses that dashboard for login and session requests. Discovery
+   runs offline with Bun, without downloading the CLI or requiring `npx` on your PATH.
+   If no CLI is available, manually hosted deployments use their API origin for sign-in. Complete the local auth
+   approval shown in the browser when prompted. The runtime API URL stays unchanged. It writes
    the API URL, the key and the container, not `INTELLIGENCE_GATEWAY_WS_URL`, so
    set that one to the same deployment yourself. Once `openbot` exists, the server assigns it
    as the default by itself unless [Admin → Automatic Learning](docs/automatic-learning.md)
