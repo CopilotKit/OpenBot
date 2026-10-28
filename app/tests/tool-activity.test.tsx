@@ -452,6 +452,100 @@ test("a declined step says so, and is not counted as an issue", () => {
   expect(view.getByText("Send your email")).toBeDefined();
 });
 
+/** A browser step, with its result as the browser handler or the server sends it back. */
+const browser = (id: string, name: string, result: unknown) =>
+  call(
+    id,
+    name,
+    { ref: "e1" },
+    typeof result === "string" ? result : JSON.stringify(result),
+  );
+const DECLINED =
+  "The person declined this action when you asked for their approval, so it was not done.";
+/** One folded line of steps, drawn as the transcript draws it once the turn is over. */
+const drawLine = (...steps: ToolItem[]) =>
+  render(
+    <QueryClientProvider client={idle()}>
+      <ToolActivity
+        active={false}
+        group={{ kind: "tools", id: steps[0]?.id ?? "a", steps }}
+      />
+    </QueryClientProvider>,
+  );
+
+test("a browser click the person declined says so, muted, and is never called done or an issue", () => {
+  // The server answers in words for the model, not the browser's JSON, and may arrive encoded.
+  for (const result of [DECLINED, JSON.stringify(DECLINED)]) {
+    const click = browser("click", "computer_click", result);
+    expect(stepDetails(click)).toMatchObject({
+      declined: true,
+      refused: false,
+      failed: false,
+    });
+    const view = drawLine(click);
+    expect(view.getByText("Declined").className).toContain(
+      "text-muted-foreground",
+    );
+    expect(view.queryByText(/issue/)).toBeNull();
+    expect(view.container.querySelector(".text-status-problem")).toBeNull();
+    const summary = view.container.querySelector("summary");
+    expect(summary?.textContent).toContain("You declined");
+    expect(summary?.querySelector(".text-status-done")).toBeNull();
+    cleanup();
+  }
+});
+
+test("a browser step a policy refused reads Blocked, with the policy's reason", () => {
+  const refused = browser("nav", "computer_navigate", {
+    ok: false,
+    refused: true,
+    reason: "That site is off limits here.",
+  });
+  expect(stepDetails(refused)).toMatchObject({
+    refused: true,
+    failed: false,
+    declined: false,
+  });
+  const view = drawLine(refused);
+  expect(view.getByText("Blocked").className).toContain("text-status-problem");
+  expect(view.queryByText("Didn't work")).toBeNull();
+  expect(view.getByText("That site is off limits here.")).toBeDefined();
+  expect(view.getByText("1 issue")).toBeDefined();
+  const summary = view.container.querySelector("summary");
+  expect(summary?.textContent).toContain("Blocked: Opened page");
+  expect(summary?.querySelector(".text-status-done")).toBeNull();
+});
+
+test("a browser step cut off, or turned away by a computer still starting, is not done and not an issue", () => {
+  const view = drawLine(
+    browser("stopped", "computer_click", {
+      ok: false,
+      stopped: true,
+      reason: "Stopped.",
+    }),
+    browser("starting", "computer_click", {
+      ok: false,
+      starting: true,
+      reason: "Still starting.",
+    }),
+  );
+  expect(view.getByText("Not completed").className).toContain(
+    "text-muted-foreground",
+  );
+  expect(view.getByText("Not done yet").className).toContain(
+    "text-muted-foreground",
+  );
+  expect(view.queryByText("Didn't work")).toBeNull();
+  expect(view.queryByText(/issue/)).toBeNull();
+  const summary = view.container.querySelector("summary");
+  expect(summary?.textContent).toContain("not done yet");
+  expect(summary?.querySelector(".text-status-done")).toBeNull();
+  // Only the note that it went to its approval card is no result either.
+  expect(
+    stepDetails(browser("held", "computer_click", { waiting: true })).pending,
+  ).toBe(true);
+});
+
 test("a step held on its approval card waits for the person, named for what it would do", () => {
   const client = idle();
   client.setQueryData(["approvals"], {
