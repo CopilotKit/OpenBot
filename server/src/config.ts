@@ -977,7 +977,11 @@ function runtimeCapabilities(environment: Environment): RuntimeCapabilities {
   const settings = {
     apiUrl: url(environment, "INTELLIGENCE_API_URL"),
     gatewayWsUrl: url(environment, "INTELLIGENCE_GATEWAY_WS_URL"),
-    apiKey: optional(environment, "INTELLIGENCE_API_KEY"),
+    // The CopilotKit CLI writes the runtime key as CPK_INTELLIGENCE_API_KEY; setup-learning.ts
+    // copies it across, but a deployment that ran only the CLI would otherwise refuse to boot.
+    apiKey:
+      optional(environment, "INTELLIGENCE_API_KEY") ??
+      optional(environment, "CPK_INTELLIGENCE_API_KEY"),
     licenseToken: optional(environment, "COPILOTKIT_LICENSE_TOKEN"),
   };
 
