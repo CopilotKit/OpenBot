@@ -91,9 +91,18 @@ export async function answerOpenBotPage(
       return refuse(SENTENCES.ownTab);
     // No language: OpenBot's page is in OpenBot's own language, which says nothing of the person's, so the narration
     // takes the browser's, as a Record with no page language of its own does.
+    // The person's narration choice as OpenBot keeps it on their account, as its own Record form passes it on; absent,
+    // the choice they made here, and no microphone until they made one.
     return answer(
       await controls.page(
-        { type: "page.record", title: message.title, tabId },
+        {
+          type: "page.record",
+          title: message.title,
+          tabId,
+          ...(message.narrate !== undefined
+            ? { narrate: message.narrate }
+            : {}),
+        },
         {},
       ),
     );

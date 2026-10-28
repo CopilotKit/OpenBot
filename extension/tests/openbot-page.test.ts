@@ -525,3 +525,49 @@ test("once the person disconnects this browser, OpenBot's page is told it is not
   });
   expect(fake.storage.local.get("activeRecording")).toBeUndefined();
 });
+
+test("Record from OpenBot's page carries the person's narration choice from their account, and without one the Recorder's own", async () => {
+  // OpenBot keeps the choice on the person's account, and its own Record form passes it on; a Record from its page
+  // in the person's everyday browser used to leave it out, so the Recorder went by its own setting instead.
+  await connectFromOpenBot();
+  const voice = async () => (await recorderState()).capture.voice?.state;
+  const recordAndStop = async (message: object) => {
+    expect(await ask(message)).toMatchObject({ ok: true });
+    await until(
+      async () => (await voice()) !== undefined,
+      "the recording's voice",
+    );
+    const heard = await voice();
+    await advanceTo(clock + 5_000);
+    expect(await ask({ type: "openbot.stop" })).toMatchObject({ ok: true });
+    await until(
+      async () => (await recorderState()).phase === "idle",
+      "the recording stopped",
+    );
+    return heard;
+  };
+  // Nothing chosen in the Recorder, which is no microphone, while the account says to narrate.
+  expect(
+    await recordAndStop({
+      type: "openbot.record",
+      title: "Archive order 1043",
+      narrate: true,
+    }),
+  ).not.toBe("muted");
+  // The account says no, while the Recorder was set to narrate: the account's choice wins.
+  fake.storage.local.set("narration", "on");
+  expect(
+    await recordAndStop({
+      type: "openbot.record",
+      title: "Archive order 1044",
+      narrate: false,
+    }),
+  ).toBe("muted");
+  // No choice from the account: the Recorder's own.
+  expect(
+    await recordAndStop({
+      type: "openbot.record",
+      title: "Archive order 1045",
+    }),
+  ).not.toBe("muted");
+}, 20_000);

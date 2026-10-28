@@ -57,6 +57,15 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `computers/<Bot id>` on the workspace volume (below). Files saved before the upgrade stay at the
   root of the volume, where no Bot sees them; move them into a Bot's folder to give them back.
 
+### The audit log reads like a log
+
+Admin → Audit fills the window and runs the table across the whole pane, with the title, the views
+and the search held in place while only the rows scroll. Each row shows the full date and time and a
+mark for what happened, with blocked rows tinted red and actions that did not happen tinted amber.
+The newest come first, and a press on When turns the order round. A search box and Outcome, Bot and
+Started by buttons narrow the events already loaded, and the count says how many of them match. A
+row about a Bot (a message routed to it, say) now names it under Bot.
+
 ### Each Bot on a shared computer has its own files
 
 A computer that serves many Bots kept one folder of files for all of them, so a note one Bot saved
@@ -342,6 +351,15 @@ apps, which nobody could connect there. An app's own page, reached from an older
 available yet and that an administrator has to finish setting it up, instead of naming the setting.
 The administrator's page for the app still names `COMPOSIO_API_KEY`.
 
+### A built-in Bot behind an OpenAI proxy answers again
+
+A built-in Bot behind a gateway or proxy in front of OpenAI (an `OPENAI_BASE_URL` that is not OpenAI or
+Azure) answers again on `gpt-5.6-terra` and on every other model that takes tools only through the
+Responses API (`gpt-5.6` and later, the `-pro` models, `gpt-5.3-codex`, also under a gateway's `openai/`
+name). OpenBot now sets `COPILOTKIT_OPENAI_API=responses` for those at boot, where CopilotKit 1.79.1 had
+sent them to Chat Completions and every turn failed with "Function tools with reasoning_effort are not
+supported". Every other model still uses Chat Completions there, and a value you set yourself still wins.
+
 ### Teach a Bot by doing the task in your own browser: the OpenBot Recorder
 
 The OpenBot Recorder is a Chrome and Edge extension. A person names the task, does it in their own
@@ -397,13 +415,15 @@ hands out each capture pass; it receives nothing that is recorded.
   is transcribed on your own computer only (Chrome's on-device speech recognition, with the language
   downloaded once on your click); where on-device recognition is not available, narration stays off
   and the page says why.
-- **Every recorded tab shows that it is being recorded**, from its first step, with one click to leave
+- **Every recorded tab shows that it is being recorded**, from its first step (a page cannot hide the mark: it
+  comes back at once if removed or hidden), with one click to leave
   that site out of recordings; a left-out site records nothing, and the Recorder's options list the
   sites left out. A page you have only looked at is held while you stay on its site, and sent when you
   act there, move to another tab or stop, so leaving a site out at any point in a visit sends nothing
   of it.
-- **A Recorder's connection ends** when you sign out of OpenBot, or after it goes unused for as long as
-  an OpenBot sign-in lasts; a recording kept for a person who never connects again is deleted unsent
+- **A Recorder's connection ends** whenever your sign-in ends (signing out, signing out everywhere, an
+  admin removing you or requiring SSO, your organization ending its session), or after it goes unused for
+  as long as an OpenBot sign-in lasts; signing out does not finish, and says so, if they cannot be ended; a recording kept for a person who never connects again is deleted unsent
   after 7 days. A page on your own computer is trusted to connect without a click only at OpenBot
   Desktop's own address, as its native host confirms it, and connecting to another OpenBot or as
   another person always asks you first, saying which connection it replaces.

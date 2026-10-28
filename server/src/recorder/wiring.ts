@@ -8,6 +8,7 @@ import type { AuthenticatedActor, RoleRepository } from "../auth/guards";
 import {
   ORGANIZATION_SESSION_COOKIE,
   ORGANIZATION_SESSION_MAX_AGE_SECONDS,
+  organizationCookieExpiresAt,
 } from "../auth/organization";
 import type { DeploymentConfig } from "../config";
 import { decryptSecret, encryptSecret } from "../credentials";
@@ -27,6 +28,7 @@ import {
   type RecorderResolver,
 } from "./guard";
 import { createRecorderRefusalAudit } from "./refusal-audit";
+import { createRecorderSignOut, type SignOutRecorders } from "./sign-out";
 import type { RecorderRouteDeps } from "./routes";
 import { createTrajectoryBindingStore } from "./trajectory-bindings";
 import {
@@ -42,6 +44,8 @@ export type RecorderExtensionDeps = Omit<
 > & {
   resolve: RecorderResolver;
   onRefused: RecorderRefusalSink;
+  /** Ends a person's Recorders when their sign-in here ends (recorder/sign-out.ts): what every such path calls. */
+  signOut: SignOutRecorders;
 };
 
 /** How long the Recorder's popup waits for the person's Learning space: the capture pass's own budget. */
@@ -113,13 +117,16 @@ export function createRecorderExtension(deps: {
 
   /*
    * A connection is a sign-in of its own, so it lasts as the person's sign-in here does. Better Auth's session ends once
-   * it has gone unused for its `expiresIn`; an organization session is a cookie that ends at its Max-Age, and the
+   * it has gone unused for its `expiresIn`; an organization session is a cookie that ends at its own expiry, and the
    * connection carries a sealed copy of it, which must not outlive the cookie. A single-user OpenBot has no sign-in.
    */
   const lifetime: RecorderConnectionLifetime = config.singleUser
     ? null
     : organizationAuth
-      ? { kind: "absolute", ms: ORGANIZATION_SESSION_MAX_AGE_SECONDS * 1_000 }
+      ? {
+          kind: "organization",
+          ms: ORGANIZATION_SESSION_MAX_AGE_SECONDS * 1_000,
+        }
       : { kind: "idle", ms: betterAuthLifetime(deps.sessionLifetimeMs) };
   const connections = createRecorderConnectionStore(database, {
     lifetime,
@@ -154,15 +161,33 @@ export function createRecorderExtension(deps: {
         .where(eq(users.id, userId))
         .limit(1)
     )[0] ?? null;
-  const resolve = createRecorderResolver({ connections, mode, user: userRow });
+  const resolve = createRecorderResolver({
+    connections,
+    mode,
+    user: userRow,
+    endConnection: async (userId, connectionId) => {
+      await connections.revoke(
+        userId,
+        connectionId,
+        "signed_out",
+        "organization",
+      );
+    },
+  });
 
+  // Sealed with when the cookie itself expires, which the connection made from it keeps and ends at.
   const sealOrganizationSession: RecorderExtensionDeps["sealOrganizationSession"] =
     organizationAuth
       ? async (cookieHeader) => {
           const value = cookieHeader
             ? cookieValue(cookieHeader, ORGANIZATION_SESSION_COOKIE)
             : undefined;
-          return value ? encryptSecret(config.keyEncryptionKey, value) : null;
+          return value
+            ? {
+                sealed: await encryptSecret(config.keyEncryptionKey, value),
+                expiresAt: organizationCookieExpiresAt(value),
+              }
+            : null;
         }
       : async () => null;
 
@@ -186,6 +211,10 @@ export function createRecorderExtension(deps: {
     sealOrganizationSession,
     resolve,
     onRefused: createRecorderRefusalAudit(deps.auditStore),
+    signOut: createRecorderSignOut({
+      connections,
+      auditStore: deps.auditStore,
+    }),
     trajectoryCapture: {
       gate: createTrajectoryConnectHook({
         resolveRecorder: resolve,

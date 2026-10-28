@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   installIdFor,
   installSecret,
@@ -100,5 +100,25 @@ describe("storage helpers", () => {
   test("restrictStorageToTrustedContexts records TRUSTED_CONTEXTS for local", async () => {
     await restrictStorageToTrustedContexts();
     expect(fake.storage.accessLevel).toBe("TRUSTED_CONTEXTS");
+  });
+
+  test("a restriction Chrome refuses is said where the Recorder's failures are, and never rejects", async () => {
+    // The service worker asks for it at its top level with nobody waiting: a rejection there went unhandled.
+    const refusal = new Error(
+      "Access level can only be set from a trusted context.",
+    );
+    chrome.storage.local.setAccessLevel = async () => {
+      throw refusal;
+    };
+    const logged = spyOn(console, "error").mockImplementation(() => {});
+    try {
+      expect(await restrictStorageToTrustedContexts()).toBeUndefined();
+      expect(logged).toHaveBeenCalledWith(
+        "Recorder: keeping its stored connection from content scripts failed; it asks again at its next start",
+        refusal,
+      );
+    } finally {
+      logged.mockRestore();
+    }
   });
 });

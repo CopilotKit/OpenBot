@@ -52,14 +52,16 @@ function show(
   return mark;
 }
 
+/** Inside a shown mark: its closed shadow root, which only the content script that showed it holds. */
+type Shown = { root: ShadowRoot };
 /** What the mark shows, part by part, as a person reads it. */
-const text = (host: HTMLElement) =>
-  [...(host.shadowRoot?.querySelectorAll(".label, .voice, button") ?? [])]
+const text = (mark: Shown) =>
+  [...mark.root.querySelectorAll(".label, .voice, button")]
     .filter((part) => !(part as HTMLElement).hidden)
     .map((part) => part.textContent)
     .join(" ");
-const buttonOf = (host: HTMLElement) =>
-  host.shadowRoot?.querySelector("button") as HTMLButtonElement;
+const buttonOf = (mark: Shown) =>
+  mark.root.querySelector("button") as HTMLButtonElement;
 
 /** happy-dom cannot make trusted events; the collector listens only for them, so these are marked trusted by hand. */
 const trustedClick = () => {
@@ -76,23 +78,23 @@ test("a recorded tab says OpenBot is recording it, with one button that leaves i
   const choices: boolean[] = [];
   const mark = show(RECORDING, (recorded) => choices.push(recorded));
   expect(document.querySelector(INDICATOR_TAG)).toBe(mark.host);
-  expect(text(mark.host)).toBe(
+  expect(text(mark)).toBe(
     "OpenBot is recording this tab Don't record example.test",
   );
-  expect(
-    mark.host.shadowRoot?.querySelector("[role=status]")?.textContent,
-  ).toContain("OpenBot is recording this tab");
-  buttonOf(mark.host).click();
+  expect(mark.root.querySelector("[role=status]")?.textContent).toContain(
+    "OpenBot is recording this tab",
+  );
+  buttonOf(mark).click();
   expect(choices).toEqual([false]);
 });
 
 test("while the Recorder hears the person, the mark says so", () => {
   const mark = show({ ...RECORDING, narrating: true });
-  expect(text(mark.host)).toBe(
+  expect(text(mark)).toBe(
     "OpenBot is recording this tab · Listening to you Don't record example.test",
   );
   mark.update({ ...RECORDING, narrating: false });
-  expect(text(mark.host)).toBe(
+  expect(text(mark)).toBe(
     "OpenBot is recording this tab Don't record example.test",
   );
 });
@@ -102,22 +104,22 @@ test("a site left out says it is not recorded, and its button records it again",
   const mark = show({ site: "example.test", excluded: true }, (recorded) =>
     choices.push(recorded),
   );
-  expect(text(mark.host)).toBe("Not recording example.test Record it");
-  buttonOf(mark.host).click();
+  expect(text(mark)).toBe("Not recording example.test Record it");
+  buttonOf(mark).click();
   expect(choices).toEqual([true]);
   // The same mark turns back when the background says the site is recorded again.
   mark.update(RECORDING);
-  expect(text(mark.host)).toBe(
+  expect(text(mark)).toBe(
     "OpenBot is recording this tab Don't record example.test",
   );
-  buttonOf(mark.host).click();
+  buttonOf(mark).click();
   expect(choices).toEqual([true, false]);
 });
 
 test("a page script clicking the mark does nothing", () => {
   const choices: boolean[] = [];
   const mark = show(RECORDING, (recorded) => choices.push(recorded), false);
-  buttonOf(mark.host).click();
+  buttonOf(mark).click();
   expect(choices).toEqual([]);
 });
 
@@ -133,7 +135,7 @@ test("a click on the mark is never one of the person's steps", () => {
     send: (event) => sent.push(event),
   });
   try {
-    buttonOf(mark.host).dispatchEvent(trustedClick());
+    buttonOf(mark).dispatchEvent(trustedClick());
     expect(sent.filter((event) => event.name === "click")).toEqual([]);
     (document.getElementById("b") as HTMLElement).dispatchEvent(trustedClick());
     expect(sent.filter((event) => event.name === "click")).toHaveLength(1);
@@ -145,7 +147,7 @@ test("a click on the mark is never one of the person's steps", () => {
 
 test("the mark sits above the page, in OpenBot's colours, and removes itself", () => {
   const mark = show(RECORDING);
-  const css = mark.host.shadowRoot?.querySelector("style")?.textContent ?? "";
+  const css = mark.root.querySelector("style")?.textContent ?? "";
   expect(css).toContain("2147483647");
   expect(css).toContain("position: fixed");
   expect(css).toContain("prefers-color-scheme: dark");
@@ -161,8 +163,7 @@ test("the mark sits above the page, in OpenBot's colours, and removes itself", (
 
 // ---- Where the mark hangs ------------------------------------------------------------------------------------------
 //
-// End-to-end run 1 of the review fixes: on OpenBot's own tab the mark, then bottom-left, covered the sidebar's account
-// row. What a person can use along the edges of OpenBot's home page, measured in Chromium 151 (headless, 2026-10-27,
+// On OpenBot's own tab the mark, when it hung bottom-left, covered the sidebar's account row. What a person can use along the edges of OpenBot's home page, measured in Chromium 151 (headless, 2026-10-27,
 // the self-host bar shown, as a new install shows it), at the sizes of a laptop and a desktop screen.
 
 type Usable = { what: string; tag: "a" | "button" | "input"; box: Box };
@@ -418,13 +419,13 @@ test("the shown mark takes the spot the page leaves clear, hangs from that edge,
       timers: { set: (fn) => looks.push(fn), clear: () => {} },
     });
     shown = mark;
-    const edge = () =>
-      mark.host.shadowRoot?.querySelector<HTMLElement>(".mark")?.dataset.edge;
+    const inside = mark.root.querySelector<HTMLElement>(".mark");
+    const edge = () => inside?.dataset.edge;
     expect(edge()).toBe("bottom");
-    expect(mark.host.style.getPropertyValue("top")).toBe(
+    expect(inside?.style.getPropertyValue("top")).toBe(
       `${height - MARK_SIZE.height}px`,
     );
-    expect(mark.host.style.getPropertyValue("left")).toBe(
+    expect(inside?.style.getPropertyValue("left")).toBe(
       `${width / 2 - MARK_SIZE.width / 2}px`,
     );
     // The toolbar goes away while the person points at the mark: it does not move from under them.
@@ -443,8 +444,91 @@ test("the shown mark takes the spot the page leaves clear, hangs from that edge,
     ];
     for (const look of looks) look();
     expect(edge()).toBe("top");
-    expect(mark.host.style.getPropertyValue("top")).toBe("0px");
+    expect(inside?.style.getPropertyValue("top")).toBe("0px");
   } finally {
     HTMLElement.prototype.getBoundingClientRect = rect;
+  }
+});
+
+/*
+ * The mark is the sign that a tab is being recorded, and it lives in the page's DOM: the page could hide it with one
+ * CSS rule, or remove it, and nothing put it back. Its shadow root was open, so a page script could reach inside too.
+ */
+test("a page cannot reach inside the mark: its shadow root is closed to the page", () => {
+  const mark = show(RECORDING);
+  expect(mark.host.shadowRoot).toBeNull();
+  expect(mark.root.querySelector("button")).not.toBeNull();
+});
+
+test("what makes the mark seen is set on its host from inside, important, so no page rule or inline style outranks it", () => {
+  // A shadow tree's important :host rules outrank the page's important rules and an inline style on the host (CSS
+  // Cascade 5, context); measured in Chromium, which happy-dom does not cascade, so this pins the rule's words.
+  const mark = show(RECORDING);
+  const css = mark.root.querySelector("style")?.textContent ?? "";
+  const host = /:host \{([^}]*)\}/.exec(css)?.[1] ?? "";
+  for (const declaration of [
+    "display: block !important",
+    "position: fixed !important",
+    "visibility: visible !important",
+    "opacity: 1 !important",
+    "transform: none !important",
+    "filter: none !important",
+    "clip-path: none !important",
+    "pointer-events: auto !important",
+    "z-index: 2147483647 !important",
+  ])
+    expect(host).toContain(declaration);
+  // Where it hangs is set inside, where the page cannot reach, never on the host.
+  expect(mark.host.getAttribute("style")).toBeNull();
+});
+
+test("a page that removes the mark, or hides it with hidden or inert, has it put back at once", async () => {
+  const mark = show(RECORDING);
+  mark.host.remove();
+  await Promise.resolve();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(mark.host.isConnected).toBe(true);
+  expect(document.documentElement.lastElementChild).toBe(mark.host);
+
+  mark.host.setAttribute("hidden", "");
+  mark.host.setAttribute("inert", "");
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(mark.host.hasAttribute("hidden")).toBe(false);
+  expect(mark.host.hasAttribute("inert")).toBe(false);
+
+  // Something the page adds after it, which would be drawn over it at the same z-index: the mark goes last again.
+  const cover = document.createElement("div");
+  document.documentElement.append(cover);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(document.documentElement.lastElementChild).toBe(mark.host);
+  cover.remove();
+
+  // Taken away by the content script itself, it stays away.
+  mark.remove();
+  shown = undefined;
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(document.querySelector(INDICATOR_TAG)).toBeNull();
+});
+
+test("a script that also wants to be last trades places with the mark a few times a look, not as fast as the two can", async () => {
+  const mark = show(RECORDING);
+  const rival = document.createElement("div");
+  document.documentElement.append(rival);
+  const rivalWatch = new MutationObserver(() => {
+    if (document.documentElement.lastElementChild !== rival)
+      document.documentElement.append(rival);
+  });
+  rivalWatch.observe(document.documentElement, { childList: true });
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    // Both still on the page, and the trading has stopped: no mutation is left to come.
+    expect(mark.host.isConnected).toBe(true);
+    expect(rival.isConnected).toBe(true);
+    const settled = document.documentElement.lastElementChild;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(document.documentElement.lastElementChild).toBe(settled);
+  } finally {
+    rivalWatch.disconnect();
+    rival.remove();
   }
 });

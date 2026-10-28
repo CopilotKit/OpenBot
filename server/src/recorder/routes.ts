@@ -18,7 +18,10 @@ import { type AuditStore, DEPLOYMENT_INITIATOR } from "../audit";
 import { reasonWithoutStatement } from "../db/query-failure";
 import type { AppVariables, AuthenticatedActor } from "../auth/guards";
 import { recorderAudit, recorderConnected } from "./connected";
-import type { RecorderConnectionStore } from "./connections";
+import type {
+  RecorderConnectionStore,
+  SealedOrganizationSession,
+} from "./connections";
 import type { RecorderVariables } from "./variables";
 
 export type RecorderRouteDeps = {
@@ -35,10 +38,10 @@ export type RecorderRouteDeps = {
   onRevoked?: (userId: string, connection: RecorderConnection) => Promise<void>;
   /** The name falls back to the email, never empty. */
   user: (userId: string) => Promise<RecorderUser | null>;
-  /** Null outside organization mode. */
+  /** The request's organization session cookie, sealed, with when that cookie expires. Null outside organization mode. */
   sealOrganizationSession: (
     cookieHeader: string | undefined,
-  ) => Promise<string | null>;
+  ) => Promise<SealedOrganizationSession | null>;
   auditStore?: AuditStore;
 };
 

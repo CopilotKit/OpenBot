@@ -4792,8 +4792,8 @@ fn main() {
         serde_json::to_string(&rows).unwrap()
     }
 
-    /// The code-owner review: Windows ended the person's browser with `taskkill /T /F` while Unix
-    /// asks it to close and waits. Now its windows are asked to close first (no `/F`), and the tree
+    /// Windows used to end the person's browser with `taskkill /T /F` while Unix asks it to close
+    /// and waits, which risks the profile damage a graceful close avoids. Now its windows are asked to close first (no `/F`), and the tree
     /// is ended only once it has gone. Never the person's everyday Chrome, nor the console.
     #[cfg(unix)]
     #[test]

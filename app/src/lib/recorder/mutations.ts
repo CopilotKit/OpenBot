@@ -87,10 +87,14 @@ async function askRecorderHere(
  * uses. Then the Recorder is asked again, so the red dot and the popover read what it is doing now. */
 export function recordHereMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
-    mutationFn: (variables: { id: string; title: string }) =>
+    mutationFn: (variables: { id: string; title: string; narrate?: boolean }) =>
       askRecorderHere(variables.id, {
         type: RECORDER_PAGE_MESSAGES.record,
         title: variables.title,
+        // The person's narration choice, kept on their account; absent when it is not known, so the Recorder's own.
+        ...(variables.narrate !== undefined
+          ? { narrate: variables.narrate }
+          : {}),
       }),
     onSuccess: () =>
       queryClient.invalidateQueries({ queryKey: recorderKeys.here() }),

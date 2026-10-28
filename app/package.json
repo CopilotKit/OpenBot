@@ -27,6 +27,7 @@
     "@tanstack/react-hotkeys": "^0.10.0",
     "@tanstack/react-query": "^5.101.4",
     "@tanstack/react-router": "^1.170.27",
+    "@tanstack/react-table": "^9.3.1",
     "better-auth": "^1.6.27",
     "boring-avatars": "^2.0.4",
     "class-variance-authority": "^0.7.1",

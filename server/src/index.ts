@@ -127,6 +127,7 @@ import {
 import { createSnapshotStore } from "./computer/snapshot-store";
 import { loadConfig } from "./config";
 import {
+  chooseOpenAIApi,
   mountCopilotRuntime,
   normalizeModelBaseUrls,
   runtimeModelForEnvironment,
@@ -482,6 +483,8 @@ const peopleStore = createPeopleStore(
           userId,
           by,
         ),
+      // Removing somebody ends their sessions, so it ends their browsers' Recorders too.
+      recorders: () => signOutRecorders(userId, "person_removed"),
     }),
 );
 const identityProviderStore = createIdentityProviderStore(database);
@@ -491,18 +494,19 @@ const identityProviderStore = createIdentityProviderStore(database);
  */
 const signInAuditStore = createAuditStore(database);
 /*
- * Signing out of OpenBot signs the person's browsers' Recorders out with them: every connection they hold ends. Called
- * on a sign-out, which comes after the Recorder's wiring below exists.
+ * A person's sign-in ending here ends their browsers' Recorders with it, however it ends: they sign out, their sessions
+ * are ended (by them, an administrator, the directory, the identity provider), or they are removed. Retried, and when it
+ * still fails the sign-in does not end either (recorder/sign-out.ts). Called only once something ends, which comes after
+ * the Recorder's wiring below exists.
  */
-const signOutRecorders = async (userId: string) => {
-  await recorderExtension.connections.revokeAll(userId, "signed_out");
-};
+const signOutRecorders = (userId: string, ending: string) =>
+  recorderExtension.signOut(userId, ending);
 // Its own const so the Recorder can re-check a stored session through `verifySessionQuietly`.
 const organizationAuth = config.organizationAuthUrl
   ? createOrganizationAuth({
       authorityUrl: config.organizationAuthUrl,
       materializeUser: organizationUserStore(database),
-      onSignedOut: signOutRecorders,
+      signOutRecorders,
     })
   : undefined;
 // Its own const so the Recorder's connections can last as long as one of its sessions does.
@@ -513,7 +517,7 @@ const betterAuth =
         database,
         (email) => peopleStore.isRevoked(email),
         signInAuditStore,
-        { onSignedOut: signOutRecorders },
+        { signOutRecorders },
       )
     : undefined;
 const auth: AuthService | undefined = organizationAuth ?? betterAuth;
@@ -689,6 +693,16 @@ const storedApprovals = createApprovalStore(database);
 // Before anything reads the model environment: blank base URLs removed, Anthropic given its `/v1`.
 normalizeModelBaseUrls();
 const runtimeModel = runtimeModelForEnvironment(tenantPackage.model);
+// And before any Bot's model is resolved: behind a gateway, the API that model takes tools on (chooseOpenAIApi).
+if (chooseOpenAIApi(runtimeModel) === "responses")
+  console.info(
+    JSON.stringify({
+      type: "openai-api",
+      api: "responses",
+      model: runtimeModel.defaultModel,
+      message: `${runtimeModel.defaultModel} takes tools only through the Responses API, so the built-in Bots call /responses at OPENAI_BASE_URL. Set COPILOTKIT_OPENAI_API=chat to call /chat/completions instead.`,
+    }),
+  );
 
 /**
  * Pass one of tool selection: which skills a message needs, on the deployment's own model.
@@ -2414,6 +2428,10 @@ await installEnterpriseControls({
   builtInModel: `${runtimeModel.provider}/${runtimeModel.defaultModel}`,
   people: peopleStore,
   initialAdminEmails: config.auth?.initialAdminEmails ?? [],
+  recorders: {
+    holders: () => recorderExtension.connections.holders(),
+    signOut: signOutRecorders,
+  },
 });
 guardDeliveryStore(
   deliveryStore,

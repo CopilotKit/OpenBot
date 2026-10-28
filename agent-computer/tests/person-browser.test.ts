@@ -1565,8 +1565,8 @@ describe.skipIf(!asked)("among Bots' browsers on one computer", () => {
   }, 60_000);
 
   /*
-   * A cloud browser, shown on the Browser page, takes the Bots' own rule. The code-owner review found it exempt: an
-   * abandoned Browser tab kept a root, sandbox-less Chromium running for ever, and the cap closed Bots' browsers first.
+   * A cloud browser, shown on the Browser page, takes the Bots' own rule. It used to be exempt: an abandoned Browser
+   * tab kept a root, sandbox-less Chromium running for ever, and the cap closed Bots' browsers first.
    */
   test("the cap closes whichever browser was used longest ago, the person's cloud browser among them", async () => {
     // The person's browser is the least recently used of the three, and the cap is two.

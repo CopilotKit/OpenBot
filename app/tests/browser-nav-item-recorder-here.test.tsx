@@ -30,7 +30,7 @@ import {
   Outlet,
   RouterProvider,
 } from "@tanstack/react-router";
-import { act, cleanup, render, waitFor } from "@testing-library/react";
+import { act, cleanup, render, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { StrictMode } from "react";
 import {
@@ -80,6 +80,9 @@ const EDGE_STORE_ID = "a".repeat(32);
 const requests: string[] = [];
 let state: BrowserApiState;
 let connectionsFail = false;
+/** The signed-in person's narration choice as OpenBot keeps it on their account; undefined: no account to read. */
+let accountNarration: "on" | "off" | null | undefined;
+const preferenceWrites: unknown[] = [];
 
 function closedState(shows: BrowserWindow): BrowserApiState {
   return {
@@ -94,6 +97,31 @@ function closedState(shows: BrowserWindow): BrowserApiState {
 async function server(path: string, init?: RequestInit): Promise<Response> {
   const method = init?.method ?? "GET";
   requests.push(`${method} ${path}`);
+  if (accountNarration !== undefined && path === "/api/me")
+    return Response.json({
+      user: {
+        id: "ada",
+        email: "ada@example.com",
+        role: "user",
+        onboarding: null,
+      },
+    });
+  if (accountNarration !== undefined && path === "/api/settings/preferences") {
+    if (method === "PATCH") {
+      const body = JSON.parse(String(init?.body)) as {
+        narration: "on" | "off";
+      };
+      preferenceWrites.push(body);
+      accountNarration = body.narration;
+    }
+    return Response.json({
+      preferences: {
+        messageListEmphasis: "thread",
+        selfHostBannerDismissed: false,
+        narration: accountNarration,
+      },
+    });
+  }
   if (path === browserApiPaths.state && method === "GET")
     return Response.json(state);
   if (path === browserApiPaths.open && method === "POST")
@@ -130,6 +158,8 @@ beforeEach(() => {
   queryClient.clear();
   requests.length = 0;
   connectionsFail = false;
+  accountNarration = undefined;
+  preferenceWrites.length = 0;
   state = closedState("screen");
   global.fetch = Object.assign(
     (input: Parameters<typeof fetch>[0], init?: RequestInit) =>
@@ -295,6 +325,53 @@ test("with the Recorder here and connected, one click opens a popover where Reco
   // None of it went through the server's Browser routes, and the person never left where they were.
   expect(browserRoutes()).toEqual([]);
   expect(router.state.location.pathname).toBe("/");
+}, 15_000);
+
+test("Record here carries the person's narration choice from their account, and asks before their first recording as the Browser page does", async () => {
+  // OpenBot keeps the choice on the person's account and its own Record form passes it on; Record from the everyday
+  // browser left it out, so the Recorder went by its own setting.
+  const recorder = new FakeRecorder();
+  recorder.connected = true;
+  inBrowser("chrome", [recorder]);
+  accountNarration = "off";
+  const { view } = draw();
+  const user = userEvent.setup({ document });
+  const recordTask = async (name: string) => {
+    await user.click(await view.findByRole("button", { name: "Browser" }));
+    await user.type(
+      await view.findByRole("textbox", { name: "Task name" }),
+      name,
+    );
+    await user.click(view.getByRole("button", { name: "Record" }));
+  };
+  await recordTask("Submit the receipt");
+  await waitFor(() =>
+    expect(sent(recorder, "openbot.record")).toEqual([
+      { type: "openbot.record", title: "Submit the receipt", narrate: false },
+    ]),
+  );
+  await user.click(await view.findByRole("button", { name: "Stop" }));
+  await waitFor(() => expect(sent(recorder, "openbot.stop").length).toBe(1));
+  await user.keyboard("{Escape}");
+
+  // A person who never chose is asked first, and the answer goes with the Record and is kept.
+  accountNarration = null;
+  await act(() => queryClient.invalidateQueries());
+  await recordTask("Book the room");
+  const question = await view.findByRole("dialog", {
+    name: "Narrate while you record?",
+  });
+  expect(sent(recorder, "openbot.record")).toHaveLength(1);
+  await user.click(
+    within(question).getByRole("button", { name: "Record with narration" }),
+  );
+  await waitFor(() =>
+    expect(sent(recorder, "openbot.record")).toEqual([
+      { type: "openbot.record", title: "Submit the receipt", narrate: false },
+      { type: "openbot.record", title: "Book the room", narrate: true },
+    ]),
+  );
+  expect(preferenceWrites).toEqual([{ narration: "on" }]);
 }, 15_000);
 
 test("Record and Stop from the keyboard: Tab to the button, Enter opens the popover, Escape closes it and gives the button its focus back", async () => {
@@ -467,8 +544,8 @@ test("with the Recorder here but not connected, one click connects it as Setting
 }, 10_000);
 
 test("a Cancel on the Recorder's Connect page reaches the popover within a second, which says so and offers Connect again", async () => {
-  // End-to-end run 1 of the review fixes: after Cancel, OpenBot went on saying "Confirm in the OpenBot Recorder tab that
-  // opened." for up to five minutes.
+  // After a Cancel, OpenBot used to go on saying "Confirm in the OpenBot Recorder tab that opened." for up to five
+  // minutes: nothing told it the person had cancelled.
   const recorder = new FakeRecorder();
   inBrowser("chrome", [recorder]);
   const { view } = draw();

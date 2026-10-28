@@ -505,8 +505,8 @@ const connectStatus = (from = origin) =>
   );
 
 test("the page that asked to connect hears at once that the person cancelled on the Connect page, or closed it, and no other site hears anything", async () => {
-  // End-to-end run 1 of the review fixes: after Cancel on the Connect page, OpenBot's Settings went on saying "Confirm
-  // in the OpenBot Recorder tab that opened." for up to five minutes, as nothing told it the person had cancelled.
+  // After a Cancel on the Connect page, OpenBot's Settings used to go on saying "Confirm in the OpenBot Recorder tab that
+  // opened." for up to five minutes, as nothing told it the person had cancelled.
   expect(await connectStatus()).toEqual({ ok: true, connect: "none" });
   await connect("obc_abc");
   expect(await connectStatus()).toEqual({ ok: true, connect: "waiting" });
@@ -543,6 +543,34 @@ test("the page that asked to connect hears at once that the person cancelled on 
   });
   expect(await connectStatus()).toEqual({ ok: true, connect: "none" });
   expect(exchanges.map((exchange) => exchange.code)).toEqual(["obc_ghi"]);
+});
+
+test("a Cancel is said only while a page could still be waiting on it: not after the five minutes, nor once that OpenBot connected another way", async () => {
+  const cancel = async () => {
+    await connect(`obc_${clock}`);
+    await handleConnectionMessage({
+      type: "page.connect.decide",
+      approve: false,
+      label: "x",
+      origin,
+    });
+    expect(await connectStatus()).toEqual({ ok: true, connect: "cancelled" });
+  };
+  // Five minutes on, nothing waits on it any more.
+  await cancel();
+  clock += 5 * 60 * 1000;
+  expect(await connectStatus()).toEqual({ ok: true, connect: "none" });
+  expect(await readSession("cancelledConnect")).toBeUndefined();
+
+  // Cancelled on the Connect page, then connected as the organization's own OpenBot, with no Connect page.
+  clock += 60 * 1000;
+  await cancel();
+  policy = { ...policy, openbotUrl: origin };
+  expect(await connect("obc_pinned")).toMatchObject({
+    ok: true,
+    connected: true,
+  });
+  expect(await connectStatus()).toEqual({ ok: true, connect: "none" });
 });
 
 const OUT_OF_DATE =
@@ -1026,6 +1054,27 @@ test("an origin that asks to connect over and over is throttled with the time le
   });
   clock += 1;
   expect((await connect("obc_13")).ok).toBe(true);
+});
+
+test("a loopback page asking to connect over and over starts OpenBot Desktop's native host no more often than the limit lets it connect", async () => {
+  // Asking OpenBot Desktop for its address starts its native host, which looks for OpenBot's port with lsof or netstat.
+  // The request was counted only after that, so any page on a loopback port could have it started as often as it liked.
+  desktopAnswers("http://127.0.0.1:3010");
+  const asked = () =>
+    fake.native.sent.filter(
+      (message) => (message as { type?: string }).type === "address",
+    ).length;
+  for (let i = 1; i <= 10; i++) {
+    expect((await connect(`obc_${i}`, loopback)).ok).toBe(true);
+    clock += 1_000;
+  }
+  expect(asked()).toBe(10);
+  for (let i = 11; i <= 30; i++)
+    expect(await connect(`obc_${i}`, loopback)).toMatchObject({
+      ok: false,
+      error: "throttled",
+    });
+  expect(asked()).toBe(10);
 });
 
 test("twelve connects in one tick from one origin open one tab, and the limit throttles the other two", async () => {
@@ -1666,8 +1715,9 @@ test("a trusted OpenBot asking to connect over and over is held to the same limi
   expect(exchanges).toHaveLength(10);
 });
 
-// ---- Blocker 1 of the code-owner review on #858: a loopback page is OpenBot Desktop's only when Desktop says so, and
-// no connection is ever replaced without the Connect page --------------------------------------------------------------
+// ---- A loopback page is OpenBot Desktop's only when Desktop says so, and no connection is ever replaced without the
+// Connect page: any program on this computer can serve a page on a loopback port, and one that connected with no click
+// would receive the person's next recordings ---------------------------------------------------------------------------
 
 test("a page on a loopback port that OpenBot Desktop did not confirm gets the Connect page, whatever serves it, and nothing is exchanged until the person approves it", async () => {
   const elsewhere = Bun.serve({

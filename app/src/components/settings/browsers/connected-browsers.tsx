@@ -92,6 +92,13 @@ function ConnectedBrowserRow({
     revokeRecorderConnectionMutationOptions(queryClient),
   );
   const name = here ? `${connection.label} · This browser` : connection.label;
+  // The browser the dialog is about, by the name the row shows: "this browser" only for the copy in the browser this page
+  // is open in, which every row's dialog used to say.
+  const which = here
+    ? "this browser"
+    : connection.via === "openbot-browser"
+      ? "your OpenBot browser"
+      : connection.label;
   return (
     <>
       <Item size="sm">
@@ -141,8 +148,8 @@ function ConnectedBrowserRow({
           </DialogHeader>
           <DialogBody className="mt-4 text-sm">
             <p>
-              OpenBot signs the Recorder in this browser out. It records nothing
-              for you until you connect it again, and a recording running there
+              OpenBot signs the Recorder in {which} out. It records nothing for
+              you until you connect it again, and a recording running there
               stops.
             </p>
             {revoke.error ? (

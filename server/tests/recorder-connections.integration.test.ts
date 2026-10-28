@@ -34,14 +34,22 @@ afterAll(async () => {
   await database.$client.close();
 });
 
-/** Mints a code, failing the test when the store refuses one. */
+/** Mints a code, failing the test when the store refuses one. A sealed session's cookie expires a week from now unless
+ * the test says when. */
 async function mint(
   on: ReturnType<typeof createRecorderConnectionStore>,
   userId: string,
   via: "web" | "desktop",
   organizationSession: string | null = null,
+  cookieExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60_000),
 ) {
-  const minted = await on.mintCode(userId, via, organizationSession);
+  const minted = await on.mintCode(
+    userId,
+    via,
+    organizationSession
+      ? { sealed: organizationSession, expiresAt: cookieExpiresAt }
+      : null,
+  );
   if (!minted) throw new Error("the store refused a connect code");
   return minted;
 }
@@ -514,8 +522,15 @@ describe("how long a connection lasts", () => {
     person: string,
     installId = CHROME,
     organizationSession: string | null = null,
+    cookieExpiresAt?: Date,
   ) {
-    const { code } = await mint(on, person, "web", organizationSession);
+    const { code } = await mint(
+      on,
+      person,
+      "web",
+      organizationSession,
+      cookieExpiresAt,
+    );
     const made = await on.exchange({
       code,
       label: "Chrome",
@@ -552,18 +567,52 @@ describe("how long a connection lasts", () => {
     }
   });
 
-  test("as an organization session cookie: it ends at the cookie's age, however much it is used", async () => {
-    const person = await newPerson("absolute");
-    const { on, later } = clocked({ kind: "absolute", ms: WEEK });
+  test("as an organization session cookie: it ends when the cookie it copies expires, not a week from connecting", async () => {
+    const person = await newPerson("cookie");
+    const { on, rows, later } = clocked({ kind: "organization", ms: WEEK });
     try {
-      const made = await connectOn(on, person, CHROME, "sealed-cookie");
-      for (let day = 0; day < 6; day += 1) {
-        later(24 * 60 * MINUTE);
-        expect((await on.resolve(made.token))?.organizationSession).toBe(
-          "sealed-cookie",
-        );
-      }
-      later(24 * 60 * MINUTE);
+      // The cookie was set five days ago, so it has two days left when the browser connects.
+      const cookieExpiresAt = new Date(Date.now() + 2 * 24 * 60 * MINUTE);
+      const made = await connectOn(
+        on,
+        person,
+        CHROME,
+        "sealed-cookie",
+        cookieExpiresAt,
+      );
+      later(2 * 24 * 60 * MINUTE - MINUTE);
+      expect((await on.resolve(made.token))?.organizationSession).toBe(
+        "sealed-cookie",
+      );
+      later(2 * MINUTE);
+      expect(await on.resolve(made.token)).toBeNull();
+      // And the sweep takes the copy away then, five days before a week from connecting would have.
+      expect(await on.expire()).toBeGreaterThanOrEqual(1);
+      expect(await sessionOf(made.connection.id)).toBeNull();
+      expect(
+        rows.find(
+          (row) =>
+            row.eventType === "recorder.revoked" &&
+            row.targetId === made.connection.id,
+        )?.payload.reason,
+      ).toBe("expired");
+    } finally {
+      await database.delete(users).where(eq(users.id, person));
+    }
+  });
+
+  test("an organization connection made before the cookie's expiry was kept lasts the cookie's Max-Age from connecting", async () => {
+    const person = await newPerson("unknown-expiry");
+    const { on, later } = clocked({ kind: "organization", ms: WEEK });
+    try {
+      const made = await connectOn(on, person, CHROME, "sealed-older");
+      await database
+        .update(recorderConnections)
+        .set({ organizationSessionExpiresAt: null })
+        .where(eq(recorderConnections.id, made.connection.id));
+      later(WEEK - MINUTE);
+      expect((await on.resolve(made.token))?.userId).toBe(person);
+      later(2 * MINUTE);
       expect(await on.resolve(made.token)).toBeNull();
     } finally {
       await database.delete(users).where(eq(users.id, person));

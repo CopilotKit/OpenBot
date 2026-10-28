@@ -38,7 +38,7 @@ export function Page({
   useColourScheme();
   if (width === "prose") {
     return (
-      <PageColumn width="prose" bar={false}>
+      <PageColumn bar={false}>
         <PageHeader title={title} description={description} />
         {children}
       </PageColumn>

@@ -215,8 +215,8 @@ describe("finding the person's own browsers", () => {
   });
 
   /*
-   * The code-owner review: on Linux only `/opt/google/chrome` and `/opt/microsoft/msedge` were looked in, so a browser
-   * a distribution keeps anywhere else was never found. Google's and Microsoft's own packages use `/opt` on every
+   * On Linux only `/opt/google/chrome` and `/opt/microsoft/msedge` used to be looked in, so a browser a distribution
+   * keeps anywhere else was never found. Google's and Microsoft's own packages use `/opt` on every
    * distribution; NixOS keeps the browser in its store, behind the vendor's launcher name on the PATH. A Flatpak's
    * exported launcher and the Snap Store's Chromium are not the person's Chrome or Edge, and cannot open here.
    */

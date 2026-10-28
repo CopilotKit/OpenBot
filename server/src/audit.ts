@@ -625,13 +625,22 @@ export const auditEventTypes = [
    */
   "recorder.connect_refused",
   /*
-   * A connection ended; payload `via`, how it was made, and `reason`: replaced (the same copy connected again),
-   * disconnected, revoked, signed_out (the person signed out of OpenBot) or expired (its lifetime ran out: the
-   * deployment ended it, payload `owner`); for a Bot's browser's connection, which lasts one recording, stopped (the
-   * person's Stop), ended (the recording ended without one) or not-started (the start it was for did not happen).
-   * Written in the transaction that ends the connection, as `recorder.connected` is in the one that makes it.
+   * A connection ended; payload `via`, how it was made (as on `recorder.connected`), and `reason`: replaced (the same
+   * copy connected again), disconnected, revoked, signed_out (the person's sign-in here ended: payload `ending` says how,
+   * a sign-out, sessions ended another way, the person removed, their organization ending the session it holds a copy
+   * of) or expired (its lifetime ran out: the deployment ended it, payload `owner`); for a Bot's browser's connection,
+   * which lasts one recording, stopped (the person's Stop), ended (the recording ended without one) or not-started (the
+   * start it was for did not happen). Written in the transaction that ends the connection, as `recorder.connected` is in
+   * the one that makes it.
    */
   "recorder.revoked",
+  /*
+   * A security row: a person's sign-in here was ending (payload `ending`) and their Recorder connections could not be
+   * ended, after `attempts` tries (payload `error`, the database's complaint, never the query). The sign-in did not end
+   * either, and whoever was ending it was told: the person signing out, the administrator, the directory. Target the
+   * person.
+   */
+  "recorder.sign_out_failed",
   /*
    * The capture pass (the runtime's trajectory/connect) turned a caller away: an id that is not a UUID, no
    * Recorder bearer or one that no longer resolves, no role, the organization unable to answer, or a trajectory

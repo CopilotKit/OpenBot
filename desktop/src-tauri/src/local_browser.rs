@@ -540,8 +540,8 @@ mod tests {
         }
     }
 
-    /// The code-owner review: on Linux only `/opt` was looked in, and anywhere else the Browser
-    /// button changed with the reason only in Desktop's log. Google's and Microsoft's packages use
+    /// On Linux only `/opt` used to be looked in, and anywhere else the Browser button changed with
+    /// the reason only in Desktop's log. Google's and Microsoft's packages use
     /// `/opt` on every distribution; NixOS keeps the browser in its store, behind the vendor's
     /// launcher name on the PATH.
     #[test]

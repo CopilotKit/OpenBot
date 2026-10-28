@@ -1057,8 +1057,8 @@ mod tests {
             "Delete \"$LOCALAPPDATA\\{}\"",
             relative.join("\\")
         )));
-        // The code-owner review: the person's browser profile survived uninstall, and the folder
-        // holding the manifest was removed only when empty (RMDir without /r). Each of Desktop's
+        // The person's browser profile used to survive uninstall, and the folder holding the
+        // manifest was removed only when empty (RMDir without /r). Each of Desktop's
         // folders now goes with all it holds: the manifest's, and the browser's whole data root.
         let folder = relative[..relative.len() - 1].join("\\");
         assert!(
@@ -1080,7 +1080,7 @@ mod tests {
         );
     }
 
-    /// The code-owner review: on Linux nothing was removed on uninstall. The .deb's and the .rpm's
+    /// On Linux nothing used to be removed on uninstall. The .deb's and the .rpm's
     /// removal script takes away, in each person's home and as that person, the browser's data root
     /// and every browser's host manifest, exactly where the code writes them, and on an upgrade
     /// nothing. Run here against a home laid out as Desktop leaves it, with `getent` and `runuser`

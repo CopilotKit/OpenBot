@@ -488,6 +488,14 @@ export async function handleExternalConnect(
   if (policy.openbotUrl && !sameOrigin(policy.openbotUrl, checked.origin))
     return { ok: false, error: "pinned-elsewhere" };
 
+  // Counted before anything else is done for it. Asking OpenBot Desktop for its address starts its native host, which
+  // looks for OpenBot's own port with lsof or netstat, and any page on a loopback port can ask to connect: counted
+  // after, a page asking over and over had the Recorder start that host as often as it liked.
+  const throttled = await serially(() =>
+    countConnect(checked.origin, Date.now()),
+  );
+  if (throttled) return throttled;
+
   // A trusted OpenBot connects with no Connect page, and only while this browser is connected to nothing: replacing a
   // connection (to another OpenBot, or for another person) always asks the person on the Connect page, which names the
   // connection it replaces. Every other site keeps the one Connect click. Only an http origin can be OpenBot Desktop's
@@ -556,7 +564,7 @@ async function countConnect(
 /**
  * A trusted OpenBot's connect (`trustedConnectRule`), with no Connect page: the person is already in that OpenBot,
  * signed in, asking, and this browser is connected to nothing. Otherwise it is what an approved Connect is, as OpenBot
- * Desktop's connect is: counted against the same limit; its code exchanged at the origin Chrome reported, under this
+ * Desktop's connect is: counted against the same limit (by `handleExternalConnect`, first); its code exchanged at the origin Chrome reported, under this
  * copy's install id for it and the browser's own name; the connection stored in a queued job that checks the policy
  * again and that nothing was connected meanwhile (a token either keeps out is revoked: a connection that landed during
  * the exchange is never replaced without the Connect page, and the page asking again gets that page); a Connect page
@@ -568,8 +576,6 @@ async function trustedConnect(
   code: string,
   deps: ConnectionDeps,
 ): Promise<ExternalResponse> {
-  const throttled = await serially(() => countConnect(origin, Date.now()));
-  if (throttled) return throttled;
   let exchanged: ExchangeResponse;
   try {
     exchanged = await openbotJson<ExchangeResponse>(
@@ -628,15 +634,14 @@ async function trustedConnect(
   };
 }
 
-/** Everything from the request count through the connect tab, in one queued job (see `serially`). */
+/** Everything from the pending connect through the connect tab, in one queued job (see `serially`); the request was
+ * counted already, as every connect is first (`handleExternalConnect`). */
 async function webConnect(
   origin: string,
   code: string,
   deps: ConnectionDeps,
 ): Promise<ExternalResponse> {
   const now = Date.now();
-  const throttled = await countConnect(origin, now);
-  if (throttled) return throttled;
 
   const pending = await readSession("pendingConnect");
   if (pending && (await tabIsOpen(pending.tabId))) {
@@ -711,11 +716,23 @@ async function connectStatus(
       ok: true,
       connect: (await tabIsOpen(pending.tabId)) ? "waiting" : "closed",
     };
+  // A Cancel is news only while a page could still be waiting on it: within the five minutes a request lasts, and before
+  // that origin connected by any other way (a trusted OpenBot's connect, OpenBot Desktop's). It was kept for the whole
+  // browser session, and only a new web connect from the same origin took it away.
   const cancelled = await readSession("cancelledConnect");
-  return {
-    ok: true,
-    connect: cancelled?.origin === checked.origin ? "cancelled" : "none",
-  };
+  if (cancelled?.origin !== checked.origin)
+    return { ok: true, connect: "none" };
+  const stale =
+    Date.now() - cancelled.at >= PENDING_MAX_AGE_MS ||
+    (await currentConnection())?.openbotUrl === checked.origin;
+  if (stale) {
+    await serially(async () => {
+      if ((await readSession("cancelledConnect"))?.at === cancelled.at)
+        await removeSession("cancelledConnect");
+    });
+    return { ok: true, connect: "none" };
+  }
+  return { ok: true, connect: "cancelled" };
 }
 
 function sameOrigin(raw: string, origin: string): boolean {

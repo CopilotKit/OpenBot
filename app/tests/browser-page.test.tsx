@@ -72,6 +72,9 @@ let tabsOpen = false;
 let narrationChoice: "on" | "off" | null = "on";
 /** While set, opening the browser waits for it, as a browser that takes seconds to launch does. */
 let opening: Promise<void> | null = null;
+/** While set, reading the person's preferences waits for it; `preferencesFail` makes the read fail instead. */
+let preferencesHeld: Promise<void> | null = null;
+let preferencesFail = false;
 
 function nativeState(): BrowserApiState {
   return {
@@ -146,6 +149,11 @@ async function server(path: string, init?: RequestInit): Promise<Response> {
       },
     });
   if (path === "/api/settings/preferences") {
+    if (method === "GET") {
+      await preferencesHeld;
+      if (preferencesFail)
+        return Response.json({ error: "Unavailable" }, { status: 500 });
+    }
     // As the server's own route takes it: one preference at a time, merged into the rest.
     if (method === "PATCH" && body && "narration" in body)
       narrationChoice = body.narration;
@@ -316,6 +324,8 @@ beforeEach(() => {
   tabsOpen = false;
   narrationChoice = "on";
   opening = null;
+  preferencesHeld = null;
+  preferencesFail = false;
   state = nativeState();
   openAnswer = answerFor("native");
   QuietSocket.urls = [];
@@ -980,7 +990,8 @@ test("on hosted OpenBot in a browser with no speech recognition, the page says n
   );
 });
 
-// ---- Narration only by the person's choice, on their own computer (the code owner's review) -----------------------
+// ---- Narration only by the person's choice, on their own computer: a microphone is opened for nobody who did not ask
+// for it, and what they say is turned into text without leaving it ---------------------------------------------------
 
 const preferenceWrites = () =>
   writes.filter((write) => write.path === "/api/settings/preferences");
@@ -1026,6 +1037,54 @@ test("Record asks whether to narrate before the first recording, keeps the answe
   ]);
   expect(starts()[0]?.body).toMatchObject({ narrate: false });
   expect(view.queryByRole("dialog")).toBeNull();
+});
+
+test("a choice still being read when Record is pressed is read, not asked again", async () => {
+  // The person chose narration on long ago. Their preferences took a moment to arrive, and a Record pressed meanwhile
+  // asked them again, as if they never had.
+  narrationChoice = "on";
+  let arrive = () => {};
+  preferencesHeld = new Promise<void>((resolve) => {
+    arrive = resolve;
+  });
+  const view = draw(<BrowserPage />);
+  const user = userEvent.setup({ document });
+  await user.type(
+    await view.findByRole("textbox", { name: "Task name" }),
+    "Submit an expense report",
+  );
+  await user.click(view.getByRole("button", { name: "Record" }));
+  await settleReactWork();
+  expect(
+    view.queryByRole("dialog", { name: "Narrate while you record?" }),
+  ).toBeNull();
+  expect(starts()).toEqual([]);
+  arrive();
+  await waitFor(() => expect(starts()).toHaveLength(1));
+  expect(starts()[0]?.body).toMatchObject({ narrate: true });
+  expect(
+    view.queryByRole("dialog", { name: "Narrate while you record?" }),
+  ).toBeNull();
+  expect(preferenceWrites()).toEqual([]);
+});
+
+test("a choice that cannot be read records without narration and asks nothing", async () => {
+  narrationChoice = "on";
+  preferencesFail = true;
+  const view = draw(<BrowserPage />);
+  const user = userEvent.setup({ document });
+  await user.type(
+    await view.findByRole("textbox", { name: "Task name" }),
+    "Submit an expense report",
+  );
+  await user.click(view.getByRole("button", { name: "Record" }));
+  await waitFor(() => expect(starts()).toHaveLength(1));
+  // The microphone stays closed, and the choice is left as the person made it.
+  expect(starts()[0]?.body).toMatchObject({ narrate: false });
+  expect(
+    view.queryByRole("dialog", { name: "Narrate while you record?" }),
+  ).toBeNull();
+  expect(preferenceWrites()).toEqual([]);
 });
 
 test("on hosted OpenBot a yes to the narration question listens, on the person's computer, and the bar says it is listening", async () => {
@@ -1508,7 +1567,8 @@ test("on hosted OpenBot narration the person turned off stays off after a reload
 });
 
 test("where the server says why there is no browser of the person's own, the page says that instead", async () => {
-  // Every Bot shares one computer here, which is no place for a person's browser (the code-owner review's blocker 3).
+  // Every Bot shares one computer here, which is no place for a person's browser: a Bot's shell there could read the
+  // cookies in its profile (server/src/browser/host.ts).
   const why =
     "This OpenBot can't open a browser of your own, because its Bots share one computer.";
   state = { ...screenState(), available: false, open: false, note: why };

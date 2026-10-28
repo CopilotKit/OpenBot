@@ -32,6 +32,7 @@ import {
   recorderHereQueryOptions,
 } from "@/lib/recorder/queries";
 import { queryClient } from "@/query-client";
+import { NarrationChoiceDialog, useNarrationChoice } from "./narration-choice";
 import { elapsed, RecordingMark, useSecondsSince } from "./recording";
 import {
   type ConnectProgress,
@@ -335,6 +336,19 @@ function RecorderHereButton({
   const connect = useMutation(connectRecorderHereMutationOptions(queryClient));
   const record = useMutation(recordHereMutationOptions(queryClient));
   const stop = useMutation(stopHereMutationOptions(queryClient));
+  /*
+   * The person's narration choice, kept on their account, goes with Record as OpenBot's own Record form passes it on, so
+   * the Recorder opens a microphone only for a person who chose to narrate. One who never chose is asked first, by the
+   * same question, and `asking` holds the task they named meanwhile.
+   */
+  const choice = useNarrationChoice();
+  const [asking, setAsking] = useState<string | null>(null);
+  const recordHere = (title: string, narrate: boolean | undefined) =>
+    record.mutate({
+      id: here.id,
+      title,
+      ...(narrate !== undefined ? { narrate } : {}),
+    });
   const [expired, setExpired] = useState(false);
   // The person pressed Cancel on the Recorder's Connect page, or closed it, as the Recorder said when asked.
   const [ended, setEnded] = useState<"cancelled" | "closed" | null>(null);
@@ -385,64 +399,85 @@ function RecorderHereButton({
     dotFrom(connected ? here.state : undefined, activity),
   );
   return (
-    <Popover
-      onOpenChange={(next) => {
-        setOpen(next);
-        // The click that opens it connects the Recorder, unless a connect is already under way or has said why not.
-        if (next && !connected && progress === null) startConnect();
-        // A refusal is about the last Record or Stop; the next time the popover opens it starts clean.
-        if (!next) {
-          record.reset();
-          stop.reset();
-        }
-      }}
-      open={open}
-    >
-      <PopoverTrigger
-        render={
-          <SidebarMenuButton
-            className={BUTTON_CLASS}
-            tooltip={recordingTooltip(recording)}
-          />
-        }
+    <>
+      <Popover
+        onOpenChange={(next) => {
+          setOpen(next);
+          // The click that opens it connects the Recorder, unless a connect is already under way or has said why not.
+          if (next && !connected && progress === null) startConnect();
+          // A refusal is about the last Record or Stop; the next time the popover opens it starts clean.
+          if (!next) {
+            record.reset();
+            stop.reset();
+          }
+        }}
+        open={open}
       >
-        <BrowserLabel>
-          {recording ? <RecordingDot {...recording} /> : null}
-        </BrowserLabel>
-      </PopoverTrigger>
-      {/* Above the button and as wide as it, as the account menu below it opens; never narrower than a task name
-       * needs, which a collapsed sidebar's icon would make it. */}
-      <PopoverContent
-        align="start"
-        className="w-(--anchor-width) min-w-72"
-        side="top"
-        sideOffset={8}
-      >
-        {connected ? (
-          <RecordHerePanel
-            controls={{
-              record: (title) => {
-                stop.reset();
-                record.mutate({ id: here.id, title });
-              },
-              recordPending: record.isPending,
-              stop: () => {
-                record.reset();
-                stop.mutate(here.id);
-              },
-              stopPending: stop.isPending,
-              error: record.error ?? stop.error,
-            }}
-            state={here.state}
-          />
-        ) : (
-          <ConnectHerePanel
-            connect={startConnect}
-            progress={progress ?? { state: "idle" }}
-          />
-        )}
-      </PopoverContent>
-    </Popover>
+        <PopoverTrigger
+          render={
+            <SidebarMenuButton
+              className={BUTTON_CLASS}
+              tooltip={recordingTooltip(recording)}
+            />
+          }
+        >
+          <BrowserLabel>
+            {recording ? <RecordingDot {...recording} /> : null}
+          </BrowserLabel>
+        </PopoverTrigger>
+        {/* Above the button and as wide as it, as the account menu below it opens; never narrower than a task name
+         * needs, which a collapsed sidebar's icon would make it. */}
+        <PopoverContent
+          align="start"
+          className="w-(--anchor-width) min-w-72"
+          side="top"
+          sideOffset={8}
+        >
+          {connected ? (
+            <RecordHerePanel
+              controls={{
+                record: async (title) => {
+                  stop.reset();
+                  const narration = await choice.read();
+                  if (narration === null) {
+                    setAsking(title);
+                    return;
+                  }
+                  // Not readable: the Recorder's own choice, with no microphone until the person made one there.
+                  recordHere(
+                    title,
+                    narration === undefined ? undefined : narration === "on",
+                  );
+                },
+                recordPending: record.isPending,
+                stop: () => {
+                  record.reset();
+                  stop.mutate(here.id);
+                },
+                stopPending: stop.isPending,
+                error: record.error ?? stop.error,
+              }}
+              state={here.state}
+            />
+          ) : (
+            <ConnectHerePanel
+              connect={startConnect}
+              progress={progress ?? { state: "idle" }}
+            />
+          )}
+        </PopoverContent>
+      </Popover>
+      <NarrationChoiceDialog
+        onAnswer={(narrate) => {
+          const title = asking;
+          setAsking(null);
+          choice.choose(narrate);
+          if (title) recordHere(title, narrate);
+        }}
+        onClose={() => setAsking(null)}
+        open={asking !== null}
+      />
+    </>
   );
 }
 

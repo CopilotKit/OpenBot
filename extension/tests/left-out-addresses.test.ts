@@ -297,8 +297,8 @@ afterEach(async () => {
 }, 15_000);
 
 test("a page change away from a site left out comes from nowhere: the left-out address is never sent", async () => {
-  // End-to-end run 2 of the review fixes: the person left example.com out, went on to httpbin.org in the same tab, and
-  // that page change reached Intelligence as `navigation from:"https://example.com/" to:"https://httpbin.org/forms/post"`.
+  // The person leaves example.com out and goes on to httpbin.org in the same tab: that page change used to reach
+  // Intelligence as `navigation from:"https://example.com/" to:"https://httpbin.org/forms/post"`.
   const trajectoryId = await record();
   frame(7, SHOP);
   await advanceTo(clock + 2_000);
