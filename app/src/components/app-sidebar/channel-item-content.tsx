@@ -26,8 +26,9 @@ export function ChannelItemContent({
   pinned?: boolean;
   revealing?: boolean;
 }) {
-  const primaryText = `text-[0.9rem] leading-5 tracking-[-1%] ${unread ? "font-semibold" : "font-medium"}`;
-  const secondaryText = "text-[12px] leading-4 text-muted-foreground";
+  // On the type scale: the line that leads at the sub size, the other a caption.
+  const primaryText = `type-sub ${unread ? "font-semibold" : "font-medium"}`;
+  const secondaryText = "type-caption text-muted-foreground";
 
   return (
     <div className="flex min-w-0 flex-1 items-center gap-2">
@@ -46,15 +47,23 @@ export function ChannelItemContent({
           >
             {name}
           </span>
-          <span className="shrink-0 whitespace-nowrap text-[12px] leading-4 text-muted-foreground/70">
-            {lastMessageAt}
+          {/*
+           * The sidebar row's "…" button sits over this end of the line while it shows: under the
+           * pointer, with focus in the row, or with its menu open. The time and marks step aside
+           * for it. Under 768px the button always shows and the row keeps room for it instead. The
+           * preview in Settings is in no menu item, so none of this reaches it.
+           */}
+          <span className="flex shrink-0 items-center gap-1.5 md:group-has-[[data-sidebar=menu-action][aria-expanded=true]]/menu-item:opacity-0 md:group-focus-within/menu-item:opacity-0 md:group-hover/menu-item:opacity-0">
+            <span className="type-caption whitespace-nowrap text-muted-foreground">
+              {lastMessageAt}
+            </span>
+            {unread ? (
+              <span className="size-2 shrink-0 rounded-full bg-brand" />
+            ) : null}
+            {pinned ? (
+              <IconPinFilled className="size-3 shrink-0 text-muted-foreground" />
+            ) : null}
           </span>
-          {unread ? (
-            <span className="size-2 shrink-0 rounded-full bg-primary" />
-          ) : null}
-          {pinned ? (
-            <IconPinFilled className="size-3 shrink-0 text-muted-foreground/70" />
-          ) : null}
         </div>
         <div
           className={`mt-px truncate ${emphasis === "thread" ? primaryText : secondaryText}`}

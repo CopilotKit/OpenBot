@@ -5,6 +5,7 @@ import { IconBrowser } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useState } from "react";
+import { LIT } from "@/components/app-sidebar/channel";
 import {
   Popover,
   PopoverContent,
@@ -40,7 +41,9 @@ import {
 } from "./recorder-here-popover";
 import { elapsed, RecordingMark, useSecondsSince } from "./recording";
 
-const BUTTON_CLASS = "hover:bg-foreground/5 h-10";
+/** The sidebar's destinations' look: lifted to the card's fill and shadow under the pointer and while open. */
+const BUTTON_CLASS =
+  "h-10 hover:bg-sidebar-accent hover:shadow-(--shadow-card) aria-expanded:bg-sidebar-accent aria-expanded:shadow-(--shadow-card)";
 
 /**
  * The sidebar's Browser button, beside Bots, Capabilities and Connections: the person's own browser, with the Recorder
@@ -488,11 +491,7 @@ function BrowserPageLink({ activity }: { activity?: RecorderActivity }) {
     <SidebarMenuButton
       className={BUTTON_CLASS}
       render={(props) => (
-        <Link
-          {...props}
-          to="/browser"
-          activeProps={{ className: "bg-foreground/5" }}
-        />
+        <Link {...props} to="/browser" activeProps={{ className: LIT }} />
       )}
       tooltip={recordingTooltip(recording)}
     >
@@ -510,7 +509,7 @@ function BrowserLabel({ children }: { children?: ReactNode }) {
       <div className="size-[28px] flex items-center justify-center">
         <IconBrowser />
       </div>
-      <span className="text-sm">Browser</span>
+      <span className="type-sub">Browser</span>
       {children}
     </>
   );
