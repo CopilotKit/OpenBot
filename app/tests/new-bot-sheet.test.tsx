@@ -155,11 +155,12 @@ async function settle() {
 test("opens on New Bot details and creates locally without another screen", async () => {
   const { view, user } = await opened();
   expect(view.getByRole("heading", { name: "New Bot" })).toBeTruthy();
+  expect(view.queryByRole("button", { name: /^Run here/ })).toBeNull();
   expect(
     view
-      .getByRole("button", { name: /^Run here/ })
-      .getAttribute("aria-pressed"),
-  ).toBe("true");
+      .getByRole("button", { name: /^Connect a custom agent/ })
+      .hasAttribute("aria-pressed"),
+  ).toBe(false);
   expect(
     view.getByRole("button", { name: "Create Bot" }).hasAttribute("disabled"),
   ).toBe(true);
@@ -173,15 +174,8 @@ test("unavailable hosting still permits the custom path", async () => {
   builtInAvailable = false;
   const { view, user } = await opened();
   await settle();
-  expect(
-    view.getByRole("button", { name: /^Run here/ }).hasAttribute("disabled"),
-  ).toBe(true);
+  expect(view.queryByRole("button", { name: /^Run here/ })).toBeNull();
   await user.type(view.getByLabelText("Name"), "External");
-  expect(
-    view
-      .getByRole("button", { name: /^Connect a custom agent/ })
-      .getAttribute("aria-pressed"),
-  ).toBe("true");
   expect(
     view.getByRole("button", { name: "Continue" }).hasAttribute("disabled"),
   ).toBe(false);
@@ -264,7 +258,6 @@ test("preserves every entry across back navigation and hosting switches", async 
   );
   await user.type(view.getByLabelText(/^Instructions/), "Review carefully");
   await user.click(view.getByRole("button", { name: /Public/ }));
-  await user.click(view.getByRole("button", { name: /^Run here/ }));
   expect(
     (view.getByLabelText(/^Instructions/) as HTMLTextAreaElement).value,
   ).toBe("Review carefully");
@@ -280,7 +273,6 @@ test("preserves every entry across back navigation and hosting switches", async 
   );
   await user.click(view.getByRole("button", { name: "Back" }));
   await user.click(view.getByRole("button", { name: "Back" }));
-  await user.click(view.getByRole("button", { name: /^Run here/ }));
   await user.click(view.getByRole("button", { name: "Create Bot" }));
   await view.findByText("Expense Review is ready");
   expect(creates[0]).toMatchObject({

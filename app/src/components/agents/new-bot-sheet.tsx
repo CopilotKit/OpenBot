@@ -1,7 +1,6 @@
 import { summaryFor, WEB_HARNESSES } from "@openbot/shared/harnesses";
 import {
   IconCheck,
-  IconDeviceDesktop,
   IconLock,
   IconPlugConnected,
   IconUsers,
@@ -157,8 +156,7 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
   const [visibility, setVisibility] = useState<Visibility>("private");
   /** Run it here unless the person picks otherwise: the answer that needs nothing set up. */
   const [runtime, setRuntime] = useState<Runtime | null>({ kind: "builtin" });
-  const [customSelected, setCustom] = useState(false);
-  const custom = customSelected || !builtInAvailable;
+  const custom = !builtInAvailable;
   const [endpoint, setEndpoint] = useState("");
   const [key, setKey] = useState("");
   /** Whether Continue was pressed on the address, which is when its error becomes worth showing. */
@@ -376,62 +374,12 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
                   onVisibility={setVisibility}
                   visibility={visibility}
                 />
-                <FieldSet className="mt-6">
-                  <FieldLegend variant="label">Where it runs</FieldLegend>
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    <button
-                      type="button"
-                      className={OPTION_CLASSES}
-                      aria-pressed={!custom && builtInAvailable}
-                      disabled={!builtInAvailable}
-                      onClick={() => setCustom(false)}
-                    >
-                      <IconDeviceDesktop className="size-5 shrink-0 text-muted-foreground" />
-                      <span className="min-w-0">
-                        <span className="block font-medium text-sm">
-                          Run here
-                        </span>
-                        <span className="block text-pretty text-muted-foreground text-xs">
-                          OpenBot hosts and runs your Bot.
-                        </span>
-                      </span>
-                    </button>
-                    <button
-                      type="button"
-                      className={OPTION_CLASSES}
-                      aria-pressed={custom}
-                      onClick={() => {
-                        if (busy) return;
-                        setCustom(true);
-                        const parsed =
-                          agentFormSchema.shape.name.safeParse(name);
-                        if (!parsed.success) {
-                          setNameError(parsed.error.issues[0]?.message);
-                          document.getElementById("new-bot-name")?.focus();
-                          return;
-                        }
-                        setNameError(undefined);
-                        go("runtime");
-                      }}
-                    >
-                      <IconPlugConnected className="size-5 shrink-0 text-muted-foreground" />
-                      <span className="min-w-0">
-                        <span className="block font-medium text-sm">
-                          Connect a custom agent
-                        </span>
-                        <span className="block text-pretty text-muted-foreground text-xs">
-                          Connect an agent you host elsewhere.
-                        </span>
-                      </span>
-                    </button>
-                  </div>
-                  {!builtInAvailable && (
-                    <FieldDescription>
-                      An admin must enable built-in hosting before you can run a
-                      Bot here.
-                    </FieldDescription>
-                  )}
-                </FieldSet>
+                {!builtInAvailable && (
+                  <p className="mt-3 text-sm text-muted-foreground">
+                    An admin must enable built-in hosting before you can run a
+                    Bot here.
+                  </p>
+                )}
               </>
             ) : step === "runtime" ? (
               <RuntimeStep
@@ -468,7 +416,7 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
         ) : null}
       </div>
 
-      <SheetFooter className="flex-row justify-between border-t border-border">
+      <SheetFooter className="flex-row flex-wrap items-center justify-between border-t border-border">
         {step === "about" ? (
           <SheetClose
             render={<Button className="px-4" size="lg" variant="ghost" />}
@@ -487,22 +435,45 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
             Back
           </Button>
         )}
-        {step !== "runtime" && (
-          <Button
-            className="px-4"
-            disabled={!canContinue}
-            size="lg"
-            type="submit"
-          >
-            {checking
-              ? "Checking…"
-              : createAgent.isPending
-                ? "Creating…"
-                : step === "endpoint" || (step === "about" && !custom)
-                  ? "Create Bot"
-                  : "Continue"}
-          </Button>
-        )}
+        <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+          {step === "about" && (
+            <Button
+              type="button"
+              variant="outline"
+              size="lg"
+              disabled={busy}
+              onClick={() => {
+                const parsed = agentFormSchema.shape.name.safeParse(name);
+                if (!parsed.success) {
+                  setNameError(parsed.error.issues[0]?.message);
+                  document.getElementById("new-bot-name")?.focus();
+                  return;
+                }
+                setNameError(undefined);
+                go("runtime");
+              }}
+            >
+              <IconPlugConnected className="size-4" />
+              Connect a custom agent
+            </Button>
+          )}
+          {step !== "runtime" && (
+            <Button
+              className="px-4"
+              disabled={!canContinue}
+              size="lg"
+              type="submit"
+            >
+              {checking
+                ? "Checking…"
+                : createAgent.isPending
+                  ? "Creating…"
+                  : step === "endpoint" || (step === "about" && !custom)
+                    ? "Create Bot"
+                    : "Continue"}
+            </Button>
+          )}
+        </div>
       </SheetFooter>
     </form>
   );
