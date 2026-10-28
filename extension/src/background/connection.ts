@@ -716,11 +716,23 @@ async function connectStatus(
       ok: true,
       connect: (await tabIsOpen(pending.tabId)) ? "waiting" : "closed",
     };
+  // A Cancel is news only while a page could still be waiting on it: within the five minutes a request lasts, and before
+  // that origin connected by any other way (a trusted OpenBot's connect, OpenBot Desktop's). It was kept for the whole
+  // browser session, and only a new web connect from the same origin took it away.
   const cancelled = await readSession("cancelledConnect");
-  return {
-    ok: true,
-    connect: cancelled?.origin === checked.origin ? "cancelled" : "none",
-  };
+  if (cancelled?.origin !== checked.origin)
+    return { ok: true, connect: "none" };
+  const stale =
+    Date.now() - cancelled.at >= PENDING_MAX_AGE_MS ||
+    (await currentConnection())?.openbotUrl === checked.origin;
+  if (stale) {
+    await serially(async () => {
+      if ((await readSession("cancelledConnect"))?.at === cancelled.at)
+        await removeSession("cancelledConnect");
+    });
+    return { ok: true, connect: "none" };
+  }
+  return { ok: true, connect: "cancelled" };
 }
 
 function sameOrigin(raw: string, origin: string): boolean {

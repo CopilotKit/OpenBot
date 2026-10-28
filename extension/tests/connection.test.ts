@@ -545,6 +545,34 @@ test("the page that asked to connect hears at once that the person cancelled on 
   expect(exchanges.map((exchange) => exchange.code)).toEqual(["obc_ghi"]);
 });
 
+test("a Cancel is said only while a page could still be waiting on it: not after the five minutes, nor once that OpenBot connected another way", async () => {
+  const cancel = async () => {
+    await connect(`obc_${clock}`);
+    await handleConnectionMessage({
+      type: "page.connect.decide",
+      approve: false,
+      label: "x",
+      origin,
+    });
+    expect(await connectStatus()).toEqual({ ok: true, connect: "cancelled" });
+  };
+  // Five minutes on, nothing waits on it any more.
+  await cancel();
+  clock += 5 * 60 * 1000;
+  expect(await connectStatus()).toEqual({ ok: true, connect: "none" });
+  expect(await readSession("cancelledConnect")).toBeUndefined();
+
+  // Cancelled on the Connect page, then connected as the organization's own OpenBot, with no Connect page.
+  clock += 60 * 1000;
+  await cancel();
+  policy = { ...policy, openbotUrl: origin };
+  expect(await connect("obc_pinned")).toMatchObject({
+    ok: true,
+    connected: true,
+  });
+  expect(await connectStatus()).toEqual({ ok: true, connect: "none" });
+});
+
 const OUT_OF_DATE =
   "This page is out of date. Close it and choose Connect this browser in OpenBot again.";
 
