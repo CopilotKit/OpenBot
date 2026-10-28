@@ -279,7 +279,8 @@
 
 /*
  * A conversation's composer floats inset from the column's edges, as OpenDuet's does, with its
- * focus ring off the screen's edge. OpenBot draws it in a column with no side padding.
+ * focus ring off the screen's edge. OpenBot's own column insets it by the same 12px now; the frame
+ * keeps its rule so the inset holds whatever the default does.
  */
 [data-skin="openduet"] [data-openduet-frame] [data-slot="composer-column"] {
   padding-inline: 12px;
