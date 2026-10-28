@@ -25,6 +25,10 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { componentListQueryOptions } from "@/lib/components/queries";
+import {
+  STANDARD_UI_GROUPS,
+  standardUiFamily,
+} from "@openbot/shared/standard-ui";
 
 /** The same way back from every state this route can be in. */
 const BACK = {
@@ -91,6 +95,7 @@ function RouteComponent() {
   const component = components.data?.find(
     (entry) => entry.name === name && entry.published,
   );
+  const family = standardUiFamily(name);
 
   if (!component) {
     return (
@@ -136,14 +141,22 @@ function RouteComponent() {
       <PageSection title="Details">
         <PageRows>
           <FactRow icon={<IconTag />} label="Kind">
-            {component.kind}
+            {family
+              ? `Building block: ${STANDARD_UI_GROUPS[family.group].title}`
+              : component.kind}
           </FactRow>
           <Separator />
-          <FactRow icon={<IconCode />} label="Called as">
-            <code className="rounded bg-foreground/5 px-1.5 py-0.5 text-xs">
-              {component.name}
-            </code>
-          </FactRow>
+          {family ? (
+            <FactRow icon={<IconCode />} label="Includes">
+              {family.members.join(", ")}
+            </FactRow>
+          ) : (
+            <FactRow icon={<IconCode />} label="Called as">
+              <code className="rounded bg-foreground/5 px-1.5 py-0.5 text-xs">
+                {component.name}
+              </code>
+            </FactRow>
+          )}
         </PageRows>
       </PageSection>
     </PageShell>

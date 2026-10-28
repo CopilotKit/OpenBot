@@ -87,7 +87,10 @@ function RouteComponent() {
               </Link>
             ))}
           </div>
-          <BuildingBlockSections components={blocks} />
+          <BuildingBlockSections
+            components={blocks}
+            linkTo="/settings/components-gallery/$name"
+          />
         </>
       )}
     </PageShell>

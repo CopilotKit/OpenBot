@@ -58,8 +58,9 @@ The gallery components a Bot is granted are unchanged. `OPENBOT_GENERATIVE_UI=fa
 it all off, on the server as well as in the browser.
 
 They are governed like the gallery. Each family (a component and the parts that only work with it,
-such as Table with its rows and cells) is a row an administrator publishes, words and withholds per
-Bot. Layout, text and input families arrive published; data, media, overlay and composite families
+such as Table with its rows and cells) is listed under Admin → UI components, grouped and with a
+preview, and an administrator publishes it, words it and withholds it per Bot. The components gallery
+lists the published ones. Layout, text and input families arrive published; data, media, overlay and composite families
 arrive unpublished and wait for an administrator. The server builds every run's catalog from its own
 copy and those rows, so a Bot is told only what it holds, in the published words, and is refused any
 other component whatever the browser sends. Conversations still draw what they drew before a family

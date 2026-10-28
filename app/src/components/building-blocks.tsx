@@ -70,8 +70,8 @@ export function BuildingBlockSections({
   linkTo,
 }: {
   components: readonly ComponentRecord[];
-  /** The admin list opens each family's page; the people's gallery only lists them. */
-  linkTo?: "/admin/components/$name";
+  /** Where a row opens: the family's governance in Admin, or its preview in the people's gallery. */
+  linkTo: "/admin/components/$name" | "/settings/components-gallery/$name";
 }) {
   const groups = (Object.keys(STANDARD_UI_GROUPS) as StandardUiGroup[])
     .map((group) => ({
@@ -88,27 +88,21 @@ export function BuildingBlockSections({
             {index > 0 ? <Separator /> : null}
             <Item
               data-testid={`block-${component.name}`}
-              render={
-                linkTo ? (
-                  <Link params={{ name: component.name }} to={linkTo} />
-                ) : undefined
-              }
+              render={<Link params={{ name: component.name }} to={linkTo} />}
               size="sm"
             >
               <ItemMedia variant="icon">{GROUP_ICONS[group]}</ItemMedia>
               <ItemContent>
                 <ItemTitle>{component.title}</ItemTitle>
                 <ItemDescription>
-                  {linkTo
+                  {linkTo === "/admin/components/$name"
                     ? blockAvailability(component)
                     : component.publishedDescription}
                 </ItemDescription>
               </ItemContent>
-              {linkTo ? (
-                <ItemActions>
-                  <IconChevronRight className="size-4 text-muted-foreground" />
-                </ItemActions>
-              ) : null}
+              <ItemActions>
+                <IconChevronRight className="size-4 text-muted-foreground" />
+              </ItemActions>
             </Item>
           </Fragment>
         ))}

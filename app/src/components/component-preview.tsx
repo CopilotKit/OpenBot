@@ -2,6 +2,7 @@ import { OpenGenerativeUIActivityRenderer } from "@copilotkit/react-core/v2";
 import { useQuery } from "@tanstack/react-query";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { galleryComponent } from "@/lib/copilot/gallery-registry";
+import { BuildingBlockPreview } from "./building-block-preview";
 import { isStandardUiComponentName } from "@openbot/shared/standard-ui";
 import {
   type SandboxedRecord,
@@ -54,6 +55,16 @@ export function ComponentPreview({
   fill?: number;
 }) {
   const entry = galleryComponent(name);
+  if (isStandardUiComponentName(name)) {
+    return (
+      <FittedPreview fill={fill}>
+        {/* On a card, as a conversation draws it: a building block alone has no surface of its own. */}
+        <div className="w-full max-w-2xl rounded-xl border border-border bg-card p-4 dark:border-transparent">
+          <BuildingBlockPreview name={name} />
+        </div>
+      </FittedPreview>
+    );
+  }
   if (entry?.preview) {
     return (
       <FittedPreview fill={fill}>
@@ -101,11 +112,9 @@ export function ComponentPreview({
     <PreviewNotice>
       {entry
         ? "This one is only drawn in a conversation."
-        : isStandardUiComponentName(name)
-          ? "A Bot draws this inside an interface it builds."
-          : kind === "sandboxed"
-            ? "Published in the playground."
-            : "This build cannot draw this."}
+        : kind === "sandboxed"
+          ? "Published in the playground."
+          : "This build cannot draw this."}
     </PreviewNotice>
   );
 }
