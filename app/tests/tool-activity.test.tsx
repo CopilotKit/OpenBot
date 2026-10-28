@@ -489,7 +489,8 @@ test("a browser click the person declined says so, muted, and is never called do
     expect(view.queryByText(/issue/)).toBeNull();
     expect(view.container.querySelector(".text-status-problem")).toBeNull();
     const summary = view.container.querySelector("summary");
-    expect(summary?.textContent).toContain("You declined");
+    expect(summary?.textContent).toContain("You declined: Click on page");
+    expect(summary?.textContent).not.toContain("Clicked");
     expect(summary?.querySelector(".text-status-done")).toBeNull();
     cleanup();
   }
@@ -512,7 +513,8 @@ test("a browser step a policy refused reads Blocked, with the policy's reason", 
   expect(view.getByText("That site is off limits here.")).toBeDefined();
   expect(view.getByText("1 issue")).toBeDefined();
   const summary = view.container.querySelector("summary");
-  expect(summary?.textContent).toContain("Blocked: Opened page");
+  expect(summary?.textContent).toContain("Blocked: Open page");
+  expect(summary?.textContent).not.toContain("Opened page");
   expect(summary?.querySelector(".text-status-done")).toBeNull();
 });
 
