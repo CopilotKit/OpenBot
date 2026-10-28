@@ -371,7 +371,8 @@ test("a skin switched while on a screen only the old skin has lands on home, dra
   expect(document.querySelector("[data-openduet-frame]")).toBeNull();
   // Home, inside the new skin's frame, with something on it.
   expect(
-    await view.findByRole("heading", { name: "Start a conversation" }, HOME),
+    // Home draws its composer; its greeting is personal, so it is not what this waits for.
+    await view.findByRole("textbox", { name: "Message" }, HOME),
   ).toBeTruthy();
   expect(document.querySelector("[data-opendots-main]")).not.toBeNull();
 });
