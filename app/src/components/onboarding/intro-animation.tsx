@@ -1,22 +1,34 @@
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { type ReactNode, useEffect, useState } from "react";
-import { Button } from "@/components/ui/button";
 
 export type IntroScene = { id: string; label: string; content: ReactNode };
 
-/** One introduction, with optional playback controls instead of more wizard steps. */
+/** A looping introduction instead of more wizard steps. */
 export function IntroAnimation({ scenes }: { scenes: IntroScene[] }) {
   const reducedMotion = useReducedMotion();
   const [scene, setScene] = useState(0);
-  const [paused, setPaused] = useState(false);
-  const last = scene === scenes.length - 1;
-  const playing = !reducedMotion && !paused && !last;
-
   useEffect(() => {
-    if (!playing) return;
-    const timer = window.setTimeout(() => setScene(scene + 1), 6000);
-    return () => window.clearTimeout(timer);
-  }, [playing, scene]);
+    if (reducedMotion || scenes.length < 2) return;
+    const timer = window.setInterval(
+      () => setScene((current) => (current + 1) % scenes.length),
+      4000,
+    );
+    return () => window.clearInterval(timer);
+  }, [reducedMotion, scenes.length]);
+
+  // Keep every scene available without auto-updating content when motion is reduced.
+  if (reducedMotion) {
+    return (
+      <section
+        aria-label="Meet OpenBot"
+        className="flex w-full flex-col gap-12 py-8"
+      >
+        {scenes.map((item) => (
+          <div key={item.id}>{item.content}</div>
+        ))}
+      </section>
+    );
+  }
 
   return (
     <section aria-label="Meet OpenBot" className="w-full">
@@ -33,43 +45,6 @@ export function IntroAnimation({ scenes }: { scenes: IntroScene[] }) {
             {scenes[scene]?.content}
           </motion.div>
         </AnimatePresence>
-      </div>
-      <div className="mt-6 flex items-center justify-center gap-4">
-        <fieldset className="flex gap-1" aria-label="Introduction scenes">
-          {scenes.map((item, index) => (
-            <button
-              key={item.id}
-              type="button"
-              aria-label={item.label}
-              aria-current={index === scene ? "step" : undefined}
-              className="group flex h-10 w-10 items-center justify-center rounded-md focus-visible:outline-2 focus-visible:outline-ring"
-              onClick={() => {
-                setScene(index);
-                setPaused(true);
-              }}
-            >
-              <span
-                className={`h-1 w-8 rounded-full transition-colors ${index === scene ? "bg-foreground" : "bg-foreground/15 group-hover:bg-foreground/30"}`}
-              />
-            </button>
-          ))}
-        </fieldset>
-        {!reducedMotion && (
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="w-20 text-muted-foreground"
-            onClick={() => {
-              if (last) {
-                setScene(0);
-                setPaused(false);
-              } else setPaused((current) => !current);
-            }}
-          >
-            {last ? "Replay" : paused ? "Play" : "Pause"}
-          </Button>
-        )}
       </div>
     </section>
   );
