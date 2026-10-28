@@ -167,6 +167,12 @@ changes for a deployment.
   working, its orb in the list shows it, and so does a still blue dot. Each conversation has a "…"
   button with Pin and Delete, which used to be on right-click alone. ⌘K, or Ctrl+K, opens the
   sidebar and puts you in its search box.
+- A conversation reads like a chat. A Bot's reply arrives one bubble per thought, and a bubble holding
+  a code block or a table takes the full width on a wide screen; your messages sit in a tinted bubble,
+  and three dots show a Bot thinking. A step is marked done only when it worked: one that was refused,
+  failed or declined by you is named for what it would have done ("Send your email"), and one held on
+  its approval card says it is waiting for you. Mail and calendar steps, through any app, are named
+  for what happened to yours ("Searched your email").
 
 ### Generated interfaces use A2UI 1.0
 

@@ -59,6 +59,15 @@
   --status-problem: #b91c1c;
   --status-problem-soft: #fbeaea;
   /*
+   * A conversation's bubbles: a Bot's in a grey a shade darker than the page, the person's in a
+   * tint of the accent. One radius on every corner and no tail. `--radius-bubble` sits in
+   * Tailwind's `--radius-*` namespace like `--shadow-*` below, so it is not registered either: use
+   * it as `rounded-(--radius-bubble)`.
+   */
+  --bubble: #eeeef1;
+  --bubble-user: #e7e3f7;
+  --radius-bubble: 1.25rem;
+  /*
    * Not registered with Tailwind: `--shadow-*` is its namespace, and a theme key of the same name
    * would point at itself. Use them as `shadow-(--shadow-float)`.
    */
@@ -138,6 +147,8 @@
   --status-working-soft: #18233d;
   --status-problem: #f87171;
   --status-problem-soft: #3a1717;
+  --bubble: #26262b;
+  --bubble-user: #2f2845;
   --shadow-float:
     0 0 0 0.5px rgb(255 255 255 / 10%), 0 4px 12px -4px rgb(0 0 0 / 50%);
   --shadow-card: 0 0 0 1px var(--border);
@@ -233,6 +244,8 @@ body {
   --color-status-working-soft: var(--status-working-soft);
   --color-status-problem: var(--status-problem);
   --color-status-problem-soft: var(--status-problem-soft);
+  --color-bubble: var(--bubble);
+  --color-bubble-user: var(--bubble-user);
 }
 
 /*

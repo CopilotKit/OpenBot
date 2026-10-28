@@ -114,6 +114,9 @@ describe("light and dark", () => {
       "--dur-swap",
       "--dur-enter",
       "--dur-sheet",
+      "--bubble",
+      "--bubble-user",
+      "--radius-bubble",
     ];
     expect(roles.filter((name) => !light.has(name))).toEqual([]);
     expect(light.get("--target")).toBe("44px");
@@ -183,6 +186,28 @@ describe("contrast, checked in both themes", () => {
         }).toEqual({ status, ratio: true });
     });
   }
+
+  test("a message's words clear 4.5:1 on its bubble", () => {
+    for (const [themeName, theme] of themes)
+      for (const [ink, bubble] of [
+        // A Bot's markdown: its words, its quotes and its links.
+        ["--foreground", "--bubble"],
+        ["--muted-foreground", "--bubble"],
+        ["--brand", "--bubble"],
+        // The person's words are drawn as typed, in one colour.
+        ["--foreground", "--bubble-user"],
+      ])
+        expect({
+          themeName,
+          ink,
+          bubble,
+          clears:
+            contrast(
+              resolve(theme, ink as string),
+              resolve(theme, bubble as string),
+            ) >= 4.5,
+        }).toEqual({ themeName, ink, bubble, clears: true });
+  });
 
   test("what sits on the primary clears 4.5:1", () => {
     for (const [themeName, theme] of themes)
