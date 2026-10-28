@@ -1,4 +1,5 @@
 import { CopilotKitContext } from "@copilotkit/react-core/v2/context";
+import { useQuery } from "@tanstack/react-query";
 import {
   readConnectPrompt,
   SHOW_APP_ACCESS_TOOL,
@@ -14,17 +15,20 @@ import {
 import { useCallback, useContext, useMemo, useSyncExternalStore } from "react";
 import { Streamdown } from "streamdown";
 import { PendingApprovals } from "@/components/approvals/inline-approval";
+import { approvalInboxOptions } from "@/lib/approvals";
 import { markdownComponents } from "@/lib/markdown";
 import {
   connectorName,
   humanise,
   ownToolLabel,
+  personToolLabel,
   readToolName,
 } from "@/lib/plugins/tool-name";
 import {
   asText,
   forDisplay,
   REFUSAL_MARKER,
+  toolResultDeclined,
   toolResultFailed,
 } from "@/lib/plugins/tool-result";
 import { readTeamBotConsent } from "@/lib/team-bots";
@@ -218,18 +222,25 @@ type StepKind = "search" | "fetch" | "browser" | "connector" | "tool";
 export type StepDetails = {
   id: string;
   kind: StepKind;
+  /** What it is doing while it runs, and what it did once it has. */
   label: string;
+  /** What it would do, for a step that did not happen or has not yet: "Send your email". */
+  plain: string;
   /** What it was done to: a query, a page, a connector. Muted beside the label. */
   detail?: string;
   href?: string;
   pending: boolean;
   failed: boolean;
   refused: boolean;
+  /** The person said no on its card. Their decision, not an issue. */
+  declined: boolean;
   reason?: string;
   /** Pages a browser step opened, or a fetch read; zero for anything else. */
   pages: number;
   /** The connector a connector step reached, said the way a person would. */
   connector?: string;
+  /** What it did to the person's own things, once done: "Searched your email". */
+  person?: string;
   inputs: [string, string][];
   output?: string;
 };
@@ -286,15 +297,18 @@ export function stepDetails(step: ToolItem): StepDetails {
   );
   if (isBrowserStep(step)) {
     const browser = browserStepDetails(step);
+    const label = browser.label ?? "Used the browser";
     return {
       id: step.id,
       kind: "browser",
-      label: browser.label ?? "Used the browser",
+      label,
+      plain: label,
       ...(browser.title ? { detail: browser.title } : {}),
       ...(browser.href ? { href: browser.href } : {}),
       pending: browser.pending,
       failed: browser.failed,
       refused: false,
+      declined: false,
       ...(browser.reason ? { reason: browser.reason } : {}),
       pages: browser.visited ? 1 : 0,
       inputs,
@@ -303,33 +317,44 @@ export function stepDetails(step: ToolItem): StepDetails {
 
   const name = step.toolCall.function.name;
   const answer = step.result === undefined ? undefined : asText(step.result);
-  const refused = answer?.startsWith(REFUSAL_MARKER) ?? false;
+  // The person declining on the card is not a result either, and its words are for the model.
+  const declined = toolResultDeclined(step.result);
+  const refused = !declined && (answer?.startsWith(REFUSAL_MARKER) ?? false);
   const body = refused ? answer?.slice(REFUSAL_MARKER.length).trim() : answer;
   // This deployment's own tools answer the model, not the person; see `ServerToolLine`.
   const own = ownToolLabel(name) !== null;
+  const failed = !refused && !declined && toolResultFailed(step.result);
   const outcome = {
     id: step.id,
     pending: step.result === undefined,
-    failed: !refused && toolResultFailed(step.result),
+    failed,
     refused,
+    declined,
     inputs,
-    ...(body && !own ? { output: body } : {}),
+    ...(body && !own && !declined ? { output: body } : {}),
   };
+  // Running, a step says what is happening now; done, what happened. One that did not happen is
+  // named plainly ("Send your email"), never as though it had.
+  const state = failed || refused || declined ? "plain" : outcome.pending;
   // Not a connector: one of this deployment's own tools, or one an external agent runs itself.
   // Named in words, never as an identifier.
-  if (!name.startsWith("mcp__"))
+  if (!name.startsWith("mcp__")) {
+    const plain = humanise(name);
     return {
       ...outcome,
       kind: "tool",
-      label: ownToolLabel(name, outcome.pending) ?? humanise(name),
+      label: (state === "plain" ? null : ownToolLabel(name, state)) ?? plain,
+      plain,
       pages: 0,
     };
+  }
 
   const [, server = "", ...rest] = name.split("__");
   const role = researchRoleOfTool(server, rest.join("__"));
-  const { label, detail } = readToolName(name);
+  const { label, detail } = readToolName(name, state);
+  const plain = readToolName(name, "plain").label;
   const urls = role === "fetch" ? urlsOf(args) : [];
-  const base = { ...outcome, label };
+  const base = { ...outcome, label, plain };
   if (role === "search") {
     const query = firstString(
       args.query,
@@ -361,13 +386,20 @@ export function stepDetails(step: ToolItem): StepDetails {
       pages: Math.max(urls.length, 1),
     };
   }
+  const person = personToolLabel(name);
   return {
     ...base,
     kind: "connector",
     ...(detail ? { detail } : {}),
     pages: 0,
     connector: connectorName(server),
+    ...(person ? { person } : {}),
   };
+}
+
+/** It ran and it worked: the only kind of step a summary may say was done. */
+function isDone(step: StepDetails): boolean {
+  return !step.pending && !step.failed && !step.refused && !step.declined;
 }
 
 function joinPhrases(phrases: string[]): string {
@@ -384,10 +416,15 @@ function plural(count: number, one: string, many: string): string {
  *
  * Counted by kind rather than listed, because the list is what the line opens to. Research is
  * never attributed to a provider; a connector is named, because which system was reached is the
- * person's own fact.
+ * person's own fact, and what it did to the person's own mail or calendar is named in their words.
+ *
+ * ONLY WHAT HAPPENED. A step that was refused, failed or declined, or never finished, is not called
+ * done: the first two are counted as issues beside the line, and all of them say how they stand
+ * when it is opened. With nothing done, the line names the first step plainly.
  */
 export function summarise(steps: readonly StepDetails[]): string {
-  const of = (kind: StepKind) => steps.filter((step) => step.kind === kind);
+  const done = steps.filter(isDone);
+  const of = (kind: StepKind) => done.filter((step) => step.kind === kind);
   const phrases: string[] = [];
   if (of("search").length) phrases.push("searched the web");
   const read = of("fetch").reduce((sum, step) => sum + step.pages, 0);
@@ -396,8 +433,16 @@ export function summarise(steps: readonly StepDetails[]): string {
   const browsed = browser.reduce((sum, step) => sum + step.pages, 0);
   if (browsed) phrases.push(`browsed ${plural(browsed, "page", "pages")}`);
   else if (browser.length) phrases.push("used the browser");
+  for (const person of new Set(
+    of("connector").flatMap((step) => (step.person ? [step.person] : [])),
+  ))
+    phrases.push(person.charAt(0).toLowerCase() + person.slice(1));
   const connectors = [
-    ...new Set(of("connector").map((step) => step.connector ?? "")),
+    ...new Set(
+      of("connector")
+        .filter((step) => !step.person)
+        .map((step) => step.connector ?? ""),
+    ),
   ].filter(Boolean);
   if (connectors.length === 1) phrases.push(`used ${connectors[0]}`);
   else if (connectors.length > 1)
@@ -406,6 +451,7 @@ export function summarise(steps: readonly StepDetails[]): string {
     );
   const tools = of("tool").length;
   if (tools) phrases.push(`used ${plural(tools, "tool", "tools")}`);
+  if (phrases.length === 0) return steps[0]?.plain ?? "";
   const sentence = joinPhrases(phrases);
   return sentence.charAt(0).toUpperCase() + sentence.slice(1);
 }
@@ -453,29 +499,46 @@ function IconStack({ kinds }: { kinds: StepKind[] }) {
   );
 }
 
-function StepStatus({ step, active }: { step: StepDetails; active: boolean }) {
+function StepStatus({
+  step,
+  active,
+  waiting,
+}: {
+  step: StepDetails;
+  active: boolean;
+  waiting: boolean;
+}) {
   if (step.pending)
     return (
       <span className="shrink-0 text-muted-foreground">
-        {active ? "In progress" : "Not completed"}
+        {waiting ? "Waiting for you" : active ? "In progress" : "Not completed"}
       </span>
     );
+  if (step.declined)
+    return <span className="shrink-0 text-muted-foreground">Declined</span>;
   if (step.refused)
-    return <span className="shrink-0 text-destructive">Blocked</span>;
+    return <span className="shrink-0 text-status-problem">Blocked</span>;
   if (step.failed)
-    return (
-      <span className="shrink-0 text-amber-600 dark:text-amber-500">
-        Didn't work
-      </span>
-    );
+    return <span className="shrink-0 text-status-needs">Didn't work</span>;
   return null;
 }
 
-function StepRow({ step, active }: { step: StepDetails; active: boolean }) {
+function StepRow({
+  step,
+  active,
+  waiting,
+}: {
+  step: StepDetails;
+  active: boolean;
+  /** Held on its approval card until the person answers. */
+  waiting: boolean;
+}) {
+  // Only a step that is running now says it is happening; one stopped or held says what it would do.
+  const label = step.pending && (waiting || !active) ? step.plain : step.label;
   const line = (
     <span className="flex min-w-0 items-center gap-2">
       <StepIcon kind={step.kind} />
-      <span className="shrink-0">{step.label}</span>
+      <span className="min-w-0 truncate">{label}</span>
       {step.href ? (
         <a
           href={step.href}
@@ -488,12 +551,12 @@ function StepRow({ step, active }: { step: StepDetails; active: boolean }) {
       ) : step.detail ? (
         <span className="truncate text-muted-foreground">{step.detail}</span>
       ) : null}
-      <StepStatus step={step} active={active} />
+      <StepStatus active={active} step={step} waiting={waiting} />
     </span>
   );
   const reason =
     step.failed && step.kind === "browser" ? (
-      <p className="mt-0.5 pl-6 text-destructive">
+      <p className="mt-0.5 pl-6 text-status-problem">
         {step.reason ?? "Couldn't finish this step."}
       </p>
     ) : null;
@@ -509,10 +572,10 @@ function StepRow({ step, active }: { step: StepDetails; active: boolean }) {
   return (
     <li className="min-w-0">
       <details className="tool-line min-w-0">
-        <summary className="flex cursor-pointer list-none items-center gap-1.5">
+        <summary className="flex min-h-11 cursor-pointer list-none items-center gap-1.5 [&::-webkit-details-marker]:hidden">
           <span
             aria-hidden
-            className="tool-line-chevron shrink-0 text-xs text-muted-foreground transition-transform"
+            className="tool-line-chevron shrink-0 text-xs text-muted-foreground transition-transform motion-reduce:transition-none"
           >
             ▸
           </span>
@@ -542,6 +605,27 @@ function StepRow({ step, active }: { step: StepDetails; active: boolean }) {
   );
 }
 
+/**
+ * The tool calls the server is holding on an approval card, read from the same inbox the cards are.
+ *
+ * A held step has no result yet, the same as one still running or one a stopped turn left behind,
+ * and only the inbox can tell them apart.
+ */
+function useHeldForPerson(): ReadonlySet<string> {
+  const inbox = useQuery(approvalInboxOptions());
+  return useMemo(
+    () =>
+      new Set(
+        (inbox.data?.requests ?? []).flatMap((request) =>
+          request.status === "pending" && request.action.toolCallId
+            ? [request.action.toolCallId]
+            : [],
+        ),
+      ),
+    [inbox.data],
+  );
+}
+
 export function ToolActivity({
   group,
   active,
@@ -551,10 +635,16 @@ export function ToolActivity({
   active: boolean;
 }) {
   const steps = group.steps.map(stepDetails);
+  const held = useHeldForPerson();
   const running = active && steps.some((step) => step.pending);
   const current = steps.find((step) => step.pending);
   const issues = steps.filter((step) => step.failed || step.refused).length;
   const kinds = [...new Set(steps.map((step) => step.kind))];
+  /*
+   * NOTHING DONE IS NOT DONE. With no step that worked, the line is named for the first one plainly
+   * and marked for how the group stands, so it never carries the done mark.
+   */
+  const nothingDone = !running && !steps.some(isDone);
   // The folded line draws its own steps, so a waiting approval gets its card beside it, not inside.
   return (
     <>
@@ -563,10 +653,23 @@ export function ToolActivity({
         label={running && current ? `${current.label}…` : summarise(steps)}
         detail={issues ? plural(issues, "issue", "issues") : undefined}
         running={running}
+        failed={nothingDone && steps.some((step) => step.failed)}
+        refused={
+          nothingDone &&
+          !steps.some((step) => step.failed) &&
+          steps.some((step) => step.refused)
+        }
+        declined={nothingDone && !issues && steps.some((step) => step.declined)}
+        notYet={nothingDone && !issues && !steps.some((step) => step.declined)}
       >
         <ol className="space-y-2 py-1">
           {steps.map((step) => (
-            <StepRow key={step.id} step={step} active={active} />
+            <StepRow
+              active={active}
+              key={step.id}
+              step={step}
+              waiting={held.has(step.id)}
+            />
           ))}
         </ol>
       </ToolLine>

@@ -66,6 +66,7 @@ import {
   asText,
   forDisplay,
   REFUSAL_MARKER,
+  toolResultDeclined,
   toolResultFailed,
 } from "@/lib/plugins/tool-result";
 import { readTeamBotConsent } from "@/lib/team-bots";
@@ -84,6 +85,7 @@ import type { QueuedMessage } from "./composer";
 import { FollowScroll, RESUME_PX, useFollowIntent } from "./follow-intent";
 import { LateRenderersContext, LateRenderersWatch } from "./late-renderers";
 import { usePacedReveal } from "./paced-reveal";
+import { holdsBlock, splitBubbles } from "./split-bubbles";
 import { TeamBotConsentCard } from "./team-bot-consent";
 import {
   dropRepeatedAppCards,
@@ -138,6 +140,32 @@ type ChatTranscriptProps = {
 
 /** One shared empty array, so a screen without a queue does not hand down a new one per render. */
 const EMPTY_QUEUE: readonly QueuedMessage[] = [];
+
+/**
+ * A conversation's bubbles: body text, one radius on every corner and no tail, the same padding for
+ * the Bot and the person. Their colours are `--bubble` and `--bubble-user` (theme.css).
+ */
+const BUBBLE_CONTENT = "type-body rounded-(--radius-bubble) px-4 py-3";
+/** The person's words, in the accent's tint, on the right. */
+const USER_BUBBLE = "max-w-[85%] *:data-[slot=bubble-content]:bg-bubble-user";
+/*
+ * A Bot's thought, in a bubble of its own. STILL THE GHOST VARIANT, because a skin finds a Bot's
+ * words by `[data-variant="ghost"][data-align="start"]` (`skins/<id>/skin.css`); so these put back
+ * the fill, the radius and the padding the variant takes off, rather than choose another variant
+ * and leave every skin's rule matching nothing.
+ *
+ * Capped like a chat's bubble, so a short answer reads as a message rather than a page.
+ */
+const AGENT_BUBBLE =
+  "data-[variant=ghost]:max-w-[82%] *:data-[slot=bubble-content]:rounded-(--radius-bubble) *:data-[slot=bubble-content]:bg-bubble *:data-[slot=bubble-content]:px-4 *:data-[slot=bubble-content]:py-3";
+/**
+ * A bubble holding a code block or a table spans the column once there is room. On a phone it keeps
+ * the cap, and the block scrolls inside it.
+ */
+const WIDE_BUBBLE = "md:w-full md:data-[variant=ghost]:max-w-full";
+/** Streamdown's prose, tightened to a bubble: closer paragraphs, bullets hung outside the text. */
+const AGENT_PROSE =
+  "[&>div]:space-y-2.5 [&_ol]:list-outside [&_ol]:pl-5 [&_ul]:list-outside [&_ul]:pl-5 [&_li]:py-0.5";
 
 /**
  * Split a person's message into the skill they invoked and the rest of what they typed.
@@ -205,19 +233,27 @@ function RestoringTranscript() {
  * A person who has just asked something watches their own message sit there, and a Bot that is
  * thinking is indistinguishable from a Bot that failed silently — which this app has shipped before.
  *
- * It borrows the shimmer a running tool line uses, so "working on it" reads the same whether the
- * work is a tool call or a model that has not spoken yet.
+ * It is the Bot's bubble with three dots in it, where its first words will land, the way a chat
+ * shows somebody typing. The dots hold still with reduced motion (`.typing-dot` in styles.css).
  */
 function Thinking() {
   return (
-    <p
-      className="tool-line-running text-muted-foreground text-sm"
+    <div
+      className="inline-flex h-10.5 w-fit items-center gap-1.5 self-start rounded-(--radius-bubble) bg-bubble px-4"
       // `status` rather than `alert`: this is progress, not something that interrupts what somebody
-      // is doing. The text says it, so a screen reader is told the same thing the shimmer implies.
+      // is doing. The word is for a screen reader, which is told what the dots show.
       role="status"
     >
-      Thinking
-    </p>
+      <span className="sr-only">Thinking</span>
+      {[0, 1, 2].map((dot) => (
+        <span
+          aria-hidden
+          className="typing-dot size-2 rounded-full bg-muted-foreground"
+          key={dot}
+          style={{ animationDelay: `${dot * 160}ms` }}
+        />
+      ))}
+    </div>
   );
 }
 
@@ -366,8 +402,12 @@ function Queued({
          * message sent by mistake rather than as a file waiting its turn.
          */}
         {text ? (
-          <Bubble align="end" className="opacity-60" variant="muted">
-            <BubbleContent>
+          <Bubble
+            align="end"
+            className={cn(USER_BUBBLE, "opacity-60")}
+            variant="muted"
+          >
+            <BubbleContent className={BUBBLE_CONTENT}>
               {/* Shown exactly as typed, for the same reason a sent message is. */}
               <span className="whitespace-pre-wrap">{text}</span>
             </BubbleContent>
@@ -752,23 +792,16 @@ const TranscriptMessage = memo(function TranscriptMessage({
     <MessageRow align={align}>
       <MessageContent>
         <Arriving>
-          {/*
-            A Bot's message takes the whole column, not the width of its words: block content
-            inside it — a fenced code block, a table — should span the transcript rather than
-            shrink to its own text. A person's bubble keeps fitting what they said.
-          */}
-          <Bubble
-            align={align}
-            variant={isUser ? "muted" : "ghost"}
-            className={isUser ? undefined : "w-full"}
-          >
-            <BubbleContent className={isUser ? undefined : "w-full"}>
-              {isUser ? (
-                // A person's own message is shown exactly as they typed it. Rendering it as markdown
-                // would silently reformat what they said, and an asterisk in a sentence is not
-                // emphasis. The chip is the one exception, and it is not reformatting: it is drawing
-                // the thing that was already a chip in the composer as a chip here too, so the
-                // transcript shows a skill was used rather than a slash that was typed.
+          {isUser ? (
+            <Bubble align={align} className={USER_BUBBLE} variant="muted">
+              <BubbleContent className={BUBBLE_CONTENT}>
+                {/*
+                 * A person's own message is shown exactly as they typed it. Rendering it as
+                 * markdown would silently reformat what they said, and an asterisk in a sentence
+                 * is not emphasis. The chip is the one exception, and it is not reformatting: it is
+                 * drawing the thing that was already a chip in the composer as a chip here too, so
+                 * the transcript shows a skill was used rather than a slash that was typed.
+                 */}
                 <span className="whitespace-pre-wrap">
                   {origin && (
                     <span className="mr-1.5 inline-flex items-center rounded bg-foreground/10 px-1.5 py-0.5 align-middle text-foreground/70 text-xs">
@@ -792,25 +825,72 @@ const TranscriptMessage = memo(function TranscriptMessage({
                     said
                   )}
                 </span>
-              ) : (
-                /*
-                 * A Bot's prose is markdown, and it arrives in pieces.
-                 *
-                 * Rendered with a streaming-aware renderer rather than an ordinary one: half a fenced
-                 * code block or an unclosed bold marker is the NORMAL state for most of a run, and a
-                 * plain markdown parser draws that as literal asterisks and backticks until the
-                 * closing token arrives, so the answer visibly rewrites itself as it lands. This
-                 * closes them for the duration.
-                 */
-                <Streamdown components={markdownComponents} mode={mode}>
-                  {revealed}
-                </Streamdown>
-              )}
-            </BubbleContent>
-          </Bubble>
+              </BubbleContent>
+            </Bubble>
+          ) : (
+            <AgentReply mode={mode} text={revealed} />
+          )}
         </Arriving>
       </MessageContent>
     </MessageRow>
+  );
+});
+
+/**
+ * A Bot's reply as separate bubbles, one per thought and 8px apart, the way a chat sends them
+ * (`splitBubbles`).
+ *
+ * ONE MEMOISED BUBBLE PER PART. A streamed reply changes only its last part on each chunk, so the
+ * parts before it compare equal and their markdown is not parsed again: the same reasoning as
+ * `TranscriptMessage`, one level down. The split itself is one pass over the text and runs whenever
+ * the text changes, which is the only time this draws at all.
+ */
+function AgentReply({
+  mode,
+  text,
+}: {
+  mode: "static" | "streaming";
+  text: string;
+}) {
+  const parts = splitBubbles(text);
+  return (
+    <div className="flex flex-col items-start gap-2">
+      {parts.map((part, index) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: a reply's thoughts keep their order as it streams.
+        <AgentBubble key={index} mode={mode} part={part} />
+      ))}
+    </div>
+  );
+}
+
+const AgentBubble = memo(function AgentBubble({
+  mode,
+  part,
+}: {
+  mode: "static" | "streaming";
+  part: string;
+}) {
+  return (
+    <Bubble
+      align="start"
+      className={cn(AGENT_BUBBLE, holdsBlock(part) && WIDE_BUBBLE)}
+      variant="ghost"
+    >
+      <BubbleContent className={cn(BUBBLE_CONTENT, AGENT_PROSE)}>
+        {/*
+         * A Bot's prose is markdown, and it arrives in pieces.
+         *
+         * Rendered with a streaming-aware renderer rather than an ordinary one: half a fenced code
+         * block or an unclosed bold marker is the NORMAL state for most of a run, and a plain
+         * markdown parser draws that as literal asterisks and backticks until the closing token
+         * arrives, so the answer visibly rewrites itself as it lands. This closes them for the
+         * duration.
+         */}
+        <Streamdown components={markdownComponents} mode={mode}>
+          {part}
+        </Streamdown>
+      </BubbleContent>
+    </Bubble>
   );
 });
 
@@ -1553,7 +1633,8 @@ export function ServerToolLine({
   place?: CardPlace;
 }) {
   const running = result === undefined;
-  const { label, detail } = readToolName(name, running);
+  // Said no on its card: nothing was done, and the line says so rather than naming it as done.
+  const declined = toolResultDeclined(result);
   /*
    * A refusal is not a result, and must not read like one.
    *
@@ -1562,8 +1643,13 @@ export function ServerToolLine({
    * any guess made here. See REFUSAL_MARKER in server/src/plugins/tools.ts.
    */
   const answer = result === undefined ? undefined : asText(result);
-  const refused = answer?.startsWith(REFUSAL_MARKER) ?? false;
-  const failed = !refused && toolResultFailed(result);
+  const refused = !declined && (answer?.startsWith(REFUSAL_MARKER) ?? false);
+  const failed = !refused && !declined && toolResultFailed(result);
+  // A call that did not happen is named plainly ("Send your email"), never as done.
+  const { label, detail } = readToolName(
+    name,
+    refused || failed || declined ? "plain" : running,
+  );
   /*
    * The marker is for this component, not for the reader. Left in, a refusal reads "Blocked" in the
    * label and then "Refused." again in the first two words of the body, which is the same fact three
@@ -1590,15 +1676,17 @@ export function ServerToolLine({
    * THAT TOOL'S OTHER ANSWERS ARE FOR THE MODEL. An app nobody can name comes back as plain text
    * telling the Bot to say so plainly and not to browse to it — an instruction, which read by the
    * person looks like the Bot being told off in front of them. The line still says the check
-   * happened; the Bot's own reply says what it found.
+   * happened; the Bot's own reply says what it found. A decline's answer is the same kind of thing:
+   * it tells the Bot not to try again, and the line has already said what happened.
    */
-  const shown = name === SHOW_APP_ACCESS_TOOL ? undefined : body;
+  const shown = name === SHOW_APP_ACCESS_TOOL || declined ? undefined : body;
   return (
     <ToolLine
       {...(detail ? { detail } : {})}
       label={label}
       refused={refused}
       failed={failed}
+      declined={declined}
       running={running}
     >
       {shown ? (

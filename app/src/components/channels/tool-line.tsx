@@ -1,4 +1,6 @@
+import { IconCircleCheck, IconClock, IconX } from "@tabler/icons-react";
 import type { ReactNode } from "react";
+import { cn } from "@/lib/utils";
 
 /**
  * One line for one thing a Bot did.
@@ -17,10 +19,11 @@ export function ToolLine({
   running,
   refused,
   failed,
+  declined,
   notYet,
   children,
 }: {
-  /** Drawn before the label, small and muted. A group of steps puts its kinds here. */
+  /** Drawn after the label, small and muted. A group of steps puts its kinds here. */
   icon?: ReactNode;
   /** What was done, in a couple of words: "Searched Slack", "Filled in", "Read the page". */
   label: string;
@@ -31,6 +34,8 @@ export function ToolLine({
   refused?: boolean;
   /** It was permitted and did not work. A different request might. */
   failed?: boolean;
+  /** The person said no on its card, so it was not done. Their decision, not a failure. */
+  declined?: boolean;
   /**
    * Nothing was done yet, for an ordinary reason: a computer still starting turned the call away
    * before it reached anything. Muted like a success, because nothing went wrong, and labelled so it
@@ -41,53 +46,102 @@ export function ToolLine({
   children?: ReactNode;
 }) {
   const tone = refused
-    ? "text-destructive"
+    ? "text-status-problem"
     : failed
-      ? "text-amber-600 dark:text-amber-500"
+      ? "text-status-needs"
       : "text-muted-foreground";
-
+  /*
+   * A hairline hook, then a mark saying how it went, then what was done. Only a line that worked
+   * gets the check, in the done colour; a group's own kinds come after the label, where they no
+   * longer compete with the outcome.
+   */
+  const Mark =
+    refused || failed || declined
+      ? IconX
+      : running || notYet
+        ? IconClock
+        : IconCircleCheck;
+  const markTone =
+    refused || failed
+      ? tone
+      : running || notYet || declined
+        ? "text-muted-foreground"
+        : "text-status-done";
   const text = (
-    <span
-      className={`inline-flex min-w-0 max-w-full items-baseline gap-1.5 text-sm ${tone} ${
-        running ? "tool-line-running" : ""
-      }`}
-    >
-      {icon ? <span className="shrink-0 self-center">{icon}</span> : null}
-      <span className="shrink-0">
-        {refused
-          ? `Blocked: ${label}`
-          : failed
-            ? `${label}, didn't work`
-            : notYet
-              ? `${label}, not done yet`
-              : label}
+    <span className="inline-flex min-w-0 max-w-full items-center gap-[7px]">
+      <svg
+        aria-hidden
+        className="mt-[9px] shrink-0 text-muted-foreground"
+        height={14}
+        viewBox="0 0 14 14"
+        width={14}
+      >
+        <path
+          d="M1 13V7a6 6 0 0 1 6-6h6"
+          fill="none"
+          stroke="currentColor"
+          strokeLinecap="round"
+          strokeWidth={1.2}
+        />
+      </svg>
+      <Mark
+        aria-hidden
+        className={cn("size-4 shrink-0", markTone)}
+        stroke={2.2}
+      />
+      <span
+        className={cn(
+          "type-sub inline-flex min-w-0 items-baseline gap-1.5 font-medium",
+          tone,
+          running && "tool-line-running",
+        )}
+      >
+        {/* Cut with an ellipsis rather than run past its row: a summary can be long. */}
+        <span className="min-w-0 truncate">
+          {declined
+            ? `You declined: ${label}`
+            : refused
+              ? `Blocked: ${label}`
+              : failed
+                ? `${label}, didn't work`
+                : notYet
+                  ? `${label}, not done yet`
+                  : label}
+        </span>
+        {detail ? <span className="truncate opacity-70">{detail}</span> : null}
       </span>
-      {detail ? <span className="truncate opacity-70">{detail}</span> : null}
+      {icon ? (
+        <span className="shrink-0 self-center text-muted-foreground">
+          {icon}
+        </span>
+      ) : null}
     </span>
   );
 
-  if (!children) return <div className="my-1.5">{text}</div>;
+  if (!children) return <div className="pl-1">{text}</div>;
 
   return (
-    <details className="tool-line my-1.5 min-w-0">
+    <details className="tool-line min-w-0 pl-1">
       {/*
        * Native <details> owns expansion because SDK tool renderers can be re-invoked independently
-       * of this component's React state.
+       * of this component's React state. The summary is the line, a finger's height tall, and the
+       * chevron after the label says it opens.
        */}
-      <summary className="flex cursor-pointer list-none items-baseline gap-1.5">
+      <summary className="flex min-h-11 cursor-pointer list-none items-center gap-1.5 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+        {text}
         <span
           aria-hidden
-          className="tool-line-chevron shrink-0 text-xs text-muted-foreground transition-transform"
+          className="tool-line-chevron shrink-0 text-muted-foreground text-xs transition-transform motion-reduce:transition-none"
         >
           ▸
         </span>
-        {text}
       </summary>
       {/*
+       * Indented to the label, past the hook and the mark, so the detail reads as belonging to it.
        * Headings are cut down to the size of the surrounding text. A tool result is markdown a
        * server wrote for a model, so its `#` is a section marker rather than a page title.
        */}
-      <div className="mt-2 max-h-80 overflow-auto border-l pl-3 text-xs [&_h1]:text-sm [&_h2]:text-xs [&_h3]:text-xs [&_h4]:text-xs [&_h1]:font-medium [&_h2]:font-medium [&_h3]:font-medium">
+      <div className="mt-2 ml-[45px] max-h-80 overflow-auto border-l pl-3 type-caption [&_h1]:text-sm [&_h2]:text-xs [&_h3]:text-xs [&_h4]:text-xs [&_h1]:font-medium [&_h2]:font-medium [&_h3]:font-medium">
         {children}
       </div>
     </details>
