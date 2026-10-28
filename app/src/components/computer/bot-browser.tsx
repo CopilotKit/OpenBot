@@ -5,10 +5,12 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { type ReactNode, useId } from "react";
 import {
   AddressBar,
+  ClearBrowserDialog,
   latest,
   shownAddress,
   TabPanel,
   TabStrip,
+  useClearBrowserData,
   useOpenedTab,
 } from "@/components/browser/browser-bar";
 import { NarrationRow } from "@/components/browser/narration";
@@ -38,6 +40,7 @@ import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { useComputerControl } from "@/lib/computers/use-control";
 import {
   botBrowserTabsMutationOptions,
+  clearBotBrowserMutationOptions,
   navigateBotBrowserMutationOptions,
   sendBotBrowserNarration,
   startBotBrowserRecordingMutationOptions,
@@ -79,6 +82,8 @@ export function BotBrowserBar({
   const navigate = useMutation(
     navigateBotBrowserMutationOptions(queryClient, botId),
   );
+  const clear = useMutation(clearBotBrowserMutationOptions(queryClient, botId));
+  const clearing = useClearBrowserData(clear);
   const ids = useId();
   const active = state?.tabs.find((tab) => tab.active);
   const newTab = useOpenedTab(active?.id);
@@ -133,6 +138,9 @@ export function BotBrowserBar({
               onNavigated?.();
             }}
             onMove={(action) => navigate.mutate({ action })}
+            // Only for the person holding the wheel, so the browser is never wiped under the Bot. Open or closed: its
+            // data is there either way, and a running recording of theirs is ended by the clear itself.
+            clear={{ disabled: !state.mine, ask: clearing.ask }}
           />
         ) : null}
         {failure ? (
@@ -145,6 +153,13 @@ export function BotBrowserBar({
         ) : null}
         {children}
       </TabPanel>
+      {/* Over the Bot's screen, which is a dialog itself. */}
+      <ClearBrowserDialog
+        clear={clear}
+        open={clearing.asking}
+        onOpenChange={clearing.setAsking}
+        stacked
+      />
     </>
   );
 }

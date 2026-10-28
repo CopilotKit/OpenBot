@@ -111,6 +111,23 @@ export function navigateBrowserMutationOptions(queryClient: QueryClient) {
   });
 }
 
+/**
+ * Wipes the person's browser: cookies, saved passwords, history and site storage, which signs it out of everything. One
+ * that was open opens again, fresh; the answer is the browser after it.
+ */
+export function clearBrowserMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: async (): Promise<BrowserApiState> =>
+      (
+        await client(browserApiPaths.clear, {
+          method: "POST",
+          fallback: "Couldn't clear your browser. Try again.",
+        })
+      ).json(),
+    onSettled: () => invalidateBrowser(queryClient),
+  });
+}
+
 type Unsent<T> = T extends unknown ? Omit<T, "sentAt"> : never;
 /** A narration post as the page makes it: `sentAt` is stamped as it leaves (`sendNarration`). */
 export type NarrationPost = Unsent<BrowserNarrationRequest>;

@@ -282,6 +282,11 @@ export interface ComputerGateway {
     botId: string,
     actor: ActionActor,
   ): Promise<{ cleared: boolean }>;
+  /**
+   * A Bot's browser was cleared by the person holding its wheel (browser/bot-browser.ts), its profile already gone on
+   * the computer: the row for it, then the snapshot and the screenshots kept of its pages, as `resetComputer` does.
+   */
+  browserCleared(botId: string, actor: ActionActor): Promise<void>;
   /** Move a computer onto the current image, keeping its files and sign-ins. */
   updateComputer(botId: string, actor: ActionActor): Promise<ComputerUpdate>;
 }
@@ -946,6 +951,20 @@ export function createComputerGateway(
       return result;
     },
 
+    async browserCleared(botId: string, actor: ActionActor) {
+      // Written first, as a reset's is: the profile is gone already, and a failure in the clears below must not leave
+      // the wipe with nothing on the trail to say who made it. That failure still reaches the caller.
+      await writeControlEvent(auditStore, "computer.browser_cleared", {
+        botId,
+        actor,
+        reason:
+          "a person holding control cleared the browser: its cookies, saved passwords, history and site storage",
+      });
+      // The refs and the pictures of signed-in pages go with the profile, for the reasons `resetComputer` gives.
+      await snapshots.clear(botId);
+      await pageFrames?.clear(botId);
+    },
+
     /**
      * Asking for a secret, and supplying one.
      *
@@ -1459,6 +1478,7 @@ async function writeControlEvent(
     | "computer.secret_supplied"
     | "computer.stopped"
     | "computer.reset"
+    | "computer.browser_cleared"
     | "computer.updated",
   entry: {
     botId: string;

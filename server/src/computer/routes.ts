@@ -980,8 +980,9 @@ async function act(
  */
 const DEV_ACTOR_EMAIL = "dev@openbot.local";
 
-/** The audit identity derived from the signed-in actor, with the same FK rule as every acting call. */
-function actorOf(record: AppVariables["actor"]): ActionActor {
+/** The audit identity derived from the signed-in actor, with the same FK rule as every acting call. A Bot's browser's
+ * routes, which sit under these, use it too (browser/bot-browser.ts). */
+export function actorOf(record: AppVariables["actor"]): ActionActor {
   return {
     id: record.id,
     // Only a real users row may go in the audit table's foreign key column. The local development

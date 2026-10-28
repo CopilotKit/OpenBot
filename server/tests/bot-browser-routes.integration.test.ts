@@ -10,6 +10,7 @@ import {
   BOT_BROWSER_VIA,
   type BotBrowserApiState,
   type BotBrowserState,
+  botBrowserComputerClearRequestSchema,
   botBrowserComputerPaths,
   botBrowserComputerRecordingRequestSchema,
 } from "@openbot/shared/bot-browser";
@@ -355,6 +356,32 @@ const computer = Bun.serve({
         endRecording(bot);
         return Response.json(bot.state);
       }
+      case botBrowserComputerPaths.clear: {
+        const parsed = botBrowserComputerClearRequestSchema.safeParse(body);
+        if (!parsed.success)
+          return Response.json({ error: "Bad request." }, { status: 400 });
+        if (!holds() || bot.control.heldBy !== parsed.data.by)
+          return conflict(
+            "Only the person holding control of this Bot's browser can clear it. Take control first.",
+          );
+        // As the computer clears it: a recording there ends and its Recorder lets the person go, the profile goes, and
+        // the browser starts again with nothing in it, the wheel still the person's.
+        bot.connection = undefined;
+        bot.startedBy = undefined;
+        bot.state = {
+          open: true,
+          tabs: [
+            {
+              id: "fresh",
+              url: "about:blank",
+              title: "about:blank",
+              active: true,
+            },
+          ],
+          recorder: recorderIdle(),
+        };
+        return Response.json(bot.state);
+      }
       case botBrowserComputerPaths.narration: {
         if (!bot.state.recordingBy)
           return conflict("Nothing is being recorded.");
@@ -698,8 +725,18 @@ describe("through OpenBot's own HTTP server", () => {
       expect((at(rest) ?? 0) * 1000).toBeGreaterThan(
         CALL_BUDGET_MS + STATE_TIMEOUT_MS,
       );
+    // A clear ends a recording and waits for the last of it, wipes the browser and starts it again.
+    expect((at("/clear") ?? 0) * 1000).toBeGreaterThan(
+      OPEN_BUDGET_MS + STATE_TIMEOUT_MS,
+    );
     // Under the largest idle timeout Bun.serve takes.
-    for (const rest of ["/recording", "/tabs", "/navigate", "/narration"])
+    for (const rest of [
+      "/recording",
+      "/tabs",
+      "/navigate",
+      "/narration",
+      "/clear",
+    ])
       expect(at(rest)).toBeLessThanOrEqual(255);
     expect(at("")).toBeUndefined();
     expect(botBrowserRequestSeconds("/api/browser/recording")).toBeUndefined();
@@ -1088,5 +1125,83 @@ describe("recording in a Bot's browser", () => {
       reason: "not-started",
     });
     expect(lastPushed()).toEqual(OWN_POLICY);
+  });
+});
+
+describe("clearing a Bot's browser", () => {
+  const clears = () =>
+    botOf(BOT).history.filter((path) => path === botBrowserComputerPaths.clear)
+      .length;
+  const clear = (as: keyof typeof PEOPLE) =>
+    call(browser("/clear"), { method: "POST", as });
+
+  test("only the person holding the wheel clears it: never under the Bot, never by someone watching, and it is on the trail", async () => {
+    // Whoever held it last, the Bot has the wheel back now.
+    wheelBackOnItsOwn(BOT);
+    await stateFor("ada");
+    const before = clears();
+    const audited = auditsOf("computer.browser_cleared").length;
+
+    expect((await clear("cy")).status).toBe(404);
+    const underTheBot = await clear("ada");
+    expect(underTheBot.status).toBe(409);
+    expect(await underTheBot.json()).toEqual({
+      error: "Take control of the Bot's browser first.",
+    });
+    const requestId = await takeWheel("ada");
+    // Ben may use the Bot, but the wheel is Ada's.
+    expect((await clear("ben")).status).toBe(409);
+    expect(clears()).toBe(before);
+    expect(auditsOf("computer.browser_cleared")).toHaveLength(audited);
+
+    // Ada is recording when she clears it.
+    expect((await record("ada", "Before the clear")).status).toBe(200);
+    expect(await held()).toHaveLength(1);
+    const cleared = await clear("ada");
+    expect(cleared.status).toBe(200);
+    expect(await cleared.json()).toMatchObject({
+      open: true,
+      mine: true,
+      recordingIsMine: false,
+      tabs: [{ url: "about:blank", active: true }],
+    });
+    expect(clears()).toBe(before + 1);
+    // Who cleared which Bot's browser, as a reset is recorded.
+    expect(auditsOf("computer.browser_cleared").slice(audited)).toEqual([
+      expect.objectContaining({
+        targetType: "computer",
+        targetId: BOT,
+        actorUserId: ada.id,
+        payload: expect.objectContaining({ bot: BOT, actor: ada.id }),
+      }),
+    ]);
+    // The recording ended with the clear: its connection goes, and the Bot is pushed its own policy again.
+    expect(await held()).toEqual([]);
+    expect(lastPushed()).toEqual(OWN_POLICY);
+    // And the wheel is still hers.
+    expect((await stateFor("ada")).mine).toBe(true);
+    await handBack("ada", requestId);
+  });
+
+  test("a clear the trail cannot take is said, for the person, rather than answered as done", async () => {
+    const requestId = await takeWheel("ada");
+    auditFails = "computer.browser_cleared";
+    try {
+      const cleared = await clear("ada");
+      expect(cleared.status).toBe(500);
+      expect(await cleared.json()).toEqual({
+        error:
+          "The Bot's browser was cleared, but OpenBot couldn't finish. Clear it again.",
+      });
+    } finally {
+      auditFails = null;
+    }
+    // Cleared again, it is recorded.
+    expect((await clear("ada")).status).toBe(200);
+    expect(auditsOf("computer.browser_cleared").at(-1)).toMatchObject({
+      targetId: BOT,
+      actorUserId: ada.id,
+    });
+    await handBack("ada", requestId);
   });
 });

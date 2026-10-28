@@ -49,7 +49,37 @@ export const botBrowserComputerPaths = {
   recording: "/bot-browser/recording",
   /** POST `BrowserNarrationRequest`, on the server's clock. 409 unless a recording is running. */
   narration: "/bot-browser/narration",
+  /**
+   * POST `BotBrowserComputerClearRequest`: wipe the Bot's browser (see CLEARING A BROWSER below) and start it again,
+   * fresh. 409 unless `by` holds the wheel. Answers the fresh browser's `BotBrowserState`.
+   */
+  clear: "/bot-browser/clear",
 } as const;
+
+/*
+ * CLEARING A BROWSER: what a person does when its data has gone wrong, for a Bot's browser (only by the person holding
+ * its wheel, so it is never wiped under the Bot mid-task) and for the person's own (`browserComputerPaths.clear`).
+ *
+ * The whole profile goes: cookies, cache, saved passwords, history, site storage, and the Recorder's own storage. A
+ * recording running there ends first, and what it has not sent yet is waited for. The computer closes the browser,
+ * deletes its user data directory, and forgets the page it described; the server forgets the snapshots and the
+ * screenshots it kept of its pages. Nothing else on the computer goes (a Bot's files stay), and nor do OpenBot's
+ * Passwords, which are OpenBot's and never were the browser's. A person holding a Bot's wheel keeps it: the browser
+ * starts again under them.
+ *
+ * Deleted while closed, rather than cleared through DevTools (`Storage.clearDataForOrigin`, `Network.clearBrowserCookies`),
+ * which clear one origin's site storage or every cookie but not history, saved passwords or an extension's own storage,
+ * and so leave a browser partly what it was.
+ */
+export const botBrowserComputerClearRequestSchema = z
+  .object({
+    /** The person who pressed Clear; must be `heldBy`. */
+    by: z.string().min(1).max(200),
+  })
+  .strict();
+export type BotBrowserComputerClearRequest = z.infer<
+  typeof botBrowserComputerClearRequestSchema
+>;
 
 /** What the server sends the computer: the app's request, plus who pressed Record and their connection. */
 export const botBrowserComputerRecordingRequestSchema = z.discriminatedUnion(
@@ -111,6 +141,10 @@ export const botBrowserApiPaths = {
   /** POST `BrowserNarrationRequest`. 409 unless the running recording is the caller's. */
   narration: (botId: string) =>
     `/api/computers/${encodeURIComponent(botId)}/browser/narration`,
+  /** POST, no body: clear the Bot's browser (CLEARING A BROWSER, above). Answers `BotBrowserApiState`, the fresh
+   * browser. 409 unless the caller holds the wheel. Audited as `computer.browser_cleared`. */
+  clear: (botId: string) =>
+    `/api/computers/${encodeURIComponent(botId)}/browser/clear`,
 } as const;
 
 export type BotBrowserApiState = BotBrowserState & {

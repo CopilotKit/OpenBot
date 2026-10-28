@@ -68,12 +68,17 @@ function ToastPortal({ ...props }: ToastPrimitive.Portal.Props) {
   return <ToastPrimitive.Portal data-slot="toast-portal" {...props} />;
 }
 
+/**
+ * Above every dialog (`z-50`, the layer dialogs, their backdrops and the Bot's full-size screen share). On the same
+ * layer the dialog opened last is drawn over it, and the Toaster is in the page long before any dialog opens, so a toast
+ * raised while one was open (Clear browser data, in a Bot's screen) was drawn behind it, where nobody could read it.
+ */
 function ToastViewport({ className, ...props }: ToastPrimitive.Viewport.Props) {
   return (
     <ToastPrimitive.Viewport
       data-slot="toast-viewport"
       className={cn(
-        "pointer-events-none fixed inset-x-4 bottom-4 z-50 mx-auto w-auto max-w-sm outline-none sm:right-4 sm:left-auto sm:mx-0 sm:w-full",
+        "pointer-events-none fixed inset-x-4 bottom-4 z-60 mx-auto w-auto max-w-sm outline-none sm:right-4 sm:left-auto sm:mx-0 sm:w-full",
         className,
       )}
       {...props}

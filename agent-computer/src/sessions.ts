@@ -179,17 +179,31 @@ export function createSessions(options: SessionsOptions) {
      * on its own when a session is genuinely new, and zeroing it here would hand the server a fresh
      * generation one under a fresh run for a counter that never restarted.
      */
-    renewRun(botId: string): string {
+    renewRun(
+      botId: string,
+      {
+        keepWheel = false,
+      }: {
+        /**
+         * The browser went because the person holding the wheel cleared it, which is not a restart under them: they
+         * keep the wheel and work the fresh browser. Every ref handed out before is retired all the same.
+         */
+        keepWheel?: boolean;
+      } = {},
+    ): string {
       const existing = sessions.get(botId);
       // Nothing to renew: a Bot nobody has touched yet gets a session, and its run is already new.
       if (!existing) return sessionFor(botId).run;
       // A browser that closed or was replaced underneath the request is a restart, so its page stays
       // for a request raised from the blank browser that follows. A deliberate stop or reset clears
-      // it straight after, in its own route.
-      existing.control.interrupt(
-        "The browser was stopped or replaced; request help again to continue.",
-        { keepPage: true },
-      );
+      // it straight after, in its own route. A clear leaves the wheel where it is, and retires the
+      // refs as the interruption would have.
+      if (keepWheel) existing.snapshotId += 1;
+      else
+        existing.control.interrupt(
+          "The browser was stopped or replaced; request help again to continue.",
+          { keepPage: true },
+        );
       existing.livePage = undefined;
       existing.browserContext = undefined;
       existing.run = mintRun();

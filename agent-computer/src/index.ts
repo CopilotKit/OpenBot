@@ -328,10 +328,19 @@ const profiles = createProfiles(
  * The OpenBot Browser: a person's own browser with the Recorder in it, opened for them by the
  * server. See browser-host.ts, and person-access.ts for what a person's browser id may do here.
  */
+/**
+ * A browser being cleared by the person working it is forgotten as a closed one is (a new run, no page), with the wheel
+ * left where it is: the browser starts again under them (profiles.ts, `clear`).
+ */
+const forgetClearedBrowser = (botId: string) => {
+  if (sessions.get(botId)) sessions.renewRun(botId, { keepWheel: true });
+};
+
 const browserHost = createBrowserHost({
   profiles,
   recorderDir: () => process.env[RECORDER_DIR_ENV],
   navigationTimeoutMs: NAVIGATION_TIMEOUT_MS,
+  forget: forgetClearedBrowser,
 });
 
 /**
@@ -345,6 +354,7 @@ const botBrowser = createBotBrowserHost({
   drove: (botId) => {
     sessions.for(botId).humanInputs += 1;
   },
+  forget: forgetClearedBrowser,
   navigationTimeoutMs: NAVIGATION_TIMEOUT_MS,
 });
 

@@ -27,6 +27,7 @@ import { act, cleanup, render, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { type ReactNode, StrictMode } from "react";
 import { BrowserPage } from "@/components/browser/browser-page";
+import { Toaster, toast } from "@/components/ui/toast";
 import type { Recognition } from "@/lib/browser/narration";
 import { queryClient } from "@/query-client";
 import { installChrome } from "./browser-narration.fixture";
@@ -253,6 +254,29 @@ async function server(path: string, init?: RequestInit): Promise<Response> {
       };
     return Response.json(state);
   }
+  if (path === browserApiPaths.clear && method === "POST") {
+    if (body !== undefined) return refuse();
+    // As the server clears it: the computer wipes the browser, and one that was open opens again fresh, its Recorder
+    // connected anew, one empty tab and nothing recording.
+    state = {
+      ...state,
+      recorder: {
+        connected: true,
+        phase: "idle",
+        actions: 0,
+        narration: state.narration ?? "external",
+      },
+      tabs: [
+        {
+          id: "tab-fresh",
+          url: "about:blank",
+          title: "about:blank",
+          active: true,
+        },
+      ],
+    };
+    return Response.json(state);
+  }
   if (path === browserApiPaths.navigate && method === "POST") {
     return browserNavigateRequestSchema.safeParse(body).success
       ? Response.json(state)
@@ -346,11 +370,18 @@ afterEach(() => {
   delete speechGlobals.webkitSpeechRecognition;
 });
 
-/** Drawn as the app draws it: strict mode, the app's one query client, a router. */
+/** Drawn as the app draws it: strict mode, the app's one query client, a router, and its toasts. */
 function draw(ui: ReactNode) {
   const router = createRouter({
     history: createMemoryHistory({ initialEntries: ["/"] }),
-    routeTree: createRootRoute({ component: () => ui }),
+    routeTree: createRootRoute({
+      component: () => (
+        <>
+          {ui}
+          <Toaster />
+        </>
+      ),
+    }),
   });
   return render(
     <StrictMode>
@@ -1634,3 +1665,61 @@ function installRefusingChrome(onDevice: OnDeviceModel = everyLanguage()) {
     withOnDevice(RefusingRecognition, onDevice);
   return chrome;
 }
+
+test("on hosted OpenBot Clear browser data asks first in one sentence, Cancel does nothing, and Clear shows the browser fresh", async () => {
+  state = screenState();
+  openAnswer = answerFor("screen");
+  const view = draw(<BrowserPage />);
+  await view.findByLabelText(SCREEN);
+  const user = userEvent.setup({ document });
+  const clears = () =>
+    writes.filter((write) => write.path === browserApiPaths.clear);
+  const tabNames = () =>
+    within(view.getByRole("tablist", { name: "Tabs" }))
+      .getAllByRole("tab")
+      .map((tab) => tab.textContent);
+
+  await user.click(view.getByRole("button", { name: "Clear browser data" }));
+  const confirm = within(
+    await view.findByRole("dialog", { name: "Clear this browser?" }),
+  );
+  expect(
+    confirm.getByText(
+      "Cookies, saved passwords and history are wiped. You'll have to sign in everywhere again.",
+    ),
+  ).toBeTruthy();
+  await user.click(confirm.getByRole("button", { name: "Cancel" }));
+  await waitFor(() =>
+    expect(
+      view.queryByRole("dialog", { name: "Clear this browser?" }),
+    ).toBeNull(),
+  );
+  expect(clears()).toEqual([]);
+  expect(tabNames()).toEqual(["Example Domain", "New tab"]);
+
+  await user.click(view.getByRole("button", { name: "Clear browser data" }));
+  await user.click(
+    within(
+      await view.findByRole("dialog", { name: "Clear this browser?" }),
+    ).getByRole("button", { name: "Clear" }),
+  );
+  await waitFor(() => expect(tabNames()).toEqual(["New tab"]));
+  // One POST, with no body: the route takes none.
+  expect(
+    clears().map((write) => [write.method, write.body !== undefined]),
+  ).toEqual([["POST", false]]);
+  expect(
+    view.queryByRole("dialog", { name: "Clear this browser?" }),
+  ).toBeNull();
+  expect(
+    (view.getByRole("textbox", { name: "Address" }) as HTMLInputElement).value,
+  ).toBe("");
+  await waitFor(() =>
+    expect(
+      [...document.querySelectorAll("[data-slot=toast]")].map(
+        (each) => each.textContent,
+      ),
+    ).toEqual(["Browser cleared"]),
+  );
+  toast.close();
+});

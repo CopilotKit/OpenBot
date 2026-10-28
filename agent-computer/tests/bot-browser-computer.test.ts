@@ -35,8 +35,16 @@ const BOT = "sales-bot";
 const PERSON = "person-fedcba9876543210fedcba9876543210";
 const FIXTURE = join(import.meta.dir, "fixtures", "recorder");
 
-type FixtureCall = { method: string; input: unknown; front: string };
+type FixtureCall = {
+  method: string;
+  input: unknown;
+  front: string;
+  /** Whether the last of a stopped recording was still on its way to Intelligence when the call came. */
+  sending?: boolean;
+};
 const calls: FixtureCall[] = [];
+/** How long the last of a stopped recording takes to reach Intelligence, as this OpenBot tells the fixture Recorder. */
+let tailMs = 0;
 
 type Computer = { base: string; child: ReturnType<typeof Bun.spawn> };
 const computers: Computer[] = [];
@@ -166,6 +174,22 @@ beforeAll(async () => {
       }
       if (url.pathname === "/api/recorder/me")
         return Response.json({ user: connection().user });
+      if (url.pathname === "/fixture/tail")
+        return Response.json({ ms: tailMs });
+      // A cookie kept for an hour, as a site keeps a sign-in: it outlives the browser closing.
+      if (url.pathname === "/set-cookie")
+        return new Response("<!doctype html><title>set</title>", {
+          headers: {
+            "content-type": "text/html; charset=utf-8",
+            "set-cookie": "signed-in=yes; Max-Age=3600; Path=/",
+          },
+        });
+      // The cookies the browser sent, as the page's title.
+      if (url.pathname === "/cookies")
+        return new Response(
+          `<!doctype html><title>cookies:${request.headers.get("cookie") ?? ""}</title>`,
+          { headers: { "content-type": "text/html; charset=utf-8" } },
+        );
       // Busy 20 ms on every key down, and writes every key it receives into its title, in the order it received them.
       if (url.pathname === "/keys")
         return new Response(
@@ -194,7 +218,13 @@ beforeAll(async () => {
 afterAll(async () => {
   if (!asked) return;
   for (const running of computers) {
-    for (const botId of [BOT, "other-bot", "source-bot", "typed-bot"])
+    for (const botId of [
+      BOT,
+      "other-bot",
+      "source-bot",
+      "typed-bot",
+      "clear-bot",
+    ])
       await call("/computers/stop", { body: {}, botId, on: running }).catch(
         () => undefined,
       );
@@ -534,6 +564,124 @@ describe.skipIf(!asked)(
     }, 60_000);
   },
 );
+
+describe.skipIf(!asked)("clearing a Bot's browser", () => {
+  const botId = "clear-bot";
+  const on = (path: string, body?: unknown) =>
+    call<BotBrowserState>(path, { body, botId });
+  const clear = (by: string) => on("/bot-browser/clear", { by });
+  /** The cookies the Bot's browser sends, read by the Bot itself. */
+  const botSees = async () =>
+    (
+      await call<{ title: string }>("/navigate", {
+        body: { url: `${origin}/cookies` },
+        botId,
+      })
+    ).json.title;
+  /** The cookies the Bot's browser sends, read through the bar by the person holding the wheel. */
+  const personSees = async () => {
+    const there = await on("/bot-browser/navigate", {
+      url: `${origin}/cookies`,
+    });
+    expect(there.status).toBe(200);
+    return there.json.tabs.find((tab) => tab.active)?.title;
+  };
+
+  test("only the person holding the wheel clears it: their recording ends first, the profile goes and the Bot's files stay, and the browser starts fresh under them", async () => {
+    // The Bot signs in somewhere (a cookie kept for an hour) and keeps a note in its files.
+    expect(
+      (
+        await call("/navigate", {
+          body: { url: `${origin}/set-cookie` },
+          botId,
+        })
+      ).status,
+    ).toBe(200);
+    expect(await botSees()).toBe("cookies:signed-in=yes");
+    expect(
+      (
+        await call("/files/write", {
+          body: { path: "notes.md", contents: "Keep me." },
+          botId,
+        })
+      ).status,
+    ).toBe(200);
+
+    // Never under the Bot, and never by someone who is only watching.
+    expect((await clear("user-1")).status).toBe(409);
+    const asked = await call<ComputerControlState>("/control/request", {
+      body: { reason: "I want to take control of the browser." },
+      botId,
+    });
+    const requestId = asked.json.request?.id;
+    expect(
+      (
+        await call("/control/take", {
+          body: { requestId, by: "user-1" },
+          botId,
+        })
+      ).status,
+    ).toBe(200);
+    const refused = await clear("user-2");
+    expect(refused.status).toBe(409);
+    expect(refused.json as unknown).toEqual({
+      error:
+        "Only the person holding control of this Bot's browser can clear it. Take control first.",
+    });
+    expect(await personSees()).toBe("cookies:signed-in=yes");
+
+    // A recording of theirs is running, and the last of it takes a moment to reach Intelligence after Stop.
+    expect(
+      (
+        await on("/bot-browser/recording", {
+          action: "start",
+          title: "Before the clear",
+          by: "user-1",
+          connection: connection(),
+        })
+      ).status,
+    ).toBe(200);
+    tailMs = 1_500;
+    calls.length = 0;
+    const cleared = await clear("user-1");
+    tailMs = 0;
+    expect(cleared.status).toBe(200);
+    // Stopped, waited for, and let go, before the browser was wiped.
+    expect(calls.map((each) => each.method)).toEqual(["record", "disconnect"]);
+    expect(calls[0]?.input).toEqual({ action: "stop" });
+    expect(calls[1]?.sending).toBe(false);
+    // Fresh: one empty tab, nothing recording, the Recorder in it again and connected to nobody.
+    expect(cleared.json.open).toBe(true);
+    expect(cleared.json.recordingBy).toBeUndefined();
+    expect(cleared.json.tabs).toEqual([
+      expect.objectContaining({ url: "about:blank", active: true }),
+    ]);
+    expect(cleared.json.recorder).toMatchObject({
+      connected: false,
+      phase: "idle",
+    });
+    // Still theirs: the wheel stayed with them, and the bar works the fresh browser.
+    expect(
+      (await call<ComputerControlState>("/control", { botId })).json,
+    ).toMatchObject({
+      holder: "human",
+      heldBy: "user-1",
+      recoveryRequired: false,
+    });
+    // Signed out: the cookie went with the profile, where only closing the browser would have kept it.
+    expect(await personSees()).toBe("cookies:");
+    // The Bot's files are its own, and stay.
+    expect(
+      await Bun.file(
+        join(root, "with-recorder", "workspace", "notes.md"),
+      ).text(),
+    ).toBe("Keep me.");
+
+    expect(
+      (await call("/control/release", { body: { requestId }, botId })).status,
+    ).toBe(200);
+  }, 90_000);
+});
 
 describe.skipIf(!asked)("a person's keys on a Bot's live screen", () => {
   test("reach the page in the order they were typed, however long each takes to land", async () => {

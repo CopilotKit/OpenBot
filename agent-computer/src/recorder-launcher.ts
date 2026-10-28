@@ -41,6 +41,52 @@ export class RecorderUnavailableError extends Error {
   }
 }
 
+/**
+ * How long ending a recording waits for the last of it to reach Intelligence before the Recorder is let go all the
+ * same (`untilSent`): a rejoin and a push, each given the gateway's own timeout (`PHOENIX_TIMEOUT_MS`, 10 s, in
+ * `extension/src/offscreen/phoenix-session.ts`; `bot-browser.test.ts` keeps the two in step). Well inside the 45 s
+ * the server gives a call to the computer, so Stop, a hand-back and a clear still answer, and the server revokes the
+ * person's connection only after.
+ */
+export const SENDING_WAIT_MS = 2 * 10_000;
+/** How often the Recorder is asked whether the last of a recording has gone (`untilSent`). */
+const SENDING_POLL_MS = 250;
+
+/**
+ * Wait, after a Stop, until the Recorder says the last of the recording it stopped has reached Intelligence
+ * (`lastStopped.sending` gone), or `waitMs` runs out. Answers its newest report, and whether it was still sending when
+ * the wait ran out.
+ *
+ * WHY. Stop answers once the recording's outcome is queued; the rest goes to Intelligence after, and until it has gone
+ * it is kept in the Recorder's own storage. Whoever lets the Recorder go after a Stop waits on this first: a disconnect
+ * keeps what is not sent for the person's next connection in that browser, and clearing the browser deletes that
+ * storage outright.
+ */
+export async function untilSent(
+  launcher: Pick<LauncherApi, "state">,
+  report: LauncherState | undefined,
+  waitMs: number,
+): Promise<{ report: LauncherState | undefined; stillSending: boolean }> {
+  const recordingId = report?.lastStopped?.recordingId;
+  if (!recordingId || !report?.lastStopped?.sending)
+    return { report, stillSending: false };
+  const deadline = Date.now() + waitMs;
+  let latest = report;
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, SENDING_POLL_MS));
+    // A Recorder too busy to answer is asked again, within the bound.
+    const now = await launcher.state().catch(() => undefined);
+    if (!now) continue;
+    latest = now;
+    if (
+      now.lastStopped?.recordingId !== recordingId ||
+      !now.lastStopped.sending
+    )
+      return { report: now, stillSending: false };
+  }
+  return { report: latest, stillSending: true };
+}
+
 /** How long a worker that is starting gets to appear and define its launcher. */
 const WORKER_START_MS = 10_000;
 /** How long one launcher call may take. Starting a recording attaches the debugger to a tab. */

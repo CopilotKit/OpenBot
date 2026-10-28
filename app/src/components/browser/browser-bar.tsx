@@ -2,11 +2,13 @@ import type { BrowserTab } from "@openbot/shared/openbot-browser";
 import {
   IconArrowLeft,
   IconArrowRight,
+  IconEraser,
   IconPlus,
   IconReload,
   IconWorld,
   IconX,
 } from "@tabler/icons-react";
+import type { UseMutationResult } from "@tanstack/react-query";
 import {
   type KeyboardEvent,
   type ReactNode,
@@ -17,17 +19,27 @@ import {
 } from "react";
 import { Button } from "@/components/ui/button";
 import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   InputGroup,
   InputGroupAddon,
   InputGroupInput,
 } from "@/components/ui/input-group";
+import { toast } from "@/components/ui/toast";
 import { addressFrom } from "@/lib/browser/address";
 import { cn } from "@/lib/utils";
 
 /*
- * THE BAR ABOVE A BROWSER SHOWN IN THE PAGE: its tabs, then back, forward, reload and the address. One component for
- * both browsers a person works in through OpenBot, their own (the Browser page, hosted) and a Bot's (the Bot's screen),
- * so the two never drift into two different browsers.
+ * THE BAR ABOVE A BROWSER SHOWN IN THE PAGE: its tabs, then back, forward, reload, Clear browser data and the address.
+ * One component for both browsers a person works in through OpenBot, their own (the Browser page, hosted) and a Bot's
+ * (the Bot's screen), so the two never drift into two different browsers.
  */
 
 /**
@@ -261,6 +273,9 @@ export function TabPanel({
  *
  * `focus` takes the focus into the address, as Chrome does for a tab the person has just opened, so they can type
  * where to go at once; `onFocused` says it has, so it happens once rather than every time they come back to the tab.
+ *
+ * `clear` draws Clear browser data beside reload, which asks first (`ClearBrowserDialog`). Only the button is here: the
+ * bar is drawn again for each tab and each change of the wheel, and the question must not close with it.
  */
 export function AddressBar({
   address,
@@ -270,6 +285,7 @@ export function AddressBar({
   onFocused,
   onGo,
   onMove,
+  clear,
 }: {
   address: string;
   disabled: boolean;
@@ -278,6 +294,7 @@ export function AddressBar({
   onFocused?: () => void;
   onGo: (url: string) => void;
   onMove: (action: "back" | "forward" | "reload") => void;
+  clear?: { disabled: boolean; ask: () => void };
 }) {
   const [draft, setDraft] = useState<string | null>(null);
   const input = useRef<HTMLInputElement>(null);
@@ -329,6 +346,18 @@ export function AddressBar({
       >
         <IconReload />
       </Button>
+      {clear ? (
+        <Button
+          aria-label="Clear browser data"
+          disabled={clear.disabled}
+          onClick={clear.ask}
+          size="icon-sm"
+          title="Clear browser data"
+          variant="ghost"
+        >
+          <IconEraser />
+        </Button>
+      ) : null}
       <InputGroup className="ml-1 h-8 flex-1 bg-background text-sm">
         <InputGroupInput
           aria-label="Address"
@@ -349,6 +378,101 @@ export function AddressBar({
         </InputGroupAddon>
       </InputGroup>
     </form>
+  );
+}
+
+/** The browser's own clear (the person's browser's or a Bot's), as `useMutation` gives it. */
+type ClearMutation = Pick<
+  UseMutationResult<unknown, Error, void>,
+  "mutate" | "isPending" | "error" | "reset"
+>;
+
+/**
+ * CLEAR BROWSER DATA: one button beside reload (`AddressBar`'s `clear`), and a confirmation short enough to be read,
+ * because the browser's data can go wrong and wiping it is the way back (`shared/bot-browser.ts`, CLEARING A BROWSER).
+ * Everything it is signed in to goes with it, which is the one thing the confirmation says. Cancel does nothing; Clear
+ * wipes it, the browser starts again fresh, and a toast says so.
+ *
+ * This is the question being asked, kept by whoever draws the bar rather than by the bar, and `ask` for the button.
+ */
+export function useClearBrowserData(clear: ClearMutation) {
+  const [asking, setAsking] = useState(false);
+  return {
+    asking,
+    setAsking,
+    ask: () => {
+      clear.reset();
+      setAsking(true);
+    },
+  };
+}
+
+/**
+ * The confirmation Clear browser data asks (`useClearBrowserData`). A refusal is said in it, where Clear was pressed.
+ * `stacked` is a confirmation opened over another dialog (the Bot's screen), which then gets its own backdrop: Base UI
+ * draws none for a nested dialog unless asked.
+ */
+export function ClearBrowserDialog({
+  clear,
+  open,
+  onOpenChange,
+  stacked = false,
+}: {
+  clear: ClearMutation;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  stacked?: boolean;
+}) {
+  return (
+    <Dialog onOpenChange={onOpenChange} open={open}>
+      <DialogContent
+        {...(stacked
+          ? {
+              overlayClassName:
+                "bg-black/20 supports-backdrop-filter:backdrop-blur-sm",
+            }
+          : {})}
+      >
+        <DialogHeader>
+          <DialogTitle>Clear this browser?</DialogTitle>
+          <DialogDescription>
+            Cookies, saved passwords and history are wiped. You'll have to sign
+            in everywhere again.
+          </DialogDescription>
+        </DialogHeader>
+        {clear.error ? (
+          <DialogBody className="mt-4">
+            <p className="text-destructive text-sm" role="alert">
+              {clear.error.message}
+            </p>
+          </DialogBody>
+        ) : null}
+        <DialogFooter className="mt-4">
+          <Button
+            onClick={() => onOpenChange(false)}
+            size="sm"
+            variant="outline"
+          >
+            Cancel
+          </Button>
+          <Button
+            disabled={clear.isPending}
+            onClick={() =>
+              clear.mutate(undefined, {
+                onSuccess: () => {
+                  onOpenChange(false);
+                  toast.add({ title: "Browser cleared", type: "success" });
+                },
+              })
+            }
+            size="sm"
+            variant="destructive"
+          >
+            {clear.isPending ? "Clearing…" : "Clear"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

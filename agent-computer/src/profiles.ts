@@ -1104,6 +1104,46 @@ export function createProfiles(
     },
 
     /**
+     * Wipe this browser's data, at the request of the person working it (`shared/bot-browser.ts`, CLEARING A BROWSER):
+     * closed, its whole profile deleted, and nothing recreated, as `reset` does to the profile.
+     *
+     * NOT A CLOSE ANYTHING WATCHING IS TOLD OF. Every other close announces itself (`onClosed`), which ends the live
+     * screen and hands the wheel back to the Bot, because a browser that went from under a person is a restart they
+     * have to look at again. This one is the person's own doing, and the browser is about to start again under them,
+     * as the half-dead browser `page` drops is swapped: the live screen's follow loop finds the fresh one within the
+     * second, and the wheel stays where it is. `forget` is told after the close and before anything can start the
+     * browser again, so the computer forgets the browser it described (its run, its page) before the fresh one is
+     * seen. Whatever has to happen while the browser can still be told (a recording ending) is the caller's, first.
+     *
+     * Its session cookies are not written on the way out: they are part of what goes. Answers whether a browser was
+     * running.
+     */
+    async clear(botId: string, forget: () => void): Promise<boolean> {
+      let wasRunning = false;
+      await whileClosing(botId, async () => {
+        // A launch it is racing finishes first, and is closed with the rest, as a reset closes it.
+        await settleWithin(starting.get(botId), LAUNCH_WAIT_MS);
+        const running = live.get(botId);
+        if (running) {
+          wasRunning = true;
+          live.delete(botId);
+          console.info(
+            JSON.stringify({
+              type: "computer-browser-closed",
+              botId,
+              reason: "its data was cleared",
+            }),
+          );
+          await running.sessionCookies?.stop();
+          await closeAndWait(running.context);
+        }
+        forget();
+        await rm(directoryFor(botId), { recursive: true, force: true });
+      });
+      return wasRunning;
+    },
+
+    /**
      * Every Bot that has a computer, whether or not one is running.
      *
      * Read from disk rather than from memory, because a Bot's computer exists as long as its profile

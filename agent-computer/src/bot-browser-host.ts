@@ -14,8 +14,9 @@
  *
  * A RECORDING ENDS WHEN THE WHEEL LEAVES ITS PERSON. The control says so (`onWheelLeft`): they hand it back, the
  * request they took is cancelled, a stop or reset interrupts it, the browser or the computer starts again. The browser
- * closing says so too (`browserClosing`). Each ends the recording, then disconnects the Recorder, so the Recorder in a
- * Bot's browser never holds a person's connection longer than their recording.
+ * closing says so too (`browserClosing`), and so does the person clearing it (`clear`). Each ends the recording, then
+ * disconnects the Recorder, so the Recorder in a Bot's browser never holds a person's connection longer than their
+ * recording.
  *
  * Its own module, taking the browsers and controls it acts on, so a test can serve these exact routes.
  */
@@ -23,6 +24,7 @@ import type { BrowserContext } from "playwright";
 import {
   type BotBrowserComputerRecordingRequest,
   type BotBrowserState,
+  botBrowserComputerClearRequestSchema,
   botBrowserComputerPaths,
   botBrowserComputerRecordingRequestSchema,
 } from "../../shared/bot-browser";
@@ -41,27 +43,26 @@ import type { OpenBotBrowser, Profiles } from "./profiles";
 import {
   type RecorderLauncher,
   RecorderUnavailableError,
+  SENDING_WAIT_MS,
+  untilSent,
 } from "./recorder-launcher";
 
-/**
- * How long ending a recording waits for the last of it to reach Intelligence before the Recorder is disconnected all
- * the same: a rejoin and a push, each given the gateway's own timeout (`PHOENIX_TIMEOUT_MS`, 10 s, in
- * `extension/src/offscreen/phoenix-session.ts`; `bot-browser.test.ts` keeps the two in step). Well inside the 45 s
- * the server gives a call to the computer, so Stop and a hand-back still answer, and the server revokes the person's
- * connection only after.
- */
-export const SENDING_WAIT_MS = 2 * 10_000;
-/** How often the Recorder is asked whether the last of a recording has gone. */
-const SENDING_POLL_MS = 250;
+// Where `bot-browser.test.ts` keeps it in step with the gateway's own timeout.
+export { SENDING_WAIT_MS };
 
 export type BotBrowserHostOptions = {
   profiles: Profiles;
   /** The Bot's control, asked at every call who holds the wheel. */
   control: (
     botId: string,
-  ) => Pick<Control, "humanMayDrive" | "personMayRecord">;
+  ) => Pick<Control, "humanMayDrive" | "personMayRecord" | "personHolds">;
   /** Told each time a person works the bar, which is driving the browser as their input on the screen is. */
   drove?: (botId: string) => void;
+  /**
+   * Told while a Bot's browser is being cleared, once it has closed and before it can start again: the computer forgets
+   * the browser it described (`profiles.clear`).
+   */
+  forget?: (botId: string) => void;
   navigationTimeoutMs: number;
   /** `SENDING_WAIT_MS` unless a test needs the bound to run out sooner. */
   sendingWaitMs?: number;
@@ -73,6 +74,8 @@ const SENTENCES = {
     "These routes are for a Bot's browser. A person's own browser has its own: send a Bot's id in x-openbot-bot-id.",
   onlyTheHolder:
     "Only the person holding control of this Bot's browser can record in it. Take control first.",
+  onlyTheHolderClears:
+    "Only the person holding control of this Bot's browser can clear it. Take control first.",
   alreadyRecording: "A recording is already running in this Bot's browser.",
   notRecording: "Nothing is being recorded in this Bot's browser.",
   noRecorder:
@@ -206,44 +209,34 @@ export function createBotBrowserHost(options: BotBrowserHostOptions) {
 
   /**
    * Wait, after a Stop, until the Recorder says the last of the recording it stopped has reached Intelligence, or the
-   * bound runs out. Answers its newest report.
+   * bound runs out (`untilSent`), saying in the log when it ran out. Answers its newest report.
    *
    * WHY. Stop answers once the recording's outcome is queued; the rest goes to Intelligence after. A disconnect then
    * keeps whatever has not gone for the person's next connection in this browser, which on a Bot shared by several
    * people may be never, and the server revokes the connection and narrows the Bot's network as soon as the computer
    * answers. So the Recorder is let go only once nothing of the recording is still on its way (`lastStopped.sending`).
    */
-  const untilSent = async (
+  const whenSent = async (
     botId: string,
     launcher: RecorderLauncher,
     report: LauncherState | undefined,
   ): Promise<LauncherState | undefined> => {
-    const recordingId = report?.lastStopped?.recordingId;
-    if (!recordingId || !report?.lastStopped?.sending) return report;
     const started = Date.now();
-    const deadline = started + (options.sendingWaitMs ?? SENDING_WAIT_MS);
-    let latest = report;
-    while (Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, SENDING_POLL_MS));
-      // A Recorder too busy to answer is asked again, within the bound.
-      const now = await launcher.state().catch(() => undefined);
-      if (!now) continue;
-      latest = now;
-      if (
-        now.lastStopped?.recordingId !== recordingId ||
-        !now.lastStopped.sending
-      )
-        return now;
-    }
-    console.info(
-      JSON.stringify({
-        type: "computer-bot-recording-still-sending",
-        botId,
-        waitedMs: Date.now() - started,
-        note: "The Recorder keeps what it has not sent for the person's next connection in this browser.",
-      }),
+    const sent = await untilSent(
+      launcher,
+      report,
+      options.sendingWaitMs ?? SENDING_WAIT_MS,
     );
-    return latest;
+    if (sent.stillSending)
+      console.info(
+        JSON.stringify({
+          type: "computer-bot-recording-still-sending",
+          botId,
+          waitedMs: Date.now() - started,
+          note: "The Recorder keeps what it has not sent for the person's next connection in this browser.",
+        }),
+      );
+    return sent.report;
   };
 
   /**
@@ -269,7 +262,7 @@ export function createBotBrowserHost(options: BotBrowserHostOptions) {
     } catch (failure) {
       error = messageOf(failure);
     }
-    report = await untilSent(botId, current.launcher, report);
+    report = await whenSent(botId, current.launcher, report);
     try {
       const disconnected = await current.launcher.disconnect();
       if (!disconnected.ok) error ??= disconnected.error;
@@ -367,6 +360,27 @@ export function createBotBrowserHost(options: BotBrowserHostOptions) {
     return json(await stateOf(botId, view, started.state));
   }
 
+  /**
+   * Clear the Bot's browser for the person holding its wheel (`shared/bot-browser.ts`, CLEARING A BROWSER): their
+   * recording, if one runs, ends and is let go first, as a closing browser's does; then the profile goes; then the
+   * browser starts again, fresh, under them. In the recordings' turn, so a Record pressed meanwhile starts in the fresh
+   * browser rather than in the one being wiped. A browser that does not start again is still cleared, and said closed.
+   */
+  async function clear(botId: string, by: string): Promise<Response> {
+    return inTurn(botId, async () => {
+      if (!options.control(botId).personHolds(by))
+        return json({ error: SENTENCES.onlyTheHolderClears }, 409);
+      await end(botId, "the browser's data was cleared");
+      await profiles.clear(botId, () => options.forget?.(botId));
+      console.info(
+        JSON.stringify({ type: "computer-bot-browser-cleared", botId }),
+      );
+      const view = await running(botId);
+      if (view instanceof Response) return json(closedState);
+      return json(await stateOf(botId, view));
+    });
+  }
+
   async function handle(
     request: Request,
     pathname: string,
@@ -397,10 +411,16 @@ export function createBotBrowserHost(options: BotBrowserHostOptions) {
       pathname === botBrowserComputerPaths.navigate
         ? parseBody(browserNavigateRequestSchema, body)
         : undefined;
-    for (const parsed of [recording, narration, tabs, navigate])
+    const clearing =
+      pathname === botBrowserComputerPaths.clear
+        ? parseBody(botBrowserComputerClearRequestSchema, body)
+        : undefined;
+    for (const parsed of [recording, narration, tabs, navigate, clearing])
       if (parsed && !parsed.ok) return parsed.response;
 
     try {
+      if (clearing?.ok) return await clear(botId, clearing.value.by);
+
       if (pathname === botBrowserComputerPaths.state) {
         const view = profiles.bot(botId);
         if (!view) {

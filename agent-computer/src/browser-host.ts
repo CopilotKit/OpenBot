@@ -1,6 +1,6 @@
 /**
  * The OpenBot Browser's routes on this computer: open a person's browser with the Recorder in it and
- * connected, and act for the person in it (record, narrate, tabs, navigate, close).
+ * connected, and act for the person in it (record, narrate, tabs, navigate, close, clear).
  *
  * Under the computer token like every other route, with the person's browser id in
  * `x-openbot-bot-id`; `index.ts` checks the token, this checks the id. The server is the only caller:
@@ -36,13 +36,24 @@ import {
 } from "./person-browser";
 import type { OpenPersonBrowser, Profiles } from "./profiles";
 import { findRecorder } from "./recorder";
-import { RecorderUnavailableError } from "./recorder-launcher";
+import {
+  RecorderUnavailableError,
+  SENDING_WAIT_MS,
+  untilSent,
+} from "./recorder-launcher";
 
 export type BrowserHostOptions = {
   profiles: Profiles;
   /** `OPENBOT_RECORDER_DIR`, read at every open so a rebuilt Recorder is the one the next browser gets. */
   recorderDir: () => string | undefined;
   navigationTimeoutMs: number;
+  /**
+   * Told while a person's browser is being cleared, once it has closed and before it can open again: the computer
+   * forgets the browser it described (`profiles.clear`).
+   */
+  forget?: (botId: string) => void;
+  /** How long a clear waits for a recording it stopped to reach Intelligence: `SENDING_WAIT_MS` unless a test's own. */
+  sendingWaitMs?: number;
 };
 
 /** What the person is told when their browser did not open for a reason that is not the computer's setup: the reason
@@ -393,6 +404,50 @@ export function createBrowserHost(options: BrowserHostOptions) {
     }
   }
 
+  /**
+   * Wipe the person's browser, open or closed (`shared/bot-browser.ts`, CLEARING A BROWSER), and leave it closed: only
+   * the server can hand its Recorder a connection, so it is the server that opens it again. A recording running in it
+   * is stopped first, and the last of it waited for, because what it has not sent is kept in the storage about to go.
+   * Never fails for the Recorder: a browser cleared because it went wrong may well have a Recorder that does not answer,
+   * and is cleared all the same.
+   */
+  async function clear(botId: string): Promise<Response> {
+    const browser = profiles.person(botId);
+    if (browser) {
+      try {
+        const report = await browser.launcher.state();
+        if (report.phase !== "idle") {
+          const stopped = await browser.launcher.record({ action: "stop" });
+          const sent = await untilSent(
+            browser.launcher,
+            stopped.ok ? stopped.state : report,
+            options.sendingWaitMs ?? SENDING_WAIT_MS,
+          );
+          console.info(
+            JSON.stringify({
+              type: "computer-browser-recording-ended",
+              botId,
+              reason: "the browser's data was cleared",
+              ...(stopped.ok ? {} : { error: stopped.error }),
+              ...(sent.stillSending ? { stillSending: true } : {}),
+            }),
+          );
+        }
+      } catch (error) {
+        console.info(
+          JSON.stringify({
+            type: "computer-browser-recording-not-ended",
+            botId,
+            error: messageOf(error),
+          }),
+        );
+      }
+    }
+    await profiles.clear(botId, () => options.forget?.(botId));
+    console.info(JSON.stringify({ type: "computer-browser-cleared", botId }));
+    return json(closedState);
+  }
+
   async function handle(
     request: Request,
     pathname: string,
@@ -418,6 +473,8 @@ export function createBrowserHost(options: BrowserHostOptions) {
       await profiles.stop(botId);
       return json(closedState);
     }
+
+    if (pathname === browserComputerPaths.clear) return clear(botId);
 
     /*
      * OpenBot revoked this browser's connection: the Recorder forgets it now rather than at its next

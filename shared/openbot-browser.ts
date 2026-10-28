@@ -150,6 +150,11 @@ export const browserComputerPaths = {
   tabs: "/browser/tabs",
   navigate: "/browser/navigate",
   close: "/browser/close",
+  /**
+   * POST, no body: wipe the person's browser, open or closed, as a Bot's is wiped (`shared/bot-browser.ts`, CLEARING A
+   * BROWSER), and leave it closed: only the server can hand its Recorder a connection again. Answers `BrowserState`.
+   */
+  clear: "/browser/clear",
 } as const;
 
 /**
@@ -274,6 +279,11 @@ export const browserApiPaths = {
   navigate: "/api/browser/navigate",
   /** POST: close the person's browser. */
   close: "/api/browser/close",
+  /**
+   * POST, no body: clear the person's browser (`shared/bot-browser.ts`, CLEARING A BROWSER). One that was open opens
+   * again, fresh. Answers `BrowserApiState`. Audited as `computer.browser_cleared`.
+   */
+  clear: "/api/browser/clear",
 } as const;
 
 /* THE PERSON'S REAL BROWSER (OpenBot Desktop). Where the person's own everyday Chrome or Edge can hold the Recorder,

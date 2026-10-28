@@ -501,11 +501,16 @@ export function createControl(
      * because the Bot cannot act while this is true.
      */
     personMayRecord(by: string): boolean {
+      return this.personHolds(by) && current()?.status === "taken";
+    },
+    /**
+     * Whether `by` holds the wheel now, with nothing the Bot was doing still draining: the bar's own rule
+     * (`humanMayDrive`), for the person it names. What clearing the Bot's browser asks, so it is never wiped under the
+     * Bot, nor by anyone but the person working it.
+     */
+    personHolds(by: string): boolean {
       return (
-        this.humanMayDrive() &&
-        data.heldBy !== undefined &&
-        data.heldBy === by &&
-        current()?.status === "taken"
+        this.humanMayDrive() && data.heldBy !== undefined && data.heldBy === by
       );
     },
     requestSecret(input: {

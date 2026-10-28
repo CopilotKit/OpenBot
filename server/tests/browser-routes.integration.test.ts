@@ -385,6 +385,15 @@ const computer = Bun.serve<{ bot: string }>({
       case "/browser/close":
         browsers.delete(id);
         return Response.json(closed);
+      case "/browser/clear":
+        // A POST with no body. As the computer clears it (agent-computer's browser-host.ts): the browser closed and its
+        // whole profile deleted, the Recorder's storage with it, so the connection the Recorder kept goes too. It stays
+        // closed: only OpenBot can hand the Recorder a connection again.
+        if (request.method !== "POST" || sent !== "")
+          return Response.json({ error: "Bad request." }, { status: 400 });
+        browsers.delete(id);
+        recorderKeeps.delete(id);
+        return Response.json(closed);
     }
     return Response.json({ error: "Not found." }, { status: 404 });
   },
@@ -1516,6 +1525,79 @@ describe("opening a person's own browser", () => {
   });
 });
 
+describe("clearing a person's own browser", () => {
+  const clear = (as?: keyof typeof PEOPLE) =>
+    call(openbot, "/api/browser/clear", {
+      method: "POST",
+      ...(as ? { as } : {}),
+    });
+  const clearedRows = () =>
+    audits.filter((event) => event.eventType === "computer.browser_cleared");
+  const clears = (userId: string) =>
+    asked.filter(
+      (line) => line === `POST /browser/clear ${personBrowserId(userId)}`,
+    ).length;
+
+  test("wipes the person's browser, says who did it on the trail, and opens it again fresh with its Recorder connected anew", async () => {
+    await open(openbot, "ada");
+    const before = handed(ada.id);
+    const rows = clearedRows().length;
+    const cleared = await clear("ada");
+    expect(cleared.status).toBe(200);
+    expect(await cleared.json()).toMatchObject({
+      available: true,
+      computerId: personBrowserId(ada.id),
+      open: true,
+      recorder: { connected: true, userId: ada.id },
+    });
+    expect(clears(ada.id)).toBeGreaterThan(0);
+    // The connection the wiped Recorder held went with its storage: it was opened with a new one, which replaced it.
+    const after = handed(ada.id);
+    expect(after.connectionId).not.toBe(before.connectionId);
+    expect(
+      (
+        await call(openbot, "/api/recorder/me", {
+          headers: bearer(before.token),
+        })
+      ).status,
+    ).toBe(401);
+    expect(
+      await (
+        await call(openbot, "/api/recorder/me", {
+          headers: bearer(after.token),
+        })
+      ).json(),
+    ).toMatchObject({ user: { id: ada.id } });
+    // Who cleared which browser, as a computer reset is recorded.
+    expect(clearedRows().slice(rows)).toEqual([
+      expect.objectContaining({
+        targetType: "computer",
+        targetId: personBrowserId(ada.id),
+        actorUserId: ada.id,
+        payload: expect.objectContaining({ actor: ada.id }),
+      }),
+    ]);
+  });
+
+  test("a closed browser is cleared and left closed, and nobody signed out reaches it", async () => {
+    await call(openbot, "/api/browser/close", { method: "POST", as: "ben" });
+    const opensBefore = asked.filter((line) =>
+      line.startsWith("POST /browser/open "),
+    ).length;
+    const cleared = await clear("ben");
+    expect(cleared.status).toBe(200);
+    expect(await cleared.json()).toMatchObject({ open: false, tabs: [] });
+    expect(clears(ben.id)).toBeGreaterThan(0);
+    expect(
+      asked.filter((line) => line.startsWith("POST /browser/open ")).length,
+    ).toBe(opensBefore);
+
+    const unsigned = asked.length;
+    expect((await clear()).status).toBe(401);
+    expect(asked.slice(unsigned)).toEqual([]);
+  });
+});
+
 /** The lines the server logged at warning and at error level while `work` ran. */
 async function logged<T>(
   work: () => T | Promise<T>,
@@ -1739,6 +1821,8 @@ describe("a slow page, and a browser that cannot be reached", () => {
       ["/api/browser/navigate", CALL_BUDGET_MS],
       ["/api/browser/narration", CALL_BUDGET_MS],
       ["/api/browser/close", CALL_BUDGET_MS],
+      // A clear wipes the browser and opens it again.
+      ["/api/browser/clear", OPEN_BUDGET_MS],
     ] as const) {
       const seconds = browserRequestSeconds(path) ?? 0;
       expect(seconds * 1000).toBeGreaterThan(budget + STATE_TIMEOUT_MS);

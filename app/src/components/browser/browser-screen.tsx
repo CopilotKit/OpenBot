@@ -10,15 +10,18 @@ import { SidebarToggle } from "@/components/layout/sidebar-toggle";
 import { Button } from "@/components/ui/button";
 import {
   browserTabsMutationOptions,
+  clearBrowserMutationOptions,
   navigateBrowserMutationOptions,
 } from "@/lib/browser/mutations";
 import { queryClient } from "@/query-client";
 import {
   AddressBar,
+  ClearBrowserDialog,
   latest,
   shownAddress,
   TabPanel,
   TabStrip,
+  useClearBrowserData,
   useOpenedTab,
 } from "./browser-bar";
 import { NarrationNotice, NarrationSwitch } from "./narration";
@@ -71,6 +74,8 @@ export function ScreenBrowser({
   });
   const tabs = useMutation(browserTabsMutationOptions(queryClient));
   const navigate = useMutation(navigateBrowserMutationOptions(queryClient));
+  const clear = useMutation(clearBrowserMutationOptions(queryClient));
+  const clearing = useClearBrowserData(clear);
   const active = state.tabs.find((tab) => tab.active);
   const newTab = useOpenedTab(active?.id);
   const ids = useId();
@@ -113,6 +118,11 @@ export function ScreenBrowser({
       ) : null}
       <NarrationNotice narration={narration} language={language} />
       <NarrationChoiceDialog {...recording.question} />
+      <ClearBrowserDialog
+        clear={clear}
+        open={clearing.asking}
+        onOpenChange={clearing.setAsking}
+      />
       {recording.stopped ? <StoppedNotice stopped={recording.stopped} /> : null}
       {failure ? (
         <p
@@ -155,6 +165,12 @@ export function ScreenBrowser({
             screen.current?.focus();
           }}
           onMove={(action) => navigate.mutate({ action })}
+          // Open or closed, or not answering (often why it is cleared), its data is there to wipe. A recording that is
+          // starting or stopping is let finish first; one that is running is ended by the clear itself.
+          clear={{
+            disabled: recording.starting || recording.stopping,
+            ask: clearing.ask,
+          }}
         />
         <Screen
           computerId={computerId}

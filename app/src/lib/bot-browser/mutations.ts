@@ -122,6 +122,26 @@ export function navigateBotBrowserMutationOptions(
 }
 
 /**
+ * Wipes the Bot's browser for the person holding its wheel: cookies, saved passwords, history and site storage, which
+ * signs it out of everything. The answer is the fresh browser, started again under them.
+ */
+export function clearBotBrowserMutationOptions(
+  queryClient: QueryClient,
+  botId: string,
+) {
+  return mutationOptions({
+    mutationFn: async (): Promise<BotBrowserApiState> =>
+      (
+        await client(botBrowserApiPaths.clear(botId), {
+          method: "POST",
+          fallback: "Couldn't clear the browser. Try again.",
+        })
+      ).json(),
+    onSettled: () => invalidateBotBrowser(queryClient, botId),
+  });
+}
+
+/**
  * One thing the person's narration says to the Recorder in the Bot's browser, exactly as `sendNarration` does for their
  * own: a plain function for the same reasons, answering rather than throwing.
  */

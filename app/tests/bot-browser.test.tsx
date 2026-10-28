@@ -26,6 +26,7 @@ import userEvent from "@testing-library/user-event";
 import { StrictMode } from "react";
 import { ComputerChatControls } from "@/components/computer/computer-controls";
 import { ComputerView } from "@/components/computer/computer-view";
+import { Toaster, toast } from "@/components/ui/toast";
 import { queryClient } from "@/query-client";
 import { installChrome } from "./browser-narration.fixture";
 import { settleReactWork } from "./settle-react-work";
@@ -285,6 +286,26 @@ async function server(path: string, init?: RequestInit): Promise<Response> {
     endRecording();
     return Response.json(answer());
   }
+  if (path === botBrowserApiPaths.clear(botId) && method === "POST") {
+    if (body !== undefined) return invalid();
+    if (!mine) return conflict("Take control of the Bot's browser first.");
+    // As the computer clears it: a recording there ends, the profile goes, and the browser starts again with one empty
+    // tab and nothing in it, the wheel still the person's.
+    endRecording();
+    browser = {
+      open: true,
+      recorder: idle(),
+      tabs: [
+        {
+          id: "tab-fresh",
+          url: "about:blank",
+          title: "about:blank",
+          active: true,
+        },
+      ],
+    };
+    return Response.json(answer());
+  }
   if (path === botBrowserApiPaths.narration(botId)) {
     if (!browserNarrationRequestSchema.safeParse(body).success)
       return invalid();
@@ -378,12 +399,14 @@ afterEach(() => {
   delete speechGlobals.webkitSpeechRecognition;
 });
 
-/** The Bot's screen in a conversation, drawn as the app draws it, opened full size as a person opens it. */
+/** The Bot's screen in a conversation, drawn as the app draws it (its toasts with it), opened full size as a person
+ * opens it. */
 async function openScreen() {
   const view = render(
     <StrictMode>
       <QueryClientProvider client={queryClient}>
         <ComputerView computerId={botId} name="Sales" />
+        <Toaster />
       </QueryClientProvider>
     </StrictMode>,
   );
@@ -1168,5 +1191,119 @@ test("Delete on the Bot's tab that shows puts the focus on the tab the Bot's bro
   expect(writes().map((sent) => sent.body)).toEqual([
     { action: "close", tabId: "tab-1" },
     { action: "close", tabId: "tab-2" },
+  ]);
+});
+
+test("Clear browser data is the wheel holder's: a short confirmation, Cancel does nothing, Clear wipes it and the bar shows the fresh browser", async () => {
+  const { view, dialog, user } = await openScreen();
+  const button = () =>
+    dialog.getByRole("button", { name: "Clear browser data" });
+  // Never under the Bot.
+  expect(disabled(button())).toBe(true);
+  await user.click(dialog.getByRole("button", { name: "Take control" }));
+  await waitFor(() => expect(disabled(button())).toBe(false));
+
+  // One question, one sentence, two answers.
+  await user.click(button());
+  const confirm = within(
+    await view.findByRole("dialog", { name: "Clear this browser?" }),
+  );
+  expect(
+    confirm.getByText(
+      "Cookies, saved passwords and history are wiped. You'll have to sign in everywhere again.",
+    ),
+  ).toBeTruthy();
+  expect(
+    confirm
+      .getAllByRole("button")
+      .map((each) => each.textContent?.trim())
+      .filter(Boolean),
+  ).toEqual(["Cancel", "Clear", "Close"]);
+  await user.click(confirm.getByRole("button", { name: "Cancel" }));
+  await waitFor(() =>
+    expect(
+      view.queryByRole("dialog", { name: "Clear this browser?" }),
+    ).toBeNull(),
+  );
+  expect(
+    requests.filter((sent) => sent.path === botBrowserApiPaths.clear(botId)),
+  ).toEqual([]);
+  expect(dialog.getAllByRole("tab").map((tab) => tab.textContent)).toEqual([
+    "Expense report",
+    "Travel policy",
+  ]);
+
+  // Clear: the Bot's browser is wiped, the bar shows it fresh, and a toast says so.
+  await user.click(button());
+  const again = within(
+    await view.findByRole("dialog", { name: "Clear this browser?" }),
+  );
+  await user.click(again.getByRole("button", { name: "Clear" }));
+  await waitFor(() =>
+    expect(
+      view.queryByRole("dialog", { name: "Clear this browser?" }),
+    ).toBeNull(),
+  );
+  // One POST, with no body: the route takes none.
+  const cleared = requests.filter(
+    (sent) => sent.path === botBrowserApiPaths.clear(botId),
+  );
+  expect(cleared.map((sent) => [sent.method, sent.body !== undefined])).toEqual(
+    [["POST", false]],
+  );
+  await waitFor(() =>
+    expect(dialog.getAllByRole("tab").map((tab) => tab.textContent)).toEqual([
+      "New tab",
+    ]),
+  );
+  expect(address(dialog).value).toBe("");
+  // Still theirs: the bar works the fresh browser.
+  expect(address(dialog).readOnly).toBe(false);
+  await waitFor(() =>
+    expect(
+      [...document.querySelectorAll("[data-slot=toast]")].map(
+        (each) => each.textContent,
+      ),
+    ).toEqual(["Browser cleared"]),
+  );
+  // Drawn over the Bot's screen, not behind it: both are fixed layers, and on the same one the screen, opened after the
+  // toasts were put in the page, covered the toast (seen in the headless run). Read from the layer each one is given.
+  const layer = (element: Element | null) =>
+    Number(/(?:^|\s)z-(\d+)(?:\s|$)/.exec(element?.className ?? "")?.[1]);
+  const screenLayer = layer(
+    document.querySelector('[role="dialog"][aria-label="The Bot\'s screen"]'),
+  );
+  expect(screenLayer).toBeGreaterThan(0);
+  expect(
+    layer(document.querySelector("[data-slot=toast-viewport]")),
+  ).toBeGreaterThan(screenLayer);
+  toast.close();
+});
+
+test("a clear the server refuses says why in the confirmation, and wipes nothing", async () => {
+  control = heldBy(ME);
+  const { view, dialog, user } = await openScreen();
+  const button = dialog.getByRole("button", { name: "Clear browser data" });
+  await waitFor(() => expect(disabled(button)).toBe(false));
+  await user.click(button);
+  // The wheel goes back to the Bot while the question is open.
+  control = heldBy(null);
+  const confirm = within(
+    await view.findByRole("dialog", { name: "Clear this browser?" }),
+  );
+  await user.click(confirm.getByRole("button", { name: "Clear" }));
+  expect((await confirm.findByRole("alert")).textContent).toBe(
+    "Take control of the Bot's browser first.",
+  );
+  // Nothing was wiped: the question closes on Cancel, over the browser as it was.
+  await user.click(confirm.getByRole("button", { name: "Cancel" }));
+  await waitFor(() =>
+    expect(
+      view.queryByRole("dialog", { name: "Clear this browser?" }),
+    ).toBeNull(),
+  );
+  expect(dialog.getAllByRole("tab").map((tab) => tab.textContent)).toEqual([
+    "Expense report",
+    "Travel policy",
   ]);
 });

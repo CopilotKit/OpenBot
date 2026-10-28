@@ -34,7 +34,7 @@ import {
 import { Hono, type MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import type { z } from "zod";
-import type { AuditStore } from "../audit";
+import { type AuditStore, recordAuditEvent } from "../audit";
 import type { AppVariables, AuthenticatedActor } from "../auth/guards";
 import { checkComputerAddress } from "../computer/target";
 import { reasonWithoutStatement } from "../db/query-failure";
@@ -146,7 +146,8 @@ export const STATE_TIMEOUT_MS = 8_000;
  * that may follow it ({@link STATE_TIMEOUT_MS}) and a margin for the database, so the answer always reaches them.
  */
 /** An open, and a Record, which may open the browser's connection again first: a computer woken from sleep, then a
- * browser launched, the Recorder loaded and handed its connection. */
+ * browser launched, the Recorder loaded and handed its connection. And a clear, which wipes the browser and opens it
+ * again. */
 export const OPEN_BUDGET_MS = 150_000;
 /** Tabs, an address, a phrase or a close: the computer's own wait, and finding the computer it runs on. */
 export const CALL_BUDGET_MS = CALL_TIMEOUT_MS + 15_000;
@@ -165,7 +166,9 @@ export function requestSecondsFor(budgetMs: number): number {
  */
 export function browserRequestSeconds(pathname: string): number | undefined {
   const budget =
-    pathname === browserApiPaths.open || pathname === browserApiPaths.recording
+    pathname === browserApiPaths.open ||
+    pathname === browserApiPaths.recording ||
+    pathname === browserApiPaths.clear
       ? OPEN_BUDGET_MS
       : pathname.startsWith(`${browserApiPaths.state}/`)
         ? CALL_BUDGET_MS
@@ -221,6 +224,18 @@ export async function inBudget<T>(
 }
 
 /**
+ * How long the computer may take to clear the person's browser: a recording in it stopped and the last of it waited for
+ * (the computer's SENDING_WAIT_MS, 20 s), the browser closed and given 2 s to finish writing, and its profile deleted.
+ */
+const CLEAR_TIMEOUT_MS = 60_000;
+
+/**
+ * The local actor's address, matched to decide whether the id is a real users row: the audit table's foreign key takes
+ * no other (computer/routes.ts `actorOf` has the same rule).
+ */
+const DEV_ACTOR_EMAIL = "dev@openbot.local";
+
+/**
  * How long a revoke waits for the person's browser to hear of it. The revoke has happened either way: a browser that
  * did not hear in time hears on its next call to OpenBot, and the state route reports it signed out meanwhile.
  */
@@ -258,6 +273,9 @@ const SENTENCES = {
   notAnsweringSingleUser:
     "Your browser isn't answering. If it doesn't come back soon, quit OpenBot and open it again.",
   notWeb: "Only web addresses open here.",
+  /** The profile is gone, and its row on the trail could not be written. */
+  clearedNotFinished:
+    "Your browser was cleared, but OpenBot couldn't finish. Clear it again.",
   phraseTimes:
     "That phrase's times do not fit the recording, so it was not added.",
 } as const;
@@ -1398,6 +1416,78 @@ export function createBrowserRoutes(deps: BrowserRouteDeps) {
   routes.post("/close", callBudget, deps.requireUser, async (context) =>
     forward(context.var.actor.id, browserComputerPaths.close, {}),
   );
+
+  /**
+   * Clear the person's browser (shared/bot-browser.ts, CLEARING A BROWSER), theirs alone, as every route here is. The
+   * computer wipes it and leaves it closed; past that point of no return the row is written, as a computer reset's is.
+   * One that was open opens again at once, fresh, as Open opens it, so the person is back where they were with nothing
+   * signed in; its Recorder holds no connection after the wipe, so Open connects it anew, which replaces the one OpenBot
+   * held for it. One that does not open again is answered closed: it was cleared, and the page offers to open it.
+   */
+  routes.post("/clear", openBudget, deps.requireUser, async (context) => {
+    const actor = context.var.actor;
+    const computerId = personBrowserId(actor.id);
+    const computers = deps.computers;
+    if (!computers) return context.json({ error: unavailable }, 503);
+    let base: string;
+    let answer: { status: number; body: unknown };
+    let wasOpen: boolean;
+    try {
+      base = await inBudget(computers.locate(computerId), "locate");
+      const before = await askState(base, computerId);
+      // A browser that is not answering was open, and is opened again: being stuck is the reason to clear one.
+      wasOpen =
+        before === "silent" ||
+        (typeof before === "object" && before.state.open);
+      answer = await ask(base, computerId, browserComputerPaths.clear, {
+        method: "POST",
+        timeoutMs: CLEAR_TIMEOUT_MS,
+      });
+    } catch (error) {
+      return unreachable(error);
+    }
+    if (answer.status < 200 || answer.status >= 300) return refused(answer);
+    if (deps.auditStore) {
+      try {
+        await recordAuditEvent(deps.auditStore, {
+          eventType: "computer.browser_cleared",
+          targetType: "computer",
+          targetId: computerId,
+          ...(actor.email === DEV_ACTOR_EMAIL ? {} : { actorUserId: actor.id }),
+          payload: {
+            actor: actor.id,
+            reason:
+              "the person cleared their own browser: its cookies, saved passwords, history and site storage",
+          },
+        });
+      } catch (error) {
+        console.error(
+          JSON.stringify({
+            type: "browser-cleared-not-recorded",
+            // A failed query's message carries the values bound to it: never logged.
+            error: reasonWithoutStatement(error),
+          }),
+        );
+        return context.json({ error: SENTENCES.clearedNotFinished }, 500);
+      }
+    }
+    if (!wasOpen) return context.json(await currentState(actor.id));
+    const opened = await connect(askerOf(context));
+    if (!opened.ok) {
+      console.warn(
+        JSON.stringify({
+          type: "browser-not-reopened-after-clear",
+          status: opened.response.status,
+        }),
+      );
+      return context.json(await currentState(actor.id));
+    }
+    return context.json(
+      opened.state
+        ? await view(actor.id, opened.state)
+        : await currentState(actor.id),
+    );
+  });
 
   return routes;
 }

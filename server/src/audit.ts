@@ -334,6 +334,9 @@ export const auditEventTypes = [
   // when is exactly the sort of thing an investigator needs and nothing else records.
   "computer.stopped",
   "computer.reset",
+  // A browser's data wiped by the person working it: a Bot's, by whoever held its wheel, or the person's own. Every
+  // login in it goes, as with a reset, so who did it and to which browser is worth a row; the Bot's files stay.
+  "computer.browser_cleared",
   // A computer moved onto the current image. Its files and sign-ins are kept, but a running one is
   // restarted, which interrupts whatever it was doing, so who asked is worth a row.
   "computer.updated",

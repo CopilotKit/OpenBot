@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import {
   BOT_BROWSER_VIA,
   type BotBrowserApiState,
+  type BotBrowserComputerClearRequest,
   type BotBrowserComputerRecordingRequest,
   type BotBrowserState,
   botBrowserComputerPaths,
@@ -20,6 +21,7 @@ import type { z } from "zod";
 import type { AuditStore } from "../audit";
 import type { AppVariables, AuthenticatedActor } from "../auth/guards";
 import type { ComputerGateway } from "../computer/gateway";
+import { actorOf } from "../computer/routes";
 import type { EgressPolicy } from "../computer/policy-network";
 import { reasonWithoutStatement } from "../db/query-failure";
 import { recorderAudit, recorderConnected } from "../recorder/connected";
@@ -84,6 +86,9 @@ const SENTENCES = {
   notConnected: "The Recorder could not be connected. Try again.",
   noPerson: "This person could not be found. Try again.",
   notWeb: "Only web addresses open here.",
+  /** The profile is gone, and what goes with it on this side (its row, its snapshots and screenshots) did not all go. */
+  clearedNotFinished:
+    "The Bot's browser was cleared, but OpenBot couldn't finish. Clear it again.",
 } as const;
 
 /** Why a recording cannot start when this OpenBot has no address the Recorder would take: for the log, as for the
@@ -106,14 +111,17 @@ const CONTROL_PATH = "/control";
  * - Record and Stop: a start connects the Recorder and records (up to START_TIMEOUT_MS), and Stop waits on the computer
  *   for the last of the recording to reach Intelligence before it disconnects the Recorder.
  * - The bar and narration: the computer's own wait for a page.
+ * - Clear: a recording there ends and the last of it is waited for, the browser closes and its profile goes, and it
+ *   starts again (up to CLEAR_TIMEOUT_MS on the computer).
  */
 const READ_BUDGET_MS = STATE_TIMEOUT_MS;
 const RECORDING_BUDGET_MS = OPEN_BUDGET_MS;
 const BAR_BUDGET_MS = CALL_BUDGET_MS;
+const CLEAR_BUDGET_MS = OPEN_BUDGET_MS;
 
 /** A Bot's browser's routes under the computer routes (`/api/computers/:botId/browser/...`), for the server's timeout. */
 const BOT_BROWSER_ROUTE =
-  /^\/api\/computers\/[^/]+\/browser\/(recording|tabs|navigate|narration)$/;
+  /^\/api\/computers\/[^/]+\/browser\/(recording|tabs|navigate|narration|clear)$/;
 
 /**
  * How long OpenBot's server keeps a request to a Bot's browser's routes open, in seconds (http-server.ts applies it), or
@@ -123,7 +131,11 @@ export function botBrowserRequestSeconds(pathname: string): number | undefined {
   const route = BOT_BROWSER_ROUTE.exec(pathname)?.[1];
   if (!route) return undefined;
   return requestSecondsFor(
-    route === "recording" ? RECORDING_BUDGET_MS : BAR_BUDGET_MS,
+    route === "recording"
+      ? RECORDING_BUDGET_MS
+      : route === "clear"
+        ? CLEAR_BUDGET_MS
+        : BAR_BUDGET_MS,
   );
 }
 /**
@@ -136,6 +148,12 @@ const START_TIMEOUT_MS = 90_000;
  * any start still under way. Younger, the computer may simply not have started the recording it was minted for yet.
  */
 const START_GRACE_MS = START_TIMEOUT_MS + 30_000;
+/**
+ * How long the computer may take to clear a Bot's browser: a recording there ended and the last of it waited for (the
+ * computer's SENDING_WAIT_MS, 20 s), the browser closed and given 2 s to finish writing, its profile deleted, and the
+ * browser started again, which a cold start takes seconds to do.
+ */
+const CLEAR_TIMEOUT_MS = 90_000;
 /** The longest a connection's label may be: what a Recorder may name itself when it connects (shared/recorder-api.ts). */
 const LABEL_CHARS = 80;
 
@@ -180,8 +198,8 @@ export function botBrowserNetwork(input: {
 }
 
 export type BotBrowserRouteDeps = {
-  /** Where the Bot's computer is, and whether it is up, without starting it. */
-  gateway: Pick<ComputerGateway, "locate" | "status">;
+  /** Where the Bot's computer is, and whether it is up, without starting it; and what follows a clear on this side. */
+  gateway: Pick<ComputerGateway, "locate" | "status" | "browserCleared">;
   /** The computer token, the same one every computer requires. */
   token?: string;
   /** The Recorder's connections and what goes with them (recorder/wiring.ts). */
@@ -205,8 +223,13 @@ export type BotBrowserRouteDeps = {
   fetchImpl?: typeof fetch;
   /** How long a call to the computer may take, other than a start's. A test's own, shorter. */
   callTimeoutMs?: number;
-  /** Each route's budget (READ_BUDGET_MS, RECORDING_BUDGET_MS, BAR_BUDGET_MS): a test's own, shorter. */
-  budgetMs?: { read?: number; recording?: number; bar?: number };
+  /** Each route's budget (READ_BUDGET_MS, RECORDING_BUDGET_MS, BAR_BUDGET_MS, CLEAR_BUDGET_MS): a test's own, shorter. */
+  budgetMs?: {
+    read?: number;
+    recording?: number;
+    bar?: number;
+    clear?: number;
+  };
   /** A single-user OpenBot: the one person is its admin, so a setup failure is theirs to see to. */
   singleUser?: boolean;
 };
@@ -330,6 +353,7 @@ export function createBotBrowser(deps: BotBrowserRouteDeps): BotBrowser {
     deps.budgetMs?.recording ?? RECORDING_BUDGET_MS,
   );
   const barBudget = withBudget(deps.budgetMs?.bar ?? BAR_BUDGET_MS);
+  const clearBudget = withBudget(deps.budgetMs?.clear ?? CLEAR_BUDGET_MS);
 
   /** The Bot's browser state as the computer reported it, checked for the two fields every answer has. */
   const stateOf = (value: unknown) =>
@@ -736,6 +760,53 @@ export function createBotBrowser(deps: BotBrowserRouteDeps): BotBrowser {
     );
   }
 
+  /**
+   * Clear the Bot's browser (shared/bot-browser.ts, CLEARING A BROWSER): for the person holding the wheel, as the bar
+   * is, so it is never wiped under the Bot mid-task. The computer ends a recording there first, wipes the profile and
+   * starts the browser again, fresh, under them; then, past the point of no return, the row is written and the
+   * snapshots and screenshots kept of its pages go, as a reset's do (`browserCleared`). A recording the clear ended
+   * leaves its connection behind, which goes now, and the Bot is pushed its own policy again.
+   */
+  async function clear(
+    botId: string,
+    actor: AuthenticatedActor,
+  ): Promise<Response> {
+    const wheel = await withTheWheel(botId, actor.id);
+    if (!wheel.ok) return wheel.response;
+    let answer: { status: number; body: unknown };
+    try {
+      answer = await ask(wheel.base, botId, botBrowserComputerPaths.clear, {
+        body: { by: actor.id } satisfies BotBrowserComputerClearRequest,
+        timeoutMs: CLEAR_TIMEOUT_MS,
+      });
+    } catch (error) {
+      return failed(error);
+    }
+    if (answer.status < 200 || answer.status >= 300) return refused(answer);
+    try {
+      await deps.gateway.browserCleared(botId, actorOf(actor));
+    } catch (error) {
+      console.error(
+        JSON.stringify({
+          type: "bot-browser-cleared-not-recorded",
+          botId,
+          // A failed query's message carries the values bound to it: never logged.
+          error: reasonWithoutStatement(error),
+        }),
+      );
+      return Response.json(
+        { error: SENTENCES.clearedNotFinished },
+        { status: 500 },
+      );
+    }
+    const held = await heldConnections(connections, botId).catch(() => []);
+    for (const connection of held) await revoke(connection, "ended");
+    if (held.length > 0) await pushPolicy(botId, "cleared");
+    return Response.json(
+      viewFor(actor.id, wheel.control, stateOf(answer.body) ?? CLOSED),
+    );
+  }
+
   routes.get("/", readBudget, async (context) => {
     const botId = context.req.param("botId") ?? "";
     const seen = await look(botId);
@@ -833,6 +904,10 @@ export function createBotBrowser(deps: BotBrowserRouteDeps): BotBrowser {
     if (taken.status < 200 || taken.status >= 300) return refused(taken);
     return context.json({ ok: true });
   });
+
+  routes.post("/clear", clearBudget, async (context) =>
+    clear(context.req.param("botId") ?? "", context.var.actor),
+  );
 
   return {
     routes,
