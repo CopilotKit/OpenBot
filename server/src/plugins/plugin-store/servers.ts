@@ -27,7 +27,7 @@ import {
   customUrlRefusal,
   resolveServerUrl,
   serverCredentialKind,
-  tokenHeaderFor,
+  tokenHeaderForServer,
 } from "../catalogue";
 import type { ListedTool } from "../mcp";
 import {
@@ -54,6 +54,41 @@ import {
   storableTools,
   unlistedAdvertisedTools,
 } from "./model";
+
+/**
+ * An RFC 7230 field-name token: letters, digits and the tchar symbols `!#$%&'*+-.^_`|~`, and
+ * nothing else.
+ *
+ * A token header reaches raw HTTP — `withClient` in `plugins/mcp.ts` sets it as a header name —
+ * so a value carrying whitespace, a control character or a CR/LF is not a malformed preference, it
+ * is a header injection. The check lives here, at the one boundary that writes the column, rather
+ * than in the route: the route only guards the JSON shape, and a second writer that skipped the
+ * route would otherwise store an unvalidated name.
+ */
+const TOKEN_HEADER_PATTERN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
+
+/**
+ * The token header an `addCustomServer` call asks to store, normalised for the row.
+ *
+ * `undefined` — the caller said nothing — means "leave the column alone": null on a new row, the
+ * existing value on a re-add. An empty or whitespace-only string means "clear it": a re-add that
+ * drops the header returns the server to the `Authorization: Bearer` default. Anything else must be
+ * a field-name token, or the add is refused rather than stored and silently never honoured.
+ */
+export function resolveTokenHeader(input: unknown): string | null | undefined {
+  if (input === undefined) return undefined;
+  if (typeof input !== "string") {
+    throw new CustomServerRefusedError("A token header must be a string.");
+  }
+  const header = input.trim();
+  if (header === "") return null;
+  if (!TOKEN_HEADER_PATTERN.test(header)) {
+    throw new CustomServerRefusedError(
+      "A token header must be a valid header name: letters, numbers and header-name symbols only, no spaces.",
+    );
+  }
+  return header;
+}
 
 /** Adding, removing, refreshing and listing MCP servers and brokered apps, and an app's account mode. */
 export function serverMethods(context: StoreContext) {
@@ -234,10 +269,17 @@ export function serverMethods(context: StoreContext) {
       title: string;
       url: string;
       credentialId?: string;
+      /**
+       * The header the deployment token travels in, when it is not `Authorization`. Absent
+       * leaves the column alone; an empty string clears it back to the default. Validated by
+       * {@link resolveTokenHeader} before anything is read or written.
+       */
+      tokenHeader?: string;
       by: string;
     }): Promise<ServerRecord> {
       const refusal = customUrlRefusal(input.url);
       if (refusal) throw new CustomServerRefusedError(refusal);
+      const tokenHeader = resolveTokenHeader(input.tokenHeader);
 
       // A custom server may not take a curated entry's slug. The slug prefixes tool names and is
       // what a grant and a policy rule are written against, so allowing a shadow would let a custom
@@ -401,6 +443,7 @@ export function serverMethods(context: StoreContext) {
           url: input.url,
           provenance: "custom",
           credentialId: credentialId ?? null,
+          tokenHeader: tokenHeader ?? null,
           addedBy: input.by,
         })
         .onConflictDoUpdate({
@@ -440,6 +483,12 @@ export function serverMethods(context: StoreContext) {
              * this endpoint does, and nothing asks it to.
              */
             ...(credentialId ? { credentialId } : {}),
+            /*
+             * Kept when the caller names none, for the same reason as the credential above: a
+             * re-add that corrects a title must not silently drop the header, and clearing it
+             * is an explicit empty string rather than an omission.
+             */
+            ...(tokenHeader !== undefined ? { tokenHeader } : {}),
             addedBy: input.by,
             updatedAt: new Date(),
           },
@@ -1505,7 +1554,7 @@ export function serverMethods(context: StoreContext) {
         listed = await transport.listTools({
           url: effectiveUrl(row, entry),
           token,
-          tokenHeader: tokenHeaderFor(entry),
+          tokenHeader: tokenHeaderForServer(entry, row.tokenHeader),
         });
       } catch (error) {
         /*
@@ -1980,6 +2029,7 @@ export function serverMethods(context: StoreContext) {
           summary: entry?.summary ?? "",
           docsUrl: entry?.docsUrl ?? "",
           provenance: row.provenance,
+          tokenHeader: row.tokenHeader,
           hasCredential: row.credentialId !== null,
           toolsRefreshedAt: iso(row.toolsRefreshedAt),
           lastError: row.lastError,

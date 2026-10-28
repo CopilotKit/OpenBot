@@ -70,6 +70,12 @@ export type PluginServer = {
   docsUrl: string;
   /** `first-party` for a reviewed entry, `custom` for one an administrator added by URL. */
   provenance: string;
+  /**
+   * The header this server's deployment token travels in, when it is not `Authorization`.
+   * Only a custom server ever carries one; null means the default. Optional because a server
+   * replica older than this field does not send it, mid-rollout.
+   */
+  tokenHeader?: string | null;
   hasCredential: boolean;
   toolsRefreshedAt: string | null;
   lastError: string | null;

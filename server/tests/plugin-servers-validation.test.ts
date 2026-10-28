@@ -128,6 +128,15 @@ describe("POST /api/plugins/servers/custom", () => {
     ],
     ["a number id", { id: 123, title: "T", url: "https://x.test" }],
     ["a whitespace title", { id: "s", title: "   ", url: "https://x.test" }],
+    [
+      "a number tokenHeader",
+      {
+        id: "s",
+        title: "T",
+        url: "https://x.test",
+        tokenHeader: 42,
+      },
+    ],
   ])("refuses %s with 400 and never reaches the store", async (_n, body) => {
     const seen = calls();
     const response = await appWith(seen).request(
@@ -141,6 +150,28 @@ describe("POST /api/plugins/servers/custom", () => {
 
     expect(response.status).toBe(400);
     expect(seen.addCustomServer).toEqual([]);
+  });
+
+  test("passes a string tokenHeader through to the store", async () => {
+    const seen = calls();
+    const response = await appWith(seen).request(
+      "http://openbot.test/servers/custom",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          id: "s",
+          title: "T",
+          url: "https://x.test",
+          tokenHeader: "x-consumer-api-key",
+        }),
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(seen.addCustomServer).toEqual([
+      expect.objectContaining({ tokenHeader: "x-consumer-api-key" }),
+    ]);
   });
 });
 

@@ -131,6 +131,7 @@ function serverRecord(row: { id: string; url: string }): ServerRecord {
     summary: "",
     docsUrl: "",
     provenance: "custom",
+    tokenHeader: null,
     hasCredential: false,
     toolsRefreshedAt: null,
     lastError: null,
