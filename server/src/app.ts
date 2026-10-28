@@ -143,6 +143,8 @@ import type { IntentRouter } from "./routing/classify";
 import { createRoutingRoutes } from "./routing/routes";
 import { createCoworkerRoutingService } from "./routing/service";
 import type { SelfHostBanner } from "./self-host-banner";
+import { createTaskRoutes } from "./tasks/routes";
+import type { TaskStore } from "./tasks/store";
 import { createTeamBotRoutes } from "./team-bots/routes";
 import type { TeamBots } from "./team-bots/team-bots";
 import type { PackageStatusReader } from "./tenant-package";
@@ -445,6 +447,8 @@ export function createApp(
     };
     memory?: { store: MemoryStore; ingestion: MemoryIngestion };
     proactive?: { store: ProactiveStore; engine: ProactiveEngine };
+    /** A person's tasks, each in a conversation of its own. See tasks/store.ts. */
+    tasks?: TaskStore;
     responsibilities?: {
       store: ResponsibilityStore;
       engine: ResponsibilityEngine;
@@ -1719,6 +1723,8 @@ export function createApp(
         requireUser,
       ),
     );
+  if (coworker?.tasks)
+    app.route("/api/tasks", createTaskRoutes(coworker.tasks, requireUser));
   if (coworker?.memory)
     app.route(
       "/api/memory",
