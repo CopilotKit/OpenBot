@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security problem
+    url: https://github.com/CopilotKit/OpenBot/security/advisories/new
+    about: Report it privately instead of in a public issue.
+  - name: Documentation
+    url: https://github.com/CopilotKit/OpenBot/tree/main/docs
+    about: Setup, configuration, deployment and architecture.
