@@ -10,18 +10,17 @@ import { useEffect, useState } from "react";
  * the name OpenBot gives it, and reads the composer's own controls back to know it is listening.
  * Everything a person sees while they talk is OpenBot's.
  *
- * The composer's own parts are found by the `data-slot` hooks OpenBot gives skins. Its dictation
- * controls have no hook, so those three are found by the names OpenBot gives them
- * (`dictation-controls.tsx`); `tests/skins-openduet-orb.test.tsx` renders the real composer and
- * holds every one of these to it.
+ * Every part of the composer is found by the `data-slot` hooks OpenBot gives skins, never by its
+ * classes or its words; `tests/skins-openduet-orb.test.tsx` renders the real composer and holds
+ * every one of these to it.
  */
 
 /** The composer's mic button, drawn only where this deployment can transcribe. */
-export const DICTATE_SELECTOR = 'button[aria-label="Dictate a message"]';
+export const DICTATE_SELECTOR = '[data-slot="composer-dictate"]';
 /** Drawn by the composer for as long as a recording is open. */
-export const RECORDING_SELECTOR = 'button[aria-label="Cancel dictation"]';
+export const RECORDING_SELECTOR = '[data-slot="composer-dictate-cancel"]';
 /** Ends the recording and puts the words in the draft. */
-export const STOP_SELECTOR = 'button[aria-label="Stop and transcribe"]';
+export const STOP_SELECTOR = '[data-slot="composer-dictate-stop"]';
 /**
  * Drawn by the composer for as long as the Bot's turn runs in this conversation: the most direct
  * word OpenBot has that the Bot is working, and it needs no round trip through the server.

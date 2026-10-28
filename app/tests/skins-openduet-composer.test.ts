@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 
 /*
  * Found live: in OpenDuet's 430px column a conversation's composer ran flush to the screen's edges,
@@ -24,6 +24,24 @@ test("the OpenDuet skin insets that column, by the hook and only inside its fram
     /\[data-skin="openduet"\] \[data-openduet-frame\] \[data-slot="composer-column"\] \{([^}]*)\}/,
   );
   expect(rule?.[1]).toContain("padding-inline: 12px");
-  // No selector in the skin reaches OpenBot's markup by its classes or its words.
-  expect(css).not.toMatch(/\.px-0|aria-label=/);
+  expect(css).not.toMatch(/\.px-0/);
+});
+
+/*
+ * Found in review: the skin found OpenBot's controls by their accessible names, so rewording a
+ * label for a screen reader silently broke the skin. No selector in the skin, in its stylesheet or
+ * its code, may reach OpenBot's markup by an aria-label; it uses the data-slot hooks.
+ */
+test("no selector in the OpenDuet skin targets an aria-label", () => {
+  const folder = new URL("../src/skins/openduet/", import.meta.url);
+  const offenders = readdirSync(folder)
+    .filter((name) => /\.(css|ts|tsx)$/.test(name))
+    .flatMap((name) =>
+      [
+        ...readFileSync(new URL(name, folder), "utf8").matchAll(
+          /\[aria-label[~|^$*]?=/g,
+        ),
+      ].map(() => name),
+    );
+  expect(offenders).toEqual([]);
 });
