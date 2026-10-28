@@ -126,6 +126,7 @@ import {
 import { createSnapshotStore } from "./computer/snapshot-store";
 import { loadConfig } from "./config";
 import {
+  chooseOpenAIApi,
   mountCopilotRuntime,
   normalizeModelBaseUrls,
   runtimeModelForEnvironment,
@@ -693,6 +694,16 @@ const storedApprovals = createApprovalStore(database);
 // Before anything reads the model environment: blank base URLs removed, Anthropic given its `/v1`.
 normalizeModelBaseUrls();
 const runtimeModel = runtimeModelForEnvironment(tenantPackage.model);
+// And before any Bot's model is resolved: behind a gateway, the API that model takes tools on (chooseOpenAIApi).
+if (chooseOpenAIApi(runtimeModel) === "responses")
+  console.info(
+    JSON.stringify({
+      type: "openai-api",
+      api: "responses",
+      model: runtimeModel.defaultModel,
+      message: `${runtimeModel.defaultModel} takes tools only through the Responses API, so the built-in Bots call /responses at OPENAI_BASE_URL. Set COPILOTKIT_OPENAI_API=chat to call /chat/completions instead.`,
+    }),
+  );
 
 /**
  * Pass one of tool selection: which skills a message needs, on the deployment's own model.
