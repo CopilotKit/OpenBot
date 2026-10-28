@@ -26,7 +26,42 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 GlobalRegistrator.register();
 /* `@base-ui/utils` is not a dependency of this package; the react package that owns it is. */
 await import("@base-ui/react/dialog");
+printNodesShortly(globalThis.Node);
 GlobalRegistrator.unregister();
+
+/** The longest stretch of a node's markup a failed assertion prints. */
+const PRINTED_NODE_CHARS = 300;
+
+/**
+ * A DOM node in a failed assertion is printed as its own markup, cut short, and not as everything it can reach.
+ *
+ * Bun prints the value a failed matcher received, and it printed a happy-dom node by walking every property it could
+ * reach: its window and document, and the `__reactFiber$` and `__reactProps$` that React keeps on each element it
+ * renders, which lead on to every component, query and client in the tree. The walk is synchronous, so a `waitFor`
+ * whose check failed while it waited held the whole event loop until the walk was done. One failed
+ * `expect(dialog).toBeNull()` in recorder-browsers.test.tsx took 3.3 s here and 8.8 s on GitHub's runner, where its test
+ * timed out: the fake DELETE the test had just let go could not answer until the print was over. And what it printed
+ * was the window's globals rather than the element.
+ *
+ * `Bun.inspect.custom` is what Bun's printer asks an object for first (bun.com/docs/runtime/utils; it is Node's
+ * `util.inspect.custom`). happy-dom's `Node` is one class for every window a file registers, so set once here it holds
+ * for every file.
+ */
+function printNodesShortly(node: typeof Node): void {
+  Object.defineProperty(node.prototype, Bun.inspect.custom, {
+    configurable: true,
+    value(this: Node): string {
+      // Read by its node type, not `instanceof Element`: a node can be printed after its file took the DOM away.
+      const markup =
+        this.nodeType === 1
+          ? (this as Element).outerHTML
+          : `${this.nodeName} ${JSON.stringify(this.textContent ?? "")}`;
+      return markup.length > PRINTED_NODE_CHARS
+        ? `${markup.slice(0, PRINTED_NODE_CHARS)}…`
+        : markup;
+    },
+  });
+}
 
 /**
  * `markFor` globs the vendored brand marks, and `import.meta.glob` is Vite's — under `bun test` it
