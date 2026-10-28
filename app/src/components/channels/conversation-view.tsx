@@ -18,6 +18,7 @@ import {
   type QueuedMessage,
   reduceQueue,
 } from "@/components/channels/composer";
+import { useReportConversation } from "@/components/channels/conversation-presence";
 import { attachmentUrl } from "@/lib/channels/attachments";
 import { newId } from "../../lib/new-id";
 
@@ -39,6 +40,7 @@ export function ConversationView({
   onSubmit,
   onStop,
   voiceCall,
+  placeholder,
 }: {
   messages: readonly Message[];
   busy?: boolean;
@@ -97,6 +99,8 @@ export function ConversationView({
   /** Stop the Bot mid-answer; forwarded to turn the send button into a stop button. */
   onStop?: () => void;
   voiceCall?: { active: boolean; supported: boolean; onStart(): void };
+  /** The composer's empty-state text, e.g. "Message Ana". The composer's own when absent. */
+  placeholder?: string;
 }) {
   /*
    * THE QUEUE LIVES HERE BECAUSE BOTH HALVES OF IT DO.
@@ -154,6 +158,16 @@ export function ConversationView({
    */
   const [running, setRunning] = useState(false);
   const inFlight = pending || running;
+  /*
+   * The conversation's header follows it: the orb thinks for the turn and listens to the draft, and
+   * the line under the name says the step. Not while history is restoring: joining the thread is a
+   * run of its own, and it is not an answer. Outside a conversation route nothing is reported.
+   */
+  const presence = useReportConversation({
+    working: (busy || inFlight) && !restoring,
+    failed: Boolean(stopped),
+    messages,
+  });
 
   /**
    * Every change to the queue goes through here, so the ref and the state can never disagree.
@@ -460,8 +474,17 @@ export function ConversationView({
                 }
               : undefined
           }
-          onStop={onStop}
+          onStop={
+            onStop && presence
+              ? () => {
+                  presence.onStop();
+                  onStop();
+                }
+              : onStop
+          }
           onSubmit={(draft) => submit(draft, false)}
+          {...(presence ? { onTextChange: presence.onTextChange } : {})}
+          {...(placeholder ? { placeholder } : {})}
           /*
            * `inFlight` rather than the `pending` this was given. A drained turn is started from the
            * effect above rather than from the composer, so the composer's own send tracking knows

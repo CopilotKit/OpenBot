@@ -152,6 +152,22 @@
 }
 
 /*
+ * The compact composer's editor. PromptArea draws its placeholder as an overlay beside an editor
+ * that is empty, so the box keeps one line's height of its own at any text size, and a long
+ * placeholder ("Message" and a long Bot name) ends in an ellipsis on that line instead of wrapping
+ * under the controls.
+ */
+.composer-editor > .relative {
+  min-height: 1lh;
+}
+.composer-editor > .relative > [aria-hidden="true"] {
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/*
  * A conversation's newest rows rendering in as it opens. The delay is set per row as
  * `--arrive-delay`; see
  * `openingStagger` in chat-transcript.tsx. Opacity and transform only, so nothing the scroller

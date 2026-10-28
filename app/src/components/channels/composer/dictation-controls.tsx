@@ -18,9 +18,12 @@ type Dictation = ReturnType<typeof useDictation>;
 export function DictationButton({
   dictation,
   disabled,
+  className,
 }: {
   dictation: Dictation;
   disabled: boolean;
+  /** Merged over the button's own: the compact composer makes it a 44px control. */
+  className?: string;
 }) {
   if (!dictation.available) return null;
   return (
@@ -32,7 +35,7 @@ export function DictationButton({
           ? "Dictate a message"
           : "Dictation needs a supported browser and a secure (HTTPS) connection"
       }
-      className="size-8 shrink-0 self-end rounded-full"
+      className={cn("size-8 shrink-0 self-end rounded-full", className)}
       disabled={disabled || !dictation.supported || dictation.busy}
       onClick={() => void dictation.session.start()}
       size="icon"
