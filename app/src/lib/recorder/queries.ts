@@ -21,13 +21,20 @@ export const recorderKeys = {
 };
 
 /**
+ * How often Settings, Browsers asks again while it is open, as the other settings screens do: so a browser that starts
+ * or stops recording, connects or is disconnected shows without a reload.
+ */
+export const CONNECTIONS_POLL_MS = 10_000;
+
+/**
  * The browsers connected for this person, and the extension ids this OpenBot trusts.
  *
  * `awaiting` polls every 2 s while a "Connect this browser" request waits for the person to confirm
- * it in the Recorder's own tab.
+ * it in the Recorder's own tab; `listed`, every {@link CONNECTIONS_POLL_MS} while the list is on screen.
  */
 export const recorderConnectionsQueryOptions = (options?: {
   awaiting?: boolean;
+  listed?: boolean;
 }) =>
   queryOptions({
     queryKey: recorderKeys.connections(),
@@ -38,7 +45,11 @@ export const recorderConnectionsQueryOptions = (options?: {
           fallback: "Couldn't load your connected browsers.",
         })
       ).json(),
-    refetchInterval: options?.awaiting ? 2000 : false,
+    refetchInterval: options?.awaiting
+      ? 2000
+      : options?.listed
+        ? CONNECTIONS_POLL_MS
+        : false,
   });
 
 /** How often the Browser button asks while a connect waits for the person to confirm it in the Recorder's own tab. */

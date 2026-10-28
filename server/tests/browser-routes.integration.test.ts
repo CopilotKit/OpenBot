@@ -977,7 +977,11 @@ describe("opening a person's own browser", () => {
           event.eventType === "recorder.revoked" &&
           event.targetId === first.connectionId,
       )?.payload,
-    ).toEqual({ connectionId: first.connectionId, reason: "replaced" });
+    ).toEqual({
+      connectionId: first.connectionId,
+      via: "openbot-browser",
+      reason: "replaced",
+    });
   });
 
   test("a connection that no longer stands is not kept: the next open makes a new one", async () => {
@@ -1757,8 +1761,6 @@ describe("a slow page, and a browser that cannot be reached", () => {
       },
       agentProfileStore: { get: async () => null } as never,
       computerGateway: openbot.gateway,
-      demonstrationStore: {} as never,
-      demonstrationRecorder: {} as never,
       app: openbot.app,
     });
     const post = (path: string, json?: unknown) =>
@@ -1940,8 +1942,6 @@ describe("a browser that is open and not answering", () => {
       },
       agentProfileStore: { get: async () => null } as never,
       computerGateway: openbot.gateway,
-      demonstrationStore: {} as never,
-      demonstrationRecorder: {} as never,
       app: openbot.app,
     });
     try {
@@ -2528,12 +2528,6 @@ describe("a person's browser on the computer routes and the live screen", () => 
       },
       agentProfileStore: { get: async () => null } as never,
       computerGateway: openbot.gateway,
-      demonstrationStore: {
-        active: async () => {
-          throw new Error("A person's browser is never a demonstration.");
-        },
-      } as never,
-      demonstrationRecorder: {} as never,
       app: openbot.app,
     });
     try {

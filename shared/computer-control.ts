@@ -46,9 +46,28 @@ export type ComputerControlState = {
   secretWanted?: string;
   secretRef?: string;
   secretSnapshotId?: number;
+  /**
+   * The user id of the person holding the wheel, while `holder` is `human` and they took it with `by`. Recording in a
+   * Bot's browser and its bar are theirs alone (`shared/bot-browser.ts`).
+   */
+  heldBy?: string;
 };
-export type RequestHelpInput = { reason: string; toolCallId?: string };
-export type ControlRequestInput = { requestId: string };
+/**
+ * Who asked for the wheel, of the two that can ask through `/control/request`: the Bot, stuck and asking a person to
+ * step in (`model`, the default), or a person taking the wheel themselves (`manual`), whose reason is the app's own
+ * words for asking rather than anything the Bot needs. The computer records the challenges it detects itself.
+ */
+export type RequestHelpSource = Extract<HandoffSource, "model" | "manual">;
+export type RequestHelpInput = {
+  reason: string;
+  toolCallId?: string;
+  source?: RequestHelpSource;
+};
+export type ControlRequestInput = {
+  requestId: string;
+  /** On a take: the user id of the person taking the wheel, kept as `heldBy`. The server always sends it. */
+  by?: string;
+};
 export type BrowserChallenge = {
   kind: "cloudflare" | "visible-challenge";
   reason: string;

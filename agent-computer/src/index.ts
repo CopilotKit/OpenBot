@@ -21,6 +21,7 @@ import {
   offeredToken,
 } from "./authorisation";
 import { isPlainBotId } from "./bot-id";
+import { createBotBrowserHost, isBotBrowserPath } from "./bot-browser-host";
 import { createBrowserHost, isBrowserPath } from "./browser-host";
 import { browserRuntimeFromEnv } from "./browser-runtime";
 import { detectChallenge } from "./challenge";
@@ -31,7 +32,6 @@ import {
   SnapshotRequiredError,
   TAKE_CONTROL_FIRST,
 } from "./control";
-import { describeHumanGesture } from "./demonstration";
 import { handleEgressPolicyRequest, startEgressFilter } from "./egress";
 import { enterText, FieldValueError } from "./enter-text";
 import { identity } from "./identity";
@@ -201,6 +201,8 @@ const TEXT_EXTRACT_LIMIT = 6000;
 const sessions = createSessions({
   isLive: (botId) => profiles.isLive(botId),
   profilesDirectory: process.env.PROFILES_DIR?.trim() || "/profiles",
+  // A recording in the Bot's browser is the person's who holds the wheel, and ends the moment they no longer do.
+  onWheelLeft: (botId) => botBrowser.wheelLeft(botId),
 });
 
 /**
@@ -307,6 +309,8 @@ await startEgressFilter({ forShell: import.meta.main });
 const profiles = createProfiles(
   process.env.PROFILES_DIR?.trim() || "/profiles",
   async (botId) => {
+    // First, while the browser is still there: a recording in it ends, and its Recorder lets the person go.
+    await botBrowser.browserClosing(botId);
     if (sessions.get(botId)) sessions.renewRun(botId);
     await sessions.get(botId)?.viewer.releaseAll(COMPUTER_STOPPED);
   },
@@ -320,6 +324,20 @@ const profiles = createProfiles(
 const browserHost = createBrowserHost({
   profiles,
   recorderDir: () => process.env[RECORDER_DIR_ENV],
+  navigationTimeoutMs: NAVIGATION_TIMEOUT_MS,
+});
+
+/**
+ * A Bot's browser worked by a person holding its wheel: the bar above its screen, and the Recorder loaded in it,
+ * which records that person and nobody else. See bot-browser-host.ts.
+ */
+const botBrowser = createBotBrowserHost({
+  profiles,
+  control: (botId) => sessions.for(botId).control,
+  // The bar is driving, as the person's input on the screen is, so a page restore never moves a page under them.
+  drove: (botId) => {
+    sessions.for(botId).humanInputs += 1;
+  },
   navigationTimeoutMs: NAVIGATION_TIMEOUT_MS,
 });
 
@@ -596,7 +614,6 @@ const FOLLOW_INTERVAL_MS = 1_000;
 /** What a live-screen socket carries: the Bot whose screen it is showing. */
 type StreamData = {
   botId: string;
-  recordingId?: string;
   /** The person's input so far, applied one message after another. */
   inputs?: Promise<void>;
 };
@@ -667,18 +684,7 @@ async function applyInput(
   }
   session.humanInputs += 1;
   try {
-    const recorded = ws.data.recordingId
-      ? await describeHumanGesture(await currentPage(ws.data.botId), message)
-      : null;
     await standing.cast.send(message);
-    if (recorded)
-      ws.send(
-        JSON.stringify({
-          type: "demonstration.action",
-          recordingId: ws.data.recordingId,
-          action: recorded,
-        }),
-      );
   } catch (error) {
     // Reported rather than swallowed. A dispatch that fails means the person's input did nothing,
     // and they must not be left believing it landed.
@@ -778,12 +784,11 @@ serve<StreamData>({
     },
 
     /*
-     * One message at a time, in the order the person sent them. A message is described before it is
-     * applied when the screen is recording a demonstration (a step needs the element it lands on),
-     * and that takes a trip to the page for some kinds of message and not for others: applied as each
-     * was ready, a key came up before it went down (every key up of a word before any of its key
-     * downs, measured with a page busy 20 ms per key down). Nothing else here holds a message, and a
-     * message refused or failed says so and lets the next one through.
+     * One message at a time, in the order the person sent them. Applying one is a trip to the
+     * browser, and a message whose trip is shorter than the one before it must still land after it:
+     * applied as each was ready, a key came up before it went down (every key up of a word before
+     * any of its key downs, measured with a page busy 20 ms per key down). Nothing else here holds a
+     * message, and a message refused or failed says so and lets the next one through.
      */
     message(ws, raw) {
       ws.data.inputs = (ws.data.inputs ?? Promise.resolve())
@@ -865,6 +870,10 @@ serve<StreamData>({
       if (applied.ok) await applyWebBotAuthPush(body?.webBotAuth);
       return applied;
     }
+    // A Bot's browser as a person holding its wheel works it. Ahead of the person's-browser rule below, so a
+    // person's browser id sent here is told it has the wrong routes rather than that it may not use them.
+    if (isBotBrowserPath(url.pathname))
+      return botBrowser.handle(request, url.pathname, botId);
     // A person's browser id reaches the person's browser routes, the live screen and the computer's
     // housekeeping, and nothing a Bot acts or reads through. See person-access.ts.
     if (isPersonBrowserId(botId) && !personMayUse(url.pathname))
@@ -902,17 +911,7 @@ serve<StreamData>({
         if (!isPlainBotId(streamBotId)) {
           return json({ error: "That is not a usable bot id." }, 400);
         }
-        const recordingId = url.searchParams.get("recording")?.trim();
-        if (recordingId && !/^[a-f0-9-]{36}$/.test(recordingId))
-          return json({ error: "Invalid recording identity." }, 400);
-        if (
-          server.upgrade(request, {
-            data: {
-              botId: streamBotId,
-              ...(recordingId ? { recordingId } : {}),
-            },
-          })
-        )
+        if (server.upgrade(request, { data: { botId: streamBotId } }))
           return undefined as unknown as Response;
         return json({ error: "Expected a WebSocket upgrade." }, 400);
       }
@@ -932,26 +931,35 @@ serve<StreamData>({
         );
       }
 
-      // The Bot asking for help. It does not take control: it says it is stuck and why, and a person
-      // decides. A Bot that could hand itself to a human could also hand a human a page they never
-      // asked to see.
+      // The Bot asking for help, or a person asking to take the wheel themselves (the first half of a
+      // take). It does not take control: it says who is asking and why, and a person decides. A Bot
+      // that could hand itself to a human could also hand a human a page they never asked to see.
       if (url.pathname === "/control/request" && request.method === "POST") {
         const body = (await request.json().catch(() => null)) as {
           reason?: unknown;
           toolCallId?: unknown;
+          source?: unknown;
         } | null;
         if (
           body?.toolCallId !== undefined &&
           typeof body.toolCallId !== "string"
         )
           return json({ error: "toolCallId must be a string." }, 400);
+        // A person taking the wheel themselves (`manual`), or the Bot asking for one (`model`, the default). The
+        // challenges the computer detects are recorded by the computer, never claimed by a caller.
+        if (
+          body?.source !== undefined &&
+          body.source !== "model" &&
+          body.source !== "manual"
+        )
+          return json({ error: "source must be model or manual." }, 400);
         // The page the Bot is stuck on, recorded with the request. A browser that will not start is
         // no reason to refuse the request: the person is the one who can see why.
         const stuckOn = await currentPage(botId).catch(() => undefined);
         const state = session.control.requestHelp(
           body?.reason,
           body?.toolCallId,
-          "model",
+          body?.source ?? "model",
           stuckOn?.url(),
         );
         // Not awaited: reopening the page can take a navigation timeout plus a cold browser start,
@@ -1089,19 +1097,27 @@ serve<StreamData>({
       ) {
         const body = (await request.json().catch(() => null)) as {
           requestId?: unknown;
+          by?: unknown;
         } | null;
         if (typeof body?.requestId !== "string" || !body.requestId.trim())
           return json({ error: "A requestId is required." }, 400);
         if (url.pathname === "/control/take") {
-          const taken = await session.control.take(body.requestId);
+          // Who is taking it: the signed-in person's user id, which the server always sends. Checked by `take`.
+          if (body.by !== undefined && typeof body.by !== "string")
+            return json({ error: "by must be a string." }, 400);
+          const taken = await session.control.take(body.requestId, body.by);
           // The browser may have restarted while the request waited; give the person the page. In the
           // background, so "Take control" answers at once; the live screen shows the page as it loads.
           void restoreHandoffPage(botId);
           return json(taken);
         }
-        if (url.pathname === "/control/cancel")
-          return json(session.control.cancel(body.requestId));
-        return json(session.control.release(body.requestId));
+        const changed =
+          url.pathname === "/control/cancel"
+            ? session.control.cancel(body.requestId)
+            : session.control.release(body.requestId);
+        // Answered once a recording the wheel took with it has ended, so what the caller reads next is true.
+        await botBrowser.settled(botId);
+        return json(changed);
       }
 
       // A person's input, by pixel. The Bot addresses elements by reference because it reads a list; a
@@ -1189,6 +1205,7 @@ serve<StreamData>({
         session.control.interrupt(
           "The computer stopped; the previous task was interrupted.",
         );
+        await botBrowser.settled(botId);
         return json({ stopped: true, wasRunning });
       }
 
@@ -1204,6 +1221,7 @@ serve<StreamData>({
         session.control.interrupt(
           "The computer was reset; the previous task was interrupted.",
         );
+        await botBrowser.settled(botId);
         /*
          * And a new run, because the browser this session described is gone.
          *

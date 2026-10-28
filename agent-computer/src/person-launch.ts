@@ -13,6 +13,7 @@
  *
  * The hosted person's browser is the computer's bundled Chromium, shown through the live screen.
  * It keeps a Bot's launch except for what the Recorder needs: extensions on, and only the Recorder.
+ * A Bot's own browser takes the Recorder the same way where this computer has it (`recorderLaunchOptions`).
  *
  * Free of Playwright, so the decisions can be tested without launching anything.
  */
@@ -363,18 +364,18 @@ export function personNativeLaunch(
   };
 }
 
-/** The hosted person's browser, which Playwright launches: what it needs beyond a Bot's launch here. */
-export type PersonLaunchInput = {
+/** A browser Playwright launches with the Recorder in it: what it needs beyond a Bot's launch here. */
+export type RecorderLaunchInput = {
   /** The built Recorder, loaded by flag. */
   recorderDir: string;
   headless: boolean;
   /** Chromium's own process sandbox. */
   sandbox: boolean;
-  /** The switches a Bot's browser launches with on this computer, which the hosted browser keeps. */
+  /** The switches a Bot's browser launches with on this computer, which a browser with the Recorder keeps. */
   botArgs: readonly string[];
 };
 
-export type PersonLaunchOptions = {
+export type RecorderLaunchOptions = {
   args: string[];
   ignoreDefaultArgs: string[];
   chromiumSandbox: boolean;
@@ -383,24 +384,26 @@ export type PersonLaunchOptions = {
 };
 
 /**
- * The hosted person's browser's launch: a Bot's, with the Recorder let in. It keeps Playwright's focus
- * emulation, which a native window drops (`native-browser.ts`): nobody sits at this browser, so every
- * tab of it says it is in front, and OpenBot itself decides which one is, from its own tab strip, and
- * shows that one on the live screen. Bots' browsers keep it for the reason Playwright has it: a Bot
- * acts in tabs that are not in front, and each must behave as if it were.
+ * A Bot's launch, with the Recorder let in: the hosted person's browser's, and a Bot's own on a computer that has the
+ * Recorder (`shared/bot-browser.ts`), where it waits, disconnected, for a person holding the wheel to press Record.
+ *
+ * It keeps Playwright's focus emulation, which a native window drops (`native-browser.ts`): nobody sits at this
+ * browser, so every tab of it says it is in front, and OpenBot itself decides which one is, from its own tab strip,
+ * and shows that one on the live screen. Bots' browsers keep it for the reason Playwright has it: a Bot acts in tabs
+ * that are not in front, and each must behave as if it were.
  */
-export function personLaunchOptions(
-  input: PersonLaunchInput,
+export function recorderLaunchOptions(
+  input: RecorderLaunchInput,
   viewport: { width: number; height: number },
-): PersonLaunchOptions {
+): RecorderLaunchOptions {
   return {
     args: [
       ...input.botArgs,
-      // Only the Recorder: the hosted browser takes no other extension.
+      // Only the Recorder: a browser launched here takes no other extension.
       `--disable-extensions-except=${input.recorderDir}`,
       `--load-extension=${input.recorderDir}`,
       // So the Recorder can be loaded again over DevTools when this profile's worker runs an earlier
-      // build of it (see `keepRecorderCurrent` in `person-browser.ts`). Only OpenBot holds the pipe.
+      // build of it (see `keepRecorderCurrent` in `recorder-in-browser.ts`). Only OpenBot holds the pipe.
       "--enable-unsafe-extension-debugging",
       /*
        * No "started debugging this browser" bar when the Recorder attaches `chrome.debugger` to

@@ -128,11 +128,25 @@ export type NarrationPost = Unsent<BrowserNarrationRequest>;
  * sentence if it said one, instead of throwing, because that is told to the person beside the narration switch and the
  * recording carries on.
  */
-export async function sendNarration(
+export function sendNarration(post: NarrationPost): Promise<NarrationAnswer> {
+  return sendNarrationTo(browserApiPaths.narration, post);
+}
+
+/** Whether a narration post was taken, and when it was not, the server's own sentence for why if it said one. */
+export type NarrationAnswer =
+  | { ok: true }
+  | { ok: false; error: string | null };
+
+/**
+ * `sendNarration` to the narration route at `path`: the person's own browser's, or a Bot's browser's
+ * (`lib/bot-browser`), which takes the same body and answers the same way.
+ */
+export async function sendNarrationTo(
+  path: string,
   post: NarrationPost,
-): Promise<{ ok: true } | { ok: false; error: string | null }> {
+): Promise<NarrationAnswer> {
   try {
-    const response = await tryClient(browserApiPaths.narration, {
+    const response = await tryClient(path, {
       method: "POST",
       body: { ...post, sentAt: Date.now() },
     });

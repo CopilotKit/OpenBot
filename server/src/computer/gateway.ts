@@ -18,6 +18,11 @@
  * The refs are opaque to the caller precisely so that the server holds the mapping.
  */
 
+import type {
+  ControlRequestInput,
+  RequestHelpInput,
+  RequestHelpSource,
+} from "@openbot/shared/computer-control";
 import { type ApprovalGate, currentApprovalContext } from "../approvals/types";
 import {
   type AuditInitiator,
@@ -213,11 +218,13 @@ export interface ComputerGateway {
     input: WriteFileInput,
   ): Promise<WriteFileResult>;
   control(botId: string, requestId?: string): Promise<ControlState>;
+  /** `source` is `manual` for a person taking the wheel themselves; the Bot's own requests are `model`. */
   requestHelp(
     botId: string,
     actor: ActionActor,
     reason: string,
     toolCallId?: string,
+    source?: RequestHelpSource,
   ): Promise<ControlState>;
   takeControl(
     botId: string,
@@ -777,11 +784,13 @@ export function createComputerGateway(
       actor: ActionActor,
       reason: string,
       toolCallId?: string,
+      source: RequestHelpSource = "model",
     ) {
       const state = await post<ControlState>(botId, "/control/request", {
         reason,
         ...(toolCallId ? { toolCallId } : {}),
-      });
+        source,
+      } satisfies RequestHelpInput);
       await writeControlEvent(auditStore, "computer.help_requested", {
         botId,
         actor,
@@ -791,9 +800,12 @@ export function createComputerGateway(
     },
 
     async takeControl(botId: string, actor: ActionActor, requestId: string) {
+      // Who took it, which the computer keeps as `heldBy`: the Bot's browser's bar and Record are that person's alone
+      // (shared/bot-browser.ts), so a recording is never filed under someone who was only watching.
       const state = await post<ControlState>(botId, "/control/take", {
         requestId,
-      });
+        by: actor.id,
+      } satisfies ControlRequestInput);
       await writeControlEvent(auditStore, "computer.control_taken", {
         botId,
         actor,

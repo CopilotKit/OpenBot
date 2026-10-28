@@ -1,3 +1,10 @@
+import type { Recognition } from "@/lib/browser/narration";
+import {
+  everyLanguage,
+  type OnDeviceModel,
+  withOnDevice,
+} from "./on-device-speech.fixture";
+
 /**
  * WHAT CHROME'S SPEECH RECOGNITION REALLY SENDS, recorded rather than imagined.
  *
@@ -454,3 +461,72 @@ export type SpeechEventShape = {
 export const isResult = (
   event: ChromeEvent,
 ): event is Extract<ChromeEvent, { type: "result" }> => event.type === "result";
+
+/**
+ * Chrome's speech recognition, as `SpeechRecognition` and `webkitSpeechRecognition`: once listening it sends what Chrome
+ * sent in the recorded run up to the moment Stop was pressed, and on stop() what it sent after, the final phrase then
+ * the end. One stopped before it heard anything (as strict mode's first, discarded effect is) just ends, as Chrome's
+ * does. Shared by every page that narrates a recording: the Browser page and a Bot's screen.
+ *
+ * `onDevice` is what it can recognise on the computer (on-device-speech.fixture.ts): every language unless a test
+ * says, or null for a Chrome with no on-device recognition at all.
+ */
+export function installChrome(
+  onDevice: OnDeviceModel | null = everyLanguage(),
+) {
+  const recognitions: ChromeRecognition[] = [];
+  const stopAt =
+    STOPPED_MID_PHRASE.find((event) => event.type === "stop")?.at ?? 0;
+  const before = STOPPED_MID_PHRASE.filter(isResult).filter(
+    (event) => event.at < stopAt,
+  );
+  const after = STOPPED_MID_PHRASE.filter(isResult).filter(
+    (event) => event.at > stopAt,
+  );
+  class ChromeRecognition implements Recognition {
+    lang = "";
+    continuous = false;
+    interimResults = false;
+    maxAlternatives = 0;
+    onstart: Recognition["onstart"] = null;
+    onresult: Recognition["onresult"] = null;
+    onerror: Recognition["onerror"] = null;
+    onend: Recognition["onend"] = null;
+    processLocally?: boolean;
+    started = false;
+    heard = false;
+    #listening: ReturnType<typeof setTimeout> | undefined;
+    constructor() {
+      recognitions.push(this);
+    }
+    start() {
+      this.started = true;
+      this.#listening = setTimeout(() => {
+        this.onstart?.();
+        for (const event of before) this.onresult?.(speechEvent(event));
+        this.heard = true;
+      }, 0);
+    }
+    stop() {
+      clearTimeout(this.#listening);
+      queueMicrotask(() => {
+        if (this.heard)
+          for (const event of after) this.onresult?.(speechEvent(event));
+        this.onend?.();
+      });
+    }
+    abort() {
+      clearTimeout(this.#listening);
+      queueMicrotask(() => this.onend?.());
+    }
+  }
+  const speech = globalThis as {
+    SpeechRecognition?: unknown;
+    webkitSpeechRecognition?: unknown;
+  };
+  // Chrome answers to both names, with the same recognition; its on-device side is on it (on-device-speech.fixture.ts).
+  speech.SpeechRecognition = speech.webkitSpeechRecognition = onDevice
+    ? withOnDevice(ChromeRecognition, onDevice)
+    : ChromeRecognition;
+  return recognitions;
+}

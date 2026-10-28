@@ -375,6 +375,7 @@ describe("at the same moment", () => {
             actorUserId: person,
             payload: {
               connectionId: earlier.connection.id,
+              via: "web",
               reason: "replaced",
             },
           }),
@@ -594,6 +595,7 @@ describe("how long a connection lasts", () => {
           initiator: { kind: "deployment" },
           payload: {
             connectionId: stale.connection.id,
+            via: "web",
             reason: "expired",
             owner: person,
           },

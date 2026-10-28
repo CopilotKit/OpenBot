@@ -6,6 +6,7 @@ import type {
 import { createActionBarrier } from "./action-barrier";
 import {
   type ControlStore,
+  MAX_HELD_BY,
   MAX_REQUEST_URL,
   type StoredControl,
 } from "./control-store";
@@ -42,6 +43,13 @@ type Options = {
   store?: ControlStore;
   invalidateSnapshot?: () => void;
   drainTimeoutMs?: number;
+  /**
+   * Told whenever the wheel leaves the person who held it: they hand it back, the request they took is cancelled, or
+   * the computer interrupts it (a stop, a reset, the browser or the process starting again). A recording in a Bot's
+   * browser is that person's alone and ends here (`shared/bot-browser.ts`). Called after the change is saved, and
+   * never awaited: the state machine does not wait on a browser.
+   */
+  onWheelLeft?: () => void;
 };
 
 /**
@@ -208,6 +216,9 @@ export function createControl(
         barrier.pending() > 0,
       resumeSnapshotRequired: data.resumeSnapshotRequired,
       recoveryRequired: data.recoveryRequired,
+      ...(data.holder === "human" && data.heldBy
+        ? { heldBy: data.heldBy }
+        : {}),
       ...(secret
         ? {
             secretWanted: secret.label,
@@ -256,12 +267,14 @@ export function createControl(
     }
     if (personHadIt) data.recoveryRequired = true;
     data.holder = "bot";
+    delete data.heldBy;
     data.since = now();
     data.resumeSnapshotRequired = true;
     secret = undefined;
     options.invalidateSnapshot?.();
     persist();
     syncAdmission();
+    if (personHadIt) options.onWheelLeft?.();
     return get();
   }
   // A persisted active request names a page in a previous process. Never call that completion.
@@ -368,7 +381,19 @@ export function createControl(
       persist();
       return get();
     },
-    async take(requestId: string): Promise<ControlState> {
+    /**
+     * A person takes the wheel for the request that is waiting. `by` is their user id, which the server always sends,
+     * kept as `heldBy` until the wheel goes back; a take without one leaves nobody named, and nobody may then record
+     * in the Bot's browser or use its bar. Taking a request already taken changes nothing, whoever asks.
+     */
+    async take(requestId: string, by?: string): Promise<ControlState> {
+      if (
+        by !== undefined &&
+        (typeof by !== "string" || !by.trim() || by.length > MAX_HELD_BY)
+      )
+        throw new ControlRequestError(
+          `by must be a nonempty string of at most ${MAX_HELD_BY} characters.`,
+        );
       const request = intended(requestId);
       if (request.status === "taken" && data.holder === "human") return get();
       if (request.status !== "waiting")
@@ -390,6 +415,8 @@ export function createControl(
       after.updatedAt = now();
       delete after.expiresAt;
       data.holder = "human";
+      if (by !== undefined) data.heldBy = by;
+      else delete data.heldBy;
       data.since = now();
       secret = undefined;
       persist();
@@ -408,6 +435,7 @@ export function createControl(
         );
       if (request.status === "taken") finish(request, "completed");
       data.holder = "bot";
+      delete data.heldBy;
       data.since = now();
       data.resumeSnapshotRequired = true;
       data.recoveryRequired = false;
@@ -415,6 +443,7 @@ export function createControl(
       options.invalidateSnapshot?.();
       persist();
       syncAdmission();
+      options.onWheelLeft?.();
       return get();
     },
     cancel(requestId: string): ControlState {
@@ -422,9 +451,12 @@ export function createControl(
       if (request.status === "cancelled") return get();
       if (!active(request))
         throw new ControlRequestError("That request is no longer active.", 409);
+      const wasTaken = request.status === "taken";
       finish(request, "cancelled");
       persist();
       syncAdmission();
+      // The person keeps the page until they hand it back, but what they took it for is over.
+      if (wasTaken) options.onWheelLeft?.();
       return get();
     },
     interrupt,
@@ -462,6 +494,19 @@ export function createControl(
     },
     humanMayDrive(): boolean {
       return data.holder === "human" && barrier.pending() === 0;
+    },
+    /**
+     * Whether `by` may record in the Bot's browser now: they hold the wheel, for a request that is still theirs (not
+     * cancelled), and nothing the Bot was doing is still draining. Only the person is ever recorded, never the Bot,
+     * because the Bot cannot act while this is true.
+     */
+    personMayRecord(by: string): boolean {
+      return (
+        this.humanMayDrive() &&
+        data.heldBy !== undefined &&
+        data.heldBy === by &&
+        current()?.status === "taken"
+      );
     },
     requestSecret(input: {
       label?: unknown;

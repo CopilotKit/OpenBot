@@ -27,9 +27,14 @@ export const TRAJECTORY_GATE_REFUSALS = {
   },
 } as const;
 
-/** How a browser was connected: Connect this browser in OpenBot (`web`), OpenBot Desktop's handoff (`desktop`), or OpenBot
- * itself when it opened the person's own OpenBot browser, with no Connect step (`openbot-browser`). */
-export type RecorderConnectVia = "web" | "desktop" | "openbot-browser";
+/** How a browser was connected: Connect this browser in OpenBot (`web`), OpenBot Desktop's handoff (`desktop`), OpenBot
+ * itself when it opened the person's own OpenBot browser, with no Connect step (`openbot-browser`), or OpenBot when the
+ * person pressed Record in a Bot's browser, for that one recording (`bot-browser`, shared/bot-browser.ts). */
+export type RecorderConnectVia =
+  | "web"
+  | "desktop"
+  | "openbot-browser"
+  | "bot-browser";
 export type RecorderUser = { id: string; name: string; email: string };
 export type RecorderConnection = {
   id: string;
@@ -43,8 +48,16 @@ export type RecorderConnection = {
 };
 const RECORDER_INSTALL_ID = /^[0-9a-f]{32}$/;
 export type ConnectCodeResponse = { code: string; expiresAt: string };
+/** A connection as Settings, Browsers lists it. */
+export type ListedRecorderConnection = RecorderConnection & {
+  /**
+   * Its Recorder said it is recording, in a report recent enough to stand (`RECORDER_ACTIVITY_STALE_MS`): a browser
+   * recording now, whose last use says nothing useful, since a recording streams to the gateway rather than OpenBot.
+   */
+  recording: boolean;
+};
 export type RecorderConnectionsResponse = {
-  connections: RecorderConnection[];
+  connections: ListedRecorderConnection[];
   extensionIds: string[];
 };
 export type ExchangeResponse = {
@@ -170,6 +183,13 @@ export const recorderPaths = {
  * everyday browser or the OpenBot browser. Best effort on the Recorder's side; OpenBot treats one older than 90 s as
  * stale.
  */
+/**
+ * How long a Recorder's report of what it is doing stands without another. It reports every 30 s while a recording runs,
+ * so three missed reports in a row: a browser that quit or lost its network mid-recording stops reading as recording
+ * after this, rather than forever.
+ */
+export const RECORDER_ACTIVITY_STALE_MS = 90_000;
+
 export const recorderActivitySchema = z
   .object({
     phase: z.enum(["idle", "starting", "recording", "stopping"]),

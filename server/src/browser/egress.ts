@@ -33,19 +33,49 @@ export function personBrowserEgressPolicy(input: {
 }): EgressPolicy {
   if (input.native || input.allowPrivateHosts)
     return { mode: "allow_all", rules: [] };
-  const named = [...input.openbotUrls, input.gatewayUrl].flatMap((raw) => {
-    const origin = originOf(raw);
-    return origin ? rulesFor(origin) : [];
-  });
   return {
     mode: "allowlist_only",
     rules: [
-      ...uniqueRules(named),
+      ...recorderOriginRules(input),
       ...publicInternetRanges().map(
         (value): EgressRule => ({ type: "cidr", value }),
       ),
     ],
   };
+}
+
+/**
+ * What the Recorder in a browser must reach, as rules: OpenBot itself, for its capture passes, and the Intelligence
+ * gateway, which it streams to. Their origins only, host and port, for the reason given above.
+ */
+export function recorderOriginRules(input: {
+  /** This OpenBot's addresses (its public URL and its app's). */
+  openbotUrls: readonly (string | undefined)[];
+  /** INTELLIGENCE_GATEWAY_WS_URL. */
+  gatewayUrl: string;
+}): EgressRule[] {
+  return uniqueRules(
+    [...input.openbotUrls, input.gatewayUrl].flatMap((raw) => {
+      const origin = originOf(raw);
+      return origin ? rulesFor(origin) : [];
+    }),
+  );
+}
+
+/**
+ * A Bot's own policy with the Recorder's origins let through as well: what a Bot's computer is pushed while a person
+ * records in its browser (browser/bot-browser.ts). Only ever wider, and by those origins alone. A policy that allows
+ * everything already allows them; one that allows nothing (the owner's "Cloud network access" is off) allows them and
+ * nothing else; an allowlist gains them beside its own rules.
+ */
+export function withRecorderOrigins(
+  policy: EgressPolicy,
+  rules: readonly EgressRule[],
+): EgressPolicy {
+  if (policy.mode === "allow_all" || rules.length === 0) return policy;
+  if (policy.mode === "deny_all")
+    return { mode: "allowlist_only", rules: [...rules] };
+  return { mode: policy.mode, rules: uniqueRules([...policy.rules, ...rules]) };
 }
 
 /** The port a URL reaches when it names none: the gateway's address is a ws: or wss: one. */

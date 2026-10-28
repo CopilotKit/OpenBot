@@ -865,13 +865,6 @@ const ALLOW: Allowed[] = [
     why: 'expect(result).toEqual({ isolation: "per-bot", computers: [ { botId: "bot-proxied",',
   },
   {
-    file: "server/tests/demonstrations.test.ts",
-    line: 294,
-    shape: "c",
-    finding: "NEW (round 2 did not find this)",
-    why: 'expect(created).toEqual([ { ownerUserId: "owner", agentId: "bot", instruction: demonstrationRoutineInstruction',
-  },
-  {
     file: "server/tests/routine-runner.test.ts",
     // Moved from 169 by the work-list change, which added tests above it; the offence is the same one and
     // is re-keyed rather than re-found.

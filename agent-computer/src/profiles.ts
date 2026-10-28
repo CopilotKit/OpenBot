@@ -35,8 +35,16 @@
 
 import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { type BrowserContext, chromium, type Page } from "playwright";
-import { isPersonBrowserId } from "../../shared/openbot-browser";
+import {
+  type BrowserContext,
+  type CDPSession,
+  chromium,
+  type Page,
+} from "playwright";
+import {
+  isPersonBrowserId,
+  RECORDER_DIR_ENV,
+} from "../../shared/openbot-browser";
 import { profileDirectoryFor } from "./bot-id";
 import { chooseEvictions, chooseIdle, keptOpen } from "./browser-eviction";
 import { type BrowserRuntime, browserRuntimeFromEnv } from "./browser-runtime";
@@ -55,9 +63,16 @@ import {
   type PersonDisplay,
   PLAYWRIGHT_DISABLED_FEATURES,
   personWindow,
+  recorderLaunchOptions,
 } from "./person-launch";
 import { botIdsIn } from "./profile-listing";
-import { isRecorderPage, type Recorder } from "./recorder";
+import { findRecorder, isRecorderPage, type Recorder } from "./recorder";
+import {
+  fitWindowsToViewport,
+  keepRecorderCurrent,
+  reachRecorder,
+} from "./recorder-in-browser";
+import type { RecorderLauncher } from "./recorder-launcher";
 import {
   type SessionCookieKeeper,
   sessionCookieKeeper,
@@ -337,10 +352,56 @@ export type ProfilesOptions = {
    * as it is now.
    */
   personDisplay?: PersonDisplay;
+  /**
+   * The built Recorder (`OPENBOT_RECORDER_DIR`), read at every launch of a Bot's browser, so a rebuilt Recorder is the
+   * one the next browser gets. Defaults to this process's environment as it is at that launch.
+   */
+  recorderDir?: () => string | undefined;
 };
 
 /** Opening a person's browser, which is the one way it starts. See `person-browser.ts`. */
 export type PersonOpen = { recorder: Recorder };
+
+/**
+ * The Recorder in a Bot's browser (`shared/bot-browser.ts`): loaded at every launch on a computer that has it, and
+ * disconnected and silent until a person holding the wheel presses Record.
+ */
+export type BotRecorder = {
+  /** The Recorder's id in this browser, which says which pages and which worker are its own. */
+  recorderId: string;
+  launcher: RecorderLauncher;
+  /**
+   * Why it cannot be used, when taking hold of it at launch failed. The Bot's browser carries on without it: a
+   * Recorder that will not start is never a reason a Bot cannot work.
+   */
+  problem?: string;
+};
+
+/** A Bot's Recorder as this module holds it: with the browser-level session its launcher speaks over. */
+type HeldRecorder = BotRecorder & { session: CDPSession };
+
+/** A Bot's running browser, for the bar a person holding its wheel works (`bot-browser-host.ts`). */
+export type OpenBotBrowser = {
+  context: BrowserContext;
+  /** Absent where this computer has no Recorder, or runs Bots in local Chrome. */
+  recorder?: BotRecorder;
+  /** The browser-level DevTools session, which the tab list reads titles from. */
+  session(): Promise<CDPSession>;
+  /** The page the Bot is on, which the live screen shows and the bar acts on. */
+  active(): Page;
+  /**
+   * Put a tab in front for the Bot as well as on the screen: it stays the Bot's page until another tab opens or it
+   * closes, so the Bot carries on where the person left it.
+   */
+  activate(page: Page): void;
+  /** The Bot's tabs, oldest first, never the Recorder's own pages. */
+  pages(): Page[];
+  /**
+   * Make the window hold exactly the page the live screen shows, from the first time a person switches its tabs (see
+   * `fitWindowsToViewport`). Not at launch: a Bot's browser nobody works stays exactly as it launches.
+   */
+  fitWindows(): Promise<void>;
+};
 
 /** A person's open browser, for the browser routes. */
 export type OpenPersonBrowser = PersonBrowser & {
@@ -366,6 +427,8 @@ export function createProfiles(
     DISPLAY: process.env.DISPLAY,
     WAYLAND_DISPLAY: process.env.WAYLAND_DISPLAY,
   };
+  const recorderDir =
+    options.recorderDir ?? (() => process.env[RECORDER_DIR_ENV]);
 
   type LiveBrowser = {
     context: BrowserContext;
@@ -379,6 +442,16 @@ export function createProfiles(
     sessionCookies?: SessionCookieKeeper;
     /** Present for a person's browser, which has the Recorder in it and no Bot acting in it. */
     person?: PersonBrowser;
+    /** Present for a Bot's browser: what the bar a person holding its wheel works needs of it. */
+    bot?: {
+      recorder?: BotRecorder;
+      /** Whether a page is one of the Bot's own, rather than one of the Recorder's. */
+      own(page: Page): boolean;
+      /** Put a page in front, and keep it there (see `OpenBotBrowser.activate`). */
+      pin(page: Page): void;
+      session(): Promise<CDPSession>;
+      fitWindows(): Promise<void>;
+    };
   };
 
   /**
@@ -548,6 +621,78 @@ export function createProfiles(
     });
     sessionCookies.start();
     return sessionCookies;
+  };
+
+  /** The built Recorder a Bot's browser launches with, or none: none configured, or one that is not a built Recorder. */
+  const recorderForBot = async (
+    botId: string,
+  ): Promise<Recorder | undefined> => {
+    const configured = recorderDir();
+    if (!configured?.trim()) return undefined;
+    const found = await findRecorder(configured);
+    if (found.ok) return found.recorder;
+    console.info(
+      JSON.stringify({
+        type: "computer-bot-recorder-unavailable",
+        botId,
+        reason: found.error,
+      }),
+    );
+    return undefined;
+  };
+
+  /**
+   * Take hold of the Recorder a Bot's browser launched with, as a person's is held: its setup pages closed as they
+   * appear, its launcher reached, its worker made to run the Recorder on disk. Before the Bot's first page is chosen,
+   * so a setup page the launch or a reload opens has come and gone by then.
+   *
+   * Never fatal. A Recorder that will not start costs the Bot nothing: the browser runs on, the failure is said in the
+   * log, and Record answers that this browser cannot record.
+   */
+  const holdBotRecorder = async (
+    botId: string,
+    context: BrowserContext,
+    recorder: Recorder,
+  ): Promise<HeldRecorder | undefined> => {
+    const reason = (error: unknown) =>
+      error instanceof Error ? error.message : String(error);
+    let session: CDPSession;
+    try {
+      const browser = context.browser();
+      if (!browser) throw new Error("The browser did not start.");
+      session = await browser.newBrowserCDPSession();
+    } catch (error) {
+      console.info(
+        JSON.stringify({
+          type: "computer-bot-recorder-unavailable",
+          botId,
+          reason: reason(error),
+        }),
+      );
+      return undefined;
+    }
+    // Loaded by flag, so its id is the one its manifest key fixes (`findRecorder`).
+    const recorderId = recorder.id;
+    const launcher = reachRecorder({ session, context, recorderId });
+    try {
+      await keepRecorderCurrent({
+        session,
+        launcher,
+        recorder,
+        recorderId,
+        botId,
+      });
+      return { recorderId, launcher, session };
+    } catch (error) {
+      console.info(
+        JSON.stringify({
+          type: "computer-bot-recorder-unavailable",
+          botId,
+          reason: reason(error),
+        }),
+      );
+      return { recorderId, launcher, session, problem: reason(error) };
+    }
   };
 
   /**
@@ -758,20 +903,37 @@ export function createProfiles(
         if (open && isPersonBrowserId(botId))
           return launchPerson(botId, dir, open);
         const proxy = egressFor(botId, process.env);
+        // The Recorder, where this computer has one. Never in local Chrome, whose Bot browser is a window on the
+        // person's own desktop, and absent the Bot's browser launches exactly as it always has.
+        const recorder = local ? undefined : await recorderForBot(botId);
+        const headless = runtime.mode === "headless";
         const context = await chromium.launchPersistentContext(dir, {
           channel: runtime.channel,
-          headless: runtime.mode === "headless",
-          args: launchArgs,
-          // Playwright launches with `--enable-automation`, which sets `navigator.webdriver` and the
-          // "controlled by automated software" banner. Dropped for the same reason as the flag above:
-          // a person who takes the wheel should be able to sign in. Named explicitly so the sandbox
-          // default args Playwright still supplies are otherwise left intact.
-          ignoreDefaultArgs: ["--enable-automation"],
-          // Playwright adds `--no-sandbox` on its own unless told otherwise, so leaving this out
-          // means the flag above decides nothing and a deployment that asked for the sandbox does
-          // not get one. Verified by reading the launched process arguments, not by trusting either.
-          chromiumSandbox: sandbox,
-          viewport: VIEWPORT,
+          ...(recorder
+            ? // A Bot's launch with the Recorder let in, as the hosted person's browser launches.
+              recorderLaunchOptions(
+                {
+                  recorderDir: recorder.dir,
+                  headless,
+                  sandbox,
+                  botArgs: launchArgs,
+                },
+                VIEWPORT,
+              )
+            : {
+                headless,
+                args: launchArgs,
+                // Playwright launches with `--enable-automation`, which sets `navigator.webdriver` and the
+                // "controlled by automated software" banner. Dropped for the same reason as the flag above:
+                // a person who takes the wheel should be able to sign in. Named explicitly so the sandbox
+                // default args Playwright still supplies are otherwise left intact.
+                ignoreDefaultArgs: ["--enable-automation"],
+                // Playwright adds `--no-sandbox` on its own unless told otherwise, so leaving this out
+                // means the flag above decides nothing and a deployment that asked for the sandbox does
+                // not get one. Verified by reading the launched process arguments, not by trusting either.
+                chromiumSandbox: sandbox,
+                viewport: VIEWPORT,
+              }),
           // This process owns shutdown. Playwright's signal handlers kill Chromium immediately on
           // SIGTERM, before pending cookie writes have time to flush.
           handleSIGTERM: false,
@@ -779,23 +941,43 @@ export function createProfiles(
           handleSIGHUP: false,
           ...(proxy ? { proxy } : {}),
         });
+        const held = recorder
+          ? await holdBotRecorder(botId, context, recorder)
+          : undefined;
+        const recorderId = recorder?.id;
+        /*
+         * A Bot's page is never one of the Recorder's own. The Recorder opens its setup page each time a launch
+         * installs it, and that page closes the moment it shows (`holdRecorder`), but until then it is the newest
+         * page, which the Bot would otherwise have followed as a window the site opened.
+         */
+        const own = (opened: Page) =>
+          recorderId === undefined || !isRecorderPage(opened.url(), recorderId);
         const sessionCookies = await keepSessionCookiesFrom(
           botId,
           dir,
           context,
         );
         // Persistent contexts open with a page already; reuse it rather than leaving an extra blank tab.
-        const page = context.pages()[0] ?? (await context.newPage());
+        const page =
+          context.pages().filter(own)[0] ?? (await context.newPage());
         /*
          * The user agent fix and the Web Bot Auth signature, before the first navigation so the first
          * request a site sees already carries both. Not for a native Chrome: that is the person's own
          * browser, which says who it is already and should not announce a deployment on their behalf.
          */
-        const network = { headless: runtime.mode === "headless" };
+        const network = { headless };
         if (!local) {
           await attachBrowserNetwork(context, network);
           await attachPageNetwork(context, page, network);
         }
+        /*
+         * The tab a person holding the wheel put in front with the bar. It stays the Bot's page until another tab
+         * opens (a browser brings a new tab to the front) or it closes, so the Bot carries on in the tab the person
+         * left in front. Without one, the Bot follows the newest page, as it always has.
+         */
+        let pinned: Page | undefined;
+        let browserSession: Promise<CDPSession> | undefined;
+        let fitted: Promise<void> | undefined;
         const record: LiveBrowser = {
           context,
           page,
@@ -803,9 +985,38 @@ export function createProfiles(
           usedAt: Date.now(),
           retarget: () => {},
           ...(sessionCookies ? { sessionCookies } : {}),
+          bot: {
+            ...(held ? { recorder: held } : {}),
+            own,
+            pin: (chosen: Page) => {
+              pinned = chosen;
+              record.retarget();
+            },
+            // The Recorder's session when there is one, which the launcher already holds; otherwise one opened the
+            // first time the bar asks, so a Bot nobody works the bar of opens none.
+            session: () => {
+              browserSession ??= held
+                ? Promise.resolve(held.session)
+                : (async () => {
+                    const browser = context.browser();
+                    if (!browser) throw new BrowserNotOpenError();
+                    return browser.newBrowserCDPSession();
+                  })();
+              return browserSession;
+            },
+            // A window on the person's own desktop (local Chrome) is theirs to size.
+            fitWindows: () => {
+              if (local) return Promise.resolve();
+              fitted ??= fitWindowsToViewport(context, VIEWPORT, botId);
+              return fitted;
+            },
+          },
         };
         record.retarget = () => {
-          const next = chooseLivePage(context.pages());
+          const next =
+            pinned && !pinned.isClosed() && own(pinned)
+              ? pinned
+              : chooseLivePage(context.pages().filter(own));
           if (!next || next === record.page) return;
           record.page = next;
           console.info(
@@ -824,11 +1035,23 @@ export function createProfiles(
         const closed = () => {
           if (live.get(botId) === record) record.retarget();
         };
+        // A tab that turns out to be one of the Recorder's own (it can report the blank page it started on when it
+        // opens) is never the Bot's page.
+        const watchForRecorderPages = (opened: Page) => {
+          if (recorderId === undefined) return;
+          opened.on("framenavigated", (frame) => {
+            if (frame === opened.mainFrame() && opened === record.page)
+              record.retarget();
+          });
+        };
+        watchForRecorderPages(page);
         // Without this the Bot stays pinned to the page it launched with, so a sign-in the site opens
         // in a new window is neither shown to the person taking the wheel nor reachable by input.
         context.on("page", (opened) => {
           if (!local) void attachPageNetwork(context, opened, network);
+          if (own(opened)) pinned = undefined;
           record.retarget();
+          watchForRecorderPages(opened);
           // A popup closes itself when it succeeds, and the record must move back to the opener
           // rather than leave a closed page to be read as a dead browser.
           opened.on("close", closed);
@@ -971,6 +1194,34 @@ export function createProfiles(
           running.page = page;
         },
         pages,
+      };
+    },
+
+    /**
+     * A Bot's browser when it is running, for the bar. Never starts it, and does not count as a use: the app reads the
+     * bar's state while the Bot's screen is open, and that alone must not keep an idle browser from being closed.
+     */
+    bot(botId: string): OpenBotBrowser | undefined {
+      const running = live.get(botId);
+      const bot = running?.bot;
+      if (!running || !bot) return undefined;
+      if (!running.context.browser()?.isConnected()) return undefined;
+      running.retarget();
+      if (running.page.isClosed()) return undefined;
+      return {
+        context: running.context,
+        ...(bot.recorder ? { recorder: bot.recorder } : {}),
+        session: bot.session,
+        active: () => {
+          running.retarget();
+          return running.page;
+        },
+        activate: bot.pin,
+        pages: () =>
+          running.context
+            .pages()
+            .filter((page) => !page.isClosed() && bot.own(page)),
+        fitWindows: bot.fitWindows,
       };
     },
 

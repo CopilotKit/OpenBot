@@ -85,6 +85,13 @@ export type LauncherState = {
     stoppedAt: number;
     actions: number;
     phrases: number;
+    /**
+     * True while some of this recording is still on its way to Intelligence after Stop. Absent once all of it is sent,
+     * or once what is left is kept for later (held by Intelligence's refusal, or waiting for its person to connect this
+     * browser again) or discarded. Whoever disconnects the Recorder after a Stop waits for it, because a disconnect
+     * keeps what is not sent yet for the person's next connection here instead of sending it now.
+     */
+    sending?: boolean;
   };
 };
 

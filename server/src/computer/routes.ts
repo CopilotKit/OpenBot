@@ -7,7 +7,9 @@ import { ApprovalNeedsConversationError } from "../approvals/types";
 import type { AuditReader } from "../audit";
 import type { AppVariables } from "../auth/guards";
 import { requireAdmin } from "../auth/guards";
+import type { BotBrowser } from "../browser/bot-browser";
 import { ownsPersonBrowser } from "../browser/person";
+import { stampNarrationArrival } from "../browser/routes";
 import { DEPLOYMENT_ROUTES } from "./deployment-routes";
 import {
   type ActionActor,
@@ -60,8 +62,18 @@ export function createComputerRoutes(
    * endpoint says it cannot answer rather than answering from nothing.
    */
   auditReader?: AuditReader,
+  /**
+   * The bar above a Bot's screen and Record, for the person holding its wheel (browser/bot-browser.ts), at
+   * `/:botId/browser`. Absent where this OpenBot has no Recorder: nothing about it is mounted.
+   */
+  botBrowser?: BotBrowser,
 ) {
   const routes = new Hono<{ Variables: AppVariables }>();
+
+  // A phrase's arrival, noted before the guard below signs the person in and asks about the Bot, which can take any
+  // time: the narration's times are moved onto this server's clock from it (browser/routes.ts).
+  if (botBrowser)
+    routes.use("/:botId/browser/narration", stampNarrationArrival);
 
   /**
    * Every route under a Bot id, in one place.
@@ -116,6 +128,9 @@ export function createComputerRoutes(
     }
     await next();
   });
+
+  // After the guard, so everything under it has passed it: a person's own browser id never gets here.
+  if (botBrowser) routes.route("/:botId/browser", botBrowser.routes);
 
   routes.get("/:botId/status", async (context) => {
     const botId = context.req.param("botId");
@@ -421,6 +436,8 @@ export function createComputerRoutes(
           ? body.reason.trim()
           : "It can't continue without you.",
         typeof body?.toolCallId === "string" ? body.toolCallId : undefined,
+        // A person taking the wheel themselves says so; anything else is the Bot asking, as it always was.
+        body?.source === "manual" ? "manual" : "model",
       ),
     ),
   );
@@ -490,16 +507,25 @@ export function createComputerRoutes(
     ),
   );
 
+  /*
+   * Handing the wheel back, or the Bot's request being cancelled, ends any recording in the Bot's browser (the computer
+   * ends it), and every Recorder connection the browser holds goes with it: the Bot's network stops letting the Recorder
+   * out (browser/bot-browser.ts). A Bot whose wheel a person held acts again only once it is handed back here.
+   */
   routes.post("/:botId/control/release", (context) =>
-    act(context, (botId, actor, body) =>
-      gateway.releaseControl(botId, actor, handoffId(body)),
-    ),
+    act(context, async (botId, actor, body) => {
+      const state = await gateway.releaseControl(botId, actor, handoffId(body));
+      await botBrowser?.wheelReturned(botId);
+      return state;
+    }),
   );
 
   routes.post("/:botId/control/cancel", (context) =>
-    act(context, (botId, actor, body) =>
-      gateway.cancelControl(botId, actor, handoffId(body)),
-    ),
+    act(context, async (botId, actor, body) => {
+      const state = await gateway.cancelControl(botId, actor, handoffId(body));
+      await botBrowser?.wheelReturned(botId);
+      return state;
+    }),
   );
 
   /** The Bot asking for a value it must not be told. */

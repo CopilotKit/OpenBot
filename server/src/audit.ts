@@ -625,8 +625,10 @@ export const auditEventTypes = [
    */
   "recorder.connect_refused",
   /*
-   * A connection ended; payload `reason` is replaced (the same copy connected again), disconnected, revoked, signed_out
-   * (the person signed out of OpenBot) or expired (its lifetime ran out: the deployment ended it, payload `owner`).
+   * A connection ended; payload `via`, how it was made, and `reason`: replaced (the same copy connected again),
+   * disconnected, revoked, signed_out (the person signed out of OpenBot) or expired (its lifetime ran out: the
+   * deployment ended it, payload `owner`); for a Bot's browser's connection, which lasts one recording, stopped (the
+   * person's Stop), ended (the recording ended without one) or not-started (the start it was for did not happen).
    * Written in the transaction that ends the connection, as `recorder.connected` is in the one that makes it.
    */
   "recorder.revoked",

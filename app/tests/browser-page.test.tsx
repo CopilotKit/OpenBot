@@ -29,11 +29,7 @@ import { type ReactNode, StrictMode } from "react";
 import { BrowserPage } from "@/components/browser/browser-page";
 import type { Recognition } from "@/lib/browser/narration";
 import { queryClient } from "@/query-client";
-import {
-  isResult,
-  STOPPED_MID_PHRASE,
-  speechEvent,
-} from "./browser-narration.fixture";
+import { installChrome } from "./browser-narration.fixture";
 import {
   everyLanguage,
   type OnDeviceModel,
@@ -70,6 +66,8 @@ let actionsAfterStart = 7;
 let phrasesHeard = 0;
 /** Phrases the page passed the Recorder in the recording now running (a hosted browser's narration). */
 let phrasesPassed = 0;
+/** Whether New tab opens one, in front, as the computer does. Off where a case reads the bar it started with. */
+let tabsOpen = false;
 /** The person's narration choice as their preferences keep it: on, as for someone who chose it, unless a test says. */
 let narrationChoice: "on" | "off" | null = "on";
 /** While set, opening the browser waits for it, as a browser that takes seconds to launch does. */
@@ -214,7 +212,8 @@ async function server(path: string, init?: RequestInit): Promise<Response> {
     const request = browserTabsRequestSchema.safeParse(body);
     if (!request.success) return refuse();
     // A close, as the computer makes one: the tab goes, and when it was the one in front the person's newest tab comes
-    // forward (agent-computer's profiles.ts, `retarget`). An activate brings the tab forward.
+    // forward (agent-computer's profiles.ts, `retarget`). An activate brings the tab forward. A new tab opens empty, in
+    // front, where a case asks for it (`tabsOpen`).
     if (request.data.action === "close") {
       const closing = request.data.tabId;
       const left = state.tabs.filter((tab) => tab.id !== closing);
@@ -231,7 +230,19 @@ async function server(path: string, init?: RequestInit): Promise<Response> {
         ...state,
         tabs: state.tabs.map((tab) => ({ ...tab, active: tab.id === front })),
       };
-    }
+    } else if (tabsOpen && request.data.action === "new")
+      state = {
+        ...state,
+        tabs: [
+          ...state.tabs.map((tab) => ({ ...tab, active: false })),
+          {
+            id: "tab-new",
+            url: "about:blank",
+            title: "about:blank",
+            active: true,
+          },
+        ],
+      };
     return Response.json(state);
   }
   if (path === browserApiPaths.navigate && method === "POST") {
@@ -302,6 +313,7 @@ beforeEach(() => {
   actionsAfterStart = 7;
   phrasesHeard = 0;
   phrasesPassed = 0;
+  tabsOpen = false;
   narrationChoice = "on";
   opening = null;
   state = nativeState();
@@ -1437,6 +1449,64 @@ test("where OpenBot cannot run a browser for the person, the page says so and op
   expect(opens()).toBe(0);
 });
 
+test("on hosted OpenBot a new tab takes the focus into its address bar, as Chrome does", async () => {
+  state = screenState();
+  openAnswer = answerFor("screen");
+  tabsOpen = true;
+  const view = draw(<BrowserPage />);
+  const user = userEvent.setup({ document });
+  await user.click(await view.findByRole("button", { name: "New tab" }));
+  await waitFor(() =>
+    expect(
+      view.getAllByRole("tab").map((tab) => tab.getAttribute("aria-selected")),
+    ).toEqual(["false", "false", "true"]),
+  );
+  await waitFor(() =>
+    expect(document.activeElement).toBe(
+      view.getByRole("textbox", { name: "Address" }),
+    ),
+  );
+});
+
+test("on hosted OpenBot narration the person turned off stays off after a reload, kept on their account", async () => {
+  state = screenState();
+  openAnswer = answerFor("screen");
+  installChrome();
+  const view = draw(<BrowserPage />);
+  const user = userEvent.setup({ document });
+  const toggle = await view.findByRole("switch", { name: "Narration" });
+  await waitFor(() => expect(toggle.getAttribute("aria-checked")).toBe("true"));
+  await user.click(toggle);
+  expect(toggle.getAttribute("aria-checked")).toBe("false");
+  // Kept as the person's own preference, which every browser they open OpenBot in reads, not in this browser alone.
+  await waitFor(() =>
+    expect(preferenceWrites().map((write) => write.body)).toEqual([
+      { narration: "off" },
+    ]),
+  );
+
+  // A reload starts from nothing but what the server keeps.
+  cleanup();
+  queryClient.clear();
+  const reloaded = draw(<BrowserPage />);
+  const again = await reloaded.findByRole("switch", { name: "Narration" });
+  await settleReactWork();
+  expect(again.getAttribute("aria-checked")).toBe("false");
+  // On again is kept the same way.
+  await user.click(again);
+  await waitFor(() =>
+    expect(preferenceWrites().map((write) => write.body)).toEqual([
+      { narration: "off" },
+      { narration: "on" },
+    ]),
+  );
+  cleanup();
+  queryClient.clear();
+  const view3 = draw(<BrowserPage />);
+  const third = await view3.findByRole("switch", { name: "Narration" });
+  await waitFor(() => expect(third.getAttribute("aria-checked")).toBe("true"));
+});
+
 test("where the server says why there is no browser of the person's own, the page says that instead", async () => {
   // Every Bot shares one computer here, which is no place for a person's browser (the code-owner review's blocker 3).
   const why =
@@ -1457,66 +1527,6 @@ test("on OpenBot Desktop with no Chrome or Edge it can open, the browser in the 
   await view.findByLabelText(SCREEN);
   expect(view.getByText(why)).toBeTruthy();
 });
-
-/**
- * Chrome's speech recognition, as `webkitSpeechRecognition`: once listening it sends what Chrome sent in the recorded
- * run up to the moment Stop was pressed, and on stop() what it sent after, the final phrase then the end. One stopped
- * before it heard anything (as strict mode's first, discarded effect is) just ends, as Chrome's does.
- */
-/** Chrome's recognition, with what it can recognise on the computer (every language unless a test says; null for a
- * Chrome with no on-device recognition). */
-function installChrome(onDevice: OnDeviceModel | null = everyLanguage()) {
-  const recognitions: ChromeRecognition[] = [];
-  const stopAt =
-    STOPPED_MID_PHRASE.find((event) => event.type === "stop")?.at ?? 0;
-  const before = STOPPED_MID_PHRASE.filter(isResult).filter(
-    (event) => event.at < stopAt,
-  );
-  const after = STOPPED_MID_PHRASE.filter(isResult).filter(
-    (event) => event.at > stopAt,
-  );
-  class ChromeRecognition implements Recognition {
-    lang = "";
-    continuous = false;
-    interimResults = false;
-    maxAlternatives = 0;
-    onstart: Recognition["onstart"] = null;
-    onresult: Recognition["onresult"] = null;
-    onerror: Recognition["onerror"] = null;
-    onend: Recognition["onend"] = null;
-    processLocally?: boolean;
-    started = false;
-    heard = false;
-    #listening: ReturnType<typeof setTimeout> | undefined;
-    constructor() {
-      recognitions.push(this);
-    }
-    start() {
-      this.started = true;
-      this.#listening = setTimeout(() => {
-        this.onstart?.();
-        for (const event of before) this.onresult?.(speechEvent(event));
-        this.heard = true;
-      }, 0);
-    }
-    stop() {
-      clearTimeout(this.#listening);
-      queueMicrotask(() => {
-        if (this.heard)
-          for (const event of after) this.onresult?.(speechEvent(event));
-        this.onend?.();
-      });
-    }
-    abort() {
-      clearTimeout(this.#listening);
-      queueMicrotask(() => this.onend?.());
-    }
-  }
-  // Chrome answers to both names, with the same recognition; its on-device side is on it (on-device-speech.fixture.ts).
-  speechGlobals.SpeechRecognition = speechGlobals.webkitSpeechRecognition =
-    onDevice ? withOnDevice(ChromeRecognition, onDevice) : ChromeRecognition;
-  return recognitions;
-}
 
 /**
  * Chrome's speech recognition where it cannot hear the person: each recognition started while `error` is set fails
