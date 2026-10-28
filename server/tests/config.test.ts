@@ -134,6 +134,38 @@ describe("deployment configuration", () => {
     );
   });
 
+  // The browser opens the gateway itself, at the address `/info` gives it. A server in a container
+  // reaches local Intelligence somewhere the browser on the host cannot, so it may name both.
+  test("keeps the browser's gateway address apart from the server's, when one is given", () => {
+    const config = loadConfig({
+      ...baseEnvironment,
+      INTELLIGENCE_GATEWAY_WS_URL: "ws://host.docker.internal:14401",
+      INTELLIGENCE_BROWSER_GATEWAY_WS_URL: "ws://localhost:14401",
+    });
+    if (config.runtime.mode !== "intelligence") {
+      throw new Error("expected the Intelligence runtime");
+    }
+    expect(config.runtime.intelligence.gatewayWsUrl).toBe(
+      "ws://host.docker.internal:14401",
+    );
+    expect(config.runtime.intelligence.browserGatewayWsUrl).toBe(
+      "ws://localhost:14401",
+    );
+
+    const without = loadConfig(baseEnvironment);
+    if (without.runtime.mode !== "intelligence") {
+      throw new Error("expected the Intelligence runtime");
+    }
+    expect(without.runtime.intelligence.browserGatewayWsUrl).toBeUndefined();
+
+    expect(() =>
+      loadConfig({
+        ...baseEnvironment,
+        INTELLIGENCE_BROWSER_GATEWAY_WS_URL: "not a url",
+      }),
+    ).toThrow("INTELLIGENCE_BROWSER_GATEWAY_WS_URL must be a valid URL");
+  });
+
   test("still forwards a licence token when a deployment sets one", () => {
     const config = loadConfig({
       ...baseEnvironment,
