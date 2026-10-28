@@ -155,12 +155,13 @@ describe("whose computer a name is", () => {
     }
   });
 
-  test("the names a Bot's computer had before are still derivable, to find its old profile", () => {
+  test("the names a Bot's computer had before are still derivable, to find its old profile and files", () => {
     const legacy = legacyNamesFor("notes-bot");
     expect(legacy.ok && legacy.names).toEqual({
       botId: "notes-bot",
       container: `${NAMESPACE}-computer-notes-bot`,
       profileVolume: `${NAMESPACE}-profile-notes-bot`,
+      workspaceVolume: `${NAMESPACE}-workspace-notes-bot`,
     });
     expect(legacyNamesFor("../x").ok).toBe(false);
   });
