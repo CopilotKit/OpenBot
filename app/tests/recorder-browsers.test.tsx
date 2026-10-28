@@ -411,9 +411,11 @@ test("Disconnect sends the DELETE and the row disappears", async () => {
   const dialog = await view.findByRole("dialog", {
     name: "Disconnect Chrome on Mac?",
   });
+  // Named as the row is: it is not known to be this browser, so the dialog does not say it is.
   expect(dialog.textContent).toContain(
-    "OpenBot signs the Recorder in this browser out. It records nothing for you until you connect it again, and a recording running there stops.",
+    "OpenBot signs the Recorder in Chrome on Mac out. It records nothing for you until you connect it again, and a recording running there stops.",
   );
+  expect(dialog.textContent).not.toContain("this browser");
   expect(sent).toEqual([]);
   fireEvent.click(within(dialog).getByRole("button", { name: "Disconnect" }));
   await waitFor(() =>
@@ -449,6 +451,42 @@ test("Cancel disconnects nothing, and a refused Disconnect says why in the dialo
     "That browser is already disconnected.",
   );
   expect(view.getByText("Chrome on Mac")).toBeTruthy();
+});
+
+test("the Disconnect dialog says this browser only on this browser's row, and names every other", async () => {
+  connections = [
+    connection(),
+    connection({
+      id: "conn-2",
+      label: "Edge on Windows",
+      installId: OTHER_COPY,
+    }),
+    connection({
+      id: "conn-3",
+      label: "OpenBot browser",
+      via: "openbot-browser",
+      installId: "e".repeat(32),
+    }),
+  ];
+  const view = draw(<ConnectedBrowsers thisInstallId={THIS_COPY} />);
+  const said = async (button: string) => {
+    fireEvent.click(await view.findByRole("button", { name: button }));
+    const dialog = await view.findByRole("dialog");
+    const text = dialog.querySelector("p")?.textContent ?? "";
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(view.queryByRole("dialog")).toBeNull());
+    return text;
+  };
+  expect(await said("Disconnect Chrome on Mac · This browser")).toStartWith(
+    "OpenBot signs the Recorder in this browser out.",
+  );
+  expect(await said("Disconnect Edge on Windows")).toStartWith(
+    "OpenBot signs the Recorder in Edge on Windows out.",
+  );
+  expect(await said("Disconnect OpenBot browser")).toStartWith(
+    "OpenBot signs the Recorder in your OpenBot browser out.",
+  );
+  expect(sent).toEqual([]);
 });
 
 test("disconnecting one browser leaves every other row's Disconnect as it was", async () => {
