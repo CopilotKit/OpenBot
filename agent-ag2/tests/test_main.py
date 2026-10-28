@@ -190,13 +190,11 @@ def test_an_anthropic_key_uses_the_official_endpoint_when_compose_sets_a_blank_u
 
     async def respond(transport, request):
         body = json.loads(request.content)
-        # Anthropic 2.3 sends API keys as Bearer tokens; older SDKs use x-api-key.
-        # Assert the actual credential in either supported header, not just its presence.
-        assert (
-            request.headers.get("x-api-key") == "test-key"
-            or request.headers.get("authorization") == "Bearer test-key"
-        )
-        seen.append((str(request.url), body["model"]))
+        # Anthropic's SDK sends the key as `x-api-key` up to 1.x and as `Authorization: Bearer` from
+        # 2.x; either is the key reaching Anthropic, which is what this test is about.
+        bearer = request.headers.get("authorization") or ""
+        key = request.headers.get("x-api-key") or bearer.removeprefix("Bearer ") or None
+        seen.append((str(request.url), key, body["model"]))
         return httpx2.Response(
             200,
             request=request,
@@ -230,7 +228,7 @@ def test_an_anthropic_key_uses_the_official_endpoint_when_compose_sets_a_blank_u
         "/", json=RUN, headers={"x-openbot-agent-token": TOKEN}
     )
 
-    assert seen == [("https://api.anthropic.com/v1/messages", "claude-sonnet-4-5")]
+    assert seen == [("https://api.anthropic.com/v1/messages", "test-key", "claude-sonnet-4-5")]
     assert response.status_code == 200
     assert '"RUN_FINISHED"' in response.text
     assert '"RUN_ERROR"' not in response.text

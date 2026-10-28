@@ -50,7 +50,13 @@ afterEach(() => {
   clients.length = 0;
   globalThis.fetch = originalFetch;
 });
-afterAll(() => GlobalRegistrator.unregister());
+// A failed save rolls the cache back after the last test has seen the banner return, and React
+// renders that after `cleanup`. Unregistering at once removes `window` under it, and the scheduler's
+// read of `window.event` throws between tests, failing the run with every test passed.
+afterAll(async () => {
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  await GlobalRegistrator.unregister();
+});
 
 const banner = { name: "Self-host OpenBot" } as const;
 
