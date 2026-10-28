@@ -396,7 +396,9 @@ test("a ticked Isolated is sent with the Bot, and an unticked one says no", asyn
   cleanup();
   creates = [];
   const again = await named("Plain");
-  await again.user.click(again.view.getByRole("button", { name: "Create Bot" }));
+  await again.user.click(
+    again.view.getByRole("button", { name: "Create Bot" }),
+  );
   expect(await again.view.findByText("Plain is ready")).toBeTruthy();
   expect(creates[0]).toMatchObject({ name: "Plain", isolated: false });
 });

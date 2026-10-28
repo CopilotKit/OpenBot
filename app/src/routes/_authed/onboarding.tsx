@@ -273,7 +273,7 @@ function Introduction({ localEvaluation }: { localEvaluation: boolean }) {
         { id: "welcome", label: "Welcome", content: <WelcomeStep /> },
         {
           id: "computer",
-          label: "Each Bot has its own computer",
+          label: "Each Bot has its own browser and files",
           content: <ComputerUseStep />,
         },
         {
