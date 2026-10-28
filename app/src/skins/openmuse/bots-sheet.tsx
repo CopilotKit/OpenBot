@@ -27,7 +27,7 @@ import { Divider, ErrorNotice, LinkRow, MuseSheet, museText } from "./ui";
  * one place the difference shows, and it stays a sheet behind the name rather than a fixture.
  */
 export function BotsSheet({ onClose }: { onClose: () => void }) {
-  const { bot: centre } = useMuse();
+  const { bot: centre, userId } = useMuse();
   const agents = useQuery(agentListQueryOptions());
   const attention = useQuery(botAttentionQueryOptions());
   const channels = useInfiniteQuery(channelListQueryOptions());
@@ -37,7 +37,7 @@ export function BotsSheet({ onClose }: { onClose: () => void }) {
   const navigate = useNavigate();
 
   const choose = (agentId: string) => {
-    chooseBot(agentId);
+    if (userId) chooseBot(userId, agentId);
     onClose();
     // On Chat, choosing a Bot means talking to it; elsewhere the tab stays and follows the Bot.
     if (tabFor(pathname) !== "chat") return;

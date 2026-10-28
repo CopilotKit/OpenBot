@@ -1,18 +1,19 @@
 import { IconBell, IconHandStop } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
+import { WaitingForYou } from "@/components/approvals/waiting";
 import { approvalInboxOptions } from "@/lib/approvals";
-import { ApprovalCard, QuestionCard } from "./approvals";
 import { waitingOnYou } from "./model";
-import { ErrorNotice, LinkRow, MuseEmpty, MuseSheet } from "./ui";
+import { LinkRow, MuseEmpty, MuseSheet } from "./ui";
 
 /**
- * The bell: what every Bot is waiting on the person for, from OpenBot's approval inbox. Questions
- * first, because a run is paused on each; then actions waiting for an OK.
+ * The bell: what every Bot is waiting on the person for. The list is OpenBot's own `WaitingForYou`,
+ * so every question, approval, choice and detail is exactly the one OpenBot's Bot pages show.
  */
 export function NotificationsSheet({ onClose }: { onClose: () => void }) {
   const inbox = useQuery(approvalInboxOptions());
-  const { requests, questions } = waitingOnYou(inbox.data);
+  const nothing =
+    inbox.data !== undefined && waitingOnYou(inbox.data).count === 0;
   return (
     <MuseSheet
       onClose={onClose}
@@ -20,23 +21,14 @@ export function NotificationsSheet({ onClose }: { onClose: () => void }) {
       title="Needs you"
     >
       <div className="flex flex-col gap-3.5">
-        {inbox.isPending ? null : inbox.error ? (
-          <ErrorNotice error={inbox.error.message} />
-        ) : requests.length + questions.length === 0 ? (
+        {nothing ? (
           <MuseEmpty
-            detail="When a Bot needs your OK or an answer before it carries on, it waits here."
+            detail="When a Bot needs your OK or an answer, it shows up here."
             icon={IconBell}
             title="You're all caught up"
           />
         ) : (
-          <>
-            {questions.map((question) => (
-              <QuestionCard key={question.id} question={question} />
-            ))}
-            {requests.map((request) => (
-              <ApprovalCard key={request.id} request={request} />
-            ))}
-          </>
+          <WaitingForYou />
         )}
         <LinkRow
           detail="What your Bots may do without asking"

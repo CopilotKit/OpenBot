@@ -35,7 +35,11 @@ import type { ProactiveSetting, ProactiveSuggestion } from "@/lib/proactive";
 import type { ResponsibilityRecord } from "@/lib/responsibilities";
 import type { RoutineRecord } from "@/lib/routines/queries";
 import { openmuse } from "@/skins/openmuse";
-import { chooseBot } from "@/skins/openmuse/chosen-bot";
+import {
+  chooseBot,
+  chosenBotKey,
+  forgetChosenBots,
+} from "@/skins/openmuse/chosen-bot";
 import { OpenMuseFrame } from "@/skins/openmuse/frame";
 import {
   centreBot,
@@ -64,7 +68,8 @@ afterEach(() => {
   cleanup();
   globalThis.fetch = originalFetch;
   globalThis.WebSocket = originalSocket;
-  chooseBot("none");
+  window.localStorage.clear();
+  forgetChosenBots();
 });
 
 const now = new Date().toISOString();
@@ -364,12 +369,12 @@ const plugins: PluginsPage = {
 
 type Call = { method: string; path: string; body: unknown };
 
-function serve(options: { role?: "admin" | "user" } = {}) {
+function serve(options: { role?: "admin" | "user"; userId?: string } = {}) {
   const calls: Call[] = [];
   const routes: Record<string, unknown> = {
     "/api/me": {
       user: {
-        id: "u-1",
+        id: options.userId ?? "u-1",
         email: "alex@example.com",
         name: "Alex Rivera",
         role: options.role ?? "admin",
@@ -509,11 +514,11 @@ async function openMenu() {
 }
 
 describe("OpenMuse is a registered skin with its own frame", () => {
-  test("the registry hands OpenBot the frame and the four tab screens", () => {
+  test("the registry hands OpenBot the frame and the three skin screens", () => {
     expect(SKINS.openmuse.Frame).toBe(OpenMuseFrame);
+    // Apps is OpenBot's own Connections page, so the skin adds three screens, not four.
     expect(Object.keys(SKINS.openmuse.screens ?? {}).sort()).toEqual([
       "activity",
-      "apps",
       "goals",
       "ideas",
     ]);
@@ -523,7 +528,7 @@ describe("OpenMuse is a registered skin with its own frame", () => {
 describe("the frame", () => {
   test("centres OpenBot's default Bot, with what it is waiting on", async () => {
     serve();
-    renderAt("/s/apps");
+    renderAt("/connections");
     const centre = await page().findByRole("button", {
       name: /^Muse, Ready to review · 1 approval\. Switch Bot$/,
     });
@@ -573,13 +578,75 @@ describe("the frame", () => {
       tabs.getByRole("link", { name: "Goals" }).getAttribute("aria-current"),
     ).toBe("page");
     expect(tabs.getByRole("link", { name: "Apps" }).getAttribute("href")).toBe(
-      "/s/apps",
+      "/connections",
     );
+  });
+
+  test.each([
+    ["/s/activity", "Activity"],
+    ["/s/ideas", "Ideas"],
+    ["/s/goals", "Goals"],
+    ["/connections", "Apps"],
+    ["/channel/c-muse", "Chat"],
+    ["/routines", null],
+    ["/settings/approvals", null],
+    ["/bots/scout/setup", null],
+    ["/capabilities/memory", null],
+  ])("on %s the current tab is %s", async (path, current) => {
+    serve();
+    renderAt(path);
+    const nav = await page().findByRole("navigation", { name: PRODUCT });
+    await within(nav).findByRole("link", { name: "Chat" });
+    const marked = within(nav)
+      .getAllByRole("link")
+      .filter((link) => link.getAttribute("aria-current") === "page")
+      .map((link) => link.getAttribute("aria-label"));
+    expect(marked).toEqual(current ? [current] : []);
+  });
+
+  test.each([
+    ["/s/goals", "column"],
+    ["/connections", "column"],
+    ["/channel/c-muse", "column"],
+    // The Bot's computer open beside the conversation needs OpenBot's own width.
+    ["/channel/c-muse?watch=true", "page"],
+    ["/channel/c-muse?settings=true", "page"],
+    ["/bots/scout/setup", "page"],
+    ["/routines", "page"],
+  ])("%s is drawn at the %s width", async (path, width) => {
+    serve();
+    renderAt(path);
+    await page().findByRole("navigation", { name: PRODUCT });
+    expect(
+      document
+        .querySelector(".openmuse-stage")
+        ?.getAttribute("data-openmuse-width"),
+    ).toBe(width);
+  });
+
+  test("the chosen Bot is remembered per person, not per machine", async () => {
+    serve({ userId: "u-1" });
+    renderAt("/s/activity");
+    fireEvent.click(await page().findByRole("button", { name: /Switch Bot$/ }));
+    fireEvent.click(
+      within(await page().findByRole("dialog")).getByRole("button", {
+        name: /Scout/,
+      }),
+    );
+    await page().findByRole("button", { name: /^Scout, / });
+    expect(window.localStorage.getItem(chosenBotKey("u-1"))).toBe(scout.id);
+    cleanup();
+    // The next person on this browser starts from OpenBot's default Bot.
+    forgetChosenBots();
+    serve({ userId: "u-2" });
+    renderAt("/s/activity");
+    await page().findByRole("button", { name: /^Muse, / });
+    expect(window.localStorage.getItem(chosenBotKey("u-2"))).toBeNull();
   });
 
   test("Chat opens a new conversation with a Bot that has none yet", async () => {
     serve();
-    chooseBot(scout.id);
+    chooseBot("u-1", scout.id);
     const roster = channels.filter((row) => row.id !== "c-scout");
     globalThis.fetch = (() => {
       const real = globalThis.fetch;
@@ -630,7 +697,7 @@ describe("the frame wears the deployment's brand, not OpenMuse's", () => {
     "/s/activity",
     "/s/ideas",
     "/s/goals",
-    "/s/apps",
+    "/connections",
   ])(
     "%s shows the deployment's name, never OpenMuse, and no capybara",
     async (path) => {
@@ -649,7 +716,7 @@ describe("the frame wears the deployment's brand, not OpenMuse's", () => {
 
   test("the centre Bot is drawn with its own OpenBot avatar", async () => {
     serve();
-    renderAt("/s/apps");
+    renderAt("/connections");
     const centre = await page().findByRole("button", { name: /Switch Bot$/ });
     // AbstractAvatar names the drawing after the Bot, as on its OpenBot page.
     expect(within(centre).getByRole("img", { name: "Muse" })).toBeTruthy();
@@ -679,7 +746,7 @@ describe("every OpenBot surface stays reachable", () => {
   const surfaces: [RegExp, string][] = [
     [/^Main chat/, "/channel/c-muse"],
     [/^New chat$/, "/channel/new?agent=picked-harness"],
-    [/^Group chat$/, "/channel/new"],
+    [/^New group$/, "/channel/new"],
     [/^Home/, "/"],
     [/^Bots/, "/bots"],
     [/^Responsibilities/, "/bots/picked-harness/responsibilities"],
@@ -688,7 +755,7 @@ describe("every OpenBot surface stays reachable", () => {
     [/^Memory/, "/capabilities/memory"],
     [/^Connections/, "/connections"],
     [/^Approvals/, "/settings/approvals"],
-    [/^Reachability/, "/settings/notifications"],
+    [/^Notifications/, "/settings/notifications"],
     [/^Settings/, "/settings"],
     [/^Admin/, "/admin"],
   ];
@@ -731,7 +798,7 @@ describe("every OpenBot surface stays reachable", () => {
     "/s/activity",
     "/s/ideas",
     "/s/goals",
-    "/s/apps",
+    "/connections",
     "/bots/scout/setup",
   ])("Settings is one tap behind the menu on %s", async (path) => {
     serve();
@@ -747,7 +814,7 @@ describe("every OpenBot surface stays reachable", () => {
 
   test("the Bot switcher reaches each Bot's page, the roster and a new Bot", async () => {
     serve();
-    renderAt("/s/apps");
+    renderAt("/connections");
     fireEvent.click(await page().findByRole("button", { name: /Switch Bot$/ }));
     const sheet = within(await page().findByRole("dialog"));
     expect(hrefOf(/^Muse's page/)).toBe("/bots/picked-harness");
@@ -767,33 +834,32 @@ describe("every OpenBot surface stays reachable", () => {
   });
 });
 
-describe("each tab reads OpenBot's data", () => {
-  test("Activity shows the centre Bot's work and the approvals it asked for", async () => {
+describe("each tab is OpenBot's own sections for the centre Bot", () => {
+  test("Activity shows what the Bot waits on you for, and its work", async () => {
     serve();
     renderAt("/s/activity");
+    // OpenBot's Needs you section, with OpenBot's own approval and its details always shown.
+    expect(await page().findByText("Muse wants to open url")).toBeTruthy();
+    expect(page().getByText(/"url": "https:\/\/example.com"/)).toBeTruthy();
+    // OpenBot's activity sections for the Bot.
     expect(await page().findByText("Morning briefing")).toBeTruthy();
     expect(page().getByText("Draft the launch post")).toBeTruthy();
-    expect(await page().findByText("Open url")).toBeTruthy();
-    expect(page().getByText("Send email")).toBeTruthy();
-    expect(page().getByText("waiting")).toBeTruthy();
-    expect(page().getByText("done")).toBeTruthy();
-    fireEvent.click(page().getByRole("button", { name: "Finished" }));
-    await waitFor(() =>
-      expect(page().queryByText("Morning briefing")).toBeNull(),
-    );
-    expect(page().getByText("Draft the launch post")).toBeTruthy();
+    expect(page().getByRole("heading", { name: "In progress" })).toBeTruthy();
+    expect(page().getByRole("heading", { name: "Completed" })).toBeTruthy();
   });
 
   test("Ideas shows only the centre Bot's suggestions and starts one through OpenBot", async () => {
     const calls = serve();
-    const router = renderAt("/s/ideas");
-    const idea = await page().findByRole("button", {
-      name: "View idea: Book a table for Friday dinner",
-    });
+    renderAt("/s/ideas");
+    expect(
+      await page().findByText("Book a table for Friday dinner"),
+    ).toBeTruthy();
     expect(page().queryByText("Compare pricing pages")).toBeNull();
-    fireEvent.click(idea);
-    expect(page().getByText("From Gmail", { exact: false })).toBeTruthy();
-    fireEvent.click(page().getByRole("button", { name: "Start this" }));
+    // OpenBot's own background-research section for the Bot sits under the suggestions.
+    expect(
+      page().getByRole("heading", { name: "Background research" }),
+    ).toBeTruthy();
+    fireEvent.click(page().getByRole("button", { name: "Start as task" }));
     await waitFor(() =>
       expect(
         calls.some(
@@ -803,53 +869,24 @@ describe("each tab reads OpenBot's data", () => {
         ),
       ).toBe(true),
     );
-    // The started idea runs in the channel the research reports to.
-    await waitFor(() =>
-      expect(router.state.location.pathname).toBe("/channel/c-muse"),
-    );
-  });
-
-  test("Find ideas runs the centre Bot's background research now", async () => {
-    const calls = serve();
-    renderAt("/s/ideas");
-    fireEvent.click(await page().findByRole("button", { name: "Find ideas" }));
-    await waitFor(() =>
-      expect(
-        calls.some(
-          (call) =>
-            call.method === "POST" &&
-            call.path === "/api/proactive/settings/p-muse/run",
-        ),
-      ).toBe(true),
-    );
   });
 
   test("Goals shows the centre Bot's routines and responsibilities", async () => {
     serve();
     renderAt("/s/goals");
-    expect(
-      await page().findByRole("button", {
-        name: "Open routine: Send me the headlines",
-      }),
-    ).toBeTruthy();
-    expect(
-      await page().findByRole("button", {
-        name: "Open goal: Keep my inbox at zero",
-      }),
-    ).toBeTruthy();
+    expect(await page().findByText("Send me the headlines")).toBeTruthy();
+    expect(await page().findByText("Keep my inbox at zero")).toBeTruthy();
     expect(page().queryByText("Watch the competition")).toBeNull();
   });
 
-  test("a routine can be paused from Goals through OpenBot's own write", async () => {
+  test("a routine is paused from Goals through OpenBot's own switch", async () => {
     const calls = serve();
     renderAt("/s/goals");
     fireEvent.click(
-      await page().findByRole("button", {
-        name: "Open routine: Send me the headlines",
+      await page().findByRole("switch", {
+        name: "Enable the routine scheduled Every weekday at 9:00",
       }),
     );
-    const sheet = within(await page().findByRole("dialog"));
-    fireEvent.click(sheet.getByRole("button", { name: "Pause" }));
     await waitFor(() =>
       expect(calls).toContainEqual({
         method: "PUT",
@@ -859,34 +896,16 @@ describe("each tab reads OpenBot's data", () => {
     );
   });
 
-  test("Apps lists connections the way OpenBot does, and memory behind Personality", async () => {
-    serve();
-    renderAt("/s/apps");
-    expect(
-      (await page().findByRole("link", { name: "Manage Notion" })).getAttribute(
-        "href",
-      ),
-    ).toBe("/connections/notion");
-    expect(page().getByText("Connected")).toBeTruthy();
-    expect(page().getByText("Not connected yet")).toBeTruthy();
-    expect(hrefOf("Manage Google Drive")).toBe("/connections/google-drive");
-    fireEvent.click(
-      page().getByRole("button", { name: "Personality & memory" }),
-    );
-    expect(await page().findByText("Prefers morning meetings")).toBeTruthy();
-    expect(hrefOf(/Bot setup/)).toBe("/bots/picked-harness/setup");
-  });
-
   test("the bell lists what is waiting and decides through OpenBot's approvals", async () => {
     const calls = serve();
-    renderAt("/s/apps");
+    renderAt("/s/goals");
     fireEvent.click(
-      await page().findByRole("button", {
-        name: "Needs you, 1 waiting",
-      }),
+      await page().findByRole("button", { name: "Needs you, 1 waiting" }),
     );
     const sheet = within(await page().findByRole("dialog"));
     expect(await sheet.findByText("Muse wants to open url")).toBeTruthy();
+    // What it will send is always on screen, as in OpenBot.
+    expect(sheet.getByText(/"url": "https:\/\/example.com"/)).toBeTruthy();
     expect(sheet.queryByText(/send email/)).toBeNull();
     fireEvent.click(sheet.getByRole("button", { name: "Allow once" }));
     await waitFor(() =>
@@ -920,16 +939,20 @@ describe("the rules the frame runs on", () => {
     ).toBeUndefined();
   });
 
-  test("every path belongs to a tab", () => {
+  test("only a tab's own screen lights that tab", () => {
     expect(tabFor("/")).toBe("chat");
     expect(tabFor("/channel/new")).toBe("chat");
     expect(tabFor("/group/g-team")).toBe("chat");
     expect(tabFor("/s/activity")).toBe("activity");
     expect(tabFor("/s/ideas")).toBe("ideas");
     expect(tabFor("/s/goals")).toBe("goals");
-    expect(tabFor("/s/apps")).toBe("apps");
-    expect(tabFor("/bots/scout/setup")).toBe("apps");
-    expect(tabFor("/capabilities/skills")).toBe("apps");
+    expect(tabFor("/connections")).toBe("apps");
+    expect(tabFor("/connections/notion")).toBe("apps");
+    expect(tabFor("/routines")).toBeNull();
+    expect(tabFor("/settings/approvals")).toBeNull();
+    expect(tabFor("/bots/scout/setup")).toBeNull();
+    expect(tabFor("/capabilities/skills")).toBeNull();
+    expect(tabFor("/s/apps")).toBeNull();
   });
 
   test("something waiting on the person outranks work in progress", () => {
@@ -971,7 +994,7 @@ describe("the rules the frame runs on", () => {
       }),
     ).toBe("Paused");
     expect(statusLine({ attention: base, channels: [], agentId: "b" })).toBe(
-      "Here when you need me",
+      "Ready when you are",
     );
   });
 });

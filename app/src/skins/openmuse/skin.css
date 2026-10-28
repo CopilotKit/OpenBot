@@ -239,6 +239,21 @@
   padding-inline: 0;
 }
 
+/* With the computer or settings beside it on a wide screen, the conversation takes OpenBot's own layout. */
+@media (min-width: 1100px) {
+  :root[data-skin="openmuse"]
+    .openmuse-frame[data-openmuse-tab="chat"]
+    .openmuse-stage[data-openmuse-width="page"] {
+    padding-inline: 0;
+  }
+
+  :root[data-skin="openmuse"]
+    .openmuse-stage[data-openmuse-width="page"]
+    [class~="sticky"][class~="border-b"] {
+    padding-inline: 12px;
+  }
+}
+
 /* The person's words: OpenMuse's pale-blue bubble with its tucked corner. */
 :root[data-skin="openmuse"]
   .openmuse-stage
@@ -332,4 +347,9 @@
   svg {
   width: 22px;
   height: 22px;
+}
+
+/* A row that opens something reads from its start, as every other row does. */
+:root[data-skin="openmuse"] .openmuse-stage button[data-slot="item"] {
+  text-align: start;
 }

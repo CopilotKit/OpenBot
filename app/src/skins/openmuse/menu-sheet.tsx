@@ -100,7 +100,7 @@ export function MenuSheet({ onClose }: { onClose: () => void }) {
             render={<Link onClick={onClose} to="/channel/new" />}
             small
           >
-            Group chat
+            New group
           </MuseLinkButton>
         </div>
         <label className="relative block">
@@ -195,7 +195,7 @@ export function MenuSheet({ onClose }: { onClose: () => void }) {
             title="Memory"
           />
           <LinkRow
-            detail="The accounts your Bots use as you"
+            detail="The apps your Bots use as you"
             icon={IconPlug}
             render={<Link onClick={onClose} to="/connections" />}
             tint="orange"
@@ -213,7 +213,7 @@ export function MenuSheet({ onClose }: { onClose: () => void }) {
             icon={IconBell}
             render={<Link onClick={onClose} to="/settings/notifications" />}
             tint="orange"
-            title="Reachability"
+            title="Notifications"
           />
           <LinkRow
             detail="Theme, skin and preferences"

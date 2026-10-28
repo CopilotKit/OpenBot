@@ -17,6 +17,7 @@ import { BotsNavBadge } from "@/components/bot-profile/attention";
 import { SelfHostBanner } from "@/components/layout/self-host-banner";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { approvalInboxOptions } from "@/lib/approvals";
+import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { botAttentionQueryOptions } from "@/lib/bot-lifecycle/queries";
 import {
   channelListQueryOptions,
@@ -32,6 +33,7 @@ import { MainChatLink } from "./links";
 import { MenuSheet } from "./menu-sheet";
 import {
   centreBot,
+  inColumn,
   type MuseTab,
   statusLine,
   tabFor,
@@ -62,9 +64,15 @@ export function OpenMuseFrame({ children }: { children: ReactNode }) {
   const pathname = useRouterState({
     select: (state) => state.location.pathname,
   });
-  const addressed = useRouterState({
-    select: (state) => (state.location.search as { agent?: unknown }).agent,
+  const search = useRouterState({
+    select: (state) =>
+      state.location.search as {
+        agent?: unknown;
+        watch?: unknown;
+        settings?: unknown;
+      },
   });
+  const addressed = search.agent;
   const params = useParams({ strict: false }) as {
     channelId?: string;
     agentId?: string;
@@ -77,7 +85,9 @@ export function OpenMuseFrame({ children }: { children: ReactNode }) {
   });
   const attention = useQuery(botAttentionQueryOptions());
   const inbox = useQuery(approvalInboxOptions());
-  const chosenId = useChosenBotId();
+  const user = useQuery(currentUserQueryOptions());
+  const userId = user.data?.id;
+  const chosenId = useChosenBotId(userId);
   const [sheet, setSheet] = useState<MuseSheetKind | null>(null);
 
   /*
@@ -94,10 +104,14 @@ export function OpenMuseFrame({ children }: { children: ReactNode }) {
 
   // Talking to a Bot puts it at the centre, and it stays there after the conversation closes.
   useEffect(() => {
-    if (onScreenBot && agents.data?.some((agent) => agent.id === onScreenBot)) {
-      chooseBot(onScreenBot);
+    if (
+      userId &&
+      onScreenBot &&
+      agents.data?.some((agent) => agent.id === onScreenBot)
+    ) {
+      chooseBot(userId, onScreenBot);
     }
-  }, [onScreenBot, agents.data]);
+  }, [userId, onScreenBot, agents.data]);
 
   // A sheet belongs to the screen it was opened on.
   // biome-ignore lint/correctness/useExhaustiveDependencies: closes on navigation, by design.
@@ -106,6 +120,9 @@ export function OpenMuseFrame({ children }: { children: ReactNode }) {
   }, [pathname]);
 
   const tab = tabFor(pathname);
+  // A conversation's computer or Bot settings, open beside the transcript.
+  const sidePanelOpen = search.watch === true || search.settings === true;
+  const column = inColumn(pathname, sidePanelOpen);
   const waiting = waitingOnYou(inbox.data).count;
   const status = statusLine({
     attention: attention.data?.find((entry) => entry.agentId === bot?.id),
@@ -114,13 +131,13 @@ export function OpenMuseFrame({ children }: { children: ReactNode }) {
   });
 
   return (
-    <MuseContext.Provider value={{ bot, openSheet: setSheet }}>
+    <MuseContext.Provider value={{ bot, userId, openSheet: setSheet }}>
       <div
         className="openmuse-frame flex h-svh flex-col overflow-hidden bg-background text-foreground"
-        data-openmuse-tab={tab}
+        data-openmuse-tab={tab ?? "none"}
       >
         <SelfHostBanner />
-        <div className="mx-auto flex min-h-0 w-full max-w-[760px] flex-1 flex-col">
+        <div className="mx-auto w-full max-w-[760px] shrink-0">
           <header className="relative mx-5 h-[122px] shrink-0 pt-0.5 min-[900px]:h-[146px] min-[900px]:pt-3.5">
             <div className="absolute top-4 left-0">
               <RoundButton
@@ -139,7 +156,7 @@ export function OpenMuseFrame({ children }: { children: ReactNode }) {
                 aria-label={
                   bot ? `${bot.name}, ${status}. Switch Bot` : "Choose a Bot"
                 }
-                className="group pointer-events-auto flex max-w-[70%] flex-col items-center gap-px rounded-2xl outline-none transition-opacity active:opacity-65 focus-visible:ring-3 focus-visible:ring-ring/50"
+                className="group pointer-events-auto flex max-w-[70%] flex-col items-center gap-px rounded-2xl outline-none transition-opacity active:opacity-65 focus-visible:ring-3 focus-visible:ring-ring/50 motion-reduce:transition-none"
                 onClick={() => setSheet("bots")}
                 type="button"
               >
@@ -162,7 +179,7 @@ export function OpenMuseFrame({ children }: { children: ReactNode }) {
                   <span className="truncate">{bot?.name ?? PRODUCT}</span>
                   <IconChevronDown
                     aria-hidden="true"
-                    className="size-3 shrink-0 text-muted-foreground opacity-60 transition-opacity group-hover:opacity-100"
+                    className="size-3 shrink-0 text-muted-foreground opacity-60 transition-opacity group-hover:opacity-100 motion-reduce:transition-none"
                     stroke={2.2}
                   />
                 </span>
@@ -189,9 +206,21 @@ export function OpenMuseFrame({ children }: { children: ReactNode }) {
               </RoundButton>
             </div>
           </header>
-          <main className="openmuse-stage flex min-h-0 flex-1 flex-col overflow-hidden">
-            {children}
-          </main>
+        </div>
+        {/*
+         * A tab's own screen sits in OpenMuse's 760px column. Any other OpenBot page, and a conversation
+         * with its side panel open, takes OpenBot's own width on a wide screen; the bars stay centred.
+         */}
+        <main
+          className={cn(
+            "openmuse-stage mx-auto flex min-h-0 w-full max-w-[760px] flex-1 flex-col overflow-hidden",
+            !column && "min-[1100px]:max-w-none",
+          )}
+          data-openmuse-width={column ? "column" : "page"}
+        >
+          {children}
+        </main>
+        <div className="mx-auto w-full max-w-[760px] shrink-0">
           <nav
             aria-label={PRODUCT}
             className="flex shrink-0 justify-center px-[22px] pt-2.5 pb-[max(7px,env(safe-area-inset-bottom))] min-[900px]:pb-[22px]"
@@ -200,7 +229,7 @@ export function OpenMuseFrame({ children }: { children: ReactNode }) {
               {TABS.map((item) => {
                 const active = item.id === tab;
                 const className = cn(
-                  "flex h-[47px] flex-1 items-center justify-center rounded-[28px] text-foreground outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/50",
+                  "flex h-[47px] flex-1 items-center justify-center rounded-[28px] text-foreground outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/50 motion-reduce:transition-none",
                   active
                     ? "bg-[var(--openmuse-tab-active)]"
                     : "hover:bg-[var(--openmuse-tab-hover)]",
@@ -216,16 +245,15 @@ export function OpenMuseFrame({ children }: { children: ReactNode }) {
                     <item.icon className="size-[23px]" stroke={1.8} />
                   </MainChatLink>
                 ) : (
-                  <Link
-                    aria-current={active ? "page" : undefined}
-                    aria-label={item.label}
+                  <TabLink
+                    active={active}
                     className={className}
                     key={item.id}
-                    params={{ screen: item.id }}
-                    to="/s/$screen"
+                    label={item.label}
+                    tab={item.id}
                   >
                     <item.icon className="size-[23px]" stroke={1.8} />
-                  </Link>
+                  </TabLink>
                 );
               })}
             </div>
@@ -238,5 +266,35 @@ export function OpenMuseFrame({ children }: { children: ReactNode }) {
       ) : null}
       {sheet === "bots" ? <BotsSheet onClose={() => setSheet(null)} /> : null}
     </MuseContext.Provider>
+  );
+}
+
+/** Activity, Ideas and Goals are this skin's own screens; Apps is OpenBot's Connections. */
+function TabLink({
+  tab,
+  label,
+  active,
+  className,
+  children,
+}: {
+  tab: Exclude<MuseTab, "chat">;
+  label: string;
+  active: boolean;
+  className: string;
+  children: ReactNode;
+}) {
+  const shared = {
+    "aria-current": active ? ("page" as const) : undefined,
+    "aria-label": label,
+    className,
+  };
+  return tab === "apps" ? (
+    <Link {...shared} to="/connections">
+      {children}
+    </Link>
+  ) : (
+    <Link {...shared} params={{ screen: tab }} to="/s/$screen">
+      {children}
+    </Link>
   );
 }
