@@ -6,7 +6,8 @@ import type { SVGProps } from "react";
 export function SettingsItemBackground(props: SVGProps<SVGSVGElement>) {
   return (
     <svg
-      viewBox="0 0 1200 800"
+      // The gradient stops at 754: a viewBox of the full 800 left a white band along the bottom.
+      viewBox="0 0 1200 754"
       preserveAspectRatio="xMidYMin slice"
       fill="none"
       aria-hidden="true"
