@@ -453,7 +453,7 @@ export function ConversationView({
         />
       </div>
       <div
-        className="max-w-2xl mx-auto w-full px-0 pb-4 shrink-0"
+        className="max-w-2xl mx-auto w-full px-3 pb-4 shrink-0"
         data-slot="composer-column"
       >
         {notice}
