@@ -1,9 +1,13 @@
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { setDefaultAutoSelectFamily } from "node:net";
 import { join } from "node:path";
-import { serve } from "bun";
+import { type ServerWebSocket, serve } from "bun";
 import type { Page } from "playwright";
 import { downloadHeaders } from "../../shared/file-download";
+import {
+  isPersonBrowserId,
+  RECORDER_DIR_ENV,
+} from "../../shared/openbot-browser";
 import {
   cutAtCodeUnits,
   parseAriaSnapshot,
@@ -17,6 +21,7 @@ import {
   offeredToken,
 } from "./authorisation";
 import { isPlainBotId } from "./bot-id";
+import { createBrowserHost, isBrowserPath } from "./browser-host";
 import { browserRuntimeFromEnv } from "./browser-runtime";
 import { detectChallenge } from "./challenge";
 import {
@@ -35,7 +40,15 @@ import {
   navigateWebPage,
   type PagePurpose,
 } from "./navigation";
+import {
+  computerOwner,
+  PERSONS_OWN_BROWSER,
+  personHoldsTheWheel,
+  personMayUse,
+  refusedHere,
+} from "./person-access";
 import { createProfiles, numberFromEnv, VIEWPORT } from "./profiles";
+import { createRealBrowserHost, isRealBrowserPath } from "./real-browser";
 import {
   parseExecTimeout,
   parseInputMessage,
@@ -122,7 +135,18 @@ if (!COMPUTER_TOKEN) {
 setDefaultAutoSelectFamily(false);
 
 const RUNTIME = browserRuntimeFromEnv(process.env);
+/** Whose this computer is, which decides whether a person's browser may run on it. See person-access.ts. */
+const OWNER = computerOwner(process.env);
 const BROWSER_MODE = RUNTIME.mode;
+/*
+ * The display this process was started on, kept before the virtual one replaces it. A person's
+ * native browser on OpenBot Desktop opens on the person's own desktop, never on the Xvfb display that
+ * a Bot's headed browser uses on Linux. See `personBrowserEnv`.
+ */
+const PERSON_DISPLAY = {
+  DISPLAY: process.env.DISPLAY,
+  WAYLAND_DISPLAY: process.env.WAYLAND_DISPLAY,
+};
 const VIRTUAL_DISPLAY = await startVirtualDisplay(
   RUNTIME.useVirtualDisplay ? "headed" : "headless",
 );
@@ -286,7 +310,27 @@ const profiles = createProfiles(
     if (sessions.get(botId)) sessions.renewRun(botId);
     await sessions.get(botId)?.viewer.releaseAll(COMPUTER_STOPPED);
   },
+  { personDisplay: PERSON_DISPLAY },
 );
+
+/**
+ * The OpenBot Browser: a person's own browser with the Recorder in it, opened for them by the
+ * server. See browser-host.ts, and person-access.ts for what a person's browser id may do here.
+ */
+const browserHost = createBrowserHost({
+  profiles,
+  recorderDir: () => process.env[RECORDER_DIR_ENV],
+  navigationTimeoutMs: NAVIGATION_TIMEOUT_MS,
+});
+
+/**
+ * The person's own everyday Chrome or Edge, on OpenBot Desktop's computer only: brought forward, or
+ * handed the Recorder's store page. See real-browser.ts.
+ */
+const realBrowser = createRealBrowserHost({
+  backend: RUNTIME.backend,
+  display: PERSON_DISPLAY,
+});
 
 /**
  * The id normally arrives as a header on every request. This is the fallback for a caller that has no
@@ -312,7 +356,9 @@ async function currentPage(
   const session = sessions.for(botId);
   const page = await profiles.page(botId);
   sessions.observeBrowser(botId, page.context());
-  assertPageAccess(RUNTIME.backend, page.url(), purpose);
+  // A Bot's tools read web pages only. A person's browser is theirs, on whatever page they are on.
+  if (!isPersonBrowserId(botId))
+    assertPageAccess(RUNTIME.backend, page.url(), purpose);
   // A ref names an element on the page it was taken from, so moving to a window the site opened has
   // to retire the outstanding ones exactly as a navigation does, or a click lands on the wrong document.
   if (session.livePage && session.livePage !== page) session.snapshotId += 1;
@@ -529,6 +575,9 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
+/** Since when a person's browser has been theirs, which is always, so since this process started. */
+const PROCESS_STARTED_AT = new Date().toISOString();
+
 /** What a person watching is told when the browser they were watching went away. */
 const COMPUTER_STOPPED =
   "This computer stopped, so the screen ended. Start it again to carry on watching.";
@@ -545,7 +594,109 @@ const SCREEN_NO_LONGER_LIVE =
 const FOLLOW_INTERVAL_MS = 1_000;
 
 /** What a live-screen socket carries: the Bot whose screen it is showing. */
-type StreamData = { botId: string; recordingId?: string };
+type StreamData = {
+  botId: string;
+  recordingId?: string;
+  /** The person's input so far, applied one message after another. */
+  inputs?: Promise<void>;
+};
+
+/**
+ * Apply one thing the person did on the live screen, after asking whether the screen is theirs and
+ * whether they may drive. See the socket's `message` below for why one at a time.
+ */
+async function applyInput(
+  ws: ServerWebSocket<StreamData>,
+  raw: string | Buffer,
+): Promise<void> {
+  const session = sessions.for(ws.data.botId);
+  /*
+   * Whose screen this is, asked before anything is done with the input.
+   *
+   * A superseded socket used to dispatch through whatever the session held, so a replaced
+   * window's typing landed in the page the current viewer was watching. It heard nothing about
+   * it either, because the old missing-viewer check returned before reaching anything that could
+   * report, which is why this answers the sender rather than returning quietly.
+   *
+   * Starting and gone are told apart deliberately. Both own no cast, and answering them the same
+   * way tells somebody whose screen is still opening that their session ended.
+   */
+  const standing = session.viewer.standingOf(ws);
+  if (standing.state !== "casting") {
+    ws.send(
+      JSON.stringify({
+        type: "error",
+        error:
+          standing.state === "starting"
+            ? SCREEN_STILL_STARTING
+            : SCREEN_NO_LONGER_LIVE,
+      }),
+    );
+    return;
+  }
+  let message: InputMessage;
+  try {
+    const parsed: unknown = JSON.parse(String(raw));
+    const validated = parseInputMessage(parsed);
+    if (!validated.ok) {
+      ws.send(JSON.stringify({ type: "error", error: validated.error }));
+      return;
+    }
+    message = validated.message;
+  } catch {
+    // The validated-but-wrong branch above sends an error frame; unparseable input used to
+    // be dropped silently, so a buggy surface saw input "ignored" with no diagnostic.
+    ws.send(JSON.stringify({ type: "error", error: "Input is not JSON." }));
+    return;
+  }
+  // A person's input is accepted only while they hold the wheel. The socket being open is not permission:
+  // without this check, anything that could reach this port could drive the browser while a Bot
+  // was working, which is the one thing the control state exists to prevent.
+  //
+  // Owning the screen is not permission either, which is why this stands after the ownership
+  // question above and not instead of it: the two refuse different things, and the one asked
+  // first only decides whether the input has anywhere to land.
+  //
+  // Refuse with an error so the surface can explain why input is ignored.
+  //
+  // A person's own browser needs no handover: nobody else works in it, so it starts, and stays,
+  // with the person holding the wheel.
+  if (!isPersonBrowserId(ws.data.botId) && !session.control.humanMayDrive()) {
+    ws.send(JSON.stringify({ type: "error", error: TAKE_CONTROL_FIRST }));
+    return;
+  }
+  session.humanInputs += 1;
+  try {
+    const recorded = ws.data.recordingId
+      ? await describeHumanGesture(await currentPage(ws.data.botId), message)
+      : null;
+    await standing.cast.send(message);
+    if (recorded)
+      ws.send(
+        JSON.stringify({
+          type: "demonstration.action",
+          recordingId: ws.data.recordingId,
+          action: recorded,
+        }),
+      );
+  } catch (error) {
+    // Reported rather than swallowed. A dispatch that fails means the person's input did nothing,
+    // and they must not be left believing it landed.
+    console.error(
+      JSON.stringify({
+        type: "screencast-input-error",
+        message: message.type,
+        error: String(error),
+      }),
+    );
+    ws.send(
+      JSON.stringify({
+        type: "error",
+        error: describe(error, "That input could not be applied."),
+      }),
+    );
+  }
+}
 
 serve<StreamData>({
   port: PORT,
@@ -626,94 +777,25 @@ serve<StreamData>({
       }
     },
 
-    async message(ws, raw) {
-      const session = sessions.for(ws.data.botId);
-      /*
-       * Whose screen this is, asked before anything is done with the input.
-       *
-       * A superseded socket used to dispatch through whatever the session held, so a replaced
-       * window's typing landed in the page the current viewer was watching. It heard nothing about
-       * it either, because the old missing-viewer check returned before reaching anything that could
-       * report, which is why this answers the sender rather than returning quietly.
-       *
-       * Starting and gone are told apart deliberately. Both own no cast, and answering them the same
-       * way tells somebody whose screen is still opening that their session ended.
-       */
-      const standing = session.viewer.standingOf(ws);
-      if (standing.state !== "casting") {
-        ws.send(
-          JSON.stringify({
-            type: "error",
-            error:
-              standing.state === "starting"
-                ? SCREEN_STILL_STARTING
-                : SCREEN_NO_LONGER_LIVE,
-          }),
-        );
-        return;
-      }
-      let message: InputMessage;
-      try {
-        const parsed: unknown = JSON.parse(String(raw));
-        const validated = parseInputMessage(parsed);
-        if (!validated.ok) {
-          ws.send(JSON.stringify({ type: "error", error: validated.error }));
-          return;
-        }
-        message = validated.message;
-      } catch {
-        // The validated-but-wrong branch above sends an error frame; unparseable input used to
-        // be dropped silently, so a buggy surface saw input "ignored" with no diagnostic.
-        ws.send(JSON.stringify({ type: "error", error: "Input is not JSON." }));
-        return;
-      }
-      // A person's input is accepted only while they hold the wheel. The socket being open is not permission:
-      // without this check, anything that could reach this port could drive the browser while a Bot
-      // was working, which is the one thing the control state exists to prevent.
-      //
-      // Owning the screen is not permission either, which is why this stands after the ownership
-      // question above and not instead of it: the two refuse different things, and the one asked
-      // first only decides whether the input has anywhere to land.
-      //
-      // Refuse with an error so the surface can explain why input is ignored.
-      if (!session.control.humanMayDrive()) {
-        ws.send(JSON.stringify({ type: "error", error: TAKE_CONTROL_FIRST }));
-        return;
-      }
-      session.humanInputs += 1;
-      try {
-        const recorded = ws.data.recordingId
-          ? await describeHumanGesture(
-              await currentPage(ws.data.botId),
-              message,
-            )
-          : null;
-        await standing.cast.send(message);
-        if (recorded)
-          ws.send(
+    /*
+     * One message at a time, in the order the person sent them. A message is described before it is
+     * applied when the screen is recording a demonstration (a step needs the element it lands on),
+     * and that takes a trip to the page for some kinds of message and not for others: applied as each
+     * was ready, a key came up before it went down (every key up of a word before any of its key
+     * downs, measured with a page busy 20 ms per key down). Nothing else here holds a message, and a
+     * message refused or failed says so and lets the next one through.
+     */
+    message(ws, raw) {
+      ws.data.inputs = (ws.data.inputs ?? Promise.resolve())
+        .then(() => applyInput(ws, raw))
+        .catch((error: unknown) => {
+          console.error(
             JSON.stringify({
-              type: "demonstration.action",
-              recordingId: ws.data.recordingId,
-              action: recorded,
+              type: "screencast-input-error",
+              error: String(error),
             }),
           );
-      } catch (error) {
-        // Reported rather than swallowed. A dispatch that fails means the person's input did nothing,
-        // and they must not be left believing it landed.
-        console.error(
-          JSON.stringify({
-            type: "screencast-input-error",
-            message: message.type,
-            error: String(error),
-          }),
-        );
-        ws.send(
-          JSON.stringify({
-            type: "error",
-            error: describe(error, "That input could not be applied."),
-          }),
-        );
-      }
+        });
     },
 
     async close(ws) {
@@ -760,6 +842,18 @@ serve<StreamData>({
     if (!isOpenPath(url.pathname) && !isPlainBotId(botId)) {
       return json({ error: "That is not a usable bot id." }, 400);
     }
+    // A person's browser only on a computer of its own, and nothing else on one: before the id reaches a profile, a
+    // policy or a shell. The live screen names its browser in the query, which is the one it would show. See
+    // person-access.ts.
+    const refused = isOpenPath(url.pathname)
+      ? null
+      : refusedHere(
+          OWNER,
+          url.pathname === "/stream"
+            ? botIdOf(request, url.searchParams.get("bot"))
+            : botId,
+        );
+    if (refused) return json({ error: refused.error }, refused.status);
     // The admin network policy, pushed by the server on every change; applied without a restart.
     // The deployment's Web Bot Auth key rides the same push (see `web-bot-auth.ts`).
     if (url.pathname === "/egress-policy" && request.method === "PUT") {
@@ -771,6 +865,14 @@ serve<StreamData>({
       if (applied.ok) await applyWebBotAuthPush(body?.webBotAuth);
       return applied;
     }
+    // A person's browser id reaches the person's browser routes, the live screen and the computer's
+    // housekeeping, and nothing a Bot acts or reads through. See person-access.ts.
+    if (isPersonBrowserId(botId) && !personMayUse(url.pathname))
+      return json({ error: PERSONS_OWN_BROWSER }, 403);
+    if (isBrowserPath(url.pathname))
+      return browserHost.handle(request, url.pathname, botId);
+    if (isRealBrowserPath(url.pathname))
+      return realBrowser.handle(request, url.pathname, botId);
     const session = sessions.for(botId);
 
     /*
@@ -823,6 +925,8 @@ serve<StreamData>({
       // Who has the wheel. Polled by the surface alongside the screen, so the person sees the Bot ask
       // for help without having to reload anything.
       if (url.pathname === "/control" && request.method === "GET") {
+        if (isPersonBrowserId(botId))
+          return json(personHoldsTheWheel(PROCESS_STARTED_AT));
         return json(
           session.control.get(url.searchParams.get("requestId") ?? undefined),
         );
@@ -1004,7 +1108,7 @@ serve<StreamData>({
       // person addresses them by pointing, because they are looking at a picture. Different problem,
       // different endpoint, and only usable while they hold the wheel.
       if (HUMAN_INPUT.has(url.pathname) && request.method === "POST") {
-        if (!session.control.humanMayDrive()) {
+        if (!isPersonBrowserId(botId) && !session.control.humanMayDrive()) {
           return json({ error: TAKE_CONTROL_FIRST }, 409);
         }
         session.humanInputs += 1;

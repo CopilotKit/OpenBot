@@ -7,6 +7,7 @@ import {
   test,
 } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import type { UserPreferences } from "@openbot/shared/user-preferences";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, waitFor } from "@testing-library/react";
 import { MessageListPreference } from "@/components/settings/message-list-preference";
@@ -15,7 +16,6 @@ import {
   saveUserPreferencesMutationOptions,
   userPreferencesQueryOptions,
 } from "@/lib/settings/message-list";
-import type { UserPreferences } from "@openbot/shared/user-preferences";
 
 const originalFetch = globalThis.fetch;
 const clients: QueryClient[] = [];
@@ -99,6 +99,7 @@ test("successful writes update only the current account cache; failures preserve
   client.setQueryData(bobKey, {
     messageListEmphasis: "agent",
     selfHostBannerDismissed: false,
+    narration: null,
     skin: "opendots",
   });
   const mutation = client
@@ -109,6 +110,7 @@ test("successful writes update only the current account cache; failures preserve
       preferences: {
         messageListEmphasis: "thread",
         selfHostBannerDismissed: false,
+        narration: null,
         skin: "openbot",
       },
     });
@@ -126,6 +128,7 @@ test("successful writes update only the current account cache; failures preserve
   expect(client.getQueryData<UserPreferences>(bobKey)).toEqual({
     messageListEmphasis: "agent",
     selfHostBannerDismissed: false,
+    narration: null,
     skin: "opendots",
   });
   response = async () =>
@@ -140,6 +143,7 @@ test("successful writes update only the current account cache; failures preserve
   ).toEqual({
     messageListEmphasis: "thread",
     selfHostBannerDismissed: false,
+    narration: null,
     skin: "openbot",
   });
 });

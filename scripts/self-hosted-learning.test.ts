@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import {
   intelligenceApiOrigin,
+  learningSessionOrigin,
   type SetupBrowser,
   setupSelfHostedLearning,
 } from "./self-hosted-learning";
@@ -14,6 +15,7 @@ type Response = { status: number; body: unknown };
 
 function fixture(
   override?: (url: string, method: string) => Response | undefined,
+  sessionOrigin = apiUrl,
 ) {
   const calls: {
     url: string;
@@ -27,8 +29,8 @@ function fixture(
       navigations.push(url);
     },
     request: async (url, options) => {
-      expect(new URL(url).origin).toBe(apiUrl);
-      expect(options.headers.Origin).toBe(apiUrl);
+      expect(new URL(url).origin).toBe(sessionOrigin);
+      expect(options.headers.Origin).toBe(sessionOrigin);
       expect(options.headers).not.toHaveProperty("Authorization");
       expect(options.maxRedirects).toBe(0);
       calls.push({ url, method: options.method, data: options.data });
@@ -254,4 +256,138 @@ test("API origins reject credentials, paths, and insecure non-loopback servers",
   ]) {
     expect(() => intelligenceApiOrigin(value)).toThrow();
   }
+});
+
+const localApi = "http://localhost:61860";
+const localDashboard = "http://cpk.localhost:61861";
+const localStatus = (api = localApi, dashboard = localDashboard) => ({
+  status: "completed",
+  stacks: [{ urls: { api, dashboard } }],
+});
+
+test("local setup signs in and provisions through the dashboard while preserving the runtime API", async () => {
+  const f = fixture(undefined, localDashboard);
+  const connection = await setupSelfHostedLearning({
+    ...f.options,
+    apiUrl: localApi,
+    existingKey: "cpk-existing-runtime-key",
+    runCli: async (args) => {
+      expect(args).toEqual(["local", "list", "--json"]);
+      return { exitCode: 0, stdout: JSON.stringify(localStatus()) };
+    },
+  });
+  const login = new URL(f.navigations[0]);
+  expect(login.origin).toBe(localDashboard);
+  expect(login.pathname).toBe("/auth/signin");
+  expect(login.searchParams.get("callbackUrl")).toBe(`${localDashboard}/`);
+  expect(connection).toEqual({
+    apiUrl: localApi,
+    apiKey: "cpk-existing-runtime-key",
+    learningContainerId: "openbot",
+  });
+  expect(
+    f.calls.some(
+      (call) =>
+        call.url === `${localDashboard}${path}` && call.method === "POST",
+    ),
+  ).toBe(true);
+  expect(f.closed()).toBe(1);
+});
+
+test.each([
+  localStatus(localApi, "https://unrelated.example"),
+  localStatus(localApi, "http://cpk.localhost.evil.example:61861"),
+  localStatus(localApi, "http://user:password@cpk.localhost:61861"),
+  localStatus(localApi, `${localDashboard}/unexpected`),
+  { status: "error" },
+])(
+  "invalid or mismatched local status fails before opening a browser: %j",
+  async (status) => {
+    const f = fixture();
+    await expect(
+      setupSelfHostedLearning({
+        ...f.options,
+        apiUrl: localApi,
+        runCli: async () => ({ exitCode: 0, stdout: JSON.stringify(status) }),
+      }),
+    ).rejects.toThrow("Could not identify the local Intelligence dashboard");
+    expect(f.navigations).toHaveLength(0);
+    expect(f.calls).toHaveLength(0);
+  },
+);
+
+test("remote setup does not run the local CLI", async () => {
+  expect(
+    await learningSessionOrigin(apiUrl, async () => {
+      throw new Error("must not run");
+    }),
+  ).toBe(apiUrl);
+});
+
+test.each([
+  { exitCode: 1, stdout: "private diagnostic" },
+  { exitCode: 0, stdout: "invalid JSON" },
+])(
+  "local discovery errors are actionable and do not disclose CLI output",
+  async (result) => {
+    await expect(
+      learningSessionOrigin(localApi, async () => result),
+    ).rejects.toThrow("Could not identify the local Intelligence dashboard");
+  },
+);
+
+test("an unrelated local stack does not change a manually hosted deployment", async () => {
+  expect(
+    await learningSessionOrigin(localApi, async () => ({
+      exitCode: 0,
+      stdout: JSON.stringify(localStatus("http://localhost:9999")),
+    })),
+  ).toBe(localApi);
+});
+
+test("multiple stacks are matched by API origin, not selection or list order", async () => {
+  expect(
+    await learningSessionOrigin(localApi, async () => ({
+      exitCode: 0,
+      stdout: JSON.stringify({
+        status: "completed",
+        stacks: [
+          ...localStatus("http://localhost:9999", "http://cpk.localhost:9998")
+            .stacks,
+          ...localStatus().stacks,
+        ],
+      }),
+    })),
+  ).toBe(localDashboard);
+});
+
+test("unavailable CLI preserves a manually hosted loopback login", async () => {
+  expect(
+    await learningSessionOrigin(localApi, async () => ({
+      exitCode: 127,
+      stdout: "",
+    })),
+  ).toBe(localApi);
+});
+
+test.each([
+  "http://127.0.0.1:61860",
+  "http://[::1]:61860",
+  "http://LOCALHOST:61860/",
+])("matches loopback aliases: %s", async (origin) => {
+  expect(
+    await learningSessionOrigin(origin, async () => ({
+      exitCode: 0,
+      stdout: JSON.stringify(localStatus()),
+    })),
+  ).toBe(localDashboard);
+});
+
+test("matching preserves protocol and port", async () => {
+  expect(
+    await learningSessionOrigin("https://127.0.0.1:61860", async () => ({
+      exitCode: 0,
+      stdout: JSON.stringify(localStatus()),
+    })),
+  ).toBe("https://127.0.0.1:61860");
 });

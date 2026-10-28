@@ -1,9 +1,32 @@
-# The Bot's computer installs only the Playwright browser it launches.
+# The Bot's computer installs only the Playwright browser it launches, and carries the built OpenBot
+# Recorder for the person's browser it opens (the OpenBot Browser).
 #
 # The image tag and Playwright dependency must be pinned to the same exact version. Bump both or
 # neither.
 FROM node:24.18.1-bookworm-slim AS node-toolchain
 FROM oven/bun:1.4.3@sha256:ec06c3b6cea04192ae6770c434f668ca41d343ad19fa6472216c7b48be39c598 AS bun-toolchain
+
+# The Recorder, built here from the repository root as the root Dockerfile builds the app: the
+# workspace manifests and lockfile first, so a source edit does not reinstall the world, then the
+# sources the build reads. It needs the root install because the extension is a workspace and its
+# pages are drawn with the app's own components (`app/src`). Only `extension/dist` leaves this stage.
+FROM bun-toolchain AS recorder-build
+WORKDIR /src
+COPY package.json bun.lock ./
+# The dependency patches package.json names in patchedDependencies: the install stops without them.
+COPY patches patches
+COPY tsconfig.base.json bunfig.toml ./
+COPY app/package.json app/package.json
+COPY server/package.json server/package.json
+COPY worker/package.json worker/package.json
+COPY shared/package.json shared/package.json
+COPY toolkit/package.json toolkit/package.json
+COPY extension/package.json extension/package.json
+RUN bun install --frozen-lockfile
+COPY app/src app/src
+COPY shared shared
+COPY extension extension
+RUN bun run --cwd extension build
 
 FROM ubuntu:24.04
 
@@ -32,9 +55,22 @@ COPY agent-computer/package.json agent-computer/bun.lock ./
 RUN bun install --frozen-lockfile
 
 COPY agent-computer/src ./src
-# index.ts imports ../../shared/file-download at runtime (the other shared imports are type-only and
-# erased), so the one file it needs goes where that path resolves from /app/src.
+# index.ts imports ../../shared/file-download at runtime (shared/computer-control is type-only and
+# erased), demonstration.ts imports ../../shared/demonstration-rules, and the browser routes import
+# ../../shared/openbot-browser, so the files they need go where those paths resolve from /app/src.
 COPY shared/file-download.ts /shared/file-download.ts
+COPY shared/demonstration-rules.ts /shared/demonstration-rules.ts
+# The OpenBot Browser's contract, which the browser routes check requests against. It imports zod,
+# and a module resolves its imports from its own directory upward, which from /shared never reaches
+# /app/node_modules: so /shared is given that tree to resolve from, rather than a second install.
+COPY shared/openbot-browser.ts /shared/openbot-browser.ts
+COPY shared/recorder-extension.ts shared/recorder-extension.json /shared/
+RUN ln -s /app/node_modules /shared/node_modules
+
+# The built Recorder, put into every person's browser this computer opens. Without it the computer
+# still serves Bots and refuses to open a person's browser, saying why.
+COPY --from=recorder-build /src/extension/dist /recorder
+ENV OPENBOT_RECORDER_DIR=/recorder
 
 # Durable working directory. Bot-produced files that must survive replacement live here.
 RUN mkdir -p /workspace

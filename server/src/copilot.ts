@@ -1,6 +1,10 @@
 import type { Message, RunAgentInput } from "@ag-ui/client";
 import { type AbstractAgent, HttpAgent } from "@ag-ui/client";
-import type { BuiltInAgentConfiguration } from "@copilotkit/runtime/v2";
+import type {
+  BuiltInAgentConfiguration,
+  CopilotRuntimeHooks,
+  GetTrajectoryLearningContainerIds,
+} from "@copilotkit/runtime/v2";
 import {
   type CopilotKitIntelligence,
   CopilotRuntime,
@@ -10,7 +14,10 @@ import {
   type ComputerGuidance,
   PROVENANCE_GUIDANCE,
 } from "@openbot/shared/bot-prompt";
-import { defaultModelFor } from "@openbot/shared/model-providers";
+import {
+  defaultModelFor,
+  requiresResponsesApi,
+} from "@openbot/shared/model-providers";
 import {
   BuiltInAgentWithSaneHistory,
   CloningRemoteAgent,
@@ -56,6 +63,7 @@ import {
   LEARNED_SKILL_TOOL_NAMES,
   type LearnedSkillInvocation,
   type LearningRuntime,
+  type PersonalSkillSources,
 } from "./learning/runtime";
 import type { LearningSettingsStore } from "./learning/settings";
 import {
@@ -251,6 +259,38 @@ export function runtimeModelForEnvironment(
     defaultModel:
       selectedModelApplies && selectedModel ? selectedModel : defaultModel,
   };
+}
+
+/**
+ * The OpenAI API the built-in Bots' model is called on, where `OPENAI_BASE_URL` points somewhere: `responses` when
+ * that model takes tools only there, and nothing otherwise. Returns what it set.
+ *
+ * The CopilotKit runtime decides by host since 1.79: OpenAI and Azure get the Responses API, and any other host gets
+ * Chat Completions, because most OpenAI-compatible servers serve only `/chat/completions`. A gateway or a proxy in
+ * front of OpenAI (LiteLLM, Portkey, a company's own proxy) is any other host, and on Chat Completions
+ * `gpt-5.6-terra`, the model the built-in Bots run on by default, refuses every function tool: every turn of every
+ * built-in Bot failed with "Function tools with reasoning_effort are not supported". The host cannot say which API a
+ * model takes, so the model decides where it has to (`requiresResponsesApi`), and every other model keeps the
+ * runtime's rule, so a server that serves only Chat Completions, or serves it better (Groq's `/responses` refuses
+ * tool calls), is asked as it always was.
+ *
+ * Set on the environment because `COPILOTKIT_OPENAI_API` is the runtime's own switch, read whenever a Bot's model is
+ * resolved, and a deployment runs its built-in Bots on one model, decided once at boot. An operator who set the
+ * switch has decided, and that stands, `chat` included.
+ */
+export function chooseOpenAIApi(
+  model: RuntimeModel,
+  environment: Record<string, string | undefined> = process.env,
+): "responses" | undefined {
+  if (
+    model.provider !== "openai" ||
+    environment.COPILOTKIT_OPENAI_API?.trim() ||
+    !environment.OPENAI_BASE_URL?.trim() ||
+    !requiresResponsesApi(model.defaultModel)
+  )
+    return undefined;
+  environment.COPILOTKIT_OPENAI_API = "responses";
+  return "responses";
 }
 
 type RuntimeAgentRow = {
@@ -1724,10 +1764,31 @@ export function mountCopilotRuntime(
     basePath?: string;
     onRunBusy?: (input: { threadId: string; busy: boolean }) => void;
     learningSettings?: LearningSettingsStore;
+    /**
+     * Each person's own Learning space and everyone's opened Skills, which join the Bot's own in every run
+     * (learning/runtime.ts). Absent, a run gets only the Bot's own learned Skills.
+     */
+    personalSkills?: PersonalSkillSources;
+    /**
+     * The Recorder's capture pass (`trajectory/connect`): the gate that lets only a connected browser through, and
+     * the selector that assigns the trajectory to its person's own Learning space (`recorder/wiring.ts`). Absent, the
+     * route is the runtime's own: any person identifyUser resolves gets a pass that joins no Learning space.
+     * `index.ts` always passes it.
+     */
+    trajectoryCapture?: {
+      gate: NonNullable<CopilotRuntimeHooks["onBeforeHandler"]>;
+      selectLearningContainers: GetTrajectoryLearningContainerIds;
+    };
   } = {},
 ) {
   const { intelligence } = config.runtime;
-  const { basePath = "/api/copilotkit", onRunBusy, learningSettings } = options;
+  const {
+    basePath = "/api/copilotkit",
+    onRunBusy,
+    learningSettings,
+    personalSkills,
+    trajectoryCapture,
+  } = options;
 
   /**
    * The same Bot a person's run would get, built without a request.
@@ -1788,6 +1849,12 @@ export function mountCopilotRuntime(
             userId: user.id,
           });
         },
+        ...(trajectoryCapture
+          ? {
+              getTrajectoryLearningContainerIds:
+                trajectoryCapture.selectLearningContainers,
+            }
+          : {}),
       }),
     );
 
@@ -1795,6 +1862,7 @@ export function mountCopilotRuntime(
     ? createLearningRuntime({
         store: learningSettings,
         client: intelligenceClient,
+        ...(personalSkills ? { people: personalSkills } : {}),
       })
     : undefined;
 
@@ -1839,7 +1907,13 @@ export function mountCopilotRuntime(
   });
 
   return {
-    handler: createCopilotHonoHandler({ runtime, basePath }),
+    handler: createCopilotHonoHandler({
+      runtime,
+      basePath,
+      ...(trajectoryCapture
+        ? { hooks: { onBeforeHandler: trajectoryCapture.gate } }
+        : {}),
+    }),
     learning,
     /**
      * How to reach the platform's runner, exactly as the runtime reaches it.

@@ -463,6 +463,27 @@
       "when": 1793038662588,
       "tag": "0065_owner_shared_audience",
       "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1793052162276,
+      "tag": "0066_recorder_extension",
+      "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "7",
+      "when": 1793052258554,
+      "tag": "0067_recorder_activity",
+      "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1793203501366,
+      "tag": "0068_recorder_organization_session_expiry",
+      "breakpoints": true
     }
   ]
 }

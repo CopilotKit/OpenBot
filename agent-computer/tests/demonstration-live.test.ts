@@ -12,12 +12,12 @@ let base = "";
 let child: ReturnType<typeof Bun.spawn> | undefined;
 // The computer opens only http(s) pages, so the fixture page is served rather than a data: URL.
 let site: ReturnType<typeof Bun.serve> | undefined;
-async function api(path: string, input?: unknown) {
+async function api(path: string, input?: unknown, bot = botId) {
   const response = await fetch(`${base}${path}`, {
     method: input === undefined ? "GET" : "POST",
     headers: {
       "x-openbot-computer-token": token,
-      "x-openbot-bot-id": botId,
+      "x-openbot-bot-id": bot,
       "content-type": "application/json",
     },
     ...(input === undefined ? {} : { body: JSON.stringify(input) }),
@@ -74,6 +74,7 @@ afterAll(async () => {
   if (child?.exitCode === null) {
     try {
       await api("/computers/stop", {});
+      await api("/computers/stop", {}, "demonstration-order");
     } finally {
       child.kill();
       await child.exited;
@@ -145,4 +146,61 @@ describe.skipIf(!asked)("real human live-screen demonstration", () => {
       socket.close();
     }
   }, 20000);
+
+  test("keystrokes reach the page in the order they were typed while each is described", async () => {
+    // Each key going down is described before it is applied (a step needs the element it lands
+    // on), and a key coming up is not. Applied as each finished being described, a key came up
+    // before it had gone down, and more so the busier the page: input in a recorded live screen
+    // reached the page in an order nobody typed.
+    const html =
+      '<input autofocus><output>none</output><script>const seen=[];const show=e=>{seen.push(e.type.slice(3)+":"+e.key);document.querySelector("output").textContent=seen.join(" ")};addEventListener("keydown",e=>{const until=Date.now()+20;while(Date.now()<until){}show(e)});addEventListener("keyup",show)</script>';
+    site?.stop(true);
+    site = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: () =>
+        new Response(html, { headers: { "content-type": "text/html" } }),
+    });
+    // Another Bot's computer, which nobody has taken the wheel of yet.
+    const bot = "demonstration-order";
+    await api("/navigate", { url: `http://127.0.0.1:${site.port}/` }, bot);
+    const requested = await api(
+      "/control/request",
+      { reason: "Record a browser demonstration" },
+      bot,
+    );
+    await api("/control/take", { requestId: requested.request.id }, bot);
+    const socket = new WebSocket(
+      `${base.replace("http:", "ws:")}/stream?bot=${bot}&token=${token}&recording=${recordingId}`,
+    );
+    const live = new Promise<void>((resolve) => {
+      socket.addEventListener("message", (event) => {
+        if (JSON.parse(String(event.data)).type === "frame") resolve();
+      });
+    });
+    try {
+      await live;
+      const typed = "abcdef";
+      for (const key of typed) {
+        const code = `Key${key.toUpperCase()}`;
+        socket.send(
+          JSON.stringify({ type: "key", event: "down", key, code, text: key }),
+        );
+        socket.send(JSON.stringify({ type: "key", event: "up", key, code }));
+      }
+      const expected = [...typed]
+        .flatMap((key) => [`down:${key}`, `up:${key}`])
+        .join(" ");
+      let text = "";
+      const deadline = Date.now() + 10_000;
+      while (Date.now() < deadline) {
+        text = (await api("/read", undefined, bot)).text as string;
+        if (text.split(" ").length >= expected.split(" ").length) break;
+        await Bun.sleep(50);
+      }
+      expect(text).toContain(expected);
+    } finally {
+      socket.close();
+    }
+  }, 30000);
 });

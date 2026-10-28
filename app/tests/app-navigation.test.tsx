@@ -88,6 +88,7 @@ function renderSidebar(role: "admin" | "user") {
   queryClient.setQueryData(userPreferencesQueryOptions("maya").queryKey, {
     messageListEmphasis: "thread",
     selfHostBannerDismissed: true,
+    narration: null,
     skin: "openbot",
   });
   queryClient.setQueryData(agentKeys.list(false), []);

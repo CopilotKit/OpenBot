@@ -1,3 +1,4 @@
+import type { AuditInitiator } from "@openbot/toolkit/initiator";
 import {
   and,
   desc,
@@ -13,7 +14,6 @@ import type { PgColumn } from "drizzle-orm/pg-core";
 import type { Database } from "./db/client";
 import { auditEvents } from "./db/schema";
 import { parsePageLimit } from "./paging";
-import type { AuditInitiator } from "@openbot/toolkit/initiator";
 
 const sensitiveKeys = new Set([
   "access_token",
@@ -605,6 +605,55 @@ export const auditEventTypes = [
   "routine.enabled_changed",
   /* A run refused because its model is not on the team model allowlist. */
   "model.refused",
+  /*
+   * A Recorder extension's bearer turned away: malformed, unknown or revoked, the person removed,
+   * their organization sign-in ended, or no role. Target the first 16 hex digits of the token's
+   * SHA-256, never the token; payload `reason` and `path`. At most one row per digest and reason a
+   * minute per replica, because a browser retrying a dead token would otherwise flood the trail.
+   */
+  "recorder.bearer_refused",
+  /*
+   * A browser connected to OpenBot as the Recorder, by whom and through which extension copy. Never
+   * the token or the code; the label is the person's own name for the browser.
+   */
+  "recorder.connected",
+  /*
+   * A connection refused before it was made; payload `reason`: `origin`, an origin that is not the Recorder's (payload
+   * `origin`, the one offered); `code`, a connect code that is unknown, expired or already used (payload `extensionId`
+   * and `installId`, never the code); or `too_many_codes`, the person already holding ten unused codes (payload `via`).
+   * A row that cannot be written is logged and the refusal stands.
+   */
+  "recorder.connect_refused",
+  /*
+   * A connection ended; payload `reason` is replaced (the same copy connected again), disconnected, revoked, signed_out
+   * (the person's sign-in here ended: payload `ending` says how, a sign-out, sessions ended another way, the person
+   * removed, their organization ending the session it holds a copy of) or expired (its lifetime ran out: the deployment
+   * ended it, payload `owner`). Written in the transaction that ends the connection, as `recorder.connected` is in the
+   * one that makes it.
+   */
+  "recorder.revoked",
+  /*
+   * A security row: a person's sign-in here was ending (payload `ending`) and their Recorder connections could not be
+   * ended, after `attempts` tries (payload `error`, the database's complaint, never the query). The sign-in did not end
+   * either, and whoever was ending it was told: the person signing out, the administrator, the directory. Target the
+   * person.
+   */
+  "recorder.sign_out_failed",
+  /*
+   * The capture pass (the runtime's trajectory/connect) turned a caller away: an id that is not a UUID, no
+   * Recorder bearer or one that no longer resolves, no role, the organization unable to answer, or a trajectory
+   * already bound to another person. Target the trajectory id; payload `reason`. At most one row per person,
+   * trajectory and reason a minute per replica.
+   */
+  "recorder.trajectory_refused",
+  /*
+   * A person changed who else's Bots use the Skills learned in their own Learning space (Settings, Learning). Target
+   * the person; payload `from` and `to`, each `closed`, `open` or `choose`.
+   */
+  "learning.sharing_changed",
+  /* A person opened one of their own learned Skills to every Bot, or closed it again. Target and payload `skill`. */
+  "learning.skill_opened",
+  "learning.skill_closed",
 ] as const;
 
 export type AuditEventType = (typeof auditEventTypes)[number];

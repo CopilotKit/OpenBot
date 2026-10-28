@@ -134,7 +134,7 @@ const SECTIONS: {
       {
         title: "Enterprise controls",
         description:
-          "Configure roles, groups, SSO, SCIM, network policies, allowlists, and Action Recording.",
+          "Configure roles, groups, SSO, SCIM, Skill sharing, network policies, allowlists, and Action Recording.",
         icon: IconShieldCheck,
         linkOptions: { to: "/admin/enterprise" },
       },

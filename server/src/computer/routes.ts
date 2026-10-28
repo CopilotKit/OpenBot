@@ -1,4 +1,5 @@
 import { downloadHeaders } from "@openbot/shared/file-download";
+import { isPersonBrowserId } from "@openbot/shared/openbot-browser";
 import type { Context, MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import type { BotAccessCheck } from "../agents/profile-policy";
@@ -6,6 +7,7 @@ import { ApprovalNeedsConversationError } from "../approvals/types";
 import type { AuditReader } from "../audit";
 import type { AppVariables } from "../auth/guards";
 import { requireAdmin } from "../auth/guards";
+import { ownsPersonBrowser } from "../browser/person";
 import { DEPLOYMENT_ROUTES } from "./deployment-routes";
 import {
   type ActionActor,
@@ -37,6 +39,9 @@ import { type PolicyStore, parseActionPolicy } from "./policy-store";
  * Every computer call goes through the gateway. That is the governance seam: each acting route in
  * this file passes through a policy decision and audit row before it reaches the computer.
  */
+
+/** What a person's own browser answers under this router: the reads its live screen makes. */
+const PERSON_BROWSER_READS = new Set(["control", "status", "screenshot"]);
 
 export function createComputerRoutes(
   gateway: ComputerGateway,
@@ -87,6 +92,23 @@ export function createComputerRoutes(
     const path = context.req.path.replace(/\/+$/, "");
     if (botId && DEPLOYMENT_ROUTES.has(botId) && path.endsWith(`/${botId}`)) {
       return next();
+    }
+
+    /*
+     * A person's own OpenBot browser, named for the person (browser/person.ts), answers here only what its live screen
+     * reads, and only to that person: who holds the wheel, whether it is up, and a picture of the page. Asked here and
+     * not of `canUseBot`, which a deployment with no profile store answers yes to for everybody. Nothing that acts as a
+     * Bot (a click through the boundary, a command, a file) reaches a person's browser: no Bot uses one yet.
+     */
+    if (botId && isPersonBrowserId(botId)) {
+      const route = path.slice(
+        path.lastIndexOf(`/${botId}/`) + botId.length + 2,
+      );
+      return context.req.method === "GET" &&
+        PERSON_BROWSER_READS.has(route) &&
+        ownsPersonBrowser(context.var.actor, botId)
+        ? next()
+        : context.json({ error: "There is no such Bot." }, 404);
     }
 
     if (botId && !(await canUseBot(context.var.actor, botId))) {

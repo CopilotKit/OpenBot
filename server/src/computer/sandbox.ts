@@ -90,6 +90,41 @@ export function imagesOf(podTemplate: unknown): string {
     .join(",");
 }
 
+/**
+ * The pod template, cut for one computer: each container told which id it is for (`COMPUTER_BOT_ID`), as the supervisor
+ * tells each container it starts.
+ *
+ * THE COMPUTER DECIDES WHETHER A PERSON'S BROWSER MAY RUN ON IT FROM THIS. A Sandbox is one computer for one id, but
+ * the computer cannot see that from inside: without the id it reads as the one computer every Bot shares, and refuses
+ * a person's browser there (agent-computer's `person-access.ts`). Given it, a person's computer runs their browser and
+ * refuses everything else. For a Bot's it changes only which profile a request that names nobody falls back to, which
+ * is the Bot's own. The template itself is left as it was, since every computer is cut from it.
+ */
+export function podTemplateFor(podTemplate: unknown, botId: string): unknown {
+  const template = podTemplate as
+    | { spec?: { containers?: Record<string, unknown>[] } }
+    | undefined;
+  const containers = template?.spec?.containers;
+  if (!template?.spec || !Array.isArray(containers)) return podTemplate;
+  return {
+    ...template,
+    spec: {
+      ...template.spec,
+      containers: containers.map((container) => {
+        const env = Array.isArray(container.env)
+          ? (container.env as { name?: unknown }[]).filter(
+              (variable) => variable.name !== "COMPUTER_BOT_ID",
+            )
+          : [];
+        return {
+          ...container,
+          env: [...env, { name: "COMPUTER_BOT_ID", value: botId }],
+        };
+      }),
+    },
+  };
+}
+
 export type SandboxProviderOptions = {
   /** Where the Bots' computers live. The provider is scoped to exactly this namespace. */
   namespace: string;
@@ -335,6 +370,7 @@ export function createSandboxComputerProvider(
         // `podTemplate` is required and `volumeClaimTemplates` is what makes a suspend worth doing,
         // and both arrive together from the mounted template.
         ...options.template,
+        podTemplate: podTemplateFor(options.template.podTemplate, botId),
       },
     };
   }
@@ -402,7 +438,7 @@ export function createSandboxComputerProvider(
         {
           op: "replace",
           path: "/spec/podTemplate",
-          value: options.template.podTemplate,
+          value: podTemplateFor(options.template.podTemplate, botId),
         },
         { op: "add", path: "/spec/operatingMode", value: operatingMode },
       ]),

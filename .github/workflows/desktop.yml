@@ -9,10 +9,10 @@ name: Desktop
 # it at runtime with an `expect`, so a bad row panics the window rather than failing a type check.
 on:
   pull_request:
-    paths: ["desktop/**", "shared/harnesses.json", "shared/marks/**", "package.json", ".github/workflows/desktop.yml"]
+    paths: ["desktop/**", "shared/harnesses.json", "shared/marks/**", "shared/recorder-extension.json", "package.json", ".github/workflows/desktop.yml"]
   push:
     branches: [main]
-    paths: ["desktop/**", "shared/harnesses.json", "shared/marks/**", "package.json", ".github/workflows/desktop.yml"]
+    paths: ["desktop/**", "shared/harnesses.json", "shared/marks/**", "shared/recorder-extension.json", "package.json", ".github/workflows/desktop.yml"]
   workflow_call:
     secrets:
       OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET:
@@ -142,6 +142,18 @@ jobs:
       # Include main.rs regressions as well as lib.rs; ignored live tests remain opt-in.
       - name: Rust regression tests
         run: cargo test --locked --lib --bins
+        working-directory: desktop/src-tauri
+      # The binary run as the Recorder's browsers run it: the native messaging host Chrome starts, and
+      # the install that writes its manifests. The host name and extension id come from
+      # shared/recorder-extension.json, which the Rust reads at compile time.
+      - name: Recorder native host tests
+        run: cargo test --locked --test recorder_host
+        working-directory: desktop/src-tauri
+      # Only a release build is a GUI-subsystem executable on Windows, and only a release build proves
+      # the debug-only test seam is absent.
+      - name: Recorder native host tests (release)
+        if: matrix.platform.name == 'windows'
+        run: cargo test --locked --release --test recorder_host
         working-directory: desktop/src-tauri
       # Hosted Windows runners are administrators. Exercise setup again with an actual Users-only
       # account: DISM's feature reads worked as CI's administrator but refused ordinary app users.

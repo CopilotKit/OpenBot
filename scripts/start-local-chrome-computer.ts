@@ -1,9 +1,13 @@
-import { access, mkdir } from "node:fs/promises";
-import { constants } from "node:fs";
+import { mkdir } from "node:fs/promises";
 import { createServer } from "node:net";
 import { homedir } from "node:os";
 import { join, posix, win32 } from "node:path";
 import { browserRuntimeFromEnv } from "../agent-computer/src/browser-runtime";
+import {
+  type InstalledBrowser,
+  installedBrowser,
+  NO_INSTALLED_BROWSER,
+} from "../agent-computer/src/person-launch";
 
 type Environment = Record<string, string | undefined>;
 
@@ -61,58 +65,21 @@ export function localChromeConfiguration(
   return { root: path.normalize(root), port: Number(port), env: childEnv };
 }
 
-/** Match Playwright's stable Chrome channel locations; never accept an executable from a tool input. */
-export function chromeExecutableCandidates(
+/**
+ * The installed browser this computer can open windows in: Google Chrome, else Microsoft Edge, each
+ * at Playwright's stable-channel location and never an executable from a tool input.
+ *
+ * Edge because it ships with Windows, so a machine without Chrome still has a browser Google or
+ * Microsoft keeps patched to open a person's own browser in. A Bot's browser here is Chrome, as
+ * before: with only Edge installed, a person's browser opens and a Bot's does not.
+ */
+export async function requireInstalledBrowser(
   env: Environment,
   platform: string = process.platform,
-): string[] {
-  if (platform === "darwin")
-    return ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"];
-  if (platform === "linux") return ["/opt/google/chrome/chrome"];
-  if (platform === "win32") {
-    return [
-      env.LOCALAPPDATA,
-      env.PROGRAMFILES,
-      env["PROGRAMFILES(X86)"],
-      ...(env.HOMEDRIVE
-        ? [
-            win32.join(env.HOMEDRIVE, "Program Files"),
-            win32.join(env.HOMEDRIVE, "Program Files (x86)"),
-          ]
-        : []),
-    ]
-      .filter((prefix): prefix is string => Boolean(prefix))
-      .map((prefix) =>
-        win32.join(prefix, "Google", "Chrome", "Application", "chrome.exe"),
-      );
-  }
-  throw new Error(`Local Chrome is not supported on ${platform}.`);
-}
-
-export async function requireInstalledChrome(
-  env: Environment,
-  platform: string = process.platform,
-): Promise<void> {
-  for (const candidate of chromeExecutableCandidates(env, platform)) {
-    try {
-      await access(
-        candidate,
-        platform === "win32" ? constants.F_OK : constants.X_OK,
-      );
-      return;
-    } catch (error) {
-      if (
-        !error ||
-        typeof error !== "object" ||
-        !("code" in error) ||
-        !["ENOENT", "EACCES"].includes(String(error.code))
-      )
-        throw error;
-    }
-  }
-  throw new Error(
-    "Google Chrome was not found in its standard installation location. Install Google Chrome before starting the local computer.",
-  );
+): Promise<InstalledBrowser> {
+  const found = await installedBrowser(env, platform);
+  if (!found) throw new Error(NO_INSTALLED_BROWSER);
+  return found;
 }
 
 export async function requireAvailablePort(port: number): Promise<void> {
@@ -134,7 +101,7 @@ export async function requireAvailablePort(port: number): Promise<void> {
 
 async function main(): Promise<void> {
   const config = localChromeConfiguration(process.env);
-  await requireInstalledChrome(config.env);
+  await requireInstalledBrowser(config.env);
   await requireAvailablePort(config.port);
   await mkdir(config.root, { recursive: true, mode: 0o700 });
   for (const directory of [config.env.PROFILES_DIR, config.env.WORKSPACE_DIR]) {

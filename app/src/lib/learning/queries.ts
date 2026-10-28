@@ -1,17 +1,35 @@
-import { queryOptions } from "@tanstack/react-query";
-import { client } from "@/lib/client";
 import type {
   LearningAutoAssignState,
   LearningDeliveryStatus,
   LearningOverview,
   LearningSettings,
+  PersonalLearningSharing,
 } from "@openbot/shared/learning";
+import { queryOptions } from "@tanstack/react-query";
+import { client } from "@/lib/client";
 
 export const learningKeys = {
   all: ["learning"] as const,
   settings: ["learning", "settings"] as const,
   automatic: ["learning", "automatic"] as const,
+  personal: ["learning", "personal"] as const,
 };
+/**
+ * Settings, Learning: who else's Bots use the Skills learned from your own recordings, and the Skills in your own
+ * Learning space (null when Intelligence did not deliver them).
+ */
+export function personalLearningQueryOptions() {
+  return queryOptions({
+    queryKey: learningKeys.personal,
+    retry: false,
+    queryFn: async (): Promise<PersonalLearningSharing> =>
+      (
+        await client("/api/settings/learning", {
+          fallback: "Couldn't load your Learning settings. Reload the page.",
+        })
+      ).json(),
+  });
+}
 export function learningSettingsQueryOptions() {
   return queryOptions({
     queryKey: learningKeys.settings,
