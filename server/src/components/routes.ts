@@ -1,3 +1,4 @@
+import { isStandardUiComponentName } from "@openbot/shared/standard-ui";
 import type { MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import type { BotAccessCheck } from "../agents/profile-policy";
@@ -144,6 +145,16 @@ export function createComponentRoutes(
         return context.json(
           {
             error: `Component at index ${index} needs a name, a title, a kind and a description.`,
+          },
+          400,
+        );
+      }
+      // The server registers the standard catalog itself, from its own copy. Accepted from a
+      // browser, a row it had not reached yet would arrive in that browser's words.
+      if (isStandardUiComponentName(name.trim())) {
+        return context.json(
+          {
+            error: `Component at index ${index} uses a name reserved for the standard catalog.`,
           },
           400,
         );

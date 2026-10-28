@@ -99,6 +99,7 @@ import { createThreadIdentity } from "./channels/thread-identity";
 import { createChannelTitler } from "./channels/titler";
 import { headlessComponentCatalog } from "./components/headless";
 import { createSandboxedStore } from "./components/sandboxed";
+import { STANDARD_UI_CATALOGUE } from "./components/standard-ui";
 import { createComponentStore } from "./components/store";
 import { createComputerGateway } from "./computer/gateway";
 import { createHeadlessComputerTools } from "./computer/headless-tools";
@@ -440,12 +441,16 @@ const channelEvents = createChannelEventHub();
 /**
  * Which components each Bot may answer with.
  *
- * Nothing is seeded here. The catalogue is a fact about the build; a fork that ships four components
+ * The gallery is not seeded here. It is a fact about the build; a fork that ships four components
  * of its own should start with four rows, and the only thing that can enumerate them is
  * the app that compiled them. It announces itself on load; this process learns what exists from that,
  * and owns only what may be done with it.
+ *
+ * The standard catalog is the exception: the server builds every run's catalog from its own copy,
+ * so it registers those families itself, additively, as the gallery's announcement does.
  */
 const componentStore = createComponentStore(database);
+await componentStore.syncCatalogue(STANDARD_UI_CATALOGUE);
 // Its own connection is held for the life of the process; announced activity from any instance
 // arrives here and is fanned out to connected members.
 const channelActivityListener = await startChannelActivityListener(
@@ -1741,6 +1746,7 @@ const copilotRuntime = mountCopilotRuntime(
       void channelStore.signalBusy(input.threadId, input.busy).catch(() => {});
     },
     learningSettings,
+    componentStore,
   },
 );
 

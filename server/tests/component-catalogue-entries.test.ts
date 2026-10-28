@@ -132,4 +132,15 @@ describe("announcing a catalogue with malformed entries", () => {
       "clockPanel",
     ]);
   });
+
+  test("a name reserved for the standard catalog is refused", async () => {
+    const { published, announce } = harness();
+    const response = await announce([entry({ name: "a2ui.Table" })]);
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error:
+        "Component at index 0 uses a name reserved for the standard catalog.",
+    });
+    expect(published).toEqual([]);
+  });
 });

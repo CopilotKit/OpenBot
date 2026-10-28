@@ -70,6 +70,8 @@ export type CatalogueEntry = {
   title: string;
   kind: string;
   description: string;
+  /** Whether it arrives published. A build's gallery components do; see STANDARD_UI_GROUPS. */
+  published?: boolean;
 };
 
 export type ComponentStore = {
@@ -148,10 +150,12 @@ export function createComponentStore(database: Database): ComponentStore {
             title: entry.title,
             kind: entry.kind,
             draftDescription: entry.description,
-            // Published on arrival, so a fresh install can draw from the moment it starts.
-            publishedDescription: entry.description,
-            published: true,
-            publishedAt: new Date(),
+            // Published on arrival unless the entry says otherwise, so a fresh install can draw
+            // from the moment it starts.
+            publishedDescription:
+              entry.published === false ? null : entry.description,
+            published: entry.published !== false,
+            publishedAt: entry.published === false ? null : new Date(),
             updatedBy: "the build",
           })),
         )

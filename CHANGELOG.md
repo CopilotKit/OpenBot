@@ -57,6 +57,14 @@ and font, in light and dark. Map is left out, because it needs a map library Ope
 The gallery components a Bot is granted are unchanged. `OPENBOT_GENERATIVE_UI=false` still switches
 it all off, on the server as well as in the browser.
 
+They are governed like the gallery. Each family (a component and the parts that only work with it,
+such as Table with its rows and cells) is a row an administrator publishes, words and withholds per
+Bot. Layout, text and input families arrive published; data, media, overlay and composite families
+arrive unpublished and wait for an administrator. The server builds every run's catalog from its own
+copy and those rows, so a Bot is told only what it holds, in the published words, and is refused any
+other component whatever the browser sends. Conversations still draw what they drew before a family
+was withdrawn.
+
 ### CopilotKit 1.83
 
 OpenBot now runs on CopilotKit 1.83.0 (`@copilotkit/runtime` and `react-core`, from 1.77.0) and

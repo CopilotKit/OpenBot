@@ -11,7 +11,8 @@
     "prebuild": "bun run --cwd .. generate:app-config",
     "predev": "bun run --cwd .. generate:app-config",
     "pretypecheck": "bun run --cwd .. generate:app-config",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "export:standard-ui": "bun scripts/export-standard-ui-catalog.ts"
   },
   "dependencies": {
     "@ag-ui/core": "1.0.2",

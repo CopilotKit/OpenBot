@@ -256,6 +256,33 @@ describe("learning what a build ships", () => {
     expect((await store.decide(announced.name, botA)).allowed).toBeTrue();
   });
 
+  test("an entry announced unpublished waits for an administrator", async () => {
+    const waiting = {
+      ...announced,
+      name: `testWaiting_${suite}`,
+      published: false,
+    };
+    fixtureComponentNames.add(waiting.name);
+    expect((await store.syncCatalogue([waiting])).added).toEqual([
+      waiting.name,
+    ]);
+
+    const stored = (await store.list()).find(
+      (component) => component.name === waiting.name,
+    );
+    expect(stored?.published).toBeFalse();
+    expect(stored?.publishedDescription).toBeNull();
+    expect((await store.decide(waiting.name, botA)).allowed).toBeFalse();
+
+    // Publishing it promotes the announced wording, as for any draft.
+    await store.publish(waiting.name, "admin@example.test");
+    expect(
+      (await store.listForAgent(botA)).find(
+        (component) => component.name === waiting.name,
+      )?.description,
+    ).toBe(announced.description);
+  });
+
   test("announcing again adds nothing", async () => {
     // Runs on every page load, so a second call must be a no-op rather than a duplicate-key crash.
     expect((await store.syncCatalogue([announced])).added).toEqual([]);

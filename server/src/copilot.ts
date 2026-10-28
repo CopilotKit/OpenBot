@@ -45,6 +45,8 @@ import {
   type StoredAttachment,
 } from "./channels/attachment-parts";
 import type { AgentFetch, StallGuard } from "./channels/stall-guard";
+import { governStandardUi } from "./components/standard-ui";
+import type { ComponentStore } from "./components/store";
 import type { DeploymentConfig } from "./config";
 import { observeModelConnection } from "./desktop-connection-failure";
 import { desktopTelemetryProperties } from "./desktop-telemetry";
@@ -1724,10 +1726,17 @@ export function mountCopilotRuntime(
     basePath?: string;
     onRunBusy?: (input: { threadId: string; busy: boolean }) => void;
     learningSettings?: LearningSettingsStore;
+    /** Which standard families each Bot holds. Without it, no run carries a catalog. */
+    componentStore?: Pick<ComponentStore, "listForAgent">;
   } = {},
 ) {
   const { intelligence } = config.runtime;
-  const { basePath = "/api/copilotkit", onRunBusy, learningSettings } = options;
+  const {
+    basePath = "/api/copilotkit",
+    onRunBusy,
+    learningSettings,
+    componentStore,
+  } = options;
 
   /**
    * The same Bot a person's run would get, built without a request.
@@ -1833,6 +1842,11 @@ export function mountCopilotRuntime(
      */
     ...(config.generativeUi ? { openGenerativeUI: true } : {}),
     ...generativeUiMiddlewares(config.generativeUi),
+    // What a Bot is told it can draw is the server's to decide; see governStandardUi.
+    beforeRequestMiddleware: governStandardUi({
+      listForAgent: async (agentId) =>
+        componentStore ? componentStore.listForAgent(agentId) : [],
+    }),
     // `identifyUser` is the Intelligence projection of the same person `identifyActor` returns:
     // one resolver decides both whose threads these are and whose coworkers exist.
     agents: createRequestAgents(identifyActor, resolver) as never,

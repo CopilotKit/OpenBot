@@ -506,14 +506,14 @@ const ALLOW: Allowed[] = [
   },
   {
     file: "server/tests/component-store.integration.test.ts",
-    line: 372,
+    line: 399,
     shape: "a",
     finding: "NEW (round 2 did not find this)",
     why: 'test("revoking from a component that does not exist is an error, not a silent no-op", async () => { expect(sto',
   },
   {
     file: "server/tests/component-store.integration.test.ts",
-    line: 404,
+    line: 431,
     shape: "a",
     finding: "NEW (round 2 did not find this)",
     why: 'test("a function this build does not ship cannot be run", async () => { expect(store.callFunction(`nothing_${s',
