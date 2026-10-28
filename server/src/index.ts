@@ -284,6 +284,7 @@ import { createModelCompleter } from "./routing/model";
 import { createSelfHostBanner } from "./self-host-banner";
 import { createSetupSources, modelKeyOf } from "./setup/checklist";
 import { createComputerCheck } from "./setup/computer-check";
+import { createTaskStore } from "./tasks/store";
 import { createTeamBots } from "./team-bots/team-bots";
 import {
   createPackageStatusReader,
@@ -2245,6 +2246,11 @@ const proactiveSweep = repeatAfterEach(async () => {
   }
 }, 60_000);
 /*
+ * A person's tasks, read from the queue and the approval and question inboxes the sweeps above
+ * already keep. See tasks/store.ts.
+ */
+const taskStore = createTaskStore(database);
+/*
  * Follow-ups a Bot scheduled for itself: one headless turn each, through the same turn runner as a
  * routine, into the person's conversation with that Bot. See agents/wake-up.ts.
  */
@@ -2765,6 +2771,7 @@ const app = createApp(
     },
     memory: { store: personalMemoryStore, ingestion: memoryIngestion },
     proactive: { store: proactiveStore, engine: proactiveEngine },
+    tasks: taskStore,
     responsibilities: {
       store: responsibilityStore,
       engine: responsibilityEngine,
