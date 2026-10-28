@@ -255,11 +255,25 @@ export async function writeSession<K extends keyof SessionState>(
 export async function removeSession(key: keyof SessionState): Promise<void> {
   await chrome.storage.session.remove(key);
 }
-/** Keeps the bearer token out of content scripts: storage.local defaults to readable by them. */
+/**
+ * Keeps the bearer token out of content scripts: storage.local defaults to readable by them.
+ *
+ * Never rejects, as nothing the service worker starts at its top level may (recovery.ts says the same of recovery): it is
+ * called there with nobody waiting on it, where a rejection was an unhandled one, said nowhere the Recorder's own
+ * failures are. A failure is logged as theirs are, and the restriction is asked for again at the next start of the
+ * service worker, which Chrome stops and starts many times a day.
+ */
 export async function restrictStorageToTrustedContexts(): Promise<void> {
-  await chrome.storage.local.setAccessLevel({
-    accessLevel: "TRUSTED_CONTEXTS",
-  });
+  try {
+    await chrome.storage.local.setAccessLevel({
+      accessLevel: "TRUSTED_CONTEXTS",
+    });
+  } catch (error) {
+    console.error(
+      "Recorder: keeping its stored connection from content scripts failed; it asks again at its next start",
+      error,
+    );
+  }
 }
 /** Reads `installSecret`, creating it with crypto.randomUUID() when absent. */
 let pendingSecret: Promise<string> | null = null;
