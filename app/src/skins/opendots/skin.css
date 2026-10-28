@@ -272,7 +272,7 @@
 
 /*
  * Where the conversation column is no wider than its composer, OpenDots still keeps the composer
- * and its notices off the edges of the pane; OpenBot's runs them flush. 972px is the widest window
+ * and its notices 16px off the edges of the pane, a little more than OpenBot's own 12px. 972px is the widest window
  * at which the 672px column fills the pane beside the rail and sidebar.
  */
 @media (max-width: 972px) {
