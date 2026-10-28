@@ -500,7 +500,10 @@ describe("a built-in Bot", () => {
         }
       )?.messages ?? []
     )
-      .filter((message) => message.role === "system")
+      // Chat Completions carries a gpt-5 model's instructions as a developer message, not system.
+      .filter(
+        (message) => message.role === "system" || message.role === "developer",
+      )
       .map((message) => String(message.content))
       .join("\n");
     /*

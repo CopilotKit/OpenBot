@@ -8,7 +8,7 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-**Before upgrading.** Nine things change for an existing deployment:
+**Before upgrading.** Ten things change for an existing deployment:
 - A hosted computer's browser is now headed by default. It uses a little more memory than headless
   did; set `COMPUTER_BROWSER_MODE=headless` (Helm: `computers.browserMode: headless`) to keep the old
   behaviour.
@@ -42,6 +42,17 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - On Helm's `shared` computer and the docker-compose `agent-computer`, each Bot's files now live in
   `computers/<Bot id>` on the workspace volume (below). Files saved before the upgrade stay at the
   root of the volume, where no Bot sees them; move them into a Bot's folder to give them back.
+- With `OPENAI_BASE_URL` set to a host that is not OpenAI or Azure, `openai/...` models now use the
+  Chat Completions API rather than the Responses API (below). Set `COPILOTKIT_OPENAI_API=responses`
+  to keep the old behaviour.
+
+### CopilotKit 1.83
+
+OpenBot now runs on CopilotKit 1.83.0 (`@copilotkit/runtime` and `react-core`, from 1.77.0) and
+AG-UI 1.0.2 (`@ag-ui/core` and `@ag-ui/client`, from 1.0.1). A managed Intelligence project needs
+nothing changed. A deployment whose `OPENAI_BASE_URL` points at an OpenAI-compatible gateway rather
+than OpenAI or Azure now reaches `openai/...` models through Chat Completions; a gateway that only
+speaks the Responses API needs `COPILOTKIT_OPENAI_API=responses`.
 
 ### The audit log reads like a log
 
