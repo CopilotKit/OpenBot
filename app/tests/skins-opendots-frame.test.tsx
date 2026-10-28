@@ -595,9 +595,9 @@ describe("OpenDots screens", () => {
  * deployment's own name from `brand.yaml`, and every Bot wears OpenBot's own avatar.
  */
 describe("OpenDots skin wears the deployment's brand", () => {
-  /** What the drawing of one avatar looks like, without the ids React gives each instance. */
+  /** Which colour one avatar's orb is drawn in, which is all its seed decides. */
   const drawing = (root: Element | null) =>
-    (root?.querySelector("svg")?.outerHTML ?? "").replace(/_r_[\w]+_/g, "");
+    root?.querySelector("[data-palette]")?.getAttribute("data-palette") ?? "";
 
   test("the frame names the product from brand.yaml and never says OpenDots or Dots", async () => {
     const { view } = draw("/channel/new?agent=ada");

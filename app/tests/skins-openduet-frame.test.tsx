@@ -562,9 +562,11 @@ describe("the frame carries the deployment's brand, not OpenDuet's", () => {
     const menu = view.getByRole("dialog");
     expect(within(menu).getByText(appConfig.brand.productName)).toBeTruthy();
     expect(readable()).not.toContain("OpenDuet");
-    // OpenBot's own orb, as sign-in and onboarding draw it, and no drawing of OpenDuet's.
+    // OpenBot's own orb, as sign-in and onboarding draw it, in OpenBot's violet.
     expect(orb.querySelector(".agent-orb")).not.toBeNull();
-    expect(orb.querySelector("canvas")).toBeNull();
+    expect(
+      orb.querySelector('.agent-orb[data-palette="violet"]'),
+    ).not.toBeNull();
   });
 
   test("Tasks names nothing as OpenDuet either", async () => {
