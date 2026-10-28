@@ -475,6 +475,12 @@ export const auditEventTypes = [
   "bot.callback_token_issued",
   "bot.callback_token_revoked",
   /*
+   * A Bot was asked for a computer of its own and refused it: the person does not hold "Isolated
+   * Bots", the Bot belongs to no person, or this deployment cannot make a second computer. The row is
+   * the only trace of the attempt, since nothing about the Bot changed. `payload.reason` says which.
+   */
+  "bot.isolation_refused",
+  /*
    * A Bot's lifecycle as one person runs it: paused, resumed, reset, how loudly it may reach them,
    * a follow-up it scheduled for itself, and a delegated task somebody stopped. See agents/lifecycle.ts.
    */

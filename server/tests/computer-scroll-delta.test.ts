@@ -4,9 +4,12 @@ import type { AppVariables } from "../src/auth/guards";
 import type { ComputerGateway } from "../src/computer/gateway";
 import type { PolicyStore } from "../src/computer/policy-store";
 import { createComputerRoutes } from "../src/computer/routes";
+import { personSeat } from "../src/computer/computer-key";
 
 function appWith(calls: { deltaY?: number }[]) {
   const gateway = {
+    seatFor: async (botId: string, personId: string) =>
+      personSeat(personId, botId),
     scroll: async (
       _botId: string,
       _actor: unknown,

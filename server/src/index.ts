@@ -6,7 +6,7 @@ import {
 import { computerGuidance } from "@openbot/shared/bot-prompt";
 import { workOwner } from "@openbot/shared/work-owner";
 import { createTurnRunner } from "@openbot/toolkit/run-turn";
-import { and, eq, isNull, ne, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import { createActivityStore } from "./activity/activity";
 import {
@@ -100,6 +100,11 @@ import { createChannelTitler } from "./channels/titler";
 import { headlessComponentCatalog } from "./components/headless";
 import { createSandboxedStore } from "./components/sandboxed";
 import { createComponentStore } from "./components/store";
+import { runsIsolated } from "./agents/isolation";
+import {
+  botOwnership,
+  createComputerSeatResolver,
+} from "./computer/computer-key";
 import { createComputerGateway } from "./computer/gateway";
 import { createHeadlessComputerTools } from "./computer/headless-tools";
 import { createPageFrameStore } from "./computer/page-frames";
@@ -135,6 +140,7 @@ import {
   channelMemberships,
   channels,
   intelligenceChannelMappings,
+  users,
 } from "./db/schema";
 import { createDeliveryRouter, DELIVERY_WORK_KINDS } from "./delivery/router";
 import {
@@ -707,7 +713,7 @@ const approvalComputerTools = async (
   return computerGateway && canUseComputer(profile, actor)
     ? createHeadlessComputerTools({
         gateway: computerGateway,
-        botId: agentId,
+        seat: await computerGateway.seatFor(agentId, actor.id),
         actor: { id: actor.id, userId: actor.id, initiator },
         auditStore: bootAuditStore,
         ...(signInService ? { signIn: signInService } : {}),
@@ -735,9 +741,33 @@ const retentionSweeps = startRetentionSweeps(
   config.auditRetentionDays,
   pageFrameStore,
 );
+/**
+ * Whose computer a Bot runs on: the person it acts for, unless the Bot is isolated and its owner
+ * still holds the switch (`runsIsolated`, agents/isolation.ts). A provider that cannot make a
+ * computer for one Bot (the one shared computer) gives every Bot a seat for the person instead.
+ */
+const computerSeats = computerProvider
+  ? createComputerSeatResolver({
+      runsIsolated: (botId) => runsIsolated(database, botId),
+      bot: botOwnership(database),
+      canIsolate: computerProvider.isolation === "per-person",
+    })
+  : undefined;
+
 const computerGateway = computerProvider
   ? createComputerGateway({
       provider: computerProvider,
+      ...(computerSeats ? { seats: computerSeats } : {}),
+      // Who each person's computer belongs to, for the admin list.
+      people: async (ids) =>
+        new Map(
+          (
+            await database
+              .select({ id: users.id, name: users.name, email: users.email })
+              .from(users)
+              .where(inArray(users.id, ids))
+          ).map((row) => [row.id, { name: row.name, email: row.email }]),
+        ),
       auditStore: bootAuditStore,
       approvalGate: approvalService.gate,
       policy: () => policyStore.get(),
@@ -1673,7 +1703,7 @@ const routineRunner = createRoutineRunner({
       if (!canUseComputer(profile, actor)) return [];
       return createHeadlessComputerTools({
         gateway: computerGateway,
-        botId: agentId,
+        seat: await computerGateway.seatFor(agentId, actor.id),
         actor: { id: actor.id, userId: actor.id, initiator },
         auditStore: bootAuditStore,
         ...(signInService ? { signIn: signInService } : {}),
@@ -1901,7 +1931,7 @@ const groupConversations = createGroupConversations({
       if (!canUseComputer(profile, actor)) return [];
       return createHeadlessComputerTools({
         gateway: computerGateway,
-        botId: agentId,
+        seat: await computerGateway.seatFor(agentId, actor.id),
         actor: { id: actor.id, userId: actor.id, initiator },
         auditStore: bootAuditStore,
         ...(signInService ? { signIn: signInService } : {}),
@@ -2136,7 +2166,7 @@ const wakeUpRunner = createWakeUpRunner({
       if (!canUseComputer(profile, actor)) return [];
       return createHeadlessComputerTools({
         gateway: computerGateway,
-        botId: agentId,
+        seat: await computerGateway.seatFor(agentId, actor.id),
         actor: { id: actor.id, userId: actor.id, initiator },
         auditStore: bootAuditStore,
         ...(signInService ? { signIn: signInService } : {}),

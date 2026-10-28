@@ -74,12 +74,16 @@ export function startHttpServer(deps: {
    * Not a Hono route because an upgrade is not a request/response: Bun hands it over before Hono sees a
    * body, so it is handled in `fetch` ahead of the app.
    */
-  const toStreamUrl = (baseUrl: string, botId: string) =>
+  const toStreamUrl = (
+    baseUrl: string,
+    seat: { botId: string; personId?: string },
+  ) =>
     // The Bot travels in the query, because a websocket upgrade carries no custom header for the
-    // computer to read and every call it serves is per Bot. The secret travels the same way and for the
+    // computer to read and every call it serves is per Bot. So does the person, on the one computer
+    // many people share, where the seat is the pair. The secret travels the same way and for the
     // same reason, this socket is the one a person can type into, so it is the last thing that should
     // be reachable without it.
-    `${baseUrl.replace(/^http/, "ws").replace(/\/$/, "")}/stream?bot=${encodeURIComponent(botId)}&token=${encodeURIComponent(config.computer?.token ?? "")}`;
+    `${baseUrl.replace(/^http/, "ws").replace(/\/$/, "")}/stream?bot=${encodeURIComponent(seat.botId)}${seat.personId ? `&person=${encodeURIComponent(seat.personId)}` : ""}&token=${encodeURIComponent(config.computer?.token ?? "")}`;
 
   const isProxiedStream = (data: SocketData): data is StreamData =>
     typeof (data as StreamData).upstream === "string";
@@ -132,15 +136,20 @@ export function startHttpServer(deps: {
          */
         let upstream: string;
         try {
-          const streamBase = computerGateway
-            ? await computerGateway.locate(streamBotId)
+          // The watcher's own seat on that Bot: their computer, or the Bot's own if it is isolated.
+          const seat = computerGateway
+            ? await computerGateway.seatFor(streamBotId, actor.id)
             : undefined;
-          if (!streamBase) {
+          const streamBase =
+            computerGateway && seat
+              ? await computerGateway.locate(seat)
+              : undefined;
+          if (!streamBase || !computerGateway || !seat) {
             return new Response("No computer address is configured.", {
               status: 503,
             });
           }
-          upstream = toStreamUrl(streamBase, streamBotId);
+          upstream = toStreamUrl(streamBase, computerGateway.addressOf(seat));
         } catch (error) {
           // Said out loud rather than falling back to another Bot's computer, which is the failure this
           // whole path exists to prevent.

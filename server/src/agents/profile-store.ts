@@ -22,6 +22,8 @@ import {
   assignedToActor,
   teamBotAccess,
 } from "../team-bots/access";
+import { capabilityRefusal } from "../admin/capabilities";
+import { mayIsolate } from "./isolation";
 import { teamBotPublications } from "../db/schema/team-bots";
 import { canManageAgent } from "./profile-policy";
 import type {
@@ -119,6 +121,40 @@ export class ProtectedAgentError extends Error {
   }
 }
 
+/**
+ * A Bot was asked to have a computer of its own and may not.
+ *
+ * `capability`: the person asking does not hold "Isolated Bots". `unowned`: the Bot belongs to the
+ * deployment rather than a person (a tenant package's Bot, or one whose owner was removed), and the
+ * switch is a person's, so there is nobody it could be granted to. The route records both on the trail.
+ */
+export class IsolationRefusedError extends Error {
+  constructor(readonly reason: "capability" | "unowned") {
+    super(
+      reason === "capability"
+        ? capabilityRefusal("isolatedComputers")
+        : "This Bot doesn't belong to a person, so it can't have a computer of its own.",
+    );
+    this.name = "IsolationRefusedError";
+  }
+}
+
+/**
+ * Refuse a Bot of its own to somebody without "Isolated Bots".
+ *
+ * Here rather than only at the route, so every caller of the store meets it, as publishing a Team Bot
+ * does. Asked only of a request that turns isolation ON: turning it off is always allowed, and an
+ * absent field changes nothing.
+ *
+ * Before any transaction opens. The answer reads the switches on a pooled connection of its own, and
+ * borrowing a second one while a transaction holds the first is how `getWithin`'s deadlock happens.
+ */
+async function requireMayIsolate(actor: AgentActor) {
+  if (!(await mayIsolate(actor.id))) {
+    throw new IsolationRefusedError("capability");
+  }
+}
+
 export class ManagedAgentUnavailableError extends Error {
   constructor() {
     super("OpenBot has no managed Bot. Give this Bot its own AG-UI endpoint.");
@@ -138,6 +174,7 @@ const joinedProjection = {
   hiddenAt: agentPreferences.hiddenAt,
   pinnedAt: agentPreferences.pinnedAt,
   deletedAt: agentProfiles.deletedAt,
+  isolated: agentProfiles.isolated,
   /* The hash, only so a surface can say whether one exists. It never leaves this module. */
   callbackTokenHash: agentProfiles.callbackTokenHash,
   configuration: agents.configuration,
@@ -192,6 +229,7 @@ function mapProfile(
     pinned: row.pinnedAt !== null,
     assignedToMe: Boolean(row.assignedToMe),
     deletedAt: row.deletedAt,
+    isolated: row.isolated,
     endpoint: endpointOf(row.configuration),
     // Whether a key is set, never which. The form needs to show "a key is set" so a person does not
     // wipe one by saving an unrelated edit; showing the value would put a secret in a screenshot.
@@ -435,7 +473,8 @@ export function createAgentProfileStore(
       return findAccessibleProfile(executor, actor, id);
     },
 
-    create(actor, input) {
+    async create(actor, input) {
+      if (input.isolated === true) await requireMayIsolate(actor);
       return database.transaction(async (transaction) => {
         const id = newAgentId();
         const endpoint = input.endpoint
@@ -500,6 +539,7 @@ export function createAgentProfileStore(
           roleDescription: input.roleDescription,
           avatarSeed: id,
           visibility: input.visibility,
+          isolated: input.isolated === true,
         });
 
         const profile = await findAccessibleProfile(transaction, actor, id);
@@ -508,12 +548,23 @@ export function createAgentProfileStore(
       });
     },
 
-    update(actor, id, input) {
+    async update(actor, id, input) {
+      if (input.isolated === true) await requireMayIsolate(actor);
       return database.transaction(
         async (transaction) => {
           await lockProfileMutationRows(transaction, id);
           const profile = await findAccessibleProfile(transaction, actor, id);
           if (!profile) throw new AgentNotFoundError(id);
+          /*
+           * Before the manage check, so a tenant package's Bot is refused for what was asked of it
+           * rather than with the general "built in and can't be changed", and the trail can say so.
+           */
+          if (
+            input.isolated === true &&
+            (profile.systemOwned || profile.ownerUserId === null)
+          ) {
+            throw new IsolationRefusedError("unowned");
+          }
           requireManageable(actor, profile);
 
           const updatedAt = new Date();
@@ -599,6 +650,10 @@ export function createAgentProfileStore(
               title: input.title,
               roleDescription: input.roleDescription,
               visibility: input.visibility,
+              // Absent leaves it alone; see `CreateAgentInput.isolated`.
+              ...(input.isolated === undefined
+                ? {}
+                : { isolated: input.isolated }),
               updatedAt,
             })
             .where(eq(agentProfiles.agentId, id));
@@ -611,7 +666,13 @@ export function createAgentProfileStore(
       );
     },
 
-    duplicate(actor, id) {
+    async duplicate(actor, id) {
+      /*
+       * A copy is the duplicator's Bot, so it keeps a computer of its own only if they may give it
+       * one. Asked up front for the reason `requireMayIsolate` gives, and answered for every
+       * duplicate rather than only an isolated source's, because the source is read inside.
+       */
+      const mayKeepIsolated = await mayIsolate(actor.id);
       return database.transaction(async (transaction) => {
         const source = await findAccessibleProfile(transaction, actor, id);
         if (!source) throw new AgentNotFoundError(id);
@@ -653,6 +714,7 @@ export function createAgentProfileStore(
           roleDescription: source.roleDescription,
           avatarSeed: source.avatarSeed,
           visibility: "private",
+          isolated: source.isolated && mayKeepIsolated,
         });
 
         const duplicate = await findAccessibleProfile(

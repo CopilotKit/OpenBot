@@ -11,7 +11,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import type { HandoffRequest } from "../../shared/computer-control";
-import { isPlainBotId } from "./bot-id";
+import { isUsableSeatId } from "./bot-id";
 
 export type StoredControl = {
   version: 1;
@@ -122,7 +122,7 @@ export function createControlStore(
   profilesDirectory: string,
   botId: string,
 ): ControlStore {
-  if (!isPlainBotId(botId)) throw new Error("That is not a usable bot id.");
+  if (!isUsableSeatId(botId)) throw new Error("That is not a usable bot id.");
   const directory = join(profilesDirectory, ".control");
   const path = join(directory, `${botId}.json`);
   return {

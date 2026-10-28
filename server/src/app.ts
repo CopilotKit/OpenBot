@@ -20,6 +20,7 @@ import {
 import type { BotAccessCheck } from "./agents/profile-policy";
 import type { AgentProfileStore } from "./agents/profile-store";
 import { createAgentRoutes } from "./agents/routes";
+import { deploymentCanIsolate } from "./agents/isolation";
 import { createApprovalRoutes } from "./approvals/routes";
 import type { ApprovalService } from "./approvals/service";
 import {
@@ -1467,6 +1468,8 @@ export function createApp(
               ].filter((url): url is URL => url !== undefined),
             }
           : undefined,
+        // Whether a Bot can have a computer of its own here: only where the provider makes computers.
+        { available: deploymentCanIsolate(config.computer) },
       ),
     );
     // Choosing a coworker for an untagged message needs the same permission-filtered roster the

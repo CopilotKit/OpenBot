@@ -1,8 +1,14 @@
 import type { ComputerNames } from "./names";
-import { BOT_LABEL, NAMESPACE, NAMESPACE_LABEL } from "./names";
+import {
+  BOT_LABEL,
+  KIND_LABEL,
+  NAMESPACE,
+  NAMESPACE_LABEL,
+  PERSON_LABEL,
+} from "./names";
 
 /**
- * A SPIFFE identity for each Bot's computer.
+ * A SPIFFE identity for each computer: a person's, or an isolated Bot's.
  *
  * An SVID makes the Bot's identity something a workload holds and can be challenged on, rather than
  * a name supplied in a header.
@@ -24,8 +30,25 @@ const AGENT_SPIFFE_ID =
 
 const TRUST_DOMAIN = process.env.SPIRE_TRUST_DOMAIN ?? "openbot.local";
 
-export function spiffeIdFor(botId: string): string {
-  return `spiffe://${TRUST_DOMAIN}/bot/${botId}`;
+/** `spiffe://<domain>/person/<id>` or `spiffe://<domain>/bot/<id>`: whose computer it is. */
+export function spiffeIdFor(names: Pick<ComputerNames, "kind" | "id">): string {
+  return `spiffe://${TRUST_DOMAIN}/${names.kind}/${names.id}`;
+}
+
+/**
+ * What SPIRE matches a container on to hand it that identity.
+ *
+ * The kind as well as the id, because a computer from before one per person carries the same Bot
+ * label with no kind, and must not be handed an isolated Bot's identity.
+ */
+export function selectorsFor(
+  names: Pick<ComputerNames, "kind" | "id">,
+): string[] {
+  return [
+    `docker:label:${KIND_LABEL}:${names.kind}`,
+    `docker:label:${names.kind === "bot" ? BOT_LABEL : PERSON_LABEL}:${names.id}`,
+    `docker:label:${NAMESPACE_LABEL}:${NAMESPACE}`,
+  ];
 }
 
 export type EntryResult =
@@ -33,7 +56,7 @@ export type EntryResult =
   | { registered: false; reason: string };
 
 /**
- * Give this Bot's computer an identity, if SPIRE is part of this deployment.
+ * Give this computer an identity, if SPIRE is part of this deployment.
  *
  * Not fatal when it fails. A computer without an SVID still works; it simply cannot prove which Bot
  * it is. Refusing to start one would turn an identity outage into an outage of the product, which is
@@ -47,11 +70,8 @@ export async function registerEntry(
     return { registered: false, reason: "SPIRE is not configured." };
   }
 
-  const spiffeId = spiffeIdFor(names.botId);
-  const selectors = [
-    `docker:label:${BOT_LABEL}:${names.botId}`,
-    `docker:label:${NAMESPACE_LABEL}:${NAMESPACE}`,
-  ];
+  const spiffeId = spiffeIdFor(names);
+  const selectors = selectorsFor(names);
 
   try {
     // The SPIRE CLI rather than a hand-rolled registration client: it is the supported surface for

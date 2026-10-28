@@ -30,6 +30,14 @@ export type AgentProfile = {
    * it. A surface only needs to know whether to offer "generate" or "rotate".
    */
   hasCallbackToken: boolean;
+  /**
+   * Whether its owner asked for it to have a computer of its own rather than share theirs.
+   *
+   * What was asked for, not what happens: an administrator can withdraw "Isolated Bots" from the
+   * owner, and then the Bot runs on the shared computer while this stays true, so that giving the
+   * switch back restores it. `agents/isolation.ts` decides whether it is in effect now.
+   */
+  isolated: boolean;
 };
 
 export type CreateAgentInput = Pick<
@@ -51,4 +59,12 @@ export type CreateAgentInput = Pick<
    * why it is optional rather than defaulting to empty; a blank field must not drop a key.
    */
   auth?: { header: string; value: string };
+  /**
+   * Whether this Bot gets a computer of its own.
+   *
+   * Optional for the reason `auth` is: absent on an update leaves it as it is, so an edit to a
+   * Bot's name never moves it between computers, and absent on a create means no. True needs the
+   * "Isolated Bots" switch for whoever sends it; false is always allowed.
+   */
+  isolated?: boolean;
 };

@@ -23,6 +23,12 @@ import {
   WorkspaceRequestError,
   WorkspaceTooLargeError,
 } from "./gateway";
+import {
+  type ComputerSeat,
+  parseComputerKey,
+  personSeat,
+  seatText,
+} from "./computer-key";
 import type { PageFrameStore } from "./page-frames";
 import { dryRunAgainstHistory, REPLAYABLE_EVENT_TYPES } from "./policy-dry-run";
 import { type PolicyStore, parseActionPolicy } from "./policy-store";
@@ -95,9 +101,20 @@ export function createComputerRoutes(
     await next();
   });
 
+  /**
+   * The seat this request is for: the Bot in the path, for the person asking.
+   *
+   * Every route under a Bot reaches that Bot on the asker's computer (or on the Bot's own, for an
+   * isolated Bot), never on whoever used it last. See computer-key.ts.
+   */
+  const seatOf = (context: ComputerContext): Promise<ComputerSeat> =>
+    gateway.seatFor(
+      context.req.param("botId") ?? "default",
+      context.var.actor.id,
+    );
+
   routes.get("/:botId/status", async (context) => {
-    const botId = context.req.param("botId");
-    return context.json(await gateway.status(botId));
+    return context.json(await gateway.status(await seatOf(context)));
   });
 
   /**
@@ -119,9 +136,9 @@ export function createComputerRoutes(
    * at the exact moment of the suspend; the cost is one computer started early, never a wrong frame.
    */
   routes.get("/:botId/screenshot", async (context) => {
-    const botId = context.req.param("botId");
     try {
-      const status = await gateway.status(botId);
+      const seat = await seatOf(context);
+      const status = await gateway.status(seat);
       if (status.state !== "ready") {
         return context.json({
           ready: false,
@@ -129,7 +146,7 @@ export function createComputerRoutes(
           ...(status.reason ? { reason: status.reason } : {}),
         });
       }
-      return context.json(await gateway.screenshot(botId));
+      return context.json(await gateway.screenshot(seat));
     } catch (error) {
       return context.json(errorBody(error), statusFor(error));
     }
@@ -137,7 +154,7 @@ export function createComputerRoutes(
 
   routes.get("/:botId/read", async (context) => {
     try {
-      return context.json(await gateway.read(context.req.param("botId")));
+      return context.json(await gateway.read(await seatOf(context)));
     } catch (error) {
       return context.json(errorBody(error), statusFor(error));
     }
@@ -181,7 +198,7 @@ export function createComputerRoutes(
     pageUrl: string,
   ): { ok: true } | { ok: false; why: string } {
     if (shotUrl === undefined) {
-      if (gateway.provider.isolation === "per-bot") return { ok: true };
+      if (gateway.provider.isolation === "per-person") return { ok: true };
       return {
         ok: false,
         why: "this computer is shared and the screenshot did not say which page it is of, so it cannot be told apart from another Bot's",
@@ -212,7 +229,7 @@ export function createComputerRoutes(
    * keeps no frames has to be able to find out why from its own logs rather than by reading this file.
    */
   async function keepFrameOf(
-    botId: string,
+    seat: ComputerSeat,
     toolCallId: string,
     url: string,
     title: string,
@@ -230,14 +247,14 @@ export function createComputerRoutes(
        * suspended computer, so a convenience picture could wake a machine the culler had just put to
        * sleep and hold a navigation open for the length of a pod schedule while it did.
        */
-      const status = await gateway.status(botId);
+      const status = await gateway.status(seat);
       if (status.state !== "ready") {
         console.warn(
           `[computer] not keeping a frame for ${toolCallId}: the computer is ${status.state}, and photographing it would wake it.`,
         );
         return;
       }
-      const shot = await gateway.screenshot(botId);
+      const shot = await gateway.screenshot(seat);
       const verdict = frameIsOfThisPage(shot.url, url);
       if (!verdict.ok) {
         console.warn(
@@ -246,7 +263,8 @@ export function createComputerRoutes(
         return;
       }
       await pageFrames.save({
-        computerId: botId,
+        // Filed under the seat, so one person's pictures are never another's on the same Bot.
+        computerId: seatText(seat),
         toolCallId,
         url,
         title,
@@ -276,9 +294,9 @@ export function createComputerRoutes(
       typeof body.toolCallId === "string" ? body.toolCallId : "";
 
     try {
-      const botId = context.req.param("botId") ?? "default";
+      const seat = await seatOf(context);
       const result = await gateway.navigate(
-        botId,
+        seat,
         {
           id: context.var.actor.id,
           ...(context.var.actor.email === DEV_ACTOR_EMAIL
@@ -288,7 +306,7 @@ export function createComputerRoutes(
         body.url.trim(),
         toolCallId || undefined,
       );
-      await keepFrameOf(botId, toolCallId, result.url, result.title);
+      await keepFrameOf(seat, toolCallId, result.url, result.title);
       return context.json(result);
     } catch (error) {
       if (error instanceof ActionRefusedError) {
@@ -306,7 +324,7 @@ export function createComputerRoutes(
 
   routes.post("/:botId/snapshot", async (context) => {
     try {
-      return context.json(await gateway.snapshot(context.req.param("botId")));
+      return context.json(await gateway.snapshot(await seatOf(context)));
     } catch (error) {
       return context.json(errorBody(error), statusFor(error));
     }
@@ -319,22 +337,22 @@ export function createComputerRoutes(
    * of its own beyond the shape of the request. Where a decision gets made is a single place.
    */
   routes.post("/:botId/click", (context) =>
-    act(context, (botId, actor, body, signal) => {
+    act(context, gateway.seatFor, (seat, actor, body, signal) => {
       const ref = asRef(body);
       if (!ref) return badRef;
-      return gateway.click(botId, actor, ref, signal);
+      return gateway.click(seat, actor, ref, signal);
     }),
   );
 
   routes.post("/:botId/type", (context) =>
-    act(context, (botId, actor, body, signal) => {
+    act(context, gateway.seatFor, (seat, actor, body, signal) => {
       const ref = asRef(body);
       if (!ref) return badRef;
       if (typeof body?.text !== "string") {
         return { error: "The text to enter is required." };
       }
       return gateway.type(
-        botId,
+        seat,
         actor,
         {
           ...ref,
@@ -347,13 +365,13 @@ export function createComputerRoutes(
   );
 
   routes.post("/:botId/key", (context) =>
-    act(context, (botId, actor, body, signal) => {
+    act(context, gateway.seatFor, (seat, actor, body, signal) => {
       if (typeof body?.key !== "string" || !body.key) {
         return { error: "A key name is required, such as Enter or Tab." };
       }
       const ref = asRef(body);
       return gateway.key(
-        botId,
+        seat,
         actor,
         {
           key: body.key,
@@ -365,9 +383,9 @@ export function createComputerRoutes(
   );
 
   routes.post("/:botId/scroll", (context) =>
-    act(context, (botId, actor, body) => {
+    act(context, gateway.seatFor, (seat, actor, body) => {
       if (!usableDeltaY(body?.deltaY)) return badDeltaY;
-      return gateway.scroll(botId, actor, {
+      return gateway.scroll(seat, actor, {
         ...(typeof body?.deltaY === "number" ? { deltaY: body.deltaY } : {}),
       });
     }),
@@ -381,7 +399,7 @@ export function createComputerRoutes(
     try {
       return context.json(
         await gateway.control(
-          context.req.param("botId"),
+          await seatOf(context),
           context.req.query("requestId"),
         ),
       );
@@ -391,9 +409,9 @@ export function createComputerRoutes(
   });
 
   routes.post("/:botId/control/request", (context) =>
-    act(context, (botId, actor, body) =>
+    act(context, gateway.seatFor, (seat, actor, body) =>
       gateway.requestHelp(
-        botId,
+        seat,
         actor,
         typeof body?.reason === "string" && body.reason.trim()
           ? body.reason.trim()
@@ -430,6 +448,61 @@ export function createComputerRoutes(
     }
   });
 
+  /**
+   * An administrator acting on one computer from the list: stop, reset or update.
+   *
+   * Addressed by whose computer it is (`person:<id>` or `bot:<id>`), not by a Bot in the path,
+   * because the computer on the list is somebody else's: the Bot routes below act on the asker's own
+   * seat. `botId` names one seat on the shared computer, which lists seats rather than computers.
+   * A single segment, like `GET /fleet`, so the Bot guard above steps aside for it by name.
+   */
+  routes.post("/fleet", requireUser, async (context) => {
+    const denied = requireAdmin(context);
+    if (denied) return denied;
+    const body = (await context.req.json().catch(() => null)) as {
+      action?: unknown;
+      computer?: unknown;
+      botId?: unknown;
+    } | null;
+    const key = parseComputerKey(body?.computer);
+    if (!key) {
+      return context.json(
+        { error: "Say which computer: person:<id> or bot:<id>." },
+        400,
+      );
+    }
+    if (
+      body?.botId !== undefined &&
+      (typeof body.botId !== "string" ||
+        !body.botId.trim() ||
+        body.botId.length > 200)
+    ) {
+      return context.json({ error: "botId names one Bot." }, 400);
+    }
+    const target = {
+      key,
+      ...(typeof body?.botId === "string" ? { botId: body.botId } : {}),
+    };
+    const actor = actorOf(context.var.actor);
+    try {
+      switch (body?.action) {
+        case "stop":
+          return context.json(await gateway.stopTarget(target, actor));
+        case "reset":
+          return context.json(await gateway.resetTarget(target, actor));
+        case "update":
+          return context.json(await gateway.updateTarget(key, actor));
+        default:
+          return context.json(
+            { error: "The action is stop, reset or update." },
+            400,
+          );
+      }
+    } catch (error) {
+      return actionFailure(context, error);
+    }
+  });
+
   routes.get("/:botId/computers", async (context) => {
     // The session guard and the question of whether this person may act as the Bot in the path are
     // both applied by the middleware above. Neither is the question here: the answer is the whole
@@ -446,12 +519,16 @@ export function createComputerRoutes(
 
   /** Stop the browser, keep the logins. */
   routes.post("/:botId/computers/stop", (context) =>
-    act(context, (botId, actor) => gateway.stopComputer(botId, actor)),
+    act(context, gateway.seatFor, (seat, actor) =>
+      gateway.stopComputer(seat, actor),
+    ),
   );
 
   /** Delete the profile. Every login goes with it, which is the point and also the danger. */
   routes.post("/:botId/computers/reset", (context) =>
-    act(context, (botId, actor) => gateway.resetComputer(botId, actor)),
+    act(context, gateway.seatFor, (seat, actor) =>
+      gateway.resetComputer(seat, actor),
+    ),
   );
 
   /**
@@ -459,30 +536,32 @@ export function createComputerRoutes(
    * computer restarts, so this is a person's button and never something a wake does to a busy one.
    */
   routes.post("/:botId/computers/update", (context) =>
-    act(context, (botId, actor) => gateway.updateComputer(botId, actor)),
+    act(context, gateway.seatFor, (seat, actor) =>
+      gateway.updateComputer(seat, actor),
+    ),
   );
 
   routes.post("/:botId/control/take", (context) =>
-    act(context, (botId, actor, body) =>
-      gateway.takeControl(botId, actor, handoffId(body)),
+    act(context, gateway.seatFor, (seat, actor, body) =>
+      gateway.takeControl(seat, actor, handoffId(body)),
     ),
   );
 
   routes.post("/:botId/control/release", (context) =>
-    act(context, (botId, actor, body) =>
-      gateway.releaseControl(botId, actor, handoffId(body)),
+    act(context, gateway.seatFor, (seat, actor, body) =>
+      gateway.releaseControl(seat, actor, handoffId(body)),
     ),
   );
 
   routes.post("/:botId/control/cancel", (context) =>
-    act(context, (botId, actor, body) =>
-      gateway.cancelControl(botId, actor, handoffId(body)),
+    act(context, gateway.seatFor, (seat, actor, body) =>
+      gateway.cancelControl(seat, actor, handoffId(body)),
     ),
   );
 
   /** The Bot asking for a value it must not be told. */
   routes.post("/:botId/control/secret", (context) =>
-    act(context, (botId, actor, body) => {
+    act(context, gateway.seatFor, (seat, actor, body) => {
       if (typeof body?.ref !== "string" || !body.ref) {
         return {
           error:
@@ -495,7 +574,7 @@ export function createComputerRoutes(
       ) {
         return { error: "The snapshotId the ref came from is required." };
       }
-      return gateway.requestSecret(botId, actor, {
+      return gateway.requestSecret(seat, actor, {
         label:
           typeof body?.label === "string" && body.label.trim()
             ? body.label.trim()
@@ -514,11 +593,11 @@ export function createComputerRoutes(
    * this server returns exactly one place.
    */
   routes.post("/:botId/human/secret", (context) =>
-    act(context, (botId, actor, body) => {
+    act(context, gateway.seatFor, (seat, actor, body) => {
       if (typeof body?.text !== "string" || !body.text) {
         return { error: "A value is required." };
       }
-      return gateway.supplySecret(botId, actor, body.text);
+      return gateway.supplySecret(seat, actor, body.text);
     }),
   );
 
@@ -583,7 +662,7 @@ export function createComputerRoutes(
     }
     try {
       return context.json(
-        await gateway.humanInput(context.req.param("botId"), {
+        await gateway.humanInput(await seatOf(context), {
           ...(body ?? {}),
           // Last, so the checked value wins. Spread over it, a body carrying its own `kind` replaced
           // the one this route had just checked, and the gateway puts that value into the path it
@@ -617,13 +696,30 @@ export function createComputerRoutes(
     if (botId.length > 200 || toolCallId.length > 200) {
       return context.json({ error: "A Bot and a turn are required." }, 400);
     }
-    const stored = await pageFrames.load(botId, toolCallId);
-    return context.json({ frame: stored });
+    /*
+     * The asker's own seat first, and then the two places a frame of theirs can have been filed
+     * before it: their seat on their own computer, when the Bot has since become isolated, and the
+     * Bot alone, which is where every frame went before computers were per person. Never another
+     * person's seat, so naming a turn cannot read somebody else's screen.
+     */
+    const seat = await seatOf(context);
+    const candidates = [
+      ...new Set([
+        seatText(seat),
+        seatText(personSeat(context.var.actor.id, botId)),
+        botId,
+      ]),
+    ];
+    for (const computerId of candidates) {
+      const stored = await pageFrames.load(computerId, toolCallId);
+      if (stored) return context.json({ frame: stored });
+    }
+    return context.json({ frame: null });
   });
 
   routes.post("/:botId/files/list", (context) =>
-    act(context, (botId, actor, body) =>
-      gateway.listFiles(botId, actor, {
+    act(context, gateway.seatFor, (seat, actor, body) =>
+      gateway.listFiles(seat, actor, {
         ...(typeof body?.path === "string" && body.path.trim()
           ? { path: body.path.trim() }
           : {}),
@@ -632,11 +728,11 @@ export function createComputerRoutes(
   );
 
   routes.post("/:botId/files/read", (context) =>
-    act(context, (botId, actor, body) => {
+    act(context, gateway.seatFor, (seat, actor, body) => {
       if (typeof body?.path !== "string" || !body.path.trim()) {
         return { error: "A file path is required." };
       }
-      return gateway.readFile(botId, actor, { path: body.path.trim() });
+      return gateway.readFile(seat, actor, { path: body.path.trim() });
     }),
   );
 
@@ -656,7 +752,7 @@ export function createComputerRoutes(
 
     try {
       const file = await gateway.downloadFile(
-        context.req.param("botId"),
+        await seatOf(context),
         actorOf(context.var.actor),
         { path: path.trim() },
         context.req.raw.signal,
@@ -678,7 +774,7 @@ export function createComputerRoutes(
    * computer as a RangeError 500 or a run that outlasts the transport backstop.
    */
   routes.post("/:botId/exec", (context) =>
-    act(context, (botId, actor, body, signal) => {
+    act(context, gateway.seatFor, (seat, actor, body, signal) => {
       if (typeof body?.command !== "string" || !body.command.trim()) {
         return { error: "A command is required." };
       }
@@ -699,7 +795,7 @@ export function createComputerRoutes(
       // gateway.runCommand and into the shell's own abort listener was dead code, and Stop ended the
       // run in the transcript while the command carried on to completion inside the container.
       return gateway.runCommand(
-        botId,
+        seat,
         actor,
         {
           command: body.command,
@@ -713,14 +809,14 @@ export function createComputerRoutes(
   );
 
   routes.post("/:botId/files/write", (context) =>
-    act(context, (botId, actor, body) => {
+    act(context, gateway.seatFor, (seat, actor, body) => {
       if (typeof body?.path !== "string" || !body.path.trim()) {
         return { error: "A file path is required." };
       }
       if (typeof body?.contents !== "string") {
         return { error: "The contents to write are required." };
       }
-      return gateway.writeFile(botId, actor, {
+      return gateway.writeFile(seat, actor, {
         path: body.path.trim(),
         contents: body.contents,
         append: body.append === true,
@@ -883,8 +979,11 @@ function usableDeltaY(value: unknown): boolean {
  */
 async function act(
   context: ComputerContext,
+  /** Whose computer the Bot runs on for the asker. See `ComputerGateway.seatFor`. */
+  seatFor: (botId: string, personId: string) => Promise<ComputerSeat>,
   handler: (
-    botId: string,
+    /** The Bot in the path, on the asker's computer. */
+    seat: ComputerSeat,
     actor: ActionActor,
     body: Record<string, unknown> | null,
     /**
@@ -910,7 +1009,7 @@ async function act(
 
   try {
     const result = await handler(
-      botId,
+      await seatFor(botId, record.id),
       actorOf(record),
       body,
       context.req.raw.signal,

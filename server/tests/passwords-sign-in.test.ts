@@ -32,6 +32,11 @@ import { originOf, type SignInRequestRecord } from "../src/passwords/types";
 import { createTurnRunner, type RunnerLike } from "@openbot/toolkit/run-turn";
 import { HeadlessToolSuspension } from "@openbot/toolkit/headless-tools";
 import { serverTurnAdmission } from "../src/agents/turn-admission";
+import {
+  botSeat,
+  type ComputerSeat,
+  personSeat,
+} from "../src/computer/computer-key";
 
 /**
  * The private sign-in request and the Passwords vault, as properties:
@@ -55,11 +60,15 @@ function fakeGateway(
   const fills: SignInFillInput[] = [];
   const codes: SignInCodeInput[] = [];
   const helps: string[] = [];
+  /** Whose seat each login was typed into. */
+  const seats: ComputerSeat[] = [];
   const gateway: Pick<
     ComputerGateway,
-    "signIn" | "signInCode" | "requestHelp"
+    "signIn" | "signInCode" | "requestHelp" | "seatFor"
   > = {
-    async signIn(_botId, input) {
+    seatFor: async (botId, personId) => personSeat(personId, botId),
+    async signIn(seat, input) {
+      seats.push(seat);
       fills.push(input);
       return {
         submitted: true,
@@ -87,7 +96,7 @@ function fakeGateway(
       } as unknown as Awaited<ReturnType<ComputerGateway["requestHelp"]>>;
     },
   };
-  return { gateway, fills, codes, helps };
+  return { gateway, fills, codes, helps, seats };
 }
 
 function audit() {
@@ -165,6 +174,9 @@ describe("a sign-in request answered with a typed login", () => {
         password: PASSWORD,
       },
     ]);
+    // Typed into the browser on the owner's own computer, for this Bot: the person the sign-in is
+    // for, never whoever used the Bot last.
+    expect(computer.seats).toEqual([personSeat("owner", "bot")]);
     // A site that never asked for a code is never sent one.
     expect(computer.codes).toEqual([]);
     const done = resolved[0];
@@ -841,7 +853,7 @@ describe("an unattended turn that needs a sign-in", () => {
     const tools = async () =>
       createHeadlessComputerTools({
         gateway: {} as ComputerGateway,
-        botId: "bot",
+        seat: botSeat("bot"),
         actor,
         signIn: context.service,
       }).filter((tool) => tool.definition.name === "computer_request_sign_in");

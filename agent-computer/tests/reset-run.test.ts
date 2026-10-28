@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -192,5 +192,69 @@ describe.skipIf(!asked)("the run this computer reports", () => {
     expect(taken.status).toBe(200);
 
     expect(await run("bot-8")).toBeTruthy();
+  });
+});
+
+/**
+ * Seats on a computer many people share, over HTTP against the real process.
+ *
+ * The header the server adds on that computer is the whole mechanism, so it is driven here as the
+ * server sends it rather than through the helpers the unit tests cover.
+ */
+describe.skipIf(!asked)("seats on a shared computer", () => {
+  const as = (bot: string, person?: string) => ({
+    "x-openbot-bot-id": bot,
+    ...(person ? { "x-openbot-person-id": person } : {}),
+    "x-openbot-computer-token": TOKEN,
+  });
+
+  test("two people on one Bot have two runs, and neither is the Bot's own", async () => {
+    const ada = await fetch(`${BASE}/run`, { headers: as("pub-bot", "ada") });
+    const bo = await fetch(`${BASE}/run`, { headers: as("pub-bot", "bo") });
+    const shared = await fetch(`${BASE}/run`, { headers: as("pub-bot") });
+    const runs = await Promise.all(
+      [ada, bo, shared].map(
+        async (r) => ((await r.json()) as { run: string }).run,
+      ),
+    );
+    expect(new Set(runs).size).toBe(3);
+  });
+
+  test("a person id that could forge another seat is refused", async () => {
+    const response = await fetch(`${BASE}/run`, {
+      headers: as("pub-bot", "ada~other"),
+    });
+    expect(response.status).toBe(400);
+  });
+
+  test("a private Bot's old profile moves to its owner's seat once", async () => {
+    const profiles = join(root, "profiles");
+    await mkdir(join(profiles, "private-bot", "Default"), { recursive: true });
+    await writeFile(join(profiles, "private-bot", "Default", "Cookies"), "x");
+
+    const carry = () =>
+      fetch(`${BASE}/computers/carry-over`, {
+        method: "POST",
+        headers: as("private-bot", "ada"),
+      }).then(async (r) => ((await r.json()) as { outcome: string }).outcome);
+
+    expect(await carry()).toBe("moved");
+    expect(await carry()).toBe("kept");
+    const names = await readdir(profiles);
+    expect(names).toContain("ada~private-bot");
+    expect(names).not.toContain("private-bot");
+
+    const listed = (await (
+      await fetch(`${BASE}/computers`, { headers: as("private-bot", "ada") })
+    ).json()) as {
+      computers: { seat: string; botId: string; personId?: string }[];
+    };
+    expect(listed.computers).toContainEqual(
+      expect.objectContaining({
+        seat: "ada~private-bot",
+        botId: "private-bot",
+        personId: "ada",
+      }),
+    );
   });
 });
