@@ -1,4 +1,19 @@
-import { describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  test,
+} from "bun:test";
+import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { cleanup, render } from "@testing-library/react";
+import {
+  BotOrb,
+  type BotOrbState,
+  followPointer,
+  restingGaze,
+} from "@/components/agents/orb/bot-orb";
 import {
   drawBotOrb,
   FINISH_HELD,
@@ -12,6 +27,15 @@ import {
   RAYS,
   track,
 } from "@/components/agents/orb/bot-orb-draw";
+import { subscribePointer } from "@/components/agents/orb/orb-clock";
+import { settleReactWork } from "./settle-react-work";
+
+beforeAll(() => GlobalRegistrator.register({ url: "http://localhost/" }));
+afterEach(() => cleanup());
+afterAll(async () => {
+  await settleReactWork();
+  await GlobalRegistrator.unregister();
+});
 
 const REST: OrbPose = {
   ta: 1.6,
@@ -189,5 +213,366 @@ describe("a finish", () => {
     expect(strokesOf({ ...REST, finishAge: 0.4 })).toBe(rest + RAYS + 1);
     expect(strokesOf({ ...REST, finishAge: FINISH_HELD })).toBe(rest + 1);
     expect(strokesOf({ ...REST, finishAge: FINISH_S })).toBe(rest);
+  });
+});
+
+/** Every canvas draws on `ctx` until `restore`, as if each had its own 2D context. */
+function withContext(ctx: ReturnType<typeof fakeContext>) {
+  const getContext = HTMLCanvasElement.prototype.getContext;
+  HTMLCanvasElement.prototype.getContext = (() =>
+    ctx) as unknown as typeof getContext;
+  return () => {
+    HTMLCanvasElement.prototype.getContext = getContext;
+  };
+}
+
+/**
+ * Animation frames that run only when the test says, as the browser would at its next paint:
+ * `requested` counts every frame asked for, `pending` the ones not yet run or cancelled.
+ */
+function manualFrames() {
+  const queue = new Map<number, FrameRequestCallback>();
+  let next = 1;
+  let requested = 0;
+  const request = window.requestAnimationFrame;
+  const cancel = window.cancelAnimationFrame;
+  window.requestAnimationFrame = (callback) => {
+    requested++;
+    queue.set(next, callback);
+    return next++;
+  };
+  window.cancelAnimationFrame = (id) => {
+    queue.delete(id);
+  };
+  return {
+    get requested() {
+      return requested;
+    },
+    get pending() {
+      return queue.size;
+    },
+    run() {
+      const due = [...queue.values()];
+      queue.clear();
+      const now = performance.now();
+      for (const callback of due) callback(now);
+    },
+    restore() {
+      window.requestAnimationFrame = request;
+      window.cancelAnimationFrame = cancel;
+    },
+  };
+}
+
+/** An `IntersectionObserver` that reports only what the test tells it to. */
+class Sight {
+  static all: Sight[] = [];
+  readonly root = null;
+  readonly rootMargin = "";
+  readonly thresholds = [];
+  targets: Element[] = [];
+
+  constructor(private readonly callback: IntersectionObserverCallback) {
+    Sight.all.push(this);
+  }
+
+  observe(target: Element) {
+    this.targets.push(target);
+  }
+
+  unobserve(target: Element) {
+    this.targets = this.targets.filter((t) => t !== target);
+  }
+
+  disconnect() {
+    this.targets = [];
+  }
+
+  takeRecords() {
+    return [];
+  }
+
+  static show(target: Element, isIntersecting: boolean) {
+    for (const sight of Sight.all) {
+      if (!sight.targets.includes(target)) continue;
+      sight.callback(
+        [{ target, isIntersecting } as IntersectionObserverEntry],
+        sight as unknown as IntersectionObserver,
+      );
+    }
+  }
+}
+
+/** Runs `body` with `IntersectionObserver` set to `observer`, or missing when it is undefined. */
+function withObserver(observer: typeof Sight | undefined, body: () => void) {
+  const original = globalThis.IntersectionObserver;
+  if (observer) {
+    globalThis.IntersectionObserver =
+      observer as unknown as typeof IntersectionObserver;
+  } else {
+    Reflect.deleteProperty(globalThis, "IntersectionObserver");
+  }
+  try {
+    body();
+  } finally {
+    globalThis.IntersectionObserver = original;
+    Sight.all = [];
+  }
+}
+
+const orbOf = (container: HTMLElement) =>
+  container.querySelector("[data-state]") as HTMLElement;
+
+describe("<BotOrb>", () => {
+  test("holds its footprint, hides from assistive tech, and draws on a canvas twice its size", () => {
+    const view = render(
+      <BotOrb palette="violet" size={40} state="listening" />,
+    );
+    const orb = view.container.firstElementChild as HTMLElement;
+    expect(orb.getAttribute("aria-hidden")).toBe("true");
+    expect(orb.dataset.state).toBe("listening");
+    expect(orb.dataset.palette).toBe("violet");
+    expect(orb.style.width).toBe("40px");
+    const canvas = orb.querySelector("canvas") as HTMLCanvasElement;
+    expect(canvas.style.width).toBe("80px");
+    expect(canvas.style.left).toBe("-20px");
+  });
+
+  test("still, it draws once and again only when the theme changes, never on a frame loop", async () => {
+    const ctx = fakeContext();
+    const frames = manualFrames();
+    const restore = withContext(ctx);
+    try {
+      render(<BotOrb palette="ember" size={40} still />);
+      expect(ctx.draws).toBe(1);
+      document.documentElement.classList.add("dark");
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(ctx.draws).toBe(2);
+      expect(frames.requested).toBe(0);
+
+      cleanup();
+      render(<BotOrb palette="ember" size={40} />);
+      expect(frames.requested).toBe(1);
+    } finally {
+      cleanup();
+      document.documentElement.classList.remove("dark");
+      frames.restore();
+      restore();
+    }
+  });
+
+  test("still, finished is the check without the burst", () => {
+    const strokes = (state?: "finished") => {
+      const ctx = fakeContext();
+      const restore = withContext(ctx);
+      try {
+        render(<BotOrb palette="moss" size={40} state={state} still />);
+        cleanup();
+        return ctx.strokes;
+      } finally {
+        restore();
+      }
+    };
+    expect(strokes("finished")).toBe(strokes() + 1);
+  });
+
+  test("follows a change of state", () => {
+    const view = render(<BotOrb palette="sun" size={40} />);
+    expect(orbOf(view.container).dataset.state).toBe("idle");
+    view.rerender(<BotOrb palette="sun" size={40} state="thinking" />);
+    expect(orbOf(view.container).dataset.state).toBe("thinking");
+    view.rerender(<BotOrb palette="sun" size={40} state="finished" />);
+    expect(orbOf(view.container).dataset.state).toBe("finished");
+  });
+
+  test("fifty orbs share one animation frame", () => {
+    withObserver(undefined, () => {
+      const ctx = fakeContext();
+      const frames = manualFrames();
+      const restore = withContext(ctx);
+      try {
+        render(
+          <div>
+            {Array.from({ length: 50 }, (_, i) => `bot-${i}`).map((id) => (
+              <BotOrb key={id} palette={orbPaletteFor(id)} size={28} />
+            ))}
+          </div>,
+        );
+        expect(frames.requested).toBe(1);
+        frames.run();
+        expect(ctx.draws).toBe(50);
+        expect(frames.requested).toBe(2);
+
+        // The last one gone, the clock stops asking for frames.
+        cleanup();
+        expect(frames.pending).toBe(0);
+      } finally {
+        cleanup();
+        frames.restore();
+        restore();
+      }
+    });
+  });
+
+  test("an orb off screen is not drawn", () => {
+    withObserver(Sight, () => {
+      const ctx = fakeContext();
+      const frames = manualFrames();
+      const restore = withContext(ctx);
+      try {
+        const view = render(<BotOrb palette="berry" size={40} />);
+        const orb = orbOf(view.container);
+        Sight.show(orb, false);
+        expect(frames.pending).toBe(0);
+        frames.run();
+        expect(ctx.draws).toBe(0);
+
+        Sight.show(orb, true);
+        expect(frames.pending).toBe(1);
+        frames.run();
+        expect(ctx.draws).toBe(1);
+      } finally {
+        cleanup();
+        frames.restore();
+        restore();
+      }
+    });
+  });
+
+  test("nothing draws while the tab is hidden", () => {
+    withObserver(undefined, () => {
+      const ctx = fakeContext();
+      const frames = manualFrames();
+      const restore = withContext(ctx);
+      const hide = (hidden: boolean) => {
+        Object.defineProperty(document, "hidden", {
+          configurable: true,
+          get: () => hidden,
+        });
+        document.dispatchEvent(new Event("visibilitychange"));
+      };
+      try {
+        render(<BotOrb palette="ocean" size={40} />);
+        expect(frames.pending).toBe(1);
+        hide(true);
+        expect(frames.pending).toBe(0);
+        frames.run();
+        expect(ctx.draws).toBe(0);
+
+        hide(false);
+        expect(frames.pending).toBe(1);
+        frames.run();
+        expect(ctx.draws).toBe(1);
+      } finally {
+        Reflect.deleteProperty(document, "hidden");
+        cleanup();
+        frames.restore();
+        restore();
+      }
+    });
+  });
+
+  test("renders with no canvas context", () => {
+    const frames = manualFrames();
+    try {
+      const view = render(
+        <BotOrb palette="slate" size={40} state="thinking" />,
+      );
+      expect(view.container.querySelector("canvas")).not.toBeNull();
+      // Nothing to draw on, so it asks for no frames.
+      expect(frames.requested).toBe(0);
+    } finally {
+      cleanup();
+      frames.restore();
+    }
+  });
+});
+
+describe("its eyes", () => {
+  /** An orb 40 px across, centred at (120, 120). */
+  const rect = { left: 100, top: 100, width: 40, height: 40 };
+  const measure = () => rect;
+  const moveTo = (x: number, y: number) =>
+    window.dispatchEvent(
+      new PointerEvent("pointermove", { clientX: x, clientY: y }),
+    );
+  /** A second of frames at 30 a second, from `from` seconds on, and whether any of them perked up. */
+  const watchFor = (
+    gaze: ReturnType<typeof restingGaze>,
+    state: BotOrbState,
+    from = 0,
+  ) => {
+    let perked = false;
+    for (let i = 1; i <= 30; i++) {
+      perked = followPointer(gaze, from + i / 30, state, measure) || perked;
+    }
+    return perked;
+  };
+
+  test("turn to the pointer, fully at rest and partly while it works", () => {
+    const stop = subscribePointer();
+    try {
+      moveTo(600, 120);
+      const idle = restingGaze();
+      const thinking = restingGaze();
+      watchFor(idle, "idle");
+      watchFor(idle, "idle", 1);
+      watchFor(thinking, "thinking");
+      watchFor(thinking, "thinking", 1);
+      // Far to its right: it looks right, level.
+      expect(idle.x).toBeGreaterThan(0.6);
+      expect(Math.abs(idle.y)).toBeLessThan(0.05);
+      expect(idle.w).toBeCloseTo(1, 2);
+      expect(thinking.w).toBeCloseTo(0.35, 2);
+    } finally {
+      stop();
+    }
+  });
+
+  test("perk up once when the pointer comes close, and let go only well past it", () => {
+    const stop = subscribePointer();
+    try {
+      moveTo(600, 120);
+      const gaze = restingGaze();
+      expect(watchFor(gaze, "idle")).toBe(false);
+
+      // Within 0.9 of its size of its centre.
+      moveTo(150, 120);
+      expect(watchFor(gaze, "idle", 1)).toBe(true);
+      expect(watchFor(gaze, "idle", 2)).toBe(false);
+
+      // Out to 1.2 of its size: still close, no second perk.
+      moveTo(168, 120);
+      expect(watchFor(gaze, "idle", 3)).toBe(false);
+      moveTo(150, 120);
+      expect(watchFor(gaze, "idle", 4)).toBe(false);
+
+      // Past 1.3 it lets go, and the next approach perks again.
+      moveTo(180, 120);
+      watchFor(gaze, "idle", 5);
+      moveTo(150, 120);
+      expect(watchFor(gaze, "idle", 6)).toBe(true);
+    } finally {
+      stop();
+    }
+  });
+
+  test("a listening orb has already noticed you, and stops watching once the pointer leaves", () => {
+    const stop = subscribePointer();
+    try {
+      moveTo(150, 120);
+      const gaze = restingGaze();
+      expect(watchFor(gaze, "listening")).toBe(false);
+      expect(gaze.w).toBeGreaterThan(0.4);
+
+      document.dispatchEvent(
+        new PointerEvent("pointerout", { bubbles: true, relatedTarget: null }),
+      );
+      watchFor(gaze, "listening", 1);
+      watchFor(gaze, "listening", 2);
+      expect(gaze.w).toBeLessThan(0.01);
+    } finally {
+      stop();
+    }
   });
 });
