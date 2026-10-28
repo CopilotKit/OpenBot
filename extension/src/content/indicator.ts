@@ -16,9 +16,26 @@
  * never moves while the person points at it or it has the keyboard, and never for nothing: it stays where it is while
  * it covers nothing there, or while no spot covers less.
  *
- * Drawn like the notice: OpenBot's colours copied from app/src/theme.css (notice.ts), in an open shadow root the page's
- * styles cannot reach, marked `data-copilotkit-ignore` so a click on it is never one of the person's steps, and acting
- * only on trusted events, so a page script cannot press its button.
+ * Drawn like the notice: OpenBot's colours copied from app/src/theme.css (notice.ts), marked `data-copilotkit-ignore` so
+ * a click on it is never one of the person's steps, and acting only on trusted events, so a page script cannot press its
+ * button.
+ *
+ * THE PAGE CANNOT TAKE IT AWAY. It is the sign that a tab is being recorded, and it lives in the page's own DOM, so the
+ * page could hide it with one CSS rule, or remove it, and nothing put it back. Now:
+ * - Its shadow root is closed, so no page script can reach inside it (`host.shadowRoot` is null to the page). This
+ *   content script's isolated world keeps its own globals, so the page cannot patch `attachShadow` to see it either.
+ * - What makes it seen is set on its host from inside its shadow root, `!important`: `:host` rules of a shadow tree
+ *   outrank, when important, every important rule of the page's and every inline style on the host (CSS Cascade 5,
+ *   "context": https://www.w3.org/TR/css-cascade-5/#cascade-context; measured in Chromium against a page rule and an
+ *   inline style, both `display: none !important`). Where it hangs is set on the mark inside, which the page cannot reach.
+ * - Removed, or the document replaced, it is put back at once (a `MutationObserver` on the document), and the look it
+ *   takes every couple of seconds puts it back too. It is kept the last child of the root element, so nothing the page
+ *   adds there later is drawn over it at the same z-index, and `hidden` or `inert` set on it is taken off again. Kept last
+ *   at most a few times a second, so another script that also wants to be last cannot make the two trade places forever.
+ * A page can still put something of the browser's own top layer (a modal dialog) over it, as it can over anything.
+ *
+ * A test reaches inside through `root`, which only this content script holds; the end-to-end build (RECORDER_VARIANT
+ * `e2e`) opens the root, so a harness driving a real page can press the mark's button as a person would.
  */
 import { declarations, NOTICE_TOKENS, RADIUS } from "./notice";
 
@@ -148,13 +165,27 @@ type Timers = {
   clear(handle: unknown): void;
 };
 
+/** How many times the mark moves itself back to the end of the root element in one look (`LOOK_MS`), at most. */
+const MOVES_PER_LOOK = 10;
+
 const STYLE = `
 :host {
-  all: initial;
-  position: fixed;
-  top: 0;
-  left: 0;
-  z-index: 2147483647;
+  all: initial !important;
+  display: block !important;
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: 0 !important;
+  height: 0 !important;
+  overflow: visible !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  transform: none !important;
+  filter: none !important;
+  clip-path: none !important;
+  mask: none !important;
+  pointer-events: auto !important;
+  z-index: 2147483647 !important;
   --radius: ${RADIUS};
   ${declarations(NOTICE_TOKENS.light)}
 }
@@ -162,6 +193,9 @@ const STYLE = `
   :host { ${declarations(NOTICE_TOKENS.dark)} }
 }
 .mark {
+  position: fixed;
+  top: 0;
+  left: 0;
   box-sizing: border-box;
   display: flex;
   align-items: center;
@@ -242,13 +276,17 @@ export function showIndicator(options: {
   timers?: Timers;
 }): {
   host: HTMLElement;
+  /** Inside the mark, for this content script and its tests alone: the page sees no shadow root. */
+  root: ShadowRoot;
   update(view: IndicatorView): void;
   remove(): void;
 } {
   const trusted = options.isTrusted ?? ((event: Event) => event.isTrusted);
   const host = document.createElement(INDICATOR_TAG);
   host.setAttribute("data-copilotkit-ignore", "");
-  const root = host.attachShadow({ mode: "open" });
+  const root = host.attachShadow({
+    mode: import.meta.env.RECORDER_VARIANT === "e2e" ? "open" : "closed",
+  });
   const style = document.createElement("style");
   style.textContent = STYLE;
 
@@ -286,6 +324,37 @@ export function showIndicator(options: {
   root.append(style, mark);
   document.documentElement.append(host);
 
+  /*
+   * Put back when the page takes it away (the header says how). `moves` counts this look's moves to the end of the
+   * root element, so two scripts that each want to be last stop trading places after a few.
+   */
+  let moves = 0;
+  let removed = false;
+  const keep = () => {
+    if (removed) return;
+    for (const attribute of ["hidden", "inert"])
+      if (host.hasAttribute(attribute)) host.removeAttribute(attribute);
+    const top = document.documentElement;
+    if (!top) return;
+    if (host.parentNode === top && top.lastElementChild === host) return;
+    if (host.isConnected && moves >= MOVES_PER_LOOK) return;
+    moves += 1;
+    top.append(host);
+  };
+  const watch = new MutationObserver(keep);
+  const observe = () => {
+    watch.disconnect();
+    // The document's own children too: a page that replaces its root element takes the mark with it.
+    watch.observe(document, { childList: true });
+    if (document.documentElement)
+      watch.observe(document.documentElement, { childList: true });
+    watch.observe(host, {
+      attributes: true,
+      attributeFilter: ["hidden", "inert"],
+    });
+  };
+  observe();
+
   // Where it hangs, looked at again as the page changes (the header says why). A page with no hit test (none in a
   // browser the Recorder runs in) shows it at its first spot.
   const under =
@@ -308,6 +377,10 @@ export function showIndicator(options: {
   let spot: MarkSpot | undefined;
   let held = 0;
   const place = () => {
+    moves = 0;
+    keep();
+    // A replaced root element is a new one to watch.
+    if (host.parentNode !== null) observe();
     if (held > 0) return;
     const rect = mark.getBoundingClientRect();
     const size = { width: rect.width, height: rect.height };
@@ -320,8 +393,9 @@ export function showIndicator(options: {
       spot,
     );
     const box = spotBox(spot, size, page);
-    host.style.setProperty("left", `${box.left}px`, "important");
-    host.style.setProperty("top", `${box.top}px`, "important");
+    // On the mark inside, where the page cannot reach: the host stays at the page's top left, as its own rule says.
+    mark.style.left = `${box.left}px`;
+    mark.style.top = `${box.top}px`;
     mark.dataset.edge = spot.edge;
   };
   // Never away from under the person's pointer, nor while the button has the keyboard.
@@ -341,12 +415,15 @@ export function showIndicator(options: {
 
   return {
     host,
+    root,
     update: (view) => {
       update(view);
       // Its words changed, and with them its width.
       place();
     },
     remove: () => {
+      removed = true;
+      watch.disconnect();
       timers.clear(looking);
       window.removeEventListener("resize", place);
       host.remove();
