@@ -1,5 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
+import {
+  BuildingBlockSections,
+  splitBuildingBlocks,
+} from "@/components/building-blocks";
 import { ComponentPreview } from "@/components/component-preview";
 import { PageShell } from "@/components/layout/page-shell";
 import { SettingsItemBackground } from "@/components/settings/background";
@@ -26,10 +30,11 @@ export const Route = createFileRoute("/_authed/settings/components-gallery/")({
 function RouteComponent() {
   const components = useQuery(componentListQueryOptions());
   const published = components.data?.filter((component) => component.published);
+  const { gallery, blocks } = splitBuildingBlocks(published ?? []);
 
   return (
     <PageShell
-      description="Browse components that Bots can display in conversations. An admin controls which components each Bot can use."
+      description="Browse the components and building blocks Bots can display in conversations. An admin controls which ones each Bot can use."
       title="Components gallery"
     >
       {components.isPending ? null : components.error ? (
@@ -46,41 +51,44 @@ function RouteComponent() {
           </EmptyHeader>
         </Empty>
       ) : (
-        <div className="mt-12 grid w-full grid-cols-1 gap-4 md:grid-cols-2">
-          {published?.map((component) => (
-            /*
-             * No status dot, unlike the Admin tiles. Everything listed here is published by
-             * definition, so a dot saying so would be the same mark on every tile.
-             */
-            <Link
-              className="flex aspect-square flex-col overflow-hidden rounded-lg border border-border bg-card text-left outline-none transition-colors hover:border-ring focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
-              data-testid={`gallery-${component.name}`}
-              key={component.name}
-              params={{ name: component.name }}
-              to="/settings/components-gallery/$name"
-            >
-              <div className="min-h-28 p-4">
-                <h4 className="line-clamp-1 font-medium text-sm">
-                  {component.title}
-                </h4>
-                <p className="mt-2 line-clamp-2 text-muted-foreground text-xs">
-                  {component.publishedDescription}
-                </p>
-              </div>
-              <div className="relative flex-1">
-                <div className="absolute top-0 left-0 h-full w-full p-3">
-                  <SettingsItemBackground className="h-full w-full rounded-md" />
+        <>
+          <div className="mt-12 grid w-full grid-cols-1 gap-4 md:grid-cols-2">
+            {gallery.map((component) => (
+              /*
+               * No status dot, unlike the Admin tiles. Everything listed here is published by
+               * definition, so a dot saying so would be the same mark on every tile.
+               */
+              <Link
+                className="flex aspect-square flex-col overflow-hidden rounded-lg border border-border bg-card text-left outline-none transition-colors hover:border-ring focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                data-testid={`gallery-${component.name}`}
+                key={component.name}
+                params={{ name: component.name }}
+                to="/settings/components-gallery/$name"
+              >
+                <div className="min-h-28 p-4">
+                  <h4 className="line-clamp-1 font-medium text-sm">
+                    {component.title}
+                  </h4>
+                  <p className="mt-2 line-clamp-2 text-muted-foreground text-xs">
+                    {component.publishedDescription}
+                  </p>
                 </div>
-                <div className="absolute top-0 left-0 z-10 h-full w-full p-3">
-                  <ComponentPreview
-                    kind={component.kind}
-                    name={component.name}
-                  />
+                <div className="relative flex-1">
+                  <div className="absolute top-0 left-0 h-full w-full p-3">
+                    <SettingsItemBackground className="h-full w-full rounded-md" />
+                  </div>
+                  <div className="absolute top-0 left-0 z-10 h-full w-full p-3">
+                    <ComponentPreview
+                      kind={component.kind}
+                      name={component.name}
+                    />
+                  </div>
                 </div>
-              </div>
-            </Link>
-          ))}
-        </div>
+              </Link>
+            ))}
+          </div>
+          <BuildingBlockSections components={blocks} />
+        </>
       )}
     </PageShell>
   );

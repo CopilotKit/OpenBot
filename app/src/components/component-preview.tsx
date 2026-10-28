@@ -2,6 +2,7 @@ import { OpenGenerativeUIActivityRenderer } from "@copilotkit/react-core/v2";
 import { useQuery } from "@tanstack/react-query";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { galleryComponent } from "@/lib/copilot/gallery-registry";
+import { isStandardUiComponentName } from "@openbot/shared/standard-ui";
 import {
   type SandboxedRecord,
   sandboxedListQueryOptions,
@@ -100,9 +101,11 @@ export function ComponentPreview({
     <PreviewNotice>
       {entry
         ? "This one is only drawn in a conversation."
-        : kind === "sandboxed"
-          ? "Published in the playground."
-          : "This build cannot draw this."}
+        : isStandardUiComponentName(name)
+          ? "A Bot draws this inside an interface it builds."
+          : kind === "sandboxed"
+            ? "Published in the playground."
+            : "This build cannot draw this."}
     </PreviewNotice>
   );
 }

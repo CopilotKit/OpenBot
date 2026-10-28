@@ -60,6 +60,10 @@ import {
   dataFunctionsQueryOptions,
 } from "@/lib/components/queries";
 import { RENDERABLE_NAMES } from "@/lib/copilot/gallery-registry";
+import {
+  STANDARD_UI_GROUPS,
+  standardUiFamily,
+} from "@openbot/shared/standard-ui";
 import { queryClient } from "@/query-client";
 
 /**
@@ -265,8 +269,12 @@ function ComponentDetail({
   const [draft, setDraft] = useState(component.draftDescription);
   const withheld = new Set(component.withheldFrom);
   const heldFunctions = new Set(component.functions);
+  // A family of the standard catalog: every member is drawn by the SDK, and none reads data.
+  const family = standardUiFamily(component.name);
   const renderable =
-    RENDERABLE_NAMES.has(component.name) || component.kind === "sandboxed";
+    RENDERABLE_NAMES.has(component.name) ||
+    component.kind === "sandboxed" ||
+    family !== undefined;
 
   const granted = bots.filter((bot) => !withheld.has(bot.id));
   const held = dataFunctions.filter((fn) => heldFunctions.has(fn.name));
@@ -379,29 +387,41 @@ function ComponentDetail({
             testId={`grants-${component.name}`}
           />
 
-          <Separator />
+          {family ? null : (
+            <>
+              <Separator />
 
-          <SheetRow
-            icon={<IconDatabase />}
-            label="Can read"
-            onOpen={() => setSheet("functions")}
-            summary={functionSummary}
-            testId={`functions-${component.name}`}
-          />
+              <SheetRow
+                icon={<IconDatabase />}
+                label="Can read"
+                onOpen={() => setSheet("functions")}
+                summary={functionSummary}
+                testId={`functions-${component.name}`}
+              />
+            </>
+          )}
         </PageRows>
       </PageSection>
 
       <PageSection title="Details">
         <PageRows>
           <FactRow icon={<IconTag />} label="Kind">
-            {component.kind}
+            {family
+              ? `Building block: ${STANDARD_UI_GROUPS[family.group].title}`
+              : component.kind}
           </FactRow>
           <Separator />
-          <FactRow icon={<IconCode />} label="Called as">
-            <code className="rounded bg-foreground/5 px-1.5 py-0.5 text-xs">
-              {component.name}
-            </code>
-          </FactRow>
+          {family ? (
+            <FactRow icon={<IconCode />} label="Includes">
+              {family.members.join(", ")}
+            </FactRow>
+          ) : (
+            <FactRow icon={<IconCode />} label="Called as">
+              <code className="rounded bg-foreground/5 px-1.5 py-0.5 text-xs">
+                {component.name}
+              </code>
+            </FactRow>
+          )}
           <Separator />
           <FactRow icon={<IconClock />} label="Last changed">
             {new Date(component.updatedAt).toLocaleString()}

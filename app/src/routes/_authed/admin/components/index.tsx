@@ -1,5 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
+import {
+  BuildingBlockSections,
+  splitBuildingBlocks,
+} from "@/components/building-blocks";
 import { AdminComponentPreview } from "@/components/component-preview";
 import { PageShell } from "@/components/layout/page-shell";
 import { SettingsItemBackground } from "@/components/settings/background";
@@ -23,10 +27,11 @@ export const Route = createFileRoute("/_authed/admin/components/")({
 
 function RouteComponent() {
   const components = useQuery(componentListQueryOptions());
+  const { gallery, blocks } = splitBuildingBlocks(components.data ?? []);
 
   return (
     <PageShell
-      description="Choose which components each Bot can display. Published components are available to all Bots by default. Changes and blocked requests appear in Audit."
+      description="Choose which components and building blocks each Bot can display. Published ones are available to all Bots by default. Changes and blocked requests appear in Audit."
       title="UI components"
     >
       {/*
@@ -48,57 +53,63 @@ function RouteComponent() {
           </EmptyHeader>
         </Empty>
       ) : (
-        <div className="mt-12 grid w-full grid-cols-1 gap-4 md:grid-cols-2">
-          {components.data?.map((component) => (
-            /*
-             * A real link rather than a button, so a component can be opened in a new tab the way
-             * anything else addressable can. Its name comes from the title and description below:
-             * the preview is `aria-hidden`, so nothing inside it reaches the accessible name.
-             */
-            <Link
-              className="flex aspect-square flex-col overflow-hidden rounded-lg border border-border bg-card text-left outline-none transition-colors hover:border-ring focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
-              data-testid={`component-${component.name}`}
-              key={component.name}
-              params={{ name: component.name }}
-              to="/admin/components/$name"
-            >
-              <div className="min-h-28 p-4">
-                <div className="flex flex-row items-center gap-2">
-                  <div
-                    className={cn("inline-block size-1.5 rounded-full", {
-                      "bg-muted-foreground": !component.published,
-                      "bg-success": component.published,
-                    })}
-                  />
-                  <h4 className="line-clamp-1 font-medium text-sm">
-                    {component.title}
-                  </h4>
+        <>
+          <div className="mt-12 grid w-full grid-cols-1 gap-4 md:grid-cols-2">
+            {gallery.map((component) => (
+              /*
+               * A real link rather than a button, so a component can be opened in a new tab the way
+               * anything else addressable can. Its name comes from the title and description below:
+               * the preview is `aria-hidden`, so nothing inside it reaches the accessible name.
+               */
+              <Link
+                className="flex aspect-square flex-col overflow-hidden rounded-lg border border-border bg-card text-left outline-none transition-colors hover:border-ring focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                data-testid={`component-${component.name}`}
+                key={component.name}
+                params={{ name: component.name }}
+                to="/admin/components/$name"
+              >
+                <div className="min-h-28 p-4">
+                  <div className="flex flex-row items-center gap-2">
+                    <div
+                      className={cn("inline-block size-1.5 rounded-full", {
+                        "bg-muted-foreground": !component.published,
+                        "bg-success": component.published,
+                      })}
+                    />
+                    <h4 className="line-clamp-1 font-medium text-sm">
+                      {component.title}
+                    </h4>
+                  </div>
+                  <p className="mt-2 line-clamp-2 text-muted-foreground text-xs">
+                    {component.draftDescription}
+                  </p>
                 </div>
-                <p className="mt-2 line-clamp-2 text-muted-foreground text-xs">
-                  {component.draftDescription}
-                </p>
-              </div>
-              <div className="relative flex-1">
-                {/*
-                 * The artwork is sized explicitly. Left to itself it carries a viewBox and no width
-                 * or height, which resolves to the full width and a height derived from its 3:2
-                 * ratio — taller than this box, and `overflow-hidden` clips at the border rather
-                 * than the padding, so it escaped the inset and met the tile's corners square.
-                 * `slice` crops it to whatever shape it is given instead.
-                 */}
-                <div className="absolute top-0 left-0 h-full w-full p-3">
-                  <SettingsItemBackground className="h-full w-full rounded-md" />
+                <div className="relative flex-1">
+                  {/*
+                   * The artwork is sized explicitly. Left to itself it carries a viewBox and no width
+                   * or height, which resolves to the full width and a height derived from its 3:2
+                   * ratio — taller than this box, and `overflow-hidden` clips at the border rather
+                   * than the padding, so it escaped the inset and met the tile's corners square.
+                   * `slice` crops it to whatever shape it is given instead.
+                   */}
+                  <div className="absolute top-0 left-0 h-full w-full p-3">
+                    <SettingsItemBackground className="h-full w-full rounded-md" />
+                  </div>
+                  <div className="absolute top-0 left-0 z-10 h-full w-full p-3">
+                    <AdminComponentPreview
+                      kind={component.kind}
+                      name={component.name}
+                    />
+                  </div>
                 </div>
-                <div className="absolute top-0 left-0 z-10 h-full w-full p-3">
-                  <AdminComponentPreview
-                    kind={component.kind}
-                    name={component.name}
-                  />
-                </div>
-              </div>
-            </Link>
-          ))}
-        </div>
+              </Link>
+            ))}
+          </div>
+          <BuildingBlockSections
+            components={blocks}
+            linkTo="/admin/components/$name"
+          />
+        </>
       )}
     </PageShell>
   );
