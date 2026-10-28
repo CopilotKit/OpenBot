@@ -340,6 +340,13 @@ describe("<BotOrb>", () => {
     expect(canvas.style.left).toBe("-20px");
   });
 
+  test("is a block, so a small face never sits on a line's baseline and drops out of its circle", () => {
+    const view = render(<BotOrb palette="violet" size={12} />);
+    const orb = view.container.firstElementChild as HTMLElement;
+    expect(orb.classList.contains("block")).toBe(true);
+    expect(orb.classList.contains("inline-block")).toBe(false);
+  });
+
   test("still, it draws once and again only when the theme changes, never on a frame loop", async () => {
     const ctx = fakeContext();
     const frames = manualFrames();

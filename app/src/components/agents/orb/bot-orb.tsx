@@ -1,5 +1,4 @@
-import { useReducedMotion } from "motion/react";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useSyncExternalStore } from "react";
 import { cn } from "@/lib/utils";
 import {
   blinkCurve,
@@ -289,10 +288,16 @@ function surface(canvas: HTMLCanvasElement, size: number) {
   const ctx = canvas.getContext("2d");
   if (!ctx) return null;
   const box = size * (1 + 2 * SPILL);
-  const dpr = Math.min(MAX_DPR, window.devicePixelRatio || 1);
-  canvas.width = Math.round(box * dpr);
-  canvas.height = Math.round(box * dpr);
+  let dpr = 0;
   return (pose: OrbPose, palette: OrbPaletteName) => {
+    // Read on every draw: a window dragged to another screen, or a zoom, changes it under an orb
+    // that stays mounted, and an orb drawn for the old one goes soft.
+    const next = Math.min(MAX_DPR, window.devicePixelRatio || 1);
+    if (next !== dpr) {
+      dpr = next;
+      canvas.width = Math.round(box * dpr);
+      canvas.height = Math.round(box * dpr);
+    }
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, box, box);
     ctx.translate(box / 2, box / 2);
@@ -301,6 +306,49 @@ function surface(canvas: HTMLCanvasElement, size: number) {
       palette,
     });
   };
+}
+
+/**
+ * Calls `onChange` whenever the screen's pixel density changes, for a still orb that nothing else
+ * redraws. A resolution query matches only the density it names, so it is asked again after each change.
+ */
+function watchResolution(onChange: () => void): () => void {
+  if (typeof window.matchMedia !== "function") return () => {};
+  let query: MediaQueryList | null = null;
+  const arm = () => {
+    query?.removeEventListener("change", fire);
+    query = window.matchMedia(
+      `(resolution: ${window.devicePixelRatio || 1}dppx)`,
+    );
+    query.addEventListener("change", fire);
+  };
+  const fire = () => {
+    arm();
+    onChange();
+  };
+  arm();
+  return () => query?.removeEventListener("change", fire);
+}
+
+const REDUCE_MOTION = "(prefers-reduced-motion: reduce)";
+
+/**
+ * Whether the person asks for less motion, kept current: turning it on while the app is open stills
+ * every orb already on screen, not only the ones drawn afterwards.
+ */
+function usePrefersReducedMotion(): boolean {
+  return useSyncExternalStore(
+    (onChange) => {
+      if (typeof window.matchMedia !== "function") return () => {};
+      const query = window.matchMedia(REDUCE_MOTION);
+      query.addEventListener("change", onChange);
+      return () => query.removeEventListener("change", onChange);
+    },
+    () =>
+      typeof window.matchMedia === "function" &&
+      window.matchMedia(REDUCE_MOTION).matches,
+    () => false,
+  );
 }
 
 let seeds = 0;
@@ -333,7 +381,7 @@ export function BotOrb({
 }) {
   const boxRef = useRef<HTMLSpanElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const reduced = (useReducedMotion() ?? false) || still;
+  const reduced = usePrefersReducedMotion() || still;
   const clock = useRef<{ start: number; seed: number } | null>(null);
   clock.current ??= { start: performance.now(), seed: ++seeds * 7 };
   const motion = useRef<Motion | null>(null);
@@ -388,7 +436,11 @@ export function BotOrb({
       attributes: true,
       attributeFilter: ["class"],
     });
-    return () => theme.disconnect();
+    const unwatch = watchResolution(paint);
+    return () => {
+      theme.disconnect();
+      unwatch();
+    };
   }, [reduced, size, palette, state]);
 
   // Alive: drawn on the shared clock while it is on screen. It counts as on screen until an
@@ -444,10 +496,7 @@ export function BotOrb({
   return (
     <span
       aria-hidden
-      className={cn(
-        "pointer-events-none relative inline-block shrink-0",
-        className,
-      )}
+      className={cn("pointer-events-none relative block shrink-0", className)}
       data-palette={palette}
       data-state={state}
       ref={boxRef}
