@@ -1360,35 +1360,28 @@ const ToolCallBody = memo(function ToolCallBody({
   );
 });
 
-type ToolCallProps = React.ComponentProps<typeof ToolCallBody>;
-
-/** A tool call on its own row, arriving as one. */
-function TranscriptToolCall(props: ToolCallProps) {
-  return (
-    <Arriving>
-      <ToolCallBody {...props} />
-    </Arriving>
-  );
-}
-
 /**
- * A row of calls the transcript folds, drawn by ONE component whatever its size, so the row is not
- * rebuilt when a second call joins it. A lone call is the line it always was; a run, or a browser
- * step, is the folded group. See `groupToolSteps` for why the row's key survives the same changes.
+ * A row of tool calls, drawn by ONE component whatever it holds, so a row is never rebuilt as its
+ * calls change. A lone call is the line or card it always was; a run, or a browser step, is the
+ * folded group. Both a `tools` group and a single `tool` item come through here, because a lone call
+ * can be either over its life (it stops folding once its answer asks the person) under one key; see
+ * `groupToolSteps`.
  */
-function FoldedToolRow({
-  group,
+function ToolRow({
+  id,
+  steps,
   active,
   latest,
 }: {
-  group: ToolGroup;
+  id: string;
+  steps: ToolGroup["steps"];
   active: boolean;
   latest: boolean;
 }) {
-  const [only] = group.steps;
+  const [only] = steps;
   return (
     <Arriving>
-      {group.steps.length === 1 && only && !isBrowserStep(only) ? (
+      {steps.length === 1 && only && !isBrowserStep(only) ? (
         <ToolCallBody
           args={only.toolCall.function.arguments}
           latest={latest}
@@ -1397,7 +1390,7 @@ function FoldedToolRow({
           toolCallId={only.toolCall.id}
         />
       ) : (
-        <ToolActivity active={active} group={group} />
+        <ToolActivity active={active} group={{ kind: "tools", id, steps }} />
       )}
     </Arriving>
   );
@@ -1409,7 +1402,7 @@ function FoldedToolRow({
  * Named from the reader's side: what was done, against which server, with the server's own words
  * behind a disclosure. The identifier the model was offered never reaches the screen.
  *
- * Exported for its tests, which draw it without the CopilotKit provider `TranscriptToolCall` needs.
+ * Exported for its tests, which draw it without the CopilotKit provider `ToolCallBody` needs.
  */
 export function ServerToolLine({
   name,
@@ -1872,10 +1865,11 @@ export function ChatTranscript({
                     messageId={item.id}
                     {...openingProps(item.id)}
                   >
-                    <FoldedToolRow
+                    <ToolRow
                       active={busy && index === items.length - 1}
-                      group={item}
+                      id={item.id}
                       latest={index >= latestIndex}
+                      steps={item.steps}
                     />
                   </MessageScrollerItem>
                 ) : item.kind === "tool" ? (
@@ -1884,12 +1878,11 @@ export function ChatTranscript({
                     messageId={item.id}
                     {...openingProps(item.id)}
                   >
-                    <TranscriptToolCall
-                      args={item.toolCall.function.arguments}
+                    <ToolRow
+                      active={busy && index === items.length - 1}
+                      id={item.id}
                       latest={index >= latestIndex}
-                      name={item.toolCall.function.name}
-                      result={item.result}
-                      toolCallId={item.toolCall.id}
+                      steps={[item]}
                     />
                   </MessageScrollerItem>
                 ) : item.kind === "activity" ? (

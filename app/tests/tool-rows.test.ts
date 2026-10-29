@@ -85,3 +85,12 @@ test("two groups never claim the same row id", () => {
     "group:t2",
   ]);
 });
+
+test("a lone call whose result asks the person keeps its row id", () => {
+  const rowIds = new Map<string, string>();
+  groupToolSteps([call("t1")], drawsNothing, rowIds);
+  const after = groupToolSteps([call("t1", asks)], drawsNothing, rowIds);
+  expect(after.map((item) => [item.kind, item.id])).toEqual([
+    ["tool", "group:t1"],
+  ]);
+});

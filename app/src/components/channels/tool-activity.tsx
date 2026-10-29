@@ -69,19 +69,10 @@ export function groupToolSteps(
   isDrawn: (name: string) => boolean,
   rowIds: Map<string, string> = new Map(),
 ): TranscriptItem[] {
-  const grouped: TranscriptItem[] = [];
-  const claimed = new Set<string>();
+  const segments: (VisibleChatItem | ToolItem[])[] = [];
   let run: ToolItem[] = [];
   const close = () => {
-    const [first] = run;
-    if (!first) return;
-    const kept = run
-      .map((step) => rowIds.get(step.id))
-      .find((id) => id !== undefined && !claimed.has(id));
-    const id = kept ?? `group:${first.id}`;
-    claimed.add(id);
-    for (const step of run) rowIds.set(step.id, id);
-    grouped.push({ kind: "tools", id, steps: run });
+    if (run.length > 0) segments.push(run);
     run = [];
   };
   for (const item of items) {
@@ -90,10 +81,41 @@ export function groupToolSteps(
       continue;
     }
     close();
-    grouped.push(item);
+    segments.push(item);
   }
   close();
-  return grouped;
+
+  // Runs claim their rows first, so a group keeps its row when its first step leaves it...
+  const claimed = new Set<string>();
+  const runIds = new Map<ToolItem[], string>();
+  for (const segment of segments) {
+    if (!Array.isArray(segment)) continue;
+    const [first] = segment;
+    if (!first) continue;
+    const kept = segment
+      .map((step) => rowIds.get(step.id))
+      .find((id) => id !== undefined && !claimed.has(id));
+    const id = kept ?? `group:${first.id}`;
+    claimed.add(id);
+    runIds.set(segment, id);
+    for (const step of segment) rowIds.set(step.id, id);
+  }
+
+  // ...and a lone call that stops folding (its answer asks the person) keeps the row it had.
+  return segments.map((segment): TranscriptItem => {
+    if (Array.isArray(segment)) {
+      return {
+        kind: "tools",
+        id: runIds.get(segment) ?? "",
+        steps: segment,
+      };
+    }
+    if (segment.kind !== "tool") return segment;
+    const previous = rowIds.get(segment.id);
+    if (previous === undefined || claimed.has(previous)) return segment;
+    claimed.add(previous);
+    return { ...segment, id: previous };
+  });
 }
 
 function foldable(item: ToolItem, isDrawn: (name: string) => boolean): boolean {
