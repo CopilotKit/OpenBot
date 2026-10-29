@@ -255,6 +255,57 @@ describe("the header's orb and the line under the name", () => {
     expect(orb()).toBe("idle");
   });
 
+  test("a turn that ends on a call held for the person does not land", () => {
+    // The server holds the search for the person: the turn ends with the call and no result.
+    const held = renderConversation(<Chat busy messages={RUNNING} />);
+    held.show(<Chat messages={RUNNING} />);
+    expect(held.orb()).toBe("idle");
+    cleanup();
+
+    // The browser sends a click to its card, stops the run, and notes that it went there.
+    const clicking = (result?: string): Message[] => [
+      asked("u1", "Pay the invoice"),
+      {
+        id: "c-call",
+        role: "assistant",
+        content: "",
+        toolCalls: [
+          {
+            id: "click",
+            type: "function",
+            function: {
+              name: "computer_click",
+              arguments: JSON.stringify({ ref: "e1" }),
+            },
+          },
+        ],
+      },
+      ...(result === undefined
+        ? []
+        : [
+            {
+              id: "c-result",
+              role: "tool" as const,
+              toolCallId: "click",
+              content: result,
+            },
+          ]),
+    ];
+    const sent = renderConversation(<Chat busy messages={clicking()} />);
+    sent.show(<Chat messages={clicking(JSON.stringify({ waiting: true }))} />);
+    expect(sent.orb()).toBe("idle");
+  });
+
+  test("Needs you holds off the landing of a turn that did answer", () => {
+    const { show, line, orb } = renderConversation(
+      <Chat busy messages={RUNNING} />,
+      { inbox: inboxWith([{ threadId: THREAD, status: "pending" }]) },
+    );
+    show(<Chat messages={ANSWERED} />);
+    expect(line()).toBe("Needs you");
+    expect(orb()).toBe("idle");
+  });
+
   test("say Needs you while an approval waits in this conversation, and only this one", () => {
     const waiting = renderConversation(<Chat messages={ANSWERED} />, {
       inbox: inboxWith([{ threadId: THREAD, status: "pending" }]),
