@@ -13,6 +13,7 @@ import {
   agentKeys,
   agentListQueryOptions,
 } from "@/lib/agents/queries";
+import { approvalInboxOptions } from "@/lib/approvals";
 import { tryClient } from "@/lib/client";
 import { useActiveBot } from "@/lib/copilot/active-bot";
 import { useBotThread } from "@/lib/copilot/bot-thread";
@@ -142,6 +143,8 @@ function RouteComponent() {
 function BotChat({ agentId, name }: { agentId: string; name: string }) {
   // Tool calls here act on this Bot's own computer.
   useActiveBot(agentId);
+  // This screen's one poll of the inbox. The approval cards in the chat read the cache it keeps fresh.
+  useQuery(approvalInboxOptions());
   /*
    * Minted by this deployment rather than by the chat. `history` reports whether Intelligence
    * still recognised the thread this browser remembered from a previous visit; when it did not,
