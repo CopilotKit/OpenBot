@@ -38,8 +38,20 @@ import { join } from "node:path";
 import { type BrowserContext, chromium, type Page } from "playwright";
 import { isPersonBrowserId } from "../../shared/openbot-browser";
 import { profileDirectoryFor } from "./bot-id";
-import { chooseEvictions, chooseIdle, keptOpen } from "./browser-eviction";
+import {
+  chooseEvictions,
+  chooseForMemory,
+  chooseIdle,
+  chooseIdleTabs,
+  type Evictable,
+  keptOpen,
+} from "./browser-eviction";
 import { type BrowserRuntime, browserRuntimeFromEnv } from "./browser-runtime";
+import {
+  type MemoryReading,
+  memoryRunsHigh,
+  readContainerMemory,
+} from "./container-memory";
 import { egressFor, egressLabel } from "./egress";
 import { numberFromEnv, settleWithin } from "./env";
 import { chooseLivePage } from "./live-page";
@@ -304,8 +316,51 @@ const IDLE_TIMEOUT_MS = numberFromEnv("COMPUTER_BROWSER_IDLE_MS", 30 * 60_000, {
   zeroSwitchesItOff: true,
 });
 
-/** How often the idle sweep looks. Cheap: it walks a map of at most `MAX_LIVE_BROWSERS`. */
+/**
+ * How often the idle sweep looks. Cheap: it walks a map of at most `MAX_LIVE_BROWSERS`, their tabs,
+ * and three small files under `/sys/fs/cgroup`.
+ */
 const IDLE_SWEEP_MS = 60_000;
+
+/**
+ * At what share of the computer's memory it starts closing browsers, least recently used first.
+ *
+ * The cap counts browsers, and a browser is not a fixed size: a few heavy pages can take a container
+ * past its memory limit well under the cap, and the OOM killer does not choose by use: on Kubernetes
+ * with cgroup v2 it kills every process in the container together, every Bot's browser at once, and
+ * nothing can reach the computer until it comes back. So memory is read the way Kubernetes reads it (`container-memory.ts`)
+ * before every launch, which is when memory jumps, and on every tick of the idle sweep, and while it
+ * is at or above this share of the limit the least recently used browser is closed and memory read
+ * again. Closing one costs its Bot a relaunch and nothing else, the same as the cap.
+ *
+ * Eighty-five leaves room for the launch that asked, and for a page that grows after the check,
+ * before the limit is reached. Zero switches it off, as it does for the idle sweep. A computer with no
+ * cgroup of its own (OpenBot Desktop's, on a person's Mac) has no limit to read and closes nothing
+ * for memory either way.
+ */
+const MEMORY_HIGH_PERCENT = numberFromEnv("COMPUTER_MEMORY_HIGH_PERCENT", 85, {
+  zeroSwitchesItOff: true,
+  max: 100,
+});
+
+/**
+ * How long a Bot's background tab may sit untouched before the idle sweep closes it.
+ *
+ * A Bot is always on its newest page, so a tab it left behind (the page a sign-in popup opened from,
+ * a link a site opened in a new tab) is one it cannot get back to, holding a renderer and its memory
+ * for as long as the browser is up. Ten minutes is long enough for a popup's sign-in to come back to
+ * the page that opened it, and a third of the thirty after which a whole idle browser is closed, so a
+ * tab left behind in a browser that is still in use does not wait for the browser to go. See
+ * `chooseIdleTabs` for what is never closed. Zero switches it off.
+ *
+ * No count of tabs alongside it. A count is the wrong measure for the same reason the browser cap is
+ * not enough on its own: one heavy tab outweighs twenty light ones, and memory is now watched
+ * directly. A count would also close tabs a site opened a moment ago, in the middle of the flow they
+ * were opened for, where a timeout only ever closes what has been left alone.
+ */
+const TAB_IDLE_MS = numberFromEnv("COMPUTER_TAB_IDLE_MS", 10 * 60_000, {
+  zeroSwitchesItOff: true,
+});
 
 /**
  * Told whenever a Bot's browser is closed and forgotten, before the close is waited on.
@@ -337,6 +392,21 @@ export type ProfilesOptions = {
    * as it is now.
    */
   personDisplay?: PersonDisplay;
+  /**
+   * The computer's memory now, or nothing when it has no limit to read. The container's own cgroup
+   * unless a test hands in the reading it wants the computer to see.
+   */
+  memory?: () => Promise<MemoryReading | undefined>;
+  /** {@link MEMORY_HIGH_PERCENT}, for a test. */
+  memoryHighPercent?: number;
+  /** {@link TAB_IDLE_MS}, for a test that cannot wait ten minutes. */
+  tabIdleMs?: number;
+  /**
+   * Whether a person holds this Bot's wheel, or has been asked to take it. Such a browser is never
+   * closed for memory, and none of its tabs are closed for being idle: a person may be working across
+   * them. The computer's sessions answer it (`sessions.personHasTheWheel`); without it, nobody does.
+   */
+  heldByPerson?: (botId: string) => boolean;
 };
 
 /** Opening a person's browser, which is the one way it starts. See `person-browser.ts`. */
@@ -365,6 +435,22 @@ export function createProfiles(
   const personDisplay: PersonDisplay = options.personDisplay ?? {
     DISPLAY: process.env.DISPLAY,
     WAYLAND_DISPLAY: process.env.WAYLAND_DISPLAY,
+  };
+  const readMemory = options.memory ?? (() => readContainerMemory());
+  const memoryHighPercent = options.memoryHighPercent ?? MEMORY_HIGH_PERCENT;
+  const tabIdleMs = options.tabIdleMs ?? TAB_IDLE_MS;
+  const heldByPerson = options.heldByPerson ?? (() => false);
+  /*
+   * A wheel that cannot be read counts as held. The control state throws when its store has failed,
+   * and the answer decides whether a browser or a tab is closed: keeping one is the mistake that
+   * costs nothing, and a throw here must never fail the launch that asked.
+   */
+  const spared = (botId: string): boolean => {
+    try {
+      return heldByPerson(botId);
+    } catch {
+      return true;
+    }
   };
 
   type LiveBrowser = {
@@ -400,6 +486,26 @@ export function createProfiles(
   const live = new Map<string, LiveBrowser>();
   /** A person's native window: the idle sweep leaves it and the cap takes it last. See `keptOpen`. */
   const stays = keptOpen(personWindow(runtime));
+  /**
+   * When each of a Bot's tabs was last used: acted on, navigated, or in front. Decides which
+   * background tabs the idle sweep closes. Weak, so a closed page takes its entry with it.
+   */
+  const tabUsedAt = new WeakMap<Page, number>();
+  const touchTab = (page: Page): void => {
+    tabUsedAt.set(page, Date.now());
+  };
+  /** A tab never seen before counts as used now, so one this process missed is not closed at once. */
+  const tabLastUsed = (page: Page): number => {
+    const at = tabUsedAt.get(page) ?? Date.now();
+    tabUsedAt.set(page, at);
+    return at;
+  };
+  /** A tab that navigates is in use, a background one included: a site moving it on, a sign-in finishing. */
+  const touchOnNavigation = (page: Page): void => {
+    page.on("framenavigated", (frame) => {
+      if (frame === page.mainFrame()) touchTab(page);
+    });
+  };
   /** Launches in flight, so a cold computer is started once however many callers ask at once. */
   const starting = new Map<string, Promise<Page>>();
   /** Closes and resets in flight, so a Bot's browser is never reopened from a profile being closed or deleted. */
@@ -471,10 +577,91 @@ export function createProfiles(
   };
 
   /**
-   * Close browsers nothing has touched for a while.
+   * Close browsers, least recently used first, while the computer's memory runs high.
+   *
+   * One at a time, reading memory again after each close, because what one browser was holding is
+   * not known until it has gone. `asking` is the Bot whose launch this runs ahead of: counted as the
+   * newest, so it is never what makes room for itself, while every other browser here can be. Stops
+   * when memory is back under the line, when nothing is left that may be closed (`chooseForMemory`),
+   * or when the same browser comes up twice, which a close racing this one could otherwise loop on.
+   */
+  const relieveMemory = async (asking?: string): Promise<void> => {
+    if (memoryHighPercent <= 0) return;
+    const tried = new Set<string>();
+    for (;;) {
+      // A reading that fails is a computer with nothing to act on, the same as one with no cgroup.
+      const reading = await readMemory().catch(() => undefined);
+      if (!reading || !memoryRunsHigh(reading, memoryHighPercent)) return;
+      const running: [string, Evictable][] = [...live.entries()];
+      if (asking && !live.has(asking))
+        running.push([asking, { usedAt: Date.now() }]);
+      const next = chooseForMemory(running, stays, spared);
+      if (!next || tried.has(next)) return;
+      tried.add(next);
+      console.info(
+        JSON.stringify({
+          type: "computer-browser-closed-for-memory",
+          botId: next,
+          workingSetBytes: reading.workingSet,
+          limitBytes: reading.limit,
+        }),
+      );
+      await evict(next, "the computer's memory ran high");
+    }
+  };
+
+  /**
+   * Close the background tabs of every Bot's browser that nothing has touched for a while.
+   *
+   * Never a person's browser, whose tabs are theirs and which has no Bot in it, and never a Bot's
+   * while a person holds its wheel, because they may be working across its tabs. Within a Bot's
+   * browser, `chooseIdleTabs` decides, and the page the Bot is on is never one of them, so it is
+   * still the newest open page afterwards and the record does not move. The address is not logged:
+   * a page left behind can be a sign-in link with a one-time token in it.
+   */
+  const closeIdleTabs = async (): Promise<number> => {
+    if (tabIdleMs <= 0) return 0;
+    const now = Date.now();
+    let closed = 0;
+    for (const [botId, running] of [...live.entries()]) {
+      if (running.person || isPersonBrowserId(botId) || spared(botId)) continue;
+      // Closed while an earlier Bot's tabs were being closed: nothing of it is left to sweep.
+      if (live.get(botId) !== running) continue;
+      running.retarget();
+      const tabs = running.context
+        .pages()
+        .filter((page) => !page.isClosed())
+        .map((page) => ({
+          page,
+          usedAt: tabLastUsed(page),
+          front: page === running.page,
+          kept:
+            page.url().startsWith("chrome-extension://") ||
+            page.url().startsWith("devtools://"),
+        }));
+      for (const { page } of chooseIdleTabs(tabs, tabIdleMs, now)) {
+        console.info(
+          JSON.stringify({
+            type: "computer-tab-closed",
+            botId,
+            reason: "it had been idle",
+          }),
+        );
+        await page.close().catch(() => undefined);
+        closed += 1;
+      }
+    }
+    return closed;
+  };
+
+  /**
+   * Close browsers nothing has touched for a while, then the tabs Bots left behind, then, if memory
+   * still runs high, browsers by use.
    *
    * The cap answers concurrent breadth; this answers a Bot used once last Tuesday whose browser is
-   * still resident and doing nothing for anybody.
+   * still resident and doing nothing for anybody. In that order because each step is gentler than the
+   * next: a browser nobody is using goes before a tab of one somebody is, and a tab nobody can reach
+   * goes before a browser that is still in use.
    */
   const sweepIdle = async (): Promise<void> => {
     for (const botId of chooseIdle(
@@ -485,6 +672,12 @@ export function createProfiles(
     )) {
       await evict(botId, "it had been idle");
     }
+    const tabsClosed = await closeIdleTabs().catch(() => 0);
+    // A closed tab's renderer exits a moment after the tab does, so memory read at once would still
+    // count it, and a browser could be closed for memory the tabs had already given back.
+    if (tabsClosed > 0)
+      await new Promise((resolve) => setTimeout(resolve, CLOSE_SETTLE_MS));
+    await relieveMemory();
   };
 
   const idleSweep = setInterval(() => {
@@ -723,8 +916,10 @@ export function createProfiles(
         existing?.context.browser()?.isConnected() &&
         !existing.page.isClosed()
       ) {
-        // Touched on every use, which is what makes "least recently used" mean anything.
+        // Touched on every use, which is what makes "least recently used" mean anything. The page in
+        // front with it: a Bot's next action, and a person's input on the live screen, land there.
         existing.usedAt = Date.now();
+        touchTab(existing.page);
         return existing.page;
       }
       if (existing) {
@@ -748,6 +943,9 @@ export function createProfiles(
       if (isPersonBrowserId(botId) && !open) throw new BrowserNotOpenError();
 
       const launch = (async () => {
+        // Before the launch, which is when memory jumps: a cold Chromium and its first page are the
+        // largest single step up a computer takes, and the OOM killer does not wait for the cap.
+        await relieveMemory(botId);
         const dir = directoryFor(botId);
         // A second native helper can target the same data root on another port. Do not remove an
         // active Chrome profile's lock; Chrome reports contention and handles its own stale locks.
@@ -804,9 +1002,14 @@ export function createProfiles(
           retarget: () => {},
           ...(sessionCookies ? { sessionCookies } : {}),
         };
+        touchTab(page);
+        touchOnNavigation(page);
         record.retarget = () => {
           const next = chooseLivePage(context.pages());
           if (!next || next === record.page) return;
+          // Both are in use at this moment: the one going behind was in front until now.
+          touchTab(record.page);
+          touchTab(next);
           record.page = next;
           console.info(
             JSON.stringify({
@@ -828,6 +1031,8 @@ export function createProfiles(
         // in a new window is neither shown to the person taking the wheel nor reachable by input.
         context.on("page", (opened) => {
           if (!local) void attachPageNetwork(context, opened, network);
+          touchTab(opened);
+          touchOnNavigation(opened);
           record.retarget();
           // A popup closes itself when it succeeds, and the record must move back to the opener
           // rather than leave a closed page to be read as a dead browser.

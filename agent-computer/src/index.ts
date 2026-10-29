@@ -310,7 +310,14 @@ const profiles = createProfiles(
     if (sessions.get(botId)) sessions.renewRun(botId);
     await sessions.get(botId)?.viewer.releaseAll(COMPUTER_STOPPED);
   },
-  { personDisplay: PERSON_DISPLAY },
+  {
+    personDisplay: PERSON_DISPLAY,
+    // A browser a person is working in, or has been asked to, is never closed for memory, and none
+    // of its tabs are closed for being idle. A person's own browser is not a Bot's wheel at all: it
+    // takes the cap's rules, a native window last and a cloud one by use.
+    heldByPerson: (botId) =>
+      !isPersonBrowserId(botId) && sessions.personHasTheWheel(botId),
+  },
 );
 
 /**

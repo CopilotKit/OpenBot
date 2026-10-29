@@ -163,6 +163,19 @@ spec:
             - name: COMPUTER_BROWSER_IDLE_MS
               value: {{ . | quote }}
             {{- end }}
+            {{- /*
+              Asked whether anybody set them, not whether they are truthy: zero switches each off,
+              and `with` reads zero as empty and would drop it, leaving the default on for a
+              deployment that had said off. Absent, as it is on a release from before these keys,
+              is nothing set.
+            */}}
+            {{- range $name, $key := dict "COMPUTER_MEMORY_HIGH_PERCENT" "memoryHighPercent" "COMPUTER_TAB_IDLE_MS" "tabIdleMs" }}
+            {{- $value := index $.Values.computers $key }}
+            {{- if and (not (kindIs "invalid" $value)) (ne (toString $value) "") }}
+            - name: {{ $name }}
+              value: {{ include "openbot.wholeNumber" $value | quote }}
+            {{- end }}
+            {{- end }}
             {{- with include "openbot.computerEnv" . | fromJsonArray }}
 {{ toYaml . | indent 12 }}
             {{- end }}

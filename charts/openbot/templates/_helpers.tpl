@@ -827,3 +827,16 @@ than anything that names the cause.
 {{- end }}
 {{- end -}}
 
+{{- /*
+  A number from values written out in digits, which is how the computer reads its settings.
+
+  A whole number in a values file arrives as a float, because Helm reads values through JSON, and a
+  float renders in Go's shortest form: `tabIdleMs: 1200000` became `1.2e+06`. The computer takes
+  digits only, so it fell back to its default without a word. A float with nothing after the point is
+  written as the whole number it is; anything else (a string, a number from `--set`) as it came.
+*/}}
+{{- define "openbot.wholeNumber" -}}
+{{- if kindIs "float64" . -}}
+{{- if eq . (floor .) -}}{{ int64 . }}{{- else -}}{{ . }}{{- end -}}
+{{- else -}}{{ . }}{{- end -}}
+{{- end -}}

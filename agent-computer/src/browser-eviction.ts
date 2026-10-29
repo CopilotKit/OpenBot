@@ -1,5 +1,5 @@
 /**
- * Which Bots' browsers to close, and when.
+ * Which Bots' browsers to close, and when, and which of a Bot's tabs.
  *
  * Its own file, with no Playwright import, for the reason `authorisation.ts` and `bot-id.ts` are:
  * `profiles.ts` imports Playwright at module scope, so anything living there needs a browser merely
@@ -62,21 +62,66 @@ export function chooseEvictions(
   const entries = [...running];
   if (entries.length <= max) return [];
   // A cap of zero keeps nothing, the newest included; that is the mistake reading the setting guards.
-  const newest =
-    max > 0
-      ? entries.reduce((latest, entry) =>
-          entry[1].usedAt >= latest[1].usedAt ? entry : latest,
-        )
-      : undefined;
+  const newest = max > 0 ? newestOf(entries) : undefined;
 
+  return inClosingOrder(entries, newest, goesLast)
+    .slice(0, entries.length - max)
+    .map(([botId]) => botId);
+}
+
+/** The most recently used, which is the one a launch has just added. Ties go to the later entry. */
+function newestOf(
+  entries: [string, Evictable][],
+): [string, Evictable] | undefined {
+  if (entries.length === 0) return undefined;
+  return entries.reduce((latest, entry) =>
+    entry[1].usedAt >= latest[1].usedAt ? entry : latest,
+  );
+}
+
+/**
+ * The order browsers are closed in when some have to go: every Bot's before a person's native window
+ * (`keptOpen`), and least recently used first within each. `spare` is left out, which is the newest.
+ */
+function inClosingOrder(
+  entries: [string, Evictable][],
+  spare: [string, Evictable] | undefined,
+  goesLast: (botId: string) => boolean,
+): [string, Evictable][] {
   return entries
-    .filter((entry) => entry !== newest)
+    .filter((entry) => entry !== spare)
     .sort(
       ([aId, a], [bId, b]) =>
         Number(goesLast(aId)) - Number(goesLast(bId)) || a.usedAt - b.usedAt,
-    )
-    .slice(0, entries.length - max)
-    .map(([botId]) => botId);
+    );
+}
+
+/**
+ * Which to close next because the computer's memory runs high (`container-memory.ts`).
+ *
+ * One at a time, because the caller reads memory again after each close and stops as soon as it is
+ * enough: a count says in advance how many have to go, and bytes do not.
+ *
+ * The cap's order, so the two never disagree about who goes first: least recently used, with a
+ * person's native window last. And the cap's protection: the newest is never chosen. Before a
+ * launch the caller counts the Bot that is asking as the newest, so the browser being launched is
+ * never what makes room for itself; on the idle sweep the newest is whoever was used last. Either
+ * way at least one browser is always left, because one browser that is on its own too big for the
+ * computer is the limit's problem, and closing it would only start it again on the next request.
+ *
+ * Never one `spared` names, which is a Bot whose wheel a person holds or has been asked to take.
+ * Closing that browser closes it under somebody's hands, or under a page the Bot is waiting for
+ * somebody to come and work, and memory pressure is not a reason to do either.
+ */
+export function chooseForMemory(
+  running: Iterable<[string, Evictable]>,
+  goesLast: (botId: string) => boolean = () => false,
+  spared: (botId: string) => boolean = () => false,
+): string | undefined {
+  const entries = [...running];
+  return inClosingOrder(entries, newestOf(entries), goesLast)
+    .map(([botId]) => botId)
+    .find((botId) => !spared(botId));
 }
 
 /**
@@ -103,4 +148,41 @@ export function chooseIdle(
   return [...running]
     .filter(([botId, entry]) => entry.usedAt <= cutoff && !stays(botId))
     .map(([botId]) => botId);
+}
+
+/** Enough of a tab for the choice. Keeps this file independent of what else is on a page. */
+export type IdleTab = {
+  /** When the Bot or a person last acted on it, it navigated, or it was the page in front. */
+  usedAt: number;
+  /** The page the Bot is on, which is the one the live screen shows and its next action lands in. */
+  front: boolean;
+  /** A page that is never the Bot's to lose: an extension's own (the Recorder's) or DevTools. */
+  kept?: boolean;
+};
+
+/**
+ * Which of a Bot's background tabs to close because nothing has touched them.
+ *
+ * A Bot is always on its newest page (`chooseLivePage`): a window a site opens is where its work
+ * went, and it has no way back to an older tab except that newer ones close. So a tab left behind
+ * (the page a sign-in popup was opened from, a link that opened in a new tab and was never closed)
+ * holds a renderer and its memory for nothing, for as long as the browser stays up. Closed past a
+ * timeout rather than at once, because an opener whose popup is still mid sign-in is waiting for
+ * that popup to come back to it.
+ *
+ * Never the page in front, which is the one the Bot is on, so closing tabs never moves it: it stays
+ * the newest open page, which is what the Bot follows. And never anything when which page is in
+ * front is not exactly one, because then any tab could be the one the Bot is on. That also means the
+ * last tab is never closed, since a single tab is the one in front. A timeout of zero or less
+ * switches this off.
+ */
+export function chooseIdleTabs<T extends IdleTab>(
+  tabs: readonly T[],
+  idleTimeoutMs: number,
+  now: number,
+): T[] {
+  if (idleTimeoutMs <= 0) return [];
+  if (tabs.filter((tab) => tab.front).length !== 1) return [];
+  const cutoff = now - idleTimeoutMs;
+  return tabs.filter((tab) => !tab.front && !tab.kept && tab.usedAt <= cutoff);
 }

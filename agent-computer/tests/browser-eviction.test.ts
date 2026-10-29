@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { chooseEvictions, chooseIdle, keptOpen } from "../src/browser-eviction";
+import {
+  chooseEvictions,
+  chooseForMemory,
+  chooseIdle,
+  chooseIdleTabs,
+  keptOpen,
+} from "../src/browser-eviction";
 import { numberFromEnv } from "../src/env";
 
 /**
@@ -250,5 +256,144 @@ describe("a person's cloud browser among Bots' browsers", () => {
     expect(chooseIdle(used, 30_000, NOW, keptOpen("screen"))).toEqual([
       "bot-0",
     ]);
+  });
+});
+
+/**
+ * Which browser to close next when the computer's memory runs high.
+ *
+ * The cap counts browsers and the idle sweep counts minutes, and neither looks at memory, so a few
+ * heavy pages took a container past its limit and the OOM killer took every browser on it at once.
+ * The computer now closes browsers one at a time while memory runs high, reading it again after each.
+ */
+describe("closing a browser because memory runs high", () => {
+  const PERSON = "person-0123456789abcdef0123456789abcdef";
+  const isPerson = (botId: string) => botId.startsWith("person-");
+
+  test("closes the least recently used, by the cap's own order", () => {
+    expect(chooseForMemory(running(500, 100, 300, 900))).toBe("bot-1");
+  });
+
+  test("never the newest, which before a launch is the Bot asking", () => {
+    // The caller adds the Bot whose browser is about to launch as the most recently used, so it is
+    // never what makes room for itself, however everything else is ranked.
+    const before = running(100, 200);
+    before.set("asking", { usedAt: 300 });
+    const chosen: string[] = [];
+    for (;;) {
+      const next = chooseForMemory(before);
+      if (!next) break;
+      chosen.push(next);
+      before.delete(next);
+    }
+    expect(chosen).toEqual(["bot-0", "bot-1"]);
+    expect([...before.keys()]).toEqual(["asking"]);
+  });
+
+  test("never the last browser left: one too big on its own is the limit's problem", () => {
+    expect(chooseForMemory(running(100))).toBeUndefined();
+    expect(chooseForMemory(running())).toBeUndefined();
+  });
+
+  test("never a browser whose wheel a person holds", () => {
+    // bot-0 is the least recently used and a person is working in it: the next one goes instead.
+    const held = (botId: string) => botId === "bot-0";
+    expect(chooseForMemory(running(100, 200, 300), undefined, held)).toBe(
+      "bot-1",
+    );
+    // With only the held one and the newest left, nothing is closed.
+    expect(chooseForMemory(running(100, 300), undefined, held)).toBeUndefined();
+  });
+
+  test("a person's native window goes after every Bot's browser, as at the cap", () => {
+    const withPerson = new Map([
+      [PERSON, { usedAt: 1 }],
+      ...running(500, 300, 900),
+    ]);
+    expect(chooseForMemory(withPerson, isPerson)).toBe("bot-1");
+    expect(
+      chooseForMemory(
+        new Map([[PERSON, { usedAt: 1 }], ...running(900)]),
+        isPerson,
+      ),
+    ).toBe(PERSON);
+  });
+});
+
+/**
+ * Which of a Bot's background tabs to close because nobody has touched them.
+ *
+ * A Bot is always on its newest page, so a tab it left behind, the page a sign-in popup opened from
+ * or a link a site opened in a new tab, is one it cannot go back to, and it held a renderer for as
+ * long as the browser stayed up.
+ */
+describe("closing a Bot's idle background tabs", () => {
+  const NOW = 1_000_000;
+  const IDLE = 10 * 60_000;
+  const tab = (name: string, usedAt: number, front = false, kept = false) => ({
+    name,
+    usedAt,
+    front,
+    kept,
+  });
+  const names = (tabs: { name: string }[]) => tabs.map((t) => t.name);
+
+  test("closes a background tab past the timeout, and keeps the page in front", () => {
+    const tabs = [
+      tab("left behind", NOW - IDLE - 1),
+      tab("in front", NOW - IDLE - 1, true),
+    ];
+    // The page in front is as old as the other and is still never closed: it is the one the Bot is on.
+    expect(names(chooseIdleTabs(tabs, IDLE, NOW))).toEqual(["left behind"]);
+  });
+
+  test("keeps a background tab used inside the timeout, and closes one at it", () => {
+    expect(
+      names(
+        chooseIdleTabs(
+          [
+            tab("recent", NOW - IDLE + 1),
+            tab("at the line", NOW - IDLE),
+            tab("in front", NOW, true),
+          ],
+          IDLE,
+          NOW,
+        ),
+      ),
+    ).toEqual(["at the line"]);
+  });
+
+  test("never the last tab", () => {
+    expect(chooseIdleTabs([tab("only", 0, true)], IDLE, NOW)).toEqual([]);
+  });
+
+  test("closes nothing when which page is in front is not known", () => {
+    // Any tab could then be the one the Bot is on, and closing it would move the Bot.
+    expect(chooseIdleTabs([tab("a", 0), tab("b", 0)], IDLE, NOW)).toEqual([]);
+    expect(
+      chooseIdleTabs([tab("a", 0, true), tab("b", 0, true)], IDLE, NOW),
+    ).toEqual([]);
+  });
+
+  test("never an extension's own page or DevTools", () => {
+    expect(
+      names(
+        chooseIdleTabs(
+          [
+            tab("recorder", 0, false, true),
+            tab("old", 0),
+            tab("front", NOW, true),
+          ],
+          IDLE,
+          NOW,
+        ),
+      ),
+    ).toEqual(["old"]);
+  });
+
+  test("a timeout of zero switches it off", () => {
+    expect(
+      chooseIdleTabs([tab("old", 0), tab("front", NOW, true)], 0, NOW),
+    ).toEqual([]);
   });
 });
