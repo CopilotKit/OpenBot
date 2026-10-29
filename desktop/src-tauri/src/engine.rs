@@ -933,12 +933,23 @@ pub mod local_api {
     pub struct Service {
         child: Option<Child>,
         socket: Option<(PathBuf, u64, u64)>,
-        /// The host loopback configuration was written or changed since a Start last asked.
-        host_loopback_changed: bool,
+        /// Where [`allow_host_loopback`](Service::allow_host_loopback) last wrote, so a Start can
+        /// ask whether the reset it calls for is still owed.
+        config_home: Option<PathBuf>,
     }
 
     /// Podman's own drop-in directory, under the person's configuration home.
     pub const HOST_LOOPBACK_CONFIG: &str = "containers/containers.conf.d/90-openbot-host.conf";
+
+    /**
+    Present from the moment [`HOST_LOOPBACK_CONFIG`] changes until a Start has taken OpenBot's
+    stack down, so the containers after it build a new rootless network namespace.
+
+    A file rather than a flag in memory, so the reset is still owed after a Start whose teardown
+    failed, and after the app quit between writing the drop-in and starting. Beside Podman's
+    configuration rather than in `containers.conf.d`, where Podman reads drop-ins.
+    */
+    pub const HOST_LOOPBACK_PENDING: &str = "containers/openbot-host-loopback.pending";
 
     /**
     The drop-in that opens the rootless network namespace to this machine's loopback at
@@ -967,7 +978,8 @@ pub mod local_api {
     }
 
     /// Write [`host_loopback_config`] under `config_home`, saying whether anything changed.
-    /// Replaced whole, through a sibling, so Podman never reads half of it.
+    /// Replaced whole, through a sibling, so Podman never reads half of it. A change marks the
+    /// reset owed ([`HOST_LOOPBACK_PENDING`]) first, so no drop-in is ever in place without it.
     pub fn write_host_loopback(config_home: &Path) -> Result<bool, String> {
         let path = config_home.join(HOST_LOOPBACK_CONFIG);
         let wanted = host_loopback_config();
@@ -980,6 +992,8 @@ pub mod local_api {
         let directory = path.parent().expect("the drop-in has a directory");
         std::fs::create_dir_all(directory)
             .map_err(|error| format!("{}: {error}", directory.display()))?;
+        let pending = config_home.join(HOST_LOOPBACK_PENDING);
+        std::fs::write(&pending, "").map_err(|error| format!("{}: {error}", pending.display()))?;
         let partial = path.with_extension("conf.partial");
         std::fs::write(&partial, wanted)
             .and_then(|()| std::fs::rename(&partial, &path))
@@ -1167,23 +1181,42 @@ pub mod local_api {
         /// started read its configuration when it started, so a change stops it, and the
         /// `ensure` that follows starts it again. A service somebody else runs is left alone.
         pub(super) fn allow_host_loopback(&mut self, config_home: &Path) -> Result<(), Problem> {
+            self.config_home = Some(config_home.to_path_buf());
             if write_host_loopback(config_home).map_err(problem)? {
-                self.host_loopback_changed = true;
                 self.stop()?;
             }
             Ok(())
         }
 
         /**
-        Whether the host loopback configuration changed since the last Start asked, and forget it.
+        Whether a Start still owes the host loopback configuration a teardown of OpenBot's stack.
 
         Podman reads it only when the rootless network namespace is created, and that namespace
         lives while any container on a Compose network does, so a stack still running from before
         keeps the old one. Measured: written while a container held the namespace, nothing
         changed; once the last one stopped, the next container reached the host.
+
+        Owed until [`acknowledge_host_loopback_reset`](Self::acknowledge_host_loopback_reset),
+        which a Start calls only once the teardown succeeded.
         */
-        pub fn take_host_loopback_change(&mut self) -> bool {
-            std::mem::take(&mut self.host_loopback_changed)
+        pub fn host_loopback_reset_pending(&self) -> bool {
+            self.config_home
+                .as_ref()
+                .is_some_and(|home| home.join(HOST_LOOPBACK_PENDING).exists())
+        }
+
+        /// The teardown [`host_loopback_reset_pending`](Self::host_loopback_reset_pending) asked
+        /// for is done.
+        pub fn acknowledge_host_loopback_reset(&self) -> Result<(), Problem> {
+            let Some(home) = self.config_home.as_ref() else {
+                return Ok(());
+            };
+            let pending = home.join(HOST_LOOPBACK_PENDING);
+            match std::fs::remove_file(&pending) {
+                Ok(()) => Ok(()),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                Err(error) => Err(problem(format!("{}: {error}", pending.display()))),
+            }
         }
 
         pub fn stop(&mut self) -> Result<(), Problem> {
@@ -1324,15 +1357,20 @@ mod local_api_tests {
         )
         .unwrap();
 
+        let pending = home.join(super::local_api::HOST_LOOPBACK_PENDING);
         assert!(super::local_api::write_host_loopback(&home).unwrap());
         assert_eq!(
             std::fs::read_to_string(&path).unwrap(),
             super::local_api::host_loopback_config()
         );
+        assert!(pending.exists(), "a new drop-in owes a reset");
+        std::fs::remove_file(&pending).unwrap();
         assert!(!super::local_api::write_host_loopback(&home).unwrap());
+        assert!(!pending.exists(), "an unchanged drop-in owes nothing");
 
         std::fs::write(&path, "[network]\n").unwrap();
         assert!(super::local_api::write_host_loopback(&home).unwrap());
+        assert!(pending.exists(), "a changed drop-in owes a reset");
         assert_eq!(
             std::fs::read_to_string(&path).unwrap(),
             super::local_api::host_loopback_config()
@@ -1347,9 +1385,9 @@ mod local_api_tests {
     }
 
     /// A change restarts the service this session owns, because it read its configuration when it
-    /// started, and is reported to the next Start once. No change leaves it running.
+    /// started, and owes a Start a teardown until one acknowledges it. No change leaves it running.
     #[test]
-    fn a_host_loopback_change_restarts_the_owned_api_and_is_reported_once() {
+    fn a_host_loopback_change_restarts_the_owned_api_and_owes_a_reset_until_acknowledged() {
         let root = temp_root("host-loopback-restart");
         std::fs::create_dir_all(&root).unwrap();
         let home = root.join("config");
@@ -1372,12 +1410,22 @@ mod local_api_tests {
             .unwrap();
         let second = owned.child_id().unwrap();
         assert_ne!(first, second);
-        assert!(owned.take_host_loopback_change());
-        assert!(!owned.take_host_loopback_change());
+        assert!(owned.host_loopback_reset_pending());
+        // A Start whose teardown failed acknowledges nothing, so asking again still says owed.
+        assert!(owned.host_loopback_reset_pending());
 
+        // Nor is it forgotten with the app: a later session, with the drop-in already in place
+        // and nothing written, still owes it.
         owned.allow_host_loopback(&home).unwrap();
         assert_eq!(owned.child_id(), Some(second), "no change, no restart");
-        assert!(!owned.take_host_loopback_change());
+        let mut later = Service::default();
+        later.allow_host_loopback(&home).unwrap();
+        assert!(later.host_loopback_reset_pending());
+
+        later.acknowledge_host_loopback_reset().unwrap();
+        assert!(!later.host_loopback_reset_pending());
+        assert!(!owned.host_loopback_reset_pending());
+        later.acknowledge_host_loopback_reset().unwrap();
         owned.stop().unwrap();
         std::fs::remove_dir_all(root).unwrap();
     }
