@@ -28,7 +28,10 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { conversationLabel } from "@/lib/channels/label";
-import { channelListQueryOptions } from "@/lib/channels/queries";
+import {
+  channelListQueryOptions,
+  conversationsOnly,
+} from "@/lib/channels/queries";
 import {
   createResponsibilityMutationOptions,
   type ResponsibilityRecord,
@@ -74,12 +77,11 @@ export function NewResponsibilityDialog({
   const availableBots =
     bots.data?.filter((bot) => selectedChannel?.agentIds.includes(bot.id)) ??
     [];
-  const offered =
-    channels.data?.filter(
-      (channel) =>
-        channel.active &&
-        (fixedBot === undefined || channel.agentIds.includes(fixedBot)),
-    ) ?? [];
+  const offered = conversationsOnly(channels.data).filter(
+    (channel) =>
+      channel.active &&
+      (fixedBot === undefined || channel.agentIds.includes(fixedBot)),
+  );
   const create = useMutation(createResponsibilityMutationOptions(queryClient));
   return (
     <Dialog onOpenChange={(next) => !next && onClose()} open>

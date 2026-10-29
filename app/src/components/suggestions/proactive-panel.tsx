@@ -44,7 +44,10 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { conversationLabel } from "@/lib/channels/label";
-import { channelListQueryOptions } from "@/lib/channels/queries";
+import {
+  channelListQueryOptions,
+  conversationsOnly,
+} from "@/lib/channels/queries";
 import {
   changeProactiveSettingMutationOptions,
   createProactiveSettingMutationOptions,
@@ -289,7 +292,7 @@ function TurnOnResearchDialog({
   const [focus, setFocus] = useState("");
   const [intervalMinutes, setIntervalMinutes] = useState(240);
   const id = useId();
-  const eligibleChannels = (channels.data ?? []).filter(
+  const eligibleChannels = conversationsOnly(channels.data).filter(
     (channel) => channel.active && channel.agentIds.includes(agentId),
   );
   const add = useMutation(createProactiveSettingMutationOptions(queryClient));

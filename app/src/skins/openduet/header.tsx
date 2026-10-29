@@ -65,6 +65,7 @@ export function doingLine(busy: boolean, work: ChannelWork[]): string | null {
   if (first?.kind === "handoff")
     return `Asking ${first.botName ?? "another Bot"}`;
   if (first?.kind === "routine") return "Running a routine";
+  if (first?.kind === "task") return "Working on a task";
   return busy ? "Thinking" : null;
 }
 

@@ -9,8 +9,9 @@ export type KnownBot = { name: string; avatarSeed: string };
  * What a conversation is waiting on, one row each, at the end of the transcript.
  *
  * Driven by the server's list rather than this tab's run, because the work is not this tab's: a Bot
- * the conversation's Bot asked answers out of sight, and a routine fires with nobody's browser
- * open. Without these the conversation looks finished while something is still working on it.
+ * the conversation's Bot asked answers out of sight, a routine fires with nobody's browser open, and
+ * a task's turn runs on the server. Without these the conversation looks finished while something is
+ * still working on it.
  *
  * Gone when the list empties, which is when the answer is being written into the conversation or
  * the work is over. The caller hides it while its own run is going, so a turn that has just asked
@@ -53,6 +54,10 @@ export function ChannelWorkRows({
 function labelFor(entry: ChannelWork, name: string | null): string {
   if (entry.kind === "handoff") {
     return name ? `Asking ${name}…` : "Asking another Bot…";
+  }
+  // A task's own turn, in the task's own conversation: the Bot is doing the work it was handed.
+  if (entry.kind === "task") {
+    return name ? `${name} is working on it…` : "Working on it…";
   }
   return name ? `${name} is running a routine…` : "A routine is running…";
 }
