@@ -57,6 +57,7 @@ import {
   PROACTIVE_RUN_KIND,
   PROACTIVE_TASK_KIND,
   type ProactiveScope,
+  type TaskThreads,
 } from "../src/proactive/engine";
 import { createProactiveRoutes } from "../src/proactive/routes";
 import { createProactiveStore } from "../src/proactive/store";
@@ -242,6 +243,7 @@ function engineFor(
   ) => Promise<void> = async () => {},
   durable?: WorkQueue,
   replyContext?: ReturnType<typeof createTaskReplyContext>,
+  tasks: TaskThreads = threads,
 ) {
   const memory = memoryQueue();
   const queue = durable ?? memory.queue;
@@ -264,7 +266,7 @@ function engineFor(
     },
     resolveScope: scopeFor,
     notify: async () => undefined,
-    tasks: threads,
+    tasks,
     startTask: async (scope, input) => {
       const run = {
         scope,
@@ -640,21 +642,32 @@ describe("while a task's turn runs", () => {
   });
 
   test("its conversation is told it is no longer busy once the turn is off the queue, and its work list says so", async () => {
-    const { engine, items } = engineFor();
-    const task = await engine.startAsked(owner.id, bot, {
+    // What the queue held for the turn at the moment the conversation was told.
+    const finishedWhenTold: (boolean | undefined)[] = [];
+    let items: ReturnType<typeof memoryQueue>["items"] | undefined;
+    let key = "";
+    const watching = createTaskThreads({
+      database,
+      store: taskStore,
+      channels: {
+        create: channelStore.create,
+        signalBusy: async (_threadId, busy) => {
+          if (!busy) finishedWhenTold.push(items?.get(key)?.finished);
+        },
+      },
+      actorFor,
+      scopeFor,
+    });
+    const harness = engineFor(async () => {}, undefined, undefined, watching);
+    items = harness.items;
+    const task = await harness.engine.startAsked(owner.id, bot, {
       title: "Prepare the notes",
       instruction: "Prepare the notes.",
     });
-    await engine.idle();
-    const scope = await threads.scope(owner.id, task.id);
-    // Said after the turn was finished on the queue, never before.
-    expect(items.get(`${PROACTIVE_TASK_KIND}:task:${task.id}`)?.finished).toBe(
-      true,
-    );
-    expect(busySignals).toContainEqual({
-      threadId: scope?.threadId ?? "",
-      busy: false,
-    });
+    key = `${PROACTIVE_TASK_KIND}:task:${task.id}`;
+    await harness.engine.idle();
+    // Told once, after the turn was finished on the queue, never before.
+    expect(finishedWhenTold).toEqual([true]);
 
     // The real announcement, on its own: the turn is finished, so the list it carries is empty.
     const real = createTaskThreads({
@@ -665,13 +678,13 @@ describe("while a task's turn runs", () => {
       scopeFor,
     });
     await real.settled?.(owner.id, task.id);
-    expect(
-      (
-        await channelStore.workIn(owner, [
-          { id: task.channelId, threadId: scope?.threadId ?? "" },
-        ])
-      ).get(task.channelId),
-    ).toBeUndefined();
+    const conversation = await channelStore.get(owner, task.channelId);
+    const thread = {
+      id: task.channelId,
+      threadId: conversation?.threadId ?? "",
+    };
+    const work = await channelStore.workIn(owner, [thread]);
+    expect(work.has(task.channelId)).toBe(false);
   });
 });
 
@@ -695,9 +708,9 @@ describe("status", () => {
 
   async function acceptedAnswer() {
     const task = await freshTask();
-    // On the database's clock, and before the reply: a host clock a few milliseconds ahead of the
-    // database's would otherwise put this turn's end after the reply's failure.
-    await turnFor(task.id, { finishedAt: sql`now() - interval '1 minute'` });
+    // Well before the reply: a host clock a few milliseconds ahead of the database's would
+    // otherwise put this turn's end after the reply's failure.
+    await turnFor(task.id, { finishedAt: new Date(Date.now() - 60_000) });
     const questionId = `${prefix}-answered-${randomUUID()}`;
     const question = {
       ownerUserId: owner.id,
