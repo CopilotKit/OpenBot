@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, type SQL, sql } from "drizzle-orm";
 import { createDatabase } from "../src/db/client";
 import { workItems } from "../src/db/schema";
 import { createWorkQueue, type SerialOrder } from "../src/work/queue";
@@ -501,6 +501,60 @@ describe("offering at most so many under one prefix", () => {
       [1, 2, 3, 4, 5].map((n) => queue.offer({ kind, key: `${run}${n}` })),
     );
     expect(results.every((result) => result === "queued")).toBe(true);
+  });
+});
+
+describe("at most so many running for one value", () => {
+  const perPerson = {
+    by: (row: SQL) => sql`${row}.payload->>'ownerUserId'`,
+    max: 2,
+  };
+  const claimFor = async (owner: string, from = queue) =>
+    (
+      await from.claim({
+        kind,
+        owner,
+        leaseMs: 30_000,
+        runningAtMost: perPerson,
+      })
+    ).map((item) => item.key);
+
+  test("leaves the rest queued, not refused, and starts the next as one finishes", async () => {
+    for (const key of ["a-1", "a-2", "a-3", "b-1"])
+      await queue.offer({
+        kind,
+        key,
+        payload: { ownerUserId: key.slice(0, 1) },
+      });
+    const claimed: string[] = [];
+    for (const replica of ["one", "two", "three", "four"])
+      claimed.push(...(await claimFor(replica)));
+    // Another person's item is not held back by the first person's.
+    expect(claimed).toEqual(["a-1", "a-2", "b-1"]);
+
+    await queue.finish({ kind, key: "a-1", owner: "one" });
+    expect(await claimFor("five")).toEqual(["a-3"]);
+  });
+
+  test("five replicas claiming at once start exactly the cap", async () => {
+    for (const n of [1, 2, 3, 4, 5])
+      await queue.offer({
+        kind,
+        key: `a-${n}`,
+        payload: { ownerUserId: "a" },
+      });
+    // A connection each, so all five count what is running at the same moment.
+    const replicas = createDatabase(testDatabaseUrl(), { max: 5 });
+    try {
+      const racing = createWorkQueue(replicas);
+      const claimed = await Promise.all(
+        [1, 2, 3, 4, 5].map((n) => claimFor(`replica-${n}`, racing)),
+      );
+      expect(claimed.flat()).toHaveLength(2);
+    } finally {
+      await replicas.$client.end({ timeout: 5 });
+    }
+    expect(await claimFor("replica-6")).toEqual([]);
   });
 });
 
