@@ -146,7 +146,7 @@ function NotifyPreview({ botName }: { botName: string }) {
           </span>
           <span className="min-w-0 flex-1">
             <span className="flex items-baseline justify-between gap-2">
-              <span className="type-sub truncate font-semibold text-foreground">
+              <span className="type-sub line-clamp-2 font-semibold text-foreground">
                 {preview.title}
               </span>
               <span className="type-caption shrink-0 text-muted-foreground">

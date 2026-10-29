@@ -29,6 +29,7 @@ import {
 import { StepIntro } from "@/components/onboarding/onboarding-frame";
 import { OnboardingWizard } from "@/components/onboarding/onboarding-wizard";
 import { agentKeys } from "@/lib/agents/queries";
+import { authKeys } from "@/lib/auth/queries";
 import type { AppAccess } from "@/lib/app-access/queries";
 import { refreshNotificationPermission } from "@/lib/notifications/permission";
 import { queryClient } from "@/query-client";
@@ -162,19 +163,32 @@ function withQueries(children: ReactNode) {
 }
 
 function drawConnect(
-  props: { failed?: boolean; returned?: ConsentApp | null } = {},
+  props: {
+    failed?: boolean;
+    returned?: ConsentApp | null;
+    role?: "admin" | "member";
+  } = {},
 ) {
   const left: Array<[string, ConsentApp]> = [];
+  const opened: Array<{ label: string; path: string }> = [];
+  if (props.role)
+    queryClient.setQueryData(authKeys.currentUser(), {
+      id: "u1",
+      email: "jo@example.com",
+      name: "Jo",
+      role: props.role,
+    });
   const view = render(
     withQueries(
       <ConnectAppsStep
         failed={props.failed ?? false}
         leaveFor={(url, left_) => left.push([url, left_])}
+        openPage={(target) => opened.push(target)}
         returned={props.returned ?? null}
       />,
     ),
   );
-  return Object.assign(view, { left });
+  return Object.assign(view, { left, opened });
 }
 
 /** One app's row, once the list has arrived. */
@@ -377,9 +391,23 @@ test("a list that could not be read says so, and never claims Connected", async 
 
 test("no apps to connect says how they arrive", async () => {
   apps = [];
-  const view = drawConnect();
+  const view = drawConnect({ role: "member" });
 
   expect(await view.findByText("No apps to connect yet")).toBeTruthy();
+  expect(
+    view.getByText(
+      "When an admin adds apps, you can connect them in Connections.",
+    ),
+  ).toBeTruthy();
+  expect(view.queryByRole("button", { name: "Add apps" })).toBeNull();
+});
+
+test("an admin with no apps to connect is offered the page where apps are added", async () => {
+  apps = [];
+  const view = drawConnect({ role: "admin" });
+
+  fireEvent.click(await view.findByRole("button", { name: "Add apps" }));
+  expect(view.opened).toEqual([{ label: "Plugins", path: "/admin/plugins" }]);
 });
 
 /** Get notified between two plain steps, in the real frame. */
