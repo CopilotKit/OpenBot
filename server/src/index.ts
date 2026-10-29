@@ -285,6 +285,7 @@ import { createSelfHostBanner } from "./self-host-banner";
 import { createTaskReplyContext } from "./tasks/reply-context";
 import { createTaskStore } from "./tasks/store";
 import { createTaskThreads, createTaskTurn } from "./tasks/threads";
+import { builtInBots, taskTools } from "./tasks/tools";
 import { createTeamBots } from "./team-bots/team-bots";
 import {
   createPackageStatusReader,
@@ -1472,9 +1473,21 @@ const memorySweep = repeatAfterEach(async () => {
 // Follow-ups a Bot schedules for itself, on the shared work queue. See agents/wake-up.ts.
 const wakeUpStore = createWakeUpStore(database, { auditStore: bootAuditStore });
 
+/** Whether OpenBot runs a Bot itself: only those are offered `start_task`. See tasks/tools.ts. */
+const isBuiltInBot = builtInBots(database);
+
 const loadToolsForActor =
   (actorId: string, initiator: AuditInitiator = PERSON_INITIATOR) =>
   async (botId: string) => [
+    // Hands bigger work to a task of its own. Read when a turn is built, long after the engine is.
+    ...(await taskTools({
+      actorId,
+      botId,
+      initiator,
+      start: ({ ownerUserId, agentId, task }) =>
+        proactiveEngine.startAsked(ownerUserId, agentId, task),
+      builtIn: isBuiltInBot,
+    })),
     ...wakeUpTools({
       store: wakeUpStore,
       ownerUserId: actorId,

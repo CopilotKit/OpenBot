@@ -69,6 +69,7 @@ import { createTaskReplyContext } from "../src/tasks/reply-context";
 import { createTaskRoutes } from "../src/tasks/routes";
 import { createTaskStore } from "../src/tasks/store";
 import { createTaskThreads, createTaskTurn } from "../src/tasks/threads";
+import { builtInBots, START_TASK_TOOL, taskTools } from "../src/tasks/tools";
 import type { TaskRecord } from "../src/tasks/types";
 import {
   createWorkQueue,
@@ -2254,6 +2255,241 @@ describe("a task whose turn fails", () => {
     expect((await again(owner.id, fresh.id)).status).toBe(200);
     await engine.idle();
     expect(readTaskBrief(started[1]?.text ?? "")).toBe("Prepare the notes.");
+  });
+});
+
+describe("start_task", () => {
+  test("opens the task with a conversation of its own and starts exactly one turn there", async () => {
+    const chat = await chatOf();
+    const { engine, items, started } = engineFor();
+    const [tool] = await taskTools({
+      actorId: owner.id,
+      botId: bot,
+      initiator: { kind: "person" },
+      start: ({ ownerUserId, agentId, task }) =>
+        engine.startAsked(ownerUserId, agentId, task),
+      builtIn: async () => true,
+    });
+    if (tool?.name !== START_TASK_TOOL)
+      throw new Error(`${START_TASK_TOOL} is not held`);
+
+    const instruction =
+      "Draft a reply to Rosa saying we'll take Oat Satin instead of the discontinued glaze.";
+    const result = JSON.parse(
+      await tool.execute({
+        title: "Draft a reply to Rosa about Oat Satin",
+        instruction,
+        why: "She needs an answer before Friday's firing.",
+        source: "Gmail",
+      }),
+    ) as { taskId: string; channelId: string; title: string };
+    await engine.idle();
+
+    expect(result.title).toBe("Draft a reply to Rosa about Oat Satin");
+    const task = await taskStore.get(owner.id, result.taskId);
+    expect(task).toMatchObject({
+      botId: bot,
+      channelId: result.channelId,
+      origin: "asked",
+      why: "She needs an answer before Friday's firing.",
+      sourceApp: "Gmail",
+      suggestionId: null,
+      resolvedAt: null,
+    });
+    // Its own conversation, with the Bot alone, and not the one it was asked in.
+    expect(task.channelId).not.toBe(chat.id);
+    const conversation = await channelStore.get(owner, task.channelId);
+    expect(conversation?.agentIds).toEqual([bot]);
+
+    // One turn, in that conversation, with the ask as the person's message under the task frame.
+    expect(started).toHaveLength(1);
+    expect(started[0]?.scope).toEqual({
+      ownerUserId: owner.id,
+      channelId: task.channelId,
+      agentId: bot,
+      threadId: conversation?.threadId ?? "",
+    });
+    expect(started[0]?.runId).toBe(`task-${task.id}`);
+    expect(started[0]?.text).toBe(frameTaskBrief(instruction));
+    expect(readTaskBrief(started[0]?.text ?? "")).toBe(instruction);
+    expect(items.get(`${PROACTIVE_TASK_KIND}:task:${task.id}`)?.finished).toBe(
+      true,
+    );
+  });
+
+  test("refuses what it cannot start, and starts nothing", async () => {
+    const { engine, started } = engineFor();
+    const [tool] = await taskTools({
+      actorId: owner.id,
+      botId: bot,
+      initiator: { kind: "person" },
+      start: ({ ownerUserId, agentId, task }) =>
+        engine.startAsked(ownerUserId, agentId, task),
+      builtIn: async () => true,
+    });
+    for (const args of [
+      {},
+      { title: "No instruction" },
+      { title: "x".repeat(161), instruction: "Do it." },
+      { title: "Linked", instruction: "Do it.", link: "javascript:alert(1)" },
+      { title: "Extra", instruction: "Do it.", runAs: "someone-else" },
+    ])
+      expect(await tool?.execute(args)).toStartWith("Refused.");
+    await engine.idle();
+    expect(started).toEqual([]);
+  });
+
+  test("is offered only to a Bot OpenBot runs itself, never to one behind a remote agent framework", async () => {
+    const builtInStore = createAgentProfileStore(database, undefined);
+    const builtIn = await builtInStore.create(owner, {
+      name: "In the box",
+      title: "Runs here",
+      roleDescription: "Works for one person.",
+      visibility: "private",
+      systemPrompt: "You work for one person.",
+    });
+    try {
+      const isBuiltIn = builtInBots(database);
+      const held = async (botId: string) =>
+        (
+          await taskTools({
+            actorId: owner.id,
+            botId,
+            initiator: { kind: "person" },
+            start: async () => {
+              throw new Error("Never started here.");
+            },
+            builtIn: isBuiltIn,
+          })
+        ).map((tool) => tool.name);
+      expect(await held(builtIn.id)).toEqual([START_TASK_TOOL]);
+      // This file's Bot runs at an AG-UI endpoint, as a remote agent framework's does.
+      expect(await held(bot)).toEqual([]);
+      expect(await held("no-such-bot")).toEqual([]);
+    } finally {
+      await database
+        .delete(agentProfiles)
+        .where(eq(agentProfiles.agentId, builtIn.id));
+      await database.delete(agents).where(eq(agents.id, builtIn.id));
+    }
+  });
+});
+
+describe("the + on Tasks", () => {
+  function plus() {
+    const { engine, started } = engineFor();
+    const routes = createTaskRoutes(
+      taskStore,
+      async (context, next) => {
+        context.set("actor", {
+          id: context.req.header("x-person") ?? owner.id,
+        } as AuthenticatedActor);
+        await next();
+      },
+      {
+        intake: {
+          start: (ownerUserId, agentId, task) =>
+            engine.startAsked(ownerUserId, agentId, task),
+        },
+      },
+    );
+    const post = (path: string, body: unknown, person = owner.id) =>
+      routes.request(path, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-person": person },
+        body: JSON.stringify(body),
+      });
+    return { engine, started, post };
+  }
+
+  test("Start now opens a task in a conversation of its own and starts it, titled from its first sentence", async () => {
+    const chat = await chatOf();
+    const { engine, started, post } = plus();
+    const instruction =
+      "Find a time for coffee with Sam next week.\nHe prefers mornings.";
+    const response = await post("/", { botId: bot, instruction });
+    expect(response.status).toBe(201);
+    const { task } = (await response.json()) as { task: TaskRecord };
+    await engine.idle();
+
+    expect(task).toMatchObject({
+      botId: bot,
+      title: "Find a time for coffee with Sam next week",
+      origin: "asked",
+      suggestionId: null,
+      resolvedAt: null,
+    });
+    expect(task.channelId).not.toBe(chat.id);
+    const conversation = await channelStore.get(owner, task.channelId);
+    expect(task.threadId).toBe(conversation?.threadId ?? "missing");
+    // One turn, in its conversation, carrying the whole ask.
+    expect(started).toHaveLength(1);
+    expect(started[0]?.scope.channelId).toBe(task.channelId);
+    expect(started[0]?.text).toBe(frameTaskBrief(instruction));
+    expect((await taskStore.list(owner.id)).map((row) => row.id)).toContain(
+      task.id,
+    );
+  });
+
+  test("a title the person gives is kept", async () => {
+    const { engine, post } = plus();
+    const response = await post("/", {
+      botId: bot,
+      title: "Coffee with Sam",
+      instruction: "Find a time for coffee with Sam next week.",
+    });
+    const { task } = (await response.json()) as { task: TaskRecord };
+    await engine.idle();
+    expect(task.title).toBe("Coffee with Sam");
+  });
+
+  test("an empty ask, or no Bot, is refused with what to do", async () => {
+    const { post } = plus();
+    const empty = await post("/", { botId: bot, instruction: "   " });
+    expect(empty.status).toBe(400);
+    expect(((await empty.json()) as { error: string }).error).toContain(
+      "Say what your Bot should do",
+    );
+    const noBot = await post("/", { instruction: "Do a thing" });
+    expect(noBot.status).toBe(400);
+    expect(((await noBot.json()) as { error: string }).error).toBe(
+      "Choose one of your Bots.",
+    );
+    const extra = await post("/", {
+      botId: bot,
+      instruction: "Do a thing",
+      runAs: "someone-else",
+    });
+    expect(extra.status).toBe(400);
+  });
+
+  test("a Bot the person cannot reach is the same as no Bot", async () => {
+    const { started, post } = plus();
+    const before = (await taskStore.list(other.id)).length;
+    const response = await post(
+      "/",
+      { botId: bot, instruction: "Read their mail" },
+      other.id,
+    );
+    expect(response.status).toBe(404);
+    expect(((await response.json()) as { error: string }).error).toBe(
+      "Couldn't find that Bot. Reload the page.",
+    );
+    expect(started).toHaveLength(0);
+    expect(await taskStore.list(other.id)).toHaveLength(before);
+  });
+
+  test("without anywhere to start a task, the + is not served", async () => {
+    const routes = createTaskRoutes(taskStore, async (context, next) => {
+      context.set("actor", { id: owner.id } as AuthenticatedActor);
+      await next();
+    });
+    const response = await routes.request("/", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ botId: bot, instruction: "Do a thing" }),
+    });
+    expect(response.status).toBe(404);
   });
 });
 

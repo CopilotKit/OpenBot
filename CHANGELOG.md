@@ -89,6 +89,11 @@ queue and the approval and question inboxes on every read. A turn that fails is 
 reads as failed with the reason in plain words and can be tried again; replying in a task's
 conversation steers it, in order, even across a restart. The new `/api/tasks` routes serve it.
 
+A Bot OpenBot runs itself now hands anything bigger than a quick answer to a task of its own
+(`start_task`) and answers "On it" where it was asked. A Bot behind a remote agent framework is not
+offered the tool; its tasks start from its suggestions, or from `POST /api/tasks`, which starts one
+with any of the person's Bots.
+
 ### A computer closes browsers nobody is using when its memory runs high
 
 A computer runs one browser for each Bot that is browsing, and the only limits were a count and half
