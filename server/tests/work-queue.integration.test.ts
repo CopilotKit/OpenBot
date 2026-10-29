@@ -198,6 +198,39 @@ describe("claiming durable work", () => {
     ).toHaveLength(0);
   });
 
+  test("finishing keeps what the work came to on its payload, as an object, only while it is ours", async () => {
+    await queue.offer({ kind, key: "bot-a", payload: { botId: "bot-a" } });
+    await queue.claim({ kind, owner: "replica-1", leaseMs: 30_000 });
+    const ending = { messageId: "run-1:reply", asks: true };
+    expect(
+      await queue.finish({
+        kind,
+        key: "bot-a",
+        owner: "replica-2",
+        payload: { ending: { messageId: "stale", asks: false } },
+      }),
+    ).toBe(false);
+    expect(
+      await queue.finish({
+        kind,
+        key: "bot-a",
+        owner: "replica-1",
+        payload: { ending },
+      }),
+    ).toBe(true);
+    const [row] = await database
+      .select({
+        payload: workItems.payload,
+        asks: sql<string>`${workItems.payload}->'ending'->>'asks'`,
+      })
+      .from(workItems)
+      .where(and(eq(workItems.kind, kind), eq(workItems.key, "bot-a")));
+    expect(row).toEqual({
+      payload: { botId: "bot-a", ending },
+      asks: "true",
+    });
+  });
+
   test("finished rows are swept once they are past their retention", async () => {
     await queue.offer({ kind, key: "bot-a" });
     await queue.claim({ kind, owner: "replica-1", leaseMs: 30_000 });
