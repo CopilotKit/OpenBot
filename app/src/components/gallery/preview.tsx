@@ -62,7 +62,7 @@ export function GalleryPreview({
   if (shown.length === 0) {
     return (
       <p className="text-muted-foreground text-sm">
-        This Bot has not been granted any components, so it answers in prose.
+        This Bot can't use any components yet. It answers in text.
       </p>
     );
   }
@@ -117,8 +117,8 @@ function PreviewOf({ name }: { name: string }) {
      */
     return (
       <p className="text-muted-foreground text-sm">
-        Draws this deployment's own records, so it has nothing to show until a
-        Bot asks for it.
+        Shows OpenBot's own records. There's nothing to show until a Bot asks
+        for it.
       </p>
     );
   }

@@ -223,7 +223,7 @@ export function VoiceCallWidget({
               title={
                 state.muted
                   ? "Unmute your microphone"
-                  : "Mute your microphone · you’ll still hear the agent"
+                  : "Mute your microphone · you’ll still hear the Bot"
               }
               variant="secondary"
               size="icon"
@@ -264,7 +264,7 @@ export function VoiceCallWidget({
                 <div className="mt-3 h-16 overflow-y-auto rounded-xl bg-muted/40 p-2 text-xs leading-relaxed text-muted-foreground">
                   {state.reply ||
                     state.transcript ||
-                    "Speak when you’re ready. This call uses the current chat."}
+                    "Speak when you’re ready. This call is part of this conversation."}
                 </div>
               </motion.div>
             )}

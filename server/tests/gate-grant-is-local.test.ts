@@ -161,7 +161,7 @@ describe("connectionTokenFor asks the broker where the grant lives", () => {
         actorId: asker,
       }),
     ).rejects.toThrow(
-      "Team GitHub is shared across this deployment and no account is connected to it yet. Ask an administrator to connect it.",
+      "Team GitHub uses a shared account, and nobody has connected it yet. Ask an admin to connect it.",
     );
     expect(sentAs).toEqual([]);
   });

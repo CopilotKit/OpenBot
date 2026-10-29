@@ -253,9 +253,8 @@ export function DemonstrationRecorder({
       <div>
         <h3 className="font-semibold">Teach a browser workflow</h3>
         <p className="mt-1 text-xs text-muted-foreground">
-          Take control, record the steps, then review a skill draft. Typed
-          values and images are omitted. Sensitive fields stay in your hands.
-          Recording stops automatically after ten minutes.
+          Take control, record the steps, then review the skill it drafts. Typed
+          values and images aren't recorded. Recording stops after ten minutes.
         </p>
       </div>
       {active ? (
@@ -353,7 +352,7 @@ export function DemonstrationRecorder({
               {recording.status === "published" && recording.skillSlug ? (
                 <>
                   <Link
-                    to="/skills"
+                    to="/capabilities/skills"
                     search={{ edit: recording.skillSlug }}
                     className="text-xs underline"
                   >
@@ -402,8 +401,7 @@ export function DemonstrationRecorder({
         <div className="grid gap-3 border-t pt-4">
           <h3 className="font-semibold">Review and edit the skill</h3>
           <p className="text-xs text-muted-foreground">
-            Replace parameter names and clarify the expected outcome. Saving
-            uses the same skill permissions as Skills.
+            Rename the inputs and say what the result should be.
           </p>
           <SkillFields
             key={draft.sourceRecordingId}
@@ -432,7 +430,7 @@ export function DemonstrationRecorder({
                 setSaveError(
                   error instanceof Error
                     ? error
-                    : new Error("The skill could not be saved."),
+                    : new Error("Couldn't save the skill."),
                 );
                 await refresh();
               }
@@ -442,9 +440,8 @@ export function DemonstrationRecorder({
       )}
       {savedSlug && (
         <p className="text-sm">
-          /{savedSlug} is ready on this Bot. Invoke it in the conversation with
-          the inputs you want to use, or choose Run on a schedule to rerun it as
-          a routine.
+          /{savedSlug} is ready on this Bot. Type it in the conversation with
+          your inputs, or choose Run on a schedule to make it a routine.
         </p>
       )}
     </section>

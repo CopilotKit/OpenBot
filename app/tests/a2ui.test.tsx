@@ -1,120 +1,111 @@
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
+import { CopilotKitProvider } from "@copilotkit/react-core/v2";
 import {
-  type A2UIClientEventMessage,
-  A2UIProvider,
-  A2UIRenderer,
-  type ServerToClientMessage,
-  useA2UIActions,
-} from "@copilotkit/a2ui-renderer";
+  GenerativeUISurface,
+  useGenerativeUIRuntime,
+} from "@copilotkit/react-core/v2/generative-ui";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { cleanup, render, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { cleanup, render } from "@testing-library/react";
 import { useEffect } from "react";
-import { a2uiProviderOptions, OPENBOT_A2UI_CATALOG } from "@/lib/copilot/a2ui";
+import {
+  A2UI_BASIC_COMPONENTS,
+  generativeUiProviderOptions,
+  OPENBOT_UI,
+  OPENBOT_UI_THEME,
+} from "@/lib/copilot/a2ui";
 
 beforeAll(() => GlobalRegistrator.register());
 afterEach(cleanup);
 afterAll(() => GlobalRegistrator.unregister());
 
-const operations: ServerToClientMessage[] = [
-  {
-    version: "v0.9",
-    createSurface: { surfaceId: "trip", catalogId: OPENBOT_A2UI_CATALOG.id },
-  },
-  {
-    version: "v0.9",
-    updateComponents: {
+const THREAD = "thread-trip";
+
+/** What the runtime commits for a `render_ui` call that targets the "trip" surface. */
+function Committed() {
+  const runtime = useGenerativeUIRuntime();
+  useEffect(() => {
+    if (!runtime) return;
+    runtime.manager.setActiveThread(THREAD);
+    runtime.manager.ingest(THREAD, undefined, {
       surfaceId: "trip",
-      components: [
-        { id: "root", component: "Card", child: "fields" },
+      target: "trip",
+      catalogId: OPENBOT_UI.id,
+      status: "ready",
+      rejected: [],
+      operations: [
         {
-          id: "fields",
-          component: "Column",
-          children: ["title", "destination", "confirm"],
-        },
-        {
-          id: "title",
-          component: "Text",
-          text: "Trip preferences",
-          variant: "h3",
-        },
-        {
-          id: "destination",
-          component: "TextField",
-          label: "Destination",
-          value: { path: "/destination" },
-        },
-        {
-          id: "confirm",
-          component: "Button",
-          variant: "primary",
-          child: "confirm-label",
-          action: {
-            event: {
-              name: "confirm_trip",
-              context: { destination: { path: "/destination" } },
-            },
+          version: "v1.0",
+          createSurface: {
+            surfaceId: "trip",
+            catalogId: OPENBOT_UI.id,
+            dataModel: { destination: "Paris" },
           },
         },
-        { id: "confirm-label", component: "Text", text: "Confirm" },
+        {
+          version: "v1.0",
+          updateComponents: {
+            surfaceId: "trip",
+            components: [
+              { id: "root", component: "Card", child: "fields" },
+              {
+                id: "fields",
+                component: "Column",
+                children: ["title", "destination"],
+              },
+              { id: "title", component: "Text", text: "Trip preferences" },
+              {
+                id: "destination",
+                component: "TextField",
+                label: "Destination",
+                value: { "@path": "/destination" },
+              },
+            ],
+          },
+        },
       ],
-    },
-  },
-  {
-    version: "v0.9",
-    updateDataModel: {
-      surfaceId: "trip",
-      path: "/",
-      value: { destination: "Paris" },
-    },
-  },
-];
-
-function TripSurface() {
-  const { processMessages } = useA2UIActions();
-  useEffect(() => {
-    processMessages(operations);
-  }, [processMessages]);
-  return <A2UIRenderer surfaceId="trip" />;
+    });
+  }, [runtime]);
+  return null;
 }
 
-test("the public catalog renders a generated form and its action resolves the edited data", async () => {
-  const user = userEvent.setup({ document });
-  const actions: A2UIClientEventMessage[] = [];
+test("the catalog draws a committed surface in OpenBot's tokens", async () => {
   const view = render(
-    <A2UIProvider
-      catalog={OPENBOT_A2UI_CATALOG}
-      onAction={(action) => {
-        actions.push(action);
-      }}
-    >
-      <TripSurface />
-    </A2UIProvider>,
+    <CopilotKitProvider {...generativeUiProviderOptions(true)}>
+      <Committed />
+      <GenerativeUISurface id="trip" />
+    </CopilotKitProvider>,
   );
   expect(await view.findByText("Trip preferences")).toBeTruthy();
   const field = view.getByRole("textbox", { name: "Destination" });
-  expect(field.getAttribute("value")).toBe("Paris");
-  await user.clear(field);
-  await user.type(field, "Kyoto");
-  await user.click(view.getByRole("button", { name: "Confirm" }));
-  await waitFor(() => expect(actions).toHaveLength(1));
-  expect(actions[0]).toMatchObject({
-    userAction: {
-      name: "confirm_trip",
-      surfaceId: "trip",
-      context: { destination: "Kyoto" },
-    },
-  });
-  expect(
-    view.container.querySelector('[data-openbot-a2ui="Card"]'),
-  ).toBeTruthy();
+  expect((field as HTMLInputElement).value).toBe("Paris");
+
+  // The theme is a stylesheet on the surface root, and it points at the app's own variables, which
+  // switch under `.dark` themselves.
+  const sheet = view.container.querySelector(".a2ui-surface style");
+  expect(sheet?.textContent).toContain("--a2ui-color-accent:var(--primary)");
+  expect(sheet?.textContent).toContain("--a2ui-color-surface:var(--card)");
 });
 
-test("disabled and unresolved deployments do not activate or advertise the A2UI catalog", () => {
-  expect(a2uiProviderOptions(false)).toEqual({});
-  expect(a2uiProviderOptions(undefined)).toEqual({});
-  expect(a2uiProviderOptions(true).a2ui?.catalog).toBe(OPENBOT_A2UI_CATALOG);
-  // Existing OpenBot gallery components retain their separate per-Bot tool/grant path.
-  expect(OPENBOT_A2UI_CATALOG.components.has("showTable")).toBe(false);
-  expect(OPENBOT_A2UI_CATALOG.components.has("askForm")).toBe(false);
+test("disabled and unresolved deployments do not send the catalog", () => {
+  expect(generativeUiProviderOptions(false)).toEqual({});
+  expect(generativeUiProviderOptions(undefined)).toEqual({});
+  expect(generativeUiProviderOptions(true).generativeUI).toEqual({
+    ui: OPENBOT_UI,
+    theme: OPENBOT_UI_THEME,
+  });
+});
+
+test("the catalog is the A2UI 1.0 basic components, without the gallery", () => {
+  expect(OPENBOT_UI.id).toBe("openbot/ui@1");
+  // The same set the A2UI 0.9 basic catalog drew, under their A2UI names, and nothing else.
+  expect([...OPENBOT_UI.components.keys()].sort()).toEqual(
+    [...A2UI_BASIC_COMPONENTS].sort(),
+  );
+  expect(A2UI_BASIC_COMPONENTS).toHaveLength(18);
+  // The rest of the standard catalog stays out until an admin can see and govern it.
+  expect(OPENBOT_UI.components.has("Table")).toBe(false);
+  expect(OPENBOT_UI.components.has("LinkCard")).toBe(false);
+  // The gallery components keep their separate per-Bot tool and grant path.
+  expect(OPENBOT_UI.components.has("showTable")).toBe(false);
+  expect(OPENBOT_UI.components.has("askForm")).toBe(false);
 });

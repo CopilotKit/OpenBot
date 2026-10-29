@@ -27,7 +27,7 @@ import { testEnvironment } from "./support/environment";
  * source said. Identical on both providers, and it names no vendor and no setting.
  */
 const PERSON_UNCONFIGURED =
-  "Connected apps are not set up for this deployment, so nothing was asked. An administrator can set them up.";
+  "Connecting apps isn't set up yet, so nothing was asked. Ask an admin to set it up.";
 
 /**
  * The handful of reads one route makes, typed against the store that really answers them.
@@ -140,6 +140,8 @@ function serverRecord(row: { id: string; url: string }): ServerRecord {
     authScheme: null,
     accountMode: null,
     sharedVendorConnected: false,
+    ownerGrants: "admin",
+    ownerGrantsChosen: null,
     tools: [],
     withdrawn: [],
   };
@@ -531,8 +533,7 @@ describe("granting one Bot to another", () => {
 
     expect(response.status).toBe(403);
     expect(await response.json()).toEqual({
-      error:
-        "An administrator decides which Bots may hand work to another Bot.",
+      error: "Only an admin can choose which Bots hand work to another Bot.",
     });
     expect(calls).toEqual([]);
   });
@@ -687,7 +688,7 @@ describe("what a bot grant refusal reveals", () => {
     // One sentence for all three, so nothing distinguishes "exists" from "does not".
     expect(said.size).toBe(1);
     expect([...said][0]).toBe(
-      "An administrator decides which Bots may hand work to another Bot.",
+      "Only an admin can choose which Bots hand work to another Bot.",
     );
   });
 
@@ -1524,8 +1525,7 @@ const DEV_ACTOR_ACCOUNT: AccountRef = {
  * assertion rather than a call to `connectedAccountsUrlFor`, because an assertion that builds the
  * expected value the way the code does cannot fail when the code's answer changes.
  */
-const RETURN_URL =
-  "http://localhost:3001/settings/connected-accounts/composio-linear";
+const RETURN_URL = "http://localhost:3001/connections/composio-linear";
 const ADMIN_RETURN_URL = "http://localhost:3001/admin/plugins/composio-linear";
 
 /**
@@ -2136,12 +2136,12 @@ describe("connecting a brokered app", () => {
     // The pre-0030 row: brokered, connected, and carrying no scheme at all.
     const held = await connectAt("composio-slack");
     expect(held.status).toBe(400);
-    expect(String((await held.json()).error)).toMatch(/cannot tell how/);
+    expect(String((await held.json()).error)).toMatch(/can't tell how/);
 
     // And a scheme the vendor names that this deployment does not.
     const drifted = await connectAt("composio-trello");
     expect(drifted.status).toBe(400);
-    expect(String((await drifted.json()).error)).toMatch(/cannot tell how/);
+    expect(String((await drifted.json()).error)).toMatch(/can't tell how/);
 
     expect(authorized).toEqual([]);
   });
@@ -2840,7 +2840,7 @@ describe("connecting a key-type Shared app", () => {
 
     expect(response.status).toBe(403);
     expect((await response.json()).error).toBe(
-      "An administrator connects shared apps.",
+      "Only an admin can connect shared apps.",
     );
     // Nothing was asked of Composio and nothing was sent: the refusal happens before either.
     expect(asked).toEqual([]);
@@ -3041,10 +3041,10 @@ describe("confirming and ending a brokered connection", () => {
     expect(confirmResponse.status).toBe(400);
     expect(disconnectResponse.status).toBe(400);
     expect((await confirmResponse.json()).error).toBe(
-      "That app is not reached through a broker.",
+      "That app doesn't connect this way.",
     );
     expect((await disconnectResponse.json()).error).toBe(
-      "That app is not reached through a broker.",
+      "That app doesn't connect this way.",
     );
     // And the store was left alone: a confirm here would write a row for an app whose connection
     // is not Composio's to answer about, and a disconnect would ask the broker to revoke a grant
@@ -3212,7 +3212,7 @@ describe("re-checking a brokered connection", () => {
 
     expect(response.status).toBe(400);
     expect((await response.json()).error).toBe(
-      "That app is not reached through a broker.",
+      "That app doesn't connect this way.",
     );
     expect(rechecked).toEqual([]);
   });

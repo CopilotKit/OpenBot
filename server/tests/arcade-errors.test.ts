@@ -64,7 +64,7 @@ describe("callTool failures", () => {
     const result = await callTool(connection, "Gmail.SendEmail", {});
     expect(result.isError).toBe(true);
     expect(result.text).toBe(
-      "Gmail.SendEmail has not been authorized on this account yet. Authorize it in Settings → Connected accounts and ask again.",
+      "Gmail.SendEmail has not been authorized on this account yet. Authorize it in Connections and ask again.",
     );
     expect(result.text).not.toContain("http");
     expect(result.text).not.toContain("SECRET");
@@ -153,7 +153,7 @@ describe("callTool successes", () => {
     expect(result.text).not.toContain("SECRET");
     expect(result.text).not.toContain("LEAKME");
     expect(result.text).toBe(
-      "Gmail.SendEmail has not been authorized on this account yet. Authorize it in Settings → Connected accounts and ask again.",
+      "Gmail.SendEmail has not been authorized on this account yet. Authorize it in Connections and ask again.",
     );
     expect(result.isError).toBe(true);
   });

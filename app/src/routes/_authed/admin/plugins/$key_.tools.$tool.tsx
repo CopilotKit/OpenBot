@@ -1,3 +1,4 @@
+import { IconPlugOff, IconRobot, IconTool } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useParams } from "@tanstack/react-router";
 import { useState } from "react";
@@ -93,7 +94,7 @@ function RouteComponent() {
     return (
       <PageShell backButton={back} title={toolName}>
         <p className="mt-12 text-destructive text-sm" role="alert">
-          Plugins could not be loaded.
+          Couldn't load plugins. Reload the page.
         </p>
       </PageShell>
     );
@@ -103,17 +104,20 @@ function RouteComponent() {
     return (
       <PageShell
         backButton={back}
-        description="This connector does not advertise a tool by that name."
+        description="This connector has no tool with that name."
         title={toolName}
       >
         {/*
          * Says which of the two it is. A tool disappears from this list when the vendor stops
          * offering it, and that reads very differently from a mistyped address.
          */}
-        <PageEmpty>
+        <PageEmpty
+          icon={server ? IconTool : IconPlugOff}
+          title={server ? "Tool not found" : "This connector is off"}
+        >
           {server
-            ? "It may have been withdrawn since the tool list was last refreshed."
-            : "This deployment has not enabled that connector."}
+            ? "It may have been removed since the tool list was last refreshed."
+            : "Turn it on to see its tools."}
         </PageEmpty>
       </PageShell>
     );
@@ -137,7 +141,7 @@ function RouteComponent() {
   return (
     <PageShell
       backButton={back}
-      description={tool.description || "This tool came with no description."}
+      description={tool.description || "This tool has no description."}
       title={toolName}
     >
       {error ? (
@@ -149,8 +153,8 @@ function RouteComponent() {
       <PageSection
         description={
           tool.effect === "write"
-            ? "This tool changes something at the vendor. A boundary written about writes applies to it, and it is refused when one matches."
-            : "This tool only reads. A boundary written about writes does not apply to it."
+            ? "This tool changes something at the vendor. Boundaries about writes apply to it."
+            : "This tool only reads. Boundaries about writes don't apply to it."
         }
         title="What it does"
       >
@@ -164,8 +168,8 @@ function RouteComponent() {
             <ItemContent>
               <ItemTitle>Effect</ItemTitle>
               <ItemDescription>
-                Decided by the connector, not by the tool's name. Anything
-                unrecognised counts as a write.
+                Set by the connector, not the tool's name. Anything unknown
+                counts as a write.
               </ItemDescription>
             </ItemContent>
             <ItemActions>
@@ -184,13 +188,12 @@ function RouteComponent() {
       </PageSection>
 
       <PageSection
-        description="A Bot may call this tool only while its switch is on. Turning one off takes effect on the next call, with nothing cached in between."
+        description="A Bot can call this tool only while its switch is on. Turning it off applies from the next call."
         title="Bots"
       >
         {bots.length === 0 ? (
-          <PageEmpty>
-            This deployment has no Bots yet, so there is nobody to grant this
-            to.
+          <PageEmpty icon={IconRobot} title="No Bots yet">
+            Create one to give it this tool.
           </PageEmpty>
         ) : (
           <PageRows>
@@ -205,9 +208,9 @@ function RouteComponent() {
                         {bot.hidden ? "Hidden from your roster. " : ""}
                         {held
                           ? canCallBack(bot)
-                            ? "May call this tool. Every call is still checked against the boundaries and written to the audit trail."
-                            : "Granted, but this Bot has no credential for calling tools back, so every call is refused before it reaches the boundary. Issue one on its own page, or set AGENT_TOOL_TOKEN for the deployment."
-                          : "Cannot call this tool. It is not offered to the model at all, so it has nothing to refuse."}
+                            ? "Can call this tool. Every call is still checked against boundaries and logged in Audit."
+                            : "Allowed, but this Bot has no callback token. Every call is refused. Issue one on its page, or set AGENT_TOOL_TOKEN."
+                          : "Can't call this tool. The Bot never sees it."}
                       </ItemDescription>
                     </ItemContent>
                     <ItemActions>

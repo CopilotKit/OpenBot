@@ -182,15 +182,17 @@ test("/bot with an empty agent query uses the normal default Bot", async () => {
   expect(view.getByTestId("copilot-chat").dataset.agentId).toBe(
     "picked-harness",
   );
-  expect(view.queryByText('This deployment has no Bot called "".')).toBeNull();
-  expect(view.queryByText("This deployment has no Bots yet.")).toBeNull();
+  expect(view.queryByText('There\'s no Bot called "".')).toBeNull();
+  expect(view.queryByText("There are no Bots yet.")).toBeNull();
 });
 
 test("/bot reports a failed initial roster load instead of claiming there are no Bots", async () => {
   const view = renderBot(queryClientWithFailingAgents());
 
-  expect(await view.findByText("Bots couldn't be loaded.")).toBeTruthy();
-  expect(view.queryByText("This deployment has no Bots yet.")).toBeNull();
+  expect(
+    await view.findByText("Couldn't load your Bots. Reload the page."),
+  ).toBeTruthy();
+  expect(view.queryByText("There are no Bots yet.")).toBeNull();
 });
 
 test("/bot preserves an explicit agent, including the built-in first agent", async () => {
@@ -218,7 +220,7 @@ test("/bot preserves an explicit unknown agent as a clear missing-bot state", as
   );
 
   expect(
-    await view.findByText('This deployment has no Bot called "missing-agent".'),
+    await view.findByText('There\'s no Bot called "missing-agent".'),
   ).toBeTruthy();
   expect(view.queryByTestId("copilot-chat")).toBeNull();
 });
@@ -241,9 +243,7 @@ test("/bot loads a hidden explicit agent from the detail endpoint", async () => 
 
   expect(await view.findByRole("heading", { name: "Hidden Bot" })).toBeTruthy();
   expect(view.getByTestId("copilot-chat").dataset.agentId).toBe("hidden-bot");
-  expect(
-    view.queryByText('This deployment has no Bot called "hidden-bot".'),
-  ).toBeNull();
+  expect(view.queryByText('There\'s no Bot called "hidden-bot".')).toBeNull();
 });
 
 test("/bot hidden lookup does not collide with the shared agent detail cache", async () => {
@@ -263,9 +263,7 @@ test("/bot hidden lookup does not collide with the shared agent detail cache", a
 
   expect(await view.findByRole("heading", { name: "Hidden Bot" })).toBeTruthy();
   expect(view.getByTestId("copilot-chat").dataset.agentId).toBe("hidden-bot");
-  expect(
-    view.queryByText('This deployment has no Bot called "hidden-bot".'),
-  ).toBeNull();
+  expect(view.queryByText('There\'s no Bot called "hidden-bot".')).toBeNull();
 });
 
 test("/bot reports an explicit agent detail load failure", async () => {
@@ -279,7 +277,7 @@ test("/bot reports an explicit agent detail load failure", async () => {
   );
 
   expect((await view.findByRole("alert")).textContent).toBe(
-    "Bot couldn't be loaded.",
+    "Couldn't load this Bot. Reload the page.",
   );
   expect(view.queryByTestId("copilot-chat")).toBeNull();
 });
@@ -341,7 +339,7 @@ test("/bot opens a live Computer sidebar with ownership controls and preserves t
   ).toBe(false);
   expect(
     sidebar.getByRole("button", {
-      name: "Open the assistant's screen full size",
+      name: "Open the Bot's screen full size",
     }),
   ).toBeTruthy();
   expect(sidebar.getByRole("heading", { name: "Activity" })).toBeTruthy();

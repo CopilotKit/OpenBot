@@ -99,12 +99,12 @@ export function checkAgentEndpoint(
     return { allowed: true, url: new URL(raw.trim()).toString() };
   }
   if (!verdict.allowed) {
-    // The navigation wording talks about "the assistant opening" a page, which is not what is
+    // The navigation wording talks about "the Bot opening" a page, which is not what is
     // happening here, so the reason is restated for the form surface.
     return {
       allowed: false,
       reason: verdict.reason.replace(
-        /the assistant is never allowed to open it\.|the assistant is not allowed to open it\./,
+        /the Bot can never open it\.|the Bot can't open it\./,
         "an agent may not live there.",
       ),
     };
@@ -127,6 +127,24 @@ export class EndpointNotAllowedError extends Error {
     super(message);
     this.name = "EndpointNotAllowedError";
   }
+}
+
+/** How a refusal of the stored address begins, whoever ends up holding its message. */
+const NOT_DIALLED = "This deployment will not dial ";
+
+/**
+ * Whether a run failed because its stored address is one this deployment will not dial.
+ *
+ * By message as well as by type, because the AG-UI client turns a fetch that throws into a RUN_ERROR
+ * event carrying only the message, so the error a caller finally holds is a plain `Error`. Only the
+ * stored address counts: a redirect can stop redirecting, and that address cannot change on its own.
+ */
+export function isEndpointRefusal(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    (error.name === "EndpointNotAllowedError" ||
+      error.message.startsWith(NOT_DIALLED))
+  );
 }
 
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
@@ -282,7 +300,7 @@ export function createAgentFetch(
     if (!stored.allowed) {
       throw refuse(
         url,
-        `This deployment will not dial ${url}: ${stored.reason.charAt(0).toLowerCase()}${stored.reason.slice(1)}`,
+        `${NOT_DIALLED}${url}: ${stored.reason.charAt(0).toLowerCase()}${stored.reason.slice(1)}`,
       );
     }
 

@@ -11,11 +11,7 @@ export const agentFormSchema = z.object({
     .trim()
     .min(1, "Name is required.")
     .max(80, "Name must be 80 characters or fewer."),
-  title: z
-    .string()
-    .trim()
-    .min(1, "Title is required.")
-    .max(120, "Title must be 120 characters or fewer."),
+  title: z.string().trim().max(120, "Title must be 120 characters or fewer."),
   roleDescription: z
     .string()
     .trim()

@@ -52,7 +52,7 @@ export type CustomServerInput = {
 /** Which kinds of plugin a grant can be about. */
 export type PluginKind = "mcp" | "skill";
 
-const FALLBACK = "That did not work.";
+const FALLBACK = "That didn't work. Try again.";
 
 /**
  * Refetch everything the plugin screens read.
@@ -123,7 +123,7 @@ export function grantPlugin(variables: {
       agentId: variables.agentId,
       ...(variables.approval ? { approval: variables.approval } : {}),
     },
-    fallback: "That Agent could not be changed.",
+    fallback: "Couldn't change that Bot.",
   });
 }
 
@@ -195,6 +195,29 @@ export function setAccountModeMutationOptions(queryClient: QueryClient) {
 }
 
 /**
+ * Who may give an app to a Bot: any Bot's owner (`any`) or only an admin (`admin`). The server writes
+ * the choice to the trail.
+ */
+export function setOwnerGrantsMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: async (variables: {
+      serverId: string;
+      ownerGrants: "any" | "admin";
+    }) => {
+      await client(
+        `/api/plugins/servers/${encodeURIComponent(variables.serverId)}/owner-grants`,
+        {
+          method: "PUT",
+          body: { ownerGrants: variables.ownerGrants },
+          fallback: "Couldn't change who can give this app.",
+        },
+      );
+    },
+    onSettled: () => invalidatePlugins(queryClient),
+  });
+}
+
+/**
  * Whether one Bot carries one plugin.
  *
  * Granting posts to the collection; withholding deletes from it, and the delete identifies the row
@@ -214,7 +237,7 @@ export function setPluginGrantMutationOptions(queryClient: QueryClient) {
       }
       await client(
         `/api/plugins/grants?kind=${variables.kind}&ref=${encodeURIComponent(variables.ref)}&agentId=${encodeURIComponent(variables.agentId)}`,
-        { method: "DELETE", fallback: "That Agent could not be changed." },
+        { method: "DELETE", fallback: "Couldn't change that Bot." },
       );
     },
     onSettled: () => invalidatePlugins(queryClient),
@@ -318,7 +341,7 @@ export function saveSkillMutationOptions(queryClient: QueryClient) {
          * The server refuses for reasons a form cannot check — a slug somebody else already owns is
          * the common one — and paraphrasing that would throw away the only part worth reading.
          */
-        fallback: "The skill could not be saved.",
+        fallback: "Couldn't save the skill.",
       }),
     onSettled: () => invalidatePlugins(queryClient),
   });
@@ -398,21 +421,50 @@ export function registerOAuthClientMutationOptions(queryClient: QueryClient) {
  * assignment to `window.location.href` typechecks, and the compiler has been told the same lie in
  * a second place. `null` is the one absent-value this inference cannot quietly discard, which is
  * what makes the branch below it obligatory rather than advisory.
+ *
+ * AND A THIRD ANSWER, WHICH IS NOT A URL AND NOT A FORM: `{ connected: true }`. A brokered app
+ * whose account the vendor already holds, with no row for it here, is recorded by the route on
+ * the spot, so the press ends connected with no page to visit. Unwrapping only the url read that
+ * answer as `null`, and every caller drew `null` as "this app takes a key" or as a failure, over an
+ * account that had just been recorded as connected. It is its own member of {@link ConnectStart}
+ * so a caller has to say what it draws for it.
  */
 export function connectAccountMutationOptions(
   returnTo: "settings" | "admin" = "settings",
 ) {
   return mutationOptions({
-    mutationFn: async (serverId: string): Promise<string | null> => {
-      const authorizationUrl = await client<string | undefined>(
+    mutationFn: async (serverId: string): Promise<ConnectStart> => {
+      const fallback = "Couldn't connect that account.";
+      const response = await client(
         `/api/plugins/servers/${encodeURIComponent(serverId)}/connect?returnTo=${returnTo}`,
-        "authorizationUrl",
-        { method: "POST", fallback: "That account could not be connected." },
+        { method: "POST", fallback },
       );
-      return authorizationUrl ?? null;
+      // Read as `client` reads an envelope: a body that is not an object is a failed request.
+      const body = (await response.json().catch(() => null)) as unknown;
+      if (!body || typeof body !== "object" || Array.isArray(body)) {
+        throw new Error(fallback);
+      }
+      const answer = body as {
+        authorizationUrl?: unknown;
+        connected?: unknown;
+      };
+      if (answer.connected === true) return { connected: true };
+      return typeof answer.authorizationUrl === "string"
+        ? { authorizationUrl: answer.authorizationUrl }
+        : null;
     },
   });
 }
+
+/**
+ * What one press of Connect started: a consent page to visit, an account that is already
+ * connected, or `null` for neither (an app whose key somebody types). See
+ * {@link connectAccountMutationOptions}.
+ */
+export type ConnectStart =
+  | { authorizationUrl: string }
+  | { connected: true }
+  | null;
 
 /**
  * What asking the vendor about an account comes back with.
@@ -450,7 +502,7 @@ export function confirmBrokeredConnectionMutationOptions(
     ): Promise<BrokeredConnectionConfirmation> => {
       const response = await client(
         `/api/plugins/servers/${encodeURIComponent(serverId)}/connection/confirm`,
-        { method: "POST", fallback: "That connection could not be confirmed." },
+        { method: "POST", fallback: "Couldn't confirm that connection." },
       );
       return response.json();
     },
@@ -472,7 +524,7 @@ export function disconnectBrokeredMutationOptions(queryClient: QueryClient) {
         `/api/plugins/servers/${encodeURIComponent(serverId)}/connection`,
         {
           method: "DELETE",
-          fallback: "That account could not be disconnected.",
+          fallback: "Couldn't disconnect that account.",
         },
       );
     },
@@ -534,7 +586,7 @@ export function brokeredConnectionFieldsMutationOptions() {
         "fields",
         {
           method: "POST",
-          fallback: "That app could not be asked what it needs.",
+          fallback: "Couldn't find out what this app needs.",
         },
       );
       return fields ?? null;
@@ -597,7 +649,7 @@ export function connectBrokeredWithFieldsMutationOptions(
           {
             method: "POST",
             body: { values: variables.values },
-            fallback: "That account could not be connected.",
+            fallback: "Couldn't connect that account.",
           },
         );
         return response.json();
@@ -649,7 +701,7 @@ export function recheckBrokeredConnectionMutationOptions(
     mutationFn: async (serverId: string): Promise<BrokeredKeyCheck> => {
       const response = await client(
         `/api/plugins/servers/${encodeURIComponent(serverId)}/connection/recheck`,
-        { method: "POST", fallback: "That connection could not be checked." },
+        { method: "POST", fallback: "Couldn't check that connection." },
       );
       return response.json();
     },

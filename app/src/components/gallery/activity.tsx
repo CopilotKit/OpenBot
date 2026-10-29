@@ -90,7 +90,7 @@ export function ActivityReportCard({
           : {
               status: "refused",
               reason:
-                result.reason ?? result.error ?? "That data could not be read.",
+                result.reason ?? result.error ?? "Couldn't read that data.",
             },
       );
     });
@@ -110,10 +110,7 @@ export function ActivityReportCard({
 
   if (state.status === "reading") {
     return (
-      <GalleryFrame
-        caption="Reading from this deployment"
-        title={title ?? "Report"}
-      >
+      <GalleryFrame caption="Reading from OpenBot" title={title ?? "Report"}>
         <p className="text-sm text-muted-foreground">Reading…</p>
       </GalleryFrame>
     );
@@ -183,7 +180,7 @@ function ActivityChart({
           </Button>
         ) : undefined
       }
-      caption={`Counted from this deployment's audit trail, last ${data.days} days`}
+      caption={`Counted from OpenBot's audit trail, last ${data.days} days`}
       title={title ?? "Bot activity"}
     >
       <ul className="flex flex-col gap-2">
@@ -226,7 +223,7 @@ function RefusalList({
     return (
       <GalleryFrame title={title ?? "Recent refusals"}>
         <p className="text-sm text-muted-foreground">
-          This deployment has refused nothing.
+          OpenBot hasn't refused anything.
         </p>
       </GalleryFrame>
     );
@@ -249,7 +246,7 @@ function RefusalList({
           </Button>
         ) : undefined
       }
-      caption="Read from this deployment's audit trail"
+      caption="Read from OpenBot's audit trail"
       title={title ?? "Recent refusals"}
     >
       <ul className="flex flex-col gap-2">

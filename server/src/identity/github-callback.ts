@@ -51,7 +51,7 @@ function logFailed(stage: string, error: unknown): void {
 /**
  * Finishes linking a GitHub account when GitHub sends the person back.
  *
- * Every exit this router reaches is a redirect to the connected-accounts page, `?linked=github`,
+ * Every exit this router reaches is a redirect to GitHub's page under Connections, `?linked=github`,
  * `?linked=github-taken` (the account is already linked to another person) or `?linked=failed`. A request with no session never gets here: requireUser answers it with a 401
  * first. Each failed exit logs one line saying which refusal or stage it was; nothing the vendor
  * or the request carried (code, tokens, secret, state, account or session ids) is logged or returned.
@@ -60,7 +60,7 @@ export function githubCallbackRoutes(
   deps: GithubCallbackDeps,
 ): Hono<{ Variables: AppVariables }> {
   const routes = new Hono<{ Variables: AppVariables }>();
-  const base = `${(deps.appUrl ?? "").replace(/\/+$/, "")}/settings/connected-accounts?linked=`;
+  const base = `${(deps.appUrl ?? "").replace(/\/+$/, "")}/connections/github?linked=`;
   const now = deps.now ?? (() => new Date());
 
   routes.get("/", async (context) => {

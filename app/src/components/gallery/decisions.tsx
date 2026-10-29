@@ -56,7 +56,7 @@ export function ApprovalCard(props: Waiting<ApprovalArgs> & { name?: string }) {
 
   if (status === "inProgress") {
     return (
-      <GalleryFrame title={args.title ?? "Waiting for the assistant…"}>
+      <GalleryFrame title={args.title ?? "Waiting for the Bot…"}>
         <p className="text-sm text-muted-foreground">Preparing the request…</p>
       </GalleryFrame>
     );
@@ -155,7 +155,7 @@ export function ChoiceCard(props: Waiting<ChoiceArgs>) {
 
   if (status === "inProgress") {
     return (
-      <GalleryFrame title={args.title ?? "Waiting for the assistant…"}>
+      <GalleryFrame title={args.title ?? "Waiting for the Bot…"}>
         <p className="text-sm text-muted-foreground">Preparing the question…</p>
       </GalleryFrame>
     );

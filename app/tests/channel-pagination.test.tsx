@@ -26,9 +26,10 @@ import { AppSidebar } from "@/components/app-sidebar/app-sidebar";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { agentKeys } from "@/lib/agents/queries";
 import { authKeys } from "@/lib/auth/queries";
+import { botLifecycleKeys } from "@/lib/bot-lifecycle/queries";
+import { browserKeys } from "@/lib/browser/queries";
 import { type ChannelSummary, channelKeys } from "@/lib/channels/queries";
 import { userPreferencesQueryOptions } from "@/lib/settings/message-list";
-import { botLifecycleKeys } from "@/lib/bot-lifecycle/queries";
 
 // Keep the sidebar's live-update socket offline; these tests exercise HTTP pagination.
 class OfflineWebSocket extends EventTarget implements WebSocket {
@@ -167,6 +168,8 @@ function renderSidebar() {
   queryClient.setQueryData(userPreferencesQueryOptions("user").queryKey, {
     messageListEmphasis: "thread",
     selfHostBannerDismissed: false,
+    narration: null,
+    skin: "openbot",
   });
   queryClient.setQueryData(authKeys.currentUser(), {
     id: "user",
@@ -181,6 +184,13 @@ function renderSidebar() {
     refetchInterval: false,
   });
   queryClient.setQueryData(botLifecycleKeys.attention, []);
+  // The Browser button reads whether there is a browser once; answered here so only channel requests are counted.
+  queryClient.setQueryData(browserKeys.state, {
+    available: false,
+    computerId: "",
+    open: false,
+    tabs: [],
+  });
   queryClient.setQueryData(channelKeys.list(), {
     pages: [
       { channels: [channel("Recent conversation")], nextCursor: "older/page" },
@@ -220,6 +230,8 @@ test("message emphasis updates mounted rows from the account preferences cache",
     clients[0]?.setQueryData(userPreferencesQueryOptions("user").queryKey, {
       messageListEmphasis: "agent",
       selfHostBannerDismissed: false,
+      narration: null,
+      skin: "openbot",
     }),
   );
   await waitFor(() => expect(agent.className).toContain("text-[0.9rem]"));
@@ -270,7 +282,7 @@ test("a failed page preserves rows and waits for an explicit retry", async () =>
   act(() => activeObserver().intersect());
   expect(await view.findByRole("alert")).toHaveProperty(
     "textContent",
-    "Could not load older conversations.",
+    "Couldn't load older conversations.",
   );
   expect(view.getByText("Recent conversation")).toBeTruthy();
   expect(ScrollObserver.active.size).toBe(0);
@@ -280,9 +292,7 @@ test("a failed page preserves rows and waits for an explicit retry", async () =>
       channels: [channel("Recovered conversation")],
       nextCursor: "last-page",
     });
-  fireEvent.click(
-    view.getByRole("button", { name: "Retry loading older conversations" }),
-  );
+  fireEvent.click(view.getByRole("button", { name: "Try again" }));
   expect(await view.findByText("Recovered conversation")).toBeTruthy();
   expect(requests).toEqual([
     "/api/channels?cursor=older%2Fpage",
@@ -303,10 +313,10 @@ test("search loads older history explicitly and includes new matches", async () 
   const view = renderSidebar();
   const user = userEvent.setup({ document: view.container.ownerDocument });
   await view.findByText("Recent conversation");
-  const search = view.getByRole("textbox", { name: "Search channels" });
+  const search = view.getByRole("textbox", { name: "Search conversations" });
   await user.type(search, "Archived");
   expect(
-    await view.findByText("No loaded channels match your search"),
+    await view.findByText("No loaded conversations match your search"),
   ).toBeTruthy();
   expect(ScrollObserver.active.size).toBe(0);
   expect(requests).toEqual([]);
@@ -319,7 +329,9 @@ test("search loads older history explicitly and includes new matches", async () 
     view.getByRole("button", { name: "Load older conversations" }),
   );
   expect(await view.findByText("Archived conversation")).toBeTruthy();
-  expect(view.queryByText("No loaded channels match your search")).toBeNull();
+  expect(
+    view.queryByText("No loaded conversations match your search"),
+  ).toBeNull();
   await user.click(search);
   await user.keyboard("{Control>}a{/Control}{Backspace}");
   expect(await view.findByText("Recent conversation")).toBeTruthy();

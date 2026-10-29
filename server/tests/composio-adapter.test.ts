@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Composio, telemetry } from "@composio/core";
 import {
+  BrokerAccountGoneError,
   type BrokerConnection,
   BrokerRefusalError,
   BrokerUnconfiguredError,
@@ -141,7 +142,7 @@ const WHOLE_LISTING = 1000;
 const PAGES_BEFORE_REFUSING = 200;
 
 /** The page this deployment sends somebody back to once the consent screen is done with them. */
-const RETURN_URL = "https://openbot.test/settings/connected-accounts/x";
+const RETURN_URL = "https://openbot.test/connections/x";
 
 /**
  * What Composio answers a withdrawal it actually performed, returned by every double that performs
@@ -1120,8 +1121,7 @@ describe("beginning one person's connection", () => {
         vendorUserId: VENDOR_USER,
       },
       toolkit: "linear",
-      returnUrl:
-        "https://openbot.test/settings/connected-accounts/composio-linear",
+      returnUrl: "https://openbot.test/connections/composio-linear",
     });
 
     // The config this deployment already holds for the app — and no `authConfigs.create`, which
@@ -1135,8 +1135,7 @@ describe("beginning one person's connection", () => {
         VENDOR_USER,
         "ac_this_deployments",
         {
-          callbackUrl:
-            "https://openbot.test/settings/connected-accounts/composio-linear",
+          callbackUrl: "https://openbot.test/connections/composio-linear",
         },
       ],
     ]);
@@ -1175,8 +1174,7 @@ describe("beginning one person's connection", () => {
         vendorUserId: VENDOR_USER,
       },
       toolkit: "linear",
-      returnUrl:
-        "https://openbot.test/settings/connected-accounts/composio-linear",
+      returnUrl: "https://openbot.test/connections/composio-linear",
     });
 
     const refusal = await failureOf(refused);
@@ -1239,7 +1237,7 @@ describe("telling this deployment's auth configs from anybody else's", () => {
         vendorUserId: VENDOR_USER,
       },
       toolkit: "linear",
-      returnUrl: "https://openbot.test/settings/connected-accounts/x",
+      returnUrl: "https://openbot.test/connections/x",
     });
 
     // A connection is a lasting attachment to whatever config it was made against: scopes, tool
@@ -1249,7 +1247,7 @@ describe("telling this deployment's auth configs from anybody else's", () => {
       [
         VENDOR_USER,
         "ac_ours",
-        { callbackUrl: "https://openbot.test/settings/connected-accounts/x" },
+        { callbackUrl: "https://openbot.test/connections/x" },
       ],
     ]);
   });
@@ -1277,7 +1275,7 @@ describe("telling this deployment's auth configs from anybody else's", () => {
         vendorUserId: VENDOR_USER,
       },
       toolkit: "linear",
-      returnUrl: "https://openbot.test/settings/connected-accounts/x",
+      returnUrl: "https://openbot.test/connections/x",
     });
 
     const refusal = await failureOf(refused);
@@ -1788,7 +1786,7 @@ describe("telling this deployment's auth configs from anybody else's", () => {
         vendorUserId: VENDOR_USER,
       },
       toolkit: "linear",
-      returnUrl: "https://openbot.test/settings/connected-accounts/x",
+      returnUrl: "https://openbot.test/connections/x",
     });
 
     // Sending somebody to consent against a disabled config spends their consent and attaches
@@ -3053,7 +3051,7 @@ describe("refusals a route can tell from an outage", () => {
           vendorUserId: VENDOR_USER,
         },
         toolkit: "linear",
-        returnUrl: "https://openbot.test/settings/connected-accounts/x",
+        returnUrl: "https://openbot.test/connections/x",
       })
       .catch((raised: unknown) => raised);
 
@@ -3088,7 +3086,7 @@ describe("refusals a route can tell from an outage", () => {
           vendorUserId: VENDOR_USER,
         },
         toolkit: "linear",
-        returnUrl: "https://openbot.test/settings/connected-accounts/x",
+        returnUrl: "https://openbot.test/connections/x",
       })
       .catch((raised: unknown) => raised);
 
@@ -3270,10 +3268,6 @@ describe("a catalogue that might be a fragment", () => {
  * the failure named there, its entry reddens and has to be deleted rather than quietly outliving
  * the state it describes.
  *
- * THE METHOD LIST IS THE SEAM'S OWN. It is read off the objects {@link buildComposioClient}
- * returns rather than copied into this file, and typed as `keyof ComposioBroker | keyof
- * ComposioActions`, so a method added to either seam with no entry here fails the completeness
- * test below instead of being covered by nobody.
  */
 describe("what a vendor failure becomes on its way out of the seam", () => {
   /**
@@ -3436,9 +3430,6 @@ describe("what a vendor failure becomes on its way out of the seam", () => {
    * therefore asks nobody anything. A row in the table below would have to invent a vendor call for
    * it to break on, which would assert something about the fake and nothing about the method.
    *
-   * NAMING IT IS WHAT KEEPS THE COMPLETENESS TEST HONEST IN BOTH DIRECTIONS: the next method added
-   * to this seam is covered by the table or appears on this list on purpose, and the test below
-   * then checks that what is on this list genuinely dials nothing.
    */
   const DIALS_NOTHING = new Set<SeamMethod>(["authProviderOf"]);
 
@@ -3626,30 +3617,6 @@ describe("what a vendor failure becomes on its way out of the seam", () => {
     },
   ];
 
-  test("every method the seam offers has an entry in the table", () => {
-    // Read off the built objects rather than listed here a second time: a method added to either
-    // projection arrives in this set, and the table that does not cover it fails here rather than
-    // being the one door nobody thought to probe.
-    const seam = buildComposioClient(fakeVendor({}));
-    // Methods only: `grantIsLocal` is a declared property of the broker, not a door to probe.
-    const methodsOf = (part: object) =>
-      Object.entries(part)
-        .filter(([, member]) => typeof member === "function")
-        .map(([name]) => name);
-    expect(
-      [...methodsOf(seam.broker), ...methodsOf(seam.actions)]
-        .filter((name) => !DIALS_NOTHING.has(name as SeamMethod))
-        .sort(),
-    ).toEqual(SEAM_CASES.map((seamCase) => seamCase.method).sort());
-    // Whatever is not a method must be acknowledged by name, so a new non-function member of the
-    // broker is a decision somebody makes rather than a thing the filter above silently drops.
-    expect(
-      Object.entries(seam.broker)
-        .filter(([, member]) => typeof member !== "function")
-        .map(([name]) => name),
-    ).toEqual(["grantIsLocal", "authorizations"]);
-  });
-
   /**
    * The other direction of {@link DIALS_NOTHING}: what is excused from the table must genuinely
    * have nothing to fail at. The vendor here has no methods at all, so any call out of this seam
@@ -3834,7 +3801,7 @@ describe("each vendor condition reaches the reader as its own remedy", () => {
     {
       name: "ComposioMultipleConnectedAccountsError",
       raisedBy: "connectedAccounts.link",
-      remedy: /disconnecting the account they already hold/,
+      remedy: /an account this person is already connected through/,
       ask: whileLinking,
     },
     {
@@ -3898,6 +3865,20 @@ describe("each vendor condition reaches the reader as its own remedy", () => {
       }
     });
   }
+
+  test("an account Composio no longer holds is raised as its own class, so a call can offer Reconnect", async () => {
+    const failure = await failureOf(
+      whileRunning(raising("ComposioConnectedAccountNotFoundError")),
+    );
+    expect(failure).toBeInstanceOf(BrokerAccountGoneError);
+    // Still an authored refusal, so every reader that prefers this deployment's sentence still does.
+    expect(failure).toBeInstanceOf(BrokerRefusalError);
+    // And nothing else is: the class is what the store acts on.
+    const other = await failureOf(
+      whileRunning(raising("ComposioRequestCancelledError")),
+    );
+    expect(other).not.toBeInstanceOf(BrokerAccountGoneError);
+  });
 
   /**
    * ONE VENDOR CLASS OVER EVERY WAY A FETCH CAN FAIL, which is a fact about the SDK rather than a

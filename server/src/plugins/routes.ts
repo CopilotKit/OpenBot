@@ -3,6 +3,7 @@ import type { BotAccessCheck } from "../agents/profile-policy";
 import type { AppVariables } from "../auth/guards";
 import { BROKERED_PROFILE, type BrokerProvider, toolkitOfFor } from "./access";
 import type { AccountModeSwitch } from "./account-mode";
+import { mountAppAccessRoutes } from "./route-groups/app-access";
 import type { ComposioBroker } from "./broker";
 import { mountComposioAppRoutes } from "./route-groups/composio-apps";
 import { mountConnectionRoutes } from "./route-groups/connections";
@@ -186,7 +187,7 @@ export function createPluginRoutes(
     const owner = await store.skillOwner(slug);
     if (owner === undefined) return null; // A new skill. Ownership is decided on the way in.
     if (owner === null) {
-      return `${slug} belongs to this deployment. An administrator looks after it.`;
+      return `${slug} belongs to everyone. Only an admin can change it.`;
     }
     return owner === actor.id ? null : `${slug} is somebody else's skill.`;
   }
@@ -213,6 +214,7 @@ export function createPluginRoutes(
   mountOAuthCallbackRoute(context);
   mountSkillRoutes(context);
   mountGrantRoutes(context);
+  mountAppAccessRoutes(context);
 
   return routes;
 }

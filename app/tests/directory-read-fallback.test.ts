@@ -19,14 +19,16 @@ async function failureMessage(provider: "composio" | "arcade") {
   throw new Error("the query was expected to fail");
 }
 
-test("a Composio deployment's messageless directory failure is the existing sentence, unchanged", async () => {
+test("a Composio deployment's messageless directory failure is the directory screen's sentence", async () => {
   expect(await failureMessage("composio")).toBe(
-    "Composio's app directory could not be read.",
+    "Couldn't load Composio's app directory. Reload the page.",
   );
 });
 
 test("an Arcade deployment's messageless directory failure names Arcade and never Composio", async () => {
   const message = await failureMessage("arcade");
-  expect(message).toBe("Arcade's app directory could not be read.");
+  expect(message).toBe(
+    "Couldn't load Arcade's app directory. Reload the page.",
+  );
   expect(message).not.toMatch(/composio/i);
 });

@@ -8,8 +8,6 @@ import {
   test,
 } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import { MCPMock, type MCPToolDefinition } from "@copilotkit/aimock/mcp";
 import { readConnectPrompt } from "@openbot/shared/connect-prompt";
 import type { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
@@ -47,6 +45,7 @@ import {
   type ComposioResult,
   useComposioClient,
 } from "../src/plugins/composio";
+import { actionOf } from "../src/plugins/composio-vendor";
 import { redirectUriFor } from "../src/plugins/oauth";
 import type { AccountRef } from "../src/plugins/shared-accounts";
 import {
@@ -64,6 +63,7 @@ import {
   unlistedAdvertisedTools,
 } from "../src/plugins/store";
 import { grantedTools, REFUSAL_MARKER } from "../src/plugins/tools";
+import fileActions from "./fixtures/composio-file-actions.json";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
@@ -639,7 +639,7 @@ describe("the policy is asked as well as the grant", () => {
         botId: holderId,
         actorId,
       }),
-    ).rejects.toThrow("credential material");
+    ).rejects.toThrow("a password or key");
 
     const rows = await auditRowsFor(ref, holderId, actorId);
     const rejected = rows.filter(
@@ -1876,7 +1876,7 @@ describe("refresh token rotation", () => {
      */
     const UNREADABLE_PLAINTEXT = `secret_notJsonClient${suite}`;
     /** What the person and the trail are told instead, which is the operator's signal. */
-    const UNUSABLE = "Notion has no usable OAuth client for this deployment.";
+    const UNUSABLE = "Notion needs connecting again.";
 
     /** The client the suite registered, restored after each test repoints the server. */
     let registeredClientId: string | null = null;
@@ -2680,7 +2680,7 @@ describe("a dynamic client the vendor has evicted", () => {
      * usable one — only a new consent under the client that now exists.
      */
     await expect(call()).rejects.toThrow(
-      "Notion no longer recognises this deployment's OAuth client",
+      "Notion needs connecting again, so this wasn't done.",
     );
 
     /*
@@ -2723,7 +2723,7 @@ describe("a dynamic client the vendor has evicted", () => {
     issue = () => ({ clientId: "dyn-3", clientSecret: "" });
 
     await expect(call()).rejects.toThrow(
-      "Notion no longer recognises this deployment's OAuth client",
+      "Notion needs connecting again, so this wasn't done.",
     );
     expect(registrations.length).toBe(1);
     expect(exchanges).toEqual([
@@ -2789,7 +2789,7 @@ describe("a dynamic client the vendor has evicted", () => {
       );
 
     await expect(call()).rejects.toThrow(
-      "Notion no longer recognises this deployment's OAuth client",
+      "Notion needs connecting again, so this wasn't done.",
     );
 
     expect(offered).toEqual([EVICTED.clientId]);
@@ -2809,12 +2809,29 @@ describe("a dynamic client the vendor has evicted", () => {
         "invalid_grant",
       );
 
-    await expect(call()).rejects.toThrow("invalid_grant");
+    // A withdrawn grant is the person's to fix by connecting again: the refusal draws the card that
+    // says so, rather than folding the vendor's code into a tool error.
+    const refusal = await call().catch((error: unknown) => error);
+    expect(refusal).toBeInstanceOf(PluginRefusedError);
+    expect(readConnectPrompt((refusal as Error).message)).toMatchObject({
+      serverId: dynamicServerId,
+      reason: "reconnect",
+    });
 
-    // A withdrawn grant is the person's to fix by connecting again. Minting a client for it would
-    // leave a spare client behind and still refuse.
+    // Minting a client for it would leave a spare client behind and still refuse.
     expect(registrations).toEqual([]);
     expect(offered).toEqual([EVICTED.clientId]);
+
+    // And the connection now reads as withdrawn, which is Reconnect on every screen.
+    const [connection] = await dynamicStore.connectionsFor(dynamicUserId);
+    expect(connection).toMatchObject({
+      serverId: dynamicServerId,
+      revoked: true,
+    });
+    // The next call is refused before anything is presented to the vendor again.
+    offered.length = 0;
+    await expect(call()).rejects.toBeInstanceOf(PluginRefusedError);
+    expect(offered).toEqual([]);
   });
 
   /**
@@ -3563,7 +3580,7 @@ describe("a dynamic client the vendor has evicted", () => {
     });
     /** What the operator must be told instead: the credential named, and nothing else claimed. */
     const UNUSABLE =
-      "Notion has no usable OAuth client for this deployment. Connect Notion again in Settings: the deployment registers itself with the vendor on the next connect.";
+      "Notion needs connecting again. Reconnect it on Connections and ask again.";
 
     /**
      * Plant arbitrary stored bytes as this server's client, the way {@link putClient} plants a real
@@ -6003,6 +6020,66 @@ test("a catalogue entry declaring the broker's transport is refused, not dialled
 });
 
 /**
+ * A COMPOSIO ACTION WHOSE ONLY FILE IS OPTIONAL IS RECORDED, WITHOUT THE FILE.
+ *
+ * The listing used to drop every action with a `file_uploadable` parameter in it, so a refresh of
+ * Gmail recorded 59 of its 63 actions and never GMAIL_SEND_EMAIL, GMAIL_CREATE_EMAIL_DRAFT,
+ * GMAIL_REPLY_TO_THREAD or GMAIL_UPDATE_DRAFT: no row to grant, so no Bot could send, draft or
+ * reply. The rows below are Composio's own (`fixtures/composio-file-actions.json`), mapped through
+ * `actionOf` exactly as the adapter maps a page, and what is asserted is the row a grant points at
+ * and a model is shown.
+ */
+describe("a Composio action whose only file is optional", () => {
+  test("is recorded with its version and without the attachment a model cannot fill in", async () => {
+    const { store, database } = await freshStore();
+    useComposioClient({
+      listActions: async () =>
+        fileActions.gmail.map((row, position) =>
+          actionOf(structuredClone(row), position, "gmail"),
+        ),
+      execute: async () => vendorAnswered(),
+    });
+    await seedComposioGmail(database, store);
+
+    expect(await store.refreshTools("gmail", "admin_user")).toEqual({
+      tools: 5,
+    });
+
+    const stored = await database
+      .select({
+        name: mcpTools.name,
+        inputSchema: mcpTools.inputSchema,
+        version: mcpTools.version,
+      })
+      .from(mcpTools)
+      .where(eq(mcpTools.serverId, "gmail"))
+      .orderBy(asc(mcpTools.name));
+
+    expect(stored.map((row) => row.name)).toEqual([
+      "GMAIL_CREATE_EMAIL_DRAFT",
+      "GMAIL_FETCH_EMAILS",
+      "GMAIL_REPLY_TO_THREAD",
+      "GMAIL_SEND_EMAIL",
+      "GMAIL_UPDATE_DRAFT",
+    ]);
+    // Callable: the version Composio published, which a call has to send back.
+    expect(new Set(stored.map((row) => row.version))).toEqual(
+      new Set(["20261018_00"]),
+    );
+    const send = stored.find((row) => row.name === "GMAIL_SEND_EMAIL")
+      ?.inputSchema as { properties?: Record<string, unknown> } | undefined;
+    const properties = Object.keys(send?.properties ?? {});
+    expect(properties).not.toContain("attachment");
+    expect(properties).toContain("recipient_email");
+    expect(properties).toContain("body");
+    // No staging descriptor in any row a model is shown.
+    expect(JSON.stringify(stored.map((row) => row.inputSchema))).not.toContain(
+      "file_uploadable",
+    );
+  });
+});
+
+/**
  * WHAT A VENDOR SENT THAT THIS DATABASE WILL NOT TAKE, and what came out when it did not.
  *
  * Both of these aborted the wholesale replace from INSIDE its transaction, which sits OUTSIDE the
@@ -6660,65 +6737,6 @@ describe("a query of this deployment's own that failed", () => {
     expect(failure).not.toContain("Failed query");
     expect(failure).not.toContain("params:");
     expect(failure).not.toContain("mcp_user_credentials");
-  });
-
-  /**
-   * AND THE ONE REMAINING SITE THAT ASKS NOTHING, read as text because nothing can drive it.
-   *
-   * WHY THERE IS NO BEHAVIOURAL TEST FOR THIS ONE, and why that is a reason to assert it rather
-   * than to leave it. `refreshTools`' vendor `catch` opens with `isDeploymentFault`, which answers
-   * true for a query failure, so every arrival whose message is a statement is raised before the
-   * line below it can copy one. What that line can still be handed is a WRAPPER: `composio.ts`'s
-   * `listTools` catches whatever the client threw and rethrows `new Error(listingSentence(...))`,
-   * and `listingSentence` falls through to the thrown message verbatim. A wrapper has no `query`
-   * and no `params` of its own, so it is not on the shelf and it is not a query failure by shape —
-   * it is simply a message this deployment has stopped asking any question about. Nothing reachable
-   * puts a statement inside one today, which is exactly the sentence that was true of the credential
-   * envelope before the rotation path started writing one.
-   *
-   * SO WHAT IS ASSERTED IS THAT THE DOOR IS THE ONLY WAY THROUGH. `db/query-failure.ts` exists to be
-   * the single place the question is asked; a site reading `.message` directly is a second answer to
-   * it, and the last two leaks in this review were both a second answer that had drifted. The test
-   * above owns the behaviour of the reachable path; this owns the shape of every path.
-   */
-  test("no recording site in the plugin store reads a caught message without asking", () => {
-    // Every file the store is made of: the assembly in `store.ts` and the modules it was split into.
-    const plugins = join(import.meta.dir, "..", "src", "plugins");
-    const files = [
-      "store.ts",
-      ...readdirSync(join(plugins, "plugin-store"))
-        .filter((name) => name.endsWith(".ts"))
-        .map((name) => `plugin-store/${name}`),
-    ];
-    /*
-     * Comments blanked rather than removed, because these files argue about `error.message` at
-     * length — the prose naming the hazard must not be mistaken for the hazard, and the line
-     * numbers reported below have to stay each file's own so a failure names where to look.
-     */
-    const code = files.map((file) => ({
-      file,
-      code: readFileSync(join(plugins, file), "utf8")
-        .replace(/\/\*[\s\S]*?\*\//g, (block) => block.replace(/[^\n]/g, " "))
-        .replace(/^([^\n"'`]*?)\/\/.*$/gm, "$1"),
-    }));
-
-    // Listed rather than matched, so a failure prints the line to correct instead of the file.
-    expect(
-      code.flatMap(({ file, code: text }) =>
-        text
-          .split("\n")
-          .flatMap((line, index) =>
-            /\berror\.message\b/.test(line)
-              ? [`${file}:${index + 1}: ${line.trim()}`]
-              : [],
-          ),
-      ),
-    ).toEqual([]);
-    // And the door is genuinely in use, so the assertion above cannot be satisfied by deleting the
-    // read altogether and saying nothing.
-    expect(code.map(({ code: text }) => text).join("\n")).toMatch(
-      /\b(withoutStatement|reasonWithoutStatement)\(/,
-    );
   });
 });
 

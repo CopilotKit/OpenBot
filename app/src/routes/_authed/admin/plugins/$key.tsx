@@ -2,6 +2,8 @@ import {
   IconArrowUpRight,
   IconChevronRight,
   IconExternalLink,
+  IconPuzzle,
+  IconTool,
 } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link, useParams } from "@tanstack/react-router";
@@ -13,6 +15,7 @@ import {
   PageSection,
   PageShell,
 } from "@/components/layout/page-shell";
+import { AccessRequestsSection } from "@/components/plugins/access-requests";
 import { AccountModeDialog } from "@/components/plugins/account-mode-dialog";
 import {
   BrokeredAccountRow,
@@ -52,7 +55,15 @@ import {
   refreshPluginServerMutationOptions,
   registerOAuthClientMutationOptions,
   removePluginServerMutationOptions,
+  setOwnerGrantsMutationOptions,
 } from "@/lib/plugins/mutations";
+import {
+  brokeredConnectionDescription,
+  brokeredDisconnectNote,
+  brokeredPerActionTrip,
+  brokeredProvenance,
+  brokeredReach,
+} from "@/lib/plugins/provider-vocabulary";
 import {
   type CatalogueItem,
   connectionsQueryOptions,
@@ -61,13 +72,6 @@ import {
   pluginsPageQueryOptions,
   pluginsProvider,
 } from "@/lib/plugins/queries";
-import {
-  brokeredConnectionDescription,
-  brokeredDisconnectNote,
-  brokeredPerActionTrip,
-  brokeredProvenance,
-  brokeredReach,
-} from "@/lib/plugins/provider-vocabulary";
 import {
   botSharedAppsQueryOptions,
   describeApproval,
@@ -197,10 +201,8 @@ function ConnectionStateUnreadable() {
       <ItemContent>
         <ItemTitle>Your account</ItemTitle>
         <ItemDescription role="alert">
-          Whether you have connected an account here could not be loaded, so
-          nothing about it is shown rather than something that may be wrong.
-          Reload the page, and check this deployment&rsquo;s logs if it
-          persists.
+          Couldn't load whether you've connected an account here. Reload the
+          page, or check this deployment's logs if it keeps happening.
         </ItemDescription>
       </ItemContent>
     </Item>
@@ -300,6 +302,10 @@ function RouteComponent() {
     ...refreshPluginServerMutationOptions(queryClient),
     ...report,
   });
+  const ownerGrants = useMutation({
+    ...setOwnerGrantsMutationOptions(queryClient),
+    ...report,
+  });
   const remove = useMutation({
     ...removePluginServerMutationOptions(queryClient),
     ...report,
@@ -313,16 +319,23 @@ function RouteComponent() {
      * shown to this person in their own browser; there is deliberately nothing here that could
      * complete it for them, and nothing about being an administrator changes that.
      */
-    onSuccess: (authorizationUrl) => {
+    onSuccess: (start) => {
       /*
        * A 200 with no url on it is not a url to follow. This press is on a `user-oauth` catalogue
        * entry, whose half of that route always mints one or refuses, so this is the server having
        * answered something this page does not understand. Assigning it navigated to a page called
        * `undefined` on this deployment's own origin. See `connectAccountMutationOptions`.
+       *
+       * `{ connected: true }` is a brokered app's answer and never this half's, so it is the same
+       * not-understood answer here.
        */
+      const authorizationUrl =
+        start !== null && "authorizationUrl" in start
+          ? start.authorizationUrl
+          : null;
       if (authorizationUrl === null) {
         setError(
-          "This deployment answered without a consent link, so there was nowhere to send you and nothing was connected. Try again, and check this connector's setup if it persists.",
+          "OpenBot got no consent link back, so nothing was connected. Try again, or check this connector's setup if it keeps happening.",
         );
         return;
       }
@@ -513,7 +526,7 @@ function RouteComponent() {
         title="Plugins"
       >
         <p className="mt-12 text-destructive text-sm" role="alert">
-          Plugins could not be loaded.
+          Couldn't load plugins. Reload the page.
         </p>
       </PageShell>
     );
@@ -522,10 +535,12 @@ function RouteComponent() {
     return (
       <PageShell
         backButton={{ label: "Plugins", linkProps: { to: "/admin/plugins" } }}
-        description="This deployment does not have a plugin by that name, and the catalogue does not offer one."
+        description="There is no plugin with that name, here or in the catalogue."
         title="Not a plugin"
       >
-        <PageEmpty>Nothing to configure.</PageEmpty>
+        <PageEmpty icon={IconPuzzle} title="Plugin not found">
+          Nothing to configure.
+        </PageEmpty>
       </PageShell>
     );
   }
@@ -573,8 +588,8 @@ function RouteComponent() {
               <ItemTitle>Enable for this deployment</ItemTitle>
               <ItemDescription>
                 {server
-                  ? "Bots may be granted its tools. Switching this off removes it and every grant on its tools."
-                  : "No Bot can reach this vendor. Switch it on to configure it and grant its tools."}
+                  ? "Bots can be given its tools. Turning this off removes it and every Bot's access to its tools."
+                  : "No Bot can reach this vendor. Turn it on to set it up and give Bots its tools."}
               </ItemDescription>
             </ItemContent>
             <ItemActions>
@@ -628,8 +643,54 @@ function RouteComponent() {
               </Item>
             </>
           ) : null}
+
+          {/*
+           * Who may give the app to a Bot. Binary and immediate, so a Switch. Every person's own
+           * account and the built-in Routines start on; a deployment token, a shared account and an
+           * app with no account start off, because a Bot given one of those reaches an account that
+           * is not the asker's. An owner's grant runs on the asker's own account, except on a shared
+           * account, where the grant lets the people who can use the Bot use the team account.
+           */}
+          {server ? (
+            <>
+              <Separator />
+              <Item size="sm">
+                <ItemContent>
+                  <ItemTitle>Bot owners can give it to their Bots</ItemTitle>
+                  <ItemDescription>
+                    {server.ownerGrants !== "any"
+                      ? "Only an admin can give it to a Bot."
+                      : shared
+                        ? "Bot owners who give it to their Bots let those Bots use the team account."
+                        : "People can let Bots they own use it, on the account of whoever is asking."}
+                  </ItemDescription>
+                </ItemContent>
+                <ItemActions>
+                  <Switch
+                    aria-label={`Let Bot owners give ${title} to their Bots`}
+                    checked={server.ownerGrants === "any"}
+                    disabled={ownerGrants.isPending}
+                    onCheckedChange={(next) => {
+                      setError(null);
+                      ownerGrants.mutate({
+                        serverId: key,
+                        ownerGrants: next ? "any" : "admin",
+                      });
+                    }}
+                  />
+                </ItemActions>
+              </Item>
+            </>
+          ) : null}
         </PageRows>
       </PageSection>
+
+      {/*
+       * People asking for this app: to switch it on, give it to a Bot, or connect its shared
+       * account. Only when somebody is; the section draws nothing otherwise. Requests name who
+       * asked — connections still name nobody.
+       */}
+      <AccessRequestsSection app={key} />
 
       <AccountModeDialog
         names={botNames}
@@ -644,13 +705,13 @@ function RouteComponent() {
         <PageSection
           description={
             auth === "user-oauth"
-              ? "This vendor answers as whoever is asking. The deployment registers an OAuth client, and each person connects their own account, so a Bot only ever sees what that person can see."
+              ? "This vendor answers as whoever is asking. The deployment registers an OAuth client, and each person connects their own account. A Bot only sees what that person can see."
               : auth === "builtin"
-                ? "Built into this deployment. There is no vendor to reach and no credential to hold — a call runs as whoever asked."
+                ? "Built into this deployment. There is no vendor to reach and no credential to keep. A call runs as whoever asked."
                 : auth === "brokered"
-                  ? /* The row below says how, at length. This says whose account it is, which is the part that decides what an administrator has to do here — which is nothing. */
+                  ? /* The row below says how, at length. This says whose account it is, which is the part that decides what an admin has to do here — which is nothing. */
                     brokeredConnectionDescription(provider)
-                  : "What this deployment presents to the vendor. One credential, used for everybody."
+                  : "What this deployment sends to the vendor. One credential for everybody."
           }
           title="Connection"
         >
@@ -687,8 +748,8 @@ function RouteComponent() {
                 <ItemContent>
                   <ItemTitle>Connection</ItemTitle>
                   <ItemDescription>
-                    Nothing to configure. These tools run inside this
-                    deployment, on the tables it already owns.
+                    Nothing to set up. These tools run inside this deployment,
+                    on its own data.
                   </ItemDescription>
                 </ItemContent>
                 <ItemActions>
@@ -735,7 +796,7 @@ function RouteComponent() {
                 </ItemContent>
                 <ItemActions>
                   <span className="text-muted-foreground text-xs">
-                    {server?.hasCredential ? "Held" : "Not set"}
+                    {server?.hasCredential ? "Saved" : "Not set"}
                   </span>
                   <IconChevronRight className="size-4 shrink-0 text-muted-foreground" />
                 </ItemActions>
@@ -774,8 +835,8 @@ function RouteComponent() {
                 <ItemContent>
                   <ItemTitle>OAuth client</ItemTitle>
                   <ItemDescription>
-                    Identifies this deployment to the vendor. It reaches
-                    nobody's documents on its own.
+                    Identifies this deployment to the vendor. On its own, it
+                    can't reach anyone's documents.
                   </ItemDescription>
                 </ItemContent>
                 <ItemActions>
@@ -823,8 +884,8 @@ function RouteComponent() {
                 ) : shared ? (
                   <BrokeredAccountRow
                     account={brokeredAccount}
-                    connectedDescription={`Connected${sharedConnection?.displayName ? ` as ${sharedConnection.displayName}` : ""}${sharedConnection?.connectedBy ? ` by ${sharedConnection.connectedBy}` : ""}. Every Bot granted these tools acts as this account.`}
-                    disconnectedDescription={`No team account is connected, so Bots granted these tools are refused.${perActionGrants ? ` ${brokeredPerActionTrip(provider, "settings")}` : ""}`}
+                    connectedDescription={`Connected${sharedConnection?.displayName ? ` as ${sharedConnection.displayName}` : ""}${sharedConnection?.connectedBy ? ` by ${sharedConnection.connectedBy}` : ""}. Every Bot with these tools acts as this account.`}
+                    disconnectedDescription={`No team account is connected. Bots with these tools are refused.${perActionGrants ? ` ${brokeredPerActionTrip(provider, "settings")}` : ""}`}
                     heading="Team account"
                     notice="Sign in as the team account, not your own."
                     provider={provider}
@@ -836,7 +897,7 @@ function RouteComponent() {
                     /* Said beside the button rather than after it: disconnecting ends the account
                        at Composio, so what it undoes is not the row here but the grant on this
                        person's mailbox, and connecting again is a fresh consent. */
-                    connectedDescription={`Connected, so a Bot granted these tools uses your ${title} as you. ${brokeredDisconnectNote(provider)}`}
+                    connectedDescription={`Connected. A Bot with these tools uses your ${title} as you. ${brokeredDisconnectNote(provider)}`}
                     disconnectedDescription={
                       perActionGrants
                         ? `${brokeredPerActionTrip(provider, "settings")} ${reassurance}`
@@ -867,7 +928,7 @@ function RouteComponent() {
                       <ItemTitle>Your account</ItemTitle>
                       <ItemDescription>
                         {youConnected
-                          ? `Connected, so a Bot granted these tools uses your ${title} as you. Everybody else connects their own.`
+                          ? `Connected. A Bot with these tools uses your ${title} as you. Everybody else connects their own.`
                           : "Connect your own account to try this connector. Setup is complete without it, and it reaches your documents only."}
                       </ItemDescription>
                     </ItemContent>
@@ -920,8 +981,8 @@ function RouteComponent() {
                   <ItemContent>
                     <ItemTitle>Instance host</ItemTitle>
                     <ItemDescription>
-                      This vendor gives every customer their own hostname,
-                      checked against its pattern before anything is stored.
+                      This vendor gives every customer their own hostname. It is
+                      checked against the vendor's pattern before it is saved.
                     </ItemDescription>
                   </ItemContent>
                   <ItemActions>
@@ -967,20 +1028,20 @@ function RouteComponent() {
             <div className="mt-3 p-3">
               {server?.dynamicClient ? (
                 <p className="text-muted-foreground text-sm">
-                  The deployment registers its redirect URI itself, so there is
+                  The deployment registers its redirect URI itself. There is
                   nothing to add at the vendor.
                 </p>
               ) : (
                 <p className="text-muted-foreground text-sm">
                   Add this to the client's authorised redirect URIs at the
-                  vendor, exactly as written. A single wrong character fails
-                  there, with a message that does not mention OpenBot.
+                  vendor, exactly as written. One wrong character fails there,
+                  with an error that doesn't mention OpenBot.
                 </p>
               )}
               {!plugins.data?.redirectUri ? (
                 <p className="mt-3 text-destructive text-sm" role="alert">
-                  This deployment has no public URL, so nobody can complete a
-                  consent flow. Set OPENBOT_PUBLIC_URL.
+                  This deployment has no public URL, so nobody can finish
+                  connecting. Set OPENBOT_PUBLIC_URL.
                 </p>
               ) : server?.dynamicClient ? null : (
                 /* Selectable and monospaced: it is copied by hand into somebody else's console. */
@@ -1032,14 +1093,13 @@ function RouteComponent() {
               ) : null}
             </div>
           }
-          description="A Bot is told about a tool only when it holds it. Every call is decided again when it happens, so removing a grant takes effect on the next one."
+          description="A Bot only sees the tools it has been given. Each call is checked when it happens, so removing access applies from the next call."
           title="Tools"
         >
           <SkippedToolsNotice names={server.skippedTools ?? []} />
           {server.tools.length === 0 ? (
-            <PageEmpty>
-              {server.lastError ??
-                "No tools listed. Refresh to ask the vendor again."}
+            <PageEmpty icon={IconTool} title="No tools listed">
+              {server.lastError ?? "Refresh tools to check again."}
             </PageEmpty>
           ) : (
             <PageRows>
@@ -1124,8 +1184,8 @@ function RouteComponent() {
                         <ItemTitle>{bot.name}</ItemTitle>
                         <ItemDescription>
                           {bot.hidden
-                            ? "Hidden from your roster. Every action this app offers, switched one at a time."
-                            : "Every action this app offers, switched one at a time."}
+                            ? "Hidden from your roster. Turn this app's actions on or off one at a time."
+                            : "Turn this app's actions on or off one at a time."}
                         </ItemDescription>
                       </ItemContent>
                       <ItemActions>
@@ -1166,8 +1226,8 @@ function RouteComponent() {
        */}
       {server && server.withdrawn.length > 0 ? (
         <PageSection
-          description="This vendor no longer lists these, so no Bot is told about them and no model can call one. The grant is still recorded, and the tool would be offered again if the vendor started listing it. Revoke from the Bot's own page if that is not what you want."
-          title="Held but not offered"
+          description="This vendor no longer lists these. No Bot sees them, and none can call them. The access is still saved, and comes back if the vendor lists the tool again. To remove it, use the Bot's own page."
+          title="Given but no longer listed"
         >
           <PageRows>
             {server.withdrawn.map((held, index) => (
@@ -1211,10 +1271,10 @@ function RouteComponent() {
             </DialogTitle>
             <DialogDescription>
               {dialog === "client"
-                ? "From the vendor's console. The secret is stored in this deployment's vault and never read back."
+                ? "From the vendor's console. The secret is saved in this deployment's vault and never shown again."
                 : dialog === "instance"
-                  ? "Your own hostname with this vendor. It is checked against their pattern before anything is stored."
-                  : "Stored in this deployment's vault and never read back."}
+                  ? "Your own hostname with this vendor. It is checked against the vendor's pattern before it is saved."
+                  : "Saved in this deployment's vault and never shown again."}
             </DialogDescription>
           </DialogHeader>
           <DialogBody className="mt-4">
@@ -1311,8 +1371,8 @@ function RouteComponent() {
             <DialogHeader>
               <DialogTitle>Grant tools</DialogTitle>
               <DialogDescription>
-                Each grant is its own entry on the audit trail, and a granted
-                write is still checked against the boundaries on every call.
+                Each grant is its own row in Audit. Tools that change things are
+                still checked against the boundaries on every call.
               </DialogDescription>
             </DialogHeader>
             <DialogBody className="mt-4 space-y-5">
@@ -1462,13 +1522,13 @@ function RouteComponent() {
                 <p className="flex-1 text-muted-foreground text-xs">
                   {`Grant ${selectedRefs.size} ${
                     selectedRefs.size === 1 ? "tool" : "tools"
-                  }${
+                  } to ${chosenNames.join(", ")}.${
                     chosenWrites > 0
-                      ? `, ${chosenWrites} of which ${
+                      ? ` ${chosenWrites} ${
                           chosenWrites === 1 ? "changes" : "change"
-                        } things,`
+                        } things.`
                       : ""
-                  } to ${chosenNames.join(", ")}.`}
+                  }`}
                 </p>
               ) : null}
               <Button onClick={() => setDialog(null)} size="sm" variant="ghost">

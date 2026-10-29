@@ -12,8 +12,7 @@
  * nowhere else, and the next table went back to an object literal.
  *
  * So the prototype-safe read is a named function rather than a habit: `keyedLookup(TABLE, key)`
- * reads the same whichever page writes it, greps as one symbol, and has exactly one definition —
- * `server/tests/sole-definition.test.ts` asserts that it does.
+ * reads the same whichever page writes it and keeps the prototype-safe read in one place.
  *
  * A `Map` answers only with what was PUT IN IT. That is the whole mechanism; this function adds
  * nothing to it but a name. Taking a `ReadonlyMap` is the point — passing an object literal is a

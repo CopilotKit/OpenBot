@@ -64,7 +64,7 @@ export function mountSkillRoutes({
     const actor = skillActor(context);
     if (body.global && !actor.isAdmin) {
       return context.json(
-        { error: "Only an administrator writes a skill for the deployment." },
+        { error: "Only an admin can write a skill for everyone." },
         403,
       );
     }

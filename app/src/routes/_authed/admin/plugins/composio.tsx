@@ -37,8 +37,7 @@ function RouteComponent() {
   if (plugins.isError) {
     return (
       <p className="m-4 text-destructive text-sm" role="alert">
-        This deployment's plugin settings could not be read, so nothing was
-        shown.
+        Couldn't load the plugin settings. Reload the page.
       </p>
     );
   }

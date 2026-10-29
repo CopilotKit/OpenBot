@@ -31,6 +31,16 @@ export const sharedUseApprovals = pgTable(
     audience: text("audience").$type<"owner" | "people" | "team">().notNull(),
     outsideInput: boolean("outside_input").notNull(),
     approvedBy: text("approved_by").notNull(),
+    /**
+     * Who set this audience: an administrator (`admin`, or null from a replica older than this
+     * column), or the Bot's owner giving it a Shared app whose rule lets owners decide (`owner`).
+     *
+     * AN OWNER'S AUDIENCE LIVES ONLY AS LONG AS WHAT ALLOWED IT. It is withdrawn when the owner takes
+     * the app back or an administrator stops letting owners decide, and it is not read at all while
+     * the app's `owner_grants` is anything but `any`. An administrator's approval over it makes it
+     * theirs, and then it stays.
+     */
+    approvedAs: text("approved_as").$type<"admin" | "owner">(),
     approvedAt: timestamp("approved_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -40,6 +50,10 @@ export const sharedUseApprovals = pgTable(
     check(
       "shared_use_approvals_audience_check",
       sql`${table.audience} IN ('owner', 'people', 'team')`,
+    ),
+    check(
+      "shared_use_approvals_approved_as_check",
+      sql`${table.approvedAs} IS NULL OR ${table.approvedAs} IN ('admin', 'owner')`,
     ),
   ],
 );

@@ -121,7 +121,7 @@ describe("createArcadeClient", () => {
     );
     expect(result.isError).toBe(true);
     expect(result.text).toBe(
-      "Gmail.SendEmail has not been authorized on this account yet. Authorize it in Settings → Connected accounts and ask again.",
+      "Gmail.SendEmail has not been authorized on this account yet. Authorize it in Connections and ask again.",
     );
   });
 

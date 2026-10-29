@@ -10,9 +10,9 @@ services:
     # says it plainly: isolation is the container's job, a shell can reach whatever the container
     # can reach.
     #
-    # `migrate` is the only service that reaches this by name, so the two of them are all that
-    # belongs here. Everything else that needs the database is outside this file: the API server
-    # runs on the host in local development and connects through the published port below.
+    # `migrate` reaches this by name, and so do `server` and `worker` when an installed OpenBot runs
+    # them; those are all that belong here. In local development the API server and the worker run
+    # on the host instead and connect through the published port below.
     environment:
       POSTGRES_DB: openbot
       POSTGRES_USER: openbot
@@ -74,6 +74,160 @@ services:
     networks:
       - data
 
+  # OpenBot itself, the API and the app it serves, as an installed OpenBot runs it.
+  #
+  # BEHIND A PROFILE, BECAUSE A DEVELOPER'S SERVER IS ON THE HOST. `scripts/start.sh` runs the server
+  # and the worker as host processes for hot reload, names the services it wants from this file, and
+  # owns port 3001 while it does. Without the profile, a plain `docker compose up -d` would start a
+  # second server beside that one, fighting it for the port and the routines. Naming `server` on the
+  # command line still starts it, profile or not, which is how an installed OpenBot asks for it.
+  #
+  # The image `migrate` runs, because it is one image: the API, the built app at `APP_DIST_DIR`, and
+  # the worker below. A machine with that image needs Docker and nothing else, which is the point.
+  server:
+    profiles: ["openbot"]
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    # See migrate above for what pull_policy decides, and why an installed OpenBot overrides the
+    # `build` section away rather than trusting it.
+    image: ${SERVER_IMAGE:-openbot-server:latest}
+    pull_policy: ${IMAGE_PULL_POLICY:-build}
+    # The settings a host server reads with `--env-file=../.env`, so the two run the same deployment.
+    # Optional, because `docker compose config` and a first start both come before anything wrote it.
+    #
+    # Everything in `environment:` below wins over this file. That is what lets the addresses there
+    # name services on this network: the file says `127.0.0.1`, which inside this container is the
+    # container.
+    env_file:
+      - path: ./.env
+        required: false
+    environment:
+      # Both names, because `.env` carries `SERVER_PORT` for the host port, and the server refuses to
+      # start when the two disagree (`serverPort` in server/src/config.ts). Inside this container it
+      # is always 3001; the host port is the mapping's business, below.
+      PORT: "3001"
+      SERVER_PORT: "3001"
+      # Not production, as a host server is not. The image says production, and in production the
+      # server refuses `AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS`, which a local OpenBot needs: its
+      # supervisor, computers and Bots are all at private addresses, on purpose. Empty rather than
+      # `development`, because unset is what a host server has, and libraries that look at this
+      # treat the two alike.
+      NODE_ENV: ""
+      # Every address below names a service on this network rather than the loopback port the host
+      # server reaches it on.
+      DATABASE_URL: postgres://openbot:openbot@postgres:5432/openbot
+      AGENT_COMPUTER_URL: http://agent-computer:4100
+      # Per-Bot computers too, which is not automatic: the supervisor publishes each on a loopback
+      # port unless `COMPUTER_NETWORK` names this project's `default` network, and a loopback port on
+      # the host is not one this container can open. Whoever starts this service sets that as well.
+      COMPUTER_SUPERVISOR_URL: http://supervisor:4300
+      # The managed Bot by name, when the deployment has one. `:+` keeps an empty setting empty, which
+      # is how a deployment without that Bot says so: the package drops its row while this is blank.
+      MANAGED_AGENT_AG_UI_URL: ${MANAGED_AGENT_AG_UI_URL:+http://agent-langgraph:4201/ag-ui}
+      # These three have a container address only the deployment knows, so they take the shape
+      # `OPENAI_CONTAINER_BASE_URL` already has on the Bots below: the container's own address when
+      # one is given, and otherwise the deployment's, which for anything not on this machine is
+      # already right. The picked harness's path, a model endpoint on the host, and Intelligence.
+      PICKED_HARNESS_URL: ${PICKED_HARNESS_CONTAINER_URL:-${PICKED_HARNESS_URL:-}}
+      OPENAI_BASE_URL: ${OPENAI_CONTAINER_BASE_URL:-${OPENAI_BASE_URL:-}}
+      INTELLIGENCE_API_URL: ${INTELLIGENCE_CONTAINER_API_URL:-${INTELLIGENCE_API_URL:-}}
+      INTELLIGENCE_GATEWAY_WS_URL: ${INTELLIGENCE_CONTAINER_GATEWAY_WS_URL:-${INTELLIGENCE_GATEWAY_WS_URL:-}}
+      # The browser opens the gateway too, at the address the server gives it in `/info`, and the
+      # browser is on the host. So it gets the deployment's own address, the one a host server would
+      # have used, whatever this container uses itself.
+      INTELLIGENCE_BROWSER_GATEWAY_WS_URL: ${INTELLIGENCE_GATEWAY_WS_URL:-}
+      # The deployment's secrets, from the environment Compose runs in and then from `.env`, which
+      # Compose reads for these `${...}` and the host server reads for itself. OpenBot Desktop keeps
+      # them out of that file and hands them to Compose in its environment, so they reach this
+      # container only by being named here. The defaults are the ones every other service in this
+      # file and `scripts/start.sh` agree on.
+      AGENT_TOOL_TOKEN: ${AGENT_TOOL_TOKEN:-}
+      COMPUTER_TOKEN: ${COMPUTER_TOKEN:-openbot-dev-computer-token}
+      KEY_ENCRYPTION_KEY: ${KEY_ENCRYPTION_KEY:-}
+      MANAGED_AGENT_TOKEN: ${MANAGED_AGENT_TOKEN:-}
+      SUPERVISOR_TOKEN: ${SUPERVISOR_TOKEN:-openbot-dev-supervisor-token}
+      WORKER_SHARED_SECRET: ${WORKER_SHARED_SECRET:-openbot-dev-worker-secret}
+      INTELLIGENCE_API_KEY: ${INTELLIGENCE_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      # The desktop's host-access broker proves itself with this. Minted per start and given to the
+      # server alone, so it is named here and nowhere else in this file.
+      OPENBOT_DESKTOP_HOST_TOKEN: ${OPENBOT_DESKTOP_HOST_TOKEN:-}
+      # A Google or xAI sign-in, which the server reads and renews itself. The file is on the host,
+      # at `.openbot/model-oauth.json` beside this one, and reaches the container through the mount
+      # below, so a host path here becomes the mount's. Empty stays empty: no sign-in, no file.
+      OPENBOT_MODEL_OAUTH_FILE: ${OPENBOT_MODEL_OAUTH_FILE:+/openbot/model-oauth.json}
+    # Who the server runs as. The image's own user by default. On Linux the desktop names the host's,
+    # because the sign-in file below is the host user's and readable by nobody else, and a bind mount
+    # there keeps the host's numbers; Docker Desktop's file sharing on macOS and Windows does not.
+    user: "${OPENBOT_SERVER_USER:-1001:1001}"
+    volumes:
+      # The directory, not the file: the server renews the token by writing a sibling and renaming it
+      # over the original, which a single-file mount cannot take. Not created here, because Docker
+      # would create it as root on Linux and the desktop could then not write its sign-in into it;
+      # whoever starts this service makes it first.
+      - type: bind
+        source: ./.openbot
+        target: /openbot
+        bind:
+          create_host_path: false
+    ports:
+      # Two host ports, one process. The app's is the address a window is given: the server serves
+      # the built app itself, so that one port reaches both halves on one origin. The server's is
+      # where everything else on the host already calls it, OpenBot Desktop's host-access broker
+      # among them. Loopback, for the reason every other port here is.
+      - "127.0.0.1:${APP_PORT:-3010}:3001"
+      - "[::1]:${APP_PORT:-3010}:3001"
+      - "127.0.0.1:${SERVER_PORT:-3001}:3001"
+      - "[::1]:${SERVER_PORT:-3001}:3001"
+    # For whatever stays on the host and is addressed as such: a model endpoint on this machine, and
+    # anything else the Bots below already reach the same way.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "bun -e \"const r = await fetch('http://127.0.0.1:3001/health'); process.exit(r.ok ? 0 : 1)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    # Both: `data` for the database, `default` for the Bots, the computers and the supervisor. This is
+    # the one service the note on `networks:` at the end of this file says may sit on both.
+    networks:
+      - data
+      - default
+
+  # The routines worker, from the same image: the server's own sweep in a loop. See
+  # `worker/src/index.ts` for why a local deployment has this rather than a CronJob.
+  worker:
+    profiles: ["openbot"]
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    image: ${SERVER_IMAGE:-openbot-server:latest}
+    pull_policy: ${IMAGE_PULL_POLICY:-build}
+    command: ["bun", "../worker/src/index.ts"]
+    # Its three settings and nothing else. It is handed no `.env`: it does not read the deployment's
+    # configuration, and the less this process holds, the less a mistake in it can spend.
+    environment:
+      DATABASE_URL: postgres://openbot:openbot@postgres:5432/openbot
+      SERVER_INTERNAL_URL: http://server:3001
+      WORKER_SHARED_SECRET: ${WORKER_SHARED_SECRET:-openbot-dev-worker-secret}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      server:
+        condition: service_started
+    restart: unless-stopped
+    # `data` only. It reaches the database there, and the server, which is on it too. Nothing a Bot
+    # can reach can reach this.
+    networks:
+      - data
+
   # The Bot's computer is long-lived so browser sessions remain signed in across turns.
   agent-computer:
     build:
@@ -116,6 +270,9 @@ services:
       # minutes; closing a browser costs only a relaunch, because the profile is on the volume below.
       COMPUTER_MAX_BROWSERS: ${COMPUTER_MAX_BROWSERS:-}
       COMPUTER_BROWSER_IDLE_MS: ${COMPUTER_BROWSER_IDLE_MS:-}
+      # Every Bot without a computer of its own reaches this one, so each gets its own folder of
+      # files and its shell starts there. The supervisor's per-Bot computers do not need it.
+      COMPUTER_SEPARATE_WORKSPACES: "on"
     volumes:
       - agent-workspace:/workspace
       # Chromium's user-data directory is volume-backed so logins survive container restarts.
@@ -382,6 +539,10 @@ services:
       BOT_REASONING_EFFORT: ${BOT_REASONING_EFFORT:-}
       # Where this Bot runs a tool: back through the deployment that granted it, never at the vendor.
       # `host.docker.internal` because the API server runs on the host, not in this network.
+      #
+      # Left as the default even though `server` above is now in this file, because the default is
+      # what `scripts/start.sh` relies on and that server is on the host. A deployment that starts
+      # `server` sets this to `http://server:3001/api/agent-tools/call`, for every Bot at once.
       OPENBOT_TOOL_URL: ${OPENBOT_TOOL_URL:-http://host.docker.internal:3001/api/agent-tools/call}
       AGENT_TOOL_TOKEN: ${AGENT_TOOL_TOKEN:-}
     extra_hosts:
@@ -393,10 +554,9 @@ services:
       retries: 5
 
 networks:
-  # The database and the one service that reaches it by name. Nothing a Bot can reach is on it.
+  # The database and the services that reach it by name. Nothing a Bot can reach is on it.
   #
-  # A deployment that runs the API server inside Compose rather than on the host puts that service
-  # on both this and `default`, which is the one place the two are meant to meet.
+  # `server` is on both this and `default`, which is the one place the two are meant to meet.
   data:
   # Everything else, which is where `default` already put it. Named here only so that adding a
   # service without a `networks:` key keeps landing beside the Bots rather than beside the database.

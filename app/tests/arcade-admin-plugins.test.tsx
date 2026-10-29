@@ -47,21 +47,20 @@ test("a Composio deployment keeps today's exact wording", () => {
     // `provider === "composio"` branch in `moreAppsRow`, and moving it here is what let that
     // branch go.
     directoryDescription:
-      "A few hundred apps, reached as whoever is asking. Each person connects their own account.",
+      "A few hundred apps. Each person connects their own account.",
   });
   expect(moreAppsSectionDescription("composio")).toBe(
-    "A directory this deployment has not reviewed, reached through Composio.",
+    "Apps from Composio. Nobody here has reviewed them.",
   );
   expect(moreAppsRow("composio", true)).toEqual({
     title: "Browse Composio",
-    description:
-      "A few hundred apps, reached as whoever is asking. Each person connects their own account.",
+    description: "A few hundred apps. Each person connects their own account.",
     linked: true,
   });
   expect(moreAppsRow("composio", false)).toEqual({
     title: "Composio",
     description:
-      "Add your Composio key to enable a catalogue of tools. Set COMPOSIO_API_KEY on this deployment.",
+      "Not set up. Set COMPOSIO_API_KEY on this deployment to browse its apps.",
     linked: false,
   });
   expect(brokeredConnectionDescription("composio")).toBe(
@@ -69,11 +68,11 @@ test("a Composio deployment keeps today's exact wording", () => {
   );
   expect(brokeredReach("composio")).toEqual({
     description:
-      "This app is reached through Composio, which holds the account. This deployment sends one key and the name of whoever is asking, so each person connects their own and a Bot sees only what that person can see. There is no token to paste.",
+      "Composio holds the account. This deployment sends one key and who is asking. Each person connects their own, and a Bot sees only what that person can see. There is no token to paste.",
     badge: "Through Composio",
   });
   expect(brokeredDisconnectNote("composio")).toBe(
-    "Disconnecting ends the account at Composio, not just here.",
+    "Disconnecting also ends the account at Composio.",
   );
 });
 
@@ -95,7 +94,7 @@ test("a configured deployment links to its own directory, whichever provider it 
     title: "Browse Arcade",
     // Arcade's own sentence: it claims no app count, because nobody here has counted Arcade's.
     description:
-      "A directory this deployment has not reviewed, reached as whoever is asking. Each person connects their own account.",
+      "Apps nobody here has reviewed. Each person connects their own account.",
     linked: true,
   });
   expect(moreAppsRow("composio", true).linked).toBe(true);

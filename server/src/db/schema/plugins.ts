@@ -133,6 +133,21 @@ export const mcpServers = pgTable(
      * any connection row exists, so this is where `authorize` and `confirm` both read it from.
      */
     sharedVendorUserId: text("shared_vendor_user_id"),
+    /**
+     * Who may give this app to a Bot: any Bot's owner, for their own Bot (`any`), or only an
+     * administrator (`admin`).
+     *
+     * NULL MEANS THE DEFAULT FOR WHOSE ACCOUNT THE APP RUNS ON, and that is a statement rather than
+     * a gap. `ownerGrantsOf` in `plugins/app-access.ts` reads it: an app every person connects for
+     * themselves, and the built-in Routines, default to `any`; an app on the deployment's token, a
+     * Shared team account or no account at all defaults to `admin`. Stored only once an
+     * administrator chooses, so an app switched from Personal to Shared falls back to `admin` by
+     * itself instead of keeping a default somebody chose for the other mode.
+     *
+     * Nullable for the reason `docs/development.md` gives under Migrations: a replica from before
+     * this column writes rows without it.
+     */
+    ownerGrants: text("owner_grants").$type<"any" | "admin">(),
     /** What the deployment last heard back from it. `null` until the first successful listing. */
     toolsRefreshedAt: timestamp("tools_refreshed_at", { withTimezone: true }),
     /** The last failure, kept so the Plugins page can say why a server has no tools. */
@@ -153,6 +168,10 @@ export const mcpServers = pgTable(
     check(
       "mcp_servers_account_mode_check",
       sql`${table.accountMode} IS NULL OR ${table.accountMode} IN ('personal', 'shared')`,
+    ),
+    check(
+      "mcp_servers_owner_grants_check",
+      sql`${table.ownerGrants} IS NULL OR ${table.ownerGrants} IN ('any', 'admin')`,
     ),
   ],
 );
@@ -802,12 +821,30 @@ export const pluginGrants = pgTable(
       .notNull()
       .references(() => agents.id, { onDelete: "cascade" }),
     grantedBy: text("granted_by"),
+    /**
+     * Whether an administrator made this grant (`admin`, or null on every row from before this
+     * column) or the Bot's owner gave one of their own apps to their own Bot (`owner`).
+     *
+     * NOT BOOKKEEPING: IT DECIDES WHOSE ACCOUNT A CALL USES. On a published Team Bot, an
+     * administrator's grant of a personal app goes out on the owner's account wherever the owner
+     * connected it — `credentialActorFor` in `team-bots/team-bots.ts`. An owner's grant never does:
+     * it always uses the asking person's own account. Otherwise publishing a Bot would hand every
+     * teammate the owner's mailbox, which nobody decided except by giving the Bot their own Gmail.
+     *
+     * Nullable, null read as `admin`, for the rolling deploy `docs/development.md` describes: a
+     * replica from before this column only ever wrote an administrator's grant.
+     */
+    grantedAs: text("granted_as").$type<"admin" | "owner">(),
     grantedAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (table) => [
     primaryKey({ columns: [table.kind, table.ref, table.agentId] }),
     index("plugin_grants_agent_idx").on(table.agentId),
+    check(
+      "plugin_grants_granted_as_check",
+      sql`${table.grantedAs} IS NULL OR ${table.grantedAs} IN ('admin', 'owner')`,
+    ),
   ],
 );
 
@@ -870,3 +907,73 @@ export const sandboxedComponents = pgTable("sandboxed_components", {
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
+
+/**
+ * A person asking an administrator to make one work app usable through one Bot.
+ *
+ * WHAT IS ASKED FOR IS THE SERVER'S, NEVER THE BROWSER'S. `kind` is derived from the app's state for
+ * the person and the Bot at the moment of asking — switched off is `enable`, held by no grant is
+ * `grant`, a Shared app with no team account is `connect_shared` — so a request cannot be worded as
+ * something the deployment does not actually need, and approving it does exactly the one thing
+ * that state was missing.
+ *
+ * `app_key` IS THE SERVER ID THE APP HAS OR WOULD HAVE, and is not a foreign key. A request to
+ * switch an app on names an app with no `mcp_servers` row yet — `composio-<slug>` for a Composio app,
+ * the catalogue key for one this deployment ships — and is the row's id the moment it is enabled,
+ * so one key follows the app across the change being asked for. `app_title` is the app's name as
+ * the server resolved it when the request was filed, so an administrator's list can name an app
+ * that has no row to read the name from.
+ *
+ * `agent_id` IS NULLABLE FOR A REQUEST ABOUT THE APP ALONE. Every path that files one today names
+ * the Bot, so approving a request to switch an app on can grant it to that Bot in the same step;
+ * the column admits none because "switch this on" is a complete question without one.
+ *
+ * ONE PENDING REQUEST PER (PERSON, APP, BOT, KIND), held by the partial unique index rather than by
+ * a read-then-write, so two replicas filing the same request at once cannot both insert. The Bot is
+ * read through `coalesce` because Postgres treats two NULLs as distinct, and an index on the bare
+ * column would let the same app-only request pile up.
+ *
+ * NO ROW IS DELETED WHEN IT IS ANSWERED. Approved, dismissed and cancelled requests stay, with who
+ * resolved them and when; the trail says the same thing in its own rows.
+ */
+export const appAccessRequests = pgTable(
+  "app_access_requests",
+  {
+    id: text("id").primaryKey(),
+    requestedBy: text("requested_by")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    agentId: text("agent_id").references(() => agents.id, {
+      onDelete: "cascade",
+    }),
+    appKey: text("app_key").notNull(),
+    appTitle: text("app_title").notNull(),
+    kind: text("kind").$type<"enable" | "grant" | "connect_shared">().notNull(),
+    status: text("status")
+      .$type<"pending" | "approved" | "dismissed" | "cancelled">()
+      .notNull()
+      .default("pending"),
+    createdAt: createdAt(),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    resolvedBy: text("resolved_by"),
+  },
+  (table) => [
+    uniqueIndex("app_access_requests_pending_idx")
+      .on(
+        table.requestedBy,
+        table.appKey,
+        sql`coalesce(${table.agentId}, '')`,
+        table.kind,
+      )
+      .where(sql`${table.status} = 'pending'`),
+    index("app_access_requests_status_idx").on(table.status, table.appKey),
+    check(
+      "app_access_requests_kind_check",
+      sql`${table.kind} IN ('enable', 'grant', 'connect_shared')`,
+    ),
+    check(
+      "app_access_requests_status_check",
+      sql`${table.status} IN ('pending', 'approved', 'dismissed', 'cancelled')`,
+    ),
+  ],
+);

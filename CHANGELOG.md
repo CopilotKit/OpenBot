@@ -8,7 +8,7 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-**Before upgrading.** Five things change for an existing deployment:
+**Before upgrading.** Fourteen things change for an existing deployment:
 - A hosted computer's browser is now headed by default. It uses a little more memory than headless
   did; set `COMPUTER_BROWSER_MODE=headless` (Helm: `computers.browserMode: headless`) to keep the old
   behaviour.
@@ -31,6 +31,573 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - Migration `0056_sign_in_code_step` widens the check on `sign_in_requests.status` to allow
   `code_required` (below). A server and a computer must be upgraded together: an older computer has
   no `/sign-in/code`.
+- Migration `0060_app_access_requests` adds one table, `app_access_requests`, where a person's
+  request for an administrator to switch on a work app, grant it to a Bot, or connect a Shared app's
+  team account is kept, with who answered it and when. It starts empty and nothing is backfilled.
+- Migration `0066_recorder_extension` adds six tables for the OpenBot Recorder and each person's own
+  Learning space (below): `recorder_connect_codes`, `recorder_connections`,
+  `recorder_trajectory_bindings`, `learning_person_spaces`, `learning_skill_sharing` and
+  `learning_open_skills`. Nothing existing changes, and the tables stay empty until somebody
+  connects a browser or changes Settings → Learning.
+- The CopilotKit runtime moves to 1.79.1. A built-in Bot whose `openai/...` model is reached
+  through an `OPENAI_BASE_URL` that is not OpenAI or Azure now calls that endpoint's Chat
+  Completions API (`/chat/completions`) instead of the Responses API. That is what most
+  OpenAI-compatible endpoints serve, so Bots behind one of them now work; a gateway that also serves
+  the Responses API loses Responses-only features, such as reasoning summaries, without an error.
+  `COPILOTKIT_OPENAI_API=responses` keeps the Responses API (`chat` forces Chat Completions); any
+  other value is an error when a built-in Bot runs. Deployments on OpenAI or Azure are unchanged.
+- Migration `0067_recorder_activity` adds two nullable columns to `recorder_connections`, where each
+  OpenBot Recorder's latest recording activity is kept. Nothing existing changes.
+- Migration `0061_suggestion_superseded` widens the check on `proactive_suggestions.status` to allow
+  `superseded` (below). Open suggestions from before the upgrade stay open until that Bot's next
+  research run replaces them.
+- Migration `0062_action_policy_labels` adds a `labels` column to `action_policies`, defaulting to
+  empty. Existing boundary rules keep working and show as "Custom rule" until somebody names them.
+- On Helm's `shared` computer and the docker-compose `agent-computer`, each Bot's files now live in
+  `computers/<Bot id>` on the workspace volume (below). Files saved before the upgrade stay at the
+  root of the volume, where no Bot sees them; move them into a Bot's folder to give them back.
+- With `OPENAI_BASE_URL` set to a host that is not OpenAI or Azure, `openai/...` models now use the
+  Chat Completions API rather than the Responses API (below). Set `COPILOTKIT_OPENAI_API=responses`
+  to keep the old behaviour.
+- Interfaces a Bot drew before the upgrade (A2UI 0.9 surfaces) no longer draw when a conversation is
+  reopened; the messages around them stay. New ones use A2UI 1.0 (below).
+
+### Generated interfaces use A2UI 1.0
+
+With generative UI on, a Bot builds an interface from the A2UI 1.0 basic components instead of the
+A2UI 0.9 ones. It's the same set of 18: text, images, icons, video, audio, rows, columns, lists,
+cards, tabs, dividers, dialogs, buttons, checkboxes, text fields, date pickers, choice pickers and
+sliders. They now take OpenBot's colours, radii and font, in light and dark. The gallery components a
+Bot is granted are unchanged. `OPENBOT_GENERATIVE_UI=false` still switches it all off, on the server
+as well as in the browser.
+
+### CopilotKit 1.83
+
+OpenBot now runs on CopilotKit 1.83.0 (`@copilotkit/runtime` and `react-core`, from 1.77.0) and
+AG-UI 1.0.2 (`@ag-ui/core` and `@ag-ui/client`, from 1.0.1). A managed Intelligence project needs
+nothing changed. A deployment whose `OPENAI_BASE_URL` points at an OpenAI-compatible gateway rather
+than OpenAI or Azure now reaches `openai/...` models through Chat Completions; a gateway that only
+speaks the Responses API needs `COPILOTKIT_OPENAI_API=responses`.
+
+### Pick a skin: OpenDuet, OpenDots or OpenMuse
+
+Settings → Preferences → Skin changes how OpenBot looks for you, and nothing about what it does.
+Three skins draw the open-source templates' looks over OpenBot's own features: OpenDuet (one
+phone-width column with Chat and Tasks), OpenDots (a rail, a sidebar of Bots with their avatars, and
+the Bot's computer beside the chat) and OpenMuse (one Bot at the centre, with Chat, Activity, Ideas,
+Goals and Apps). Every skin keeps your deployment's name from `brand.yaml`, OpenBot's own mark and
+each Bot's own avatar; only the look changes. The choice is saved on your account, so it follows
+you to every device, and changes nothing for anybody else. The templates' own features that
+OpenBot has no server for, such as OpenDots' Spaces, OpenDuet's morning brief and OpenMuse's mail and
+calendar, are not part of the skins.
+
+### The audit log reads like a log
+
+Admin → Audit fills the window and runs the table across the whole pane, with the title, the views
+and the search held in place while only the rows scroll. Each row shows the full date and time and a
+mark for what happened, with blocked rows tinted red and actions that did not happen tinted amber.
+The newest come first, and a press on When turns the order round. A search box and Outcome, Bot and
+Started by buttons narrow the events already loaded, and the count says how many of them match. A
+row about a Bot (a message routed to it, say) now names it under Bot.
+
+### Each Bot on a shared computer has its own files
+
+A computer that serves many Bots kept one folder of files for all of them, so a note one Bot saved
+was a file every other Bot could list and read. Each Bot now gets its own folder, and its commands
+start there. Logins were already kept apart. This is on for Helm's `shared` computer and the
+docker-compose `agent-computer`, and `COMPUTER_SEPARATE_WORKSPACES=on` turns it on for the
+all-in-one image. A command can still read another Bot's folder, so a deployment that needs people
+kept apart should give each Bot a computer of its own (`computers.mode: sandbox`).
+
+### Every chart says where its figures came from
+
+A chart a Bot draws now ends with a line naming what its figures were read from and when they are
+from, such as "Sources: World Bank World Development Indicators · As of 2025". Figures a Bot charted
+from its own knowledge, without looking them up, are marked "From the Bot's own knowledge. Not
+checked against a source." Bots are told to look up figures that change over time before charting
+them. In Slack and Teams the same line follows the chart in the reply. Charts already in a
+conversation are drawn as before, with no such line.
+
+### A Bot searches with its search tool, never its browser
+
+Asked to search for something, a Bot could drive its browser to Google or another search engine
+instead of using the search tool it held. With a search tool it now searches with that, and keeps
+the browser for signing in, clicking through a site, filling in a form or opening a page the person
+named. Without one it answers from what it knows, says it has not checked, and shows a card for a
+search app (Parallel Search, Exa Search or Firecrawl) that the person can ask an administrator for.
+
+### A computer that is starting says so, instead of showing a problem
+
+Opening the Computer panel while a Bot's computer was asleep or starting showed "Can't show the
+screen right now", and an action during a cold start was marked "didn't work". The panel now says
+the computer is starting, or is off until the Bot next uses it, and shows a problem only when it
+can't be reached or has gone two and a half minutes without a picture; a live screen being
+reconnected shows a small "Reconnecting…" badge. An action turned away by a cold start reads "not
+done yet" and the Bot is told to try again. Looking at the panel no longer wakes a sleeping computer,
+a Bot says in one sentence what it is about to do before its first computer action, and a hosted
+computer's cold start answers within 45 seconds, under a load balancer's usual 60-second idle
+timeout. A Docker computer still booting its browser reads as starting once the supervisor is
+upgraded too; an older supervisor works as before.
+
+### A conversation shows who it is waiting on
+
+When a Bot asks another Bot, the end of the conversation now shows that Bot's avatar and "Asking
+Risk Analyst…" until the answer comes back; a routine firing into it reads "Market Scout is running a
+routine…". A Bot whose address this deployment will not dial is reported at once, not after five
+minutes of retries. The sidebar keeps the conversation lit while it waits, and both survive a
+reload. In a shared conversation only the person whose Bot asked sees whom it asked; the others see
+only that it is busy. Migration `0063_work_items_open_thread` adds one partial index to `work_items`.
+
+### A Bot's owner can give it their own apps
+
+The owner of a Bot can now let it use an app they connect for themselves, without an administrator:
+from the app card ("Let Research Bot use your Gmail?"), under Your apps on the Bot's page, or on the
+New Bot sheet, which offers their connected apps. Calls under such a grant always use the asking
+person's own account, even on a published Team Bot, and an owner can take back only what they gave.
+By default this covers apps each person connects for themselves and Routines; an administrator
+decides per app on its page, and can switch it off for people with the "Give apps to their own Bots"
+capability. Migration `0063_owner_app_grants` adds two nullable columns, `mcp_servers.owner_grants`
+and `plugin_grants.granted_as`.
+
+Where an administrator lets owners give a Shared app, an owner's grant works straight away: it lets
+the people who can use the Bot (just the owner, or a Team Bot's audience) use the team account, with
+no separate approval. Writes still ask first. Taking the app back, or the administrator switching the
+app back to admins only, withdraws that. Migration `0064_owner_shared_audience` adds the nullable
+`shared_use_approvals.approved_as`.
+
+### An app card carries the task on once the app is ready
+
+When a Bot stopped because it needed an app, and the person then connected it in another tab or an
+administrator turned it on for the Bot, the card said "Ask again". It now sends "Gmail is ready now.
+Please carry on." for the person, once, and the Bot picks the task back up; a card opened after the
+change offers Continue instead. An administrator looking at the card gets the fix itself, "Turn on
+and give it to Sales" or "Give it to Sales", which grants the app's read-only actions with the same
+checks and trail as approving a request, or a link to the app's page where one press can't do it.
+
+### Screens share one spacing, row and empty-state design
+
+Every configuration screen now takes its spacing from the page frame: 32px under the title, 48px
+between sections, rows at least 56px tall with dividers inset to the text. Rows draw their icon as a
+glyph on a small tile, and a section with nothing in it says so with an icon, a title and, where
+there is one, the button that adds the first thing. The root font size is the browser's 16px again,
+with text kept on its 15px scale, so Tailwind sizes are their documented values.
+
+### Adding a credential and a boundary rule are screens of their own
+
+Add credential opens a page with a back button instead of a dialog. Boundaries is now a list of
+named rules ("Bots may never…"); adding one starts from a template or a blank rule and can be tested
+against recent activity before it applies, and each rule opens to what it has stopped lately.
+
+### A Bot's page is shorter
+
+Its In progress, Scheduled and Completed lists move to their own Activity page. The Bot's page keeps
+what is running or scheduled, three at most, with a dot on anything under way, and shows its newest
+three suggested next steps with the rest behind "Show more".
+
+### Suggested next steps no longer pile up
+
+Each research run replaces the open suggestions from the one before, and one with the same title as
+a suggestion that is already open, or was dismissed in the last 30 days, is not suggested again. The
+research is asked to suggest nothing when nothing needs doing, and not to name the Bot's tools.
+
+### Pin or delete a conversation from its Bot panel
+
+The gear panel in a conversation ends with Pin and Delete for that conversation.
+
+### The @ menu shows each Bot's avatar, at the caret
+
+On the home screen the @ menu opened away from the text, partly off the window; it now opens at the
+caret. It is wider and shows each Bot's avatar beside its name.
+
+### Filling in a form is no longer mistaken for paying
+
+The built-in safety rules (paying or moving money, credentials, security settings) read the words a
+Bot typed as well as where it typed them, so a Bot entering a CRM note about a customer's purchase
+orders, or a press release's source such as Business Wire, was stopped with "Paying, purchasing or
+moving money is always done by the person" and the step handed back to you. Typing is now judged by
+the field, the page and the button: a card number field, a checkout page or a new password field
+still goes to you, whatever is typed. A news wire (business, news or press wire) on a link or button
+no longer counts as wiring money; wiring money still does.
+
+### A page visit an approval rule covers now asks you
+
+With an approval rule that asks before a Bot opens, reads or scrolls a page, the Bot was told the
+action "was not started from a conversation that can ask you", did nothing, and said it could not get
+an approval in this chat. The visit now waits on the approval card in the conversation, like a click
+or a command does: Allow once opens the page and the Bot carries on, Deny tells the Bot it was
+declined. Page visits no rule asks about still go straight to the computer.
+
+### A Bot's browser step is no longer refused while it is being saved
+
+Before your browser runs a click or a typed entry for a Bot, the server checks it against the copy
+saved in the conversation. That copy is saved a moment behind, a piece at a time, and a check that
+read it half saved refused the step with "That unanswered tool call is not saved in this
+conversation" or "Supply a valid request", so a form the Bot was filling in could stop partway or ask
+for your approval twice. The check now waits, as it already did for a step not saved at all, until
+the step is saved whole.
+
+### A Bot can choose from a dropdown
+
+A Bot filling in a form in its browser could not set a dropdown (a native `<select>`, such as a CRM's
+Industry or Stage). Typing into one waited until it timed out and was reported as a field that had
+gone from the page, so the Bot took a fresh snapshot and tried the same thing again. Typing into a
+dropdown now chooses the option it names, by the option's label or its value, and the page sees the
+same change a person's choice makes. Text that names no option is refused with a message saying so.
+A page snapshot now lists each dropdown's options and the one it shows, so the Bot can see what it
+may choose and what is already chosen.
+
+### A Bot carries on after a browser step fails
+
+When a click, typed entry or key press the Bot made in its browser failed, the Bot's turn ended on
+the spot: the step showed "Didn't work" and the Bot said nothing more. The failure now reaches the
+Bot like any other result, so it can take a fresh snapshot, try another way, or tell you what
+stopped it. A refused step reads as a refusal the Bot can explain.
+
+### The computer image is about a fifth smaller to download
+
+The `openbot-agent-computer` image carried two copies of Chromium: the full browser it runs, and
+Playwright's separate headless shell, which it never starts. Every launch names a Chromium channel,
+and Playwright runs the full browser for a named channel even with `COMPUTER_BROWSER_MODE=headless`.
+The image now installs only the full browser and drops the package cache left from installing it.
+The download falls from 537 MB to about 423 MB on arm64 and from 520 MB to about 411 MB on amd64.
+Unpacked, the image is about 375 MB smaller on arm64 and 296 MB smaller on amd64. The all-in-one `openbot` image installs the same browser the same way and shrinks by about
+as much. The browser and its behaviour are unchanged. On a desktop install the computer is the
+largest image, so a first install and each upgrade download less.
+
+### A Bot can send, draft and reply in Gmail
+
+OpenBot left out every Composio action that takes a file, because a Bot has no way to supply one.
+That also left out actions where the file is optional, such as an email's attachment, so Gmail's
+send, draft, reply and update-draft actions never appeared and a Bot could read mail but not send
+it. These actions are now offered without the optional file, and a call that includes one anyway is
+refused with a message saying to try again without it. An action that cannot run without a file,
+such as uploading one to Google Drive, is still left out. For an app that is already on, press
+Refresh tools on its page in Admin to list the new actions, then grant them to a Bot as usual.
+
+### Connect works for an app Composio already holds your account for
+
+Pressing Connect on a Composio app, from a conversation's Connect card or from Connections, could end
+in a refusal saying Composio already held a connected account for the app and that disconnecting it
+would clear the way. The app showed as not connected, so there was nothing to disconnect. This
+happened when Composio held the account and OpenBot had no record of it: on a fresh or upgraded
+install, or on a second local install signing in as the same person with the same Composio key. Connect
+now asks Composio again, records the account it holds, and shows the app as connected, the same way
+opening the app's page already did. A Shared app's team account is still recorded only by an admin.
+If Composio then reports no account after all, Connect says nothing was connected and asks you to
+press it again. It no longer tells you to disconnect anything.
+
+### A Bot with an app or web research can use its browser in a conversation again
+
+A Bot that held any app or research tool, such as Parallel Search, could not open a page, click or
+type in a conversation: every browser and computer step came back as unavailable, and the Bot
+fetched the page some other way instead. Its browser now works beside those tools, as it does for a
+Bot that holds none. Routines and other unattended turns are unchanged.
+
+### An app a Bot could not use asks to be connected once
+
+When a Bot reached for an app the person had not connected, such as Airtable, the conversation drew
+the Connect card twice, and still did after a reload. The built-in LangGraph Bot now names the message
+its tool calls belong to the way the conversation store does, so a conversation no longer keeps a
+second copy of every tool call, and a conversation that already has one draws each call once.
+
+### An app's steps are named for the app, never for the service behind it
+
+A conversation named a Composio app's work after the broker and the vendor's own prefix: "Used
+Composio Airtable", then "Airtable list bases". It now says "Used Airtable", and each step reads as
+the action, "List bases", with the app beside it. An Arcade app is named the same way, as the app
+rather than `arcade-Gmail`.
+
+### An app a Bot cannot use yet asks once per turn
+
+When a Bot's call to an unconnected app was refused, the Bot often also asked to show that app's
+card, and the conversation drew the same Connect card twice. Each app's card is now drawn once per
+turn; asking again in a new message can draw it again.
+
+### The Computer panel shows the Bot's screen when it opens
+
+Opening the Computer panel beside a conversation could leave it on "Waiting for the Bot's screen…"
+while the Bot browsed, because the panel slid in from off-screen and the screen counted as out of
+view for as long as it stayed open. The panel now starts showing the screen once it has opened.
+
+### Plainer words, and one word for each thing
+
+OpenBot now says **Bot** everywhere a person reads it, where screens used to mix Bot, agent, coworker
+and assistant; "agent" is kept only for an outside program you connect. It says **admin** rather
+than administrator, **conversation** rather than channel, and **OpenBot** rather than "this
+deployment" on pages anybody can open. Headings, descriptions, empty states, errors and the
+messages the server shows are shorter and say what happened and what to do next, across the home
+page, a Bot's pages, Capabilities, Connections, Settings, conversations and Admin. Admin keeps the
+exact setting names an admin needs, such as `COMPOSIO_API_KEY`. Text written for the model, such
+as tool descriptions and instructions, is unchanged.
+
+### Every settings screen is the same, slightly wider column
+
+Settings, Admin, Connections, Capabilities and each Bot's pages share one column width, now 720px instead of 630px, so
+no screen is wider than another and a row has room for its label beside its control. Sentences keep
+their comfortable reading width inside it. The audit log stays wider, because it is a table.
+
+### Capabilities and Connections sit beside Bots in the sidebar
+
+The sidebar's Skills entry becomes two, below Bots: **Capabilities** (`/capabilities`), with Skills
+(`/capabilities/skills`) and Memory (`/capabilities/memory`) as tabs under its title, Memory leaving
+Settings; and **Connections** (`/connections`), the apps your Bots use as you, which leaves Settings
+too. On the home page, Explore agents shows each Bot as a white card with its avatar on top, the same
+card as elsewhere. The old
+addresses — `/skills`, `/settings/connected-accounts` with any account beneath it, and
+`/settings/memory` — redirect to the new ones, keeping `?connected=`, `?linked=` and a skill being
+written or edited, so a consent begun before upgrading still lands on its page. OAuth, GitHub linking
+and the Slack link confirmation now send people to `/connections`.
+
+Connections is one searchable list. Apps you connect, apps on your organisation's account (marked
+"Team account") and your GitHub and Slack links are rows of the same kind, with those already in use
+first, and each opens its own page. GitHub's page holds your link, the repositories whose events can
+start a responsibility (formerly "GitHub events"), and a way to a Composio GitHub app where one is
+enabled, so GitHub is listed once; linking GitHub now comes back to that page. The reset for what
+you let shared Bots use moves to Settings → Approvals, as **Shared Bots**.
+
+### Each app on a Bot says whether you can use it, and you can ask an administrator for the rest
+
+A Bot's page now says, for every work app the Bot holds, what that app is for the person looking:
+ready, not connected yet, needing reconnecting, waiting on your organisation's shared account or on
+an administrator's approval of who the Bot reaches, not switched on or not finished setting up, or not
+given to this Bot. On somebody else's Team Bot it says whose account the app runs on: the owner's,
+which only the owner can reconnect, or your own, which the Bot asks to use the first time. Each comes with the one thing you can do about it —
+Connect or Reconnect your own account, or Request access where only an administrator can help — and
+apps are named by their own name ("Gmail", not "Composio Gmail"). In a conversation, a Bot that needs
+an app it cannot use now puts the same card in front of you instead of a sentence: an account you have
+not connected, a Shared app with no team account, an account the vendor no longer holds, and — through
+a new `show_app_access` tool every Bot holds — an app that is switched off or not granted to it. The
+card reads the app's current state when it is drawn, so it never offers a step already taken.
+Administrators see waiting requests at the top of Plugins, a count on each app's row, and a Requests
+section on the app's own page, where Approve switches the app on and grants the Bot the app's
+read-only actions in one press (or says what has to be done first; other actions are chosen on the
+Bot's page for the app) and Dismiss closes the request. Requests name who asked; nobody's connection
+status is shown to administrators. A person may have 20 requests waiting at once.
+
+A connection the vendor turns out to have lost now reads as lost everywhere once a call finds out: a
+Composio account the vendor no longer holds is removed so it can be connected again, and a Google
+Drive or Notion connection whose refresh token the vendor refuses is marked withdrawn, with Reconnect
+on the card instead of a tool error. A Memory source that fails for the same reasons says so in words
+rather than showing the card's marker.
+
+On a deployment with no `COMPOSIO_API_KEY`, Settings → Connected accounts no longer lists Composio
+apps, which nobody could connect there. An app's own page, reached from an older link, says it is not
+available yet and that an administrator has to finish setting it up, instead of naming the setting.
+The administrator's page for the app still names `COMPOSIO_API_KEY`.
+
+### A built-in Bot behind an OpenAI proxy answers again
+
+A built-in Bot behind a gateway or proxy in front of OpenAI (an `OPENAI_BASE_URL` that is not OpenAI or
+Azure) answers again on `gpt-5.6-terra` and on every other model that takes tools only through the
+Responses API (`gpt-5.6` and later, the `-pro` models, `gpt-5.3-codex`, also under a gateway's `openai/`
+name). OpenBot now sets `COPILOTKIT_OPENAI_API=responses` for those at boot, where CopilotKit 1.79.1 had
+sent them to Chat Completions and every turn failed with "Function tools with reasoning_effort are not
+supported". Every other model still uses Chat Completions there, and a value you set yourself still wins.
+
+### Teach a Bot by doing the task in your own browser: the OpenBot Recorder
+
+The OpenBot Recorder is a Chrome and Edge extension. A person names the task, does it in their own
+browser, and the Recorder sends what they did, step by step (each click, entry, choice, submit,
+Enter and page change, with what an agent needs to find that element again, and the one request a
+step sent when it saved something), masked in the browser first, straight to Intelligence as a
+trajectory in that person's own Learning space; the page's own traffic is never recorded, except the
+agent's AG-UI events (below). Every Bot
+they use then gets the Skills learned there, beside the Bot's own. OpenBot connects the browser and
+hands out each capture pass; it receives nothing that is recorded.
+
+- **The agent's side too.** On a page whose agent speaks AG-UI (over SSE or the Intelligence
+  WebSocket, OpenBot's own chat included), the Recorder also sends the agent's side, in exactly the
+  shape the CopilotKit SDK emits so Intelligence cannot tell the two apart: `agent.run`,
+  `agent.message` (the person's own messages too), `tool.call` and `thread.linked`, a click inside a
+  chat message with its Thread and message, and `agent.event` for what those leave out (a tool
+  call's arguments and result, state, reasoning, errors), never one row per streamed token.
+  CopilotKit's suggestion runs are left out, as its own capture leaves them out.
+- **Clicks and typing come from CopilotKit main's own capture code**, carried as a Bun patch over
+  `@copilotkit/learning` 0.0.1 (`patches/`, which the images and OpenBot Desktop copy) until main is
+  published.
+- **Settings → Browsers** connects the Recorder in this browser and lists every browser connected
+  as you, each with a Disconnect. OpenBot Desktop can connect the Recorder on its own computer too.
+- **Only a connected browser gets a capture pass.** The runtime's `trajectory/<id>/connect` route
+  answers only the Recorder's own bearer, and binds the trajectory to that person; no Bot is
+  picked or named. A signed-in session alone gets no pass, and the Recorder's bearer cannot run a
+  Bot or read a conversation.
+- **One Learning space per person.** Every recording joins the person's own Intelligence Learning
+  container, `user-` and 32 hex digits derived from their OpenBot user id. OpenBot makes it when
+  the browser connects (and again on a capture pass if it is still missing) with the same
+  credential that makes the `openbot` container: a service token on a CopilotKit local evaluation
+  install, or a CopilotKit CLI login against managed Intelligence. Intelligence's runtime key
+  cannot make one. With neither, a missing space cannot be made, and the Recorder's popup says
+  Learning will not see the recording; the recording still goes to Intelligence.
+- **Every Bot a person uses draws on their space.** A run gets the Bot's own learned Skills, then
+  the person's own, then any another person opened (below). On a name clash the Bot's own wins,
+  then the person's own; two people's opened Skills with one name are both kept, each named
+  `<their space>/<name>`. A person's space that is missing or unreachable never fails a run: it
+  goes on with the Skills it has. Admin → Automatic Learning off, or a Bot excluded there, still
+  means no learned Skills at all.
+- **Settings → Learning** chooses who else's Bots use a person's Skills: only their own (the
+  default), every Bot in the deployment, or the Skills they open one by one, and only Skills in
+  their own space can be opened. Opening Skills to others needs **Admin → Enterprise controls →
+  Skill sharing**, off by default: while it is off nobody can open their Skills, runs offer nobody
+  another person's, and each person's choice is kept for when it is turned on. Runs read what is
+  open from memory, refreshed at once on the replica that saved a change and within 30 seconds on
+  the others.
+- **What the Recorder collects is said before the first Connect** (Settings → Browsers, the
+  Recorder's setup page, the Browser page and its Record form): your steps, what each step saves
+  (the request and its answer), the conversation with an AG-UI agent on the page (your own messages
+  too) and your narration, masked in your browser first.
+- **Narration is off until you choose it**, asked before your first recording and remembered, and it
+  is transcribed on your own computer only (Chrome's on-device speech recognition, with the language
+  downloaded once on your click); where on-device recognition is not available, narration stays off
+  and the page says why.
+- **Every recorded tab shows that it is being recorded**, from its first step (a page cannot hide the mark: it
+  comes back at once if removed or hidden), with one click to leave
+  that site out of recordings; a left-out site records nothing, and the Recorder's options list the
+  sites left out. A page you have only looked at is held while you stay on its site, and sent when you
+  act there, move to another tab or stop, so leaving a site out at any point in a visit sends nothing
+  of it.
+- **A Recorder's connection ends** whenever your sign-in ends (signing out, signing out everywhere, an
+  admin removing you or requiring SSO, your organization ending its session), or after it goes unused for
+  as long as an OpenBot sign-in lasts; signing out does not finish, and says so, if they cannot be ended; a recording kept for a person who never connects again is deleted unsent
+  after 7 days. A page on your own computer is trusted to connect without a click only at OpenBot
+  Desktop's own address, as its native host confirms it, and connecting to another OpenBot or as
+  another person always asks you first, saying which connection it replaces.
+- **Intelligence must allow trajectories:** the `trajectories` licence feature,
+  `FF_LEARNING_TRAJECTORIES=true`, a realtime gateway that can ask Intelligence whether an
+  organization may capture, and an `INTELLIGENCE_GATEWAY_WS_URL` that people's browsers can reach.
+- **`OPENBOT_RECORDER_EXTRA_EXTENSION_IDS`** lists other extension ids to trust besides the
+  Recorder's own, for a fork or a build signed with another key. Each must be 32 letters from a to
+  p, comma separated; **a value that is not stops the server at boot.**
+- Connecting, disconnecting and refusals are audited as `recorder.connected`, `recorder.revoked`,
+  `recorder.connect_refused`, `recorder.bearer_refused` and `recorder.trajectory_refused`; changing
+  Settings → Learning as `learning.sharing_changed`, `learning.skill_opened` and
+  `learning.skill_closed`.
+
+### When OpenBot is open in Chrome or Edge, the Browser button uses that browser
+
+With the OpenBot Recorder in that browser, one click on Browser opens Record and Stop right in OpenBot,
+and the red dot follows the recording at once. If the Recorder is not connected yet, the same click
+connects it (OpenBot Desktop and your organization's own OpenBot, when its address is set by policy,
+need no Connect click; any other site still asks you to confirm). If it is not installed, the click
+opens its store page in a new tab. Only the OpenBot the Recorder is connected to can start, stop or see
+its recordings; any other website is told it is not connected. Settings, Browsers shows Connected
+straight away when no Connect click is needed. OpenBot Desktop's own window, Safari and Firefox are
+unchanged.
+
+### Your own everyday Chrome or Edge, with the Recorder in it
+
+On OpenBot Desktop the Browser button now works with your own everyday Chrome or Edge: your profile,
+extensions, password manager and logins, not a separate copy.
+
+- **Once the OpenBot Recorder is published** on the Chrome Web Store and Edge Add-ons, OpenBot Desktop
+  registers it with your Chrome and Edge, and the browser installs it from the store and asks you once to
+  turn it on (on a Mac the next time you restart the browser, on Windows while it runs, on Linux in Edge
+  only). Before it is there, the Browser button opens the Recorder's store page in your Chrome (or Edge)
+  so you can add it at once. Until the Recorder is published, the Browser button opens the OpenBot browser
+  as before. Uninstalling Desktop on Windows takes the registration back out.
+- **The Recorder connects through OpenBot Desktop as it installs, with nothing to click.** "Connect with
+  OpenBot Desktop" in the Recorder's popup also connects at once; connecting from a web page still asks
+  you to confirm. Once it is connected, the Browser button brings that browser to the front.
+- **The red dot follows a recording in any of your browsers**, your everyday one included, on Desktop and
+  hosted: the Recorder tells OpenBot when it starts and stops recording, and every 30 seconds while it
+  records, and the dot goes out 90 seconds after a browser stops reporting.
+- **The Recorder says what it collects** first on its setup page (above its request for your microphone)
+  and on its Record form, before anything is recorded: every step in every tab you use until you stop, what is on those pages, your clicks and
+  typing (secrets masked in your browser first), what each step saves and what you say, all going
+  straight from your browser to your organization's own Intelligence, with a pass from your
+  organization's OpenBot, which is told that you are recording, the task's name, when it started and
+  how many steps it holds; when you record in a browser shown inside OpenBot, your narration passes
+  through it to the Recorder without being stored.
+- Migration `0067_recorder_activity` adds two nullable columns to `recorder_connections` (each
+  Recorder's latest activity). Nothing existing changes.
+
+### A recording follows every tab you use
+
+While a recording runs, the OpenBot Recorder now records in every tab you use: any tab you switch to or
+open, in any window, in the OpenBot browser and in your everyday Chrome. Before, it recorded only the
+tab you started in and tabs opened from it, so steps in a tab you switched to were lost. Tabs you do
+not visit during a recording are never recorded, and nothing on the browser's own pages (a new tab,
+settings) or the Recorder's own is. A tab that reloaded as you switched to it no longer loses the saves
+it sends.
+
+### Your own browser, opened from OpenBot, with the Recorder already in it
+
+Wherever OpenBot can run a browser for you, the sidebar has a **Browser** button below Connections. It
+opens your own browser with the OpenBot Recorder already in it and connected as you: no install and no
+Connect step. On OpenBot Desktop one click opens your browser window, or brings it to the front, and
+you stay where you are in OpenBot; record with the Recorder's button in that window's toolbar. On
+hosted OpenBot the click takes you to the browser in the page. While a recording runs, the Browser
+button shows a red dot; hover it for the recording's name and how long it has run. Name a task and press Record; the page shows the recording's name, how long it has run and
+how many actions it holds, and after Stop it says what was saved to your Learning space (for example
+"7 actions and 1 narrated phrase"), or that nothing was recorded, and says the same after a reload. Nothing a Bot does is recorded. When
+your browser cannot open because of how OpenBot is set up, OpenBot tells you to ask an admin (on
+single-user OpenBot, such as OpenBot Desktop, to quit and reopen OpenBot), the message stays until you
+close it, and the reason is in the server's and the computer's logs.
+
+- **On OpenBot Desktop** it is your installed Google Chrome, or Microsoft Edge where Chrome is missing,
+  in a separate OpenBot profile, as its own window; opening it again brings that window to the front.
+  OpenBot starts it itself rather than through Playwright, so tabs behind the one in front behave as
+  background tabs, and OpenBot follows the tab you are on. It is an everyday browser: install your password manager from the Chrome Web Store (a password manager's
+  link to its desktop app works, such as 1Password's), or sign in to Chrome and sync brings your
+  extensions, bookmarks and passwords; saved passwords use the system keychain. Once you turn narration
+  on, the Recorder hears your microphone itself, and the page shows whether it is listening, muted or
+  cannot hear.
+  Desktop runs this browser as a fourth process beside the server, app and worker, only where Chrome or
+  Edge is installed. Installation copies the Recorder, prebuilt, out of the release's computer image into
+  your OpenBot folder, existing installations download their OpenBot files once more after updating, and Stop
+  and Quit let the browser close cleanly first. Chrome's extensions page lists the Recorder as an
+  extension it cannot verify, because it is not installed from the Chrome Web Store.
+- **On hosted OpenBot** the browser is the computer's Chromium, shown in the page with tabs, an address
+  bar, back, forward and reload, and you click and type in it straight away. Only the Recorder is
+  allowed in it. It runs only on a computer of its own (each person's own, as the supervisor and the
+  sandbox give one): where Bots share one computer, which can run commands, the Browser button is
+  hidden and the Browser page says why. While you record with narration on, the page transcribes it
+  with your own browser's on-device speech recognition (Firefox has none, and the page says so; the
+  narration switch reads off whenever it cannot hear you), and each phrase is placed before the steps
+  you took while saying it. It reaches the open web, and OpenBot and the Intelligence gateway on their own
+  ports, never anything else inside the deployment.
+- **Only you** can see or use your browser, admins included. It appears in Settings → Browsers as your
+  OpenBot browser and can be disconnected there, which signs out the Recorder in it at once (a recording
+  in progress stops and is kept, and goes to Intelligence when you next record). Each open replaces its
+  previous connection, and Record after a Disconnect connects it again first.
+- A person's hosted browser closes after going idle as a Bot's does, and the computer's browser cap
+  closes the least recently used first; OpenBot Desktop's own window is never closed for being idle.
+- On Linux, OpenBot Desktop also finds Chrome and Edge on the `PATH` (Flatpak builds cannot hold the
+  Recorder and are not used), and the Browser page says why when there is none. On Windows, Stop and
+  Quit ask the browser to close before ending it. Uninstalling on Windows, and removing the Linux
+  package, deletes the OpenBot browser's profile and the Recorder's files.
+- `OPENBOT_RECORDER_DIR` on a computer is the built Recorder it puts in a person's browser; the computer
+  image sets it, and without it the computer still serves Bots and refuses to open a person's browser,
+  saying why. `OPENBOT_BROWSER_URL` on the server runs people's browsers on a separate computer
+  (OpenBot Desktop sets it). The local Chrome helper (`scripts/start-local-chrome-computer.ts`) now also
+  starts when only Edge is installed.
+- A computer's network rules can allow a site by name on given ports only (`ports` on a domain rule).
+- **Each browser on a shared computer follows its own network policy.** Browsers there now identify
+  themselves to the computer's network filter, so a Bot allowed to reach a service is no longer refused
+  because another browser on that computer is not, and no browser borrows another's allowances.
+- A hosted person's browser says who it is as a hosted Bot's does (no `HeadlessChrome`), but never
+  carries the deployment's Web Bot Auth signature: a person browsing is not the deployment's Bot.
+- A person's browser always runs the Recorder that came with its OpenBot, even in a profile that ran an
+  earlier one, and keeps it pinned to the toolbar once.
+- A Recorder that is slow to answer is refused instead of taking down the computer and every browser
+  on it. Typing on a live screen that records a demonstration reaches the page in the order typed.
+- Opening the Browser page twice in quick succession (reloading it while your browser is still
+  opening, for one) opens your browser once, connected; before, both opens could be refused, most
+  often the first after the Recorder was updated. When a browser cannot be opened, the server's and
+  the computer's logs say why and at which step.
+- **Google loads in Bots' browsers again.** Behind the computer's network filter, Google's pages never
+  finished loading (Chromium restarts the request for client hints and the restart was lost); the
+  computer now launches every filtered browser with that restart switched off.
+- When a page does not open, OpenBot names the site and says it did not load or was refused, instead of
+  showing a browser error, the address bar keeps the address that failed, and a slow page says it is
+  slow rather than that the browser could not be reached.
+- A package can no longer give a Bot an id shaped like `person-` and 32 hex digits.
+- The Recorder times a narrated phrase from its first word when Chrome reuses a result slot; it was
+  stamped up to seconds early.
+
+### The desktop window answers while software is installing
+
+Clicking or focusing the desktop window while it downloaded local software showed a spinning cursor
+until the download finished. The window now comes forward at once and keeps the setup screen.
 
 ### A reinstall no longer picks up the previous installation's Bot files and sign-ins
 
@@ -515,7 +1082,7 @@ A call that is refused anyway, from a schema offered earlier, is still refused a
 
 ## 0.1.0
 
-**Before upgrading.** Six things change for an existing deployment:
+**Before upgrading.** Eight things change for an existing deployment:
 - Automatic Learning is on unless an administrator saved it off. It does nothing until a Learning
   container is assigned; see below.
 - A Bot's computer refuses the network until the server pushes its policy. A computer run without

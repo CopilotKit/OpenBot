@@ -30,8 +30,8 @@ export class ToolRenderBoundary extends Component<
     if (this.state.failed) {
       return (
         <p className="my-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
-          <span className="font-medium">{this.props.name}</span> could not be
-          drawn. The rest of this conversation is unaffected.
+          Couldn't show <span className="font-medium">{this.props.name}</span>.
+          The rest of the conversation is fine.
         </p>
       );
     }

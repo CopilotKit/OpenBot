@@ -1,4 +1,9 @@
-import { IconChevronRight } from "@tabler/icons-react";
+import {
+  IconChevronRight,
+  IconPlus,
+  IconRobot,
+  IconShare,
+} from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { Fragment, useState } from "react";
@@ -46,7 +51,7 @@ export function BotRoster() {
   if (agents.data === undefined) {
     return (
       <p className="mt-6 text-destructive text-sm" role="alert">
-        Could not load your Bots.
+        Couldn't load your Bots. Reload the page.
       </p>
     );
   }
@@ -76,12 +81,35 @@ export function BotRoster() {
         {yours.length ? (
           <RosterRows agents={yours} byId={byId} />
         ) : (
-          <PageEmpty>
+          <PageEmpty
+            action={
+              yoursPinned || yoursWaiting ? undefined : (
+                <Button
+                  render={(props) => (
+                    <Link {...props} search={{ new: true }} to="/bots" />
+                  )}
+                  size="sm"
+                  variant="outline"
+                >
+                  <IconPlus />
+                  New Bot
+                </Button>
+              )
+            }
+            icon={IconRobot}
+            title={
+              yoursPinned
+                ? "All pinned"
+                : yoursWaiting
+                  ? "All waiting on you"
+                  : "No Bots yet"
+            }
+          >
             {yoursPinned
               ? "Your Bots are all pinned above."
               : yoursWaiting
                 ? "Your Bots are all under Needs you."
-                : "You have no Bots of your own yet."}
+                : "Bots you create show up here."}
           </PageEmpty>
         )}
       </PageSection>
@@ -89,7 +117,9 @@ export function BotRoster() {
         {shared.length ? (
           <RosterRows agents={shared} byId={byId} />
         ) : (
-          <PageEmpty>Nobody has shared a Bot with you yet.</PageEmpty>
+          <PageEmpty icon={IconShare} title="Nothing shared yet">
+            Bots somebody shares with you show up here.
+          </PageEmpty>
         )}
       </PageSection>
       {hidden.data?.length ? (
@@ -118,7 +148,7 @@ function HiddenSection({
           {open ? "Hide" : "Show"}
         </Button>
       }
-      description={`${agents.length} ${agents.length === 1 ? "Bot" : "Bots"} you took off this list. Nobody else's list changed.`}
+      description={`${agents.length} ${agents.length === 1 ? "Bot" : "Bots"} you hid. Only your list changes.`}
       title="Hidden"
     >
       {open ? <RosterRows agents={agents} byId={byId} /> : null}

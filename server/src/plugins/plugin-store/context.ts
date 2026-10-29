@@ -44,6 +44,7 @@ import {
   connectionSiblings,
   exchangeRefreshTokenOverHttp,
   INVALID_CLIENT,
+  INVALID_GRANT,
   isUsableClient,
   type OAuthClient,
   PluginInvariantError,
@@ -261,7 +262,7 @@ export function createStoreContext(options: PluginStoreOptions) {
       .limit(1);
     if (!dialled)
       return {
-        refusal: `${serverId} is not an app this deployment has added.`,
+        refusal: `OpenBot has no app called ${serverId}.`,
       };
     /*
      * THE NAME IS THE DIALLED ROW'S; THE ACCOUNT IS THE APP'S.
@@ -288,7 +289,7 @@ export function createStoreContext(options: PluginStoreOptions) {
     const app = toolkit ? await brokeredAppRow(toolkit) : null;
     if (toolkit && !app)
       return {
-        refusal: `${serverId} is not an app this deployment has added.`,
+        refusal: `OpenBot has no app called ${serverId}.`,
       };
     const row = app
       ? {
@@ -661,13 +662,22 @@ export function createStoreContext(options: PluginStoreOptions) {
         .limit(1);
       if (!connected) {
         /*
-         * Only the personal half carries a connect prompt. A Shared app's account belongs to the
-         * deployment, so the person reading this cannot connect it however clearly they are asked —
-         * a card offering them the button would be an invitation to a refusal.
+         * BOTH HALVES CARRY A PROMPT, AND ONLY ONE OF THEM OFFERS A CONNECT BUTTON. A Shared app's
+         * account belongs to the deployment, so the person reading this cannot connect it however
+         * clearly they are asked — a card offering them that button would be an invitation to a
+         * refusal. What the card draws is decided by the app's state for this person, read when it
+         * is drawn: for a missing team account that is Request access, which files the request an
+         * administrator answers by connecting it. The sentence stays for the model and for a reader
+         * with no card. `reason: "shared"` is only a hint; see `ConnectReason`.
          */
         throw new PluginRefusedError(
           resolved.ref.holder === "deployment"
-            ? `${row.title} is shared across this deployment and no account is connected to it yet. Ask an administrator to connect it.`
+            ? connectAppRefusal({
+                serverId: row.id,
+                title: row.title,
+                message: `${row.title} uses a shared account, and nobody has connected it yet. Ask an admin to connect it.`,
+                reason: "shared",
+              })
             : connectAppRefusal({
                 serverId: row.id,
                 title: row.title,
@@ -688,7 +698,7 @@ export function createStoreContext(options: PluginStoreOptions) {
       const token = row.credentialId
         ? await secretFor(
             row.credentialId,
-            `${row.id} needs a credential this deployment no longer holds. An administrator has to add it again.`,
+            `${row.id} is missing its key, so this can't be done. Ask an admin to add it again.`,
           )
         : undefined;
       return { token };
@@ -779,11 +789,11 @@ export function createStoreContext(options: PluginStoreOptions) {
      * no step to take, which is worse than saying nothing.
      */
     const noClient = registrationUrl
-      ? `${title} has no OAuth client for this deployment, so this cannot be called. Connect ${title} again in Settings: the deployment registers itself with the vendor when somebody connects.`
-      : `${title} has no OAuth client registered for this deployment, so this cannot be called. An administrator has to add one.`;
+      ? `${title} needs connecting again, so this can't be done. Reconnect it on Connections and ask again.`
+      : `${title} isn't set up yet, so this can't be done. Ask an admin to finish setting it up.`;
     const unusableClient = registrationUrl
-      ? `${title} has no usable OAuth client for this deployment. Connect ${title} again in Settings: the deployment registers itself with the vendor on the next connect.`
-      : `${title} has no usable OAuth client for this deployment. An administrator has to add one again.`;
+      ? `${title} needs connecting again. Reconnect it on Connections and ask again.`
+      : `${title} isn't set up correctly. Ask an admin to set it up again.`;
     /**
      * What to say when the vendor has forgotten the client this person's grant was issued under.
      *
@@ -797,7 +807,7 @@ export function createStoreContext(options: PluginStoreOptions) {
      * refuses — and one that only ever appears to work against a vendor whose acceptance would
      * itself be the vulnerability. A new consent is the only thing that produces a usable grant.
      */
-    const clientReplaced = `${title} no longer recognises this deployment's OAuth client, so this cannot be called. The deployment has registered itself again — connect ${title} again in Settings.`;
+    const clientReplaced = `${title} needs connecting again, so this wasn't done. Reconnect it on Connections and ask again.`;
 
     if (!row.credentialId) {
       // The person did their part; the deployment has not. Refused before anything queues, because
@@ -928,6 +938,8 @@ export function createStoreContext(options: PluginStoreOptions) {
        * token it had read on the way in would present the one the first replica just spent, which is
        * the very double-spend this exists to prevent.
        */
+      /** The credential whose refresh token went to the vendor, once one has. */
+      let presented: string | null = null;
       try {
         return await database.transaction(async (transaction) => {
           const [current] = await transaction
@@ -985,6 +997,7 @@ export function createStoreContext(options: PluginStoreOptions) {
             locked.encryptedValue,
           );
 
+          presented = current.credentialId;
           const minted = await exchangeRefreshToken({
             tokenUrl,
             client: stored.client,
@@ -1018,6 +1031,31 @@ export function createStoreContext(options: PluginStoreOptions) {
           return { token: minted.accessToken };
         });
       } catch (error) {
+        /*
+         * THE VENDOR DISOWNED THE GRANT, NOT THE CLIENT. A refresh token answered `invalid_grant`
+         * will never be honoured again, and until now nothing here wrote that down: the connection
+         * read as connected on every screen, and every call came back as the same folded tool
+         * error. Revoked here — after the transaction, for the reason the recovery below gives — the
+         * connection reads as withdrawn, which is Reconnect on the Bot page and on the card this
+         * refusal draws, and the consent that fixes it replaces the credential as any reconnect does.
+         */
+        if (
+          error instanceof TokenRefusedError &&
+          error.code === INVALID_GRANT &&
+          presented
+        ) {
+          await credentials.revoke(presented);
+          throw new PluginRefusedError(
+            connectAppRefusal({
+              serverId: row.id,
+              title,
+              message: `Your ${title} access was withdrawn at the vendor, so this was not done. Reconnect it and ask again.`,
+              reason: "reconnect",
+              at: new Date().toISOString(),
+            }),
+            null,
+          );
+        }
         /*
          * Outside the transaction, so the row lock is already released and the vault read this does
          * is not a second connection held behind this one's.
@@ -1853,8 +1891,7 @@ export function createStoreContext(options: PluginStoreOptions) {
    * and that order is kept rather than moved behind the revoke for the helper's convenience.
    *
    * Answers the payload fragment rather than the boolean so that no writer computes the field
-   * itself: a writer spreads this, and the guard in `sole-definition.test.ts` holds that to one
-   * home.
+   * itself: a writer spreads this to keep the claim's definition in one place.
    */
   async function vendorRevocationClaim(
     app: string,

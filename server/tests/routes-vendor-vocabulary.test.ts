@@ -11,7 +11,13 @@
  * ASSERTED ON BOTH PROVIDERS FROM ONE HARNESS, the way `routes-arcade-urls.test.ts` asserts its
  * four reads. The Arcade half is what was red: the sentence must name Arcade and must not contain
  * the word Composio anywhere. The Composio half is the evidence that nothing about that deployment
- * moved — the same sentence, word for word, as before.
+ * moved — the same sentence, word for word, but for the vendor's name.
+ *
+ * TWO AUDIENCES, TWO RULES. The two admin sentences (removing and enabling an app) name the broker,
+ * because the admin is the one who holds its key. The connect, confirm, re-check and disconnect
+ * sentences answer whoever pressed the button, and since the copy pass they name NO broker at all
+ * (see `.claude/skills/openbot-copy/SKILL.md`): the broker is an internal that person cannot act
+ * on. Neither rule lets a deployment read the other vendor's name.
  */
 import { describe, expect, test } from "bun:test";
 import { Hono, type MiddlewareHandler } from "hono";
@@ -220,12 +226,22 @@ function deployment(provider: BrokerProvider, wiring: Wiring = {}) {
   };
 }
 
-/** Every sentence this file pins, as the request that produces it. */
-const CASES: Record<string, (provider: BrokerProvider) => Promise<Response>> = {
+/** The admin's sentences, which name the broker, as the request that produces each. */
+const ADMIN_CASES: Record<
+  string,
+  (provider: BrokerProvider) => Promise<Response>
+> = {
   "removing an app that would not finish": (provider) =>
     deployment(provider, { throwing: { removeServer: true } }).remove(),
   "enabling an app the broker would not enable": (provider) =>
     deployment(provider, { throwing: { addBrokeredApp: true } }).enable(),
+};
+
+/** A person's sentences, which name no broker, as the request that produces each. */
+const PERSON_CASES: Record<
+  string,
+  (provider: BrokerProvider) => Promise<Response>
+> = {
   "a key app whose form the broker would not publish": (provider) =>
     deployment(provider, {
       authScheme: "API_KEY",
@@ -277,6 +293,9 @@ const CASES: Record<string, (provider: BrokerProvider) => Promise<Response>> = {
     }).disconnect(),
 };
 
+/** Every sentence this file pins. */
+const CASES = { ...ADMIN_CASES, ...PERSON_CASES };
+
 async function sentenceOf(
   provider: BrokerProvider,
   name: keyof typeof CASES,
@@ -287,8 +306,8 @@ async function sentenceOf(
   return body.error as string;
 }
 
-describe("an Arcade deployment's refusals name Arcade and never Composio", () => {
-  for (const name of Object.keys(CASES)) {
+describe("an Arcade deployment's admin refusals name Arcade and never Composio", () => {
+  for (const name of Object.keys(ADMIN_CASES)) {
     test(name, async () => {
       const sentence = await sentenceOf("arcade", name);
       expect(sentence).not.toContain("Composio");
@@ -297,13 +316,24 @@ describe("an Arcade deployment's refusals name Arcade and never Composio", () =>
   }
 });
 
-describe("and a Composio deployment reads exactly what it read before", () => {
-  for (const name of Object.keys(CASES)) {
+describe("and a Composio deployment's admin refusals name Composio and never Arcade", () => {
+  for (const name of Object.keys(ADMIN_CASES)) {
     test(name, async () => {
       const sentence = await sentenceOf("composio", name);
       expect(sentence).not.toContain("Arcade");
       expect(sentence).toContain(VENDOR.composio);
     });
+  }
+});
+
+describe("a person's refusals name no broker on either deployment", () => {
+  for (const name of Object.keys(PERSON_CASES)) {
+    for (const provider of ["composio", "arcade"] as const) {
+      test(`${name} (${provider})`, async () => {
+        const sentence = await sentenceOf(provider, name);
+        expect(sentence).not.toMatch(/composio|arcade/i);
+      });
+    }
   }
 });
 

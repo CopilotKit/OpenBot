@@ -35,13 +35,13 @@ function automaticMessage(
     automatic.state === "assigned" &&
     settings.defaultTarget?.containerId === automatic.containerId
   )
-    return `OpenBot assigned this Intelligence project's "${automatic.containerId}" container automatically. Change it here at any time.`;
+    return `OpenBot assigned this Intelligence project's "${automatic.containerId}" container automatically. You can change it here.`;
   if (automatic.state === "absent")
-    return `This Intelligence project has no "${automatic.containerId}" Learning container yet, so nothing is collected.`;
+    return `This Intelligence project has no "${automatic.containerId}" Learning container yet. Nothing is collected.`;
   if (automatic.state === "not_entitled")
-    return "This Intelligence project's plan does not include Learning, so no container was assigned.";
+    return "This Intelligence project's plan doesn't include Learning. No container was assigned.";
   if (automatic.state === "unavailable")
-    return "OpenBot could not ask Intelligence for this project's Learning container. It tries again.";
+    return "Couldn't reach Intelligence to find this project's Learning container. OpenBot will try again.";
   return undefined;
 }
 
@@ -127,8 +127,7 @@ function ContainerSetup({
               : `Create the ${automatic.containerId} container`}
           </Button>
           <span className="text-muted-foreground">
-            Uses the credential this deployment was given, never the runtime
-            key.
+            Uses this deployment's credential, not the runtime key.
           </span>
         </div>
       )}
@@ -193,12 +192,12 @@ export function LearningPage() {
 
   return (
     <PageShell
-      title="Automatic Learning"
-      description="Collect completed conversations as evidence, review the skills Intelligence proposes, and deliver published guidance to Bots."
+      title="Automatic learning"
+      description="Learn from finished conversations, review the skills Intelligence proposes, and give published skills to Bots."
     >
       <PageSection
         title="Participation"
-        description="Changes to container assignments apply to new threads. Existing threads keep their first assignment. Containers must already exist in the same Intelligence project. Until anything is saved here, OpenBot assigns that project's openbot container automatically."
+        description="Container changes apply to new conversations. Existing ones keep their first container. Containers must already exist in the same Intelligence project. Until you save here, OpenBot uses that project's openbot container."
       >
         {settingsQuery.isPending && (
           <p role="status">Loading Learning settings…</p>
@@ -224,7 +223,7 @@ export function LearningPage() {
                   change({ ...settings, enabled: event.target.checked })
                 }
               />
-              Enable Automatic Learning and skill delivery
+              Turn on automatic learning and skill delivery
             </label>
             <TargetFields
               label="Default"
@@ -242,9 +241,9 @@ export function LearningPage() {
               <ContainerSetup automatic={automatic.data} />
             )}
             <p className="text-muted-foreground text-sm">
-              An empty default leaves unmapped Bots out. IDs use 1–64 lowercase
-              letters, numbers, and single hyphens. Leave revision empty to
-              follow the latest published skills.
+              With no default, Bots without their own container are left out.
+              IDs are 1 to 64 lowercase letters, numbers and single hyphens.
+              Leave revision empty to use the latest published skills.
             </p>
             <fieldset className="grid gap-4">
               <legend className="mb-3 font-medium">
@@ -252,7 +251,7 @@ export function LearningPage() {
               </legend>
               {(agents.error || hiddenAgents.error) && (
                 <p role="alert" className="text-destructive">
-                  The Bot list could not be loaded. Existing mappings are shown
+                  Couldn't load the Bot list. Saved settings for each Bot are
                   below.
                 </p>
               )}
@@ -287,7 +286,7 @@ export function LearningPage() {
                         }}
                       >
                         <option value="inherit">Use deployment default</option>
-                        <option value="exclude">Exclude from Learning</option>
+                        <option value="exclude">Leave out of Learning</option>
                         <option value="container">
                           Use a specific container
                         </option>
@@ -332,11 +331,11 @@ export function LearningPage() {
       </PageSection>
       <PageSection
         title="Review and publish"
-        description="Intelligence analyzes completed runs and proposes skills. Review their supporting evidence and publish approved revisions in Intelligence before Bots can use them."
+        description="Intelligence studies finished conversations and proposes skills. Review and publish them in Intelligence. Bots only use published skills."
       >
         <div className="grid gap-4">
           <label className="grid gap-2 text-sm">
-            Inspect container for
+            Show the container for
             <select
               className={selectClass}
               value={selected}
@@ -362,9 +361,9 @@ export function LearningPage() {
                 {snapshot.configuration === "configured"
                   ? `${snapshot.container?.name} (${snapshot.container?.id})`
                   : snapshot.configuration === "invalid"
-                    ? "The selected container or instrumentation is unavailable."
+                    ? "The selected container or its instrumentation isn't available."
                     : snapshot.configuration === "selection_required"
-                      ? "Select a Bot or configure a default container."
+                      ? "Choose a Bot, or set a default container."
                       : "No Learning container is assigned."}
               </p>
               <dl className="grid grid-cols-2 gap-4 rounded-lg border p-4 text-sm">
@@ -447,7 +446,7 @@ export function LearningPage() {
                         : !delivery.data.initialized
                           ? "Waiting for the first verified skill snapshot."
                           : delivery.data.stale
-                            ? "Using the last verified snapshot; refresh is pending."
+                            ? "Using the last verified snapshot. A refresh is pending."
                             : "A verified snapshot is available."}
                     </p>
                     {delivery.data.revision && (
@@ -479,10 +478,10 @@ export function LearningPage() {
             Refresh status
           </Button>
           <p className="text-muted-foreground text-sm">
-            Management requires your Intelligence account and project
-            permissions. OpenBot keeps project credentials on the server.
-            Pausing here preserves settings and thread assignments; schedules
-            and publication remain managed in Intelligence.
+            Managing Learning needs your Intelligence account and project
+            access. OpenBot keeps project credentials on the server. Turning
+            Learning off here keeps settings and conversation assignments.
+            Schedules and publishing stay in Intelligence.
           </p>
         </div>
       </PageSection>

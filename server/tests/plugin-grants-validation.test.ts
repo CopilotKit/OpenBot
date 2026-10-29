@@ -126,7 +126,7 @@ describe("POST /api/plugins/grants, for an app this deployment does not have", (
     expect(response.status).toBe(403);
     await expect(response.json()).resolves.toEqual({
       error:
-        "missing-app is not an app this deployment has added, so there is nothing for a Bot to reach. Add it first, and its tools can be granted then.",
+        "missing-app hasn't been added yet. Add it first, then give its tools to a Bot.",
     });
     expect(calls.grants).toEqual([]);
     // The server half, not the whole ref: the tool is not what is being looked up.

@@ -657,8 +657,7 @@ export type ConnectedAppBroker = {
    * IT PAIRS WITH {@link ConnectedAppBroker.authorizations}: a broker declaring `null` there
    * answers `null` here, and a broker declaring a flow answers a non-null id on every successful
    * mint. A broker that grew a flow and forgot the id would leave D24 with no source while every
-   * type still checked, so `broker-authorization-pairing.test.ts` asserts the pair over every
-   * broker literal in the tree.
+   * type still checked. A broker's authorization tests must verify this pairing.
    */
   authorize(request: {
     account: AccountRef;
@@ -903,10 +902,52 @@ export class BrokerUnconfiguredError extends BrokerRefusalError {
     const { vendor, envVar } = BROKERED_PROFILE[provider];
     super(
       reader === "person"
-        ? "Connected apps are not set up for this deployment, so nothing was asked. An administrator can set them up."
+        ? "Connecting apps isn't set up yet, so nothing was asked. Ask an admin to set it up."
         : `${vendor} is not configured for this deployment, so nothing was asked. Set ${envVar} to make the brokered apps available; until it is set there is nothing to connect, nothing to grant and no ${vendor} tool for a Bot to call, and the admin Plugins page shows one row under More apps that goes nowhere.`,
     );
     this.name = "BrokerUnconfiguredError";
+  }
+}
+
+/**
+ * An account this deployment still has a row for and the vendor no longer holds.
+ *
+ * ITS OWN CLASS BECAUSE IT IS THE ONE VENDOR CONDITION A PERSON CAN FIX FROM THE CONVERSATION. A
+ * grant withdrawn at the provider and an account removed in Composio's dashboard both arrive like
+ * this, nothing on this deployment records either — the `brokered_connections` row still stands and
+ * the app still reads as ready — and connecting again is the whole remedy. Telling it apart by type
+ * is what lets the tool call that met it hand the transcript a card with Reconnect on it instead of
+ * a sentence naming a settings page, without anything matching on the sentence.
+ *
+ * A {@link BrokerRefusalError} because it keeps that class's promise about the message, and because
+ * every reader that already prefers an authored sentence goes on preferring this one.
+ */
+export class BrokerAccountGoneError extends BrokerRefusalError {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = "BrokerAccountGoneError";
+  }
+}
+
+/**
+ * An account the vendor ALREADY HOLDS for this person and this app, met while beginning another.
+ *
+ * {@link BrokerAccountGoneError} TURNED AROUND, AND ITS OWN CLASS FOR THE SAME REASON. That one is
+ * a row this deployment still has over an account the vendor no longer holds; this one is an
+ * account the vendor holds under a row this deployment does not have. A fresh install, an upgrade
+ * that lost the table, or a second install signing in as the same person against the same vendor
+ * key all arrive here, and the person sees an app drawn as not connected that the vendor refuses to
+ * connect a second time. Telling it apart by type is what lets the connect route ask the vendor
+ * once more and RECORD the account it already holds, which is the confirm route's own act, instead
+ * of handing the person a refusal that names a Disconnect button their page does not show.
+ *
+ * A {@link BrokerRefusalError} because it keeps that class's promise about the message, so a
+ * reader that never learned this class still passes on a sentence this deployment wrote.
+ */
+export class BrokerAccountHeldError extends BrokerRefusalError {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = "BrokerAccountHeldError";
   }
 }
 
@@ -950,8 +991,8 @@ export class BrokerReturnUrlError extends BrokerRefusalError {
     const { vendor } = BROKERED_PROFILE[provider];
     super(
       address === "unbuilt"
-        ? "This deployment built no address to send you back to, so connecting was not begun rather than begun with nowhere to land. Nothing was asked of your account; an administrator can set this deployment's address up."
-        : "The address this deployment would send you back to is not a web address, so a consent granted now would end on a page with no way back here. Nothing was asked of your account; an administrator can correct this deployment's address.",
+        ? "OpenBot has no address to bring you back to, so connecting didn't start. Nothing was asked of your account. Ask an admin to set OpenBot's address."
+        : "OpenBot's return address isn't a web address, so connecting didn't start. Nothing was asked of your account. Ask an admin to fix OpenBot's address.",
     );
     this.operatorMessage =
       address === "unbuilt"

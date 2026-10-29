@@ -2,6 +2,7 @@ import type { AppVariables } from "../../auth/guards";
 import { reasonWithoutStatement } from "../../db/query-failure";
 import { normalizeArcadeError } from "../arcade-adapter";
 import {
+  BrokerAccountHeldError,
   type BrokerField,
   BrokerUnconfiguredError,
   brokerReturnUrl,
@@ -48,7 +49,6 @@ export function mountConnectionRoutes({
   connect,
   composio,
   activeProvider,
-  activeVendor,
   appOfUrl,
   actorEmail,
 }: PluginRouteContext) {
@@ -130,6 +130,10 @@ export function mountConnectionRoutes({
    * Answers with a URL rather than redirecting, so the browser decides when to leave the page. The
    * state is minted here, from the session and the row's mode, and never from anything the request
    * carries.
+   *
+   * A brokered app can answer two other ways: `{ fields }` for an app whose key somebody types, and
+   * `{ connected: true }` where the vendor already holds this account and this deployment had no
+   * row for it, which is recorded here exactly as the confirm route records it.
    */
   routes.post("/servers/:id/connect", requireUser, async (context) => {
     const serverId = context.req.param("id");
@@ -180,7 +184,7 @@ export function mountConnectionRoutes({
       if (schemeKind(row.authScheme) === "none") {
         return context.json(
           {
-            error: `${row.title} needs no account, so there is nothing to connect. A Bot granted its tools can use it as it is.`,
+            error: `${row.title} needs no account, so there's nothing to connect. Bots that can use it already work.`,
           },
           400,
         );
@@ -364,7 +368,7 @@ export function mountConnectionRoutes({
         } catch (error) {
           const refusal = brokerRefusal(
             error,
-            `${activeVendor} would not say what ${row.title} asks for, and said nothing about why. Try again, and ask an administrator to check this deployment's ${activeVendor} key if it persists.`,
+            `Couldn't find out what ${row.title} needs to connect. Try again, or ask an admin if it keeps happening.`,
           );
           return context.json({ error: refusal.error }, refusal.status);
         }
@@ -394,7 +398,7 @@ export function mountConnectionRoutes({
         if (published.length === 0) {
           return context.json(
             {
-              error: `${row.title} publishes no boxes to fill in, so there is nothing you could type that would reach it and no account was made. An administrator has to look at how ${row.title} is set up at ${activeVendor}; removing it on the Plugins page and adding it again is what records the way ${activeVendor} connects it now.`,
+              error: `${row.title} doesn't ask for anything to connect with, so no account was made. Ask an admin to remove it under Plugins and add it again.`,
             },
             400,
           );
@@ -472,7 +476,7 @@ export function mountConnectionRoutes({
           const optional = published.map((field) => field.name).join(", ");
           return context.json(
             {
-              error: `${row.title} publishes no box it says has to be filled in — only ${optional} — so nothing you could type would be a credential it insists on, and no account was made. An app that genuinely needs none is one ${activeVendor} publishes as needing no authentication, and ${row.title} is recorded here as an app whose secret you type. An administrator has to look at how ${row.title} is set up at ${activeVendor}; removing it on the Plugins page and adding it again is what records the way ${activeVendor} connects it now.`,
+              error: `${row.title} marks nothing as required (only ${optional}), so no account was made. Ask an admin to remove it under Plugins and add it again.`,
             },
             400,
           );
@@ -538,7 +542,7 @@ export function mountConnectionRoutes({
              */
             return context.json(
               {
-                error: `That is not the form ${row.title} publishes, so nothing was sent to ${activeVendor}. Press Connect again to draw it from what the app asks for now, and fill in the boxes it shows; each one holds text.`,
+                error: `That isn't the form ${row.title} asks for, so nothing was sent. Press Connect again and fill in the form it shows.`,
               },
               400,
             );
@@ -586,7 +590,7 @@ export function mountConnectionRoutes({
         if (missing.length > 0) {
           return context.json(
             {
-              error: `${row.title} cannot be connected without ${missing.join(", ")}, so nothing was sent to ${activeVendor}. Fill in every box the form marks required — a box holding only spaces is an empty one — and press Connect again.`,
+              error: `${row.title} needs ${missing.join(", ")}, so nothing was sent. Fill in every required box and press Connect again.`,
             },
             400,
           );
@@ -627,7 +631,7 @@ export function mountConnectionRoutes({
           }
           const refusal = brokerRefusal(
             error,
-            `${row.title} could not be connected with what you entered, and ${activeVendor} said nothing about why. Try again, and ask an administrator to check this deployment's ${activeVendor} key if it persists.`,
+            `Couldn't connect ${row.title} with what you entered. Try again, or ask an admin if it keeps happening.`,
           );
           return context.json({ error: refusal.error }, refusal.status);
         }
@@ -654,7 +658,7 @@ export function mountConnectionRoutes({
       if (kind === "unreadable") {
         return context.json(
           {
-            error: `This deployment cannot tell how ${row.title} connects, so nothing was sent to ${activeVendor} and no account was made. An administrator has to remove it on the Plugins page and add it again, which records the way ${activeVendor} connects it now.`,
+            error: `OpenBot can't tell how ${row.title} connects, so no account was made. Ask an admin to remove it under Plugins and add it again.`,
           },
           400,
         );
@@ -688,7 +692,8 @@ export function mountConnectionRoutes({
       if (!connect?.appUrl) {
         return context.json(
           {
-            error: `This deployment has no app URL configured, so ${activeVendor} would have nowhere to send you back to. Set OPENBOT_APP_URL.`,
+            error:
+              "Connecting apps isn't set up yet. Ask an admin to set OPENBOT_APP_URL.",
           },
           503,
         );
@@ -757,10 +762,69 @@ export function mountConnectionRoutes({
           }),
         ));
       } catch (error) {
+        /*
+         * THE VENDOR ALREADY HOLDS THIS ACCOUNT, AND THIS DEPLOYMENT HAS NO ROW FOR IT: RECORD IT,
+         * DON'T REFUSE IT.
+         *
+         * The one-account guard above already refused wherever a row stands here, so this can
+         * only be the other half of that rule: an account the vendor holds that this deployment
+         * lost track of. A fresh or upgraded install meets it, and so does every local install in
+         * single-user mode, because they all sign in as the same person against one vendor key.
+         * Refused, the person read a sentence telling them to disconnect an account on a page
+         * that drew the app as not connected and offered no Disconnect. Nothing they could press
+         * would ever end it.
+         *
+         * WHAT IS DONE INSTEAD IS EXACTLY WHAT CONFIRM DOES, THROUGH THE SAME STORE CALL. The
+         * vendor is asked whether this account is connected, and a yes writes the row and files
+         * `mcp.account_connected` for it, once, as a confirm on page load would have. The account
+         * is the one `brokeredAccountFor` resolved at the top of this branch and the actor is the
+         * session's, so a Shared app's account is still only ever adopted by an administrator,
+         * and nothing the request carries can name whose account is recorded.
+         *
+         * `{ connected: true }` IS THE STORE'S ANSWER, PASSED BACK WHOLE, which is the shape
+         * confirm answers with and the one the browser already reads as connected. No link was
+         * minted, so there is no url to hand back and nothing for the person to finish anywhere.
+         *
+         * A NO IS STILL A REFUSAL, AND IT SAYS WHAT HAPPENED. The vendor refused a second link
+         * and then answered that it holds no active account, which is a race with somebody
+         * ending it or a vendor that disagrees with itself. The row confirm deletes on a no was
+         * never here, so the person is not sent to disconnect anything; asking again is the step
+         * that settles it. 409, the status of the one-account guard above, because it is that
+         * guard's conflict seen from the vendor's side.
+         *
+         * A CONFIRM THAT THROWS IS ANSWERED AS CONFIRM ANSWERS IT, with the vendor's or this
+         * deployment's sentence and never with a guess about the account in either direction.
+         *
+         * ARCADE NEVER RAISES THIS CLASS, so this is a no-op there. Only Composio's adapter
+         * translates a held account into it.
+         */
+        if (error instanceof BrokerAccountHeldError) {
+          let confirmed: { connected: boolean };
+          try {
+            confirmed = await store.confirmBrokeredConnection({
+              toolkit,
+              account,
+              by: context.var.actor.id,
+            });
+          } catch (confirmFailure) {
+            const refusal = brokerRefusal(
+              confirmFailure,
+              `Couldn't check whether ${row.title} is already connected. Try again, or ask an admin if it keeps happening.`,
+            );
+            return context.json({ error: refusal.error }, refusal.status);
+          }
+          if (confirmed.connected) return context.json(confirmed);
+          return context.json(
+            {
+              error: `OpenBot was told an account for ${row.title} is already connected, but found none when it checked. Nothing was connected. Press Connect again, or ask an admin if it keeps happening.`,
+            },
+            409,
+          );
+        }
         logReturnUrlRefusal(error, serverId);
         const refusal = brokerRefusal(
           error,
-          `${activeVendor} would not begin a connection to ${row.title}, and said nothing about why. Try again, and ask an administrator to check this deployment's ${activeVendor} key if it persists.`,
+          `Couldn't start connecting ${row.title}. Try again, or ask an admin if it keeps happening.`,
         );
         return context.json({ error: refusal.error }, refusal.status);
       }
@@ -771,7 +835,7 @@ export function mountConnectionRoutes({
       return context.json(
         {
           error:
-            "This deployment has no public URL configured, so it cannot complete a consent flow. Set OPENBOT_PUBLIC_URL.",
+            "Connecting apps isn't set up yet. Ask an admin to set OPENBOT_PUBLIC_URL.",
         },
         503,
       );
@@ -811,7 +875,7 @@ export function mountConnectionRoutes({
       if (error instanceof CatalogueEntryUnknownError) {
         return context.json(
           {
-            error: `${entry.title} has not been added to this deployment yet. An administrator has to add it first.`,
+            error: `${entry.title} hasn't been added yet. Ask an admin to add it.`,
           },
           409,
         );
@@ -822,14 +886,14 @@ export function mountConnectionRoutes({
       if (entry.auth.clientRegistration === "dynamic") {
         return context.json(
           {
-            error: `${entry.title} would not register this deployment, or could not be reached. Try again, and check the vendor's status if it persists.`,
+            error: `Couldn't set up ${entry.title}. Try again, or check ${entry.title}'s status if it keeps happening.`,
           },
           502,
         );
       }
       return context.json(
         {
-          error: `${entry.title} has no OAuth client registered yet. An administrator has to add one first.`,
+          error: `${entry.title} isn't set up yet. Ask an admin to finish setting it up.`,
         },
         409,
       );
@@ -929,7 +993,7 @@ export function mountConnectionRoutes({
     if (!toolkit) {
       return {
         refusal: {
-          error: "That app is not reached through a broker.",
+          error: "That app doesn't connect this way.",
           status: 400,
         },
       };
@@ -953,7 +1017,7 @@ export function mountConnectionRoutes({
     ) {
       return {
         refusal: {
-          error: "An administrator connects shared apps.",
+          error: "Only an admin can connect shared apps.",
           status: 403,
         },
       };
@@ -1017,7 +1081,7 @@ export function mountConnectionRoutes({
           action: toolkit,
           state: "unknown",
           reason:
-            "This deployment could not read what this account holds just now, so nothing is said about it either way. Try again in a moment.",
+            "Couldn't read what this account allows right now. Try again in a moment.",
         },
       ];
     }
@@ -1040,6 +1104,11 @@ export function mountConnectionRoutes({
    * calling this heals it in whichever direction it went: written where the vendor says yes,
    * deleted where it says no. Repeating it files no trail rows and moves no timestamps; the store
    * is where that is settled.
+   *
+   * THE CONNECT ROUTE MAKES THE SAME CALL, for one case: the vendor refusing a new link because it
+   * already holds this account. That is a drift this route would heal on the next page load, met
+   * at the moment somebody pressed Connect, so it is healed there by the same store method rather
+   * than by a second writer of the row.
    *
    * BEHIND `requireUser` AND NOT ADMIN-GATED AT THE ROUTE — `brokeredAccountFor` is where that
    * happens instead. A Personal app's confirm is not an administrative act, so the route itself
@@ -1096,7 +1165,7 @@ export function mountConnectionRoutes({
          */
         const refusal = brokerRefusal(
           error,
-          `${activeVendor} would not say whether this account is connected, and gave no reason, so what is shown here is the last answer it gave rather than a fresh one. Try again, and ask an administrator to check this deployment's ${activeVendor} key if it persists.`,
+          "Couldn't check whether this account is connected. This shows the last answer. Try again, or ask an admin if it keeps happening.",
         );
         return context.json({ error: refusal.error }, refusal.status);
       }
@@ -1184,7 +1253,7 @@ export function mountConnectionRoutes({
          */
         const refusal = brokerRefusal(
           error,
-          `${activeVendor} would not say whether this connection still works, and gave no reason, so what is shown here is the last answer it gave rather than a fresh one. Press Re-check again, and ask an administrator to check this deployment's ${activeVendor} key if it persists.`,
+          "Couldn't check whether this connection still works. This shows the last check. Press Re-check again, or ask an admin if it keeps happening.",
         );
         return context.json({ error: refusal.error }, refusal.status);
       }
@@ -1251,7 +1320,7 @@ export function mountConnectionRoutes({
        */
       const refusal = brokerRefusal(
         error,
-        `${activeVendor} would not end this account, and gave no reason. Press Disconnect again: the revoke at ${activeVendor} runs before anything here is deleted, so repeating it is safe and is the whole recovery. Ask an administrator to check this deployment's ${activeVendor} key if it persists.`,
+        "Couldn't disconnect this account. Press Disconnect again. It's safe to repeat. Ask an admin if it keeps happening.",
       );
       return context.json({ error: refusal.error }, refusal.status);
     }
@@ -1296,7 +1365,7 @@ export function mountConnectionRoutes({
       } catch (error) {
         const refusal = brokerRefusal(
           error,
-          "This deployment could not work out which other apps share this connection, and the vendor said nothing about why. Try again.",
+          "Couldn't work out which other apps share this connection. Try again.",
         );
         return context.json({ error: refusal.error }, refusal.status);
       }
@@ -1344,7 +1413,7 @@ export function mountConnectionRoutes({
       return context.json(
         {
           error:
-            "This deployment's apps are connected once for the whole app, with the Connect button on the app's page; they are not authorized one action at a time.",
+            "Apps here connect once, with Connect on the app's page. They aren't authorized one action at a time.",
         },
         503,
       );
@@ -1370,7 +1439,7 @@ export function mountConnectionRoutes({
       !(await store.serverPublishesAction(serverId, action))
     ) {
       return context.json(
-        { error: `${title} does not publish an action by that name.` },
+        { error: `${title} has no action by that name.` },
         400,
       );
     }
@@ -1379,7 +1448,7 @@ export function mountConnectionRoutes({
       return context.json(
         {
           error:
-            "This deployment has no app URL configured, so there is nowhere to send you back to. Set OPENBOT_APP_URL.",
+            "Connecting apps isn't set up yet. Ask an admin to set OPENBOT_APP_URL.",
         },
         503,
       );
@@ -1396,7 +1465,7 @@ export function mountConnectionRoutes({
       logReturnUrlRefusal(error, serverId);
       const refusal = brokerRefusal(
         error,
-        "This deployment could not build the address to send you back to, so nothing was started.",
+        "Couldn't build the address to bring you back to, so nothing was started.",
       );
       return context.json({ error: refusal.error }, refusal.status);
     }
@@ -1506,13 +1575,13 @@ export function mountConnectionRoutes({
         }
         const refusal = brokerRefusal(
           error,
-          "The app's vendor refused to start that authorization, so nothing was started. Try again in a moment.",
+          "The app refused to start that authorization. Try again in a moment.",
         );
         return context.json(
           {
             error: freed
               ? refusal.error
-              : `${refusal.error} The attempt could not be cleared either; it expires within fifteen minutes, and starting over works after that.`,
+              : `${refusal.error} This attempt expires within fifteen minutes. You can start over after that.`,
           },
           refusal.status,
         );
@@ -1552,7 +1621,7 @@ export function mountConnectionRoutes({
        * construction, the adapter's own refusals are ours, and {@link VendorTimeoutError} is ours.
        *
        * NOT AN AUDIT ROW. Nothing here writes to `pending_authorizations`, and the attempt's
-       * missing trail rows are already debt in `pending-authorization-audit-ledger.test.ts`, under
+       * missing trail rows are tracked in https://github.com/CopilotKit/OpenBot/issues/876, under
        * the claim and the expiry overwrite (B5e). Filing an event for this one branch while the
        * claim it follows files none would put half a lifecycle on the trail.
        */
@@ -1590,7 +1659,7 @@ export function mountConnectionRoutes({
       return context.json(
         {
           error:
-            "The app's vendor did not answer clearly, so nobody was sent to a consent screen and nothing was connected. Whether an authorization started at the vendor is unknown, and one that did cannot be finished from here. This attempt expires within fifteen minutes, and starting over works after that.",
+            "The app didn't answer clearly, so nobody was sent to a consent screen and nothing was connected. This attempt expires within fifteen minutes. You can start over after that.",
         },
         502,
       );
@@ -1659,8 +1728,8 @@ export function mountConnectionRoutes({
       return context.json(
         {
           error: freed
-            ? "The app's vendor started that authorization, and this deployment could not record it — so it cannot be finished here and nothing was connected. Press Authorize again: the attempt was cleared, so starting over is safe."
-            : "The app's vendor started that authorization, and this deployment could not record it — so it cannot be finished here and nothing was connected. The attempt could not be cleared either; it expires within fifteen minutes, and starting over works after that.",
+            ? "The app started that authorization, but OpenBot couldn't record it, so nothing was connected. Press Authorize again. It's safe to start over."
+            : "The app started that authorization, but OpenBot couldn't record it, so nothing was connected. This attempt expires within fifteen minutes. You can start over after that.",
         },
         500,
       );
@@ -1691,7 +1760,7 @@ export function mountConnectionRoutes({
       return context.json(
         {
           error:
-            "That authorization was cancelled before the app's vendor finished starting it, so you were not sent on and nothing was connected. Press Authorize to start again.",
+            "That authorization was cancelled before it started, so nothing was connected. Press Authorize to start again.",
         },
         409,
       );
@@ -1797,7 +1866,7 @@ export function mountConnectionRoutes({
         return context.json(
           {
             error:
-              "That authorization finished before it could be cancelled, so the account is connected. Disconnect it if you did not mean to connect it.",
+              "That authorization finished before it could be cancelled, so the account is connected. Disconnect it if you didn't mean to connect it.",
           },
           409,
         );
@@ -1924,7 +1993,7 @@ export function mountConnectionRoutes({
         return context.json(
           {
             error:
-              "This deployment no longer recognises you, so nothing was recorded. Ask an administrator to restore your access, then start the authorization again from the app's page.",
+              "OpenBot doesn't recognise you anymore, so nothing was recorded. Ask an admin to restore your access, then authorize again from the app's page.",
           },
           403,
         );

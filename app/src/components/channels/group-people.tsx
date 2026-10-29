@@ -67,8 +67,8 @@ export function GroupPeopleButton({ channelId }: { channelId: string }) {
           <DialogHeader>
             <DialogTitle>People in this group</DialogTitle>
             <DialogDescription>
-              Everyone here sees the whole conversation, and every Bot in it
-              answers them.
+              Everyone here sees the whole conversation. Every Bot in it answers
+              them.
             </DialogDescription>
           </DialogHeader>
           <DialogBody className="mt-4 grid gap-4 overflow-y-auto">

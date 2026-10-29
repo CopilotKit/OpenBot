@@ -164,9 +164,9 @@ test("team rules are locked for members, enforced auto-review is shown as requir
   expect(view.getByText("Locked")).toBeTruthy();
   const review = view.getByRole("switch", { name: "Auto-review" });
   expect(review.getAttribute("aria-checked")).toBe("true");
-  expect(view.getByText(/Required by your team/)).toBeTruthy();
+  expect(view.getByText(/An admin requires this/)).toBeTruthy();
   expect(
-    view.getByText(/Your team limits this to "Ask every time"/),
+    view.getByText(/An admin limits this to "Ask every time"/),
   ).toBeTruthy();
   expect(view.queryByText("Team settings")).toBeNull();
 });
@@ -289,7 +289,11 @@ test("with personal rules switched off by the team, they are shown as not applyi
     team: { ...inbox.team, customRulesEnabled: false },
   };
   const view = draw(<ApprovalSettings />);
-  expect(await view.findByText(/kept but do not apply/)).toBeTruthy();
+  expect(
+    await view.findByText(
+      /An admin has turned off personal rules\. Yours are kept but don't apply\./,
+    ),
+  ).toBeTruthy();
   expect(view.queryByText("Add a rule")).toBeNull();
 });
 

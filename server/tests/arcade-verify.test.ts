@@ -287,10 +287,10 @@ function verify(
 
 /** Where a refusal lands: the LIST, with the reason as an opaque code and no sentence. */
 const refusedTo = (reason: string) =>
-  `${APP_URL}/settings/connected-accounts?authorized=${reason}`;
+  `${APP_URL}/connections?authorized=${reason}`;
 
 /** Where a completion lands: the app's own page, built from the attempt row's `server_id`. */
-const LANDING = `${APP_URL}/settings/connected-accounts/${APP}?action=${encodeURIComponent(ACTION)}`;
+const LANDING = `${APP_URL}/connections/${APP}?action=${encodeURIComponent(ACTION)}`;
 
 /**
  * A refusal, named by its code and not merely by the fact that something redirected.

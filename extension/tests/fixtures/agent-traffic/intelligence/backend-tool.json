@@ -1,0 +1,841 @@
+{
+  "name": "backend-tool",
+  "transport": "intelligence",
+  "recordedWith": {
+    "copilotkit": "c21eeda029",
+    "@ag-ui/client": "1.0.2"
+  },
+  "exchanges": [
+    {
+      "at": 55,
+      "url": "http://127.0.0.1:4000/api/copilotkit",
+      "method": "POST",
+      "body": "{\"method\":\"agent/run\",\"params\":{\"agentId\":\"default\"},\"body\":{\"threadId\":\"5fa049ed-fbcc-4ac9-8e59-bdc843946c86\",\"runId\":\"9fb80749-50d9-4d5c-9e47-61e6b589cb5e\",\"protocolVersion\":\"1.0\",\"tools\":[],\"context\":[],\"forwardedProps\":{},\"state\":{},\"messages\":[{\"id\":\"b26ef2b1-4268-4457-85ca-149781a1ec17\",\"role\":\"user\",\"content\":\"What is the weather in Lisbon? Call lookupWeather once, then answer in one sentence.\"}]}}",
+      "status": 200,
+      "contentType": "application/json;charset=utf-8",
+      "chunks": [
+        {
+          "at": 177,
+          "text": "{\"threadId\":\"5fa049ed-fbcc-4ac9-8e59-bdc843946c86\",\"runId\":\"9fb80749-50d9-4d5c-9e47-61e6b589cb5e\",\"joinToken\":\"[omitted]\",\"realtime\":{\"clientUrl\":\"ws://127.0.0.1:7253/client\",\"topic\":\"thread:5fa049ed-fbcc-4ac9-8e59-bdc843946c86\"}}"
+        }
+      ],
+      "end": {
+        "at": 177,
+        "outcome": "complete"
+      }
+    }
+  ],
+  "frames": [
+    {
+      "at": 179,
+      "socket": 1,
+      "direction": "out",
+      "joinRef": "3",
+      "topic": "thread:5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+      "event": "phx_join",
+      "payload": {
+        "stream_mode": "run",
+        "run_id": "9fb80749-50d9-4d5c-9e47-61e6b589cb5e"
+      }
+    },
+    {
+      "at": 234,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+      "event": "ag_ui_event",
+      "payload": {
+        "input": {
+          "context": [],
+          "messages": [
+            {
+              "content": "What is the weather in Lisbon? Call lookupWeather once, then answer in one sentence.",
+              "id": "b26ef2b1-4268-4457-85ca-149781a1ec17",
+              "role": "user"
+            }
+          ],
+          "protocolVersion": "1.0",
+          "runId": "9fb80749-50d9-4d5c-9e47-61e6b589cb5e",
+          "state": {},
+          "threadId": "5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+          "tools": []
+        },
+        "metadata": {
+          "cpki_event_id": "86491874-43be-4030-a85b-20b59cf6662b",
+          "cpki_event_seq": 1,
+          "cpki_ingested": "01a15b9d-9170-756b-8e68-cd49c9b66572"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "protocolVersion": "1.0",
+        "runId": "9fb80749-50d9-4d5c-9e47-61e6b589cb5e",
+        "run_id": "9fb80749-50d9-4d5c-9e47-61e6b589cb5e",
+        "threadId": "5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+        "thread_id": "5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+        "type": "RUN_STARTED"
+      }
+    },
+    {
+      "at": 238,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+      "event": "replay_complete"
+    },
+    {
+      "at": 960,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+      "event": "ag_ui_event",
+      "payload": {
+        "metadata": {
+          "cpki_event_id": "02859169-c2dd-4ad9-bc1c-2aec1f006c23",
+          "cpki_event_seq": 2,
+          "cpki_ingested": "01a15b9d-9477-7332-b4ae-8e9cc11c2339"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "parentMessageId": "b8f0af98-3b1a-4087-b910-6a1e60a75c0b",
+        "project_id": 1,
+        "runId": "9fb80749-50d9-4d5c-9e47-61e6b589cb5e",
+        "run_id": "9fb80749-50d9-4d5c-9e47-61e6b589cb5e",
+        "threadId": "5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+        "thread_id": "5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+        "toolCallId": "call_tCVdkwaKaYTxtWrTvKXH7jAY",
+        "toolCallName": "lookupWeather",
+        "type": "TOOL_CALL_START"
+      }
+    },
+    {
+      "at": 961,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "{\"",
+        "metadata": {
+          "cpki_event_id": "41c99ae1-26e7-4d21-b317-da2f33e3f375",
+          "cpki_event_seq": 3,
+          "cpki_ingested": "01a15b9d-9478-7567-876b-2617f5501fe4"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "9fb80749-50d9-4d5c-9e47-61e6b589cb5e",
+        "run_id": "9fb80749-50d9-4d5c-9e47-61e6b589cb5e",
+        "threadId": "5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+        "thread_id": "5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+        "toolCallId": "call_tCVdkwaKaYTxtWrTvKXH7jAY",
+        "type": "TOOL_CALL_ARGS"
+      }
+    },
+    {
+      "at": 961,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "city",
+        "metadata": {
+          "cpki_event_id": "adf9ac2a-053a-410b-a78f-3a8f564216d7",
+          "cpki_event_seq": 4,
+          "cpki_ingested": "01a15b9d-9478-721d-8829-298eaef36c98"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "9fb80749-50d9-4d5c-9e47-61e6b589cb5e",
+        "run_id": "9fb80749-50d9-4d5c-9e47-61e6b589cb5e",
+        "threadId": "5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+        "thread_id": "5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+        "toolCallId": "call_tCVdkwaKaYTxtWrTvKXH7jAY",
+        "type": "TOOL_CALL_ARGS"
+      }
+    },
+    {
+      "at": 966,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "\":\"",
+        "metadata": {
+          "cpki_event_id": "0132ca31-c41b-42b5-89bd-503a1ebfceef",
+          "cpki_event_seq": 5,
+          "cpki_ingested": "01a15b9d-947e-7266-931d-57d2bd123315"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "9fb80749-50d9-4d5c-9e47-61e6b589cb5e",
+        "run_id": "9fb80749-50d9-4d5c-9e47-61e6b589cb5e",
+        "threadId": "5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+        "thread_id": "5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+        "toolCallId": "call_tCVdkwaKaYTxtWrTvKXH7jAY",
+        "type": "TOOL_CALL_ARGS"
+      }
+    },
+    {
+      "at": 967,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "Lis",
+        "metadata": {
+          "cpki_event_id": "b978fb12-84fc-40dc-9b1e-92d62febe003",
+          "cpki_event_seq": 6,
+          "cpki_ingested": "01a15b9d-947e-7043-8ff1-3b343db505ce"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "9fb80749-50d9-4d5c-9e47-61e6b589cb5e",
+        "run_id": "9fb80749-50d9-4d5c-9e47-61e6b589cb5e",
+        "threadId": "5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+        "thread_id": "5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+        "toolCallId": "call_tCVdkwaKaYTxtWrTvKXH7jAY",
+        "type": "TOOL_CALL_ARGS"
+      }
+    },
+    {
+      "at": 967,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "bon",
+        "metadata": {
+          "cpki_event_id": "45149307-a476-4038-9069-3374a865a4e1",
+          "cpki_event_seq": 7,
+          "cpki_ingested": "01a15b9d-947e-7c4f-9ddb-493addfe4136"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "9fb80749-50d9-4d5c-9e47-61e6b589cb5e",
+        "run_id": "9fb80749-50d9-4d5c-9e47-61e6b589cb5e",
+        "threadId": "5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+        "thread_id": "5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+        "toolCallId": "call_tCVdkwaKaYTxtWrTvKXH7jAY",
+        "type": "TOOL_CALL_ARGS"
+      }
+    },
+    {
+      "at": 980,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "\"}",
+        "metadata": {
+          "cpki_event_id": "602f3771-7fd4-42dd-9223-f99ec293a76b",
+          "cpki_event_seq": 8,
+          "cpki_ingested": "01a15b9d-948c-7517-91d3-3d5c5e3893c6"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "9fb80749-50d9-4d5c-9e47-61e6b589cb5e",
+        "run_id": "9fb80749-50d9-4d5c-9e47-61e6b589cb5e",
+        "threadId": "5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+        "thread_id": "5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+        "toolCallId": "call_tCVdkwaKaYTxtWrTvKXH7jAY",
+        "type": "TOOL_CALL_ARGS"
+      }
+    },
+    {
+      "at": 1033,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+      "event": "ag_ui_event",
+      "payload": {
+        "metadata": {
+          "cpki_event_id": "c2615e41-816b-4d78-bf3a-8925b2c8c712",
+          "cpki_event_seq": 9,
+          "cpki_ingested": "01a15b9d-94c1-782a-97c0-418295f0c68b"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "9fb80749-50d9-4d5c-9e47-61e6b589cb5e",
+        "run_id": "9fb80749-50d9-4d5c-9e47-61e6b589cb5e",
+        "threadId": "5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+        "thread_id": "5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+        "toolCallId": "call_tCVdkwaKaYTxtWrTvKXH7jAY",
+        "type": "TOOL_CALL_END"
+      }
+    },
+    {
+      "at": 1034,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+      "event": "ag_ui_event",
+      "payload": {
+        "content": "{\"city\":\"Lisbon\",\"forecast\":\"sunny\",\"celsius\":21}",
+        "messageId": "0dc57c74-6df9-43bf-b248-0696883f327c",
+        "metadata": {
+          "cpki_event_id": "216ccb5e-20d7-45d9-97ec-33e215d61967",
+          "cpki_event_seq": 10,
+          "cpki_ingested": "01a15b9d-94c1-7105-aa55-2dd3fa91b390"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "role": "tool",
+        "runId": "9fb80749-50d9-4d5c-9e47-61e6b589cb5e",
+        "run_id": "9fb80749-50d9-4d5c-9e47-61e6b589cb5e",
+        "threadId": "5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+        "thread_id": "5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+        "toolCallId": "call_tCVdkwaKaYTxtWrTvKXH7jAY",
+        "type": "TOOL_CALL_RESULT"
+      }
+    },
+    {
+      "at": 1807,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+      "event": "ag_ui_event",
+      "payload": {
+        "messageId": "msg_0217255e5b6fc195006ad7f7310bb887d089cfc6ac39a00cc9",
+        "metadata": {
+          "cpki_event_id": "15f59793-a7c7-4ccf-9b86-0e5de30fa9c1",
+          "cpki_event_seq": 11,
+          "cpki_ingested": "01a15b9d-97c7-761d-a19c-d569a9442e8e"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "role": "assistant",
+        "runId": "9fb80749-50d9-4d5c-9e47-61e6b589cb5e",
+        "run_id": "9fb80749-50d9-4d5c-9e47-61e6b589cb5e",
+        "threadId": "5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+        "thread_id": "5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+        "type": "TEXT_MESSAGE_START"
+      }
+    },
+    {
+      "at": 1809,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "The",
+        "messageId": "msg_0217255e5b6fc195006ad7f7310bb887d089cfc6ac39a00cc9",
+        "metadata": {
+          "cpki_event_id": "a41b7a5e-f94a-4ba9-9fdf-5c3d63a68e36",
+          "cpki_event_seq": 12,
+          "cpki_ingested": "01a15b9d-97c7-71cf-972b-d7bc85f28a2c"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "9fb80749-50d9-4d5c-9e47-61e6b589cb5e",
+        "run_id": "9fb80749-50d9-4d5c-9e47-61e6b589cb5e",
+        "threadId": "5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+        "thread_id": "5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+        "type": "TEXT_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1809,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " weather",
+        "messageId": "msg_0217255e5b6fc195006ad7f7310bb887d089cfc6ac39a00cc9",
+        "metadata": {
+          "cpki_event_id": "c14789c9-c136-4940-9298-fa2ad31aab09",
+          "cpki_event_seq": 13,
+          "cpki_ingested": "01a15b9d-97c7-787d-86d1-fd15d97bdcbf"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "9fb80749-50d9-4d5c-9e47-61e6b589cb5e",
+        "run_id": "9fb80749-50d9-4d5c-9e47-61e6b589cb5e",
+        "threadId": "5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+        "thread_id": "5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+        "type": "TEXT_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1810,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " in",
+        "messageId": "msg_0217255e5b6fc195006ad7f7310bb887d089cfc6ac39a00cc9",
+        "metadata": {
+          "cpki_event_id": "ca8170de-4fd7-434d-b596-4188ce4cf78e",
+          "cpki_event_seq": 14,
+          "cpki_ingested": "01a15b9d-97c7-7465-9ad8-3ffb3fb08fd6"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "9fb80749-50d9-4d5c-9e47-61e6b589cb5e",
+        "run_id": "9fb80749-50d9-4d5c-9e47-61e6b589cb5e",
+        "threadId": "5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+        "thread_id": "5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+        "type": "TEXT_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1810,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " Lisbon",
+        "messageId": "msg_0217255e5b6fc195006ad7f7310bb887d089cfc6ac39a00cc9",
+        "metadata": {
+          "cpki_event_id": "a6270119-0245-4310-83e9-70329b46d1a1",
+          "cpki_event_seq": 15,
+          "cpki_ingested": "01a15b9d-97c7-7b5e-a192-28d842fbb4bf"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "9fb80749-50d9-4d5c-9e47-61e6b589cb5e",
+        "run_id": "9fb80749-50d9-4d5c-9e47-61e6b589cb5e",
+        "threadId": "5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+        "thread_id": "5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+        "type": "TEXT_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1810,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " is",
+        "messageId": "msg_0217255e5b6fc195006ad7f7310bb887d089cfc6ac39a00cc9",
+        "metadata": {
+          "cpki_event_id": "aa5f2896-108c-4f01-9301-e34da787c751",
+          "cpki_event_seq": 16,
+          "cpki_ingested": "01a15b9d-97c7-7ecc-8aa2-a492ba2715c4"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "9fb80749-50d9-4d5c-9e47-61e6b589cb5e",
+        "run_id": "9fb80749-50d9-4d5c-9e47-61e6b589cb5e",
+        "threadId": "5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+        "thread_id": "5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+        "type": "TEXT_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1810,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " sunny",
+        "messageId": "msg_0217255e5b6fc195006ad7f7310bb887d089cfc6ac39a00cc9",
+        "metadata": {
+          "cpki_event_id": "8b0af105-6825-460f-9df3-d7ea5ea79d65",
+          "cpki_event_seq": 17,
+          "cpki_ingested": "01a15b9d-97c7-7fa0-862b-552295103bf5"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "9fb80749-50d9-4d5c-9e47-61e6b589cb5e",
+        "run_id": "9fb80749-50d9-4d5c-9e47-61e6b589cb5e",
+        "threadId": "5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+        "thread_id": "5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+        "type": "TEXT_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1833,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " with",
+        "messageId": "msg_0217255e5b6fc195006ad7f7310bb887d089cfc6ac39a00cc9",
+        "metadata": {
+          "cpki_event_id": "8fe87fac-ba9e-4164-bd0b-b7f3c59c1c9f",
+          "cpki_event_seq": 18,
+          "cpki_ingested": "01a15b9d-97e1-76af-a1fa-4970a5019d58"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "9fb80749-50d9-4d5c-9e47-61e6b589cb5e",
+        "run_id": "9fb80749-50d9-4d5c-9e47-61e6b589cb5e",
+        "threadId": "5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+        "thread_id": "5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+        "type": "TEXT_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1833,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " a",
+        "messageId": "msg_0217255e5b6fc195006ad7f7310bb887d089cfc6ac39a00cc9",
+        "metadata": {
+          "cpki_event_id": "973f1c8a-96c2-44bf-9631-b471bb2b7233",
+          "cpki_event_seq": 19,
+          "cpki_ingested": "01a15b9d-97e1-7696-b887-2973d7a22414"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "9fb80749-50d9-4d5c-9e47-61e6b589cb5e",
+        "run_id": "9fb80749-50d9-4d5c-9e47-61e6b589cb5e",
+        "threadId": "5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+        "thread_id": "5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+        "type": "TEXT_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1914,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " temperature",
+        "messageId": "msg_0217255e5b6fc195006ad7f7310bb887d089cfc6ac39a00cc9",
+        "metadata": {
+          "cpki_event_id": "e37ce2f7-2529-4421-9bc5-ca7255cb4d3c",
+          "cpki_event_seq": 20,
+          "cpki_ingested": "01a15b9d-9833-7e71-a3c9-7771da414ea6"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "9fb80749-50d9-4d5c-9e47-61e6b589cb5e",
+        "run_id": "9fb80749-50d9-4d5c-9e47-61e6b589cb5e",
+        "threadId": "5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+        "thread_id": "5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+        "type": "TEXT_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1933,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " of",
+        "messageId": "msg_0217255e5b6fc195006ad7f7310bb887d089cfc6ac39a00cc9",
+        "metadata": {
+          "cpki_event_id": "d479497c-3a83-489f-a9e3-9119189d3b13",
+          "cpki_event_seq": 21,
+          "cpki_ingested": "01a15b9d-9845-74cf-a82b-fb5823ebb0eb"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "9fb80749-50d9-4d5c-9e47-61e6b589cb5e",
+        "run_id": "9fb80749-50d9-4d5c-9e47-61e6b589cb5e",
+        "threadId": "5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+        "thread_id": "5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+        "type": "TEXT_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1934,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " ",
+        "messageId": "msg_0217255e5b6fc195006ad7f7310bb887d089cfc6ac39a00cc9",
+        "metadata": {
+          "cpki_event_id": "e9f4e765-2ed2-4d00-9681-e5790c22f0da",
+          "cpki_event_seq": 22,
+          "cpki_ingested": "01a15b9d-9845-7622-8d31-50e6343ced50"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "9fb80749-50d9-4d5c-9e47-61e6b589cb5e",
+        "run_id": "9fb80749-50d9-4d5c-9e47-61e6b589cb5e",
+        "threadId": "5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+        "thread_id": "5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+        "type": "TEXT_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1970,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "21",
+        "messageId": "msg_0217255e5b6fc195006ad7f7310bb887d089cfc6ac39a00cc9",
+        "metadata": {
+          "cpki_event_id": "64334e69-b039-48d3-8486-1ae1ed09829b",
+          "cpki_event_seq": 23,
+          "cpki_ingested": "01a15b9d-986b-7373-81f6-8044e1458694"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "9fb80749-50d9-4d5c-9e47-61e6b589cb5e",
+        "run_id": "9fb80749-50d9-4d5c-9e47-61e6b589cb5e",
+        "threadId": "5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+        "thread_id": "5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+        "type": "TEXT_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 2016,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "°C",
+        "messageId": "msg_0217255e5b6fc195006ad7f7310bb887d089cfc6ac39a00cc9",
+        "metadata": {
+          "cpki_event_id": "8364f9c6-f680-4bfe-b9b0-a9708676e42f",
+          "cpki_event_seq": 24,
+          "cpki_ingested": "01a15b9d-9898-77b7-b2dd-304feb93578e"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "9fb80749-50d9-4d5c-9e47-61e6b589cb5e",
+        "run_id": "9fb80749-50d9-4d5c-9e47-61e6b589cb5e",
+        "threadId": "5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+        "thread_id": "5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+        "type": "TEXT_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 2049,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": ".",
+        "messageId": "msg_0217255e5b6fc195006ad7f7310bb887d089cfc6ac39a00cc9",
+        "metadata": {
+          "cpki_event_id": "e6595706-4068-4a0b-a32d-84941da0f326",
+          "cpki_event_seq": 25,
+          "cpki_ingested": "01a15b9d-98ba-7f61-ad49-c0c064da3a85"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "9fb80749-50d9-4d5c-9e47-61e6b589cb5e",
+        "run_id": "9fb80749-50d9-4d5c-9e47-61e6b589cb5e",
+        "threadId": "5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+        "thread_id": "5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+        "type": "TEXT_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 2192,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+      "event": "ag_ui_event",
+      "payload": {
+        "messageId": "msg_0217255e5b6fc195006ad7f7310bb887d089cfc6ac39a00cc9",
+        "metadata": {
+          "cpki_event_id": "75b776bb-4172-4a5a-8afe-bf4e2062e2f8",
+          "cpki_event_seq": 26,
+          "cpki_ingested": "01a15b9d-9947-7a7f-8f9d-e55db19d9d70"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "9fb80749-50d9-4d5c-9e47-61e6b589cb5e",
+        "run_id": "9fb80749-50d9-4d5c-9e47-61e6b589cb5e",
+        "threadId": "5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+        "thread_id": "5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+        "type": "TEXT_MESSAGE_END"
+      }
+    },
+    {
+      "at": 2193,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+      "event": "ag_ui_event",
+      "payload": {
+        "metadata": {
+          "cpki_event_id": "8c7ba013-55a1-4d17-9da3-6ad213f27d32",
+          "cpki_event_seq": 27,
+          "cpki_ingested": "01a15b9d-9948-7ea9-9c22-04f33bc42747",
+          "finishReason": "stop"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "9fb80749-50d9-4d5c-9e47-61e6b589cb5e",
+        "run_id": "9fb80749-50d9-4d5c-9e47-61e6b589cb5e",
+        "threadId": "5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+        "thread_id": "5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+        "type": "RUN_FINISHED",
+        "usage": [
+          {
+            "cachedInputTokens": 0,
+            "inputTokens": 472,
+            "model": "gpt-4.1-mini",
+            "outputTokens": 32,
+            "provider": "openai.responses",
+            "reasoningTokens": 0,
+            "totalTokens": 504
+          }
+        ]
+      }
+    },
+    {
+      "at": 2195,
+      "socket": 1,
+      "direction": "out",
+      "joinRef": "3",
+      "topic": "thread:5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+      "event": "phx_leave"
+    }
+  ],
+  "sink": [
+    {
+      "trajectoryId": "9ff0f428-d9ec-4c51-9d6b-935f945a0c64",
+      "events": [
+        {
+          "type": "CUSTOM",
+          "name": "page",
+          "value": {
+            "route": "/",
+            "url": "http://127.0.0.1:4000/",
+            "title": "",
+            "referrer": "",
+            "seq": 1
+          },
+          "timestamp": 1792538415299
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.message",
+          "value": {
+            "messageId": "b26ef2b1-4268-4457-85ca-149781a1ec17",
+            "runId": null,
+            "threadId": "5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+            "agentId": "default",
+            "role": "user",
+            "textLength": 84,
+            "text": "What is the weather in Lisbon? Call lookupWeather once, then answer in one sentence.",
+            "seq": 2
+          },
+          "timestamp": 1792538415350
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.run",
+          "value": {
+            "phase": "started",
+            "runId": "9fb80749-50d9-4d5c-9e47-61e6b589cb5e",
+            "threadId": "5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+            "agentId": "default",
+            "seq": 3
+          },
+          "timestamp": 1792538415535
+        },
+        {
+          "type": "CUSTOM",
+          "name": "tool.call",
+          "value": {
+            "phase": "started",
+            "toolCallId": "call_tCVdkwaKaYTxtWrTvKXH7jAY",
+            "toolName": "lookupWeather",
+            "agentId": "default",
+            "threadId": "5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+            "messageId": "b8f0af98-3b1a-4087-b910-6a1e60a75c0b",
+            "runId": "9fb80749-50d9-4d5c-9e47-61e6b589cb5e",
+            "seq": 4
+          },
+          "timestamp": 1792538416258
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.message",
+          "value": {
+            "messageId": "0dc57c74-6df9-43bf-b248-0696883f327c",
+            "runId": "9fb80749-50d9-4d5c-9e47-61e6b589cb5e",
+            "threadId": "5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+            "agentId": "default",
+            "role": "tool",
+            "textLength": 49,
+            "text": "{\"city\":\"Lisbon\",\"forecast\":\"sunny\",\"celsius\":21}",
+            "seq": 5
+          },
+          "timestamp": 1792538416332
+        }
+      ],
+      "dropped": 0
+    },
+    {
+      "trajectoryId": "9ff0f428-d9ec-4c51-9d6b-935f945a0c64",
+      "events": [
+        {
+          "type": "CUSTOM",
+          "name": "agent.message",
+          "value": {
+            "messageId": "msg_0217255e5b6fc195006ad7f7310bb887d089cfc6ac39a00cc9",
+            "runId": "9fb80749-50d9-4d5c-9e47-61e6b589cb5e",
+            "threadId": "5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+            "agentId": "default",
+            "role": "assistant",
+            "textLength": 58,
+            "text": "The weather in Lisbon is sunny with a temperature of 21°C.",
+            "seq": 6
+          },
+          "timestamp": 1792538417490
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.run",
+          "value": {
+            "phase": "finished",
+            "runId": "9fb80749-50d9-4d5c-9e47-61e6b589cb5e",
+            "threadId": "5fa049ed-fbcc-4ac9-8e59-bdc843946c86",
+            "agentId": "default",
+            "seq": 7
+          },
+          "timestamp": 1792538417493
+        }
+      ],
+      "dropped": 0
+    }
+  ]
+}

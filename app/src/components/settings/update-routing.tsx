@@ -13,18 +13,18 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { setUpdateRoutingMutationOptions } from "@/lib/bot-lifecycle/mutations";
-import { deliveryQueryOptions } from "@/lib/delivery";
 import {
   type UpdateKind,
   type UpdateTransport,
   updateRoutingQueryOptions,
 } from "@/lib/bot-lifecycle/queries";
+import { deliveryQueryOptions } from "@/lib/delivery";
 import { queryClient } from "@/query-client";
 
 const KIND_LABEL: Record<UpdateKind, { title: string; description: string }> = {
   progress: {
     title: "Progress",
-    description: "Replies and results from work you were not watching.",
+    description: "Replies and results from work you weren't watching.",
   },
   decision: {
     title: "Decisions",
@@ -62,12 +62,12 @@ export function UpdateRoutingSection() {
     reach.data ? reach.data.available[transport] : true;
   return (
     <PageSection
-      description="Where each kind of update goes when you are not looking. The web always shows everything."
+      description="Choose where to receive each type of update when you’re away. All updates remain available in the web app."
       title="Where updates go"
     >
       {routing.isPending || reach.isPending ? null : routing.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Could not load where your updates go.
+          Couldn't load where your updates go. Reload the page.
         </p>
       ) : (
         <PageRows>

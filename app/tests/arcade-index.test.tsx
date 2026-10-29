@@ -3,7 +3,7 @@ import type { PluginServer } from "@/lib/plugins/queries";
 import {
   brokeredAccountsListedOn,
   sharedAccountsListedOn,
-} from "@/routes/_authed/settings/connected-accounts/index";
+} from "@/lib/plugins/listed";
 
 /**
  * The Connected accounts index lists brokered rows from either broker. A deployment holds rows from

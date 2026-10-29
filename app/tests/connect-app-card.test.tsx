@@ -11,6 +11,8 @@ import {
 } from "@tanstack/react-router";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { ConnectAppCard } from "@/components/channels/connect-app-card";
+import { carryOnMessage } from "@/lib/copilot/carry-on";
+import { ConversationProvider } from "@/lib/copilot/conversation";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -54,10 +56,15 @@ type Row = { serverId: string; holder?: string; revoked?: boolean };
 function mounted(
   options: {
     connections?: Row[];
-    /** What `POST /connect` answers: a page to visit, or a form to fill in. */
-    answers?: "url" | "fields" | "failure";
+    /**
+     * What `POST /connect` answers: a page to visit, a form to fill in, or an account the vendor
+     * already held, which the route records on the press and lists from then on.
+     */
+    answers?: "url" | "fields" | "failure" | "connected";
     /** False stands in for a browser that refused the tab, which answers null. */
     popupsAllowed?: boolean;
+    /** Drawn inside a conversation, as the latest thing in it: what the card sends is kept here. */
+    asked?: string[];
   } = {},
 ) {
   const { connections = [], answers = "url", popupsAllowed = true } = options;
@@ -84,6 +91,8 @@ function mounted(
     return tab as unknown as Window;
   }) as typeof window.open;
 
+  /** Whether the route has recorded the account, which is what the connections read lists. */
+  let recorded = false;
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     const json = (body: unknown, status = 200) =>
@@ -92,13 +101,23 @@ function mounted(
         headers: { "content-type": "application/json" },
       });
     if (url.includes("/api/plugins/connections"))
-      return json({ connections, redirectUri: null });
+      return json({
+        connections: recorded
+          ? [...connections, { serverId: "srv_notion", holder: "person" }]
+          : connections,
+        redirectUri: null,
+      });
     if (url.includes("/connect") && init?.method === "POST") {
       if (answers === "failure")
         return json({ error: "That account could not be connected." }, 502);
       // What a key-entry app answers: a form to fill in, and no page to visit.
       if (answers === "fields")
         return json({ fields: [{ name: "api_key", type: "string" }] });
+      // What the route answers once it has recorded an account the vendor already held.
+      if (answers === "connected") {
+        recorded = true;
+        return json({ connected: true });
+      }
       return json({ authorizationUrl: "https://notion.test/consent" });
     }
     return json({});
@@ -107,22 +126,35 @@ function mounted(
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
+  // One card, one tool call, however often the route draws it.
+  const toolCallId = `call_${Math.random().toString(36).slice(2)}`;
   const root = createRootRoute({ component: Outlet });
   const card = createRoute({
     getParentRoute: () => root,
     path: "/",
-    component: () => (
-      <ConnectAppCard
-        message="You have not connected your Notion account. Connect it and ask again."
-        serverId="srv_notion"
-        title="Notion"
-      />
-    ),
+    component: () => {
+      const drawn = (
+        <ConnectAppCard
+          message="You have not connected your Notion account. Connect it and ask again."
+          place={{ toolCallId, latest: true }}
+          serverId="srv_notion"
+          title="Notion"
+        />
+      );
+      const { asked } = options;
+      return asked ? (
+        <ConversationProvider ask={(text) => asked.push(text)}>
+          {drawn}
+        </ConversationProvider>
+      ) : (
+        drawn
+      );
+    },
   });
   // The destination the card links to for an app connected with a typed key.
   const settings = createRoute({
     getParentRoute: () => root,
-    path: "/settings/connected-accounts/$key",
+    path: "/connections/$key",
     component: () => null,
   });
   const router = createRouter({
@@ -210,11 +242,29 @@ test("says where to type a key for an app that has no page to visit", async () =
   const link = await waitFor(() =>
     card.view.getByRole("link", { name: /Enter it on Notion's page/ }),
   );
-  expect(link.getAttribute("href")).toBe(
-    "/settings/connected-accounts/srv_notion",
-  );
+  expect(link.getAttribute("href")).toBe("/connections/srv_notion");
   // The blank tab claimed on the click is let go rather than left sitting on about:blank.
   expect(card.tabsClosed()).toBe(1);
+});
+
+test("says connected when the press records an account the vendor already held", async () => {
+  /*
+   * The vendor refused a second link because it already held this person's account, and the route
+   * recorded that account on the press. Read as "no url", the card told the person to type a key
+   * for an app that had just been connected through a sign-in.
+   */
+  const card = mounted({ answers: "connected" });
+  await waitFor(() => card.view.getByRole("button", { name: /^Connect$/ }));
+
+  press(card);
+
+  await waitFor(() =>
+    expect(card.view.getByText(/Notion is connected/)).toBeTruthy(),
+  );
+  expect(card.view.queryByText(/needs a key from you/)).toBeNull();
+  // Nothing to visit: the claimed tab is let go without ever being pointed anywhere.
+  expect(card.tabsClosed()).toBe(1);
+  expect(card.sentTo).toEqual([]);
 });
 
 test("lets go of the claimed tab when connecting fails", async () => {
@@ -265,4 +315,17 @@ test("does not read a Shared app's deployment account as this person's", async (
     expect(card.view.getByRole("button", { name: /^Connect$/ })).toBeTruthy(),
   );
   expect(card.view.queryByText(/Notion is connected/)).toBeNull();
+});
+
+test("once connected in front of the person, the conversation carries on by itself, once", async () => {
+  const asked: string[] = [];
+  const card = mounted({ answers: "connected", asked });
+  await waitFor(() => card.view.getByRole("button", { name: /^Connect$/ }));
+
+  press(card);
+
+  await waitFor(() => expect(asked).toEqual([carryOnMessage("Notion")]));
+  expect(card.view.getByText("Notion is connected.")).toBeTruthy();
+  await settleReactWork();
+  expect(asked).toHaveLength(1);
 });

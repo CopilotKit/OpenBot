@@ -287,7 +287,7 @@ test("an identity code from a Slack sender is redeemed through the adapter", asy
     ...linkMessage(IDENTITY_CODE),
   });
   expect(said(result.events)).toBe(
-    "Linked your Slack account to OpenBot. You can see it under Settings → Connected accounts.",
+    "Linked your Slack account to OpenBot. You can see it under Connections.",
   );
   expect(redeemed).toEqual([[IDENTITY_CODE, { teamId: "T1", userId: "U1" }]]);
 });
@@ -781,6 +781,71 @@ test("a chart the Bot drew is drawn natively by the Channel, and its follow-up r
   expect(
     f.calls.filter((c) => (c as { converse?: unknown }).converse),
   ).toHaveLength(turns);
+});
+test("a chart drawn natively in Slack or Teams says where its figures came from", async () => {
+  const points = [{ label: "France", value: 3.1 }];
+  const f = fixture({
+    converse: {
+      kind: "replied",
+      binding: bound,
+      inboxId: "in1",
+      replyText: "Here is GDP.",
+      components: [
+        {
+          name: "showBarChart",
+          args: {
+            title: "GDP",
+            points,
+            basis: "read",
+            sources: [
+              { title: "World Bank", url: "https://data.worldbank.org" },
+              { title: "World Bank", url: "https://data.worldbank.org" },
+              { title: "Notes", url: "javascript:alert(1)" },
+              null,
+            ],
+            asOf: "2025",
+          },
+        },
+        {
+          name: "showPieChart",
+          args: { title: "Unchecked", points, basis: "own-knowledge" },
+        },
+        { name: "showBarChart", args: { title: "Old", points } },
+      ],
+      extras: { approvals: [], questions: [] },
+    },
+  });
+  const result = await run(f, {
+    tools: [{ name: "render_chart", description: "", parameters: {} }],
+    context: [sender()],
+    messages: [{ id: "m1", role: "user", content: "chart GDP" }],
+  });
+  expect(
+    result.events.filter((e) => e.type === "TOOL_CALL_START"),
+  ).toHaveLength(3);
+  expect(
+    result.events
+      .filter((e) => e.type === "TEXT_MESSAGE_CONTENT")
+      .map((e) => e.delta),
+  ).toEqual([
+    "Here is GDP.",
+    "Sources: [World Bank](https://data.worldbank.org), Notes · As of 2025",
+    "From the Bot's own knowledge. Not checked against a source.",
+  ]);
+  // Each line follows its own chart.
+  const kinds = result.events
+    .filter(
+      (e) => e.type === "TOOL_CALL_START" || e.type === "TEXT_MESSAGE_CONTENT",
+    )
+    .map((e) => e.type);
+  expect(kinds).toEqual([
+    "TEXT_MESSAGE_CONTENT",
+    "TOOL_CALL_START",
+    "TEXT_MESSAGE_CONTENT",
+    "TOOL_CALL_START",
+    "TEXT_MESSAGE_CONTENT",
+    "TOOL_CALL_START",
+  ]);
 });
 test("a channel message from a colleague who never linked still reaches the owners' Slack triggers", async () => {
   // Whose triggers fire is decided by each owner's channel membership in the ingest, never by the

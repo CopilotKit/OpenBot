@@ -98,7 +98,7 @@ export function SignInForm({ requestId }: { requestId: string }) {
     return (
       <PageSection title={data.status === "signed_in" ? "Signed in" : "Closed"}>
         <p className="text-muted-foreground text-sm">
-          {data.outcome ?? "This sign-in request is no longer open."}
+          {data.outcome ?? "This sign-in has ended."}
         </p>
       </PageSection>
     );
@@ -174,7 +174,7 @@ export function SignInForm({ requestId }: { requestId: string }) {
     return (
       <PageSection
         title="Sign in by hand"
-        description="Take the Bot's browser, sign in, and hand it back. Then say you are done so the Bot carries on."
+        description="Open the Bot's browser and sign in yourself. Then choose I've signed in and the Bot carries on."
       >
         <div className="flex flex-wrap gap-2">
           <Button
@@ -220,7 +220,7 @@ export function SignInForm({ requestId }: { requestId: string }) {
       {data.savedLogins.length > 0 ? (
         <PageSection
           title="Use a saved login"
-          description={`Choosing one confirms it may be used for this sign-in to ${data.origin}.`}
+          description={`Pick one to use it for this sign-in to ${data.origin}.`}
         >
           <PageRows>
             {data.savedLogins.map((login, index) => (
@@ -256,7 +256,7 @@ export function SignInForm({ requestId }: { requestId: string }) {
       ) : null}
       <PageSection
         title="Enter your login"
-        description="Typed straight into the Bot's browser. The Bot is only told whether it worked."
+        description="This goes straight into the Bot's browser. The Bot only learns whether it worked."
       >
         <form
           className="flex flex-col gap-3"

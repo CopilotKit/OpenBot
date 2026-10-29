@@ -1,11 +1,11 @@
 import {
   IconArrowLeft,
   IconBell,
-  IconBrain,
+  IconBrowser,
   IconChecks,
   IconKey,
   IconLayoutGrid,
-  IconPlug,
+  IconSchool,
   IconSettings,
 } from "@tabler/icons-react";
 import { Link, type LinkOptions } from "@tanstack/react-router";
@@ -23,7 +23,7 @@ import {
 
 const appLinkOptions = { to: "/" } satisfies LinkOptions;
 
-const ITEMS: {
+export const SETTINGS_SIDEBAR_ITEMS: {
   /**
    * Whether this entry lights only on its own route.
    *
@@ -55,19 +55,16 @@ const ITEMS: {
     linkOptions: { to: "/settings/approvals" },
   },
   {
-    /* What your Bots know about you, across all of them. */
-    title: "Memory",
-    icon: IconBrain,
-    linkOptions: { to: "/settings/memory" },
+    /* The browsers signed in to the Recorder extension as you; each can be disconnected here. */
+    title: "Browsers",
+    icon: IconBrowser,
+    linkOptions: { to: "/settings/browsers" },
   },
   {
-    /*
-     * The same subject as Admin's Plugins, from the other side: there an administrator decides what
-     * this deployment may reach at all, here you decide what it may reach as you.
-     */
-    title: "Connected accounts",
-    icon: IconPlug,
-    linkOptions: { to: "/settings/connected-accounts" },
+    /* Who else's Bots use the Skills learned from your recordings: none, all, or the ones you open. */
+    title: "Learning",
+    icon: IconSchool,
+    linkOptions: { to: "/settings/learning" },
   },
   {
     /* Logins saved from a Bot's private sign-in form. */
@@ -110,7 +107,7 @@ export function SettingsSidebar({
          */}
         <SidebarGroup>
           <SidebarMenu className="gap-px">
-            {ITEMS.map((option) => (
+            {SETTINGS_SIDEBAR_ITEMS.map((option) => (
               <SidebarMenuItem key={option.title}>
                 <SidebarMenuButton
                   render={(props) => (

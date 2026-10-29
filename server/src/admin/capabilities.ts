@@ -25,6 +25,7 @@ export const CAPABILITIES = [
   "passwordManager",
   "slackTeams",
   "teamBots",
+  "ownerApps",
 ] as const;
 
 export type Capability = (typeof CAPABILITIES)[number];
@@ -80,6 +81,11 @@ export const CAPABILITY_LABELS: Record<
     title: "Team Bots",
     description: "People may publish a Bot for the whole team to use.",
   },
+  ownerApps: {
+    title: "Give apps to their own Bots",
+    description:
+      "People may let Bots they own use apps they connected themselves.",
+  },
 };
 
 /**
@@ -97,6 +103,7 @@ export const DEFAULT_CAPABILITIES: Record<Capability, boolean> = {
   passwordManager: true,
   slackTeams: true,
   teamBots: true,
+  ownerApps: true,
 };
 
 export type CapabilityRow = {
@@ -171,5 +178,5 @@ export function resolveAllCapabilities(
 
 /** The sentence a refused person reads. */
 export function capabilityRefusal(capability: Capability): string {
-  return `An administrator has turned off "${CAPABILITY_LABELS[capability].title}" for you, so that was not done.`;
+  return `An admin has turned off "${CAPABILITY_LABELS[capability].title}" for you, so that wasn't done.`;
 }

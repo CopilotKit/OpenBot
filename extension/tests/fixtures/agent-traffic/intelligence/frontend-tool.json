@@ -1,0 +1,577 @@
+{
+  "name": "frontend-tool",
+  "transport": "intelligence",
+  "recordedWith": {
+    "copilotkit": "c21eeda029",
+    "@ag-ui/client": "1.0.2"
+  },
+  "exchanges": [
+    {
+      "at": 58,
+      "url": "http://127.0.0.1:4000/api/copilotkit",
+      "method": "POST",
+      "body": "{\"method\":\"agent/run\",\"params\":{\"agentId\":\"default\"},\"body\":{\"threadId\":\"0b7b0974-af2a-43bf-9623-08b6c20efefc\",\"runId\":\"6f0b0608-0733-4ad8-a4d6-20f1388b9bb2\",\"protocolVersion\":\"1.0\",\"tools\":[{\"name\":\"showGreeting\",\"description\":\"Show a greeting card to the person in the page.\",\"parameters\":{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"},\"mood\":{\"type\":\"string\"}},\"required\":[\"name\",\"mood\"]}}],\"context\":[],\"forwardedProps\":{},\"state\":{},\"messages\":[{\"id\":\"7c149759-e2be-478a-96d0-cc22d4ed4437\",\"role\":\"user\",\"content\":\"Call showGreeting with name Ada and mood cheerful, then say done in one word.\"}]}}",
+      "status": 200,
+      "contentType": "application/json;charset=utf-8",
+      "chunks": [
+        {
+          "at": 102,
+          "text": "{\"threadId\":\"0b7b0974-af2a-43bf-9623-08b6c20efefc\",\"runId\":\"6f0b0608-0733-4ad8-a4d6-20f1388b9bb2\",\"joinToken\":\"[omitted]\",\"realtime\":{\"clientUrl\":\"ws://127.0.0.1:7253/client\",\"topic\":\"thread:0b7b0974-af2a-43bf-9623-08b6c20efefc\"}}"
+        }
+      ],
+      "end": {
+        "at": 102,
+        "outcome": "complete"
+      }
+    },
+    {
+      "at": 1800,
+      "url": "http://127.0.0.1:4000/api/copilotkit",
+      "method": "POST",
+      "body": "{\"method\":\"agent/run\",\"params\":{\"agentId\":\"default\"},\"body\":{\"threadId\":\"0b7b0974-af2a-43bf-9623-08b6c20efefc\",\"runId\":\"755bcf5c-5cd6-46f1-a504-93b7676be021\",\"protocolVersion\":\"1.0\",\"tools\":[{\"name\":\"showGreeting\",\"description\":\"Show a greeting card to the person in the page.\",\"parameters\":{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"},\"mood\":{\"type\":\"string\"}},\"required\":[\"name\",\"mood\"]}}],\"context\":[],\"forwardedProps\":{},\"state\":{},\"messages\":[{\"id\":\"7c149759-e2be-478a-96d0-cc22d4ed4437\",\"role\":\"user\",\"content\":\"Call showGreeting with name Ada and mood cheerful, then say done in one word.\"},{\"id\":\"ff4f2049-3af9-43e1-8d60-97db4f04b89f\",\"role\":\"assistant\",\"toolCalls\":[{\"id\":\"call_7Yz4aP65IP3x2lIos86W2CS4\",\"type\":\"function\",\"function\":{\"name\":\"showGreeting\",\"arguments\":\"{\\\"name\\\":\\\"Ada\\\",\\\"mood\\\":\\\"cheerful\\\"}\"},\"metadata\":{\"cpki_event_id\":\"081b1783-bc63-44c8-802d-d4ece75c0d64\",\"cpki_event_seq\":4,\"cpki_ingested\":\"01a15b9d-a6b0-7604-9f0f-ed54a39aff4f\"}}]},{\"id\":\"da1c9a50-5836-4944-8b5a-7a61ed27de3a\",\"role\":\"tool\",\"toolCallId\":\"call_7Yz4aP65IP3x2lIos86W2CS4\",\"content\":\"Shown a greeting card for Ada.\"}]}}",
+      "status": 200,
+      "contentType": "application/json;charset=utf-8",
+      "chunks": [
+        {
+          "at": 1836,
+          "text": "{\"threadId\":\"0b7b0974-af2a-43bf-9623-08b6c20efefc\",\"runId\":\"755bcf5c-5cd6-46f1-a504-93b7676be021\",\"joinToken\":\"[omitted]\",\"realtime\":{\"clientUrl\":\"ws://127.0.0.1:7253/client\",\"topic\":\"thread:0b7b0974-af2a-43bf-9623-08b6c20efefc\"}}"
+        }
+      ],
+      "end": {
+        "at": 1836,
+        "outcome": "complete"
+      }
+    }
+  ],
+  "frames": [
+    {
+      "at": 105,
+      "socket": 1,
+      "direction": "out",
+      "joinRef": "3",
+      "topic": "thread:0b7b0974-af2a-43bf-9623-08b6c20efefc",
+      "event": "phx_join",
+      "payload": {
+        "stream_mode": "run",
+        "run_id": "6f0b0608-0733-4ad8-a4d6-20f1388b9bb2"
+      }
+    },
+    {
+      "at": 163,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:0b7b0974-af2a-43bf-9623-08b6c20efefc",
+      "event": "ag_ui_event",
+      "payload": {
+        "input": {
+          "context": [],
+          "messages": [
+            {
+              "content": "Call showGreeting with name Ada and mood cheerful, then say done in one word.",
+              "id": "7c149759-e2be-478a-96d0-cc22d4ed4437",
+              "role": "user"
+            }
+          ],
+          "protocolVersion": "1.0",
+          "runId": "6f0b0608-0733-4ad8-a4d6-20f1388b9bb2",
+          "state": {},
+          "threadId": "0b7b0974-af2a-43bf-9623-08b6c20efefc",
+          "tools": [
+            {
+              "description": "Show a greeting card to the person in the page.",
+              "name": "showGreeting",
+              "parameters": {
+                "properties": {
+                  "mood": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "required": ["name", "mood"],
+                "type": "object"
+              }
+            }
+          ]
+        },
+        "metadata": {
+          "cpki_event_id": "f2fd6af9-8d25-4ce8-81b6-c23fc129123d",
+          "cpki_event_seq": 1,
+          "cpki_ingested": "01a15b9d-a0f2-74b5-8f4f-25b3ec7345c1"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "protocolVersion": "1.0",
+        "runId": "6f0b0608-0733-4ad8-a4d6-20f1388b9bb2",
+        "run_id": "6f0b0608-0733-4ad8-a4d6-20f1388b9bb2",
+        "threadId": "0b7b0974-af2a-43bf-9623-08b6c20efefc",
+        "thread_id": "0b7b0974-af2a-43bf-9623-08b6c20efefc",
+        "type": "RUN_STARTED"
+      }
+    },
+    {
+      "at": 168,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:0b7b0974-af2a-43bf-9623-08b6c20efefc",
+      "event": "replay_complete"
+    },
+    {
+      "at": 1552,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:0b7b0974-af2a-43bf-9623-08b6c20efefc",
+      "event": "ag_ui_event",
+      "payload": {
+        "metadata": {
+          "cpki_event_id": "845a9df9-b3a8-4948-b9f1-221a99c3a821",
+          "cpki_event_seq": 2,
+          "cpki_ingested": "01a15b9d-a697-7a9b-babe-445115fcec24"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "parentMessageId": "ff4f2049-3af9-43e1-8d60-97db4f04b89f",
+        "project_id": 1,
+        "runId": "6f0b0608-0733-4ad8-a4d6-20f1388b9bb2",
+        "run_id": "6f0b0608-0733-4ad8-a4d6-20f1388b9bb2",
+        "threadId": "0b7b0974-af2a-43bf-9623-08b6c20efefc",
+        "thread_id": "0b7b0974-af2a-43bf-9623-08b6c20efefc",
+        "toolCallId": "call_7Yz4aP65IP3x2lIos86W2CS4",
+        "toolCallName": "showGreeting",
+        "type": "TOOL_CALL_START"
+      }
+    },
+    {
+      "at": 1564,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:0b7b0974-af2a-43bf-9623-08b6c20efefc",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "{\"name\":\"Ada\",\"mood\":\"cheerful\"}",
+        "metadata": {
+          "cpki_event_id": "7de22aeb-cf4a-4ba3-87b6-b82ca8b3cafc",
+          "cpki_event_seq": 3,
+          "cpki_ingested": "01a15b9d-a6a3-7dc9-8377-410fbe2678c3"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "6f0b0608-0733-4ad8-a4d6-20f1388b9bb2",
+        "run_id": "6f0b0608-0733-4ad8-a4d6-20f1388b9bb2",
+        "threadId": "0b7b0974-af2a-43bf-9623-08b6c20efefc",
+        "thread_id": "0b7b0974-af2a-43bf-9623-08b6c20efefc",
+        "toolCallId": "call_7Yz4aP65IP3x2lIos86W2CS4",
+        "type": "TOOL_CALL_ARGS"
+      }
+    },
+    {
+      "at": 1577,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:0b7b0974-af2a-43bf-9623-08b6c20efefc",
+      "event": "ag_ui_event",
+      "payload": {
+        "metadata": {
+          "cpki_event_id": "081b1783-bc63-44c8-802d-d4ece75c0d64",
+          "cpki_event_seq": 4,
+          "cpki_ingested": "01a15b9d-a6b0-7604-9f0f-ed54a39aff4f"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "6f0b0608-0733-4ad8-a4d6-20f1388b9bb2",
+        "run_id": "6f0b0608-0733-4ad8-a4d6-20f1388b9bb2",
+        "threadId": "0b7b0974-af2a-43bf-9623-08b6c20efefc",
+        "thread_id": "0b7b0974-af2a-43bf-9623-08b6c20efefc",
+        "toolCallId": "call_7Yz4aP65IP3x2lIos86W2CS4",
+        "type": "TOOL_CALL_END"
+      }
+    },
+    {
+      "at": 1796,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:0b7b0974-af2a-43bf-9623-08b6c20efefc",
+      "event": "ag_ui_event",
+      "payload": {
+        "metadata": {
+          "cpki_event_id": "a388e398-39b2-423c-a5b1-915efb6ffeaa",
+          "cpki_event_seq": 5,
+          "cpki_ingested": "01a15b9d-a78b-77c9-8a8f-730037204a13",
+          "finishReason": "tool-calls"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "6f0b0608-0733-4ad8-a4d6-20f1388b9bb2",
+        "run_id": "6f0b0608-0733-4ad8-a4d6-20f1388b9bb2",
+        "threadId": "0b7b0974-af2a-43bf-9623-08b6c20efefc",
+        "thread_id": "0b7b0974-af2a-43bf-9623-08b6c20efefc",
+        "type": "RUN_FINISHED",
+        "usage": [
+          {
+            "cachedInputTokens": 0,
+            "inputTokens": 244,
+            "model": "gpt-4.1-mini",
+            "outputTokens": 38,
+            "provider": "openai.responses",
+            "reasoningTokens": 0,
+            "totalTokens": 282
+          }
+        ]
+      }
+    },
+    {
+      "at": 1798,
+      "socket": 1,
+      "direction": "out",
+      "joinRef": "3",
+      "topic": "thread:0b7b0974-af2a-43bf-9623-08b6c20efefc",
+      "event": "phx_leave"
+    },
+    {
+      "at": 1838,
+      "socket": 2,
+      "direction": "out",
+      "joinRef": "3",
+      "topic": "thread:0b7b0974-af2a-43bf-9623-08b6c20efefc",
+      "event": "phx_join",
+      "payload": {
+        "stream_mode": "run",
+        "run_id": "755bcf5c-5cd6-46f1-a504-93b7676be021"
+      }
+    },
+    {
+      "at": 1894,
+      "socket": 2,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:0b7b0974-af2a-43bf-9623-08b6c20efefc",
+      "event": "ag_ui_event",
+      "payload": {
+        "input": {
+          "context": [],
+          "messages": [
+            {
+              "content": "Shown a greeting card for Ada.",
+              "id": "da1c9a50-5836-4944-8b5a-7a61ed27de3a",
+              "role": "tool",
+              "toolCallId": "call_7Yz4aP65IP3x2lIos86W2CS4"
+            }
+          ],
+          "protocolVersion": "1.0",
+          "runId": "755bcf5c-5cd6-46f1-a504-93b7676be021",
+          "state": {},
+          "threadId": "0b7b0974-af2a-43bf-9623-08b6c20efefc",
+          "tools": [
+            {
+              "description": "Show a greeting card to the person in the page.",
+              "name": "showGreeting",
+              "parameters": {
+                "properties": {
+                  "mood": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "required": ["name", "mood"],
+                "type": "object"
+              }
+            }
+          ]
+        },
+        "metadata": {
+          "cpki_event_id": "54f16fde-2f27-488e-a0b7-0d8a4077d434",
+          "cpki_event_seq": 1,
+          "cpki_ingested": "01a15b9d-a7b7-7d96-a32b-332b5eff00dc"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "protocolVersion": "1.0",
+        "runId": "755bcf5c-5cd6-46f1-a504-93b7676be021",
+        "run_id": "755bcf5c-5cd6-46f1-a504-93b7676be021",
+        "threadId": "0b7b0974-af2a-43bf-9623-08b6c20efefc",
+        "thread_id": "0b7b0974-af2a-43bf-9623-08b6c20efefc",
+        "type": "RUN_STARTED"
+      }
+    },
+    {
+      "at": 1896,
+      "socket": 2,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:0b7b0974-af2a-43bf-9623-08b6c20efefc",
+      "event": "replay_complete"
+    },
+    {
+      "at": 2384,
+      "socket": 2,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:0b7b0974-af2a-43bf-9623-08b6c20efefc",
+      "event": "ag_ui_event",
+      "payload": {
+        "messageId": "msg_0376d6432fdb869a006ad7f735a70c87d0909ab2d36ef5089f",
+        "metadata": {
+          "cpki_event_id": "a4d00809-efab-489a-946c-0812bd1e6d75",
+          "cpki_event_seq": 2,
+          "cpki_ingested": "01a15b9d-a9d5-742f-9a39-8d6233f31486"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "role": "assistant",
+        "runId": "755bcf5c-5cd6-46f1-a504-93b7676be021",
+        "run_id": "755bcf5c-5cd6-46f1-a504-93b7676be021",
+        "threadId": "0b7b0974-af2a-43bf-9623-08b6c20efefc",
+        "thread_id": "0b7b0974-af2a-43bf-9623-08b6c20efefc",
+        "type": "TEXT_MESSAGE_START"
+      }
+    },
+    {
+      "at": 2386,
+      "socket": 2,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:0b7b0974-af2a-43bf-9623-08b6c20efefc",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "Done",
+        "messageId": "msg_0376d6432fdb869a006ad7f735a70c87d0909ab2d36ef5089f",
+        "metadata": {
+          "cpki_event_id": "d15fcc20-fa1d-463f-94a1-fc6643c7e998",
+          "cpki_event_seq": 3,
+          "cpki_ingested": "01a15b9d-a9d5-7a2f-af93-a8f7a07285aa"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "755bcf5c-5cd6-46f1-a504-93b7676be021",
+        "run_id": "755bcf5c-5cd6-46f1-a504-93b7676be021",
+        "threadId": "0b7b0974-af2a-43bf-9623-08b6c20efefc",
+        "thread_id": "0b7b0974-af2a-43bf-9623-08b6c20efefc",
+        "type": "TEXT_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 2472,
+      "socket": 2,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:0b7b0974-af2a-43bf-9623-08b6c20efefc",
+      "event": "ag_ui_event",
+      "payload": {
+        "messageId": "msg_0376d6432fdb869a006ad7f735a70c87d0909ab2d36ef5089f",
+        "metadata": {
+          "cpki_event_id": "dddf8fef-7c1d-4345-8005-6165d7a83b2a",
+          "cpki_event_seq": 4,
+          "cpki_ingested": "01a15b9d-aa2d-744f-a8cf-c650a87ef42a"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "755bcf5c-5cd6-46f1-a504-93b7676be021",
+        "run_id": "755bcf5c-5cd6-46f1-a504-93b7676be021",
+        "threadId": "0b7b0974-af2a-43bf-9623-08b6c20efefc",
+        "thread_id": "0b7b0974-af2a-43bf-9623-08b6c20efefc",
+        "type": "TEXT_MESSAGE_END"
+      }
+    },
+    {
+      "at": 2473,
+      "socket": 2,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:0b7b0974-af2a-43bf-9623-08b6c20efefc",
+      "event": "ag_ui_event",
+      "payload": {
+        "metadata": {
+          "cpki_event_id": "59f07f94-14b3-4afa-9142-d2c161282e70",
+          "cpki_event_seq": 5,
+          "cpki_ingested": "01a15b9d-aa2d-794f-b39e-25136821b062",
+          "finishReason": "stop"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "755bcf5c-5cd6-46f1-a504-93b7676be021",
+        "run_id": "755bcf5c-5cd6-46f1-a504-93b7676be021",
+        "threadId": "0b7b0974-af2a-43bf-9623-08b6c20efefc",
+        "thread_id": "0b7b0974-af2a-43bf-9623-08b6c20efefc",
+        "type": "RUN_FINISHED",
+        "usage": [
+          {
+            "cachedInputTokens": 0,
+            "inputTokens": 278,
+            "model": "gpt-4.1-mini",
+            "outputTokens": 3,
+            "provider": "openai.responses",
+            "reasoningTokens": 0,
+            "totalTokens": 281
+          }
+        ]
+      }
+    },
+    {
+      "at": 2474,
+      "socket": 2,
+      "direction": "out",
+      "joinRef": "3",
+      "topic": "thread:0b7b0974-af2a-43bf-9623-08b6c20efefc",
+      "event": "phx_leave"
+    }
+  ],
+  "sink": [
+    {
+      "trajectoryId": "602993c9-8c44-4d18-b215-65d12ba4b96e",
+      "events": [
+        {
+          "type": "CUSTOM",
+          "name": "page",
+          "value": {
+            "route": "/",
+            "url": "http://127.0.0.1:4000/",
+            "title": "",
+            "referrer": "",
+            "seq": 1
+          },
+          "timestamp": 1792538419346
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.message",
+          "value": {
+            "messageId": "7c149759-e2be-478a-96d0-cc22d4ed4437",
+            "runId": null,
+            "threadId": "0b7b0974-af2a-43bf-9623-08b6c20efefc",
+            "agentId": "default",
+            "role": "user",
+            "textLength": 77,
+            "text": "Call showGreeting with name Ada and mood cheerful, then say done in one word.",
+            "seq": 2
+          },
+          "timestamp": 1792538419398
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.run",
+          "value": {
+            "phase": "started",
+            "runId": "6f0b0608-0733-4ad8-a4d6-20f1388b9bb2",
+            "threadId": "0b7b0974-af2a-43bf-9623-08b6c20efefc",
+            "agentId": "default",
+            "seq": 3
+          },
+          "timestamp": 1792538419511
+        },
+        {
+          "type": "CUSTOM",
+          "name": "tool.call",
+          "value": {
+            "phase": "started",
+            "toolCallId": "call_7Yz4aP65IP3x2lIos86W2CS4",
+            "toolName": "showGreeting",
+            "agentId": "default",
+            "threadId": "0b7b0974-af2a-43bf-9623-08b6c20efefc",
+            "messageId": "ff4f2049-3af9-43e1-8d60-97db4f04b89f",
+            "runId": "6f0b0608-0733-4ad8-a4d6-20f1388b9bb2",
+            "seq": 4
+          },
+          "timestamp": 1792538420897
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.run",
+          "value": {
+            "phase": "finished",
+            "runId": "6f0b0608-0733-4ad8-a4d6-20f1388b9bb2",
+            "threadId": "0b7b0974-af2a-43bf-9623-08b6c20efefc",
+            "agentId": "default",
+            "seq": 5
+          },
+          "timestamp": 1792538421142
+        },
+        {
+          "type": "CUSTOM",
+          "name": "tool.call",
+          "value": {
+            "phase": "executing",
+            "toolCallId": "call_7Yz4aP65IP3x2lIos86W2CS4",
+            "toolName": "showGreeting",
+            "agentId": "default",
+            "threadId": "0b7b0974-af2a-43bf-9623-08b6c20efefc",
+            "messageId": "ff4f2049-3af9-43e1-8d60-97db4f04b89f",
+            "runId": "6f0b0608-0733-4ad8-a4d6-20f1388b9bb2",
+            "seq": 6
+          },
+          "timestamp": 1792538421143
+        },
+        {
+          "type": "CUSTOM",
+          "name": "tool.call",
+          "value": {
+            "phase": "completed",
+            "toolCallId": "call_7Yz4aP65IP3x2lIos86W2CS4",
+            "toolName": "showGreeting",
+            "agentId": "default",
+            "threadId": "0b7b0974-af2a-43bf-9623-08b6c20efefc",
+            "messageId": "ff4f2049-3af9-43e1-8d60-97db4f04b89f",
+            "runId": "6f0b0608-0733-4ad8-a4d6-20f1388b9bb2",
+            "durationMs": 0,
+            "outcome": "ok",
+            "seq": 7
+          },
+          "timestamp": 1792538421143
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.run",
+          "value": {
+            "phase": "started",
+            "runId": "755bcf5c-5cd6-46f1-a504-93b7676be021",
+            "threadId": "0b7b0974-af2a-43bf-9623-08b6c20efefc",
+            "agentId": "default",
+            "seq": 8
+          },
+          "timestamp": 1792538421240
+        }
+      ],
+      "dropped": 0
+    },
+    {
+      "trajectoryId": "602993c9-8c44-4d18-b215-65d12ba4b96e",
+      "events": [
+        {
+          "type": "CUSTOM",
+          "name": "agent.message",
+          "value": {
+            "messageId": "msg_0376d6432fdb869a006ad7f735a70c87d0909ab2d36ef5089f",
+            "runId": "6f0b0608-0733-4ad8-a4d6-20f1388b9bb2",
+            "threadId": "0b7b0974-af2a-43bf-9623-08b6c20efefc",
+            "agentId": "default",
+            "role": "assistant",
+            "textLength": 4,
+            "text": "Done",
+            "seq": 9
+          },
+          "timestamp": 1792538421817
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.run",
+          "value": {
+            "phase": "finished",
+            "runId": "755bcf5c-5cd6-46f1-a504-93b7676be021",
+            "threadId": "0b7b0974-af2a-43bf-9623-08b6c20efefc",
+            "agentId": "default",
+            "seq": 10
+          },
+          "timestamp": 1792538421818
+        }
+      ],
+      "dropped": 0
+    }
+  ]
+}

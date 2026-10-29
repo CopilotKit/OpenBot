@@ -205,14 +205,6 @@ describe.skipIf(!live)("Arcade, for real", () => {
     }
   }, VENDOR_TIMEOUT_MS);
 
-  test("the throwaway user id is printed before anything is created", () => {
-    say(`ARCADE LIVE  user id for this run: ${USER}`);
-    say(
-      `ARCADE LIVE  toolkit measured: ${TOOLKIT}; verifier listens on :${PORT}`,
-    );
-    expect(Number.isInteger(PORT)).toBe(true);
-  });
-
   /**
    * GATE 1 — WHAT `provider_id` ACTUALLY MEANS ON A GOOGLE-FAMILY TOOLKIT.
    *
@@ -309,7 +301,7 @@ describe.skipIf(!live)("Arcade, for real", () => {
       const client = arcade();
       const action = need(run.action, "no action was chosen");
       const values = [
-        "https://app.example.com/settings/connected-accounts",
+        "https://app.example.com/connections",
         `http://localhost:${PORT}/`,
         "https://cloud.arcade.dev",
         "http://localhost:3000/",

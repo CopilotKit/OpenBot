@@ -190,7 +190,11 @@ def test_an_anthropic_key_uses_the_official_endpoint_when_compose_sets_a_blank_u
 
     async def respond(transport, request):
         body = json.loads(request.content)
-        seen.append((str(request.url), request.headers.get("x-api-key"), body["model"]))
+        # Anthropic's SDK sends the key as `x-api-key` up to 1.x and as `Authorization: Bearer` from
+        # 2.x; either is the key reaching Anthropic, which is what this test is about.
+        bearer = request.headers.get("authorization") or ""
+        key = request.headers.get("x-api-key") or bearer.removeprefix("Bearer ") or None
+        seen.append((str(request.url), key, body["model"]))
         return httpx2.Response(
             200,
             request=request,

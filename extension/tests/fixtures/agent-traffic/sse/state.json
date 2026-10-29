@@ -1,0 +1,409 @@
+{
+  "name": "state",
+  "transport": "sse",
+  "recordedWith": {
+    "copilotkit": "c21eeda029",
+    "@ag-ui/client": "1.0.2"
+  },
+  "exchanges": [
+    {
+      "at": 52,
+      "url": "http://127.0.0.1:4000/api/copilotkit",
+      "method": "POST",
+      "body": "{\"method\":\"agent/run\",\"params\":{\"agentId\":\"default\"},\"body\":{\"threadId\":\"621cef1b-dcff-4a2a-8f7a-fb9055485424\",\"runId\":\"c21a685d-dc58-4103-9fce-0d5ab192538d\",\"protocolVersion\":\"1.0\",\"tools\":[],\"context\":[],\"forwardedProps\":{},\"state\":{\"todos\":[]},\"messages\":[{\"id\":\"fd15a94c-5e48-4b70-b049-22d3cf135cdb\",\"role\":\"user\",\"content\":\"First call AGUISendStateSnapshot with snapshot {\\\"todos\\\":[\\\"buy milk\\\"]}. Then call AGUISendStateDelta to add \\\"walk dog\\\" at /todos/-. Then call AGUISendStateDelta again to add \\\"post letter\\\" at /todos/-. Then say done.\"}]}}",
+      "status": 200,
+      "contentType": "text/event-stream",
+      "chunks": [
+        {
+          "at": 56,
+          "text": "data: {\"type\":\"RUN_STARTED\",\"threadId\":\"621cef1b-dcff-4a2a-8f7a-fb9055485424\",\"runId\":\"c21a685d-dc58-4103-9fce-0d5ab192538d\",\"protocolVersion\":\"1.0\",\"input\":{\"threadId\":\"621cef1b-dcff-4a2a-8f7a-fb9055485424\",\"runId\":\"c21a685d-dc58-4103-9fce-0d5ab192538d\",\"protocolVersion\":\"1.0\",\"state\":{\"todos\":[]},\"messages\":[{\"id\":\"fd15a94c-5e48-4b70-b049-22d3cf135cdb\",\"role\":\"user\",\"content\":\"First call AGUISendStateSnapshot with snapshot {\\\"todos\\\":[\\\"buy milk\\\"]}. Then call AGUISendStateDelta to add \\\"walk dog\\\" at /todos/-. Then call AGUISendStateDelta again to add \\\"post letter\\\" at /todos/-. Then say done.\"}],\"tools\":[],\"context\":[],\"forwardedProps\":{}}}\n\n"
+        },
+        {
+          "at": 1200,
+          "text": "data: {\"type\":\"TOOL_CALL_START\",\"toolCallId\":\"call_SC47ltT7qKnGd2TdOn28bZeK\",\"toolCallName\":\"AGUISendStateSnapshot\",\"parentMessageId\":\"5c7e748c-ce03-45b4-80ee-715dda4fff7b\"}\n\n"
+        },
+        {
+          "at": 1202,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_SC47ltT7qKnGd2TdOn28bZeK\",\"delta\":\"{\\\"\"}\n\n"
+        },
+        {
+          "at": 1208,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_SC47ltT7qKnGd2TdOn28bZeK\",\"delta\":\"snapshot\"}\n\n"
+        },
+        {
+          "at": 1221,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_SC47ltT7qKnGd2TdOn28bZeK\",\"delta\":\"\\\":{\\\"\"}\n\n"
+        },
+        {
+          "at": 1239,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_SC47ltT7qKnGd2TdOn28bZeK\",\"delta\":\"todos\"}\n\n"
+        },
+        {
+          "at": 1255,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_SC47ltT7qKnGd2TdOn28bZeK\",\"delta\":\"\\\":[\\\"\"}\n\n"
+        },
+        {
+          "at": 1270,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_SC47ltT7qKnGd2TdOn28bZeK\",\"delta\":\"buy\"}\n\n"
+        },
+        {
+          "at": 1287,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_SC47ltT7qKnGd2TdOn28bZeK\",\"delta\":\" milk\"}\n\n"
+        },
+        {
+          "at": 1292,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_SC47ltT7qKnGd2TdOn28bZeK\",\"delta\":\"\\\"]\"}\n\n"
+        },
+        {
+          "at": 1315,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_SC47ltT7qKnGd2TdOn28bZeK\",\"delta\":\"}}\"}\n\n"
+        },
+        {
+          "at": 1324,
+          "text": "data: {\"type\":\"TOOL_CALL_END\",\"toolCallId\":\"call_SC47ltT7qKnGd2TdOn28bZeK\"}\n\ndata: {\"type\":\"STATE_SNAPSHOT\",\"snapshot\":{\"todos\":[\"buy milk\"]}}\n\ndata: {\"type\":\"TOOL_CALL_RESULT\",\"messageId\":\"42dd4cac-c219-45cb-9d4a-164fa260926e\",\"toolCallId\":\"call_SC47ltT7qKnGd2TdOn28bZeK\",\"content\":\"{\\\"success\\\":true,\\\"snapshot\\\":{\\\"todos\\\":[\\\"buy milk\\\"]}}\",\"role\":\"tool\"}\n\n"
+        },
+        {
+          "at": 2176,
+          "text": "data: {\"type\":\"TOOL_CALL_START\",\"toolCallId\":\"call_cq3PWX7m2YRuMjUdzTs1nPU6\",\"toolCallName\":\"AGUISendStateDelta\",\"parentMessageId\":\"5c7e748c-ce03-45b4-80ee-715dda4fff7b\"}\n\n"
+        },
+        {
+          "at": 2181,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_cq3PWX7m2YRuMjUdzTs1nPU6\",\"delta\":\"{\\\"\"}\n\n"
+        },
+        {
+          "at": 2185,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_cq3PWX7m2YRuMjUdzTs1nPU6\",\"delta\":\"delta\"}\n\n"
+        },
+        {
+          "at": 2191,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_cq3PWX7m2YRuMjUdzTs1nPU6\",\"delta\":\"\\\":[\"}\n\n"
+        },
+        {
+          "at": 2196,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_cq3PWX7m2YRuMjUdzTs1nPU6\",\"delta\":\"{\\\"\"}\n\n"
+        },
+        {
+          "at": 2202,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_cq3PWX7m2YRuMjUdzTs1nPU6\",\"delta\":\"op\"}\n\n"
+        },
+        {
+          "at": 2204,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_cq3PWX7m2YRuMjUdzTs1nPU6\",\"delta\":\"\\\":\\\"\"}\n\n"
+        },
+        {
+          "at": 2205,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_cq3PWX7m2YRuMjUdzTs1nPU6\",\"delta\":\"add\"}\n\n"
+        },
+        {
+          "at": 2211,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_cq3PWX7m2YRuMjUdzTs1nPU6\",\"delta\":\"\\\",\\\"\"}\n\n"
+        },
+        {
+          "at": 2214,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_cq3PWX7m2YRuMjUdzTs1nPU6\",\"delta\":\"path\"}\n\n"
+        },
+        {
+          "at": 2218,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_cq3PWX7m2YRuMjUdzTs1nPU6\",\"delta\":\"\\\":\"}\n\n"
+        },
+        {
+          "at": 2222,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_cq3PWX7m2YRuMjUdzTs1nPU6\",\"delta\":\"\\\"/\"}\n\n"
+        },
+        {
+          "at": 2225,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_cq3PWX7m2YRuMjUdzTs1nPU6\",\"delta\":\"todos\"}\n\n"
+        },
+        {
+          "at": 2227,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_cq3PWX7m2YRuMjUdzTs1nPU6\",\"delta\":\"/-\"}\n\n"
+        },
+        {
+          "at": 2236,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_cq3PWX7m2YRuMjUdzTs1nPU6\",\"delta\":\"\\\",\\\"\"}\n\n"
+        },
+        {
+          "at": 2255,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_cq3PWX7m2YRuMjUdzTs1nPU6\",\"delta\":\"value\"}\n\n"
+        },
+        {
+          "at": 2265,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_cq3PWX7m2YRuMjUdzTs1nPU6\",\"delta\":\"\\\":\\\"\"}\n\n"
+        },
+        {
+          "at": 2267,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_cq3PWX7m2YRuMjUdzTs1nPU6\",\"delta\":\"walk\"}\n\n"
+        },
+        {
+          "at": 2316,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_cq3PWX7m2YRuMjUdzTs1nPU6\",\"delta\":\" dog\"}\n\n"
+        },
+        {
+          "at": 2324,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_cq3PWX7m2YRuMjUdzTs1nPU6\",\"delta\":\"\\\"}\"}\n\ndata: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_cq3PWX7m2YRuMjUdzTs1nPU6\",\"delta\":\"]}\"}\n\ndata: {\"type\":\"TOOL_CALL_END\",\"toolCallId\":\"call_cq3PWX7m2YRuMjUdzTs1nPU6\"}\n\ndata: {\"type\":\"STATE_DELTA\",\"delta\":[{\"op\":\"add\",\"path\":\"/todos/-\",\"value\":\"walk dog\"}]}\n\ndata: {\"type\":\"TOOL_CALL_RESULT\",\"messageId\":\"c0838ac8-8682-4ffc-a76f-439d2f2621cc\",\"toolCallId\":\"call_cq3PWX7m2YRuMjUdzTs1nPU6\",\"content\":\"{\\\"success\\\":true,\\\"delta\\\":[{\\\"op\\\":\\\"add\\\",\\\"path\\\":\\\"/todos/-\\\",\\\"value\\\":\\\"walk dog\\\"}]}\",\"role\":\"tool\"}\n\n"
+        },
+        {
+          "at": 3291,
+          "text": "data: {\"type\":\"TOOL_CALL_START\",\"toolCallId\":\"call_1M0m1RoZzzTaKWJjASBPMCdk\",\"toolCallName\":\"AGUISendStateDelta\",\"parentMessageId\":\"5c7e748c-ce03-45b4-80ee-715dda4fff7b\"}\n\n"
+        },
+        {
+          "at": 3293,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_1M0m1RoZzzTaKWJjASBPMCdk\",\"delta\":\"{\\\"\"}\n\n"
+        },
+        {
+          "at": 3301,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_1M0m1RoZzzTaKWJjASBPMCdk\",\"delta\":\"delta\"}\n\n"
+        },
+        {
+          "at": 3304,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_1M0m1RoZzzTaKWJjASBPMCdk\",\"delta\":\"\\\":[\"}\n\n"
+        },
+        {
+          "at": 3306,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_1M0m1RoZzzTaKWJjASBPMCdk\",\"delta\":\"{\\\"\"}\n\n"
+        },
+        {
+          "at": 3310,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_1M0m1RoZzzTaKWJjASBPMCdk\",\"delta\":\"op\"}\n\ndata: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_1M0m1RoZzzTaKWJjASBPMCdk\",\"delta\":\"\\\":\\\"\"}\n\ndata: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_1M0m1RoZzzTaKWJjASBPMCdk\",\"delta\":\"add\"}\n\ndata: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_1M0m1RoZzzTaKWJjASBPMCdk\",\"delta\":\"\\\",\\\"\"}\n\n"
+        },
+        {
+          "at": 3311,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_1M0m1RoZzzTaKWJjASBPMCdk\",\"delta\":\"path\"}\n\ndata: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_1M0m1RoZzzTaKWJjASBPMCdk\",\"delta\":\"\\\":\"}\n\n"
+        },
+        {
+          "at": 3325,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_1M0m1RoZzzTaKWJjASBPMCdk\",\"delta\":\"\\\"/\"}\n\n"
+        },
+        {
+          "at": 3331,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_1M0m1RoZzzTaKWJjASBPMCdk\",\"delta\":\"todos\"}\n\n"
+        },
+        {
+          "at": 3337,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_1M0m1RoZzzTaKWJjASBPMCdk\",\"delta\":\"/-\"}\n\n"
+        },
+        {
+          "at": 3342,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_1M0m1RoZzzTaKWJjASBPMCdk\",\"delta\":\"\\\",\\\"\"}\n\n"
+        },
+        {
+          "at": 3349,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_1M0m1RoZzzTaKWJjASBPMCdk\",\"delta\":\"value\"}\n\n"
+        },
+        {
+          "at": 3356,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_1M0m1RoZzzTaKWJjASBPMCdk\",\"delta\":\"\\\":\\\"\"}\n\n"
+        },
+        {
+          "at": 3378,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_1M0m1RoZzzTaKWJjASBPMCdk\",\"delta\":\"post\"}\n\n"
+        },
+        {
+          "at": 3394,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_1M0m1RoZzzTaKWJjASBPMCdk\",\"delta\":\" letter\"}\n\n"
+        },
+        {
+          "at": 3412,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_1M0m1RoZzzTaKWJjASBPMCdk\",\"delta\":\"\\\"}\"}\n\n"
+        },
+        {
+          "at": 3418,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_1M0m1RoZzzTaKWJjASBPMCdk\",\"delta\":\"]}\"}\n\n"
+        },
+        {
+          "at": 3424,
+          "text": "data: {\"type\":\"TOOL_CALL_END\",\"toolCallId\":\"call_1M0m1RoZzzTaKWJjASBPMCdk\"}\n\ndata: {\"type\":\"STATE_DELTA\",\"delta\":[{\"op\":\"add\",\"path\":\"/todos/-\",\"value\":\"post letter\"}]}\n\ndata: {\"type\":\"TOOL_CALL_RESULT\",\"messageId\":\"26b53ec7-f205-4a2c-83f7-74650c151a98\",\"toolCallId\":\"call_1M0m1RoZzzTaKWJjASBPMCdk\",\"content\":\"{\\\"success\\\":true,\\\"delta\\\":[{\\\"op\\\":\\\"add\\\",\\\"path\\\":\\\"/todos/-\\\",\\\"value\\\":\\\"post letter\\\"}]}\",\"role\":\"tool\"}\n\n"
+        },
+        {
+          "at": 4183,
+          "text": "data: {\"type\":\"TEXT_MESSAGE_START\",\"messageId\":\"msg_0ce7f44ea88074c1006ad7f6c2637887d081eab6e615287c9c\",\"role\":\"assistant\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_0ce7f44ea88074c1006ad7f6c2637887d081eab6e615287c9c\",\"delta\":\"done\"}\n\n"
+        },
+        {
+          "at": 4314,
+          "text": "data: {\"type\":\"TEXT_MESSAGE_END\",\"messageId\":\"msg_0ce7f44ea88074c1006ad7f6c2637887d081eab6e615287c9c\"}\n\ndata: {\"type\":\"RUN_FINISHED\",\"metadata\":{\"finishReason\":\"stop\"},\"threadId\":\"621cef1b-dcff-4a2a-8f7a-fb9055485424\",\"runId\":\"c21a685d-dc58-4103-9fce-0d5ab192538d\",\"usage\":[{\"provider\":\"openai.responses\",\"model\":\"gpt-4.1-mini\",\"inputTokens\":1534,\"outputTokens\":94,\"totalTokens\":1628,\"reasoningTokens\":0,\"cachedInputTokens\":0}]}\n\n"
+        }
+      ],
+      "end": {
+        "at": 4315,
+        "outcome": "complete"
+      }
+    }
+  ],
+  "frames": [],
+  "sink": [
+    {
+      "trajectoryId": "068f9d8d-ac3c-40f9-b7d1-a9a012abe246",
+      "events": [
+        {
+          "type": "CUSTOM",
+          "name": "page",
+          "value": {
+            "route": "/",
+            "url": "http://127.0.0.1:4000/",
+            "title": "",
+            "referrer": "",
+            "seq": 1
+          },
+          "timestamp": 1792538302266
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.message",
+          "value": {
+            "messageId": "fd15a94c-5e48-4b70-b049-22d3cf135cdb",
+            "runId": null,
+            "threadId": "621cef1b-dcff-4a2a-8f7a-fb9055485424",
+            "agentId": "default",
+            "role": "user",
+            "textLength": 214,
+            "text": "First call AGUISendStateSnapshot with snapshot {\"todos\":[\"buy milk\"]}. Then call AGUISendStateDelta to add \"walk dog\" at /todos/-. Then call AGUISendStateDelta again to add \"post letter\" at /todos/-. Then say done.",
+            "seq": 2
+          },
+          "timestamp": 1792538302318
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.run",
+          "value": {
+            "phase": "started",
+            "runId": "c21a685d-dc58-4103-9fce-0d5ab192538d",
+            "threadId": "621cef1b-dcff-4a2a-8f7a-fb9055485424",
+            "agentId": "default",
+            "seq": 3
+          },
+          "timestamp": 1792538302322
+        },
+        {
+          "type": "CUSTOM",
+          "name": "tool.call",
+          "value": {
+            "phase": "started",
+            "toolCallId": "call_SC47ltT7qKnGd2TdOn28bZeK",
+            "toolName": "AGUISendStateSnapshot",
+            "agentId": "default",
+            "threadId": "621cef1b-dcff-4a2a-8f7a-fb9055485424",
+            "messageId": "5c7e748c-ce03-45b4-80ee-715dda4fff7b",
+            "runId": "c21a685d-dc58-4103-9fce-0d5ab192538d",
+            "seq": 4
+          },
+          "timestamp": 1792538303466
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.message",
+          "value": {
+            "messageId": "42dd4cac-c219-45cb-9d4a-164fa260926e",
+            "runId": "c21a685d-dc58-4103-9fce-0d5ab192538d",
+            "threadId": "621cef1b-dcff-4a2a-8f7a-fb9055485424",
+            "agentId": "default",
+            "role": "tool",
+            "textLength": 50,
+            "text": "{\"success\":true,\"snapshot\":{\"todos\":[\"buy milk\"]}}",
+            "seq": 5
+          },
+          "timestamp": 1792538303591
+        }
+      ],
+      "dropped": 0
+    },
+    {
+      "trajectoryId": "068f9d8d-ac3c-40f9-b7d1-a9a012abe246",
+      "events": [
+        {
+          "type": "CUSTOM",
+          "name": "tool.call",
+          "value": {
+            "phase": "started",
+            "toolCallId": "call_cq3PWX7m2YRuMjUdzTs1nPU6",
+            "toolName": "AGUISendStateDelta",
+            "agentId": "default",
+            "threadId": "621cef1b-dcff-4a2a-8f7a-fb9055485424",
+            "messageId": "5c7e748c-ce03-45b4-80ee-715dda4fff7b",
+            "runId": "c21a685d-dc58-4103-9fce-0d5ab192538d",
+            "seq": 6
+          },
+          "timestamp": 1792538304442
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.message",
+          "value": {
+            "messageId": "c0838ac8-8682-4ffc-a76f-439d2f2621cc",
+            "runId": "c21a685d-dc58-4103-9fce-0d5ab192538d",
+            "threadId": "621cef1b-dcff-4a2a-8f7a-fb9055485424",
+            "agentId": "default",
+            "role": "tool",
+            "textLength": 76,
+            "text": "{\"success\":true,\"delta\":[{\"op\":\"add\",\"path\":\"/todos/-\",\"value\":\"walk dog\"}]}",
+            "seq": 7
+          },
+          "timestamp": 1792538304592
+        },
+        {
+          "type": "CUSTOM",
+          "name": "tool.call",
+          "value": {
+            "phase": "started",
+            "toolCallId": "call_1M0m1RoZzzTaKWJjASBPMCdk",
+            "toolName": "AGUISendStateDelta",
+            "agentId": "default",
+            "threadId": "621cef1b-dcff-4a2a-8f7a-fb9055485424",
+            "messageId": "5c7e748c-ce03-45b4-80ee-715dda4fff7b",
+            "runId": "c21a685d-dc58-4103-9fce-0d5ab192538d",
+            "seq": 8
+          },
+          "timestamp": 1792538305557
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.message",
+          "value": {
+            "messageId": "26b53ec7-f205-4a2c-83f7-74650c151a98",
+            "runId": "c21a685d-dc58-4103-9fce-0d5ab192538d",
+            "threadId": "621cef1b-dcff-4a2a-8f7a-fb9055485424",
+            "agentId": "default",
+            "role": "tool",
+            "textLength": 79,
+            "text": "{\"success\":true,\"delta\":[{\"op\":\"add\",\"path\":\"/todos/-\",\"value\":\"post letter\"}]}",
+            "seq": 9
+          },
+          "timestamp": 1792538305690
+        }
+      ],
+      "dropped": 0
+    },
+    {
+      "trajectoryId": "068f9d8d-ac3c-40f9-b7d1-a9a012abe246",
+      "events": [
+        {
+          "type": "CUSTOM",
+          "name": "agent.message",
+          "value": {
+            "messageId": "msg_0ce7f44ea88074c1006ad7f6c2637887d081eab6e615287c9c",
+            "runId": "c21a685d-dc58-4103-9fce-0d5ab192538d",
+            "threadId": "621cef1b-dcff-4a2a-8f7a-fb9055485424",
+            "agentId": "default",
+            "role": "assistant",
+            "textLength": 4,
+            "text": "done",
+            "seq": 10
+          },
+          "timestamp": 1792538306581
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.run",
+          "value": {
+            "phase": "finished",
+            "runId": "c21a685d-dc58-4103-9fce-0d5ab192538d",
+            "threadId": "621cef1b-dcff-4a2a-8f7a-fb9055485424",
+            "agentId": "default",
+            "seq": 11
+          },
+          "timestamp": 1792538306581
+        }
+      ],
+      "dropped": 0
+    }
+  ]
+}

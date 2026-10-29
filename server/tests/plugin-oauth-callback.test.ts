@@ -26,8 +26,7 @@ const KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
 
 const CALLBACK = "http://t/api/plugins/oauth/callback";
 
-const FAILED =
-  "https://app.example/settings/connected-accounts?connected=failed";
+const FAILED = "https://app.example/connections?connected=failed";
 
 function signedIn(): MiddlewareHandler<{ Variables: AppVariables }> {
   return async (context, next) => {
@@ -133,7 +132,7 @@ describe("a consent that came back the way it left", () => {
     const asked = await withWillingVendor(async (asked) => {
       const response = await hono.request(callbackUrl(state));
       expect(response.headers.get("location")).toBe(
-        "https://app.example/settings/connected-accounts/notion",
+        "https://app.example/connections/notion",
       );
       return asked;
     });

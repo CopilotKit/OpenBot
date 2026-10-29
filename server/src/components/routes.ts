@@ -252,7 +252,7 @@ export function createComponentRoutes(
      */
     for (const functionName of functions) {
       if (await store.mayCall(name, functionName)) continue;
-      const reason = `${name} has not been granted the function ${functionName}. An administrator grants each function to each component.`;
+      const reason = `${name} can't use the function ${functionName}. An admin has to give it to this component.`;
       await audit(context, "component.function_refused", name, {
         bot: agentId,
         function: functionName,
@@ -345,7 +345,7 @@ export function createComponentRoutes(
 
     if (!(await store.mayCall(name, functionName))) {
       return refuse(
-        `${name} has not been granted the function ${functionName}. An administrator grants each function to each component.`,
+        `${name} can't use the function ${functionName}. An admin has to give it to this component.`,
       );
     }
 

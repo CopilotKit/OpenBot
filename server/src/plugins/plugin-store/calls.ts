@@ -1,3 +1,4 @@
+import { connectAppRefusal } from "@openbot/shared/connect-prompt";
 import { and, eq } from "drizzle-orm";
 import { currentApprovalContext } from "../../approvals/types";
 import { type AuditInitiator, recordAuditEvent } from "../../audit";
@@ -7,7 +8,12 @@ import {
   policyInitiator,
 } from "../../computer/policy";
 import { withoutStatement } from "../../db/query-failure";
-import { mcpTools, pluginGrants, vendorNameOf } from "../../db/schema";
+import {
+  brokeredConnections,
+  mcpTools,
+  pluginGrants,
+  vendorNameOf,
+} from "../../db/schema";
 import { classifyTool, tokenHeaderFor } from "../catalogue";
 import { VERSION_ARG } from "../composio";
 import { inspectToolArguments } from "../content-governance";
@@ -35,6 +41,7 @@ export function callMethods(context: StoreContext) {
     injectedVendor,
     connectionTokenFor,
     requireServer,
+    brokerProvider,
   } = context;
   return {
     /**
@@ -330,7 +337,7 @@ export function callMethods(context: StoreContext) {
         });
         throw new PluginRefusedError(
           contentDecision.reason === "sensitive_content"
-            ? "The tool call was refused because its arguments contain credential material."
+            ? "The tool call was refused because its arguments contain a password or key."
             : "The tool call was refused because its arguments could not be inspected safely.",
           null,
         );
@@ -409,7 +416,7 @@ export function callMethods(context: StoreContext) {
             })
           : {
               allowed: false as const,
-              message: `${row.title} is shared, and this deployment cannot check who may use it, so it was not called.`,
+              message: `${row.title} is shared, and OpenBot can't check who may use it, so it wasn't called.`,
             };
         if (!verdict.allowed) {
           await recordAuditEvent(auditStore, {
@@ -524,7 +531,11 @@ export function callMethods(context: StoreContext) {
         });
         const answer = { text: result.text, isError: result.isError };
         await approval?.complete(answer);
-        return answer;
+        /*
+         * The one answer that leaves this block without returning: see below the catch. Thrown
+         * from in here, the catch would write a second `mcp.call_failed` row about the same call.
+         */
+        if (!result.accountGone) return answer;
       } catch (error) {
         /*
          * Recorded, then rethrown unchanged. The caller's behaviour is unaffected — what changes is
@@ -560,6 +571,57 @@ export function callMethods(context: StoreContext) {
         });
         throw error;
       }
+      /*
+       * THE ACCOUNT IS GONE AT THE VENDOR, AND THE PERSON CAN PUT IT BACK FROM WHERE THEY ARE. The
+       * only way here: every other answer returned inside the block and every throw left the catch.
+       *
+       * Recorded above as the failure it is, with the vendor's condition in the trail. Handed on as
+       * a refusal carrying an app card rather than as the vendor's error, because nothing on this
+       * deployment's rows knows the account is gone — the app reads as ready on every screen — and
+       * the card is the one place the person is told, with Reconnect beside it. A Shared app's
+       * account is the deployment's, so there the card says an administrator has to reconnect it.
+       *
+       * AND THE ROW GOES, as it does when a confirm hears the same no from the vendor: the row is
+       * only the vendor's last answer, and one that outlived the account would go on reading
+       * `ready` on every screen — `show_app_access` telling the model to use the app straight after
+       * this card — and would make the connect route refuse a fresh connection until somebody
+       * found Disconnect. Deleted, the app reads not connected for the person, or the team account
+       * not connected for everybody, which is the truth and the state whose button fixes it. Like
+       * the confirm's, the delete files no trail entry: nobody disconnected anything here.
+       */
+      if (access.credential === "brokered" && access.toolkit)
+        await database
+          .delete(brokeredConnections)
+          .where(
+            gatedMode === "shared"
+              ? and(
+                  eq(brokeredConnections.provider, brokerProvider),
+                  eq(brokeredConnections.app, access.toolkit),
+                  eq(brokeredConnections.holder, "deployment"),
+                )
+              : and(
+                  eq(brokeredConnections.provider, brokerProvider),
+                  eq(brokeredConnections.app, access.toolkit),
+                  eq(brokeredConnections.holder, "person"),
+                  eq(
+                    brokeredConnections.userId,
+                    input.credentialActorId ?? input.actorId,
+                  ),
+                ),
+          );
+      throw new PluginRefusedError(
+        connectAppRefusal({
+          serverId: row.id,
+          title: row.title,
+          message:
+            gatedMode === "shared"
+              ? `The shared ${row.title} account is no longer connected, so this wasn't done. Ask an admin to reconnect it.`
+              : `Your ${row.title} account is no longer connected, so this wasn't done. Reconnect it and ask again.`,
+          reason: gatedMode === "shared" ? "shared" : "reconnect",
+          at: new Date().toISOString(),
+        }),
+        null,
+      );
     },
   };
 }

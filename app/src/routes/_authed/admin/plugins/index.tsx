@@ -2,6 +2,7 @@ import {
   IconBrandGoogleDrive,
   IconBrandNotion,
   IconChevronRight,
+  IconCircleCheck,
   IconPlug,
 } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
@@ -15,6 +16,10 @@ import {
 } from "@/components/layout/page-shell";
 import { RowMark } from "@/components/layout/row-mark";
 import {
+  AccessRequestsSection,
+  usePendingRequestCounts,
+} from "@/components/plugins/access-requests";
+import {
   Item,
   ItemActions,
   ItemContent,
@@ -23,6 +28,11 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import {
+  moreAppsRow,
+  moreAppsSectionDescription,
+  providerVocabulary,
+} from "@/lib/plugins/provider-vocabulary";
+import {
   type CatalogueItem,
   connectionsQueryOptions,
   type PluginServer,
@@ -30,11 +40,6 @@ import {
   pluginsPageQueryOptions,
   pluginsProvider,
 } from "@/lib/plugins/queries";
-import {
-  moreAppsRow,
-  moreAppsSectionDescription,
-  providerVocabulary,
-} from "@/lib/plugins/provider-vocabulary";
 
 /**
  * What this deployment can reach, as one list per state.
@@ -102,6 +107,11 @@ function summaryFor(
 function RouteComponent() {
   const plugins = useQuery(pluginsPageQueryOptions());
   const connections = useQuery(connectionsQueryOptions());
+  /*
+   * Requests waiting per app, so an administrator sees which app somebody is asking about from the
+   * list, without opening each one. Every request is also listed in full above the lists.
+   */
+  const requestCounts = usePendingRequestCounts();
   // A NAME for the "More apps" row, which cannot be read off a row that may not exist yet.
   const provider = pluginsProvider(plugins.data);
   const moreApps = moreAppsRow(
@@ -130,23 +140,29 @@ function RouteComponent() {
 
   return (
     <PageShell
-      description="What this deployment can reach, and which Bots may reach it. Adding a plugin is account-wide; which Bots hold its tools is decided on its own page."
+      description="Connect services for your company, then choose which Bots can use each service’s tools."
       title="Plugins"
     >
       {/* Pending, error, empty, rows — pending first, so no sentence asserts anything mid-fetch. */}
       {plugins.isPending ? null : plugins.error ? (
         <p className="mt-12 text-destructive text-sm" role="alert">
-          Plugins could not be loaded.
+          Couldn't load plugins. Reload the page.
         </p>
       ) : (
         <>
+          {/*
+           * First, because each one is somebody waiting. All of them, not only those about an app
+           * that is connected: an app nobody has switched on has no page of its own to list them on.
+           */}
+          <AccessRequestsSection />
+
           <PageSection
-            description="Added for the whole deployment. Open one to set what it needs and which Bots hold its tools."
+            description="Added for everybody. Open one to set it up and choose which Bots get its tools."
             title="Connected"
           >
             {plugins.data?.servers.length === 0 ? (
-              <PageEmpty>
-                Nothing connected yet. Everything available is below.
+              <PageEmpty icon={IconPlug} title="Nothing connected yet">
+                Pick one from the list below.
               </PageEmpty>
             ) : (
               <PageRows>
@@ -188,6 +204,9 @@ function RouteComponent() {
                           </ItemDescription>
                         </ItemContent>
                         <ItemActions>
+                          <PendingRequests
+                            count={requestCounts?.byApp[server.id] ?? 0}
+                          />
                           <span className="text-muted-foreground text-xs">
                             {summaryFor(
                               server,
@@ -209,11 +228,13 @@ function RouteComponent() {
           </PageSection>
 
           <PageSection
-            description="Reviewed, first-party servers this build will talk to. Open one to add it."
+            description="Reviewed, first-party servers. Open one to add it."
             title="Explore plugins"
           >
             {explore.length === 0 ? (
-              <PageEmpty>Everything in the catalogue is connected.</PageEmpty>
+              <PageEmpty icon={IconCircleCheck} title="All connected">
+                Every plugin in the catalogue is connected.
+              </PageEmpty>
             ) : (
               <PageRows>
                 {explore.map((entry: CatalogueItem, index) => {
@@ -238,6 +259,9 @@ function RouteComponent() {
                           <ItemDescription>{entry.summary}</ItemDescription>
                         </ItemContent>
                         <ItemActions>
+                          <PendingRequests
+                            count={requestCounts?.byApp[entry.key] ?? 0}
+                          />
                           <span className="text-muted-foreground text-xs">
                             Not added
                           </span>
@@ -306,5 +330,18 @@ function RouteComponent() {
         </>
       )}
     </PageShell>
+  );
+}
+
+/**
+ * "2 requests", beside a row's summary, in the foreground colour so it is the first thing on the
+ * row that reads as something to do. Nothing at zero: a count of nothing on every row is noise.
+ */
+function PendingRequests({ count }: { count: number }) {
+  if (count === 0) return null;
+  return (
+    <span className="font-medium text-foreground text-xs tabular-nums">
+      {count} {count === 1 ? "request" : "requests"}
+    </span>
   );
 }

@@ -139,9 +139,7 @@ async function openAddSource(view: ReturnType<typeof draw>) {
   const user = userEvent.setup({ document });
   await view.findByText("Receipts folder");
   await user.click(view.getByRole("button", { name: "Add source" }));
-  await user.click(
-    await view.findByRole("combobox", { name: "Connected app action" }),
-  );
+  await user.click(await view.findByRole("combobox", { name: "What to read" }));
   await user.click(await view.findByRole("option", { name: "Search Drive" }));
   return user;
 }

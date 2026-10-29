@@ -80,6 +80,8 @@ function server(provider: Provider, shared: boolean): PluginServer {
     dynamicClient: false,
     accountMode: shared ? "shared" : null,
     sharedVendorConnected: false,
+    ownerGrants: shared ? "admin" : "any",
+    ownerGrantsChosen: null,
     tools: [],
     withdrawn: [],
   };
@@ -167,9 +169,9 @@ function everythingRendered(view: ReturnType<typeof render>): string {
 const WAIT_FOR_ROW = /^Set [A-Z]+_API_KEY on this deployment\./;
 
 const COMPOSIO_KEY_MISSING =
-  "Set COMPOSIO_API_KEY on this deployment. Without it there is no broker to reach, so this account can be neither connected nor ended from here. The app stays enabled and every grant on its tools still stands.";
+  "Set COMPOSIO_API_KEY on this deployment. Until then, this account can't be connected or disconnected here. The app stays turned on, and its tool grants still stand.";
 const ARCADE_KEY_MISSING =
-  "Set ARCADE_API_KEY on this deployment. Without it there is no broker to reach, so this account can be neither connected nor ended from here. The app stays enabled and every grant on its tools still stands.";
+  "Set ARCADE_API_KEY on this deployment. Until then, this account can't be connected or disconnected here. The app stays turned on, and its tool grants still stand.";
 
 for (const shared of [false, true]) {
   const row = shared ? "team row" : "personal row";
