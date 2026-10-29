@@ -419,7 +419,12 @@ export function toVisibleChatItems(
           kind: "tool",
           // One assistant message can carry multiple tool calls.
           id: toolCall.id,
-          toolCall,
+          /*
+           * A copy, not the agent's object: the client appends argument chunks to the call it
+           * already handed over, so a row comparing the call it drew with the next one would be
+           * comparing an object with itself and never see the arguments grow.
+           */
+          toolCall: { ...toolCall, function: { ...toolCall.function } },
           ...(results.has(toolCall.id)
             ? { result: results.get(toolCall.id) }
             : {}),

@@ -145,3 +145,48 @@ test("a finished tool group does not re-render while a reply streams", () => {
   expect(renders.mock.calls.length).toBe(before);
   renders.mockRestore();
 });
+
+/*
+ * The agent client appends a call's argument chunks to the same `toolCall` object it already
+ * handed over. A row that compared the arguments it was given with themselves never saw them grow,
+ * so a running search showed no query until its result arrived.
+ */
+test("a running tool row redraws as its arguments stream in place", () => {
+  const renders = spyOn(toolActivity, "ToolActivity");
+  const [call, ...rest] = searched("a1");
+  const message = call as Message & {
+    toolCalls: { function: { arguments: string } }[];
+  };
+  const streaming = message.toolCalls[1];
+  if (!streaming) throw new Error("the fixture has two calls");
+  streaming.function.arguments = "";
+  const results = rest.slice(0, 1);
+  const client = new QueryClient();
+  const view = render(
+    <ChatTranscript
+      busy
+      messages={[user("u1", "look it up"), message, ...results]}
+      restoring={false}
+    />,
+    {
+      wrapper: ({ children }) => (
+        <QueryClientProvider client={client}>{children}</QueryClientProvider>
+      ),
+    },
+  );
+
+  const before = renders.mock.calls.length;
+  streaming.function.arguments = '{"q":"two"}';
+  view.rerender(
+    <ChatTranscript
+      busy
+      messages={[user("u1", "look it up"), message, ...results]}
+      restoring={false}
+    />,
+  );
+
+  expect(renders.mock.calls.length).toBeGreaterThan(before);
+  const last = renders.mock.calls.at(-1)?.[0];
+  expect(last?.group.steps[1]?.toolCall.function.arguments).toBe('{"q":"two"}');
+  renders.mockRestore();
+});
