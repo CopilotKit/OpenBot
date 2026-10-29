@@ -1,4 +1,4 @@
-import { readTaskFrame } from "@openbot/shared/task-brief";
+import { readTaskFrame, START_TASK_TOOL } from "@openbot/shared/task-brief";
 import type { ActivityMessage, Message, ToolCall } from "@ag-ui/core";
 import { classifyAttachment } from "@/lib/channels/attachments";
 
@@ -590,4 +590,40 @@ export function toVisibleChatItems(
 
     return items;
   });
+}
+
+/**
+ * The tasks a Bot started in a turn, moved to the end of that turn, under its words.
+ *
+ * A Bot hands bigger work to a task of its own with `start_task` and says only "On it." in the
+ * conversation, and the call comes before the words. Drawn where it was made, the task's card sat
+ * above the line that introduces it. A turn ends where the person next says something, so the cards
+ * go just before that, in the order they were started.
+ */
+export function startedTasksLast(
+  items: readonly VisibleChatItem[],
+): VisibleChatItem[] {
+  const ordered: VisibleChatItem[] = [];
+  let started: VisibleChatItem[] = [];
+  const close = () => {
+    ordered.push(...started);
+    started = [];
+  };
+  for (const item of items) {
+    if (
+      item.kind === "tool" &&
+      item.toolCall.function.name === START_TASK_TOOL
+    ) {
+      started.push(item);
+      continue;
+    }
+    if (
+      item.kind === "attachments" ||
+      (item.kind === "text" && item.role === "user")
+    )
+      close();
+    ordered.push(item);
+  }
+  close();
+  return ordered;
 }
