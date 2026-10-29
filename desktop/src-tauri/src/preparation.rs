@@ -6,13 +6,21 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::{
-    deployment, engine::Address, harness::HarnessChoice, local_browser, problem::Problem, stack,
+    deployment,
+    engine::{Address, Engine},
+    harness::HarnessChoice,
+    local_browser,
+    problem::Problem,
+    stack,
 };
 
 pub const REQUIRED: &str = "Finish installing OpenBot's local software before signing in or starting. Return to Install and try again.";
 pub const FILE: &str = ".openbot-prepared.json";
 const DEPENDENCIES: &str = ".openbot-dependencies.json";
 const LAUNCH: &str = ".openbot-launched.json";
+/// The engine this installation was set up on. Never invalidated with the preparation record: a
+/// new release is prepared again on the same engine, where its database already is.
+pub const ENGINE: &str = ".openbot-engine.json";
 const PACKAGES: [&str; 7] = [
     "",
     "server",
@@ -94,6 +102,28 @@ pub fn installation(root: &Path) -> Option<Launch> {
     Some(Launch {
         harness: record.harness,
     })
+}
+
+#[derive(Serialize, Deserialize)]
+struct SavedEngine {
+    engine: Engine,
+}
+
+/// The engine this installation was set up on, or `None` when it saved none (a new installation,
+/// or one from before this record existed).
+///
+/// Every later install and start uses this engine and never the other one. The installation's
+/// images and its database are in the engine it was set up on, so moving to the other one, say
+/// because Docker happens to be answering, starts OpenBot with an empty database.
+pub fn saved_engine(root: &Path) -> Option<Engine> {
+    let record: SavedEngine =
+        serde_json::from_slice(&std::fs::read(root.join(ENGINE)).ok()?).ok()?;
+    Some(record.engine)
+}
+
+/// Save the engine this installation runs on. Called once, when it has none saved.
+pub fn save_engine(root: &Path, engine: Engine) -> Result<(), Problem> {
+    write_record(root, ENGINE, &SavedEngine { engine })
 }
 
 pub fn save_selected_root(config: &Path, root: &Path) -> Result<(), Problem> {
@@ -493,6 +523,26 @@ pub fn image_settings(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_saved_engine_outlives_a_new_preparation() {
+        let root = crate::test_support::temp_root("preparation-saved-engine");
+        std::fs::create_dir_all(&root).unwrap();
+        assert_eq!(saved_engine(&root), None, "nothing saved yet");
+        save_engine(&root, Engine::Podman).unwrap();
+        assert_eq!(saved_engine(&root), Some(Engine::Podman));
+        // A new release is prepared again on the engine its database is in.
+        invalidate(&root).unwrap();
+        assert_eq!(saved_engine(&root), Some(Engine::Podman));
+        save_engine(&root, Engine::Docker).unwrap();
+        assert_eq!(saved_engine(&root), Some(Engine::Docker));
+        std::fs::write(root.join(ENGINE), "not json").unwrap();
+        assert_eq!(
+            saved_engine(&root),
+            None,
+            "an unreadable record is no record"
+        );
+    }
 
     #[test]
     fn a_release_from_before_the_toolkit_needs_no_shared_or_toolkit_manifest() {

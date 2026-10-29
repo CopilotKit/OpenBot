@@ -41,7 +41,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Engine {
-    /// Docker Desktop, OrbStack, Colima, or a Docker daemon by any other name.
+    /// Any Docker daemon, whatever product runs it.
     Docker,
     Podman,
 }
@@ -502,7 +502,23 @@ pub fn rootless_socket() -> Option<PathBuf> {
 
 /// What is here, before anything is installed.
 pub fn detect() -> EngineStatus {
-    for engine in [Engine::Docker, Engine::Podman] {
+    detect_among(&[Engine::Docker, Engine::Podman])
+}
+
+/// What is here of the engine an installation was set up on, or of either when it saved none.
+///
+/// The other engine is never looked at: an installation on Podman that found an answering Docker
+/// would start on it with none of its images and an empty database. See
+/// `preparation::saved_engine`.
+pub fn detect_saved(saved: Option<Engine>) -> EngineStatus {
+    match saved {
+        Some(engine) => detect_among(&[engine]),
+        None => detect(),
+    }
+}
+
+fn detect_among(engines: &[Engine]) -> EngineStatus {
+    for &engine in engines {
         let address = Address::new(engine, None);
         if address.responds() {
             return answering(address);
@@ -511,14 +527,16 @@ pub fn detect() -> EngineStatus {
 
     // Podman's default connection can name a machine that is not running while another one is. That
     // is not "no engine", and creating a second machine in answer to it is the wrong repair.
-    if let Some(machine) = running_machine(crate::acquire::MACHINE) {
-        let address = Address::new(Engine::Podman, Some(machine));
-        if address.responds() {
-            return answering(address);
+    if engines.contains(&Engine::Podman) {
+        if let Some(machine) = running_machine(crate::acquire::MACHINE) {
+            let address = Address::new(Engine::Podman, Some(machine));
+            if address.responds() {
+                return answering(address);
+            }
         }
     }
 
-    for engine in [Engine::Docker, Engine::Podman] {
+    for &engine in engines {
         if program(engine).is_some() {
             return EngineStatus {
                 engine: Some(engine),
