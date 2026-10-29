@@ -158,3 +158,52 @@ test("a message typed while history loads is shown under the placeholder", () =>
   expect(view.getByLabelText(PLACEHOLDER)).toBeTruthy();
   expect(view.getByText("typed early")).toBeTruthy();
 });
+
+/**
+ * Opening a conversation renders its newest rows in with a short stagger. It runs after the view
+ * has landed at the bottom, so it reads as the conversation appearing rather than loading: only
+ * the rows on screen take part, top of the screen first, newest last.
+ */
+function openingDelays(container: HTMLElement): (string | null)[] {
+  return [...container.querySelectorAll("[data-message-id]")].map((row) =>
+    row.classList.contains("history-arrive")
+      ? (row as HTMLElement).style.animationDelay
+      : null,
+  );
+}
+
+test("the newest history rows render in, staggered toward the newest", () => {
+  const messages = Array.from({ length: 10 }, (_, index) =>
+    index % 2 === 0
+      ? user(`u${index}`, `question ${index}`)
+      : assistant(`a${index}`, `answer ${index}`),
+  );
+  const view = render(<ChatTranscript messages={messages} restoring={false} />);
+
+  expect(openingDelays(view.container)).toEqual([
+    null,
+    null,
+    "0ms",
+    "30ms",
+    "60ms",
+    "90ms",
+    "120ms",
+    "150ms",
+    "180ms",
+    "210ms",
+  ]);
+});
+
+test("a row that arrives after opening does not take the opening stagger", () => {
+  const history = [user("u1", "one"), assistant("a1", "two")];
+  const view = render(<ChatTranscript messages={history} restoring={false} />);
+
+  view.rerender(
+    <ChatTranscript
+      messages={[...history, user("u2", "new")]}
+      restoring={false}
+    />,
+  );
+
+  expect(openingDelays(view.container)).toEqual(["0ms", "30ms", null]);
+});

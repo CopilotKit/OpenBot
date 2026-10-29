@@ -426,6 +426,33 @@ function ScrollNewestQueuedIntoView({ newest }: { newest: string | null }) {
 }
 
 /**
+ * How many of the newest rows render in when a conversation opens, and how far apart.
+ *
+ * The view has already landed at the bottom before the first paint, so these are the rows on
+ * screen; the stagger runs top of the screen first, newest last. Short on purpose: eight rows 30ms
+ * apart is a little over 200ms before the last one starts, which reads as the conversation
+ * appearing rather than as it loading. Older rows, above the fold, are simply there.
+ */
+const OPENING_STAGGER_COUNT = 8;
+const OPENING_STAGGER_MS = 30;
+
+/**
+ * The opening stagger, decided once from the rows present when the conversation opens.
+ *
+ * Applied as a CSS animation on the scroller's row wrapper, not on the memoised row inside it: the
+ * row's props stay the same and a streaming answer can never replay it, and a transform composites
+ * without moving the layout box the scroller just landed on. Exported for its tests.
+ */
+export function openingStagger(ids: readonly string[]): Map<string, string> {
+  const start = Math.max(0, ids.length - OPENING_STAGGER_COUNT);
+  return new Map(
+    ids
+      .slice(start)
+      .map((id, index) => [id, `${index * OPENING_STAGGER_MS}ms`] as const),
+  );
+}
+
+/**
  * Whether a row mounting now is arriving live or was already there when the conversation opened.
  *
  * A ref, not state: it is read once, at a row's first render, and flipping it must not re-render
@@ -468,11 +495,9 @@ function ArrivalsLive({ children }: { children: React.ReactNode }) {
  * accelerated and drops frames exactly when the main thread is busy, which here is while a reply is
  * streaming.
  *
- * ONLY FOR WHAT ARRIVES WHILE THE CONVERSATION IS OPEN. History is already there when it opens:
- * it was cascading the newest dozen rows in, 40ms apart, and the bottom of the conversation filling
- * in over half a second read as the conversation still loading. A row mounted with the history
- * draws at rest; `ArrivalsLiveContext` says which is which, decided once at the row's first render
- * so a streaming answer can never replay it.
+ * ONLY FOR WHAT ARRIVES WHILE THE CONVERSATION IS OPEN. A row mounted with the history draws at
+ * rest here and takes the opening stagger instead (`openingStagger`); `ArrivalsLiveContext` says
+ * which is which, decided once at the row's first render so a streaming answer can never replay it.
  */
 function Arriving({ children }: { children: React.ReactNode }) {
   const shouldReduceMotion = useReducedMotion();
@@ -1654,6 +1679,25 @@ export function ChatTranscript({
   const anchorRows = anchorRowIds(items);
 
   /*
+   * Decided once, from the rows present when the scroller mounts, and forgotten while restoring so
+   * a conversation opened again staggers again. Rows that arrive later are not in it: they have
+   * their own entrance (`Arriving`).
+   */
+  const openingRef = useRef<Map<string, string> | null>(null);
+  if (restoring) {
+    openingRef.current = null;
+  } else if (openingRef.current === null) {
+    openingRef.current = openingStagger(items.map((item) => item.id));
+  }
+  const opening = openingRef.current;
+  const openingProps = (id: string) => {
+    const delay = opening?.get(id);
+    return delay === undefined
+      ? {}
+      : { className: "history-arrive", style: { animationDelay: delay } };
+  };
+
+  /*
    * NOTHING BUT THE PLACEHOLDER UNTIL HISTORY IS COMPLETE, AND THE SCROLLER MOUNTED FRESH AFTER IT.
    *
    * History arrives in pieces: the gateway snapshot, then the stored thread merged into it, then
@@ -1770,7 +1814,11 @@ export function ChatTranscript({
               </div>
               {items.map((item, index) =>
                 item.kind === "tools" ? (
-                  <MessageScrollerItem key={item.id} messageId={item.id}>
+                  <MessageScrollerItem
+                    key={item.id}
+                    messageId={item.id}
+                    {...openingProps(item.id)}
+                  >
                     <Arriving>
                       <ToolActivity
                         group={item}
@@ -1779,7 +1827,11 @@ export function ChatTranscript({
                     </Arriving>
                   </MessageScrollerItem>
                 ) : item.kind === "tool" ? (
-                  <MessageScrollerItem key={item.id} messageId={item.id}>
+                  <MessageScrollerItem
+                    key={item.id}
+                    messageId={item.id}
+                    {...openingProps(item.id)}
+                  >
                     <TranscriptToolCall
                       args={item.toolCall.function.arguments}
                       latest={index >= latestIndex}
@@ -1789,7 +1841,11 @@ export function ChatTranscript({
                     />
                   </MessageScrollerItem>
                 ) : item.kind === "activity" ? (
-                  <MessageScrollerItem key={item.id} messageId={item.id}>
+                  <MessageScrollerItem
+                    key={item.id}
+                    messageId={item.id}
+                    {...openingProps(item.id)}
+                  >
                     <TranscriptActivity message={item.message} />
                   </MessageScrollerItem>
                 ) : item.kind === "text" ? (
@@ -1797,6 +1853,7 @@ export function ChatTranscript({
                     key={item.id}
                     messageId={item.id}
                     scrollAnchor={anchorRows.has(item.id)}
+                    {...openingProps(item.id)}
                   >
                     <TranscriptMessage
                       commandNames={commandNames}
@@ -1809,6 +1866,7 @@ export function ChatTranscript({
                     key={item.id}
                     messageId={item.id}
                     scrollAnchor={anchorRows.has(item.id)}
+                    {...openingProps(item.id)}
                   >
                     <TranscriptAttachments attachments={item.attachments} />
                   </MessageScrollerItem>

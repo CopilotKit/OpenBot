@@ -120,3 +120,33 @@
     margin-top: 0;
   }
 }
+
+/*
+ * A conversation's newest rows rendering in as it opens. The delay is set per row inline; see
+ * `openingStagger` in chat-transcript.tsx. Opacity and transform only, so nothing the scroller
+ * measured moves.
+ */
+.history-arrive {
+  animation: history-arrive 240ms cubic-bezier(0.23, 1, 0.32, 1) both;
+}
+
+@keyframes history-arrive {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+/* Reduced motion keeps the fade and drops the movement and the queue: gentler, not absent. */
+@media (prefers-reduced-motion: reduce) {
+  .history-arrive {
+    animation-name: history-arrive-fade;
+    animation-delay: 0ms !important;
+  }
+}
+
+@keyframes history-arrive-fade {
+  from {
+    opacity: 0;
+  }
+}
