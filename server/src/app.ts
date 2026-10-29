@@ -143,6 +143,7 @@ import type { IntentRouter } from "./routing/classify";
 import { createRoutingRoutes } from "./routing/routes";
 import { createCoworkerRoutingService } from "./routing/service";
 import type { SelfHostBanner } from "./self-host-banner";
+import { createSetupRoutes, type SetupSources } from "./setup/checklist";
 import { createTeamBotRoutes } from "./team-bots/routes";
 import type { TeamBots } from "./team-bots/team-bots";
 import type { PackageStatusReader } from "./tenant-package";
@@ -461,6 +462,11 @@ export function createApp(
     teamBots?: TeamBots;
     /** Pause, reset, Activity and attention for a person's own Bots. See agents/lifecycle.ts. */
     lifecycle?: BotLifecycleServices;
+    /**
+     * The setup checklist onboarding's "Check your setup" step draws, read from this server's own
+     * configuration and state. See setup/checklist.ts. Absent, `/api/setup` is not mounted.
+     */
+    setup?: SetupSources;
   },
   /**
    * Whether to offer help self-hosting, which also hides it from a deployment that pays for
@@ -1673,6 +1679,13 @@ export function createApp(
       "/api/bots",
       createBotLifecycleRoutes(coworker.lifecycle, requireUser),
     );
+  /*
+   * Signed in, unlike `/api/capabilities`, which anybody can read. The checklist names what this
+   * deployment has and lacks, and for an admin which variables would close a gap, which is not a
+   * visitor's to have before they sign in.
+   */
+  if (coworker?.setup)
+    app.route("/api/setup", createSetupRoutes(coworker.setup, requireUser));
   if (coworker?.groups)
     app.route("/api/groups", createGroupRoutes(coworker.groups, requireUser));
   if (coworker?.teamBots)
