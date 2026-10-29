@@ -19,6 +19,18 @@ export const TASK_FRAME = [
   `Do the work here yourself, all of it, and end with what you did and anything still waiting on them. Never call ${START_TASK_TOOL} in this conversation: this is the task.`,
 ] as const;
 
+/**
+ * How a task's turn should end, sent as a system message on its turns rather than in the frame,
+ * which has to stay word for word so earlier tasks are still read as tasks.
+ *
+ * A reply that ends on a question reads as Needs you in Tasks (`replyEnding`), so the Bot asks one
+ * only when it cannot go on without an answer. Without this, "end with what you did and anything
+ * still waiting on them" came back as literal "What I did:" and "Still waiting on you:" labels, the
+ * second of them on the list's next-step line.
+ */
+export const TASK_ENDING =
+  'End with a sentence or two in plain words on what you did. Ask the person a question only if you need their answer to go on, and never end by offering more work as a question. Don\'t label these parts, as in "What I did:" or "Still waiting on you:".';
+
 /** The historical frame and blank line remain the prefix of correction messages. */
 const PREFIX = [...TASK_FRAME, "", ""].join("\n");
 // The label precedes the blank line, so this cannot match a historical frame's arbitrary body.
