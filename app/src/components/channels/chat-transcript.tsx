@@ -81,7 +81,7 @@ import {
 } from "./tool-activity";
 import { isBrowserStep } from "./browser-activity";
 import { shouldDrawEarlier, useTranscriptPages } from "./transcript-pages";
-import { FollowScroll, useFollowIntent } from "./follow-intent";
+import { FollowScroll, RESUME_PX, useFollowIntent } from "./follow-intent";
 import { usePacedReveal } from "./paced-reveal";
 import { TranscriptRail } from "./transcript-rail";
 import {
@@ -1954,8 +1954,19 @@ export function ChatTranscript({
    */
   const goToTurnStill = useCallback(
     (id: string) => {
-      dispatchFollow({ type: "jump" });
       goToTurn(id);
+      /*
+       * Not when the move left the view at the end: a short last turn is clamped there, nothing
+       * scrolls, and nothing would ever pick following up again.
+       */
+      const element = viewportRef.current;
+      if (
+        element !== null &&
+        element.scrollHeight - element.scrollTop - element.clientHeight >
+          RESUME_PX
+      ) {
+        dispatchFollow({ type: "jump" });
+      }
     },
     [dispatchFollow, goToTurn],
   );

@@ -87,6 +87,11 @@ test("jumping to a turn that is not drawn yet draws down to it and stops followi
     <ChatTranscript messages={conversation(50)} restoring={false} />,
   );
   expect(view.container.querySelector('[data-message-id="u0"]')).toBeNull();
+  // Far from the end once the jump has moved the view up.
+  Object.defineProperty(viewport(view.container), "scrollHeight", {
+    configurable: true,
+    get: () => 5000,
+  });
 
   await act(async () => {
     fireEvent.click(marks(view.container)[0] as HTMLButtonElement);
@@ -95,4 +100,21 @@ test("jumping to a turn that is not drawn yet draws down to it and stops followi
 
   expect(view.container.querySelector('[data-message-id="u0"]')).not.toBeNull();
   expect(viewport(view.container).getAttribute("data-following")).toBe("false");
+});
+
+/*
+ * At the end, the highlighted mark is the last turn; choosing it moves nothing, so no scroll would
+ * ever pick following up again, and a streaming reply would grow below the fold.
+ */
+test("jumping to a turn that leaves the view at the end keeps following", async () => {
+  const view = render(
+    <ChatTranscript messages={conversation(3)} restoring={false} />,
+  );
+
+  await act(async () => {
+    fireEvent.click(marks(view.container).at(-1) as HTMLButtonElement);
+    await new Promise((resolve) => window.requestAnimationFrame(resolve));
+  });
+
+  expect(viewport(view.container).getAttribute("data-following")).toBe("true");
 });
