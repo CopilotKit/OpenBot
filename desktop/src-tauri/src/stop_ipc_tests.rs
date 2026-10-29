@@ -312,7 +312,7 @@ mod stop_ipc {
         let shell = fixture.app.state::<Shell>();
         wait_until(|| fixture.window.url().unwrap().as_str() == setup);
         assert_compose_down_ran_under(&fixture.root.join("commands.log"), &fixture.root);
-        let problem = last_failure(fixture.app.handle().clone())
+        let problem = last_failure_now(fixture.app.handle())
             .expect("menu Stop failure should be retained for setup");
         assert_eq!(
             problem.said,
@@ -326,7 +326,7 @@ mod stop_ipc {
                     && detail.contains("synthetic Compose refusal")),
             "{problem:?}"
         );
-        assert!(last_failure(fixture.app.handle().clone()).is_none());
+        assert!(last_failure_now(fixture.app.handle()).is_none());
         assert!(
             recovery_required(&shell, &fixture.root),
             "reading the retained notice must not clear recovery-required state"
@@ -363,7 +363,7 @@ mod stop_ipc {
         wait_until(|| fixture.window.url().unwrap().as_str() == setup);
         assert_compose_down_ran_under(&fixture.root.join("commands.log"), &fixture.root);
         let shell = fixture.app.state::<Shell>();
-        assert!(last_failure(fixture.app.handle().clone()).is_none());
+        assert!(last_failure_now(fixture.app.handle()).is_none());
         assert!(!recovery_required(&shell, &fixture.root));
         let stopped = configured();
         assert!(stopped.launch.is_some(), "Stop retains the installed setup");

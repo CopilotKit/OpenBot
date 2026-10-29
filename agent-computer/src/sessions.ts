@@ -104,13 +104,22 @@ export function createSessions(options: SessionsOptions) {
     for (const [botId, session] of [...sessions.entries()]) {
       if (session.viewer.occupied()) continue;
       if (options.isLive(botId)) continue;
-      if (
-        session.control.get().request?.status === "waiting" ||
-        session.control.get().holder === "human"
-      )
-        continue;
+      if (wheelWithPerson(session)) continue;
       sessions.delete(botId);
     }
+  }
+
+  /**
+   * Whether a person holds this Bot's wheel, or the Bot has asked one to take it and is waiting.
+   *
+   * Either way the browser is somebody's to work in or about to be, so it is kept: here, when the map
+   * is trimmed, and by the computer when it closes browsers for memory or closes a Bot's idle tabs.
+   * A request that has waited past its time has expired by the time this asks (`get` expires it), so
+   * a Bot that asked and was never answered does not hold its browser for ever.
+   */
+  function wheelWithPerson(session: BotSession): boolean {
+    const state = session.control.get();
+    return state.request?.status === "waiting" || state.holder === "human";
   }
 
   function sessionFor(botId: string): BotSession {
@@ -165,6 +174,17 @@ export function createSessions(options: SessionsOptions) {
      */
     get(botId: string): BotSession | undefined {
       return sessions.get(botId);
+    },
+
+    /**
+     * Whether a person holds this Bot's wheel or has been asked to take it (`wheelWithPerson`).
+     *
+     * Asks without answering, like `get`: a Bot with no session has nobody at its wheel, and this is
+     * asked on the paths that close browsers, where creating an entry would grow the map.
+     */
+    personHasTheWheel(botId: string): boolean {
+      const session = sessions.get(botId);
+      return session ? wheelWithPerson(session) : false;
     },
 
     /**

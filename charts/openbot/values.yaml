@@ -405,6 +405,16 @@ computers:
   # the process default, which is a handful and thirty minutes.
   maxBrowsers: ""
   browserIdleMs: ""
+  # At what share of the pod's memory limit the computer starts closing browsers nobody is using,
+  # least recently used first, down to ten points under it. Measured as the kubelet measures it (the
+  # working set), before each launch and once a minute: it stops idle browsers filling the pod one
+  # launch at a time, and a page that grows between two checks can still run the pod out of memory.
+  # Empty means 85; 0 switches it off.
+  memoryHighPercent: ""
+  # How long a Bot's background tab (one it left behind, such as the page a sign-in popup opened from)
+  # is kept untouched before it is closed. The page the Bot is on is never closed. Empty means ten
+  # minutes; 0 keeps them.
+  tabIdleMs: ""
 
   # Which Chromium a Bot's computer runs. `headed` is full Chromium drawing to the pod's own X server
   # (Xvfb, started by the computer), behind the same streamed screen: it is what sites see from a

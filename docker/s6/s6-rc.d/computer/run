@@ -12,6 +12,12 @@
 #
 # `with-contenv` is not decoration. Without it s6 starts a service with none of the container's
 # environment, and the failure is a config error naming a variable that is plainly set.
+#
+# COMPUTER_MEMORY_HIGH_PERCENT stays on here, and here it counts everything in this container: the
+# database and the API server as well as the browsers, because the cgroup the computer reads is the
+# container's. That is deliberate. The kernel's out-of-memory kill counts all of it too and can take
+# the database down, so closing a browser nobody is using, before memory gets there, is how the
+# database is protected. Set it to 0 to leave memory to the kernel.
 set -eu
 if [ "${EMBEDDED_COMPUTER:-on}" != "on" ]; then
   exec /bin/true
@@ -26,7 +32,7 @@ for name in \
   BUN_INSTALL PLAYWRIGHT_BROWSERS_PATH SPIFFE_ENDPOINT_SOCKET \
   COMPUTER_TOKEN COMPUTER_BOT_ID COMPUTER_BROWSER_MODE COMPUTER_MAX_BROWSERS \
   COMPUTER_BROWSER_IDLE_MS COMPUTER_SANDBOX COMPUTER_SHELL_ENV COMPUTER_STOPPED \
-  COMPUTER_SEPARATE_WORKSPACES \
+  COMPUTER_SEPARATE_WORKSPACES COMPUTER_MEMORY_HIGH_PERCENT COMPUTER_TAB_IDLE_MS \
   ACTION_TIMEOUT_MS NAVIGATION_TIMEOUT_MS AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS
 do
   eval "isset=\${$name+x}"

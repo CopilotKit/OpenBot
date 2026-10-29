@@ -8,7 +8,7 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-**Before upgrading.** Fourteen things change for an existing deployment:
+**Before upgrading.** Fifteen things change for an existing deployment:
 - A hosted computer's browser is now headed by default. It uses a little more memory than headless
   did; set `COMPUTER_BROWSER_MODE=headless` (Helm: `computers.browserMode: headless`) to keep the old
   behaviour.
@@ -61,6 +61,55 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   to keep the old behaviour.
 - Interfaces a Bot drew before the upgrade (A2UI 0.9 surfaces) no longer draw when a conversation is
   reopened; the messages around them stay. New ones use A2UI 1.0 (below).
+- A computer now closes browsers nobody is using, least recently used first, when its memory
+  reaches 85% of its limit, and closes a Bot's background tabs after ten minutes untouched (below).
+  In the all-in-one image that share counts the database and the API server too.
+  `COMPUTER_MEMORY_HIGH_PERCENT=0` and `COMPUTER_TAB_IDLE_MS=0` (Helm: `computers.memoryHighPercent`
+  and `computers.tabIdleMs`) keep the old behaviour.
+
+### A computer closes browsers nobody is using when its memory runs high
+
+A computer runs one browser for each Bot that is browsing, and the only limits were a count and half
+an hour untouched. Neither looked at memory, so a few heavy pages could take a container past its
+memory limit well under the count, and the kernel then killed processes without regard to which Bot
+was busy. On Kubernetes it kills everything in the container at once, so every Bot's browser closed
+together and nothing could reach the computer until it came back. A computer now reads its own
+memory the way the kubelet does (the working set, which leaves out the file cache the kernel can
+drop), before it starts a browser and once a minute. At or above 85% of its limit it closes browsers
+one at a time, least recently used first, until it is under 75%, so the next launch does not cross
+the line again straight away. Launches that arrive together share one pass rather than closing a
+browser each. A Bot whose browser was closed starts again where it left off on its next step, still
+signed in, because its profile is on disk.
+
+Only a browser nobody is using is closed. Never closed for memory: the browser being started, the
+most recently used one, any browser used in the last minute (a Bot between two steps asks for
+nothing while its model works out the next), a person's own browser, cloud or native, whose Recorder
+session would end, and the browser of a Bot whose wheel a person holds or has been asked to take.
+When every browser is in use, none is closed.
+
+This is a check, not a guarantee. Memory is read before each launch and once a minute, so a page
+that grows between two checks can still run the container out of memory. A container with no memory
+limit is measured against the machine's memory, and a computer outside a container, such as OpenBot
+Desktop's, closes nothing for memory. In the all-in-one image the database and the API server run in
+the same container as the browsers, and the share counts them too. That is deliberate: the kernel's
+out-of-memory kill counts everything in the container and can take the database down, and closing a
+browser nobody is using first is how the database is protected. Each close is logged as
+`computer-browser-closed-for-memory` with the working set and the limit in bytes.
+`COMPUTER_MEMORY_HIGH_PERCENT` (Helm: `computers.memoryHighPercent`) sets the share where closing
+starts, and `0` switches it off.
+
+The tabs a Bot leaves behind are closed too. A Bot always works in its newest page, so an older tab,
+such as the page a sign-in popup was opened from or a link a site opened in a new tab, is one it
+cannot go back to, and it held memory for as long as the browser stayed up. A background tab that
+nothing has used, navigated or brought to the front for ten minutes is now closed. The page the Bot
+is on is never closed, and neither is any tab of a person's own browser or of a Bot whose wheel a
+person holds. `COMPUTER_TAB_IDLE_MS` (Helm: `computers.tabIdleMs`) sets the time, and `0` keeps them.
+
+Through Helm, `computers.browserIdleMs` and `computers.maxBrowsers` now reach the computer as
+written. An hour (`browserIdleMs: 3600000`) used to render as `3.6e+06`, which the computer ignored
+for its default of thirty minutes, and `browserIdleMs: 0` (keep browsers open) was dropped. All four
+of these settings now also reach the computers `computers.mode: sandbox` makes, which had none of
+them.
 
 ### Generated interfaces use A2UI 1.0
 
@@ -99,6 +148,12 @@ mark for what happened, with blocked rows tinted red and actions that did not ha
 The newest come first, and a press on When turns the order round. A search box and Outcome, Bot and
 Started by buttons narrow the events already loaded, and the count says how many of them match. A
 row about a Bot (a message routed to it, say) now names it under Bot.
+
+### The desktop setup page does not freeze when it loads during an install
+
+If the setup page loaded again while the desktop app downloaded local software, the window showed a
+spinning cursor until the download finished. Its checks for a running OpenBot and for the last
+failure now wait in the background, so the window keeps answering.
 
 ### Each Bot on a shared computer has its own files
 
@@ -385,6 +440,13 @@ apps, which nobody could connect there. An app's own page, reached from an older
 available yet and that an administrator has to finish setting it up, instead of naming the setting.
 The administrator's page for the app still names `COMPOSIO_API_KEY`.
 
+### A new desktop install of v0.2.0 gets past Install again
+
+A desktop app built from `main` stopped every new install at "Installing OpenBot" with
+`shared/package.json: No such file or directory`. It had started reading `shared`, `toolkit` and
+`extension` as packages, which v0.2.0 does not have: there `shared` is plain source and there is no
+`toolkit` or `extension`. It now reads them only when the release includes them.
+
 ### A built-in Bot behind an OpenAI proxy answers again
 
 A built-in Bot behind a gateway or proxy in front of OpenAI (an `OPENAI_BASE_URL` that is not OpenAI or
@@ -645,6 +707,16 @@ close it, and the reason is in the server's and the computer's logs.
 
 Clicking or focusing the desktop window while it downloaded local software showed a spinning cursor
 until the download finished. The window now comes forward at once and keeps the setup screen.
+
+### A reinstall no longer picks up the previous installation's Bot files and sign-ins
+
+A desktop installation set up again after its folder was deleted reused whatever the previous one
+left in the container engine: Bot workspace files, and each Bot's browser profile with its website
+sign-ins, under the same Bot ids. Only the database was checked. Start now finds every volume and
+stopped container the previous installation left and offers Start fresh, which deletes exactly those
+and then starts; nothing is reused without asking. To keep the data, restore the previous folder
+instead. A container from it that is still running stops the deletion until it is stopped. An
+installation with its saved key keeps its data as before.
 
 ### A new desktop install starts its server again
 

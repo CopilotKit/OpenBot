@@ -167,3 +167,21 @@ test("a replacement context interrupts a live handoff; the same context keeps it
   expect(session.control.get(request.id).request?.status).toBe("interrupted");
   expect(session.control.humanMayDrive()).toBe(false);
 });
+
+test("a Bot whose wheel a person holds, or has been asked to take, says so without a session being made", async () => {
+  // The computer asks this before closing a browser for memory or a Bot's idle tabs, and neither
+  // may close one under a person working in it, or under a page the Bot is waiting for them to work.
+  const sessions = createSessions({ isLive: () => true, mintRun: counting() });
+  expect(sessions.personHasTheWheel("bot-1")).toBe(false);
+  // Asking did not make one: the paths that ask are the ones that close things.
+  expect(sessions.get("bot-1")).toBeUndefined();
+
+  const session = sessions.for("bot-1");
+  expect(sessions.personHasTheWheel("bot-1")).toBe(false);
+  const request = session.control.requestHelp("Sign in").request!;
+  expect(sessions.personHasTheWheel("bot-1")).toBe(true);
+  await session.control.take(request.id);
+  expect(sessions.personHasTheWheel("bot-1")).toBe(true);
+  session.control.release(request.id);
+  expect(sessions.personHasTheWheel("bot-1")).toBe(false);
+});

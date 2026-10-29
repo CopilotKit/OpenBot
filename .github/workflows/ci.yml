@@ -142,7 +142,7 @@ jobs:
           tests/webrtc-proxy.test.ts tests/web-bot-auth-browser.test.ts
           tests/handoff-page-restore.test.ts tests/enter-text.test.ts tests/person-browser.test.ts tests/person-browser-computer.test.ts
           tests/bot-browser.test.ts tests/bot-browser-computer.test.ts
-          tests/screencast-keys-browser.test.ts
+          tests/screencast-keys-browser.test.ts tests/browser-memory.test.ts
         working-directory: agent-computer
         env:
           OPENBOT_COMPUTER_BROWSER: '1'
