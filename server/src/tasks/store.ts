@@ -703,6 +703,27 @@ export function createTaskStore(
         .limit(1);
       return row !== undefined;
     },
+    /** Whether this thread of the person's is a task's own conversation. */
+    async isTaskThread(owner: string, threadId: string) {
+      const [row] = await database
+        .select({ id: tasks.id })
+        .from(tasks)
+        .innerJoin(
+          intelligenceChannelMappings,
+          and(
+            eq(intelligenceChannelMappings.channelId, tasks.channelId),
+            eq(intelligenceChannelMappings.userId, owner),
+          ),
+        )
+        .where(
+          and(
+            eq(tasks.ownerUserId, owner),
+            eq(intelligenceChannelMappings.threadId, threadId),
+          ),
+        )
+        .limit(1);
+      return row !== undefined;
+    },
     /** Where a task lives, without working out what it is doing: for running its turn. */
     async locate(
       owner: string,
