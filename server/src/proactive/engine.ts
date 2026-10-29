@@ -34,6 +34,7 @@ import { REFUSAL_MARKER } from "../plugins/tools";
 import { TASK_RUNS, type TaskOrigin } from "../tasks/types";
 import {
   DEFAULT_MAX_ATTEMPTS,
+  type RunningCap,
   type SerialOrder,
   type WorkQueue,
 } from "../work/queue";
@@ -68,6 +69,14 @@ const RUN_LEASE_MS = 10 * 60_000;
 const TASK_LEASE_MS = 3 * 60_000;
 /** How long a task's turn that threw waits before its one retry. */
 const TASK_RETRY_MS = 10_000;
+/**
+ * How many of one person's task turns run at once, across every replica. The rest wait on the
+ * queue, still Working, and start as those finish, so a run of replies, suggestions or `start_task`
+ * calls never becomes dozens of headless turns at once for one person.
+ */
+export const TASK_TURNS_PER_PERSON = 3;
+/** How many task turns one process runs at once, for everyone. The rest wait on the queue. */
+const TASK_TURNS_AT_ONCE = 10;
 
 /**
  * One task's conversation takes one turn at a time, in the order the person gave them: its own
@@ -288,6 +297,8 @@ export type ProactiveEngineDeps = {
   now?: () => Date;
   /** How long a task's turn that threw waits for its retry. Tests pass 0. */
   taskRetryMs?: number;
+  /** How many task turns this process runs at once. Tests pass fewer. */
+  taskTurnsAtOnce?: number;
 };
 
 /** What a setting suggested before, as `ProactiveStore.history` answers it. */
@@ -584,6 +595,7 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
       /** Told once the item is off the queue for now, finished or let go. Never throws. */
       onSettled?: (payload: Record<string, unknown>) => Promise<void>;
       serialBy?: SerialOrder;
+      runningAtMost?: RunningCap;
       /**
        * A turn refused the conversation's lock on its first ask is given back without spending
        * its attempt. Only for work that is a single turn, with nothing earlier to repeat.
@@ -606,6 +618,9 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
       limit: 1,
       maxAttempts: options.maxAttempts,
       ...(options.serialBy ? { serialBy: options.serialBy } : {}),
+      ...(options.runningAtMost
+        ? { runningAtMost: options.runningAtMost }
+        : {}),
     });
     if (!item) return false;
     const controller = new AbortController();
@@ -795,6 +810,11 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
     return drain(PROACTIVE_TASK_KIND, runTask, {
       leaseMs: TASK_LEASE_MS,
       serialBy: TASK_ORDER,
+      // The expression `work_items_owner_task_idx` indexes, so the count is a lookup by person.
+      runningAtMost: {
+        by: (row) => sql`${row}.payload->>'ownerUserId'`,
+        max: TASK_TURNS_PER_PERSON,
+      },
       deferBusy: true,
       maxAttempts: TASK_RUNS,
       retryMs,
@@ -811,7 +831,23 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
    * A task starts now, not at the next sweep a minute away: the person was just told it is under
    * way. Each start claims one queued turn, so tasks started together run side by side, one per
    * start, and the sweep stays the backstop for any a crash left behind.
+   *
+   * Up to `TASK_TURNS_AT_ONCE` in this process, and `TASK_TURNS_PER_PERSON` for one person. A start
+   * past either leaves its turn queued, and each turn that finishes looks for the next, so a turn
+   * held back starts as soon as there is room rather than at the next sweep.
    */
+  const atOnce = deps.taskTurnsAtOnce ?? TASK_TURNS_AT_ONCE;
+  let turnsRunning = 0;
+  /** `drainTask`, unless this process already runs as many task turns as it may. */
+  async function drainTaskIfRoom() {
+    if (turnsRunning >= atOnce) return false;
+    turnsRunning += 1;
+    try {
+      return await drainTask();
+    } finally {
+      turnsRunning -= 1;
+    }
+  }
   const kicked = new Set<Promise<unknown>>();
   function track(work: Promise<unknown>) {
     const tracked = work.finally(() => kicked.delete(tracked));
@@ -819,7 +855,7 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
   }
   function startSoon() {
     track(
-      drainTask()
+      drainTaskIfRoom()
         .then((ran) => {
           if (ran) startSoon();
         })
@@ -1097,7 +1133,7 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
           const { settingId, runId } = payloadSchema.parse(payload);
           await run(settingId, runId, signal);
         }),
-        drainTask(),
+        drainTaskIfRoom(),
       ]);
       for (const outcome of outcomes)
         if (outcome.status === "rejected") throw outcome.reason;
