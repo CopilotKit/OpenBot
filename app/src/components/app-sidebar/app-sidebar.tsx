@@ -37,6 +37,7 @@ import { currentUserQueryOptions } from "@/lib/auth/queries";
 import {
   type ChannelSummary,
   channelListQueryOptions,
+  conversationsOnly,
 } from "@/lib/channels/queries";
 import { useChannelEvents } from "@/lib/channels/use-channel-events";
 import { appConfig } from "@/lib/generated/application-config";
@@ -272,6 +273,8 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const { data: currentUser } = useQuery(currentUserQueryOptions());
   const signOut = useSignOut();
   const channels = useInfiniteQuery(channelListQueryOptions());
+  // A task's own conversation is listed under Tasks, never here.
+  const conversations = channels.data && conversationsOnly(channels.data);
   // One socket for the app, opened where the roster is kept live.
   useChannelEvents();
   const [search, setSearch] = useState("");
@@ -289,7 +292,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
     focusWhenDrawn(searchBox);
   });
   const searching = search.trim().length > 0;
-  const visibleChannels = pinnedFirst(matchingChannels(channels.data, search));
+  const visibleChannels = pinnedFirst(matchingChannels(conversations, search));
   /*
    * FILTERING DOES NOT ANIMATE. Rows exit and relayout on every keystroke otherwise, which is a
    * list thrashing under somebody who is still typing — and the moving target is the very thing
@@ -297,7 +300,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
    * occasional; this is not.
    */
   const animateOrder =
-    !searching && (channels.data?.length ?? 0) <= MAX_ANIMATED_ROWS;
+    !searching && (conversations?.length ?? 0) <= MAX_ANIMATED_ROWS;
   const navigation = useNavigationItems();
 
   return (
@@ -389,7 +392,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                 </Empty>
               </div>
             ) : null}
-            {!searching && channels.data?.length === 0 ? (
+            {!searching && conversations?.length === 0 ? (
               <div className="py-4">
                 <Empty className="border border-dashed min-h-[40dvh]">
                   <EmptyHeader>

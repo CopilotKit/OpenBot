@@ -29,6 +29,7 @@ import { setChannelPinnedMutationOptions } from "@/lib/channels/mutations";
 import {
   type ChannelSummary,
   channelListQueryOptions,
+  conversationsOnly,
 } from "@/lib/channels/queries";
 import { appConfig } from "@/lib/generated/application-config";
 import { useNavigationItems } from "@/lib/navigation";
@@ -61,7 +62,9 @@ export function MenuSheet({ onClose }: { onClose: () => void }) {
   const [search, setSearch] = useState("");
   const body = useRef<HTMLDivElement>(null);
   const searching = search.trim().length > 0;
-  const shown = pinnedFirst(matchingChannels(channels.data, search));
+  const shown = pinnedFirst(
+    matchingChannels(conversationsOnly(channels.data), search),
+  );
   const botName = bot?.name ?? "your Bot";
 
   return (

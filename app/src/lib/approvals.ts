@@ -4,6 +4,7 @@ import {
   queryOptions,
 } from "@tanstack/react-query";
 import { client } from "@/lib/client";
+import { taskKeys } from "@/lib/tasks/queries";
 export type ApprovalDecision =
   | "allow_once"
   | "allow_always"
@@ -193,6 +194,12 @@ export const updateTeamApprovalRule = (
 const approvalsKey = ["approvals"] as const;
 const settle = (queryClient: QueryClient) => () =>
   queryClient.invalidateQueries({ queryKey: approvalsKey });
+/** An answer can move the task it was asked in off Needs you, so the tasks are read again too. */
+const settleAnswer = (queryClient: QueryClient) => () =>
+  Promise.all([
+    settle(queryClient)(),
+    queryClient.invalidateQueries({ queryKey: taskKeys.all }),
+  ]);
 
 export const approvalPreferencesMutationOptions = (queryClient: QueryClient) =>
   mutationOptions({
@@ -282,7 +289,7 @@ export const decideApprovalMutationOptions = (queryClient: QueryClient) =>
             ),
           },
       );
-      await settle(queryClient)();
+      await settleAnswer(queryClient)();
     },
   });
 /** Answer a question a Bot asked mid-run; the run resumes with the answer. */
@@ -290,7 +297,7 @@ export const answerPersonQuestionMutationOptions = (queryClient: QueryClient) =>
   mutationOptions({
     mutationFn: ({ id, response }: { id: string; response: string }) =>
       answerPersonQuestion(id, response),
-    onSuccess: settle(queryClient),
+    onSuccess: settleAnswer(queryClient),
   });
 
 /**

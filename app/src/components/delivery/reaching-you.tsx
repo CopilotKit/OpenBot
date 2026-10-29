@@ -43,7 +43,10 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { conversationLabel } from "@/lib/channels/label";
-import { channelListQueryOptions } from "@/lib/channels/queries";
+import {
+  channelListQueryOptions,
+  conversationsOnly,
+} from "@/lib/channels/queries";
 import {
   type ChatLink,
   confirmSmsMutationOptions,
@@ -349,12 +352,11 @@ function ConnectDialog({
         },
       },
     );
-  const conversations =
-    channels.data?.filter(
-      (channel) =>
-        channel.active &&
-        (fixedBot === undefined || channel.agentIds.includes(fixedBot)),
-    ) ?? [];
+  const conversations = conversationsOnly(channels.data).filter(
+    (channel) =>
+      channel.active &&
+      (fixedBot === undefined || channel.agentIds.includes(fixedBot)),
+  );
   const selected = channels.data?.find((channel) => channel.id === channelId);
   const chosen = !!agentId && !!channelId;
   const error = channels.error ?? link.error ?? sms.error ?? confirm.error;
