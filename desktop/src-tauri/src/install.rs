@@ -442,9 +442,11 @@ fn install_engine_with(
      */
     if found.docker_desktop_platform {
         if found.docker_app_installed {
-            let said = start_docker()?;
-            place_compose(&into)?;
-            return Ok(said);
+            // Nothing is placed: Docker Desktop ships Compose as a CLI plugin, and `docker compose`
+            // never looks on PATH, where a placed provider goes. `place_compose` asks Podman, which
+            // a Docker-only machine does not have, so it downloaded a provider nothing used. The
+            // caller checks Docker's own Compose once Docker answers.
+            return start_docker();
         }
         if found.docker_cli_installed && !found.podman_installed {
             return Err(Problem::with(
@@ -750,7 +752,7 @@ mod tests {
                 |engine, ok| observed.push((engine, ok)),
                 || Ok("started".into()),
                 |_| panic!("Podman is never installed beside Docker"),
-                |_| Ok("Compose placed".into()),
+                |_| panic!("Docker Desktop ships its own Compose"),
             )
             .unwrap();
             assert_eq!(said, "started");
