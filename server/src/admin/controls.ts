@@ -44,6 +44,7 @@ import type { Database } from "../db/client";
 import { agentProfiles, agents, auditEvents } from "../db/schema";
 import { createOtelEventExporter, type EventExporter } from "../telemetry/otel";
 import { scrubCommand } from "../telemetry/scrub";
+import type { WebBotAuth } from "../web-bot-auth";
 import {
   type Capability,
   type CapabilityRow,
@@ -59,7 +60,6 @@ import {
   type EnterpriseStore,
   type NetworkPolicyRow,
 } from "./settings-store";
-import type { WebBotAuth } from "../web-bot-auth";
 
 /** Action Recording keeps 90 days, as Grok Bot's does. */
 export const ACTION_RECORD_RETENTION_DAYS = 90;
@@ -700,11 +700,9 @@ export function guardDeliveryStore<T extends DeliveryLike>(
   const bind = store.bind.bind(store);
   const removeBinding = store.removeBinding.bind(store);
   store.bind = (async (input: Parameters<T["bind"]>[0]) => {
+    const chat = input.transport === "slack" || input.transport === "teams";
     const controls = enterpriseControls();
-    if (
-      controls &&
-      (input.transport === "slack" || input.transport === "teams")
-    ) {
+    if (controls && chat) {
       let allowed = false;
       try {
         allowed = await controls.capabilityFor(input.ownerUserId, "slackTeams");
@@ -724,6 +722,20 @@ export function guardDeliveryStore<T extends DeliveryLike>(
         realm: input.realm,
         channelId: input.channelId ?? null,
         agentId: input.agentId ?? null,
+        /*
+         * Which chat account now speaks as the owner, for Slack and Teams only.
+         *
+         * A link code there is redeemed by whoever sends it, and that account then runs the Bot as
+         * its owner and decides approvals as them. The row is filed under the owner, so without
+         * this a binding somebody else redeemed reads as the owner connecting their own account,
+         * and once the binding is removed nothing anywhere says which account it was. Recorded on
+         * the link only: `delivery.unlinked` carries the same `targetId`, so the trail joins them.
+         *
+         * Not for SMS or push. There `identity` is a phone number or a device token, the trail is
+         * readable by every administrator, and the code-in-a-shared-chat risk does not exist —
+         * an SMS code proves possession of the phone it was sent to.
+         */
+        ...(chat ? { identity: input.identity } : {}),
       },
     }).catch(() => undefined);
     return bound;
