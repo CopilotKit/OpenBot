@@ -8,7 +8,7 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-**Before upgrading.** Sixteen things change for an existing deployment:
+**Before upgrading.** Seventeen things change for an existing deployment:
 - Bots now share one computer per person instead of each having its own. Migration
   `0069_isolated_bots` adds `agent_profiles.isolated`, off for every existing Bot. With the
   supervisor (laptop, Desktop, Compose), a person's computer is created the first time one of their
@@ -64,6 +64,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   research run replaces them.
 - Migration `0062_action_policy_labels` adds a `labels` column to `action_policies`, defaulting to
   empty. Existing boundary rules keep working and show as "Custom rule" until somebody names them.
+- Migration `0070_tasks` adds one table, `tasks`, naming each task's conversation (below). It starts
+  empty. A suggestion started before the upgrade and still queued opens a task when it runs, rather
+  than running in the conversation it was suggested in.
 - On Helm's `shared` computer and the docker-compose `agent-computer`, each Bot's files now live in
   `computers/<Bot id>` on the workspace volume (below). Files saved before the upgrade stay at the
   root of the volume, where no Bot sees them; move them into a Bot's folder to give them back.
@@ -77,6 +80,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   In the all-in-one image that share counts the database and the API server too.
   `COMPUTER_MEMORY_HIGH_PERCENT=0` and `COMPUTER_TAB_IDLE_MS=0` (Helm: `computers.memoryHighPercent`
   and `computers.tabIdleMs`) keep the old behaviour.
+
+### Started work gets a conversation of its own
+
+Start on a suggestion now opens a task: a new conversation with the Bot where the work runs, so the
+conversation the suggestion came from stays as it was. A task's status is worked out from the work
+queue and the approval and question inboxes on every read. A turn that fails is tried once more, then
+reads as failed with the reason in plain words and can be tried again; replying in a task's
+conversation steers it, in order, even across a restart. The new `/api/tasks` routes serve it.
 
 ### A computer closes browsers nobody is using when its memory runs high
 

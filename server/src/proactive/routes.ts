@@ -5,7 +5,10 @@ import type { ProactiveEngine } from "./engine";
 import type { ProactiveStore } from "./store";
 import { ProactiveNotFoundError, ProactiveRefusedError } from "./types";
 
-/** `/api/proactive`: a person's background-research settings and the suggestions they produced. */
+/**
+ * `/api/proactive`: a person's background-research settings, the suggestions they produced, and
+ * Start, which opens one as a task.
+ */
 export function createProactiveRoutes(
   store: ProactiveStore,
   engine: ProactiveEngine,
@@ -68,13 +71,23 @@ export function createProactiveRoutes(
       suggestions: await store.suggestions(context.var.actor.id),
     }),
   );
-  routes.post("/suggestions/:id/start", async (context) =>
+  // One of the person's suggestions, whatever its status, so a card can say Started or Dismissed.
+  routes.get("/suggestions/:id", async (context) =>
     context.json({
-      suggestion: await engine.start(
+      suggestion: await store.suggestion(
         context.var.actor.id,
         context.req.param("id"),
       ),
     }),
+  );
+  /*
+   * Starting one opens it as a task, in a conversation of its own (engine.ts), and answers with
+   * both: the suggestion, now started, and the task to open.
+   */
+  routes.post("/suggestions/:id/start", async (context) =>
+    context.json(
+      await engine.start(context.var.actor.id, context.req.param("id")),
+    ),
   );
   routes.post("/suggestions/:id/dismiss", async (context) =>
     context.json({

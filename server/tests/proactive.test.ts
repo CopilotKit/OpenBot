@@ -6,12 +6,16 @@ import {
   type RunAgentInput,
 } from "@ag-ui/client";
 import type { GrantedTool } from "@openbot/toolkit/granted-tool";
+import { HeadlessToolSuspension } from "@openbot/toolkit/headless-tools";
 import { createTurnRunner, type RunnerLike } from "@openbot/toolkit/run-turn";
 import { Observable } from "rxjs";
 import { z } from "zod";
 import { serverTurnAdmission } from "../src/agents/turn-admission";
 import type { ApprovalRecord } from "../src/approvals/types";
-import { createProactiveEngine } from "../src/proactive/engine";
+import {
+  createProactiveEngine,
+  type TaskThreads,
+} from "../src/proactive/engine";
 import { createPrivateShareCheck } from "../src/proactive/private-share";
 import {
   createReadOnlyClassifier,
@@ -24,6 +28,16 @@ import type { ProactiveStore } from "../src/proactive/store";
 import type { ProactiveSetting } from "../src/proactive/types";
 import type { WorkQueue } from "../src/work/queue";
 
+/** These engines never start a task; one that tried would fail the test loudly. */
+const NO_TASKS: TaskThreads = {
+  open: async () => {
+    throw new Error("This test never opens a task.");
+  },
+  scope: async () => null,
+  failedTurn: async () => {
+    throw new Error("This test never retries a task.");
+  },
+};
 const catalogue = (effects: Record<string, "read" | "write">) => ({
   listServers: async () => [
     {
@@ -326,6 +340,7 @@ describe("proactive run", () => {
       notify: async (_scope, input) => {
         notified.push(input.text);
       },
+      tasks: NO_TASKS,
       startTask: async () => {
         writes.push("task");
       },
@@ -440,6 +455,7 @@ describe("proactive run", () => {
         threadId: "t",
       }),
       notify: async () => undefined,
+      tasks: NO_TASKS,
       startTask: async () => undefined,
       catalogue: {
         listServers: async () => [
@@ -578,6 +594,7 @@ describe("proactive run", () => {
       notify: async (_scope, message) => {
         seen.notified.push(message.text);
       },
+      tasks: NO_TASKS,
       startTask: async () => undefined,
       catalogue: { listServers: async () => [] },
       mintThreadId: () => "t",
@@ -738,5 +755,89 @@ describe("private information sharing check", () => {
     ).toBe("allowed");
     expect((await check(input)).status).toBe("allowed");
     expect(opened).toHaveLength(0);
+  });
+});
+
+describe("a started task's turn", () => {
+  /** An engine with one task's turn queued, whose turn does what `startTask` does. */
+  function withTask(startTask: () => Promise<void>) {
+    const calls: { name: string; args: unknown[] }[] = [];
+    const record =
+      (name: string, answer: unknown = undefined) =>
+      async (...args: unknown[]) => {
+        calls.push({ name, args });
+        return answer;
+      };
+    const store = {
+      claimDue: async () => [],
+    } as unknown as ProactiveStore;
+    let queued = [
+      {
+        kind: "proactive.task",
+        key: "task:t1",
+        payload: {
+          ownerUserId: "owner",
+          taskId: "t1",
+          text: "Reply to Rosa",
+          runs: 2,
+        },
+      },
+    ];
+    const queue = {
+      offer: record("offer", "queued"),
+      claim: async ({ kind }: { kind: string }) => {
+        const items = queued.filter((item) => item.kind === kind);
+        queued = queued.filter((item) => item.kind !== kind);
+        return items.map((item) => ({ ...item, attempts: 1 }));
+      },
+      renew: async () => true,
+      finish: record("finish", true),
+      release: record("release", true),
+      purge: async () => 0,
+    } as unknown as WorkQueue;
+    const engine = createProactiveEngine({
+      store,
+      memory: {
+        formMemory: async () => ({
+          id: "m",
+          duplicate: false,
+          forgotten: false,
+        }),
+      },
+      queue,
+      owner: "replica",
+      runTurn: (async () => ({ replyText: "" })) as never,
+      resolveScope: async () => null,
+      notify: async () => undefined,
+      tasks: {
+        ...NO_TASKS,
+        scope: async (ownerUserId) => ({
+          ownerUserId,
+          channelId: "task-channel",
+          agentId: "bot",
+          threadId: "task-thread",
+        }),
+      },
+      startTask,
+      catalogue: { listServers: async () => [] },
+      mintThreadId: () => "t",
+      taskRetryMs: 0,
+    });
+    return { engine, calls };
+  }
+  const named = (calls: { name: string; args: unknown[] }[], name: string) =>
+    calls.filter((call) => call.name === name).map((call) => call.args);
+
+  test("stopped on an approval, it is finished, never released to be run (and sent) again", async () => {
+    const { engine, calls } = withTask(async () => {
+      throw new HeadlessToolSuspension(
+        "This action is waiting for your approval.",
+        { kind: "approval", requestId: "approval-1" },
+      );
+    });
+    await engine.sweep();
+    await engine.idle();
+    expect(named(calls, "finish")).toHaveLength(1);
+    expect(named(calls, "release")).toEqual([]);
   });
 });

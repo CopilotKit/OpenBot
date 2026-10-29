@@ -24,6 +24,13 @@ describe("plainFailure", () => {
       plainFailure("This turn failed before it could be tried again."),
     ).toBe("it failed before it could be tried again");
     expect(plainFailure("fetch failed")).toBe("a service didn't answer");
+    // The conversation's lock refused, by the platform or as the turn first asked for it.
+    expect(plainFailure("Thread lock denied")).toBe(
+      "the conversation was busy with another reply",
+    );
+    expect(plainFailure("The conversation is busy with another turn.")).toBe(
+      "the conversation was busy with another reply",
+    );
     expect(plainFailure("invalid x-api-key")).toBe(
       "the model provider turned the request away",
     );

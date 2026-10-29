@@ -215,6 +215,7 @@ describe("what a channel is waiting on", () => {
       createdAt: since,
       pinned: false,
       lastReadAt: null,
+      taskId: null,
     });
     const store = fakeStore({
       list: async () => ({
