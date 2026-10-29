@@ -1678,6 +1678,28 @@ export function ChatTranscript({
     }
   }, [hasItems, delays]);
 
+  /*
+   * NOTHING BUT THE PLACEHOLDER UNTIL HISTORY IS COMPLETE, AND THE SCROLLER MOUNTED FRESH AFTER IT.
+   *
+   * History arrives in pieces: the gateway snapshot, then the stored thread merged into it, then
+   * the voice archive. Drawing each piece as it came showed a conversation that loaded and then
+   * moved. And the scroller decides where to land ONCE, in a layout effect, the first time it sees
+   * any child (`defaultScrollPosition`, applied by `ie()` in `@shadcn/react`'s message-scroller).
+   * Mounted early, it spent that on the always-present `contents` block below, and the restored
+   * rows then took the "rows appended" path, which pins a lone person's message to the top instead
+   * of going to the end. Mounted here, with every row in the same commit, its one landing is the
+   * bottom of the whole conversation, before the browser paints anything.
+   */
+  if (restoring) {
+    return (
+      <div className="flex size-full min-h-0 flex-col overflow-hidden">
+        <div className="mx-auto w-full max-w-2xl px-4 py-6">
+          <RestoringTranscript />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <MessageScrollerProvider autoScroll scrollPreviousItemPeek={48}>
       <MessageScroller>
@@ -1755,7 +1777,6 @@ export function ChatTranscript({
                 />
               ))}
             </div>
-            {items.length === 0 && restoring ? <RestoringTranscript /> : null}
             {items.map((item, index) =>
               item.kind === "tools" ? (
                 <MessageScrollerItem key={item.id} messageId={item.id}>
