@@ -1603,7 +1603,7 @@ pub fn spawn_host_process(
     let out = std::fs::File::create(logs.join(format!("{}.log", process.name)))?;
     let err = out.try_clone()?;
 
-    let mut command = command(bun);
+    let mut command = bun_command(bun);
     command.current_dir(root.join(process.cwd));
     let ports = crate::env::Ports::read(root)?;
     if process.name == LOCAL_BROWSER {
@@ -1636,6 +1636,23 @@ pub fn spawn_host_process(
         .stderr(Stdio::from(err))
         .stdin(Stdio::null());
     command.spawn()
+}
+
+/// The installation's Bun, with its own directory first on `PATH`.
+///
+/// The app runs as a package script (`serve`), and that script runs `bun` again by name. A desktop
+/// app opened from Finder has the system's minimal `PATH`, where there is no `bun`, so the app
+/// exited with status 127 the moment it started. First, so the Bun this installation downloaded is
+/// the one found, not an older one somebody has on `PATH`.
+fn bun_command(bun: &Path) -> Command {
+    let mut command = command(bun);
+    if let Some(directory) = bun
+        .parent()
+        .filter(|directory| !directory.as_os_str().is_empty())
+    {
+        command.env("PATH", crate::engine::path_with(directory));
+    }
+    command
 }
 
 /// The person's browser is started the way `scripts/start-local-chrome-computer.ts` starts it, and
@@ -3660,6 +3677,33 @@ fn dirs_home() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The app's `serve` script runs `bun` by name. Opened from Finder, the desktop has no `bun` on
+    /// `PATH`, so a host process has to be handed the directory of the Bun that started it.
+    #[test]
+    fn a_host_process_finds_the_installations_own_bun_by_name() {
+        let bun = Path::new("/installation/openbot-engine/bun-1.4.3/bun");
+        let command = bun_command(bun);
+        let path = command
+            .get_envs()
+            .find(|(name, _)| *name == "PATH")
+            .and_then(|(_, value)| value)
+            .expect("a host process is given a PATH");
+        let mut entries = std::env::split_paths(path);
+        assert_eq!(
+            entries.next().as_deref(),
+            Some(Path::new("/installation/openbot-engine/bun-1.4.3")),
+            "the installation's Bun comes first"
+        );
+        let inherited: Vec<_> = std::env::var_os("PATH")
+            .map(|path| std::env::split_paths(&path).collect())
+            .unwrap_or_default();
+        assert_eq!(
+            entries.collect::<Vec<_>>(),
+            inherited,
+            "and the rest of PATH is kept"
+        );
+    }
     use crate::test_support::temp_root;
 
     #[test]
