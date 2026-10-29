@@ -456,7 +456,13 @@ export function summarise(steps: readonly StepDetails[]): string {
   const browser = of("browser");
   const browsed = browser.reduce((sum, step) => sum + step.pages, 0);
   if (browsed) phrases.push(`browsed ${plural(browsed, "page", "pages")}`);
-  else if (browser.length) phrases.push("used the browser");
+  else if (browser.length) {
+    // Named as the computer's step log names them, up to two; past that, one phrase for all.
+    const actions = [...new Set(browser.map((step) => step.label))];
+    if (actions.length <= 2)
+      phrases.push(...actions.map((label) => label.toLowerCase()));
+    else phrases.push("used the browser");
+  }
   for (const person of new Set(
     of("connector").flatMap((step) => (step.person ? [step.person] : [])),
   ))
