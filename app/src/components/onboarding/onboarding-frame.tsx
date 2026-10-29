@@ -13,9 +13,9 @@ import { cn } from "@/lib/utils";
  * screen and held in view while the left scrolls, the step's picture. Steps already reached can be
  * picked from the list; the ones ahead cannot.
  *
- * BELOW `lg`, ONE COLUMN, the way OpenDuet lays a step out on a phone: a round back chevron at the
- * top left, the steps as dashes across the top, the heading and its picture, and the buttons pinned
- * to the bottom, full width, with a fade above them where the step scrolls under.
+ * BELOW `lg`, ONE COLUMN, for a phone: a round back chevron at the top left, the steps as dashes
+ * across the top, the heading and its picture, and the buttons pinned to the bottom, full width,
+ * with a fade above them where the step scrolls under.
  *
  * The frame owns where things are, never what a step says. Back, the list and the buttons sit in
  * the same place on every step, so moving through onboarding never moves the control somebody is
