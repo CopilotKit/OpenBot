@@ -37,9 +37,9 @@ export const Route = createRootRouteWithContext<RouterContext>()({
  * app-wide guard could not be installed by a leaf: several composers can be mounted at once, so a
  * `document` listener owned by one of them would be installed once per composer and torn down by
  * whichever unmounted first. The leaf approach also cannot reach every surface even in principle.
- * The onboarding poster (`_authed/onboarding.tsx`) wraps its decorative composer in
- * `pointer-events-none` on purpose, so that composer can never receive a drop at all: the event
- * goes straight past it to the document. So do the transcript, the sidebar, the page margin, and
+ * Onboarding's pictures (`components/onboarding/illustration-frame.tsx`), its drawing of a
+ * composer among them, are `pointer-events-none` on purpose, so nothing in them can ever receive a
+ * drop at all: the event goes straight past them to the document. So do the transcript, the sidebar, the page margin, and
  * every screen that will ever be added without thinking about drag and drop. The root is the one
  * place where "once" is a fact rather than a hope: `RootComponent` mounts once per app.
  *

@@ -143,8 +143,9 @@ changes for a deployment.
 - Check your setup asks the new `GET /api/setup` whether Intelligence, the model key, the Bot computer,
   more apps and Slack and Teams work, row by row. An admin, or somebody running OpenBot alone, is
   shown the page or the variables that close a gap; everybody else only that their admin sets it up.
-  Check again asks Intelligence and the model provider again, at most every 10 seconds, and pushes
-  each running Bot computer its network policy to see that it answers; it wakes none.
+  Check again asks Intelligence and the model provider again, at most every 10 seconds. To check the
+  Bot computer, the server sends each running computer its network policy, at start-up and on Check
+  again, and sees that it answers; it wakes none.
 - A connection started from onboarding, or cancelled at the app's own sign-in page, now returns to
   the screen it started on instead of the Connections list.
 
