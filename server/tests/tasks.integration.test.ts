@@ -149,9 +149,9 @@ describe("status", () => {
    */
   async function acceptedAnswer() {
     const task = await freshTask();
-    // On the database's clock, and before the reply: a host clock a few milliseconds ahead of the
-    // database's would otherwise put this turn's end after the reply's failure.
-    await turnFor(task.id, { finishedAt: sql`now() - interval '1 minute'` });
+    // Well before the reply: a host clock a few milliseconds ahead of the database's would
+    // otherwise put this turn's end after the reply's failure.
+    await turnFor(task.id, { finishedAt: new Date(Date.now() - 60_000) });
     const questionId = `${prefix}-answered-${randomUUID()}`;
     const question = {
       ownerUserId: owner.id,
