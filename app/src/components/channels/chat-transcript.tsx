@@ -1707,21 +1707,27 @@ function useSmoothSendScroll(
 ) {
   const reducedMotion = useReducedMotion();
   const seenRef = useRef<string | null>(null);
+  /*
+   * Whether the conversation has been seen open since it was restored. Separate from `seenRef`:
+   * the glide needs a previous message to compare with, but a send does not. In a routine's channel
+   * that holds only firings, the person's first message has nothing before it and is still a send.
+   */
+  const openRef = useRef(false);
 
   useLayoutEffect(() => {
     const element = viewport.current;
     const previous = seenRef.current;
+    const wasOpen = openRef.current;
     // Nothing is recorded while restoring, so the first id after it is a baseline (see above).
     seenRef.current = restoring ? null : newestUserMessageId;
+    openRef.current = !restoring;
 
     // A send picks following back up whatever the motion setting; only the glide depends on it.
     if (
-      shouldGlideOnSend({
-        previous,
-        next: newestUserMessageId,
-        restoring,
-        reducedMotion: false,
-      })
+      wasOpen &&
+      !restoring &&
+      newestUserMessageId !== null &&
+      newestUserMessageId !== previous
     ) {
       onSend();
     }

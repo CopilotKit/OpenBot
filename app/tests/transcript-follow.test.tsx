@@ -200,3 +200,23 @@ test("dragging an overlay scrollbar up pauses", () => {
 
   expect(following(view.container)).toBe("false");
 });
+
+/*
+ * A routine's channel can hold nothing the person sent: only firings and what the Bot said. Their
+ * first message there is still a send, though there was no earlier one to compare it with.
+ */
+test("the first message a person sends picks following up again", () => {
+  const before = [assistant("a0", "the daily digest")];
+  const view = render(<ChatTranscript messages={before} restoring={false} />);
+  fireEvent.wheel(viewport(view.container), { deltaY: -100 });
+  expect(following(view.container)).toBe("false");
+
+  view.rerender(
+    <ChatTranscript
+      messages={[...before, user("u1", "what changed?")]}
+      restoring={false}
+    />,
+  );
+
+  expect(following(view.container)).toBe("true");
+});
