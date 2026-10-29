@@ -12,9 +12,10 @@ export function Welcome({
   onStart: () => void;
   /**
    * When this build can run Intelligence on this computer, Install sets up both here. Local is the
-   * default with nothing to choose: one fewer decision before anything is installed.
+   * default, and Install is the one button that asks for attention. Hosted is a quiet second button
+   * for somebody who already knows local is not for them, so they need not fail at it first.
    */
-  local?: { onInstall: () => void };
+  local?: { onInstall: () => void; onHosted: () => void };
 }) {
   if (local) {
     return (
@@ -31,6 +32,9 @@ export function Welcome({
         <div className="row">
           <button type="button" onClick={local.onInstall}>
             Install
+          </button>
+          <button type="button" className="quiet" onClick={local.onHosted}>
+            Use CopilotKit's hosted service instead
           </button>
         </div>
       </div>

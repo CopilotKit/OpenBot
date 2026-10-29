@@ -622,7 +622,7 @@ test("with a CLI, the first screen is Install, local by default with nothing to 
       "Installs OpenBot and CopilotKit Intelligence on this computer. The first setup takes about 10 minutes.",
     ),
   ).toBeTruthy();
-  expect(buttons(view)).toEqual(["Install"]);
+  expect(buttons(view)).toEqual(["Install", HOSTED_LINK]);
   expect(view.queryByRole("radio")).toBeNull();
   expectPlain(view);
   expect(localCliCalls()).toEqual([]);
@@ -641,6 +641,20 @@ test("with a CLI, the first screen is Install, local by default with nothing to 
   expect(buttons(view)).toEqual(["Set up OpenBot"]);
   await userEvent.click(view.getByRole("button", { name: "Set up OpenBot" }));
   expect(stepLabel(view)).toBe("Bot");
+});
+
+test("with a CLI, the first screen also offers the hosted service, which sets up without the CLI", async () => {
+  setupRootConfiguration("/tmp/local-eval-welcome-hosted", async () =>
+    emptyConfiguration(),
+  );
+  withLocalCli({});
+  const view = await renderApp();
+  await userEvent.click(view.getByRole("button", { name: HOSTED_LINK }));
+  // The hosted setup a build without local Intelligence starts: the Bot first.
+  expect(stepLabel(view)).toBe("Bot");
+  expect(view.queryByText("Choose where Intelligence runs")).toBeNull();
+  expect(installationCalls()).toEqual([]);
+  expect(localCliCalls()).toEqual([]);
 });
 
 test("Install prepares the default Bot in the default folder, with no Bot or folder screen", async () => {

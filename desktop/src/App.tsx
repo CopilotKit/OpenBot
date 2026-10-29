@@ -1060,6 +1060,11 @@ function Setup() {
                     setStep("account");
                     void beginLocalInstall();
                   },
+                  // The hosted setup, as a build without local Intelligence starts it.
+                  onHosted: () => {
+                    chooseIntelligence("hosted");
+                    setStep("harness");
+                  },
                 }
               : undefined
           }
