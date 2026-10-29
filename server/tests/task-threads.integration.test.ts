@@ -81,7 +81,11 @@ import {
 } from "../src/tasks/report";
 import { createTaskRoutes } from "../src/tasks/routes";
 import { createTaskStore } from "../src/tasks/store";
-import { createTaskThreads, createTaskTurn } from "../src/tasks/threads";
+import {
+  createContinuationRunner,
+  createTaskThreads,
+  createTaskTurn,
+} from "../src/tasks/threads";
 import {
   builtInBots,
   MAX_TASKS_PER_TURN,
@@ -2640,6 +2644,51 @@ describe("start_task", () => {
     ] satisfies AuditInitiator[])
       expect(await held(initiator)).toEqual([]);
     expect(await held({ kind: "person" }, true)).toEqual([]);
+  });
+
+  test("is not offered to a turn carried on in a task's conversation, which is built as the task's turn", async () => {
+    const task = await threads.open({
+      ownerUserId: owner.id,
+      agentId: bot,
+      title: `Carried on ${randomUUID()}`,
+      why: null,
+      origin: "asked",
+      suggestionId: null,
+      sourceApp: null,
+      sourceLink: null,
+    });
+    const taskThread = (await channelStore.get(owner, task.channelId))
+      ?.threadId;
+    const chat = await chatOf();
+    const builtFor: string[] = [];
+    const runner = createContinuationRunner({
+      isTaskThread: taskStore.isTaskThread,
+      taskTurn: async ({ threadId }) => {
+        builtFor.push(`task:${threadId}`);
+        return { replyText: "" };
+      },
+      otherwise: async ({ threadId }) => {
+        builtFor.push(`other:${threadId}`);
+        return { replyText: "" };
+      },
+    });
+    const carryOn = (ownerUserId: string, threadId: string) =>
+      runner({
+        ownerUserId,
+        routineId: "approval",
+        agentId: bot,
+        threadId,
+        instruction: "",
+      });
+    await carryOn(owner.id, taskThread ?? "");
+    await carryOn(owner.id, chat.threadId);
+    // Another person's turn is never read as this person's task.
+    await carryOn(other.id, taskThread ?? "");
+    expect(builtFor).toEqual([
+      `task:${taskThread}`,
+      `other:${chat.threadId}`,
+      `other:${taskThread}`,
+    ]);
   });
 
   test(`starts at most ${MAX_TASKS_PER_TURN} tasks from one turn, counting calls made in parallel`, async () => {
