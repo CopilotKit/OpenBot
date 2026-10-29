@@ -5,7 +5,10 @@ import {
 } from "@openbot/shared/task-brief";
 import { HeadlessToolSuspension } from "@openbot/toolkit/headless-tools";
 import { ThreadLockBusyError } from "@openbot/toolkit/lease";
-import type { TurnRunner } from "@openbot/toolkit/run-turn";
+import {
+  HEADLESS_WAITING_FALLBACK,
+  type TurnRunner,
+} from "@openbot/toolkit/run-turn";
 import type { AgentActor } from "../agents/profile-types";
 import { PERSON_INITIATOR } from "../audit";
 import type { ChannelStore } from "../channels/routes";
@@ -94,6 +97,19 @@ export function createTaskThreads(deps: {
       if (found) await deps.channels.signalBusy(found.threadId, false);
     },
   };
+}
+
+/**
+ * What a task's conversation says while its turn waits on the person. The line becomes the task's
+ * next step on Tasks, so a turn stopped with no words of its own is named for what it waits on,
+ * never by the toolkit's "The turn is waiting for human input."
+ */
+function waitingLine(suspension: HeadlessToolSuspension): string {
+  if (suspension.message !== HEADLESS_WAITING_FALLBACK)
+    return suspension.message;
+  return suspension.waiting.kind === "approval"
+    ? "Waiting for you to allow a step."
+    : "Waiting for your answer.";
 }
 
 /**
@@ -198,7 +214,7 @@ export function createTaskTurn(deps: {
           ).catch(() => {});
         throw error;
       }
-      await record(error.message, scope.agentId, `${input.runId}:waiting`);
+      await record(waitingLine(error), scope.agentId, `${input.runId}:waiting`);
     }
   };
 }
