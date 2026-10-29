@@ -1,0 +1,134 @@
+/*
+ * OpenBot's own look: the default skin only. Every rule is scoped to `:root:not([data-skin])`, so OpenDuet,
+ * OpenDots and OpenMuse keep theirs. It lives apart from theme.css because the extension's pages import
+ * theme.css and must keep today's palette.
+ */
+/*
+ * OpenBot's own look, drawn only while no skin is active. The `:root` and `.dark` above stay as the
+ * base the skins inherit; everything here sits under `:root:not([data-skin])`, so OpenDuet, OpenDots
+ * and OpenMuse never see it. That selector outranks `.dark`, so every token set for light is set
+ * again for dark below, or dark mode would show the light value. `design-tokens.test.ts` holds the
+ * two blocks to each other.
+ *
+ * White surfaces with cool hairlines in light, a plum ground in dark. Orange is kept out of these
+ * tokens on purpose: it means "waits for you" and nothing else.
+ */
+:root:not([data-skin]) {
+  --background: #ffffff;
+  --foreground: #010507;
+  --card: #ffffff;
+  --card-foreground: #010507;
+  --popover: #ffffff;
+  --popover-foreground: #010507;
+  --primary: #010507;
+  --primary-foreground: #ffffff;
+  --secondary: #f0f0f4;
+  --secondary-foreground: #010507;
+  --muted: #f0f0f4;
+  --muted-foreground: #64646c;
+  --accent: #f0f0f4;
+  --accent-foreground: #010507;
+  --destructive: #b42530;
+  --success: #12795b;
+  --border: #dbdbe5;
+  --input: #dbdbe5;
+  --ring: #7480f1;
+  --radius: 0.625rem;
+  --sidebar: #ffffff;
+  --sidebar-foreground: #010507;
+  --sidebar-primary: #010507;
+  --sidebar-primary-foreground: #ffffff;
+  /* The selected row: a lilac tint rather than a gray, as the rest of the frame is white. */
+  --sidebar-accent: rgb(190 194 255 / 20%);
+  --sidebar-accent-foreground: #010507;
+  --sidebar-border: #dbdbe5;
+  --sidebar-ring: #7480f1;
+
+  /* A firmer edge for rows, cards and tiles that sit on the white ground. */
+  --line-strong: #c4c6d8;
+  /* The faint fill behind an empty state. */
+  --wash: #f4f4fa;
+  --card-shadow: 0 1px 2px rgb(1 5 7 / 5%), 0 6px 16px -10px rgb(1 5 7 / 16%);
+  --card-shadow-hover:
+    0 2px 4px rgb(1 5 7 / 6%), 0 14px 28px -14px rgb(1 5 7 / 24%);
+  /* The hairline and drop that lift a Bot's orb off the surface. */
+  --orb-edge: 0 0 0 1px rgb(1 5 7 / 7%), 0 1px 3px -1px rgb(1 5 7 / 20%);
+  /*
+   * CopilotKit's square-dot matrix: one 108px tile of 5px squares on a 9px pitch, each at its own
+   * opacity, repeated. A tile is drawn per theme, in lilac. It appears only behind a conversation's
+   * large orb and in empty states, at `--accent-dot-opacity`.
+   */
+  --dot-tile: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='108' height='108' fill='%239ea4f5' shape-rendering='crispEdges'%3E%3Cpath fill-opacity='.26' d='M11 2h5v5h-5z'/%3E%3Cpath fill-opacity='.66' d='M20 2h5v5h-5z'/%3E%3Cpath fill-opacity='.29' d='M29 2h5v5h-5z'/%3E%3Cpath fill-opacity='.69' d='M38 2h5v5h-5z'/%3E%3Cpath fill-opacity='.61' d='M47 2h5v5h-5z'/%3E%3Cpath fill-opacity='.76' d='M56 2h5v5h-5z'/%3E%3Cpath fill-opacity='.32' d='M65 2h5v5h-5z'/%3E%3Cpath fill-opacity='.62' d='M74 2h5v5h-5z'/%3E%3Cpath fill-opacity='.40' d='M92 2h5v5h-5z'/%3E%3Cpath fill-opacity='.75' d='M101 2h5v5h-5z'/%3E%3Cpath fill-opacity='.44' d='M2 11h5v5h-5z'/%3E%3Cpath fill-opacity='.61' d='M11 11h5v5h-5z'/%3E%3Cpath fill-opacity='.50' d='M20 11h5v5h-5z'/%3E%3Cpath fill-opacity='.88' d='M29 11h5v5h-5z'/%3E%3Cpath fill-opacity='.29' d='M38 11h5v5h-5z'/%3E%3Cpath fill-opacity='.29' d='M47 11h5v5h-5z'/%3E%3Cpath fill-opacity='.26' d='M56 11h5v5h-5z'/%3E%3Cpath fill-opacity='.26' d='M65 11h5v5h-5z'/%3E%3Cpath fill-opacity='.48' d='M74 11h5v5h-5z'/%3E%3Cpath fill-opacity='.84' d='M83 11h5v5h-5z'/%3E%3Cpath fill-opacity='.48' d='M101 11h5v5h-5z'/%3E%3Cpath fill-opacity='.36' d='M2 20h5v5h-5z'/%3E%3Cpath fill-opacity='.88' d='M11 20h5v5h-5z'/%3E%3Cpath fill-opacity='.30' d='M29 20h5v5h-5z'/%3E%3Cpath fill-opacity='.90' d='M38 20h5v5h-5z'/%3E%3Cpath fill-opacity='.19' d='M47 20h5v5h-5z'/%3E%3Cpath fill-opacity='.25' d='M56 20h5v5h-5z'/%3E%3Cpath fill-opacity='.36' d='M65 20h5v5h-5z'/%3E%3Cpath fill-opacity='.45' d='M74 20h5v5h-5z'/%3E%3Cpath fill-opacity='.22' d='M83 20h5v5h-5z'/%3E%3Cpath fill-opacity='.39' d='M92 20h5v5h-5z'/%3E%3Cpath fill-opacity='.56' d='M101 20h5v5h-5z'/%3E%3Cpath fill-opacity='.44' d='M2 29h5v5h-5z'/%3E%3Cpath fill-opacity='.61' d='M11 29h5v5h-5z'/%3E%3Cpath fill-opacity='.34' d='M20 29h5v5h-5z'/%3E%3Cpath fill-opacity='.23' d='M29 29h5v5h-5z'/%3E%3Cpath fill-opacity='.30' d='M38 29h5v5h-5z'/%3E%3Cpath fill-opacity='.33' d='M47 29h5v5h-5z'/%3E%3Cpath fill-opacity='.84' d='M56 29h5v5h-5z'/%3E%3Cpath fill-opacity='.77' d='M65 29h5v5h-5z'/%3E%3Cpath fill-opacity='.18' d='M83 29h5v5h-5z'/%3E%3Cpath fill-opacity='.22' d='M101 29h5v5h-5z'/%3E%3Cpath fill-opacity='.18' d='M2 38h5v5h-5z'/%3E%3Cpath fill-opacity='.51' d='M11 38h5v5h-5z'/%3E%3Cpath fill-opacity='.90' d='M20 38h5v5h-5z'/%3E%3Cpath fill-opacity='.85' d='M29 38h5v5h-5z'/%3E%3Cpath fill-opacity='.88' d='M38 38h5v5h-5z'/%3E%3Cpath fill-opacity='.25' d='M47 38h5v5h-5z'/%3E%3Cpath fill-opacity='.15' d='M65 38h5v5h-5z'/%3E%3Cpath fill-opacity='.22' d='M83 38h5v5h-5z'/%3E%3Cpath fill-opacity='.41' d='M92 38h5v5h-5z'/%3E%3Cpath fill-opacity='.23' d='M101 38h5v5h-5z'/%3E%3Cpath fill-opacity='.22' d='M2 47h5v5h-5z'/%3E%3Cpath fill-opacity='.86' d='M11 47h5v5h-5z'/%3E%3Cpath fill-opacity='.41' d='M20 47h5v5h-5z'/%3E%3Cpath fill-opacity='.56' d='M38 47h5v5h-5z'/%3E%3Cpath fill-opacity='.14' d='M47 47h5v5h-5z'/%3E%3Cpath fill-opacity='.20' d='M56 47h5v5h-5z'/%3E%3Cpath fill-opacity='.49' d='M65 47h5v5h-5z'/%3E%3Cpath fill-opacity='.24' d='M74 47h5v5h-5z'/%3E%3Cpath fill-opacity='.21' d='M83 47h5v5h-5z'/%3E%3Cpath fill-opacity='.15' d='M92 47h5v5h-5z'/%3E%3Cpath fill-opacity='.63' d='M101 47h5v5h-5z'/%3E%3Cpath fill-opacity='.42' d='M2 56h5v5h-5z'/%3E%3Cpath fill-opacity='.89' d='M20 56h5v5h-5z'/%3E%3Cpath fill-opacity='.61' d='M29 56h5v5h-5z'/%3E%3Cpath fill-opacity='.14' d='M38 56h5v5h-5z'/%3E%3Cpath fill-opacity='.82' d='M47 56h5v5h-5z'/%3E%3Cpath fill-opacity='.94' d='M56 56h5v5h-5z'/%3E%3Cpath fill-opacity='.35' d='M65 56h5v5h-5z'/%3E%3Cpath fill-opacity='.66' d='M74 56h5v5h-5z'/%3E%3Cpath fill-opacity='.34' d='M83 56h5v5h-5z'/%3E%3Cpath fill-opacity='.34' d='M92 56h5v5h-5z'/%3E%3Cpath fill-opacity='.48' d='M101 56h5v5h-5z'/%3E%3Cpath fill-opacity='.54' d='M2 65h5v5h-5z'/%3E%3Cpath fill-opacity='.29' d='M11 65h5v5h-5z'/%3E%3Cpath fill-opacity='.36' d='M20 65h5v5h-5z'/%3E%3Cpath fill-opacity='.27' d='M29 65h5v5h-5z'/%3E%3Cpath fill-opacity='.99' d='M38 65h5v5h-5z'/%3E%3Cpath fill-opacity='.83' d='M47 65h5v5h-5z'/%3E%3Cpath fill-opacity='.21' d='M56 65h5v5h-5z'/%3E%3Cpath fill-opacity='.18' d='M65 65h5v5h-5z'/%3E%3Cpath fill-opacity='.48' d='M74 65h5v5h-5z'/%3E%3Cpath fill-opacity='.93' d='M83 65h5v5h-5z'/%3E%3Cpath fill-opacity='.20' d='M92 65h5v5h-5z'/%3E%3Cpath fill-opacity='.19' d='M101 65h5v5h-5z'/%3E%3Cpath fill-opacity='.44' d='M2 74h5v5h-5z'/%3E%3Cpath fill-opacity='.43' d='M11 74h5v5h-5z'/%3E%3Cpath fill-opacity='.31' d='M20 74h5v5h-5z'/%3E%3Cpath fill-opacity='.14' d='M29 74h5v5h-5z'/%3E%3Cpath fill-opacity='.46' d='M38 74h5v5h-5z'/%3E%3Cpath fill-opacity='.65' d='M47 74h5v5h-5z'/%3E%3Cpath fill-opacity='.23' d='M56 74h5v5h-5z'/%3E%3Cpath fill-opacity='.36' d='M65 74h5v5h-5z'/%3E%3Cpath fill-opacity='.77' d='M83 74h5v5h-5z'/%3E%3Cpath fill-opacity='.88' d='M92 74h5v5h-5z'/%3E%3Cpath fill-opacity='.94' d='M101 74h5v5h-5z'/%3E%3Cpath fill-opacity='.52' d='M11 83h5v5h-5z'/%3E%3Cpath fill-opacity='.86' d='M20 83h5v5h-5z'/%3E%3Cpath fill-opacity='.16' d='M38 83h5v5h-5z'/%3E%3Cpath fill-opacity='.16' d='M47 83h5v5h-5z'/%3E%3Cpath fill-opacity='.93' d='M65 83h5v5h-5z'/%3E%3Cpath fill-opacity='.17' d='M74 83h5v5h-5z'/%3E%3Cpath fill-opacity='.60' d='M83 83h5v5h-5z'/%3E%3Cpath fill-opacity='.39' d='M92 83h5v5h-5z'/%3E%3Cpath fill-opacity='.36' d='M101 83h5v5h-5z'/%3E%3Cpath fill-opacity='.71' d='M2 92h5v5h-5z'/%3E%3Cpath fill-opacity='.35' d='M11 92h5v5h-5z'/%3E%3Cpath fill-opacity='.75' d='M29 92h5v5h-5z'/%3E%3Cpath fill-opacity='.18' d='M38 92h5v5h-5z'/%3E%3Cpath fill-opacity='.43' d='M47 92h5v5h-5z'/%3E%3Cpath fill-opacity='.21' d='M56 92h5v5h-5z'/%3E%3Cpath fill-opacity='.19' d='M65 92h5v5h-5z'/%3E%3Cpath fill-opacity='.57' d='M83 92h5v5h-5z'/%3E%3Cpath fill-opacity='.41' d='M92 92h5v5h-5z'/%3E%3Cpath fill-opacity='.15' d='M101 92h5v5h-5z'/%3E%3Cpath fill-opacity='.28' d='M2 101h5v5h-5z'/%3E%3Cpath fill-opacity='.16' d='M29 101h5v5h-5z'/%3E%3Cpath fill-opacity='.90' d='M38 101h5v5h-5z'/%3E%3Cpath fill-opacity='.70' d='M47 101h5v5h-5z'/%3E%3Cpath fill-opacity='.81' d='M56 101h5v5h-5z'/%3E%3Cpath fill-opacity='.74' d='M65 101h5v5h-5z'/%3E%3Cpath fill-opacity='.49' d='M74 101h5v5h-5z'/%3E%3Cpath fill-opacity='.34' d='M83 101h5v5h-5z'/%3E%3Cpath fill-opacity='.42' d='M92 101h5v5h-5z'/%3E%3Cpath fill-opacity='.65' d='M101 101h5v5h-5z'/%3E%3C/svg%3E");
+  --accent-dot-opacity: 0.1;
+  --font-sans:
+    "Atkinson Hyperlegible Next Variable", ui-sans-serif, system-ui, sans-serif;
+  /* Only for URLs, times, codes and file names. */
+  --font-mono: "Atkinson Hyperlegible Mono Variable", ui-monospace, monospace;
+}
+
+:root:not([data-skin]).dark {
+  --background: #242032;
+  --foreground: #f0f0f4;
+  --card: #242032;
+  --card-foreground: #f0f0f4;
+  --popover: #2b2645;
+  --popover-foreground: #f0f0f4;
+  --primary: #f0f0f4;
+  --primary-foreground: #010507;
+  --secondary: #1f1c2c;
+  --secondary-foreground: #f0f0f4;
+  --muted: #1f1c2c;
+  --muted-foreground: #9a9aa6;
+  --accent: #2b2645;
+  --accent-foreground: #f0f0f4;
+  --destructive: #ff9aa0;
+  --success: #5fe3bb;
+  --border: #3a3452;
+  --input: #3a3452;
+  --ring: #8d97ff;
+  --radius: 0.625rem;
+  --sidebar: #242032;
+  --sidebar-foreground: #f0f0f4;
+  --sidebar-primary: #f0f0f4;
+  --sidebar-primary-foreground: #010507;
+  --sidebar-accent: rgb(190 194 255 / 12%);
+  --sidebar-accent-foreground: #f0f0f4;
+  --sidebar-border: #3a3452;
+  --sidebar-ring: #8d97ff;
+
+  --line-strong: #4d4670;
+  --wash: #211d30;
+  --card-shadow: 0 1px 2px rgb(0 0 0 / 35%), 0 8px 18px -12px rgb(0 0 0 / 60%);
+  --card-shadow-hover:
+    0 2px 6px rgb(0 0 0 / 40%), 0 16px 30px -14px rgb(0 0 0 / 70%);
+  --orb-edge: 0 0 0 1px rgb(255 255 255 / 8%);
+  --dot-tile: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='108' height='108' fill='%23bec2ff' shape-rendering='crispEdges'%3E%3Cpath fill-opacity='.26' d='M11 2h5v5h-5z'/%3E%3Cpath fill-opacity='.66' d='M20 2h5v5h-5z'/%3E%3Cpath fill-opacity='.29' d='M29 2h5v5h-5z'/%3E%3Cpath fill-opacity='.69' d='M38 2h5v5h-5z'/%3E%3Cpath fill-opacity='.61' d='M47 2h5v5h-5z'/%3E%3Cpath fill-opacity='.76' d='M56 2h5v5h-5z'/%3E%3Cpath fill-opacity='.32' d='M65 2h5v5h-5z'/%3E%3Cpath fill-opacity='.62' d='M74 2h5v5h-5z'/%3E%3Cpath fill-opacity='.40' d='M92 2h5v5h-5z'/%3E%3Cpath fill-opacity='.75' d='M101 2h5v5h-5z'/%3E%3Cpath fill-opacity='.44' d='M2 11h5v5h-5z'/%3E%3Cpath fill-opacity='.61' d='M11 11h5v5h-5z'/%3E%3Cpath fill-opacity='.50' d='M20 11h5v5h-5z'/%3E%3Cpath fill-opacity='.88' d='M29 11h5v5h-5z'/%3E%3Cpath fill-opacity='.29' d='M38 11h5v5h-5z'/%3E%3Cpath fill-opacity='.29' d='M47 11h5v5h-5z'/%3E%3Cpath fill-opacity='.26' d='M56 11h5v5h-5z'/%3E%3Cpath fill-opacity='.26' d='M65 11h5v5h-5z'/%3E%3Cpath fill-opacity='.48' d='M74 11h5v5h-5z'/%3E%3Cpath fill-opacity='.84' d='M83 11h5v5h-5z'/%3E%3Cpath fill-opacity='.48' d='M101 11h5v5h-5z'/%3E%3Cpath fill-opacity='.36' d='M2 20h5v5h-5z'/%3E%3Cpath fill-opacity='.88' d='M11 20h5v5h-5z'/%3E%3Cpath fill-opacity='.30' d='M29 20h5v5h-5z'/%3E%3Cpath fill-opacity='.90' d='M38 20h5v5h-5z'/%3E%3Cpath fill-opacity='.19' d='M47 20h5v5h-5z'/%3E%3Cpath fill-opacity='.25' d='M56 20h5v5h-5z'/%3E%3Cpath fill-opacity='.36' d='M65 20h5v5h-5z'/%3E%3Cpath fill-opacity='.45' d='M74 20h5v5h-5z'/%3E%3Cpath fill-opacity='.22' d='M83 20h5v5h-5z'/%3E%3Cpath fill-opacity='.39' d='M92 20h5v5h-5z'/%3E%3Cpath fill-opacity='.56' d='M101 20h5v5h-5z'/%3E%3Cpath fill-opacity='.44' d='M2 29h5v5h-5z'/%3E%3Cpath fill-opacity='.61' d='M11 29h5v5h-5z'/%3E%3Cpath fill-opacity='.34' d='M20 29h5v5h-5z'/%3E%3Cpath fill-opacity='.23' d='M29 29h5v5h-5z'/%3E%3Cpath fill-opacity='.30' d='M38 29h5v5h-5z'/%3E%3Cpath fill-opacity='.33' d='M47 29h5v5h-5z'/%3E%3Cpath fill-opacity='.84' d='M56 29h5v5h-5z'/%3E%3Cpath fill-opacity='.77' d='M65 29h5v5h-5z'/%3E%3Cpath fill-opacity='.18' d='M83 29h5v5h-5z'/%3E%3Cpath fill-opacity='.22' d='M101 29h5v5h-5z'/%3E%3Cpath fill-opacity='.18' d='M2 38h5v5h-5z'/%3E%3Cpath fill-opacity='.51' d='M11 38h5v5h-5z'/%3E%3Cpath fill-opacity='.90' d='M20 38h5v5h-5z'/%3E%3Cpath fill-opacity='.85' d='M29 38h5v5h-5z'/%3E%3Cpath fill-opacity='.88' d='M38 38h5v5h-5z'/%3E%3Cpath fill-opacity='.25' d='M47 38h5v5h-5z'/%3E%3Cpath fill-opacity='.15' d='M65 38h5v5h-5z'/%3E%3Cpath fill-opacity='.22' d='M83 38h5v5h-5z'/%3E%3Cpath fill-opacity='.41' d='M92 38h5v5h-5z'/%3E%3Cpath fill-opacity='.23' d='M101 38h5v5h-5z'/%3E%3Cpath fill-opacity='.22' d='M2 47h5v5h-5z'/%3E%3Cpath fill-opacity='.86' d='M11 47h5v5h-5z'/%3E%3Cpath fill-opacity='.41' d='M20 47h5v5h-5z'/%3E%3Cpath fill-opacity='.56' d='M38 47h5v5h-5z'/%3E%3Cpath fill-opacity='.14' d='M47 47h5v5h-5z'/%3E%3Cpath fill-opacity='.20' d='M56 47h5v5h-5z'/%3E%3Cpath fill-opacity='.49' d='M65 47h5v5h-5z'/%3E%3Cpath fill-opacity='.24' d='M74 47h5v5h-5z'/%3E%3Cpath fill-opacity='.21' d='M83 47h5v5h-5z'/%3E%3Cpath fill-opacity='.15' d='M92 47h5v5h-5z'/%3E%3Cpath fill-opacity='.63' d='M101 47h5v5h-5z'/%3E%3Cpath fill-opacity='.42' d='M2 56h5v5h-5z'/%3E%3Cpath fill-opacity='.89' d='M20 56h5v5h-5z'/%3E%3Cpath fill-opacity='.61' d='M29 56h5v5h-5z'/%3E%3Cpath fill-opacity='.14' d='M38 56h5v5h-5z'/%3E%3Cpath fill-opacity='.82' d='M47 56h5v5h-5z'/%3E%3Cpath fill-opacity='.94' d='M56 56h5v5h-5z'/%3E%3Cpath fill-opacity='.35' d='M65 56h5v5h-5z'/%3E%3Cpath fill-opacity='.66' d='M74 56h5v5h-5z'/%3E%3Cpath fill-opacity='.34' d='M83 56h5v5h-5z'/%3E%3Cpath fill-opacity='.34' d='M92 56h5v5h-5z'/%3E%3Cpath fill-opacity='.48' d='M101 56h5v5h-5z'/%3E%3Cpath fill-opacity='.54' d='M2 65h5v5h-5z'/%3E%3Cpath fill-opacity='.29' d='M11 65h5v5h-5z'/%3E%3Cpath fill-opacity='.36' d='M20 65h5v5h-5z'/%3E%3Cpath fill-opacity='.27' d='M29 65h5v5h-5z'/%3E%3Cpath fill-opacity='.99' d='M38 65h5v5h-5z'/%3E%3Cpath fill-opacity='.83' d='M47 65h5v5h-5z'/%3E%3Cpath fill-opacity='.21' d='M56 65h5v5h-5z'/%3E%3Cpath fill-opacity='.18' d='M65 65h5v5h-5z'/%3E%3Cpath fill-opacity='.48' d='M74 65h5v5h-5z'/%3E%3Cpath fill-opacity='.93' d='M83 65h5v5h-5z'/%3E%3Cpath fill-opacity='.20' d='M92 65h5v5h-5z'/%3E%3Cpath fill-opacity='.19' d='M101 65h5v5h-5z'/%3E%3Cpath fill-opacity='.44' d='M2 74h5v5h-5z'/%3E%3Cpath fill-opacity='.43' d='M11 74h5v5h-5z'/%3E%3Cpath fill-opacity='.31' d='M20 74h5v5h-5z'/%3E%3Cpath fill-opacity='.14' d='M29 74h5v5h-5z'/%3E%3Cpath fill-opacity='.46' d='M38 74h5v5h-5z'/%3E%3Cpath fill-opacity='.65' d='M47 74h5v5h-5z'/%3E%3Cpath fill-opacity='.23' d='M56 74h5v5h-5z'/%3E%3Cpath fill-opacity='.36' d='M65 74h5v5h-5z'/%3E%3Cpath fill-opacity='.77' d='M83 74h5v5h-5z'/%3E%3Cpath fill-opacity='.88' d='M92 74h5v5h-5z'/%3E%3Cpath fill-opacity='.94' d='M101 74h5v5h-5z'/%3E%3Cpath fill-opacity='.52' d='M11 83h5v5h-5z'/%3E%3Cpath fill-opacity='.86' d='M20 83h5v5h-5z'/%3E%3Cpath fill-opacity='.16' d='M38 83h5v5h-5z'/%3E%3Cpath fill-opacity='.16' d='M47 83h5v5h-5z'/%3E%3Cpath fill-opacity='.93' d='M65 83h5v5h-5z'/%3E%3Cpath fill-opacity='.17' d='M74 83h5v5h-5z'/%3E%3Cpath fill-opacity='.60' d='M83 83h5v5h-5z'/%3E%3Cpath fill-opacity='.39' d='M92 83h5v5h-5z'/%3E%3Cpath fill-opacity='.36' d='M101 83h5v5h-5z'/%3E%3Cpath fill-opacity='.71' d='M2 92h5v5h-5z'/%3E%3Cpath fill-opacity='.35' d='M11 92h5v5h-5z'/%3E%3Cpath fill-opacity='.75' d='M29 92h5v5h-5z'/%3E%3Cpath fill-opacity='.18' d='M38 92h5v5h-5z'/%3E%3Cpath fill-opacity='.43' d='M47 92h5v5h-5z'/%3E%3Cpath fill-opacity='.21' d='M56 92h5v5h-5z'/%3E%3Cpath fill-opacity='.19' d='M65 92h5v5h-5z'/%3E%3Cpath fill-opacity='.57' d='M83 92h5v5h-5z'/%3E%3Cpath fill-opacity='.41' d='M92 92h5v5h-5z'/%3E%3Cpath fill-opacity='.15' d='M101 92h5v5h-5z'/%3E%3Cpath fill-opacity='.28' d='M2 101h5v5h-5z'/%3E%3Cpath fill-opacity='.16' d='M29 101h5v5h-5z'/%3E%3Cpath fill-opacity='.90' d='M38 101h5v5h-5z'/%3E%3Cpath fill-opacity='.70' d='M47 101h5v5h-5z'/%3E%3Cpath fill-opacity='.81' d='M56 101h5v5h-5z'/%3E%3Cpath fill-opacity='.74' d='M65 101h5v5h-5z'/%3E%3Cpath fill-opacity='.49' d='M74 101h5v5h-5z'/%3E%3Cpath fill-opacity='.34' d='M83 101h5v5h-5z'/%3E%3Cpath fill-opacity='.42' d='M92 101h5v5h-5z'/%3E%3Cpath fill-opacity='.65' d='M101 101h5v5h-5z'/%3E%3C/svg%3E");
+  --accent-dot-opacity: 0.05;
+  --font-sans:
+    "Atkinson Hyperlegible Next Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Atkinson Hyperlegible Mono Variable", ui-monospace, monospace;
+}
+
+/*
+ * The default skin's face. `body` above names Inter outright, which the skins still inherit, so
+ * OpenBot's own look reads the token instead.
+ */
+:root:not([data-skin]) body {
+  font-family: var(--font-sans);
+}
+
+/*
+ * A Bot's live orb, toned for white surfaces. AgentOrb's own contrast boost and full-strength
+ * halftone wash light colors out to white; these keep each Bot's palette true. Only `BotOrb`
+ * carries `.bot-orb-live`, so the orb anywhere else is unchanged.
+ */
+:root:not([data-skin]) .bot-orb-live .agent-orb::before {
+  filter: blur(var(--blur-amount)) contrast(1.15) saturate(1.3);
+}
+:root:not([data-skin]) .bot-orb-live .agent-orb::after {
+  opacity: 0.25;
+  backdrop-filter: blur(calc(var(--blur-amount) * 1.5)) contrast(1.25);
+}
+:root:not([data-skin]).dark .bot-orb-live .agent-orb::before {
+  filter: blur(var(--blur-amount)) contrast(1) saturate(0.95) brightness(1.18);
+}

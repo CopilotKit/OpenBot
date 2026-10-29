@@ -3,8 +3,12 @@
 @import "shadcn/tailwind.css";
 /* Composer chips/dropdown. Reads the shadcn tokens declared below, so it themes itself. */
 @import "prompt-area/tailwind.css";
+/* Inter is OpenDuet's face; Atkinson Hyperlegible is OpenBot's own (openbot.css). */
 @import "@fontsource-variable/inter";
+@import "@fontsource-variable/atkinson-hyperlegible-next";
+@import "@fontsource-variable/atkinson-hyperlegible-mono";
 @import "./theme.css";
+@import "./openbot.css";
 @import "./skins/skins.css";
 
 /*
