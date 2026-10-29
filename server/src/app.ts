@@ -144,7 +144,7 @@ import { createRoutingRoutes } from "./routing/routes";
 import { createCoworkerRoutingService } from "./routing/service";
 import type { SelfHostBanner } from "./self-host-banner";
 import { createSetupRoutes, type SetupSources } from "./setup/checklist";
-import { createTaskRoutes } from "./tasks/routes";
+import { createTaskRoutes, type TaskIntake } from "./tasks/routes";
 import type { TaskStore } from "./tasks/store";
 import { createTeamBotRoutes } from "./team-bots/routes";
 import type { TeamBots } from "./team-bots/team-bots";
@@ -1742,6 +1742,9 @@ export function createApp(
       // A task's turns run on the proactive engine, so replying and Try again are its.
       createTaskRoutes(coworker.tasks, requireUser, {
         retry: coworker.proactive?.engine,
+        ...(coworker.proactive
+          ? { intake: taskIntake(coworker.proactive.engine) }
+          : {}),
       }),
     );
   if (coworker?.memory)
@@ -2112,5 +2115,12 @@ function credentialInput(
     metadata: body.metadata as Record<string, unknown>,
     plaintext: body.plaintext,
     actorUserId,
+  };
+}
+
+/** The + on Tasks starts a task the way `start_task` does, on the proactive engine. */
+function taskIntake(engine: ProactiveEngine): TaskIntake {
+  return {
+    start: (owner, botId, task) => engine.startAsked(owner, botId, task),
   };
 }

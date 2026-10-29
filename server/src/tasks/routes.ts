@@ -54,6 +54,47 @@ const replySchema = z
     (input) => input.reply.length > 0 || (input.attachmentIds?.length ?? 0) > 0,
   );
 
+/** Starts a task the person asked for from the + on Tasks: the proactive engine's `startAsked`. */
+export type TaskIntake = {
+  start(
+    ownerUserId: string,
+    botId: string,
+    task: { title: string; instruction: string },
+  ): Promise<{ id: string }>;
+};
+
+/** The longest ask the + takes, as `start_task` takes. */
+export const MAX_ASK = 4000;
+/** How long a title made from the ask gets before it is cut at a word. */
+const TITLE_LENGTH = 80;
+
+/**
+ * A task's title from the person's ask when they gave none: the first sentence of its first line,
+ * with its full stop dropped, cut at a word with an ellipsis past `TITLE_LENGTH`.
+ */
+export function titleFrom(ask: string): string {
+  const line =
+    ask
+      .split("\n")
+      .map((part) => part.replace(/\s+/g, " ").trim())
+      .find(Boolean) ?? "";
+  // A sentence ends at a stop followed by a capital: "Sam. He", but not "no. 5521" or "it... then".
+  const sentence = line.split(/(?<=[^.][.!?])\s+(?=\p{Lu})/u)[0] ?? line;
+  const plain = sentence.replace(/(?<!\.)\.$/, "");
+  if (plain.length <= TITLE_LENGTH) return plain;
+  const cut = plain.slice(0, TITLE_LENGTH);
+  const space = cut.lastIndexOf(" ");
+  return `${(space > TITLE_LENGTH / 2 ? cut.slice(0, space) : cut).replace(/[\s,;:.-]+$/, "")}…`;
+}
+
+const askSchema = z
+  .object({
+    botId: z.string().trim().min(1).max(200),
+    instruction: z.string().trim().min(1).max(MAX_ASK),
+    title: z.string().trim().min(1).max(160).optional(),
+  })
+  .strict();
+
 /** A request the routes refuse as it stands: the person can fix it and send it again. */
 export class TaskRefusedError extends Error {
   constructor(message: string) {
@@ -69,6 +110,8 @@ export function createTaskRoutes(
   options: {
     /** Absent, replying and Try again are not served: there is nothing to run them. */
     retry?: TaskRetry | undefined;
+    /** Absent, the + is not served: there is nowhere to start a task. */
+    intake?: TaskIntake | undefined;
   } = {},
 ) {
   const routes = new Hono<{ Variables: AppVariables }>();
@@ -99,6 +142,22 @@ export function createTaskRoutes(
   routes.get("/", async (context) =>
     context.json({ tasks: await store.list(context.var.actor.id) }),
   );
+  const intake = options.intake;
+  if (intake)
+    /*
+     * The + on Tasks, Start now: the ask opens a task in a conversation of its own with the Bot the
+     * person chose, and starts there, the path `start_task` takes. Any Bot of theirs, wherever it
+     * runs. Answers with the task as Tasks reads it.
+     */
+    routes.post("/", async (context) => {
+      const owner = context.var.actor.id;
+      const ask = await readAsk(context.req.raw);
+      const opened = await intake.start(owner, ask.botId, {
+        title: ask.title,
+        instruction: ask.instruction,
+      });
+      return context.json({ task: await store.get(owner, opened.id) }, 201);
+    });
   routes.get("/:id", async (context) =>
     context.json({
       task: await store.get(context.var.actor.id, context.req.param("id")),
@@ -161,4 +220,23 @@ export function createTaskRoutes(
     }),
   );
   return routes;
+}
+
+/** The +'s ask, with its title worked out when the person gave none. */
+async function readAsk(request: Request) {
+  if (!request.headers.get("content-type")?.includes("application/json"))
+    throw new TaskRefusedError("Say what your Bot should do.");
+  const parsed = askSchema.safeParse(await request.json().catch(() => null));
+  if (!parsed.success)
+    throw new TaskRefusedError(
+      parsed.error.issues.some((issue) => issue.path[0] === "instruction")
+        ? `Say what your Bot should do, in at most ${MAX_ASK} characters.`
+        : "Choose one of your Bots.",
+    );
+  const { botId, instruction } = parsed.data;
+  return {
+    botId,
+    instruction,
+    title: parsed.data.title ?? titleFrom(instruction),
+  };
 }
