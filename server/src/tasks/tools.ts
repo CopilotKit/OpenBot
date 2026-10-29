@@ -10,6 +10,11 @@ import type { AskedTask, OpenedTask } from "../proactive/engine";
 export { START_TASK_TOOL };
 /** The whole ask, in the person's words or a faithful restatement. Room for a long paragraph. */
 export const MAX_INSTRUCTION = 4000;
+/**
+ * How many tasks one turn may start. Enough for a person who asks for several things at once; a
+ * page or message the Bot read can't use one turn to start dozens of headless turns.
+ */
+export const MAX_TASKS_PER_TURN = 5;
 
 /** Opens a task in a conversation of its own and starts it: the proactive engine's `startAsked`. */
 export type TaskStarter = (input: {
@@ -96,7 +101,11 @@ const startParameters = z
  *
  * Nothing leaves the deployment here: the turn it starts is the person's own, made on their behalf in
  * their words, and anything it then tries to send meets the approval gate as any turn of theirs does.
- * Inside a task's own conversation the frame its ask arrives in tells the Bot never to call this.
+ *
+ * So it is offered only in a conversation a person started. A routine, a responsibility, a wake-up or
+ * a hand-off acting on what it read would otherwise start a turn that runs as the person, past every
+ * rule written for unattended runs and credited to them on the trail. A task's own turn is never
+ * offered it either: there the work is done, not handed on again.
  */
 export async function taskTools(options: {
   actorId: string;
@@ -105,8 +114,13 @@ export async function taskTools(options: {
   start: TaskStarter;
   /** Whether OpenBot runs this Bot itself. See `builtInBots`. */
   builtIn: (botId: string) => Promise<boolean>;
+  /** This turn is a task's own. See `AgentResolutionContext.task`. */
+  inTask?: boolean;
 }): Promise<GrantedTool[]> {
+  if (options.initiator.kind !== "person" || options.inTask) return [];
   if (!(await options.builtIn(options.botId))) return [];
+  // Tools are built for each turn, so this counts one turn's starts.
+  let started = 0;
   return [
     {
       name: START_TASK_TOOL,
@@ -123,6 +137,10 @@ export async function taskTools(options: {
         const parsed = startParameters.safeParse(args ?? {});
         if (!parsed.success)
           return `Refused. ${START_TASK_TOOL} takes a title (at most 160 characters) and the instruction (at most ${MAX_INSTRUCTION}); why, source and link are optional, and a link must be an http or https URL. ${parsed.error.issues[0]?.message ?? ""}`.trim();
+        // Counted before the start is awaited, so calls made in parallel are held to it too.
+        if (started >= MAX_TASKS_PER_TURN)
+          return `Refused. One reply starts at most ${MAX_TASKS_PER_TURN} tasks. Tell the person which ones are under way, and ask them to send the rest in another message.`;
+        started += 1;
         const task = await options.start({
           ownerUserId: options.actorId,
           agentId: options.botId,
