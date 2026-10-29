@@ -14,13 +14,16 @@ export const BROWSER_STEP_DONE: Record<string, string> = {
   computer_scroll: "Scrolled page",
 };
 
-/** The same steps as what they would do: waiting on the person, declined, blocked or cut off. */
+/**
+ * The same steps as what they would do: waiting on the person, declined, blocked or cut off. Whole
+ * phrases, because they also sit inside sentences ("Allow it to fill in a field, or decline").
+ */
 export const BROWSER_STEP_PLAIN: Record<string, string> = {
-  computer_navigate: "Open page",
-  computer_read: "Read page",
-  computer_snapshot: "Inspect page",
-  computer_click: "Click on page",
-  computer_type: "Fill in field",
-  computer_key: "Press key",
-  computer_scroll: "Scroll page",
+  computer_navigate: "Open a page",
+  computer_read: "Read the page",
+  computer_snapshot: "Inspect the page",
+  computer_click: "Click on the page",
+  computer_type: "Fill in a field",
+  computer_key: "Press a key",
+  computer_scroll: "Scroll the page",
 };

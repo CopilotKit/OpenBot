@@ -71,7 +71,7 @@ test("a browser action keeps what it acts on and drops the page plumbing", () =>
   );
   const view = describeApproval(request);
   // Named as its step in the conversation names it, so the card and the line above it agree.
-  expect(view.title).toBe("Click on page");
+  expect(view.title).toBe("Click on the page");
   expect(view.app).toBeNull();
   expect(view.kind).toBe("browser");
   expect(view.fields).toEqual([{ label: "Element", value: "Pay now" }]);
@@ -258,7 +258,7 @@ test("typing into a page reads as the step does, and a yes-or-no argument reads 
       { scope: "en.wikipedia.org" },
     ),
   );
-  expect(view.title).toBe("Fill in field");
+  expect(view.title).toBe("Fill in a field");
   expect(view.body).toBe("OpenBot");
   expect(view.fields).toEqual([{ label: "Submit after typing", value: "Yes" }]);
 });
