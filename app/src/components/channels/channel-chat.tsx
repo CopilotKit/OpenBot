@@ -6,20 +6,19 @@ import {
   useAgent,
   useCopilotKit,
 } from "@copilotkit/react-core/v2";
-import { observeApprovalAgent } from "@/lib/copilot/approval-context";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { HandoffResumeNotice } from "@/components/computer/handoff-resume-notice";
+import { ChannelWorkRows } from "@/components/channels/channel-work";
 import { attachmentModality } from "@/components/channels/chat-messages";
 import { toAgentOptions } from "@/components/channels/composer";
-import { ChannelWorkRows } from "@/components/channels/channel-work";
 import { ConversationView } from "@/components/channels/conversation-view";
-import { VoiceCallWidget } from "@/components/channels/voice-call-widget";
 import {
   seedMessage,
   takeFirstMessage,
   transcriptMessages,
 } from "@/components/channels/transcript-messages";
+import { VoiceCallWidget } from "@/components/channels/voice-call-widget";
+import { HandoffResumeNotice } from "@/components/computer/handoff-resume-notice";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { attachmentUrl } from "@/lib/channels/attachments";
 import {
@@ -32,9 +31,14 @@ import {
   channelKeys,
 } from "@/lib/channels/queries";
 import { useActiveBot } from "@/lib/copilot/active-bot";
+import { observeApprovalAgent } from "@/lib/copilot/approval-context";
 import { ConversationProvider } from "@/lib/copilot/conversation";
 import { afterMs, joinWithin } from "@/lib/copilot/join-thread";
 import { repairUnansweredToolCalls } from "@/lib/copilot/repair-history";
+import {
+  onTurnFinishedAway,
+  turnFinishedAway,
+} from "@/lib/channels/turns-finished-away";
 import { stoppedReason } from "@/lib/copilot/stopped-turn";
 import { readThreadMessages } from "@/lib/copilot/thread-messages";
 import { useSkillCommands } from "@/lib/plugins/skill-commands";
@@ -44,14 +48,14 @@ import {
   voiceContext,
   withVoiceContext,
 } from "@/lib/voice/agent-bridge";
-import { useVoiceCall } from "@/lib/voice/use-voice-call";
 import {
-  loadVoiceArchive,
   cachedVoiceArchive,
+  loadVoiceArchive,
   useVoiceArchive,
   voiceArchiveContext,
   withVoiceChats,
 } from "@/lib/voice/archive";
+import { useVoiceCall } from "@/lib/voice/use-voice-call";
 import { queryClient } from "@/query-client";
 import { newId } from "../../lib/new-id";
 
@@ -561,6 +565,11 @@ export function ChannelChat({
         pull();
       }
     });
+    /*
+     * A turn of this channel that outlived the chat it was started in, finished now. Its reply was stored and never
+     * streamed here, so it is read: see `turns-finished-away.ts`.
+     */
+    const offFinishedAway = onTurnFinishedAway(channel.id, pull);
     void (async () => {
       await joinGatePromise;
       if (
@@ -574,6 +583,7 @@ export function ChannelChat({
     return () => {
       cancelled = true;
       unsubscribe();
+      offFinishedAway();
     };
   }, [channel.id, channel.threadId, joinGatePromise, runtimeAgentId]);
 
@@ -668,6 +678,14 @@ export function ChannelChat({
   const [turnsInFlight, setTurnsInFlight] = useState(0);
   /* Authoritative once this screen unmounts, where `setTurnsInFlight` becomes a no-op. */
   const turnsRef = useRef(0);
+  /** Whether this chat is still on screen, for a turn that finishes after it closed. */
+  const onScreen = useRef(true);
+  useEffect(() => {
+    onScreen.current = true;
+    return () => {
+      onScreen.current = false;
+    };
+  }, []);
   const [runsInFlight, setRunsInFlight] = useState(0);
 
   /**
@@ -874,7 +892,14 @@ export function ChannelChat({
       void setChannelBusy({ channelId: channel.id, busy: true });
     }
     try {
-      return await deliver(trimmed, skillInstructions, attachments);
+      const reply = await deliver(trimmed, skillInstructions, attachments);
+      /*
+       * The person left while this turn was running (holding control of the Bot's browser, say) and the turn went on
+       * without this screen. The run-finished subscription that tells the roster what the Bot said went with it, so the
+       * reply is reported here.
+       */
+      if (!onScreen.current) reportRef.current(reply, runtimeAgentId);
+      return reply;
     } finally {
       turnsRef.current -= 1;
       setTurnsInFlight(turnsRef.current);
@@ -883,6 +908,8 @@ export function ChannelChat({
       if (turnsRef.current === 0) {
         void setChannelBusy({ channelId: channel.id, busy: false });
       }
+      // And the conversation open now, if the person came back, reads what this turn stored.
+      if (!onScreen.current) turnFinishedAway(channel.id);
     }
   };
 

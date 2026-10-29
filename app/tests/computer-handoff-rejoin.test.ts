@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { callComputer } from "../src/lib/computers/call";
 import {
   awaitHandoff,
   pendingHandoff,
@@ -8,7 +9,6 @@ import {
   runHelpRequest,
   runNavigation,
 } from "../src/lib/computers/handoff";
-import { callComputer } from "../src/lib/computers/call";
 
 const realFetch = globalThis.fetch;
 const paths: string[] = [];

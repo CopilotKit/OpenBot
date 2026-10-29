@@ -1,5 +1,5 @@
-import { Hono, type MiddlewareHandler } from "hono";
 import { SKIN_IDS } from "@openbot/shared/user-preferences";
+import { Hono, type MiddlewareHandler } from "hono";
 import { z } from "zod";
 import type { AppVariables } from "./auth/guards";
 import type { UserPreferencesStore } from "./user-preferences";

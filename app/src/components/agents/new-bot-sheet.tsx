@@ -1,6 +1,7 @@
 import { summaryFor, WEB_HARNESSES } from "@openbot/shared/harnesses";
 import {
   IconCheck,
+  IconInfoCircle,
   IconLock,
   IconPlugConnected,
   IconUsers,
@@ -32,10 +33,20 @@ import {
 } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
   type AgentFormValues,
   agentFormSchema,
   agentInputFrom,
 } from "@/lib/agents/form";
+import {
+  ISOLATION_NOT_ALLOWED,
+  ISOLATION_UNAVAILABLE,
+  isolatedExplained,
+} from "@/lib/agents/isolation";
 import { createAgentMutationOptions } from "@/lib/agents/mutations";
 import {
   agentCapabilitiesQueryOptions,
@@ -47,7 +58,9 @@ import {
   giveableAppsQueryOptions,
 } from "@/lib/app-access/queries";
 import { isComposing } from "@/lib/composing";
+import { myCapabilitiesQueryOptions } from "@/lib/enterprise/queries";
 import { pluginKeys } from "@/lib/plugins/queries";
+import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
 
 /**
@@ -146,6 +159,17 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
    */
   const { data: capabilities } = useQuery(agentCapabilitiesQueryOptions());
   const builtInAvailable = capabilities?.builtInAvailable ?? true;
+  /*
+   * A computer of its own: whether this deployment can make one, and whether an administrator lets
+   * this person ask. Unavailable until the deployment says otherwise, since promising a computer
+   * that cannot be made is the worse mistake; allowed unless the switch says no, since the server
+   * refuses a create without it either way.
+   */
+  const isolationAvailable = capabilities?.isolationAvailable ?? false;
+  const { data: mine } = useQuery(myCapabilitiesQueryOptions());
+  const isolationAllowed = mine?.capabilities.isolatedComputers !== false;
+  /** Shared with the person's own computer unless they tick it. */
+  const [isolated, setIsolated] = useState(false);
   const [step, setStep] = useState<Step>("about");
   const [direction, setDirection] = useState(1);
   const [name, setName] = useState("");
@@ -234,6 +258,8 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
         // A Bot that runs here has no address; whatever was typed on the way past stays behind.
         endpoint: managed ? endpoint.trim() : "",
         authValue: managed ? key : "",
+        // Only what the box shows: a tick the person can no longer change is not sent.
+        isolated: isolated && isolationAvailable && isolationAllowed,
       }),
     );
     /*
@@ -365,6 +391,12 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
                       return next;
                     })
                   }
+                  isolation={{
+                    checked: isolated,
+                    available: isolationAvailable,
+                    allowed: isolationAllowed,
+                    onChange: setIsolated,
+                  }}
                   onInstructions={setInstructions}
                   onName={(value) => {
                     setName(value);
@@ -569,6 +601,7 @@ function AboutStep({
   apps,
   leftOut,
   onApp,
+  isolation,
   name,
   nameError,
   instructions,
@@ -587,6 +620,7 @@ function AboutStep({
   apps: GiveableApp[];
   leftOut: Set<string>;
   onApp: (app: string, used: boolean) => void;
+  isolation: IsolationChoice;
 }) {
   return (
     <FieldGroup>
@@ -655,6 +689,7 @@ function AboutStep({
           })}
         </div>
       </FieldSet>
+      <IsolatedOption isPublic={visibility === "public"} {...isolation} />
       {apps.length > 0 ? (
         <FieldSet>
           <FieldLegend variant="label">Apps it can use</FieldLegend>
@@ -685,6 +720,96 @@ function AboutStep({
         </FieldSet>
       ) : null}
     </FieldGroup>
+  );
+}
+
+/** The Isolated box's state and what decides whether it can be ticked. */
+type IsolationChoice = {
+  checked: boolean;
+  /** Whether this deployment can make a computer for one Bot. */
+  available: boolean;
+  /** Whether an administrator lets this person ask for one ("Isolated Bots"). */
+  allowed: boolean;
+  onChange: (checked: boolean) => void;
+};
+
+/**
+ * A computer of its own, asked where the Bot is made.
+ *
+ * One tick rather than a choice of two, because sharing the person's computer is the answer that
+ * needs nothing and costs nothing more; Isolated is the exception somebody opts into. What it means
+ * is in the tooltip beside it, and for a public Bot that includes who else ends up on that computer.
+ *
+ * NEVER HIDDEN. Where it cannot be ticked it is drawn disabled with the reason in place of its
+ * summary, so somebody who heard about Isolated Bots finds out here why they cannot have one rather
+ * than wondering where it went.
+ *
+ * A label for the word only, not the whole tile, so the tooltip's button beside it does not tick the
+ * box when pressed.
+ */
+function IsolatedOption({
+  checked,
+  available,
+  allowed,
+  isPublic,
+  onChange,
+}: IsolationChoice & { isPublic: boolean }) {
+  const reason = !available
+    ? ISOLATION_UNAVAILABLE
+    : !allowed
+      ? ISOLATION_NOT_ALLOWED
+      : null;
+  return (
+    <FieldSet>
+      <FieldLegend variant="label">Its computer</FieldLegend>
+      <div className="flex items-start gap-3 rounded-lg bg-muted/50 p-3">
+        <Checkbox
+          aria-describedby="new-bot-isolated-summary"
+          checked={checked && reason === null}
+          className="mt-0.5"
+          disabled={reason !== null}
+          id="new-bot-isolated"
+          onCheckedChange={(next) => onChange(next === true)}
+        />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1">
+            <label
+              className={cn(
+                "font-medium text-sm",
+                reason === null ? "cursor-pointer" : "opacity-50",
+              )}
+              htmlFor="new-bot-isolated"
+            >
+              Isolated
+            </label>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    aria-label="What Isolated means"
+                    className="text-muted-foreground"
+                    size="icon-xs"
+                    type="button"
+                    variant="ghost"
+                  >
+                    <IconInfoCircle className="size-3.5" />
+                  </Button>
+                }
+              />
+              <TooltipContent className="block text-pretty">
+                {isolatedExplained(isPublic)}
+              </TooltipContent>
+            </Tooltip>
+          </div>
+          <p
+            className="text-pretty text-muted-foreground text-xs"
+            id="new-bot-isolated-summary"
+          >
+            {reason ?? "A computer of its own, instead of sharing yours."}
+          </p>
+        </div>
+      </div>
+    </FieldSet>
   );
 }
 

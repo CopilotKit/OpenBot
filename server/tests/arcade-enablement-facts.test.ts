@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import Arcade from "@arcadeai/arcadejs";
-import fixture from "./fixtures/arcade-catalogue.json";
 import { createArcadeClient } from "../src/plugins/arcade-adapter";
 import type { BrokerApp } from "../src/plugins/broker";
+import fixture from "./fixtures/arcade-catalogue.json";
 
 /**
  * The three enablement facts `listApps` measures beside `actionCount`: how many actions Arcade

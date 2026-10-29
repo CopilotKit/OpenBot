@@ -4,7 +4,7 @@
 
 **The AI assistant your company can actually own.** Same shape as ChatGPT, Claude or Grok, with one difference that matters: it runs on your infrastructure and you can change anything about it. Any agent stack, through AG-UI.
 
-Each coworker gets a computer of its own: a real browser with its own logins, its own files, and only the tools you grant. Every action decided before it happens and recorded after.
+Each coworker gets a real browser with its own logins, its own files, and only the tools you grant. Every action decided before it happens and recorded after.
 
 [**Talk to an engineer**](https://copilotkit.ai/talk-to-an-engineer?ref=openbot_readme) · [**Have us build it with you**](https://copilotkit.ai/talk-to-an-engineer?ref=openbot_readme) · [**copilotkit.ai/openbot**](https://copilotkit.ai/openbot) · [**Quick start**](#quick-start) · [**Docs**](docs/README.md)
 
@@ -219,7 +219,7 @@ Leave `EMBEDDED_POSTGRES` off and set `DATABASE_URL` to point at a database you 
 
 ## Features
 
-- **A computer per Bot**: the supervisor gives each Bot its own container, its own `/workspace` volume and its own browser profile. Set `COMPUTER_RUNTIME=runsc` to run them under gVisor where the host supports it.
+- **A computer per person**: the supervisor gives each person their own container, with a folder and browser profile for each of their Bots. Tick Isolated on a Bot to give it a container of its own. Set `COMPUTER_RUNTIME=runsc` to run them under gVisor where the host supports it.
 - **A shell, not just a browser**: a Bot can run a command in its workspace, install what it needs, and process a file it saved. Through the same gate as everything else, so a rule can refuse a shell outright or refuse particular commands, and the command is on the record either way. The command inherits PATH, locale, terminal and proxy variables, not the rest of the deployment's environment.
 - **The gateway is the only way in**: it resolves the target from a server-held snapshot, evaluates the policy, writes the audit row, and only then calls the computer. There is no path that acts without the record existing first.
 - **CEL policy, fail closed**: rules can inspect `tool.name`, `intent`, `bot.id`, `actor.id`, `page.url`, `page.host`, `element.*`, `key`, `command`, `file.*`, `mcp.*` and `initiator.*` (what started the run, so a rule can refuse a scheduled routine what it would allow a person). Deny is evaluated before allow, a missing policy permits nothing, and a broken rule refuses rather than opens.
@@ -294,7 +294,7 @@ Settings worth knowing:
 | `COMPUTER_TOKEN`                     | Secret every Bot computer request must present. `start.sh` falls back to a fixed dev value. |
 | `SUPERVISOR_TOKEN`                   | Secret the supervisor requires. `start.sh` falls back to a fixed dev value. |
 | `AGENT_TOOL_TOKEN`                   | Secret a Bot presents to call a granted tool back. `start.sh` sets one. Without it no Bot may call tools. |
-| `COMPUTER_SUPERVISOR_URL`            | Gives each Bot a computer of its own instead of one shared computer.      |
+| `COMPUTER_SUPERVISOR_URL`            | Gives each person a computer of their own instead of one shared computer. |
 | `COMPUTER_RUNTIME`                   | Set to `runsc` to run computers under gVisor, where the host has it.      |
 | `COMPUTER_SANDBOX`                   | Set to `on` for Chromium's own sandbox, where the host permits it.        |
 | `EMBEDDED_POSTGRES`                  | Set to `on` for a database inside the deployment container.               |
@@ -316,7 +316,7 @@ Full reference: [docs/configuration.md](docs/configuration.md).
 | `agent-computer`         | 4100                       | Chromium plus `/workspace` and browser profile.                                                  |
 | `agent-bot`              | 4200                       | Proof-of-concept AG-UI Bot.                                                                          |
 | `agent-langgraph`        | 4201                       | LangGraph AG-UI Bot.                                                                             |
-| `supervisor`             | 4500 host / 4300 container | Creates and manages one computer per Bot.                                                        |
+| `supervisor`             | 4500 host / 4300 container | Creates and manages one computer per person, and one per Isolated Bot.                           |
 | `worker`                 | none                       | Fires due routines by handing each run to the server.                                            |
 | PostgreSQL with pgvector | 5432                       | Product data, policy, audit, credentials, grants, channels, and component metadata.              |
 | CopilotKit Intelligence  | external                   | Durable threads and memory.                                                                      |

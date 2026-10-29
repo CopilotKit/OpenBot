@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
-import type { ComposioApp } from "@/lib/plugins/queries";
 import { matchingApps } from "@/lib/plugins/enablement-notes";
+import type { ComposioApp } from "@/lib/plugins/queries";
 
 /**
  * What the Composio picker lists, decided without drawing anything.

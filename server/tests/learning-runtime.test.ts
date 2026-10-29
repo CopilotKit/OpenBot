@@ -3,13 +3,13 @@ import {
   CopilotKitIntelligence,
   LearnedSkillsError,
 } from "@copilotkit/runtime/v2";
+import type { LearningSettings } from "@openbot/shared/learning";
 import {
-  createLearningRuntime,
   clearLearningRevisionFallback,
+  createLearningRuntime,
   selectLearningTarget,
 } from "../src/learning/runtime";
 import type { LearningSettingsStore } from "../src/learning/settings";
-import type { LearningSettings } from "@openbot/shared/learning";
 import { skillSnapshot } from "./fixtures/learned-skills";
 
 function fixture() {

@@ -9,8 +9,8 @@ import {
 } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { MCPMock, type MCPToolDefinition } from "@copilotkit/aimock/mcp";
-import { readConnectPrompt } from "@openbot/shared/connect-prompt";
 import type { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
+import { readConnectPrompt } from "@openbot/shared/connect-prompt";
 import { and, asc, eq, gte, inArray, sql } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import type { ActionPolicy } from "../src/computer/policy";

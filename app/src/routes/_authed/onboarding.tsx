@@ -83,7 +83,7 @@ function ComputerUseStep() {
   return (
     <div className="w-full flex flex-col items-center justify-center">
       <h1 className="text-3xl font-semibold tracking-tight max-w-md text-center">
-        Each Bot has its own computer
+        Each Bot has its own browser and files
       </h1>
       <div className="h-8" />
       <div className="relative aspect-5/3 w-full max-w-lg rounded-2xl overflow-hidden border border-border">
@@ -273,7 +273,7 @@ function Introduction({ localEvaluation }: { localEvaluation: boolean }) {
         { id: "welcome", label: "Welcome", content: <WelcomeStep /> },
         {
           id: "computer",
-          label: "Each Bot has its own computer",
+          label: "Each Bot has its own browser and files",
           content: <ComputerUseStep />,
         },
         {

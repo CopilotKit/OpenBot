@@ -3,6 +3,7 @@ import type { AbstractAgent, BaseEvent, RunAgentInput } from "@ag-ui/client";
 import { EventType, HttpAgent } from "@ag-ui/client";
 import { LLMock } from "@copilotkit/aimock";
 import { BuiltInAgent } from "@copilotkit/runtime/v2";
+import type { GrantedTool } from "@openbot/toolkit/granted-tool";
 import { z } from "zod";
 import {
   buildAgents,
@@ -10,7 +11,6 @@ import {
   type RuntimeModel,
   type ToolSelection,
 } from "../src/copilot";
-import type { GrantedTool } from "@openbot/toolkit/granted-tool";
 import { createModelCompleter } from "../src/routing/model";
 
 const model: RuntimeModel = { provider: "openai", defaultModel: "gpt-5.5" };

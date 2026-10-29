@@ -270,6 +270,12 @@ services:
       # minutes; closing a browser costs only a relaunch, because the profile is on the volume below.
       COMPUTER_MAX_BROWSERS: ${COMPUTER_MAX_BROWSERS:-}
       COMPUTER_BROWSER_IDLE_MS: ${COMPUTER_BROWSER_IDLE_MS:-}
+      # At what share of the container's memory it starts closing browsers nobody is using, least
+      # recently used first, down to ten points under (default 85), and how long a Bot's background
+      # tab may sit untouched (default ten minutes). A container with no --memory is measured against
+      # the machine's memory. 0 switches either off.
+      COMPUTER_MEMORY_HIGH_PERCENT: ${COMPUTER_MEMORY_HIGH_PERCENT:-}
+      COMPUTER_TAB_IDLE_MS: ${COMPUTER_TAB_IDLE_MS:-}
       # Every Bot without a computer of its own reaches this one, so each gets its own folder of
       # files and its shell starts there. The supervisor's per-Bot computers do not need it.
       COMPUTER_SEPARATE_WORKSPACES: "on"

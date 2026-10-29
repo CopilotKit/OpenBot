@@ -13,6 +13,7 @@ import {
   sameToken,
 } from "./agents/callback-token";
 import { computerAccessCheck } from "./agents/computer-access";
+import { deploymentCanIsolate } from "./agents/isolation";
 import {
   type BotLifecycleServices,
   createBotLifecycleRoutes,
@@ -45,14 +46,18 @@ import {
 import type { IdentityProviderStore } from "./auth/identity-provider-store";
 import { desktopAuthPage } from "./auth/native-browser";
 import {
-  createAttachmentRoutes,
-  createChannelAttachmentRoutes,
-} from "./channels/attachments";
+  type BotBrowserRouteDeps,
+  createBotBrowser,
+} from "./browser/bot-browser";
 import {
   type BrowserRouteDeps,
   browserConnectionRevoked,
   createBrowserRoutes,
 } from "./browser/routes";
+import {
+  createAttachmentRoutes,
+  createChannelAttachmentRoutes,
+} from "./channels/attachments";
 import type { ChannelEventHub } from "./channels/events";
 import { createGroupRoutes, type GroupConversations } from "./channels/group";
 import { type ChannelStore, createChannelRoutes } from "./channels/routes";
@@ -79,9 +84,6 @@ import {
   createDeliveryRoutes,
   createDeliveryWebhookRoutes,
 } from "./delivery/routes";
-import type { DemonstrationRecorder } from "./demonstrations/recording";
-import { createDemonstrationRoutes } from "./demonstrations/routes";
-import type { DemonstrationStore } from "./demonstrations/store";
 import { mountDesktopConnectionFailure } from "./desktop-connection-failure";
 import { createTranscriptionProvider } from "./dictation/provider";
 import { createDictationRoutes } from "./dictation/routes";
@@ -107,9 +109,9 @@ import type { SignInService } from "./passwords/service";
 import type { OnboardingStore } from "./people/onboarding";
 import { createProfileRoutes, type ProfileStore } from "./people/profile";
 import { MAX_PAGE, type PeopleStore } from "./people/store";
+import type { BrokerProvider } from "./plugins/access";
 import type { AccountModeSwitch } from "./plugins/account-mode";
 import type { ComposioBroker } from "./plugins/broker";
-import type { BrokerProvider } from "./plugins/access";
 import { createPluginRoutes } from "./plugins/routes";
 import { createSharedUseRoutes } from "./plugins/shared-use-routes";
 import type { SharedUseStore } from "./plugins/shared-use-store";
@@ -407,16 +409,18 @@ export function createApp(
   voiceSessions?: VoiceSessionServices,
   learning?: LearningAdminDependencies,
   coworker?: {
-    demonstrations?: {
-      store: DemonstrationStore;
-      recorder: DemonstrationRecorder;
-    };
     approvals?: ApprovalService;
     /** The Recorder extension's routes and guards (recorder/wiring.ts). Absent, nothing about it is mounted. */
     recorder?: RecorderExtensionDeps;
     /** A person's own OpenBot browser, with the Recorder in it already connected (browser/routes.ts). Absent, nothing
      * about it is mounted and the app shows no Browser button. */
     browser?: Omit<BrowserRouteDeps, "requireUser" | "auditStore">;
+    /** A Bot's browser worked by a person: its bar and Record (browser/bot-browser.ts), under the computer routes. Absent,
+     * or with no computer, nothing about it is mounted. */
+    botBrowser?: Omit<
+      BotBrowserRouteDeps,
+      "gateway" | "auditStore" | "botName"
+    >;
     /** Settings, Learning: who else's Bots use a person's own learned Skills. Absent, the screen has nothing to read. */
     personalLearning?: PersonalLearningRouteDeps;
     /**
@@ -1419,6 +1423,19 @@ export function createApp(
         agentProfileStore ? computerAccessCheck(agentProfileStore) : canUseBot,
         pageFrames,
         auditReader,
+        coworker?.botBrowser
+          ? createBotBrowser({
+              ...coworker.botBrowser,
+              gateway: computerGateway,
+              ...(auditStore ? { auditStore } : {}),
+              ...(agentProfileStore
+                ? {
+                    botName: async (actor, botId) =>
+                      (await agentProfileStore.get(actor, botId))?.name ?? null,
+                  }
+                : {}),
+            })
+          : undefined,
       ),
     );
   }
@@ -1490,6 +1507,8 @@ export function createApp(
               ].filter((url): url is URL => url !== undefined),
             }
           : undefined,
+        // Whether a Bot can have a computer of its own here: only where the provider makes computers.
+        { available: deploymentCanIsolate(config.computer) },
       ),
     );
     // Choosing a coworker for an untagged message needs the same permission-filtered roster the
@@ -1646,15 +1665,6 @@ export function createApp(
       "/api/settings/learning",
       createPersonalLearningRoutes(
         { ...coworker.personalLearning, auditStore },
-        requireUser,
-      ),
-    );
-  if (coworker?.demonstrations)
-    app.route(
-      "/api/demonstrations",
-      createDemonstrationRoutes(
-        coworker.demonstrations.store,
-        coworker.demonstrations.recorder,
         requireUser,
       ),
     );

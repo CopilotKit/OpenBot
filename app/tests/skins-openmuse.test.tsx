@@ -94,6 +94,9 @@ function agent(
     systemOwned: false,
     title: "",
     visibility: "private",
+    isolated: false,
+    isolationActive: false,
+    isolationOffReason: null,
     ...overrides,
   };
 }

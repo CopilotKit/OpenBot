@@ -19,7 +19,7 @@
  */
 
 import { isPersonBrowserId } from "@openbot/shared/openbot-browser";
-import { and, eq, inArray, like, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import postgres from "postgres";
 import {
   type AuditStore,
@@ -28,6 +28,7 @@ import {
   recordAuditEvent,
 } from "../audit";
 import { isConfiguredAdmin } from "../auth/roles";
+import { type ComputerKey, computerKeyText } from "../computer/computer-key";
 import {
   type PolicyContext,
   type PolicyDecision,
@@ -41,9 +42,11 @@ import {
 } from "../computer/policy-network";
 import type { ComputerProvider } from "../computer/provider";
 import type { Database } from "../db/client";
-import { agentProfiles, agents, auditEvents } from "../db/schema";
+import { agentProfiles, agents } from "../db/schema";
 import { createOtelEventExporter, type EventExporter } from "../telemetry/otel";
 import { scrubCommand } from "../telemetry/scrub";
+import type { WebBotAuth } from "../web-bot-auth";
+import { lastUsedByComputer, runningComputers } from "../work/culler";
 import {
   type Capability,
   type CapabilityRow,
@@ -59,7 +62,6 @@ import {
   type EnterpriseStore,
   type NetworkPolicyRow,
 } from "./settings-store";
-import type { WebBotAuth } from "../web-bot-auth";
 
 /** Action Recording keeps 90 days, as Grok Bot's does. */
 export const ACTION_RECORD_RETENTION_DAYS = 90;
@@ -82,6 +84,16 @@ export type EnterpriseDeps = {
   /** Where a person's own OpenBot browser may go (browser/egress.ts): pushed to it instead of a Bot's policy, which says
    * where Bots may go. Absent, a person's browser is pushed `deny_all`, the answer for a computer with no policy. */
   personBrowserPolicy?: EgressPolicy;
+  /**
+   * A Bot's policy as it must be for now, from the one its owner is under: wider while a person records in the Bot's
+   * browser, so the Recorder there reaches OpenBot and the gateway (browser/bot-browser.ts), and the Bot's own once
+   * nobody does. Applied to every push of a Bot's policy, the periodic one and the push on wake, so neither takes the
+   * Recorder's way out away mid-recording, and neither leaves it to the Bot afterwards. Absent: the owner's policy.
+   */
+  duringRecording?: (
+    botId: string,
+    policy: EgressPolicy,
+  ) => Promise<EgressPolicy>;
   /** Pushed to every computer with its policy; see `computer/policy-network.ts`. */
   webBotAuth?: WebBotAuth;
   /** `provider/model` the built-in Bot runs on, for the model allowlist and usage view. */
@@ -116,8 +128,9 @@ export type EnterpriseControls = {
     userId: string,
     by: { id?: string; email: string },
   ) => Promise<{
+    /** The computers stopped: `person:<id>`, and `bot:<id>` for each of their isolated Bots. */
     stopped: string[];
-    failed: { botId: string; reason: string }[];
+    failed: { computer: string; reason: string }[];
   }>;
   terminateInactiveComputers: () => Promise<{ stopped: string[] } | null>;
   pushNetworkPolicies: () => Promise<void>;
@@ -404,7 +417,7 @@ export async function installEnterpriseControls(
       member,
       cloudNetwork,
     );
-    return policy;
+    return deps.duringRecording ? deps.duringRecording(botId, policy) : policy;
   };
 
   let pushing: Promise<void> | undefined;
@@ -453,16 +466,29 @@ export async function installEnterpriseControls(
     async (userId, by) => {
       const result = {
         stopped: [] as string[],
-        failed: [] as { botId: string; reason: string }[],
+        failed: [] as { computer: string; reason: string }[],
       };
       if (!deps.provider) return result;
-      for (const botId of await ownedBots(userId)) {
+      /*
+       * Their own computer, which every Bot they used runs on, and the computer of each Bot of theirs
+       * that has one of its own. Asking about an isolated Bot that never had a computer is a stop of
+       * nothing, which answers that nothing was running.
+       */
+      const keys: ComputerKey[] = [
+        { kind: "person", personId: userId },
+        ...(await ownedBots(userId)).map((botId) => ({
+          kind: "bot" as const,
+          botId,
+        })),
+      ];
+      for (const key of keys) {
+        const computer = computerKeyText(key);
         try {
-          const { wasRunning } = await deps.provider.stop(botId);
-          if (wasRunning) result.stopped.push(botId);
+          const { wasRunning } = await deps.provider.stop({ key });
+          if (wasRunning) result.stopped.push(computer);
         } catch (error) {
           result.failed.push({
-            botId,
+            computer,
             reason: error instanceof Error ? error.message : String(error),
           });
         }
@@ -504,45 +530,35 @@ export async function installEnterpriseControls(
       >`select pg_try_advisory_lock(4192011) as held`;
       if (!lock?.held) return null;
       const tx = deps.database;
-      const running = (await (deps.provider as ComputerProvider).list()).filter(
-        (computer) => computer.status === "running",
+      const running = runningComputers(
+        await (deps.provider as ComputerProvider).list(),
       );
       if (running.length === 0) return { stopped: [] };
-      const bot = sql<string>`${auditEvents.payload}->>'bot'`;
-      const used = new Map(
-        (
-          await tx
-            .select({ bot, last: sql<string>`max(${auditEvents.createdAt})` })
-            .from(auditEvents)
-            .where(
-              and(
-                like(auditEvents.eventType, "computer.%"),
-                inArray(
-                  bot,
-                  running.map((computer) => computer.botId),
-                ),
-              ),
-            )
-            .groupBy(bot)
-        ).map((row) => [row.bot, new Date(row.last)] as const),
+      // By computer, as the idle culler reads it: a person's computer is in use while any Bot is.
+      const used = await lastUsedByComputer(
+        tx,
+        running.map((computer) => computer.computer),
       );
       const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
       const stopped: string[] = [];
       for (const computer of running) {
         const since =
-          used.get(computer.botId) ??
+          used.get(computer.computer) ??
           (computer.startedAt ? new Date(computer.startedAt) : undefined);
         if (!since || since.getTime() > cutoff) continue;
         try {
-          await (deps.provider as ComputerProvider).stop(computer.botId);
-          stopped.push(computer.botId);
+          await (deps.provider as ComputerProvider).stop({ key: computer.key });
+          stopped.push(computer.computer);
           await audit({
             eventType: "computer.terminated_inactive",
             targetType: "computer",
-            targetId: computer.botId,
+            targetId: computer.computer,
             initiator: DEPLOYMENT_INITIATOR,
             payload: {
-              bot: computer.botId,
+              computer: computer.computer,
+              ...(computer.key.kind === "bot"
+                ? { bot: computer.key.botId }
+                : {}),
               idleSince: since.toISOString(),
               inactiveDays: days,
             },
@@ -551,7 +567,7 @@ export async function installEnterpriseControls(
           console.warn(
             JSON.stringify({
               type: "inactive-computer-stop-failed",
-              botId: computer.botId,
+              computer: computer.computer,
               error: String(error),
             }),
           );

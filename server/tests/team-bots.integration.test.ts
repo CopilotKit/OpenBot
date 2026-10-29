@@ -2,6 +2,7 @@ import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { eq, inArray } from "drizzle-orm";
 import { computerAccessCheck } from "../src/agents/computer-access";
+import { runsIsolated } from "../src/agents/isolation";
 import {
   AgentAssignedError,
   createAgentProfileStore,
@@ -9,6 +10,10 @@ import {
 import type { AgentActor } from "../src/agents/profile-types";
 import { createChannelStore } from "../src/channels/routes";
 import { createThreadIdentity } from "../src/channels/thread-identity";
+import {
+  botOwnership,
+  createComputerSeatResolver,
+} from "../src/computer/computer-key";
 import { createDatabase } from "../src/db/client";
 import {
   agentProfiles,
@@ -114,6 +119,34 @@ describe("Team Bots in PostgreSQL", () => {
     const canUseBot = async (actor: AgentActor, botId: string) =>
       (await profiles.get(actor, botId)) !== null;
     expect(await canUseBot(teammate, bot)).toBe(true);
+  });
+
+  test("the owner's Team Bot runs on the owner's own computer, carrying its old login", async () => {
+    const owner = await person();
+    const teammate = await person();
+    const bot = await privateBot(owner);
+    await teamBots.publish(owner, bot, {
+      audience: "team",
+      emails: [],
+      groups: [],
+    });
+    const seats = createComputerSeatResolver({
+      runsIsolated: (botId) => runsIsolated(database, botId),
+      bot: botOwnership(database),
+      canIsolate: true,
+    });
+    // The owner, whose computer it is: their own, and the Bot's profile from before is theirs.
+    expect(await seats.seatFor(bot, owner.id)).toEqual({
+      botId: bot,
+      key: { kind: "person", personId: owner.id },
+      inheritsProfile: true,
+    });
+    // Teammates still get no computer: the access check above refuses them before any seat is
+    // asked for. Were one asked, it would be their own and never inherit the owner's login.
+    expect(await seats.seatFor(bot, teammate.id)).toEqual({
+      botId: bot,
+      key: { kind: "person", personId: teammate.id },
+    });
   });
 
   test("publishing reaches the team, named people or groups, and unpublishing takes it away", async () => {

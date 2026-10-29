@@ -7,7 +7,7 @@ import { computerGuidance } from "@openbot/shared/bot-prompt";
 import { isPersonBrowserId } from "@openbot/shared/openbot-browser";
 import { workOwner } from "@openbot/shared/work-owner";
 import { createTurnRunner } from "@openbot/toolkit/run-turn";
-import { and, eq, isNull, ne, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import { createActivityStore } from "./activity/activity";
 import {
@@ -35,6 +35,7 @@ import { createAgentFetch } from "./agents/endpoint";
 import { createHandoffDesk } from "./agents/handoff";
 import { createHandoffRunner } from "./agents/handoff-runner";
 import { startHandoffDelivery } from "./agents/handoff-wiring";
+import { runsIsolated } from "./agents/isolation";
 import {
   configureBotLifecycle,
   createBotLifecycleStore,
@@ -77,6 +78,16 @@ import { createRoleRepository } from "./auth/guards";
 import { createIdentityProviderStore } from "./auth/identity-provider-store";
 import { createOrganizationAuth } from "./auth/organization";
 import { organizationUserStore } from "./auth/organization-store";
+import { openbotAddress } from "./browser/address";
+import { botBrowserNetwork } from "./browser/bot-browser";
+import { personBrowserEgressPolicy } from "./browser/egress";
+import {
+  botRecordRefusal,
+  directBrowserComputers,
+  gatewayBrowserComputers,
+  personBrowserPlace,
+  withPersonBrowsers,
+} from "./browser/host";
 import {
   loadAttachmentForTurn,
   markAttachmentsSent,
@@ -102,19 +113,18 @@ import { createChannelTitler } from "./channels/titler";
 import { headlessComponentCatalog } from "./components/headless";
 import { createSandboxedStore } from "./components/sandboxed";
 import { createComponentStore } from "./components/store";
-import { openbotAddress } from "./browser/address";
-import { personBrowserEgressPolicy } from "./browser/egress";
 import {
-  directBrowserComputers,
-  gatewayBrowserComputers,
-  personBrowserPlace,
-  withPersonBrowsers,
-} from "./browser/host";
+  botOwnership,
+  createComputerSeatResolver,
+} from "./computer/computer-key";
 import { createComputerGateway } from "./computer/gateway";
 import { createHeadlessComputerTools } from "./computer/headless-tools";
 import { createPageFrameStore } from "./computer/page-frames";
 import { startPolicyListener } from "./computer/policy-listener";
-import { withPolicyPushOnWake } from "./computer/policy-network";
+import {
+  pushEgressPolicy,
+  withPolicyPushOnWake,
+} from "./computer/policy-network";
 import {
   createPolicyStore,
   DEFAULT_ACTION_POLICY,
@@ -154,8 +164,6 @@ import {
 import { createDeliveryStore } from "./delivery/store";
 import type { DeliveryScope } from "./delivery/types";
 import { DeliveryRefusedError } from "./delivery/types";
-import { createDemonstrationRecorder } from "./demonstrations/recording";
-import { createDemonstrationStore } from "./demonstrations/store";
 import {
   createHostAccessBroker,
   HostAccessRefusedError,
@@ -201,32 +209,32 @@ import { createIntelligenceMemory } from "./memory/intelligence";
 import { createMemoryStore } from "./memory/store";
 import { memoryTools } from "./memory/tools";
 import { reportModelAvailability } from "./model-availability-check";
-import { appAccessTools } from "./plugins/app-access-tool";
 import { createSignInNotifier, createSignInResumer } from "./passwords/resume";
 import { createSignInService } from "./passwords/service";
 import { createPasswordStore } from "./passwords/store";
 import { createOnboardingStore } from "./people/onboarding";
 import { createProfileStore } from "./people/profile";
 import { createPeopleStore } from "./people/store";
-import { createAccountModeSwitch } from "./plugins/account-mode";
-import { assertActivatable, providerDecision } from "./plugins/broker";
 import { BROKERED_PROFILE } from "./plugins/access";
-import { useRoutineTools } from "./plugins/builtin-routines";
+import { createAccountModeSwitch } from "./plugins/account-mode";
+import { appAccessTools } from "./plugins/app-access-tool";
 import { useArcadeClient } from "./plugins/arcade";
 import { createArcadeClient } from "./plugins/arcade-adapter";
+import { assertActivatable, providerDecision } from "./plugins/broker";
+import { useRoutineTools } from "./plugins/builtin-routines";
 import { useComposioClient } from "./plugins/composio";
 import { createComposioClient } from "./plugins/composio-adapter";
 import { backfillBrokeredLogos } from "./plugins/logos";
 import { redirectUriFor } from "./plugins/oauth";
 import {
-  createSharedUseGate,
-  createSharedUseStore,
-} from "./plugins/shared-use-store";
-import {
   arcadeVerifierNotice,
   selectProviderWiring,
   storedProvider,
 } from "./plugins/provider-wiring";
+import {
+  createSharedUseGate,
+  createSharedUseStore,
+} from "./plugins/shared-use-store";
 import { createPluginStore } from "./plugins/store";
 import {
   grantedSkills,
@@ -562,6 +570,9 @@ const computerProvider = config.computer
     )
   : undefined;
 
+/** Why Record is refused in a Bot's browser here, or undefined where each Bot has a computer of its own. */
+const recordRefused = botRecordRefusal(computerProvider) ?? undefined;
+
 if (computerProvider?.warm) {
   void computerProvider.warm();
 }
@@ -760,7 +771,7 @@ const approvalComputerTools = async (
   return computerGateway && canUseComputer(profile, actor)
     ? createHeadlessComputerTools({
         gateway: computerGateway,
-        botId: agentId,
+        seat: await computerGateway.seatFor(agentId, actor.id),
         actor: { id: actor.id, userId: actor.id, initiator },
         auditStore: bootAuditStore,
         ...(signInService ? { signIn: signInService } : {}),
@@ -788,9 +799,33 @@ const retentionSweeps = startRetentionSweeps(
   config.auditRetentionDays,
   pageFrameStore,
 );
+/**
+ * Whose computer a Bot runs on: the person it acts for, unless the Bot is isolated and its owner
+ * still holds the switch (`runsIsolated`, agents/isolation.ts). A provider that cannot make a
+ * computer for one Bot (the one shared computer) gives every Bot a seat for the person instead.
+ */
+const computerSeats = computerProvider
+  ? createComputerSeatResolver({
+      runsIsolated: (botId) => runsIsolated(database, botId),
+      bot: botOwnership(database),
+      canIsolate: computerProvider.isolation === "per-person",
+    })
+  : undefined;
+
 const computerGateway = computerProvider
   ? createComputerGateway({
       provider: computerProvider,
+      ...(computerSeats ? { seats: computerSeats } : {}),
+      // Who each person's computer belongs to, for the admin list.
+      people: async (ids) =>
+        new Map(
+          (
+            await database
+              .select({ id: users.id, name: users.name, email: users.email })
+              .from(users)
+              .where(inArray(users.id, ids))
+          ).map((row) => [row.id, { name: row.name, email: row.email }]),
+        ),
       auditStore: bootAuditStore,
       approvalGate: approvalService.gate,
       policy: () => policyStore.get(),
@@ -1331,17 +1366,6 @@ const recorderExpirySweep = repeatAfterEach(async () => {
     );
   }
 }, 60_000);
-const demonstrationStore = createDemonstrationStore(database);
-const demonstrationRecorder = createDemonstrationRecorder({
-  store: demonstrationStore,
-  // Teaching a shared deployment Bot is allowed as well as an owned one; the skill is the owner's.
-  ownsBot: async (ownerUserId, botId) =>
-    (await pluginStore.agentOwner(botId)) === ownerUserId ||
-    (await agentProfileStore.get(await actorFor(ownerUserId), botId)) !== null,
-  ownsSkill: async (owner, slug) =>
-    (await pluginStore.skillOwner(slug)) === owner,
-  routines: routineStore,
-});
 const memoryIngestion = createMemoryIngestion({
   store: personalMemoryStore,
   plugins: pluginStore,
@@ -1757,7 +1781,7 @@ const routineRunner = createRoutineRunner({
       if (!canUseComputer(profile, actor)) return [];
       return createHeadlessComputerTools({
         gateway: computerGateway,
-        botId: agentId,
+        seat: await computerGateway.seatFor(agentId, actor.id),
         actor: { id: actor.id, userId: actor.id, initiator },
         auditStore: bootAuditStore,
         ...(signInService ? { signIn: signInService } : {}),
@@ -1995,7 +2019,7 @@ const groupConversations = createGroupConversations({
       if (!canUseComputer(profile, actor)) return [];
       return createHeadlessComputerTools({
         gateway: computerGateway,
-        botId: agentId,
+        seat: await computerGateway.seatFor(agentId, actor.id),
         actor: { id: actor.id, userId: actor.id, initiator },
         auditStore: bootAuditStore,
         ...(signInService ? { signIn: signInService } : {}),
@@ -2230,7 +2254,7 @@ const wakeUpRunner = createWakeUpRunner({
       if (!canUseComputer(profile, actor)) return [];
       return createHeadlessComputerTools({
         gateway: computerGateway,
-        botId: agentId,
+        seat: await computerGateway.seatFor(agentId, actor.id),
         actor: { id: actor.id, userId: actor.id, initiator },
         auditStore: bootAuditStore,
         ...(signInService ? { signIn: signInService } : {}),
@@ -2434,6 +2458,12 @@ await installEnterpriseControls({
   databaseUrl: config.databaseUrl,
   auditStore: bootAuditStore,
   personBrowserPolicy,
+  // While a person records in a Bot's browser, the Recorder there reaches OpenBot and the gateway; the Bot does not.
+  duringRecording: botBrowserNetwork({
+    connections: recorderExtension.connections,
+    openbotUrls: [config.publicUrl, config.appUrl],
+    gatewayUrl: config.runtime.intelligence.gatewayWsUrl,
+  }),
   ...(computerProvider ? { provider: computerProvider } : {}),
   ...(config.computer?.token ? { computerToken: config.computer.token } : {}),
   ...(config.webBotAuth ? { webBotAuth: config.webBotAuth } : {}),
@@ -2615,11 +2645,41 @@ const app = createApp(
     approvals: approvalService,
     shared: { modes: accountModes, use: sharedUseStore },
     ...(signInService ? { passwords: signInService } : {}),
-    demonstrations: {
-      store: demonstrationStore,
-      recorder: demonstrationRecorder,
-    },
     recorder: recorderExtension,
+    // A Bot's browser, worked by the person holding its wheel: its bar and Record, wherever Bots have computers.
+    ...(computerGateway
+      ? {
+          botBrowser: {
+            recorder: recorderExtension,
+            openbotUrl: openbotAddress(config),
+            ...(config.computer?.token ? { token: config.computer.token } : {}),
+            // The Bot's policy, which `botBrowserNetwork` widens while a recording runs, to the computer of the seat
+            // the recording is on: the person's own, or the isolated Bot's.
+            pushPolicy: async (seat) => {
+              const policy = await enterpriseControls()?.policyForBot(
+                seat.botId,
+              );
+              if (!policy) return;
+              await pushEgressPolicy(
+                await computerGateway.locate(seat),
+                seat.botId,
+                policy,
+                {
+                  ...(config.computer?.token
+                    ? { token: config.computer.token }
+                    : {}),
+                  ...(config.webBotAuth
+                    ? { webBotAuth: config.webBotAuth }
+                    : {}),
+                },
+              );
+            },
+            singleUser: config.singleUser,
+            // Where every Bot shares one computer, Record is refused in all their browsers (browser/host.ts).
+            ...(recordRefused ? { recordRefused } : {}),
+          },
+        }
+      : {}),
     // Only where a person's browser can run: OpenBot Desktop's host-side computer, or computers Bots run on that give
     // each its own. Where every Bot shares one, the routes have no computers and say why (browser/host.ts).
     ...(computerGateway || config.browser
@@ -2726,8 +2786,6 @@ startHttpServer({
   resolveRequestActor,
   agentProfileStore,
   computerGateway,
-  demonstrationStore,
-  demonstrationRecorder,
   app,
 });
 

@@ -1,5 +1,5 @@
-import { useEffect, useRef } from "react";
 import { IconDeviceDesktop } from "@tabler/icons-react";
+import { useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { useComputerControl } from "@/lib/computers/use-control";
 
@@ -11,14 +11,16 @@ export function ComputerControlButton({
   computerId: string;
   onTakeControl?: () => void;
 }) {
-  const { control, busy, problem, change } = useComputerControl(computerId);
-  const human = control?.holder === "human";
+  const { control, busy, problem, change, someoneElse } =
+    useComputerControl(computerId);
+  // Someone else's wheel is not the person's to hand back, and not theirs to take from under them either.
+  const human = control?.holder === "human" && !someoneElse;
   return (
     <div className="flex flex-col items-start gap-1">
       <Button
         size="sm"
         variant={human ? "default" : "outline"}
-        disabled={busy || !control || control.transitioning}
+        disabled={busy || !control || control.transitioning || someoneElse}
         aria-busy={busy || control?.transitioning}
         onClick={async () => {
           if (await change?.(human ? "release" : "take")) {
@@ -56,11 +58,14 @@ export function ComputerChatControls({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const { control } = useComputerControl(computerId ?? "", Boolean(computerId));
+  const { control, someoneElse } = useComputerControl(
+    computerId ?? "",
+    Boolean(computerId),
+  );
   const needsYou = Boolean(
     control &&
       (control.requested ||
-        control.holder === "human" ||
+        (control.holder === "human" && !someoneElse) ||
         control.recoveryRequired ||
         control.secretWanted !== undefined),
   );

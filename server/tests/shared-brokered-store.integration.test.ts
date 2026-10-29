@@ -1,17 +1,17 @@
 // server/tests/shared-brokered-store.integration.test.ts
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
+import { readConnectPrompt } from "@openbot/shared/connect-prompt";
 import { and, eq, inArray } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import { createDatabase } from "../src/db/client";
 import {
   agents,
+  auditEvents,
   brokeredConnections,
   mcpServers,
   mcpTools,
 } from "../src/db/schema";
-import { readConnectPrompt } from "@openbot/shared/connect-prompt";
-import { auditEvents } from "../src/db/schema";
 import {
   BrokerAccountGoneError,
   type ConnectedAppBroker,

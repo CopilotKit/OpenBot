@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { join } from "node:path";
 import { createServer } from "node:net";
+import { join } from "node:path";
 import {
   localChromeConfiguration,
   requireAvailablePort,

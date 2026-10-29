@@ -7,6 +7,10 @@ import {
 } from "@copilotkit/react-core/v2";
 import { useQuery } from "@tanstack/react-query";
 import {
+  readConnectPrompt,
+  SHOW_APP_ACCESS_TOOL,
+} from "@openbot/shared/connect-prompt";
+import {
   IconAlertTriangle,
   IconBox,
   IconChevronDown,
@@ -53,7 +57,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { attachmentUrl } from "@/lib/channels/attachments";
 import { readResponsibilityTurn } from "@/lib/channels/responsibility-turn";
 import { readFiring } from "@/lib/channels/routine-firing";
-import { splitChatOrigin } from "./chat-origin";
+import type { CardPlace } from "@/lib/copilot/carry-on";
+import { ToolPlaceContext } from "@/lib/copilot/tool-place";
 import { markdownComponents } from "@/lib/markdown";
 import { EASE_OUT, ENTRANCE_SECONDS } from "@/lib/motion";
 import { readToolName } from "@/lib/plugins/tool-name";
@@ -64,25 +69,32 @@ import {
   toolResultFailed,
 } from "@/lib/plugins/tool-result";
 import { readTeamBotConsent } from "@/lib/team-bots";
-import type { CardPlace } from "@/lib/copilot/carry-on";
-import {
-  readConnectPrompt,
-  SHOW_APP_ACCESS_TOOL,
-} from "@openbot/shared/connect-prompt";
 import { cn } from "@/lib/utils";
 import { VOICE_CHAT_ACTIVITY, type VoiceChatEntry } from "@/lib/voice/archive";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import { AppAccessCard } from "./app-access-card";
+import { isBrowserStep } from "./browser-activity";
+import {
+  attachmentModality,
+  type SentAttachment,
+  toVisibleChatItems,
+} from "./chat-messages";
+import { splitChatOrigin } from "./chat-origin";
+import type { QueuedMessage } from "./composer";
+import { FollowScroll, RESUME_PX, useFollowIntent } from "./follow-intent";
+import { LateRenderersContext, LateRenderersWatch } from "./late-renderers";
+import { usePacedReveal } from "./paced-reveal";
+import { TeamBotConsentCard } from "./team-bot-consent";
 import {
   dropRepeatedAppCards,
   groupToolSteps,
   ToolActivity,
   type ToolGroup,
-  useDrawnTool,
   type TranscriptItem,
+  useDrawnTool,
 } from "./tool-activity";
-import { isBrowserStep } from "./browser-activity";
+import { ToolRenderBoundary, toolCallFinal } from "./tool-boundary";
 import { shouldDrawEarlier, useTranscriptPages } from "./transcript-pages";
-import { FollowScroll, RESUME_PX, useFollowIntent } from "./follow-intent";
-import { usePacedReveal } from "./paced-reveal";
 import { TranscriptRail } from "./transcript-rail";
 import {
   AT_END_PX,
@@ -91,17 +103,6 @@ import {
   type Turn,
   turnsOf,
 } from "./transcript-turns";
-import { LateRenderersContext, LateRenderersWatch } from "./late-renderers";
-import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
-import {
-  attachmentModality,
-  type SentAttachment,
-  toVisibleChatItems,
-} from "./chat-messages";
-import type { QueuedMessage } from "./composer";
-import { AppAccessCard } from "./app-access-card";
-import { TeamBotConsentCard } from "./team-bot-consent";
-import { ToolRenderBoundary, toolCallFinal } from "./tool-boundary";
 import { ToolLine } from "./tool-line";
 import { VoiceChatCard } from "./voice-chat-card";
 
@@ -1373,6 +1374,7 @@ const ToolCallBody = memo(function ToolCallBody({
   args,
   result,
   latest,
+  spokeAfter,
 }: {
   toolCallId: string;
   name: string;
@@ -1380,6 +1382,8 @@ const ToolCallBody = memo(function ToolCallBody({
   result?: string;
   /** Nothing said or queued since this call, and the Bot is not working. See `CardPlace`. */
   latest: boolean;
+  /** The Bot said something after this call in its turn. See `ToolPlace`. */
+  spokeAfter: boolean;
 }) {
   const renderToolCall = useRenderToolCall();
   const toolCall = useMemo(
@@ -1405,28 +1409,35 @@ const ToolCallBody = memo(function ToolCallBody({
         }),
   });
 
+  const place = useMemo(
+    () => ({ toolCallId, latest, spokeAfter }),
+    [toolCallId, latest, spokeAfter],
+  );
+
   return (
     <ToolRenderBoundary
       final={toolCallFinal(args, result)}
       name={name}
       resetKey={args}
     >
-      {/*
-       * A TOOL WITH NO REGISTERED RENDERER STILL HAPPENED, and since tools moved to the server
-       * that is now the ordinary case rather than the exception: MCP tools execute in the runtime
-       * and register no renderer here at all. `renderToolCall` still draws the components the app
-       * registers, and everything else lands below.
-       *
-       * What was called, shimmering until its result arrives, and then the server's own words
-       * drawn the way a Bot's prose is drawn.
-       */}
-      {drawn ?? (
-        <ServerToolLine
-          name={name}
-          place={{ toolCallId, latest }}
-          result={result}
-        />
-      )}
+      <ToolPlaceContext.Provider value={place}>
+        {/*
+         * A TOOL WITH NO REGISTERED RENDERER STILL HAPPENED, and since tools moved to the server
+         * that is now the ordinary case rather than the exception: MCP tools execute in the runtime
+         * and register no renderer here at all. `renderToolCall` still draws the components the app
+         * registers, and everything else lands below.
+         *
+         * What was called, shimmering until its result arrives, and then the server's own words
+         * drawn the way a Bot's prose is drawn.
+         */}
+        {drawn ?? (
+          <ServerToolLine
+            name={name}
+            place={{ toolCallId, latest }}
+            result={result}
+          />
+        )}
+      </ToolPlaceContext.Provider>
     </ToolRenderBoundary>
   );
 });
@@ -1443,6 +1454,8 @@ type ToolRowProps = {
   steps: ToolGroup["steps"];
   active: boolean;
   latest: boolean;
+  /** The Bot said something after this row in its turn. See `ToolPlace`. */
+  spokeAfter: boolean;
 };
 
 /**
@@ -1457,6 +1470,7 @@ export function sameToolRow(a: ToolRowProps, b: ToolRowProps): boolean {
     a.id === b.id &&
     a.active === b.active &&
     a.latest === b.latest &&
+    a.spokeAfter === b.spokeAfter &&
     a.steps.length === b.steps.length &&
     a.steps.every((step, index) => {
       const other = b.steps[index];
@@ -1476,6 +1490,7 @@ const ToolRow = memo(function ToolRow({
   steps,
   active,
   latest,
+  spokeAfter,
 }: ToolRowProps) {
   const [only] = steps;
   return (
@@ -1487,6 +1502,7 @@ const ToolRow = memo(function ToolRow({
             latest={latest}
             name={only.toolCall.function.name}
             result={only.result}
+            spokeAfter={spokeAfter}
             toolCallId={only.toolCall.id}
           />
         </ArgumentsArrivingContext.Provider>
@@ -1855,6 +1871,10 @@ export function ChatTranscript({
 
   /* Which tool calls are still the latest thing, for an app card: see `latestFrom`. */
   const latestIndex = latestFrom(items, { busy, queued: queued.length });
+  /* The last thing the Bot said, so a call can tell whether its turn went on to say anything: see `ToolPlace`. */
+  const lastBotWords = items.findLastIndex(
+    (item) => item.kind === "text" && item.role === "assistant",
+  );
 
   /* One rule for both kinds of row — see `anchorRowIds`, which is where it is written down. */
   const anchorRows = anchorRowIds(items);
@@ -2096,6 +2116,7 @@ export function ChatTranscript({
           active={busy && index === items.length - 1}
           id={item.id}
           latest={index >= latestIndex}
+          spokeAfter={lastBotWords > index}
           steps={item.kind === "tools" ? item.steps : [item]}
         />
       </MessageScrollerItem>

@@ -265,6 +265,13 @@ describe("OpenBot database schema", () => {
         hasDefault: false,
         primary: false,
       },
+      // Off unless the owner asked for a computer of its own and is allowed one.
+      {
+        name: "isolated",
+        notNull: true,
+        hasDefault: true,
+        primary: false,
+      },
       /*
        * Nullable, and that is the security property.
        *

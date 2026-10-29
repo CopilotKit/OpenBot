@@ -17,13 +17,13 @@ import {
 } from "@openbot/shared/recorder-api";
 import type { CapturedEvent } from "@openbot/shared/recorder-masking";
 import type {
-  NetworkCaptureDeps,
-  NetworkMode,
-} from "../src/background/network";
-import type {
   AgentObservation,
   CaptureObservation,
 } from "../src/background/agent/observation";
+import type {
+  NetworkCaptureDeps,
+  NetworkMode,
+} from "../src/background/network";
 import type { PageFallback } from "../src/background/network/fallback";
 import {
   installRecording,

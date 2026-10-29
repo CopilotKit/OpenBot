@@ -2,7 +2,6 @@ import { readFile, rename, rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { parseEnv } from "node:util";
-import { intelligenceApiKey } from "../shared/intelligence-key";
 import {
   cliLoginPresent,
   containerMissing,
@@ -17,6 +16,7 @@ import {
   runCli,
   verifiedContainer,
 } from "../server/src/learning/ensure-container";
+import { intelligenceApiKey } from "../shared/intelligence-key";
 import {
   intelligenceApiOrigin,
   type LearningConnection,

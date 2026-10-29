@@ -35,6 +35,11 @@ export const agentFormSchema = z.object({
    * always empty when editing, and leaving it empty keeps whatever key is already set.
    */
   authValue: z.string(),
+  /**
+   * A computer of its own. Optional because only the New Bot sheet and the Setup row ask it: every
+   * other form leaves it out, and the server reads absent as "leave it as it is".
+   */
+  isolated: z.boolean().optional(),
 });
 
 export type AgentFormValues = z.infer<typeof agentFormSchema>;
@@ -59,6 +64,7 @@ export function agentInputFrom(values: AgentFormValues) {
     ...(values.authValue.trim()
       ? { auth: { header: "Authorization", value: values.authValue.trim() } }
       : {}),
+    ...(values.isolated === undefined ? {} : { isolated: values.isolated }),
   };
 }
 

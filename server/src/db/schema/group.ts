@@ -1,12 +1,12 @@
 import { sql } from "drizzle-orm";
 import {
   check,
+  index,
   pgTable,
+  primaryKey,
   text,
   timestamp,
-  primaryKey,
   uniqueIndex,
-  index,
 } from "drizzle-orm/pg-core";
 import { channels, users } from "./core";
 import { jsonb } from "./json";

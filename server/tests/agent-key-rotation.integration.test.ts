@@ -5,8 +5,8 @@ import { createAgentProfileStore } from "../src/agents/profile-store";
 import type { AgentActor } from "../src/agents/profile-types";
 import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
-import { testDatabaseUrl } from "./support/database";
 import { agentProfiles, agents, credentials, users } from "../src/db/schema";
+import { testDatabaseUrl } from "./support/database";
 
 /**
  * Editing a Bot's key, against a real database.

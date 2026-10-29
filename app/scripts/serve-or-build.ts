@@ -1,9 +1,9 @@
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  type BuildCachePaths,
   isReusableBuild,
   writeBuildCacheManifest,
-  type BuildCachePaths,
 } from "./build-cache";
 
 type RunCommand = (command: string[], cwd: string) => Promise<void>;

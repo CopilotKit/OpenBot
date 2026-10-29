@@ -7,7 +7,7 @@ import {
   IconCircleCheck,
   IconPlayerRecordFilled,
 } from "@tabler/icons-react";
-import { useMutation } from "@tanstack/react-query";
+import { type UseMutationOptions, useMutation } from "@tanstack/react-query";
 import { type ReactNode, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -61,44 +61,82 @@ export const actionCount = (actions: number) =>
 const phraseCount = (phrases: number) =>
   `${phrases} narrated ${phrases === 1 ? "phrase" : "phrases"}`;
 
+/** What Record and Stop do around the recording itself, on a screen. */
+export type RecordingHooks = {
+  /**
+   * Runs first on Stop. On a screen it hands over the phrase being said, so the last thing the person said is in the
+   * recording before it ends.
+   */
+  beforeStop?: () => Promise<void>;
+  /** Hears the answer to the narration question on the person's click, where narration in the page needs it. */
+  answered?: (narrate: boolean) => void;
+};
+
 /**
- * Record and Stop for the person's browser, from the Recorder's own report in `state`.
- *
- * Record asks the person whether to narrate when they have never said (`choice`), in a dialog whose answer records and
- * is kept, and tells the Recorder the answer with every recording, so it opens a microphone only for a person who chose
- * to narrate. `answered` hears the answer on the person's click, where narration in the page needs it.
- *
- * `beforeStop` runs first on Stop. On a screen it hands over the phrase being said, so the last thing the person said
- * is in the recording before it ends.
+ * Record and Stop for the person's browser, from the Recorder's own report in `state`. Record asks about narration
+ * first when the person has never said (`useRecordingWith`).
  */
 export function useRecording(
   state: BrowserApiState,
   choice: NarrationChoice,
-  options: {
-    beforeStop?: () => Promise<void>;
-    answered?: (narrate: boolean) => void;
-  } = {},
+  hooks: RecordingHooks = {},
 ) {
-  const { beforeStop, answered } = options;
+  return useRecordingWith({
+    recorder: state.recorder,
+    /*
+     * A Recorder that reports itself disconnected does not hold Record back: the server connects the person's own
+     * browser again before it starts (a Disconnect in Settings, Browsers leaves it signed out until then).
+     */
+    waiting: !state.open ? "Your browser is closed. Open it to record." : null,
+    start: startBrowserRecordingMutationOptions(queryClient),
+    stop: stopBrowserRecordingMutationOptions(queryClient),
+    choice,
+    ...hooks,
+  });
+}
+
+/** What Record posts: the task's name, the language narration is heard in, and whether the person narrates it. */
+export type RecordingStart = {
+  title: string;
+  language?: string;
+  narrate?: boolean;
+};
+
+/**
+ * Record and Stop for any browser the Recorder is in, from its own report (`recorder`): the person's own browser
+ * (`useRecording`), or a Bot's (`components/computer/bot-browser.tsx`), whose routes take the same bodies.
+ *
+ * `waiting` is why Record cannot be pressed yet, in a sentence, or null when it can.
+ *
+ * Record asks the person whether to narrate when they have never said (`choice`, their account's preference, the same
+ * in every browser they record in), in a dialog whose answer records and is kept, and tells the Recorder the answer
+ * with every recording, so a microphone opens only for a person who chose to narrate.
+ */
+export function useRecordingWith<Started, Stopped>({
+  recorder,
+  waiting,
+  start: startOptions,
+  stop: stopOptions,
+  choice,
+  beforeStop,
+  answered,
+}: {
+  recorder: LauncherState | undefined;
+  waiting: string | null;
+  start: UseMutationOptions<Started, Error, RecordingStart>;
+  stop: UseMutationOptions<Stopped, Error, void>;
+  choice: NarrationChoice;
+} & RecordingHooks) {
   const [title, setTitle] = useState("");
   const [finishing, setFinishing] = useState(false);
   /** The narration question is on screen, for the task named when Record was pressed. */
   const [asking, setAsking] = useState(false);
-  const start = useMutation(startBrowserRecordingMutationOptions(queryClient));
-  const stop = useMutation(stopBrowserRecordingMutationOptions(queryClient));
-  const recorder = state.recorder;
+  const start = useMutation(startOptions);
+  const stop = useMutation(stopOptions);
   const phase = recorder?.phase ?? "idle";
   const seconds = useSecondsSince(
     phase === "recording" ? recorder?.startedAt : undefined,
   );
-  /**
-   * Why Record cannot be pressed yet, in a sentence, or null when it can. A Recorder that reports itself disconnected
-   * does not hold Record back: the server connects the person's own browser again before it starts (a Disconnect in
-   * Settings, Browsers leaves it signed out until then).
-   */
-  const waiting = !state.open
-    ? "Your browser is closed. Open it to record."
-    : null;
 
   function begin(name: string, narrate: boolean) {
     stop.reset();
@@ -128,6 +166,8 @@ export function useRecording(
     /** Why Record or Stop was refused, in the server's own sentence, and when it was asked (the latest of the page's
      * failures is the one it shows). */
     error: start.error ?? stop.error,
+    startError: start.error,
+    stopError: stop.error,
     failedAt: start.error
       ? start.submittedAt
       : stop.error
@@ -236,10 +276,20 @@ export function StoppedIcon({
 }
 
 /**
- * The recording Stop ended last, by name, on a page of rows (OpenBot Desktop), until the next one starts: Stop says
- * where the recording went and what it held, or that it held nothing.
+ * The recording Stop ended last, by name, on a page of rows (OpenBot Desktop, a Bot's screen), until the next one
+ * starts: Stop says where the recording went and what it held, or that it held nothing. `ended` comes first when
+ * something other than Stop ended it, in a sentence saying what did.
  */
-export function StoppedRow({ stopped }: { stopped: Stopped }) {
+export function StoppedRow({
+  stopped,
+  ended,
+}: {
+  stopped: Stopped;
+  ended?: string;
+}) {
+  const held = stopped.empty
+    ? `Nothing was recorded. ${WHAT_IT_RECORDS}`
+    : `Saved to your Learning space: ${heldIn(stopped)}.`;
   return (
     <Item size="sm" role="status">
       <ItemMedia variant="icon">
@@ -248,9 +298,7 @@ export function StoppedRow({ stopped }: { stopped: Stopped }) {
       <ItemContent>
         <ItemTitle>{stopped.title}</ItemTitle>
         <ItemDescription className="line-clamp-none">
-          {stopped.empty
-            ? `Nothing was recorded. ${WHAT_IT_RECORDS}`
-            : `Saved to your Learning space: ${heldIn(stopped)}.`}
+          {ended ? `${ended} ${held}` : held}
         </ItemDescription>
       </ItemContent>
     </Item>
@@ -298,10 +346,17 @@ function progressLine(recording: Recording): string {
 }
 
 /**
- * The recording row on a page of rows (OpenBot Desktop): a task name and Record, or while recording its name, how long
- * it has run, its actions and Stop.
+ * The recording row on a page of rows (OpenBot Desktop, a Bot's screen): a task name and Record, or while recording its
+ * name, how long it has run, its actions and Stop. `placeholder` is shorter where the row is narrow (the column beside
+ * a Bot's screen), so the field says what it is for rather than half an example.
  */
-export function RecordingRow({ recording }: { recording: Recording }) {
+export function RecordingRow({
+  recording,
+  placeholder = "Name the task, like Submit an expense report",
+}: {
+  recording: Recording;
+  placeholder?: string;
+}) {
   if (recording.phase !== "idle") {
     return (
       <Item size="sm">
@@ -347,7 +402,7 @@ export function RecordingRow({ recording }: { recording: Recording }) {
           aria-label="Task name"
           maxLength={200}
           onChange={(event) => recording.setTitle(event.target.value)}
-          placeholder="Name the task, like Submit an expense report"
+          placeholder={placeholder}
           value={recording.title}
         />
         {recording.waiting ? (

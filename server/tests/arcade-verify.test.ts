@@ -40,8 +40,8 @@ import { AUTHORIZATION_REFUSALS } from "../src/plugins/routes";
 import type { AccountRef } from "../src/plugins/shared-accounts";
 import { createPluginStore } from "../src/plugins/store";
 import { testDatabaseUrl } from "./support/database";
-import { removePeople, seedPeople } from "./support/people";
 import { testEnvironment } from "./support/environment";
+import { removePeople, seedPeople } from "./support/people";
 
 /*
  * SIX CONNECTIONS RATHER THAN THE SHARED `TEST_POOL` OF TWO, because the race below drives two

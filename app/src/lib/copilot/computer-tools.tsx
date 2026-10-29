@@ -2,6 +2,7 @@ import { z } from "zod";
 import { ToolLine } from "@/components/channels/tool-line";
 import { CommandOutput } from "@/components/computer/command-output";
 import { ComputerView } from "@/components/computer/computer-view";
+import { HelpRequestCard } from "@/components/computer/help-request-card";
 import { tryClient } from "@/lib/client";
 import { noteBrowsed, recordActivity } from "@/lib/computers/activity";
 import { callComputer, type ToolOutcome } from "@/lib/computers/call";
@@ -606,8 +607,15 @@ export function ComputerTools() {
         toolCall,
       }: { signal?: AbortSignal; toolCall?: { id?: string } } = {},
     ) => runHelpRequest(bot.current, input.reason, toolCall?.id, signal),
-    // Rendered by ComputerView as the take-the-wheel prompt.
-    render: () => null,
+    // The Bot's screen with the wheel while the request is open, then a line saying what was asked and what came of it.
+    render: ({ args, result, toolCallId }) => (
+      <HelpRequestCard
+        botId={bot.current}
+        reason={typeof args?.reason === "string" ? args.reason : undefined}
+        result={result}
+        toolCallId={toolCallId}
+      />
+    ),
   });
 
   useFrontendTool({

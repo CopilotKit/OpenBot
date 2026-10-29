@@ -92,6 +92,7 @@ function profile(
     endpoint: null,
     hasAuth: false,
     hasCallbackToken: false,
+    isolated: false,
     ...overrides,
   };
 }

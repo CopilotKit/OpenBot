@@ -29,8 +29,8 @@ export type {
 export {
   BROKERED_PROBE_OUTCOMES,
   CatalogueEntryUnknownError,
-  connectionSiblings,
   CustomServerRefusedError,
+  connectionSiblings,
   deploymentFaultSentence,
   exchangeRefreshTokenOverHttp,
   INVALID_CLIENT,

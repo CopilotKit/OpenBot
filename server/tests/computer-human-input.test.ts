@@ -1,9 +1,10 @@
 import { describe, expect, test } from "bun:test";
+import type { MiddlewareHandler } from "hono";
+import type { AppVariables } from "../src/auth/guards";
+import { personSeat } from "../src/computer/computer-key";
 import type { ComputerGateway } from "../src/computer/gateway";
 import type { PolicyStore } from "../src/computer/policy-store";
 import { createComputerRoutes } from "../src/computer/routes";
-import type { AppVariables } from "../src/auth/guards";
-import type { MiddlewareHandler } from "hono";
 
 /**
  * A person's own mouse and keyboard, shaped before it travels.
@@ -33,6 +34,8 @@ function asActor(
 function recordingGateway() {
   const calls: Array<{ botId: string; input: Record<string, unknown> }> = [];
   const gateway = {
+    seatFor: async (botId: string, personId: string) =>
+      personSeat(personId, botId),
     humanInput: async (botId: string, input: Record<string, unknown>) => {
       calls.push({ botId, input });
       return { ok: true };

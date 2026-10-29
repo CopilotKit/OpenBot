@@ -70,6 +70,7 @@ function serve() {
         endpoint: null,
         hasAuth: false,
         hasCallbackToken: false,
+        isolated: false,
       })),
   } as unknown as AgentProfileStore;
   const router = {

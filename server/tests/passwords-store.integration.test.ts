@@ -2,6 +2,7 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { inArray } from "drizzle-orm";
 import type { AuditEventInput } from "../src/audit";
+import { personSeat } from "../src/computer/computer-key";
 import { createDatabase } from "../src/db/client";
 import { users } from "../src/db/schema/core";
 import { savedLogins, signInRequests } from "../src/db/schema/passwords";
@@ -26,6 +27,7 @@ const service = createSignInService({
   encryptionKey: Buffer.alloc(32, 3).toString("base64"),
   auditStore: { insert: async (event) => void audit.push(event) },
   gateway: {
+    seatFor: async (botId, personId) => personSeat(personId, botId),
     signIn: async () => {
       await new Promise<void>((resolve) => {
         releaseFill = resolve;
@@ -118,6 +120,7 @@ test("a request waiting on its verification code is stored, listed, and then sig
     store,
     encryptionKey: Buffer.alloc(32, 3).toString("base64"),
     gateway: {
+      seatFor: async (botId, personId) => personSeat(personId, botId),
       signIn: async () => ({
         submitted: true,
         passwordFieldVisible: false,

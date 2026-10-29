@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
-import { DictationSession } from "@/lib/dictation/session";
 import type { Recording } from "@/lib/dictation/recording";
+import { DictationSession } from "@/lib/dictation/session";
 
 const audio = new Blob(["recorded audio"], { type: "audio/webm" });
 

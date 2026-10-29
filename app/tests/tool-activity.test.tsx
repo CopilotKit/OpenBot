@@ -1,8 +1,8 @@
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
+import { CopilotKitContext } from "@copilotkit/react-core/v2/context";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, renderHook } from "@testing-library/react";
-import { CopilotKitContext } from "@copilotkit/react-core/v2/context";
 import type { ReactNode } from "react";
 import type { VisibleChatItem } from "../src/components/channels/chat-messages";
 import {

@@ -28,8 +28,8 @@ import {
   type RecorderResolver,
 } from "./guard";
 import { createRecorderRefusalAudit } from "./refusal-audit";
-import { createRecorderSignOut, type SignOutRecorders } from "./sign-out";
 import type { RecorderRouteDeps } from "./routes";
+import { createRecorderSignOut, type SignOutRecorders } from "./sign-out";
 import { createTrajectoryBindingStore } from "./trajectory-bindings";
 import {
   createTrajectoryConnectHook,

@@ -78,7 +78,7 @@ startup.
 
 Compose puts it on a different network from PostgreSQL. A Bot has a shell, and a shell reaches whatever its container reaches, so the database is on a `data` network carrying only itself and `migrate`, and everything else is on `default`. A deployment that runs the API server inside Compose rather than on the host joins it to both, which is the one place the two meet.
 
-With `COMPUTER_SUPERVISOR_URL`, each Bot gets its own computer container, workspace volume, and browser profile. Without it, all Bots share `AGENT_COMPUTER_URL`.
+With `COMPUTER_SUPERVISOR_URL`, each person gets a computer container of their own, and every Bot they use has its own folder and browser profile in it; a Bot marked Isolated gets a container of its own instead. Without it, all Bots share `AGENT_COMPUTER_URL`, still with a profile and folder for each person and Bot.
 
 Each computer also filters its own outbound connections. The browser and shell commands go through a filter proxy that applies the Bot's network policy (`allow_all`, `defaults_plus_allowlist`, `allowlist_only` or `deny_all`, which is what a Bot gets when its owner's Cloud network access is switched off). The server pushes the policy before the computer acts and whenever it wakes, and until one arrives nothing may leave. `EGRESS_POLICY_REQUIRED=0` is for a computer run with no API server. Cloud metadata addresses are refused in every mode. A process that ignores the proxy variables and opens a raw socket is not stopped by this; that is a Kubernetes NetworkPolicy's job.
 

@@ -1,12 +1,14 @@
-import { AbstractAgent, HttpAgent, type RunAgentInput } from "@ag-ui/client";
-import { EMPTY } from "rxjs";
-import { standingRoleMessage } from "../src/copilot";
-import { PROFILE_CONTEXT } from "../src/people/name-context";
-import { NameContextMiddleware } from "../src/people/name-context";
 import { describe, expect, spyOn, test } from "bun:test";
+import { AbstractAgent, HttpAgent, type RunAgentInput } from "@ag-ui/client";
 import { BuiltInAgent } from "@copilotkit/runtime/v2";
+import { EMPTY } from "rxjs";
 import { createActorAgentResolver } from "../src/agents/agent-resolver";
 import type { AuditInitiator } from "../src/audit";
+import { standingRoleMessage } from "../src/copilot";
+import {
+  NameContextMiddleware,
+  PROFILE_CONTEXT,
+} from "../src/people/name-context";
 
 describe("actor-scoped agent resolver", () => {
   test("builds only the addressed coworker and carries the headless initiator and depth", async () => {

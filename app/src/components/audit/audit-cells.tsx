@@ -397,6 +397,7 @@ const DECISIONS: Record<string, string> = {
   "computer.secret_requested": "The Bot asked for a secret",
   "computer.secret_supplied": "A person supplied a secret",
   "computer.reset": "The computer was reset",
+  "computer.browser_cleared": "A person cleared the browser",
   "computer.updated": "The computer was updated",
   "computer.stopped": "A person pressed stop",
 

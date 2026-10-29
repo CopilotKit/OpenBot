@@ -8,7 +8,18 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-**Before upgrading.** Fourteen things change for an existing deployment:
+**Before upgrading.** Sixteen things change for an existing deployment:
+- Bots now share one computer per person instead of each having its own. Migration
+  `0069_isolated_bots` adds `agent_profiles.isolated`, off for every existing Bot. With the
+  supervisor (laptop, Desktop, Compose), a person's computer is created the first time one of their
+  Bots acts, as `<namespace>-computer-person-<id>`, and the supervisor stops the old per-Bot containers
+  when it starts, keeping their volumes. A private Bot's logins are copied into its owner's computer
+  once; public Bots, the built-in ones included, sign in again once, because their old logins were
+  shared by everyone who used them. Helm `shared` moves private Bots' profiles the same way. On Helm
+  `sandbox` nothing is copied, so private Bots sign in again once there too. With the supervisor, a
+  private Bot's files come along the same way, into its folder on its owner's computer; a public
+  Bot's old files stay in its old volume. Old per-Bot volumes are left in place; remove them when you
+  are satisfied. Helm's computer memory defaults rise to a 2Gi request and an 8Gi limit.
 - A hosted computer's browser is now headed by default. It uses a little more memory than headless
   did; set `COMPUTER_BROWSER_MODE=headless` (Helm: `computers.browserMode: headless`) to keep the old
   behaviour.
@@ -61,6 +72,55 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   to keep the old behaviour.
 - Interfaces a Bot drew before the upgrade (A2UI 0.9 surfaces) no longer draw when a conversation is
   reopened; the messages around them stay. New ones use A2UI 1.0 (below).
+- A computer now closes browsers nobody is using, least recently used first, when its memory
+  reaches 85% of its limit, and closes a Bot's background tabs after ten minutes untouched (below).
+  In the all-in-one image that share counts the database and the API server too.
+  `COMPUTER_MEMORY_HIGH_PERCENT=0` and `COMPUTER_TAB_IDLE_MS=0` (Helm: `computers.memoryHighPercent`
+  and `computers.tabIdleMs`) keep the old behaviour.
+
+### A computer closes browsers nobody is using when its memory runs high
+
+A computer runs one browser for each Bot that is browsing, and the only limits were a count and half
+an hour untouched. Neither looked at memory, so a few heavy pages could take a container past its
+memory limit well under the count, and the kernel then killed processes without regard to which Bot
+was busy. On Kubernetes it kills everything in the container at once, so every Bot's browser closed
+together and nothing could reach the computer until it came back. A computer now reads its own
+memory the way the kubelet does (the working set, which leaves out the file cache the kernel can
+drop), before it starts a browser and once a minute. At or above 85% of its limit it closes browsers
+one at a time, least recently used first, until it is under 75%, so the next launch does not cross
+the line again straight away. Launches that arrive together share one pass rather than closing a
+browser each. A Bot whose browser was closed starts again where it left off on its next step, still
+signed in, because its profile is on disk.
+
+Only a browser nobody is using is closed. Never closed for memory: the browser being started, the
+most recently used one, any browser used in the last minute (a Bot between two steps asks for
+nothing while its model works out the next), a person's own browser, cloud or native, whose Recorder
+session would end, and the browser of a Bot whose wheel a person holds or has been asked to take.
+When every browser is in use, none is closed.
+
+This is a check, not a guarantee. Memory is read before each launch and once a minute, so a page
+that grows between two checks can still run the container out of memory. A container with no memory
+limit is measured against the machine's memory, and a computer outside a container, such as OpenBot
+Desktop's, closes nothing for memory. In the all-in-one image the database and the API server run in
+the same container as the browsers, and the share counts them too. That is deliberate: the kernel's
+out-of-memory kill counts everything in the container and can take the database down, and closing a
+browser nobody is using first is how the database is protected. Each close is logged as
+`computer-browser-closed-for-memory` with the working set and the limit in bytes.
+`COMPUTER_MEMORY_HIGH_PERCENT` (Helm: `computers.memoryHighPercent`) sets the share where closing
+starts, and `0` switches it off.
+
+The tabs a Bot leaves behind are closed too. A Bot always works in its newest page, so an older tab,
+such as the page a sign-in popup was opened from or a link a site opened in a new tab, is one it
+cannot go back to, and it held memory for as long as the browser stayed up. A background tab that
+nothing has used, navigated or brought to the front for ten minutes is now closed. The page the Bot
+is on is never closed, and neither is any tab of a person's own browser or of a Bot whose wheel a
+person holds. `COMPUTER_TAB_IDLE_MS` (Helm: `computers.tabIdleMs`) sets the time, and `0` keeps them.
+
+Through Helm, `computers.browserIdleMs` and `computers.maxBrowsers` now reach the computer as
+written. An hour (`browserIdleMs: 3600000`) used to render as `3.6e+06`, which the computer ignored
+for its default of thirty minutes, and `browserIdleMs: 0` (keep browsers open) was dropped. All four
+of these settings now also reach the computers `computers.mode: sandbox` makes, which had none of
+them.
 
 ### A conversation opens at the bottom and stays still while a Bot writes
 
@@ -101,6 +161,35 @@ each Bot's own avatar; only the look changes. The choice is saved on your accoun
 you to every device, and changes nothing for anybody else. The templates' own features that
 OpenBot has no server for, such as OpenDots' Spaces, OpenDuet's morning brief and OpenMuse's mail and
 calendar, are not part of the skins.
+
+### Each person's Bots share one computer, and a Bot can have its own
+
+Every Bot used to get a computer of its own, which on a laptop or Desktop meant a container per Bot
+running all the time, and meant everyone who used a public Bot shared its logins. Now all the Bots a
+person uses run on that person's one computer, each with its own browser profile and folder, so a
+login belongs to the person and the Bot, never to everyone who uses it. Tick **Isolated** when you
+make a Bot, or in its Setup, to give it a computer of its own that keeps its logins; everyone who
+uses that Bot shares that computer. Administrators decide who may: Admin → Enterprise → Isolated
+Bots, on for everyone by default, and can be turned off for everyone or allowed for chosen roles and
+groups. When it is turned off for somebody, their isolated Bots run on their own computer from the
+next run, and the Bot's Setup says why. A deployment with one shared computer (Helm `shared`, or no
+supervisor) cannot give a Bot its own, and the checkbox says so.
+
+As is the industry standard for an always-on agent's computer, the Bots on a person's computer are
+not kept from each other: a command any of them runs, a public Bot somebody else made included, can
+reach anything on that computer. Each Bot still keeps its own browser profile there, which is
+stricter than the standard, where a person's Bots share their sign-ins too. The admin Computers
+screen says this, and a Bot that must be kept apart is made Isolated.
+
+An isolated Bot's one computer is shared by everybody who uses it, so its Setup says, before it is
+made public and while it is, that anything signed in to there is theirs too. Only the Bot's owner's
+switch decides whether it may be isolated: an administrator ticking Isolated on somebody else's Bot
+is refused when that owner lacks the switch, rather than saving a tick the Bot never ran with.
+
+A person's computer runs a browser for each of their Bots in use, so Helm's computer now requests
+2Gi of memory with an 8Gi limit (was 1Gi and 4Gi); `computers.resources` in values.yaml says how to
+size it. Removing a person or deleting an isolated Bot leaves its computer until an administrator
+resets it from Admin → Computers, which signs every Bot on it out of everything.
 
 ### The audit log reads like a log
 
@@ -543,6 +632,56 @@ not visit during a recording are never recorded, and nothing on the browser's ow
 settings) or the Recorder's own is. A tab that reloaded as you switched to it no longer loses the saves
 it sends.
 
+### Record a task in a Bot's own browser, with nothing to install
+
+A Bot's screen, opened larger from a conversation, is now a browser a person can work in: tabs, an
+address bar, back, forward and reload sit above the page. Take control and the bar is yours (typing an
+address, switching, opening and closing tabs, all from the keyboard too); while the Bot has control it
+shows where the Bot is, read only. The OpenBot Recorder is already in every Bot's browser, idle until
+someone records, so recording a task needs no extension and no Connect step.
+
+- **Record replaces "Teach a browser workflow".** Name the task, press Record, do it, press Stop. The
+  panel shows the name, the time and the step count, asks about narration before your first recording
+  (the same choice as the Browser page), and after Stop says what was saved to your Learning space. The
+  recording lands in Intelligence exactly as the Recorder sends from any browser, in your own Learning
+  space, so every Bot you use learns from it, this one included.
+- **Only you are recorded, never the Bot.** Record works only while you hold control, and handing it
+  back (or the Bot's request ending) stops the recording, with its last steps sent before the Recorder
+  disconnects; the Bot acts again only once the recording has ended. Taking control now records who
+  took it, so on a shared Bot only that person can use the bar or record, someone else's recording
+  shows only that one is running, and nobody else sees its name, its step count or its microphone.
+- **Record runs on your own computer, never the one everyone shares.** Where every person's Bots run
+  on one computer (Helm's shared mode, or `AGENT_COMPUTER_URL` with no supervisor), Record is refused
+  in every Bot's browser and the panel says why: your Recorder connection would sit in the Bot's
+  profile, where another person's Bot could read it. The bar still works. The computer refuses it too.
+  With a supervisor (laptop, Desktop) or a Sandbox, a Bot's browser is on your own computer, beside
+  only your own Bots, or on an isolated Bot's computer of its own, and Record works there. Your
+  hand-back ends only your own recording: another person recording in the same Bot's browser on their
+  own computer is never touched.
+- **One connection per recording.** Record mints a Recorder connection for the person who pressed it
+  and Stop revokes it; Settings, Browsers lists it as "<Bot>'s browser" while it lives, and says
+  "recording now" for any browser that is recording.
+- While a recording runs in a Bot's browser, that Bot's network policy also lets the Recorder reach
+  OpenBot and the Intelligence gateway, on their own ports only; the Bot's own policy returns when it
+  ends.
+- **Removed: the old "Teach a browser workflow" panel and everything behind it** (its routes under
+  `/api/demonstrations`, its instant skill draft, "Save and use with this Bot" and "Run on a schedule").
+  Skills already saved from it stay, as ordinary skills; its recordings stay in the database, unread.
+- When you take control yourself, the line under the screen no longer repeats your own request back as
+  if you had said it.
+- **What you type while you hold control stays yours.** After you hand back, the Bot reads a field you
+  filled as "filled in by the person", never its value, in its page snapshot, its page text and its
+  screenshots; a field you only tabbed through keeps the Bot's own value.
+- **A Bot's request for help shows in the conversation**, with its reason and Take control, and folds
+  into one line once answered. After you hand back, the Bot is told what you did and carries on, saying
+  what it does next; if it still stops without a word, the card says so and offers Carry on.
+- **Clear browser data.** One button beside reload, in a Bot's browser and in your own, asks "Clear this
+  browser?" and wipes it: cookies, saved passwords, history, site storage and the screenshots kept of its
+  pages. It starts fresh, signed out of everything; OpenBot's own Passwords stay. A Bot's browser can be
+  cleared only by the person holding its control. Audited as `computer.browser_cleared`.
+- Leaving a conversation while you hold a Bot's control no longer leaves it blank: the Bot's reply after
+  you hand back shows when you return, with no "A browser task is paused" notice.
+
 ### Your own browser, opened from OpenBot, with the Recorder already in it
 
 Wherever OpenBot can run a browser for you, the sidebar has a **Browser** button below Connections. It
@@ -603,7 +742,7 @@ close it, and the reason is in the server's and the computer's logs.
 - A person's browser always runs the Recorder that came with its OpenBot, even in a profile that ran an
   earlier one, and keeps it pinned to the toolbar once.
 - A Recorder that is slow to answer is refused instead of taking down the computer and every browser
-  on it. Typing on a live screen that records a demonstration reaches the page in the order typed.
+  on it. Typing on a live screen reaches the page in the order typed.
 - Opening the Browser page twice in quick succession (reloading it while your browser is still
   opening, for one) opens your browser once, connected; before, both opens could be refused, most
   often the first after the Recorder was updated. When a browser cannot be opened, the server's and

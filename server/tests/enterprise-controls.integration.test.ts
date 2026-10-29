@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { AbstractAgent } from "@ag-ui/client";
+import { createTurnRunner } from "@openbot/toolkit/run-turn";
 import { and, eq, inArray, like } from "drizzle-orm";
 import { Hono } from "hono";
 import { EMPTY } from "rxjs";
@@ -14,9 +15,11 @@ import {
 import { createEnterpriseGate } from "../src/admin/gate";
 import { createEnterpriseAdminRoutes } from "../src/admin/routes";
 import { createHandoffDelivery } from "../src/agents/handoff-delivery";
+import { serverTurnAdmission } from "../src/agents/turn-admission";
 import { addAuditTap, createAuditStore, recordAuditEvent } from "../src/audit";
 import { createAuth } from "../src/auth";
 import type { AppVariables } from "../src/auth/guards";
+import { computerKeyText } from "../src/computer/computer-key";
 import type { ComputerProvider } from "../src/computer/provider";
 import type { DeploymentConfig } from "../src/config";
 import { createDatabase } from "../src/db/client";
@@ -36,10 +39,8 @@ import {
   teamBotPublications,
   users,
 } from "../src/db/schema";
-import { createTurnRunner } from "@openbot/toolkit/run-turn";
 import { createTeamBots } from "../src/team-bots/team-bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
-import { serverTurnAdmission } from "../src/agents/turn-admission";
 
 /**
  * The enterprise controls against a real PostgreSQL, through the same seams production uses: the
@@ -61,17 +62,17 @@ const bot = `ent-bot-${suite}`;
 const stopped: string[] = [];
 const provider: ComputerProvider = {
   name: "fake",
-  isolation: "per-bot",
+  isolation: "per-person",
   locate: async () => "http://unused",
-  status: async (botId) => ({ botId, state: "ready" }),
-  stop: async (botId) => {
-    stopped.push(botId);
+  status: async (seat) => ({ botId: seat.botId, state: "ready" }),
+  stop: async (target) => {
+    stopped.push(computerKeyText(target.key));
     return { wasRunning: true };
   },
   reset: async () => ({ cleared: false }),
   list: async () => [
     {
-      botId: bot,
+      key: { kind: "bot", botId: bot },
       status: "running",
       url: "",
       startedAt: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString(),
@@ -92,6 +93,14 @@ async function clean() {
     .delete(modelUsage)
     .where(like(modelUsage.agentId, `ent-%${suite}%`));
 }
+
+/** A Bot a person is recording in the browser of, as far as the controls are told (browser/bot-browser.ts). */
+const recordingBot = `ent-recording-${suite}`;
+const RECORDER_RULE = {
+  type: "domain" as const,
+  value: "openbot.acme.test",
+  ports: "443",
+};
 
 beforeAll(async () => {
   await clean();
@@ -119,6 +128,10 @@ beforeAll(async () => {
     auditStore,
     provider,
     builtInModel: "openai/gpt-test",
+    duringRecording: async (botId, policy) =>
+      botId === recordingBot
+        ? { ...policy, rules: [...policy.rules, RECORDER_RULE] }
+        : policy,
     env: {},
   });
 });
@@ -698,15 +711,33 @@ describe("network policy", () => {
       rules: [{ type: "cidr", value: "10.0.0.0/8", ports: "443" }],
     });
   });
+
+  test("a Bot someone records in is pushed its policy as the recording needs it, and other Bots theirs", async () => {
+    // Every push of a Bot's policy reads this one function, the periodic push and the push on wake alike, so neither
+    // can take the Recorder's way out away mid-recording.
+    const quiet = await controls.policyForBot(`ent-quiet-${suite}`);
+    expect(quiet.rules).not.toContainEqual(RECORDER_RULE);
+    expect(await controls.policyForBot(recordingBot)).toEqual({
+      ...quiet,
+      rules: [...quiet.rules, RECORDER_RULE],
+    });
+  });
 });
 
 describe("offboarding", () => {
   test("terminating a member's computers stops their Bots and is audited", async () => {
+    stopped.length = 0;
     const response = await asAdmin.request(
       `/api/admin/enterprise/people/${member.id}/terminate-computers`,
       { method: "POST" },
     );
-    expect((await response.json()).stopped).toEqual([bot]);
+    // Their own computer, which every Bot they used runs on, and the computer of the Bot they own,
+    // which would be its own were it isolated.
+    expect((await response.json()).stopped).toEqual([
+      `person:${member.id}`,
+      `bot:${bot}`,
+    ]);
+    expect(stopped).toEqual([`person:${member.id}`, `bot:${bot}`]);
     const [row] = await database
       .select()
       .from(auditEvents)
@@ -722,7 +753,7 @@ describe("offboarding", () => {
   test("the inactive sweep stops a computer idle past the window", async () => {
     stopped.length = 0;
     const result = await controls.terminateInactiveComputers();
-    expect(result?.stopped).toEqual([bot]);
+    expect(result?.stopped).toEqual([`bot:${bot}`]);
   });
 });
 

@@ -1,9 +1,9 @@
 import { expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import fixture from "../../server/tests/fixtures/arcade-catalogue.json";
-import type { ComposioApp } from "@/lib/plugins/queries";
 import { BreadthNote } from "@/components/plugins/broker-directory";
 import { consentBreadth } from "@/lib/plugins/enablement-notes";
+import type { ComposioApp } from "@/lib/plugins/queries";
+import fixture from "../../server/tests/fixtures/arcade-catalogue.json";
 
 /**
  * The D32 consent-breadth line on the enablement screen. Derived from the three measured counts and

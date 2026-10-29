@@ -66,14 +66,22 @@ export type SealedOrganizationSession = { sealed: string; expiresAt: Date };
  * Why a connection ended, as its `recorder.revoked` row says: `replaced` (the same copy connected again), `disconnected`
  * (its own Recorder's Disconnect), `revoked` (the person, from Settings, Browsers), `signed_out` (the person's sign-in
  * here ended: they signed out, their sessions were ended, they were removed; the row's `ending` says how) or `expired`
- * (its lifetime ran out).
+ * (its lifetime ran out). A Bot's browser's connection, which lasts one recording (browser/bot-browser.ts), ends
+ * `stopped` (the person's Stop), `ended` (the recording ended without one, and the connection was found left behind)
+ * or `not-started` (the start it was minted for did not happen). The person's own OpenBot browser's ends `cleared` when
+ * they clear that browser (browser/routes.ts): its token was in the profile the clear deleted.
  */
 export type RecorderRevokeReason =
   | "replaced"
   | "disconnected"
   | "revoked"
   | "signed_out"
-  | "expired";
+  | "expired"
+  | "cleared"
+  | BotBrowserRevokeReason;
+
+/** Why a Bot's browser's connection ended (`RecorderRevokeReason`). */
+export type BotBrowserRevokeReason = "stopped" | "ended" | "not-started";
 
 /** A live connection with what its Recorder last said it was doing, and when that arrived; both null until it has said. */
 export type ReportingConnection = RecorderConnection & {
@@ -152,10 +160,11 @@ export function createRecorderConnectionStore(
   const live = (at: Date) =>
     and(isNull(recorderConnections.revokedAt), withinLifetime(at));
 
-  /** One `recorder.revoked` row for each connection ended, in the transaction that ended them. */
+  /** One `recorder.revoked` row for each connection ended, in the transaction that ended them, saying how it was made as
+   * its `recorder.connected` row did. */
   async function auditRevoked(
     transaction: Transaction,
-    ended: Array<{ id: string; userId: string }>,
+    ended: Array<{ id: string; userId: string; via: RecorderConnectVia }>,
     reason: RecorderRevokeReason,
     /** How the person's sign-in ended, for `signed_out`. */
     ending?: string,
@@ -173,6 +182,7 @@ export function createRecorderConnectionStore(
           : { actorUserId: connection.userId }),
         payload: {
           connectionId: connection.id,
+          via: connection.via,
           reason,
           ...(ending ? { ending } : {}),
           ...(reason === "expired" ? { owner: connection.userId } : {}),
@@ -279,6 +289,7 @@ export function createRecorderConnectionStore(
           .returning({
             id: recorderConnections.id,
             userId: recorderConnections.userId,
+            via: recorderConnections.via,
           });
         const token = secretWithPrefix(RECORDER_TOKEN_PREFIX);
         const [connection] = await transaction
@@ -334,6 +345,32 @@ export function createRecorderConnectionStore(
     },
 
     /**
+     * The live connections stored under one install id and made `via` this, whoever they belong to, oldest first: a Bot's
+     * browser holds one for each person recording in it (browser/bot-browser.ts), and the Bot's browser, not any one
+     * person, is what is asked about.
+     */
+    async atInstall(
+      installId: string,
+      via: RecorderConnectVia,
+    ): Promise<(RecorderConnection & { userId: string })[]> {
+      const rows = await database
+        .select()
+        .from(recorderConnections)
+        .where(
+          and(
+            eq(recorderConnections.installId, installId),
+            eq(recorderConnections.via, via),
+            live(now()),
+          ),
+        )
+        .orderBy(asc(recorderConnections.createdAt));
+      return rows.map((row) => ({
+        ...connectionView(row),
+        userId: row.userId,
+      }));
+    },
+
+    /**
      * This person's live connections, oldest first, each with what its Recorder last said it was doing: in one query, for
      * the Browser button, which asks every few seconds.
      */
@@ -381,7 +418,13 @@ export function createRecorderConnectionStore(
     async revoke(
       userId: string,
       connectionId: string,
-      reason: "disconnected" | "revoked" | "signed_out",
+      reason:
+        | "disconnected"
+        | "revoked"
+        | "signed_out"
+        | "cleared"
+        | BotBrowserRevokeReason,
+      /** How the person's sign-in ended, for `signed_out`. */
       ending?: string,
     ): Promise<boolean> {
       return database.transaction(async (transaction) => {
@@ -402,6 +445,7 @@ export function createRecorderConnectionStore(
           .returning({
             id: recorderConnections.id,
             userId: recorderConnections.userId,
+            via: recorderConnections.via,
           });
         await auditRevoked(transaction, revoked, reason, ending);
         return revoked.length > 0;
@@ -441,6 +485,7 @@ export function createRecorderConnectionStore(
           .returning({
             id: recorderConnections.id,
             userId: recorderConnections.userId,
+            via: recorderConnections.via,
           });
         await auditRevoked(transaction, revoked, reason, ending);
         return revoked.map((connection) => connection.id);
@@ -493,6 +538,7 @@ export function createRecorderConnectionStore(
           .returning({
             id: recorderConnections.id,
             userId: recorderConnections.userId,
+            via: recorderConnections.via,
           });
         await auditRevoked(transaction, expired, "expired");
         return expired.length;

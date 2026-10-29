@@ -84,7 +84,12 @@ const step = (id: string, result?: string) => ({
 });
 
 test("a rebuilt but identical tool row is the same row", () => {
-  const props = { id: "group:a", active: false, latest: false };
+  const props = {
+    id: "group:a",
+    active: false,
+    latest: false,
+    spokeAfter: false,
+  };
   expect(
     sameToolRow(
       { ...props, steps: [step("a", "done")] },
@@ -107,6 +112,12 @@ test("a rebuilt but identical tool row is the same row", () => {
     sameToolRow(
       { ...props, steps: [step("a", "done")] },
       { ...props, active: true, steps: [step("a", "done")] },
+    ),
+  ).toBe(false);
+  expect(
+    sameToolRow(
+      { ...props, steps: [step("a", "done")] },
+      { ...props, spokeAfter: true, steps: [step("a", "done")] },
     ),
   ).toBe(false);
 });

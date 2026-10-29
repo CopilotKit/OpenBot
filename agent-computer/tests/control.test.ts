@@ -4,6 +4,7 @@ import {
   ControlRequestError,
   createControl,
   HELP_REQUEST_TTL_MS,
+  RECORDING_ENDING,
   SnapshotRequiredError,
 } from "../src/control";
 
@@ -183,5 +184,119 @@ describe("secret entry remains scoped and ephemeral", () => {
     control.requestSecret({ ref: "e2" });
     control.release(help.id);
     expect(control.pendingSecret()).toBeNull();
+  });
+});
+
+describe("who holds the wheel, for a Bot's browser's bar and Recorder", () => {
+  function held() {
+    let left = 0;
+    const control = createControl(undefined, {
+      onWheelLeft: () => {
+        left += 1;
+        return undefined;
+      },
+    });
+    const request = (toolCallId: string) =>
+      control.requestHelp("I want to take control of the browser.", toolCallId)
+        .request!;
+    return { control, request, left: () => left };
+  }
+
+  test("a take names who took it, and only they may record, while the request is theirs", async () => {
+    const { control, request, left } = held();
+    const first = request("call-1");
+    expect(control.get().heldBy).toBeUndefined();
+    await control.take(first.id, "user-1");
+    expect(control.get()).toMatchObject({ holder: "human", heldBy: "user-1" });
+    expect(control.personMayRecord("user-1")).toBe(true);
+    expect(control.personMayRecord("user-2")).toBe(false);
+    // Taking it again changes nothing, whoever asks.
+    await control.take(first.id, "user-2");
+    expect(control.get().heldBy).toBe("user-1");
+
+    // The request is over though the person still has the page: nobody records, and the recording is told to end.
+    control.cancel(first.id);
+    expect(control.humanMayDrive()).toBe(true);
+    expect(control.personMayRecord("user-1")).toBe(false);
+    expect(left()).toBe(1);
+    control.release(first.id);
+    expect(control.get().heldBy).toBeUndefined();
+    expect(left()).toBe(2);
+  });
+
+  test("handing it back, and the computer interrupting it, let the person go", async () => {
+    const { control, request, left } = held();
+    const first = request("call-1");
+    await control.take(first.id, "user-1");
+    control.release(first.id);
+    expect(control.get().heldBy).toBeUndefined();
+    expect(control.personMayRecord("user-1")).toBe(false);
+    expect(left()).toBe(1);
+
+    const second = request("call-2");
+    await control.take(second.id, "user-1");
+    control.interrupt("The computer stopped.");
+    expect(control.get().heldBy).toBeUndefined();
+    expect(left()).toBe(2);
+    // A request nobody took has nobody to let go.
+    request("call-3");
+    control.interrupt("The computer stopped.");
+    expect(left()).toBe(2);
+  });
+
+  test("the Bot stays out after a hand-back until the recording the wheel took with it has ended", async () => {
+    // A recording that is still stopping, behind a Record that was still starting when the person handed back.
+    let ended: () => void = () => {};
+    const control = createControl(undefined, {
+      onWheelLeft: () =>
+        new Promise<void>((resolve) => {
+          ended = resolve;
+        }),
+    });
+    const first = control.requestHelp("Take the wheel.", "call-1").request!;
+    await control.take(first.id, "user-1");
+    control.release(first.id);
+    expect(control.get().holder).toBe("bot");
+    expect(() => control.assertBotMayAct()).toThrow(RECORDING_ENDING);
+    expect(() => control.admitBotAction()).toThrow(ControlError);
+
+    ended();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(() => control.assertBotMayAct()).not.toThrow();
+    control.admitBotAction()();
+  });
+
+  test("an ending that fails still lets the Bot back in", async () => {
+    let failed: (error: Error) => void = () => {};
+    const control = createControl(undefined, {
+      onWheelLeft: () =>
+        new Promise<void>((_, reject) => {
+          failed = reject;
+        }),
+    });
+    const first = control.requestHelp("Take the wheel.", "call-1").request!;
+    await control.take(first.id, "user-1");
+    control.release(first.id);
+    expect(() => control.assertBotMayAct()).toThrow(RECORDING_ENDING);
+    failed(new Error("The Recorder did not answer."));
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(() => control.assertBotMayAct()).not.toThrow();
+  });
+
+  test("a take with nobody named lets nobody record, and a take naming nobody usable is refused", async () => {
+    const { control, request } = held();
+    const first = request("call-1");
+    for (const by of ["", "  ", "x".repeat(201)])
+      await expect(control.take(first.id, by)).rejects.toThrow(
+        ControlRequestError,
+      );
+    expect(control.get().holder).toBe("bot");
+    await control.take(first.id);
+    expect(control.humanMayDrive()).toBe(true);
+    expect(control.get().heldBy).toBeUndefined();
+    expect(control.personMayRecord("")).toBe(false);
   });
 });

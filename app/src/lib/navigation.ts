@@ -1,7 +1,7 @@
 import {
+  type Icon,
   IconBolt,
   IconBox,
-  type Icon,
   IconPlug,
   IconSettings,
   IconShieldLock,

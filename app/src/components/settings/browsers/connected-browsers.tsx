@@ -1,4 +1,4 @@
-import type { RecorderConnection } from "@openbot/shared/recorder-api";
+import type { ListedRecorderConnection } from "@openbot/shared/recorder-api";
 import { IconBrowser } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Fragment, useState } from "react";
@@ -43,7 +43,9 @@ export function ConnectedBrowsers({
 }: {
   thisInstallId?: string;
 } = {}) {
-  const connections = useQuery(recorderConnectionsQueryOptions());
+  const connections = useQuery(
+    recorderConnectionsQueryOptions({ listed: true }),
+  );
   return (
     <PageSection title="Connected browsers">
       {connections.isPending ? null : connections.error ? (
@@ -81,7 +83,7 @@ function ConnectedBrowserRow({
   connection,
   here,
 }: {
-  connection: RecorderConnection;
+  connection: ListedRecorderConnection;
   /** The copy of the Recorder in the browser this page is open in. */
   here: boolean;
 }) {
@@ -116,9 +118,12 @@ function ConnectedBrowserRow({
                 ? " from OpenBot"
                 : ""}
             ,{" "}
-            {connection.lastUsedAt
-              ? `last used ${relativeTime(connection.lastUsedAt)}`
-              : "never used"}
+            {/* A recording streams to the gateway, not to OpenBot, so its last use lags: it says so instead. */}
+            {connection.recording
+              ? "recording now"
+              : connection.lastUsedAt
+                ? `last used ${relativeTime(connection.lastUsedAt)}`
+                : "never used"}
           </ItemDescription>
         </ItemContent>
         <ItemActions>

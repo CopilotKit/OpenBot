@@ -678,7 +678,7 @@ const ALLOW: Allowed[] = [
       '"a computer with no address at all is an error, not a fallback"',
     ],
     expression:
-      'expect(client.locate("sales")).rejects.toThrow(SupervisorError)',
+      'expect(client.locate(botSeat("sales"))).rejects.toThrow(SupervisorError)',
     finding: "NEW (round 2 did not find this)",
   },
   {
@@ -689,7 +689,7 @@ const ALLOW: Allowed[] = [
       '"a refusal from the supervisor is reported in its own words"',
     ],
     expression:
-      'expect(client.locate("bad id")).rejects.toThrow("A bot id may contain only letters.",)',
+      'expect(client.locate(botSeat("bad id"))).rejects.toThrow("A bot id may contain only letters.",)',
     finding: "NEW (round 2 did not find this)",
   },
   {
@@ -700,7 +700,7 @@ const ALLOW: Allowed[] = [
       '"an unreachable supervisor says so, rather than looking like a broken computer"',
     ],
     expression:
-      'expect(client.locate("sales")).rejects.toThrow(/couldnotbereached/)',
+      'expect(client.locate(botSeat("sales"))).rejects.toThrow(/couldnotbereached/,)',
     finding: "NEW (round 2 did not find this)",
   },
   {
@@ -860,7 +860,8 @@ const ALLOW: Allowed[] = [
       '"shared computer provider"',
       '"answers undefined when the computer cannot say, rather than throwing"',
     ],
-    expression: 'expect(awaitprovider.sessionOf?.("sales")).toBeUndefined()',
+    expression:
+      'expect(awaitprovider.sessionOf?.(ada("sales"))).toBeUndefined()',
     finding: "NEW (round 2 did not find this)",
   },
   {
@@ -870,7 +871,8 @@ const ALLOW: Allowed[] = [
       '"shared computer provider"',
       '"answers undefined when the computer answers without one"',
     ],
-    expression: 'expect(awaitprovider.sessionOf?.("sales")).toBeUndefined()',
+    expression:
+      'expect(awaitprovider.sessionOf?.(ada("sales"))).toBeUndefined()',
     finding: "NEW (round 2 did not find this)",
   },
   {
@@ -881,7 +883,7 @@ const ALLOW: Allowed[] = [
       '"a suspended computer has no run to name"',
     ],
     expression:
-      'expect(awaitproviderWith(suspended).sessionOf?.("knowledge"),).toBeUndefined()',
+      'expect(awaitproviderWith(suspended).sessionOf?.(botSeat("knowledge")),).toBeUndefined()',
     finding: "NEW (round 2 did not find this)",
   },
   {
@@ -985,7 +987,7 @@ const ALLOW: Allowed[] = [
       '"a computer that cannot say which run it is on leaves the row unordered, not refused"',
     ],
     expression:
-      'expect((awaitsnapshots.load("bot-1"))?.session).toBeUndefined()',
+      'expect((awaitsnapshots.load("bot:bot-1"))?.session).toBeUndefined()',
     finding: "NEW (round 2 did not find this)",
   },
   {
@@ -1076,17 +1078,7 @@ const ALLOW: Allowed[] = [
       "\"computers maps provider status 'running' and 'stopped' directly and preserves egress distinctions\"",
     ],
     expression:
-      'expect(result).toEqual({isolation:"per-bot",computers:[{botId:"bot-proxied",running:true,startedAt:"2026-08-20T12:00:00.000Z",egress:"198.51.100.42",},{botId:"bot-direct",running:false,startedAt:"2026-08-20T11:00:00.000Z",egress:null,},{botId:"bot-unknown-egress",running:false,startedAt:"2026-08-20T10:00:00.000Z",egress:undefined,},],})',
-    finding: "NEW (round 2 did not find this)",
-  },
-  {
-    file: "server/tests/demonstrations.test.ts",
-    shape: "c",
-    context: [
-      '"scheduling creates a routine for the recording\'s own Bot through the routine store"',
-    ],
-    expression:
-      'expect(created).toEqual([{ownerUserId:"owner",agentId:"bot",instruction:demonstrationRoutineInstruction({title:"Find invoice",slug:"find-invoice",}),cron:"0 9 * * 1-5",timezone:undefined,channelId:undefined,},])',
+      'expect(result).toEqual({isolation:"per-person",computers:[{computer:"bot:bot-proxied",kind:"bot",botId:"bot-proxied",running:true,startedAt:"2026-08-20T12:00:00.000Z",egress:"198.51.100.42",},{computer:"bot:bot-direct",kind:"bot",botId:"bot-direct",running:false,startedAt:"2026-08-20T11:00:00.000Z",egress:null,},{computer:"bot:bot-unknown-egress",kind:"bot",botId:"bot-unknown-egress",running:false,startedAt:"2026-08-20T10:00:00.000Z",egress:undefined,},],})',
     finding: "NEW (round 2 did not find this)",
   },
   {
@@ -1147,13 +1139,6 @@ const ALLOW: Allowed[] = [
     shape: "e",
     context: [],
     expression: "constviewers:string[]=[]",
-    finding: "NEW (round 2 did not find this)",
-  },
-  {
-    file: "server/tests/enterprise-controls.integration.test.ts",
-    shape: "e",
-    context: [],
-    expression: "conststopped:string[]=[]",
     finding: "NEW (round 2 did not find this)",
   },
   {

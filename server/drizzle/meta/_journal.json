@@ -484,6 +484,13 @@
       "when": 1793203501366,
       "tag": "0068_recorder_organization_session_expiry",
       "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1793224884828,
+      "tag": "0069_isolated_bots",
+      "breakpoints": true
     }
   ]
 }

@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { CopilotKitProvider, useCopilotKit } from "@copilotkit/react-core/v2";
+import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, waitFor } from "@testing-library/react";
 import type { ComponentType, ReactNode } from "react";

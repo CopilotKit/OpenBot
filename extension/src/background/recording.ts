@@ -67,13 +67,13 @@ import {
   writeLocal,
   writeSession,
 } from "../shared/storage";
+import { createActivityReport } from "./activity";
 import {
   type AgentEvents,
   type AgentSnapshot,
   createAgentEvents,
 } from "./agent/events";
 import type { CaptureObservation } from "./agent/observation";
-import { createActivityReport } from "./activity";
 import { showBadge } from "./badge";
 import {
   type ConnectionLoss,

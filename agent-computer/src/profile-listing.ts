@@ -9,7 +9,7 @@
  * Free of Playwright on purpose. `profiles.ts` launches browsers, so a test that wanted this rule had
  * to drag a browser runtime in with it, which is most of why the copy existed in the first place.
  */
-import { isPlainBotId } from "./bot-id";
+import { isUsableSeatId } from "./bot-id";
 
 /** The shape of a directory entry, as both `readdir` and a test can supply it. */
 export type ProfileEntry = { name: string; isDirectory: () => boolean };
@@ -23,15 +23,15 @@ export type ProfileEntry = { name: string; isDirectory: () => boolean };
  * Never seen locally, because a bind mount and kind's local-path volumes have no such directory,
  * which is exactly the shape of bug that ships.
  *
- * `isPlainBotId` is the same allow-list that stops a hostile id becoming a path, used here for the
+ * `isUsableSeatId` is the same allow-list that stops a hostile id becoming a path, used here for the
  * other half of the question: an entry it would refuse to create is not one of ours to list.
  */
-export function botIdsIn(entries: readonly ProfileEntry[]): string[] {
+export function seatIdsIn(entries: readonly ProfileEntry[]): string[] {
   return [
     ...new Set(
       entries
         .filter((entry) => entry.isDirectory())
-        .filter((entry) => isPlainBotId(entry.name))
+        .filter((entry) => isUsableSeatId(entry.name))
         .map((entry) => entry.name),
     ),
   ].sort();

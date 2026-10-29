@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { isPlainBotId, profileDirectoryFor } from "../src/bot-id";
+import {
+  isPlainBotId,
+  isUsableSeatId,
+  profileDirectoryFor,
+  seatIdFor,
+  seatParts,
+} from "../src/bot-id";
 
 /**
  * The Bot id arrives as a request header and becomes a filesystem path, so it is the same kind of
@@ -60,5 +66,78 @@ describe("profileDirectoryFor", () => {
       const directory = profileDirectoryFor("/profiles", id);
       expect(directory.startsWith("/profiles/")).toBe(true);
     }
+  });
+});
+
+/**
+ * A seat is a Bot's place on a computer: its own profile, folder and session.
+ *
+ * On a computer many people share, the server names the person as well as the Bot, and the seat is
+ * the pair. The regression it closes: a public Bot had one profile on the shared computer, so
+ * whoever signed it into a site signed it in for everybody using it.
+ */
+describe("seats", () => {
+  test("a Bot with no person named is its own seat, exactly as before", () => {
+    expect(seatIdFor("sales")).toBe("sales");
+    expect(profileDirectoryFor("/profiles", seatIdFor("sales"))).toBe(
+      "/profiles/sales",
+    );
+  });
+
+  test("two people on one Bot get two seats, and two directories", () => {
+    const ada = seatIdFor("sales", "ada");
+    const bo = seatIdFor("sales", "bo");
+    expect(ada).not.toBe(bo);
+    expect(profileDirectoryFor("/profiles", ada)).toBe("/profiles/ada~sales");
+    expect(profileDirectoryFor("/profiles", bo)).toBe("/profiles/bo~sales");
+    // And neither is the Bot's old shared profile, which nobody's seat reaches any more.
+    expect(profileDirectoryFor("/profiles", ada)).not.toBe("/profiles/sales");
+  });
+
+  test("one person's two Bots get two seats", () => {
+    expect(seatIdFor("sales", "ada")).not.toBe(seatIdFor("support", "ada"));
+  });
+
+  test("a seat reads back as the person and the Bot it was made from", () => {
+    expect(seatParts(seatIdFor("agent_1f-2", "u-9"))).toEqual({
+      personId: "u-9",
+      botId: "agent_1f-2",
+    });
+    expect(seatParts("sales")).toEqual({ botId: "sales" });
+  });
+
+  test.each([
+    ["../etc", "sales", "a hostile person"],
+    ["ada", "../etc", "a hostile Bot"],
+    [
+      "ada~bo",
+      "sales",
+      "a person carrying the separator, to forge another seat",
+    ],
+    ["", "sales", "an empty person"],
+    ["ada", "", "an empty Bot"],
+  ])("refuses person %s with Bot %s (%s)", (person, bot) => {
+    expect(() => seatIdFor(bot, person)).toThrow();
+  });
+
+  test.each([
+    ["ada~sales", true],
+    ["sales", true],
+    ["ada~bo~sales", false],
+    ["~sales", false],
+    ["ada~", false],
+    ["../x~sales", false],
+    ["ada~../x", false],
+  ])("%s is a usable seat: %s", (seat, usable) => {
+    expect(isUsableSeatId(seat)).toBe(usable);
+  });
+
+  test("a seat stays a single directory inside the root", () => {
+    const directory = profileDirectoryFor(
+      "/profiles",
+      seatIdFor("sales", "ada"),
+    );
+    expect(directory.startsWith("/profiles/")).toBe(true);
+    expect(directory.slice("/profiles/".length)).not.toContain("/");
   });
 });
