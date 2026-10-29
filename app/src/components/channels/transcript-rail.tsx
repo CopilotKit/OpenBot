@@ -1,7 +1,39 @@
 import { Tooltip as TooltipPrimitive } from "@base-ui/react/tooltip";
-import { useEffect, useRef } from "react";
+import { memo, useEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
 import type { Turn } from "./transcript-turns";
+
+type RailProps = {
+  turns: readonly Turn[];
+  /** The id of the turn being read. */
+  active: string | null;
+  onJump: (turn: Turn) => void;
+};
+
+function sameTurn(a: Turn, b: Turn): boolean {
+  return (
+    a.id === b.id &&
+    a.index === b.index &&
+    a.prompt === b.prompt &&
+    a.reply === b.reply
+  );
+}
+
+/**
+ * The transcript re-renders on every streamed chunk and rebuilds its turns each time; the rail
+ * redraws only when what it shows has changed, and then only the marks that did.
+ */
+export function sameRail(a: RailProps, b: RailProps): boolean {
+  return (
+    a.active === b.active &&
+    a.onJump === b.onJump &&
+    a.turns.length === b.turns.length &&
+    a.turns.every((turn, index) => {
+      const other = b.turns[index];
+      return other !== undefined && sameTurn(turn, other);
+    })
+  );
+}
 
 /**
  * A rail in the margin beside a conversation: a mark per turn, the one being read drawn longer.
@@ -12,16 +44,11 @@ import type { Turn } from "./transcript-turns";
  * `max-w-2xl` column and a gutter either side), and only once there is more than one turn to move
  * between.
  */
-export function TranscriptRail({
+export const TranscriptRail = memo(function TranscriptRail({
   turns,
   active,
   onJump,
-}: {
-  turns: readonly Turn[];
-  /** The id of the turn being read. */
-  active: string | null;
-  onJump: (turn: Turn) => void;
-}) {
+}: RailProps) {
   const listRef = useRef<HTMLOListElement | null>(null);
 
   /* A long conversation's rail scrolls; keep the current mark on it. */
@@ -55,9 +82,9 @@ export function TranscriptRail({
       </ol>
     </nav>
   );
-}
+}, sameRail);
 
-function RailMark({
+const RailMark = memo(function RailMark({
   turn,
   current,
   onJump,
@@ -107,5 +134,14 @@ function RailMark({
         </TooltipPrimitive.Positioner>
       </TooltipPrimitive.Portal>
     </TooltipPrimitive.Root>
+  );
+}, sameMark);
+
+function sameMark(
+  a: { turn: Turn; current: boolean; onJump: (turn: Turn) => void },
+  b: { turn: Turn; current: boolean; onJump: (turn: Turn) => void },
+): boolean {
+  return (
+    a.current === b.current && a.onJump === b.onJump && sameTurn(a.turn, b.turn)
   );
 }

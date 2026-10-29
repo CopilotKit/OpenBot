@@ -1,4 +1,13 @@
-import { afterAll, afterEach, beforeAll, expect, mock, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  expect,
+  mock,
+  spyOn,
+  test,
+} from "bun:test";
+import { Tooltip } from "@base-ui/react/tooltip";
 import type { Message } from "@ag-ui/core";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act, cleanup, fireEvent, render } from "@testing-library/react";
@@ -117,4 +126,28 @@ test("jumping to a turn that leaves the view at the end keeps following", async 
   });
 
   expect(viewport(view.container).getAttribute("data-following")).toBe("true");
+});
+
+/*
+ * The transcript re-renders on every streamed chunk and rebuilds its turns each time. The rail
+ * must not redraw a mark per turn for it: only what a mark shows changing redraws it.
+ */
+test("the rail does not redraw for turns that are rebuilt but the same", () => {
+  const marksDrawn = spyOn(Tooltip, "Root");
+  const copy = () => TURNS.map((turn) => ({ ...turn }));
+  const onJump = () => {};
+  const view = render(
+    <TranscriptRail active="u3" onJump={onJump} turns={copy()} />,
+  );
+  const before = marksDrawn.mock.calls.length;
+  expect(before).toBe(TURNS.length);
+
+  view.rerender(<TranscriptRail active="u3" onJump={onJump} turns={copy()} />);
+  expect(marksDrawn.mock.calls.length).toBe(before);
+
+  const grown = copy();
+  grown[2] = { ...TURNS[2], reply: "Now this." } as Turn;
+  view.rerender(<TranscriptRail active="u3" onJump={onJump} turns={grown} />);
+  expect(marksDrawn.mock.calls.length).toBe(before + 1);
+  marksDrawn.mockRestore();
 });

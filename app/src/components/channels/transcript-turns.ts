@@ -37,8 +37,25 @@ function isPersons(item: TranscriptItem): boolean {
   );
 }
 
+/*
+ * The turns are rebuilt on every streamed chunk, and stripping every message again each time was the
+ * per-token cost the rest of the transcript avoids. Each text is stripped once; only the reply still
+ * growing is new on a chunk. Cleared whole when it grows large, which only a very long session reaches.
+ */
+const plainCache = new Map<string, string>();
+const PLAIN_CACHE_SIZE = 1000;
+
 /** Markdown read as the words a preview shows: no headings, emphasis, code marks or link targets. */
 export function plainWords(markdown: string): string {
+  const cached = plainCache.get(markdown);
+  if (cached !== undefined) return cached;
+  if (plainCache.size >= PLAIN_CACHE_SIZE) plainCache.clear();
+  const plain = strip(markdown);
+  plainCache.set(markdown, plain);
+  return plain;
+}
+
+function strip(markdown: string): string {
   return markdown
     .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
     .replace(/^\s{0,3}(#{1,6}|>|[-*+]|\d+\.)\s+/gm, "")

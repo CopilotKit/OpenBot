@@ -1909,30 +1909,51 @@ export function ChatTranscript({
   const turns = turnsOf(items);
   const turnIds = turns.map((turn) => turn.id).join("\n");
   const [activeTurn, setActiveTurn] = useState<string | null>(null);
-  const readActiveTurn = useCallback(() => {
+  /*
+   * Read at most once a frame, with one query: while a reply streams the scroller scrolls on every
+   * resize, and a lookup and a layout read per turn per scroll event was real work on a long
+   * conversation.
+   */
+  const activeFrameRef = useRef<number | null>(null);
+  const readActiveTurnNow = useCallback(() => {
+    activeFrameRef.current = null;
     const element = viewportRef.current;
     if (element === null || turnIds === "") return;
+    const wanted = new Set(turnIds.split("\n"));
     const view = element.getBoundingClientRect();
     const rows: { id: string; top: number }[] = [];
-    for (const id of turnIds.split("\n")) {
-      const row = element.querySelector(
-        `[data-message-id="${CSS.escape(id)}"]`,
-      );
-      if (row !== null) {
+    for (const row of element.querySelectorAll<HTMLElement>(
+      "[data-message-id]",
+    )) {
+      const id = row.dataset.messageId;
+      if (id !== undefined && wanted.has(id)) {
         rows.push({ id, top: row.getBoundingClientRect().top - view.top });
       }
     }
-    const current = currentTurn(
-      rows,
-      element.clientHeight / 3,
-      element.scrollHeight - element.scrollTop - element.clientHeight <=
-        AT_END_PX,
+    setActiveTurn(
+      currentTurn(
+        rows,
+        element.clientHeight / 3,
+        element.scrollHeight - element.scrollTop - element.clientHeight <=
+          AT_END_PX,
+      ),
     );
-    setActiveTurn(current);
   }, [turnIds]);
+  const readActiveTurn = useCallback(() => {
+    if (activeFrameRef.current !== null) return;
+    activeFrameRef.current = window.requestAnimationFrame(readActiveTurnNow);
+  }, [readActiveTurnNow]);
+  useEffect(
+    () => () => {
+      if (activeFrameRef.current !== null) {
+        window.cancelAnimationFrame(activeFrameRef.current);
+      }
+    },
+    [],
+  );
   useLayoutEffect(() => {
-    if (!restoring) readActiveTurn();
-  }, [restoring, readActiveTurn]);
+    if (!restoring) readActiveTurnNow();
+  }, [restoring, readActiveTurnNow]);
 
   /*
    * A jump from the rail. A turn already drawn is gone to now; one in a page not drawn yet draws
