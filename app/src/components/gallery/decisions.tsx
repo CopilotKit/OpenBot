@@ -3,6 +3,7 @@ import { z } from "zod";
 import { Button } from "@/components/ui/button";
 import type { GalleryComponent } from "@/lib/copilot/gallery-registry";
 import { Badge, GalleryFrame } from "./frame";
+import { byPosition } from "./positions";
 
 /**
  * Human-in-the-loop gallery components. `respond` resolves the suspended Bot run, and completed
@@ -82,8 +83,8 @@ export function ApprovalCard(props: Waiting<ApprovalArgs> & { name?: string }) {
 
       {args.details?.length ? (
         <dl className="mt-3 grid grid-cols-[minmax(0,9rem)_1fr] gap-x-4 gap-y-1.5 text-sm">
-          {args.details.map((detail) => (
-            <div className="contents" key={detail.label}>
+          {byPosition(args.details).map(({ item: detail, key }) => (
+            <div className="contents" key={key}>
               <dt className="truncate text-muted-foreground">{detail.label}</dt>
               <dd className="min-w-0 break-words">{detail.value}</dd>
             </div>

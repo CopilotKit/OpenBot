@@ -2,6 +2,7 @@ import { useState } from "react";
 import { z } from "zod";
 import type { GalleryComponent } from "@/lib/copilot/gallery-registry";
 import { Badge, GalleryFrame } from "./frame";
+import { byPosition } from "./positions";
 
 export const DataTableProps = z
   .object({
@@ -86,9 +87,9 @@ export function DataTable(props: Record<string, unknown>) {
           </caption>
           <thead className="bg-muted/50 text-xs text-muted-foreground">
             <tr>
-              {columns.map((column, index) => (
+              {byPosition(columns).map(({ item: column, key }, index) => (
                 <th
-                  key={column}
+                  key={key}
                   scope="col"
                   aria-sort={
                     sort?.column === index
@@ -132,9 +133,9 @@ export function DataTable(props: Record<string, unknown>) {
                 key={row.position}
                 className="even:bg-muted/20 hover:bg-muted/40"
               >
-                {columns.map((column, index) => (
+                {byPosition(columns).map(({ key }, index) => (
                   <td
-                    key={column}
+                    key={key}
                     className={`min-w-24 max-w-xs break-words px-3 py-2.5 align-top ${typeof row.cells[index] === "number" ? "text-right tabular-nums" : ""}`}
                   >
                     {row.cells[index] === "" ? (

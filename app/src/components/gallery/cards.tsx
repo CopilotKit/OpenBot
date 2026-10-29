@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { GalleryComponent } from "@/lib/copilot/gallery-registry";
 import { Badge, GalleryFrame, type Tone } from "./frame";
+import { byPosition } from "./positions";
 
 const tone = z
   .enum(["neutral", "positive", "caution", "negative"])
@@ -43,8 +44,9 @@ export function RecordCard({
       title={title}
     >
       <dl className="grid grid-cols-[minmax(0,10rem)_1fr] gap-x-4 gap-y-2 text-sm">
-        {fields.map((field) => (
-          <div className="contents" key={field.label}>
+        {byPosition(fields).map(({ item: field, key }) => (
+          // Keyed by position: a label is still being typed while the card draws.
+          <div className="contents" key={key}>
             <dt className="truncate text-muted-foreground">{field.label}</dt>
             {/* Field values wrap because truncation can hide the reported data. */}
             <dd className="min-w-0 break-words">{field.value}</dd>
@@ -85,8 +87,8 @@ export function MetricsCard({
   return (
     <GalleryFrame caption={caption} title={title}>
       <div className="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-3">
-        {metrics.map((metric) => (
-          <div key={metric.label}>
+        {byPosition(metrics).map(({ item: metric, key }) => (
+          <div key={key}>
             <p className="truncate text-xs text-muted-foreground">
               {metric.label}
             </p>
@@ -148,8 +150,8 @@ export function ChecklistCard({
       title={title}
     >
       <ul className="space-y-2">
-        {items.map((item) => (
-          <li className="flex items-start gap-2.5 text-sm" key={item.text}>
+        {byPosition(items).map(({ item, key }) => (
+          <li className="flex items-start gap-2.5 text-sm" key={key}>
             <span
               aria-hidden="true"
               className={`mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-[5px] border text-[10px] ${
@@ -209,8 +211,8 @@ export function NoticeCard({
       <p className="text-sm">{body}</p>
       {points?.length ? (
         <ul className="mt-2 space-y-1 text-sm text-muted-foreground">
-          {points.map((entry) => (
-            <li className="flex gap-2" key={entry}>
+          {byPosition(points).map(({ item: entry, key }) => (
+            <li className="flex gap-2" key={key}>
               <span aria-hidden="true">·</span>
               <span className="min-w-0">{entry}</span>
             </li>
