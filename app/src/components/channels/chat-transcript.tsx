@@ -63,6 +63,12 @@ import {
   toolResultFailed,
 } from "@/lib/plugins/tool-result";
 import { readTeamBotConsent } from "@/lib/team-bots";
+import type { CardPlace } from "@/lib/copilot/carry-on";
+import { ToolPlaceContext } from "@/lib/copilot/tool-place";
+import {
+  readConnectPrompt,
+  SHOW_APP_ACCESS_TOOL,
+} from "@openbot/shared/connect-prompt";
 import { cn } from "@/lib/utils";
 import { VOICE_CHAT_ACTIVITY, type VoiceChatEntry } from "@/lib/voice/archive";
 import { AppAccessCard } from "./app-access-card";
@@ -1309,6 +1315,7 @@ const TranscriptToolCall = memo(function TranscriptToolCall({
   args,
   result,
   latest,
+  spokeAfter,
 }: {
   delay: number;
   toolCallId: string;
@@ -1317,6 +1324,8 @@ const TranscriptToolCall = memo(function TranscriptToolCall({
   result?: string;
   /** Nothing said or queued since this call, and the Bot is not working. See `CardPlace`. */
   latest: boolean;
+  /** The Bot said something after this call in its turn. See `ToolPlace`. */
+  spokeAfter: boolean;
 }) {
   const renderToolCall = useRenderToolCall();
   const toolCall = useMemo(
@@ -1342,25 +1351,32 @@ const TranscriptToolCall = memo(function TranscriptToolCall({
         }),
   });
 
+  const place = useMemo(
+    () => ({ toolCallId, latest, spokeAfter }),
+    [toolCallId, latest, spokeAfter],
+  );
+
   return (
     <Arriving delay={delay}>
       <ToolRenderBoundary name={name}>
-        {/*
-         * A TOOL WITH NO REGISTERED RENDERER STILL HAPPENED, and since tools moved to the server
-         * that is now the ordinary case rather than the exception: MCP tools execute in the runtime
-         * and register no renderer here at all. `renderToolCall` still draws the components the app
-         * registers, and everything else lands below.
-         *
-         * What was called, shimmering until its result arrives, and then the server's own words
-         * drawn the way a Bot's prose is drawn.
-         */}
-        {drawn ?? (
-          <ServerToolLine
-            name={name}
-            place={{ toolCallId, latest }}
-            result={result}
-          />
-        )}
+        <ToolPlaceContext.Provider value={place}>
+          {/*
+           * A TOOL WITH NO REGISTERED RENDERER STILL HAPPENED, and since tools moved to the server
+           * that is now the ordinary case rather than the exception: MCP tools execute in the runtime
+           * and register no renderer here at all. `renderToolCall` still draws the components the app
+           * registers, and everything else lands below.
+           *
+           * What was called, shimmering until its result arrives, and then the server's own words
+           * drawn the way a Bot's prose is drawn.
+           */}
+          {drawn ?? (
+            <ServerToolLine
+              name={name}
+              place={{ toolCallId, latest }}
+              result={result}
+            />
+          )}
+        </ToolPlaceContext.Provider>
       </ToolRenderBoundary>
     </Arriving>
   );
@@ -1650,6 +1666,10 @@ export function ChatTranscript({
 
   /* Which tool calls are still the latest thing, for an app card: see `latestFrom`. */
   const latestIndex = latestFrom(items, { busy, queued: queued.length });
+  /* The last thing the Bot said, so a call can tell whether its turn went on to say anything: see `ToolPlace`. */
+  const lastBotWords = items.findLastIndex(
+    (item) => item.kind === "text" && item.role === "assistant",
+  );
 
   /* One rule for both kinds of row — see `anchorRowIds`, which is where it is written down. */
   const anchorRows = anchorRowIds(items);
@@ -1776,6 +1796,7 @@ export function ChatTranscript({
                     latest={index >= latestIndex}
                     name={item.toolCall.function.name}
                     result={item.result}
+                    spokeAfter={lastBotWords > index}
                     toolCallId={item.toolCall.id}
                   />
                 </MessageScrollerItem>

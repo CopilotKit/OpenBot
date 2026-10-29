@@ -19,6 +19,11 @@
  */
 
 import { HeadlessToolSuspension } from "@openbot/toolkit/headless-tools";
+import type {
+  ControlRequestInput,
+  RequestHelpInput,
+  RequestHelpSource,
+} from "@openbot/shared/computer-control";
 import { type ApprovalGate, currentApprovalContext } from "../approvals/types";
 import {
   type AuditInitiator,
@@ -259,11 +264,13 @@ export interface ComputerGateway {
     input: WriteFileInput,
   ): Promise<WriteFileResult>;
   control(seat: ComputerSeat, requestId?: string): Promise<ControlState>;
+  /** `source` is `manual` for a person taking the wheel themselves; the Bot's own requests are `model`. */
   requestHelp(
     seat: ComputerSeat,
     actor: ActionActor,
     reason: string,
     toolCallId?: string,
+    source?: RequestHelpSource,
   ): Promise<ControlState>;
   takeControl(
     seat: ComputerSeat,
@@ -327,6 +334,11 @@ export interface ComputerGateway {
     seat: ComputerSeat,
     actor: ActionActor,
   ): Promise<{ cleared: boolean }>;
+  /**
+   * A Bot's browser was cleared by the person holding its wheel (browser/bot-browser.ts), its profile already gone on
+   * the computer: the row for it, then the snapshot and the screenshots kept of its pages, as `resetComputer` does.
+   */
+  browserCleared(botId: string, actor: ActionActor): Promise<void>;
   /** Move a computer onto the current image, keeping its files and sign-ins. */
   updateComputer(
     seat: ComputerSeat,
@@ -936,11 +948,13 @@ export function createComputerGateway(
       actor: ActionActor,
       reason: string,
       toolCallId?: string,
+      source: RequestHelpSource = "model",
     ) {
       const state = await post<ControlState>(seat, "/control/request", {
         reason,
         ...(toolCallId ? { toolCallId } : {}),
-      });
+        source,
+      } satisfies RequestHelpInput);
       await writeControlEvent(auditStore, "computer.help_requested", {
         seat,
         actor,
@@ -954,9 +968,12 @@ export function createComputerGateway(
       actor: ActionActor,
       requestId: string,
     ) {
+      // Who took it, which the computer keeps as `heldBy`: the Bot's browser's bar and Record are that person's alone
+      // (shared/bot-browser.ts), so a recording is never filed under someone who was only watching.
       const state = await post<ControlState>(seat, "/control/take", {
         requestId,
-      });
+        by: actor.id,
+      } satisfies ControlRequestInput);
       await writeControlEvent(auditStore, "computer.control_taken", {
         seat,
         actor,
@@ -1116,6 +1133,20 @@ export function createComputerGateway(
       // And what was filed under the Bot alone, before computers were per person: pictures of the same signed-in pages.
       await forget(seat.botId);
       return result;
+    },
+
+    async browserCleared(botId: string, actor: ActionActor) {
+      // Written first, as a reset's is: the profile is gone already, and a failure in the clears below must not leave
+      // the wipe with nothing on the trail to say who made it. That failure still reaches the caller.
+      await writeControlEvent(auditStore, "computer.browser_cleared", {
+        botId,
+        actor,
+        reason:
+          "a person holding control cleared the browser: its cookies, saved passwords, history and site storage",
+      });
+      // The refs and the pictures of signed-in pages go with the profile, for the reasons `resetComputer` gives.
+      await snapshots.clear(botId);
+      await pageFrames?.clear(botId);
     },
 
     /**
@@ -1683,6 +1714,7 @@ async function writeControlEvent(
     | "computer.secret_supplied"
     | "computer.stopped"
     | "computer.reset"
+    | "computer.browser_cleared"
     | "computer.updated",
   entry: {
     /** The seat, or for an administrator's action on a whole computer, just its key. */

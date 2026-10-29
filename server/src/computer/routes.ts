@@ -7,7 +7,9 @@ import { ApprovalNeedsConversationError } from "../approvals/types";
 import type { AuditReader } from "../audit";
 import type { AppVariables } from "../auth/guards";
 import { requireAdmin } from "../auth/guards";
+import type { BotBrowser } from "../browser/bot-browser";
 import { ownsPersonBrowser } from "../browser/person";
+import { stampNarrationArrival } from "../browser/routes";
 import {
   type ComputerSeat,
   parseComputerKey,
@@ -66,8 +68,18 @@ export function createComputerRoutes(
    * endpoint says it cannot answer rather than answering from nothing.
    */
   auditReader?: AuditReader,
+  /**
+   * The bar above a Bot's screen and Record, for the person holding its wheel (browser/bot-browser.ts), at
+   * `/:botId/browser`. Absent where this OpenBot has no Recorder: nothing about it is mounted.
+   */
+  botBrowser?: BotBrowser,
 ) {
   const routes = new Hono<{ Variables: AppVariables }>();
+
+  // A phrase's arrival, noted before the guard below signs the person in and asks about the Bot, which can take any
+  // time: the narration's times are moved onto this server's clock from it (browser/routes.ts).
+  if (botBrowser)
+    routes.use("/:botId/browser/narration", stampNarrationArrival);
 
   /**
    * Every route under a Bot id, in one place.
@@ -134,6 +146,9 @@ export function createComputerRoutes(
       context.req.param("botId") ?? "default",
       context.var.actor.id,
     );
+
+  // After the guard, so everything under it has passed it: a person's own browser id never gets here.
+  if (botBrowser) routes.route("/:botId/browser", botBrowser.routes);
 
   routes.get("/:botId/status", async (context) => {
     return context.json(await gateway.status(await seatOf(context)));
@@ -439,6 +454,8 @@ export function createComputerRoutes(
           ? body.reason.trim()
           : "It can't continue without you.",
         typeof body?.toolCallId === "string" ? body.toolCallId : undefined,
+        // A person taking the wheel themselves says so; anything else is the Bot asking, as it always was.
+        body?.source === "manual" ? "manual" : "model",
       ),
     ),
   );
@@ -569,16 +586,38 @@ export function createComputerRoutes(
     ),
   );
 
+  /*
+   * Handing the wheel back, or the Bot's request being cancelled, ends any recording in the Bot's browser (the computer
+   * ends it), and every Recorder connection the browser holds goes with it: the Bot's network stops letting the Recorder
+   * out (browser/bot-browser.ts). A Bot whose wheel a person held acts again only once it is handed back here.
+   */
   routes.post("/:botId/control/release", (context) =>
-    act(context, gateway.seatFor, (seat, actor, body) =>
-      gateway.releaseControl(seat, actor, handoffId(body)),
-    ),
+    act(context, gateway.seatFor, async (seat, actor, body) => {
+      let state: Awaited<ReturnType<typeof gateway.releaseControl>>;
+      try {
+        state = await gateway.releaseControl(seat, actor, handoffId(body));
+      } catch (error) {
+        // The computer may have handed it back though its answer never came (a timeout): what it says now decides.
+        await botBrowser?.wheelMayHaveReturned(seat);
+        throw error;
+      }
+      await botBrowser?.wheelReturned(seat);
+      return state;
+    }),
   );
 
   routes.post("/:botId/control/cancel", (context) =>
-    act(context, gateway.seatFor, (seat, actor, body) =>
-      gateway.cancelControl(seat, actor, handoffId(body)),
-    ),
+    act(context, gateway.seatFor, async (seat, actor, body) => {
+      let state: Awaited<ReturnType<typeof gateway.cancelControl>>;
+      try {
+        state = await gateway.cancelControl(seat, actor, handoffId(body));
+      } catch (error) {
+        await botBrowser?.wheelMayHaveReturned(seat);
+        throw error;
+      }
+      await botBrowser?.wheelReturned(seat);
+      return state;
+    }),
   );
 
   /** The Bot asking for a value it must not be told. */
@@ -1053,8 +1092,9 @@ async function act(
  */
 const DEV_ACTOR_EMAIL = "dev@openbot.local";
 
-/** The audit identity derived from the signed-in actor, with the same FK rule as every acting call. */
-function actorOf(record: AppVariables["actor"]): ActionActor {
+/** The audit identity derived from the signed-in actor, with the same FK rule as every acting call. A Bot's browser's
+ * routes, which sit under these, use it too (browser/bot-browser.ts). */
+export function actorOf(record: AppVariables["actor"]): ActionActor {
   return {
     id: record.id,
     // Only a real users row may go in the audit table's foreign key column. The local development

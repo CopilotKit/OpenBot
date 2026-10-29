@@ -6,6 +6,8 @@ import {
   type PendingHandoff,
   pendingHandoff,
   rememberHandoff,
+  type PendingHandoff,
+  wasHandoffAnswered,
 } from "@/lib/computers/handoff";
 import {
   findPendingTool,
@@ -43,7 +45,10 @@ export function HandoffResumeNotice({
             requestId: request.id,
             toolCallId: request.toolCallId,
           };
-          if (findPendingTool(agent.messages, candidate)) {
+          if (
+            !wasHandoffAnswered(botId, candidate.requestId) &&
+            findPendingTool(agent.messages, candidate)
+          ) {
             rememberHandoff(botId, candidate.requestId, candidate.toolCallId);
             stored = candidate;
           }
@@ -58,8 +63,17 @@ export function HandoffResumeNotice({
         if (answered) forgetHandoff(botId, stored.requestId);
         stored = null;
       }
+      /*
+       * Nothing to resume while a call in this tab is still waiting on the request, nor once one has taken its answer:
+       * a person who left the conversation while holding control comes back to a new chat whose restored call looks
+       * unanswered, while the turn that was running carried on with the answer and the reply is on its way here.
+       */
       setPending(
-        stored && !hasActiveHandoff(botId, stored.requestId) ? stored : null,
+        stored &&
+          !hasActiveHandoff(botId, stored.requestId) &&
+          !wasHandoffAnswered(botId, stored.requestId)
+          ? stored
+          : null,
       );
       timer = setTimeout(() => void check(), 1000);
     };

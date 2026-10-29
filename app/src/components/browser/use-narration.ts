@@ -1,6 +1,10 @@
 import { installOnDeviceSpeech } from "@openbot/shared/on-device-speech";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { type NarrationPost, sendNarration } from "@/lib/browser/mutations";
+import {
+  type NarrationAnswer,
+  type NarrationPost,
+  sendNarration,
+} from "@/lib/browser/mutations";
 import {
   browserNarrationDeps,
   type Narration,
@@ -16,12 +20,13 @@ const PHRASE_MAX = 4000;
 export type LostNarration = { error: string | null };
 
 /**
- * The person's narration while a recording runs in the browser the page shows: listening from when `listening` turns
- * on, but only for a person who chose to narrate (`chosen`, their preference, which the page asks for before their
- * first recording); a mute lasts across recordings, and starts as their choice says. Everything the Recorder needs to place what they say among their steps
- * goes to it in the order it happened: that a phrase began (its first words came back), the phrase once it is final,
- * and that they stopped speaking. One post at a time, each after the last has been answered, because a phrase that
- * overtook the word that it began would leave the Recorder holding the person's steps for a phrase already placed.
+ * The person's narration while a recording runs in the browser the page shows (their own, or a Bot's they record in):
+ * listening from when `listening` turns on, but only for a person who chose to narrate (`chosen`, their preference,
+ * which the page asks for before their first recording); a mute lasts across recordings, and starts as their choice
+ * says. Everything the Recorder needs to place what they say among their steps goes to it in the order it happened:
+ * that a phrase began (its first words came back), the phrase once it is final, and that they stopped speaking. One
+ * post at a time, each after the last has been answered, because a phrase that overtook the word that it began would
+ * leave the Recorder holding the person's steps for a phrase already placed.
  *
  * `finish` is for Stop. It hands over the phrase in progress and waits until every post has been answered, so the
  * last thing the person said is in the recording before the recording ends.
@@ -31,6 +36,7 @@ export function useNarration({
   language,
   chosen,
   deps,
+  send = sendNarration,
 }: {
   listening: boolean;
   language: string;
@@ -38,6 +44,8 @@ export function useNarration({
   chosen: boolean;
   /** The browser's own recognition and clock unless a test gives others. */
   deps?: NarrationDeps;
+  /** Where each post goes: the person's own browser unless this narrates a Bot's (`sendBotBrowserNarration`). */
+  send?: (post: NarrationPost) => Promise<NarrationAnswer>;
 }) {
   const [muted, setMuted] = useState(!chosen);
   // The choice arrives with the person's preferences, after the page first draws, and changes when they make it.
@@ -53,11 +61,13 @@ export function useNarration({
   mutedNow.current = muted;
   const depsNow = useRef(deps);
   depsNow.current = deps;
+  const sendNow = useRef(send);
+  sendNow.current = send;
   const supported = (deps ?? browserNarrationDeps()).Recognition !== null;
 
   const post = useCallback((body: NarrationPost) => {
     posted.current = posted.current.then(async () => {
-      const answer = await sendNarration(body);
+      const answer = await sendNow.current(body);
       if (!answer.ok) setLost({ error: answer.error });
     });
   }, []);

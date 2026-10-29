@@ -46,6 +46,10 @@ import {
 import type { IdentityProviderStore } from "./auth/identity-provider-store";
 import { desktopAuthPage } from "./auth/native-browser";
 import {
+  type BotBrowserRouteDeps,
+  createBotBrowser,
+} from "./browser/bot-browser";
+import {
   type BrowserRouteDeps,
   browserConnectionRevoked,
   createBrowserRoutes,
@@ -80,9 +84,6 @@ import {
   createDeliveryRoutes,
   createDeliveryWebhookRoutes,
 } from "./delivery/routes";
-import type { DemonstrationRecorder } from "./demonstrations/recording";
-import { createDemonstrationRoutes } from "./demonstrations/routes";
-import type { DemonstrationStore } from "./demonstrations/store";
 import { mountDesktopConnectionFailure } from "./desktop-connection-failure";
 import { createTranscriptionProvider } from "./dictation/provider";
 import { createDictationRoutes } from "./dictation/routes";
@@ -408,16 +409,18 @@ export function createApp(
   voiceSessions?: VoiceSessionServices,
   learning?: LearningAdminDependencies,
   coworker?: {
-    demonstrations?: {
-      store: DemonstrationStore;
-      recorder: DemonstrationRecorder;
-    };
     approvals?: ApprovalService;
     /** The Recorder extension's routes and guards (recorder/wiring.ts). Absent, nothing about it is mounted. */
     recorder?: RecorderExtensionDeps;
     /** A person's own OpenBot browser, with the Recorder in it already connected (browser/routes.ts). Absent, nothing
      * about it is mounted and the app shows no Browser button. */
     browser?: Omit<BrowserRouteDeps, "requireUser" | "auditStore">;
+    /** A Bot's browser worked by a person: its bar and Record (browser/bot-browser.ts), under the computer routes. Absent,
+     * or with no computer, nothing about it is mounted. */
+    botBrowser?: Omit<
+      BotBrowserRouteDeps,
+      "gateway" | "auditStore" | "botName"
+    >;
     /** Settings, Learning: who else's Bots use a person's own learned Skills. Absent, the screen has nothing to read. */
     personalLearning?: PersonalLearningRouteDeps;
     /**
@@ -1420,6 +1423,19 @@ export function createApp(
         agentProfileStore ? computerAccessCheck(agentProfileStore) : canUseBot,
         pageFrames,
         auditReader,
+        coworker?.botBrowser
+          ? createBotBrowser({
+              ...coworker.botBrowser,
+              gateway: computerGateway,
+              ...(auditStore ? { auditStore } : {}),
+              ...(agentProfileStore
+                ? {
+                    botName: async (actor, botId) =>
+                      (await agentProfileStore.get(actor, botId))?.name ?? null,
+                  }
+                : {}),
+            })
+          : undefined,
       ),
     );
   }
@@ -1649,15 +1665,6 @@ export function createApp(
       "/api/settings/learning",
       createPersonalLearningRoutes(
         { ...coworker.personalLearning, auditStore },
-        requireUser,
-      ),
-    );
-  if (coworker?.demonstrations)
-    app.route(
-      "/api/demonstrations",
-      createDemonstrationRoutes(
-        coworker.demonstrations.store,
-        coworker.demonstrations.recorder,
         requireUser,
       ),
     );

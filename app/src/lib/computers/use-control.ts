@@ -1,4 +1,7 @@
+import { useQuery } from "@tanstack/react-query";
 import { useSyncExternalStore } from "react";
+import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { queryClient } from "@/query-client";
 import {
   type ControlState,
   cancelControl,
@@ -134,6 +137,27 @@ function createControlStore(computerId: string): ControlStore {
 }
 const noSubscription = () => () => undefined;
 const emptySnapshot = () => EMPTY;
+/**
+ * Whether a person other than the signed-in one holds the wheel.
+ *
+ * The control state names the holder (`heldBy`), and on a Bot shared by several people the wheel in somebody's hands is
+ * not necessarily the hands of the person looking: telling them "You have control" and offering Hand back put them
+ * at the controls of someone else's session, with their clicks reaching a browser that is recording somebody else. A
+ * holder the state does not name (a take from before the wheel knew whose it was) or a signed-in person not known yet
+ * reads as the person looking, as every take did before.
+ */
+export function heldByOther(
+  control: ControlState | null,
+  me: string | undefined,
+): boolean {
+  return (
+    control?.holder === "human" &&
+    control.heldBy !== undefined &&
+    me !== undefined &&
+    control.heldBy !== me
+  );
+}
+
 export function useComputerControl(computerId: string, enabled = true) {
   let store = enabled ? stores.get(computerId) : undefined;
   if (enabled && !store) {
@@ -145,5 +169,13 @@ export function useComputerControl(computerId: string, enabled = true) {
     store?.getSnapshot ?? emptySnapshot,
     emptySnapshot,
   );
-  return { ...snapshot, change: store?.change, refresh: store?.refresh };
+  // The app's one client, passed rather than found through a provider: this hook runs in places drawn without one.
+  const me = useQuery(currentUserQueryOptions(), queryClient).data?.id;
+  return {
+    ...snapshot,
+    /** Someone other than the signed-in person holds the wheel: nothing here is theirs to drive or hand back. */
+    someoneElse: heldByOther(snapshot.control, me),
+    change: store?.change,
+    refresh: store?.refresh,
+  };
 }

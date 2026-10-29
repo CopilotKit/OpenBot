@@ -8,7 +8,7 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-**Before upgrading.** Fifteen things change for an existing deployment:
+**Before upgrading.** Sixteen things change for an existing deployment:
 - Bots now share one computer per person instead of each having its own. Migration
   `0069_isolated_bots` adds `agent_profiles.isolated`, off for every existing Bot. With the
   supervisor (laptop, Desktop, Compose), a person's computer is created the first time one of their
@@ -72,6 +72,55 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   to keep the old behaviour.
 - Interfaces a Bot drew before the upgrade (A2UI 0.9 surfaces) no longer draw when a conversation is
   reopened; the messages around them stay. New ones use A2UI 1.0 (below).
+- A computer now closes browsers nobody is using, least recently used first, when its memory
+  reaches 85% of its limit, and closes a Bot's background tabs after ten minutes untouched (below).
+  In the all-in-one image that share counts the database and the API server too.
+  `COMPUTER_MEMORY_HIGH_PERCENT=0` and `COMPUTER_TAB_IDLE_MS=0` (Helm: `computers.memoryHighPercent`
+  and `computers.tabIdleMs`) keep the old behaviour.
+
+### A computer closes browsers nobody is using when its memory runs high
+
+A computer runs one browser for each Bot that is browsing, and the only limits were a count and half
+an hour untouched. Neither looked at memory, so a few heavy pages could take a container past its
+memory limit well under the count, and the kernel then killed processes without regard to which Bot
+was busy. On Kubernetes it kills everything in the container at once, so every Bot's browser closed
+together and nothing could reach the computer until it came back. A computer now reads its own
+memory the way the kubelet does (the working set, which leaves out the file cache the kernel can
+drop), before it starts a browser and once a minute. At or above 85% of its limit it closes browsers
+one at a time, least recently used first, until it is under 75%, so the next launch does not cross
+the line again straight away. Launches that arrive together share one pass rather than closing a
+browser each. A Bot whose browser was closed starts again where it left off on its next step, still
+signed in, because its profile is on disk.
+
+Only a browser nobody is using is closed. Never closed for memory: the browser being started, the
+most recently used one, any browser used in the last minute (a Bot between two steps asks for
+nothing while its model works out the next), a person's own browser, cloud or native, whose Recorder
+session would end, and the browser of a Bot whose wheel a person holds or has been asked to take.
+When every browser is in use, none is closed.
+
+This is a check, not a guarantee. Memory is read before each launch and once a minute, so a page
+that grows between two checks can still run the container out of memory. A container with no memory
+limit is measured against the machine's memory, and a computer outside a container, such as OpenBot
+Desktop's, closes nothing for memory. In the all-in-one image the database and the API server run in
+the same container as the browsers, and the share counts them too. That is deliberate: the kernel's
+out-of-memory kill counts everything in the container and can take the database down, and closing a
+browser nobody is using first is how the database is protected. Each close is logged as
+`computer-browser-closed-for-memory` with the working set and the limit in bytes.
+`COMPUTER_MEMORY_HIGH_PERCENT` (Helm: `computers.memoryHighPercent`) sets the share where closing
+starts, and `0` switches it off.
+
+The tabs a Bot leaves behind are closed too. A Bot always works in its newest page, so an older tab,
+such as the page a sign-in popup was opened from or a link a site opened in a new tab, is one it
+cannot go back to, and it held memory for as long as the browser stayed up. A background tab that
+nothing has used, navigated or brought to the front for ten minutes is now closed. The page the Bot
+is on is never closed, and neither is any tab of a person's own browser or of a Bot whose wheel a
+person holds. `COMPUTER_TAB_IDLE_MS` (Helm: `computers.tabIdleMs`) sets the time, and `0` keeps them.
+
+Through Helm, `computers.browserIdleMs` and `computers.maxBrowsers` now reach the computer as
+written. An hour (`browserIdleMs: 3600000`) used to render as `3.6e+06`, which the computer ignored
+for its default of thirty minutes, and `browserIdleMs: 0` (keep browsers open) was dropped. All four
+of these settings now also reach the computers `computers.mode: sandbox` makes, which had none of
+them.
 
 ### Generated interfaces use A2UI 1.0
 
@@ -139,6 +188,12 @@ mark for what happened, with blocked rows tinted red and actions that did not ha
 The newest come first, and a press on When turns the order round. A search box and Outcome, Bot and
 Started by buttons narrow the events already loaded, and the count says how many of them match. A
 row about a Bot (a message routed to it, say) now names it under Bot.
+
+### The desktop setup page does not freeze when it loads during an install
+
+If the setup page loaded again while the desktop app downloaded local software, the window showed a
+spinning cursor until the download finished. Its checks for a running OpenBot and for the last
+failure now wait in the background, so the window keeps answering.
 
 ### Each Bot on a shared computer has its own files
 
@@ -425,6 +480,13 @@ apps, which nobody could connect there. An app's own page, reached from an older
 available yet and that an administrator has to finish setting it up, instead of naming the setting.
 The administrator's page for the app still names `COMPOSIO_API_KEY`.
 
+### A new desktop install of v0.2.0 gets past Install again
+
+A desktop app built from `main` stopped every new install at "Installing OpenBot" with
+`shared/package.json: No such file or directory`. It had started reading `shared`, `toolkit` and
+`extension` as packages, which v0.2.0 does not have: there `shared` is plain source and there is no
+`toolkit` or `extension`. It now reads them only when the release includes them.
+
 ### A built-in Bot behind an OpenAI proxy answers again
 
 A built-in Bot behind a gateway or proxy in front of OpenAI (an `OPENAI_BASE_URL` that is not OpenAI or
@@ -559,6 +621,53 @@ not visit during a recording are never recorded, and nothing on the browser's ow
 settings) or the Recorder's own is. A tab that reloaded as you switched to it no longer loses the saves
 it sends.
 
+### Record a task in a Bot's own browser, with nothing to install
+
+A Bot's screen, opened larger from a conversation, is now a browser a person can work in: tabs, an
+address bar, back, forward and reload sit above the page. Take control and the bar is yours (typing an
+address, switching, opening and closing tabs, all from the keyboard too); while the Bot has control it
+shows where the Bot is, read only. The OpenBot Recorder is already in every Bot's browser, idle until
+someone records, so recording a task needs no extension and no Connect step.
+
+- **Record replaces "Teach a browser workflow".** Name the task, press Record, do it, press Stop. The
+  panel shows the name, the time and the step count, asks about narration before your first recording
+  (the same choice as the Browser page), and after Stop says what was saved to your Learning space. The
+  recording lands in Intelligence exactly as the Recorder sends from any browser, in your own Learning
+  space, so every Bot you use learns from it, this one included.
+- **Only you are recorded, never the Bot.** Record works only while you hold control, and handing it
+  back (or the Bot's request ending) stops the recording, with its last steps sent before the Recorder
+  disconnects; the Bot acts again only once the recording has ended. Taking control now records who
+  took it, so on a shared Bot only that person can use the bar or record, someone else's recording
+  shows only that one is running, and nobody else sees its name, its step count or its microphone.
+- **Record needs a computer the Bot does not share.** Where every Bot runs on one computer (Helm's
+  shared mode, or `AGENT_COMPUTER_URL` with no supervisor), Record is refused in every Bot's browser
+  and the panel says why: your Recorder connection would sit in the Bot's profile, where any other
+  Bot's shell could read it. The bar still works. The computer refuses it too. With a supervisor
+  (laptop, Desktop) or a Sandbox, each Bot has its own computer and Record works.
+- **One connection per recording.** Record mints a Recorder connection for the person who pressed it
+  and Stop revokes it; Settings, Browsers lists it as "<Bot>'s browser" while it lives, and says
+  "recording now" for any browser that is recording.
+- While a recording runs in a Bot's browser, that Bot's network policy also lets the Recorder reach
+  OpenBot and the Intelligence gateway, on their own ports only; the Bot's own policy returns when it
+  ends.
+- **Removed: the old "Teach a browser workflow" panel and everything behind it** (its routes under
+  `/api/demonstrations`, its instant skill draft, "Save and use with this Bot" and "Run on a schedule").
+  Skills already saved from it stay, as ordinary skills; its recordings stay in the database, unread.
+- When you take control yourself, the line under the screen no longer repeats your own request back as
+  if you had said it.
+- **What you type while you hold control stays yours.** After you hand back, the Bot reads a field you
+  filled as "filled in by the person", never its value, in its page snapshot, its page text and its
+  screenshots; a field you only tabbed through keeps the Bot's own value.
+- **A Bot's request for help shows in the conversation**, with its reason and Take control, and folds
+  into one line once answered. After you hand back, the Bot is told what you did and carries on, saying
+  what it does next; if it still stops without a word, the card says so and offers Carry on.
+- **Clear browser data.** One button beside reload, in a Bot's browser and in your own, asks "Clear this
+  browser?" and wipes it: cookies, saved passwords, history, site storage and the screenshots kept of its
+  pages. It starts fresh, signed out of everything; OpenBot's own Passwords stay. A Bot's browser can be
+  cleared only by the person holding its control. Audited as `computer.browser_cleared`.
+- Leaving a conversation while you hold a Bot's control no longer leaves it blank: the Bot's reply after
+  you hand back shows when you return, with no "A browser task is paused" notice.
+
 ### Your own browser, opened from OpenBot, with the Recorder already in it
 
 Wherever OpenBot can run a browser for you, the sidebar has a **Browser** button below Connections. It
@@ -619,7 +728,7 @@ close it, and the reason is in the server's and the computer's logs.
 - A person's browser always runs the Recorder that came with its OpenBot, even in a profile that ran an
   earlier one, and keeps it pinned to the toolbar once.
 - A Recorder that is slow to answer is refused instead of taking down the computer and every browser
-  on it. Typing on a live screen that records a demonstration reaches the page in the order typed.
+  on it. Typing on a live screen reaches the page in the order typed.
 - Opening the Browser page twice in quick succession (reloading it while your browser is still
   opening, for one) opens your browser once, connected; before, both opens could be refused, most
   often the first after the Recorder was updated. When a browser cannot be opened, the server's and
@@ -638,6 +747,16 @@ close it, and the reason is in the server's and the computer's logs.
 
 Clicking or focusing the desktop window while it downloaded local software showed a spinning cursor
 until the download finished. The window now comes forward at once and keeps the setup screen.
+
+### A reinstall no longer picks up the previous installation's Bot files and sign-ins
+
+A desktop installation set up again after its folder was deleted reused whatever the previous one
+left in the container engine: Bot workspace files, and each Bot's browser profile with its website
+sign-ins, under the same Bot ids. Only the database was checked. Start now finds every volume and
+stopped container the previous installation left and offers Start fresh, which deletes exactly those
+and then starts; nothing is reused without asking. To keep the data, restore the previous folder
+instead. A container from it that is still running stops the deletion until it is stopped. An
+installation with its saved key keeps its data as before.
 
 ### A new desktop install starts its server again
 

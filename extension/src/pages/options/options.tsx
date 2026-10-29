@@ -43,6 +43,7 @@ const VIA: Record<RecorderConnectVia, string> = {
   web: "Connected from OpenBot in your browser",
   desktop: "Connected from OpenBot Desktop",
   "openbot-browser": "Connected by OpenBot when it opened this browser",
+  "bot-browser": "Connected by OpenBot while you record in a Bot's browser",
 };
 
 function plural(count: number, one: string, many: string) {

@@ -56,14 +56,14 @@ RUN bun install --frozen-lockfile
 
 COPY agent-computer/src ./src
 # index.ts imports ../../shared/file-download at runtime (shared/computer-control is type-only and
-# erased), demonstration.ts imports ../../shared/demonstration-rules, and the browser routes import
-# ../../shared/openbot-browser, so the files they need go where those paths resolve from /app/src.
+# erased), and the browser routes import ../../shared/openbot-browser and ../../shared/bot-browser,
+# so the files they need go where those paths resolve from /app/src.
 COPY shared/file-download.ts /shared/file-download.ts
-COPY shared/demonstration-rules.ts /shared/demonstration-rules.ts
-# The OpenBot Browser's contract, which the browser routes check requests against. It imports zod,
-# and a module resolves its imports from its own directory upward, which from /shared never reaches
-# /app/node_modules: so /shared is given that tree to resolve from, rather than a second install.
-COPY shared/openbot-browser.ts /shared/openbot-browser.ts
+# The OpenBot Browser's contract and a Bot's browser's, which the browser routes check requests
+# against. They import zod, and a module resolves its imports from its own directory upward, which
+# from /shared never reaches /app/node_modules: so /shared is given that tree to resolve from, rather
+# than a second install.
+COPY shared/openbot-browser.ts shared/bot-browser.ts /shared/
 COPY shared/recorder-extension.ts shared/recorder-extension.json /shared/
 RUN ln -s /app/node_modules /shared/node_modules
 

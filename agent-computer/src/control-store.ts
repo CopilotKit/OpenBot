@@ -22,6 +22,11 @@ export type StoredControl = {
   currentRequestId?: string;
   requests: HandoffRequest[];
   aliases: Record<string, string>;
+  /**
+   * The user id of the person holding the wheel, when they took it with one. Optional, so a state saved before it
+   * existed still loads: nobody may record in a Bot's browser or use its bar until the wheel is taken again.
+   */
+  heldBy?: string;
 };
 export type ControlStore = {
   load(): StoredControl | undefined;
@@ -36,6 +41,8 @@ const statuses = new Set([
   "interrupted",
 ]);
 const sources = new Set(["model", "manual", "cloudflare", "visible-challenge"]);
+/** The longest user id kept as who holds the wheel: the contract's limit on a person's id. */
+export const MAX_HELD_BY = 200;
 /** The longest page address a request keeps. Longer ones are not kept rather than cut. */
 export const MAX_REQUEST_URL = 2048;
 const record = (v: unknown): v is Record<string, unknown> =>
@@ -87,7 +94,12 @@ function validate(value: unknown): StoredControl {
     !record(value.aliases) ||
     Object.keys(value.aliases).length > 256 ||
     (value.currentRequestId !== undefined &&
-      typeof value.currentRequestId !== "string")
+      typeof value.currentRequestId !== "string") ||
+    (value.heldBy !== undefined &&
+      (typeof value.heldBy !== "string" ||
+        value.heldBy.length === 0 ||
+        value.heldBy.length > MAX_HELD_BY ||
+        value.holder !== "human"))
   )
     throw new Error("Corrupt computer control state.");
   const ids = new Set(value.requests.map((r) => r.id));

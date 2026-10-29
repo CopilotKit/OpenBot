@@ -79,8 +79,10 @@ import { createIdentityProviderStore } from "./auth/identity-provider-store";
 import { createOrganizationAuth } from "./auth/organization";
 import { organizationUserStore } from "./auth/organization-store";
 import { openbotAddress } from "./browser/address";
+import { botBrowserNetwork } from "./browser/bot-browser";
 import { personBrowserEgressPolicy } from "./browser/egress";
 import {
+  botRecordRefusal,
   directBrowserComputers,
   gatewayBrowserComputers,
   personBrowserPlace,
@@ -119,7 +121,7 @@ import { createComputerGateway } from "./computer/gateway";
 import { createHeadlessComputerTools } from "./computer/headless-tools";
 import { createPageFrameStore } from "./computer/page-frames";
 import { startPolicyListener } from "./computer/policy-listener";
-import { withPolicyPushOnWake } from "./computer/policy-network";
+import { policyPusher, withPolicyPushOnWake } from "./computer/policy-network";
 import {
   createPolicyStore,
   DEFAULT_ACTION_POLICY,
@@ -159,8 +161,6 @@ import {
 import { createDeliveryStore } from "./delivery/store";
 import type { DeliveryScope } from "./delivery/types";
 import { DeliveryRefusedError } from "./delivery/types";
-import { createDemonstrationRecorder } from "./demonstrations/recording";
-import { createDemonstrationStore } from "./demonstrations/store";
 import {
   createHostAccessBroker,
   HostAccessRefusedError,
@@ -566,6 +566,9 @@ const computerProvider = config.computer
       },
     )
   : undefined;
+
+/** Why Record is refused in a Bot's browser here, or undefined where each Bot has a computer of its own. */
+const recordRefused = botRecordRefusal(computerProvider) ?? undefined;
 
 if (computerProvider?.warm) {
   void computerProvider.warm();
@@ -1360,17 +1363,6 @@ const recorderExpirySweep = repeatAfterEach(async () => {
     );
   }
 }, 60_000);
-const demonstrationStore = createDemonstrationStore(database);
-const demonstrationRecorder = createDemonstrationRecorder({
-  store: demonstrationStore,
-  // Teaching a shared deployment Bot is allowed as well as an owned one; the skill is the owner's.
-  ownsBot: async (ownerUserId, botId) =>
-    (await pluginStore.agentOwner(botId)) === ownerUserId ||
-    (await agentProfileStore.get(await actorFor(ownerUserId), botId)) !== null,
-  ownsSkill: async (owner, slug) =>
-    (await pluginStore.skillOwner(slug)) === owner,
-  routines: routineStore,
-});
 const memoryIngestion = createMemoryIngestion({
   store: personalMemoryStore,
   plugins: pluginStore,
@@ -2463,6 +2455,12 @@ await installEnterpriseControls({
   databaseUrl: config.databaseUrl,
   auditStore: bootAuditStore,
   personBrowserPolicy,
+  // While a person records in a Bot's browser, the Recorder there reaches OpenBot and the gateway; the Bot does not.
+  duringRecording: botBrowserNetwork({
+    connections: recorderExtension.connections,
+    openbotUrls: [config.publicUrl, config.appUrl],
+    gatewayUrl: config.runtime.intelligence.gatewayWsUrl,
+  }),
   ...(computerProvider ? { provider: computerProvider } : {}),
   ...(config.computer?.token ? { computerToken: config.computer.token } : {}),
   ...(config.webBotAuth ? { webBotAuth: config.webBotAuth } : {}),
@@ -2644,11 +2642,29 @@ const app = createApp(
     approvals: approvalService,
     shared: { modes: accountModes, use: sharedUseStore },
     ...(signInService ? { passwords: signInService } : {}),
-    demonstrations: {
-      store: demonstrationStore,
-      recorder: demonstrationRecorder,
-    },
     recorder: recorderExtension,
+    // A Bot's browser, worked by the person holding its wheel: its bar and Record, wherever Bots have computers.
+    ...(computerGateway
+      ? {
+          botBrowser: {
+            recorder: recorderExtension,
+            openbotUrl: openbotAddress(config),
+            ...(config.computer?.token ? { token: config.computer.token } : {}),
+            pushPolicy: policyPusher({
+              locate: (botId) => computerGateway.locate(botId),
+              policyForBot: (botId) =>
+                enterpriseControls()?.policyForBot(botId),
+              ...(config.computer?.token
+                ? { token: config.computer.token }
+                : {}),
+              ...(config.webBotAuth ? { webBotAuth: config.webBotAuth } : {}),
+            }),
+            singleUser: config.singleUser,
+            // Where every Bot shares one computer, Record is refused in all their browsers (browser/host.ts).
+            ...(recordRefused ? { recordRefused } : {}),
+          },
+        }
+      : {}),
     // Only where a person's browser can run: OpenBot Desktop's host-side computer, or computers Bots run on that give
     // each its own. Where every Bot shares one, the routes have no computers and say why (browser/host.ts).
     ...(computerGateway || config.browser
@@ -2755,8 +2771,6 @@ startHttpServer({
   resolveRequestActor,
   agentProfileStore,
   computerGateway,
-  demonstrationStore,
-  demonstrationRecorder,
   app,
 });
 

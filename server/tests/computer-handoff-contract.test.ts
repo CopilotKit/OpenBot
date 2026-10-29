@@ -116,11 +116,18 @@ test("request/rejoin and exact polling/take/release/cancel identities reach the 
     "/control/release",
     "/control/cancel",
   ]);
+  // A request that does not say it is a person's own take is the Bot's, and the computer is told so.
   expect(JSON.parse(String(requests[0]?.init?.body))).toEqual({
     reason: "Sign in",
     toolCallId: "call-1",
+    source: "model",
   });
-  for (const request of requests.slice(2))
+  // A take says who is taking the wheel, the signed-in person, which the computer keeps as `heldBy`.
+  expect(JSON.parse(String(requests[2]?.init?.body))).toEqual({
+    requestId: "request-1",
+    by: "user-1",
+  });
+  for (const request of requests.slice(3))
     expect(JSON.parse(String(request.init?.body))).toEqual({
       requestId: "request-1",
     });

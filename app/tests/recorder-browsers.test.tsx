@@ -26,6 +26,7 @@ import { BrowserSections } from "@/components/settings/browsers/browser-sections
 import { ConnectedBrowsers } from "@/components/settings/browsers/connected-browsers";
 import { ThisBrowser } from "@/components/settings/browsers/this-browser";
 import { Toaster } from "@/components/ui/toast";
+import { CONNECTIONS_POLL_MS } from "@/lib/recorder/queries";
 import { queryClient } from "@/query-client";
 import { setBrowserBrands } from "./recorder-page.fixture";
 
@@ -391,6 +392,46 @@ test("the OpenBot browser's connection says it is the person's OpenBot browser",
   expect(
     view.getByText(`Your OpenBot browser, connected ${at}, never used`),
   ).toBeTruthy();
+});
+
+test("a browser recording now says so instead of when it was last used, and the list keeps itself current while open", async () => {
+  // End-to-end run: a browser recording right now read "last used 49 seconds ago". A recording streams to the gateway,
+  // so its last use lags; its Recorder's own recent report is what says it is recording.
+  const realSetInterval = globalThis.setInterval;
+  const polls: (() => void)[] = [];
+  globalThis.setInterval = ((
+    handler: () => void,
+    delay?: number,
+    ...args: unknown[]
+  ) => {
+    if (delay !== CONNECTIONS_POLL_MS)
+      return realSetInterval(handler, delay, ...args);
+    // Fired by the test rather than waited for.
+    polls.push(handler);
+    return realSetInterval(handler, 3_600_000, ...args);
+  }) as unknown as typeof setInterval;
+  try {
+    const lastUsedAt = new Date(Date.now() - 49_000).toISOString();
+    connections = [connection({ lastUsedAt, recording: false })];
+    const view = draw(<ConnectedBrowsers />);
+    const at = new Intl.DateTimeFormat(undefined, {
+      dateStyle: "medium",
+      timeStyle: "short",
+    }).format(new Date(String(connections[0]?.createdAt)));
+    await view.findByText(/^Connected .* from OpenBot, last used /);
+    // The browser starts recording; the screen hears of it on its next ask, with no reload.
+    connections = [connection({ lastUsedAt, recording: true })];
+    expect(polls.length).toBeGreaterThan(0);
+    const asked = connectionsFetches;
+    act(() => {
+      for (const poll of polls) poll();
+    });
+    await view.findByText(`Connected ${at} from OpenBot, recording now`);
+    expect(connectionsFetches).toBeGreaterThan(asked);
+    expect(view.queryByText(/last used/)).toBeNull();
+  } finally {
+    globalThis.setInterval = realSetInterval;
+  }
 });
 
 test("Disconnect sends the DELETE and the row disappears", async () => {

@@ -15,6 +15,11 @@
  *
  * Like the Recorder, it asks OpenBot whether a connection stands before it takes it, and refuses one
  * OpenBot says is signed out.
+ *
+ * Like the Recorder, the last of a recording reaches Intelligence after Stop answers: for as long as the OpenBot it is
+ * connected to says at `/fixture/tail` (none when it says nothing), `lastStopped.sending` is true. A disconnect in that
+ * time keeps the rest for the person's next connection, as the Recorder does, so it is sending no longer; every report
+ * says whether it was still sending when the call came.
  */
 const LAUNCHER_GLOBAL = "openbotLauncher";
 /**
@@ -30,6 +35,7 @@ async function held() {
     "recording",
     "lastStopped",
     "setupOpened",
+    "sendingUntil",
   ]);
   return {
     connection: stored.connection,
@@ -37,7 +43,20 @@ async function held() {
     recording: stored.recording,
     lastStopped: stored.lastStopped,
     setupOpened: stored.setupOpened === true,
+    sendingUntil: stored.sendingUntil ?? 0,
   };
+}
+
+/** Whether the last of the recording Stop ended is still on its way to Intelligence. */
+const sending = (now) =>
+  Boolean(now.lastStopped) && Date.now() < now.sendingUntil;
+
+/** How long the OpenBot this is connected to says the last of a stopped recording takes to send. */
+async function tailMs(connection) {
+  const answer = await fetch(new URL("/fixture/tail", connection.openbotUrl))
+    .then((response) => response.json())
+    .catch(() => ({}));
+  return typeof answer.ms === "number" ? answer.ms : 0;
 }
 
 function stateOf(now) {
@@ -58,7 +77,13 @@ function stateOf(now) {
     ...(now.narration === "own"
       ? { voice: now.recording ? "listening" : "off" }
       : {}),
-    ...(now.lastStopped ? { lastStopped: now.lastStopped } : {}),
+    ...(now.lastStopped
+      ? {
+          lastStopped: sending(now)
+            ? { ...now.lastStopped, sending: true }
+            : now.lastStopped,
+        }
+      : {}),
   };
 }
 
@@ -96,6 +121,7 @@ async function report(method, input) {
       front: front?.url ?? "",
       microphone,
       setupOpened: now.setupOpened,
+      sending: sending(now),
       build: BUILD,
     }),
   });
@@ -168,10 +194,12 @@ globalThis[LAUNCHER_GLOBAL] = {
         stoppedAt: Date.now(),
       };
       now.recording = undefined;
+      now.sendingUntil = Date.now() + (await tailMs(now.connection));
     }
     await chrome.storage.local.set({
       recording: now.recording ?? null,
       lastStopped: now.lastStopped ?? null,
+      sendingUntil: now.sendingUntil,
     });
     await report("record", input);
     return { ok: true, state: stateOf(now) };
@@ -199,7 +227,12 @@ globalThis[LAUNCHER_GLOBAL] = {
       await chrome.debugger
         .detach({ tabId: now.recording.tabId })
         .catch(() => undefined);
-    await chrome.storage.local.set({ connection: null, recording: null });
+    // What had not gone is kept for the person's next connection: nothing is on its way any more.
+    await chrome.storage.local.set({
+      connection: null,
+      recording: null,
+      sendingUntil: 0,
+    });
     return { ok: true };
   },
   async state() {

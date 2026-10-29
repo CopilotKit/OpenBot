@@ -30,7 +30,7 @@ import {
   forgetRecorderPins,
   PLAYWRIGHT_DEFAULTS_A_PERSON_DOES_NOT_GET,
   personBrowserEnv,
-  personLaunchOptions,
+  recorderLaunchOptions,
   personNativeLaunch,
   runnable,
 } from "../src/person-launch";
@@ -213,7 +213,7 @@ describe("launching a person's browser", () => {
   });
 
   test("the hosted browser keeps a Bot's launch, with only the Recorder let in", () => {
-    const screen = personLaunchOptions(
+    const screen = recorderLaunchOptions(
       {
         recorderDir: FIXTURE,
         headless: true,

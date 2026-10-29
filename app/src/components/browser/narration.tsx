@@ -230,15 +230,7 @@ export function NarrationNotice({
   narration: NarrationControls;
   language: string;
 }) {
-  const sentence = !narration.supported
-    ? narrationProblemSentence("unsupported", language)
-    : narration.status?.state === "failed"
-      ? narrationProblemSentence(narration.status.problem, language)
-      : narration.status?.state === "downloading"
-        ? downloadingSentence(language)
-        : narration.lost
-          ? lostNarrationSentence(narration.lost.error)
-          : null;
+  const sentence = narrationNoticeSentence(narration, language);
   if (!sentence) return null;
   return (
     <p
@@ -247,5 +239,103 @@ export function NarrationNotice({
     >
       {sentence}
     </p>
+  );
+}
+
+/**
+ * What the person needs to know about narration, or null when it is simply on or off as they set it. `lost` is whether
+ * to say that some of it did not reach the Recorder.
+ */
+function narrationNoticeSentence(
+  narration: NarrationControls,
+  language: string,
+  lost = true,
+): string | null {
+  return !narration.supported
+    ? narrationProblemSentence("unsupported", language)
+    : narration.status?.state === "failed"
+      ? narrationProblemSentence(narration.status.problem, language)
+      : narration.status?.state === "downloading"
+        ? downloadingSentence(language)
+        : lost && narration.lost
+          ? lostNarrationSentence(narration.lost.error)
+          : null;
+}
+
+/**
+ * Narration as a row, for a card of rows under a browser shown in the page (a Bot's screen): the same switch, the same
+ * choice and the same sentences as the bar above the person's own browser, laid out as every other setting is. The row
+ * always says what narration does, so a person deciding whether to talk knows before Record whether it is heard, and
+ * how; and while the page hears them it says Listening, so an open microphone is never something to guess at.
+ *
+ * `choice` is the person's preference (`useNarrationChoice`), null until they answered the question Record asks first.
+ * `onChange` keeps a new one, as the bar's switch does.
+ *
+ * `recording` is whether the person's recording is running. Narration that did not reach the Recorder is news only
+ * then: a phrase cut off as the wheel went back was refused because the recording had already ended, which the
+ * recording's own row says, and the row must not still be saying it when they take the wheel again.
+ */
+export function NarrationRow({
+  narration,
+  choice,
+  language,
+  recording,
+  onChange,
+}: {
+  narration: NarrationControls;
+  choice: NarrationChoice["narration"];
+  language: string;
+  recording: boolean;
+  onChange: (on: boolean) => void;
+}) {
+  const labelId = useId();
+  const notice = narrationNoticeSentence(narration, language, recording);
+  const listening =
+    !notice && recording && narration.status?.state === "listening";
+  const sentence =
+    notice ??
+    (listening
+      ? "Listening. Say what you're doing as you go."
+      : narration.on
+        ? "On. OpenBot hears your microphone while you record and turns your speech into text on your computer, so say what you're doing as you go."
+        : choice === null
+          ? "Not chosen yet. Record asks before your first recording, and the microphone stays closed until you say yes."
+          : "Off. What you say isn't recorded.");
+  return (
+    <Item size="sm">
+      <ItemMedia variant="icon">
+        {narration.supported && narration.on ? (
+          <IconMicrophone />
+        ) : (
+          <IconMicrophoneOff />
+        )}
+      </ItemMedia>
+      <ItemContent>
+        <ItemTitle id={labelId}>Narration</ItemTitle>
+        <ItemDescription className="line-clamp-none" role="status">
+          {listening ? (
+            <span className="inline-flex items-center gap-1.5">
+              {/* Decorative: the word beside it says it is live. */}
+              <span
+                aria-hidden="true"
+                className="size-1.5 shrink-0 rounded-full bg-emerald-500 motion-safe:animate-pulse"
+              />
+              {sentence}
+            </span>
+          ) : (
+            sentence
+          )}
+        </ItemDescription>
+      </ItemContent>
+      {narration.supported ? (
+        <ItemActions>
+          <Switch
+            aria-labelledby={labelId}
+            checked={narration.on}
+            onCheckedChange={onChange}
+          />
+        </ItemActions>
+      ) : null}
+    </Item>
   );
 }

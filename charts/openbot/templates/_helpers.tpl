@@ -679,7 +679,8 @@ podAntiAffinity:
 The computer settings this chart has values for, as a JSON list of env entries.
 
 One definition, read by the shared StatefulSet and by the per-Bot sandbox template, so a computer
-cannot be headed in one mode and headless in the other, or proxied in one and not the other.
+cannot be headed in one mode and headless in the other, proxied in one and not the other, or keep a
+different number of browsers in one than the other.
 
 Each key is reached through a guard, because `helm upgrade --reuse-values` hands an existing release
 none of the keys this release added (see scripts/check-new-values-keys.ts). Absent `browserMode`
@@ -690,6 +691,19 @@ leaves the computer to its own default, which is headed on Linux, the same thing
 {{- $computers := .Values.computers | default dict -}}
 {{- with $computers.browserMode -}}
 {{- $env = append $env (dict "name" "COMPUTER_BROWSER_MODE" "value" (toString .)) -}}
+{{- end -}}
+{{- /*
+  How many browsers a computer keeps, and when it closes them and their idle tabs. Asked whether
+  anybody set each, not whether it is truthy: zero switches the idle closes and the memory check
+  off, and `with` reads zero as empty and would drop it. Written out in digits
+  (`openbot.wholeNumber`), because a whole number from a values file arrives as a float and
+  rendered `browserIdleMs: 3600000` as `3.6e+06`, which the computer refused for its default.
+*/ -}}
+{{- range $name, $key := dict "COMPUTER_MAX_BROWSERS" "maxBrowsers" "COMPUTER_BROWSER_IDLE_MS" "browserIdleMs" "COMPUTER_MEMORY_HIGH_PERCENT" "memoryHighPercent" "COMPUTER_TAB_IDLE_MS" "tabIdleMs" -}}
+{{- $value := index $computers $key -}}
+{{- if and (not (kindIs "invalid" $value)) (ne (toString $value) "") -}}
+{{- $env = append $env (dict "name" $name "value" (include "openbot.wholeNumber" $value)) -}}
+{{- end -}}
 {{- end -}}
 {{- $egressProxy := $computers.egressProxy | default dict -}}
 {{- if $egressProxy.enabled -}}
@@ -833,3 +847,16 @@ than anything that names the cause.
 {{- end }}
 {{- end -}}
 
+{{- /*
+  A number from values written out in digits, which is how the computer reads its settings.
+
+  A whole number in a values file arrives as a float, because Helm reads values through JSON, and a
+  float renders in Go's shortest form: `tabIdleMs: 1200000` became `1.2e+06`. The computer takes
+  digits only, so it fell back to its default without a word. A float with nothing after the point is
+  written as the whole number it is; anything else (a string, a number from `--set`) as it came.
+*/}}
+{{- define "openbot.wholeNumber" -}}
+{{- if kindIs "float64" . -}}
+{{- if eq . (floor .) -}}{{ int64 . }}{{- else -}}{{ . }}{{- end -}}
+{{- else -}}{{ . }}{{- end -}}
+{{- end -}}

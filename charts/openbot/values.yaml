@@ -329,13 +329,14 @@ config:
 #   shared    One browser for every Bot, run by this chart. Needs nothing installed in the cluster,
 #             and is what a first install should use. Each person's Bots keep their own logins
 #             and files, but a command one Bot runs can read another's files. For that reason a
-#             person's own OpenBot browser does not run here: the Browser page says so.
+#             person's own OpenBot browser does not run here, and nobody records in a Bot's browser:
+#             the Browser page and the Bot's screen say so.
 #   sandbox   A computer for each person, and for each Isolated Bot, as a `Sandbox` from
 #             kubernetes-sigs/agent-sandbox, suspended when idle and resumed with its logins
 #             intact. Needs that controller in the cluster. Each person's own OpenBot browser gets a
 #             computer of its own the same way.
 #   external  Neither. `url` points at a computer somebody else runs, which is shared like the
-#             first, so it runs no person's browser either.
+#             first, so it runs no person's browser and records in no Bot's browser either.
 computers:
   mode: shared
   # Only for `mode: external`. The other modes derive the address from what they created.
@@ -405,6 +406,16 @@ computers:
   # the process default, which is a handful and thirty minutes.
   maxBrowsers: ""
   browserIdleMs: ""
+  # At what share of the pod's memory limit the computer starts closing browsers nobody is using,
+  # least recently used first, down to ten points under it. Measured as the kubelet measures it (the
+  # working set), before each launch and once a minute: it stops idle browsers filling the pod one
+  # launch at a time, and a page that grows between two checks can still run the pod out of memory.
+  # Empty means 85; 0 switches it off.
+  memoryHighPercent: ""
+  # How long a Bot's background tab (one it left behind, such as the page a sign-in popup opened from)
+  # is kept untouched before it is closed. The page the Bot is on is never closed. Empty means ten
+  # minutes; 0 keeps them.
+  tabIdleMs: ""
 
   # Which Chromium a Bot's computer runs. `headed` is full Chromium drawing to the pod's own X server
   # (Xvfb, started by the computer), behind the same streamed screen: it is what sites see from a

@@ -246,6 +246,7 @@ test("removing somebody ends their browsers' Recorders with their sessions, and 
     )?.payload,
   ).toEqual({
     connectionId: chrome.connection.id,
+    via: "web",
     reason: "signed_out",
     ending: "person_removed",
   });

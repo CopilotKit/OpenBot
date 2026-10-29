@@ -6,13 +6,21 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::{
-    deployment, engine::Address, harness::HarnessChoice, local_browser, problem::Problem, stack,
+    deployment,
+    engine::{Address, Engine},
+    harness::HarnessChoice,
+    local_browser,
+    problem::Problem,
+    stack,
 };
 
 pub const REQUIRED: &str = "Finish installing OpenBot's local software before signing in or starting. Return to Install and try again.";
 pub const FILE: &str = ".openbot-prepared.json";
 const DEPENDENCIES: &str = ".openbot-dependencies.json";
 const LAUNCH: &str = ".openbot-launched.json";
+/// The engine this installation was set up on. Never invalidated with the preparation record: a
+/// new release is prepared again on the same engine, where its database already is.
+pub const ENGINE: &str = ".openbot-engine.json";
 const PACKAGES: [&str; 7] = [
     "",
     "server",
@@ -22,6 +30,18 @@ const PACKAGES: [&str; 7] = [
     "toolkit",
     "extension",
 ];
+/// Packages a release has only since #784 (`shared` as a package, `toolkit`) and #858 (`extension`).
+/// v0.2.0, still the latest release when this desktop was built, has `shared` as plain source and no
+/// `toolkit` or `extension`; requiring their manifests failed every new install with
+/// "shared/package.json: No such file or directory".
+const LATER_PACKAGES: [&str; 3] = ["shared", "toolkit", "extension"];
+
+/// The packages this release actually has: every one in `PACKAGES`, less a later one it predates.
+fn packages(root: &Path) -> impl Iterator<Item = &'static str> + '_ {
+    PACKAGES.into_iter().filter(move |package| {
+        !LATER_PACKAGES.contains(package) || root.join(package).join("package.json").is_file()
+    })
+}
 
 #[derive(Serialize, Deserialize)]
 struct Dependencies {
@@ -84,6 +104,28 @@ pub fn installation(root: &Path) -> Option<Launch> {
     })
 }
 
+#[derive(Serialize, Deserialize)]
+struct SavedEngine {
+    engine: Engine,
+}
+
+/// The engine this installation was set up on, or `None` when it saved none (a new installation,
+/// or one from before this record existed).
+///
+/// Every later install and start uses this engine and never the other one. The installation's
+/// images and its database are in the engine it was set up on, so moving to the other one, say
+/// because Docker happens to be answering, starts OpenBot with an empty database.
+pub fn saved_engine(root: &Path) -> Option<Engine> {
+    let record: SavedEngine =
+        serde_json::from_slice(&std::fs::read(root.join(ENGINE)).ok()?).ok()?;
+    Some(record.engine)
+}
+
+/// Save the engine this installation runs on. Called once, when it has none saved.
+pub fn save_engine(root: &Path, engine: Engine) -> Result<(), Problem> {
+    write_record(root, ENGINE, &SavedEngine { engine })
+}
+
 pub fn save_selected_root(config: &Path, root: &Path) -> Result<(), Problem> {
     let root = std::fs::canonicalize(root).map_err(|e| {
         Problem::with(
@@ -142,7 +184,7 @@ fn dependency_fingerprint(root: &Path) -> Result<String, Problem> {
     hash_files(
         root,
         std::iter::once(PathBuf::from("bun.lock"))
-            .chain(PACKAGES.map(|path| Path::new(path).join("package.json")))
+            .chain(packages(root).map(|path| Path::new(path).join("package.json")))
             .chain(separate_packages(root).into_iter().flat_map(|package| {
                 [
                     Path::new(package).join("bun.lock"),
@@ -198,7 +240,7 @@ pub fn invalidate(root: &Path) -> Result<(), Problem> {
 /// Record resolved package manifests, not just the existence of a partial node_modules directory.
 fn package_files(root: &Path) -> Result<Vec<PathBuf>, Problem> {
     let mut files = BTreeSet::new();
-    for package in PACKAGES.into_iter().chain(separate_packages(root)) {
+    for package in packages(root).chain(separate_packages(root)) {
         let directory = root.join(package);
         let manifest: serde_json::Value = serde_json::from_slice(
             &std::fs::read(directory.join("package.json")).map_err(|e| required(e.to_string()))?,
@@ -481,6 +523,53 @@ pub fn image_settings(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_saved_engine_outlives_a_new_preparation() {
+        let root = crate::test_support::temp_root("preparation-saved-engine");
+        std::fs::create_dir_all(&root).unwrap();
+        assert_eq!(saved_engine(&root), None, "nothing saved yet");
+        save_engine(&root, Engine::Podman).unwrap();
+        assert_eq!(saved_engine(&root), Some(Engine::Podman));
+        // A new release is prepared again on the engine its database is in.
+        invalidate(&root).unwrap();
+        assert_eq!(saved_engine(&root), Some(Engine::Podman));
+        save_engine(&root, Engine::Docker).unwrap();
+        assert_eq!(saved_engine(&root), Some(Engine::Docker));
+        std::fs::write(root.join(ENGINE), "not json").unwrap();
+        assert_eq!(
+            saved_engine(&root),
+            None,
+            "an unreadable record is no record"
+        );
+    }
+
+    #[test]
+    fn a_release_from_before_the_toolkit_needs_no_shared_or_toolkit_manifest() {
+        let root = crate::test_support::temp_root("preparation-v020-layout");
+        for package in ["", "server", "app", "worker"] {
+            std::fs::create_dir_all(root.join(package)).unwrap();
+            std::fs::write(root.join(package).join("package.json"), "{}").unwrap();
+        }
+        // v0.2.0: `shared` is source with no manifest, and there is no `toolkit` or `extension`.
+        std::fs::create_dir_all(root.join("shared")).unwrap();
+        assert_eq!(
+            packages(&root).collect::<Vec<_>>(),
+            ["", "server", "app", "worker"]
+        );
+        std::fs::write(root.join("bun.lock"), "lock").unwrap();
+        assert!(dependency_fingerprint(&root).is_ok());
+        assert!(package_files(&root).is_ok());
+        // A release that has them is held to them.
+        for package in LATER_PACKAGES {
+            std::fs::create_dir_all(root.join(package)).unwrap();
+            std::fs::write(root.join(package).join("package.json"), "{}").unwrap();
+        }
+        assert_eq!(packages(&root).count(), PACKAGES.len());
+        // The packages every release has stay required.
+        std::fs::remove_file(root.join("server").join("package.json")).unwrap();
+        assert!(dependency_fingerprint(&root).is_err());
+    }
 
     struct Fixture {
         root: PathBuf,

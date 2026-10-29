@@ -1,16 +1,14 @@
 import { DICTATION_HTTP_IDLE_SECONDS } from "@openbot/shared/dictation";
-import { isPersonBrowserId } from "@openbot/shared/openbot-browser";
 import { serve } from "bun";
 import { computerAccessCheck } from "./agents/computer-access";
 import type { AgentProfileStore } from "./agents/profile-store";
 import type { OpenBotRole } from "./auth/roles";
+import { botBrowserRequestSeconds } from "./browser/bot-browser";
 import { browserRequestSeconds } from "./browser/routes";
 import { websocket as channelSocket } from "./channels/socket";
 import type { ComputerGateway } from "./computer/gateway";
 import { streamPathBotId } from "./computer/stream-path";
 import type { DeploymentConfig } from "./config";
-import type { DemonstrationRecorder } from "./demonstrations/recording";
-import type { DemonstrationStore } from "./demonstrations/store";
 
 /**
  * The server's front door: one Bun server that hands ordinary requests to the Hono app, proxies the
@@ -22,9 +20,6 @@ import type { DemonstrationStore } from "./demonstrations/store";
 /** What each proxied socket carries: where to connect inward, and the socket once opened. */
 type StreamData = {
   upstream: string;
-  ownerUserId: string;
-  botId: string;
-  recordingId?: string;
   inward?: WebSocket;
 };
 
@@ -45,8 +40,6 @@ export function startHttpServer(deps: {
   ) => Promise<{ id: string; name: string; role: OpenBotRole }>;
   agentProfileStore: AgentProfileStore;
   computerGateway: ComputerGateway | undefined;
-  demonstrationStore: DemonstrationStore;
-  demonstrationRecorder: DemonstrationRecorder;
   app: {
     fetch: (
       request: Request,
@@ -60,8 +53,6 @@ export function startHttpServer(deps: {
     resolveRequestActor,
     agentProfileStore,
     computerGateway,
-    demonstrationStore,
-    demonstrationRecorder,
     app,
   } = deps;
 
@@ -105,8 +96,12 @@ export function startHttpServer(deps: {
       if (url.pathname === "/api/voice/calls") server.timeout(request, 30);
       if (url.pathname === "/api/voice/sessions") server.timeout(request, 30);
       // The person's browser's routes wait on its computer for longer than Bun's 10 s: a cold open, a slow page. Kept
-      // open for each route's own budget, so its answer, or its sentence, reaches the person (browser/routes.ts).
-      const browserSeconds = browserRequestSeconds(url.pathname);
+      // open for each route's own budget, so its answer, or its sentence, reaches the person (browser/routes.ts). A
+      // Bot's browser's routes the same, for a start, a Stop waiting on the last of a recording, a slow page
+      // (browser/bot-browser.ts).
+      const browserSeconds =
+        browserRequestSeconds(url.pathname) ??
+        botBrowserRequestSeconds(url.pathname);
       if (browserSeconds !== undefined) server.timeout(request, browserSeconds);
       const streamBotId = streamPathBotId(url.pathname);
       if (
@@ -168,22 +163,7 @@ export function startHttpServer(deps: {
             { status: 502 },
           );
         }
-        // A demonstration teaches a Bot, in that Bot's browser; a person's own browser records through its Recorder.
-        const recording = isPersonBrowserId(streamBotId)
-          ? null
-          : await demonstrationStore.active(actor.id, streamBotId);
-        if (recording)
-          upstream += `&recording=${encodeURIComponent(recording.id)}`;
-        if (
-          server.upgrade(request, {
-            data: {
-              upstream,
-              ownerUserId: actor.id,
-              botId: streamBotId,
-              ...(recording ? { recordingId: recording.id } : {}),
-            },
-          })
-        ) {
+        if (server.upgrade(request, { data: { upstream } })) {
           return undefined as unknown as Response;
         }
         return new Response("Expected a WebSocket upgrade.", { status: 400 });
@@ -202,66 +182,6 @@ export function startHttpServer(deps: {
         // Frames outward, input inward. Buffered by neither side: a frame the browser is too slow for
         // should be dropped, not queued, because a stale frame is worse than a missing one.
         inward.onmessage = (event) => {
-          if (stream.recordingId) {
-            let recorded: unknown;
-            try {
-              recorded = JSON.parse(String(event.data));
-            } catch {
-              recorded = null;
-            }
-            if (
-              recorded &&
-              typeof recorded === "object" &&
-              "type" in recorded &&
-              recorded.type === "demonstration.action"
-            ) {
-              const data = stream;
-              const message = recorded as {
-                recordingId?: unknown;
-                action?: unknown;
-              };
-              if (message.recordingId !== data.recordingId) {
-                ws.send(
-                  JSON.stringify({
-                    type: "error",
-                    error:
-                      "The recording identity changed. Stop and restart recording.",
-                  }),
-                );
-                return;
-              }
-              demonstrationRecorder
-                .capture(
-                  data.ownerUserId,
-                  data.botId,
-                  data.recordingId ?? "",
-                  message.action,
-                )
-                .catch((error) => {
-                  console.error(
-                    JSON.stringify({
-                      type: "demonstration-capture-error",
-                      error:
-                        error instanceof Error ? error.name : "UnknownError",
-                      context: { recordingId: data.recordingId },
-                      timestamp: new Date().toISOString(),
-                    }),
-                  );
-                  try {
-                    ws.send(
-                      JSON.stringify({
-                        type: "error",
-                        error:
-                          "A browser step could not be saved. Stop and review the demonstration before continuing.",
-                      }),
-                    );
-                  } catch {
-                    /* A closed viewer cannot receive the already logged failure. */
-                  }
-                });
-              return;
-            }
-          }
           try {
             ws.send(String(event.data));
           } catch {

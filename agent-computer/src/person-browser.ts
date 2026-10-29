@@ -23,7 +23,6 @@
  * https://chromedevtools.github.io/devtools-protocol/tot/Extensions/#method-loadUnpacked
  * https://chromedevtools.github.io/devtools-protocol/tot/Browser/#method-grantPermissions
  */
-import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   type BrowserContext,
@@ -45,15 +44,13 @@ import {
   installedBrowserAt,
   NO_INSTALLED_BROWSER,
   type PersonDisplay,
-  personLaunchOptions,
   personNativeLaunch,
   personWindow,
+  recorderLaunchOptions,
 } from "./person-launch";
-import { isRecorderPage, isRecorderSetupPage, type Recorder } from "./recorder";
-import {
-  createRecorderLauncher,
-  type RecorderLauncher,
-} from "./recorder-launcher";
+import { isRecorderPage, type Recorder } from "./recorder";
+import { fitWindowsToViewport, holdRecorder } from "./recorder-in-browser";
+import type { RecorderLauncher } from "./recorder-launcher";
 
 /** No Chrome and no Edge on this machine: nothing to open a person's window in. */
 export class NoInstalledBrowserError extends Error {
@@ -198,127 +195,6 @@ export function personPages(
 }
 
 /**
- * Close the Recorder's setup and connect pages whenever one appears, for the life of the browser.
- *
- * The Recorder opens its setup page when it is installed, and every launch installs it afresh, so
- * this is not a one-off at start. The url a new tab reports can still be the blank one it started
- * on, so each page is checked again as it navigates.
- */
-function closeRecorderSetupPages(context: BrowserContext, recorderId: string) {
-  const check = (page: Page) => {
-    if (isRecorderSetupPage(page.url(), recorderId))
-      void page.close().catch(() => undefined);
-  };
-  const watch = (page: Page) => {
-    check(page);
-    page.on("framenavigated", (frame) => {
-      if (frame === page.mainFrame()) check(page);
-    });
-  };
-  for (const page of context.pages()) watch(page);
-  context.on("page", watch);
-}
-
-/**
- * Make a hosted browser's window hold exactly the page the live screen shows, as each tab opens.
- *
- * Playwright sizes the window to the viewport with its own allowance for the browser's toolbars, and
- * that allowance is none when headless, though headless Chromium lays its toolbars out all the same
- * (87 pixels here). The page is told it is 800 high, and a tab that has been laid out again (switched
- * away from and back, say) is then shown in what is left of the window: the live screen lost the
- * bottom of the page, 713 of 800, while the page's own viewport still said 800. Measured on bundled
- * Chromium, headless, with Playwright 1.62.1. `Browser.setContentsSize` grows the window around the
- * contents, so the toolbars come out of the window and not the page, headed or headless. After
- * Playwright's own resize, which it makes as each tab starts and then leaves alone.
- * https://chromedevtools.github.io/devtools-protocol/tot/Browser/#method-setContentsSize
- */
-function fitWindowsToViewport(
-  context: BrowserContext,
-  viewport: { width: number; height: number },
-  botId: string,
-) {
-  const fit = async (page: Page) => {
-    const session = await context.newCDPSession(page);
-    try {
-      const { windowId } = await session.send("Browser.getWindowForTarget");
-      await session.send("Browser.setContentsSize", { windowId, ...viewport });
-    } finally {
-      await session.detach().catch(() => undefined);
-    }
-  };
-  const fitting = (page: Page) =>
-    void fit(page).catch((error: unknown) => {
-      // A tab that closed while it was being fitted needs nothing; anything else is said, because
-      // the live screen then shows less than the whole page.
-      if (page.isClosed()) return;
-      console.info(
-        JSON.stringify({
-          type: "computer-window-not-fitted",
-          botId,
-          error: error instanceof Error ? error.message : String(error),
-        }),
-      );
-    });
-  for (const page of context.pages()) fitting(page);
-  context.on("page", fitting);
-}
-
-/**
- * Make the Recorder's worker run the Recorder on disk, loading it again when it runs an earlier one.
- *
- * WHY. A browser keeps an extension's service worker registered in the profile, its scripts cached
- * in `Service Worker/ScriptCache`, from one run to the next: closing the browser unloads nothing.
- * Loaded at the next start, by `--load-extension` or DevTools `Extensions.loadUnpacked`, the Recorder
- * is installed as if new rather than updated, so nothing unregisters that worker; registering the
- * same script again is, by the service worker rules, the registration already there; and the
- * browser's own update check never runs for an extension's worker. So a profile kept running the
- * Recorder it first cached, whatever had been built since: every Recorder fix was invisible in a
- * browser that had run an earlier one, and an update of OpenBot would never have updated it.
- * Measured on Google Chrome 156 and Playwright's Chromium, for a changed script and for a changed
- * manifest version alike, which makes no difference. Loading the Recorder again while it is loaded
- * is an update, and an update unregisters the worker and registers the one on disk: measured the
- * same way, the new script then runs, and keeps running at later launches.
- *
- * Compared byte for byte, as a service worker's own update check compares, so a browser already
- * running the Recorder on disk is left alone and its worker is not restarted.
- * https://chromium.googlesource.com/chromium/src/+/main/extensions/browser/service_worker/service_worker_task_queue.cc
- * https://chromium.googlesource.com/chromium/src/+/main/content/browser/service_worker/service_worker_register_job.cc
- * https://w3c.github.io/ServiceWorker/#register-algorithm
- * https://chromedevtools.github.io/devtools-protocol/tot/Extensions/#method-loadUnpacked
- */
-async function keepRecorderCurrent(input: {
-  session: CDPSession;
-  launcher: RecorderLauncher;
-  recorder: Recorder;
-  recorderId: string;
-  botId: string;
-}): Promise<void> {
-  const { recorder, launcher } = input;
-  const built = await step("recorder-files", () =>
-    readFile(join(recorder.dir, recorder.worker), "utf8"),
-  );
-  const url = `chrome-extension://${input.recorderId}/${recorder.worker}`;
-  // The first call to the worker since the launch: it finds it, and wakes it if it has not started.
-  if ((await step("worker", () => launcher.workerSource(url))) === built)
-    return;
-  console.info(
-    JSON.stringify({
-      type: "computer-recorder-reloaded",
-      botId: input.botId,
-      reason:
-        "Its service worker ran an earlier build than the Recorder on disk.",
-    }),
-  );
-  await step("recorder-reload", async () => {
-    await input.session.send("Extensions.loadUnpacked", { path: recorder.dir });
-    if ((await launcher.workerSource(url)) !== built)
-      throw new Error(
-        "The Recorder in this browser runs an earlier build, and loading the current one did not replace it.",
-      );
-  });
-}
-
-/**
  * Start a person's browser, with the Recorder loaded and its microphone granted.
  *
  * All or nothing: a browser whose Recorder could not be put in is closed again rather than handed
@@ -383,7 +259,7 @@ export async function launchPersonBrowser(
         })
       : chromium.launchPersistentContext(input.dir, {
           channel: product,
-          ...personLaunchOptions(
+          ...recorderLaunchOptions(
             {
               recorderDir: input.recorder.dir,
               headless,
@@ -425,17 +301,16 @@ export async function launchPersonBrowser(
         recorderId = id;
       }
     }
-    closeRecorderSetupPages(context, recorderId);
-    const launcher = createRecorderLauncher({ session, context, recorderId });
-    await keepRecorderCurrent({
+    const launcher = await holdRecorder({
       session,
-      launcher,
+      context,
       recorder: input.recorder,
       recorderId,
       botId: input.botId,
+      step,
     });
     if (window === "screen")
-      fitWindowsToViewport(context, input.viewport, input.botId);
+      void fitWindowsToViewport(context, input.viewport, input.botId);
     // Narration in a native window is the Recorder hearing the person, and it asks nobody first.
     // The hosted browser has no microphone; the grant costs nothing there and keeps one launch.
     await step("microphone", () =>

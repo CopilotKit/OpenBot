@@ -21,6 +21,7 @@ import {
   offeredToken,
 } from "./authorisation";
 import { isPlainBotId, seatIdFor } from "./bot-id";
+import { createBotBrowserHost, isBotBrowserPath } from "./bot-browser-host";
 import { createBrowserHost, isBrowserPath } from "./browser-host";
 import { browserRuntimeFromEnv } from "./browser-runtime";
 import { detectChallenge } from "./challenge";
@@ -31,7 +32,6 @@ import {
   SnapshotRequiredError,
   TAKE_CONTROL_FIRST,
 } from "./control";
-import { describeHumanGesture } from "./demonstration";
 import { handleEgressPolicyRequest, startEgressFilter } from "./egress";
 import { enterText, FieldValueError } from "./enter-text";
 import { identity } from "./identity";
@@ -42,6 +42,7 @@ import {
 } from "./navigation";
 import {
   computerOwner,
+  NOT_ITS_OWN_COMPUTER_RECORD,
   PERSONS_OWN_BROWSER,
   personHoldsTheWheel,
   personMayUse,
@@ -57,11 +58,18 @@ import {
 } from "./request-validation";
 import { type InputMessage, startScreencast } from "./screencast";
 import {
+  HIDDEN_FIELD_SELECTOR,
+  hiddenValues,
+  inputFills,
+  keyFills,
+  MASKED_VALUE,
   markElementSecret,
+  markPersonFilled,
   maskSensitiveValues,
+  PERSON_FILLED_ATTRIBUTE,
+  PERSON_FILLED_VALUE,
   SECRET_ATTRIBUTE,
-  SENSITIVE_FIELD_SELECTOR,
-  sensitiveRefs,
+  unmarkPersonFilled,
 } from "./secret-masking";
 import { type BotSession, createSessions } from "./sessions";
 import {
@@ -201,6 +209,8 @@ const TEXT_EXTRACT_LIMIT = 6000;
 const sessions = createSessions({
   isLive: (botId) => profiles.isLive(botId),
   profilesDirectory: process.env.PROFILES_DIR?.trim() || "/profiles",
+  // A recording in the Bot's browser is the person's who holds the wheel, and ends the moment they no longer do.
+  onWheelLeft: (botId) => botBrowser.wheelLeft(botId),
 });
 
 /**
@@ -327,20 +337,56 @@ await startEgressFilter({ forShell: import.meta.main });
 const profiles = createProfiles(
   process.env.PROFILES_DIR?.trim() || "/profiles",
   async (botId) => {
+    // First, while the browser is still there: a recording in it ends, and its Recorder lets the person go.
+    await botBrowser.browserClosing(botId);
     if (sessions.get(botId)) sessions.renewRun(botId);
     await sessions.get(botId)?.viewer.releaseAll(COMPUTER_STOPPED);
   },
-  { personDisplay: PERSON_DISPLAY },
+  {
+    personDisplay: PERSON_DISPLAY,
+    // A Bot's browser a person is working in, or has been asked to, is never closed for memory, and
+    // none of its tabs are closed for being idle. A person's own browser has no Bot's wheel to hold:
+    // it is never closed for memory whoever is at it (`chooseForMemory`), and its tabs are never swept.
+    heldByPerson: (botId) =>
+      !isPersonBrowserId(botId) && sessions.personHasTheWheel(botId),
+  },
 );
 
 /**
  * The OpenBot Browser: a person's own browser with the Recorder in it, opened for them by the
  * server. See browser-host.ts, and person-access.ts for what a person's browser id may do here.
  */
+/**
+ * A browser being cleared by the person working it is forgotten as a closed one is (a new run, no page), with the wheel
+ * left where it is: the browser starts again under them (profiles.ts, `clear`).
+ */
+const forgetClearedBrowser = (botId: string) => {
+  if (sessions.get(botId)) sessions.renewRun(botId, { keepWheel: true });
+};
+
 const browserHost = createBrowserHost({
   profiles,
   recorderDir: () => process.env[RECORDER_DIR_ENV],
   navigationTimeoutMs: NAVIGATION_TIMEOUT_MS,
+  forget: forgetClearedBrowser,
+});
+
+/**
+ * A Bot's browser worked by a person holding its wheel: the bar above its screen, and the Recorder loaded in it,
+ * which records that person and nobody else. See bot-browser-host.ts.
+ */
+const botBrowser = createBotBrowserHost({
+  profiles,
+  control: (botId) => sessions.for(botId).control,
+  // The bar is driving, as the person's input on the screen is, so a page restore never moves a page under them.
+  drove: (botId) => {
+    sessions.for(botId).humanInputs += 1;
+  },
+  forget: forgetClearedBrowser,
+  navigationTimeoutMs: NAVIGATION_TIMEOUT_MS,
+  ...(OWNER.kind === "shared"
+    ? { recordRefused: NOT_ITS_OWN_COMPUTER_RECORD }
+    : {}),
 });
 
 /**
@@ -463,14 +509,38 @@ async function restoreHandoffPage(botId: string): Promise<void> {
 async function readablePageText(
   target: Page,
 ): Promise<{ text: string; truncated: boolean }> {
-  const raw = await target.evaluate(() => {
-    const clone = document.body?.cloneNode(true) as HTMLElement | undefined;
-    if (!clone) return "";
-    for (const node of clone.querySelectorAll("script, style, noscript, svg")) {
-      node.remove();
-    }
-    return clone.innerText ?? "";
-  });
+  const raw = await target.evaluate(
+    (hidden) => {
+      const clone = document.body?.cloneNode(true) as HTMLElement | undefined;
+      if (!clone) return "";
+      for (const node of clone.querySelectorAll(
+        "script, style, noscript, svg",
+      )) {
+        node.remove();
+      }
+      /*
+       * An editor's words are page text, where a field's value is not, so an editor a secret was typed
+       * into, or a person filled in while they held the wheel, says it holds something and not what
+       * (see secret-masking.ts).
+       */
+      for (const { selector, instead } of hidden)
+        for (const node of clone.querySelectorAll(selector))
+          if (
+            !(node instanceof HTMLInputElement) &&
+            !(node instanceof HTMLTextAreaElement) &&
+            !(node instanceof HTMLSelectElement)
+          )
+            node.textContent = instead;
+      return clone.innerText ?? "";
+    },
+    [
+      { selector: `[${SECRET_ATTRIBUTE}]`, instead: MASKED_VALUE },
+      {
+        selector: `[${PERSON_FILLED_ATTRIBUTE}]:not([${SECRET_ATTRIBUTE}])`,
+        instead: PERSON_FILLED_VALUE,
+      },
+    ],
+  );
 
   const collapsed = raw.replace(/\n{3,}/g, "\n\n").trim();
   return {
@@ -523,10 +593,11 @@ async function snapshotPage(
     url: target.url(),
     title,
     truncated: parsed.truncated,
-    // A password field's value is in the aria snapshot in plain text. See secret-masking.ts.
+    // A password field's value is in the aria snapshot in plain text, and so is anything a person
+    // typed while they held the wheel. See secret-masking.ts.
     elements: maskSensitiveValues(
       parsed.elements,
-      await sensitiveRefs(target, parsed.elements),
+      await hiddenValues(target, parsed.elements),
     ),
   };
 }
@@ -613,10 +684,32 @@ const SCREEN_NO_LONGER_LIVE =
 /** How often the cast checks that it is still showing the page the Bot is on. */
 const FOLLOW_INTERVAL_MS = 1_000;
 
+/**
+ * After a person's input on a Bot's screen lands: the field it filled is theirs, and the Bot reads only
+ * that it was filled (see secret-masking.ts). A person's own browser has no Bot reading it. Never fails
+ * the input, which has landed: a field that could not be marked is said in the log.
+ */
+async function notePersonFilled(
+  botId: string,
+  fills: "typed" | "chose" | null,
+): Promise<void> {
+  if (!fills || isPersonBrowserId(botId)) return;
+  try {
+    await markPersonFilled(await currentPage(botId), fills === "typed");
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        type: "computer-person-filled-not-marked",
+        botId,
+        error: String(error),
+      }),
+    );
+  }
+}
+
 /** What a live-screen socket carries: the Bot whose screen it is showing. */
 type StreamData = {
   botId: string;
-  recordingId?: string;
   /** The person's input so far, applied one message after another. */
   inputs?: Promise<void>;
 };
@@ -687,18 +780,8 @@ async function applyInput(
   }
   session.humanInputs += 1;
   try {
-    const recorded = ws.data.recordingId
-      ? await describeHumanGesture(await currentPage(ws.data.botId), message)
-      : null;
     await standing.cast.send(message);
-    if (recorded)
-      ws.send(
-        JSON.stringify({
-          type: "demonstration.action",
-          recordingId: ws.data.recordingId,
-          action: recorded,
-        }),
-      );
+    await notePersonFilled(ws.data.botId, inputFills(message));
   } catch (error) {
     // Reported rather than swallowed. A dispatch that fails means the person's input did nothing,
     // and they must not be left believing it landed.
@@ -798,12 +881,11 @@ serve<StreamData>({
     },
 
     /*
-     * One message at a time, in the order the person sent them. A message is described before it is
-     * applied when the screen is recording a demonstration (a step needs the element it lands on),
-     * and that takes a trip to the page for some kinds of message and not for others: applied as each
-     * was ready, a key came up before it went down (every key up of a word before any of its key
-     * downs, measured with a page busy 20 ms per key down). Nothing else here holds a message, and a
-     * message refused or failed says so and lets the next one through.
+     * One message at a time, in the order the person sent them. Applying one is a trip to the
+     * browser, and a message whose trip is shorter than the one before it must still land after it:
+     * applied as each was ready, a key came up before it went down (every key up of a word before
+     * any of its key downs, measured with a page busy 20 ms per key down). Nothing else here holds a
+     * message, and a message refused or failed says so and lets the next one through.
      */
     message(ws, raw) {
       ws.data.inputs = (ws.data.inputs ?? Promise.resolve())
@@ -891,6 +973,10 @@ serve<StreamData>({
       if (applied.ok) await applyWebBotAuthPush(body?.webBotAuth);
       return applied;
     }
+    // A Bot's browser as a person holding its wheel works it. Ahead of the person's-browser rule below, so a
+    // person's browser id sent here is told it has the wrong routes rather than that it may not use them.
+    if (isBotBrowserPath(url.pathname))
+      return botBrowser.handle(request, url.pathname, botId);
     // A person's browser id reaches the person's browser routes, the live screen and the computer's
     // housekeeping, and nothing a Bot acts or reads through. See person-access.ts.
     if (isPersonBrowserId(botId) && !personMayUse(url.pathname))
@@ -928,17 +1014,7 @@ serve<StreamData>({
         if (streamBotId === undefined) {
           return json({ error: "That is not a usable bot id." }, 400);
         }
-        const recordingId = url.searchParams.get("recording")?.trim();
-        if (recordingId && !/^[a-f0-9-]{36}$/.test(recordingId))
-          return json({ error: "Invalid recording identity." }, 400);
-        if (
-          server.upgrade(request, {
-            data: {
-              botId: streamBotId,
-              ...(recordingId ? { recordingId } : {}),
-            },
-          })
-        )
+        if (server.upgrade(request, { data: { botId: streamBotId } }))
           return undefined as unknown as Response;
         return json({ error: "Expected a WebSocket upgrade." }, 400);
       }
@@ -958,26 +1034,35 @@ serve<StreamData>({
         );
       }
 
-      // The Bot asking for help. It does not take control: it says it is stuck and why, and a person
-      // decides. A Bot that could hand itself to a human could also hand a human a page they never
-      // asked to see.
+      // The Bot asking for help, or a person asking to take the wheel themselves (the first half of a
+      // take). It does not take control: it says who is asking and why, and a person decides. A Bot
+      // that could hand itself to a human could also hand a human a page they never asked to see.
       if (url.pathname === "/control/request" && request.method === "POST") {
         const body = (await request.json().catch(() => null)) as {
           reason?: unknown;
           toolCallId?: unknown;
+          source?: unknown;
         } | null;
         if (
           body?.toolCallId !== undefined &&
           typeof body.toolCallId !== "string"
         )
           return json({ error: "toolCallId must be a string." }, 400);
+        // A person taking the wheel themselves (`manual`), or the Bot asking for one (`model`, the default). The
+        // challenges the computer detects are recorded by the computer, never claimed by a caller.
+        if (
+          body?.source !== undefined &&
+          body.source !== "model" &&
+          body.source !== "manual"
+        )
+          return json({ error: "source must be model or manual." }, 400);
         // The page the Bot is stuck on, recorded with the request. A browser that will not start is
         // no reason to refuse the request: the person is the one who can see why.
         const stuckOn = await currentPage(botId).catch(() => undefined);
         const state = session.control.requestHelp(
           body?.reason,
           body?.toolCallId,
-          "model",
+          body?.source ?? "model",
           stuckOn?.url(),
         );
         // Not awaited: reopening the page can take a navigation timeout plus a cold browser start,
@@ -1115,19 +1200,27 @@ serve<StreamData>({
       ) {
         const body = (await request.json().catch(() => null)) as {
           requestId?: unknown;
+          by?: unknown;
         } | null;
         if (typeof body?.requestId !== "string" || !body.requestId.trim())
           return json({ error: "A requestId is required." }, 400);
         if (url.pathname === "/control/take") {
-          const taken = await session.control.take(body.requestId);
+          // Who is taking it: the signed-in person's user id, which the server always sends. Checked by `take`.
+          if (body.by !== undefined && typeof body.by !== "string")
+            return json({ error: "by must be a string." }, 400);
+          const taken = await session.control.take(body.requestId, body.by);
           // The browser may have restarted while the request waited; give the person the page. In the
           // background, so "Take control" answers at once; the live screen shows the page as it loads.
           void restoreHandoffPage(botId);
           return json(taken);
         }
-        if (url.pathname === "/control/cancel")
-          return json(session.control.cancel(body.requestId));
-        return json(session.control.release(body.requestId));
+        const changed =
+          url.pathname === "/control/cancel"
+            ? session.control.cancel(body.requestId)
+            : session.control.release(body.requestId);
+        // Answered once a recording the wheel took with it has ended, so what the caller reads next is true.
+        await botBrowser.settled(botId);
+        return json(changed);
       }
 
       // A person's input, by pixel. The Bot addresses elements by reference because it reads a list; a
@@ -1150,9 +1243,22 @@ serve<StreamData>({
         }
         try {
           const target = await currentPage(botId);
-          return json(
-            await performHumanInput(target, url.pathname, body ?? {}),
+          const done = await performHumanInput(
+            target,
+            url.pathname,
+            body ?? {},
           );
+          await notePersonFilled(
+            botId,
+            url.pathname === "/human/type"
+              ? "typed"
+              : url.pathname === "/human/key" && typeof body?.key === "string"
+                ? keyFills(body.key)
+                : url.pathname === "/human/click"
+                  ? "chose"
+                  : null,
+          );
+          return json(done);
         } catch (error) {
           return json({ error: describe(error, "That did not work.") }, 502);
         }
@@ -1215,6 +1321,7 @@ serve<StreamData>({
         session.control.interrupt(
           "The computer stopped; the previous task was interrupted.",
         );
+        await botBrowser.settled(botId);
         return json({ stopped: true, wasRunning });
       }
 
@@ -1253,6 +1360,7 @@ serve<StreamData>({
         session.control.interrupt(
           "The computer was reset; the previous task was interrupted.",
         );
+        await botBrowser.settled(botId);
         /*
          * And a new run, because the browser this session described is gone.
          *
@@ -1328,10 +1436,11 @@ serve<StreamData>({
       if (url.pathname === "/screenshot" && request.method === "GET") {
         try {
           const target = await currentPage(botId);
-          // Sensitive fields are masked in the picture the Bot is handed. See secret-masking.ts.
+          // Sensitive fields, and fields a person filled while they held the wheel, are masked in the
+          // picture the Bot is handed. See secret-masking.ts.
           const buffer = await target.screenshot({
             type: "png",
-            mask: [target.locator(SENSITIVE_FIELD_SELECTOR)],
+            mask: [target.locator(HIDDEN_FIELD_SELECTOR)],
           });
           const size = target.viewportSize() ?? { width: 1280, height: 800 };
           return json({
@@ -1748,6 +1857,10 @@ async function performAction(
     // this box" means. Typing into a field a previous attempt half-filled otherwise appends, and the
     // form ends up with "AlicAlice" in it. A dropdown is chosen from instead (see enterText).
     await enterText(field, body.text, acting);
+    // The Bot's own value now, whoever filled the field before.
+    await field
+      .evaluate(unmarkPersonFilled, PERSON_FILLED_ATTRIBUTE)
+      .catch(() => undefined);
     if (body.submit === true) {
       await field.press("Enter", acting);
     }

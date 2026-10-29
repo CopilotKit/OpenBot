@@ -94,6 +94,14 @@ async function clean() {
     .where(like(modelUsage.agentId, `ent-%${suite}%`));
 }
 
+/** A Bot a person is recording in the browser of, as far as the controls are told (browser/bot-browser.ts). */
+const recordingBot = `ent-recording-${suite}`;
+const RECORDER_RULE = {
+  type: "domain" as const,
+  value: "openbot.acme.test",
+  ports: "443",
+};
+
 beforeAll(async () => {
   await clean();
   await database.insert(users).values([
@@ -120,6 +128,10 @@ beforeAll(async () => {
     auditStore,
     provider,
     builtInModel: "openai/gpt-test",
+    duringRecording: async (botId, policy) =>
+      botId === recordingBot
+        ? { ...policy, rules: [...policy.rules, RECORDER_RULE] }
+        : policy,
     env: {},
   });
 });
@@ -697,6 +709,17 @@ describe("network policy", () => {
     expect(await controls.policyForBot(bot)).toEqual({
       mode: "defaults_plus_allowlist",
       rules: [{ type: "cidr", value: "10.0.0.0/8", ports: "443" }],
+    });
+  });
+
+  test("a Bot someone records in is pushed its policy as the recording needs it, and other Bots theirs", async () => {
+    // Every push of a Bot's policy reads this one function, the periodic push and the push on wake alike, so neither
+    // can take the Recorder's way out away mid-recording.
+    const quiet = await controls.policyForBot(`ent-quiet-${suite}`);
+    expect(quiet.rules).not.toContainEqual(RECORDER_RULE);
+    expect(await controls.policyForBot(recordingBot)).toEqual({
+      ...quiet,
+      rules: [...quiet.rules, RECORDER_RULE],
     });
   });
 });

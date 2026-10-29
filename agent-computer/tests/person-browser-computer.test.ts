@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type {
@@ -86,6 +86,8 @@ async function startComputer(
 }
 
 let computer: Computer;
+/** What the fixture Recorder said it was called with, oldest first. */
+const calls: { method: string; input: unknown }[] = [];
 
 function call(
   path: string,
@@ -129,10 +131,25 @@ beforeAll(async () => {
     hostname: "127.0.0.1",
     port: 0,
     async fetch(request) {
-      if (new URL(request.url).pathname === "/fixture/calls") {
-        await request.text();
+      const { pathname } = new URL(request.url);
+      if (pathname === "/fixture/calls") {
+        calls.push((await request.json()) as (typeof calls)[number]);
         return new Response("");
       }
+      // A cookie kept for an hour, as a site keeps a sign-in: it outlives the browser closing.
+      if (pathname === "/set-cookie")
+        return new Response("<!doctype html><title>set</title>", {
+          headers: {
+            "content-type": "text/html; charset=utf-8",
+            "set-cookie": "signed-in=yes; Max-Age=3600; Path=/",
+          },
+        });
+      // The cookies the browser sent, as the page's title.
+      if (pathname === "/cookies")
+        return new Response(
+          `<!doctype html><title>cookies:${request.headers.get("cookie") ?? ""}</title>`,
+          { headers: { "content-type": "text/html; charset=utf-8" } },
+        );
       return new Response(
         "<!doctype html><title>empty</title><input autofocus><script>document.querySelector('input').addEventListener('input',e=>document.title=e.target.value)</script>",
         { headers: { "content-type": "text/html; charset=utf-8" } },
@@ -287,6 +304,66 @@ describe.skipIf(!asked)("a person's browser on the computer", () => {
     const state = (await (await call("/browser/state")).json()) as BrowserState;
     expect(state.open).toBe(false);
   }, 30_000);
+
+  test("clears: a recording in it ends first, the whole profile goes and nothing else does, and it opens again signed out of everything", async () => {
+    const origin = `http://127.0.0.1:${site?.port}`;
+    const open = () =>
+      call("/browser/open", { body: { connection: connection() } });
+    const sees = async () => {
+      const there = await call("/browser/navigate", {
+        body: { url: `${origin}/cookies` },
+      });
+      expect(there.status).toBe(200);
+      return ((await there.json()) as BrowserState).tabs.find(
+        (tab) => tab.active,
+      )?.title;
+    };
+    expect((await open()).status).toBe(200);
+    expect(
+      (
+        await call("/browser/navigate", {
+          body: { url: `${origin}/set-cookie` },
+        })
+      ).status,
+    ).toBe(200);
+    expect(await sees()).toBe("cookies:signed-in=yes");
+    // Something of the computer's that is not the browser's.
+    const workspace = join(root, "with-recorder", "workspace");
+    await mkdir(workspace, { recursive: true });
+    await writeFile(join(workspace, "notes.md"), "Keep me.");
+    const profiles = join(root, "with-recorder", "profiles");
+    expect(await readdir(profiles)).toContain(PERSON);
+
+    expect(
+      (
+        await call("/browser/recording", {
+          body: { action: "start", title: "Before the clear" },
+        })
+      ).status,
+    ).toBe(200);
+    calls.length = 0;
+    const cleared = await call("/browser/clear", { body: {} });
+    expect(cleared.status).toBe(200);
+    expect(await cleared.json()).toEqual({ open: false, tabs: [] });
+    // The recording was stopped while the Recorder could still be told.
+    expect(calls.map((each) => [each.method, each.input])).toEqual([
+      ["record", { action: "stop" }],
+    ]);
+    // The profile is gone, and left gone: only the server can hand the Recorder a connection, so it opens it again.
+    expect(await readdir(profiles)).not.toContain(PERSON);
+    expect(await Bun.file(join(workspace, "notes.md")).text()).toBe("Keep me.");
+    expect(
+      ((await (await call("/browser/state")).json()) as BrowserState).open,
+    ).toBe(false);
+
+    // Opened again, it is fresh: signed out of the site, with only closing the browser it would have stayed signed in.
+    expect((await open()).status).toBe(200);
+    expect(await sees()).toBe("cookies:");
+    // A browser that is closed is cleared all the same.
+    await call("/browser/close", { body: {} });
+    expect((await call("/browser/clear", { body: {} })).status).toBe(200);
+    expect(await readdir(profiles)).not.toContain(PERSON);
+  }, 90_000);
 
   test("a computer without a built Recorder refuses to open one, and says why", async () => {
     const without = await startComputer("without-recorder", {

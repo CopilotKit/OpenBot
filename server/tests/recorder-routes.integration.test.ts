@@ -3,7 +3,9 @@ import { randomUUID } from "node:crypto";
 import {
   type ExchangeResponse,
   LEARNING_SPACE_STATES,
+  RECORDER_ACTIVITY_STALE_MS,
   RECORDER_SIGNED_OUT,
+  type RecorderConnectionsResponse,
 } from "@openbot/shared/recorder-api";
 import { RECORDER_EXTENSION_ID } from "@openbot/shared/recorder-extension";
 import { eq, inArray } from "drizzle-orm";
@@ -355,6 +357,7 @@ describe("connecting", () => {
     expect(replaced).toHaveLength(1);
     expect(replaced[0]?.payload).toEqual({
       connectionId: first.connection.id,
+      via: "web",
       reason: "replaced",
     });
     expect(
@@ -498,6 +501,46 @@ describe("using the bearer", () => {
     };
     expect(listed.connections.map((c) => c.id)).toContain(made.connection.id);
     expect(listed.extensionIds).toEqual([RECORDER_EXTENSION_ID]);
+  });
+
+  test("the connections list says which browser is recording now, from its Recorder's own recent report", async () => {
+    // End-to-end run: a browser recording right now read "last used 49 seconds ago", since a recording streams to the
+    // gateway and reaches OpenBot only with its activity reports.
+    const h = build();
+    const made = await connect(h, "5".repeat(32));
+    const recordingNow = async () => {
+      const listed = (await (
+        await call(h, "/api/recorder/connections", { headers: COOKIE })
+      ).json()) as RecorderConnectionsResponse;
+      return listed.connections.find(
+        (connection) => connection.id === made.connection.id,
+      )?.recording;
+    };
+    const report = async (phase: "recording" | "idle") =>
+      expect(
+        (
+          await call(h, "/api/recorder/activity", {
+            method: "POST",
+            headers: bearer(made.token),
+            json: { phase, recordingId: "rec-1", actions: 3 },
+          })
+        ).status,
+      ).toBe(204);
+    expect(await recordingNow()).toBe(false);
+    await report("recording");
+    expect(await recordingNow()).toBe(true);
+    // A report from a browser that went quiet mid-recording stops standing after its window.
+    await database
+      .update(recorderConnections)
+      .set({
+        activityAt: new Date(Date.now() - RECORDER_ACTIVITY_STALE_MS - 1_000),
+      })
+      .where(eq(recorderConnections.id, made.connection.id));
+    expect(await recordingNow()).toBe(false);
+    await report("recording");
+    expect(await recordingNow()).toBe(true);
+    await report("idle");
+    expect(await recordingNow()).toBe(false);
   });
 
   test("disconnecting signs the browser out", async () => {

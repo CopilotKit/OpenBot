@@ -199,6 +199,33 @@ export async function pushEgressPolicy(
   if (!response.ok) throw new Error(`the computer answered ${response.status}`);
 }
 
+/**
+ * Push one Bot's computer its policy now, not on the way to its next action: for a change that must reach a computer
+ * already pushed this run, which the push on wake (once per run) would not send again. A recording starting in the Bot's
+ * browser widens its policy, and one ending narrows it back (browser/bot-browser.ts). Throws with the reason when the
+ * computer does not take it; does nothing where no policy is pushed at all.
+ */
+export function policyPusher(options: {
+  /** The Bot's computer, checked as every computer address is (the gateway's `locate`). */
+  locate: (botId: string) => Promise<string>;
+  policyForBot: (
+    botId: string,
+  ) => Promise<EgressPolicy | undefined> | undefined;
+  token?: string;
+  webBotAuth?: WebBotAuth;
+  fetchImpl?: typeof fetch;
+}): (botId: string) => Promise<void> {
+  return async (botId) => {
+    const policy = await options.policyForBot(botId);
+    if (!policy) return;
+    await pushEgressPolicy(await options.locate(botId), botId, policy, {
+      ...(options.token ? { token: options.token } : {}),
+      ...(options.webBotAuth ? { webBotAuth: options.webBotAuth } : {}),
+      ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
+    });
+  };
+}
+
 /** Without a run to compare, how long a pushed policy is trusted before it is pushed again. */
 const UNKNOWN_RUN_REPUSH_MS = 30_000;
 

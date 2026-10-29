@@ -334,6 +334,9 @@ export const auditEventTypes = [
   // when is exactly the sort of thing an investigator needs and nothing else records.
   "computer.stopped",
   "computer.reset",
+  // A browser's data wiped by the person working it: a Bot's, by whoever held its wheel, or the person's own. Every
+  // login in it goes, as with a reset, so who did it and to which browser is worth a row; the Bot's files stay.
+  "computer.browser_cleared",
   // A computer moved onto the current image. Its files and sign-ins are kept, but a running one is
   // restarted, which interrupts whatever it was doing, so who asked is worth a row.
   "computer.updated",
@@ -631,11 +634,14 @@ export const auditEventTypes = [
    */
   "recorder.connect_refused",
   /*
-   * A connection ended; payload `reason` is replaced (the same copy connected again), disconnected, revoked, signed_out
-   * (the person's sign-in here ended: payload `ending` says how, a sign-out, sessions ended another way, the person
-   * removed, their organization ending the session it holds a copy of) or expired (its lifetime ran out: the deployment
-   * ended it, payload `owner`). Written in the transaction that ends the connection, as `recorder.connected` is in the
-   * one that makes it.
+   * A connection ended; payload `via`, how it was made (as on `recorder.connected`), and `reason`: replaced (the same
+   * copy connected again), disconnected, revoked, signed_out (the person's sign-in here ended: payload `ending` says how,
+   * a sign-out, sessions ended another way, the person removed, their organization ending the session it holds a copy
+   * of) or expired (its lifetime ran out: the deployment ended it, payload `owner`); for a Bot's browser's connection,
+   * which lasts one recording, stopped (the person's Stop), ended (the recording ended without one) or not-started (the
+   * start it was for did not happen); for the person's own OpenBot browser's, cleared (they cleared that browser, and its
+   * token went with the profile). Written in the transaction that ends the connection, as `recorder.connected` is in
+   * the one that makes it.
    */
   "recorder.revoked",
   /*

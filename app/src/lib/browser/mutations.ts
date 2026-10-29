@@ -111,6 +111,23 @@ export function navigateBrowserMutationOptions(queryClient: QueryClient) {
   });
 }
 
+/**
+ * Wipes the person's browser: cookies, saved passwords, history and site storage, which signs it out of everything. One
+ * that was open opens again, fresh; the answer is the browser after it.
+ */
+export function clearBrowserMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: async (): Promise<BrowserApiState> =>
+      (
+        await client(browserApiPaths.clear, {
+          method: "POST",
+          fallback: "Couldn't clear your browser. Try again.",
+        })
+      ).json(),
+    onSettled: () => invalidateBrowser(queryClient),
+  });
+}
+
 type Unsent<T> = T extends unknown ? Omit<T, "sentAt"> : never;
 /** A narration post as the page makes it: `sentAt` is stamped as it leaves (`sendNarration`). */
 export type NarrationPost = Unsent<BrowserNarrationRequest>;
@@ -128,11 +145,25 @@ export type NarrationPost = Unsent<BrowserNarrationRequest>;
  * sentence if it said one, instead of throwing, because that is told to the person beside the narration switch and the
  * recording carries on.
  */
-export async function sendNarration(
+export function sendNarration(post: NarrationPost): Promise<NarrationAnswer> {
+  return sendNarrationTo(browserApiPaths.narration, post);
+}
+
+/** Whether a narration post was taken, and when it was not, the server's own sentence for why if it said one. */
+export type NarrationAnswer =
+  | { ok: true }
+  | { ok: false; error: string | null };
+
+/**
+ * `sendNarration` to the narration route at `path`: the person's own browser's, or a Bot's browser's
+ * (`lib/bot-browser`), which takes the same body and answers the same way.
+ */
+export async function sendNarrationTo(
+  path: string,
   post: NarrationPost,
-): Promise<{ ok: true } | { ok: false; error: string | null }> {
+): Promise<NarrationAnswer> {
   try {
-    const response = await tryClient(browserApiPaths.narration, {
+    const response = await tryClient(path, {
       method: "POST",
       body: { ...post, sentAt: Date.now() },
     });

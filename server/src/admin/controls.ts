@@ -84,6 +84,16 @@ export type EnterpriseDeps = {
   /** Where a person's own OpenBot browser may go (browser/egress.ts): pushed to it instead of a Bot's policy, which says
    * where Bots may go. Absent, a person's browser is pushed `deny_all`, the answer for a computer with no policy. */
   personBrowserPolicy?: EgressPolicy;
+  /**
+   * A Bot's policy as it must be for now, from the one its owner is under: wider while a person records in the Bot's
+   * browser, so the Recorder there reaches OpenBot and the gateway (browser/bot-browser.ts), and the Bot's own once
+   * nobody does. Applied to every push of a Bot's policy, the periodic one and the push on wake, so neither takes the
+   * Recorder's way out away mid-recording, and neither leaves it to the Bot afterwards. Absent: the owner's policy.
+   */
+  duringRecording?: (
+    botId: string,
+    policy: EgressPolicy,
+  ) => Promise<EgressPolicy>;
   /** Pushed to every computer with its policy; see `computer/policy-network.ts`. */
   webBotAuth?: WebBotAuth;
   /** `provider/model` the built-in Bot runs on, for the model allowlist and usage view. */
@@ -407,7 +417,7 @@ export async function installEnterpriseControls(
       member,
       cloudNetwork,
     );
-    return policy;
+    return deps.duringRecording ? deps.duringRecording(botId, policy) : policy;
   };
 
   let pushing: Promise<void> | undefined;

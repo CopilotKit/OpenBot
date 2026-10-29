@@ -1082,16 +1082,6 @@ const ALLOW: Allowed[] = [
     finding: "NEW (round 2 did not find this)",
   },
   {
-    file: "server/tests/demonstrations.test.ts",
-    shape: "c",
-    context: [
-      '"scheduling creates a routine for the recording\'s own Bot through the routine store"',
-    ],
-    expression:
-      'expect(created).toEqual([{ownerUserId:"owner",agentId:"bot",instruction:demonstrationRoutineInstruction({title:"Find invoice",slug:"find-invoice",}),cron:"0 9 * * 1-5",timezone:undefined,channelId:undefined,},])',
-    finding: "NEW (round 2 did not find this)",
-  },
-  {
     file: "server/tests/routine-runner.test.ts",
     shape: "c",
     context: [

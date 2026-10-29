@@ -21,9 +21,10 @@ import {
   type RealBrowserRequest,
   realBrowserComputerPaths,
 } from "@openbot/shared/openbot-browser";
-import type {
-  RecorderActivity,
-  RecorderConnection,
+import {
+  RECORDER_ACTIVITY_STALE_MS,
+  type RecorderActivity,
+  type RecorderConnection,
 } from "@openbot/shared/recorder-api";
 import {
   RECORDER_EXTENSION_ID,
@@ -33,7 +34,7 @@ import {
 import { Hono, type MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import type { z } from "zod";
-import type { AuditStore } from "../audit";
+import { type AuditStore, recordAuditEvent } from "../audit";
 import type { AppVariables, AuthenticatedActor } from "../auth/guards";
 import { checkComputerAddress } from "../computer/target";
 import { reasonWithoutStatement } from "../db/query-failure";
@@ -94,12 +95,9 @@ export type BrowserRouteDeps = {
   storeIds?: { chrome?: string; edge?: string };
 };
 
-/**
- * How long a Recorder's report of what it is doing stands without another. A Recorder says it whenever its recording
- * phase changes and every 30 s while one runs (shared/recorder-api.ts), so three missed reports in a row: a browser that
- * quit or lost its network mid-recording stops showing the red dot after this, rather than forever.
- */
-export const ACTIVITY_STALE_MS = 90_000;
+/** How long a Recorder's report of what it is doing stands without another: after this a browser that quit or lost its
+ * network mid-recording stops showing the red dot (shared/recorder-api.ts). */
+export const ACTIVITY_STALE_MS = RECORDER_ACTIVITY_STALE_MS;
 
 /** The person's own browsers in the order the Browser button tries them: Chrome first, then Edge. */
 const REAL_BROWSERS: readonly RealBrowser[] = ["chrome", "msedge"];
@@ -148,12 +146,19 @@ export const STATE_TIMEOUT_MS = 8_000;
  * that may follow it ({@link STATE_TIMEOUT_MS}) and a margin for the database, so the answer always reaches them.
  */
 /** An open, and a Record, which may open the browser's connection again first: a computer woken from sleep, then a
- * browser launched, the Recorder loaded and handed its connection. */
+ * browser launched, the Recorder loaded and handed its connection. And a clear, which wipes the browser and opens it
+ * again. */
 export const OPEN_BUDGET_MS = 150_000;
 /** Tabs, an address, a phrase or a close: the computer's own wait, and finding the computer it runs on. */
 export const CALL_BUDGET_MS = CALL_TIMEOUT_MS + 15_000;
 /** What the person's request is kept open for past its budget and a state read: the database, and the answer itself. */
 const ANSWER_MARGIN_MS = 7_000;
+
+/** How long OpenBot's server keeps open a request whose route has `budgetMs`, in seconds: its budget, the one state read
+ * that may follow it, and a margin for the database and the answer itself. */
+export function requestSecondsFor(budgetMs: number): number {
+  return Math.ceil((budgetMs + STATE_TIMEOUT_MS + ANSWER_MARGIN_MS) / 1000);
+}
 
 /**
  * How long OpenBot's server keeps a person's request to one of these routes open, in seconds, or undefined for the state
@@ -161,17 +166,26 @@ const ANSWER_MARGIN_MS = 7_000;
  */
 export function browserRequestSeconds(pathname: string): number | undefined {
   const budget =
-    pathname === browserApiPaths.open || pathname === browserApiPaths.recording
+    pathname === browserApiPaths.open ||
+    pathname === browserApiPaths.recording ||
+    pathname === browserApiPaths.clear
       ? OPEN_BUDGET_MS
       : pathname.startsWith(`${browserApiPaths.state}/`)
         ? CALL_BUDGET_MS
         : undefined;
   if (budget === undefined) return undefined;
-  return Math.ceil((budget + STATE_TIMEOUT_MS + ANSWER_MARGIN_MS) / 1000);
+  return requestSecondsFor(budget);
 }
 
 /** When the request being answered must have its answer by (epoch ms): set by each route, read by every wait in it. */
 const answerBy = new AsyncLocalStorage<number>();
+
+/** A route's budget of `ms` from the request's arrival, which every wait in it shares (`inBudget`, `computerCaller`):
+ * the person's own browser's routes, and a Bot's (browser/bot-browser.ts). */
+export const withBudget =
+  (ms: number): MiddlewareHandler =>
+  (_context, next) =>
+    answerBy.run(Date.now() + ms, next);
 
 /** What is left of the request's budget, in ms; unbounded outside a route (a revoke's notice, say). */
 function budgetLeft(): number {
@@ -179,8 +193,13 @@ function budgetLeft(): number {
   return by === undefined ? Number.POSITIVE_INFINITY : by - Date.now();
 }
 
-/** The work, unless the request's budget runs out first: then the person is told their browser is taking too long. */
-async function inBudget<T>(work: Promise<T>, path: string): Promise<T> {
+/** The work, unless the request's budget runs out first: then the person is told their browser is taking too long
+ * (`slow`: a Bot's browser says it is the Bot's). */
+export async function inBudget<T>(
+  work: Promise<T>,
+  path: string,
+  slow: string = SENTENCES.slow,
+): Promise<T> {
   const left = budgetLeft();
   if (!Number.isFinite(left)) return work;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -190,7 +209,7 @@ async function inBudget<T>(work: Promise<T>, path: string): Promise<T> {
         console.warn(
           JSON.stringify({ type: "browser-computer-slow", path, budget: true }),
         );
-        reject(new BrowserCallError(SENTENCES.slow, 504));
+        reject(new BrowserCallError(slow, 504));
       },
       Math.max(0, left),
     );
@@ -203,6 +222,18 @@ async function inBudget<T>(work: Promise<T>, path: string): Promise<T> {
     clearTimeout(timer);
   }
 }
+
+/**
+ * How long the computer may take to clear the person's browser: a recording in it stopped and the last of it waited for
+ * (the computer's SENDING_WAIT_MS, 20 s), the browser closed and given 2 s to finish writing, and its profile deleted.
+ */
+const CLEAR_TIMEOUT_MS = 60_000;
+
+/**
+ * The local actor's address, matched to decide whether the id is a real users row: the audit table's foreign key takes
+ * no other (computer/routes.ts `actorOf` has the same rule).
+ */
+const DEV_ACTOR_EMAIL = "dev@openbot.local";
 
 /**
  * How long a revoke waits for the person's browser to hear of it. The revoke has happened either way: a browser that
@@ -242,6 +273,9 @@ const SENTENCES = {
   notAnsweringSingleUser:
     "Your browser isn't answering. If it doesn't come back soon, quit OpenBot and open it again.",
   notWeb: "Only web addresses open here.",
+  /** The profile is gone, and its row on the trail could not be written. */
+  clearedNotFinished:
+    "Your browser was cleared, but OpenBot couldn't finish. Clear it again.",
   phraseTimes:
     "That phrase's times do not fit the recording, so it was not added.",
 } as const;
@@ -255,7 +289,7 @@ const NO_ADDRESS =
   "This OpenBot has no address a person's browser can reach it at, so the Recorder in it cannot be connected. Set OPENBOT_PUBLIC_URL to this OpenBot's https address.";
 
 /** OpenBot did not get the computer's answer: 502 when nothing answered, 504 when it took too long to. */
-class BrowserCallError extends Error {
+export class BrowserCallError extends Error {
   readonly status: 502 | 504;
   constructor(message: string, status: 502 | 504 = 502) {
     super(message);
@@ -289,22 +323,58 @@ function onServerClock(
   return fits(since) ? { speaking: true, since, sentAt: arrival } : null;
 }
 
+/** When each narration request reached this server, read before signing the person in can take any time. */
+const arrivals = new WeakMap<Request, number>();
+
+/** Notes when a narration request arrived. Mounted ahead of every check on the route, so the time is its arrival. */
+export const stampNarrationArrival: MiddlewareHandler = async (
+  context,
+  next,
+) => {
+  arrivals.set(context.req.raw, Date.now());
+  await next();
+};
+
+/**
+ * A narration request's body, read against the contract and moved onto this server's clock from the time it arrived
+ * ({@link stampNarrationArrival}): the request the computer is sent, or what the person is told instead (400). The same
+ * for the person's own browser and a Bot's.
+ */
+export async function narrationOnServerClock(
+  request: Request,
+): Promise<
+  | { ok: true; narration: BrowserNarrationRequest }
+  | { ok: false; error: string }
+> {
+  const arrival = arrivals.get(request) ?? Date.now();
+  const parsed = browserNarrationRequestSchema.safeParse(
+    await request.json().catch(() => null),
+  );
+  const body = parsed.success ? parsed.data : null;
+  if (!body || ("text" in body && body.endedAt < body.startedAt))
+    return { ok: false, error: "That phrase was not complete." };
+  const corrected = onServerClock(body, arrival);
+  return corrected
+    ? { ok: true, narration: corrected }
+    : { ok: false, error: SENTENCES.phraseTimes };
+}
+
 /** A cross-site form can only send these three content types, so requiring JSON stops one. */
-const jsonOnly: MiddlewareHandler = async (context, next) => {
+export const jsonOnly: MiddlewareHandler = async (context, next) => {
   if (!context.req.header("content-type")?.startsWith("application/json")) {
     return context.json({ error: "Send the request as JSON." }, 415);
   }
   await next();
 };
 
-const smallBody = bodyLimit({
+export const smallBody = bodyLimit({
   maxSize: BODY_LIMIT_BYTES,
   onError: (context) =>
     context.json({ error: "That request is too large." }, 413),
 });
 
 /** A browser's state as the computer reports it, checked for the two fields every answer has. */
-function browserState(value: unknown): BrowserState | null {
+export function browserState(value: unknown): BrowserState | null {
   if (typeof value !== "object" || value === null) return null;
   const state = value as Partial<BrowserState>;
   return typeof state.open === "boolean" && Array.isArray(state.tabs)
@@ -347,10 +417,17 @@ function signedOut(recorder: LauncherState): LauncherState {
   return { ...rest, connected: false };
 }
 
-/** One computer route for a person's browser, under the computer token with the browser in `x-openbot-bot-id`: a GET,
- * or a POST of `body` (a POST with no body when `method` says so). */
-function computerCaller(
+/** What a person is told when the computer does not answer: about their own browser, unless a caller says whose. */
+const NOT_ANSWERED = {
+  slow: SENTENCES.slow,
+  unreachable: SENTENCES.unreachable,
+};
+
+/** One computer route for a person's browser (or a Bot's, browser/bot-browser.ts), under the computer token with the
+ * browser in `x-openbot-bot-id`: a GET, or a POST of `body` (a POST with no body when `method` says so). */
+export function computerCaller(
   deps: Pick<BrowserRouteDeps, "token" | "fetchImpl" | "callTimeoutMs">,
+  words: { slow: string; unreachable: string } = NOT_ANSWERED,
 ) {
   const doFetch = deps.fetchImpl ?? fetch;
   const callTimeoutMs = deps.callTimeoutMs ?? CALL_TIMEOUT_MS;
@@ -378,7 +455,7 @@ function computerCaller(
       console.warn(
         JSON.stringify({ type: "browser-computer-slow", path, budget: true }),
       );
-      throw new BrowserCallError(SENTENCES.slow, 504);
+      throw new BrowserCallError(words.slow, 504);
     }
     const checked = checkComputerAddress(base);
     if (!checked.allowed) throw new BrowserCallError(checked.reason);
@@ -402,7 +479,7 @@ function computerCaller(
         console.warn(
           JSON.stringify({ type: "browser-computer-slow", path, timeoutMs }),
         );
-        throw new BrowserCallError(SENTENCES.slow, 504);
+        throw new BrowserCallError(words.slow, 504);
       }
       console.error(
         JSON.stringify({
@@ -411,7 +488,7 @@ function computerCaller(
           error: error instanceof Error ? error.name : String(error),
         }),
       );
-      throw new BrowserCallError(SENTENCES.unreachable);
+      throw new BrowserCallError(words.unreachable);
     }
     const answered: unknown = await response.json().catch(() => null);
     // The computer answered and said what went wrong, to the person: a page that did not load, a Recorder that failed.
@@ -619,6 +696,47 @@ export function isWebAddress(input: string): boolean {
 }
 
 /**
+ * The computer's refusal, for the person. What is about their request keeps its status and the computer's sentence: a
+ * bad request (400), a browser that is not open or a Recorder that refused (409). What is about how OpenBot reaches its
+ * computer (the token, a route an older computer lacks) is never passed on as the person's own 401 or 404: it is the
+ * computer failing, 502, as a Recorder or a page that failed is, with the computer's sentence where it said one for the
+ * person.
+ *
+ * A browser this computer cannot run at all (503: no built Recorder on it, or no Chrome or Edge) is OpenBot's setup, not
+ * anything the person did or can do. The computer's sentence for it is written for whoever runs OpenBot: it names
+ * `OPENBOT_RECORDER_DIR` and a build command, and the fourth end-to-end run showed it on the Browser page. So the person
+ * is told `words.notSetUp`, which says who can see to it, and the computer's own sentence stays in both logs
+ * (`browser-computer-failed` here, `computer-browser-open-failed` on the computer).
+ */
+export function computerRefusal(
+  answer: { status: number; body: unknown },
+  words: { notSetUp: string; unreachable: string },
+): Response {
+  const said = (answer.body as { error?: unknown } | null)?.error;
+  const sentence = typeof said === "string" && said ? said : null;
+  if (answer.status === 503)
+    return Response.json({ error: words.notSetUp }, { status: 503 });
+  if (answer.status === 400 || answer.status === 409)
+    return Response.json(
+      { error: sentence ?? words.unreachable },
+      { status: answer.status },
+    );
+  return Response.json(
+    {
+      error: answer.status >= 500 && sentence ? sentence : words.unreachable,
+    },
+    { status: 502 },
+  );
+}
+
+/** A call to the computer that got no answer, for the person: what `computerCaller` said, else `unreachable`. */
+export function callFailed(error: unknown, unreachable: string): Response {
+  return error instanceof BrowserCallError
+    ? Response.json({ error: error.message }, { status: error.status })
+    : Response.json({ error: unreachable }, { status: 502 });
+}
+
+/**
  * The person's own OpenBot browser: open it, see it, record in it, narrate, move between its tabs and close it. Every
  * route is the signed-in person's own browser, named from who is asking (browser/person.ts), so there is no id in the
  * path to ask for anybody else's.
@@ -633,61 +751,21 @@ export function createBrowserRoutes(deps: BrowserRouteDeps) {
   const routes = new Hono<{ Variables: AppVariables }>();
   const audit = recorderAudit(deps.auditStore);
   /** The route's budget, from the request's arrival: every wait in it shares it (`answerBy`). */
-  const budget =
-    (ms: number): MiddlewareHandler =>
-    (_context, next) =>
-      answerBy.run(Date.now() + ms, next);
-  const openBudget = budget(deps.budgetMs?.open ?? OPEN_BUDGET_MS);
-  const callBudget = budget(deps.budgetMs?.call ?? CALL_BUDGET_MS);
+  const openBudget = withBudget(deps.budgetMs?.open ?? OPEN_BUDGET_MS);
+  const callBudget = withBudget(deps.budgetMs?.call ?? CALL_BUDGET_MS);
   const ask = computerCaller(deps);
-  /** When each narration request reached this server, read before signing the person in can take any time. */
-  const arrivals = new WeakMap<Request, number>();
   /** What the person is told when OpenBot's own setup stops their browser opening: ask an admin, unless they are it. */
   const notSetUp = deps.singleUser
     ? SENTENCES.notSetUpSingleUser
     : SENTENCES.notSetUp;
+  const refused = (answer: { status: number; body: unknown }) =>
+    computerRefusal(answer, { notSetUp, unreachable: SENTENCES.unreachable });
+  const unreachable = (error: unknown) =>
+    callFailed(error, SENTENCES.unreachable);
   /** What the person is told when their browser is open and not answering: the same two ways round. */
   const notAnswering = deps.singleUser
     ? SENTENCES.notAnsweringSingleUser
     : SENTENCES.notAnswering;
-
-  /**
-   * The computer's refusal, for the person. What is about their request keeps its status and the computer's sentence: a
-   * bad request (400), a browser that is not open or a Recorder that refused (409). What is about how OpenBot reaches
-   * its computer (the token, a route an older computer lacks) is never passed on as the person's own 401 or 404: it is
-   * the computer failing, 502, as a Recorder or a page that failed is, with the computer's sentence where it said one
-   * for the person.
-   *
-   * A browser this computer cannot run at all (503: no built Recorder on it, or no Chrome or Edge) is OpenBot's setup,
-   * not anything the person did or can do. The computer's sentence for it is written for whoever runs OpenBot: it names
-   * `OPENBOT_RECORDER_DIR` and a build command, and the fourth end-to-end run showed it on the Browser page. So the
-   * person is told their browser cannot open and who can see to it, and the computer's own sentence stays in both logs
-   * (`browser-computer-failed` here, `computer-browser-open-failed` on the computer).
-   */
-  function refused(answer: { status: number; body: unknown }): Response {
-    const said = (answer.body as { error?: unknown } | null)?.error;
-    const sentence = typeof said === "string" && said ? said : null;
-    if (answer.status === 503)
-      return Response.json({ error: notSetUp }, { status: 503 });
-    if (answer.status === 400 || answer.status === 409)
-      return Response.json(
-        { error: sentence ?? SENTENCES.unreachable },
-        { status: answer.status },
-      );
-    return Response.json(
-      {
-        error:
-          answer.status >= 500 && sentence ? sentence : SENTENCES.unreachable,
-      },
-      { status: 502 },
-    );
-  }
-
-  function unreachable(error: unknown): Response {
-    return error instanceof BrowserCallError
-      ? Response.json({ error: error.message }, { status: error.status })
-      : Response.json({ error: SENTENCES.unreachable }, { status: 502 });
-  }
 
   /** Whether this OpenBot can run the person's browser, where it shows when it can, and why not when that wants
    * saying: the same answer open or closed, decided by where people's browsers run here rather than by asking the
@@ -1288,25 +1366,17 @@ export function createBrowserRoutes(deps: BrowserRouteDeps) {
   routes.post(
     "/narration",
     callBudget,
-    async (context, next) => {
-      arrivals.set(context.req.raw, Date.now());
-      await next();
-    },
+    stampNarrationArrival,
     deps.requireUser,
     jsonOnly,
     smallBody,
     async (context) => {
-      const arrival = arrivals.get(context.req.raw) ?? Date.now();
-      const body = await parsed(context.req.raw, browserNarrationRequestSchema);
-      if (!body || ("text" in body && body.endedAt < body.startedAt))
-        return context.json({ error: "That phrase was not complete." }, 400);
-      const corrected = onServerClock(body, arrival);
-      if (!corrected)
-        return context.json({ error: SENTENCES.phraseTimes }, 400);
+      const read = await narrationOnServerClock(context.req.raw);
+      if (!read.ok) return context.json({ error: read.error }, 400);
       return forward(
         context.var.actor.id,
         browserComputerPaths.narration,
-        corrected,
+        read.narration,
         async () => ({ ok: true }),
       );
     },
@@ -1346,6 +1416,103 @@ export function createBrowserRoutes(deps: BrowserRouteDeps) {
   routes.post("/close", callBudget, deps.requireUser, async (context) =>
     forward(context.var.actor.id, browserComputerPaths.close, {}),
   );
+
+  /**
+   * Clear the person's browser (shared/bot-browser.ts, CLEARING A BROWSER), theirs alone, as every route here is. The
+   * computer wipes it and leaves it closed; past that point of no return the row is written, as a computer reset's is.
+   *
+   * The Recorder connection OpenBot holds for this browser ends with it (`cleared`, with its `recorder.revoked` row), open
+   * or closed: its token was in the profile the clear deleted, so nothing should stand for it. Left live, a closed
+   * browser's stayed in Settings, Browsers as connected until the person next opened it.
+   *
+   * One that was open opens again at once, fresh, as Open opens it, so the person is back where they were with nothing
+   * signed in, its Recorder connected anew. One that does not open again is answered closed: it was cleared, and the page
+   * offers to open it.
+   */
+  routes.post("/clear", openBudget, deps.requireUser, async (context) => {
+    const actor = context.var.actor;
+    const computerId = personBrowserId(actor.id);
+    const computers = deps.computers;
+    if (!computers) return context.json({ error: unavailable }, 503);
+    let base: string;
+    let answer: { status: number; body: unknown };
+    let wasOpen: boolean;
+    try {
+      base = await inBudget(computers.locate(computerId), "locate");
+      const before = await askState(base, computerId);
+      // A browser that is not answering was open, and is opened again: being stuck is the reason to clear one.
+      wasOpen =
+        before === "silent" ||
+        (typeof before === "object" && before.state.open);
+      answer = await ask(base, computerId, browserComputerPaths.clear, {
+        method: "POST",
+        timeoutMs: CLEAR_TIMEOUT_MS,
+      });
+    } catch (error) {
+      return unreachable(error);
+    }
+    if (answer.status < 200 || answer.status >= 300) return refused(answer);
+    if (deps.auditStore) {
+      try {
+        await recordAuditEvent(deps.auditStore, {
+          eventType: "computer.browser_cleared",
+          targetType: "computer",
+          targetId: computerId,
+          ...(actor.email === DEV_ACTOR_EMAIL ? {} : { actorUserId: actor.id }),
+          payload: {
+            actor: actor.id,
+            reason:
+              "the person cleared their own browser: its cookies, saved passwords, history and site storage",
+          },
+        });
+      } catch (error) {
+        console.error(
+          JSON.stringify({
+            type: "browser-cleared-not-recorded",
+            // A failed query's message carries the values bound to it: never logged.
+            error: reasonWithoutStatement(error),
+          }),
+        );
+        return context.json({ error: SENTENCES.clearedNotFinished }, 500);
+      }
+    }
+    try {
+      const installId = personBrowserInstallId(computerId);
+      for (const connection of await deps.recorder.connections.list(actor.id))
+        if (connection.installId === installId)
+          await deps.recorder.connections.revoke(
+            actor.id,
+            connection.id,
+            "cleared",
+          );
+    } catch (error) {
+      // Not ended without its row (the two are one transaction): it stands, and clearing again ends it.
+      console.error(
+        JSON.stringify({
+          type: "browser-cleared-connection-not-revoked",
+          // A failed query's message carries the values bound to it: never logged.
+          error: reasonWithoutStatement(error),
+        }),
+      );
+      return context.json({ error: SENTENCES.clearedNotFinished }, 500);
+    }
+    if (!wasOpen) return context.json(await currentState(actor.id));
+    const opened = await connect(askerOf(context));
+    if (!opened.ok) {
+      console.warn(
+        JSON.stringify({
+          type: "browser-not-reopened-after-clear",
+          status: opened.response.status,
+        }),
+      );
+      return context.json(await currentState(actor.id));
+    }
+    return context.json(
+      opened.state
+        ? await view(actor.id, opened.state)
+        : await currentState(actor.id),
+    );
+  });
 
   return routes;
 }

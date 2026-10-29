@@ -39,6 +39,30 @@ export function personBrowserRefusal(
 }
 
 /**
+ * What the person is told where Record in a Bot's browser cannot run here: every Bot shares the one computer.
+ *
+ * RECORD IN A BOT'S BROWSER NEEDS A COMPUTER THE BOT DOES NOT SHARE. Record hands the Recorder in the Bot's browser the
+ * person's own connection, which it keeps in the Bot's profile on disk until Stop, and a recording it has not sent yet
+ * stays there after. On the shared computer every other Bot's shell (`/exec`) can read that profile, so a
+ * prompt-injected Bot would hold a live connection into the person's Learning space. The person's own browser is
+ * refused there for the same reason (`SHARED_COMPUTER`), and the computer refuses Record there too (agent-computer's
+ * `bot-browser-host.ts`), so neither can be talked into it alone.
+ */
+export const SHARED_COMPUTER_RECORD =
+  "This OpenBot can't record in a Bot's browser, because its Bots share one computer.";
+
+/**
+ * Why Record in a Bot's browser cannot run on these computers, or null where it can: a provider that gives every Bot a
+ * computer of its own (`per-bot`). Null too where there is no provider, where there is no Bot's browser to record in.
+ */
+export function botRecordRefusal(
+  provider: Pick<ComputerProvider, "isolation"> | undefined,
+): string | null {
+  if (!provider) return null;
+  return provider.isolation === "per-bot" ? null : SHARED_COMPUTER_RECORD;
+}
+
+/**
  * Where the browser routes find people's browsers here, and what the person is told about it: no computers, and why,
  * where their Bots share one computer (`personBrowserRefusal`); otherwise `computers`, with OpenBot Desktop's reason
  * for not running the person's own Chrome or Edge (`absent`) where it gave one. The server and the tests of its routes

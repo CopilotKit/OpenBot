@@ -72,6 +72,8 @@ let gateway: FakeGateway;
 /** The tokens OpenBot still knows, and how often each asked who it is for. */
 let liveTokens = new Set<string>();
 let meAsked: string[] = [];
+/** Whose each token is, as OpenBot answers who a connection is for; Ada's unless a test hands out another's. */
+let tokenOwners = new Map<string, typeof ada>();
 /** Every call the Recorder made to OpenBot's own routes, as `<method> <path>`. */
 let openbotAsked: string[] = [];
 /** The person's own Learning space, as OpenBot answers the Recorder's popup; none until a test sets one. */
@@ -117,7 +119,10 @@ function route(request: Request): Response | Promise<Response> | null {
         },
         { status: 401 },
       );
-    return Response.json({ user: ada, connectionId: `c-${token}` });
+    return Response.json({
+      user: tokenOwners.get(token) ?? ada,
+      connectionId: `c-${token}`,
+    });
   }
   if (path === recorderPaths.learning && learning)
     return Response.json({ learning });
@@ -178,15 +183,31 @@ let documentTimers: ReturnType<typeof setTimeout>[] = [];
 let speech = fakeSpeech();
 let microphone = fakeMicrophone();
 
+/*
+ * Which document is open: closing one ends it, as Chrome ends a closed document's page, so its port goes, it cannot
+ * connect again and its timers never fire. Without this a closed document went on answering beside the next one, and
+ * the second recording in one browser could not be stopped.
+ */
+let documentGeneration = 0;
+let documentPorts: chrome.runtime.Port[] = [];
 function runDocument(): void {
+  const generation = documentGeneration;
   fake.runAs("offscreen-document", () =>
     createOffscreenController({
       openOutbox: () => openOutbox(databaseName),
-      connectPort: () => chrome.runtime.connect({ name: PORT_OFFSCREEN }),
+      connectPort: () => {
+        if (generation !== documentGeneration)
+          throw new Error("This document was closed.");
+        const port = chrome.runtime.connect({ name: PORT_OFFSCREEN });
+        documentPorts.push(port);
+        return port;
+      },
       now: () => clock,
       timers: {
         set: (fn, ms) => {
-          const handle = setTimeout(fn, ms);
+          const handle = setTimeout(() => {
+            if (generation === documentGeneration) fn();
+          }, ms);
           documentTimers.push(handle);
           return handle;
         },
@@ -305,9 +326,13 @@ beforeEach(async () => {
   databaseName = `launcher-${Date.now()}-${databaseCounter++}`;
   due = [];
   documentTimers = [];
+  // The last test's document is gone with its browser.
+  documentGeneration += 1;
+  documentPorts = [];
   speech = fakeSpeech();
   microphone = fakeMicrophone();
   liveTokens = new Set([TOKEN]);
+  tokenOwners = new Map();
   meAsked = [];
   openbotAsked = [];
   learning = null;
@@ -321,6 +346,10 @@ beforeEach(async () => {
   });
   fake.offscreen.onDocumentCreated.addListener(() => {
     setTimeout(runDocument, 0);
+  });
+  fake.offscreen.onDocumentClosed.addListener(() => {
+    documentGeneration += 1;
+    for (const port of documentPorts.splice(0)) port.disconnect();
   });
   clock = 1_760_000_000_000;
   startWorker();
@@ -665,6 +694,65 @@ test("the launcher's connection that comes while the install's OpenBot Desktop c
   expect(fake.storage.local.get("notice")).toBeUndefined();
 });
 
+test("a second person's recording in the same browser connects through the launcher, after a disconnect or over a connection still held", async () => {
+  // A Bot's browser: one Recorder, one person per recording, each handed their own connection over the DevTools pipe
+  // (agent-computer's bot-browser-host.ts). The launcher is the trusted way in, so no Connect page asks anyone, unlike a
+  // web page asking to replace a live connection (connection.ts).
+  const ben = { id: "p2", name: "Ben", email: "ben@example.test" };
+  const BEN = "obr_bot-browser-ben";
+  liveTokens.add(BEN);
+  tokenOwners.set(BEN, ben);
+  const forBen = connection({
+    token: BEN,
+    connectionId: `c-${BEN}`,
+    user: ben,
+  });
+
+  // Ada records and stops; the computer disconnects the Recorder once the last of it has gone.
+  await launcher().connect({ connection: connection(), narration: "external" });
+  const adas = await record(clock, "Archive order 1043");
+  clock += 30_000;
+  expect(await launcher().record({ action: "stop" })).toMatchObject({
+    ok: true,
+  });
+  const drains = () =>
+    (fake.storage.local.get("drains") as DrainRecord[] | undefined) ?? [];
+  await until(() => drains().length === 0, "the last of Ada's to be sent");
+  expect(names(adas).filter((name) => name === "outcome")).toHaveLength(2);
+  expect(await launcher().disconnect()).toEqual({ ok: true });
+
+  // Ben takes the wheel and presses Record: his connection is taken at once, and the recording is his.
+  expect(
+    await launcher().connect({ connection: forBen, narration: "external" }),
+  ).toEqual({ ok: true });
+  expect(stored()).toMatchObject({ token: BEN, user: ben });
+  expect(await launcher().state()).toMatchObject({
+    connected: true,
+    userId: ben.id,
+  });
+  const bens = await record(clock + 60_000, "Pay the vendor");
+  expect(bens).not.toBe(adas);
+  expect(
+    (fake.storage.local.get("activeRecording") as DrainRecord).userId,
+  ).toBe(ben.id);
+  clock += 30_000;
+  expect(await launcher().record({ action: "stop" })).toMatchObject({
+    ok: true,
+  });
+
+  // The computer could not disconnect Ben's (it was stopped under it): Ada's next connection replaces it all the same.
+  expect(
+    await launcher().connect({
+      connection: connection(),
+      narration: "external",
+    }),
+  ).toEqual({ ok: true });
+  expect(stored()).toMatchObject({ token: TOKEN, user: ada });
+  expect(await launcher().state()).toMatchObject({ userId: ada.id });
+  expect(fake.opened).toEqual([]);
+  expect(fake.storage.session.get("pendingConnect")).toBeUndefined();
+}, 15_000);
+
 test("Record starts on the tab the person is on and Stop ends it, through the popup's own paths", async () => {
   await launcher().connect({ connection: connection(), narration: "own" });
   const click = rows.archiveClick;
@@ -946,6 +1034,50 @@ test("Stop leaves the recording it ended, by name, for OpenBot to confirm it wen
     actions: 0,
     phrases: 0,
   });
+}, 15_000);
+
+test("Stop says the recording is still sending until the last of it has reached Intelligence", async () => {
+  // A Bot's browser disconnects the Recorder after Stop, and a disconnect keeps what is not sent yet for the person's
+  // next connection there: whoever disconnects waits until this says the last of it has gone.
+  await launcher().connect({ connection: connection(), narration: "external" });
+  const trajectoryId = await record(clock, "Archive order 1043");
+  const recordingId = (await launcher().state()).recordingId;
+  clock += 30_000;
+  // Intelligence takes its time over the last of it.
+  gateway.delayNextAck(1_500);
+  const stopped = await launcher().record({ action: "stop" });
+  expect(stopped).toMatchObject({
+    ok: true,
+    state: { lastStopped: { recordingId, sending: true } },
+  });
+  expect((await launcher().state()).lastStopped?.sending).toBe(true);
+  const drains = () =>
+    (fake.storage.local.get("drains") as DrainRecord[] | undefined) ?? [];
+  await until(() => drains().length === 0, "the last of it to be sent");
+  expect(names(trajectoryId).filter((name) => name === "outcome")).toHaveLength(
+    2,
+  );
+  const after = (await launcher().state()).lastStopped;
+  expect(after?.recordingId).toBe(recordingId ?? "");
+  expect(after).not.toHaveProperty("sending");
+}, 15_000);
+
+test("a stopped recording a disconnect catches part sent is kept for its person, and no longer said to be sending", async () => {
+  await launcher().connect({ connection: connection(), narration: "external" });
+  await record(clock, "Archive order 1043");
+  const recordingId = (await launcher().state()).recordingId;
+  clock += 30_000;
+  gateway.delayNextAck(5_000);
+  const stopped = await launcher().record({ action: "stop" });
+  expect(stopped).toMatchObject({ state: { lastStopped: { sending: true } } });
+  liveTokens.delete(TOKEN);
+  expect(await launcher().disconnect()).toEqual({ ok: true });
+  // What is left waits for the person to connect this browser again: nothing more is on its way now.
+  const drains = (fake.storage.local.get("drains") as DrainRecord[]) ?? [];
+  expect(
+    drains.find((drain) => drain.recordingId === recordingId)?.kept,
+  ).toMatchObject({ waitingForReconnect: true });
+  expect((await launcher().state()).lastStopped?.sending).toBeUndefined();
 }, 15_000);
 
 test("Stop reports what the recording held: narration alone is something, and actions and phrases are both counted", async () => {

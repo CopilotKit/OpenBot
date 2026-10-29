@@ -237,6 +237,12 @@ fn postgres_configuration(
 }
 
 fn named_volume_exists(engine: &Address, root: &Path, volume: &str) -> Result<bool, Problem> {
+    Ok(volume_inventory(engine, root)?
+        .iter()
+        .any(|name| name == volume))
+}
+
+fn volume_inventory(engine: &Address, root: &Path) -> Result<Vec<String>, Problem> {
     let inventory = engine
         .command()
         .current_dir(root)
@@ -251,7 +257,12 @@ fn named_volume_exists(engine: &Address, root: &Path, volume: &str) -> Result<bo
     }
     let names = std::str::from_utf8(&inventory.stdout)
         .map_err(|_| postgres_volume_problem("Volume inventory was not valid UTF-8."))?;
-    Ok(names.lines().any(|name| name.trim() == volume))
+    Ok(names
+        .lines()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_owned)
+        .collect())
 }
 
 fn postgres_volume_problem(detail: impl Into<String>) -> Problem {
@@ -267,65 +278,120 @@ pub fn leftover_database_volume(
     root: &Path,
     secrets: &Secrets,
 ) -> Result<Option<String>, Problem> {
+    let config = leftover_configuration(engine, root, secrets)?;
+    let inventory = volume_inventory(engine, root)?;
+    owned_database_volume(engine, root, &config, &inventory)
+}
+
+fn leftover_configuration(
+    engine: &Address,
+    root: &Path,
+    secrets: &Secrets,
+) -> Result<serde_json::Value, Problem> {
     let configuration = postgres_configuration(engine, root, secrets)?;
-    let config: serde_json::Value = serde_json::from_slice(&configuration)
-        .map_err(|_| postgres_volume_problem("Compose config did not return valid JSON."))?;
-    let Some((source, definition)) = postgres_data_volume(&config) else {
+    serde_json::from_slice(&configuration)
+        .map_err(|_| postgres_volume_problem("Compose config did not return valid JSON."))
+}
+
+fn owned_database_volume(
+    engine: &Address,
+    root: &Path,
+    config: &serde_json::Value,
+    inventory: &[String],
+) -> Result<Option<String>, Problem> {
+    let Some((source, definition)) = postgres_data_volume(config) else {
         return Ok(None);
     };
     let Some(project) = config["name"].as_str().filter(|name| !name.is_empty()) else {
         return Ok(None);
     };
-    let Some(name) = definition["name"].as_str() else {
+    let Some(name) = ordinary_project_volume(project, source, definition) else {
         return Ok(None);
     };
-    // Compose's explicit names and external volumes can refer to somebody else's database.
-    // Permit only ordinary project-scoped, local storage, even if a custom volume has labels.
-    if name != format!("{project}_{source}")
-        || !name.bytes().enumerate().all(|(index, byte)| {
+    // Another service mounting the database volume, under any alias, makes it shared storage.
+    if config["services"].as_object().is_some_and(|services| {
+        services.iter().any(|(service, configuration)| {
+            service != "postgres"
+                && configuration["volumes"].as_array().is_some_and(|mounts| {
+                    mounts.iter().any(|mount| {
+                        mount["source"].as_str().is_some_and(|other_source| {
+                            other_source == source
+                                || config["volumes"][other_source]["name"].as_str() == Some(name)
+                        })
+                    })
+                })
+        })
+    }) {
+        return Ok(None);
+    }
+    owned_compose_volume(engine, root, project, source, name, inventory)
+}
+
+/// Compose's explicit names and external volumes can refer to somebody else's data.
+/// Permit only ordinary project-scoped, local storage, even if a custom volume has labels.
+fn ordinary_project_volume<'a>(
+    project: &str,
+    source: &str,
+    definition: &'a serde_json::Value,
+) -> Option<&'a str> {
+    let name = definition["name"].as_str()?;
+    (name == format!("{project}_{source}")
+        && name.bytes().enumerate().all(|(index, byte)| {
             byte.is_ascii_alphanumeric() || (index > 0 && b"_.-".contains(&byte))
         })
-        || !matches!(
+        && matches!(
             definition.get("external"),
             None | Some(serde_json::Value::Bool(false))
         )
-        || definition["driver"]
+        && !definition["driver"]
             .as_str()
             .is_some_and(|driver| driver != "local")
-        || !empty_volume_options(&definition["driver_opts"])
-        || config["services"].as_object().is_some_and(|services| {
-            services.iter().any(|(service, configuration)| {
-                service != "postgres"
-                    && configuration["volumes"].as_array().is_some_and(|mounts| {
-                        mounts.iter().any(|mount| {
-                            mount["source"].as_str().is_some_and(|other_source| {
-                                other_source == source
-                                    || config["volumes"][other_source]["name"].as_str()
-                                        == Some(name)
-                            })
-                        })
-                    })
-            })
-        })
-    {
+        && empty_volume_options(&definition["driver_opts"]))
+    .then_some(name)
+}
+
+fn owned_compose_volume(
+    engine: &Address,
+    root: &Path,
+    project: &str,
+    source: &str,
+    name: &str,
+    inventory: &[String],
+) -> Result<Option<String>, Problem> {
+    if !inventory.iter().any(|listed| listed == name) {
         return Ok(None);
     }
-    if !named_volume_exists(engine, root, name)? {
+    let Some(labels) = inspect_local_volume(engine, root, name)? else {
         return Ok(None);
-    }
+    };
+    Ok(
+        (labels["com.docker.compose.project"].as_str() == Some(project)
+            && labels["com.docker.compose.volume"].as_str() == Some(source))
+        .then(|| name.to_owned()),
+    )
+}
+
+/// The labels of exactly this local volume, or `None` when the engine describes anything else.
+fn inspect_local_volume(
+    engine: &Address,
+    root: &Path,
+    name: &str,
+) -> Result<Option<serde_json::Value>, Problem> {
     let inspect = engine
         .command()
         .current_dir(root)
         .args(["volume", "inspect", name])
         .output()
         .map_err(|error| {
-            postgres_volume_problem(format!("Could not inspect the database volume: {error}"))
+            postgres_volume_problem(format!("Could not inspect volume {name}: {error}"))
         })?;
     if !inspect.status.success() {
-        return Err(postgres_volume_problem(format!("Database volume inspection exited with {}. Output omitted because it can contain credentials.", inspect.status)));
+        return Err(postgres_volume_problem(format!("Inspection of volume {name} exited with {}. Output omitted because it can contain credentials.", inspect.status)));
     }
     let inspected: serde_json::Value = serde_json::from_slice(&inspect.stdout).map_err(|_| {
-        postgres_volume_problem("Database volume inspection did not return valid JSON.")
+        postgres_volume_problem(format!(
+            "Inspection of volume {name} did not return valid JSON."
+        ))
     })?;
     let Some(volumes) = inspected.as_array().filter(|volumes| volumes.len() == 1) else {
         return Ok(None);
@@ -335,36 +401,402 @@ pub fn leftover_database_volume(
     // tied to the full name the person confirmed, never a similarly named backup.
     Ok((volume["Name"].as_str() == Some(name)
         && volume["Driver"].as_str() == Some("local")
-        && empty_volume_options(&volume["Options"])
-        && volume["Labels"]["com.docker.compose.project"].as_str() == Some(project)
-        && volume["Labels"]["com.docker.compose.volume"].as_str() == Some(source))
+        && empty_volume_options(&volume["Options"]))
+    .then(|| volume["Labels"].clone()))
+}
+
+/// A Bot's profile or workspace volume, created by the supervisor in this namespace.
+/// Matches `supervisor/src/names.ts` names and `labelsFor` in `supervisor/src/docker.ts`;
+/// all three labels are required, so an older or foreign volume is never claimed.
+fn owned_supervisor_volume(
+    engine: &Address,
+    root: &Path,
+    namespace: &str,
+    name: &str,
+) -> Result<Option<String>, Problem> {
+    let Some(bot) = ["profile", "workspace"]
+        .iter()
+        .find_map(|kind| name.strip_prefix(&format!("{namespace}-{kind}-")))
+        .filter(|bot| supervisor_identifier(bot))
+    else {
+        return Ok(None);
+    };
+    let Some(labels) = inspect_local_volume(engine, root, name)? else {
+        return Ok(None);
+    };
+    Ok((labels["openbot.supervisor"].as_str() == Some("true")
+        && labels["openbot.bot-id"].as_str() == Some(bot)
+        && labels["openbot.namespace"].as_str() == Some(namespace))
     .then(|| name.to_owned()))
 }
 
-pub fn reset_leftover_database(
+/// The namespace the selected supervisor will run with, as `supervisor/src/names.ts` reads it.
+/// No supervisor, or a namespace it would refuse, owns no volumes.
+fn supervisor_namespace(config: &serde_json::Value) -> Option<String> {
+    let supervisor = config["services"]["supervisor"].as_object()?;
+    let configured = match supervisor
+        .get("environment")
+        .and_then(|environment| environment.get("COMPUTER_NAMESPACE"))
+    {
+        None | Some(serde_json::Value::Null) => "",
+        Some(value) => value.as_str()?,
+    };
+    resolve_namespace(configured).map(str::to_owned)
+}
+
+/// Match supervisor/src/names.ts: trim, default only an empty value, then the same 64-character
+/// ASCII identifier grammar.
+fn resolve_namespace(configured: &str) -> Option<&str> {
+    let namespace = match configured.trim() {
+        "" => "openbot",
+        value => value,
+    };
+    supervisor_identifier(namespace).then_some(namespace)
+}
+
+fn supervisor_identifier(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 64
+        && value.as_bytes()[0].is_ascii_alphanumeric()
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+}
+
+/// What a previous installation of this deployment left on the selected engine.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct LeftoverVolumes {
+    /// The Postgres volume, when Compose and the engine agree this project owns it.
+    pub database: Option<String>,
+    /// Whether the volume Compose selects for Postgres exists at all, owned or not.
+    pub database_exists: bool,
+    /// Every verified, owned volume, sorted. This is exactly what a reset removes.
+    pub volumes: Vec<String>,
+    /// Stopped containers this deployment provably owns, sorted by name. They still hold the
+    /// volumes, so a reset removes them first.
+    pub containers: Vec<LeftoverContainer>,
+    /// Owned containers that are not stopped, by name. Any one of them blocks a reset.
+    pub running: Vec<String>,
+}
+
+/// A stopped container a reset may remove, named for the person and removed by its exact id.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct LeftoverContainer {
+    pub name: String,
+    pub id: String,
+}
+
+impl LeftoverVolumes {
+    /// A reset must not leave a database it cannot verify for the new installation to reuse,
+    /// and never touches a container that is still running.
+    pub fn resettable(&self) -> bool {
+        !self.volumes.is_empty()
+            && (self.database.is_some() || !self.database_exists)
+            && self.running.is_empty()
+    }
+
+    pub fn container_names(&self) -> Vec<String> {
+        self.containers
+            .iter()
+            .map(|container| container.name.clone())
+            .collect()
+    }
+
+    /// The sentence for a reset that a running container blocks, or `None` when none is running.
+    pub fn running_said(&self) -> Option<String> {
+        (!self.running.is_empty()).then(|| {
+            format!(
+                "A container from the previous installation is still running: {}. Stop it in Docker or Podman, then try Start again.",
+                self.running.join(", ")
+            )
+        })
+    }
+}
+
+fn leftover_container_problem(detail: impl Into<String>) -> Problem {
+    Problem::with(
+        "OpenBot could not verify which containers a previous installation left. Nothing was changed. Check the selected container engine, then try again.",
+        detail,
+    )
+}
+
+/// The ids carrying every one of these labels. Only a hint: each one is inspected before use.
+fn labelled_containers(
+    engine: &Address,
+    root: &Path,
+    labels: &[(&str, &str)],
+) -> Result<Vec<String>, Problem> {
+    let mut command = engine.command();
+    command
+        .current_dir(root)
+        .args(["ps", "--all", "--quiet", "--no-trunc"]);
+    for (key, value) in labels {
+        command.args(["--filter", &format!("label={key}={value}")]);
+    }
+    let listed = command.output().map_err(|error| {
+        leftover_container_problem(format!("Could not list containers: {error}"))
+    })?;
+    if !listed.status.success() {
+        return Err(leftover_container_problem(format!(
+            "Container listing exited with {}. Output omitted because it can contain credentials.",
+            listed.status
+        )));
+    }
+    let listed = std::str::from_utf8(&listed.stdout)
+        .map_err(|_| leftover_container_problem("Container listing was not valid UTF-8."))?;
+    Ok(listed.split_whitespace().map(str::to_owned).collect())
+}
+
+enum ContainerState {
+    Stopped,
+    Running,
+}
+
+/// The name and state of a container whose labels prove this deployment owns it, or `None`.
+fn owned_container(
+    engine: &Address,
+    root: &Path,
+    id: &str,
+    project: Option<&str>,
+    namespace: Option<&str>,
+) -> Result<Option<(String, ContainerState)>, Problem> {
+    let inspect = engine
+        .command()
+        .current_dir(root)
+        .args(["container", "inspect", id])
+        .output()
+        .map_err(|error| {
+            leftover_container_problem(format!("Could not inspect container {id}: {error}"))
+        })?;
+    if !inspect.status.success() {
+        return Err(leftover_container_problem(format!(
+            "Inspection of container {id} exited with {}. Output omitted because it can contain credentials.",
+            inspect.status
+        )));
+    }
+    let inspected: serde_json::Value = serde_json::from_slice(&inspect.stdout).map_err(|_| {
+        leftover_container_problem(format!(
+            "Inspection of container {id} did not return valid JSON."
+        ))
+    })?;
+    let Some(containers) = inspected
+        .as_array()
+        .filter(|containers| containers.len() == 1)
+    else {
+        return Ok(None);
+    };
+    let container = &containers[0];
+    // Exact ids only: an engine resolving a prefix to something else is not this container.
+    if container["Id"].as_str() != Some(id) {
+        return Ok(None);
+    }
+    // Docker reports `/name`; Podman reports `name`.
+    let Some(name) = container["Name"]
+        .as_str()
+        .map(|name| name.strip_prefix('/').unwrap_or(name))
+        .filter(|name| !name.is_empty())
+    else {
+        return Ok(None);
+    };
+    let labels = &container["Config"]["Labels"];
+    let compose_owned = project
+        .is_some_and(|project| labels["com.docker.compose.project"].as_str() == Some(project));
+    // Matches `namesFor` in supervisor/src/names.ts and `labelsFor` in supervisor/src/docker.ts.
+    let supervisor_owned = namespace.is_some_and(|namespace| {
+        labels["openbot.supervisor"].as_str() == Some("true")
+            && labels["openbot.namespace"].as_str() == Some(namespace)
+            && labels["openbot.bot-id"].as_str().is_some_and(|bot| {
+                supervisor_identifier(bot) && name == format!("{namespace}-computer-{bot}")
+            })
+    });
+    if !compose_owned && !supervisor_owned {
+        return Ok(None);
+    }
+    let state = &container["State"];
+    // Only states a plain removal accepts count as stopped. Anything else, or anything unknown,
+    // is treated as running so it is never touched.
+    let stopped = state["Running"].as_bool() == Some(false)
+        && state["Status"].as_str().is_some_and(|status| {
+            matches!(status, "created" | "exited" | "stopped" | "configured")
+        });
+    Ok(Some((
+        name.to_owned(),
+        if stopped {
+            ContainerState::Stopped
+        } else {
+            ContainerState::Running
+        },
+    )))
+}
+
+fn leftover_containers(
+    engine: &Address,
+    root: &Path,
+    project: Option<&str>,
+    namespace: Option<&str>,
+) -> Result<(Vec<LeftoverContainer>, Vec<String>), Problem> {
+    let mut ids = Vec::new();
+    if let Some(project) = project {
+        ids.extend(labelled_containers(
+            engine,
+            root,
+            &[("com.docker.compose.project", project)],
+        )?);
+    }
+    if let Some(namespace) = namespace {
+        ids.extend(labelled_containers(
+            engine,
+            root,
+            &[
+                ("openbot.supervisor", "true"),
+                ("openbot.namespace", namespace),
+            ],
+        )?);
+    }
+    ids.sort();
+    ids.dedup();
+    let mut stopped = Vec::new();
+    let mut running = Vec::new();
+    for id in ids {
+        match owned_container(engine, root, &id, project, namespace)? {
+            Some((name, ContainerState::Stopped)) => stopped.push(LeftoverContainer { name, id }),
+            Some((name, ContainerState::Running)) => running.push(name),
+            None => {}
+        }
+    }
+    stopped.sort_by(|a, b| a.name.cmp(&b.name));
+    running.sort();
+    Ok((stopped, running))
+}
+
+/**
+Every volume a previous installation of this deployment left behind, and that it provably owns.
+
+A deleted installation folder removes `.env` and the vault, but not the engine's volumes. Compose
+and the supervisor reattach them by name, so a new installation silently inherits the old one's
+Bots' workspace files and browser sign-ins. Only three kinds are claimed: the verified Postgres
+volume, the other ordinary project-scoped Compose volumes labelled for this project, and the
+per-Bot volumes the supervisor labelled for this namespace. Never include config output in
+diagnostics: interpolation may have put credentials in it.
+*/
+pub fn leftover_volumes(
     engine: &Address,
     root: &Path,
     secrets: &Secrets,
-    confirmed_volume: &str,
-) -> Result<(), Problem> {
-    if leftover_database_volume(engine, root, secrets)?.as_deref() != Some(confirmed_volume) {
-        return Err(Problem::plain("The leftover database no longer matches the volume you confirmed, or OpenBot could not verify that it owns the volume. Nothing was removed. Try Start again."));
+) -> Result<LeftoverVolumes, Problem> {
+    let config = leftover_configuration(engine, root, secrets)?;
+    let inventory = volume_inventory(engine, root)?;
+    let postgres = postgres_data_volume(&config);
+    let database_exists = postgres
+        .and_then(|(_, definition)| definition["name"].as_str())
+        .is_some_and(|name| inventory.iter().any(|listed| listed == name));
+    let database = owned_database_volume(engine, root, &config, &inventory)?;
+    let mut volumes: Vec<String> = database.iter().cloned().collect();
+    let project = config["name"].as_str().filter(|name| !name.is_empty());
+    let namespace = supervisor_namespace(&config);
+    if let (Some(project), Some(definitions)) = (project, config["volumes"].as_object()) {
+        for (source, definition) in definitions {
+            // The database has its own, stricter test above.
+            if postgres.is_some_and(|(postgres_source, _)| postgres_source == source) {
+                continue;
+            }
+            let Some(name) = ordinary_project_volume(project, source, definition) else {
+                continue;
+            };
+            volumes.extend(owned_compose_volume(
+                engine, root, project, source, name, &inventory,
+            )?);
+        }
     }
-    // Never force this operation: the engine must refuse any container attachment, including a
-    // stopped container or one created after inspection. Do not stop containers to make it pass.
-    let removed = engine
-        .command()
-        .current_dir(root)
-        .args(["volume", "rm", confirmed_volume])
-        .output()
-        .map_err(|error| {
-            Problem::with(
-                "OpenBot could not reset the leftover database. Nothing else was removed.",
-                format!("Could not run volume removal: {error}"),
-            )
-        })?;
-    if !removed.status.success() {
-        return Err(Problem::with("OpenBot could not reset the leftover database. It may still be attached to a container. Nothing else was removed; stop the installation using it before trying again.", format!("Volume removal exited with {}. Output omitted because it can contain credentials.", removed.status)));
+    if let Some(namespace) = &namespace {
+        for name in &inventory {
+            volumes.extend(owned_supervisor_volume(engine, root, namespace, name)?);
+        }
+    }
+    volumes.sort();
+    volumes.dedup();
+    // Stopped containers keep their volumes attached, so the engine refuses to remove them. Only
+    // worth listing when there is data to reset.
+    let (containers, running) = if volumes.is_empty() {
+        Default::default()
+    } else {
+        leftover_containers(engine, root, project, namespace.as_deref())?
+    };
+    Ok(LeftoverVolumes {
+        database,
+        database_exists,
+        volumes,
+        containers,
+        running,
+    })
+}
+
+/// Remove exactly the leftover containers and volumes the person confirmed, containers first,
+/// or nothing when either set changed or an owned container is running.
+pub fn reset_leftover_volumes(
+    engine: &Address,
+    root: &Path,
+    secrets: &Secrets,
+    confirmed: &[String],
+    confirmed_containers: &[String],
+) -> Result<(), Problem> {
+    let leftovers = leftover_volumes(engine, root, secrets)?;
+    if let Some(said) = leftovers.running_said() {
+        return Err(Problem::plain(format!("{said} Nothing was removed.")));
+    }
+    let sorted = |names: &[String]| {
+        let mut names = names.to_vec();
+        names.sort();
+        names
+    };
+    if !leftovers.resettable()
+        || leftovers.volumes != sorted(confirmed)
+        || leftovers.container_names() != sorted(confirmed_containers)
+    {
+        return Err(Problem::plain("The leftover data no longer matches the containers and volumes you confirmed, or OpenBot could not verify that it owns them. Nothing was removed. Try Start again."));
+    }
+    let mut removed: Vec<&str> = Vec::new();
+    let removals = leftovers
+        .containers
+        .iter()
+        .map(|container| ("container", container.id.as_str(), container.name.as_str()))
+        .chain(
+            leftovers
+                .volumes
+                .iter()
+                .map(|volume| ("volume", volume.as_str(), volume.as_str())),
+        );
+    for (kind, target, name) in removals {
+        let so_far = || match removed.as_slice() {
+            [] => "Nothing was removed.".to_owned(),
+            removed => format!("Already removed: {}.", removed.join(", ")),
+        };
+        // Never force this operation: the engine must refuse a running container and any
+        // container attachment, including one created after inspection. Do not stop containers
+        // to make it pass.
+        let output = engine
+            .command()
+            .current_dir(root)
+            .args([kind, "rm", target])
+            .output()
+            .map_err(|error| {
+                Problem::with(
+                    format!("OpenBot could not remove {name}. {}", so_far()),
+                    format!("Could not run {kind} removal: {error}"),
+                )
+            })?;
+        if !output.status.success() {
+            let why = if kind == "container" {
+                "It may have started again."
+            } else {
+                "It may still be attached to a container."
+            };
+            return Err(Problem::with(
+                format!("OpenBot could not remove {name}. {why} {} Stop the installation using it, then try Start again.", so_far()),
+                format!("{kind} removal exited with {}. Output omitted because it can contain credentials.", output.status),
+            ));
+        }
+        removed.push(name);
     }
     Ok(())
 }
@@ -756,20 +1188,9 @@ fn computer_namespace(engine: &Address, root: &Path) -> Result<Option<String>, S
         .pointer("/services/supervisor/environment/COMPUTER_NAMESPACE")
         .and_then(serde_json::Value::as_str)
         .ok_or("could not resolve computer namespace: supervisor configuration has no namespace")?;
-    // Match supervisor/src/names.ts: trim, default only an empty value, then the same 64-character
-    // ASCII identifier grammar. A malformed/missing response never becomes an unscoped filter.
-    let namespace = match configured.trim() {
-        "" => "openbot",
-        value => value,
-    };
-    if namespace.len() > 64
-        || !namespace.as_bytes()[0].is_ascii_alphanumeric()
-        || !namespace
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
-    {
-        return Err("could not resolve computer namespace: supervisor namespace is invalid".into());
-    }
+    // A malformed/missing response never becomes an unscoped filter.
+    let namespace = resolve_namespace(configured)
+        .ok_or("could not resolve computer namespace: supervisor namespace is invalid")?;
     Ok(Some(namespace.to_string()))
 }
 
@@ -3437,14 +3858,25 @@ mod tests {
                 leftover_database_volume(&address, &root, &Secrets::new()).unwrap(),
                 Some("openbot_postgres-data".into())
             );
-            assert!(
-                reset_leftover_database(&address, &root, &Secrets::new(), "unrelated").is_err()
-            );
+            assert!(reset_leftover_volumes(
+                &address,
+                &root,
+                &Secrets::new(),
+                &["unrelated".into()],
+                &[]
+            )
+            .is_err());
             assert!(!std::fs::read_to_string(&record)
                 .unwrap()
                 .contains("volume rm"));
-            reset_leftover_database(&address, &root, &Secrets::new(), "openbot_postgres-data")
-                .unwrap();
+            reset_leftover_volumes(
+                &address,
+                &root,
+                &Secrets::new(),
+                &["openbot_postgres-data".into()],
+                &[],
+            )
+            .unwrap();
             assert_eq!(
                 std::fs::read_to_string(root.join(".fixture-volumes")).unwrap(),
                 "unrelated\n"
@@ -3557,9 +3989,14 @@ mod tests {
             if let Some(marker) = marker {
                 std::fs::write(root.join(marker), "").unwrap();
             }
-            let error =
-                reset_leftover_database(&address, &root, &Secrets::new(), "openbot_postgres-data")
-                    .expect_err(scenario);
+            let error = reset_leftover_volumes(
+                &address,
+                &root,
+                &Secrets::new(),
+                &["openbot_postgres-data".into()],
+                &[],
+            )
+            .expect_err(scenario);
             assert!(
                 !format!("{error:?}").contains("synthetic-secret"),
                 "{scenario}"
@@ -3583,6 +4020,462 @@ mod tests {
                 std::fs::remove_file(root.join(marker)).unwrap();
             }
         }
+    }
+
+    /// A reinstall's Compose project and supervisor volumes, beside look-alikes it does not own.
+    fn leftover_volumes_fixture(root: &Path, namespace: &str) {
+        let config = serde_json::json!({
+            "name": "openbot",
+            "services": {
+                "postgres": {"volumes": [{
+                    "type": "volume", "source": "postgres-data", "target": "/var/lib/postgresql/data"
+                }]},
+                "supervisor": {"environment": {"COMPUTER_NAMESPACE": namespace}},
+                "agent-computer": {"volumes": [
+                    {"type": "volume", "source": "agent-profiles", "target": "/profiles"},
+                    {"type": "volume", "source": "agent-workspace", "target": "/workspace"}
+                ]}
+            },
+            "volumes": {
+                "postgres-data": {"name": "openbot_postgres-data"},
+                "agent-profiles": {"name": "openbot_agent-profiles"},
+                "agent-workspace": {"name": "openbot_agent-workspace"},
+                "spire-server-data": {"name": "openbot_spire-server-data"},
+                "unlabeled": {"name": "openbot_unlabeled"},
+                "foreign": {"name": "openbot_foreign"},
+                "shared-cache": {"name": "shared-cache", "external": true},
+                "explicit": {"name": "explicitly-named"},
+                "remote": {"name": "openbot_remote", "driver_opts": {"device": "/shared"}}
+            }
+        });
+        std::fs::write(root.join(".fixture-config"), config.to_string()).unwrap();
+        std::fs::write(
+            root.join(".fixture-volumes"),
+            [
+                "unrelated",
+                "openbot_agent-profiles",
+                "openbot_agent-workspace",
+                "openbot_unlabeled",
+                "openbot_foreign",
+                "shared-cache",
+                "explicitly-named",
+                "openbot_remote",
+                "openbot-profile-general-assistant",
+                "openbot-workspace-general-assistant",
+                "openbot-profile-unlabeled",
+                "openbot-workspace-elsewhere",
+                "openbot-profile-legacy",
+                "other-profile-knowledge",
+            ]
+            .map(|name| format!("{name}\n"))
+            .concat(),
+        )
+        .unwrap();
+        let inspect = |name: &str, labels: serde_json::Value| {
+            std::fs::write(
+                root.join(format!(".fixture-inspect-{name}")),
+                serde_json::json!([{
+                    "Name": name, "Driver": "local", "Options": {}, "Labels": labels
+                }])
+                .to_string(),
+            )
+            .unwrap();
+        };
+        let compose = |project: &str, source: &str| {
+            serde_json::json!({
+                "com.docker.compose.project": project, "com.docker.compose.volume": source
+            })
+        };
+        let supervisor = |bot: &str, namespace: &str| {
+            serde_json::json!({
+                "openbot.supervisor": "true", "openbot.bot-id": bot, "openbot.namespace": namespace
+            })
+        };
+        inspect(
+            "openbot_agent-profiles",
+            compose("openbot", "agent-profiles"),
+        );
+        inspect(
+            "openbot_agent-workspace",
+            compose("openbot", "agent-workspace"),
+        );
+        inspect("openbot_unlabeled", serde_json::json!({}));
+        inspect("openbot_foreign", compose("another-project", "foreign"));
+        inspect(
+            "openbot-profile-general-assistant",
+            supervisor("general-assistant", "openbot"),
+        );
+        inspect(
+            "openbot-workspace-general-assistant",
+            supervisor("general-assistant", "openbot"),
+        );
+        inspect("openbot-profile-unlabeled", serde_json::json!({}));
+        inspect(
+            "openbot-workspace-elsewhere",
+            supervisor("elsewhere", "other"),
+        );
+        inspect(
+            "openbot-profile-legacy",
+            serde_json::json!({"openbot.supervisor": "true", "openbot.bot-id": "legacy"}),
+        );
+        inspect("other-profile-knowledge", supervisor("knowledge", "other"));
+    }
+
+    const OWNED_LEFTOVERS: [&str; 4] = [
+        "openbot-profile-general-assistant",
+        "openbot-workspace-general-assistant",
+        "openbot_agent-profiles",
+        "openbot_agent-workspace",
+    ];
+
+    #[test]
+    fn leftover_volumes_are_only_volumes_this_project_or_namespace_provably_owns() {
+        if crate::test_support::isolated_process(
+            "stack::tests::leftover_volumes_are_only_volumes_this_project_or_namespace_provably_owns",
+        ) {
+            return;
+        }
+        let path = PathFixture::with_fake_engine("postgres-volume");
+        let address = computer_stop_addresses(&path)[0].clone();
+        let root = path.bin.join("leftover-volumes");
+        std::fs::create_dir(&root).unwrap();
+        let record = root.join("commands.log");
+        std::env::set_var("OPENBOT_TEST_ENGINE_RECORD", &record);
+
+        leftover_volumes_fixture(&root, "openbot");
+        let found = leftover_volumes(&address, &root, &Secrets::new()).unwrap();
+        assert_eq!(found.volumes, OWNED_LEFTOVERS.map(String::from));
+        assert_eq!(found.database, None);
+        assert!(!found.database_exists);
+        assert!(found.resettable());
+        let log = std::fs::read_to_string(&record).unwrap();
+        for never_inspected in ["shared-cache", "explicitly-named", "openbot_remote"] {
+            assert!(
+                !log.contains(&format!("volume inspect {never_inspected}")),
+                "{never_inspected}: {log}"
+            );
+        }
+        assert!(!log.contains("volume rm"));
+
+        // Another deployment's namespace selects only that namespace's Bots.
+        leftover_volumes_fixture(&root, "other");
+        assert_eq!(
+            leftover_volumes(&address, &root, &Secrets::new())
+                .unwrap()
+                .volumes,
+            [
+                "openbot_agent-profiles",
+                "openbot_agent-workspace",
+                "other-profile-knowledge"
+            ]
+        );
+
+        // The database joins the set when it is verified, and blocks the offer when it is not.
+        leftover_volumes_fixture(&root, "openbot");
+        let mut inventory = std::fs::read_to_string(root.join(".fixture-volumes")).unwrap();
+        inventory.push_str("openbot_postgres-data\n");
+        std::fs::write(root.join(".fixture-volumes"), inventory).unwrap();
+        let database = serde_json::json!([{
+            "Name": "openbot_postgres-data", "Driver": "local", "Options": {},
+            "Labels": {"com.docker.compose.project":"openbot", "com.docker.compose.volume":"postgres-data"}
+        }]);
+        std::fs::write(root.join(".fixture-inspect"), database.to_string()).unwrap();
+        let found = leftover_volumes(&address, &root, &Secrets::new()).unwrap();
+        assert_eq!(found.database.as_deref(), Some("openbot_postgres-data"));
+        assert!(found.database_exists && found.resettable());
+        let mut expected = OWNED_LEFTOVERS.map(String::from).to_vec();
+        expected.push("openbot_postgres-data".into());
+        expected.sort();
+        assert_eq!(found.volumes, expected);
+
+        let mut foreign = database.clone();
+        foreign[0]["Labels"]["com.docker.compose.project"] = "another-project".into();
+        std::fs::write(root.join(".fixture-inspect"), foreign.to_string()).unwrap();
+        let found = leftover_volumes(&address, &root, &Secrets::new()).unwrap();
+        assert_eq!(found.database, None);
+        assert!(found.database_exists);
+        assert_eq!(found.volumes, OWNED_LEFTOVERS.map(String::from));
+        assert!(
+            !found.resettable(),
+            "an unverified database must not be left behind by a reset"
+        );
+        std::fs::write(record, "").unwrap();
+        assert!(reset_leftover_volumes(
+            &address,
+            &root,
+            &Secrets::new(),
+            &OWNED_LEFTOVERS.map(String::from),
+            &[]
+        )
+        .is_err());
+        assert!(!std::fs::read_to_string(root.join("commands.log"))
+            .unwrap()
+            .contains("volume rm"));
+    }
+
+    #[test]
+    fn leftover_volume_reset_removes_exactly_the_confirmed_owned_set() {
+        if crate::test_support::isolated_process(
+            "stack::tests::leftover_volume_reset_removes_exactly_the_confirmed_owned_set",
+        ) {
+            return;
+        }
+        let path = PathFixture::with_fake_engine("postgres-volume");
+        for address in computer_stop_addresses(&path) {
+            let root = path
+                .bin
+                .join(format!("{}-leftover-reset", address.engine.binary()));
+            std::fs::create_dir(&root).unwrap();
+            let record = root.join("commands.log");
+            std::env::set_var("OPENBOT_TEST_ENGINE_RECORD", &record);
+            leftover_volumes_fixture(&root, "openbot");
+            let owned = OWNED_LEFTOVERS.map(String::from).to_vec();
+            let mut duplicated = owned.clone();
+            duplicated.push(owned[0].clone());
+            let mut superset = owned.clone();
+            superset.push("other-profile-knowledge".into());
+            for stale in [
+                owned[..3].to_vec(),
+                superset,
+                duplicated,
+                vec!["unrelated".into()],
+                Vec::new(),
+            ] {
+                let error = reset_leftover_volumes(&address, &root, &Secrets::new(), &stale, &[])
+                    .expect_err("a changed set must not be removed");
+                assert!(error.said.contains("Nothing was removed"), "{}", error.said);
+                assert!(!std::fs::read_to_string(&record)
+                    .unwrap_or_default()
+                    .contains("volume rm"));
+            }
+
+            // The engine refuses a volume a container still uses; nothing is forced.
+            std::fs::write(
+                root.join(".fixture-attached-openbot-profile-general-assistant"),
+                "",
+            )
+            .unwrap();
+            let error = reset_leftover_volumes(&address, &root, &Secrets::new(), &owned, &[])
+                .expect_err("an attached volume is refused");
+            assert!(
+                error.said.contains("openbot-profile-general-assistant"),
+                "{}",
+                error.said
+            );
+            assert!(error.said.contains("Nothing was removed"), "{}", error.said);
+            assert!(!format!("{error:?}").contains("synthetic-secret"));
+            std::fs::remove_file(root.join(".fixture-attached-openbot-profile-general-assistant"))
+                .unwrap();
+
+            let mut reordered = owned.clone();
+            reordered.reverse();
+            reset_leftover_volumes(&address, &root, &Secrets::new(), &reordered, &[]).unwrap();
+            let remaining = std::fs::read_to_string(root.join(".fixture-volumes")).unwrap();
+            for name in &owned {
+                assert!(!remaining.lines().any(|line| line == name), "{name}");
+            }
+            for kept in [
+                "unrelated",
+                "openbot_unlabeled",
+                "openbot_foreign",
+                "shared-cache",
+                "explicitly-named",
+                "openbot_remote",
+                "openbot-profile-unlabeled",
+                "openbot-workspace-elsewhere",
+                "openbot-profile-legacy",
+                "other-profile-knowledge",
+            ] {
+                assert!(remaining.lines().any(|line| line == kept), "{kept}");
+            }
+            let log = std::fs::read_to_string(&record).unwrap();
+            let removals: Vec<_> = log
+                .lines()
+                .filter_map(|line| line.split_once("volume rm "))
+                .map(|(_, name)| name)
+                .collect();
+            // One refused attempt, then each confirmed volume once.
+            assert_eq!(removals[0], "openbot-profile-general-assistant");
+            assert_eq!(removals[1..], OWNED_LEFTOVERS);
+            assert!(!log.contains("--force") && !log.contains("prune") && !log.contains("down"));
+            if address.engine == crate::engine::Engine::Podman {
+                assert!(log.lines().all(|line| line
+                    .split_once('\t')
+                    .unwrap()
+                    .1
+                    .starts_with("--connection fixture-machine ")));
+            }
+        }
+    }
+
+    /// The previous installation's stopped computers and Compose containers, beside ones it
+    /// does not own. Each still mounts the volumes it used, as a real engine reports it.
+    fn leftover_containers_fixture(root: &Path, computer_status: &str) {
+        let supervisor = |bot: &str, namespace: &str| {
+            format!("openbot.supervisor=true,openbot.bot-id={bot},openbot.namespace={namespace}")
+        };
+        let lines = [
+            format!(
+                "c-computer\topenbot-computer-general-assistant\t{computer_status}\t{}\topenbot-profile-general-assistant,openbot-workspace-general-assistant",
+                supervisor("general-assistant", "openbot")
+            ),
+            "c-compose\topenbot-agent-computer-1\texited\tcom.docker.compose.project=openbot,com.docker.compose.service=agent-computer\topenbot_agent-profiles,openbot_agent-workspace".into(),
+            format!("c-other-namespace\tother-computer-knowledge\texited\t{}\tother-profile-knowledge", supervisor("knowledge", "other")),
+            "c-unlabeled\topenbot-computer-unlabeled\texited\t\topenbot-profile-unlabeled".into(),
+            "c-other-project\tanother-project-postgres-1\texited\tcom.docker.compose.project=another-project\t".into(),
+            format!("c-renamed\topenbot-computer-not-this-bot\texited\t{}\t", supervisor("general-assistant", "openbot")),
+            "c-legacy\topenbot-computer-legacy\texited\topenbot.supervisor=true,openbot.bot-id=legacy\topenbot-profile-legacy".into(),
+        ];
+        std::fs::write(
+            root.join(".fixture-containers"),
+            lines.map(|line| format!("{line}\n")).concat(),
+        )
+        .unwrap();
+    }
+
+    const OWNED_CONTAINERS: [&str; 2] = [
+        "openbot-agent-computer-1",
+        "openbot-computer-general-assistant",
+    ];
+
+    #[test]
+    fn leftover_reset_removes_stopped_owned_containers_before_their_volumes() {
+        if crate::test_support::isolated_process(
+            "stack::tests::leftover_reset_removes_stopped_owned_containers_before_their_volumes",
+        ) {
+            return;
+        }
+        let path = PathFixture::with_fake_engine("postgres-volume");
+        for address in computer_stop_addresses(&path) {
+            let root = path
+                .bin
+                .join(format!("{}-leftover-containers", address.engine.binary()));
+            std::fs::create_dir(&root).unwrap();
+            let record = root.join("commands.log");
+            std::env::set_var("OPENBOT_TEST_ENGINE_RECORD", &record);
+            leftover_volumes_fixture(&root, "openbot");
+            leftover_containers_fixture(&root, "exited");
+
+            let found = leftover_volumes(&address, &root, &Secrets::new()).unwrap();
+            assert_eq!(found.volumes, OWNED_LEFTOVERS.map(String::from));
+            assert_eq!(
+                found
+                    .containers
+                    .iter()
+                    .map(|container| container.name.as_str())
+                    .collect::<Vec<_>>(),
+                OWNED_CONTAINERS
+            );
+            assert!(found.running.is_empty() && found.resettable());
+
+            let volumes = OWNED_LEFTOVERS.map(String::from).to_vec();
+            let containers = OWNED_CONTAINERS.map(String::from).to_vec();
+            for (stale_volumes, stale_containers) in [
+                (volumes.clone(), Vec::new()),
+                (volumes.clone(), containers[..1].to_vec()),
+                (
+                    volumes.clone(),
+                    [containers.clone(), vec!["other-computer-knowledge".into()]].concat(),
+                ),
+                (Vec::new(), containers.clone()),
+            ] {
+                let error = reset_leftover_volumes(
+                    &address,
+                    &root,
+                    &Secrets::new(),
+                    &stale_volumes,
+                    &stale_containers,
+                )
+                .expect_err("a changed set must not be removed");
+                assert!(error.said.contains("Nothing was removed"), "{}", error.said);
+                assert!(!std::fs::read_to_string(&record).unwrap().contains(" rm "));
+            }
+
+            reset_leftover_volumes(&address, &root, &Secrets::new(), &volumes, &containers)
+                .unwrap();
+            let log = std::fs::read_to_string(&record).unwrap();
+            let removals: Vec<_> = log
+                .lines()
+                .filter_map(|line| line.split_once('\t'))
+                .map(|(_, command)| {
+                    command
+                        .strip_prefix("--connection fixture-machine ")
+                        .unwrap_or(command)
+                })
+                .filter(|command| command.contains(" rm "))
+                .collect();
+            assert_eq!(
+                removals,
+                [
+                    "container rm c-compose",
+                    "container rm c-computer",
+                    "volume rm openbot-profile-general-assistant",
+                    "volume rm openbot-workspace-general-assistant",
+                    "volume rm openbot_agent-profiles",
+                    "volume rm openbot_agent-workspace",
+                ]
+            );
+            assert!(!log.contains("--force") && !log.contains("prune") && !log.contains("down"));
+            let kept = std::fs::read_to_string(root.join(".fixture-containers")).unwrap();
+            let kept: Vec<_> = kept
+                .lines()
+                .map(|line| line.split('\t').next().unwrap())
+                .collect();
+            assert_eq!(
+                kept,
+                [
+                    "c-other-namespace",
+                    "c-unlabeled",
+                    "c-other-project",
+                    "c-renamed",
+                    "c-legacy"
+                ]
+            );
+        }
+    }
+
+    #[test]
+    fn a_running_owned_container_blocks_the_reset_and_removes_nothing() {
+        if crate::test_support::isolated_process(
+            "stack::tests::a_running_owned_container_blocks_the_reset_and_removes_nothing",
+        ) {
+            return;
+        }
+        let path = PathFixture::with_fake_engine("postgres-volume");
+        let address = computer_stop_addresses(&path)[0].clone();
+        let root = path.bin.join("leftover-running");
+        std::fs::create_dir(&root).unwrap();
+        let record = root.join("commands.log");
+        std::env::set_var("OPENBOT_TEST_ENGINE_RECORD", &record);
+        leftover_volumes_fixture(&root, "openbot");
+        for status in ["running", "paused", "restarting"] {
+            leftover_containers_fixture(&root, status);
+            let found = leftover_volumes(&address, &root, &Secrets::new()).unwrap();
+            assert_eq!(found.running, ["openbot-computer-general-assistant"]);
+            assert!(!found.resettable(), "{status}");
+            let error = reset_leftover_volumes(
+                &address,
+                &root,
+                &Secrets::new(),
+                &OWNED_LEFTOVERS.map(String::from),
+                &OWNED_CONTAINERS.map(String::from),
+            )
+            .expect_err("a running container blocks the reset");
+            assert!(
+                error.said.contains("openbot-computer-general-assistant")
+                    && error.said.contains("still running")
+                    && error.said.contains("Nothing was removed"),
+                "{}",
+                error.said
+            );
+            assert!(!format!("{error:?}").contains("synthetic-secret"));
+            assert!(!std::fs::read_to_string(&record).unwrap().contains(" rm "));
+        }
+        // A container listing that fails is not proof that nothing is running.
+        leftover_containers_fixture(&root, "exited");
+        std::fs::write(root.join(".fixture-ps-failure"), "").unwrap();
+        let error = leftover_volumes(&address, &root, &Secrets::new()).unwrap_err();
+        assert!(!format!("{error:?}").contains("synthetic-secret"));
     }
 
     #[test]
@@ -5102,6 +5995,24 @@ fn main() {
     const FAKE_ENGINE_SOURCE: &str = r#"
 use std::io::Write;
 
+/// `.fixture-containers`: one container per line, `id<TAB>name<TAB>status<TAB>k=v,k=v<TAB>volume,volume`.
+struct FixtureContainer { id: String, name: String, status: String, labels: Vec<(String, String)>, mounts: Vec<String> }
+
+fn fixture_containers() -> Vec<FixtureContainer> {
+    let Ok(listing) = std::fs::read_to_string(".fixture-containers") else { return Vec::new() };
+    listing.lines().filter(|line| !line.is_empty()).map(|line| {
+        let fields: Vec<&str> = line.split('\t').collect();
+        let list = |field: &str| field.split(',').filter(|item| !item.is_empty()).map(str::to_owned).collect::<Vec<_>>();
+        FixtureContainer {
+            id: fields[0].into(),
+            name: fields[1].into(),
+            status: fields[2].into(),
+            labels: list(fields[3]).into_iter().map(|pair| { let (k, v) = pair.split_once('=').unwrap(); (k.to_owned(), v.to_owned()) }).collect(),
+            mounts: list(fields.get(4).copied().unwrap_or("")),
+        }
+    }).collect()
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let joined = args.join(" ");
@@ -5123,14 +6034,70 @@ fn main() {
             (".fixture-volumes", ".fixture-volume-failure")
         } else if actual == ["volume", "inspect", "openbot_postgres-data"] {
             (".fixture-inspect", ".fixture-inspect-failure")
-        } else if actual == ["volume", "rm", "openbot_postgres-data"] {
-            if std::path::Path::new(".fixture-attached").exists() {
+        } else if actual.len() == 3 && actual[0] == "volume" && actual[1] == "inspect" {
+            let file = format!(".fixture-inspect-{}", actual[2]);
+            if !std::path::Path::new(&file).exists() {
+                eprintln!("no such volume: {}", actual[2]);
+                std::process::exit(1);
+            }
+            print!("{}", std::fs::read_to_string(file).unwrap());
+            return;
+        } else if actual.len() == 3 && actual[0] == "volume" && actual[1] == "rm" {
+            let volume = actual[2].as_str();
+            if (volume == "openbot_postgres-data" && std::path::Path::new(".fixture-attached").exists())
+                || std::path::Path::new(&format!(".fixture-attached-{volume}")).exists()
+                || fixture_containers().iter().any(|container| container.mounts.iter().any(|mount| mount == volume))
+            {
                 eprintln!("synthetic-secret attached container");
                 std::process::exit(2);
             }
             let inventory = std::fs::read_to_string(".fixture-volumes").unwrap();
-            let remaining: String = inventory.lines().filter(|name| *name != "openbot_postgres-data").map(|name| format!("{name}\n")).collect();
+            let remaining: String = inventory.lines().filter(|name| *name != volume).map(|name| format!("{name}\n")).collect();
             std::fs::write(".fixture-volumes", remaining).unwrap();
+            return;
+        } else if actual.first().map(String::as_str) == Some("ps") {
+            assert_eq!(actual[1..4], ["--all", "--quiet", "--no-trunc"], "{actual:?}");
+            let wanted: Vec<(&str, &str)> = actual[4..].chunks(2).map(|pair| {
+                assert_eq!(pair[0], "--filter");
+                pair[1].strip_prefix("label=").unwrap().split_once('=').unwrap()
+            }).collect();
+            if std::path::Path::new(".fixture-ps-failure").exists() {
+                eprintln!("synthetic-secret-must-not-appear-in-diagnostics");
+                std::process::exit(17);
+            }
+            for container in fixture_containers() {
+                if wanted.iter().all(|(key, value)| container.labels.iter().any(|(k, v)| k == key && v == value)) {
+                    println!("{}", container.id);
+                }
+            }
+            return;
+        } else if actual.len() == 3 && actual[0] == "container" && actual[1] == "inspect" {
+            let Some(container) = fixture_containers().into_iter().find(|container| container.id == actual[2]) else {
+                eprintln!("no such container: {}", actual[2]);
+                std::process::exit(1);
+            };
+            // Docker reports names with a leading slash; Podman does not.
+            let slash = if args.first().map(String::as_str) == Some("--connection") { "" } else { "/" };
+            let labels: Vec<String> = container.labels.iter().map(|(k, v)| format!("\"{k}\":\"{v}\"")).collect();
+            let mounts: Vec<String> = container.mounts.iter().map(|m| format!("{{\"Type\":\"volume\",\"Name\":\"{m}\"}}")).collect();
+            print!(
+                "[{{\"Id\":\"{}\",\"Name\":\"{slash}{}\",\"State\":{{\"Status\":\"{}\",\"Running\":{}}},\"Config\":{{\"Labels\":{{{}}}}},\"Mounts\":[{}]}}]",
+                container.id, container.name, container.status, container.status == "running", labels.join(","), mounts.join(",")
+            );
+            return;
+        } else if actual.len() == 3 && actual[0] == "container" && actual[1] == "rm" {
+            let containers = fixture_containers();
+            let Some(container) = containers.iter().find(|container| container.id == actual[2]) else {
+                eprintln!("no such container: {}", actual[2]);
+                std::process::exit(1);
+            };
+            if container.status == "running" {
+                eprintln!("synthetic-secret cannot remove a running container");
+                std::process::exit(2);
+            }
+            let inventory = std::fs::read_to_string(".fixture-containers").unwrap();
+            let remaining: String = inventory.lines().filter(|line| line.split('\t').next() != Some(actual[2].as_str())).map(|line| format!("{line}\n")).collect();
+            std::fs::write(".fixture-containers", remaining).unwrap();
             return;
         } else { panic!("unexpected volume probe command: {actual:?}"); };
         if std::path::Path::new(failure).exists() {
