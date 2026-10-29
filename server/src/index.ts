@@ -285,7 +285,11 @@ import { createSelfHostBanner } from "./self-host-banner";
 import { createTaskReplyContext } from "./tasks/reply-context";
 import { createTaskReportReader, intelligenceHistory } from "./tasks/report";
 import { createTaskStore } from "./tasks/store";
-import { createTaskThreads, createTaskTurn } from "./tasks/threads";
+import {
+  createContinuationRunner,
+  createTaskThreads,
+  createTaskTurn,
+} from "./tasks/threads";
 import { builtInBots, taskTools } from "./tasks/tools";
 import { createTeamBots } from "./team-bots/team-bots";
 import {
@@ -937,7 +941,7 @@ const signInService = computerGateway
           resumeResponsibility: (owner, runId, result) =>
             responsibilityStore.resumeWaiting(owner, runId, result),
           continueTurn: ({ ownerUserId, botId, snapshot, result, messageId }) =>
-            approvalContinuationRunner({
+            continuationRunner({
               ownerUserId,
               routineId: "sign-in",
               agentId: botId,
@@ -2036,6 +2040,15 @@ const taskTurnRunner = createTurnRunner({
     Promise.resolve(undefined),
 });
 /**
+ * Turns carried on after waiting on the person: Allow once, a question card's answer, a sign-in.
+ * One in a task's own conversation is the task's turn, built by `taskTurnRunner`.
+ */
+const continuationRunner = createContinuationRunner({
+  isTaskThread: taskStore.isTaskThread,
+  taskTurn: taskTurnRunner,
+  otherwise: approvalContinuationRunner,
+});
+/**
  * Conversations with several Bots. Each Bot turn is an ordinary headless AG-UI turn into that Bot's
  * own group thread, built exactly as a routine's is, so governance, learning and the computer tools
  * apply unchanged; Bots answering each other reuse the handoff desk's grant and caps.
@@ -2118,7 +2131,7 @@ const approvalSweep = repeatAfterEach(
     database,
     responsibilityStore,
     groupConversations,
-    approvalContinuationRunner,
+    approvalContinuationRunner: continuationRunner,
     channelStore,
     actorFor,
     // Assigned further down, once delivery is wired.
@@ -2378,7 +2391,7 @@ const personResponseSweep = repeatAfterEach(
     approvalQueue,
     personResponseOwner,
     authoriseQuestion,
-    approvalContinuationRunner,
+    approvalContinuationRunner: continuationRunner,
     responsibilityStore,
     responsibilityAnswerTurn,
     sourceForCoordinationRun,
