@@ -196,6 +196,7 @@ test("Admin is in the list for admins only", () => {
   expect(ids("user")).not.toContain("admin");
   expect(ids(undefined)).not.toContain("admin");
   expect(ids("user")).toEqual([
+    "tasks",
     "bots",
     "capabilities",
     "connections",

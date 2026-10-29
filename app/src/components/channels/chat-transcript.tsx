@@ -10,6 +10,7 @@ import {
   readConnectPrompt,
   SHOW_APP_ACCESS_TOOL,
 } from "@openbot/shared/connect-prompt";
+import { readTaskBrief } from "@openbot/shared/task-brief";
 import {
   IconAlertTriangle,
   IconBox,
@@ -123,6 +124,11 @@ type ChatTranscriptProps = {
   queued?: readonly QueuedMessage[];
   /** Take one back before it runs. Without it a queued line is shown but cannot be undone. */
   onRemoveQueued?: (id: string) => void;
+  /**
+   * Taken by the server and waiting for their turn, after anything queued here: a task's replies.
+   * Drawn as Queued, and never taken back from here.
+   */
+  held?: readonly { messageId: string; text: string }[];
   /** History has been asked for and has not arrived. Drawn only when there is nothing else to draw. */
   restoring?: boolean;
   /**
@@ -143,6 +149,8 @@ type ChatTranscriptProps = {
 
 /** One shared empty array, so a screen without a queue does not hand down a new one per render. */
 const EMPTY_QUEUE: readonly QueuedMessage[] = [];
+const EMPTY_HELD: readonly { messageId: string; text: string }[] = [];
+const NO_FILES: readonly Attachment[] = [];
 
 /**
  * A conversation's bubbles: body text, one radius on every corner and no tail, the same padding for
@@ -786,9 +794,14 @@ const TranscriptMessage = memo(function TranscriptMessage({
     );
   }
   const align = isUser ? "end" : "start";
+  /*
+   * A task's turns open with the person's ask, or their reply, inside a frame the model reads
+   * (shared/task-brief.ts). They see their own words.
+   */
+  const asked = (isUser ? readTaskBrief(text) : null) ?? text;
   // Slack/Teams turns carry a model-facing participant line; show a marker instead of the line.
-  const origin = isUser ? splitChatOrigin(text) : null;
-  const said = origin ? origin.text : text;
+  const origin = isUser ? splitChatOrigin(asked) : null;
+  const said = origin ? origin.text : asked;
   const invoked = isUser ? splitSkillChip(said, commandNames) : null;
 
   return (
@@ -1934,6 +1947,7 @@ export function ChatTranscript({
   messages,
   onRemoveQueued,
   queued = EMPTY_QUEUE,
+  held = EMPTY_HELD,
   restoring = false,
   stopped,
   working,
@@ -2010,7 +2024,10 @@ export function ChatTranscript({
   );
 
   /* Which tool calls are still the latest thing, for an app card: see `latestFrom`. */
-  const latestIndex = latestFrom(items, { busy, queued: queued.length });
+  const latestIndex = latestFrom(items, {
+    busy,
+    queued: queued.length + held.length,
+  });
   /* The last thing the Bot said, so a call can tell whether its turn went on to say anything: see `ToolPlace`. */
   const lastBotWords = items.findLastIndex(
     (item) => item.kind === "text" && item.role === "assistant",
@@ -2236,6 +2253,13 @@ export function ChatTranscript({
               text={message.text}
             />
           ))}
+          {held.map((message) => (
+            <Queued
+              attachments={NO_FILES}
+              key={message.messageId}
+              text={message.text}
+            />
+          ))}
         </div>
       </div>
     );
@@ -2415,6 +2439,13 @@ export function ChatTranscript({
                       text={message.text}
                     />
                   ))}
+                  {held.map((message) => (
+                    <Queued
+                      attachments={NO_FILES}
+                      key={message.messageId}
+                      text={message.text}
+                    />
+                  ))}
                 </div>
                 {items
                   .slice(pages.split)
@@ -2429,7 +2460,7 @@ export function ChatTranscript({
               }}
             />
             <ScrollNewestQueuedIntoView
-              newest={queued.at(-1)?.id ?? null}
+              newest={held.at(-1)?.messageId ?? queued.at(-1)?.id ?? null}
               onQueued={followOnQueued}
             />
             <FollowScroll request={follow.request} />

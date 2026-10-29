@@ -42,6 +42,7 @@ export function ConversationView({
   onStop,
   voiceCall,
   placeholder,
+  held,
 }: {
   messages: readonly Message[];
   busy?: boolean;
@@ -102,6 +103,11 @@ export function ConversationView({
   voiceCall?: { active: boolean; supported: boolean; onStart(): void };
   /** The composer's empty-state text, e.g. "Message Ana". The composer's own when absent. */
   placeholder?: string;
+  /**
+   * Messages the server took and holds for their turn, drawn as Queued at the end of the transcript.
+   * A task's replies wait there. Unlike the queue this screen keeps, nothing here can take one back.
+   */
+  held?: readonly { messageId: string; text: string }[];
 }) {
   /*
    * THE QUEUE LIVES HERE BECAUSE BOTH HALVES OF IT DO.
@@ -448,6 +454,7 @@ export function ConversationView({
             apply({ id, type: "remove" });
           }}
           queued={queued}
+          {...(held?.length ? { held } : {})}
           restoring={restoring}
           {...(stopped ? { stopped } : {})}
           working={working}

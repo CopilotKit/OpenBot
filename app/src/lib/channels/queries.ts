@@ -33,6 +33,12 @@ export type AgentChannel = {
    * Kept so an older event arriving late does not put back a list that has moved on.
    */
   workAt?: string;
+  /**
+   * The task this conversation belongs to, or null for an ordinary conversation. A task's
+   * conversation is listed under Tasks, never among the person's conversations, and opens as the
+   * task. Absent from a server that predates tasks, which reads as null.
+   */
+  taskId?: string | null;
 };
 
 /**
@@ -97,12 +103,6 @@ export type ChannelSummary = AgentChannel & {
    * hop, a relay — sets it, which is how the roster shows work the browser never streamed.
    */
   busy?: boolean;
-  /**
-   * The task this conversation belongs to, or null for an ordinary conversation. A task's
-   * conversation is listed under Tasks, never among the person's conversations. Absent from a server
-   * that predates tasks, which reads as null.
-   */
-  taskId?: string | null;
 };
 
 /**

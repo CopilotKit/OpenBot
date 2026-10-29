@@ -26,10 +26,12 @@ import { AppSidebar } from "@/components/app-sidebar/app-sidebar";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { agentKeys } from "@/lib/agents/queries";
 import { authKeys } from "@/lib/auth/queries";
+import { approvalInboxOptions } from "@/lib/approvals";
 import { botLifecycleKeys } from "@/lib/bot-lifecycle/queries";
 import { browserKeys } from "@/lib/browser/queries";
 import { type ChannelSummary, channelKeys } from "@/lib/channels/queries";
 import { userPreferencesQueryOptions } from "@/lib/settings/message-list";
+import { taskKeys } from "@/lib/tasks/queries";
 
 // Keep the sidebar's live-update socket offline; these tests exercise HTTP pagination.
 class OfflineWebSocket extends EventTarget implements WebSocket {
@@ -190,6 +192,21 @@ function renderSidebar() {
     computerId: "",
     open: false,
     tabs: [],
+  });
+  // So does the Tasks entry's count, from the tasks and the approval inbox.
+  for (const queryKey of [taskKeys.list(), approvalInboxOptions().queryKey]) {
+    queryClient.setQueryDefaults(queryKey, {
+      staleTime: Number.POSITIVE_INFINITY,
+      refetchInterval: false,
+    });
+  }
+  queryClient.setQueryData(taskKeys.list(), []);
+  queryClient.setQueryData(approvalInboxOptions().queryKey, {
+    enabled: true,
+    requests: [],
+    rules: [],
+    teamRules: [],
+    questions: [],
   });
   queryClient.setQueryData(channelKeys.list(), {
     pages: [
