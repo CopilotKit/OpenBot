@@ -660,8 +660,6 @@ export function ComputerView({
     : shot
       ? { base64: shot.base64, url: shot.url ?? "" }
       : null;
-  /** The site a secret is for, named in the password box. */
-  const secretHost = drawn?.url ? hostOf(drawn.url) : null;
   /** Whether there is a page to draw. A blank browser and an unreadable screen are both "no". */
   const showScreen = drawn !== null && !blankBrowser;
   /**
@@ -794,7 +792,8 @@ export function ComputerView({
         {control?.secretWanted ? (
           /*
            * The password box: what the page wants, a masked field, and the promise that the value
-           * goes to the page and nowhere else. Said with the page's own host when there is one.
+           * goes to the page and nowhere else. "The page", not a site's name: the value goes to the
+           * element the Bot pointed at, and the frame drawn here can lag behind or show another page.
            */
           <form
             className="border-t bg-card px-4 py-4 text-foreground"
@@ -817,7 +816,7 @@ export function ComputerView({
               </span>
               <label className="min-w-0" htmlFor="openbot-secret">
                 <span className="type-body block font-semibold">
-                  {secretHost ?? "The page"} needs {control.secretWanted}
+                  The page needs {control.secretWanted}
                 </span>
                 <span className="type-sub block text-muted-foreground">
                   Type it here and it goes into the page.
@@ -850,8 +849,7 @@ export function ComputerView({
                 aria-hidden
                 className="size-[18px] shrink-0 text-status-done"
               />
-              It goes straight to {secretHost ?? "the page"}.{" "}
-              {name ?? "The Bot"} never sees it.
+              It goes straight to the page. {name ?? "The Bot"} never sees it.
             </p>
             {secretProblem ? (
               <p className="type-sub mt-2 text-status-problem" role="alert">
