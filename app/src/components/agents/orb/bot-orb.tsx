@@ -11,6 +11,7 @@ import {
   type OrbPaletteName,
   type OrbPose,
   restLook,
+  samePicture,
   type Track,
   type TrackKey,
   track,
@@ -52,8 +53,15 @@ const BLINK_EVERY = 4.2;
 const SPILL = 0.5;
 /** Backing pixels per CSS pixel, at most: sharp on a 3× screen without a huge canvas. */
 const MAX_DPR = 3;
-/** Below this footprint, in CSS px, an orb only blinks and watches: no glances, no breath. */
+/** Below this footprint, in CSS px, an orb only blinks and watches: no glances, no breath, no drift. */
 const SMALL = 40;
+/**
+ * The least time between two frames of a small orb, in ms: about thirty a second, plenty for eyes a
+ * few px across, where a fast screen would otherwise draw every face in a list 120 times a second.
+ */
+const SMALL_FRAME_MS = 30;
+/** The moment on its clock a still is composed at, and where a small orb's colour holds. */
+const STILL_T = 1.6;
 /** How much of its look an orb gives the pointer: all of it at rest, some while it listens or works. */
 const WATCH: Record<BotOrbState, number> = {
   idle: 1,
@@ -156,7 +164,8 @@ function enter(m: Motion, state: BotOrbState, now: number): Motion {
 
 /**
  * The pose at `t` seconds on the orb's clock. `seed` keeps two orbs from blinking and glancing in
- * step. A small orb keeps still apart from its blinks, so a list of them doesn't fidget.
+ * step. A small orb keeps still apart from its blinks, its colour included, so a list of them
+ * doesn't fidget and, once its eyes settle, has nothing new to draw.
  */
 function poseAt(
   m: Motion,
@@ -178,7 +187,7 @@ function poseAt(
     }
   }
   return {
-    ta: t,
+    ta: small ? STILL_T : t,
     listen,
     think,
     done: Math.max(0, track(m.done, t)),
@@ -281,18 +290,29 @@ function lookAt(pose: OrbPose, gaze: Gaze): OrbPose {
 }
 
 /**
- * Sizes the canvas for a footprint of `size` and returns how to draw a pose on it, or null where
- * there is no 2D context to draw with.
+ * Sizes the canvas for a footprint of `size` and returns how to draw a pose on it in `palette`, or
+ * null where there is no 2D context to draw with. A pose that would draw what the canvas already
+ * shows, in the same theme and at the same density, is skipped.
  */
-function surface(canvas: HTMLCanvasElement, size: number) {
+function surface(
+  canvas: HTMLCanvasElement,
+  size: number,
+  palette: OrbPaletteName,
+) {
   const ctx = canvas.getContext("2d");
   if (!ctx) return null;
   const box = size * (1 + 2 * SPILL);
   let dpr = 0;
-  return (pose: OrbPose, palette: OrbPaletteName) => {
+  let shown: { pose: OrbPose; dark: boolean } | null = null;
+  return (pose: OrbPose) => {
     // Read on every draw: a window dragged to another screen, or a zoom, changes it under an orb
     // that stays mounted, and an orb drawn for the old one goes soft.
     const next = Math.min(MAX_DPR, window.devicePixelRatio || 1);
+    const dark = document.documentElement.classList.contains("dark");
+    if (next === dpr && shown?.dark === dark && samePicture(shown.pose, pose)) {
+      return;
+    }
+    shown = { pose, dark };
     if (next !== dpr) {
       dpr = next;
       canvas.width = Math.round(box * dpr);
@@ -301,10 +321,7 @@ function surface(canvas: HTMLCanvasElement, size: number) {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, box, box);
     ctx.translate(box / 2, box / 2);
-    drawBotOrb(ctx, size, pose, {
-      dark: document.documentElement.classList.contains("dark"),
-      palette,
-    });
+    drawBotOrb(ctx, size, pose, { dark, palette });
   };
 }
 
@@ -360,11 +377,11 @@ const secondsSince = (start: number) => (performance.now() - start) / 1000;
  * lands with a ping and a smile when done. Passed `finished`, its eyes give way to a check while
  * short rays burst out round it, and then it is back as it was. Wherever the pointer is, its eyes
  * follow it: fully at rest, partly while it listens or works, with a small perk when the pointer
- * comes close. An orb under 40 px only blinks and watches.
+ * comes close. An orb under 40 px only blinks and watches, at about thirty frames a second.
  *
- * Every orb on the page draws on one shared animation frame, and only while it is on screen and the
- * tab is shown. With reduced motion, or `still`, it is a still in the state's pose, drawn again
- * only when the state or the theme changes, and its eyes stay put.
+ * Every orb on the page draws on one shared animation frame, and only while it is on screen, the
+ * tab is shown and its picture has changed. With reduced motion, or `still`, it is a still in the
+ * state's pose, drawn again only when the state or the theme changes, and its eyes stay put.
  */
 export function BotOrb({
   className,
@@ -418,7 +435,7 @@ export function BotOrb({
   // again on its own, so it is redrawn when the theme flips the root's `dark` class.
   useEffect(() => {
     const canvas = canvasRef.current;
-    const draw = reduced && canvas ? surface(canvas, size) : null;
+    const draw = reduced && canvas ? surface(canvas, size, palette) : null;
     if (!draw || !clock.current) return;
     const { seed } = clock.current;
     const held =
@@ -426,10 +443,7 @@ export function BotOrb({
         ? { ...settled(shown.current ?? "idle"), finishedAt: 0 }
         : settled(state);
     const paint = () =>
-      draw(
-        poseAt(held, 1.6, seed, { reduced: true, small: size < SMALL }),
-        palette,
-      );
+      draw(poseAt(held, STILL_T, seed, { reduced: true, small: size < SMALL }));
     paint();
     const theme = new MutationObserver(paint);
     theme.observe(document.documentElement, {
@@ -445,17 +459,21 @@ export function BotOrb({
 
   // Alive: drawn on the shared clock while it is on screen. It counts as on screen until an
   // IntersectionObserver says otherwise, and always where there is none to ask. It reads the theme
-  // on every frame, so a flip shows on the next one.
+  // on every frame, so a flip shows on the next one; a frame that would draw what is already there
+  // is skipped, so a small orb at rest with the pointer still draws nothing between blinks.
   useEffect(() => {
     const canvas = canvasRef.current;
     const box = boxRef.current;
-    const draw = !reduced && canvas ? surface(canvas, size) : null;
+    const draw = !reduced && canvas ? surface(canvas, size, palette) : null;
     if (!draw || !box || !clock.current || !gaze.current) return;
     const { start, seed } = clock.current;
     const eyes = gaze.current;
     const small = size < SMALL;
     const measure = () => box.getBoundingClientRect();
+    let ticked = Number.NEGATIVE_INFINITY;
     const frame = (now: number) => {
+      if (small && now - ticked < SMALL_FRAME_MS) return;
+      ticked = now;
       const t = Math.max(0, (now - start) / 1000);
       const state = current.current;
       if (followPointer(eyes, t, state, measure) && motion.current) {
@@ -465,7 +483,7 @@ export function BotOrb({
         reduced: false,
         small,
       });
-      draw(lookAt(pose, eyes), palette);
+      draw(lookAt(pose, eyes));
     };
     let unsubscribe: (() => void) | null = null;
     const onScreen = (on: boolean) => {

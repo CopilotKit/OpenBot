@@ -27,6 +27,7 @@ import {
   orbPaletteFor,
   palette,
   RAYS,
+  samePicture,
   track,
 } from "@/components/agents/orb/bot-orb-draw";
 import { subscribePointer } from "@/components/agents/orb/orb-clock";
@@ -181,6 +182,18 @@ describe("the drawing", () => {
   test("has no grilles: at rest its only stroke is the sphere's rim", () => {
     expect(strokesOf(REST)).toBe(1);
   });
+
+  test("two poses draw the same picture once what their ages time is over, not while it plays", () => {
+    expect(samePicture(REST, { ...REST })).toBe(true);
+    expect(samePicture(REST, { ...REST, ax: REST.ax + 0.01 })).toBe(false);
+    // A ping long rung, a perk long faded and a finish long over: the orb at rest.
+    expect(
+      samePicture(REST, { ...REST, doneAge: 4, noticeAge: 9, finishAge: 30 }),
+    ).toBe(true);
+    expect(
+      samePicture({ ...REST, doneAge: 0.2 }, { ...REST, doneAge: 0.3 }),
+    ).toBe(false);
+  });
 });
 
 describe("a finish", () => {
@@ -229,8 +242,9 @@ function withContext(ctx: ReturnType<typeof fakeContext>) {
 }
 
 /**
- * Animation frames that run only when the test says, as the browser would at its next paint:
- * `requested` counts every frame asked for, `pending` the ones not yet run or cancelled.
+ * Animation frames that run only when the test says, as the browser would at its next paint, at
+ * the time the test gives or now: `requested` counts every frame asked for, `pending` the ones not
+ * yet run or cancelled.
  */
 function manualFrames() {
   const queue = new Map<number, FrameRequestCallback>();
@@ -253,10 +267,9 @@ function manualFrames() {
     get pending() {
       return queue.size;
     },
-    run() {
+    run(now = performance.now()) {
       const due = [...queue.values()];
       queue.clear();
-      const now = performance.now();
       for (const callback of due) callback(now);
     },
     restore() {
@@ -419,6 +432,87 @@ describe("<BotOrb>", () => {
         cleanup();
         frames.restore();
         restore();
+      }
+    });
+  });
+
+  const pointAt = (x: number, y: number) =>
+    window.dispatchEvent(
+      new PointerEvent("pointermove", { clientX: x, clientY: y }),
+    );
+
+  /**
+   * One orb `size` px across, its corner at (100, 100) on screen. `play` runs its frames from `from`
+   * to `to` seconds after it mounts, `fps` a second, calling `each` before every frame, and says how
+   * many of them it drew.
+   */
+  function onScreen(size: number) {
+    const ctx = fakeContext();
+    const frames = manualFrames();
+    const restore = withContext(ctx);
+    const view = render(<BotOrb palette="moss" size={size} />);
+    orbOf(view.container).getBoundingClientRect = () =>
+      ({ left: 100, top: 100, width: size, height: size }) as DOMRect;
+    const start = performance.now();
+    return {
+      play(from: number, to: number, fps = 60, each?: (t: number) => void) {
+        const before = ctx.draws;
+        for (let i = Math.ceil(from * fps); i < to * fps; i++) {
+          each?.(i / fps);
+          frames.run(start + (i / fps) * 1000);
+        }
+        return ctx.draws - before;
+      },
+      done() {
+        cleanup();
+        frames.restore();
+        restore();
+      },
+    };
+  }
+
+  test("a small orb at rest with the pointer still draws nothing once it settles, and draws again when the pointer moves", () => {
+    withObserver(undefined, () => {
+      const orb = onScreen(28);
+      try {
+        pointAt(400, 114);
+        // It turns to the pointer, settles and blinks once, all before 3.2s.
+        expect(orb.play(0, 3.2)).toBeGreaterThan(0);
+        // Its next blink is 5.5s in at the soonest.
+        expect(orb.play(3.2, 4.4)).toBe(0);
+        // A theme flip is drawn once, though nothing else has moved.
+        document.documentElement.classList.add("dark");
+        expect(orb.play(4.4, 4.8)).toBe(1);
+        pointAt(114, 400);
+        expect(orb.play(4.8, 5.4)).toBeGreaterThan(0);
+      } finally {
+        document.documentElement.classList.remove("dark");
+        orb.done();
+      }
+    });
+  });
+
+  test("a small orb draws about thirty frames a second on a 120Hz screen, a large one every frame", () => {
+    withObserver(undefined, () => {
+      // A pointer circling the orb, so its eyes always have somewhere new to look.
+      const circle = (t: number) =>
+        pointAt(
+          114 + 200 * Math.cos(2 * Math.PI * t),
+          114 + 200 * Math.sin(2 * Math.PI * t),
+        );
+      const small = onScreen(28);
+      try {
+        const drawn = small.play(0, 1, 120, circle);
+        expect(drawn).toBeGreaterThanOrEqual(28);
+        expect(drawn).toBeLessThanOrEqual(31);
+      } finally {
+        small.done();
+      }
+      const large = onScreen(56);
+      try {
+        expect(large.play(0, 1, 120, circle)).toBe(120);
+      } finally {
+        large.done();
       }
     });
   });
