@@ -398,3 +398,25 @@ test("/bot?watch=true restores the live Computer panel on reload", async () => {
     "general-assistant",
   );
 });
+
+/*
+ * The approval cards in the chat read the inbox without polling it, one reader per tool call, so
+ * the screen polls it once for all of them.
+ */
+test("/bot keeps the approvals its chat's cards read fresh, with one poll", async () => {
+  const queryClient = queryClientWithAgents([GENERAL_ASSISTANT]);
+  queryClient.setQueryData(["approvals"], {
+    enabled: true,
+    requests: [],
+    rules: [],
+    teamRules: [],
+    questions: [],
+  });
+  const view = renderBot(queryClient);
+  await view.findByTestId("copilot-chat");
+  const polling = (
+    queryClient.getQueryCache().find({ queryKey: ["approvals"] })?.observers ??
+    []
+  ).filter((observer) => observer.options.refetchInterval);
+  expect(polling).toHaveLength(1);
+});

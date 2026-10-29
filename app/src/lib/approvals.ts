@@ -88,6 +88,8 @@ export type ApprovalInboxData = {
   hostCommands?: HostCommandPolicy;
   questions: PersonQuestion[];
 };
+/** How often a screen showing approvals asks for them again. */
+const INBOX_POLL_MS = 10_000;
 export const approvalInboxOptions = () =>
   queryOptions({
     queryKey: ["approvals"],
@@ -97,7 +99,21 @@ export const approvalInboxOptions = () =>
       });
       return response.json();
     },
-    refetchInterval: 10_000,
+    refetchInterval: INBOX_POLL_MS,
+  });
+/**
+ * The same inbox, for a reader drawn once per tool call, with no poll of its own.
+ *
+ * TanStack Query polls once per observer, and every tool call in a conversation reads the inbox, so
+ * a reply with thirty calls asked for it sixty times every ten seconds. The screen polls it once
+ * (`ConversationPresenceProvider`, the Bot page), and a row that mounts between two polls reads what
+ * the last one brought.
+ */
+export const approvalInboxCacheOptions = () =>
+  queryOptions({
+    ...approvalInboxOptions(),
+    refetchInterval: false,
+    staleTime: INBOX_POLL_MS,
   });
 export const decideApproval = (id: string, decision: ApprovalDecision) =>
   client(`/api/approvals/${encodeURIComponent(id)}/decision`, {
