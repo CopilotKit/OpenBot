@@ -39,6 +39,7 @@ import {
   channels,
   deploymentPackages,
   intelligenceChannelMappings,
+  tasks,
   users,
 } from "../src/db/schema";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
@@ -58,6 +59,7 @@ function channel(overrides: Partial<AgentChannel> = {}): AgentChannel {
     threadId: "thread-1",
     active: true,
     lastMessageAt: null,
+    taskId: null,
     ...overrides,
   };
 }
@@ -360,6 +362,7 @@ describe("channel routes", () => {
         threadId: "thread-1",
         active: true,
         lastMessageAt: null,
+        taskId: null,
       },
     });
     expect(fetched.status).toBe(200);
@@ -395,6 +398,23 @@ describe("channel routes", () => {
         lastMessageAt: spokenAt.toISOString(),
         work: [],
       },
+    });
+  });
+
+  test("says which task the channel is the conversation of", async () => {
+    const store = fakeStore({
+      async get() {
+        return channel({ taskId: "task-1" });
+      },
+    });
+
+    const fetched = await appFor(store).request(
+      "http://openbot.test/channel-1",
+    );
+
+    expect(fetched.status).toBe(200);
+    expect(await json(fetched)).toEqual({
+      channel: { ...channel(), taskId: "task-1", work: [] },
     });
   });
 
@@ -1003,6 +1023,30 @@ describe("channel store integration", () => {
     expect(await persistentStore.get(actor, created.id)).toEqual(created);
   });
 
+  test("reads which task a channel is the conversation of", async () => {
+    const actor = await createPersistentUser();
+    const agentId = await createPersistentAgent({
+      name: "Task agent",
+      owner: actor,
+    });
+    const ordinary = await persistentStore.create(actor, [agentId]);
+    const worked = await persistentStore.create(actor, [agentId]);
+    createdChannelIds.push(ordinary.id, worked.id);
+    const taskId = persistentId("task");
+    // Removed with its channel, which the cleanup deletes.
+    await database.insert(tasks).values({
+      id: taskId,
+      ownerUserId: actor.id,
+      botId: agentId,
+      channelId: worked.id,
+      title: "Find a time for coffee",
+      origin: "asked",
+    });
+
+    expect((await persistentStore.get(actor, worked.id))?.taskId).toBe(taskId);
+    expect((await persistentStore.get(actor, ordinary.id))?.taskId).toBeNull();
+  });
+
   test("does not expose a member's channel to another user through public agents", async () => {
     const creator = await createPersistentUser();
     const otherUser = await createPersistentUser();
@@ -1175,6 +1219,7 @@ describe("channel store integration", () => {
       threadId: created.threadId,
       active: true,
       lastMessageAt: null,
+      taskId: null,
     });
     const persisted = await persistedChannel(created.id);
     expect(persisted.channelRow?.name).toBe("Zulu, Alpha");
