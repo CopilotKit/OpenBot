@@ -1,9 +1,11 @@
 import type { ActivityMessage, Message } from "@ag-ui/core";
 import type { Attachment } from "@copilotkit/react-core/v2";
 import {
+  useCopilotKit,
   useRenderActivityMessage,
   useRenderToolCall,
 } from "@copilotkit/react-core/v2";
+import { useQuery } from "@tanstack/react-query";
 import {
   IconAlertTriangle,
   IconBox,
@@ -80,6 +82,8 @@ import { isBrowserStep } from "./browser-activity";
 import { shouldDrawEarlier, useTranscriptPages } from "./transcript-pages";
 import { FollowScroll, useFollowIntent } from "./follow-intent";
 import { usePacedReveal } from "./paced-reveal";
+import { useLateRenderers } from "./late-renderers";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import {
   attachmentModality,
   type SentAttachment,
@@ -1317,12 +1321,20 @@ const TranscriptActivity = memo(function TranscriptActivity({
   message: ActivityMessage;
 }) {
   const { renderActivityMessage } = useRenderActivityMessage();
-  const drawn =
-    message.activityType === VOICE_CHAT_ACTIVITY ? (
-      <VoiceChatCard call={message.content.call as VoiceChatEntry} />
-    ) : (
-      renderActivityMessage(message)
-    );
+  const { copilotkit } = useCopilotKit();
+  const { data: capabilities } = useQuery(deploymentCapabilitiesQueryOptions());
+  const voice = message.activityType === VOICE_CHAT_ACTIVITY;
+  const drawn = voice ? (
+    <VoiceChatCard call={message.content.call as VoiceChatEntry} />
+  ) : (
+    renderActivityMessage(message)
+  );
+  /*
+   * Drawn before generative UI was switched on (a cold load: the capabilities answer or the runtime
+   * connection still on its way), an activity found no renderer. Re-rendered when the renderers
+   * arrive, rather than staying blank until its own message next changes; see `useLateRenderers`.
+   */
+  useLateRenderers(copilotkit, !voice && !drawn, capabilities?.generativeUi);
   if (!drawn) return null;
 
   return (
