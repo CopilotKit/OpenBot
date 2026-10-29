@@ -97,31 +97,61 @@ function inClosingOrder(
 }
 
 /**
+ * How long after its last use a browser still counts as in use, and so is never closed for memory.
+ *
+ * A browser's use is recorded when something asks for its page: a Bot's step, a person's input, the
+ * live screen. Between two steps a Bot asks for nothing while its model works out the next one, which
+ * can take tens of seconds, and nothing here can tell that pause from a Bot that has finished.
+ * Closing the browser then closes it in the middle of a run: the page the Bot was on is gone, and its
+ * next step starts a cold browser, which is the very jump in memory the close was meant to head off.
+ * A minute covers a model's turn between steps. It also covers a browser that has just launched, so
+ * the next launch never closes the one before it, which is what would otherwise turn a full computer
+ * into a loop of each Bot's launch closing the last Bot's browser.
+ */
+export const RECENTLY_USED_MS = 60_000;
+
+/**
  * Which to close next because the computer's memory runs high (`container-memory.ts`).
  *
  * One at a time, because the caller reads memory again after each close and stops as soon as it is
- * enough: a count says in advance how many have to go, and bytes do not.
+ * enough: a count says in advance how many have to go, and bytes do not. Least recently used first,
+ * the cap's order, so the two never disagree about who goes first.
  *
- * The cap's order, so the two never disagree about who goes first: least recently used, with a
- * person's native window last. And the cap's protection: the newest is never chosen. Before a
- * launch the caller counts the Bot that is asking as the newest, so the browser being launched is
- * never what makes room for itself; on the idle sweep the newest is whoever was used last. Either
- * way at least one browser is always left, because one browser that is on its own too big for the
- * computer is the limit's problem, and closing it would only start it again on the next request.
+ * Never a browser in use, which here means four things:
+ *   - The one being launched. The caller runs this before a launch and passes only the browsers
+ *     already running, so the Bot that asked is not among them.
+ *   - The most recently used of those, however long ago that was. So at least one browser is always
+ *     left, because one browser that is on its own too big for the computer is the limit's problem,
+ *     and closing it would only start it again on its next step.
+ *   - Any used within `recentlyUsedMs` ({@link RECENTLY_USED_MS}), which is a Bot in the middle of a
+ *     run or a browser that has just started.
+ *   - Any `spared` names, which is a Bot whose wheel a person holds or has been asked to take: closing
+ *     it closes it under somebody's hands, or under a page the Bot is waiting for somebody to work.
  *
- * Never one `spared` names, which is a Bot whose wheel a person holds or has been asked to take.
- * Closing that browser closes it under somebody's hands, or under a page the Bot is waiting for
- * somebody to come and work, and memory pressure is not a reason to do either.
+ * And never a person's own browser, cloud or native. Their Recorder runs in it, and closing it ends
+ * what they were recording without a word to them. It still counts toward the cap, which closes it
+ * last; memory pressure is not a reason to end somebody's session.
  */
 export function chooseForMemory(
   running: Iterable<[string, Evictable]>,
-  goesLast: (botId: string) => boolean = () => false,
-  spared: (botId: string) => boolean = () => false,
+  now: number,
+  {
+    recentlyUsedMs = RECENTLY_USED_MS,
+    spared = () => false,
+  }: {
+    recentlyUsedMs?: number;
+    spared?: (botId: string) => boolean;
+  } = {},
 ): string | undefined {
   const entries = [...running];
-  return inClosingOrder(entries, newestOf(entries), goesLast)
+  const cutoff = now - recentlyUsedMs;
+  return inClosingOrder(entries, newestOf(entries), () => false)
+    .filter(
+      ([botId, entry]) =>
+        entry.usedAt <= cutoff && !isPersonBrowserId(botId) && !spared(botId),
+    )
     .map(([botId]) => botId)
-    .find((botId) => !spared(botId));
+    .at(0);
 }
 
 /**

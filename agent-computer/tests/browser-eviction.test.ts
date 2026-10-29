@@ -5,6 +5,7 @@ import {
   chooseIdle,
   chooseIdleTabs,
   keptOpen,
+  RECENTLY_USED_MS,
 } from "../src/browser-eviction";
 import { numberFromEnv } from "../src/env";
 
@@ -264,59 +265,89 @@ describe("a person's cloud browser among Bots' browsers", () => {
  *
  * The cap counts browsers and the idle sweep counts minutes, and neither looks at memory, so a few
  * heavy pages took a container past its limit and the OOM killer took every browser on it at once.
- * The computer now closes browsers one at a time while memory runs high, reading it again after each.
+ * The computer now closes browsers one at a time while memory runs high, reading it again after each,
+ * and never one that is in use: a Bot between two steps asks for nothing while its model thinks, and
+ * closing its browser then closes it in the middle of a run.
  */
 describe("closing a browser because memory runs high", () => {
+  const NOW = 10_000_000;
+  const MINUTE = 60_000;
   const PERSON = "person-0123456789abcdef0123456789abcdef";
-  const isPerson = (botId: string) => botId.startsWith("person-");
+  /** Bots used this long before NOW, in order. */
+  const usedAgo = (...ago: number[]) => running(...ago.map((ms) => NOW - ms));
 
-  test("closes the least recently used, by the cap's own order", () => {
-    expect(chooseForMemory(running(500, 100, 300, 900))).toBe("bot-1");
+  test("closes the least recently used of the browsers nobody has used for a minute", () => {
+    expect(
+      chooseForMemory(usedAgo(5 * MINUTE, 9 * MINUTE, 2 * MINUTE, 1_000), NOW),
+    ).toBe("bot-1");
   });
 
-  test("never the newest, which before a launch is the Bot asking", () => {
-    // The caller adds the Bot whose browser is about to launch as the most recently used, so it is
-    // never what makes room for itself, however everything else is ranked.
-    const before = running(100, 200);
-    before.set("asking", { usedAt: 300 });
-    const chosen: string[] = [];
-    for (;;) {
-      const next = chooseForMemory(before);
-      if (!next) break;
-      chosen.push(next);
-      before.delete(next);
-    }
-    expect(chosen).toEqual(["bot-0", "bot-1"]);
-    expect([...before.keys()]).toEqual(["asking"]);
+  test("never a Bot used seconds ago, which is a Bot whose model is working out its next step", () => {
+    // bot-0 asked for its page ten seconds ago and has asked for nothing since. It is the least
+    // recently used here and it is still in the middle of its run.
+    expect(chooseForMemory(usedAgo(10_000, 5_000), NOW)).toBeUndefined();
+    expect(chooseForMemory(usedAgo(10_000, 3 * MINUTE, 5_000), NOW)).toBe(
+      "bot-1",
+    );
   });
 
-  test("never the last browser left: one too big on its own is the limit's problem", () => {
-    expect(chooseForMemory(running(100))).toBeUndefined();
-    expect(chooseForMemory(running())).toBeUndefined();
+  test("a minute is the line: used exactly a minute ago may close, a moment inside it may not", () => {
+    expect(chooseForMemory(usedAgo(MINUTE, 0), NOW)).toBe("bot-0");
+    expect(chooseForMemory(usedAgo(MINUTE - 1, 0), NOW)).toBeUndefined();
+    expect(RECENTLY_USED_MS).toBe(MINUTE);
+  });
+
+  test("never the most recently used browser running, however long ago that was", () => {
+    // Before a launch the caller passes the browsers already running, and the one launching is not
+    // among them. Of those, the newest stays even when every one is an hour quiet, so one is left.
+    expect(chooseForMemory(usedAgo(60 * MINUTE), NOW)).toBeUndefined();
+    expect(chooseForMemory(usedAgo(90 * MINUTE, 60 * MINUTE), NOW)).toBe(
+      "bot-0",
+    );
+    expect(chooseForMemory(running(), NOW)).toBeUndefined();
+  });
+
+  test("a browser that has just launched is never what the next launch closes", () => {
+    // The loop this rules out: each Bot's launch closing the browser the Bot before it just started.
+    // Here the one just launched is not the newest (another Bot asked a second ago), so only the
+    // minute keeps it.
+    const justLaunched = new Map([
+      ["just-launched", { usedAt: NOW - 2_000 }],
+      ["asked-a-second-ago", { usedAt: NOW - 1_000 }],
+      ["quiet", { usedAt: NOW - 20 * MINUTE }],
+    ]);
+    expect(chooseForMemory(justLaunched, NOW)).toBe("quiet");
+    justLaunched.delete("quiet");
+    expect(chooseForMemory(justLaunched, NOW)).toBeUndefined();
+  });
+
+  test("never a person's own browser, cloud or native, even the one used longest ago", () => {
+    // Their Recorder runs in it, and closing it ends what they were recording without a word.
+    const withPerson = new Map([
+      [PERSON, { usedAt: NOW - 120 * MINUTE }],
+      ...usedAgo(30 * MINUTE, 10 * MINUTE),
+    ]);
+    expect(chooseForMemory(withPerson, NOW)).toBe("bot-0");
+    withPerson.delete("bot-0");
+    expect(chooseForMemory(withPerson, NOW)).toBeUndefined();
   });
 
   test("never a browser whose wheel a person holds", () => {
-    // bot-0 is the least recently used and a person is working in it: the next one goes instead.
     const held = (botId: string) => botId === "bot-0";
-    expect(chooseForMemory(running(100, 200, 300), undefined, held)).toBe(
-      "bot-1",
-    );
-    // With only the held one and the newest left, nothing is closed.
-    expect(chooseForMemory(running(100, 300), undefined, held)).toBeUndefined();
+    expect(
+      chooseForMemory(usedAgo(30 * MINUTE, 20 * MINUTE, 10 * MINUTE), NOW, {
+        spared: held,
+      }),
+    ).toBe("bot-1");
+    expect(
+      chooseForMemory(usedAgo(30 * MINUTE, 10 * MINUTE), NOW, { spared: held }),
+    ).toBeUndefined();
   });
 
-  test("a person's native window goes after every Bot's browser, as at the cap", () => {
-    const withPerson = new Map([
-      [PERSON, { usedAt: 1 }],
-      ...running(500, 300, 900),
-    ]);
-    expect(chooseForMemory(withPerson, isPerson)).toBe("bot-1");
-    expect(
-      chooseForMemory(
-        new Map([[PERSON, { usedAt: 1 }], ...running(900)]),
-        isPerson,
-      ),
-    ).toBe(PERSON);
+  test("the window can be narrowed, which is how the browser tests run without waiting a minute", () => {
+    expect(chooseForMemory(usedAgo(500, 0), NOW, { recentlyUsedMs: 100 })).toBe(
+      "bot-0",
+    );
   });
 });
 

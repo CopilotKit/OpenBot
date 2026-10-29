@@ -43,13 +43,14 @@ import {
   chooseForMemory,
   chooseIdle,
   chooseIdleTabs,
-  type Evictable,
   keptOpen,
 } from "./browser-eviction";
 import { type BrowserRuntime, browserRuntimeFromEnv } from "./browser-runtime";
 import {
   type MemoryReading,
+  memoryAtOrAbove,
   memoryRunsHigh,
+  memoryTargetPercent,
   readContainerMemory,
 } from "./container-memory";
 import { egressFor, egressLabel } from "./egress";
@@ -326,17 +327,23 @@ const IDLE_SWEEP_MS = 60_000;
  * At what share of the computer's memory it starts closing browsers, least recently used first.
  *
  * The cap counts browsers, and a browser is not a fixed size: a few heavy pages can take a container
- * past its memory limit well under the cap, and the OOM killer does not choose by use: on Kubernetes
+ * past its memory limit well under the cap, and the OOM killer does not choose by use. On Kubernetes
  * with cgroup v2 it kills every process in the container together, every Bot's browser at once, and
- * nothing can reach the computer until it comes back. So memory is read the way Kubernetes reads it (`container-memory.ts`)
- * before every launch, which is when memory jumps, and on every tick of the idle sweep, and while it
- * is at or above this share of the limit the least recently used browser is closed and memory read
- * again. Closing one costs its Bot a relaunch and nothing else, the same as the cap.
+ * nothing can reach the computer until it comes back. So memory is read the way Kubernetes reads it
+ * (`container-memory.ts`) before every launch, which is when memory jumps, and on every tick of the
+ * idle sweep. At or above this share of the limit, browsers are closed one at a time, least recently
+ * used first, until memory is ten points under it (`memoryTargetPercent`). Closing one costs its Bot
+ * a relaunch and nothing else, the same as the cap.
+ *
+ * A check, not a guarantee. Between two checks a page can grow on its own, and memory can run out
+ * before the next launch or the next minute comes round. What this removes is the computer filling
+ * itself up one launch at a time with browsers nobody is using.
  *
  * Eighty-five leaves room for the launch that asked, and for a page that grows after the check,
  * before the limit is reached. Zero switches it off, as it does for the idle sweep. A computer with no
  * cgroup of its own (OpenBot Desktop's, on a person's Mac) has no limit to read and closes nothing
- * for memory either way.
+ * for memory either way. In the all-in-one image the share counts the database and the API server as
+ * well, deliberately: the OOM kill counts them too, and a browser closed first is what keeps them up.
  */
 const MEMORY_HIGH_PERCENT = numberFromEnv("COMPUTER_MEMORY_HIGH_PERCENT", 85, {
   zeroSwitchesItOff: true,
@@ -402,6 +409,11 @@ export type ProfilesOptions = {
   /** {@link TAB_IDLE_MS}, for a test that cannot wait ten minutes. */
   tabIdleMs?: number;
   /**
+   * The clock every use, idle timeout and memory decision here is measured by. `Date.now` unless a
+   * test needs a browser to have gone quiet a minute ago without waiting a minute for it.
+   */
+  now?: () => number;
+  /**
    * Whether a person holds this Bot's wheel, or has been asked to take it. Such a browser is never
    * closed for memory, and none of its tabs are closed for being idle: a person may be working across
    * them. The computer's sessions answer it (`sessions.personHasTheWheel`); without it, nobody does.
@@ -439,6 +451,7 @@ export function createProfiles(
   const readMemory = options.memory ?? (() => readContainerMemory());
   const memoryHighPercent = options.memoryHighPercent ?? MEMORY_HIGH_PERCENT;
   const tabIdleMs = options.tabIdleMs ?? TAB_IDLE_MS;
+  const now = options.now ?? Date.now;
   const heldByPerson = options.heldByPerson ?? (() => false);
   /*
    * A wheel that cannot be read counts as held. The control state throws when its store has failed,
@@ -492,11 +505,11 @@ export function createProfiles(
    */
   const tabUsedAt = new WeakMap<Page, number>();
   const touchTab = (page: Page): void => {
-    tabUsedAt.set(page, Date.now());
+    tabUsedAt.set(page, now());
   };
   /** A tab never seen before counts as used now, so one this process missed is not closed at once. */
   const tabLastUsed = (page: Page): number => {
-    const at = tabUsedAt.get(page) ?? Date.now();
+    const at = tabUsedAt.get(page) ?? now();
     tabUsedAt.set(page, at);
     return at;
   };
@@ -577,25 +590,26 @@ export function createProfiles(
   };
 
   /**
-   * Close browsers, least recently used first, while the computer's memory runs high.
+   * Close browsers, least recently used first, once the computer's memory runs high, until it is ten
+   * points under the line.
    *
    * One at a time, reading memory again after each close, because what one browser was holding is
-   * not known until it has gone. `asking` is the Bot whose launch this runs ahead of: counted as the
-   * newest, so it is never what makes room for itself, while every other browser here can be. Stops
-   * when memory is back under the line, when nothing is left that may be closed (`chooseForMemory`),
-   * or when the same browser comes up twice, which a close racing this one could otherwise loop on.
+   * not known until it has gone. Starts at {@link MEMORY_HIGH_PERCENT} and goes on to
+   * `memoryTargetPercent` under it, so the launch after it does not cross the line again at once.
+   * Stops when memory is there, when nothing is left that may be closed (`chooseForMemory`: never
+   * the browser launching, the most recently used, one in use within the last minute, one a person
+   * holds the wheel of, or a person's own), or when the same browser comes up twice.
    */
-  const relieveMemory = async (asking?: string): Promise<void> => {
+  const relieveMemoryOnce = async (): Promise<void> => {
     if (memoryHighPercent <= 0) return;
+    // A reading that fails is a computer with nothing to act on, the same as one with no cgroup.
+    const read = () => readMemory().catch(() => undefined);
+    let reading = await read();
+    if (!reading || !memoryRunsHigh(reading, memoryHighPercent)) return;
+    const target = memoryTargetPercent(memoryHighPercent);
     const tried = new Set<string>();
-    for (;;) {
-      // A reading that fails is a computer with nothing to act on, the same as one with no cgroup.
-      const reading = await readMemory().catch(() => undefined);
-      if (!reading || !memoryRunsHigh(reading, memoryHighPercent)) return;
-      const running: [string, Evictable][] = [...live.entries()];
-      if (asking && !live.has(asking))
-        running.push([asking, { usedAt: Date.now() }]);
-      const next = chooseForMemory(running, stays, spared);
+    while (reading && memoryAtOrAbove(reading, target)) {
+      const next = chooseForMemory(live.entries(), now(), { spared });
       if (!next || tried.has(next)) return;
       tried.add(next);
       console.info(
@@ -607,7 +621,24 @@ export function createProfiles(
         }),
       );
       await evict(next, "the computer's memory ran high");
+      reading = await read();
     }
+  };
+
+  /**
+   * One pass at a time, which every caller waits on.
+   *
+   * A burst of launches each ran a pass of its own, and each read memory before any close had given
+   * any back: a browser's memory is released when its Chromium exits, seconds after it was taken out
+   * of the map. So K launches at once read the same high number and closed K browsers where one was
+   * enough. A launch that arrives while a pass is running waits for that pass and launches after it.
+   */
+  let relieving: Promise<void> | undefined;
+  const relieveMemory = (): Promise<void> => {
+    relieving ??= relieveMemoryOnce().finally(() => {
+      relieving = undefined;
+    });
+    return relieving;
   };
 
   /**
@@ -621,7 +652,7 @@ export function createProfiles(
    */
   const closeIdleTabs = async (): Promise<number> => {
     if (tabIdleMs <= 0) return 0;
-    const now = Date.now();
+    const sweptAt = now();
     let closed = 0;
     for (const [botId, running] of [...live.entries()]) {
       if (running.person || isPersonBrowserId(botId) || spared(botId)) continue;
@@ -639,7 +670,7 @@ export function createProfiles(
             page.url().startsWith("chrome-extension://") ||
             page.url().startsWith("devtools://"),
         }));
-      for (const { page } of chooseIdleTabs(tabs, tabIdleMs, now)) {
+      for (const { page } of chooseIdleTabs(tabs, tabIdleMs, sweptAt)) {
         console.info(
           JSON.stringify({
             type: "computer-tab-closed",
@@ -667,7 +698,7 @@ export function createProfiles(
     for (const botId of chooseIdle(
       live.entries(),
       IDLE_TIMEOUT_MS,
-      Date.now(),
+      now(),
       stays,
     )) {
       await evict(botId, "it had been idle");
@@ -821,7 +852,7 @@ export function createProfiles(
       context,
       page,
       startedAt: new Date().toISOString(),
-      usedAt: Date.now(),
+      usedAt: now(),
       retarget: () => {},
       ...(sessionCookies ? { sessionCookies } : {}),
       person,
@@ -918,7 +949,7 @@ export function createProfiles(
       ) {
         // Touched on every use, which is what makes "least recently used" mean anything. The page in
         // front with it: a Bot's next action, and a person's input on the live screen, land there.
-        existing.usedAt = Date.now();
+        existing.usedAt = now();
         touchTab(existing.page);
         return existing.page;
       }
@@ -945,7 +976,7 @@ export function createProfiles(
       const launch = (async () => {
         // Before the launch, which is when memory jumps: a cold Chromium and its first page are the
         // largest single step up a computer takes, and the OOM killer does not wait for the cap.
-        await relieveMemory(botId);
+        await relieveMemory();
         const dir = directoryFor(botId);
         // A second native helper can target the same data root on another port. Do not remove an
         // active Chrome profile's lock; Chrome reports contention and handles its own stale locks.
@@ -998,7 +1029,7 @@ export function createProfiles(
           context,
           page,
           startedAt: new Date().toISOString(),
-          usedAt: Date.now(),
+          usedAt: now(),
           retarget: () => {},
           ...(sessionCookies ? { sessionCookies } : {}),
         };
@@ -1164,7 +1195,7 @@ export function createProfiles(
       const pages = () => personPages(running.context, person.recorderId);
       if (!windowPages(running.context).includes(running.page))
         return undefined;
-      running.usedAt = Date.now();
+      running.usedAt = now();
       return {
         ...person,
         context: running.context,

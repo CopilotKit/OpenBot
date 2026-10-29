@@ -312,9 +312,9 @@ const profiles = createProfiles(
   },
   {
     personDisplay: PERSON_DISPLAY,
-    // A browser a person is working in, or has been asked to, is never closed for memory, and none
-    // of its tabs are closed for being idle. A person's own browser is not a Bot's wheel at all: it
-    // takes the cap's rules, a native window last and a cloud one by use.
+    // A Bot's browser a person is working in, or has been asked to, is never closed for memory, and
+    // none of its tabs are closed for being idle. A person's own browser has no Bot's wheel to hold:
+    // it is never closed for memory whoever is at it (`chooseForMemory`), and its tabs are never swept.
     heldByPerson: (botId) =>
       !isPersonBrowserId(botId) && sessions.personHasTheWheel(botId),
   },

@@ -2,6 +2,7 @@ import { afterAll, afterEach, describe, expect, spyOn, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { BrowserContext, Page } from "playwright";
 import type { MemoryReading } from "../src/container-memory";
 
 /**
@@ -79,92 +80,238 @@ async function profilesFor(
   return { profiles, told };
 }
 
-/**
- * A container where each running browser holds the same 450 MiB of a 1000 MiB limit, read from how
- * many are running now, as the cgroup would read it. Two browsers are 90% (high at 85), one is 45%.
- */
 const MIB = 1024 ** 2;
 const LIMIT = 1000 * MIB;
-const PER_BROWSER = 450 * MIB;
-const perBrowser =
-  (running: () => number) => async (): Promise<MemoryReading> => ({
-    workingSet: running() * PER_BROWSER,
-    limit: LIMIT,
-  });
+const MINUTE = 60_000;
+const PERSON = "person-0123456789abcdef0123456789abcdef";
+
+/**
+ * A container whose memory is its browsers, read the way the cgroup reads it.
+ *
+ * Each browser holds the same share, counted while its Chromium is still connected, because that is
+ * when the kernel gives its memory back: when the process exits, seconds after the computer took it
+ * out of its map, not at the moment it decided to close it. The browsers are real; only their size
+ * is set, so a test can say how many fit.
+ */
+function containerOf(percentEach: number) {
+  const contexts = new Set<BrowserContext>();
+  return {
+    /** Count this page's browser from now on. */
+    holds(page: Page): Page {
+      contexts.add(page.context());
+      return page;
+    },
+    memory: async (): Promise<MemoryReading> => ({
+      workingSet:
+        [...contexts].filter((context) => context.browser()?.isConnected())
+          .length *
+        percentEach *
+        10 *
+        MIB,
+      limit: LIMIT,
+    }),
+  };
+}
+
+/**
+ * A clock that can be moved on, so every browser used so far reads as quiet for as long as a test
+ * says, without the test waiting a minute for the window in which a browser counts as in use.
+ */
+function clock() {
+  let ahead = 0;
+  return {
+    now: () => Date.now() + ahead,
+    passes(ms: number) {
+      ahead += ms;
+    },
+  };
+}
+
+const closedForMemory = () =>
+  logged("computer-browser-closed-for-memory").map((line) => line.botId);
 
 describe.skipIf(!asked)("closing browsers when memory runs high", () => {
   test(
-    "a launch on a computer whose memory runs high closes the least recently used first, never the one launching",
+    "a Bot used seconds ago is not closed when another launches; the quiet ones are",
     async () => {
-      let profiles: Awaited<ReturnType<typeof profilesFor>>["profiles"];
-      const made = await profilesFor("memory", {
-        memory: perBrowser(() => profiles.liveCount()),
-        memoryHighPercent: 85,
+      // Two browsers are 90%, over the line at 85.
+      const container = containerOf(45);
+      const time = clock();
+      const { profiles, told } = await profilesFor("memory-recent", {
+        memory: container.memory,
+        now: time.now,
       });
-      profiles = made.profiles;
+      const open = async (botId: string) =>
+        container.holds(await profiles.page(botId));
       try {
-        // One browser is 45%: the second launches without anything being closed.
-        await profiles.page("first");
-        await profiles.page("second");
-        expect(made.told).toEqual([]);
-        // The first is used again, so the second is now the least recently used: by use, not by
-        // which started first. A moment later, because use is kept to the millisecond and the
-        // second's launch can finish inside the same one.
-        await new Promise((resolve) => setTimeout(resolve, 5));
-        await profiles.page("first");
+        await open("first");
+        await open("second");
+        // Memory is high, and both Bots asked for their pages seconds ago: either could be waiting on
+        // its model between two steps. Neither is closed, and the third launches anyway.
+        await open("third");
+        expect(told).toEqual([]);
+        expect(profiles.liveCount()).toBe(3);
 
-        // Two browsers are 90%. The third Bot's launch closes the second, reads 45%, and launches.
-        const third = await profiles.page("third");
+        // Ten minutes on, the first Bot takes a step. The other two have been quiet all that time.
+        time.passes(10 * MINUTE);
+        await open("first");
+        await open("fourth");
 
-        expect(made.told).toEqual(["second"]);
+        // Both quiet ones close, down to under 75: three browsers were 135%, one is 45%.
+        expect(told).toEqual(["second", "third"]);
         expect(profiles.isLive("first")).toBe(true);
-        expect(profiles.isLive("second")).toBe(false);
-        expect(profiles.isLive("third")).toBe(true);
-        expect(third.isClosed()).toBe(false);
-        expect(logged("computer-browser-closed-for-memory")).toEqual([
-          {
-            type: "computer-browser-closed-for-memory",
-            botId: "second",
-            workingSetBytes: 2 * PER_BROWSER,
-            limitBytes: LIMIT,
-          },
-        ]);
+        expect(profiles.isLive("fourth")).toBe(true);
+        expect(logged("computer-browser-closed-for-memory")[0]).toEqual({
+          type: "computer-browser-closed-for-memory",
+          botId: "second",
+          workingSetBytes: 3 * 450 * MIB,
+          limitBytes: LIMIT,
+        });
       } finally {
-        await made.profiles.closeAll();
+        await profiles.closeAll();
       }
     },
     LAUNCH_TIMEOUT_MS,
   );
 
   test(
-    "a browser a person is working in stays, and memory that will not come down never closes the last browser",
+    "a burst of launches closes only what memory needs, not one browser per launch",
     async () => {
-      // Memory that reads high whatever is closed: one browser too big on its own. The loop has to
-      // stop at the newest, not close its way to nothing.
-      const made = await profilesFor("memory-held", {
+      // Three browsers are 90%; one closed is 60%, under 75.
+      const container = containerOf(30);
+      const time = clock();
+      const { profiles, told } = await profilesFor("memory-burst", {
+        memory: container.memory,
+        now: time.now,
+      });
+      const open = async (botId: string) =>
+        container.holds(await profiles.page(botId));
+      try {
+        await open("a");
+        await open("b");
+        await open("c");
+        time.passes(10 * MINUTE);
+
+        // Three Bots at once. Each launch used to read memory itself, before the first close had
+        // given anything back, and each closed a browser of its own.
+        await Promise.all([open("d"), open("e"), open("f")]);
+
+        expect(told).toEqual(["a"]);
+        expect(closedForMemory()).toEqual(["a"]);
+        expect(profiles.liveCount()).toBe(5);
+      } finally {
+        await profiles.closeAll();
+      }
+    },
+    LAUNCH_TIMEOUT_MS,
+  );
+
+  test(
+    "a Bot that comes back after its browser was closed does not start a cycle of closes",
+    async () => {
+      // Four browsers are 100%. One closed is 75%, which is under where closing starts (85) and not
+      // under where it stops (75), so the pass goes on to 50%.
+      const container = containerOf(25);
+      const time = clock();
+      const { profiles, told } = await profilesFor("memory-cycle", {
+        memory: container.memory,
+        now: time.now,
+      });
+      const open = async (botId: string) =>
+        container.holds(await profiles.page(botId));
+      try {
+        for (const botId of ["a", "b", "c", "d"]) await open(botId);
+        time.passes(10 * MINUTE);
+
+        await open("e");
+        // Two, not one: a pass that stopped at 75% left the next launch at 100% again.
+        expect(told).toEqual(["a", "b"]);
+
+        // Each Bot whose browser was closed comes straight back, as a Bot in the middle of its work
+        // would. Each comeback used to close the least recently used browser, which by then was the
+        // one the last comeback had just launched, and so on round the ring for ever.
+        for (let round = 0; round < 8; round += 1) {
+          const closed = told.find((botId) => !profiles.isLive(botId));
+          if (!closed) break;
+          await open(closed);
+        }
+
+        // Every quiet browser was closed once, and none that was in use: the Bots are all back.
+        expect(told).toEqual(["a", "b", "c", "d"]);
+        expect(new Set(told).size).toBe(told.length);
+        for (const botId of ["a", "b", "c", "d", "e"])
+          expect(profiles.isLive(botId)).toBe(true);
+      } finally {
+        await profiles.closeAll();
+      }
+    },
+    LAUNCH_TIMEOUT_MS,
+  );
+
+  test(
+    "a Bot a person is working in stays, and memory that will not come down leaves the newest",
+    async () => {
+      // Memory that reads full whatever is closed: one browser too big on its own. The pass has to
+      // stop, not close its way to nothing.
+      const time = clock();
+      const { profiles, told } = await profilesFor("memory-held", {
         memory: async () => ({ workingSet: LIMIT, limit: LIMIT }),
-        memoryHighPercent: 85,
+        now: time.now,
         heldByPerson: (botId) => botId === "held",
       });
-      const { profiles } = made;
       try {
         await profiles.page("held");
         await profiles.page("other");
-        // Both are live before the third arrives: launching "other" closed nothing it could, because
-        // the only other browser was the one a person holds.
-        expect(made.told).toEqual([]);
+        await profiles.page("third");
+        time.passes(10 * MINUTE);
 
         await profiles.page("asking");
-        // "other" goes; "held" is a person's, and "asking" is the launch itself.
-        expect(made.told).toEqual(["other"]);
+        // "held" is a person's to work in and "third" was the most recently used: "other" goes.
+        expect(told).toEqual(["other"]);
+
+        // The sweep's tick reads full again. "third" is quiet and goes; "held" and the newest stay.
+        await profiles.sweepIdleNow();
+        expect(told).toEqual(["other", "third"]);
         expect(profiles.isLive("held")).toBe(true);
         expect(profiles.isLive("asking")).toBe(true);
-
-        // The idle sweep's tick reads the same and closes nothing more: what is left is held, or the
-        // newest.
-        await profiles.sweepIdleNow();
-        expect(made.told).toEqual(["other"]);
         expect(profiles.liveCount()).toBe(2);
+      } finally {
+        await profiles.closeAll();
+      }
+    },
+    LAUNCH_TIMEOUT_MS,
+  );
+
+  test(
+    "a person's own browser is never closed for memory, even the one used longest ago",
+    async () => {
+      // Their Recorder runs in it, so closing it would end what they were recording without a word.
+      const { findRecorder } = await import("../src/recorder");
+      const found = await findRecorder(
+        join(import.meta.dir, "fixtures", "recorder"),
+      );
+      if (!found.ok) throw new Error(found.error);
+      const container = containerOf(30);
+      const time = clock();
+      const { profiles, told } = await profilesFor("memory-person", {
+        memory: container.memory,
+        now: time.now,
+      });
+      try {
+        container.holds(
+          await profiles.page(PERSON, { open: { recorder: found.recorder } }),
+        );
+        container.holds(await profiles.page("bot-a"));
+        container.holds(await profiles.page("bot-b"));
+        time.passes(10 * MINUTE);
+
+        container.holds(await profiles.page("bot-c"));
+
+        // The person's browser is the least recently used by ten minutes and stays; the quieter of
+        // the two Bots goes in its place.
+        expect(told).toEqual(["bot-a"]);
+        expect(profiles.isLive(PERSON)).toBe(true);
+        expect(profiles.person(PERSON)).toBeDefined();
       } finally {
         await profiles.closeAll();
       }

@@ -164,6 +164,14 @@ export async function readContainerMemory({
   return cgroupV1Memory({ usage, limit, stat: v1Stat }, machineBytes);
 }
 
+/** Whether the working set is at or above a share of the limit. */
+export function memoryAtOrAbove(
+  reading: MemoryReading,
+  percent: number,
+): boolean {
+  return reading.workingSet * 100 >= reading.limit * percent;
+}
+
 /**
  * Whether the computer is close enough to its limit to start closing browsers.
  *
@@ -176,5 +184,25 @@ export function memoryRunsHigh(
   highPercent: number,
 ): boolean {
   if (highPercent <= 0) return false;
-  return reading.workingSet * 100 >= reading.limit * highPercent;
+  return memoryAtOrAbove(reading, highPercent);
+}
+
+/**
+ * How far under the share that starts the closing memory has to fall before the closing stops.
+ *
+ * Stopping at the same line it started at leaves the computer a browser's launch from crossing it
+ * again, so the next Bot to start closes another browser, whose Bot starts again and closes another:
+ * each launch paying for the last. Closing on to ten points under gives the launches after it room.
+ * Ten points, not a setting of its own: it is a gap between two numbers, and the one an operator
+ * chooses is where the closing starts.
+ */
+export const MEMORY_TARGET_POINTS_UNDER = 10;
+
+/**
+ * The share closing stops under: {@link MEMORY_TARGET_POINTS_UNDER} below where it starts, so 75 at
+ * the default 85. At or under zero, which only a starting share of ten or less gives, closing goes on
+ * while anything is left that may be closed.
+ */
+export function memoryTargetPercent(highPercent: number): number {
+  return highPercent - MEMORY_TARGET_POINTS_UNDER;
 }

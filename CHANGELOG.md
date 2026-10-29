@@ -61,12 +61,13 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   to keep the old behaviour.
 - Interfaces a Bot drew before the upgrade (A2UI 0.9 surfaces) no longer draw when a conversation is
   reopened; the messages around them stay. New ones use A2UI 1.0 (below).
-- A computer now closes browsers, least recently used first, when its memory reaches 85% of its
-  limit, and closes a Bot's background tabs after ten minutes untouched (below).
+- A computer now closes browsers nobody is using, least recently used first, when its memory
+  reaches 85% of its limit, and closes a Bot's background tabs after ten minutes untouched (below).
+  In the all-in-one image that share counts the database and the API server too.
   `COMPUTER_MEMORY_HIGH_PERCENT=0` and `COMPUTER_TAB_IDLE_MS=0` (Helm: `computers.memoryHighPercent`
   and `computers.tabIdleMs`) keep the old behaviour.
 
-### A computer closes a browser before its memory runs out
+### A computer closes browsers nobody is using when its memory runs high
 
 A computer runs one browser for each Bot that is browsing, and the only limits were a count and half
 an hour untouched. Neither looked at memory, so a few heavy pages could take a container past its
@@ -75,14 +76,27 @@ was busy. On Kubernetes it kills everything in the container at once, so every B
 together and nothing could reach the computer until it came back. A computer now reads its own
 memory the way the kubelet does (the working set, which leaves out the file cache the kernel can
 drop), before it starts a browser and once a minute. At or above 85% of its limit it closes browsers
-one at a time, least recently used first, until it is back under. A Bot whose browser was closed
-starts again where it left off on its next step, still signed in, because its profile is on disk.
-The browser being started, the one used most recently, and the browser of a Bot whose wheel a person
-holds or has been asked to take are never closed for memory. A container with no memory limit is
-measured against the machine's memory, and a computer outside a container, such as OpenBot
-Desktop's, closes nothing for memory. Each close is logged as `computer-browser-closed-for-memory`
-with the working set and the limit in bytes. `COMPUTER_MEMORY_HIGH_PERCENT` (Helm:
-`computers.memoryHighPercent`) sets the share, and `0` switches it off.
+one at a time, least recently used first, until it is under 75%, so the next launch does not cross
+the line again straight away. Launches that arrive together share one pass rather than closing a
+browser each. A Bot whose browser was closed starts again where it left off on its next step, still
+signed in, because its profile is on disk.
+
+Only a browser nobody is using is closed. Never closed for memory: the browser being started, the
+most recently used one, any browser used in the last minute (a Bot between two steps asks for
+nothing while its model works out the next), a person's own browser, cloud or native, whose Recorder
+session would end, and the browser of a Bot whose wheel a person holds or has been asked to take.
+When every browser is in use, none is closed.
+
+This is a check, not a guarantee. Memory is read before each launch and once a minute, so a page
+that grows between two checks can still run the container out of memory. A container with no memory
+limit is measured against the machine's memory, and a computer outside a container, such as OpenBot
+Desktop's, closes nothing for memory. In the all-in-one image the database and the API server run in
+the same container as the browsers, and the share counts them too. That is deliberate: the kernel's
+out-of-memory kill counts everything in the container and can take the database down, and closing a
+browser nobody is using first is how the database is protected. Each close is logged as
+`computer-browser-closed-for-memory` with the working set and the limit in bytes.
+`COMPUTER_MEMORY_HIGH_PERCENT` (Helm: `computers.memoryHighPercent`) sets the share where closing
+starts, and `0` switches it off.
 
 The tabs a Bot leaves behind are closed too. A Bot always works in its newest page, so an older tab,
 such as the page a sign-in popup was opened from or a link a site opened in a new tab, is one it

@@ -2,7 +2,12 @@ import { describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { memoryRunsHigh, readContainerMemory } from "../src/container-memory";
+import {
+  memoryAtOrAbove,
+  memoryRunsHigh,
+  memoryTargetPercent,
+  readContainerMemory,
+} from "../src/container-memory";
 
 /**
  * How much of its memory a computer is using, from the files a real container wrote.
@@ -117,5 +122,28 @@ describe("whether memory runs high", () => {
 
   test("a share of zero switches it off", () => {
     expect(memoryRunsHigh({ workingSet: LIMIT, limit: LIMIT }, 0)).toBe(false);
+  });
+});
+
+describe("where closing for memory stops", () => {
+  const LIMIT = 1_000;
+
+  test("ten points under where it starts, so 75 at the default 85", () => {
+    expect(memoryTargetPercent(85)).toBe(75);
+    expect(memoryTargetPercent(60)).toBe(50);
+  });
+
+  test("between the two lines nothing starts, and a pass that started goes on", () => {
+    // 80% does not start a pass at 85, and a pass already closing at 85 does not stop at 80: it
+    // closes on to under 75, so the next launch does not cross 85 again straight away.
+    const at80 = { workingSet: 800, limit: LIMIT };
+    expect(memoryRunsHigh(at80, 85)).toBe(false);
+    expect(memoryAtOrAbove(at80, memoryTargetPercent(85))).toBe(true);
+    expect(
+      memoryAtOrAbove(
+        { workingSet: 749, limit: LIMIT },
+        memoryTargetPercent(85),
+      ),
+    ).toBe(false);
   });
 });
