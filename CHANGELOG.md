@@ -62,6 +62,15 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - Interfaces a Bot drew before the upgrade (A2UI 0.9 surfaces) no longer draw when a conversation is
   reopened; the messages around them stay. New ones use A2UI 1.0 (below).
 
+### A conversation opens at the bottom and stays still while a Bot writes
+
+Opening a conversation shows its newest messages at once, already at the bottom, instead of loading
+and then gliding down; a long one draws older messages as somebody scrolls up to them, without
+moving what they are reading. Charts, tables, cards and decisions a Bot draws grow in place while
+they stream, and no longer flash "not available" before they appear. A reply is revealed at a steady
+pace, and the view follows it until the person scrolls up or selects some of it, and picks it up
+again when they come back to the end or press the arrow. Nothing changes for a deployment.
+
 ### Generated interfaces use A2UI 1.0
 
 With generative UI on, a Bot builds an interface from the A2UI 1.0 basic components instead of the
