@@ -282,6 +282,42 @@ struct ReadyRespondingEngine {
     installed: Option<String>,
 }
 
+/// What Start does first, so the engine this installation runs on is answering.
+///
+/// Install brings the engine up; Start used to only look for it. So after a restart a Podman
+/// installation's machine was stopped and Start failed with "podman is installed but not
+/// answering", which nobody this app is for can act on. Now the saved engine is brought up:
+///
+/// - Docker: a stopped Docker Desktop is opened. It answered for this installation before.
+/// - Podman, or an installation from before engines were saved: OpenBot's own machine is
+///   started, when it exists. A machine is never created here, and nobody else's is started.
+///
+/// An engine that still does not answer is reported by the check after this one. An older
+/// installation that was on Docker cannot land on an empty machine: Start requires the
+/// installation's images on the engine it uses before it runs or saves anything.
+fn wake_saved_engine(
+    saved: Option<engine::Engine>,
+    engine_in_a_machine: bool,
+    answers: impl FnOnce() -> bool,
+    open_docker_desktop: impl FnOnce() -> Result<(), Problem>,
+    our_machine_exists: impl FnOnce() -> bool,
+    start_our_machine: impl FnOnce() -> Result<(), Problem>,
+) -> Result<(), Problem> {
+    if answers() {
+        return Ok(());
+    }
+    match saved {
+        Some(engine::Engine::Docker) => open_docker_desktop(),
+        Some(engine::Engine::Podman) | None => {
+            if engine_in_a_machine && our_machine_exists() {
+                start_our_machine()
+            } else {
+                Ok(())
+            }
+        }
+    }
+}
+
 /// Return a responding engine only after Compose is present too.
 fn ready_responding_engine_after_compose_repair(
     found: engine::EngineStatus,
@@ -1546,21 +1582,49 @@ async fn start_stack_inner<R: tauri::Runtime>(
         )
     })?;
 
-    // An installation on Docker whose Docker Desktop is stopped: opened here, before startup is
-    // held, because it can take minutes and Quit must not wait on it. See `docker_desktop`.
+    // The installation's own engine, brought up when it is stopped: here, before startup is held,
+    // because it can take minutes and Quit must not wait on it. See `wake_saved_engine`.
     let saved = preparation::saved_engine(&root);
     let owned = shell.containers.lock().unwrap().is_some();
-    if saved == Some(engine::Engine::Docker) && !owned {
+    if !owned {
         let progress_app = app.clone();
         tauri::async_runtime::spawn_blocking(move || {
-            openbot_desktop_lib::docker_desktop::start_saved(&mut |said| {
-                report_running(&progress_app, "engine", said, None)
-            })
+            wake_saved_engine(
+                saved,
+                cfg!(any(target_os = "macos", target_os = "windows")),
+                || engine::detect_saved(saved).responding,
+                || {
+                    openbot_desktop_lib::docker_desktop::start_saved(&mut |said| {
+                        report_running(&progress_app, "engine", said, None)
+                    })
+                },
+                || acquire::machine_exists().unwrap_or(false),
+                || {
+                    report_running(
+                        &progress_app,
+                        "start-machine",
+                        "Starting the engine machine.",
+                        None,
+                    );
+                    let started = acquire::start_machine();
+                    report(
+                        &progress_app,
+                        "start-machine",
+                        started.ok,
+                        started.said.clone(),
+                    );
+                    if started.ok {
+                        Ok(())
+                    } else {
+                        Err(started.problem())
+                    }
+                },
+            )
         })
         .await
         .map_err(|error| {
             Problem::with(
-                "OpenBot could not start Docker Desktop. Open it yourself, then try again.",
+                "OpenBot could not start the software it runs on. Try again.",
                 error.to_string(),
             )
         })??;
@@ -6802,6 +6866,65 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
+    }
+
+    #[test]
+    fn start_brings_up_the_engine_this_installation_runs_on() {
+        use engine::Engine::{Docker, Podman};
+        use std::cell::RefCell;
+        // (saved, in a machine, answers, our machine exists) -> what was done
+        let run = |saved, in_machine, answers, exists| {
+            let done = RefCell::new(Vec::new());
+            wake_saved_engine(
+                saved,
+                in_machine,
+                || answers,
+                || {
+                    done.borrow_mut().push("open Docker Desktop");
+                    Ok(())
+                },
+                || exists,
+                || {
+                    done.borrow_mut().push("start our machine");
+                    Ok(())
+                },
+            )
+            .unwrap();
+            done.into_inner()
+        };
+        let none: [&str; 0] = [];
+        // Answering: nothing is done, whatever was saved.
+        for saved in [Some(Docker), Some(Podman), None] {
+            assert_eq!(run(saved, true, true, true), none, "{saved:?}");
+        }
+        // A saved Docker opens Docker Desktop, never a Podman machine.
+        assert_eq!(
+            run(Some(Docker), true, false, true),
+            ["open Docker Desktop"]
+        );
+        // A saved Podman after a restart: OpenBot's machine is started.
+        assert_eq!(run(Some(Podman), true, false, true), ["start our machine"]);
+        // An installation from before engines were saved, with nothing answering: the same.
+        assert_eq!(run(None, true, false, true), ["start our machine"]);
+        // No machine of ours: none is created and nobody else's is started.
+        assert_eq!(run(Some(Podman), true, false, false), none);
+        assert_eq!(run(None, true, false, false), none);
+        // Linux runs Podman natively: there is no machine to start.
+        assert_eq!(run(Some(Podman), false, false, true), none);
+    }
+
+    #[test]
+    fn a_machine_that_fails_to_start_stops_start_with_its_own_words() {
+        let problem = wake_saved_engine(
+            Some(engine::Engine::Podman),
+            true,
+            || false,
+            || panic!("a Podman installation never opens Docker Desktop"),
+            || true,
+            || Err(Problem::plain("machine did not start")),
+        )
+        .unwrap_err();
+        assert_eq!(problem.said, "machine did not start");
     }
 
     #[test]
