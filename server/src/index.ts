@@ -283,6 +283,7 @@ import { createIntentRouter } from "./routing/classify";
 import { createModelCompleter } from "./routing/model";
 import { createSelfHostBanner } from "./self-host-banner";
 import { createTaskReplyContext } from "./tasks/reply-context";
+import { createTaskReportReader, intelligenceHistory } from "./tasks/report";
 import { createTaskStore } from "./tasks/store";
 import { createTaskThreads, createTaskTurn } from "./tasks/threads";
 import { builtInBots, taskTools } from "./tasks/tools";
@@ -2782,6 +2783,11 @@ const app = createApp(
     memory: { store: personalMemoryStore, ingestion: memoryIngestion },
     proactive: { store: proactiveStore, engine: proactiveEngine },
     tasks: taskStore,
+    // A task's report reads its conversation through the client every headless turn reads with.
+    taskReport: createTaskReportReader({
+      database,
+      history: intelligenceHistory(routineIntelligence),
+    }),
     responsibilities: {
       store: responsibilityStore,
       engine: responsibilityEngine,

@@ -143,6 +143,7 @@ import type { IntentRouter } from "./routing/classify";
 import { createRoutingRoutes } from "./routing/routes";
 import { createCoworkerRoutingService } from "./routing/service";
 import type { SelfHostBanner } from "./self-host-banner";
+import type { TaskReportReader } from "./tasks/report";
 import { createTaskRoutes, type TaskIntake } from "./tasks/routes";
 import type { TaskStore } from "./tasks/store";
 import { createTeamBotRoutes } from "./team-bots/routes";
@@ -449,6 +450,8 @@ export function createApp(
     proactive?: { store: ProactiveStore; engine: ProactiveEngine };
     /** A person's tasks, each in a conversation of its own. See tasks/store.ts. */
     tasks?: TaskStore;
+    /** A task's report, read from its conversation. See tasks/report.ts. Absent, it is not served. */
+    taskReport?: TaskReportReader;
     responsibilities?: {
       store: ResponsibilityStore;
       engine: ResponsibilityEngine;
@@ -1729,6 +1732,7 @@ export function createApp(
       // A task's turns run on the proactive engine, so replying and Try again are its.
       createTaskRoutes(coworker.tasks, requireUser, {
         retry: coworker.proactive?.engine,
+        report: coworker.taskReport,
         ...(coworker.proactive
           ? { intake: taskIntake(coworker.proactive.engine) }
           : {}),

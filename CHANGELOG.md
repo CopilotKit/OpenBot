@@ -92,7 +92,8 @@ conversation steers it, in order, even across a restart. The new `/api/tasks` ro
 A Bot OpenBot runs itself now hands anything bigger than a quick answer to a task of its own
 (`start_task`) and answers "On it" where it was asked. A Bot behind a remote agent framework is not
 offered the tool; its tasks start from its suggestions, or from `POST /api/tasks`, which starts one
-with any of the person's Bots.
+with any of the person's Bots. `GET /api/tasks/:id/report` reads a task's conversation back as its
+report: the person's decisions and replies, and the Bot's update as each turn ended, in order.
 
 ### A computer closes browsers nobody is using when its memory runs high
 
