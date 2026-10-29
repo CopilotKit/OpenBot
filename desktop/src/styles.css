@@ -1,86 +1,181 @@
 /*
- * OpenBot Desktop: the setup window.
+ * OpenBot Desktop: the setup window, in the CopilotKit visual system.
  *
- * The world is the one the product sits next to: warm off-white ground, near-black text, almost no
- * chrome, and one rounded focal element per screen. Measured from Grok rather than guessed — the
- * ground is a warm #F9F8F7 and the hairlines are a warm-tinted black at 4-8% rather than a cool
- * gray, which is most of why that interface reads calm instead of clinical.
+ * Values come from the CopilotKit UI theme and brand rules (the CopilotCloud design tokens, also
+ * used by the AG-UI dojo) and are applied as given rather than approximated: the cool lavender-gray
+ * ground with six blurred colour fields behind it, one frosted-glass card per screen with a white
+ * edge, Plus Jakarta Sans for reading, Spline Sans Mono uppercase for buttons and technical status,
+ * and a 4px spacing grid. Where a value is not a named token it is marked an implementation default.
  *
- * `universalSans` is deliberately absent: it is xAI's own face and not ours to ship. Inter is the
- * documented fallback and the system stack is what a desktop window can rely on with no network at
- * the moment it draws.
+ * Both faces are bundled (`@fontsource-variable`), not fetched: the window draws before anything
+ * guarantees a network, and a first-run screen that falls back to the system face is not on brand.
  *
- * Light is committed rather than defaulted. The use scene is a corporate laptop in an office in the
- * daytime, and this window is the first thing somebody sees after a download.
+ * Light only, as before: this window exists for a few minutes, once, and then becomes OpenBot,
+ * which keeps its own light and dark. The macOS title bar takes this ground (see `match_title_bar`).
  */
 :root {
-  /* Warm, not neutral. Every gray here is tinted from the same 15/13/10 black. */
-  --ground: #f9f8f7;
-  --raised: #ffffff;
-  --ink: #050505;
-  --ink-soft: rgba(15, 13, 10, 0.62);
-  --ink-faint: rgba(15, 13, 10, 0.45);
-  --hair: rgba(15, 13, 10, 0.08);
-  --hair-soft: rgba(15, 13, 10, 0.04);
-  --sunk: rgba(15, 13, 10, 0.04);
-  --accent: #050505;
-  --accent-ink: #ffffff;
-  --bad: #b3261e;
-  --good: #1a7f37;
+  /* Surfaces */
+  --surface-main: #dedee9;
+  --surface-container: #ffffff;
+  --surface-hovered: #fafcfa;
+  --white-50: rgba(255, 255, 255, 0.5);
+  --white-65: rgba(255, 255, 255, 0.65);
+  --white-70: rgba(255, 255, 255, 0.7);
+  --active-tint: #bec2ff1a;
 
-  /* One radius family: 12px for rows and controls, 16px for the focal card. */
-  --r-row: 12px;
-  --r-card: 16px;
+  /* Borders */
+  --border-default: #ffffff;
+  --border-container: #dbdbe5;
+  --border-action: #bec2ff;
 
-  font-family:
-    Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, ui-sans-serif,
-    system-ui, sans-serif;
-  font-size: 14px;
+  /* Text */
+  --text-primary: #010507;
+  --text-secondary: #57575b;
+  --text-disabled: #838389;
+  --text-invert: #ffffff;
+
+  /* Greys */
+  --grey-200: #f0f0f4;
+  --grey-600: #afafb7;
+  --grey-900: #2b2b2b;
+  --ink-5: #0105070d;
+
+  /* Actions: the filled button and its states. */
+  --action: var(--text-primary);
+  --action-ink: var(--text-invert);
+  --action-hover: #2b2b2b;
+  --action-disabled: #afafb7;
+  --action-disabled-ink: #ffffff;
+
+  /* Brand marks are drawn for a white ground, in either theme. */
+  --mark-ground: #ffffff;
+  --mark-ink: #010507;
+
+  --color-scheme: light;
+
+  /* State */
+  --good: #189370;
+  --bad: #fa5f67;
+  --lilac-30: #bec2ff4d;
+
+  /* Radius: 4px items, 8px cards and controls, full for pills. */
+  --r-item: 4px;
+  --r-card: 8px;
+  --r-full: 9999px;
+
+  --elevation-sm: 0px 1px 3px 0px rgba(1, 5, 7, 0.08);
+  --elevation-md: 0px 6px 6px -2px rgba(1, 5, 7, 0.08);
+
+  --sans:
+    "Plus Jakarta Sans Variable", "Plus Jakarta Sans", -apple-system,
+    BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --mono:
+    "Spline Sans Mono Variable", "Spline Sans Mono", ui-monospace,
+    SFMono-Regular, Menlo, monospace;
+
+  /* The names the screens were written against, kept so every rule reads one vocabulary. */
+  --ink: var(--text-primary);
+  --ink-soft: var(--text-secondary);
+  --ink-faint: var(--text-disabled);
+  --hair: var(--border-container);
+  --raised: var(--surface-container);
+  --sunk: var(--ink-5);
+  --accent: var(--text-primary);
+  --accent-ink: var(--text-invert);
+  --r-row: var(--r-card);
+
+  color-scheme: var(--color-scheme);
+  font-family: var(--sans);
+  font-size: 16px;
   line-height: 1.5;
-  color: var(--ink);
-  background: var(--ground);
+  color: var(--text-primary);
+  background: var(--surface-main);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
 
-/*
- * NO DARK VARIANT, DELIBERATELY, and this is the one place in the product where that is right.
- *
- * This window exists for about five minutes, once, before it becomes OpenBot and hands over to the
- * app — which does follow the system. A first-run screen is the product's handshake, and the look
- * committed here is the warm light one measured from the interface this is meant to sit beside.
- * Following the system instead would mean the first thing half of all installers ever see is a
- * variant nobody composed against a reference.
- *
- * The app this hands over to keeps its own light and dark. Only the setup window is pinned.
- */
 * {
   box-sizing: border-box;
 }
 
 body {
   margin: 0;
-  background: var(--ground);
-  color: var(--ink);
+  background: var(--surface-main);
+  color: var(--text-primary);
 }
 
 /*
- * The window is 900x640 and cannot be resized into something else, so it is composed as a room
- * rather than a page: one centred column, vertically settled, with the same optical centre on every
- * step. A wizard whose content jumps position between steps reads as four different screens.
+ * The six blurred colour fields behind everything: the signature depth cue, without which the
+ * ground reads flat. Positions, sizes and colours are the CopilotCloud frame's (1440 wide), scaled
+ * to the window so they sit in the same places at 1000 wide.
+ *
+ * MEASURED: drawn as six discs under `filter: blur(103px)`, the window felt laggy. WebKit repaints
+ * a filtered layer whenever anything above it changes, and the progress spinners and elapsed
+ * counters change every frame and every second. Each field is now a radial gradient with the same
+ * centre and a soft edge as wide as that blur, painted once with the page.
+ */
+.backdrop {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(
+      circle 24vw at 87.7vw 16.3vw,
+      rgba(255, 172, 77, 0.14),
+      transparent
+    ),
+    radial-gradient(
+      circle 30vw at 114.2vw 64.6vw,
+      #c9c9da 15%,
+      rgba(201, 201, 218, 0)
+    ),
+    radial-gradient(
+      circle 30vw at 67.7vw -4.2vw,
+      #c9c9da 15%,
+      rgba(201, 201, 218, 0)
+    ),
+    radial-gradient(
+      circle 30vw at 56.5vw 70vw,
+      #f3f3fc 15%,
+      rgba(243, 243, 252, 0)
+    ),
+    radial-gradient(
+      circle 24vw at 24.4vw 38.5vw,
+      rgba(255, 243, 136, 0.22),
+      transparent
+    ),
+    radial-gradient(
+      circle 24vw at 1.3vw 71.3vw,
+      rgba(255, 172, 77, 0.14),
+      transparent
+    );
+}
+
+/*
+ * The window opens at 1000x800 and grows to fit a taller step (see fitWindow.ts): one centred card,
+ * vertically settled, with the same optical centre on every step.
  */
 main {
+  position: relative;
+  z-index: 1;
   min-height: 100vh;
   display: grid;
   place-items: center;
-  padding: 2.5rem 2rem;
+  padding: 32px 24px;
 }
 
+/* The one focal surface per screen: frosted glass with the white edge. */
 .sheet {
   width: 100%;
-  max-width: 30rem;
+  max-width: 36rem;
   display: flex;
   flex-direction: column;
+  padding: 40px;
+  background: var(--white-50);
+  border: 2px solid var(--border-default);
+  border-radius: var(--r-card);
   /* One authored entrance, on the step rather than on every element. */
   animation: settle 0.42s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
@@ -98,55 +193,94 @@ main {
   }
 }
 
-/* Where you are, stated quietly. Operate mode: a four-step flow that says nothing about progress
-   makes people wonder how much is left, which is when they close it. */
+/* Where you are: a technical label in mono, with the line the theme's section titles carry. */
 .steps-of {
-  font-size: 0.72rem;
-  letter-spacing: 0.06em;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 12px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--ink-faint);
-  margin: 0 0 1.25rem;
+  color: var(--text-secondary);
+  margin: 0 0 24px;
+}
+
+/* Every section by name: the current one in full ink, those done softer, those ahead fainter. */
+.sections {
+  list-style: none;
+  padding: 0;
+}
+
+.sections li {
+  color: var(--text-disabled);
+  white-space: nowrap;
+}
+
+.sections li.done {
+  color: var(--text-secondary);
+}
+
+.sections li.current {
+  color: var(--text-primary);
+}
+
+.sections li + li::before {
+  content: "·";
+  margin-right: 8px;
+  color: var(--text-disabled);
+}
+
+.steps-of::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border-container);
 }
 
 h1 {
-  font-size: 1.5rem;
-  line-height: 1.2;
-  font-weight: 600;
-  letter-spacing: -0.02em;
-  margin: 0 0 0.6rem;
+  font-size: 32px;
+  line-height: 36px;
+  font-weight: 500;
+  margin: 0 0 12px;
   text-wrap: balance;
 }
 
 h2 {
-  font-size: 0.95rem;
+  font-size: 18px;
+  line-height: 20px;
   font-weight: 600;
-  margin: 0 0 0.35rem;
+  margin: 0 0 8px;
 }
 
 .lede {
-  color: var(--ink-soft);
-  margin: 0 0 1.5rem;
+  font-size: 16px;
+  line-height: 24px;
+  color: var(--text-secondary);
+  margin: 0 0 24px;
   max-width: 34rem;
 }
 
 .lede.big {
-  font-size: 0.95rem;
-  line-height: 1.6;
+  font-size: 20px;
+  line-height: 28px;
 }
 
 .footnote {
-  font-size: 0.8rem;
-  color: var(--ink-faint);
-  line-height: 1.55;
-  margin: 1.25rem 0 0;
+  font-size: 14px;
+  line-height: 22px;
+  color: var(--text-secondary);
+  margin: 20px 0 0;
 }
 
 /* Controls */
 .row {
   display: flex;
-  gap: 0.6rem;
+  gap: 8px;
   align-items: center;
-  margin-top: 1.5rem;
+  margin-top: 24px;
 }
 
 .connection-sheet .row {
@@ -166,7 +300,7 @@ h2 {
 }
 
 .new-project-form {
-  margin-top: 1rem;
+  margin-top: 16px;
 }
 
 .tile.project-choice {
@@ -176,88 +310,257 @@ h2 {
   overflow-wrap: anywhere;
 }
 
+/* Where Intelligence runs: two rows with no mark. */
+.tile.intelligence-choice {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas:
+    "name"
+    "summary";
+}
+
+/* Buttons are mono and uppercase, as the brand sets controls and pills. */
 button {
-  font: inherit;
+  font-family: var(--mono);
+  font-size: 14px;
+  line-height: 14px;
   font-weight: 500;
-  padding: 0.6rem 1.1rem;
-  border-radius: var(--r-row);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  min-height: 44px;
+  padding: 0 20px;
+  border-radius: var(--r-card);
   border: 1px solid transparent;
-  background: var(--accent);
-  color: var(--accent-ink);
+  background: var(--action);
+  color: var(--action-ink);
   cursor: pointer;
   transition:
-    opacity 0.15s ease,
-    background 0.15s ease;
+    background-color 80ms ease,
+    border-color 80ms ease,
+    color 80ms ease;
 }
 
 button:hover:not(:disabled) {
-  opacity: 0.88;
+  background: var(--action-hover);
+}
+
+/*
+ * Pressed is instant. With only a hover fade, nothing changed at the moment of the press, and the
+ * click read as arriving late.
+ */
+button:active:not(:disabled) {
+  transform: translateY(1px);
+  transition: none;
 }
 
 button:disabled {
-  opacity: 0.35;
+  background: var(--action-disabled);
+  color: var(--action-disabled-ink);
   cursor: default;
 }
 
 button.quiet {
-  background: transparent;
-  color: var(--ink-soft);
-  border-color: var(--hair);
+  background: var(--surface-container);
+  color: var(--text-primary);
+  border-color: var(--border-container);
 }
 
 button.quiet:hover:not(:disabled) {
-  color: var(--ink);
-  border-color: var(--ink-faint);
-  opacity: 1;
+  background: var(--surface-hovered);
+  border-color: var(--grey-600);
+}
+
+button.quiet:active:not(:disabled) {
+  background: var(--grey-200);
+}
+
+button.quiet:disabled,
+button.text-link:disabled,
+button.another-question:disabled {
+  opacity: 0.5;
+}
+
+/* A way out that reads as a sentence, not as a second choice of equal weight. */
+button.text-link {
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 22px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  min-height: 0;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  margin-top: 16px;
+  color: var(--text-secondary);
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+
+button.text-link:hover:not(:disabled) {
+  background: transparent;
+  color: var(--text-primary);
+}
+
+/* The last screen's question box, with the button that swaps in another question beside it. */
+.field-with-action {
+  display: flex;
+  gap: 8px;
+}
+
+.field-with-action input {
+  flex: 1;
+  min-width: 0;
+}
+
+button.another-question {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  padding: 0;
+  background: var(--surface-container);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-container);
+  border-radius: var(--r-card);
+}
+
+button.another-question:hover:not(:disabled) {
+  background: var(--surface-hovered);
+  color: var(--text-primary);
+  border-color: var(--grey-600);
+}
+
+/*
+ * Intelligence stopped while another screen is in front: a card that interrupts on purpose. Lilac
+ * when it is waiting on the person, the failure dot when it failed.
+ */
+.local-alert {
+  border: 1px solid var(--border-default);
+  border-radius: var(--r-card);
+  background: var(--surface-container);
+  box-shadow: var(--elevation-md);
+  padding: 20px;
+  margin: 0 0 24px;
+}
+
+.local-alert.needs {
+  border-color: var(--border-action);
+  box-shadow:
+    0 0 0 3px var(--lilac-30),
+    var(--elevation-md);
+}
+
+.local-alert h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.local-alert h2::before {
+  content: "";
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--bad);
+}
+
+.local-alert.needs h2::before {
+  background: var(--border-action);
+}
+
+.local-alert p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.local-alert .row {
+  margin-top: 16px;
+}
+
+/* Local Intelligence setting up behind the screen in front: one line. */
+.local-status {
+  font-size: 14px;
+  line-height: 22px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  margin: 0 0 20px;
 }
 
 :focus-visible {
-  outline: 2px solid var(--ink);
+  outline: 2px solid var(--text-primary);
   outline-offset: 2px;
 }
 
 /* Fields */
 .field {
-  margin-bottom: 0.9rem;
+  margin-bottom: 16px;
 }
 
 .field label {
   display: block;
-  font-size: 0.8rem;
-  color: var(--ink-soft);
-  margin-bottom: 0.35rem;
+  font-size: 14px;
+  line-height: 22px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
 }
 
 .field input {
   font: inherit;
+  font-size: 16px;
   width: 100%;
-  padding: 0.6rem 0.75rem;
-  border-radius: var(--r-row);
-  border: 1px solid var(--hair);
-  background: var(--raised);
-  color: var(--ink);
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: var(--r-card);
+  border: 1px solid var(--border-container);
+  background: var(--surface-container);
+  color: var(--text-primary);
 }
 
 .field input::placeholder {
-  color: var(--ink-faint);
+  color: var(--text-disabled);
 }
 
 .field input:focus-visible {
-  border-color: var(--ink-faint);
+  border-color: var(--border-action);
   outline: none;
-  box-shadow: 0 0 0 3px var(--sunk);
+  box-shadow: 0 0 0 3px var(--lilac-30);
 }
 
 /* The list of choices. Rows, not a grid of same-size cards. */
 fieldset.picker {
   border: 0;
   padding: 0;
-  margin: 0.75rem 0 0;
+  margin: 12px 0 0;
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
+  gap: 8px;
   max-height: 17rem;
   overflow-y: auto;
+}
+
+/*
+ * Every provider shows without scrolling the list: the window grows to fit (see `fitWindow.ts`),
+ * and past what the screen allows the page scrolls instead.
+ */
+fieldset.picker.providers {
+  max-height: none;
+  overflow-y: visible;
+  position: relative;
+}
+
+/* Sits on the one chosen row, so going back is where the eye already is. */
+button.text-link.change-provider {
+  position: absolute;
+  top: 50%;
+  right: 16px;
+  transform: translateY(-50%);
+  margin: 0;
 }
 
 /*
@@ -269,34 +572,55 @@ fieldset.picker {
  * tile in the product that is a real button was the one nobody could read. Nothing errored and
  * nothing looked broken: the names were simply invisible, and the screen asked somebody to choose
  * between six empty boxes.
+ *
+ * A tile that is a button also undoes the button's mono, uppercase and fixed height: it is a row
+ * of reading text, not a control label.
  */
 .tile {
   position: relative;
-  color: var(--ink);
+  color: var(--text-primary);
+  font-family: var(--sans);
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  line-height: 1.5;
+  min-height: 0;
   display: grid;
-  grid-template-columns: 32px 1fr;
+  grid-template-columns: 40px 1fr;
   grid-template-areas:
     "mark name"
     "mark summary";
   align-items: center;
-  column-gap: 0.7rem;
-  row-gap: 0.1rem;
-  padding: 0.6rem 0.7rem;
-  border: 1px solid var(--hair-soft);
-  border-radius: var(--r-row);
-  background: var(--raised);
+  column-gap: 12px;
+  row-gap: 2px;
+  padding: 12px 16px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--r-card);
+  background: var(--white-65);
   cursor: pointer;
   transition:
-    border-color 0.15s ease,
-    background 0.15s ease;
+    border-color 80ms ease,
+    background-color 80ms ease,
+    box-shadow 80ms ease;
 }
 
-.tile:hover {
-  border-color: var(--hair);
+.tile:active,
+button.tile:active:not(:disabled) {
+  transform: none;
+  background: var(--surface-container);
+  border-color: var(--border-action);
+  transition: none;
+}
+
+.tile:hover,
+button.tile:hover:not(:disabled) {
+  background: var(--surface-container);
 }
 
 .tile.chosen {
-  border-color: var(--ink);
+  background: var(--surface-container);
+  border-color: var(--border-action);
+  box-shadow: var(--elevation-sm);
 }
 
 .mark-tile {
@@ -314,36 +638,43 @@ fieldset.picker {
 
 .tile-name {
   font-weight: 500;
-  font-size: 0.85rem;
+  font-size: 16px;
+  line-height: 24px;
 }
 
 .tile-summary {
-  color: var(--ink-faint);
-  font-size: 0.75rem;
-  line-height: 1.35;
+  color: var(--text-disabled);
+  font-size: 14px;
+  line-height: 22px;
 }
 
+/* A pill: mono and uppercase, as the brand sets them. */
 .tile-note {
   justify-self: start;
-  font-size: 0.68rem;
-  color: var(--ink-soft);
-  background: var(--sunk);
-  border-radius: 999px;
-  padding: 0.08rem 0.45rem;
-  margin-top: 0.15rem;
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 10px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  background: var(--grey-200);
+  border-radius: var(--r-full);
+  padding: 4px 8px;
+  margin-top: 4px;
 }
 
 /* A brand's mark, or its name where no usable mark exists. Same box either way. */
 .mark-tile {
-  width: 32px;
-  height: 32px;
+  width: 40px;
+  height: 40px;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 5px;
-  border-radius: 8px;
-  background: #fff;
-  border: 1px solid var(--hair-soft);
+  padding: 8px;
+  border-radius: var(--r-card);
+  background: var(--mark-ground);
+  border: 1px solid var(--border-container);
   flex: none;
 }
 
@@ -362,7 +693,7 @@ fieldset.picker {
   line-height: 1.05;
   text-align: center;
   letter-spacing: -0.02em;
-  color: #050505;
+  color: var(--mark-ink);
   hyphens: none;
 }
 
@@ -376,24 +707,25 @@ fieldset.picker {
 }
 
 .tile:has(.tile-input:focus-visible) {
-  outline: 2px solid var(--ink);
+  outline: 2px solid var(--text-primary);
   outline-offset: 2px;
 }
 
 /* The framework list, which almost nobody should open. */
 details {
-  border-top: 1px solid var(--hair-soft);
-  padding-top: 0.9rem;
+  border-top: 1px solid var(--border-container);
+  padding-top: 16px;
 }
 
 details > summary {
   cursor: pointer;
-  font-size: 0.82rem;
-  color: var(--ink-faint);
+  font-size: 14px;
+  line-height: 22px;
+  color: var(--text-secondary);
   list-style: none;
   display: flex;
   align-items: center;
-  gap: 0.4rem;
+  gap: 8px;
 }
 
 details > summary::-webkit-details-marker {
@@ -415,135 +747,247 @@ details[open] > summary::before {
 }
 
 details > summary:hover {
-  color: var(--ink);
+  color: var(--text-primary);
 }
 
-/* The chosen provider's own panel: the one raised surface per screen. */
+/* The chosen provider's own panel: solid white inside the glass card. */
 .chosen-provider {
-  border: 1px solid var(--hair);
+  border: 1px solid var(--border-default);
   border-radius: var(--r-card);
-  background: var(--raised);
-  padding: 1rem;
-  margin-top: 0.9rem;
+  background: var(--surface-container);
+  box-shadow: var(--elevation-sm);
+  padding: 20px;
+  margin-top: 12px;
 }
 
 .provider-sign-in-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.6rem;
+  gap: 8px;
 }
 
+/* The theme's view toggle: active white, inactive transparent, on a faint well. */
 .segmented {
   display: inline-flex;
-  background: var(--sunk);
-  border-radius: 999px;
-  padding: 3px;
-  margin-bottom: 0.9rem;
+  gap: 4px;
+  background: var(--ink-5);
+  border-radius: var(--r-card);
+  padding: 4px;
+  margin-bottom: 16px;
 }
 
 .segmented button {
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 14px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  min-height: 32px;
+  padding: 0 12px;
   border: 0;
   background: transparent;
-  color: var(--ink-soft);
-  border-radius: 999px;
-  padding: 0.3rem 0.8rem;
-  font-size: 0.78rem;
-  font-weight: 500;
+  color: var(--text-secondary);
+  border-radius: var(--r-card);
 }
 
-.segmented button.on {
-  background: var(--raised);
-  color: var(--ink);
-  box-shadow: 0 1px 2px rgba(15, 13, 10, 0.08);
+.segmented button:hover:not(:disabled) {
+  background: var(--white-50);
+  color: var(--text-primary);
+}
+
+.segmented button.on,
+.segmented button.on:hover:not(:disabled) {
+  background: var(--surface-container);
+  color: var(--text-primary);
+  box-shadow: var(--elevation-sm);
+}
+
+a {
+  color: var(--text-primary);
+  text-underline-offset: 0.2em;
 }
 
 .caution,
 .fallback {
-  font-size: 0.78rem;
-  color: var(--ink-faint);
-  line-height: 1.5;
-  margin: 0.9rem 0 0;
+  font-size: 14px;
+  line-height: 22px;
+  color: var(--text-disabled);
+  margin: 16px 0 0;
 }
 
 .caution a,
 .fallback a {
-  color: var(--ink);
+  color: var(--text-primary);
   text-underline-offset: 2px;
 }
 
 /* Something is in the way, or something failed. */
 .blocker {
-  /* No coloured side border: the heading already carries the state, and a thick accent stripe is
-     decoration standing in for hierarchy. */
-  border: 1px solid var(--hair);
-  border-radius: var(--r-row);
-  background: var(--raised);
-  padding: 0.9rem 1rem;
-  margin: 1rem 0 0;
+  /* No coloured side border: the heading carries the state, with one small dot of red. */
+  border: 1px solid var(--border-default);
+  border-radius: var(--r-card);
+  background: var(--surface-container);
+  box-shadow: var(--elevation-sm);
+  padding: 16px 20px;
+  margin: 16px 0 0;
 }
 
 .blocker h2 {
-  color: var(--bad);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-primary);
+}
+
+.blocker h2::before {
+  content: "";
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--bad);
 }
 
 .blocker p {
   margin: 0;
-  color: var(--ink-soft);
-  font-size: 0.85rem;
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 22px;
+}
+
+/* A Windows prerequisite: wider than a step, because its commands are long and must stay legible. */
+.blocker-sheet {
+  max-width: 44rem;
+}
+
+.blocker-steps {
+  margin: 0;
+  padding-left: 20px;
+  display: grid;
+  gap: 12px;
+  font-size: 15px;
+  line-height: 24px;
+  color: var(--text-primary);
+}
+
+.blocker-steps li::marker {
+  font-family: var(--mono);
+  color: var(--text-secondary);
+}
+
+.blocker-asks {
+  margin: 0;
+  font-size: 15px;
+  line-height: 24px;
+  color: var(--text-primary);
+}
+
+.blocker-manual {
+  margin-top: 28px;
+}
+
+.blocker-manual > .blocker-steps {
+  margin-top: 16px;
+}
+
+.blocker-steps code {
+  font-family: var(--mono);
+  font-size: 13px;
+  padding: 1px 4px;
+  border-radius: var(--r-item);
+  background: var(--surface-container);
+  border: 1px solid var(--border-container);
+  overflow-wrap: anywhere;
+}
+
+/* Commands to paste, in mono, with Copy pinned to the corner. */
+.command {
+  position: relative;
+  margin-top: 8px;
+  background: var(--surface-container);
+  border: 1px solid var(--border-container);
+  border-radius: var(--r-card);
+}
+
+.command pre {
+  margin: 0;
+  padding: 14px 96px 14px 16px;
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 22px;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.command button {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  min-height: 32px;
+  padding: 0 12px;
+  font-size: 12px;
 }
 
 .setup-help {
   display: inline-block;
-  margin-top: 0.65rem;
-  color: var(--ink-soft);
-  font-size: 0.8rem;
+  margin-top: 12px;
+  color: var(--text-secondary);
+  font-size: 14px;
   text-underline-offset: 2px;
 }
 
 .external-link-error {
   display: block;
-  margin-top: 0.5rem;
-  color: var(--ink-soft);
-  font-size: 0.8rem;
+  margin-top: 8px;
+  color: var(--text-secondary);
+  font-size: 14px;
   overflow-wrap: anywhere;
 }
 
 /* Per-item progress, because this is the slowest screen in the product. */
 .steps {
-  margin: 1.25rem 0 0;
+  margin: 20px 0 0;
   padding: 0;
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 0.8rem;
+  gap: 12px;
 }
 
 .step {
   display: grid;
-  grid-template-columns: 1rem minmax(0, 1fr) auto;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
   grid-template-areas:
     "mark label status"
     ". detail detail";
-  column-gap: 0.5rem;
-  row-gap: 0.15rem;
-  align-items: baseline;
-  font-size: 0.82rem;
+  column-gap: 12px;
+  row-gap: 4px;
+  align-items: center;
+  font-size: 16px;
+  line-height: 24px;
 }
 
 .step .mark {
   grid-area: mark;
-  align-self: start;
-  font-size: 0.75rem;
+  font-size: 14px;
 }
 
 .step-label {
   grid-area: label;
 }
 
+/* Status is technical annotation: mono, uppercase, small. */
 .step-status {
   grid-area: status;
-  color: var(--ink-soft);
-  font-size: 0.72rem;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 12px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
   text-align: right;
 }
 
@@ -554,11 +998,10 @@ details > summary:hover {
 
 .step-spinner {
   display: inline-block;
-  width: 0.85rem;
-  height: 0.85rem;
-  margin-top: 0.2rem;
-  border: 2px solid var(--hair);
-  border-top-color: var(--ink);
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--border-container);
+  border-top-color: var(--text-primary);
   border-radius: 50%;
   animation: step-spin 0.8s linear infinite;
 }
@@ -584,14 +1027,19 @@ details > summary:hover {
 
 .step .detail {
   grid-area: detail;
-  color: var(--ink-soft);
-  font-size: 0.75rem;
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 22px;
   overflow-wrap: anywhere;
 }
 
 @media (max-width: 580px) {
+  .sheet {
+    padding: 24px;
+  }
+
   .step {
-    grid-template-columns: 1rem minmax(0, 1fr);
+    grid-template-columns: 16px minmax(0, 1fr);
     grid-template-areas:
       "mark label"
       ". status"
@@ -633,8 +1081,8 @@ details > summary:hover {
   --c2: oklch(70% 0.18 210);
   --c3: oklch(66% 0.2 285);
   --c4: oklch(72% 0.19 325);
-  width: 30px;
-  height: 30px;
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
   position: relative;
   isolation: isolate;
@@ -672,44 +1120,54 @@ details > summary:hover {
     inset 0 -2px 5px hsl(0 0% 0% / 0.4);
 }
 
+/* The app's name beside its mark: light, as the theme sets an app title. */
 .lockup {
   display: flex;
   align-items: center;
-  gap: 0.6rem;
-  margin-bottom: 1.75rem;
+  gap: 12px;
+  margin-bottom: 32px;
 }
 
 .lockup span {
-  font-size: 1.05rem;
-  font-weight: 600;
-  letter-spacing: -0.02em;
+  font-size: 18px;
+  line-height: 20px;
+  font-weight: 300;
+}
+
+/* The CopilotKit logotype, full lockup, with its clearspace (half its height) below it. */
+.copilotkit-logo {
+  display: block;
+  height: 28px;
+  width: auto;
+  align-self: flex-start;
+  margin-bottom: 28px;
 }
 
 /* The developer half of a failure: present, and never the headline. */
 .detail-of {
   border: 0;
-  padding: 0.6rem 0 0;
+  padding: 12px 0 0;
   margin: 0;
 }
 
 .detail-of > summary {
-  font-size: 0.78rem;
+  font-size: 14px;
 }
 
 .detail-of pre {
-  margin: 0.5rem 0 0;
-  padding: 0.6rem 0.7rem;
-  background: var(--sunk);
-  border-radius: 8px;
-  font-size: 0.72rem;
-  line-height: 1.45;
+  margin: 8px 0 0;
+  padding: 12px;
+  background: var(--ink-5);
+  border-radius: var(--r-item);
+  font-size: 12px;
+  line-height: 18px;
   white-space: pre-wrap;
   word-break: break-word;
   max-height: 9rem;
   overflow-y: auto;
-  color: var(--ink-soft);
+  color: var(--text-secondary);
   /* Monospace here is for machine output, which is what it is for. */
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--mono);
 }
 
 /*
@@ -717,25 +1175,231 @@ details > summary:hover {
  * wizard that was produced rather than written, and it is the proof the install actually worked.
  */
 .answer {
-  margin: 20px 0 4px;
-  padding: 16px 18px;
-  border-radius: 14px;
-  background: var(--raised);
-  border: 1px solid var(--hair);
+  margin: 24px 0 4px;
+  padding: 20px 24px;
+  border-radius: var(--r-card);
+  background: var(--surface-container);
+  border: 1px solid var(--border-default);
+  box-shadow: var(--elevation-sm);
 }
 
 .answer-from {
-  margin: 0 0 6px;
+  margin: 0 0 8px;
+  font-family: var(--mono);
   font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  color: var(--ink-faint);
+  line-height: 12px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
 }
 
 .answer-text {
   margin: 0;
-  font-size: 17px;
-  line-height: 1.45;
-  color: var(--ink);
+  font-size: 20px;
+  line-height: 28px;
+  color: var(--text-primary);
   white-space: pre-wrap;
+}
+
+/* The tick beside "Signed in", for the moment before the screen moves on by itself. */
+.signed-in-mark {
+  color: var(--good);
+  font-weight: 600;
+}
+
+/* Something running now, said beside the rows' spinner. */
+.status-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0 0;
+  font-size: 14px;
+  line-height: 22px;
+  color: var(--text-secondary);
+}
+
+.status-line .step-spinner {
+  flex: none;
+}
+
+/* The Status window: one white card per part, each with its memory and its actions. */
+.status-part {
+  border: 1px solid var(--border-default);
+  border-radius: var(--r-card);
+  background: var(--surface-container);
+  box-shadow: var(--elevation-sm);
+  padding: 16px 20px;
+  margin-top: 12px;
+}
+
+.status-part .row {
+  margin-top: 12px;
+}
+
+.status-part .footnote {
+  margin-top: 12px;
+}
+
+.status-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.status-head h2 {
+  margin: 0;
+}
+
+.status-state {
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 12px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.status-list {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.status-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 14px;
+  line-height: 22px;
+  color: var(--text-secondary);
+}
+
+.status-list li span:first-child {
+  overflow-wrap: anywhere;
+}
+
+.status-list li span:last-child {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.status-details {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 4px 16px;
+  margin: 24px 0 0;
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.status-details dt {
+  color: var(--text-disabled);
+}
+
+.status-details dd {
+  margin: 0;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+/* The menu's status on whichever setup screen is showing, without moving that screen. */
+.window-status {
+  position: fixed;
+  z-index: 2;
+  left: 50%;
+  bottom: 20px;
+  transform: translateX(-50%);
+  max-width: calc(100% - 32px);
+  padding: 8px 16px;
+  border: 1px solid var(--border-container);
+  border-radius: var(--r-card);
+  background: var(--surface-container);
+  box-shadow: var(--elevation-md);
+}
+
+.window-status .status-line {
+  margin: 0;
+}
+
+/*
+ * Dark, following the system. The CopilotKit theme defines light only; the brand's one verified dark
+ * context is near-black #010507 with the reversed wordmark. Everything else here is an
+ * implementation default built on that: the same structure, glass as faint white over near-black,
+ * text from the verified grey scale, and the ambient fields in the brand's lilac and mint rather
+ * than the light theme's greys, which would vanish.
+ */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --surface-main: #010507;
+    --surface-container: #14151b;
+    --surface-hovered: #1b1c23;
+    --white-50: rgba(255, 255, 255, 0.04);
+    --white-65: rgba(255, 255, 255, 0.05);
+    --white-70: rgba(255, 255, 255, 0.08);
+
+    --border-default: rgba(255, 255, 255, 0.1);
+    --border-container: rgba(255, 255, 255, 0.12);
+
+    --text-primary: #f7f7f9;
+    --text-secondary: #afafb7;
+    --text-disabled: #838389;
+    --text-invert: #010507;
+
+    --grey-200: rgba(255, 255, 255, 0.08);
+    --grey-600: rgba(255, 255, 255, 0.24);
+    --ink-5: rgba(255, 255, 255, 0.06);
+
+    --action-hover: #e2e2ea;
+    --action-disabled: #2b2b2b;
+    --action-disabled-ink: #838389;
+
+    --good: #85ecce;
+
+    --elevation-sm: 0px 1px 3px 0px rgba(0, 0, 0, 0.4);
+    --elevation-md: 0px 6px 6px -2px rgba(0, 0, 0, 0.4);
+
+    --color-scheme: dark;
+  }
+
+  .backdrop {
+    background:
+      radial-gradient(
+        circle 24vw at 87.7vw 16.3vw,
+        rgba(190, 194, 255, 0.12),
+        transparent
+      ),
+      radial-gradient(
+        circle 30vw at 67.7vw -4.2vw,
+        rgba(190, 194, 255, 0.08),
+        transparent
+      ),
+      radial-gradient(
+        circle 24vw at 24.4vw 38.5vw,
+        rgba(133, 236, 206, 0.07),
+        transparent
+      ),
+      radial-gradient(
+        circle 24vw at 1.3vw 71.3vw,
+        rgba(255, 172, 77, 0.06),
+        transparent
+      ),
+      radial-gradient(
+        circle 30vw at 56.5vw 70vw,
+        rgba(190, 194, 255, 0.05),
+        transparent
+      );
+  }
+
+  /* White edges on glass become faint ones; a 2px white rim on near-black is a frame, not frost. */
+  .sheet {
+    border-width: 1px;
+  }
 }

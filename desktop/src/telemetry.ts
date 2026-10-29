@@ -5,6 +5,7 @@ export type SetupStep =
   | "welcome"
   | "harness"
   | "install"
+  | "account"
   | "model"
   | "connect"
   | "ask";

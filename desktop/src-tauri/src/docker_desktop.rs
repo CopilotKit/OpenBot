@@ -41,12 +41,19 @@ pub(crate) fn app_places() -> Vec<PathBuf> {
         }
         places
     }
+    // Per user and per machine: Docker's installer offers both.
     #[cfg(target_os = "windows")]
     {
-        std::env::var_os("ProgramFiles")
-            .map(|files| PathBuf::from(files).join("Docker\\Docker\\Docker Desktop.exe"))
-            .into_iter()
-            .collect()
+        [
+            std::env::var_os("LOCALAPPDATA").map(|local| {
+                PathBuf::from(local).join("Programs\\DockerDesktop\\Docker Desktop.exe")
+            }),
+            std::env::var_os("ProgramFiles")
+                .map(|files| PathBuf::from(files).join("Docker\\Docker\\Docker Desktop.exe")),
+        ]
+        .into_iter()
+        .flatten()
+        .collect()
     }
     #[cfg(target_os = "linux")]
     {

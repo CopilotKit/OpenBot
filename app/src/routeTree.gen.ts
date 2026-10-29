@@ -41,6 +41,7 @@ import { Route as AuthedAdminSkillsRouteImport } from './routes/_authed/admin/sk
 import { Route as AuthedSettingsIndexRouteImport } from './routes/_authed/settings/index'
 import { Route as AuthedSettingsApprovalsRouteImport } from './routes/_authed/settings/approvals'
 import { Route as AuthedSettingsBrowsersRouteImport } from './routes/_authed/settings/browsers'
+import { Route as AuthedSettingsComputerRouteImport } from './routes/_authed/settings/computer'
 import { Route as AuthedSettingsLearningRouteImport } from './routes/_authed/settings/learning'
 import { Route as AuthedSettingsMemoryRouteImport } from './routes/_authed/settings/memory'
 import { Route as AuthedSettingsNotificationsRouteImport } from './routes/_authed/settings/notifications'
@@ -242,6 +243,11 @@ const AuthedSettingsApprovalsRoute = AuthedSettingsApprovalsRouteImport.update({
 const AuthedSettingsBrowsersRoute = AuthedSettingsBrowsersRouteImport.update({
   id: '/browsers',
   path: '/browsers',
+  getParentRoute: () => AuthedSettingsRouteRoute,
+} as any)
+const AuthedSettingsComputerRoute = AuthedSettingsComputerRouteImport.update({
+  id: '/computer',
+  path: '/computer',
   getParentRoute: () => AuthedSettingsRouteRoute,
 } as any)
 const AuthedSettingsLearningRoute = AuthedSettingsLearningRouteImport.update({
@@ -513,6 +519,7 @@ export interface FileRoutesByFullPath {
   '/admin/skills': typeof AuthedAdminSkillsRoute
   '/settings/approvals': typeof AuthedSettingsApprovalsRoute
   '/settings/browsers': typeof AuthedSettingsBrowsersRoute
+  '/settings/computer': typeof AuthedSettingsComputerRoute
   '/settings/learning': typeof AuthedSettingsLearningRoute
   '/settings/memory': typeof AuthedSettingsMemoryRoute
   '/settings/notifications': typeof AuthedSettingsNotificationsRoute
@@ -584,6 +591,7 @@ export interface FileRoutesByTo {
   '/admin/skills': typeof AuthedAdminSkillsRoute
   '/settings/approvals': typeof AuthedSettingsApprovalsRoute
   '/settings/browsers': typeof AuthedSettingsBrowsersRoute
+  '/settings/computer': typeof AuthedSettingsComputerRoute
   '/settings/learning': typeof AuthedSettingsLearningRoute
   '/settings/memory': typeof AuthedSettingsMemoryRoute
   '/settings/notifications': typeof AuthedSettingsNotificationsRoute
@@ -660,6 +668,7 @@ export interface FileRoutesById {
   '/_authed/admin/skills': typeof AuthedAdminSkillsRoute
   '/_authed/settings/approvals': typeof AuthedSettingsApprovalsRoute
   '/_authed/settings/browsers': typeof AuthedSettingsBrowsersRoute
+  '/_authed/settings/computer': typeof AuthedSettingsComputerRoute
   '/_authed/settings/learning': typeof AuthedSettingsLearningRoute
   '/_authed/settings/memory': typeof AuthedSettingsMemoryRoute
   '/_authed/settings/notifications': typeof AuthedSettingsNotificationsRoute
@@ -737,6 +746,7 @@ export interface FileRouteTypes {
     | '/admin/skills'
     | '/settings/approvals'
     | '/settings/browsers'
+    | '/settings/computer'
     | '/settings/learning'
     | '/settings/memory'
     | '/settings/notifications'
@@ -808,6 +818,7 @@ export interface FileRouteTypes {
     | '/admin/skills'
     | '/settings/approvals'
     | '/settings/browsers'
+    | '/settings/computer'
     | '/settings/learning'
     | '/settings/memory'
     | '/settings/notifications'
@@ -883,6 +894,7 @@ export interface FileRouteTypes {
     | '/_authed/admin/skills'
     | '/_authed/settings/approvals'
     | '/_authed/settings/browsers'
+    | '/_authed/settings/computer'
     | '/_authed/settings/learning'
     | '/_authed/settings/memory'
     | '/_authed/settings/notifications'
@@ -1159,6 +1171,13 @@ declare module '@tanstack/react-router' {
       path: '/browsers'
       fullPath: '/settings/browsers'
       preLoaderRoute: typeof AuthedSettingsBrowsersRouteImport
+      parentRoute: typeof AuthedSettingsRouteRoute
+    }
+    '/_authed/settings/computer': {
+      id: '/_authed/settings/computer'
+      path: '/computer'
+      fullPath: '/settings/computer'
+      preLoaderRoute: typeof AuthedSettingsComputerRouteImport
       parentRoute: typeof AuthedSettingsRouteRoute
     }
     '/_authed/settings/learning': {
@@ -1516,6 +1535,7 @@ const AuthedAdminRouteRouteWithChildren =
 interface AuthedSettingsRouteRouteChildren {
   AuthedSettingsApprovalsRoute: typeof AuthedSettingsApprovalsRoute
   AuthedSettingsBrowsersRoute: typeof AuthedSettingsBrowsersRoute
+  AuthedSettingsComputerRoute: typeof AuthedSettingsComputerRoute
   AuthedSettingsLearningRoute: typeof AuthedSettingsLearningRoute
   AuthedSettingsMemoryRoute: typeof AuthedSettingsMemoryRoute
   AuthedSettingsNotificationsRoute: typeof AuthedSettingsNotificationsRoute
@@ -1530,6 +1550,7 @@ interface AuthedSettingsRouteRouteChildren {
 const AuthedSettingsRouteRouteChildren: AuthedSettingsRouteRouteChildren = {
   AuthedSettingsApprovalsRoute: AuthedSettingsApprovalsRoute,
   AuthedSettingsBrowsersRoute: AuthedSettingsBrowsersRoute,
+  AuthedSettingsComputerRoute: AuthedSettingsComputerRoute,
   AuthedSettingsLearningRoute: AuthedSettingsLearningRoute,
   AuthedSettingsMemoryRoute: AuthedSettingsMemoryRoute,
   AuthedSettingsNotificationsRoute: AuthedSettingsNotificationsRoute,

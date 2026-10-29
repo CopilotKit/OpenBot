@@ -71,7 +71,7 @@ pub struct Download {
 /// The Intel Mac case is real and not hypothetical: Podman 6.1.1 publishes `arm64` only. Answering
 /// with the arm64 package there would install something that cannot run, so it says so instead.
 pub fn podman_download() -> Result<Download, Problem> {
-    let (file, sha256) = match (std::env::consts::OS, std::env::consts::ARCH) {
+    let (file, sha256) = match (std::env::consts::OS, crate::windows::machine_arch()) {
         ("windows", "x86_64") => (
             "podman-installer-windows-amd64.msi",
             "91d0e8ea0846c0151d531c88c329bb2729387231e4d1e42306a8e3ae9d09fc8a",
@@ -117,7 +117,7 @@ pub fn podman_download() -> Result<Download, Problem> {
 /// One static binary on every platform, which is the whole reason this can be placed beside the
 /// engine rather than installed into the system.
 pub fn compose_download() -> Result<Download, Problem> {
-    let (file, sha256) = match (std::env::consts::OS, std::env::consts::ARCH) {
+    let (file, sha256) = match (std::env::consts::OS, crate::windows::machine_arch()) {
         ("windows", "x86_64") => (
             "docker-compose-windows-x86_64.exe",
             "a3c0c73033eaede90210345d0cc2233edf4fab8fe0282a91dad8fd8436809d2f",
@@ -272,7 +272,7 @@ fn bun_download(os: &str, arch: &str) -> Result<Download, Problem> {
 }
 
 fn install_bun(cache: &Path) -> Result<PathBuf, Problem> {
-    let download = bun_download(std::env::consts::OS, std::env::consts::ARCH)?;
+    let download = bun_download(std::env::consts::OS, crate::windows::machine_arch())?;
     let entry = format!(
         "{}/bun{}",
         download.file.trim_end_matches(".zip"),
@@ -397,15 +397,32 @@ pub fn install_engine_observed(
     installed: impl FnMut(Engine, bool),
     progress: &mut dyn FnMut(String),
 ) -> Result<EngineChosen, Problem> {
+    // Only one of the two runs, so they share the step row's lines one at a time.
+    let progress = std::cell::RefCell::new(progress);
     install_engine_with(
         cache,
         Found::here(saved),
         saved,
         installed,
-        || crate::docker_desktop::start(progress),
-        install_podman,
+        || crate::docker_desktop::start(&mut **progress.borrow_mut()),
+        |into| {
+            (progress.borrow_mut())(podman_install_said(std::env::consts::OS).into());
+            install_podman(into)
+        },
         place_compose,
     )
+}
+
+/// The step row's line while Podman installs, naming the prompt the platform raises for it.
+///
+/// macOS asks for the person's password, because the package writes to `/opt/podman`. Windows
+/// asks for nothing here: the MSI installs for this account alone. Linux asks through `pkexec`.
+fn podman_install_said(os: &str) -> &'static str {
+    match os {
+        "macos" => "Installing Podman. Enter your Mac password when macOS asks for it.",
+        "linux" => "Installing Podman. Enter your password when your system asks for it.",
+        _ => "Installing Podman.",
+    }
 }
 
 /// What engines this machine has, read once so the choice below can be tested on any machine.
@@ -1718,5 +1735,13 @@ esac
         assert!(quoted.starts_with('\''), "{quoted}");
         assert!(quoted.contains("Application Support"), "{quoted}");
         assert!(!quoted.contains("\\\""), "{quoted}");
+    }
+
+    /// The prompt is named where there is one, and none is promised where there is not.
+    #[test]
+    fn the_podman_install_line_names_the_prompt_each_platform_raises() {
+        assert!(podman_install_said("macos").contains("password"));
+        assert!(podman_install_said("linux").contains("password"));
+        assert_eq!(podman_install_said("windows"), "Installing Podman.");
     }
 }

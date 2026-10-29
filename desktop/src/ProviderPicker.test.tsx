@@ -1,6 +1,12 @@
 import { afterAll, afterEach, beforeAll, expect, mock, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { act, cleanup, render, waitFor } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type {
   HeldConfiguration,
@@ -152,6 +158,15 @@ async function renderPickerWithHeld(
   return view;
 }
 
+/** Chooses a provider row, going back to the whole list first when one is already chosen. */
+async function pick(view: ReturnType<typeof render>, name: RegExp) {
+  const change = view.queryByRole("button", {
+    name: "Choose a different provider",
+  });
+  if (change) await userEvent.click(change);
+  await userEvent.click(await view.findByRole("radio", { name }));
+}
+
 test("a completed plan sign-in enables and submits only its issuing provider", async () => {
   const choices: unknown[] = [];
   invokeHandler = async (command, args) => {
@@ -166,21 +181,52 @@ test("a completed plan sign-in enables and submits only its issuing provider", a
 
   const view = await renderPicker((choice) => choices.push(choice));
 
-  await userEvent.click(await view.findByRole("radio", { name: /OpenAI/ }));
+  await pick(view, /OpenAI/);
   await userEvent.click(
     view.getByRole("button", { name: "Sign in with OpenAI" }),
   );
   await waitFor(() =>
     expect(view.getByText(/Signed in to OpenAI/)).toBeTruthy(),
   );
-  await userEvent.click(view.getByRole("radio", { name: /Anthropic/ }));
+  // The finished sign-in moves on by itself, with its own provider's token.
+  await waitFor(
+    () =>
+      expect(choices).toEqual([
+        { provider: "openai", login: "plan", token: "chatgpt-token" },
+      ]),
+    { timeout: 4000 },
+  );
+  await pick(view, /Anthropic/);
 
   expect(view.queryByText(/Signed in to Anthropic/)).toBeNull();
   const continueButton = view.getByRole("button", { name: "Continue" });
   expect(continueButton).toHaveProperty("disabled", true);
 
   await userEvent.click(continueButton);
+  expect(choices).toHaveLength(1);
+});
+
+test("a finished sign-in shows its tick for a second, and choosing another row then cancels the move", async () => {
+  const choices: unknown[] = [];
+  invokeHandler = async (command) => {
+    if (command === "providers") return providers;
+    if (command === "begin_chatgpt_sign_in") return "https://chatgpt.test";
+    if (command === "finish_chatgpt_sign_in") return "chatgpt-token";
+    throw new Error(`unexpected command ${command}`);
+  };
+  const view = await renderPicker((choice) => choices.push(choice));
+  await pick(view, /OpenAI/);
+  await userEvent.click(
+    view.getByRole("button", { name: "Sign in with OpenAI" }),
+  );
+  const tick = await view.findByText(/✓/);
+  expect(tick.closest("p")?.textContent).toContain("Signed in to OpenAI.");
   expect(choices).toEqual([]);
+  // Another row inside the second: nothing moves on.
+  await pick(view, /Anthropic/);
+  await act(async () => new Promise((resolve) => setTimeout(resolve, 1300)));
+  expect(choices).toEqual([]);
+  expect(view.queryByText(/✓/)).toBeNull();
 });
 
 test("a pending plan sign-in completion is ignored after switching provider rows", async () => {
@@ -197,7 +243,7 @@ test("a pending plan sign-in completion is ignored after switching provider rows
 
   const view = await renderPicker((choice) => choices.push(choice));
 
-  await userEvent.click(await view.findByRole("radio", { name: /OpenAI/ }));
+  await pick(view, /OpenAI/);
   await userEvent.click(
     view.getByRole("button", { name: "Sign in with OpenAI" }),
   );
@@ -206,7 +252,11 @@ test("a pending plan sign-in completion is ignored after switching provider rows
       invokeCalls.some((call) => call.command === "finish_chatgpt_sign_in"),
     ).toBe(true),
   );
-  await userEvent.click(view.getByRole("radio", { name: /Anthropic/ }));
+  // The wait for the browser is said with a spinner, as every setup row is.
+  const waiting = view.getByRole("status");
+  expect(waiting.textContent).toBe("Waiting for you to approve it…");
+  expect(waiting.querySelector(".step-spinner")).not.toBeNull();
+  await pick(view, /Anthropic/);
 
   await act(async () => {
     chatgpt.resolve("chatgpt-token");
@@ -241,7 +291,7 @@ test("a saved provider-scoped plan session enables continue without exposing a t
     (choice) => choices.push(choice),
   );
 
-  await userEvent.click(await view.findByRole("radio", { name: /OpenAI/ }));
+  await pick(view, /OpenAI/);
   expect(view.getByText(/A saved OpenAI sign-in will be checked/)).toBeTruthy();
   await userEvent.click(view.getByRole("button", { name: "Continue" }));
 
@@ -277,9 +327,7 @@ for (const provider of providers) {
         (choice) => choices.push(choice),
       );
 
-      await userEvent.click(
-        await view.findByRole("radio", { name: new RegExp(provider.name) }),
-      );
+      await pick(view, new RegExp(provider.name));
       await userEvent.click(view.getByRole("tab", { name: "Use an API key" }));
       await userEvent.type(
         view.getByLabelText(`${provider.name} API key`),
@@ -310,7 +358,14 @@ for (const provider of providers) {
         ),
       );
       expect(view.queryByLabelText(`${provider.name} API key`)).toBeNull();
-      await userEvent.click(view.getByRole("button", { name: "Continue" }));
+      // A fresh sign-in moves on by itself; a saved one is only offered, so it waits for Continue.
+      if (session === "saved") {
+        await userEvent.click(view.getByRole("button", { name: "Continue" }));
+      } else {
+        await waitFor(() => expect(choices).toHaveLength(1), {
+          timeout: 4000,
+        });
+      }
 
       expect(choices).toHaveLength(1);
       expect(choices[0]).not.toHaveProperty("apiKey");
@@ -329,9 +384,7 @@ for (const provider of providers) {
       throw new Error(`unexpected command ${command}`);
     };
     const view = await renderPicker((choice) => choices.push(choice));
-    await userEvent.click(
-      await view.findByRole("radio", { name: new RegExp(provider.name) }),
-    );
+    await pick(view, new RegExp(provider.name));
     await userEvent.click(view.getByRole("tab", { name: "Use an API key" }));
     await userEvent.type(
       view.getByLabelText(`${provider.name} API key`),
@@ -369,9 +422,7 @@ test("a compatible endpoint does not inherit a saved OpenAI API key", async () =
     (choice) => choices.push(choice),
   );
 
-  await userEvent.click(
-    await view.findByRole("radio", { name: /OpenAI-compatible/ }),
-  );
+  await pick(view, /OpenAI-compatible/);
   await userEvent.type(
     view.getByLabelText("Base URL"),
     "https://models.example/v1",
@@ -409,9 +460,7 @@ test("a compatible endpoint submits the key typed into its endpoint key field", 
     (choice) => choices.push(choice),
   );
 
-  await userEvent.click(
-    await view.findByRole("radio", { name: /OpenAI-compatible/ }),
-  );
+  await pick(view, /OpenAI-compatible/);
   await userEvent.type(
     view.getByLabelText("Base URL"),
     "https://models.example/v1",
@@ -441,9 +490,7 @@ test("a compatible endpoint carries an optional container-only URL", async () =>
   };
 
   const view = await renderPickerWithHeld({}, (choice) => choices.push(choice));
-  await userEvent.click(
-    await view.findByRole("radio", { name: /OpenAI-compatible/ }),
-  );
+  await pick(view, /OpenAI-compatible/);
   await userEvent.type(
     view.getByLabelText("Base URL"),
     "http://127.0.0.1:11434/v1",
@@ -474,9 +521,7 @@ test("a compatible endpoint uses the host URL for containers when no override is
   };
 
   const view = await renderPickerWithHeld({}, (choice) => choices.push(choice));
-  await userEvent.click(
-    await view.findByRole("radio", { name: /OpenAI-compatible/ }),
-  );
+  await pick(view, /OpenAI-compatible/);
   await userEvent.type(
     view.getByLabelText("Base URL"),
     "https://models.example/v1",
@@ -507,9 +552,7 @@ test("a compatible endpoint refuses an invalid container-only URL", async () => 
   };
 
   const view = await renderPickerWithHeld({}, (choice) => choices.push(choice));
-  await userEvent.click(
-    await view.findByRole("radio", { name: /OpenAI-compatible/ }),
-  );
+  await pick(view, /OpenAI-compatible/);
   await userEvent.type(
     view.getByLabelText("Base URL"),
     "http://127.0.0.1:11434/v1",
@@ -540,9 +583,7 @@ test.each([
   };
 
   const view = await renderPicker((choice) => choices.push(choice));
-  await userEvent.click(
-    await view.findByRole("radio", { name: /OpenAI-compatible/ }),
-  );
+  await pick(view, /OpenAI-compatible/);
   await userEvent.type(view.getByLabelText("Base URL"), baseUrl);
   await userEvent.type(view.getByLabelText("Model name"), "local-model");
 
@@ -564,9 +605,7 @@ test("a compatible endpoint accepts local http and external https URLs", async (
     "https://models.example/v1",
   ]) {
     const view = await renderPicker((choice) => choices.push(choice));
-    await userEvent.click(
-      await view.findByRole("radio", { name: /OpenAI-compatible/ }),
-    );
+    await pick(view, /OpenAI-compatible/);
     await userEvent.type(view.getByLabelText("Base URL"), baseUrl);
     await userEvent.type(view.getByLabelText("Model name"), "local-model");
 
@@ -601,9 +640,7 @@ for (const provider of providers) {
         throw new Error(`unexpected protected command ${command}`);
       };
       const view = await renderPicker((choice) => choices.push(choice));
-      await userEvent.click(
-        await view.findByRole("radio", { name: new RegExp(provider.name) }),
-      );
+      await pick(view, new RegExp(provider.name));
       if (login === "api-key")
         await userEvent.click(
           view.getByRole("tab", { name: "Use an API key" }),
@@ -628,9 +665,7 @@ for (const provider of providers) {
       await userEvent.click(view.getByRole("button", { name: "Continue" }));
       expect(choices).toEqual([{ provider: provider.id, login, saved: true }]);
       const other = providers.find((item) => item.id !== provider.id)!;
-      await userEvent.click(
-        view.getByRole("radio", { name: new RegExp(other.name) }),
-      );
+      await pick(view, new RegExp(other.name));
       expect(view.getByRole("button", { name: "Continue" })).toHaveProperty(
         "disabled",
         true,
@@ -881,7 +916,8 @@ for (const provider of cloudProviders) {
       view.getByRole("button", { name: `Sign in with ${provider.name}` }),
     );
     await view.findByText(`Signed in to ${provider.name}.`);
-    await user.click(view.getByRole("button", { name: "Continue" }));
+    // Signed in with a model already named: on by itself, no Continue.
+    await waitFor(() => expect(choices).toHaveLength(1), { timeout: 4000 });
     expect(choices).toEqual([
       {
         provider: provider.id,
@@ -1061,9 +1097,7 @@ for (const provider of cloudProviders) {
     const other = cloudProviders.find(
       (candidate) => candidate.id !== provider.id,
     )!;
-    await userEvent.click(
-      view.getByRole("radio", { name: new RegExp(other.name) }),
-    );
+    await pick(view, new RegExp(other.name));
     expect(view.getByLabelText(`${other.name} API key`)).toHaveProperty(
       "value",
       "",
@@ -1087,3 +1121,28 @@ for (const provider of cloudProviders) {
     });
   });
 }
+
+test("a chosen provider stands alone, and Change or Escape shows them all again", async () => {
+  invokeHandler = async (command) => {
+    if (command === "providers") return providers;
+    return null;
+  };
+  const view = await renderPicker();
+  const everyRow = (await view.findAllByRole("radio")).length;
+  expect(everyRow).toBeGreaterThan(1);
+
+  await userEvent.click(view.getByRole("radio", { name: /Anthropic/ }));
+  expect(view.getAllByRole("radio")).toHaveLength(1);
+  await userEvent.click(
+    view.getByRole("button", { name: "Choose a different provider" }),
+  );
+  expect(view.getAllByRole("radio")).toHaveLength(everyRow);
+  expect(
+    view.queryByRole("button", { name: "Choose a different provider" }),
+  ).toBeNull();
+
+  await userEvent.click(view.getByRole("radio", { name: /OpenAI$|^OpenAI/ }));
+  expect(view.getAllByRole("radio")).toHaveLength(1);
+  fireEvent.keyDown(window, { key: "Escape" });
+  expect(view.getAllByRole("radio")).toHaveLength(everyRow);
+});

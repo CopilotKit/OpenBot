@@ -216,17 +216,27 @@ fn fingerprint(root: &Path) -> Result<String, Problem> {
 }
 
 fn write_record(root: &Path, name: &str, value: &impl Serialize) -> Result<(), Problem> {
+    write_checkpoint(root, name, value).map_err(required)
+}
+
+/// Replace a checkpoint file through a temporary file. The error is the underlying cause, for the
+/// caller to put beside its own sentence.
+pub(crate) fn write_checkpoint(
+    root: &Path,
+    name: &str,
+    value: &impl Serialize,
+) -> Result<(), String> {
     let target = root.join(name);
     let temporary = root.join(format!("{name}.tmp"));
-    let bytes = serde_json::to_vec(value).map_err(|e| required(e.to_string()))?;
-    std::fs::write(&temporary, bytes).map_err(|e| required(e.to_string()))?;
+    let bytes = serde_json::to_vec(value).map_err(|e| e.to_string())?;
+    std::fs::write(&temporary, bytes).map_err(|e| e.to_string())?;
     // Windows rename does not replace an existing file. A missing checkpoint is safe on interruption.
     match std::fs::remove_file(&target) {
         Ok(()) => {}
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(e) => return Err(required(e.to_string())),
+        Err(e) => return Err(e.to_string()),
     }
-    std::fs::rename(temporary, target).map_err(|e| required(e.to_string()))
+    std::fs::rename(temporary, target).map_err(|e| e.to_string())
 }
 
 pub fn invalidate(root: &Path) -> Result<(), Problem> {
@@ -465,11 +475,16 @@ fn complete_with(
 }
 
 /// `selection=None` is the auth check, which has no authority to change the Bot selection.
+///
+/// No runtime and no packages: OpenBot's server and worker are containers now, so what Start needs
+/// from the installation is the deployment it laid out and the images it downloaded. Installation
+/// still records the host packages, for the self-hosted Intelligence sign-in that runs on the host,
+/// and that sign-in checks them itself.
 pub fn require(
     root: &Path,
     selection: Option<&Option<HarnessChoice>>,
     address: &Address,
-) -> Result<PathBuf, Problem> {
+) -> Result<(), Problem> {
     require_with(root, selection, |images| require_images(address, images))
 }
 
@@ -477,7 +492,7 @@ fn require_with(
     root: &Path,
     selection: Option<&Option<HarnessChoice>>,
     verify: impl FnOnce(&[String]) -> Result<(), Problem>,
-) -> Result<PathBuf, Problem> {
+) -> Result<(), Problem> {
     let record: Prepared = serde_json::from_slice(
         &std::fs::read(root.join(FILE)).map_err(|e| required(e.to_string()))?,
     )
@@ -492,6 +507,12 @@ fn require_with(
     if let Some(problem) = stack::deployment_problem(root) {
         return Err(required(problem));
     }
+    // Install moves this one to the latest release; Start cannot. See `deployment_release`.
+    if deployment::predates_containers(root) {
+        return Err(required(
+            "The deployment is a release from before OpenBot ran its server in a container.",
+        ));
+    }
     // A deployment laid out by an app that copied less still matches its own fingerprint. Install
     // lays it out again; Start cannot.
     if deployment::installed(root)
@@ -501,9 +522,7 @@ fn require_with(
             "The deployment was laid out by an earlier OpenBot and is missing files this version runs.",
         ));
     }
-    let bun = dependencies_ready(root)?;
-    verify(&record.images)?;
-    Ok(bun)
+    verify(&record.images)
 }
 
 /// Public Compose overrides suffice to identify and download software before authentication.
@@ -523,6 +542,9 @@ pub fn image_settings(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A Compose file from a release that runs the server and worker as services.
+    const COMPOSE: &str = "services:\n  server: {}\n  worker: {}\n";
 
     #[test]
     fn the_saved_engine_outlives_a_new_preparation() {
@@ -594,7 +616,7 @@ mod tests {
             )
             .unwrap();
             std::fs::write(root.join("bun.lock"), "synthetic-lock").unwrap();
-            std::fs::write(root.join("docker-compose.yml"), "services: {}\n").unwrap();
+            std::fs::write(root.join("docker-compose.yml"), COMPOSE).unwrap();
             std::fs::write(root.join("container-images.json"), "{}").unwrap();
             deployment::record(&root, "v-test").unwrap();
             let source = root.join("runtime.rs");
@@ -723,7 +745,23 @@ fn main() {
     }
 
     #[test]
-    fn changed_bot_lockfile_or_deleted_package_requires_installation() {
+    fn a_release_whose_server_ran_on_the_host_must_be_installed_again_before_start() {
+        let f = Fixture::new();
+        std::fs::write(
+            f.root.join("docker-compose.yml"),
+            "services:\n  postgres: {}\n  supervisor: {}\n",
+        )
+        .unwrap();
+        f.prepared(None);
+        let problem = require_with(&f.root, Some(&None), |_| Ok(())).unwrap_err();
+        assert!(
+            format!("{problem:?}").contains("before OpenBot ran its server in a container"),
+            "{problem:?}"
+        );
+    }
+
+    #[test]
+    fn changed_bot_requires_installation_but_host_packages_do_not() {
         let f = Fixture::new();
         let chosen = Some(HarnessChoice {
             id: "langgraph".into(),
@@ -735,11 +773,18 @@ fn main() {
             "wrong selection must stop first"
         ))
         .is_err());
+        // Start runs containers, so the host's packages and runtime are not its business.
         std::fs::remove_file(f.root.join("node_modules/synthetic-package/package.json")).unwrap();
-        assert!(require_with(&f.root, Some(&chosen), |_| Ok(())).is_err());
-        f.dependencies();
-        f.prepared(chosen.as_ref());
-        std::fs::write(f.root.join("bun.lock"), "changed-lock").unwrap();
+        std::fs::write(f.root.join("runtime-version"), "1.2.15").unwrap();
+        require_with(&f.root, Some(&chosen), |_| Ok(())).unwrap();
+        // The images still are.
+        assert!(require_with(&f.root, Some(&chosen), |_| Err(required("missing image"))).is_err());
+        // And the deployment Compose runs.
+        std::fs::write(
+            f.root.join("docker-compose.yml"),
+            format!("{COMPOSE}  x: {{}}\n"),
+        )
+        .unwrap();
         assert!(require_with(&f.root, Some(&chosen), |_| Ok(())).is_err());
     }
 
@@ -810,11 +855,14 @@ fn main() {
             .expect_err("Start must not run a browser with no Recorder to load");
         assert!(gone.said.contains("Finish installing"), "{gone:?}");
 
-        // A changed lockfile for the computer is a changed installation, as the root's is.
+        // A changed lockfile for the computer is a changed installation, as the root's is. Start no
+        // longer refuses over it: the browser's next Start installs again rather than running the
+        // old packages (`install_dependencies_if_needed`).
         place_recorder_with(&f.root, COMPUTER, &mut image.engine()).unwrap();
         complete_with(&f.root, None, images(), |_| Ok(())).unwrap();
+        assert!(dependencies_ready(&f.root).is_ok());
         std::fs::write(f.root.join("agent-computer/bun.lock"), "changed-lock").unwrap();
-        assert!(require_with(&f.root, None, |_| Ok(())).is_err());
+        assert!(dependencies_ready(&f.root).is_err());
     }
 
     /// Releases before the browser have no Recorder to put in place and no computer to install for.

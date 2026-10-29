@@ -11,6 +11,8 @@ pub mod host_access;
 pub mod install;
 pub mod intelligence;
 pub mod local_browser;
+pub mod local_eval;
+pub mod local_eval_state;
 pub mod organization_auth;
 pub mod plan;
 pub mod preparation;

@@ -1,13 +1,10 @@
 "use client";
 
-import * as React from "react";
 import { mergeProps } from "@base-ui/react/merge-props";
 import { useRender } from "@base-ui/react/use-render";
+import { IconLayoutSidebar } from "@tabler/icons-react";
 import { cva, type VariantProps } from "class-variance-authority";
-
-import { useIsMobile } from "@/hooks/use-mobile";
-import { keyOf } from "@/lib/hotkeys/hotkeys";
-import { cn } from "@/lib/utils";
+import * as React from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
@@ -24,7 +21,10 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { IconLayoutSidebar } from "@tabler/icons-react";
+import { useIsMobile } from "@/hooks/use-mobile";
+import { keyOf } from "@/lib/hotkeys/hotkeys";
+import { clampSidebarWidth, SIDEBAR_MIN_WIDTH } from "@/lib/sidebar";
+import { cn } from "@/lib/utils";
 
 const SIDEBAR_WIDTH = "16rem";
 const SIDEBAR_WIDTH_MOBILE = "18rem";
@@ -296,8 +296,76 @@ function SidebarTrigger({
   );
 }
 
+/**
+ * How a shell lets its sidebar be resized: `setWidth` while the edge is dragged, `commitWidth` when it
+ * is let go. Provided by `SidebarShell`; without it the rail only toggles, as it always did.
+ */
+type SidebarResize = {
+  setWidth: (pixels: number) => void;
+  commitWidth: (pixels: number) => void;
+  setResizing: (resizing: boolean) => void;
+};
+
+const SidebarResizeContext = React.createContext<SidebarResize | null>(null);
+
+const SidebarResizeProvider = SidebarResizeContext.Provider;
+
+/**
+ * The narrowest the sidebar can be and still show its footer whole: its widest footer button's own
+ * content, plus the paddings around it. Measured from what is drawn, never from a rem constant, and
+ * never under `SIDEBAR_MIN_WIDTH`. A sidebar with no footer has only that floor.
+ */
+function footerWidth(panel: HTMLElement): number {
+  const footer = panel.querySelector<HTMLElement>(
+    '[data-slot="sidebar-footer"]',
+  );
+  if (!footer) return SIDEBAR_MIN_WIDTH;
+  const around =
+    panel.getBoundingClientRect().width - footer.getBoundingClientRect().width;
+  const footerStyle = getComputedStyle(footer);
+  const footerPadding =
+    Number.parseFloat(footerStyle.paddingLeft) +
+    Number.parseFloat(footerStyle.paddingRight);
+  let widest = 0;
+  for (const button of footer.querySelectorAll<HTMLElement>(
+    '[data-sidebar="menu-button"]',
+  )) {
+    const style = getComputedStyle(button);
+    const gap = Number.parseFloat(style.columnGap) || 0;
+    const children = Array.from(button.children) as HTMLElement[];
+    // `scrollWidth`, not the drawn width: a truncated label still reports what it needs.
+    const content =
+      children.reduce((sum, child) => sum + child.scrollWidth, 0) +
+      gap * Math.max(0, children.length - 1);
+    widest = Math.max(
+      widest,
+      content +
+        Number.parseFloat(style.paddingLeft) +
+        Number.parseFloat(style.paddingRight),
+    );
+  }
+  return Math.max(
+    SIDEBAR_MIN_WIDTH,
+    Math.ceil(widest + footerPadding + around),
+  );
+}
+
+/**
+ * The sidebar's edge. Dragged, it resizes the sidebar between what its footer needs and the shell's
+ * maximum; clicked without moving, it hides or shows the sidebar as it always did. A press counts as
+ * a drag once it has moved 3px, so a click with a slight wobble still toggles.
+ */
 function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
-  const { toggleSidebar } = useSidebar();
+  const { toggleSidebar, state, isMobile } = useSidebar();
+  const resize = React.useContext(SidebarResizeContext);
+  const drag = React.useRef<{
+    startX: number;
+    startWidth: number;
+    min: number;
+    width: number;
+    moved: boolean;
+  } | null>(null);
+  const dragged = React.useRef(false);
 
   return (
     <button
@@ -305,8 +373,58 @@ function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
       data-slot="sidebar-rail"
       aria-label="Toggle Sidebar"
       tabIndex={-1}
-      onClick={toggleSidebar}
-      title="Toggle Sidebar"
+      onPointerDown={(event) => {
+        if (!resize || isMobile || state !== "expanded" || event.button !== 0)
+          return;
+        const panel = event.currentTarget
+          .closest<HTMLElement>('[data-slot="sidebar"]')
+          ?.querySelector<HTMLElement>('[data-slot="sidebar-container"]');
+        if (!panel) return;
+        event.preventDefault();
+        event.currentTarget.setPointerCapture(event.pointerId);
+        const startWidth = panel.getBoundingClientRect().width;
+        drag.current = {
+          startX: event.clientX,
+          startWidth,
+          min: footerWidth(panel),
+          width: startWidth,
+          moved: false,
+        };
+      }}
+      onPointerMove={(event) => {
+        const current = drag.current;
+        if (!current || !resize) return;
+        const moved = event.clientX - current.startX;
+        if (!current.moved && Math.abs(moved) < 3) return;
+        if (!current.moved) resize.setResizing(true);
+        current.moved = true;
+        current.width = clampSidebarWidth(
+          current.startWidth + moved,
+          current.min,
+        );
+        resize.setWidth(current.width);
+      }}
+      onPointerUp={() => {
+        const current = drag.current;
+        drag.current = null;
+        if (!current?.moved || !resize) return;
+        dragged.current = true;
+        resize.setResizing(false);
+        resize.commitWidth(current.width);
+      }}
+      onPointerCancel={() => {
+        if (drag.current?.moved) resize?.setResizing(false);
+        drag.current = null;
+      }}
+      onClick={() => {
+        // The click that ends a drag is not a request to hide the sidebar.
+        if (dragged.current) {
+          dragged.current = false;
+          return;
+        }
+        toggleSidebar();
+      }}
+      title="Drag to resize, click to hide"
       className={cn(
         "absolute inset-y-0 z-20 hidden w-4 transition-all ease-linear group-data-[side=left]:-right-4 group-data-[side=right]:left-0 after:absolute after:inset-y-0 after:start-1/2 after:w-[2px] hover:after:bg-sidebar-border sm:flex ltr:-translate-x-1/2 rtl:-translate-x-1/2",
         "in-data-[side=left]:cursor-w-resize in-data-[side=right]:cursor-e-resize",
@@ -736,6 +854,7 @@ export {
   SidebarMenuSubItem,
   SidebarProvider,
   SidebarRail,
+  SidebarResizeProvider,
   SidebarSeparator,
   SidebarTrigger,
   useOptionalSidebar,

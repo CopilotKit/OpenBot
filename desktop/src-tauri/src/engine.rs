@@ -4,8 +4,9 @@
 //! documentation, and the three differ more than they look:
 //!
 //! - **macOS.** `podman machine` puts a Linux VM behind a socket. Inside that VM
-//!   `/var/run/docker.sock` is already a symlink to the rootless socket, so Compose's mount needs no
-//!   help and `ENGINE_SOCKET` stays unset. `applehv` is the default on Apple silicon as of Podman
+//!   `/var/run/docker.sock` is already a symlink to the socket of the mode the machine runs in
+//!   (rootful for the machine OpenBot creates, see `acquire`), so Compose's mount needs no help and
+//!   `ENGINE_SOCKET` stays unset. `applehv` is the default on Apple silicon as of Podman
 //!   6.1, so no `--provider` is passed.
 //! - **Linux.** Podman is native and rootless and there is no VM. `/var/run/docker.sock` is either
 //!   absent or, with `podman-docker` installed, a symlink to the *rootful* socket, which is not the
@@ -279,6 +280,9 @@ pub struct EngineStatus {
 /// Somebody who already has a machine up is handed it rather than made to wait while a duplicate
 /// boots beside it. Ours is preferred among running machines only so that repeat launches settle on
 /// the same one.
+///
+/// Answers with the connection for the machine's own mode (see `acquire::connection_for`): a rootful
+/// machine is reached through `<name>-root`, where its rootful engine is.
 fn running_machine(preferred: &str) -> Option<String> {
     let output = tool(Engine::Podman)
         .args(["machine", "list", "--format", "json"])
@@ -292,7 +296,7 @@ fn running_machine(preferred: &str) -> Option<String> {
     running()
         .find(|machine| machine.name == preferred)
         .or_else(|| running().next())
-        .map(|machine| machine.name.clone())
+        .map(|machine| crate::acquire::connection_of_machine(&machine.name))
 }
 
 #[derive(Deserialize)]
@@ -372,6 +376,47 @@ fn command_at(engine: Engine, binary: &Path) -> Command {
     built
 }
 
+/**
+This process's PATH with Docker's own directories appended, for a program that looks `docker` up by
+name, or None when there is no Docker here.
+
+Opened from Finder, the app has the system's minimal PATH (`/usr/bin:/bin:/usr/sbin:/sbin`), which
+does not reach Docker Desktop's `/usr/local/bin`. Appended, so a `docker` the person put first on
+their PATH stays first; both the link and the directory it resolves to, as `command_at` does.
+*/
+pub fn path_with_docker() -> Option<OsString> {
+    path_with_engines(&[Engine::Docker])
+}
+
+/// `path_with_docker`, for each of `engines` that is here, or None when none is.
+///
+/// The Intelligence CLI runs `podman` by name as it runs `docker`, and a Podman OpenBot installed
+/// in this session is not on this process's PATH (see the PATH rule above).
+pub fn path_with_engines(engines: &[Engine]) -> Option<OsString> {
+    let binaries: Vec<PathBuf> = engines
+        .iter()
+        .filter_map(|engine| program(*engine))
+        .collect();
+    if binaries.is_empty() {
+        return None;
+    }
+    let mut entries: Vec<PathBuf> = std::env::var_os("PATH")
+        .map(|path| std::env::split_paths(&path).collect())
+        .unwrap_or_default();
+    for binary in &binaries {
+        let resolved = std::fs::canonicalize(binary).ok();
+        for directory in [binary.parent(), resolved.as_deref().and_then(Path::parent)]
+            .into_iter()
+            .flatten()
+        {
+            if !entries.iter().any(|entry| entry == directory) {
+                entries.push(directory.to_path_buf());
+            }
+        }
+    }
+    std::env::join_paths(entries).ok()
+}
+
 /// This process's PATH with `first` in front of it.
 ///
 /// In front, so the provider OpenBot placed is the one found; appended, a broken `docker-compose`
@@ -436,11 +481,19 @@ fn installer_places(engine: Engine) -> Vec<PathBuf> {
             .flatten()
             .collect()
         }
+        // Docker Desktop per user, then per machine, the places `docker_desktop` looks for the app.
         #[cfg(target_os = "windows")]
-        Engine::Docker => std::env::var_os("ProgramFiles")
-            .map(|files| PathBuf::from(files).join("Docker\\Docker\\resources\\bin\\docker.exe"))
-            .into_iter()
-            .collect(),
+        Engine::Docker => [
+            std::env::var_os("LOCALAPPDATA").map(|local| {
+                PathBuf::from(local).join("Programs\\DockerDesktop\\resources\\bin\\docker.exe")
+            }),
+            std::env::var_os("ProgramFiles").map(|files| {
+                PathBuf::from(files).join("Docker\\Docker\\resources\\bin\\docker.exe")
+            }),
+        ]
+        .into_iter()
+        .flatten()
+        .collect(),
         #[cfg(target_os = "macos")]
         Engine::Podman => [
             "/opt/podman/bin/podman",
@@ -496,7 +549,8 @@ pub fn rootless_socket() -> Option<PathBuf> {
 #[cfg(not(target_os = "linux"))]
 pub fn rootless_socket() -> Option<PathBuf> {
     // macOS and Windows run the engine in a virtual machine, and inside it `/var/run/docker.sock`
-    // is already the rootless socket. Compose mounts that path, so there is nothing to override.
+    // is already the socket of the machine's own mode. Compose mounts that path, so there is
+    // nothing to override.
     None
 }
 
@@ -844,6 +898,24 @@ fn main() {
     }
 }
 
+/**
+Where a container under rootless Podman reaches this machine's loopback.
+
+Rootless Podman puts its containers in a network namespace of the person's own, and by default
+nothing in it leads back to the host's `127.0.0.1`: slirp4netns runs with host loopback disabled
+and pasta with `--no-map-gw`. The server is a container now, and what it calls on this machine
+listens only on loopback: the person's browser, deliberately, and a local Intelligence. Measured
+on Ubuntu 24.04 (Podman 4.9.3, slirp4netns) and Fedora 44 (Podman 5.8.9, pasta): a container on a
+Compose network reached neither, at any address, until [`local_api::HOST_LOOPBACK_CONFIG`] was in
+place, and then reached both at this address, which is slirp4netns's fixed one and which pasta is
+told to map.
+
+Docker Desktop and the Podman machines on macOS and Windows already forward `host.docker.internal`
+to the host's loopback, so this is for rootless Podman on Linux alone. Compose is pointed at it
+through `OPENBOT_HOST_GATEWAY` (see `env::compose`).
+*/
+pub const ROOTLESS_HOST_LOOPBACK: &str = "10.0.2.2";
+
 /// A native Podman API service belongs to the desktop session only when this session spawned it.
 /// Existing user/systemd services are probed and reused, never stopped or reconfigured.
 #[cfg(any(target_os = "linux", all(test, unix)))]
@@ -861,6 +933,81 @@ pub mod local_api {
     pub struct Service {
         child: Option<Child>,
         socket: Option<(PathBuf, u64, u64)>,
+        /// Where [`allow_host_loopback`](Service::allow_host_loopback) last wrote, so a Start can
+        /// ask whether the reset it calls for is still owed.
+        config_home: Option<PathBuf>,
+    }
+
+    /// Podman's own drop-in directory, under the person's configuration home.
+    pub const HOST_LOOPBACK_CONFIG: &str = "containers/containers.conf.d/90-openbot-host.conf";
+
+    /**
+    Present from the moment [`HOST_LOOPBACK_CONFIG`] changes until a Start has taken OpenBot's
+    stack down, so the containers after it build a new rootless network namespace.
+
+    A file rather than a flag in memory, so the reset is still owed after a Start whose teardown
+    failed, and after the app quit between writing the drop-in and starting. Beside Podman's
+    configuration rather than in `containers.conf.d`, where Podman reads drop-ins.
+    */
+    pub const HOST_LOOPBACK_PENDING: &str = "containers/openbot-host-loopback.pending";
+
+    /**
+    The drop-in that opens the rootless network namespace to this machine's loopback at
+    [`super::ROOTLESS_HOST_LOOPBACK`], for both of the programs rootless Podman builds it with.
+    Only the one in use reads its own key.
+
+    Appended rather than set, so options the person gave either program in their own files are
+    kept: a later drop-in's list otherwise replaces an earlier one's. Both Podman 4.9 and 5.8
+    parse `{append=true}`.
+
+    Nothing here renames `host.containers.internal` or `host.docker.internal` for the person's
+    other containers. OpenBot's own services are pointed at this address by Compose, and anything
+    else would have to ask for it by number.
+    */
+    pub fn host_loopback_config() -> String {
+        let address = super::ROOTLESS_HOST_LOOPBACK;
+        format!(
+            "# Written by OpenBot Desktop: lets its containers reach services this machine runs on\n\
+             # 127.0.0.1, such as the person's browser and a local Intelligence, at {address}.\n\
+             [engine]\n\
+             network_cmd_options = [\"allow_host_loopback=true\", {{append=true}}]\n\
+             \n\
+             [network]\n\
+             pasta_options = [\"--map-host-loopback\", \"{address}\", {{append=true}}]\n"
+        )
+    }
+
+    /// Write [`host_loopback_config`] under `config_home`, saying whether anything changed.
+    /// Replaced whole, through a sibling, so Podman never reads half of it. A change marks the
+    /// reset owed ([`HOST_LOOPBACK_PENDING`]) first, so no drop-in is ever in place without it.
+    pub fn write_host_loopback(config_home: &Path) -> Result<bool, String> {
+        let path = config_home.join(HOST_LOOPBACK_CONFIG);
+        let wanted = host_loopback_config();
+        match std::fs::read_to_string(&path) {
+            Ok(current) if current == wanted => return Ok(false),
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(format!("{}: {error}", path.display())),
+        }
+        let directory = path.parent().expect("the drop-in has a directory");
+        std::fs::create_dir_all(directory)
+            .map_err(|error| format!("{}: {error}", directory.display()))?;
+        let pending = config_home.join(HOST_LOOPBACK_PENDING);
+        std::fs::write(&pending, "").map_err(|error| format!("{}: {error}", pending.display()))?;
+        let partial = path.with_extension("conf.partial");
+        std::fs::write(&partial, wanted)
+            .and_then(|()| std::fs::rename(&partial, &path))
+            .map_err(|error| format!("{}: {error}", path.display()))?;
+        Ok(true)
+    }
+
+    /// Where the person's configuration lives, as Podman looks for it.
+    #[cfg(target_os = "linux")]
+    fn config_home() -> Option<PathBuf> {
+        std::env::var_os("XDG_CONFIG_HOME")
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from)
+            .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))
     }
 
     fn problem(detail: impl Into<String>) -> Problem {
@@ -927,6 +1074,9 @@ pub mod local_api {
                 });
             let socket = runtime.join("podman/podman.sock");
             let log = root.join("logs/podman-api.log");
+            let config_home =
+                config_home().ok_or_else(|| problem("Neither XDG_CONFIG_HOME nor HOME is set."))?;
+            self.allow_host_loopback(&config_home)?;
             self.ensure_with(&socket, &log, || {
                 let mut command = address.command();
                 command
@@ -1025,6 +1175,48 @@ pub mod local_api {
                     cleanup.said, cleanup.detail
                 ),
             }))
+        }
+
+        /// Write the host loopback drop-in before any container needs it. A service this session
+        /// started read its configuration when it started, so a change stops it, and the
+        /// `ensure` that follows starts it again. A service somebody else runs is left alone.
+        pub(super) fn allow_host_loopback(&mut self, config_home: &Path) -> Result<(), Problem> {
+            self.config_home = Some(config_home.to_path_buf());
+            if write_host_loopback(config_home).map_err(problem)? {
+                self.stop()?;
+            }
+            Ok(())
+        }
+
+        /**
+        Whether a Start still owes the host loopback configuration a teardown of OpenBot's stack.
+
+        Podman reads it only when the rootless network namespace is created, and that namespace
+        lives while any container on a Compose network does, so a stack still running from before
+        keeps the old one. Measured: written while a container held the namespace, nothing
+        changed; once the last one stopped, the next container reached the host.
+
+        Owed until [`acknowledge_host_loopback_reset`](Self::acknowledge_host_loopback_reset),
+        which a Start calls only once the teardown succeeded.
+        */
+        pub fn host_loopback_reset_pending(&self) -> bool {
+            self.config_home
+                .as_ref()
+                .is_some_and(|home| home.join(HOST_LOOPBACK_PENDING).exists())
+        }
+
+        /// The teardown [`host_loopback_reset_pending`](Self::host_loopback_reset_pending) asked
+        /// for is done.
+        pub fn acknowledge_host_loopback_reset(&self) -> Result<(), Problem> {
+            let Some(home) = self.config_home.as_ref() else {
+                return Ok(());
+            };
+            let pending = home.join(HOST_LOOPBACK_PENDING);
+            match std::fs::remove_file(&pending) {
+                Ok(()) => Ok(()),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                Err(error) => Err(problem(format!("{}: {error}", pending.display()))),
+            }
         }
 
         pub fn stop(&mut self) -> Result<(), Problem> {
@@ -1134,6 +1326,108 @@ mod local_api_tests {
                 .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nOK")
                 .unwrap();
         }
+    }
+
+    /// The drop-in opens host loopback for both programs, at the one address Compose is given, and
+    /// appends to what the person configured rather than replacing it.
+    #[test]
+    fn the_host_loopback_drop_in_names_both_programs_and_keeps_the_persons_options() {
+        let config = super::local_api::host_loopback_config();
+        let address = super::ROOTLESS_HOST_LOOPBACK;
+        assert!(config.contains(
+            "[engine]\nnetwork_cmd_options = [\"allow_host_loopback=true\", {append=true}]\n"
+        ));
+        assert!(config.contains(&format!(
+            "[network]\npasta_options = [\"--map-host-loopback\", \"{address}\", {{append=true}}]\n"
+        )));
+        // slirp4netns serves the host's loopback at its gateway, which is fixed.
+        assert_eq!(address, "10.0.2.2");
+        assert!(!config.contains("host_containers_internal_ip"));
+    }
+
+    #[test]
+    fn the_host_loopback_drop_in_is_written_once_and_restored_when_changed() {
+        let home = temp_root("host-loopback-drop-in");
+        let path = home.join(super::local_api::HOST_LOOPBACK_CONFIG);
+        let theirs = path.with_file_name("10-person.conf");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &theirs,
+            "[network]\npasta_options = [\"--mtu\", \"1400\"]\n",
+        )
+        .unwrap();
+
+        let pending = home.join(super::local_api::HOST_LOOPBACK_PENDING);
+        assert!(super::local_api::write_host_loopback(&home).unwrap());
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            super::local_api::host_loopback_config()
+        );
+        assert!(pending.exists(), "a new drop-in owes a reset");
+        std::fs::remove_file(&pending).unwrap();
+        assert!(!super::local_api::write_host_loopback(&home).unwrap());
+        assert!(!pending.exists(), "an unchanged drop-in owes nothing");
+
+        std::fs::write(&path, "[network]\n").unwrap();
+        assert!(super::local_api::write_host_loopback(&home).unwrap());
+        assert!(pending.exists(), "a changed drop-in owes a reset");
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            super::local_api::host_loopback_config()
+        );
+        assert_eq!(
+            std::fs::read_to_string(&theirs).unwrap(),
+            "[network]\npasta_options = [\"--mtu\", \"1400\"]\n",
+            "the person's own drop-in is not touched"
+        );
+        assert!(!path.with_extension("conf.partial").exists());
+        std::fs::remove_dir_all(home).unwrap();
+    }
+
+    /// A change restarts the service this session owns, because it read its configuration when it
+    /// started, and owes a Start a teardown until one acknowledges it. No change leaves it running.
+    #[test]
+    fn a_host_loopback_change_restarts_the_owned_api_and_owes_a_reset_until_acknowledged() {
+        let root = temp_root("host-loopback-restart");
+        std::fs::create_dir_all(&root).unwrap();
+        let home = root.join("config");
+        let socket = root.join("api.sock");
+        let log = root.join("api.log");
+        let mut owned = Service::default();
+        owned
+            .ensure_with(&socket, &log, || fixture(&socket))
+            .unwrap();
+        let first = owned.child_id().unwrap();
+
+        owned.allow_host_loopback(&home).unwrap();
+        assert_eq!(
+            unsafe { libc::kill(first as i32, 0) },
+            -1,
+            "the owned service that predates the change is stopped"
+        );
+        owned
+            .ensure_with(&socket, &log, || fixture(&socket))
+            .unwrap();
+        let second = owned.child_id().unwrap();
+        assert_ne!(first, second);
+        assert!(owned.host_loopback_reset_pending());
+        // A Start whose teardown failed acknowledges nothing, so asking again still says owed.
+        assert!(owned.host_loopback_reset_pending());
+
+        // Nor is it forgotten with the app: a later session, with the drop-in already in place
+        // and nothing written, still owes it.
+        owned.allow_host_loopback(&home).unwrap();
+        assert_eq!(owned.child_id(), Some(second), "no change, no restart");
+        let mut later = Service::default();
+        later.allow_host_loopback(&home).unwrap();
+        assert!(later.host_loopback_reset_pending());
+
+        later.acknowledge_host_loopback_reset().unwrap();
+        assert!(!later.host_loopback_reset_pending());
+        assert!(!owned.host_loopback_reset_pending());
+        later.acknowledge_host_loopback_reset().unwrap();
+        owned.stop().unwrap();
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

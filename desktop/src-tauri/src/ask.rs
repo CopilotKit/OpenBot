@@ -168,6 +168,139 @@ pub fn ask_mastra(
     mastra_answer_in(&text).ok_or_else(|| Problem::plain(String::new()))
 }
 
+/// The runtime agent id the server gives the Bot that setup picked. See `server/src/routing/routes.ts`.
+pub const PICKED_HARNESS_AGENT: &str = "picked-harness";
+
+/// How often the thread's events are read while the run is going.
+const WATCH_EVERY: Duration = Duration::from_millis(400);
+
+/**
+Put a question to a Bot through the OpenBot server's own runtime, so it is a thread in Intelligence.
+
+`ask` goes straight to the harness, which proves the credential but leaves nothing behind: the
+harness keeps its thread in memory and Intelligence never hears of it, so "View in Intelligence"
+opened a dashboard with no conversation in it. Asked here, the server mints the thread id, the
+runtime records the run in Intelligence, and the dashboard shows the question and the answer.
+
+The runtime in Intelligence mode does not stream the run back on the request: it answers with a
+token for the realtime gateway and runs on its own. Rather than a websocket client for one
+question, this reads the thread's recorded events until the run finishes or fails.
+
+`server` is the server's own address, which a single-user owned deployment admits with no sign-in.
+*/
+pub fn ask_through_server(server: &str, agent_id: &str, question: &str) -> Result<String, Problem> {
+    let server = server.trim_end_matches('/');
+    let client = reqwest::blocking::Client::builder()
+        .timeout(PATIENCE)
+        .build()
+        .map_err(|error| {
+            Problem::plain(format!("This machine cannot make web requests: {error}"))
+        })?;
+    let unreachable = |error: reqwest::Error| {
+        Problem::with("OpenBot could not reach its own server.", error.to_string())
+    };
+
+    let minted = client
+        .post(format!("{server}/api/threads/mint"))
+        .send()
+        .map_err(unreachable)?;
+    let (status, text) = read_response(minted, "openbot-server", server)?;
+    let thread_id = status
+        .is_success()
+        .then(|| serde_json::from_str::<serde_json::Value>(&text).ok())
+        .flatten()
+        .and_then(|minted| minted.get("threadId")?.as_str().map(str::to_owned))
+        .ok_or_else(|| {
+            Problem::with(
+                "OpenBot's server would not start a conversation.",
+                format!("HTTP {status}\n{text}"),
+            )
+        })?;
+
+    let started = client
+        .post(format!("{server}/api/copilotkit/agent/{agent_id}/run"))
+        .header("content-type", "application/json")
+        .json(&serde_json::json!({
+            "threadId": thread_id,
+            "runId": format!("openbot-setup-{}", moment()),
+            "state": {},
+            "messages": [{ "id": format!("openbot-setup-question-{}", moment()), "role": "user", "content": question }],
+            "tools": [],
+            "context": [],
+            "forwardedProps": {},
+        }))
+        .send()
+        .map_err(unreachable)?;
+    let (status, text) = read_response(started, "openbot-server", server)?;
+    if !status.is_success() {
+        return Err(Problem::with(
+            "The Bot could not answer.",
+            format!("HTTP {status}\n{text}"),
+        ));
+    }
+
+    let events = format!("{server}/api/copilotkit/threads/{thread_id}/events");
+    let deadline = std::time::Instant::now() + PATIENCE;
+    while std::time::Instant::now() < deadline {
+        std::thread::sleep(WATCH_EVERY);
+        // Not recorded yet reads as an error or an empty list; both are "not finished".
+        let Ok(response) = client.get(&events).send() else {
+            continue;
+        };
+        if !response.status().is_success() {
+            continue;
+        }
+        let Ok(body) = response.text() else {
+            continue;
+        };
+        if let Some(outcome) = run_outcome(&body) {
+            return outcome;
+        }
+    }
+    Err(Problem::with(
+        "The Bot did not answer in time. Ask again.",
+        format!("thread {thread_id}\nno RUN_FINISHED or RUN_ERROR within {PATIENCE:?}"),
+    ))
+}
+
+/**
+How a run on a thread ended, out of the thread's recorded events, or None while it is going.
+
+The answer is the `TEXT_MESSAGE_CONTENT` deltas, as in `answer_in`. A run that finished with no text
+is the same empty sentence `ask` returns, so the caller can fetch the harness's log for the cause.
+*/
+pub fn run_outcome(body: &str) -> Option<Result<String, Problem>> {
+    let recorded: serde_json::Value = serde_json::from_str(body).ok()?;
+    let events = recorded.get("events")?.as_array()?;
+    let mut answer = String::new();
+    for event in events {
+        match event.get("type").and_then(|kind| kind.as_str()) {
+            Some("TEXT_MESSAGE_CONTENT") => {
+                if let Some(delta) = event.get("delta").and_then(|delta| delta.as_str()) {
+                    answer.push_str(delta);
+                }
+            }
+            Some("RUN_ERROR") => {
+                let said = event
+                    .get("message")
+                    .and_then(|message| message.as_str())
+                    .unwrap_or_default();
+                return Some(Err(why_nothing_came_back(said)));
+            }
+            Some("RUN_FINISHED") => {
+                let answer = answer.trim();
+                return Some(if answer.is_empty() {
+                    Err(Problem::plain(String::new()))
+                } else {
+                    Ok(answer.to_owned())
+                });
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
 fn read_response(
     response: reqwest::blocking::Response,
     kind: &str,
@@ -595,6 +728,109 @@ mod tests {
             "{detail}"
         );
         let _ = server.request();
+    }
+
+    fn json_response(status: &str, body: &str) -> String {
+        format!(
+            "HTTP/1.1 {status}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+            body.len()
+        )
+    }
+
+    /// One connection per response, answered in order; each request line is sent back.
+    fn serve_in_order(responses: Vec<String>) -> (String, std::sync::mpsc::Receiver<String>) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let url = format!("http://{}", listener.local_addr().expect("addr"));
+        let (sender, received) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            use std::io::{Read, Write};
+            for response in responses {
+                let (mut stream, _) = listener.accept().expect("accept");
+                let mut request = Vec::new();
+                let mut buffer = [0; 4096];
+                while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+                    let read = stream.read(&mut buffer).expect("read");
+                    if read == 0 {
+                        break;
+                    }
+                    request.extend_from_slice(&buffer[..read]);
+                }
+                let text = String::from_utf8_lossy(&request).to_string();
+                let _ = sender.send(text.lines().next().unwrap_or_default().to_owned());
+                stream.write_all(response.as_bytes()).expect("write");
+            }
+        });
+        (url, received)
+    }
+
+    #[test]
+    fn a_question_asked_through_the_server_is_a_minted_thread_read_back_until_it_finishes() {
+        let thread = "55569917-dab5-8fe4-84e1-a85613418e1b";
+        let (url, requests) = serve_in_order(vec![
+            json_response("200 OK", &format!("{{\"threadId\":\"{thread}\"}}")),
+            json_response(
+                "200 OK",
+                &format!("{{\"threadId\":\"{thread}\",\"joinToken\":\"t\"}}"),
+            ),
+            // Not recorded yet, then still going, then finished.
+            json_response("404 Not Found", "{}"),
+            json_response(
+                "200 OK",
+                r#"{"events":[{"type":"RUN_STARTED"},{"type":"TEXT_MESSAGE_CONTENT","delta":"Three"}]}"#,
+            ),
+            json_response(
+                "200 OK",
+                r#"{"events":[{"type":"RUN_STARTED"},{"type":"TEXT_MESSAGE_CONTENT","delta":"Three"},{"type":"TEXT_MESSAGE_CONTENT","delta":" r's."},{"type":"RUN_FINISHED"}]}"#,
+            ),
+        ]);
+
+        let answer = ask_through_server(&url, PICKED_HARNESS_AGENT, "How many r's?").unwrap();
+
+        assert_eq!(answer, "Three r's.");
+        let asked: Vec<String> = requests.try_iter().collect();
+        assert_eq!(
+            asked,
+            [
+                "POST /api/threads/mint HTTP/1.1".to_owned(),
+                "POST /api/copilotkit/agent/picked-harness/run HTTP/1.1".to_owned(),
+                format!("GET /api/copilotkit/threads/{thread}/events HTTP/1.1"),
+                format!("GET /api/copilotkit/threads/{thread}/events HTTP/1.1"),
+                format!("GET /api/copilotkit/threads/{thread}/events HTTP/1.1"),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_run_that_will_not_start_on_the_server_says_so_with_the_response_behind_it() {
+        let (url, _) = serve_in_order(vec![
+            json_response(
+                "200 OK",
+                r#"{"threadId":"55569917-dab5-8fe4-84e1-a85613418e1b"}"#,
+            ),
+            json_response("404 Not Found", r#"{"error":"Agent not found"}"#),
+        ]);
+        let problem = ask_through_server(&url, "nobody", "hello").unwrap_err();
+        assert_eq!(problem.said, "The Bot could not answer.");
+        assert!(problem.detail.unwrap().contains("Agent not found"));
+    }
+
+    #[test]
+    fn run_outcome_reads_finished_failed_and_still_going_runs() {
+        assert!(run_outcome("{}").is_none());
+        assert!(run_outcome(r#"{"events":[{"type":"RUN_STARTED"}]}"#).is_none());
+        // Finished with no text: the empty sentence the caller fills from the harness's log.
+        let empty = run_outcome(r#"{"events":[{"type":"RUN_FINISHED"}]}"#).unwrap();
+        assert_eq!(empty.unwrap_err().said, "");
+        let refused = run_outcome(
+            r#"{"events":[{"type":"RUN_STARTED"},{"type":"RUN_ERROR","message":"Error code: 401 - invalid_api_key"}]}"#,
+        )
+        .unwrap()
+        .unwrap_err();
+        assert!(
+            refused.said.starts_with("That key was refused."),
+            "{}",
+            refused.said
+        );
     }
 
     struct TestRequest {
