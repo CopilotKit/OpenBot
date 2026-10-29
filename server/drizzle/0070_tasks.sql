@@ -21,4 +21,5 @@ ALTER TABLE "tasks" ADD CONSTRAINT "tasks_channel_id_channels_id_fk" FOREIGN KEY
 ALTER TABLE "tasks" ADD CONSTRAINT "tasks_suggestion_id_proactive_suggestions_id_fk" FOREIGN KEY ("suggestion_id") REFERENCES "public"."proactive_suggestions"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "tasks_owner_created_idx" ON "tasks" USING btree ("owner_user_id","created_at");--> statement-breakpoint
 CREATE UNIQUE INDEX "tasks_channel_idx" ON "tasks" USING btree ("channel_id");--> statement-breakpoint
-CREATE UNIQUE INDEX "tasks_suggestion_idx" ON "tasks" USING btree ("suggestion_id");
+CREATE UNIQUE INDEX "tasks_suggestion_idx" ON "tasks" USING btree ("suggestion_id");--> statement-breakpoint
+CREATE INDEX "work_items_owner_task_idx" ON "work_items" USING btree ("kind",("payload"->>'ownerUserId'),("payload"->>'taskId'));
