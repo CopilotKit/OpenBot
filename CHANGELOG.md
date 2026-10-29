@@ -69,7 +69,9 @@ and then gliding down; a long one draws older messages as somebody scrolls up to
 moving what they are reading. Charts, tables, cards and decisions a Bot draws grow in place while
 they stream, and no longer flash "not available" before they appear. A reply is revealed at a steady
 pace, and the view follows it until the person scrolls up or selects some of it, and picks it up
-again when they come back to the end or press the arrow. Nothing changes for a deployment.
+again when they come back to the end or press the arrow. A rail beside a conversation has a mark
+per turn: hovering one previews what was asked and answered, and choosing it goes there. Nothing
+changes for a deployment.
 
 ### Generated interfaces use A2UI 1.0
 

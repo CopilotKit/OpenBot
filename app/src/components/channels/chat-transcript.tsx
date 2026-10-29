@@ -82,6 +82,8 @@ import { isBrowserStep } from "./browser-activity";
 import { shouldDrawEarlier, useTranscriptPages } from "./transcript-pages";
 import { FollowScroll, useFollowIntent } from "./follow-intent";
 import { usePacedReveal } from "./paced-reveal";
+import { TranscriptRail } from "./transcript-rail";
+import { isPersonSentMessage, type Turn, turnsOf } from "./transcript-turns";
 import { useLateRenderers } from "./late-renderers";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import {
@@ -482,6 +484,9 @@ const ArrivalsLiveContext = createContext<React.RefObject<boolean> | null>(
  * For rows drawn later but older than everything on screen: an earlier page added above as the
  * reader scrolls up (`useTranscriptPages`). They are history, so they draw at rest.
  */
+/** Where a turn jumped to from the rail sits below the top of the view. */
+const TURN_INSET_PX = 24;
+
 const AT_REST: React.RefObject<boolean> = { current: false };
 
 function ArrivalsLive({ children }: { children: React.ReactNode }) {
@@ -1560,23 +1565,8 @@ export function ServerToolLine({
   );
 }
 
-/**
- * Whether a text item is the person actually sending something, as opposed to a routine firing that
- * merely arrived wearing `role: "user"`.
- *
- * A FIRING IS NOT THE PERSON SPEAKING — `TranscriptMessage` already knows that and draws it as
- * `RoutineFiring` rather than as their bubble, via the same `readFiring` check used here. The scroll
- * machinery below was the one place left that had not caught up: it smooth-scrolled and anchored on
- * `role === "user"` alone, so a routine firing while somebody was reading back through the channel
- * yanked their viewport to the bottom as though they had just typed and sent something. They hadn't;
- * the schedule had. Exported so this can be checked without mounting anything.
- */
-export function isPersonSentMessage(
-  role: "user" | "assistant",
-  text: string,
-): boolean {
-  return role === "user" && readFiring(text) === null;
-}
+/* Moved beside the turns it also decides; re-exported for the callers that read it from here. */
+export { isPersonSentMessage };
 
 /**
  * WHERE THE CONVERSATION HAS GOT TO, for an app card that may carry its task on once the app is
@@ -1862,7 +1852,7 @@ export function ChatTranscript({
 
   /* Which rows are drawn; see `useTranscriptPages`. */
   const pages = useTranscriptPages(items.length, restoring);
-  const { drawEarlier, from: pagesFrom } = pages;
+  const { drawEarlier, drawTo, from: pagesFrom } = pages;
   const drawEarlierNearTop = useCallback(
     (from: number) => {
       const element = viewportRef.current;
@@ -1896,6 +1886,84 @@ export function ChatTranscript({
     );
     return () => window.cancelAnimationFrame(frame);
   }, [pagesFrom, restoring, drawEarlierNearTop]);
+
+  /* The rail's marks, and which turn is being read; see `TranscriptRail`. */
+  const turns = turnsOf(items);
+  const turnIds = turns.map((turn) => turn.id).join("\n");
+  const [activeTurn, setActiveTurn] = useState<string | null>(null);
+  const readActiveTurn = useCallback(() => {
+    const element = viewportRef.current;
+    if (element === null || turnIds === "") return;
+    /* The last turn to start above a third of the way down the view is the one being read. */
+    const line = element.getBoundingClientRect().top + element.clientHeight / 3;
+    let current: string | null = null;
+    for (const id of turnIds.split("\n")) {
+      const row = element.querySelector(
+        `[data-message-id="${CSS.escape(id)}"]`,
+      );
+      if (row === null) continue;
+      if (current !== null && row.getBoundingClientRect().top > line) break;
+      current = id;
+    }
+    setActiveTurn(current);
+  }, [turnIds]);
+  useLayoutEffect(() => {
+    if (!restoring) readActiveTurn();
+  }, [restoring, readActiveTurn]);
+
+  /*
+   * A jump from the rail. A turn already drawn is gone to now; one in a page not drawn yet draws
+   * every page down to it first, and is gone to a frame after that commit, once the scroller has put
+   * the reader back where they were (the same wait as the fill check above). Instant, never smooth:
+   * a smooth scroll up passes the top margin and draws pages above while it is moving, and the
+   * scroller's hold on the reader's place would fight it.
+   */
+  const jumpRef = useRef<string | null>(null);
+  const goToTurn = useCallback((id: string) => {
+    const element = viewportRef.current;
+    const row = element?.querySelector(`[data-message-id="${CSS.escape(id)}"]`);
+    if (!element || !row) return;
+    // Less the transcript's own top padding (`py-6`), so the turn sits where a first row would.
+    element.scrollTop +=
+      row.getBoundingClientRect().top -
+      element.getBoundingClientRect().top -
+      TURN_INSET_PX;
+  }, []);
+  /*
+   * Following stops as the view moves, not before the pages are drawn: the scroller holds the
+   * reader's place across a prepend by moving `scrollTop` down by what was added, and at the end of
+   * the conversation that reads exactly like the person scrolling back to the end, which picks
+   * following up again (`nextFollow`).
+   */
+  const goToTurnStill = useCallback(
+    (id: string) => {
+      dispatchFollow({ type: "jump" });
+      goToTurn(id);
+    },
+    [dispatchFollow, goToTurn],
+  );
+  const jump = useCallback(
+    (turn: Turn) => {
+      setActiveTurn(turn.id);
+      if (turn.index < pagesFrom) {
+        jumpRef.current = turn.id;
+        drawTo(turn.index);
+      } else {
+        goToTurnStill(turn.id);
+      }
+    },
+    [drawTo, goToTurnStill, pagesFrom],
+  );
+  // biome-ignore lint/correctness/useExhaustiveDependencies: runs after the commit that drew the pages a jump asked for, which is a change of `pagesFrom`.
+  useLayoutEffect(() => {
+    const id = jumpRef.current;
+    if (id === null) return;
+    const frame = window.requestAnimationFrame(() => {
+      jumpRef.current = null;
+      goToTurnStill(id);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [pagesFrom, goToTurnStill]);
 
   /*
    * NOTHING BUT THE PLACEHOLDER UNTIL HISTORY IS COMPLETE, AND THE SCROLLER MOUNTED FRESH AFTER IT.
@@ -2011,13 +2079,14 @@ export function ChatTranscript({
         autoScroll={follow.following}
         scrollPreviousItemPeek={48}
       >
-        <MessageScroller>
+        <MessageScroller className="@container">
           <MessageScrollerViewport
             {...follow.viewportHandlers}
             data-following={follow.following}
             onScroll={(event) => {
               follow.viewportHandlers.onScroll?.(event);
               drawEarlierNearTop(pagesFrom);
+              readActiveTurn();
             }}
             ref={viewportRef}
           >
@@ -2131,6 +2200,7 @@ export function ChatTranscript({
             onQueued={followOnQueued}
           />
           <FollowScroll request={follow.request} />
+          <TranscriptRail active={activeTurn} onJump={jump} turns={turns} />
         </MessageScroller>
       </MessageScrollerProvider>
     </ArrivalsLive>
