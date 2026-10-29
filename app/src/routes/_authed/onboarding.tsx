@@ -81,6 +81,9 @@ function stepForNumber(step: number | undefined): StepId | null {
  * upward. What a checklist link opens once onboarding is done, carried in the address as `?open=`
  * so a reload on the name step keeps it.
  */
+/** Pages a step other than the checklist can carry through the name step, by what they're called. */
+const STEP_PAGES: Record<string, string> = { "/admin/plugins": "Plugins" };
+
 const isAppPath = (value: unknown): value is string =>
   typeof value === "string" &&
   /^\/(?!\/)[\w/-]*$/.test(value) &&
@@ -462,15 +465,17 @@ function RouteComponent() {
     ...setupChecklistQueryOptions(),
     enabled: search.open !== undefined,
   });
-  const openLabel = checklist?.rows
-    .map((row) =>
-      row.fix?.kind === "page"
-        ? row.fix
-        : row.fix?.kind === "env"
-          ? row.fix.page
-          : undefined,
-    )
-    .find((page) => page?.path === search.open)?.label;
+  const openLabel =
+    checklist?.rows
+      .map((row) =>
+        row.fix?.kind === "page"
+          ? row.fix
+          : row.fix?.kind === "env"
+            ? row.fix.page
+            : undefined,
+      )
+      .find((page) => page?.path === search.open)?.label ??
+    (search.open ? STEP_PAGES[search.open] : undefined);
 
   const capabilitiesFailed =
     capabilitiesError && !capabilities ? (
@@ -524,6 +529,7 @@ function RouteComponent() {
         <ConnectAppsStep
           failed={failedOn === "apps"}
           leaveFor={(url, app) => leaveForConsent("apps", url, app)}
+          openPage={(target) => move("name", "forward", target.path)}
           returned={returnedApp}
         />
       ),
