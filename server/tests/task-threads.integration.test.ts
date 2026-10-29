@@ -29,7 +29,7 @@ import {
   type PersonQuestion,
   questionResponseMessage,
 } from "../src/approvals/questions";
-import { createAuditStore } from "../src/audit";
+import { type AuditInitiator, createAuditStore } from "../src/audit";
 import type { AuthenticatedActor } from "../src/auth/guards";
 import {
   loadAttachmentForTurn,
@@ -55,6 +55,7 @@ import {
 import { createPluginStore } from "../src/plugins/store";
 import {
   createProactiveEngine,
+  type OpenedTask,
   PROACTIVE_RUN_KIND,
   PROACTIVE_TASK_KIND,
   type ProactiveScope,
@@ -77,7 +78,12 @@ import {
 import { createTaskRoutes } from "../src/tasks/routes";
 import { createTaskStore } from "../src/tasks/store";
 import { createTaskThreads, createTaskTurn } from "../src/tasks/threads";
-import { builtInBots, START_TASK_TOOL, taskTools } from "../src/tasks/tools";
+import {
+  builtInBots,
+  MAX_TASKS_PER_TURN,
+  START_TASK_TOOL,
+  taskTools,
+} from "../src/tasks/tools";
 import type { TaskRecord } from "../src/tasks/types";
 import {
   createWorkQueue,
@@ -2473,6 +2479,64 @@ describe("start_task", () => {
         .where(eq(agentProfiles.agentId, builtIn.id));
       await database.delete(agents).where(eq(agents.id, builtIn.id));
     }
+  });
+  test("is offered only in a conversation a person started, and never in a task's own turn", async () => {
+    const held = async (
+      initiator: AuditInitiator,
+      inTask?: boolean,
+    ): Promise<string[]> =>
+      (
+        await taskTools({
+          actorId: owner.id,
+          botId: bot,
+          initiator,
+          start: async () => {
+            throw new Error("Never started here.");
+          },
+          builtIn: async () => true,
+          ...(inTask ? { inTask } : {}),
+        })
+      ).map((tool) => tool.name);
+    expect(await held({ kind: "person" })).toEqual([START_TASK_TOOL]);
+    // Each of these acts on what it read, unattended; a task it started would run as the person.
+    for (const initiator of [
+      { kind: "routine", id: "routine-1" },
+      { kind: "responsibility", id: "responsibility-1" },
+      { kind: "memory", id: "memory-1" },
+      { kind: "deployment" },
+      { kind: "handoff", id: "handoff-1", origin: { kind: "person" } },
+    ] satisfies AuditInitiator[])
+      expect(await held(initiator)).toEqual([]);
+    expect(await held({ kind: "person" }, true)).toEqual([]);
+  });
+
+  test(`starts at most ${MAX_TASKS_PER_TURN} tasks from one turn, counting calls made in parallel`, async () => {
+    const starts: string[] = [];
+    const [tool] = await taskTools({
+      actorId: owner.id,
+      botId: bot,
+      initiator: { kind: "person" },
+      start: async ({ task }) => {
+        starts.push(task.title);
+        // Slow enough that every call below is in flight before the first start returns.
+        await Bun.sleep(5);
+        return {
+          id: `task-${starts.length}`,
+          channelId: "channel",
+          title: task.title,
+        } as unknown as OpenedTask;
+      },
+      builtIn: async () => true,
+    });
+    const results = await Promise.all(
+      Array.from({ length: MAX_TASKS_PER_TURN + 2 }, (_, index) =>
+        tool?.execute({ title: `Task ${index + 1}`, instruction: "Do it." }),
+      ),
+    );
+    expect(starts).toHaveLength(MAX_TASKS_PER_TURN);
+    expect(
+      results.filter((result) => result?.startsWith("Refused.")),
+    ).toHaveLength(2);
   });
 });
 

@@ -1494,7 +1494,11 @@ const wakeUpStore = createWakeUpStore(database, { auditStore: bootAuditStore });
 const isBuiltInBot = builtInBots(database);
 
 const loadToolsForActor =
-  (actorId: string, initiator: AuditInitiator = PERSON_INITIATOR) =>
+  (
+    actorId: string,
+    initiator: AuditInitiator = PERSON_INITIATOR,
+    turn: { task?: boolean } = {},
+  ) =>
   async (botId: string) => [
     // Hands bigger work to a task of its own. Read when a turn is built, long after the engine is.
     ...(await taskTools({
@@ -1504,6 +1508,7 @@ const loadToolsForActor =
       start: ({ ownerUserId, agentId, task }) =>
         proactiveEngine.startAsked(ownerUserId, agentId, task),
       builtIn: isBuiltInBot,
+      inTask: turn.task === true,
     })),
     ...wakeUpTools({
       store: wakeUpStore,
@@ -1768,11 +1773,14 @@ const buildAgentFor = async ({
   agentId,
   initiator,
   depth,
+  task,
 }: {
   ownerUserId: string;
   agentId: string;
   initiator: AuditInitiator;
   depth?: number;
+  /** A task's own turn. See `AgentResolutionContext.task`. */
+  task?: boolean;
 }) => {
   const actor = await actorFor(ownerUserId);
   let agent: AbstractAgent | undefined;
@@ -1780,6 +1788,7 @@ const buildAgentFor = async ({
     agent = await actorAgentResolver.resolveAgentForActor(actor, agentId, {
       initiator,
       depth,
+      ...(task ? { task } : {}),
     });
   } catch (error) {
     if (!(error instanceof CoworkerUnavailableError)) throw error;
@@ -1849,10 +1858,10 @@ const actorAgentResolver = createActorAgentResolver({
   model: runtimeModel,
   resolveModelApiKey: resolveRuntimeModelApiKey,
   stallGuard,
-  loadToolsForActor: (actorId, initiator) =>
+  loadToolsForActor: (actorId, initiator, turn) =>
     restrictToolsForRun(
       initiator,
-      loadToolsForActor(actorId, initiator),
+      loadToolsForActor(actorId, initiator, turn),
       proactiveReadOnlyRefs,
     ),
   signRunForActor,
@@ -2020,6 +2029,22 @@ const approvalContinuationRunner = createTurnRunner({
   runner: routineAgentRunner,
   components: componentCatalog,
   buildAgentFor,
+  toolsForTurn: async ({ ownerUserId, agentId, initiator }) =>
+    approvalComputerTools(ownerUserId, agentId, initiator),
+  learningContainerForThread: (input) =>
+    copilotRuntime.learning?.containerForThread(input) ??
+    Promise.resolve(undefined),
+});
+/**
+ * A task's own turns: the same runner, with the Bot built for a task's turn, so it is not offered
+ * `start_task` there (see tasks/tools.ts).
+ */
+const taskTurnRunner = createTurnRunner({
+  admission: serverTurnAdmission,
+  intelligence: routineIntelligence,
+  runner: routineAgentRunner,
+  components: componentCatalog,
+  buildAgentFor: (input) => buildAgentFor({ ...input, task: true }),
   toolsForTurn: async ({ ownerUserId, agentId, initiator }) =>
     approvalComputerTools(ownerUserId, agentId, initiator),
   learningContainerForThread: (input) =>
@@ -2248,7 +2273,7 @@ const proactiveEngine = createProactiveEngine({
   startTask: createTaskTurn({
     channels: channelStore,
     actorFor,
-    runTurn: approvalContinuationRunner,
+    runTurn: taskTurnRunner,
     replyContext: taskReplyContext,
   }),
   acceptReplyContext: taskReplyContext.accept,
