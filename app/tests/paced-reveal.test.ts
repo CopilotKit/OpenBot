@@ -86,3 +86,42 @@ test("a shorter text clamps", () => {
     }),
   ).toBe(5);
 });
+
+/*
+ * Text with no spaces (Chinese, Japanese, a long link) has no word to stop at. Held back to the last
+ * space, the whole reply stayed hidden for as long as it streamed and then appeared at once.
+ */
+test("text with no spaces still reveals while it streams", () => {
+  const text = "这是一个没有空格的很长的回答".repeat(20);
+  const seen = new Set<number>();
+  let shown = 0;
+  for (let frame = 0; frame < 60; frame++) {
+    shown = nextReveal({
+      text,
+      shown,
+      elapsedMs: 16,
+      streaming: true,
+      finishInMs: FINISH_MS,
+    });
+    seen.add(shown);
+  }
+  expect(seen.size).toBeGreaterThanOrEqual(5);
+  expect(shown).toBeGreaterThan(text.length / 2);
+});
+
+/* A reply whose text has stopped growing is finished, even while the run goes on with other work. */
+test("a tail that has stopped growing is shown", () => {
+  const text = "here is a chart of your sales:";
+  let shown = 0;
+  for (let frame = 0; frame < 60; frame++) {
+    shown = nextReveal({
+      text,
+      shown,
+      elapsedMs: 16,
+      streaming: true,
+      holdTail: false,
+      finishInMs: FINISH_MS,
+    });
+  }
+  expect(shown).toBe(text.length);
+});

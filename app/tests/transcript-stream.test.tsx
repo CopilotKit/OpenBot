@@ -87,3 +87,23 @@ test("a live reply starts from less than it has and grows to all of it", async (
 
   expect(view.container.textContent).toContain(LONG);
 });
+
+/* The run goes on after the reply's last word (drawing an interface, say); that word still shows. */
+test("a reply's last word shows while the run is still busy", async () => {
+  const history = [user("u1", "question")];
+  const text = "here is a chart of your sales:";
+  const view = render(
+    <ChatTranscript busy messages={history} restoring={false} />,
+  );
+  view.rerender(
+    <ChatTranscript
+      busy
+      messages={[...history, assistant("a1", text)]}
+      restoring={false}
+    />,
+  );
+
+  await frames(40);
+
+  expect(view.container.textContent).toContain("sales:");
+});

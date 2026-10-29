@@ -7,9 +7,10 @@ import { useEffect, useRef, useState } from "react";
  * reads as being written. The pace has a floor, so a slow stream still moves, and a catch-up
  * budget, so a big burst is worked off in well under a second rather than queued behind the floor.
  *
- * Revealed a word at a time: a prefix always ends at the end of the text or just before
- * whitespace, and while the stream is still going it never passes the last whitespace, because
- * the word after it may be half sent.
+ * Revealed a word at a time: a prefix ends at the end of the text or just before whitespace, and
+ * while the stream is still going it stops short of the last word, because that word may be half
+ * sent — until the text has not grown for TAIL_SETTLES_MS, when the reply has ended its sentence
+ * and the run is busy with something else.
  */
 
 /** The slowest the reveal ever goes, so a trickle of text still moves. */
@@ -25,13 +26,22 @@ function isSpace(character: string | undefined): boolean {
   return character !== undefined && /\s/.test(character);
 }
 
-/** The furthest prefix that may be shown: all of it, or while streaming up to the last space. */
-function limitOf(text: string, streaming: boolean): number {
-  if (!streaming) return text.length;
-  for (let index = text.length - 1; index >= 0; index--) {
+/**
+ * The longest run that counts as one word. Text with no spaces (Chinese, Japanese, a long link) has
+ * no word to stop at; past this it is revealed a character at a time rather than held whole.
+ */
+export const LONGEST_WORD = 24;
+/** A tail that has not grown for this long is the end of the reply, not half a word. */
+export const TAIL_SETTLES_MS = 250;
+
+/** The furthest prefix that may be shown: all of it, or while the tail may be half sent, up to it. */
+function limitOf(text: string, holdTail: boolean): number {
+  if (!holdTail) return text.length;
+  const end = Math.max(0, text.length - LONGEST_WORD);
+  for (let index = text.length - 1; index >= end; index--) {
     if (isSpace(text[index])) return index;
   }
-  return 0;
+  return end;
 }
 
 export function nextReveal({
@@ -39,16 +49,19 @@ export function nextReveal({
   shown,
   elapsedMs,
   streaming,
+  holdTail = streaming,
   finishInMs,
 }: {
   text: string;
   shown: number;
   elapsedMs: number;
   streaming: boolean;
+  /** Whether the last word may still be arriving. While streaming, until the text settles. */
+  holdTail?: boolean;
   finishInMs: number;
 }): number {
   const floor = Math.min(shown, text.length);
-  const limit = limitOf(text, streaming);
+  const limit = limitOf(text, streaming && holdTail);
   if (floor >= limit) return floor;
 
   const backlog = text.length - floor;
@@ -59,10 +72,11 @@ export function nextReveal({
     floor + Math.max(1, Math.ceil(rate * elapsedMs)),
   );
 
-  // Forward to the end of the word the target falls in.
+  // Forward to the end of the word the target falls in, unless it is too long to be one.
+  const stop = Math.min(limit, target + LONGEST_WORD);
   let next = target;
-  while (next < limit && !isSpace(text[next])) next++;
-  return next;
+  while (next < stop && !isSpace(text[next])) next++;
+  return next === stop && stop < limit ? target : next;
 }
 
 /**
@@ -77,6 +91,12 @@ export function usePacedReveal(
   const reducedMotion = useReducedMotion() ?? false;
   const [shown, setShown] = useState(() => (live ? 0 : text.length));
   const finishAtRef = useRef<number | null>(null);
+  const grewAtRef = useRef(0);
+  const lengthRef = useRef(text.length);
+  if (text.length !== lengthRef.current) {
+    lengthRef.current = text.length;
+    grewAtRef.current = performance.now();
+  }
 
   if (streaming) {
     finishAtRef.current = null;
@@ -99,6 +119,7 @@ export function usePacedReveal(
           shown: current,
           elapsedMs,
           streaming,
+          holdTail: now - grewAtRef.current < TAIL_SETTLES_MS,
           finishInMs: finishAt === null ? FINISH_MS : finishAt - now,
         }),
       );
