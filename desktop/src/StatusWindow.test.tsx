@@ -1,7 +1,9 @@
-import { afterAll, afterEach, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, expect, mock, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { cleanup, render, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 
-GlobalRegistrator.register();
+beforeAll(() => GlobalRegistrator.register());
 afterAll(() => GlobalRegistrator.unregister());
 
 type Invoke = (command: string, args?: unknown) => Promise<unknown>;
@@ -14,10 +16,6 @@ mock.module("@tauri-apps/api/core", () => ({
   },
 }));
 
-const { cleanup, render, waitFor, within } = await import(
-  "@testing-library/react"
-);
-const userEvent = (await import("@testing-library/user-event")).default;
 const { diagnostics, formatBytes, StatusWindow, totalMemory } = await import(
   "./StatusWindow"
 );
