@@ -36,6 +36,9 @@ export function environmentFor(
      * as every computer was before; a person's computer carries several Bots and leaves the default.
      */
     ...(names.kind === "bot" ? [`COMPUTER_BOT_ID=${names.id}`] : []),
+    // And a person's computer is told it is that person's: Record runs in its Bots' browsers, which it refuses on the
+    // computer every person shares (agent-computer's person-access.ts).
+    ...(names.kind === "person" ? [`COMPUTER_PERSON_ID=${names.id}`] : []),
     /*
      * A folder each. A person's computer carries every Bot that person uses, and each keeps its own
      * files and starts its shell there, as each keeps its own browser profile. On an isolated Bot's

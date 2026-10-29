@@ -107,8 +107,9 @@ export function imagesOf(podTemplate: unknown): string {
  * before computers were per person, with its files at the root; moving the root under it would hide every one
  * (agent-computer's `workspaces.ts`).
  *
- * A PERSON'S COMPUTER carries every Bot they use, so it names no id (anything it was given is taken out) and gives
- * each Bot a folder of its own (`COMPUTER_SEPARATE_WORKSPACES=on`), as each has a browser profile of its own.
+ * A PERSON'S COMPUTER carries every Bot they use, so it names no Bot (anything it was given is taken out), is told whose
+ * it is (`COMPUTER_PERSON_ID`, so Record runs in its Bots' browsers), and gives each Bot a folder of its own
+ * (`COMPUTER_SEPARATE_WORKSPACES=on`), as each has a browser profile of its own.
  *
  * The template itself is left as it was, since every computer is cut from it.
  */
@@ -127,7 +128,10 @@ export function podTemplateFor(
           { name: "COMPUTER_BOT_ID", value: key.botId },
           { name: "COMPUTER_SEPARATE_WORKSPACES", value: "off" },
         ]
-      : [{ name: "COMPUTER_SEPARATE_WORKSPACES", value: "on" }];
+      : [
+          { name: "COMPUTER_PERSON_ID", value: key.personId },
+          { name: "COMPUTER_SEPARATE_WORKSPACES", value: "on" },
+        ];
   return {
     ...template,
     spec: {
@@ -137,6 +141,7 @@ export function podTemplateFor(
           ? (container.env as { name?: unknown }[]).filter(
               (variable) =>
                 variable.name !== "COMPUTER_BOT_ID" &&
+                variable.name !== "COMPUTER_PERSON_ID" &&
                 variable.name !== "COMPUTER_SEPARATE_WORKSPACES",
             )
           : [];

@@ -121,7 +121,10 @@ import { createComputerGateway } from "./computer/gateway";
 import { createHeadlessComputerTools } from "./computer/headless-tools";
 import { createPageFrameStore } from "./computer/page-frames";
 import { startPolicyListener } from "./computer/policy-listener";
-import { policyPusher, withPolicyPushOnWake } from "./computer/policy-network";
+import {
+  pushEgressPolicy,
+  withPolicyPushOnWake,
+} from "./computer/policy-network";
 import {
   createPolicyStore,
   DEFAULT_ACTION_POLICY,
@@ -2650,15 +2653,27 @@ const app = createApp(
             recorder: recorderExtension,
             openbotUrl: openbotAddress(config),
             ...(config.computer?.token ? { token: config.computer.token } : {}),
-            pushPolicy: policyPusher({
-              locate: (botId) => computerGateway.locate(botId),
-              policyForBot: (botId) =>
-                enterpriseControls()?.policyForBot(botId),
-              ...(config.computer?.token
-                ? { token: config.computer.token }
-                : {}),
-              ...(config.webBotAuth ? { webBotAuth: config.webBotAuth } : {}),
-            }),
+            // The Bot's policy, which `botBrowserNetwork` widens while a recording runs, to the computer of the seat
+            // the recording is on: the person's own, or the isolated Bot's.
+            pushPolicy: async (seat) => {
+              const policy = await enterpriseControls()?.policyForBot(
+                seat.botId,
+              );
+              if (!policy) return;
+              await pushEgressPolicy(
+                await computerGateway.locate(seat),
+                seat.botId,
+                policy,
+                {
+                  ...(config.computer?.token
+                    ? { token: config.computer.token }
+                    : {}),
+                  ...(config.webBotAuth
+                    ? { webBotAuth: config.webBotAuth }
+                    : {}),
+                },
+              );
+            },
             singleUser: config.singleUser,
             // Where every Bot shares one computer, Record is refused in all their browsers (browser/host.ts).
             ...(recordRefused ? { recordRefused } : {}),

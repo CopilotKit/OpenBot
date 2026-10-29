@@ -343,6 +343,36 @@ describe.skipIf(!asked)(
       ).toBe(200);
     }, 60_000);
 
+    test("records on a person's own computer, where only their own Bots run", async () => {
+      // How the supervisor and a Sandbox start a person's computer: named for the person, no Bot.
+      const own = await startComputer("persons-computer", {
+        OPENBOT_RECORDER_DIR: FIXTURE,
+        COMPUTER_PERSON_ID: "user-1",
+      });
+      await takeWheel("user-1", own);
+      const before = calls.length;
+      const started = await start("user-1", "File an expense report", own);
+      expect(started.status).toBe(200);
+      expect(started.json.recordingBy).toBe("user-1");
+      // The Recorder there was handed the person's connection and asked to record.
+      expect(
+        calls
+          .slice(before)
+          .map((each) => each.method)
+          .filter((method) => method === "connect" || method === "record"),
+      ).toEqual(["connect", "record"]);
+      expect(
+        (
+          await call("/bot-browser/recording", {
+            body: { action: "stop" },
+            on: own,
+          })
+        ).status,
+      ).toBe(200);
+      // The fixture Recorder's calls are one list for the file; the tests after this one start from none.
+      calls.length = 0;
+    }, 60_000);
+
     test("refuses the bar, Record and narration while the Bot holds the wheel", async () => {
       for (const [path, body] of [
         ["/bot-browser/tabs", { action: "new", url: page("sneaky") }],
@@ -982,9 +1012,9 @@ describe.skipIf(!asked)(
 function serverOn(on: Computer) {
   const provider: ComputerProvider = {
     name: "this-test",
-    isolation: "per-bot",
+    isolation: "per-person",
     locate: async () => on.base,
-    status: async (botId) => ({ botId, state: "ready" }),
+    status: async (seat) => ({ botId: seat.botId, state: "ready" }),
     stop: async () => ({ wasRunning: true }),
     reset: async () => ({ cleared: true }),
     list: async () => [],
@@ -1069,8 +1099,9 @@ describe.skipIf(!asked)("who asked for the wheel", () => {
     ).toBe(200);
 
     // The Bot asking, as the headless tools and the password service do: no source, so the Bot's.
+    // On the seat the routes reach for this person, as the headless tools resolve it.
     const bots = await server.gateway.requestHelp(
-      botId,
+      await server.gateway.seatFor(botId, server.actor.id),
       server.actor,
       "Sign in to the bank, then hand back.",
       "call-sign-in",

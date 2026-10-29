@@ -29,22 +29,23 @@ import { createApp } from "../src/app";
 import type { AuditEventInput } from "../src/audit";
 import { openbotAddress } from "../src/browser/address";
 import {
+  botBrowserInstallId,
+  botBrowserNetwork,
+  botBrowserRequestSeconds,
+} from "../src/browser/bot-browser";
+import { botRecordRefusal, SHARED_COMPUTER_RECORD } from "../src/browser/host";
+import { personBrowserId } from "../src/browser/person";
+import {
   CALL_BUDGET_MS,
   OPEN_BUDGET_MS,
   STATE_TIMEOUT_MS,
 } from "../src/browser/routes";
-import {
-  botBrowserInstallId,
-  botBrowserRequestSeconds,
-  botBrowserNetwork,
-} from "../src/browser/bot-browser";
-import { botRecordRefusal, SHARED_COMPUTER_RECORD } from "../src/browser/host";
-import { personBrowserId } from "../src/browser/person";
+import { botSeat, personSeat } from "../src/computer/computer-key";
 import { createComputerGateway } from "../src/computer/gateway";
 import {
   type EgressPolicy,
-  policyPusher,
   pushEgressPolicies,
+  pushEgressPolicy,
   withPolicyPushOnWake,
 } from "../src/computer/policy-network";
 import { createSharedComputerProvider } from "../src/computer/provider";
@@ -79,6 +80,8 @@ const cy = {
 const PEOPLE = { ada, ben, cy } as const;
 const BOT = `${prefix}-sales`;
 const BOT_NAME = "Sales Bot";
+/** A Bot that runs on each person's own seat, where BOT runs on a computer of its own (isolated) everyone shares. */
+const PERSONAL = `${prefix}-notes`;
 const COMPUTER_TOKEN = "bot-browser-computer-token";
 const PUBLIC = "https://openbot.example.com";
 const GATEWAY = "wss://gateway.example.com/socket";
@@ -225,7 +228,9 @@ const computer = Bun.serve({
       pushed.set(id, [...(pushed.get(id) ?? []), policy]);
       return Response.json({ ok: true });
     }
-    const bot = botOf(id);
+    // A Bot's browser is a seat's, as on the real computer: the Bot, and on a computer people share, the person too.
+    const person = request.headers.get("x-openbot-person-id");
+    const bot = botOf(person ? `${id}/${person}` : id);
     const body =
       request.method === "POST" ? await request.json().catch(() => null) : null;
     const holds = () => bot.control.holder === "human";
@@ -427,10 +432,10 @@ const better = {
     },
   },
 };
-// The Bot is shared with Ada and Ben, not with Cy: the computer routes' own access rule decides.
+// The Bots are shared with Ada and Ben, not with Cy: the computer routes' own access rule decides.
 const profiles = {
   get: async (actor: { id: string }, botId: string) =>
-    botId === BOT && actor.id !== cy.id
+    (botId === BOT || botId === PERSONAL) && actor.id !== cy.id
       ? { name: BOT_NAME, visibility: "public", ownerUserId: ada.id }
       : null,
 };
@@ -464,6 +469,12 @@ const gateway = createComputerGateway({
   auditStore,
   policy: () => undefined,
   token: COMPUTER_TOKEN,
+  // BOT is isolated, so everyone who uses it works one browser of it, as these tests are about; PERSONAL runs on each
+  // person's own seat (computer/computer-key.ts).
+  seats: {
+    seatFor: async (botId, personId) =>
+      botId === BOT ? botSeat(botId) : personSeat(personId, botId),
+  },
 });
 const recorder = createRecorderExtension({
   config,
@@ -492,11 +503,13 @@ args[34] = {
     recorder,
     openbotUrl: openbotAddress(config),
     token: COMPUTER_TOKEN,
-    pushPolicy: policyPusher({
-      locate: (botId) => gateway.locate(botId),
-      policyForBot,
-      token: COMPUTER_TOKEN,
-    }),
+    // As index.ts pushes it: the Bot's policy, to the computer of the seat the recording is on.
+    pushPolicy: async (seat) => {
+      const policy = await policyForBot(seat.botId);
+      await pushEgressPolicy(await gateway.locate(seat), seat.botId, policy, {
+        token: COMPUTER_TOKEN,
+      });
+    },
   },
 };
 const app = createApp(...args);
@@ -1184,7 +1197,7 @@ describe("recording in a Bot's browser", () => {
 
   test("where Bots share one computer, Record is refused before a connection is minted, and the screen says why", async () => {
     expect(botRecordRefusal(sharedComputer)).toBe(SHARED_COMPUTER_RECORD);
-    expect(botRecordRefusal({ isolation: "per-bot" })).toBeNull();
+    expect(botRecordRefusal({ isolation: "per-person" })).toBeNull();
     expect(botRecordRefusal(undefined)).toBeNull();
 
     const requestId = await takeWheel("ada");
@@ -1238,6 +1251,72 @@ describe("recording in a Bot's browser", () => {
       reason: "not-started",
     });
     expect(lastPushed()).toEqual(OWN_POLICY);
+  });
+});
+
+describe("a Bot on each person's own seat", () => {
+  const route = (rest: string) =>
+    `/api/computers/${encodeURIComponent(PERSONAL)}${rest}`;
+  async function takeOwnWheel(as: keyof typeof PEOPLE) {
+    const asked = await call(route("/control/request"), {
+      method: "POST",
+      as,
+      json: { reason: "Let me show you" },
+    });
+    expect(asked.status).toBe(200);
+    const { request } = (await asked.json()) as ComputerControlState;
+    const taken = await call(route("/control/take"), {
+      method: "POST",
+      as,
+      json: { requestId: request?.id },
+    });
+    expect(taken.status).toBe(200);
+    return request?.id as string;
+  }
+  const heldFor = async (person: string) =>
+    (
+      await connections.atInstall(
+        botBrowserInstallId(PERSONAL),
+        BOT_BROWSER_VIA,
+      )
+    )
+      .filter((connection) => connection.userId === person)
+      .map((connection) => connection.id);
+
+  test("one person's hand-back ends only their own recording, never another person's on their own seat", async () => {
+    // Ada and Ben each record in the Bot's browser on their own seat: two browsers, two recordings, two connections.
+    const adaRequest = await takeOwnWheel("ada");
+    await takeOwnWheel("ben");
+    for (const as of ["ada", "ben"] as const)
+      expect(
+        (
+          await call(route("/browser/recording"), {
+            method: "POST",
+            as,
+            json: { action: "start", title: `${as}'s task` },
+          })
+        ).status,
+      ).toBe(200);
+    expect(await heldFor(ada.id)).toHaveLength(1);
+    const bens = await heldFor(ben.id);
+    expect(bens).toHaveLength(1);
+
+    // Each reads only their own: Ben's screen does not show Ada's recording, nor end her connection as left behind.
+    const benSees = (await (
+      await call(route("/browser"), { as: "ben" })
+    ).json()) as BotBrowserApiState;
+    expect(benSees.recordingBy).toBe(ben.id);
+    expect(await heldFor(ada.id)).toHaveLength(1);
+
+    // Ada hands back on her seat: her connection ends, and Ben's recording goes on.
+    const released = await call(route("/control/release"), {
+      method: "POST",
+      as: "ada",
+      json: { requestId: adaRequest },
+    });
+    expect(released.status).toBe(200);
+    expect(await heldFor(ada.id)).toEqual([]);
+    expect(await heldFor(ben.id)).toEqual(bens);
   });
 });
 

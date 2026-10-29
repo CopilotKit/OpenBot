@@ -53,6 +53,7 @@ import { attachmentUrl } from "@/lib/channels/attachments";
 import { readResponsibilityTurn } from "@/lib/channels/responsibility-turn";
 import { readFiring } from "@/lib/channels/routine-firing";
 import type { CardPlace } from "@/lib/copilot/carry-on";
+import { ToolPlaceContext } from "@/lib/copilot/tool-place";
 import { markdownComponents } from "@/lib/markdown";
 import { EASE_OUT, ENTRANCE_SECONDS } from "@/lib/motion";
 import { readToolName } from "@/lib/plugins/tool-name";
@@ -63,12 +64,6 @@ import {
   toolResultFailed,
 } from "@/lib/plugins/tool-result";
 import { readTeamBotConsent } from "@/lib/team-bots";
-import type { CardPlace } from "@/lib/copilot/carry-on";
-import { ToolPlaceContext } from "@/lib/copilot/tool-place";
-import {
-  readConnectPrompt,
-  SHOW_APP_ACCESS_TOOL,
-} from "@openbot/shared/connect-prompt";
 import { cn } from "@/lib/utils";
 import { VOICE_CHAT_ACTIVITY, type VoiceChatEntry } from "@/lib/voice/archive";
 import { AppAccessCard } from "./app-access-card";

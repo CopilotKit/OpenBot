@@ -40,5 +40,7 @@ describe("what the supervisor tells a computer about its browser", () => {
     expect(
       environment.some((line) => line.startsWith("COMPUTER_BOT_ID=")),
     ).toBe(false);
+    // Told whose it is, so Record runs in its Bots' browsers there.
+    expect(environment).toContain("COMPUTER_PERSON_ID=u-ada");
   });
 });

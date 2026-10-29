@@ -36,6 +36,7 @@ import { bodyLimit } from "hono/body-limit";
 import type { z } from "zod";
 import { type AuditStore, recordAuditEvent } from "../audit";
 import type { AppVariables, AuthenticatedActor } from "../auth/guards";
+import { type SeatAddress, seatHeaders } from "../computer/client";
 import { checkComputerAddress } from "../computer/target";
 import { reasonWithoutStatement } from "../db/query-failure";
 import { recorderAudit, recorderConnected } from "../recorder/connected";
@@ -433,7 +434,8 @@ export function computerCaller(
   const callTimeoutMs = deps.callTimeoutMs ?? CALL_TIMEOUT_MS;
   return async function ask(
     base: string,
-    computerId: string,
+    /** The browser's id, or a Bot's seat as the gateway names it (`addressOf`): with its person on the shared computer. */
+    computerId: SeatAddress,
     path: string,
     options: {
       body?: unknown;
@@ -464,7 +466,7 @@ export function computerCaller(
       response = await doFetch(`${base.replace(/\/$/, "")}${path}`, {
         method: options.method ?? (body === undefined ? "GET" : "POST"),
         headers: {
-          "x-openbot-bot-id": computerId,
+          ...seatHeaders(computerId),
           ...(deps.token ? { "x-openbot-computer-token": deps.token } : {}),
           ...(body === undefined ? {} : { "content-type": "application/json" }),
         },

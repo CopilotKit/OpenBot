@@ -20,9 +20,10 @@ import { Hono } from "hono";
 import type { z } from "zod";
 import type { AuditStore } from "../audit";
 import type { AppVariables, AuthenticatedActor } from "../auth/guards";
+import type { ComputerSeat } from "../computer/computer-key";
 import type { ComputerGateway } from "../computer/gateway";
-import { actorOf } from "../computer/routes";
 import type { EgressPolicy } from "../computer/policy-network";
+import { actorOf } from "../computer/routes";
 import { reasonWithoutStatement } from "../db/query-failure";
 import { recorderAudit, recorderConnected } from "../recorder/connected";
 import type {
@@ -187,12 +188,27 @@ export function botBrowserInstallId(botId: string): string {
     .slice(0, 32);
 }
 
-/** The live Recorder connections this Bot's browser holds, one for each person recording there (or left behind). */
-function heldConnections(
+/**
+ * The live Recorder connections this Bot's browser holds, one for each person recording there (or left behind).
+ *
+ * A Bot has a browser on every computer it runs on: its own when it is isolated, one on each person's computer
+ * otherwise (computer/computer-key.ts). Its connections are filed under the Bot (`botBrowserInstallId`), so on a
+ * person's computer only that person's are this browser's: another person's are for the same Bot's browser on their
+ * own computer, which this browser's reads, hand-backs and clears must never end. A seat on the Bot's own computer
+ * holds everyone's.
+ */
+async function heldConnections(
   connections: Pick<RecorderConnectionStore, "atInstall">,
-  botId: string,
+  where: string | Pick<ComputerSeat, "botId" | "key">,
 ) {
-  return connections.atInstall(botBrowserInstallId(botId), BOT_BROWSER_VIA);
+  const botId = typeof where === "string" ? where : where.botId;
+  const held = await connections.atInstall(
+    botBrowserInstallId(botId),
+    BOT_BROWSER_VIA,
+  );
+  if (typeof where === "string" || where.key.kind !== "person") return held;
+  const person = where.key.personId;
+  return held.filter((connection) => connection.userId === person);
 }
 
 /**
@@ -217,7 +233,10 @@ export function botBrowserNetwork(input: {
 
 export type BotBrowserRouteDeps = {
   /** Where the Bot's computer is, and whether it is up, without starting it; and what follows a clear on this side. */
-  gateway: Pick<ComputerGateway, "locate" | "status" | "browserCleared">;
+  gateway: Pick<
+    ComputerGateway,
+    "locate" | "status" | "browserCleared" | "seatFor" | "addressOf"
+  >;
   /** The computer token, the same one every computer requires. */
   token?: string;
   /** The Recorder's connections and what goes with them (recorder/wiring.ts). */
@@ -231,7 +250,7 @@ export type BotBrowserRouteDeps = {
    * Pushes the Bot's computer its network policy now (computer/policy-network.ts `policyPusher`), which
    * `botBrowserNetwork` widens while a connection is live. Absent where no network policy is pushed at all.
    */
-  pushPolicy?: (botId: string) => Promise<void>;
+  pushPolicy?: (seat: ComputerSeat) => Promise<void>;
   /** The Bot's name as this person sees it, for the connection's name in Settings, Browsers. */
   botName?: (
     actor: AuthenticatedActor,
@@ -265,13 +284,13 @@ export type BotBrowser = {
    * browser has ended, so every connection it holds is left behind. Revoked, and the Bot pushed its own policy, before
    * the Bot acts again. Never throws.
    */
-  wheelReturned(botId: string): Promise<void>;
+  wheelReturned(seat: ComputerSeat): Promise<void>;
   /**
    * A hand-back or a cancel whose answer did not arrive: it may have happened all the same. The computer is asked who
    * holds the wheel now, and every connection no recording there can be using is revoked, as a read of the Bot's screen
    * would. Never throws.
    */
-  wheelMayHaveReturned(botId: string): Promise<void>;
+  wheelMayHaveReturned(seat: ComputerSeat): Promise<void>;
 };
 
 /** The person holding the Bot's wheel, or null while the Bot holds it or nobody said who took it. */
@@ -382,10 +401,13 @@ export function createBotBrowser(deps: BotBrowserRouteDeps): BotBrowser {
   const tooSlow = () =>
     Response.json({ error: SENTENCES.slow }, { status: 504 });
   /** Whether the Bot's computer is up, and where it is: each within what is left of the request's budget. */
-  const statusOf = (botId: string) =>
-    inBudget(deps.gateway.status(botId), "status", SENTENCES.slow);
-  const where = (botId: string) =>
-    inBudget(deps.gateway.locate(botId), "locate", SENTENCES.slow);
+  const statusOf = (seat: ComputerSeat) =>
+    inBudget(deps.gateway.status(seat), "status", SENTENCES.slow);
+  const where = (seat: ComputerSeat) =>
+    inBudget(deps.gateway.locate(seat), "locate", SENTENCES.slow);
+  /** The Bot's seat for the person asking: their own computer's, or the Bot's own computer when it is isolated. */
+  const seatFor = (botId: string, actor: { id: string }) =>
+    deps.gateway.seatFor(botId, actor.id);
   const readBudget = withBudget(deps.budgetMs?.read ?? READ_BUDGET_MS);
   const recordingBudget = withBudget(
     deps.budgetMs?.recording ?? RECORDING_BUDGET_MS,
@@ -404,7 +426,7 @@ export function createBotBrowser(deps: BotBrowserRouteDeps): BotBrowser {
    */
   async function report(
     base: string,
-    botId: string,
+    seat: ComputerSeat,
   ): Promise<Pick<Seen, "control" | "state" | "slow">> {
     let slow = false;
     const unanswered = (error: unknown) => {
@@ -412,12 +434,14 @@ export function createBotBrowser(deps: BotBrowserRouteDeps): BotBrowser {
       return null;
     };
     const [control, state] = await Promise.all([
-      ask(base, botId, CONTROL_PATH, { timeoutMs: STATE_TIMEOUT_MS }).then(
+      ask(base, deps.gateway.addressOf(seat), CONTROL_PATH, {
+        timeoutMs: STATE_TIMEOUT_MS,
+      }).then(
         (answer) =>
           answer.status === 200 ? (answer.body as ComputerControlState) : null,
         unanswered,
       ),
-      ask(base, botId, botBrowserComputerPaths.state, {
+      ask(base, deps.gateway.addressOf(seat), botBrowserComputerPaths.state, {
         timeoutMs: STATE_TIMEOUT_MS,
       }).then(
         (answer) => (answer.status === 200 ? stateOf(answer.body) : null),
@@ -436,13 +460,13 @@ export function createBotBrowser(deps: BotBrowserRouteDeps): BotBrowser {
 
   /** What the Bot's computer says now, when it is up. Asking never starts it: the screen asks every few seconds, and
    * looking is not a reason to wake a computer (the screenshot route's rule, computer/routes.ts). */
-  async function look(botId: string): Promise<Seen> {
+  async function look(seat: ComputerSeat): Promise<Seen> {
     const unknown = { control: null, state: null, running: false };
     try {
-      const { state } = await statusOf(botId);
+      const { state } = await statusOf(seat);
       if (state === "absent") return { ...unknown, known: true };
       if (state !== "ready") return { ...unknown, known: false };
-      return answered(await report(await where(botId), botId));
+      return answered(await report(await where(seat), seat));
     } catch (error) {
       return {
         ...unknown,
@@ -454,11 +478,12 @@ export function createBotBrowser(deps: BotBrowserRouteDeps): BotBrowser {
 
   /** Pushes the Bot its policy as the connections now say. Logged, never thrown: a recording or a read goes on, and the
    * periodic push sends the same policy within the minute. */
-  async function pushPolicy(botId: string, why: string) {
+  async function pushPolicy(seat: ComputerSeat, why: string) {
+    const botId = seat.botId;
     if (!deps.pushPolicy) return;
     try {
       // Within the request's budget: a push that takes longer goes on without it, and is logged if it fails.
-      await inBudget(deps.pushPolicy(botId), "egress-policy", SENTENCES.slow);
+      await inBudget(deps.pushPolicy(seat), "egress-policy", SENTENCES.slow);
     } catch (error) {
       console.warn(
         JSON.stringify({
@@ -503,12 +528,13 @@ export function createBotBrowser(deps: BotBrowserRouteDeps): BotBrowser {
    * its narrowed policy when the computer is up; one that is not is pushed it when it wakes. Never throws: a read is
    * answered whatever happened here.
    */
-  async function settle(botId: string, seen: Seen, keep?: string) {
+  async function settle(seat: ComputerSeat, seen: Seen, keep?: string) {
+    const botId = seat.botId;
     if (!seen.known) return;
     try {
       const holder = heldBy(seen.control);
       const now = Date.now();
-      const leftBehind = (await heldConnections(connections, botId)).filter(
+      const leftBehind = (await heldConnections(connections, seat)).filter(
         (connection) =>
           connection.id !== keep &&
           connection.userId !== seen.state?.recordingBy &&
@@ -517,7 +543,7 @@ export function createBotBrowser(deps: BotBrowserRouteDeps): BotBrowser {
       );
       if (leftBehind.length === 0) return;
       for (const connection of leftBehind) await revoke(connection, "ended");
-      if (seen.running) await pushPolicy(botId, "left-behind");
+      if (seen.running) await pushPolicy(seat, "left-behind");
     } catch (error) {
       console.error(
         JSON.stringify({
@@ -544,7 +570,7 @@ export function createBotBrowser(deps: BotBrowserRouteDeps): BotBrowser {
    * left to it: the computer knows a person holds the wheel, and only this server knows which person is asking.
    */
   async function withTheWheel(
-    botId: string,
+    seat: ComputerSeat,
     userId: string,
   ): Promise<
     | ({ ok: true; base: string } & Pick<Seen, "control" | "state">)
@@ -552,13 +578,13 @@ export function createBotBrowser(deps: BotBrowserRouteDeps): BotBrowser {
   > {
     let base: string;
     try {
-      if ((await statusOf(botId)).state !== "ready")
+      if ((await statusOf(seat)).state !== "ready")
         return { ok: false, response: conflict(SENTENCES.takeControl) };
-      base = await where(botId);
+      base = await where(seat);
     } catch (error) {
       return { ok: false, response: failed(error) };
     }
-    const seen = await report(base, botId);
+    const seen = await report(base, seat);
     // Not said to be another's wheel when the computer only did not answer in time.
     if (seen.slow && heldBy(seen.control) !== userId)
       return { ok: false, response: tooSlow() };
@@ -569,16 +595,18 @@ export function createBotBrowser(deps: BotBrowserRouteDeps): BotBrowser {
 
   /** One request the bar makes, for the person at the wheel: answered with the Bot's browser after it. */
   async function drive(
-    botId: string,
+    seat: ComputerSeat,
     userId: string,
     path: string,
     body: unknown,
   ): Promise<Response> {
-    const wheel = await withTheWheel(botId, userId);
+    const wheel = await withTheWheel(seat, userId);
     if (!wheel.ok) return wheel.response;
     let taken: { status: number; body: unknown };
     try {
-      taken = await ask(wheel.base, botId, path, { body });
+      taken = await ask(wheel.base, deps.gateway.addressOf(seat), path, {
+        body,
+      });
     } catch (error) {
       return failed(error);
     }
@@ -598,12 +626,13 @@ export function createBotBrowser(deps: BotBrowserRouteDeps): BotBrowser {
   const starting = new Map<string, Promise<void>>();
 
   function start(
-    botId: string,
+    seat: ComputerSeat,
     asker: { actor: AuthenticatedActor; origin?: string; cookie?: string },
     request: { title: string; language?: string },
   ): Promise<Response> {
+    const botId = seat.botId;
     const run = (starting.get(botId) ?? Promise.resolve()).then(() =>
-      startNow(botId, asker, request),
+      startNow(seat, asker, request),
     );
     const settled = run.then(
       () => undefined,
@@ -624,15 +653,16 @@ export function createBotBrowser(deps: BotBrowserRouteDeps): BotBrowser {
    * A start the computer refused takes its connection and the widening away again.
    */
   async function startNow(
-    botId: string,
+    seat: ComputerSeat,
     asker: { actor: AuthenticatedActor; origin?: string; cookie?: string },
     request: { title: string; language?: string },
   ): Promise<Response> {
+    const botId = seat.botId;
     const { actor } = asker;
     // Before the wheel or the computer is asked, and long before a connection is minted for a profile others can read.
     if (deps.recordRefused)
       return Response.json({ error: deps.recordRefused }, { status: 403 });
-    const wheel = await withTheWheel(botId, actor.id);
+    const wheel = await withTheWheel(seat, actor.id);
     if (!wheel.ok) return wheel.response;
     // Whether something records there already is the computer's to say: a start on a guess could replace the
     // connection of the person's own recording that is running.
@@ -702,7 +732,7 @@ export function createBotBrowser(deps: BotBrowserRouteDeps): BotBrowser {
     /** The start did not happen: its connection goes, and with it the Bot's wider policy. */
     const unmade = async (response: Response) => {
       await revoke(mine, "not-started");
-      await pushPolicy(botId, "not-started");
+      await pushPolicy(seat, "not-started");
       return response;
     };
     const user = await deps.recorder.user(actor.id);
@@ -731,14 +761,19 @@ export function createBotBrowser(deps: BotBrowserRouteDeps): BotBrowser {
         Response.json({ error: SENTENCES.notConnected }, { status: 500 }),
       );
 
-    await settle(botId, answered(wheel), made.connection.id);
-    await pushPolicy(botId, "recording");
+    await settle(seat, answered(wheel), made.connection.id);
+    await pushPolicy(seat, "recording");
     let answer: { status: number; body: unknown };
     try {
-      answer = await ask(wheel.base, botId, botBrowserComputerPaths.recording, {
-        body: body.data,
-        timeoutMs: START_TIMEOUT_MS,
-      });
+      answer = await ask(
+        wheel.base,
+        deps.gateway.addressOf(seat),
+        botBrowserComputerPaths.recording,
+        {
+          body: body.data,
+          timeoutMs: START_TIMEOUT_MS,
+        },
+      );
     } catch (error) {
       return unmade(failed(error));
     }
@@ -759,13 +794,13 @@ export function createBotBrowser(deps: BotBrowserRouteDeps): BotBrowser {
    * recording after all), every connection of theirs for this Bot is revoked and the Bot pushed its own policy again.
    * One the computer could not be asked to stop is left alone: the recording may still be running under it.
    */
-  async function stop(botId: string, userId: string): Promise<Response> {
+  async function stop(seat: ComputerSeat, userId: string): Promise<Response> {
     let base: string;
     try {
       // A computer that is not there is recording nothing, and is not started to say so.
-      const { state } = await statusOf(botId);
+      const { state } = await statusOf(seat);
       if (state === "absent") {
-        await settle(botId, {
+        await settle(seat, {
           control: null,
           state: null,
           running: false,
@@ -775,36 +810,41 @@ export function createBotBrowser(deps: BotBrowserRouteDeps): BotBrowser {
       }
       if (state !== "ready")
         return Response.json({ error: SENTENCES.unreachable }, { status: 502 });
-      base = await where(botId);
+      base = await where(seat);
     } catch (error) {
       return failed(error);
     }
-    const seen = answered(await report(base, botId));
+    const seen = answered(await report(base, seat));
     if (!seen.state)
       return seen.slow
         ? tooSlow()
         : Response.json({ error: SENTENCES.unreachable }, { status: 502 });
     const recordingBy = seen.state.recordingBy;
     if (recordingBy !== userId) {
-      await settle(botId, seen);
+      await settle(seat, seen);
       return conflict(
         recordingBy ? SENTENCES.someoneElses : SENTENCES.nothingRecording,
       );
     }
     let answer: { status: number; body: unknown };
     try {
-      answer = await ask(base, botId, botBrowserComputerPaths.recording, {
-        body: { action: "stop" } satisfies BotBrowserComputerRecordingRequest,
-        timeoutMs: STOP_TIMEOUT_MS,
-      });
+      answer = await ask(
+        base,
+        deps.gateway.addressOf(seat),
+        botBrowserComputerPaths.recording,
+        {
+          body: { action: "stop" } satisfies BotBrowserComputerRecordingRequest,
+          timeoutMs: STOP_TIMEOUT_MS,
+        },
+      );
     } catch (error) {
       return failed(error);
     }
     const ended = answer.status >= 200 && answer.status < 300;
     if (ended || answer.status === 409) {
-      for (const connection of await heldConnections(connections, botId))
+      for (const connection of await heldConnections(connections, seat))
         if (connection.userId === userId) await revoke(connection, "stopped");
-      await pushPolicy(botId, "stopped");
+      await pushPolicy(seat, "stopped");
     }
     if (!ended) return refused(answer);
     return Response.json(
@@ -825,23 +865,29 @@ export function createBotBrowser(deps: BotBrowserRouteDeps): BotBrowser {
    * leaves its connection behind, which goes now, and the Bot is pushed its own policy again.
    */
   async function clear(
-    botId: string,
+    seat: ComputerSeat,
     actor: AuthenticatedActor,
   ): Promise<Response> {
-    const wheel = await withTheWheel(botId, actor.id);
+    const botId = seat.botId;
+    const wheel = await withTheWheel(seat, actor.id);
     if (!wheel.ok) return wheel.response;
     let answer: { status: number; body: unknown };
     try {
-      answer = await ask(wheel.base, botId, botBrowserComputerPaths.clear, {
-        body: { by: actor.id } satisfies BotBrowserComputerClearRequest,
-        timeoutMs: CLEAR_TIMEOUT_MS,
-      });
+      answer = await ask(
+        wheel.base,
+        deps.gateway.addressOf(seat),
+        botBrowserComputerPaths.clear,
+        {
+          body: { by: actor.id } satisfies BotBrowserComputerClearRequest,
+          timeoutMs: CLEAR_TIMEOUT_MS,
+        },
+      );
     } catch (error) {
       return failed(error);
     }
     if (answer.status < 200 || answer.status >= 300) return refused(answer);
     try {
-      await deps.gateway.browserCleared(botId, actorOf(actor));
+      await deps.gateway.browserCleared(seat, actorOf(actor));
     } catch (error) {
       console.error(
         JSON.stringify({
@@ -856,9 +902,9 @@ export function createBotBrowser(deps: BotBrowserRouteDeps): BotBrowser {
         { status: 500 },
       );
     }
-    const held = await heldConnections(connections, botId).catch(() => []);
+    const held = await heldConnections(connections, seat).catch(() => []);
     for (const connection of held) await revoke(connection, "ended");
-    if (held.length > 0) await pushPolicy(botId, "cleared");
+    if (held.length > 0) await pushPolicy(seat, "cleared");
     return Response.json(
       viewFor(
         actor.id,
@@ -870,11 +916,14 @@ export function createBotBrowser(deps: BotBrowserRouteDeps): BotBrowser {
   }
 
   routes.get("/", readBudget, async (context) => {
-    const botId = context.req.param("botId") ?? "";
-    const seen = await look(botId);
+    const seat = await seatFor(
+      context.req.param("botId") ?? "",
+      context.var.actor,
+    );
+    const seen = await look(seat);
     // Said, rather than read as a closed browser: the screen keeps what it last showed, and asks again in a second.
     if (seen.slow) return tooSlow();
-    await settle(botId, seen);
+    await settle(seat, seen);
     return context.json(
       viewFor(
         context.var.actor.id,
@@ -892,7 +941,7 @@ export function createBotBrowser(deps: BotBrowserRouteDeps): BotBrowser {
     if (body.action === "new" && body.url && !isWebAddress(body.url))
       return context.json({ error: SENTENCES.notWeb }, 400);
     return drive(
-      context.req.param("botId") ?? "",
+      await seatFor(context.req.param("botId") ?? "", context.var.actor),
       context.var.actor.id,
       botBrowserComputerPaths.tabs,
       body,
@@ -905,7 +954,7 @@ export function createBotBrowser(deps: BotBrowserRouteDeps): BotBrowser {
     if ("url" in body && !isWebAddress(body.url))
       return context.json({ error: SENTENCES.notWeb }, 400);
     return drive(
-      context.req.param("botId") ?? "",
+      await seatFor(context.req.param("botId") ?? "", context.var.actor),
       context.var.actor.id,
       botBrowserComputerPaths.navigate,
       body,
@@ -921,10 +970,13 @@ export function createBotBrowser(deps: BotBrowserRouteDeps): BotBrowser {
       const body = await parsed(context.req.raw, browserRecordingRequestSchema);
       if (!body)
         return context.json({ error: "Name what you are about to do." }, 400);
-      const botId = context.req.param("botId") ?? "";
-      if (body.action === "stop") return stop(botId, context.var.actor.id);
+      const seat = await seatFor(
+        context.req.param("botId") ?? "",
+        context.var.actor,
+      );
+      if (body.action === "stop") return stop(seat, context.var.actor.id);
       return start(
-        botId,
+        seat,
         {
           actor: context.var.actor,
           origin: context.req.header("origin"),
@@ -941,15 +993,18 @@ export function createBotBrowser(deps: BotBrowserRouteDeps): BotBrowser {
   routes.post("/narration", barBudget, jsonOnly, smallBody, async (context) => {
     const read = await narrationOnServerClock(context.req.raw);
     if (!read.ok) return context.json({ error: read.error }, 400);
-    const botId = context.req.param("botId") ?? "";
+    const seat = await seatFor(
+      context.req.param("botId") ?? "",
+      context.var.actor,
+    );
     const userId = context.var.actor.id;
     let base: string;
     try {
-      base = await where(botId);
+      base = await where(seat);
     } catch (error) {
       return failed(error);
     }
-    const { state, slow } = await report(base, botId);
+    const { state, slow } = await report(base, seat);
     if (!state && slow) return tooSlow();
     if (state?.recordingBy !== userId)
       return context.json(
@@ -962,9 +1017,14 @@ export function createBotBrowser(deps: BotBrowserRouteDeps): BotBrowser {
       );
     let taken: { status: number; body: unknown };
     try {
-      taken = await ask(base, botId, botBrowserComputerPaths.narration, {
-        body: read.narration,
-      });
+      taken = await ask(
+        base,
+        deps.gateway.addressOf(seat),
+        botBrowserComputerPaths.narration,
+        {
+          body: read.narration,
+        },
+      );
     } catch (error) {
       return failed(error);
     }
@@ -973,29 +1033,32 @@ export function createBotBrowser(deps: BotBrowserRouteDeps): BotBrowser {
   });
 
   routes.post("/clear", clearBudget, async (context) =>
-    clear(context.req.param("botId") ?? "", context.var.actor),
+    clear(
+      await seatFor(context.req.param("botId") ?? "", context.var.actor),
+      context.var.actor,
+    ),
   );
 
   return {
     routes,
-    async wheelReturned(botId) {
+    async wheelReturned(seat) {
       try {
-        const held = await heldConnections(connections, botId);
+        const held = await heldConnections(connections, seat);
         if (held.length === 0) return;
         for (const connection of held) await revoke(connection, "ended");
-        await pushPolicy(botId, "wheel-returned");
+        await pushPolicy(seat, "wheel-returned");
       } catch (error) {
         console.error(
           JSON.stringify({
             type: "bot-browser-settle-failed",
-            botId,
+            botId: seat.botId,
             error: error instanceof Error ? error.message : String(error),
           }),
         );
       }
     },
-    async wheelMayHaveReturned(botId) {
-      await settle(botId, await look(botId));
+    async wheelMayHaveReturned(seat) {
+      await settle(seat, await look(seat));
     },
   };
 }

@@ -513,7 +513,7 @@ describe("where a computer keeps its files", () => {
     ]);
   });
 
-  test("a person's computer gives each Bot a folder, and names no Bot", async () => {
+  test("a person's computer gives each Bot a folder, names no Bot, and is told whose it is", async () => {
     const cluster = fakeCluster({ mode: "Suspended", image: "old" });
     await createSandboxComputerProvider({
       namespace: "openbot",
@@ -537,6 +537,7 @@ describe("where a computer keeps its files", () => {
       fetchImpl: cluster.fetchImpl,
     }).locate(personSeat("user-1", "general"));
     expect(envOf(cluster.state.podTemplate)).toEqual([
+      { name: "COMPUTER_PERSON_ID", value: "user-1" },
       { name: "COMPUTER_SEPARATE_WORKSPACES", value: "on" },
     ]);
   });

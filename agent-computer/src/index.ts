@@ -20,8 +20,8 @@ import {
   mutatesBrowser,
   offeredToken,
 } from "./authorisation";
-import { isPlainBotId, seatIdFor } from "./bot-id";
 import { createBotBrowserHost, isBotBrowserPath } from "./bot-browser-host";
+import { isPlainBotId, seatIdFor } from "./bot-id";
 import { createBrowserHost, isBrowserPath } from "./browser-host";
 import { browserRuntimeFromEnv } from "./browser-runtime";
 import { detectChallenge } from "./challenge";

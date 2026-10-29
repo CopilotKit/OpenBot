@@ -6,7 +6,6 @@ import {
   type PendingHandoff,
   pendingHandoff,
   rememberHandoff,
-  type PendingHandoff,
   wasHandoffAnswered,
 } from "@/lib/computers/handoff";
 import {

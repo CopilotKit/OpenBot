@@ -30,8 +30,8 @@ import {
   forgetRecorderPins,
   PLAYWRIGHT_DEFAULTS_A_PERSON_DOES_NOT_GET,
   personBrowserEnv,
-  recorderLaunchOptions,
   personNativeLaunch,
+  recorderLaunchOptions,
   runnable,
 } from "../src/person-launch";
 import {
@@ -480,6 +480,11 @@ describe("which computer a person's browser may run on", () => {
       kind: "one",
       id: PERSON,
     });
+    // A person's computer, carrying every Bot they use.
+    expect(computerOwner({ COMPUTER_PERSON_ID: "u-ada" })).toEqual({
+      kind: "person",
+      id: "u-ada",
+    });
     // OpenBot Desktop's host-side computer.
     expect(computerOwner({ COMPUTER_PEOPLE_ONLY: "on" })).toEqual({
       kind: "people",
@@ -493,6 +498,8 @@ describe("which computer a person's browser may run on", () => {
     for (const owner of [
       computerOwner({}),
       computerOwner({ COMPUTER_BOT_ID: "invoice-collector" }),
+      // Nor on a person's own computer, where their Bots run: their browser gets a computer of its own.
+      computerOwner({ COMPUTER_PERSON_ID: "u-ada" }),
     ]) {
       expect(refusedHere(owner, PERSON)).toEqual({
         status: 503,

@@ -52,14 +52,16 @@ export const SHARED_COMPUTER_RECORD =
   "This OpenBot can't record in a Bot's browser, because its Bots share one computer.";
 
 /**
- * Why Record in a Bot's browser cannot run on these computers, or null where it can: a provider that gives every Bot a
- * computer of its own (`per-bot`). Null too where there is no provider, where there is no Bot's browser to record in.
+ * Why Record in a Bot's browser cannot run on these computers, or null where it can: a provider that gives every person
+ * a computer of their own (`per-person`), where a Bot's browser sits on the recording person's own computer, beside
+ * only their own Bots, or on an isolated Bot's computer of its own. Null too where there is no provider, where there is
+ * no Bot's browser to record in.
  */
 export function botRecordRefusal(
   provider: Pick<ComputerProvider, "isolation"> | undefined,
 ): string | null {
   if (!provider) return null;
-  return provider.isolation === "per-bot" ? null : SHARED_COMPUTER_RECORD;
+  return provider.isolation === "shared" ? SHARED_COMPUTER_RECORD : null;
 }
 
 /**
