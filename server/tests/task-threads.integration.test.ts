@@ -66,6 +66,12 @@ import {
 } from "../src/proactive/types";
 import { createResponsibilityStore } from "../src/responsibilities/store";
 import { createTaskReplyContext } from "../src/tasks/reply-context";
+import {
+  buildTaskReport,
+  createTaskReportReader,
+  type ReportMessage,
+  textOf,
+} from "../src/tasks/report";
 import { createTaskRoutes } from "../src/tasks/routes";
 import { createTaskStore } from "../src/tasks/store";
 import { createTaskThreads, createTaskTurn } from "../src/tasks/threads";
@@ -281,20 +287,6 @@ function engineFor(
 }
 
 const chatOf = () => channelStore.direct(owner, bot);
-
-/** A message's words: a string, or the text parts of structured content. */
-const textIn = (content: unknown): string =>
-  typeof content === "string"
-    ? content
-    : Array.isArray(content)
-      ? content
-          .flatMap((part) =>
-            part?.type === "text" && typeof part.text === "string"
-              ? [part.text]
-              : [],
-          )
-          .join("\n")
-      : "";
 
 /**
  * A claim on a queue whose kinds carry a test's own prefix, so its rows are only ever this test's.
@@ -703,7 +695,9 @@ describe("status", () => {
 
   async function acceptedAnswer() {
     const task = await freshTask();
-    await turnFor(task.id, { finishedAt: new Date() });
+    // On the database's clock, and before the reply: a host clock a few milliseconds ahead of the
+    // database's would otherwise put this turn's end after the reply's failure.
+    await turnFor(task.id, { finishedAt: sql`now() - interval '1 minute'` });
     const questionId = `${prefix}-answered-${randomUUID()}`;
     const question = {
       ownerUserId: owner.id,
@@ -792,12 +786,39 @@ describe("status", () => {
       status: "failed",
       failure: "a service didn't answer",
     });
+    const messages: ReportMessage[] = [
+      message,
+      {
+        id: "answer-failed",
+        role: "assistant",
+        content: "The service failed.",
+      },
+    ];
+    const report = createTaskReportReader({
+      database,
+      history: async () => messages,
+    });
+    const entries = async () =>
+      (
+        await report(owner.id, await taskStore.get(owner.id, task.id))
+      ).entries.map(({ at, ...entry }) => entry);
+    const original = [
+      { kind: "reply", id: message.id, text: "Friday" },
+      { kind: "update", id: "answer-failed", text: "The service failed." },
+    ] satisfies Awaited<ReturnType<typeof entries>>;
+    expect(await entries()).toEqual(original);
     const taskTurn = createTaskTurn({
       actorFor,
       channels: channelStore,
       runTurn: async (input) => {
         if (input.userMessage?.role !== "user")
           throw new Error("Task user message is missing");
+        messages.push(input.userMessage);
+        messages.push({
+          id: "answer-retried",
+          role: "assistant",
+          content: "The deck is ready.",
+        });
         return { replyText: "The deck is ready." };
       },
     });
@@ -818,6 +839,10 @@ describe("status", () => {
       ],
       status: "ready_for_review",
     });
+    expect(await entries()).toEqual([
+      ...original,
+      { kind: "update", id: "answer-retried", text: "The deck is ready." },
+    ]);
   });
 
   test("question-card answers execute before later task composer replies", async () => {
@@ -864,7 +889,7 @@ describe("status", () => {
       personResponseOwner: "answerer",
       authoriseQuestion: async () => {},
       approvalContinuationRunner: async (input) => {
-        starts.push(textIn(input.userMessage?.content));
+        starts.push(textOf(input.userMessage?.content));
         entered.resolve();
         await held.promise;
         return { replyText: "" };
@@ -1178,8 +1203,29 @@ describe("status", () => {
 
   test("new durable work after resolution exposes its final question", async () => {
     const text = "Should I send the revised draft?";
-    const { task, engine, accepted, taskTurns, channelId } =
+    const { task, engine, input, resolved, accepted, taskTurns, channelId } =
       await resolvedReply();
+    const messages: ReportMessage[] = [
+      { id: input.messageId, role: "user", content: input.reply },
+      {
+        id: "completed-answer",
+        role: "assistant",
+        content: "Should I send the old draft?",
+      },
+    ];
+    const report = createTaskReportReader({
+      database,
+      history: async () => messages,
+    });
+    const before = await report(owner.id, resolved);
+    expect(before.entries.filter((entry) => entry.kind === "update")).toEqual([
+      {
+        kind: "update",
+        id: "completed-answer",
+        text: "Should I send the old draft?",
+        at: expect.any(String),
+      },
+    ]);
     await engine.reply(owner.id, task.id, {
       reply: "Revise it",
       messageId: randomUUID(),
@@ -1192,6 +1238,8 @@ describe("status", () => {
     ).toMatchObject({
       attempts: 0,
     });
+    // A reply still waiting adds nothing to the report: its turn has said nothing yet.
+    expect(await report(owner.id, queued)).toEqual(before);
     await database
       .update(workItems)
       .set({ finishedAt: sql`now()` })
@@ -1962,16 +2010,17 @@ describe("a task whose turn fails", () => {
     expect(await taskStore.pendingQuestions(owner.id, task.id)).toEqual([]);
   });
 
-  test("accepted replies keep one identity across retries and Try again, including equal-text corrections", async () => {
+  test("accepted replies appear once across retries and Try again, including equal-text corrections", async () => {
     const task = await opened();
     const reply = "Use October's exchange rate.";
-    const messages: { id: string; role: string; content?: unknown }[] = [
+    const messages: ReportMessage[] = [
       {
         id: "initial",
         role: "user",
         content: frameTaskBrief("Prepare the notes."),
       },
     ];
+    const replyCounts: number[] = [];
     const received: Parameters<TurnRunner>[0][] = [];
     const context = replyContextForTest();
     const taskTurn = createTaskTurn({
@@ -1983,9 +2032,26 @@ describe("a task whose turn fails", () => {
           throw new Error("Task user message is missing");
         received.push(input);
         messages.push(input.userMessage);
+        messages.push({
+          id: `${input.routineId}:outcome`,
+          role: "assistant",
+          content: "Still unavailable.",
+        });
+        replyCounts.push(
+          report().entries.filter((entry) => entry.kind === "reply").length,
+        );
         throw new Error("fetch failed");
       },
     });
+    const report = () =>
+      buildTaskReport({
+        task: { id: task.id, status: "failed" },
+        messages,
+        approvals: [],
+        firstTurnEndedAt: null,
+        resumedEndedAt: new Map(),
+        lastMessageAt: null,
+      });
     const { engine, started } = engineFor(
       async ({ scope, ...input }, signal) => {
         await taskTurn(scope, { ...input, signal });
@@ -1999,6 +2065,7 @@ describe("a task whose turn fails", () => {
     await engine.idle();
     await engine.again(owner.id, task.id, { reply, messageId: "accepted-b" });
     await engine.idle();
+    expect(replyCounts).toEqual([1, 1, 1, 1, 2, 2]);
     expect(new Set(started.map((run) => run.runId)).size).toBe(6);
     expect(started[0]?.runId).toBe("accepted-a");
     expect(started[4]?.runId).toBe("accepted-b");
@@ -2016,6 +2083,20 @@ describe("a task whose turn fails", () => {
         .slice(1)
         .map((message) => readTaskFrame(String(message.content))?.inputId),
     ).toEqual(started.map((run) => run.acceptedReply?.id));
+    expect(report().entries.map((entry) => entry.kind)).toEqual([
+      "reply",
+      "update",
+      "update",
+      "update",
+      "update",
+      "reply",
+      "update",
+      "update",
+    ]);
+    expect(report().entries.filter((entry) => entry.kind === "reply")).toEqual([
+      { kind: "reply", id: "accepted-a", text: reply, at: null },
+      { kind: "reply", id: "accepted-b", text: reply, at: null },
+    ]);
     const quoted = frameTaskBrief("quoted task text");
     await engine.reply(owner.id, task.id, {
       reply: quoted,
@@ -2027,6 +2108,9 @@ describe("a task whose turn fails", () => {
       .slice(-2);
     for (const message of quotedInputs)
       expect(readTaskBrief(String(message.content))).toBe(quoted);
+    expect(
+      report().entries.filter((entry) => entry.kind === "reply"),
+    ).toHaveLength(3);
     const file = await attachmentForTask(task.channelId);
     await engine.reply(owner.id, task.id, {
       reply: "",
@@ -2036,14 +2120,17 @@ describe("a task whose turn fails", () => {
     await engine.idle();
     const fileInputs = received.slice(-2);
     expect(
-      fileInputs.map((input) => {
-        const content = input.userMessage?.content;
-        const text = Array.isArray(content)
-          ? content.flatMap((part) => (part.type === "text" ? [part.text] : []))
-          : [content];
-        return readTaskFrame(String(text[0] ?? ""))?.inputId;
-      }),
+      fileInputs.map(
+        (input) => readTaskFrame(textOf(input.userMessage?.content))?.inputId,
+      ),
     ).toEqual(["accepted-file", "accepted-file"]);
+    expect(replyCounts.slice(-2).map((count) => count - 3)).toEqual([1, 1]);
+    expect(
+      report()
+        .entries.filter((entry) => entry.kind === "reply")
+        .slice(3)
+        .map((entry) => entry.text),
+    ).toEqual(["Sent attachments"]);
     const document = {
       type: "document",
       source: {
@@ -2490,6 +2577,131 @@ describe("the + on Tasks", () => {
       body: JSON.stringify({ botId: bot, instruction: "Do a thing" }),
     });
     expect(response.status).toBe(404);
+  });
+});
+
+describe("report", () => {
+  test("reads its decisions and turn ends from the ledgers and the rest from the conversation", async () => {
+    const opened = await threads.open({
+      ownerUserId: owner.id,
+      agentId: bot,
+      title: `Report ${randomUUID()}`,
+      why: "Ana needs an answer today.",
+      origin: "suggestion",
+      suggestionId: null,
+      sourceApp: "Gmail",
+      sourceLink: null,
+    });
+    const task = await taskStore.get(owner.id, opened.id);
+    const threadId = task.threadId ?? "";
+    expect(threadId).not.toBe("");
+
+    // The first turn ended here, and stopped to ask before sending.
+    const firstTurnEnded = new Date("2026-10-22T16:41:12.000Z");
+    await database.insert(workItems).values({
+      kind: PROACTIVE_TASK_KIND,
+      key: `task:${task.id}`,
+      payload: { ownerUserId: owner.id, taskId: task.id, text: "Go" },
+      finishedAt: firstTurnEnded,
+    });
+    const approvalId = `${prefix}-report-${randomUUID()}`;
+    const asked = new Date("2026-10-22T16:41:10.000Z");
+    const decided = new Date("2026-10-22T16:42:00.000Z");
+    const resumed = new Date("2026-10-22T16:42:20.000Z");
+    const action = {
+      threadId,
+      botId: bot,
+      toolRef: "openbot/share_private_information",
+      effect: "share_private",
+      scope: "external:ana@example.test",
+      args: { audience: "google-workspace: ana@example.test" },
+    };
+    await database.insert(approvalRequests).values([
+      {
+        id: approvalId,
+        ownerUserId: owner.id,
+        runId: `task-${task.id}`,
+        toolCallId: "call-send",
+        actionDigest: "digest",
+        action: action as never,
+        status: "completed",
+        decision: "allow_once",
+        createdAt: asked,
+        decidedAt: decided,
+        completedAt: resumed,
+      },
+      // Another conversation's, and another person's: neither is this report's.
+      {
+        id: `${approvalId}-elsewhere`,
+        ownerUserId: owner.id,
+        runId: "elsewhere",
+        toolCallId: "call-send",
+        actionDigest: "digest",
+        action: { ...action, threadId: "another-thread" } as never,
+        status: "completed",
+        decision: "deny",
+        decidedAt: decided,
+      },
+      {
+        id: `${approvalId}-theirs`,
+        ownerUserId: other.id,
+        runId: "theirs",
+        toolCallId: "call-send-theirs",
+        actionDigest: "digest",
+        action: action as never,
+        status: "completed",
+        decision: "deny",
+        decidedAt: decided,
+      },
+    ]);
+    await database.insert(workItems).values({
+      kind: "approval.resume",
+      key: approvalId,
+      payload: { ownerUserId: owner.id, approvalId },
+      finishedAt: resumed,
+    });
+
+    const read: [string, string][] = [];
+    const report = await createTaskReportReader({
+      database,
+      history: async ({ threadId: wanted, ownerUserId }) => {
+        read.push([wanted, ownerUserId]);
+        return [
+          {
+            id: `task-${task.id}`,
+            role: "user",
+            content: frameTaskBrief("Reply to Ana."),
+          },
+          {
+            id: "a1",
+            role: "assistant",
+            content: "I read Ana's email. Sending the reply.",
+            toolCalls: [{ id: "call-send", name: "send", args: "{}" }],
+          },
+          {
+            id: `approval:${approvalId}`,
+            role: "tool",
+            toolCallId: "call-send",
+            content: "Allowed.",
+          },
+          { id: "a2", role: "assistant", content: "Sent. Ana has it." },
+        ];
+      },
+      // Read again now its turns are on the ledgers: just opened, with none, it is still starting.
+    })(owner.id, await taskStore.get(owner.id, task.id));
+
+    expect(read).toEqual([[threadId, owner.id]]);
+    expect(
+      report.entries.map((entry) =>
+        entry.kind === "decision"
+          ? `${entry.decision} ${entry.id} ${entry.at}`
+          : `${entry.kind} ${entry.text} ${entry.at}`,
+      ),
+    ).toEqual([
+      `update I read Ana's email. ${asked.toISOString()}`,
+      `allow_once ${approvalId} ${decided.toISOString()}`,
+      `update Sent. ${resumed.toISOString()}`,
+    ]);
   });
 });
 

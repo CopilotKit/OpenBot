@@ -6,6 +6,7 @@ import { z } from "zod";
 import { AgentNotFoundError } from "../agents/profile-store";
 import type { AppVariables } from "../auth/guards";
 import { ProactiveRefusedError } from "../proactive/types";
+import type { TaskReportReader } from "./report";
 import type { TaskStore } from "./store";
 import { TaskNotFoundError } from "./types";
 
@@ -112,6 +113,8 @@ export function createTaskRoutes(
     retry?: TaskRetry | undefined;
     /** Absent, the + is not served: there is nowhere to start a task. */
     intake?: TaskIntake | undefined;
+    /** Absent, a task's report is not served: there is no conversation history to read it from. */
+    report?: TaskReportReader | undefined;
   } = {},
 ) {
   const routes = new Hono<{ Variables: AppVariables }>();
@@ -163,6 +166,31 @@ export function createTaskRoutes(
       task: await store.get(context.var.actor.id, context.req.param("id")),
     }),
   );
+  const report = options.report;
+  if (report)
+    /*
+     * The task page's report: what was decided in it, what the Bot said as each turn ended, and the
+     * person's replies, worked out from its conversation on every read (tasks/report.ts).
+     */
+    routes.get("/:id/report", async (context) => {
+      const owner = context.var.actor.id;
+      const task = await store.get(owner, context.req.param("id"));
+      try {
+        return context.json({ report: await report(owner, task) });
+      } catch (error) {
+        console.error(
+          JSON.stringify({
+            type: "task-report-error",
+            error: error instanceof Error ? error.name : "UnknownError",
+            timestamp: new Date().toISOString(),
+          }),
+        );
+        return context.json(
+          { error: "Couldn't load this task's report. Try again." },
+          503,
+        );
+      }
+    });
   const retry = options.retry;
   if (retry) {
     /*
