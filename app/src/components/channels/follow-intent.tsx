@@ -44,6 +44,11 @@ export type FollowEvent =
     }
   | { type: "selection"; active: boolean }
   | { type: "button" }
+  /*
+   * A wheel, key or touch moving down the page. The scroller stops following the bottom on any
+   * input; at the end, where nothing scrolls, only a scroll to the end puts it back.
+   */
+  | { type: "down"; atEnd: boolean }
   /* A mark on the rail: they went to a turn of their choosing, so stay with what they chose. */
   | { type: "jump" }
   | { type: "send" }
@@ -62,6 +67,10 @@ const PAUSED_BY_SELECTION: FollowState = {
 };
 
 const UP_KEYS = new Set(["ArrowUp", "PageUp", "Home"]);
+const DOWN_KEYS = new Set(["ArrowDown", "PageDown", "End"]);
+
+/** Within this many pixels of the end, a downward input has nothing left to scroll. */
+const END_PX = 8;
 
 function movesUp(event: FollowEvent): boolean {
   switch (event.type) {
@@ -105,6 +114,10 @@ export function nextFollow(state: FollowState, event: FollowEvent): FollowStep {
         return { state: FOLLOWING, scrollToEnd: "auto" };
       }
       return same;
+    case "down":
+      return state.following && event.atEnd
+        ? { state, scrollToEnd: "auto" }
+        : same;
     case "button":
       return { state: FOLLOWING, scrollToEnd: "smooth" };
     case "send":
@@ -217,12 +230,26 @@ export function useFollowIntent(
     };
   }, [dispatch, viewportRef]);
 
+  const down = (element: HTMLElement) =>
+    dispatch({
+      type: "down",
+      atEnd:
+        element.scrollHeight - element.scrollTop - element.clientHeight <=
+        END_PX,
+    });
+
   const viewportHandlers: ViewportHandlers = {
-    onWheel: (event) => dispatch({ type: "wheel", deltaY: event.deltaY }),
+    onWheel: (event) => {
+      dispatch({ type: "wheel", deltaY: event.deltaY });
+      if (event.deltaY > 0) down(event.currentTarget);
+    },
     onKeyDown: (event) => {
       // A key typed into a field inside the transcript moves a caret, not the page.
       if (event.defaultPrevented || isEditable(event.target)) return;
       dispatch({ type: "key", key: event.key, shiftKey: event.shiftKey });
+      if (DOWN_KEYS.has(event.key) || (event.key === " " && !event.shiftKey)) {
+        down(event.currentTarget);
+      }
     },
     onTouchStart: (event) => {
       touchYRef.current = event.touches[0]?.clientY ?? null;
@@ -232,7 +259,10 @@ export function useFollowIntent(
       if (y === undefined) return;
       const last = touchYRef.current;
       touchYRef.current = y;
-      if (last !== null) dispatch({ type: "touch", fingerDeltaY: y - last });
+      if (last === null) return;
+      dispatch({ type: "touch", fingerDeltaY: y - last });
+      // The finger moving up the screen scrolls the page down.
+      if (y < last) down(event.currentTarget);
     },
     onPointerDown: (event) => {
       // Only a press on the scrollbar itself: the viewport is the target, and the press is in the

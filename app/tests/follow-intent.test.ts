@@ -139,3 +139,27 @@ test("a jump from the rail stops following, and coming back to the end resumes i
     FOLLOWING,
   );
 });
+
+/*
+ * The scroller drops out of following the bottom on ANY wheel, touch or scroll key, downward ones
+ * included, and only comes back on its own when a scroll lands at the end. At the end already,
+ * a downward flick scrolls nothing, so it stayed out while this said following and the reply ran
+ * off the bottom. A scroll to the end puts it back.
+ */
+test("downward input at the end while following asks for the end again", () => {
+  expect(nextFollow(FOLLOWING, { type: "down", atEnd: true })).toEqual({
+    state: FOLLOWING,
+    scrollToEnd: "auto",
+  });
+});
+
+test("downward input above the end, or while paused, asks for nothing", () => {
+  expect(nextFollow(FOLLOWING, { type: "down", atEnd: false })).toEqual({
+    state: FOLLOWING,
+    scrollToEnd: null,
+  });
+  expect(nextFollow(PAUSED, { type: "down", atEnd: true })).toEqual({
+    state: PAUSED,
+    scrollToEnd: null,
+  });
+});
