@@ -1668,8 +1668,23 @@ export function ChatTranscript({
   if (restoring) {
     return (
       <div className="flex size-full min-h-0 flex-col overflow-hidden">
-        <div className="mx-auto w-full max-w-2xl px-4 py-6">
+        <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 py-6">
           <RestoringTranscript />
+          {/*
+           * A message typed while history loads is parked, not lost, and must be seen to be: a
+           * composer that cleared with nothing appearing reads as a message that vanished, and the
+           * person types it again.
+           */}
+          {queued.map((message) => (
+            <Queued
+              attachments={message.attachments}
+              key={message.id}
+              onRemove={
+                onRemoveQueued ? () => onRemoveQueued(message.id) : undefined
+              }
+              text={message.text}
+            />
+          ))}
         </div>
       </div>
     );

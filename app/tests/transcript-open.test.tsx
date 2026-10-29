@@ -143,3 +143,18 @@ test("switching channels does not animate the new history", () => {
   expect(rows.length).toBe(2);
   expect(rows.filter(startsHidden).length).toBe(0);
 });
+
+test("a message typed while history loads is shown under the placeholder", () => {
+  const view = render(
+    <ChatTranscript
+      messages={[]}
+      queued={[
+        { id: "q1", text: "typed early", attachments: [], commandIds: [] },
+      ]}
+      restoring
+    />,
+  );
+
+  expect(view.getByLabelText(PLACEHOLDER)).toBeTruthy();
+  expect(view.getByText("typed early")).toBeTruthy();
+});
