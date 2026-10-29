@@ -1,8 +1,7 @@
 import { BotOrb } from "@/components/agents/orb/bot-orb";
-import { orbPaletteFor } from "@/components/agents/orb/bot-orb-draw";
 
 /**
- * A Bot's face: its orb, in the colour its seed picks. The seed is the Bot's id unless a tenant
+ * A Bot's face: its orb, with the look its seed picks. The seed is the Bot's id unless a tenant
  * package set one or the Bot was copied from another, so `ChannelAvatar`, which goes by id, matches it
  * for every other Bot.
  * The orb hides itself from assistive tech, so the Bot is announced once, by name.
@@ -26,7 +25,7 @@ export function AbstractAvatar({
       className="inline-flex shrink-0 overflow-hidden rounded-full"
       style={{ height: size, width: size }}
     >
-      <BotOrb palette={orbPaletteFor(seed)} size={size} />
+      <BotOrb seed={seed} size={size} />
     </span>
   );
 }

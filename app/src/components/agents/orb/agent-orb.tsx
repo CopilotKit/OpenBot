@@ -45,7 +45,6 @@ export default function AgentOrb({
   return (
     <BotOrb
       className={cn("agent-orb block", className)}
-      palette="violet"
       size={Number.parseFloat(size)}
       state={ORB_STATE[state]}
     />

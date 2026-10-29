@@ -1,7 +1,8 @@
 /**
  * The orb, every Bot's face and OpenBot's own mark, drawn on a 2D canvas: a glass sphere of
- * drifting colour with two eye-lights that look, blink and smile. It comes in nine colours; a Bot's
- * is picked from its seed, and OpenBot's own is violet. It also plays a finish: the check and the
+ * drifting colour with two eye-lights that look, blink and smile. It comes in nine colours. A Bot's
+ * look, its colour and the few small ways two Bots in one colour still differ, is picked from its
+ * seed; OpenBot's own is violet, which no Bot is given. It also plays a finish: the check and the
  * burst of rays the orb shows when something the person allowed is done.
  *
  * Every frame is a pure function of an `OrbPose`, so the component that animates it owns time and
@@ -174,8 +175,8 @@ type PaletteSpec = {
 };
 
 /**
- * The nine colours. A Bot's is `orbPaletteFor` its seed, which picks by position in `ORB_PALETTES`:
- * add a colour at the end, never reorder them, or every Bot changes colour.
+ * The nine colours: violet, OpenBot's own, and the eight a Bot's look is picked from by position.
+ * Adding, removing or reordering one changes the colour of most Bots.
  */
 const PALETTES = {
   violet: {
@@ -256,20 +257,67 @@ const PALETTES = {
 
 export type OrbPaletteName = keyof typeof PALETTES;
 
-/** Every colour, in the order `orbPaletteFor` picks from. */
+/** Every colour, OpenBot's violet first. */
 export const ORB_PALETTES = Object.keys(PALETTES) as readonly OrbPaletteName[];
 
+/** The eight colours a Bot can be: all but violet, so a Bot is never mistaken for OpenBot. */
+const BOT_PALETTES = ORB_PALETTES.filter((name) => name !== "violet");
+
 /**
- * The colour for a Bot's seed: a 32-bit FNV-1a hash of it, modulo the nine. Stable across reloads
- * and releases, so a Bot keeps its colour.
+ * How one orb is drawn apart from its motion: its colour, how far round its colour masses are
+ * turned, in radians, a nudge to its hue in degrees, and how far apart its eyes are, as a share of
+ * the usual spacing.
  */
-export function orbPaletteFor(seed: string): OrbPaletteName {
+export type OrbLook = {
+  palette: OrbPaletteName;
+  turn: number;
+  hue: number;
+  eyes: number;
+};
+
+/** OpenBot's own look: violet, untouched. */
+export const OPENBOT_LOOK: OrbLook = {
+  palette: "violet",
+  turn: 0,
+  hue: 0,
+  eyes: 1,
+};
+
+/** The most a Bot's hue is nudged either way, in degrees: a touch, never enough to pass for another colour. */
+const HUE_NUDGE = 4;
+/** The most a Bot's eyes are moved apart or together, as a share of the usual spacing. */
+const EYE_NUDGE = 0.08;
+
+/** A 32-bit FNV-1a hash of the seed, mixed with murmur3's finaliser so every character moves every bit. */
+function hashSeed(seed: string): number {
   let h = 0x811c9dc5;
   for (let i = 0; i < seed.length; i++) {
     h ^= seed.charCodeAt(i);
     h = Math.imul(h, 0x01000193);
   }
-  return ORB_PALETTES[(h >>> 0) % ORB_PALETTES.length] as OrbPaletteName;
+  h ^= h >>> 16;
+  h = Math.imul(h, 0x85ebca6b);
+  h ^= h >>> 13;
+  h = Math.imul(h, 0xc2b2ae35);
+  h ^= h >>> 16;
+  return h >>> 0;
+}
+
+/**
+ * The look for a Bot's seed. Eight colours repeat soon in a team, so the same hash also turns the
+ * colour masses, nudges the hue and spaces the eyes, and two Bots in one colour still look apart.
+ * Stable across reloads and releases, so a Bot keeps its face.
+ */
+export function orbLookFor(seed: string): OrbLook {
+  const h = hashSeed(seed);
+  // The eight colours take the low three bits, and each of the rest the next eight.
+  const share = (from: number) => ((h >>> from) & 0xff) / 256;
+  return {
+    palette: BOT_PALETTES[h % BOT_PALETTES.length] as OrbPaletteName,
+    turn: share(3) * TAU,
+    hue: Math.round((share(11) * 2 - 1) * HUE_NUDGE),
+    eyes: 1 + (share(19) * 2 - 1) * EYE_NUDGE,
+  };
 }
 
 /** A colour's tones as sRGB, ready to draw. */
@@ -412,8 +460,8 @@ const MESH = [
   [2.36, 0.45, 0.88],
 ] as const;
 
-function meshPos(ta: number, fast: boolean) {
-  const rot = fast ? 1.45 * ta + 1.1 : 0.22 * ta;
+function meshPos(ta: number, fast: boolean, turn: number) {
+  const rot = turn + (fast ? 1.45 * ta + 1.1 : 0.22 * ta);
   return MESH.map((b, i) => {
     const a =
       b[0] +
@@ -425,24 +473,28 @@ function meshPos(ta: number, fast: boolean) {
   });
 }
 
-/** Four soft colour masses drifting round a pale base; a faster swirl joins them while it works. */
+/**
+ * Four soft colour masses drifting round a pale base, starting `turn` radians round; a faster swirl
+ * joins them while it works.
+ */
 function mesh(
   ctx: Ctx,
   R: number,
   S: OrbPose,
   pal: Palette,
+  turn: number,
   lx: number,
   ly: number,
 ) {
   ctx.fillStyle = rgba(pal.base, 1);
   ctx.fillRect(-R * 1.7, -R * 1.7, R * 3.4, R * 3.4);
   const cols = [pal.main, pal.pale, pal.side, pal.deep];
-  meshPos(S.ta, false).forEach((p, i) => {
+  meshPos(S.ta, false, turn).forEach((p, i) => {
     blob(ctx, p[0] * R + lx * R, p[1] * R + ly * R, p[2] * R, cols[i], 0.94);
   });
   const swirl = S.think * 0.55;
   if (swirl > 0.01) {
-    meshPos(S.ta, true).forEach((p, i) => {
+    meshPos(S.ta, true, turn).forEach((p, i) => {
       blob(
         ctx,
         p[0] * R + lx * R * 0.6,
@@ -617,6 +669,7 @@ function sphere(
   R: number,
   S: OrbPose,
   pal: Palette,
+  look: OrbLook,
   dark: boolean,
   size: number,
 ) {
@@ -633,7 +686,7 @@ function sphere(
   const yaw = clamp(S.ax, -1.1, 1.1) * 0.62;
   const pitch = -clamp(S.ay, -1.1, 1.1) * 0.5;
   const roll = S.tilt;
-  mesh(ctx, R, S, pal, Math.sin(yaw) * 0.2, -Math.sin(pitch) * 0.16);
+  mesh(ctx, R, S, pal, look.turn, Math.sin(yaw) * 0.2, -Math.sin(pitch) * 0.16);
   light(ctx, -0.42 * R, -0.5 * R, 0.5 * R, 0.26);
   light(ctx, 0, R * 0.05, R * 0.9, 0.28 * S.done);
   rim(ctx, R, pal.shade, dark);
@@ -646,7 +699,7 @@ function sphere(
   const eh = Math.max(small ? 3.4 : 2.4, R * 0.3);
   for (const side of [-1, 1]) {
     if (finish.eyes <= 0.003) break;
-    const lon = side * 0.35;
+    const lon = side * 0.35 * look.eyes;
     const lat = 0.05 + 0.04 * S.smile;
     const x = Math.sin(lon) * Math.cos(lat);
     const y = Math.sin(lat);
@@ -675,7 +728,7 @@ function sphere(
 }
 
 /**
- * The whole orb in `palette`, centred on the context's origin, for a footprint of `size` CSS px.
+ * The whole orb with `look`, centred on the context's origin, for a footprint of `size` CSS px.
  * Its glow, the landing's ping and a finish's rays spill past the footprint, so draw it on a canvas
  * twice its size.
  */
@@ -683,13 +736,13 @@ export function drawBotOrb(
   ctx: Ctx,
   size: number,
   S: OrbPose,
-  { dark, palette: name }: { dark: boolean; palette: OrbPaletteName },
+  { dark, look }: { dark: boolean; look: OrbLook },
 ) {
   const finish = finishPhase(S.finishAge);
   const pal = palette(
-    name,
+    look.palette,
     0.9 + 0.14 * clamp(S.listen) + 0.08 * S.think + 0.12 * clamp(S.done),
-    -6 * S.think,
+    look.hue - 6 * S.think,
   );
   const r = (size / 2) * 0.72;
   const sc = scaleOf(S, finish);
@@ -703,7 +756,7 @@ export function drawBotOrb(
   glow(ctx, r * sc, glowAmt * 0.85, mix(pal.main, pal.deep, 0.4), dark);
   ping(ctx, r, S.doneAge, pal, dark);
   rays(ctx, r, finish.rays, pal, dark);
-  sphere(ctx, r, S, pal, dark, size * 0.72);
+  sphere(ctx, r, S, pal, look, dark, size * 0.72);
 }
 
 /** How long each age in a pose shows, in seconds: after that the orb draws as if it never happened. */

@@ -140,8 +140,10 @@ changes for a deployment.
   the browser's own size, so it is a little larger than before.
 - Dark mode follows the system by default. Settings → General → Appearance offers System, Light and
   Dark, kept in this browser. Someone who had turned the old dark switch on stays dark.
-- Every Bot, and OpenBot's own mark, is an orb with eyes, in a colour picked from the Bot, that blinks
-  and follows the pointer. It holds still with reduced motion.
+- Every Bot, and OpenBot's own mark, is an orb with eyes that blinks and follows the pointer. It
+  holds still with reduced motion.
+- Each Bot's orb takes its colour and pattern from the Bot, so two Bots in one colour still look
+  different. Violet is kept for OpenBot's own mark.
 
 ### Generated interfaces use A2UI 1.0
 

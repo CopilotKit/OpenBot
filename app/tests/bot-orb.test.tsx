@@ -21,10 +21,12 @@ import {
   FINISH_HELD,
   FINISH_S,
   finishPhase,
+  OPENBOT_LOOK,
   ORB_PALETTES,
+  type OrbLook,
   type OrbPose,
   oklch,
-  orbPaletteFor,
+  orbLookFor,
   palette,
   RAYS,
   samePicture,
@@ -58,22 +60,33 @@ const REST: OrbPose = {
 };
 
 /**
- * Just enough of a 2D context to run the drawing: it counts every stroke, and counts the frames
- * drawn, each of which starts by clearing the canvas.
+ * Just enough of a 2D context to run the drawing: it counts every stroke, counts the frames drawn,
+ * each of which starts by clearing the canvas, and keeps where each soft blob and each eye is drawn
+ * and in what colour.
  */
 function fakeContext() {
-  const gradient = { addColorStop: () => {} };
+  const marks: string[] = [];
+  const gradient = {
+    addColorStop: (_: number, colour: string) => marks.push(colour),
+  };
   const ctx = {
     strokes: 0,
     draws: 0,
+    marks,
     stroke() {
       this.strokes++;
     },
     clearRect() {
       this.draws++;
     },
+    translate(x: number, y: number) {
+      marks.push(`at ${x.toFixed(2)},${y.toFixed(2)}`);
+    },
     createLinearGradient: () => gradient,
-    createRadialGradient: () => gradient,
+    createRadialGradient(x: number, y: number) {
+      marks.push(`blob ${x.toFixed(2)},${y.toFixed(2)}`);
+      return gradient;
+    },
   };
   return new Proxy(ctx, {
     get: (target, key) =>
@@ -85,15 +98,18 @@ function fakeContext() {
   });
 }
 
-/** Every stroke one frame draws: the rim, the landing's ping, and a finish's rays and check. */
-const strokesOf = (pose: OrbPose) => {
+/** One frame of an orb 60px across in `pose`, drawn on a fake context. */
+const drawn = (pose: OrbPose, look: OrbLook = OPENBOT_LOOK) => {
   const ctx = fakeContext();
   drawBotOrb(ctx as unknown as CanvasRenderingContext2D, 60, pose, {
     dark: false,
-    palette: "violet",
+    look,
   });
-  return ctx.strokes;
+  return ctx;
 };
+
+/** Every stroke one frame draws: the rim, the landing's ping, and a finish's rays and check. */
+const strokesOf = (pose: OrbPose) => drawn(pose).strokes;
 
 /** The Bots a fresh OpenBot ships with, whose ids are their seeds. */
 const TEAM = [
@@ -155,21 +171,57 @@ describe("the colours", () => {
     expect(b).toBeGreaterThan(g);
   });
 
-  test("a seed always gets the same palette", () => {
+  test("a seed always gets the same look", () => {
     for (const seed of TEAM) {
-      expect(orbPaletteFor(seed)).toBe(orbPaletteFor(seed));
-      expect(ORB_PALETTES).toContain(orbPaletteFor(seed));
+      expect(orbLookFor(seed)).toEqual(orbLookFor(seed));
+      expect(ORB_PALETTES).toContain(orbLookFor(seed).palette);
     }
-    // Pinned, so a change to the hash, which would recolour every Bot, can't land unnoticed.
-    expect(orbPaletteFor("research-desk")).toBe("sky");
-    expect(orbPaletteFor("release-notes")).toBe("violet");
-    expect(ORB_PALETTES).toContain(orbPaletteFor(""));
+    // Pinned, so a change to the hash, which would change every Bot's face, can't land unnoticed.
+    expect(orbLookFor("research-desk").palette).toBe("ocean");
+    expect(orbLookFor("ticket-triage").palette).toBe("sun");
+    expect(ORB_PALETTES).toContain(orbLookFor("").palette);
   });
 
   test("nine palettes, and a team of nine seeds uses more than four of them", () => {
     expect(ORB_PALETTES).toHaveLength(9);
     expect(new Set(ORB_PALETTES).size).toBe(9);
-    expect(new Set(TEAM.map(orbPaletteFor)).size).toBeGreaterThan(4);
+    const used = TEAM.map((seed) => orbLookFor(seed).palette);
+    expect(new Set(used).size).toBeGreaterThan(4);
+  });
+
+  test("no Bot is violet, which is OpenBot's own, and every other colour is given", () => {
+    const seeds = [
+      ...TEAM,
+      "",
+      ...Array.from({ length: 400 }, (_, i) => `bot-${i}`),
+    ];
+    const given = new Set(seeds.map((seed) => orbLookFor(seed).palette));
+    expect(given.has("violet")).toBe(false);
+    expect([...given].sort()).toEqual(
+      ORB_PALETTES.filter((name) => name !== "violet").sort(),
+    );
+    expect(OPENBOT_LOOK.palette).toBe("violet");
+  });
+
+  test("every Bot in the default team is drawn unlike every other, even two in one colour", () => {
+    const apart = (a: number, b: number) => {
+      const d = Math.abs(a - b) % (2 * Math.PI);
+      return Math.min(d, 2 * Math.PI - d);
+    };
+    let sharing = 0;
+    for (const [i, a] of TEAM.entries()) {
+      for (const b of TEAM.slice(i + 1)) {
+        const one = orbLookFor(a);
+        const other = orbLookFor(b);
+        expect(drawn(REST, one).marks).not.toEqual(drawn(REST, other).marks);
+        if (one.palette !== other.palette) continue;
+        sharing++;
+        // Their colours sit at least a sixth of a turn apart, which shows at any size.
+        expect(apart(one.turn, other.turn)).toBeGreaterThan(Math.PI / 3);
+      }
+    }
+    // Eight colours can't go round nine Bots, so the team has Bots that share one.
+    expect(sharing).toBeGreaterThan(0);
   });
 
   test("each palette is a colour of its own", () => {
@@ -340,9 +392,7 @@ const orbOf = (container: HTMLElement) =>
 
 describe("<BotOrb>", () => {
   test("holds its footprint, hides from assistive tech, and draws on a canvas twice its size", () => {
-    const view = render(
-      <BotOrb palette="violet" size={40} state="listening" />,
-    );
+    const view = render(<BotOrb size={40} state="listening" />);
     const orb = view.container.firstElementChild as HTMLElement;
     expect(orb.getAttribute("aria-hidden")).toBe("true");
     expect(orb.dataset.state).toBe("listening");
@@ -354,7 +404,7 @@ describe("<BotOrb>", () => {
   });
 
   test("is a block, so a small face never sits on a line's baseline and drops out of its circle", () => {
-    const view = render(<BotOrb palette="violet" size={12} />);
+    const view = render(<BotOrb size={12} />);
     const orb = view.container.firstElementChild as HTMLElement;
     expect(orb.classList.contains("block")).toBe(true);
     expect(orb.classList.contains("inline-block")).toBe(false);
@@ -365,7 +415,7 @@ describe("<BotOrb>", () => {
     const frames = manualFrames();
     const restore = withContext(ctx);
     try {
-      render(<BotOrb palette="ember" size={40} still />);
+      render(<BotOrb seed="expense-review" size={40} still />);
       expect(ctx.draws).toBe(1);
       document.documentElement.classList.add("dark");
       await new Promise((resolve) => setTimeout(resolve, 0));
@@ -373,7 +423,7 @@ describe("<BotOrb>", () => {
       expect(frames.requested).toBe(0);
 
       cleanup();
-      render(<BotOrb palette="ember" size={40} />);
+      render(<BotOrb seed="expense-review" size={40} />);
       expect(frames.requested).toBe(1);
     } finally {
       cleanup();
@@ -388,7 +438,9 @@ describe("<BotOrb>", () => {
       const ctx = fakeContext();
       const restore = withContext(ctx);
       try {
-        render(<BotOrb palette="moss" size={40} state={state} still />);
+        render(
+          <BotOrb seed="onboarding-buddy" size={40} state={state} still />,
+        );
         cleanup();
         return ctx.strokes;
       } finally {
@@ -399,11 +451,11 @@ describe("<BotOrb>", () => {
   });
 
   test("follows a change of state", () => {
-    const view = render(<BotOrb palette="sun" size={40} />);
+    const view = render(<BotOrb seed="ticket-triage" size={40} />);
     expect(orbOf(view.container).dataset.state).toBe("idle");
-    view.rerender(<BotOrb palette="sun" size={40} state="thinking" />);
+    view.rerender(<BotOrb seed="ticket-triage" size={40} state="thinking" />);
     expect(orbOf(view.container).dataset.state).toBe("thinking");
-    view.rerender(<BotOrb palette="sun" size={40} state="finished" />);
+    view.rerender(<BotOrb seed="ticket-triage" size={40} state="finished" />);
     expect(orbOf(view.container).dataset.state).toBe("finished");
   });
 
@@ -416,7 +468,7 @@ describe("<BotOrb>", () => {
         render(
           <div>
             {Array.from({ length: 50 }, (_, i) => `bot-${i}`).map((id) => (
-              <BotOrb key={id} palette={orbPaletteFor(id)} size={28} />
+              <BotOrb key={id} seed={id} size={28} />
             ))}
           </div>,
         );
@@ -450,7 +502,7 @@ describe("<BotOrb>", () => {
     const ctx = fakeContext();
     const frames = manualFrames();
     const restore = withContext(ctx);
-    const view = render(<BotOrb palette="moss" size={size} />);
+    const view = render(<BotOrb seed="onboarding-buddy" size={size} />);
     orbOf(view.container).getBoundingClientRect = () =>
       ({ left: 100, top: 100, width: size, height: size }) as DOMRect;
     const start = performance.now();
@@ -523,7 +575,7 @@ describe("<BotOrb>", () => {
       const frames = manualFrames();
       const restore = withContext(ctx);
       try {
-        const view = render(<BotOrb palette="berry" size={40} />);
+        const view = render(<BotOrb seed="research-desk" size={40} />);
         const orb = orbOf(view.container);
         Sight.show(orb, false);
         expect(frames.pending).toBe(0);
@@ -555,7 +607,7 @@ describe("<BotOrb>", () => {
         document.dispatchEvent(new Event("visibilitychange"));
       };
       try {
-        render(<BotOrb palette="ocean" size={40} />);
+        render(<BotOrb seed="release-notes" size={40} />);
         expect(frames.pending).toBe(1);
         hide(true);
         expect(frames.pending).toBe(0);
@@ -579,7 +631,7 @@ describe("<BotOrb>", () => {
     const frames = manualFrames();
     try {
       const view = render(
-        <BotOrb palette="slate" size={40} state="thinking" />,
+        <BotOrb seed="interview-notes" size={40} state="thinking" />,
       );
       expect(view.container.querySelector("canvas")).not.toBeNull();
       // Nothing to draw on, so it asks for no frames.
@@ -690,7 +742,8 @@ describe("a Bot's face and OpenBot's mark", () => {
     expect(avatar.style.width).toBe("36px");
     const orb = orbOf(avatar);
     expect(orb.getAttribute("aria-hidden")).toBe("true");
-    expect(orb.dataset.palette).toBe(orbPaletteFor("research-desk"));
+    expect(orb.dataset.palette).toBe(orbLookFor("research-desk").palette);
+    expect(orb.dataset.seed).toBe("research-desk");
     expect(orb.style.width).toBe("36px");
     expect(avatar.querySelector("canvas")).not.toBeNull();
     expect(avatar.querySelector("svg")).toBeNull();
@@ -703,7 +756,8 @@ describe("a Bot's face and OpenBot's mark", () => {
       cleanup();
       return palette;
     };
-    expect(paletteOf("research-desk")).not.toBe(paletteOf("release-notes"));
+    // Chosen to land on different colours: one pair in eight shares one.
+    expect(paletteOf("research-desk")).not.toBe(paletteOf("expense-review"));
     expect(paletteOf("research-desk")).toBe(paletteOf("research-desk"));
   });
 

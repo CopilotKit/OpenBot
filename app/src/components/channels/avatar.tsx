@@ -1,14 +1,13 @@
 import { memo } from "react";
 import { BotOrb } from "@/components/agents/orb/bot-orb";
-import { orbPaletteFor } from "@/components/agents/orb/bot-orb-draw";
 import { cn } from "@/lib/utils";
 
 /**
  * Memoized roster avatar. Row updates usually change preview/timestamp only, and
  * `use-channel-events` preserves participant id arrays for unchanged rows.
  *
- * Each face is the Bot's orb, in the colour its id picks: the same colour `AbstractAvatar` draws
- * from the seed, which is the id unless a tenant package set one or the Bot was copied from another
+ * Each face is the Bot's orb, with the look its id picks: the same face `AbstractAvatar` draws from
+ * the seed, which is the id unless a tenant package set one or the Bot was copied from another
  * (a copy keeps its source's seed). Clipped to its circle, so its glow
  * never spills into the row.
  *
@@ -27,7 +26,7 @@ export const ChannelAvatar = memo(function ChannelAvatar({
   const avatar =
     participantIds.length === 1 ? (
       <span className="block size-full overflow-hidden rounded-full">
-        <BotOrb palette={orbPaletteFor(participantIds[0])} size={size} />
+        <BotOrb seed={participantIds[0]} size={size} />
       </span>
     ) : (
       <GroupFaces participantIds={participantIds} size={size} />
@@ -102,7 +101,7 @@ function GroupFaces({
               WebkitMaskComposite: "source-in",
             }}
           >
-            <BotOrb palette={orbPaletteFor(id)} size={diameter} />
+            <BotOrb seed={id} size={diameter} />
           </div>
         );
       })}

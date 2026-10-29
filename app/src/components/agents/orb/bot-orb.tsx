@@ -1,4 +1,4 @@
-import { useEffect, useRef, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import { cn } from "@/lib/utils";
 import {
   blinkCurve,
@@ -8,8 +8,10 @@ import {
   FINISH_S,
   mulberry32,
   nodCurve,
-  type OrbPaletteName,
+  OPENBOT_LOOK,
+  type OrbLook,
   type OrbPose,
+  orbLookFor,
   restLook,
   samePicture,
   type Track,
@@ -290,15 +292,11 @@ function lookAt(pose: OrbPose, gaze: Gaze): OrbPose {
 }
 
 /**
- * Sizes the canvas for a footprint of `size` and returns how to draw a pose on it in `palette`, or
+ * Sizes the canvas for a footprint of `size` and returns how to draw a pose on it with `look`, or
  * null where there is no 2D context to draw with. A pose that would draw what the canvas already
  * shows, in the same theme and at the same density, is skipped.
  */
-function surface(
-  canvas: HTMLCanvasElement,
-  size: number,
-  palette: OrbPaletteName,
-) {
+function surface(canvas: HTMLCanvasElement, size: number, look: OrbLook) {
   const ctx = canvas.getContext("2d");
   if (!ctx) return null;
   const box = size * (1 + 2 * SPILL);
@@ -321,7 +319,7 @@ function surface(
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, box, box);
     ctx.translate(box / 2, box / 2);
-    drawBotOrb(ctx, size, pose, { dark, palette });
+    drawBotOrb(ctx, size, pose, { dark, look });
   };
 }
 
@@ -368,16 +366,17 @@ function usePrefersReducedMotion(): boolean {
   );
 }
 
-let seeds = 0;
+let staggers = 0;
 const secondsSince = (start: number) => (performance.now() - start) / 1000;
 
 /**
- * A Bot's orb, in `palette`. `size` is its footprint in CSS px; its glow spills past it. It breathes
- * and glances about when idle, watches what you type when listening, swirls while thinking, and
- * lands with a ping and a smile when done. Passed `finished`, its eyes give way to a check while
- * short rays burst out round it, and then it is back as it was. Wherever the pointer is, its eyes
- * follow it: fully at rest, partly while it listens or works, with a small perk when the pointer
- * comes close. An orb under 40 px only blinks and watches, at about thirty frames a second.
+ * A Bot's orb, with the look its `seed` picks; with no seed, OpenBot's own, in violet. `size` is its
+ * footprint in CSS px; its glow spills past it. It breathes and glances about when idle, watches
+ * what you type when listening, swirls while thinking, and lands with a ping and a smile when done.
+ * Passed `finished`, its eyes give way to a check while short rays burst out round it, and then it
+ * is back as it was. Wherever the pointer is, its eyes follow it: fully at rest, partly while it
+ * listens or works, with a small perk when the pointer comes close. An orb under 40 px only blinks
+ * and watches, at about thirty frames a second.
  *
  * Every orb on the page draws on one shared animation frame, and only while it is on screen, the
  * tab is shown and its picture has changed. With reduced motion, or `still`, it is a still in the
@@ -385,13 +384,13 @@ const secondsSince = (start: number) => (performance.now() - start) / 1000;
  */
 export function BotOrb({
   className,
-  palette,
+  seed,
   size,
   state = "idle",
   still = false,
 }: {
   className?: string;
-  palette: OrbPaletteName;
+  seed?: string;
   size: number;
   state?: BotOrbState;
   still?: boolean;
@@ -399,8 +398,13 @@ export function BotOrb({
   const boxRef = useRef<HTMLSpanElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const reduced = usePrefersReducedMotion() || still;
-  const clock = useRef<{ start: number; seed: number } | null>(null);
-  clock.current ??= { start: performance.now(), seed: ++seeds * 7 };
+  const look = useMemo(
+    () => (seed === undefined ? OPENBOT_LOOK : orbLookFor(seed)),
+    [seed],
+  );
+  // Each orb's own, so two orbs on a page, even two of one Bot, don't blink or glance in step.
+  const clock = useRef<{ start: number; stagger: number } | null>(null);
+  clock.current ??= { start: performance.now(), stagger: ++staggers * 7 };
   const motion = useRef<Motion | null>(null);
   const shown = useRef<BotOrbState | null>(null);
   const current = useRef<BotOrbState>(state);
@@ -435,15 +439,17 @@ export function BotOrb({
   // again on its own, so it is redrawn when the theme flips the root's `dark` class.
   useEffect(() => {
     const canvas = canvasRef.current;
-    const draw = reduced && canvas ? surface(canvas, size, palette) : null;
+    const draw = reduced && canvas ? surface(canvas, size, look) : null;
     if (!draw || !clock.current) return;
-    const { seed } = clock.current;
+    const { stagger } = clock.current;
     const held =
       state === "finished"
         ? { ...settled(shown.current ?? "idle"), finishedAt: 0 }
         : settled(state);
     const paint = () =>
-      draw(poseAt(held, STILL_T, seed, { reduced: true, small: size < SMALL }));
+      draw(
+        poseAt(held, STILL_T, stagger, { reduced: true, small: size < SMALL }),
+      );
     paint();
     const theme = new MutationObserver(paint);
     theme.observe(document.documentElement, {
@@ -455,7 +461,7 @@ export function BotOrb({
       theme.disconnect();
       unwatch();
     };
-  }, [reduced, size, palette, state]);
+  }, [reduced, size, look, state]);
 
   // Alive: drawn on the shared clock while it is on screen. It counts as on screen until an
   // IntersectionObserver says otherwise, and always where there is none to ask. It reads the theme
@@ -464,9 +470,9 @@ export function BotOrb({
   useEffect(() => {
     const canvas = canvasRef.current;
     const box = boxRef.current;
-    const draw = !reduced && canvas ? surface(canvas, size, palette) : null;
+    const draw = !reduced && canvas ? surface(canvas, size, look) : null;
     if (!draw || !box || !clock.current || !gaze.current) return;
-    const { start, seed } = clock.current;
+    const { start, stagger } = clock.current;
     const eyes = gaze.current;
     const small = size < SMALL;
     const measure = () => box.getBoundingClientRect();
@@ -479,7 +485,7 @@ export function BotOrb({
       if (followPointer(eyes, t, state, measure) && motion.current) {
         motion.current = { ...motion.current, noticedAt: t };
       }
-      const pose = poseAt(motion.current ?? settled(state), t, seed, {
+      const pose = poseAt(motion.current ?? settled(state), t, stagger, {
         reduced: false,
         small,
       });
@@ -508,14 +514,15 @@ export function BotOrb({
       onScreen(false);
       unwatch();
     };
-  }, [reduced, size, palette]);
+  }, [reduced, size, look]);
 
   const spill = size * SPILL;
   return (
     <span
       aria-hidden
       className={cn("pointer-events-none relative block shrink-0", className)}
-      data-palette={palette}
+      data-palette={look.palette}
+      data-seed={seed}
       data-state={state}
       ref={boxRef}
       style={{ width: size, height: size }}
