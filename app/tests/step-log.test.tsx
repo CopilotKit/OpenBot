@@ -154,7 +154,11 @@ describe("how each step stands", () => {
   const pendingClick = call("click", "computer_click", { ref: "e1" });
   const states = (
     steps: ConversationStep[],
-    context: { working: boolean; held: ReadonlySet<string> } = at,
+    context: {
+      working: boolean;
+      held: ReadonlySet<string>;
+      waiting?: boolean;
+    } = at,
   ) => stepLogEntries(steps, [], context).map((entry) => entry.status);
 
   test("a step that worked is done", () => {
@@ -250,6 +254,53 @@ describe("how each step stands", () => {
         ),
       ]),
     ).toEqual(["blocked", "failed", "declined", "notYet", "stopped"]);
+  });
+
+  test("a click tried again after a decline is declined, from either computer's JSON", () => {
+    const declined =
+      "The person declined this action when you asked for their approval, so it was not done.";
+    expect(
+      states([
+        step(
+          call(
+            "server",
+            "computer_click",
+            { ref: "e1" },
+            { ok: false, error: declined },
+          ),
+          1,
+        ),
+        step(
+          call(
+            "browser",
+            "computer_click",
+            { ref: "e1" },
+            { ok: false, reason: declined },
+          ),
+          2,
+        ),
+      ]),
+    ).toEqual(["declined", "declined"]);
+  });
+
+  test("a click repeated while its request waits waits with it, and was not done once it's answered", () => {
+    const repeat = step(
+      call(
+        "again",
+        "computer_click",
+        { ref: "e1" },
+        {
+          ok: false,
+          error:
+            "An identical request is already waiting for the person's decision on the Bot's page in OpenBot, so this was not done and no second request was made.",
+        },
+      ),
+      1,
+    );
+    expect(
+      states([repeat], { working: false, held: new Set(), waiting: true }),
+    ).toEqual(["waiting"]);
+    expect(states([repeat])).toEqual(["stopped"]);
   });
 
   test("a command that exited non-zero failed, and one a boundary refused is blocked", () => {

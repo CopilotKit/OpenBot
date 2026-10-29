@@ -310,6 +310,15 @@ export function useConversationStatus(): ConversationStatus {
 }
 
 /**
+ * Whether an approval in this conversation is waiting on the person. A call the server did not ask
+ * about again, because the same request was already waiting, waits with it while this is true.
+ * False outside a conversation route.
+ */
+export function useConversationWaiting(): boolean {
+  return useContext(ServerContext).waiting;
+}
+
+/**
  * The browser steps the conversation's Bot took, oldest first, each with when this tab first saw it.
  * None outside a conversation route.
  */

@@ -11,6 +11,7 @@ import {
 } from "@testing-library/react";
 import type { ReactNode } from "react";
 import type { VisibleChatItem } from "../src/components/channels/chat-messages";
+import { ConversationPresenceProvider } from "../src/components/channels/conversation-presence";
 import {
   dropRepeatedAppCards,
   groupToolSteps,
@@ -500,6 +501,116 @@ test("a browser click the person declined says so, muted, and is never called do
     expect(summary?.querySelector(".text-status-done")).toBeNull();
     cleanup();
   }
+});
+
+test("a step tried again after the person declined it reads Declined, from every door it comes back through", () => {
+  const send = (result: string) =>
+    call("s", "mcp__composio-gmail__GMAIL_SEND_EMAIL", {}, result);
+  for (const step of [
+    // A connector refusing a call the person already declined.
+    send(`Refused. ${DECLINED}`),
+    send(JSON.stringify(`Refused. ${DECLINED}`)),
+    // The server's computer, and the browser's.
+    browser("click", "computer_click", { ok: false, error: DECLINED }),
+    browser("click", "computer_click", { ok: false, reason: DECLINED }),
+  ]) {
+    expect(stepDetails(step)).toMatchObject({
+      declined: true,
+      refused: false,
+      failed: false,
+    });
+    expect(stepDetails(step).output).toBeUndefined();
+    const view = drawLine(search(), step);
+    expect(view.getByText("Declined")).toBeDefined();
+    expect(view.queryByText(/Blocked|Didn't work|issue/)).toBeNull();
+    expect(view.container.textContent).not.toContain("when you asked");
+    cleanup();
+  }
+});
+
+const ALREADY_WAITING =
+  "An identical request is already waiting for the person's decision on the Bot's page in OpenBot, so this was not done and no second request was made. Do not repeat it; wait for their answer.";
+
+/** One folded line inside a conversation, with or without an approval waiting in it. */
+function drawInConversation(waiting: boolean, ...steps: ToolItem[]) {
+  const client = idle();
+  client.setQueryData(["approvals"], {
+    enabled: true,
+    requests: waiting
+      ? [
+          {
+            id: "first",
+            status: "pending",
+            createdAt: new Date(0).toISOString(),
+            action: {
+              botId: "b",
+              toolRef: "computer_click",
+              effect: "write",
+              scope: "shop.example",
+              threadId: "t",
+              toolCallId: "first-click",
+              args: {},
+              target: {},
+            },
+          },
+        ]
+      : [],
+    rules: [],
+    teamRules: [],
+    questions: [],
+  });
+  return render(
+    <QueryClientProvider client={client}>
+      <ConversationPresenceProvider channelId="c" threadId="t">
+        <ToolActivity
+          active={false}
+          group={{ kind: "tools", id: steps[0]?.id ?? "a", steps }}
+        />
+      </ConversationPresenceProvider>
+    </QueryClientProvider>,
+  );
+}
+
+test("a step repeated while its request still waits waits with it, and is never called declined", () => {
+  for (const result of [
+    `Refused. ${ALREADY_WAITING}`,
+    { ok: false, error: ALREADY_WAITING },
+    { ok: false, reason: ALREADY_WAITING },
+  ]) {
+    const repeat = browser("again", "computer_click", result);
+    expect(stepDetails(repeat)).toMatchObject({
+      alreadyWaiting: true,
+      declined: false,
+      refused: false,
+      failed: false,
+    });
+    const view = drawInConversation(true, repeat);
+    expect(view.getByText("Waiting for you")).toBeDefined();
+    const summary = view.container.querySelector("summary");
+    expect(summary?.textContent).toContain(
+      "Click on the page, waiting for you",
+    );
+    expect(view.queryByText(/declined|Declined|Blocked|issue/)).toBeNull();
+    cleanup();
+  }
+});
+
+test("a repeat whose request has been answered was not done, and is still never called declined", () => {
+  const view = drawInConversation(
+    false,
+    call(
+      "again",
+      "mcp__composio-gmail__GMAIL_SEND_EMAIL",
+      {},
+      `Refused. ${ALREADY_WAITING}`,
+    ),
+  );
+  expect(view.getByText("Not completed")).toBeDefined();
+  expect(view.container.querySelector("summary")?.textContent).toContain(
+    "Send your email, not done yet",
+  );
+  expect(view.queryByText(/declined|Declined|Blocked|issue/)).toBeNull();
+  expect(view.container.textContent).not.toContain("Do not repeat it");
 });
 
 test("a browser step a policy refused reads Blocked, with the policy's reason", () => {
