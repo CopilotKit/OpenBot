@@ -79,6 +79,7 @@ import {
 import { isBrowserStep } from "./browser-activity";
 import { shouldDrawEarlier, useTranscriptPages } from "./transcript-pages";
 import { FollowScroll, useFollowIntent } from "./follow-intent";
+import { usePacedReveal } from "./paced-reveal";
 import {
   attachmentModality,
   type SentAttachment,
@@ -492,6 +493,29 @@ function ArrivalsLive({ children }: { children: React.ReactNode }) {
 }
 
 /**
+ * Whether this row arrived while the conversation was open, decided once at its first render (see
+ * `ArrivalsLiveContext`), so a reply streaming into it can never change the answer.
+ */
+function useArrivedLive(): boolean {
+  const liveRef = useContext(ArrivalsLiveContext);
+  const [live] = useState(() => liveRef?.current ?? true);
+  return live;
+}
+
+/**
+ * How Streamdown draws a Bot's message, decided once when the message mounts. History is finished
+ * text and takes the static renderer, which does no repair of half-written markdown; anything that
+ * arrived live, or was still streaming when the conversation opened, takes the streaming one and
+ * keeps it after it finishes, so the renderer never changes under the reader. Exported for its test.
+ */
+export function messageMode(
+  live: boolean,
+  streaming: boolean,
+): "static" | "streaming" {
+  return live || streaming ? "streaming" : "static";
+}
+
+/**
  * A turn arriving in the transcript.
  *
  * WHY IT ANIMATES AT ALL: a message currently pops into existence at full opacity, and the eye has
@@ -516,8 +540,7 @@ function ArrivalsLive({ children }: { children: React.ReactNode }) {
  */
 function Arriving({ children }: { children: React.ReactNode }) {
   const shouldReduceMotion = useReducedMotion();
-  const liveRef = useContext(ArrivalsLiveContext);
-  const [live] = useState(() => liveRef?.current ?? true);
+  const live = useArrivedLive();
 
   return (
     <motion.div
@@ -650,13 +673,23 @@ function ResponsibilityFiring({
 const TranscriptMessage = memo(function TranscriptMessage({
   commandNames = "",
   role,
+  streaming = false,
   text,
 }: {
   commandNames?: string;
   role: "user" | "assistant";
+  /* This is the Bot's reply still being written: the last row of a turn in flight. */
+  streaming?: boolean;
   text: string;
 }) {
   const isUser = role === "user";
+  const live = useArrivedLive();
+  const [mode] = useState(() => messageMode(live, streaming));
+  // A person's message arrives whole; only a Bot's reply is paced.
+  const revealed = usePacedReveal(text, {
+    live: live && !isUser,
+    streaming,
+  });
   /*
    * Checked before anything else a person's message gets. A firing is not a person's message: the
    * chip split, the end alignment and the bubble are all wrong for it, and each one of them would
@@ -734,7 +767,9 @@ const TranscriptMessage = memo(function TranscriptMessage({
                  * closing token arrives, so the answer visibly rewrites itself as it lands. This
                  * closes them for the duration.
                  */
-                <Streamdown components={markdownComponents}>{text}</Streamdown>
+                <Streamdown components={markdownComponents} mode={mode}>
+                  {revealed}
+                </Streamdown>
               )}
             </BubbleContent>
           </Bubble>
@@ -1908,6 +1943,9 @@ export function ChatTranscript({
         <TranscriptMessage
           commandNames={commandNames}
           role={item.role}
+          streaming={
+            busy && item.role === "assistant" && index === items.length - 1
+          }
           text={item.text}
         />
       </MessageScrollerItem>
