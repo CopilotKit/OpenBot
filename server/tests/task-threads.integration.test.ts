@@ -14,6 +14,7 @@ import {
   frameTaskReply,
   readTaskBrief,
   readTaskFrame,
+  TASK_ENDING,
   TASK_REPLY_LINE,
 } from "@openbot/shared/task-brief";
 import type { TaskReplyContext } from "@openbot/shared/task-reply";
@@ -3854,6 +3855,7 @@ test("durable task reply context validates ownership and grants, and survives a 
     ],
   });
   expect(received[0]?.systemMessages).toEqual([
+    { id: "task:ending", role: "system", content: TASK_ENDING },
     {
       id: `${body.messageId}:skill:0`,
       role: "system",
