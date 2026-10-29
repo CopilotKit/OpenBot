@@ -153,3 +153,24 @@ test("scroll keys on the transcript itself pause", () => {
 
   expect(following(view.container)).toBe("false");
 });
+
+/*
+ * Only a press on the scrollbar makes an upward scroll the person's. A finger or mouse resting on a
+ * message while the content shrinks and clamps the view upward is a layout correction.
+ */
+test("a press on a message does not make a layout clamp a scrollbar drag", () => {
+  const view = render(<ChatTranscript messages={HISTORY} restoring={false} />);
+  const element = viewport(view.container);
+  let top = 500;
+  Object.defineProperty(element, "scrollTop", {
+    configurable: true,
+    get: () => top,
+  });
+
+  fireEvent.scroll(element);
+  fireEvent.pointerDown(view.getByText("first answer"));
+  top = 400;
+  fireEvent.scroll(element);
+
+  expect(following(view.container)).toBe("true");
+});

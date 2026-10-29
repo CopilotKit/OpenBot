@@ -203,10 +203,12 @@ export function useFollowIntent(
     // A scrollbar drag can end with the pointer anywhere on the page.
     window.addEventListener("pointerup", release);
     window.addEventListener("pointercancel", release);
+    window.addEventListener("blur", release);
     document.addEventListener("selectionchange", selectionChanged);
     return () => {
       window.removeEventListener("pointerup", release);
       window.removeEventListener("pointercancel", release);
+      window.removeEventListener("blur", release);
       document.removeEventListener("selectionchange", selectionChanged);
     };
   }, [dispatch, viewportRef]);
@@ -228,8 +230,13 @@ export function useFollowIntent(
       touchYRef.current = y;
       if (last !== null) dispatch({ type: "touch", fingerDeltaY: y - last });
     },
-    onPointerDown: () => {
-      pointerDownRef.current = true;
+    onPointerDown: (event) => {
+      // Only a press on the scrollbar itself: the viewport is the target, and the press is in the
+      // gutter to the right of its content box.
+      const element = event.currentTarget;
+      pointerDownRef.current =
+        event.target === element &&
+        event.nativeEvent.offsetX >= element.clientWidth;
     },
     onScroll: (event) => {
       const element = event.currentTarget;
