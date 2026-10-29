@@ -603,6 +603,21 @@ test("gives the selected harness the same governed callback as the framework Bot
 });
 
 /**
+ * Rootless Podman on Linux gives `host-gateway` an address that is not this machine's loopback, where
+ * the person's browser and a local Intelligence listen. OpenBot Desktop sets `OPENBOT_HOST_GATEWAY`
+ * there, to the address its Podman configuration maps to loopback, and every service that calls the
+ * host by name takes it.
+ */
+test("sends host.docker.internal where OPENBOT_HOST_GATEWAY says", () => {
+  const config = runComposeConfig({ OPENBOT_HOST_GATEWAY: "10.0.2.2" });
+  for (const service of ["server", "agent-harness", "agent-langgraph"] as const) {
+    expect(config.services[service].extra_hosts).toContain(
+      "host.docker.internal=10.0.2.2",
+    );
+  }
+});
+
+/**
  * OpenBot's own server and worker, for an installed OpenBot, and out of a developer's way.
  *
  * `scripts/start.sh` runs both on the host, so a plain `docker compose up -d` that also started them

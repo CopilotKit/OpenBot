@@ -899,6 +899,12 @@ pub fn compose(
     // Only rootless Podman on Linux needs this; see engine.rs.
     if let Some(socket) = &engine.engine_socket {
         env.insert("ENGINE_SOCKET".into(), socket.clone());
+        // And only there is `host-gateway` not this machine's loopback, which is where the
+        // person's browser and a local Intelligence listen. See `engine::ROOTLESS_HOST_LOOPBACK`.
+        env.insert(
+            HOST_GATEWAY_ENV.into(),
+            crate::engine::ROOTLESS_HOST_LOOPBACK.into(),
+        );
     }
 
     env
@@ -1049,14 +1055,19 @@ pub const MINTED: [&str; 6] = [
 /// earlier run wrote outlives the answer that implied it: `BOT_MODEL` once asked OpenAI for a model
 /// an earlier endpoint had named, and `OPENBOT_BROWSER_URL` would send the person to a browser that
 /// no longer runs.
-pub const REMOVED_WHEN_UNSET: [&str; 6] = [
+pub const REMOVED_WHEN_UNSET: [&str; 7] = [
     "BOT_PROVIDER",
     "BOT_MODEL",
     "AGENT_BOT_MODEL",
     crate::local_browser::BROWSER_URL_ENV,
     BROWSER_CONTAINER_URL_ENV,
     crate::local_browser::BROWSER_ABSENT_ENV,
+    // A machine that moves from rootless Podman to Docker must go back to `host-gateway`.
+    HOST_GATEWAY_ENV,
 ];
+
+/// What `docker-compose.yml` maps `host.docker.internal` to, in place of `host-gateway`.
+pub const HOST_GATEWAY_ENV: &str = "OPENBOT_HOST_GATEWAY";
 
 /// [`crate::local_browser::BROWSER_URL_ENV`] as the server's container reaches it, which
 /// `docker-compose.yml` prefers for the `server` service.
@@ -1916,6 +1927,32 @@ HTTPS_PROXY=http://proxy:8080
             with.get("ENGINE_SOCKET").map(String::as_str),
             Some("/run/user/501/podman/podman.sock")
         );
+    }
+
+    /// Rootless Podman alone sends `host.docker.internal` to the address its namespace maps to this
+    /// machine's loopback. Everywhere else `host-gateway` already gets there, and a value left from
+    /// rootless Podman would send Docker's containers to an address nothing answers on.
+    #[test]
+    fn host_docker_internal_is_moved_only_under_rootless_podman() {
+        let compose_with = |socket: Option<&str>| {
+            compose(
+                &intelligence(),
+                &Model::default(),
+                &engine_status(socket),
+                &Ports::default(),
+                &pinned(),
+                None,
+                &BTreeMap::new(),
+            )
+        };
+        assert!(!compose_with(None).contains_key(HOST_GATEWAY_ENV));
+        assert_eq!(
+            compose_with(Some("/run/user/501/podman/podman.sock"))
+                .get(HOST_GATEWAY_ENV)
+                .map(String::as_str),
+            Some(crate::engine::ROOTLESS_HOST_LOOPBACK)
+        );
+        assert!(REMOVED_WHEN_UNSET.contains(&HOST_GATEWAY_ENV));
     }
 
     #[test]
