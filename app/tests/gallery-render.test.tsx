@@ -161,3 +161,26 @@ test("a decision waits disabled, then enables in place", () => {
   expect(lastRespond).toBe(respond);
   expect(mounts).toBe(1);
 });
+
+function ShowsValue(props: { title?: string; value?: number }) {
+  return (
+    <p>
+      {props.title}: {props.value ?? "pending"}
+    </p>
+  );
+}
+
+test("a half-arrived number is held back until the call completes", () => {
+  const store = createGrantStore();
+  store.set({ grants: heldGrants });
+  const Render = makeGalleryRender(spec(ShowsValue), store);
+  const view = render(
+    <Render args={{ title: "Sales", value: 12 }} status="inProgress" />,
+  );
+  expect(view.getByText("Sales: pending")).toBeTruthy();
+
+  view.rerender(
+    <Render args={{ title: "Sales", value: 125 }} status="complete" />,
+  );
+  expect(view.getByText("Sales: 125")).toBeTruthy();
+});

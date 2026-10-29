@@ -23,6 +23,7 @@ import {
   type GrantStore,
   grantsFrom,
 } from "@/lib/copilot/grant-store";
+import { settledArgs } from "@/lib/copilot/settled-args";
 
 /**
  * Register compiled gallery components once per name, scoped to the active Bot with `available`.
@@ -189,7 +190,12 @@ export function makeGalleryRender(spec: GalleryComponent, store: GrantStore) {
     if (typeof state === "object") {
       return <RefusedCard reason={state.refused} title={spec.title} />;
     }
-    return <Component {...(props.args ?? {})} />;
+    // A number, link or colour still arriving is held back; see `settledArgs`.
+    return (
+      <Component
+        {...settledArgs(props.args ?? {}, props.status === "complete")}
+      />
+    );
   };
 }
 
