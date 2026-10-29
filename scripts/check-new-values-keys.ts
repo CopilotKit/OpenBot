@@ -493,6 +493,12 @@ const computerSettings: Array<{
     variable: "COMPUTER_TAB_IDLE_MS",
     whole: 1_200_000,
   },
+  // Older than this check: an hour rendered as `3.6e+06`, and `0` ("keep browsers resident") as nothing.
+  {
+    path: "computers.browserIdleMs",
+    variable: "COMPUTER_BROWSER_IDLE_MS",
+    whole: 3_600_000,
+  },
 ];
 if (!baseline.out.includes("name: COMPUTER_SEPARATE_WORKSPACES")) {
   console.log(

@@ -91,6 +91,12 @@ nothing has used, navigated or brought to the front for ten minutes is now close
 is on is never closed, and neither is any tab of a person's own browser or of a Bot whose wheel a
 person holds. `COMPUTER_TAB_IDLE_MS` (Helm: `computers.tabIdleMs`) sets the time, and `0` keeps them.
 
+Through Helm, `computers.browserIdleMs` and `computers.maxBrowsers` now reach the computer as
+written. An hour (`browserIdleMs: 3600000`) used to render as `3.6e+06`, which the computer ignored
+for its default of thirty minutes, and `browserIdleMs: 0` (keep browsers open) was dropped. All four
+of these settings now also reach the computers `computers.mode: sandbox` makes, which had none of
+them.
+
 ### Generated interfaces use A2UI 1.0
 
 With generative UI on, a Bot builds an interface from the A2UI 1.0 basic components instead of the
