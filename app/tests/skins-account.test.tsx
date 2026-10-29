@@ -337,25 +337,26 @@ function renderApp(path: string) {
 const HOME = { timeout: 5000 };
 
 test("a skin switched while on a screen only the old skin has lands on home, drawn", async () => {
-  const from = SKINS.openduet;
+  // OpenMuse's own screens; OpenDuet's Tasks is OpenBot's own route now, so it has none.
+  const from = SKINS.openmuse;
   const to = SKINS.opendots;
   const key = Object.keys(from.screens ?? {}).find(
     (screen) => !to.screens?.[screen],
   );
-  if (!key) throw new Error("OpenDuet has no screen OpenDots lacks");
+  if (!key) throw new Error("OpenMuse has no screen OpenDots lacks");
 
   signedIn();
-  setSkin("openduet");
+  setSkin("openmuse");
   queryClient.setQueryData(
     userPreferencesQueryOptions("alice").queryKey,
-    preferences("openduet"),
+    preferences("openmuse"),
   );
   serve("GET /api/agents", { agents: [] });
   serve("GET /api/channels", { channels: [], nextCursor: null });
   serve("GET /api/bots/attention", { bots: [] });
   const { view, router } = renderApp(`/s/${key}`);
   await waitFor(() =>
-    expect(document.querySelector("[data-openduet-frame]")).not.toBeNull(),
+    expect(document.querySelector("[data-openmuse-tab]")).not.toBeNull(),
   );
   expect(router.state.location.pathname).toBe(`/s/${key}`);
 
@@ -369,7 +370,7 @@ test("a skin switched while on a screen only the old skin has lands on home, dra
 
   await waitFor(() => expect(router.state.location.pathname).toBe("/"));
   expect(getSkinId()).toBe("opendots");
-  expect(document.querySelector("[data-openduet-frame]")).toBeNull();
+  expect(document.querySelector("[data-openmuse-tab]")).toBeNull();
   // Home, inside the new skin's frame, with something on it.
   expect(
     // Home draws its composer; its greeting is personal, so it is not what this waits for.
