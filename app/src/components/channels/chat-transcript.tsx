@@ -1335,7 +1335,11 @@ const ToolCallBody = memo(function ToolCallBody({
   });
 
   return (
-    <ToolRenderBoundary name={name}>
+    <ToolRenderBoundary
+      final={result !== undefined}
+      name={name}
+      resetKey={args}
+    >
       {/*
        * A TOOL WITH NO REGISTERED RENDERER STILL HAPPENED, and since tools moved to the server
        * that is now the ordinary case rather than the exception: MCP tools execute in the runtime
