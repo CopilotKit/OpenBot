@@ -1,28 +1,11 @@
+import {
+  BROWSER_STEP_DONE as labels,
+  BROWSER_STEP_PLAIN as plainLabels,
+} from "@/lib/computers/step-names";
 import { toolResultDeclined } from "@/lib/plugins/tool-result";
 import type { VisibleChatItem } from "./chat-messages";
 
 type BrowserStep = Extract<VisibleChatItem, { kind: "tool" }>;
-
-const labels: Record<string, string> = {
-  computer_navigate: "Opened page",
-  computer_read: "Read page",
-  computer_snapshot: "Inspected page",
-  computer_click: "Clicked on page",
-  computer_type: "Filled in field",
-  computer_key: "Pressed key",
-  computer_scroll: "Scrolled page",
-};
-
-/** The same steps as what they would do, for one that didn't happen: declined, blocked or cut off. */
-const plainLabels: Record<string, string> = {
-  computer_navigate: "Open page",
-  computer_read: "Read page",
-  computer_snapshot: "Inspect page",
-  computer_click: "Click on page",
-  computer_type: "Fill in field",
-  computer_key: "Press key",
-  computer_scroll: "Scroll page",
-};
 
 /** Whether a tool call is one of the browser steps a tool group draws with its page link. */
 export function isBrowserStep(item: BrowserStep): boolean {

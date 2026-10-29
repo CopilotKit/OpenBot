@@ -165,7 +165,7 @@ test("only what this Bot waits on is shown, and it can be decided here", async (
   expect(view.getByRole("button", { name: "Always allow here" })).toBeTruthy();
   expect(view.getByRole("button", { name: "Decline" })).toBeTruthy();
   // What the action is and where, in words, and who asks: this page shows every Bot's requests.
-  expect(view.getByText("Click")).toBeTruthy();
+  expect(view.getByText("Click on page")).toBeTruthy();
   expect(view.getByText("shop.example").parentElement?.textContent).toBe(
     "Expenses · shop.example",
   );

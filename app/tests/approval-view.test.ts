@@ -70,7 +70,8 @@ test("a browser action keeps what it acts on and drops the page plumbing", () =>
     { scope: "shop.example" },
   );
   const view = describeApproval(request);
-  expect(view.title).toBe("Click");
+  // Named as its step in the conversation names it, so the card and the line above it agree.
+  expect(view.title).toBe("Click on page");
   expect(view.app).toBeNull();
   expect(view.kind).toBe("browser");
   expect(view.fields).toEqual([{ label: "Element", value: "Pay now" }]);
@@ -247,4 +248,17 @@ test("a send put to the person by the share check counts as asked, and its recip
       action: { toolRef: "gmail/send_reply", scope: "x", args: {} },
     } as never),
   ).toBe(false);
+});
+
+test("typing into a page reads as the step does, and a yes-or-no argument reads as Yes or No", () => {
+  const view = describeApproval(
+    action(
+      "computer_type",
+      { ref: "e3", text: "OpenBot", submit: true },
+      { scope: "en.wikipedia.org" },
+    ),
+  );
+  expect(view.title).toBe("Fill in field");
+  expect(view.body).toBe("OpenBot");
+  expect(view.fields).toEqual([{ label: "Submit after typing", value: "Yes" }]);
 });
