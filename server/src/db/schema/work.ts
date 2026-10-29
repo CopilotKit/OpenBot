@@ -103,5 +103,17 @@ export const workItems = pgTable(
     index("work_items_open_thread_idx")
       .on(table.kind, sql`(${table.payload}->>'threadId')`)
       .where(sql`${table.finishedAt} IS NULL`),
+    /*
+     * One person's work of a kind, and one task's turns within it: what a task's status and report
+     * read, and what the person's question inbox checks each question against. Nothing purges task
+     * turns or answers, so without it each of those reads scans every person's, ever written. Not
+     * partial on the kind: the reads pass it as a parameter, and a plan made once for every value
+     * cannot tell that a partial index applies. See tasks/store.ts.
+     */
+    index("work_items_owner_task_idx").on(
+      table.kind,
+      sql`(${table.payload}->>'ownerUserId')`,
+      sql`(${table.payload}->>'taskId')`,
+    ),
   ],
 );

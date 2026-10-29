@@ -64,9 +64,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   research run replaces them.
 - Migration `0062_action_policy_labels` adds a `labels` column to `action_policies`, defaulting to
   empty. Existing boundary rules keep working and show as "Custom rule" until somebody names them.
-- Migration `0070_tasks` adds one table, `tasks`, naming each task's conversation (below). It starts
-  empty. A suggestion started before the upgrade and still queued opens a task when it runs, rather
-  than running in the conversation it was suggested in.
+- Migration `0070_tasks` adds one table, `tasks`, naming each task's conversation (below), and one
+  index to `work_items`. The table starts empty. A suggestion started before the upgrade and still
+  queued opens a task when it runs, rather than running in the conversation it was suggested in.
 - On Helm's `shared` computer and the docker-compose `agent-computer`, each Bot's files now live in
   `computers/<Bot id>` on the workspace volume (below). Files saved before the upgrade stay at the
   root of the volume, where no Bot sees them; move them into a Bot's folder to give them back.
