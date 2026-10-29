@@ -16,7 +16,7 @@ import {
 import { useCallback, useContext, useMemo, useSyncExternalStore } from "react";
 import { Streamdown } from "streamdown";
 import { ToolCallApprovals } from "@/components/approvals/inline-approval";
-import { approvalInboxOptions } from "@/lib/approvals";
+import { approvalInboxCacheOptions } from "@/lib/approvals";
 import { codingLook, foreignCodingCall } from "@/lib/copilot/coding-calls";
 import { markdownComponents, markdownPlugins } from "@/lib/markdown";
 import {
@@ -381,6 +381,7 @@ export function stepDetails(step: ToolItem): StepDetails {
       failed: outcome.state === "failed",
       refused: false,
       declined: false,
+      alreadyWaiting: false,
       pages: 0,
       inputs: [],
       ...(output ? { output, verbatim: true } : {}),
@@ -764,10 +765,10 @@ export function StepRow({
  * The tool calls the server is holding on an approval card, read from the same inbox the cards are.
  *
  * A held step has no result yet, the same as one still running or one a stopped turn left behind,
- * and only the inbox can tell them apart.
+ * and only the inbox can tell them apart. Every row asks, so it reads the cache the screen polls.
  */
 export function useHeldForPerson(): ReadonlySet<string> {
-  const inbox = useQuery(approvalInboxOptions());
+  const inbox = useQuery(approvalInboxCacheOptions());
   return useMemo(
     () =>
       new Set(
