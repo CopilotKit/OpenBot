@@ -22,6 +22,10 @@ export const FINISH_MS = 300;
 
 const MIN_CHARS_PER_MS = MIN_CHARS_PER_SECOND / 1000;
 
+/** One frame at 60Hz, and the most one step may count: a tab in the background stalls frames. */
+const FRAME_MS = 16;
+const MAX_FRAME_MS = 50;
+
 function isSpace(character: string | undefined): boolean {
   return character !== undefined && /\s/.test(character);
 }
@@ -106,19 +110,35 @@ export function usePacedReveal(
 
   const pending = !reducedMotion && shown < text.length;
 
+  /*
+   * ONE LOOP FOR AS LONG AS THERE IS TEXT TO SHOW, reading the newest text from refs. Tokens arrive
+   * every 10 to 20ms, between frames; restarting the loop on each one restarted its clock too, so
+   * the next frame measured the few ms since the token rather than the ~16ms since the last frame,
+   * and the reveal ran at a fraction of its pace, then dumped the backlog when the stream ended.
+   */
+  const textRef = useRef(text);
+  textRef.current = text;
+  const streamingRef = useRef(streaming);
+  streamingRef.current = streaming;
+
   useEffect(() => {
     if (!pending) return;
-    let last = performance.now();
+    let last: number | null = null;
     let frame = window.requestAnimationFrame(function step(now) {
-      const elapsedMs = Math.max(0, now - last);
+      // The first frame of a loop has no previous one; a frame's worth keeps it moving.
+      const elapsedMs = Math.min(
+        MAX_FRAME_MS,
+        Math.max(0, now - (last ?? now - FRAME_MS)),
+      );
       last = now;
       const finishAt = finishAtRef.current;
-      setShown((current) =>
+      const current = textRef.current;
+      setShown((shownNow) =>
         nextReveal({
-          text,
-          shown: current,
+          text: current,
+          shown: shownNow,
           elapsedMs,
-          streaming,
+          streaming: streamingRef.current,
           holdTail: now - grewAtRef.current < TAIL_SETTLES_MS,
           finishInMs: finishAt === null ? FINISH_MS : finishAt - now,
         }),
@@ -126,7 +146,7 @@ export function usePacedReveal(
       frame = window.requestAnimationFrame(step);
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [pending, text, streaming]);
+  }, [pending]);
 
   return pending ? text.slice(0, shown) : text;
 }
