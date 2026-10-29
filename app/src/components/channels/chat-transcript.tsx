@@ -1694,7 +1694,10 @@ export function ChatTranscript({
     const delay = opening?.get(id);
     return delay === undefined
       ? {}
-      : { className: "history-arrive", style: { animationDelay: delay } };
+      : {
+          className: "history-arrive",
+          style: { "--arrive-delay": delay } as React.CSSProperties,
+        };
   };
 
   /*

@@ -167,7 +167,7 @@ test("a message typed while history loads is shown under the placeholder", () =>
 function openingDelays(container: HTMLElement): (string | null)[] {
   return [...container.querySelectorAll("[data-message-id]")].map((row) =>
     row.classList.contains("history-arrive")
-      ? (row as HTMLElement).style.animationDelay
+      ? (row as HTMLElement).style.getPropertyValue("--arrive-delay")
       : null,
   );
 }
