@@ -721,6 +721,39 @@ describe("the lock is released on every exit path", () => {
 });
 
 describe("cleanup only runs for a lock that was actually taken", () => {
+  test("only a lock refused on the first ask is safe to defer", async () => {
+    const conflict = lockConflict();
+    const busy = harness({ acquireFails: () => conflict });
+    await expect(busy.run()).rejects.toMatchObject({
+      name: "ThreadLockBusyError",
+      cause: conflict,
+    });
+    expect(busy.calls.runs).toEqual([]);
+    expect(busy.calls.cleaned).toEqual([]);
+
+    // A provider's own 409, or the platform's once the run is under way, is raised as it comes.
+    const providerConflict = Object.assign(new Error("Provider conflict"), {
+      status: 409,
+    });
+    await expect(
+      harness({ acquireFails: () => providerConflict }).run(),
+    ).rejects.toBe(providerConflict);
+    await expect(
+      harness({ drive: ({ observer }) => observer.error(conflict) }).run(),
+    ).rejects.toBe(conflict);
+    await expect(
+      harness({
+        renew: () => {
+          throw conflict;
+        },
+        heartbeatMs: 1,
+        drive: ({ agent, observer }) => {
+          agent.onAbort = () => observer.complete();
+        },
+      }).run(),
+    ).rejects.toBe(conflict);
+  });
+
   test("a rejected acquire never cleans up, renews, or starts the heartbeat", async () => {
     // `ɵcleanupThreadLock` is DELETE on the platform's lock endpoint. If cleanup ran when the
     // acquire itself failed, it would delete whoever DOES hold the lock — the person's own browser
