@@ -1,4 +1,8 @@
-import { frameTaskInput, readTaskBrief } from "@openbot/shared/task-brief";
+import {
+  frameTaskInput,
+  readTaskBrief,
+  TASK_ENDING,
+} from "@openbot/shared/task-brief";
 import { HeadlessToolSuspension } from "@openbot/toolkit/headless-tools";
 import { ThreadLockBusyError } from "@openbot/toolkit/lease";
 import type { TurnRunner } from "@openbot/toolkit/run-turn";
@@ -161,17 +165,15 @@ export function createTaskTurn(deps: {
         routineId: input.runId,
         instruction: input.text,
         userMessage: { id: input.runId, role: "user", content },
-        ...(context.skillInstructions.length
-          ? {
-              systemMessages: context.skillInstructions.map(
-                (instructions, index) => ({
-                  id: `${input.runId}:skill:${index}`,
-                  role: "system" as const,
-                  content: instructions,
-                }),
-              ),
-            }
-          : {}),
+        systemMessages: [
+          // One id for every turn of the task, so its conversation holds this once.
+          { id: "task:ending", role: "system" as const, content: TASK_ENDING },
+          ...context.skillInstructions.map((instructions, index) => ({
+            id: `${input.runId}:skill:${index}`,
+            role: "system" as const,
+            content: instructions,
+          })),
+        ],
         initiator: PERSON_INITIATOR,
         signal: input.signal,
       });

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { frameTaskBrief } from "@openbot/shared/task-brief";
+import { frameTaskBrief, TASK_ENDING } from "@openbot/shared/task-brief";
 import { HeadlessToolSuspension } from "@openbot/toolkit/headless-tools";
 import { ThreadLockBusyError } from "@openbot/toolkit/lease";
 import type { TurnRunner } from "@openbot/toolkit/run-turn";
@@ -73,6 +73,21 @@ describe("a task's turn", () => {
     ]);
     // Not busy any more is the engine's to say, once the turn is off the queue.
     expect(turn.busy).toEqual([true]);
+  });
+
+  test("tells the Bot how to end, once per task, so its last line reads plainly and asks only when it must", async () => {
+    const asked: Parameters<TurnRunner>[0][] = [];
+    const turn = turnWith(async (input) => {
+      asked.push(input);
+      return { replyText: "Booked." };
+    });
+    await turn.start();
+    // One id for every turn of the task, so its conversation holds the guidance once.
+    expect(asked[0]?.systemMessages).toEqual([
+      { id: "task:ending", role: "system", content: TASK_ENDING },
+    ]);
+    expect(TASK_ENDING).toContain("Ask the person a question only if");
+    expect(TASK_ENDING).toContain("Don't label");
   });
 
   test("records a long reply by how it ends, its next step, not how it starts", async () => {
