@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
+  OnboardingNameOrb,
   OnboardingNameStep,
   ProfileNameForm,
 } from "@/components/settings/profile";
@@ -45,6 +46,19 @@ test("onboarding name step starts empty for a placeholder profile", () => {
   expect(
     view.getByRole("button", { name: "Get started" }).hasAttribute("disabled"),
   ).toBe(true);
+});
+
+test("the name step's orb is OpenBot's violet, listening, and plays its finish when onboarding ends", () => {
+  const view = render(<OnboardingNameOrb />);
+  const orb = () =>
+    view.container.querySelector<HTMLElement>("[data-palette]") as HTMLElement;
+  expect(orb().getAttribute("data-palette")).toBe("violet");
+  expect(orb().getAttribute("data-state")).toBe("listening");
+  expect(view.container.querySelector("[data-onboarding-finish]")).toBeNull();
+
+  view.rerender(<OnboardingNameOrb finished />);
+  expect(orb().getAttribute("data-state")).toBe("finished");
+  expect(orb().closest("[data-onboarding-finish]")).not.toBeNull();
 });
 
 test("onboarding name step preserves a saved name when revisited", () => {
