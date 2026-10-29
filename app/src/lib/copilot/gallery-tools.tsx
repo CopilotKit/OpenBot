@@ -1,6 +1,13 @@
-import { useFrontendTool, useHumanInTheLoop } from "@copilotkit/react-core/v2";
+import { useFrontendTool } from "@copilotkit/react-core/v2";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { RefusedCard } from "@/components/gallery/refused";
 import {
   agentComponentsQueryOptions,
@@ -208,30 +215,93 @@ function GrantedDecision({
   held: Map<string, string>;
   store: GrantStore;
 }) {
+  useDecisionTool(spec, store, held);
+  return null;
+}
+
+type FrontendTool = Parameters<typeof useFrontendTool>[0];
+
+/**
+ * A decision tool: the run waits until the person answers on the card.
+ *
+ * REGISTERED THROUGH `useFrontendTool`, NOT `useHumanInTheLoop`, AND THAT IS THE FIX. The SDK's
+ * human-in-the-loop hook wraps the render in a component of its own that is rebuilt whenever the
+ * tool's description changes (1.83.0: a `useCallback` over `tool.description`). Ours changes from
+ * the built-in words to the published ones exactly when the grants load, so a decision on screen was
+ * torn down at that moment, and again on a revoke. This is that hook's answer-and-wait handler, kept
+ * as it is, with our render created once.
+ *
+ * `register` is the SDK hook in the app and a recorder in the tests. Exported for its tests.
+ */
+export function useDecisionTool(
+  spec: GalleryComponent,
+  store: GrantStore,
+  held: Map<string, string>,
+  register: (tool: FrontendTool) => void = useFrontendTool,
+) {
   const description = held.get(spec.name);
   const isHeld = description !== undefined;
-  // Created once, for the same reason as `makeGalleryRender`.
-  const [Render] = useState(() => makeDecisionRender(spec, store));
+  const resolveRef = useRef<((result: unknown) => void) | null>(null);
+  const stopListeningRef = useRef<(() => void) | null>(null);
 
-  useHumanInTheLoop({
+  const respond = useCallback(async (result: unknown) => {
+    if (!resolveRef.current) return;
+    stopListeningRef.current?.();
+    stopListeningRef.current = null;
+    resolveRef.current(result);
+    resolveRef.current = null;
+  }, []);
+
+  const handler = useCallback(
+    async (_args: unknown, context?: { signal?: AbortSignal }) =>
+      new Promise<unknown>((resolve, reject) => {
+        const signal = context?.signal;
+        if (signal?.aborted) {
+          reject(new Error("Human-in-the-loop interaction aborted"));
+          return;
+        }
+        resolveRef.current = resolve;
+        if (signal) {
+          const onAbort = () => {
+            stopListeningRef.current = null;
+            resolveRef.current = null;
+            reject(new Error("Human-in-the-loop interaction aborted"));
+          };
+          signal.addEventListener("abort", onAbort, { once: true });
+          stopListeningRef.current = () =>
+            signal.removeEventListener("abort", onAbort);
+        }
+      }),
+    [],
+  );
+
+  // Created once, for the same reason as `makeGalleryRender`.
+  const [Render] = useState(() => makeDecisionRender(spec, store, respond));
+
+  register({
     name: spec.name,
     description: description ?? spec.description,
     parameters: spec.parameters,
     available: isHeld,
+    type: "human-in-the-loop",
+    handler,
     render: Render,
-  });
-
-  return null;
+  } as FrontendTool);
 }
 
 /**
  * The card a decision draws, made once per component.
  *
- * While the grants are unknown it draws the decision without `respond`, which the decision
- * components read as "not yet": the person sees what is being asked and cannot answer it until the
- * Bot is known to be allowed to ask. Then the same card enables in place. Exported for its tests.
+ * It can answer only while the call is executing, as the SDK's own decisions do. While the grants
+ * are unknown it draws without `respond`, which the decision components read as "not yet": the
+ * person sees what is being asked and cannot answer until the Bot is known to be allowed to ask.
+ * Then the same card enables in place. Exported for its tests.
  */
-export function makeDecisionRender(spec: GalleryComponent, store: GrantStore) {
+export function makeDecisionRender(
+  spec: GalleryComponent,
+  store: GrantStore,
+  respond: (result: unknown) => Promise<void>,
+) {
   const Component = spec.Component;
   return function DecisionRender(props: Record<string, unknown>) {
     const snapshot = useSyncExternalStore(
@@ -239,8 +309,9 @@ export function makeDecisionRender(spec: GalleryComponent, store: GrantStore) {
       store.get,
       store.get,
     );
+    const answer = props.status === "executing" ? respond : undefined;
     const state = cardState(snapshot, spec.name, spec.title);
-    if (state === "draw") return <Component {...props} />;
+    if (state === "draw") return <Component {...props} respond={answer} />;
     if (state === "wait-for-grant") {
       return <Component {...props} respond={undefined} />;
     }
@@ -249,9 +320,7 @@ export function makeDecisionRender(spec: GalleryComponent, store: GrantStore) {
         {...(snapshot.grants.status === "failed"
           ? { reason: COULDNT_CHECK(spec.title) }
           : {})}
-        respond={
-          props.respond as ((result: unknown) => Promise<void>) | undefined
-        }
+        respond={answer}
         title={spec.title}
       />
     );
