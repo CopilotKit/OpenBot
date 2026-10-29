@@ -1,9 +1,10 @@
-import { useFrontendTool } from "@copilotkit/react-core/v2";
+import { useCopilotKit, useFrontendTool } from "@copilotkit/react-core/v2";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   useCallback,
   useEffect,
   useContext,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -243,11 +244,33 @@ type FrontendTool = Parameters<typeof useFrontendTool>[0];
  *
  * `register` is the SDK hook in the app and a recorder in the tests. Exported for its tests.
  */
+/**
+ * The removal the SDK's `useHumanInTheLoop` does on unmount, which `useDecisionTool` copies the rest
+ * of: without it a decision's renderer stayed registered after the gallery tools went away, drawing
+ * from a grant store nobody updated any more.
+ */
+export function useForgetRenderOnUnmount(
+  name: string,
+  core: { removeHookRenderToolCall(name: string, agentId?: string): void },
+) {
+  useLayoutEffect(
+    () => () => core.removeHookRenderToolCall(name),
+    [core, name],
+  );
+}
+
+/** `useFrontendTool`, and its renderer removed again on unmount, as `useHumanInTheLoop` does. */
+function useHumanInTheLoopTool(tool: FrontendTool) {
+  const { copilotkit } = useCopilotKit();
+  useFrontendTool(tool);
+  useForgetRenderOnUnmount(tool.name, copilotkit);
+}
+
 export function useDecisionTool(
   spec: GalleryComponent,
   store: GrantStore,
   held: Map<string, string>,
-  register: (tool: FrontendTool) => void = useFrontendTool,
+  register: (tool: FrontendTool) => void = useHumanInTheLoopTool,
 ) {
   const description = held.get(spec.name);
   const isHeld = description !== undefined;

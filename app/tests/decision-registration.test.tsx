@@ -2,7 +2,10 @@ import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act, cleanup, render, renderHook } from "@testing-library/react";
 import type { GalleryComponent } from "@/lib/copilot/gallery-registry";
-import { useDecisionTool } from "@/lib/copilot/gallery-tools";
+import {
+  useDecisionTool,
+  useForgetRenderOnUnmount,
+} from "@/lib/copilot/gallery-tools";
 import { createGrantStore } from "@/lib/copilot/grant-store";
 import { settleReactWork } from "./settle-react-work";
 
@@ -121,4 +124,23 @@ test("the card cannot answer before the call is executing", () => {
   render(<Render args={{}} status="inProgress" />);
 
   expect(answer).toBeUndefined();
+});
+
+/*
+ * The SDK's own human-in-the-loop hook removes its renderer when it unmounts; the copy here did not,
+ * so a decision kept drawing from a grant store nobody updated after the gallery tools went away.
+ */
+test("a decision's renderer is removed when it unmounts", () => {
+  const removed: string[] = [];
+  const core = {
+    removeHookRenderToolCall: (name: string) => {
+      removed.push(name);
+    },
+  };
+  const view = renderHook(() => useForgetRenderOnUnmount("askApproval", core));
+  expect(removed).toEqual([]);
+
+  view.unmount();
+
+  expect(removed).toEqual(["askApproval"]);
 });
