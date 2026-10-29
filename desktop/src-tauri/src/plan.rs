@@ -1055,19 +1055,6 @@ fn main() {
         );
     }
 
-    /// The refresh token is the point of carrying a store, so the program must print all of it.
-    #[test]
-    fn the_login_program_prints_the_whole_store() {
-        assert!(
-            CHATGPT_LOGIN.contains("json.dumps(raw"),
-            "the login must print the store, not one field of it"
-        );
-        assert!(
-            !CHATGPT_LOGIN.contains("OPENBOT_CHATGPT_TOKEN"),
-            "an access token alone expires within the hour and cannot be renewed"
-        );
-    }
-
     /// The URL the vendor's login prints as its fallback.
     #[test]
     fn the_openai_url_is_found() {

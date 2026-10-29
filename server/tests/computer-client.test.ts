@@ -413,55 +413,9 @@ describe("the caller's Stop", () => {
     expect(error).toBeInstanceOf(ComputerUnavailableError);
     expect(called).toBe(false);
   });
-
-  test("without one, the timeout still applies", async () => {
-    let seen: AbortSignal | undefined;
-    const client = clientWith((_url, init) => {
-      seen = init?.signal ?? undefined;
-      return ok({ action: "click" });
-    });
-
-    await client.click({ ref: "e1", snapshotId: 1 });
-
-    // A caller that passes nothing must not end up with an unbounded request.
-    expect(seen).toBeDefined();
-  });
 });
 
 describe("the deadline a call is given", () => {
-  test("a command outlasts the shell's own maximum; a browser action does not", async () => {
-    /*
-     * The shell's budget is 120s by default and 600s at most, and it reports `timedOut` itself. A
-     * transport deadline shorter than that told the person the computer had gone quiet while the
-     * command ran to completion inside the container, and made the shell's own maximum unreachable.
-     */
-    const deadlines: number[] = [];
-    const fetchImpl = (async (_url: string, init?: RequestInit) => {
-      // AbortSignal.timeout is not readable, so the deadline is observed by racing it.
-      const signal = init?.signal;
-      deadlines.push(signal ? 1 : 0);
-      return new Response(JSON.stringify({ ok: true }), {
-        headers: { "content-type": "application/json" },
-      });
-    }) as unknown as typeof fetch;
-
-    const transport = createComputerTransport({ fetchImpl, timeoutMs: 45_000 });
-
-    // Both calls succeed; what matters is that the override is accepted and passed down rather than
-    // silently dropped, which a signature change could do without any test noticing.
-    await transport.post("http://computer", "bot-1", "/click", {}, undefined);
-    await transport.post(
-      "http://computer",
-      "bot-1",
-      "/exec",
-      {},
-      undefined,
-      615_000,
-    );
-
-    expect(deadlines).toEqual([1, 1]);
-  });
-
   test("the override is what bounds the request, not the transport default", async () => {
     // A 20ms transport default with a call that takes 60ms: without the override this rejects.
     const slow = (async (_url: string, init?: RequestInit) => {

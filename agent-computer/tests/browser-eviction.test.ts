@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { chooseEvictions, chooseIdle } from "../src/browser-eviction";
+import { chooseEvictions, chooseIdle, keptOpen } from "../src/browser-eviction";
 import { numberFromEnv } from "../src/env";
 
 /**
@@ -152,5 +152,103 @@ describe("reading the limits an operator set", () => {
       if (previous === undefined) delete process.env.COMPUTER_BROWSER_IDLE_MS;
       else process.env.COMPUTER_BROWSER_IDLE_MS = previous;
     }
+  });
+});
+
+/**
+ * A person's browser in a native window, which counts toward the cap and is closed last.
+ *
+ * Browsing in a native window sends the computer nothing, so a person's browser always looks like
+ * the one used longest ago. Ordered by use alone it was the first the cap closed, out from under
+ * the person, whenever a Bot started, and the idle sweep closed it half an hour into their reading.
+ */
+describe("a person's browser among Bots' browsers", () => {
+  const PERSON = "person-0123456789abcdef0123456789abcdef";
+  const isPerson = (botId: string) => botId.startsWith("person-");
+  const withPerson = (personUsedAt: number, ...botsUsedAt: number[]) =>
+    new Map([[PERSON, { usedAt: personUsedAt }], ...running(...botsUsedAt)]);
+
+  test("the cap closes every Bot's browser before the person's", () => {
+    // The person's is the least recently used by a long way, and still not the one closed.
+    expect(chooseEvictions(withPerson(1, 500, 300, 900), 3, isPerson)).toEqual([
+      "bot-1",
+    ]);
+    expect(
+      chooseEvictions(withPerson(1, 500, 300, 900), 2, isPerson).sort(),
+    ).toEqual(["bot-0", "bot-1"]);
+  });
+
+  test("it still counts, so it goes when nothing else is left to close", () => {
+    // A cap of one with the person's browser open and a Bot just started: the Bot that just asked
+    // stays, as it always has, and the person's browser is what the cap takes.
+    expect(chooseEvictions(withPerson(1, 900), 1, isPerson)).toEqual([PERSON]);
+  });
+
+  test("a person's browser that just opened is never the one closed", () => {
+    const opened = new Map([
+      ["bot-0", { usedAt: 100 }],
+      ["bot-1", { usedAt: 200 }],
+      [PERSON, { usedAt: 300 }],
+    ]);
+    expect(chooseEvictions(opened, 1, isPerson).sort()).toEqual([
+      "bot-0",
+      "bot-1",
+    ]);
+  });
+
+  test("the idle sweep never closes it", () => {
+    const NOW = 1_000_000;
+    expect(
+      chooseIdle(withPerson(NOW - 60_000, NOW - 60_000), 30_000, NOW, isPerson),
+    ).toEqual(["bot-0"]);
+  });
+});
+
+/**
+ * Which person's browser that is: a native window on the person's own desktop, never a cloud one.
+ *
+ * Every person's browser used to be exempt, the cloud one included: an abandoned Browser tab kept a
+ * root, sandbox-less Chromium running for ever, and when the cap was reached it closed the Bots'
+ * browsers first. A cloud browser is touched every second while anybody is on its
+ * page, so it takes the Bots' own rule.
+ */
+describe("a person's cloud browser among Bots' browsers", () => {
+  const PERSON = "person-0123456789abcdef0123456789abcdef";
+  const NOW = 1_000_000;
+
+  test("closes when nobody has touched it, as a Bot's does", () => {
+    const idle = new Map([
+      [PERSON, { usedAt: NOW - 60_000 }],
+      ["bot-0", { usedAt: NOW - 60_000 }],
+      ["bot-1", { usedAt: NOW - 1_000 }],
+    ]);
+    expect(chooseIdle(idle, 30_000, NOW, keptOpen("screen")).sort()).toEqual([
+      "bot-0",
+      PERSON,
+    ]);
+    // A native window on the person's desktop stays: browsing in it touches nothing here.
+    expect(chooseIdle(idle, 30_000, NOW, keptOpen("native"))).toEqual([
+      "bot-0",
+    ]);
+  });
+
+  test("is ranked by use at the cap, not ahead of the Bots", () => {
+    const full = new Map([
+      [PERSON, { usedAt: 100 }],
+      ["bot-0", { usedAt: 200 }],
+      ["bot-1", { usedAt: 300 }],
+    ]);
+    expect(chooseEvictions(full, 2, keptOpen("screen"))).toEqual([PERSON]);
+    expect(chooseEvictions(full, 2, keptOpen("native"))).toEqual(["bot-0"]);
+  });
+
+  test("a person's cloud browser in use is the Bots' equal, and stays", () => {
+    const used = new Map([
+      [PERSON, { usedAt: NOW - 1_000 }],
+      ["bot-0", { usedAt: NOW - 60_000 }],
+    ]);
+    expect(chooseIdle(used, 30_000, NOW, keptOpen("screen"))).toEqual([
+      "bot-0",
+    ]);
   });
 });

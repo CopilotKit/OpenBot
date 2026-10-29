@@ -97,11 +97,18 @@ export function DetailPanel({
         >
           <div
             className="flex h-full flex-col bg-sidebar border-l border-border"
+            data-slot="detail-pane"
             style={{ width: detailWidth }}
           >
             {/* Rendered for the whole animation, so the way out is available immediately. */}
-            <div className="h-12 shrink-0 sticky top-0 flex flex-row items-center justify-between px-2 gap-2">
-              <div className="flex min-w-0 w-full items-center gap-1.5">
+            <div
+              className="h-12 shrink-0 sticky top-0 flex flex-row items-center justify-between px-2 gap-2"
+              data-slot="detail-pane-header"
+            >
+              <div
+                className="flex min-w-0 w-full items-center gap-1.5"
+                data-slot="detail-pane-title"
+              >
                 {title}
               </div>
               <div className="flex flex-row gap-1.5">

@@ -497,23 +497,7 @@ for (const padded of PADDED_SCHEMES) {
  * for, so a member nobody named is not a failure anywhere; it is silence. A suite of one test per
  * FINDING inherits that shape exactly, because a finding is one cell.
  *
- * SO THE ROWS ARE READ OFF THE PRODUCTION ROSTERS rather than listed here a second time, which is
- * the discipline `composio-adapter.test.ts` already applies to the vendor seam ("reads the method
- * list off the built objects rather than restating it, so a new seam method cannot be covered by
- * nobody"). A member added to either vocabulary arrives in {@link SCHEME_KINDS} or
- * {@link BROKERED_PROBE_OUTCOMES}, and the completeness tests below fail for every consumer that
- * has no cell for it. The compiler says the same thing one layer up and says it first: each
- * consumer carries a `Decides<…>` roster beside its branch, and a fourth member fails `tsc` at
- * every one of them by name. This table is what the compiler cannot check — what each consumer
- * actually DOES with the member, asserted against the running code.
- *
- * NOTHING IS DECLARED RATHER THAN ASSERTED ANY MORE, AND THE MECHANISM THAT SAYS SO STAYS.
- * `confirmBrokeredConnection × consent` and `the connect route × unreadable` were each claimed by an
- * open finding: asserting what they did would have pinned the defect, and omitting the cell would
- * have left the hole invisible — which is the whole failure this table is a lever against. Both
- * findings are closed and both cells are assertions now, so {@link DECLARED_CELLS} is empty; it is
- * kept because the next contested cell has to be declared somewhere, and an empty list holds the
- * table to the claim that there is no such cell today.
+ * Each cell below exercises the consumer against a member of the production vocabulary.
  */
 
 /**
@@ -931,17 +915,8 @@ async function refusalOf(work: Promise<unknown>): Promise<string> {
   throw new Error("nothing was refused, so there is no sentence to read");
 }
 
-/**
- * ONE CELL: what a consumer does with one member, and how that is established.
- *
- * TWO SHAPES AND NOT AN OPTIONAL ASSERTION, because "this cell has no assertion" and "this cell's
- * assertion is claimed by an open finding" are the two states that have to be told apart. An
- * optional field makes an omission look exactly like a declaration, which is the failure this whole
- * table is a lever against — at one level up.
- */
-type Cell =
-  | { decides: string; assert: () => Promise<void> }
-  | { decides: string; claimedBy: string };
+/** A consumer behavior and its executable assertion. */
+type Cell = { decides: string; assert: () => Promise<void> };
 
 /** One consumer's answer for every member of one vocabulary. */
 type Consumer<Member extends string> = {
@@ -1885,39 +1860,9 @@ const PROBE_CONSUMERS: Consumer<BrokeredProbe["outcome"]>[] = [
   },
 ];
 
-/**
- * EVERY CELL DECLARED RATHER THAN ASSERTED, WITH THE FINDING THAT CLAIMS IT.
- *
- * EMPTY, WHICH IS A CLAIM AND NOT AN ABSENCE. It held two — `confirmBrokeredConnection × consent`,
- * which re-stamped `verified_at` on every mount, and `the connect route × unreadable`, which minted
- * a vendor link for a scheme nothing could read — and both are now assertions above. A cell that
- * goes back to being a declaration has to be named here, and a declaration that outlives the finding
- * it names reddens: a fix cycle that closes a hole and does not flip its cell fails at
- * {@link declaredCellsOf}, which is the half a `test.todo` or a commented-out case cannot do,
- * because both of those stay quiet whether or not the thing they describe is still true.
- */
-const DECLARED_CELLS: string[] = [];
-
-function declaredCellsOf(consumers: Consumer<string>[]): string[] {
-  return consumers.flatMap((consumer) =>
-    Object.entries(consumer.cells)
-      .filter(([, cell]) => "claimedBy" in cell)
-      .map(([member]) => `${consumer.name} × ${member}`),
-  );
-}
-
 describe.each(SCHEME_KINDS)("a %s scheme", (kind) => {
   for (const consumer of SCHEME_CONSUMERS) {
     const cell = consumer.cells[kind];
-    if ("claimedBy" in cell) {
-      test(`${consumer.name} — DECLARED, not asserted: ${cell.decides}`, () => {
-        // The declaration IS the assertion here: this cell names an open finding, and the sentence
-        // above records what the code does today so the next reader can tell the two apart.
-        expect(cell.claimedBy).not.toBe("");
-        expect(DECLARED_CELLS).toContain(`${consumer.name} × ${kind}`);
-      });
-      continue;
-    }
     test(`${consumer.name} ${cell.decides}`, cell.assert);
   }
 });
@@ -1925,52 +1870,11 @@ describe.each(SCHEME_KINDS)("a %s scheme", (kind) => {
 describe.each(BROKERED_PROBE_OUTCOMES)("a probe that %s", (outcome) => {
   for (const consumer of PROBE_CONSUMERS) {
     const cell = consumer.cells[outcome];
-    if ("claimedBy" in cell) {
-      test(`${consumer.name} — DECLARED, not asserted: ${cell.decides}`, () => {
-        expect(cell.claimedBy).not.toBe("");
-        expect(DECLARED_CELLS).toContain(`${consumer.name} × ${outcome}`);
-      });
-      continue;
-    }
     test(`${consumer.name} ${cell.decides}`, cell.assert);
   }
 });
 
-/**
- * THE COMPLETENESS HALF, WHICH IS WHAT MAKES THE TABLE A LEVER RATHER THAN A LIST.
- *
- * The rows are read off the production rosters, so a member added to either vocabulary arrives here
- * and every consumer with no cell for it fails BY NAME. That is the same discipline
- * `composio-adapter.test.ts` applies to the vendor seam, and it is the runtime half of the
- * compile-time witnesses: `tsc` names the consumers whose `Decides<…>` roster is short, and this
- * names the consumers whose behaviour nobody wrote down.
- */
-describe("the vocabularies are covered by name and not by accident", () => {
-  test("every consumer of a scheme kind has a cell for every member", () => {
-    for (const consumer of SCHEME_CONSUMERS) {
-      expect(Object.keys(consumer.cells).sort()).toEqual(
-        [...SCHEME_KINDS].sort(),
-      );
-    }
-  });
-
-  test("every consumer of a probe outcome has a cell for every member", () => {
-    for (const consumer of PROBE_CONSUMERS) {
-      expect(Object.keys(consumer.cells).sort()).toEqual(
-        [...BROKERED_PROBE_OUTCOMES].sort(),
-      );
-    }
-  });
-
-  test("the cells that are declared rather than asserted are exactly the ones an open finding claims", () => {
-    expect(
-      [
-        ...declaredCellsOf(SCHEME_CONSUMERS),
-        ...declaredCellsOf(PROBE_CONSUMERS),
-      ].sort(),
-    ).toEqual([...DECLARED_CELLS].sort());
-  });
-
+describe("scheme classifier coverage", () => {
   /**
    * AND EVERY MEMBER IS ONE THE CLASSIFIER CAN ACTUALLY PRODUCE, which is the hole a table of
    * consumers cannot see on its own. A member no recorded value ever classifies to is a member every

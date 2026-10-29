@@ -36,6 +36,21 @@ pub struct Problem {
     /// The full, verified Compose volume name offered for an explicit fresh-install reset.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub database_reset: Option<String>,
+    /// A verified fresh-install reset of everything a previous installation left behind.
+    /// Boxed and flattened: the window reads `leftover_reset` and `leftover_containers`.
+    #[serde(flatten, skip_serializing_if = "Option::is_none")]
+    pub leftover: Option<Box<LeftoverReset>>,
+}
+
+/// Exactly what one confirmed reset removes: the containers first, then the volumes.
+#[derive(Clone, Debug, Default, Serialize, PartialEq, Eq)]
+pub struct LeftoverReset {
+    /// Every verified volume, the database included.
+    #[serde(rename = "leftover_reset", skip_serializing_if = "Vec::is_empty")]
+    pub volumes: Vec<String>,
+    /// Stopped containers that still hold those volumes.
+    #[serde(rename = "leftover_containers", skip_serializing_if = "Vec::is_empty")]
+    pub containers: Vec<String>,
 }
 
 impl Problem {
@@ -46,6 +61,7 @@ impl Problem {
             detail: None,
             connection: None,
             database_reset: None,
+            leftover: None,
         }
     }
 
@@ -57,7 +73,20 @@ impl Problem {
             detail: (!detail.trim().is_empty()).then_some(detail),
             connection: None,
             database_reset: None,
+            leftover: None,
         }
+    }
+
+    /// The volumes a confirmed reset removes, or none when no reset is offered.
+    pub fn leftover_volumes(&self) -> &[String] {
+        self.leftover.as_deref().map_or(&[], |reset| &reset.volumes)
+    }
+
+    /// The stopped containers a confirmed reset removes before those volumes.
+    pub fn leftover_containers(&self) -> &[String] {
+        self.leftover
+            .as_deref()
+            .map_or(&[], |reset| &reset.containers)
     }
 
     pub fn connection(mut self, connection: Connection) -> Self {

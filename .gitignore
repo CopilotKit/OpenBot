@@ -53,3 +53,6 @@ venv/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+
+# The Recorder extension's signing key never enters the repository (Decision 9).
+extension/**/*.pem

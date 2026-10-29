@@ -328,10 +328,13 @@ config:
 #
 #   shared    One browser for every Bot, run by this chart. Needs nothing installed in the cluster,
 #             and is what a first install should use. Each Bot keeps its own logins and files,
-#             but a command one Bot runs can read another's files.
+#             but a command one Bot runs can read another's files. For that reason a person's own
+#             OpenBot browser does not run here: the Browser page says so.
 #   sandbox   A computer each, as a `Sandbox` from kubernetes-sigs/agent-sandbox, suspended when
-#             idle and resumed with its logins intact. Needs that controller in the cluster.
-#   external  Neither. `url` points at a computer somebody else runs.
+#             idle and resumed with its logins intact. Needs that controller in the cluster. Each
+#             person's own OpenBot browser gets a computer of its own the same way.
+#   external  Neither. `url` points at a computer somebody else runs, which is shared like the
+#             first, so it runs no person's browser either.
 computers:
   mode: shared
   # Only for `mode: external`. The other modes derive the address from what they created.

@@ -2,7 +2,7 @@ import { summaryFor, WEB_HARNESSES } from "@openbot/shared/harnesses";
 import {
   IconCheck,
   IconLock,
-  IconSparkles,
+  IconPlugConnected,
   IconUsers,
 } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
@@ -48,18 +48,13 @@ import {
 } from "@/lib/app-access/queries";
 import { isComposing } from "@/lib/composing";
 import { pluginKeys } from "@/lib/plugins/queries";
-import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
 
 /**
  * Where a new Bot is made: a wide sheet floating in from the right, so the roster it is being added
  * to stays in view behind it.
  *
- * No visible header and no corner ✕ — Cancel, Escape and a click outside all close it. It replaced
- * a centred wizard dialog that asked the same questions over four screens, one of them only to say
- * who could see the Bot.
- *
- * The title is still there for screen readers: a dialog with no name is announced as just "dialog".
+ * New Bot details open first. Cancel, Escape and a click outside close the sheet.
  */
 export function NewBotSheet({
   open,
@@ -84,7 +79,6 @@ export function NewBotSheet({
         side="right"
         variant="inset"
       >
-        <SheetTitle className="sr-only">New Bot</SheetTitle>
         {/* Inside the popup, so it unmounts on close and a reopened sheet starts empty. */}
         <NewBotFlow onCreated={onCreated} />
       </SheetContent>
@@ -93,28 +87,26 @@ export function NewBotSheet({
 }
 
 /**
- * The steps, in the order they are asked.
- *
- * WHERE IT RUNS COMES FIRST because it decides what the rest of the sheet means. For a Bot that runs
- * here, its instructions are the system prompt it runs on; for one somebody else runs, they are a
- * line added on top of a prompt written elsewhere. Asking for them before knowing which left the
- * field unable to say what it was for. The address is asked only of a Bot somebody else runs, and is
- * checked before the person spends time naming it. About it is always last, and always creates.
+ * Details come first; custom agents then choose a framework and verify their endpoint.
+ * Advancing from the endpoint also tests it, so there is no separate Test action to forget.
  */
-const STEPS = ["runtime", "endpoint", "about"] as const;
+const STEPS = ["about", "runtime", "endpoint"] as const;
+const CONNECTION_OPTIONS = [
+  ...WEB_HARNESSES.filter((harness) => harness.id === "byo-url"),
+  ...WEB_HARNESSES.filter((harness) => harness.id !== "byo-url"),
+];
 type Step = (typeof STEPS)[number];
 
 /**
  * Where the Bot runs: on this deployment, or behind a framework somebody hosts.
  *
- * Which framework is kept so Back returns to it still chosen, and so a Bot made without a title can
- * be given one. Every framework is reached the same way and stored the same way — an AG-UI address —
+ * The framework is kept for its connection instructions and default role description. Every framework is reached the same way and stored the same way — an AG-UI address —
  * so the server never hears which was picked.
  */
 type Runtime = { kind: "builtin" } | { kind: "managed"; harness: string };
 
-/** What a created Bot is called beneath its name when the person gave it no title. */
-function defaultTitle(runtime: Runtime): string {
+/** Framework name used in default custom-agent instructions. */
+function frameworkName(runtime: Runtime): string {
   if (runtime.kind === "builtin") return "Assistant";
   if (runtime.harness === "byo-url") return "AG-UI agent";
   return (
@@ -134,7 +126,7 @@ function defaultInstructions(name: string, runtime: Runtime): string {
   if (runtime.kind === "builtin") {
     return `You are ${name}. Help the people you work with on whatever they bring you, clearly and briefly.`;
   }
-  return `Connected from ${defaultTitle(runtime)}.`;
+  return `Connected from ${frameworkName(runtime)}.`;
 }
 
 /**
@@ -154,15 +146,16 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
    */
   const { data: capabilities } = useQuery(agentCapabilitiesQueryOptions());
   const builtInAvailable = capabilities?.builtInAvailable ?? true;
-  const [step, setStep] = useState<Step>("runtime");
+  const [step, setStep] = useState<Step>("about");
   const [direction, setDirection] = useState(1);
   const [name, setName] = useState("");
-  const [title, setTitle] = useState("");
+  const [nameError, setNameError] = useState<string>();
   const [instructions, setInstructions] = useState("");
   /** Private until said otherwise: a Bot shown to everybody by accident is the worse mistake. */
   const [visibility, setVisibility] = useState<Visibility>("private");
   /** Run it here unless the person picks otherwise: the answer that needs nothing set up. */
   const [runtime, setRuntime] = useState<Runtime | null>({ kind: "builtin" });
+  const custom = !builtInAvailable;
   const [endpoint, setEndpoint] = useState("");
   const [key, setKey] = useState("");
   /** Whether Continue was pressed on the address, which is when its error becomes worth showing. */
@@ -216,9 +209,9 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
   const canContinue =
     !busy &&
     (step === "about"
-      ? named
+      ? named && (custom || builtInAvailable)
       : step === "runtime"
-        ? runtime !== null
+        ? runtime?.kind === "managed"
         : endpointIssue === undefined || !tried);
 
   const go = (to: Step) => {
@@ -234,7 +227,7 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
     const agent = await createAgent.mutateAsync(
       agentInputFrom({
         name: name.trim(),
-        title: title.trim() || defaultTitle(chosen),
+        title: "",
         roleDescription:
           instructions.trim() || defaultInstructions(name.trim(), chosen),
         visibility,
@@ -259,25 +252,17 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
 
   const advance = () => {
     if (step === "runtime" && runtime) {
-      return go(runtime.kind === "builtin" ? "about" : "endpoint");
+      return go("endpoint");
     }
     if (step === "endpoint") return connect();
-    if (step === "about" && runtime) return create(runtime);
+    if (step === "about")
+      return custom ? go("runtime") : create({ kind: "builtin" });
   };
 
-  /** Where Back goes: the address for a Bot somebody else runs, where it runs otherwise. */
-  const previous = (): Step =>
-    step === "about" && runtime?.kind === "managed" ? "endpoint" : "runtime";
+  /** Back returns to the previous screen without resetting any answers. */
+  const previous = (): Step => (step === "endpoint" ? "runtime" : "about");
 
-  /**
-   * Continue on the address: dial it from the server, and move on only if it answers.
-   *
-   * There is no separate Test button. A test that could be skipped let a Bot be made pointed at
-   * nothing, and one that could not be skipped was a second button doing Continue's job. So Continue
-   * tests: an agent that answers moves on, and one that does not says why under its address, where
-   * the fix will be typed. Continue stays pressable after that, because the usual fix is starting the
-   * agent, not editing what was typed.
-   */
+  /** Verify the endpoint before creating a custom Bot. */
   const connect = async () => {
     const focusAddress = () =>
       // Focus would otherwise fall to the page while the button below is busy or disabled.
@@ -297,12 +282,13 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
       focusAddress();
       return;
     }
-    go("about");
+    if (runtime?.kind === "managed") await create(runtime);
   };
 
   if (createdId) {
     return (
       <MotionConfig reducedMotion="user">
+        <SheetTitle className="sr-only">New Bot</SheetTitle>
         <CreatedView name={name.trim()} />
       </MotionConfig>
     );
@@ -344,12 +330,17 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
       <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-6 pt-8 pb-6">
         <MotionConfig reducedMotion="user">
           {/* Shares its layout id with the orb on the created view, so it travels there. */}
-          <motion.div className="w-fit" layoutId={ORB_LAYOUT_ID}>
-            <AgentOrb
-              size="40px"
-              state={busy ? "thinking" : named ? "listening" : "idle"}
-            />
-          </motion.div>
+          <div className="flex items-center gap-3">
+            <motion.div className="w-fit" layoutId={ORB_LAYOUT_ID}>
+              <AgentOrb
+                size="40px"
+                state={busy ? "thinking" : named ? "listening" : "idle"}
+              />
+            </motion.div>
+            <SheetTitle className="text-2xl font-semibold tracking-tight">
+              New Bot
+            </SheetTitle>
+          </div>
 
           <motion.div
             animate={{ opacity: 1, x: 0 }}
@@ -359,32 +350,42 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
             transition={{ duration: 0.2, ease: "easeOut" }}
           >
             {step === "about" ? (
-              <AboutStep
-                apps={giveable}
-                instructions={instructions}
-                leftOut={leftOut}
-                name={name}
-                onApp={(app, used) =>
-                  setLeftOut((current) => {
-                    const next = new Set(current);
-                    if (used) next.delete(app);
-                    else next.add(app);
-                    return next;
-                  })
-                }
-                runtime={runtime ?? { kind: "builtin" }}
-                onInstructions={setInstructions}
-                onName={setName}
-                onTitle={setTitle}
-                onVisibility={setVisibility}
-                title={title}
-                visibility={visibility}
-              />
+              <>
+                <AboutStep
+                  apps={giveable}
+                  instructions={instructions}
+                  leftOut={leftOut}
+                  name={name}
+                  nameError={nameError}
+                  onApp={(app, used) =>
+                    setLeftOut((current) => {
+                      const next = new Set(current);
+                      if (used) next.delete(app);
+                      else next.add(app);
+                      return next;
+                    })
+                  }
+                  onInstructions={setInstructions}
+                  onName={(value) => {
+                    setName(value);
+                    setNameError(undefined);
+                  }}
+                  onVisibility={setVisibility}
+                  visibility={visibility}
+                />
+                {!builtInAvailable && (
+                  <p className="mt-3 text-sm text-muted-foreground">
+                    An admin must enable built-in hosting before you can run a
+                    Bot here.
+                  </p>
+                )}
+              </>
             ) : step === "runtime" ? (
               <RuntimeStep
-                builtInAvailable={builtInAvailable}
-                onChoose={setRuntime}
-                runtime={runtime}
+                onChoose={(chosen) => {
+                  setRuntime(chosen);
+                  go("endpoint");
+                }}
               />
             ) : (
               <EndpointStep
@@ -413,8 +414,8 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
         ) : null}
       </div>
 
-      <SheetFooter className="flex-row justify-between border-t border-border">
-        {step === "runtime" ? (
+      <SheetFooter className="flex-row flex-wrap items-center justify-between border-t border-border">
+        {step === "about" ? (
           <SheetClose
             render={<Button className="px-4" size="lg" variant="ghost" />}
           >
@@ -432,20 +433,45 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
             Back
           </Button>
         )}
-        <Button
-          className="px-4"
-          disabled={!canContinue}
-          size="lg"
-          type="submit"
-        >
-          {checking
-            ? "Checking…"
-            : createAgent.isPending
-              ? "Creating…"
-              : step === "about"
-                ? "Create"
-                : "Continue"}
-        </Button>
+        <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+          {step === "about" && builtInAvailable && (
+            <Button
+              type="button"
+              variant="outline"
+              size="lg"
+              disabled={busy}
+              onClick={() => {
+                const parsed = agentFormSchema.shape.name.safeParse(name);
+                if (!parsed.success) {
+                  setNameError(parsed.error.issues[0]?.message);
+                  document.getElementById("new-bot-name")?.focus();
+                  return;
+                }
+                setNameError(undefined);
+                go("runtime");
+              }}
+            >
+              <IconPlugConnected className="size-4" />
+              Connect a custom agent
+            </Button>
+          )}
+          {step !== "runtime" && (
+            <Button
+              className="px-4"
+              disabled={!canContinue}
+              size="lg"
+              type="submit"
+            >
+              {checking
+                ? "Checking…"
+                : createAgent.isPending
+                  ? "Creating…"
+                  : step === "endpoint" || (step === "about" && !custom)
+                    ? "Create Bot"
+                    : "Continue"}
+            </Button>
+          )}
+        </div>
       </SheetFooter>
     </form>
   );
@@ -528,58 +554,40 @@ const VISIBILITY_OPTIONS: Array<{
   {
     value: "public",
     title: "Public",
-    description: "Everyone in your OpenBot can find and use it.",
+    description: "Everyone in your company can find and use it.",
     icon: IconUsers,
   },
 ];
 
 /**
- * The last step: what to call it, who can see it, and — only if the person wants to be more
- * specific — a line describing it and the instructions it follows.
- *
- * Title and instructions are optional and say so; who can see it always holds an answer, so a Bot
- * named and nothing else is a complete answer, and Create waits for nothing more.
- *
- * The instructions field says what it is for the Bot being made. For one that runs here it is the
- * prompt it runs on, so it is called Instructions and says how it behaves without them; for one
- * somebody else runs it is a line added to a prompt written elsewhere, so it is called Role. The
- * title's example is the framework's name, which is what it becomes when left blank.
- *
- * Who can see it was the old wizard's last step. It is here because this step had the room, and a
- * question that does not change what is being made is cheaper answered alongside the name than as a
- * screen of its own.
- *
- * The apps it can use come last and arrive ticked: the person's own connected apps an admin lets
- * owners give. Drawn only when there are some, so a person with none connected is asked nothing.
+ * Shared details for both hosting paths. Name is required; instructions are optional.
+ * Visibility sits alongside the name because it does not need a separate screen.
+ * Connected apps are selected initially and only shown when some can be granted.
+ * These choices stay in the parent flow while navigating between screens.
  */
 function AboutStep({
   apps,
   leftOut,
   onApp,
   name,
-  title,
+  nameError,
   instructions,
-  runtime,
   visibility,
   onName,
-  onTitle,
   onInstructions,
   onVisibility,
 }: {
   name: string;
-  title: string;
+  nameError?: string;
   instructions: string;
-  runtime: Runtime;
   visibility: Visibility;
   onName: (value: string) => void;
-  onTitle: (value: string) => void;
   onInstructions: (value: string) => void;
   onVisibility: (value: Visibility) => void;
   apps: GiveableApp[];
   leftOut: Set<string>;
   onApp: (app: string, used: boolean) => void;
 }) {
-  const runsHere = runtime.kind === "builtin";
   return (
     <FieldGroup>
       <Field>
@@ -588,30 +596,26 @@ function AboutStep({
           autoComplete="off"
           autoFocus
           id="new-bot-name"
+          aria-invalid={Boolean(nameError)}
+          aria-describedby={nameError ? "new-bot-name-error" : undefined}
           maxLength={80}
           onChange={(event) => onName(event.target.value)}
           placeholder="Expense Review"
           value={name}
         />
-      </Field>
-      <Field>
-        <FieldLabel htmlFor="new-bot-title">
-          Title
-          <span className="font-normal text-muted-foreground">Optional</span>
-        </FieldLabel>
-        <Input
-          autoComplete="off"
-          id="new-bot-title"
-          maxLength={120}
-          onChange={(event) => onTitle(event.target.value)}
-          placeholder={runsHere ? "Finance Operations" : defaultTitle(runtime)}
-          value={title}
-        />
-        <FieldDescription>A few words shown under its name.</FieldDescription>
+        {nameError && (
+          <p
+            id="new-bot-name-error"
+            role="alert"
+            className="text-sm text-destructive"
+          >
+            {nameError}
+          </p>
+        )}
       </Field>
       <Field>
         <FieldLabel htmlFor="new-bot-instructions">
-          {runsHere ? "Instructions" : "Role"}
+          Instructions
           <span className="font-normal text-muted-foreground">Optional</span>
         </FieldLabel>
         <Textarea
@@ -623,11 +627,6 @@ function AboutStep({
           rows={5}
           value={instructions}
         />
-        <FieldDescription>
-          {runsHere
-            ? "How it should work. Leave it blank and it helps with anything."
-            : "Added to your agent's own instructions."}
-        </FieldDescription>
       </Field>
       <FieldSet>
         <FieldLegend variant="label">Who can see it</FieldLegend>
@@ -697,40 +696,12 @@ const OPTION_CLASSES =
   "flex w-full items-center gap-3 rounded-lg border border-transparent bg-muted/50 p-3 text-left transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-50 aria-pressed:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset";
 
 /**
- * Where it runs, answered by recognition: the Bot this deployment runs itself first, then every
- * framework somebody might already have running.
- *
- * NAMES RATHER THAN TWO RADIOS. The person here arrives knowing the role they want and could not
- * tell "Built-in" from "Managed" — both are a kind of Bot, and neither word says which is theirs. A
- * list of frameworks by name and mark is answered by finding your own.
- *
- * EVERY FRAMEWORK LEADS TO THE SAME PLACE. Picking Google ADK rather than CrewAI changes nothing but
- * the default title: both ask for an AG-UI address next and are stored identically. The names are
- * there so somebody finds theirs and knows it will work, not because the choice branches.
- *
- * RUN IT HERE IS THE BIG CARD, ALREADY CHOSEN. It is the answer that needs nothing set up, and most
- * people making a Bot want exactly that, so the sheet opens with it chosen and Continue ready. The
- * frameworks sit below at their usual size for the person who arrived with an agent of their own.
- *
- * A press chooses rather than advances, because the sheet has a Continue and the choice should be
- * visible before it is confirmed.
- *
- * No inner scroller: the sheet's body already scrolls, and a second one inside it would give the
- * list two scrollbars at once.
- *
- * The heading takes focus on arrival, so a keyboard or screen reader lands on the question rather
- * than on the Continue it just pressed, which is still there.
+ * Choose a custom framework and advance immediately to its connection settings.
+ * The heading receives focus on arrival so keyboard and screen-reader users land on the
+ * new question rather than the control on the previous screen. The sheet body scrolls;
+ * an inner scroller would give this list a second scrollbar.
  */
-function RuntimeStep({
-  builtInAvailable,
-  runtime,
-  onChoose,
-}: {
-  /** Whether this deployment has a Bot of its own to run one here on. */
-  builtInAvailable: boolean;
-  runtime: Runtime | null;
-  onChoose: (runtime: Runtime) => void;
-}) {
+function RuntimeStep({ onChoose }: { onChoose: (runtime: Runtime) => void }) {
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => heading.current?.focus(), []);
 
@@ -741,40 +712,11 @@ function RuntimeStep({
         ref={heading}
         tabIndex={-1}
       >
-        Where will your Bot run?
+        Connect a custom agent
       </h2>
 
-      <button
-        aria-pressed={runtime?.kind === "builtin"}
-        className={cn(OPTION_CLASSES, "items-start gap-4 p-5")}
-        disabled={!builtInAvailable}
-        onClick={() => onChoose({ kind: "builtin" })}
-        type="button"
-      >
-        <span className="flex size-11 shrink-0 items-center justify-center rounded-lg bg-background shadow-xs">
-          <IconSparkles className="size-6 text-foreground" />
-        </span>
-        <span className="min-w-0 pt-0.5">
-          <span className="block font-semibold text-base">Run it here</span>
-          <span className="mt-1 block text-pretty text-muted-foreground text-sm">
-            {builtInAvailable
-              ? "OpenBot runs it for you. Nothing to set up, and it can start right away."
-              : "Not available yet. An admin has to turn this on first."}
-          </span>
-        </span>
-      </button>
-
-      <div className="flex items-center gap-2 py-1 text-muted-foreground text-xs">
-        <span className="h-px flex-1 bg-border" />
-        or connect one you run
-        <span className="h-px flex-1 bg-border" />
-      </div>
-
-      {WEB_HARNESSES.map((harness) => (
+      {CONNECTION_OPTIONS.map((harness) => (
         <button
-          aria-pressed={
-            runtime?.kind === "managed" && runtime.harness === harness.id
-          }
           className={OPTION_CLASSES}
           key={harness.id}
           onClick={() => onChoose({ kind: "managed", harness: harness.id })}
@@ -800,7 +742,7 @@ function RuntimeStep({
  * connecting, but nothing below differs by framework: every one of them is an AG-UI address and is
  * stored the same way.
  *
- * The address takes focus on arrival rather than the heading, as the name does on the last step: it
+ * The address takes focus on arrival rather than the heading, as the name does on the first step: it
  * is the one thing this step asks for, and its label says what it is.
  *
  * Whether it answers is checked when Continue is pressed, by the server rather than the browser,

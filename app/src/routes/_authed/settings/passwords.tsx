@@ -37,7 +37,7 @@ function PasswordsPage() {
   return (
     <PageShell
       title="Passwords"
-      description="Logins you saved when signing a Bot in to a website. Bots never see them, and you confirm each use."
+      description="Manage saved website logins. Bots cannot see your passwords, and you approve each use."
     >
       <PageSection title="Saved logins">
         {logins.isPending ? null : logins.error ? (

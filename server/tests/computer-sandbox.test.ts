@@ -394,6 +394,75 @@ describe("a computer on an older image", () => {
   });
 });
 
+describe("which id a computer is for", () => {
+  /*
+   * A Sandbox is one computer for one id, and the computer has to know it: it runs a person's browser only on a
+   * computer of its own (agent-computer's person-access.ts), and without `COMPUTER_BOT_ID` it reads as the one computer
+   * every Bot shares and refuses. Told on creation and on every new template, as the supervisor tells each container.
+   */
+  const PERSON = "person-0123456789abcdef0123456789abcdef";
+  const envOf = (template: unknown) =>
+    (
+      template as {
+        spec: { containers: { env?: { name: string; value?: string }[] }[] };
+      }
+    ).spec.containers[0]?.env;
+
+  test("a new computer's pod says the id it was made for", async () => {
+    const created: unknown[] = [];
+    const fetchImpl = (async (_url: string, init?: RequestInit) => {
+      if (init?.method === "POST") {
+        created.push(JSON.parse(String(init.body)));
+        return Response.json({});
+      }
+      if (created.length === 0) return new Response("", { status: 404 });
+      return Response.json(running("2026-10-27T00:00:00Z", "n", "1.2.3.4"));
+    }) as unknown as typeof fetch;
+    const template = {
+      spec: {
+        containers: [
+          {
+            name: "computer",
+            image: "openbot:new",
+            env: [
+              { name: "PORT", value: "4100" },
+              // One the template carried is replaced, never doubled.
+              { name: "COMPUTER_BOT_ID", value: "shared" },
+            ],
+          },
+        ],
+      },
+    };
+    await createSandboxComputerProvider({
+      namespace: "openbot",
+      template: { podTemplate: template },
+      idleAfterMs: 60_000,
+      apiServer: "https://kubernetes.default",
+      token: "t",
+      fetchImpl,
+    }).locate(PERSON);
+    const body = created[0] as { spec: { podTemplate: unknown } };
+    expect(envOf(body.spec.podTemplate)).toEqual([
+      { name: "PORT", value: "4100" },
+      { name: "COMPUTER_BOT_ID", value: PERSON },
+    ]);
+    // The template every computer is cut from is left as it was.
+    expect(template.spec.containers[0]?.env).toHaveLength(2);
+    expect(template.spec.containers[0]?.env[1]?.value).toBe("shared");
+  });
+
+  test("a computer brought onto a new image keeps being told", async () => {
+    const cluster = fakeCluster({ mode: "Suspended", image: "old" });
+    await providerOn(cluster, "new").locate(PERSON);
+    expect(envOf(cluster.state.podTemplate)).toEqual([
+      { name: "COMPUTER_BOT_ID", value: PERSON },
+    ]);
+    // An id is no reason to call a computer out of date: only its image is.
+    const [current] = await providerOn(cluster, "new").list();
+    expect(current?.updateAvailable).toBe(false);
+  });
+});
+
 describe("updating a computer on request", () => {
   test("a running one restarts on the new image and keeps its volumes", async () => {
     const cluster = fakeCluster({ mode: "Running", image: "old" });

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { PluginServer } from "@/lib/plugins/queries";
-import { brokeredAccountsListedOn } from "@/routes/_authed/_app/connections.index";
+import { brokeredAccountsListedOn } from "@/lib/plugins/listed";
 
 /**
  * Which brokered apps the Connected accounts page lists, decided without drawing anything.

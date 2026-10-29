@@ -1,3 +1,5 @@
+import { isPersonBrowserId } from "@openbot/shared/openbot-browser";
+import { ownsPersonBrowser } from "../browser/person";
 import type { AgentProfileStore } from "./profile-store";
 import type { AgentActor } from "./profile-types";
 
@@ -22,8 +24,16 @@ export function canUseComputer(
   );
 }
 
-/** The access check the computer routes and the live screen use, read from the profile store. */
+/**
+ * The access check the computer routes and the live screen use, read from the profile store.
+ *
+ * A person's own OpenBot browser is a computer too, named for its person rather than a Bot (browser/person.ts), and only
+ * that person reaches it: there is no profile to read, and an administrator who may watch any Bot's screen may not watch
+ * a person's own browser.
+ */
 export function computerAccessCheck(store: Pick<AgentProfileStore, "get">) {
   return async (actor: AgentActor, botId: string) =>
-    canUseComputer(await store.get(actor, botId).catch(() => null), actor);
+    isPersonBrowserId(botId)
+      ? ownsPersonBrowser(actor, botId)
+      : canUseComputer(await store.get(actor, botId).catch(() => null), actor);
 }

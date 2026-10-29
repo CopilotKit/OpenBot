@@ -284,6 +284,7 @@ mod stop_ipc {
             &fixture.root.join(".logs"),
             Path::new("must-not-launch"),
             &stack::Secrets::new(),
+            None,
             |_| panic!("cancelled Start published a child"),
             |_| panic!("cancelled Start reached readiness"),
         ))
