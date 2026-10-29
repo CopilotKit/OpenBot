@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { replyEnding, replyTail } from "../src/tasks/reply-ending";
+import { titleFrom } from "../src/tasks/routes";
 import { nextStepOf, plainFailure, taskStatus } from "../src/tasks/store";
 
 describe("plainFailure", () => {
@@ -167,5 +168,37 @@ describe("how a reply ends", () => {
       "I found the date.\n\n**Draft:** Can we book Friday?",
     ])
       expect(replyEnding(text).asks).toBe(false);
+  });
+});
+
+describe("titleFrom", () => {
+  test("is the first sentence of the ask's first line, without its full stop", () => {
+    expect(
+      titleFrom("\n  Find a time for coffee with Sam.  \nHe prefers mornings."),
+    ).toBe("Find a time for coffee with Sam");
+    expect(
+      titleFrom("Find a time for coffee with Sam. He prefers mornings."),
+    ).toBe("Find a time for coffee with Sam");
+    expect(titleFrom("Can you chase Rosa? She owes us a quote.")).toBe(
+      "Can you chase Rosa?",
+    );
+    expect(titleFrom("Wait for it... then send")).toBe(
+      "Wait for it... then send",
+    );
+    expect(titleFrom("Pay invoice no. 5521 today")).toBe(
+      "Pay invoice no. 5521 today",
+    );
+    expect(titleFrom("Reply to   Rosa")).toBe("Reply to Rosa");
+  });
+
+  test("cuts a long line at a word, with an ellipsis", () => {
+    const title = titleFrom(
+      "Draft a reply to Rosa saying we will take Oat Satin instead of the discontinued gloss glaze for the spring order",
+    );
+    expect(title.length).toBeLessThanOrEqual(81);
+    expect(title.endsWith("…")).toBe(true);
+    expect(title).toBe(
+      "Draft a reply to Rosa saying we will take Oat Satin instead of the discontinued…",
+    );
   });
 });
