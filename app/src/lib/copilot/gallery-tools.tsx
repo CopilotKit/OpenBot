@@ -233,18 +233,6 @@ function GrantedDecision({
 type FrontendTool = Parameters<typeof useFrontendTool>[0];
 
 /**
- * A decision tool: the run waits until the person answers on the card.
- *
- * REGISTERED THROUGH `useFrontendTool`, NOT `useHumanInTheLoop`, AND THAT IS THE FIX. The SDK's
- * human-in-the-loop hook wraps the render in a component of its own that is rebuilt whenever the
- * tool's description changes (1.83.0: a `useCallback` over `tool.description`). Ours changes from
- * the built-in words to the published ones exactly when the grants load, so a decision on screen was
- * torn down at that moment, and again on a revoke. This is that hook's answer-and-wait handler, kept
- * as it is, with our render created once.
- *
- * `register` is the SDK hook in the app and a recorder in the tests. Exported for its tests.
- */
-/**
  * The removal the SDK's `useHumanInTheLoop` does on unmount, which `useDecisionTool` copies the rest
  * of: without it a decision's renderer stayed registered after the gallery tools went away, drawing
  * from a grant store nobody updated any more.
@@ -266,6 +254,18 @@ function useHumanInTheLoopTool(tool: FrontendTool) {
   useForgetRenderOnUnmount(tool.name, copilotkit);
 }
 
+/**
+ * A decision tool: the run waits until the person answers on the card.
+ *
+ * REGISTERED THROUGH `useFrontendTool`, NOT `useHumanInTheLoop`, AND THAT IS THE FIX. The SDK's
+ * human-in-the-loop hook wraps the render in a component of its own that is rebuilt whenever the
+ * tool's description changes (1.83.0: a `useCallback` over `tool.description`). Ours changes from
+ * the built-in words to the published ones exactly when the grants load, so a decision on screen was
+ * torn down at that moment, and again on a revoke. This is that hook's answer-and-wait handler, kept
+ * as it is, with our render created once.
+ *
+ * `register` is the SDK hook (with its unmount cleanup) in the app and a recorder in the tests. Exported for its tests.
+ */
 export function useDecisionTool(
   spec: GalleryComponent,
   store: GrantStore,

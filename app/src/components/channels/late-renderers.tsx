@@ -60,7 +60,7 @@ export function useLateRenderers(
 
 /**
  * The renderers' version for every activity in a transcript. Read by an activity so it redraws when
- * the renderers it found missing arrive; see `LateRenderersScope`.
+ * the renderers it found missing arrive; see `LateRenderersWatch`.
  */
 export const LateRenderersContext = createContext(0);
 
