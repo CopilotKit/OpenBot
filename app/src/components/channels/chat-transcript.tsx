@@ -476,31 +476,33 @@ export function openingStagger(ids: readonly string[]): Map<string, string> {
   );
 }
 
+/** Where a turn jumped to from the rail sits below the top of the view. */
+const TURN_INSET_PX = 24;
+
 /**
- * Whether a row mounting now is arriving live or was already there when the conversation opened.
+ * Since when a row mounting now is arriving live, rather than having been there when the
+ * conversation opened: null while it is not.
  *
- * A ref, not state: it is read once, at a row's first render, and flipping it must not re-render
- * anything. `ArrivalsLive` provides a fresh one with the scroller, so it starts false for the commit
- * that mounts the whole history and turns true in the effect after it; every row mounted from then
- * on is something that arrived while the person was here.
+ * A ref, not state: it is read once, at a row's first render, and setting it must not re-render
+ * anything. `ArrivalsLive` provides a fresh one with the scroller, so it is null for the commit that
+ * mounts the whole history and set to the time in the effect after it; every row mounted from then
+ * on is something that arrived while the person was here. The time is for a row that can say when
+ * what it shows happened (see `useArrivedLive`).
  */
-const ArrivalsLiveContext = createContext<React.RefObject<boolean> | null>(
-  null,
-);
+const ArrivalsLiveContext = createContext<React.RefObject<
+  number | null
+> | null>(null);
 
 /*
  * For rows drawn later but older than everything on screen: an earlier page added above as the
  * reader scrolls up (`useTranscriptPages`). They are history, so they draw at rest.
  */
-/** Where a turn jumped to from the rail sits below the top of the view. */
-const TURN_INSET_PX = 24;
-
-const AT_REST: React.RefObject<boolean> = { current: false };
+const AT_REST: React.RefObject<number | null> = { current: null };
 
 function ArrivalsLive({ children }: { children: React.ReactNode }) {
-  const live = useRef(false);
+  const live = useRef<number | null>(null);
   useEffect(() => {
-    live.current = true;
+    live.current = Date.now();
   }, []);
   return (
     <ArrivalsLiveContext.Provider value={live}>
@@ -512,10 +514,19 @@ function ArrivalsLive({ children }: { children: React.ReactNode }) {
 /**
  * Whether this row arrived while the conversation was open, decided once at its first render (see
  * `ArrivalsLiveContext`), so a reply streaming into it can never change the answer.
+ *
+ * `happenedAt` is for a row that is late rather than new: a voice chat from before the conversation
+ * opened, when the voice service answered after the conversation was already showing. It mounts
+ * among rows on screen but is history, and draws at rest.
  */
-function useArrivedLive(): boolean {
+function useArrivedLive(happenedAt?: string): boolean {
   const liveRef = useContext(ArrivalsLiveContext);
-  const [live] = useState(() => liveRef?.current ?? true);
+  const [live] = useState(() => {
+    if (liveRef === null) return true;
+    const since = liveRef.current;
+    if (since === null) return false;
+    return happenedAt === undefined || !(Date.parse(happenedAt) < since);
+  });
   return live;
 }
 
@@ -555,9 +566,16 @@ export function messageMode(
  * rest here and takes the opening stagger instead (`openingStagger`); `ArrivalsLiveContext` says
  * which is which, decided once at the row's first render so a streaming answer can never replay it.
  */
-function Arriving({ children }: { children: React.ReactNode }) {
+function Arriving({
+  children,
+  happenedAt,
+}: {
+  children: React.ReactNode;
+  /** When what the row shows happened, if it can say; see `useArrivedLive`. */
+  happenedAt?: string;
+}) {
   const shouldReduceMotion = useReducedMotion();
-  const live = useArrivedLive();
+  const live = useArrivedLive(happenedAt);
 
   return (
     <motion.div
@@ -1341,16 +1359,19 @@ const TranscriptActivity = memo(function TranscriptActivity({
    * `LateRenderersWatch`, which the transcript mounts once for all of them.
    */
   useContext(LateRenderersContext);
-  const voice = message.activityType === VOICE_CHAT_ACTIVITY;
-  const drawn = voice ? (
-    <VoiceChatCard call={message.content.call as VoiceChatEntry} />
+  const call =
+    message.activityType === VOICE_CHAT_ACTIVITY
+      ? (message.content.call as VoiceChatEntry)
+      : null;
+  const drawn = call ? (
+    <VoiceChatCard call={call} />
   ) : (
     renderActivityMessage(message)
   );
   if (!drawn) return null;
 
   return (
-    <Arriving>
+    <Arriving happenedAt={call?.startedAt}>
       <ToolRenderBoundary name={activityName(message.activityType)}>
         {drawn}
       </ToolRenderBoundary>
