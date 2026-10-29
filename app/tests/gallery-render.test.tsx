@@ -7,6 +7,7 @@ import {
   makeGalleryRender,
 } from "@/lib/copilot/gallery-tools";
 import { createGrantStore } from "@/lib/copilot/grant-store";
+import { ArgumentsArrivingContext } from "@/components/gallery/streaming";
 import { DataTable } from "@/components/gallery/table";
 import type { GalleryComponent } from "@/lib/copilot/gallery-registry";
 import { settleReactWork } from "./settle-react-work";
@@ -206,4 +207,31 @@ test("a streaming table draws its complete rows through the gallery render", () 
 
   expect(view.queryByText(/Waiting for complete table data/)).toBeNull();
   expect(view.getByText("Q1")).toBeTruthy();
+});
+
+/*
+ * `executing` is a call whose arguments are final and whose handler is still answering; a call with
+ * no result outside the running turn (a stopped run, a page closed mid-call, reloaded) stays
+ * `inProgress` for good. Neither is still arriving, so neither holds its last value back.
+ */
+test("a call whose arguments are final draws its last number", () => {
+  const store = createGrantStore();
+  store.set({ grants: heldGrants });
+  const Render = makeGalleryRender(spec(ShowsValue), store);
+  const view = render(
+    <Render args={{ title: "Sales", value: 125 }} status="executing" />,
+  );
+  expect(view.getByText("Sales: 125")).toBeTruthy();
+});
+
+test("a call left without a result outside the running turn draws its last number", () => {
+  const store = createGrantStore();
+  store.set({ grants: heldGrants });
+  const Render = makeGalleryRender(spec(ShowsValue), store);
+  const view = render(
+    <ArgumentsArrivingContext.Provider value={false}>
+      <Render args={{ title: "Sales", value: 125 }} status="inProgress" />
+    </ArgumentsArrivingContext.Provider>,
+  );
+  expect(view.getByText("Sales: 125")).toBeTruthy();
 });

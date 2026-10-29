@@ -27,6 +27,7 @@ import {
   useState,
 } from "react";
 import { Streamdown } from "streamdown";
+import { ArgumentsArrivingContext } from "@/components/gallery/streaming";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
 import {
   Dialog,
@@ -1481,13 +1482,15 @@ const ToolRow = memo(function ToolRow({
   return (
     <Arriving>
       {steps.length === 1 && only && !isBrowserStep(only) ? (
-        <ToolCallBody
-          args={only.toolCall.function.arguments}
-          latest={latest}
-          name={only.toolCall.function.name}
-          result={only.result}
-          toolCallId={only.toolCall.id}
-        />
+        <ArgumentsArrivingContext.Provider value={active}>
+          <ToolCallBody
+            args={only.toolCall.function.arguments}
+            latest={latest}
+            name={only.toolCall.function.name}
+            result={only.result}
+            toolCallId={only.toolCall.id}
+          />
+        </ArgumentsArrivingContext.Provider>
       ) : (
         <ToolActivity active={active} group={{ kind: "tools", id, steps }} />
       )}

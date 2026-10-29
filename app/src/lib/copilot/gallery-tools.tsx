@@ -3,13 +3,17 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   useCallback,
   useEffect,
+  useContext,
   useMemo,
   useRef,
   useState,
   useSyncExternalStore,
 } from "react";
 import { RefusedCard } from "@/components/gallery/refused";
-import { GalleryStreamingContext } from "@/components/gallery/streaming";
+import {
+  ArgumentsArrivingContext,
+  GalleryStreamingContext,
+} from "@/components/gallery/streaming";
 import {
   agentComponentsQueryOptions,
   announceGallery,
@@ -173,6 +177,7 @@ export function makeGalleryRender(spec: GalleryComponent, store: GrantStore) {
       store.get,
       store.get,
     );
+    const arriving = useContext(ArgumentsArrivingContext);
     const refusal = props.toolCallId
       ? snapshot.refusals.get(props.toolCallId)
       : undefined;
@@ -198,8 +203,11 @@ export function makeGalleryRender(spec: GalleryComponent, store: GrantStore) {
     if (typeof state === "object") {
       return <RefusedCard reason={state.refused} title={spec.title} />;
     }
-    // A number, link or colour still arriving is held back; see `settledArgs`.
-    const complete = props.status === "complete";
+    /*
+     * A number, link or colour still arriving is held back; see `settledArgs`. Only while the
+     * arguments are streaming (`inProgress`, not `executing`) in a row that can still receive them.
+     */
+    const complete = !(arriving && props.status === "inProgress");
     return (
       <GalleryStreamingContext.Provider value={!complete}>
         <Component {...settledArgs(props.args ?? {}, complete)} />
