@@ -606,6 +606,23 @@ export function createAgentRoutes(
   const NO_ISOLATION =
     "This OpenBot can't give a Bot a computer of its own, so it runs on yours.";
 
+  /**
+   * Whether this person may open a Bot that runs on a server of its own to everybody.
+   *
+   * Public admits every signed-in person, and a remote Bot is sent each of their conversations along
+   * with the run assertion that lets it call tools as them. So whoever runs that server sees what
+   * everybody says to it and can act as each of them within the Bot's grants. That is a decision for
+   * an administrator rather than for whoever registered the address. A Bot with no address of its own,
+   * or on this deployment's own Bot, is unaffected, and a private remote Bot can still be shared with
+   * named people and teams.
+   */
+  const PUBLIC_REMOTE_REFUSED =
+    "Only an admin can make a Bot that runs on its own server public. Keep it private and share it with the people who need it, or ask an admin.";
+  const runsElsewhere = (endpoint: string | null | undefined) =>
+    typeof endpoint === "string" &&
+    endpoint !== "" &&
+    endpoint !== managedEndpoint;
+
   routes.post("/", requireUser, async (context) => {
     // Malformed JSON is a recoverable client-input error and is validated by the same parser.
     const parsed = parseAgentInput(
@@ -614,6 +631,13 @@ export function createAgentRoutes(
       allowedHosts,
     );
     if (!parsed.ok) return context.json({ error: parsed.error }, 400);
+    if (
+      context.var.actor.role !== "admin" &&
+      parsed.value.visibility === "public" &&
+      runsElsewhere(parsed.value.endpoint)
+    ) {
+      return context.json({ error: PUBLIC_REMOTE_REFUSED }, 403);
+    }
     if (parsed.value.isolated === true && !isolationAvailable) {
       return refuseIsolation(
         context,
@@ -684,6 +708,19 @@ export function createAgentRoutes(
       allowedHosts,
     );
     if (!parsed.ok) return context.json({ error: parsed.error }, 400);
+    if (
+      context.var.actor.role !== "admin" &&
+      parsed.value.visibility === "public"
+    ) {
+      // An absent endpoint leaves the stored one in place, so the stored one is what will run.
+      const endpoint =
+        parsed.value.endpoint ??
+        (await store.get(context.var.actor, context.req.param("agentId")))
+          ?.endpoint;
+      if (runsElsewhere(endpoint)) {
+        return context.json({ error: PUBLIC_REMOTE_REFUSED }, 403);
+      }
+    }
     if (parsed.value.isolated === true && !isolationAvailable) {
       return refuseIsolation(
         context,
