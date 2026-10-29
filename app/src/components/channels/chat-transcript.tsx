@@ -1415,17 +1415,45 @@ const ToolCallBody = memo(function ToolCallBody({
  * can be either over its life (it stops folding once its answer asks the person) under one key; see
  * `groupToolSteps`.
  */
-function ToolRow({
-  id,
-  steps,
-  active,
-  latest,
-}: {
+type ToolRowProps = {
   id: string;
   steps: ToolGroup["steps"];
   active: boolean;
   latest: boolean;
-}) {
+};
+
+/**
+ * Whether a tool row would draw the same thing. `groupToolSteps` builds new step objects and a new
+ * array on every render (it has to: the agent mutates the messages in place), so the default memo
+ * check saw a change on every token of a reply streaming below and redrew every finished tool group
+ * in the history, markdown inside collapsed details included. What a row draws is its steps' calls
+ * and results, and those are what is compared. Exported for its test.
+ */
+export function sameToolRow(a: ToolRowProps, b: ToolRowProps): boolean {
+  return (
+    a.id === b.id &&
+    a.active === b.active &&
+    a.latest === b.latest &&
+    a.steps.length === b.steps.length &&
+    a.steps.every((step, index) => {
+      const other = b.steps[index];
+      return (
+        other !== undefined &&
+        step.id === other.id &&
+        step.result === other.result &&
+        step.toolCall.function.name === other.toolCall.function.name &&
+        step.toolCall.function.arguments === other.toolCall.function.arguments
+      );
+    })
+  );
+}
+
+const ToolRow = memo(function ToolRow({
+  id,
+  steps,
+  active,
+  latest,
+}: ToolRowProps) {
   const [only] = steps;
   return (
     <Arriving>
@@ -1442,7 +1470,7 @@ function ToolRow({
       )}
     </Arriving>
   );
-}
+}, sameToolRow);
 
 /**
  * A tool the runtime executed, drawn for the person watching.

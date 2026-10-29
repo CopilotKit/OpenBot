@@ -199,6 +199,27 @@ export function cachedVoiceArchive(channelId: string): VoiceChatEntry[] {
 }
 
 /** Card position is anchored to the message preceding the call, ahead of its delegated work. */
+/*
+ * One card message per call, kept for as long as the call object is: the transcript skips redrawing
+ * a card whose message is the one it drew last time, and a fresh object on every render redrew every
+ * voice-chat card on every token of a reply streaming below it.
+ */
+const cardMessages = new WeakMap<VoiceChatEntry, ActivityMessage>();
+
+function cardMessageOf(call: VoiceChatEntry): ActivityMessage {
+  let message = cardMessages.get(call);
+  if (message === undefined) {
+    message = {
+      id: `voice-chat:${call.id}`,
+      role: "activity",
+      activityType: VOICE_CHAT_ACTIVITY,
+      content: { call },
+    };
+    cardMessages.set(call, message);
+  }
+  return message;
+}
+
 export function withVoiceChats(
   messages: readonly Message[],
   calls: readonly VoiceChatEntry[],
@@ -207,12 +228,7 @@ export function withVoiceChats(
   const groups = new Map<string | null, ActivityMessage[]>();
   const ids = new Set(messages.map((message) => message.id));
   for (const call of calls) {
-    const message: ActivityMessage = {
-      id: `voice-chat:${call.id}`,
-      role: "activity",
-      activityType: VOICE_CHAT_ACTIVITY,
-      content: { call },
-    };
+    const message = cardMessageOf(call);
     if (ids.has(message.id)) continue;
     const group = groups.get(call.anchorMessageId) ?? [];
     group.push(message);
