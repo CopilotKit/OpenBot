@@ -3,7 +3,7 @@ import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { Link, type LinkOptions, useParams } from "@tanstack/react-router";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import type * as React from "react";
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -26,16 +26,18 @@ import {
   SidebarMenuItem,
   SidebarRail,
 } from "@/components/ui/sidebar";
+import { approvalInboxOptions } from "@/lib/approvals";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import {
   type ChannelSummary,
   channelListQueryOptions,
 } from "@/lib/channels/queries";
 import { useChannelEvents } from "@/lib/channels/use-channel-events";
+import { waitingThreadIds } from "@/lib/channels/waiting";
 import { appConfig } from "@/lib/generated/application-config";
 import { EASE_OUT, ENTRANCE_SECONDS } from "@/lib/motion";
 import { navigationFor } from "@/lib/navigation";
-import { relativeTime } from "@/lib/relative-time";
+import { relativeTimeShort } from "@/lib/relative-time";
 import {
   type MessageListEmphasis,
   useMessageListEmphasis,
@@ -153,10 +155,12 @@ function ChannelRow({
   channel,
   animateOrder,
   emphasis,
+  waiting,
 }: {
   channel: ChannelSummary;
   animateOrder: boolean;
   emphasis: MessageListEmphasis;
+  waiting: boolean;
 }) {
   const shouldReduceMotion = useReducedMotion();
   // Whether this row is unread, as a boolean, for the same reason `Channel` computes `isOpen`
@@ -186,13 +190,14 @@ function ChannelRow({
         lastMessage={channel.lastMessage ?? undefined}
         lastMessageAt={
           channel.lastMessageAt
-            ? relativeTime(channel.lastMessageAt)
+            ? relativeTimeShort(channel.lastMessageAt)
             : undefined
         }
         pinned={channel.pinned}
         unread={unread}
         // A turn running, or work the conversation waits on between turns: a hop, a routine.
         busy={(channel.busy ?? false) || (channel.work?.length ?? 0) > 0}
+        waiting={waiting}
       />
     </motion.div>
   );
@@ -205,6 +210,9 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const channels = useInfiniteQuery(channelListQueryOptions());
   // One socket for the app, opened where the roster is kept live.
   useChannelEvents();
+  // The approvals inbox, polled: a conversation stops waiting on the refresh after it is answered.
+  const inbox = useQuery(approvalInboxOptions());
+  const waiting = useMemo(() => waitingThreadIds(inbox.data), [inbox.data]);
   const [search, setSearch] = useState("");
   const scrollRoot = useRef<HTMLDivElement>(null);
   const searching = search.trim().length > 0;
@@ -311,6 +319,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                   key={channel.id}
                   animateOrder={animateOrder}
                   channel={channel}
+                  waiting={waiting.has(channel.threadId)}
                 />
               ))}
             </AnimatePresence>
