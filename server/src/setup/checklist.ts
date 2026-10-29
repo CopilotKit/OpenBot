@@ -214,16 +214,11 @@ export function setupRows(
       id: "computer",
       title: "Bot computer",
       required: false,
-      status: facts.computer
-        ? (facts.computerStatus ?? "not_checked")
-        : "needs_setup",
-      readyDetail: "Bots can browse the web and work with files.",
-      gapDetail: "Without it, Bots can't browse the web or work with files.",
-      fix: {
-        kind: "env",
-        names: ["AGENT_COMPUTER_URL", "COMPUTER_TOKEN"],
-        docsUrl: `${DOCS}/configuration.md#computer-and-supervisor`,
-      },
+      ...computerRow(
+        facts.computer
+          ? (facts.computerStatus ?? "not_checked")
+          : "needs_setup",
+      ),
     }),
     deployment({
       id: "apps",
@@ -284,6 +279,37 @@ function intelligenceRow(fact: IntelligenceFact, product: string) {
       kind: "env" as const,
       names: INTELLIGENCE_VARIABLES,
       docsUrl: QUICK_START,
+    },
+  };
+}
+
+/**
+ * The Bot computer row. Not checked is the usual state of one that is set up: a computer starts
+ * when a Bot first needs one, and until then none is running to ask. Its fix is the page where
+ * computers show up, because the variables are already set.
+ */
+function computerRow(status: SetupStatus) {
+  const readyDetail = "Bots can browse the web and work with files.";
+  if (status === "not_checked")
+    return {
+      status,
+      readyDetail,
+      gapDetail:
+        "Set up. No computer is running yet, so there's nothing to check.",
+      fix: {
+        kind: "page" as const,
+        label: "Computers",
+        path: "/admin/computers",
+      },
+    };
+  return {
+    status,
+    readyDetail,
+    gapDetail: "Without it, Bots can't browse the web or work with files.",
+    fix: {
+      kind: "env" as const,
+      names: ["AGENT_COMPUTER_URL", "COMPUTER_TOKEN"],
+      docsUrl: `${DOCS}/configuration.md#computer-and-supervisor`,
     },
   };
 }
