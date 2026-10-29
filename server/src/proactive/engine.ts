@@ -150,6 +150,18 @@ export const taskInputSchema = z.object({
 });
 export type TaskInput = z.infer<typeof taskInputSchema>;
 
+/**
+ * How a task's turn ended, kept on its work item as `ending` when it finishes: the id its reply was
+ * recorded under in the task's conversation, and whether that reply, read whole, asked the person
+ * something. The conversation keeps only a short line of the reply, where a long closing question
+ * loses its question mark.
+ */
+export const taskTurnEndingSchema = z.object({
+  messageId: z.string().min(1),
+  asks: z.boolean(),
+});
+export type TaskTurnEnding = z.infer<typeof taskTurnEndingSchema>;
+
 /** Where a task lives: opened with a conversation of its own, and found again to run its turn. */
 export type TaskThreads = {
   /** The person's questions waiting in the task's conversation, which a reply taken now answers. */
@@ -216,7 +228,8 @@ export type ProactiveEngineDeps = {
   tasks: TaskThreads;
   /**
    * A person-started turn in a task's conversation with this text as their message. `final` is its
-   * last run: if it fails, the task has failed, and the Bot says so in the conversation.
+   * last run: if it fails, the task has failed, and the Bot says so in the conversation. Answers
+   * how its reply ended, when it wrote one.
    */
   startTask(
     scope: ProactiveScope,
@@ -228,7 +241,7 @@ export type ProactiveEngineDeps = {
       signal: AbortSignal;
       final: boolean;
     } & TaskReplyContext,
-  ): Promise<void>;
+  ): Promise<TaskTurnEnding | undefined> | Promise<void>;
   /**
    * Checks the files and skills a reply names, and keeps the files, before the reply can wait on
    * the queue. Absent, a reply with either is refused.
@@ -528,12 +541,13 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
    */
   async function drain(
     kind: string,
+    /** Answers anything to keep on the item's payload as it finishes. */
     work: (
       payload: Record<string, unknown>,
       signal: AbortSignal,
       attempt: number,
       workKey: string,
-    ) => Promise<void>,
+    ) => Promise<Record<string, unknown> | undefined> | Promise<void>,
     options: {
       leaseMs: number;
       maxAttempts: number;
@@ -585,8 +599,18 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
     }, options.leaseMs / 3);
     renew.unref?.();
     try {
-      await work(item.payload, controller.signal, item.attempts, item.key);
-      await deps.queue.finish({ kind, key: item.key, owner: claimOwner });
+      const kept = await work(
+        item.payload,
+        controller.signal,
+        item.attempts,
+        item.key,
+      );
+      await deps.queue.finish({
+        kind,
+        key: item.key,
+        owner: claimOwner,
+        ...(kept ? { payload: kept } : {}),
+      });
     } catch (error) {
       /*
        * Only the turn's first ask for the lock can tell work that never began. A provider's own 409,
@@ -713,7 +737,7 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
      * again. The task reads as needing input from that request (tasks/store.ts).
      */
     try {
-      await deps.startTask(scope, {
+      const ending = await deps.startTask(scope, {
         runId,
         ...(work.inputId && work.reply
           ? { acceptedReply: { id: work.inputId, text: work.reply } }
@@ -731,6 +755,8 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
         signal,
         final: attempt >= TASK_RUNS,
       });
+      // Kept on the turn's work item, where the task's status reads it (`TaskTurnEnding`).
+      return ending ? { ending } : undefined;
     } catch (error) {
       if (!(error instanceof HeadlessToolSuspension)) throw error;
     }

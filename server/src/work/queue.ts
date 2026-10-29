@@ -225,6 +225,11 @@ export type WorkQueue = {
     kind: string;
     key: string;
     owner: string;
+    /**
+     * What the work came to, merged into its payload in the same write, for whatever reads the
+     * queue afterwards: how a task's turn ended, say. Kept only if the item was still ours.
+     */
+    payload?: Record<string, unknown>;
   }) => Promise<boolean>;
   /**
    * Not done, and worth another go after `delayMs`. False means the lease had expired or it was no
@@ -480,7 +485,7 @@ export function createWorkQueue(database: Database): WorkQueue {
       return Boolean(renewed);
     },
 
-    async finish({ kind, key, owner }) {
+    async finish({ kind, key, owner, payload }) {
       const [finished] = await database
         .update(workItems)
         /*
@@ -493,6 +498,12 @@ export function createWorkQueue(database: Database): WorkQueue {
           claimedBy: null,
           leaseUntil: null,
           updatedAt: sql`now()`,
+          ...(payload
+            ? {
+                // The object itself: the driver encodes it once, and a string would stay one.
+                payload: sql`${workItems.payload} || ${payload}::jsonb`,
+              }
+            : {}),
         })
         .where(ours(kind, key, owner))
         .returning({ key: workItems.key });

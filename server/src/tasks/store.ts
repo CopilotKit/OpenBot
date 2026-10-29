@@ -17,6 +17,7 @@ import {
   PROACTIVE_TASK_KIND,
   type TaskInput,
   taskInputSchema,
+  taskTurnEndingSchema,
 } from "../proactive/engine";
 import { ProactiveRefusedError } from "../proactive/types";
 import { DEFAULT_MAX_ATTEMPTS } from "../work/queue";
@@ -404,6 +405,13 @@ export function createTaskStore(
         row.suggestionId ? [[row.suggestionId, row.id] as const] : [],
       ),
     );
+    // Whether a turn's reply asked, read whole as it finished, by the id it was recorded under.
+    const replyAsks = new Map<string, boolean>();
+    for (const turn of turns) {
+      const ending = taskTurnEndingSchema.safeParse(turn.input.ending);
+      if (ending.success)
+        replyAsks.set(ending.data.messageId, ending.data.asks);
+    }
     const taskTurns = [
       ...turns.map((turn) => ({ ...turn, own: true, maxAttempts: TASK_RUNS })),
       ...responses.map(({ question, response, ...turn }) => {
@@ -525,10 +533,18 @@ export function createTaskStore(
       mark(channelOfThread.get(row.threadId), "working");
     for (const said of lastSaid) {
       const entry = state.get(taskOfChannel.get(said.id) ?? "");
+      /*
+       * The line its conversation keeps is cut short, so a long closing question loses its question
+       * mark there. A task's turn says whether its reply asked (`TaskTurnEnding`). Anything else
+       * said there, and a reply from before turns said so, is read from the line.
+       */
+      const asks =
+        replyAsks.get(said.sourceId ?? "") ??
+        replyEnding(said.lastMessage).asks;
       if (
         entry &&
         said.byBot &&
-        replyEnding(said.lastMessage).asks &&
+        asks &&
         !entry.working &&
         !entry.failure &&
         !entry.resolvedAt &&
