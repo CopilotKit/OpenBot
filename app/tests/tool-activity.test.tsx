@@ -201,9 +201,11 @@ test("a summary never says a send happened before it did, or after it was refuse
       "The person declined this action when you asked for their approval, so it was not done.",
     ),
   ].map(stepDetails);
-  expect(declined[1]).toMatchObject({ declined: true, refused: false });
-  expect(declined[1]?.label).toBe("Send your email");
-  expect(declined[1]?.output).toBeUndefined();
+  const declinedSend = declined[1];
+  if (!declinedSend) throw new Error("The send has no step.");
+  expect(declinedSend).toMatchObject({ declined: true, refused: false });
+  expect(declinedSend.label).toBe("Send your email");
+  expect(declinedSend.output).toBeUndefined();
   expect(summarise(declined)).toBe("Read your email");
   // A search that failed is not "searched"; with nothing done, the line names what it tried.
   const failed = [
