@@ -101,7 +101,7 @@ import {
 import type { QueuedMessage } from "./composer";
 import { AppAccessCard } from "./app-access-card";
 import { TeamBotConsentCard } from "./team-bot-consent";
-import { ToolRenderBoundary } from "./tool-boundary";
+import { ToolRenderBoundary, toolCallFinal } from "./tool-boundary";
 import { ToolLine } from "./tool-line";
 import { VoiceChatCard } from "./voice-chat-card";
 
@@ -1407,7 +1407,7 @@ const ToolCallBody = memo(function ToolCallBody({
 
   return (
     <ToolRenderBoundary
-      final={result !== undefined}
+      final={toolCallFinal(args, result)}
       name={name}
       resetKey={args}
     >

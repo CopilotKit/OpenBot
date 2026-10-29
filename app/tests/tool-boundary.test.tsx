@@ -1,7 +1,10 @@
 import { afterAll, afterEach, beforeAll, expect, spyOn, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { cleanup, render } from "@testing-library/react";
-import { ToolRenderBoundary } from "@/components/channels/tool-boundary";
+import {
+  ToolRenderBoundary,
+  toolCallFinal,
+} from "@/components/channels/tool-boundary";
 import { ArgumentsArrivingContext } from "@/components/gallery/streaming";
 import { settleReactWork } from "./settle-react-work";
 
@@ -96,6 +99,36 @@ test("a failure in a row that can no longer receive arguments shows", () => {
         <Fragile args="bad" />
       </ToolRenderBoundary>
     </ArgumentsArrivingContext.Provider>,
+  );
+
+  expect(view.getByText(FALLBACK)).toBeTruthy();
+  quiet.mockRestore();
+});
+
+/*
+ * A decision has no result until the person answers it, and the run stays busy for the whole wait,
+ * so "final" cannot mean "has a result": a decision that threw on its complete arguments drew
+ * nothing, and the turn hung invisibly until somebody pressed Stop. A call is final once its
+ * arguments are complete, and streamed arguments only parse once the last of them has arrived.
+ */
+test("a call is final once its arguments are complete, before any result", () => {
+  expect(toolCallFinal('{"options": "a, b"}', undefined)).toBe(true);
+  expect(toolCallFinal('{"options": ["a", "b"', undefined)).toBe(false);
+  expect(toolCallFinal("", undefined)).toBe(false);
+  expect(toolCallFinal('{"options": [', "answered")).toBe(true);
+});
+
+test("a decision that throws on complete arguments while it waits shows its failure", () => {
+  const quiet = spyOn(console, "error").mockImplementation(() => {});
+  const args = '{"options": "a, b"}';
+  const view = render(
+    <ToolRenderBoundary
+      final={toolCallFinal(args, undefined)}
+      name="Choice"
+      resetKey={args}
+    >
+      <Fragile args="bad" />
+    </ToolRenderBoundary>,
   );
 
   expect(view.getByText(FALLBACK)).toBeTruthy();

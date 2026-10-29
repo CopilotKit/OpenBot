@@ -77,3 +77,25 @@ export class ToolRenderBoundary extends Component<
     return this.props.children;
   }
 }
+
+/**
+ * Whether a tool call can no longer change: it has a result, or its arguments are complete.
+ *
+ * NOT JUST THE RESULT. A decision has none until the person answers it, and the run stays busy for
+ * the whole wait, so a decision that threw on its complete arguments was taken for one still
+ * streaming and drew nothing; the turn hung invisibly until somebody pressed Stop. Streamed
+ * arguments are a JSON object whose closing brace comes last, so they parse only once the last of
+ * them has arrived.
+ */
+export function toolCallFinal(
+  args: string,
+  result: string | undefined,
+): boolean {
+  if (result !== undefined) return true;
+  try {
+    JSON.parse(args);
+    return true;
+  } catch {
+    return false;
+  }
+}
