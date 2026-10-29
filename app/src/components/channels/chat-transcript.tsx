@@ -1517,9 +1517,40 @@ function assertNever(_item: never): null {
 
 const SEND_SCROLL_MS = 700;
 
+/**
+ * Whether the viewport should glide for a beat because the person just sent something.
+ *
+ * ONLY FOR A SEND MADE WHILE THE CONVERSATION IS OPEN. The newest person-sent id also changes while
+ * history is restored, batch by batch, and gliding then animated the scroller's jump to the bottom
+ * of a channel being opened: the conversation visibly loaded and then slid. The first id seen once
+ * history is in is the baseline, never a send.
+ *
+ * Exported so it can be checked without mounting anything.
+ */
+export function shouldGlideOnSend({
+  previous,
+  next,
+  restoring,
+  reducedMotion,
+}: {
+  previous: string | null;
+  next: string | null;
+  restoring: boolean;
+  reducedMotion: boolean;
+}): boolean {
+  return (
+    !restoring &&
+    !reducedMotion &&
+    previous !== null &&
+    next !== null &&
+    previous !== next
+  );
+}
+
 function useSmoothSendScroll(
   viewport: React.RefObject<HTMLDivElement | null>,
   newestUserMessageId: string | null,
+  restoring: boolean,
 ) {
   const reducedMotion = useReducedMotion();
   const seenRef = useRef<string | null>(null);
@@ -1527,14 +1558,17 @@ function useSmoothSendScroll(
   useLayoutEffect(() => {
     const element = viewport.current;
     const previous = seenRef.current;
-    seenRef.current = newestUserMessageId;
+    // Nothing is recorded while restoring, so the first id after it is a baseline (see above).
+    seenRef.current = restoring ? null : newestUserMessageId;
 
     if (
       element === null ||
-      newestUserMessageId === null ||
-      previous === null ||
-      previous === newestUserMessageId ||
-      reducedMotion
+      !shouldGlideOnSend({
+        previous,
+        next: newestUserMessageId,
+        restoring,
+        reducedMotion: reducedMotion ?? false,
+      })
     ) {
       return;
     }
@@ -1548,7 +1582,7 @@ function useSmoothSendScroll(
       window.clearTimeout(timer);
       element.style.scrollBehavior = "";
     };
-  }, [newestUserMessageId, reducedMotion, viewport]);
+  }, [newestUserMessageId, reducedMotion, restoring, viewport]);
 }
 
 export function ChatTranscript({
@@ -1611,7 +1645,7 @@ export function ChatTranscript({
          */
         item.kind === "attachments",
     )?.id ?? null;
-  useSmoothSendScroll(viewportRef, newestUserMessageId);
+  useSmoothSendScroll(viewportRef, newestUserMessageId, restoring);
 
   /* Which tool calls are still the latest thing, for an app card: see `latestFrom`. */
   const latestIndex = latestFrom(items, { busy, queued: queued.length });
