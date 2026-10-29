@@ -95,6 +95,17 @@ offered the tool; its tasks start from its suggestions, or from `POST /api/tasks
 with any of the person's Bots. `GET /api/tasks/:id/report` reads a task's conversation back as its
 report: the person's decisions and replies, and the Bot's update as each turn ended, in order.
 
+Tasks sits above Bots in the sidebar, with how many tasks need you. It lists every task by what it
+needs (Needs you, Working, Failed, Ready for review, then Done, folded), each with its Bot and one line
+of what comes next, and opens the task beside the list, or after it on a narrow screen. ↓ and ↑, or
+j and k, move through the list, Enter opens a task and Escape closes it. A task's page is its report
+above its conversation, with Mark done, Reopen, and Try again when it couldn't finish; a reply there
+goes to the server and waits its turn, and a reply on a failed task tries it again with your words.
+The + starts a task with any of your Bots, and Up next under the list starts or dismisses your
+Bots' suggestions. In a conversation, a task a Bot started is a card under its "On it" that keeps
+its status and opens the task. A task's own conversation is left out of the conversation list, and
+the OpenDuet skin's Tasks tab now opens this Tasks and counts the tasks that need you.
+
 ### A computer closes browsers nobody is using when its memory runs high
 
 A computer runs one browser for each Bot that is browsing, and the only limits were a count and half
