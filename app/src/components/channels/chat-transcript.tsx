@@ -45,7 +45,6 @@ import {
   MessageScrollerItem,
   MessageScrollerProvider,
   MessageScrollerViewport,
-  useMessageScroller,
 } from "@/components/ui/message-scroller";
 import { Skeleton } from "@/components/ui/skeleton";
 import { attachmentUrl } from "@/lib/channels/attachments";
@@ -79,6 +78,7 @@ import {
 } from "./tool-activity";
 import { isBrowserStep } from "./browser-activity";
 import { shouldDrawEarlier, useTranscriptPages } from "./transcript-pages";
+import { FollowScroll, useFollowIntent } from "./follow-intent";
 import {
   attachmentModality,
   type SentAttachment,
@@ -416,15 +416,20 @@ function Queued({
  * alternative is threading a ref out through three components with no other reason to know a
  * scroller exists.
  */
-function ScrollNewestQueuedIntoView({ newest }: { newest: string | null }) {
-  const { scrollToEnd } = useMessageScroller();
-
+function ScrollNewestQueuedIntoView({
+  newest,
+  onQueued,
+}: {
+  newest: string | null;
+  onQueued: () => void;
+}) {
   useEffect(() => {
     if (newest === null) {
       return;
     }
-    scrollToEnd();
-  }, [newest, scrollToEnd]);
+    // Through the follow state, so the view is told to follow before it is sent to the end.
+    onQueued();
+  }, [newest, onQueued]);
 
   return null;
 }
@@ -1624,6 +1629,7 @@ function useSmoothSendScroll(
   viewport: React.RefObject<HTMLDivElement | null>,
   newestUserMessageId: string | null,
   restoring: boolean,
+  onSend: () => void,
 ) {
   const reducedMotion = useReducedMotion();
   const seenRef = useRef<string | null>(null);
@@ -1633,6 +1639,18 @@ function useSmoothSendScroll(
     const previous = seenRef.current;
     // Nothing is recorded while restoring, so the first id after it is a baseline (see above).
     seenRef.current = restoring ? null : newestUserMessageId;
+
+    // A send picks following back up whatever the motion setting; only the glide depends on it.
+    if (
+      shouldGlideOnSend({
+        previous,
+        next: newestUserMessageId,
+        restoring,
+        reducedMotion: false,
+      })
+    ) {
+      onSend();
+    }
 
     if (
       element === null ||
@@ -1655,7 +1673,7 @@ function useSmoothSendScroll(
       window.clearTimeout(timer);
       element.style.scrollBehavior = "";
     };
-  }, [newestUserMessageId, reducedMotion, restoring, viewport]);
+  }, [newestUserMessageId, onSend, reducedMotion, restoring, viewport]);
 }
 
 export function ChatTranscript({
@@ -1721,7 +1739,23 @@ export function ChatTranscript({
          */
         item.kind === "attachments",
     )?.id ?? null;
-  useSmoothSendScroll(viewportRef, newestUserMessageId, restoring);
+  /* Whether the view follows a streaming reply; see `follow-intent`. */
+  const follow = useFollowIntent(viewportRef, restoring);
+  const { dispatch: dispatchFollow } = follow;
+  const followOnSend = useCallback(
+    () => dispatchFollow({ type: "send" }),
+    [dispatchFollow],
+  );
+  const followOnQueued = useCallback(
+    () => dispatchFollow({ type: "queued" }),
+    [dispatchFollow],
+  );
+  useSmoothSendScroll(
+    viewportRef,
+    newestUserMessageId,
+    restoring,
+    followOnSend,
+  );
 
   /* Which tool calls are still the latest thing, for an app card: see `latestFrom`. */
   const latestIndex = latestFrom(items, { busy, queued: queued.length });
@@ -1886,10 +1920,18 @@ export function ChatTranscript({
 
   return (
     <ArrivalsLive>
-      <MessageScrollerProvider autoScroll scrollPreviousItemPeek={48}>
+      <MessageScrollerProvider
+        autoScroll={follow.following}
+        scrollPreviousItemPeek={48}
+      >
         <MessageScroller>
           <MessageScrollerViewport
-            onScroll={() => drawEarlierNearTop(pagesFrom)}
+            {...follow.viewportHandlers}
+            data-following={follow.following}
+            onScroll={(event) => {
+              follow.viewportHandlers.onScroll?.(event);
+              drawEarlierNearTop(pagesFrom);
+            }}
             ref={viewportRef}
           >
             <MessageScrollerContent
@@ -1983,8 +2025,18 @@ export function ChatTranscript({
                 .map((item, offset) => renderRow(item, pages.split + offset))}
             </MessageScrollerContent>
           </MessageScrollerViewport>
-          <MessageScrollerButton />
-          <ScrollNewestQueuedIntoView newest={queued.at(-1)?.id ?? null} />
+          <MessageScrollerButton
+            onClick={(event) => {
+              // Ours, not the scroller's: it would scroll before it had been told to follow again.
+              event.preventDefault();
+              dispatchFollow({ type: "button" });
+            }}
+          />
+          <ScrollNewestQueuedIntoView
+            newest={queued.at(-1)?.id ?? null}
+            onQueued={followOnQueued}
+          />
+          <FollowScroll request={follow.request} />
         </MessageScroller>
       </MessageScrollerProvider>
     </ArrivalsLive>

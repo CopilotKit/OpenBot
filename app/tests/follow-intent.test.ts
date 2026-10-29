@@ -123,3 +123,10 @@ test("a send resumes without scrolling", () => {
     scrollToEnd: null,
   });
 });
+
+test("a queued message resumes at the end", () => {
+  expect(nextFollow(PAUSED, { type: "queued" })).toEqual({
+    state: FOLLOWING,
+    scrollToEnd: "auto",
+  });
+});
