@@ -55,6 +55,12 @@ export type AgentChannel = {
    * things to put on the screen. See the note in `channel-chat.tsx`.
    */
   lastMessageAt: Date | null;
+  /**
+   * The task this conversation is the work of, or null for an ordinary one. A task works in a
+   * conversation of its own (tasks/store.ts), which the app lists under Tasks rather than among
+   * the person's conversations, and opens as the task. Absent reads as null.
+   */
+  taskId?: string | null;
 };
 
 /** A channel plus the last thing said in it, which is what a roster renders. */
@@ -68,11 +74,7 @@ export type ChannelSummary = AgentChannel & {
   pinned: boolean;
   /** When the caller last had this channel open, or null for never. The caller's, only. */
   lastReadAt: Date | null;
-  /**
-   * The task this conversation is the work of, or null for an ordinary one. A task works in a
-   * conversation of its own (tasks/store.ts), which the app lists under Tasks rather than among
-   * the person's conversations.
-   */
+  /** Always read for the roster, which keeps a task's conversation out of the person's list. */
   taskId: string | null;
 };
 
@@ -352,7 +354,15 @@ export function createChannelStore(
       threadId,
     });
 
-    return { id, name, agentIds, threadId, active: true, lastMessageAt: null };
+    return {
+      id,
+      name,
+      agentIds,
+      threadId,
+      active: true,
+      lastMessageAt: null,
+      taskId: null,
+    };
   };
 
   /**
@@ -514,6 +524,7 @@ export function createChannelStore(
           threadId: intelligenceChannelMappings.threadId,
           lastMessageAt: channels.lastMessageAt,
           deletedAt: agentProfiles.deletedAt,
+          taskId: TASK_OF_CHANNEL,
         })
         .from(channels)
         .innerJoin(
@@ -548,6 +559,7 @@ export function createChannelStore(
         threadId: first.threadId,
         active: rows.every((row) => row.deletedAt === null),
         lastMessageAt: first.lastMessageAt,
+        taskId: first.taskId,
       };
     },
 
@@ -1382,9 +1394,10 @@ export function createChannelRoutes(
   return routes;
 }
 
-/** A channel as it goes over the wire: the same shape, with the date serialised. */
-type ChannelWire = Omit<AgentChannel, "lastMessageAt"> & {
+/** A channel as it goes over the wire: the same shape, with the date serialised and the task said. */
+type ChannelWire = Omit<AgentChannel, "lastMessageAt" | "taskId"> & {
   lastMessageAt: string | null;
+  taskId: string | null;
 };
 
 function channelDto(channel: AgentChannel): ChannelWire {
@@ -1396,6 +1409,7 @@ function channelDto(channel: AgentChannel): ChannelWire {
     active: channel.active,
     // ISO-8601 so the browser gets a string it can compare, like the roster's copy.
     lastMessageAt: channel.lastMessageAt?.toISOString() ?? null,
+    taskId: channel.taskId ?? null,
   };
 }
 
@@ -1412,7 +1426,6 @@ function channelSummaryDto(
     pinned: channel.pinned,
     // Serialised as ISO-8601 like lastMessageAt, so the browser can compare the two as strings.
     lastReadAt: channel.lastReadAt?.toISOString() ?? null,
-    taskId: channel.taskId,
     work: work.map(channelWorkDto),
     /*
      * Only ever true from here. A person's own run is not on any row this can read, so a roster
