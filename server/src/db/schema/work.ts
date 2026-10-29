@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
   index,
   integer,
@@ -94,5 +95,13 @@ export const workItems = pgTable(
     primaryKey({ columns: [table.kind, table.key] }),
     // The claim's own query: due, unclaimed or expired, not yet finished, oldest first.
     index("work_items_claimable_idx").on(table.kind, table.runAt),
+    /*
+     * What a conversation is waiting on: the open hops asked from a thread. Read on every roster
+     * page and every busy event, so it cannot scan a day of finished hops each time. Partial on
+     * unfinished rows, which keeps it as small as the queue's live work. See channels/working.ts.
+     */
+    index("work_items_open_thread_idx")
+      .on(table.kind, sql`(${table.payload}->>'threadId')`)
+      .where(sql`${table.finishedAt} IS NULL`),
   ],
 );

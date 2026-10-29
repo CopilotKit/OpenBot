@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { ComputerStillStartingError } from "../src/computer/client";
 import {
   createSandboxComputerProvider,
   sandboxNameFor,
@@ -103,6 +104,78 @@ describe("telling one run of a Bot's computer from the next", () => {
     const status = await providerWith(suspended, seen).status("knowledge");
 
     expect(status.state).toBe("absent");
+    expect(seen.every((call) => call.startsWith("GET "))).toBe(true);
+  });
+});
+
+/**
+ * A cold start that runs past the wait is a wait, not a fault.
+ *
+ * It used to throw a `SandboxError` whose message explained the pod schedule to whoever was
+ * watching, and the route answered 500. Now it is the typed "still starting" every surface knows to
+ * render gently, and the call it interrupted is said to have done nothing.
+ */
+describe("a computer that takes longer than the wait to start", () => {
+  const booting = {
+    metadata: { name: "bot-general-abc" },
+    spec: { operatingMode: "Running" },
+    status: {
+      conditions: [
+        { type: "Suspended", status: "False" },
+        { type: "Ready", status: "False" },
+      ],
+    },
+  };
+
+  test("locate gives up with the still-starting error, not a sandbox failure", async () => {
+    const provider = createSandboxComputerProvider({
+      namespace: "openbot",
+      template: { podTemplate: { spec: { containers: [] } } },
+      idleAfterMs: 60_000,
+      apiServer: "https://kubernetes.default",
+      token: "t",
+      resumeTimeoutMs: 0,
+      fetchImpl: (async () =>
+        Response.json(booting)) as unknown as typeof fetch,
+    });
+    const warn = console.warn;
+    console.warn = () => undefined;
+    try {
+      const failure = await provider.locate("general").catch((error) => error);
+      expect(failure).toBeInstanceOf(ComputerStillStartingError);
+      expect(failure.message).toContain("not performed");
+    } finally {
+      console.warn = warn;
+    }
+  });
+
+  test("locate answers within its own wait, well before a resume's budget runs out", async () => {
+    // Held under a load balancer's idle timeout, so the person's request is answered, not cut.
+    const provider = createSandboxComputerProvider({
+      namespace: "openbot",
+      template: { podTemplate: { spec: { containers: [] } } },
+      idleAfterMs: 60_000,
+      apiServer: "https://kubernetes.default",
+      token: "t",
+      resumeTimeoutMs: 600_000,
+      locateWaitMs: 0,
+      fetchImpl: (async () =>
+        Response.json(booting)) as unknown as typeof fetch,
+    });
+    const warn = console.warn;
+    console.warn = () => undefined;
+    try {
+      const failure = await provider.locate("general").catch((error) => error);
+      expect(failure).toBeInstanceOf(ComputerStillStartingError);
+    } finally {
+      console.warn = warn;
+    }
+  });
+
+  test("status calls one on its way up starting, without touching it", async () => {
+    const seen: string[] = [];
+    const status = await providerWith(booting, seen).status("general");
+    expect(status.state).toBe("starting");
     expect(seen.every((call) => call.startsWith("GET "))).toBe(true);
   });
 });
@@ -317,6 +390,75 @@ describe("a computer on an older image", () => {
     const [stale] = await providerOn(cluster, "new").list();
     expect(stale?.updateAvailable).toBe(true);
     const [current] = await providerOn(cluster, "old").list();
+    expect(current?.updateAvailable).toBe(false);
+  });
+});
+
+describe("which id a computer is for", () => {
+  /*
+   * A Sandbox is one computer for one id, and the computer has to know it: it runs a person's browser only on a
+   * computer of its own (agent-computer's person-access.ts), and without `COMPUTER_BOT_ID` it reads as the one computer
+   * every Bot shares and refuses. Told on creation and on every new template, as the supervisor tells each container.
+   */
+  const PERSON = "person-0123456789abcdef0123456789abcdef";
+  const envOf = (template: unknown) =>
+    (
+      template as {
+        spec: { containers: { env?: { name: string; value?: string }[] }[] };
+      }
+    ).spec.containers[0]?.env;
+
+  test("a new computer's pod says the id it was made for", async () => {
+    const created: unknown[] = [];
+    const fetchImpl = (async (_url: string, init?: RequestInit) => {
+      if (init?.method === "POST") {
+        created.push(JSON.parse(String(init.body)));
+        return Response.json({});
+      }
+      if (created.length === 0) return new Response("", { status: 404 });
+      return Response.json(running("2026-10-27T00:00:00Z", "n", "1.2.3.4"));
+    }) as unknown as typeof fetch;
+    const template = {
+      spec: {
+        containers: [
+          {
+            name: "computer",
+            image: "openbot:new",
+            env: [
+              { name: "PORT", value: "4100" },
+              // One the template carried is replaced, never doubled.
+              { name: "COMPUTER_BOT_ID", value: "shared" },
+            ],
+          },
+        ],
+      },
+    };
+    await createSandboxComputerProvider({
+      namespace: "openbot",
+      template: { podTemplate: template },
+      idleAfterMs: 60_000,
+      apiServer: "https://kubernetes.default",
+      token: "t",
+      fetchImpl,
+    }).locate(PERSON);
+    const body = created[0] as { spec: { podTemplate: unknown } };
+    expect(envOf(body.spec.podTemplate)).toEqual([
+      { name: "PORT", value: "4100" },
+      { name: "COMPUTER_BOT_ID", value: PERSON },
+    ]);
+    // The template every computer is cut from is left as it was.
+    expect(template.spec.containers[0]?.env).toHaveLength(2);
+    expect(template.spec.containers[0]?.env[1]?.value).toBe("shared");
+  });
+
+  test("a computer brought onto a new image keeps being told", async () => {
+    const cluster = fakeCluster({ mode: "Suspended", image: "old" });
+    await providerOn(cluster, "new").locate(PERSON);
+    expect(envOf(cluster.state.podTemplate)).toEqual([
+      { name: "COMPUTER_BOT_ID", value: PERSON },
+    ]);
+    // An id is no reason to call a computer out of date: only its image is.
+    const [current] = await providerOn(cluster, "new").list();
     expect(current?.updateAvailable).toBe(false);
   });
 });

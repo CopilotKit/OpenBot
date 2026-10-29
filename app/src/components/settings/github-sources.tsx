@@ -64,8 +64,17 @@ export function GithubSources() {
       ) : null}
       {bindings.isPending || !bindings.data ? null : bindings.data.length ===
         0 ? (
-        <PageEmpty>
-          No repositories yet. Add one with Add a repository.
+        <PageEmpty
+          action={
+            <Button onClick={() => setAdding(true)} size="sm" variant="outline">
+              <IconPlus />
+              Add a repository
+            </Button>
+          }
+          icon={IconBrandGithub}
+          title="No repositories yet"
+        >
+          Repositories you add show up here with their webhook address.
         </PageEmpty>
       ) : (
         <PageRows>

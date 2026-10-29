@@ -2,6 +2,7 @@ import {
   IconBrandGoogleDrive,
   IconBrandNotion,
   IconChevronRight,
+  IconCircleCheck,
   IconPlug,
 } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
@@ -27,6 +28,11 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import {
+  moreAppsRow,
+  moreAppsSectionDescription,
+  providerVocabulary,
+} from "@/lib/plugins/provider-vocabulary";
+import {
   type CatalogueItem,
   connectionsQueryOptions,
   type PluginServer,
@@ -34,11 +40,6 @@ import {
   pluginsPageQueryOptions,
   pluginsProvider,
 } from "@/lib/plugins/queries";
-import {
-  moreAppsRow,
-  moreAppsSectionDescription,
-  providerVocabulary,
-} from "@/lib/plugins/provider-vocabulary";
 
 /**
  * What this deployment can reach, as one list per state.
@@ -139,7 +140,7 @@ function RouteComponent() {
 
   return (
     <PageShell
-      description="What this deployment can reach, and which Bots can use it. A plugin you add is for everybody. Choose which Bots get its tools on its page."
+      description="Connect services for your company, then choose which Bots can use each service’s tools."
       title="Plugins"
     >
       {/* Pending, error, empty, rows — pending first, so no sentence asserts anything mid-fetch. */}
@@ -160,8 +161,8 @@ function RouteComponent() {
             title="Connected"
           >
             {plugins.data?.servers.length === 0 ? (
-              <PageEmpty>
-                Nothing connected yet. Pick one from the list below.
+              <PageEmpty icon={IconPlug} title="Nothing connected yet">
+                Pick one from the list below.
               </PageEmpty>
             ) : (
               <PageRows>
@@ -231,7 +232,9 @@ function RouteComponent() {
             title="Explore plugins"
           >
             {explore.length === 0 ? (
-              <PageEmpty>Every plugin in the catalogue is connected.</PageEmpty>
+              <PageEmpty icon={IconCircleCheck} title="All connected">
+                Every plugin in the catalogue is connected.
+              </PageEmpty>
             ) : (
               <PageRows>
                 {explore.map((entry: CatalogueItem, index) => {

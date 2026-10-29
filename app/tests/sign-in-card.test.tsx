@@ -72,20 +72,27 @@ function serving(open: (typeof signInRequest)[]) {
 }
 
 type Renderer = ComponentType<Record<string, unknown>>;
-type Kept = {
-  renderer?: Renderer;
-  handler?: (args: unknown, context: unknown) => Promise<unknown>;
-};
+type Handler = (args: unknown, context: unknown) => Promise<unknown>;
 
-function Capture({ kept }: { kept: Kept }) {
-  const { copilotkit } = useCopilotKit();
-  const entry = copilotkit.renderToolCalls.find(
-    (candidate) => candidate.name === "computer_request_sign_in",
-  );
-  kept.renderer = entry?.render as Renderer | undefined;
-  kept.handler = copilotkit.getTool({
-    toolName: "computer_request_sign_in",
-  })?.handler as Kept["handler"];
+/**
+ * Read from the SDK when asked, not when Capture renders: the provider does not re-render its
+ * consumers when a tool is added, so a read at render time sees the registry before the tool did.
+ */
+class Registry {
+  copilotkit?: ReturnType<typeof useCopilotKit>["copilotkit"];
+  get renderer() {
+    return this.copilotkit?.renderToolCalls.find(
+      (candidate) => candidate.name === "computer_request_sign_in",
+    )?.render as Renderer | undefined;
+  }
+  get handler() {
+    return this.copilotkit?.getTool({ toolName: "computer_request_sign_in" })
+      ?.handler as Handler | undefined;
+  }
+}
+
+function Capture({ kept }: { kept: Registry }) {
+  kept.copilotkit = useCopilotKit().copilotkit;
   return null;
 }
 
@@ -108,7 +115,7 @@ test("the waiting card offers the private sign-in once the request exists", asyn
   const queries = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
-  const kept: Kept = {};
+  const kept = new Registry();
   const tree = render(
     <Providers queries={queries}>
       <SignInTool />

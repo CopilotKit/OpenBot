@@ -40,6 +40,7 @@ let addedComponents: string[] = [];
 
 const chartArgs = {
   title: "Stories on the front page by source",
+  basis: "read",
   caption: "Read from the page the routine opened.",
   points: [
     { label: "github.com", value: 4 },

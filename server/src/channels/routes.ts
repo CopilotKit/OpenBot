@@ -37,6 +37,7 @@ import {
 import { upgradeWebSocket } from "./socket";
 import { oneLine } from "./text";
 import type { ThreadIdentity } from "./thread-identity";
+import { type ChannelWork, channelWorkDto, workIn } from "./working";
 
 export type AgentChannel = {
   id: string;
@@ -235,6 +236,21 @@ export type ChannelStore = {
     channelId: string,
     busy: boolean,
   ): Promise<void>;
+  /**
+   * Tell a channel's members what it is waiting on now, without saying a turn started or ended.
+   *
+   * For the moments the queue moves and no turn does: a hop finished, released for another try, or
+   * turned into a relay. Every busy signal carries the same list, so this is only for those.
+   */
+  signalWork(threadId: string): Promise<void>;
+  /**
+   * What each of these channels is waiting on, for this person: their own thread's hops and their
+   * own routines. See `workIn` in working.ts.
+   */
+  workIn(
+    actor: AgentActor,
+    channels: readonly { id: string; threadId: string }[],
+  ): Promise<Map<string, ChannelWork[]>>;
 };
 
 const PRIVATE_AGENT_CHANNEL_DESCRIPTION = "Private agent channel.";
@@ -317,6 +333,76 @@ export function createChannelStore(
     });
 
     return { id, name, agentIds, threadId, active: true, lastMessageAt: null };
+  };
+
+  /**
+   * Tell a channel's members what it is waiting on, and whether a turn just started or ended.
+   *
+   * No table write: busy is a moment, and the rows the work list is read from stay the source of
+   * truth. Just the announcement, carrying the members the same way recordActivity does. The list
+   * rides on every one of these so a client never merges a delta into what it holds: the newest
+   * event is the whole answer, and the same answer a reload gets.
+   *
+   * THE LIST GOES ONLY TO THE PERSON WHOSE THREAD IT IS. Each member has a thread of their own in
+   * a channel, and what that thread waits on names the Bots its owner asked. The other members
+   * hear that a turn started or ended, as they always have, and nothing about whom it asked.
+   *
+   * `workAt` is the database's clock just before the list was read. Two announcements for one
+   * channel can be read on two replicas and delivered in either order, so the browser keeps the
+   * list with the latest `workAt` rather than the one that happened to arrive last.
+   */
+  const announceWork = async (
+    channelId: string,
+    thread: { threadId: string; userId: string } | null,
+    busy?: boolean,
+  ): Promise<void> => {
+    const members = await database
+      .select({ userId: channelMemberships.userId })
+      .from(channelMemberships)
+      .where(eq(channelMemberships.channelId, channelId));
+    if (members.length === 0) return;
+
+    const notify = (event: ChannelActivityEvent) =>
+      database.execute(
+        sql`select pg_notify(${CHANNEL_ACTIVITY_TOPIC}, ${JSON.stringify(event)})`,
+      );
+    const base = {
+      channelId,
+      lastMessage: null,
+      lastMessageAt: null,
+      lastMessageAgentId: null,
+      ...(busy === undefined ? {} : { busy }),
+    };
+
+    const owner =
+      thread && members.some((member) => member.userId === thread.userId)
+        ? thread
+        : null;
+    const others = members
+      .map((member) => member.userId)
+      .filter((userId) => userId !== owner?.userId);
+
+    if (owner) {
+      // Fixed-width UTC to the microsecond, so two stamps compare as strings.
+      const [stamp] = await database.execute<{ at: string }>(
+        sql`select to_char(clock_timestamp() at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as at`,
+      );
+      const work =
+        (
+          await workIn(database, [
+            { id: channelId, threadId: owner.threadId, userId: owner.userId },
+          ])
+        ).get(channelId) ?? [];
+      await notify({
+        ...base,
+        memberIds: [owner.userId],
+        work: work.map(channelWorkDto),
+        ...(stamp ? { workAt: stamp.at } : {}),
+      });
+    }
+    // A settle with no turn moving has nothing to tell anybody but the thread's owner.
+    if (busy !== undefined && others.length > 0)
+      await notify({ ...base, memberIds: others });
   };
 
   const store: ChannelStore = {
@@ -834,36 +920,40 @@ export function createChannelStore(
       // The channel this thread is shown in, if any. A scratch thread maps to nothing, so a hop
       // running there signals nowhere and the branch below returns without announcing.
       const [mapped] = await database
-        .select({ channelId: intelligenceChannelMappings.channelId })
+        .select({
+          channelId: intelligenceChannelMappings.channelId,
+          userId: intelligenceChannelMappings.userId,
+        })
         .from(intelligenceChannelMappings)
         .where(eq(intelligenceChannelMappings.threadId, threadId))
         .limit(1);
       if (!mapped) return;
-
-      const members = await database
-        .select({ userId: channelMemberships.userId })
-        .from(channelMemberships)
-        .where(eq(channelMemberships.channelId, mapped.channelId));
-      if (members.length === 0) return;
-
-      // No table write: busy is a moment, and the roster query stays the source of truth. Just the
-      // announcement, carrying the members the same way recordActivity does.
-      const event: ChannelActivityEvent = {
-        channelId: mapped.channelId,
-        memberIds: members.map((member) => member.userId),
-        lastMessage: null,
-        lastMessageAt: null,
-        lastMessageAgentId: null,
+      await announceWork(
+        mapped.channelId,
+        { threadId, userId: mapped.userId },
         busy,
-      };
-      await database.execute(
-        sql`select pg_notify(${CHANNEL_ACTIVITY_TOPIC}, ${JSON.stringify(event)})`,
       );
+    },
+
+    async signalWork(threadId) {
+      const [mapped] = await database
+        .select({
+          channelId: intelligenceChannelMappings.channelId,
+          userId: intelligenceChannelMappings.userId,
+        })
+        .from(intelligenceChannelMappings)
+        .where(eq(intelligenceChannelMappings.threadId, threadId))
+        .limit(1);
+      if (!mapped) return;
+      await announceWork(mapped.channelId, { threadId, userId: mapped.userId });
     },
 
     async signalChannelBusy(actor, channelId, busy) {
       const [membership] = await database
-        .select({ userId: channelMemberships.userId })
+        .select({
+          userId: channelMemberships.userId,
+          threadId: intelligenceChannelMappings.threadId,
+        })
         .from(channelMemberships)
         .innerJoin(
           channels,
@@ -872,33 +962,42 @@ export function createChannelStore(
             isNull(channels.deletedAt),
           ),
         )
+        // The caller's own thread for the channel, which is the one their hops are offered from.
+        .leftJoin(
+          intelligenceChannelMappings,
+          and(
+            eq(
+              intelligenceChannelMappings.channelId,
+              channelMemberships.channelId,
+            ),
+            eq(intelligenceChannelMappings.userId, channelMemberships.userId),
+          ),
+        )
         .where(
           and(
             eq(channelMemberships.channelId, channelId),
             eq(channelMemberships.userId, actor.id),
           ),
-        );
+        )
+        .limit(1);
       // Not a member, no such channel, or a deleted one: the same refusal every way, so belonging
       // to a channel is not something an outsider can probe for.
       if (!membership) throw new ChannelNotFoundError(channelId);
 
-      const members = await database
-        .select({ userId: channelMemberships.userId })
-        .from(channelMemberships)
-        .where(eq(channelMemberships.channelId, channelId));
-
-      const event: ChannelActivityEvent = {
+      await announceWork(
         channelId,
-        memberIds: members.map((member) => member.userId),
-        lastMessage: null,
-        lastMessageAt: null,
-        lastMessageAgentId: null,
+        membership.threadId
+          ? { threadId: membership.threadId, userId: membership.userId }
+          : null,
         busy,
-      };
-      await database.execute(
-        sql`select pg_notify(${CHANNEL_ACTIVITY_TOPIC}, ${JSON.stringify(event)})`,
       );
     },
+
+    workIn: (actor, list) =>
+      workIn(
+        database,
+        list.map((channel) => ({ ...channel, userId: actor.id })),
+      ),
   };
   return store;
 }
@@ -1127,8 +1226,16 @@ export function createChannelRoutes(
         ...(parsed.limit !== undefined ? { limit: parsed.limit } : {}),
       });
 
+      /*
+       * What each row is waiting on, read with the page rather than left to the socket. A busy
+       * flag that only ever arrived as an event was gone on every reload, so a conversation a Bot
+       * was still answering in looked finished to anybody who refreshed.
+       */
+      const work = await store.workIn(context.var.actor, page.channels);
       return context.json({
-        channels: page.channels.map(channelSummaryDto),
+        channels: page.channels.map((channel) =>
+          channelSummaryDto(channel, work.get(channel.id) ?? []),
+        ),
         nextCursor: page.nextCursor,
       });
     } catch (error) {
@@ -1231,7 +1338,13 @@ export function createChannelRoutes(
       if (!channel) {
         return context.json({ error: "Couldn't find that conversation." }, 404);
       }
-      return context.json({ channel: channelDto(channel) });
+      const work = await store.workIn(context.var.actor, [channel]);
+      return context.json({
+        channel: {
+          ...channelDto(channel),
+          work: (work.get(channel.id) ?? []).map(channelWorkDto),
+        },
+      });
     } catch (error) {
       return mapStoreError(context, error);
     }
@@ -1257,7 +1370,10 @@ function channelDto(channel: AgentChannel): ChannelWire {
   };
 }
 
-function channelSummaryDto(channel: ChannelSummary) {
+function channelSummaryDto(
+  channel: ChannelSummary,
+  work: readonly ChannelWork[],
+) {
   return {
     ...channelDto(channel),
     summary: channel.summary,
@@ -1267,6 +1383,12 @@ function channelSummaryDto(channel: ChannelSummary) {
     pinned: channel.pinned,
     // Serialised as ISO-8601 like lastMessageAt, so the browser can compare the two as strings.
     lastReadAt: channel.lastReadAt?.toISOString() ?? null,
+    work: work.map(channelWorkDto),
+    /*
+     * Only ever true from here. A person's own run is not on any row this can read, so a roster
+     * that said false would put out the dot another tab's run had just lit.
+     */
+    ...(work.length > 0 ? { busy: true } : {}),
   };
 }
 

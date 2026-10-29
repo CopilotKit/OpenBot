@@ -103,9 +103,9 @@ OpenBot root where `.env` is:
   npx copilotkit@latest local connect --approve-connection
 
 `local connect` writes INTELLIGENCE_API_URL, INTELLIGENCE_GATEWAY_WS_URL and
-CPK_INTELLIGENCE_API_KEY to `.env`. OpenBot reads the first two as they are but takes its project
-key only from INTELLIGENCE_API_KEY, so copy the `cpk-...` value of CPK_INTELLIGENCE_API_KEY into
-INTELLIGENCE_API_KEY before `bash scripts/start.sh`. The local licence lasts 30 days;
+CPK_INTELLIGENCE_API_KEY to `.env`. OpenBot reads those values directly; do not copy or rename
+the key. INTELLIGENCE_API_KEY remains a legacy fallback when the CLI key is empty or absent.
+When both are set, the non-empty CLI key takes precedence. The local licence lasts 30 days;
 `npx copilotkit@latest local renew` renews it as often as needed while the account is in good
 standing. Skip the managed `project select` and setup-learning commands on this path.
 

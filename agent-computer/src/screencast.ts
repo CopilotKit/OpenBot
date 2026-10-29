@@ -238,6 +238,22 @@ export async function startScreencast(
           message.event === "up"
             ? message.text
             : (message.text ?? TEXT_FOR_KEY[message.key]);
+        /*
+         * NO `nativeVirtualKeyCode`, so the key reaches the page and never the browser itself.
+         *
+         * Chrome hands a key the page did not handle on to the browser's own shortcuts only when the
+         * event names a native key code (content/browser/devtools/protocol/input_handler.cc: without
+         * one the event is `skip_if_unhandled`, which also skips the shortcuts Chrome takes before the
+         * page, such as closing the tab). And on macOS that code is read as the Mac's own key number,
+         * not the Windows one this used to send: 37, the left arrow's, is the Mac's L, and 36, Home's,
+         * is its Return (native_input_event_builder_mac.mm builds the browser's event from it).
+         * Measured on Chrome for Testing 151 headless on macOS, a person's ArrowLeft reached the page
+         * as an unnamed key 76, and with Home after it the browser stopped answering DevTools at all;
+         * in the end-to-end run it opened chrome://settings/help and then spun a core until its
+         * computer was restarted. Without the native code every key arrived as itself and moved the
+         * caret, deleted and tabbed as it should. Playwright's and Puppeteer's own keyboards never send
+         * one either.
+         */
         await client.send("Input.dispatchKeyEvent", {
           // `keyDown` only when there is text to insert; otherwise `rawKeyDown`, which is what Chrome
           // expects for keys that do not produce a character. Sending keyDown with no text makes
@@ -248,7 +264,6 @@ export async function startScreencast(
           code: message.code,
           ...(text ? { text } : {}),
           windowsVirtualKeyCode: code,
-          nativeVirtualKeyCode: code,
           modifiers: message.modifiers ?? 0,
         });
         return;

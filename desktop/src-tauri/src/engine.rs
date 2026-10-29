@@ -700,23 +700,6 @@ fn main() {
     }
 
     #[test]
-    fn a_missing_engine_is_reported_as_missing_rather_than_as_not_responding() {
-        // Not a call to `detect`: this asserts the shape a caller has to distinguish. "Installed but
-        // not answering" tells somebody to start it; "none found" tells them to install one, and
-        // the wrong one of those sends them looking for a menu bar icon that is not there.
-        let missing = EngineStatus {
-            engine: None,
-            address: None,
-            responding: false,
-            engine_socket: None,
-            detail: "No container engine found. Install Podman Desktop or Docker Desktop first."
-                .into(),
-        };
-        assert!(missing.engine.is_none());
-        assert!(!missing.responding);
-    }
-
-    #[test]
     fn a_podman_machine_is_named_on_every_command_it_is_addressed_with() {
         let address = Address::new(Engine::Podman, Some("openbot".into()));
         let command = address.command();

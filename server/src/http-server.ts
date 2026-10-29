@@ -1,8 +1,10 @@
 import { DICTATION_HTTP_IDLE_SECONDS } from "@openbot/shared/dictation";
+import { isPersonBrowserId } from "@openbot/shared/openbot-browser";
 import { serve } from "bun";
 import { computerAccessCheck } from "./agents/computer-access";
 import type { AgentProfileStore } from "./agents/profile-store";
 import type { OpenBotRole } from "./auth/roles";
+import { browserRequestSeconds } from "./browser/routes";
 import { websocket as channelSocket } from "./channels/socket";
 import type { ComputerGateway } from "./computer/gateway";
 import { streamPathBotId } from "./computer/stream-path";
@@ -51,7 +53,7 @@ export function startHttpServer(deps: {
       env: { server: unknown },
     ) => Response | Promise<Response>;
   };
-}): void {
+}): { stop(closeActiveConnections?: boolean): Promise<void> } {
   const {
     port,
     config,
@@ -88,7 +90,8 @@ export function startHttpServer(deps: {
   const asChannelSocket = (ws: { data: SocketData }) =>
     ws as unknown as ChannelSocket;
 
-  serve<SocketData>({
+  // Answered so a test can stop the server it started; the deployment keeps it for its whole life.
+  return serve<SocketData>({
     port,
     async fetch(request, server) {
       const url = new URL(request.url);
@@ -97,6 +100,10 @@ export function startHttpServer(deps: {
       }
       if (url.pathname === "/api/voice/calls") server.timeout(request, 30);
       if (url.pathname === "/api/voice/sessions") server.timeout(request, 30);
+      // The person's browser's routes wait on its computer for longer than Bun's 10 s: a cold open, a slow page. Kept
+      // open for each route's own budget, so its answer, or its sentence, reaches the person (browser/routes.ts).
+      const browserSeconds = browserRequestSeconds(url.pathname);
+      if (browserSeconds !== undefined) server.timeout(request, browserSeconds);
       const streamBotId = streamPathBotId(url.pathname);
       if (
         streamBotId !== null &&
@@ -113,7 +120,8 @@ export function startHttpServer(deps: {
         }
         // And which Bot, which the guard above does not answer. This socket carries that Bot's screen,
         // so signing in is not enough: without this, anybody signed in watches anybody's Bot work. And
-        // seeing a Team Bot is not enough either: its screen is its owner's signed-in browser.
+        // seeing a Team Bot is not enough either: its screen is its owner's signed-in browser. A person's
+        // own OpenBot browser is that person's alone, an administrator's neither: the same check says so.
         if (
           !(await computerAccessCheck(agentProfileStore)(
             { id: actor.id, role: actor.role },
@@ -151,10 +159,10 @@ export function startHttpServer(deps: {
             { status: 502 },
           );
         }
-        const recording = await demonstrationStore.active(
-          actor.id,
-          streamBotId,
-        );
+        // A demonstration teaches a Bot, in that Bot's browser; a person's own browser records through its Recorder.
+        const recording = isPersonBrowserId(streamBotId)
+          ? null
+          : await demonstrationStore.active(actor.id, streamBotId);
         if (recording)
           upstream += `&recording=${encodeURIComponent(recording.id)}`;
         if (

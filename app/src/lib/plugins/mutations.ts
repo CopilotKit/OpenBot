@@ -195,6 +195,29 @@ export function setAccountModeMutationOptions(queryClient: QueryClient) {
 }
 
 /**
+ * Who may give an app to a Bot: any Bot's owner (`any`) or only an admin (`admin`). The server writes
+ * the choice to the trail.
+ */
+export function setOwnerGrantsMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: async (variables: {
+      serverId: string;
+      ownerGrants: "any" | "admin";
+    }) => {
+      await client(
+        `/api/plugins/servers/${encodeURIComponent(variables.serverId)}/owner-grants`,
+        {
+          method: "PUT",
+          body: { ownerGrants: variables.ownerGrants },
+          fallback: "Couldn't change who can give this app.",
+        },
+      );
+    },
+    onSettled: () => invalidatePlugins(queryClient),
+  });
+}
+
+/**
  * Whether one Bot carries one plugin.
  *
  * Granting posts to the collection; withholding deletes from it, and the delete identifies the row

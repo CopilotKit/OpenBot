@@ -29,18 +29,26 @@ test("database defaults and writes survive a new store and remain scoped to the 
   expect(await store.read(alice)).toEqual({
     messageListEmphasis: "thread",
     selfHostBannerDismissed: false,
+    narration: null,
+    skin: "openbot",
   });
   expect(await store.patch(alice, { messageListEmphasis: "agent" })).toEqual({
     messageListEmphasis: "agent",
     selfHostBannerDismissed: false,
+    narration: null,
+    skin: "openbot",
   });
   expect(await createUserPreferencesStore(database).read(alice)).toEqual({
     messageListEmphasis: "agent",
     selfHostBannerDismissed: false,
+    narration: null,
+    skin: "openbot",
   });
   expect(await store.read(bob)).toEqual({
     messageListEmphasis: "thread",
     selfHostBannerDismissed: false,
+    narration: null,
+    skin: "openbot",
   });
 });
 
@@ -67,4 +75,38 @@ test("missing users do not appear successfully saved", async () => {
   await expect(
     store.patch(id, { messageListEmphasis: "agent" }),
   ).rejects.toThrow("could not be saved");
+});
+
+test("the narration choice is kept in the database beside the others", async () => {
+  const id = await person();
+  expect((await store.read(id)).narration).toBe(null);
+  await store.patch(id, { narration: "on" });
+  expect(await createUserPreferencesStore(database).read(id)).toEqual({
+    messageListEmphasis: "thread",
+    selfHostBannerDismissed: false,
+    narration: "on",
+    skin: "openbot",
+  });
+});
+
+test("the skin is saved on the account and survives a new store", async () => {
+  const id = await person();
+  expect(await store.patch(id, { skin: "openmuse" })).toEqual({
+    messageListEmphasis: "thread",
+    selfHostBannerDismissed: false,
+    narration: null,
+    skin: "openmuse",
+  });
+  expect((await createUserPreferencesStore(database).read(id)).skin).toBe(
+    "openmuse",
+  );
+});
+
+test("a stored skin this build does not ship reads as the default", async () => {
+  const id = await person();
+  await database
+    .update(users)
+    .set({ preferences: sql`'{"skin":"retired-skin"}'::jsonb` })
+    .where(eq(users.id, id));
+  expect((await store.read(id)).skin).toBe("openbot");
 });

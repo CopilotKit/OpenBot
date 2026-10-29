@@ -61,6 +61,8 @@ type ComputerOutcome = {
   refused?: boolean;
   reason?: string;
   staleRefs?: boolean;
+  /** The computer was still starting and the call was not performed. */
+  starting?: boolean;
   elements?: unknown[];
   element?: { role?: string; name?: string };
   /** What a shell call reports back, so the line can show the output rather than only the command. */
@@ -160,6 +162,7 @@ function ActionLine({
   running,
   refused,
   failed,
+  notYet,
 }: {
   label: string;
   detail?: string;
@@ -168,21 +171,42 @@ function ActionLine({
   refused?: boolean;
   /** It was permitted and did not work. A different request might. */
   failed?: boolean;
+  /** The computer was still starting, so nothing was done yet. See `stillStarting`. */
+  notYet?: boolean;
 }) {
   return (
     <ToolLine
-      detail={detail}
+      detail={notYet ? STILL_STARTING_DETAIL : detail}
       failed={failed}
       label={label}
+      notYet={notYet}
       refused={refused}
       running={running}
     />
   );
 }
 
+/** What a line says about a call that waited on a computer still starting. */
+const STILL_STARTING_DETAIL = "The computer is still starting.";
+
 /** Whether a result is an ordinary failure rather than a refusal, so the two can render differently. */
 function didNotWork(outcome: ComputerOutcome): boolean {
-  return outcome.ok === false && outcome.refused !== true;
+  return (
+    outcome.ok === false &&
+    outcome.refused !== true &&
+    outcome.starting !== true
+  );
+}
+
+/**
+ * Whether a call came back because the computer was still starting, and so did nothing.
+ *
+ * Not a failure, and not drawn as one. A cold start can outlast the server's wait, and when it does
+ * the call is turned away before anything reaches the computer. Drawn as "didn't work" in amber, it
+ * read as a broken computer during the one minute every first start takes.
+ */
+function stillStarting(outcome: ComputerOutcome): boolean {
+  return outcome.ok === false && outcome.starting === true;
 }
 
 export function ComputerTools() {
@@ -199,9 +223,10 @@ export function ComputerTools() {
     available: offered.navigate,
     name: "computer_navigate",
     description:
-      "Open a web page on your own computer so the person can watch. Use this when asked to look " +
-      "at, visit, open or check a website. Returns the page title and its readable text, so answer " +
-      "from what comes back rather than telling the person to go and look.",
+      "Open a web page on your own computer so the person can watch. Use this when asked to open, " +
+      "visit or read a particular website. It is not a web search: never open a search engine with " +
+      "it to look something up. Returns the page title and its readable text, so answer from what " +
+      "comes back rather than telling the person to go and look.",
     parameters: z.object({
       url: z.string().describe("Full web address to open, including https://"),
     }),
@@ -362,6 +387,7 @@ export function ComputerTools() {
         }
         refused={outcomeOf(result).refused === true}
         failed={didNotWork(outcomeOf(result))}
+        notYet={stillStarting(outcomeOf(result))}
       />
     ),
   });
@@ -408,6 +434,7 @@ export function ComputerTools() {
           }
           refused={outcome.refused === true}
           failed={didNotWork(outcome)}
+          notYet={stillStarting(outcome)}
         />
       );
     },
@@ -451,6 +478,7 @@ export function ComputerTools() {
         detail={typeof args?.key === "string" ? args.key : undefined}
         refused={outcomeOf(result).refused === true}
         failed={didNotWork(outcomeOf(result))}
+        notYet={stillStarting(outcomeOf(result))}
       />
     ),
   });
@@ -625,6 +653,7 @@ export function ComputerTools() {
           }
           refused={outcome.refused === true}
           failed={didNotWork(outcome)}
+          notYet={stillStarting(outcome)}
         />
       );
     },
@@ -671,6 +700,7 @@ export function ComputerTools() {
           }
           refused={outcome.refused === true}
           failed={didNotWork(outcome)}
+          notYet={stillStarting(outcome)}
         />
       );
     },
@@ -748,6 +778,7 @@ export function ComputerTools() {
           }
           refused={outcome.refused === true}
           failed={didNotWork(outcome) || exit !== 0}
+          notYet={stillStarting(outcome)}
         >
           {status === "complete" ? (
             <CommandOutput
@@ -825,6 +856,7 @@ export function ComputerTools() {
           }
           refused={outcome.refused === true}
           failed={didNotWork(outcome)}
+          notYet={stillStarting(outcome)}
         />
       );
     },
@@ -860,6 +892,7 @@ export function ComputerTools() {
         label="Scrolled"
         refused={outcomeOf(result).refused === true}
         failed={didNotWork(outcomeOf(result))}
+        notYet={stillStarting(outcomeOf(result))}
       />
     ),
   });

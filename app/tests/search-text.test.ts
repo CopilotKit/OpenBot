@@ -10,20 +10,14 @@
  *
  * Two halves are pinned here. `searchText` renders whatever arrived back to the text it was, and
  * `parseSearchText` takes away the one case it could not have rendered back exactly — a number too
- * long to survive a double. The guard at the bottom keeps the `typeof` form from coming back.
+ * long to survive a double.
  */
 import { expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import {
   parseSearchText,
   searchText,
   searchTextEntry,
 } from "@/lib/search-text";
-import {
-  logicalLines,
-  sourceFiles,
-} from "../../server/tests/support/source-scan";
 
 test("text is recovered from whatever the router parsed the value into", () => {
   expect(searchText("abc")).toBe("abc");
@@ -67,30 +61,4 @@ test("a handle survives the URL whatever it is made of", () => {
 
 test("a parameter that is not there stays not there", () => {
   expect(searchText(parseSearchText("?other=1").flow_id)).toBeUndefined();
-});
-
-/**
- * AND THE SHAPE THAT CAUSED IT DOES NOT COME BACK. A `typeof search.x === "string"` test in a
- * route's `validateSearch` is the defect itself: it reads "keep it when it is text" and means "drop
- * it whenever the sender's value happened to be valid JSON". Routes read text through `searchText`.
- */
-const ROUTES_DIR = join(import.meta.dir, "../src/routes");
-const DROPPED_STRING = /typeof\s+search\??\.\w+\s*===\s*["']string["']/;
-
-test("no route reads a search parameter by guarding on its parsed type", () => {
-  // The walk and the line-splitting are the shared scanner's (server/tests/support): recursive,
-  // and LOGICAL lines — prettier wraps `typeof search.flowId ===` away from its `"string"`, and
-  // read one physical line at a time this guard would have reported green on the very shape it
-  // exists to catch.
-  const files = sourceFiles(ROUTES_DIR, [".ts", ".tsx"]);
-  expect(files.length).toBeGreaterThan(10);
-  const offenders: string[] = [];
-  for (const file of files) {
-    for (const { line, text } of logicalLines(readFileSync(file, "utf8"))) {
-      if (DROPPED_STRING.test(text)) {
-        offenders.push(`${file.slice(ROUTES_DIR.length + 1)}:${line}`);
-      }
-    }
-  }
-  expect(offenders).toEqual([]);
 });

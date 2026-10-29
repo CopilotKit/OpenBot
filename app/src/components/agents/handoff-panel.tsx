@@ -1,3 +1,4 @@
+import { IconArrowsExchange, IconLock, IconRobot } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Fragment } from "react";
 import { AbstractAvatar } from "@/components/agents/abstract-avatar";
@@ -76,19 +77,19 @@ export function HandoffPanel({ agentId }: { agentId: string }) {
           </span>
         ) : null
       }
-      description="The Bots this one can ask for help. This doesn't change who can ask it. Their answers come back into the same conversation, under their name."
+      description="Choose which Bots this Bot can ask for help. Their answers appear in the same conversation under their own names. This does not change who can ask this Bot for help."
       title="Bots it can ask"
     >
       {/* Facts about the deployment rather than rows to act on, so said as sentences. */}
       {enabled ? null : (
-        <PageEmpty>
-          Handing work between Bots is turned off. These settings are kept, and
-          they apply again once an admin turns it back on.
+        <PageEmpty icon={IconArrowsExchange} title="Handoffs are off">
+          An admin turned off handing work between Bots. These settings are
+          kept, and they apply again once it's back on.
         </PageEmpty>
       )}
 
       {grantable ? null : (
-        <PageEmpty>
+        <PageEmpty icon={IconLock} title="Can't hand off work">
           This Bot can't hand work to other Bots. Other Bots can still hand work
           to it.
         </PageEmpty>
@@ -101,9 +102,8 @@ export function HandoffPanel({ agentId }: { agentId: string }) {
       ) : null}
 
       {grantable && total === 0 ? (
-        <PageEmpty>
-          No other Bots yet. When there are more, you can let this Bot ask them
-          here.
+        <PageEmpty icon={IconRobot} title="No other Bots yet">
+          When there are more, you can let this Bot ask them here.
         </PageEmpty>
       ) : null}
       {candidates.length > 0 ? (
@@ -153,7 +153,9 @@ export function HandoffPanel({ agentId }: { agentId: string }) {
       ) : null}
 
       {canGrant ? null : (
-        <PageEmpty>An admin decides which Bots this one can ask.</PageEmpty>
+        <PageEmpty icon={IconLock} title="Set by an admin">
+          An admin decides which Bots this one can ask.
+        </PageEmpty>
       )}
     </PageSection>
   );

@@ -1,0 +1,1 @@
+CREATE INDEX "work_items_open_thread_idx" ON "work_items" USING btree ("kind",("payload"->>'threadId')) WHERE "work_items"."finished_at" IS NULL;

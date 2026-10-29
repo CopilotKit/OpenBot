@@ -1,3 +1,10 @@
+import {
+  IconListDetails,
+  IconPlugOff,
+  IconRobot,
+  IconSearch,
+  IconTool,
+} from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useParams } from "@tanstack/react-router";
 import * as React from "react";
@@ -208,7 +215,9 @@ function RouteComponent() {
         description="No app with that name is turned on."
         title={appTitle}
       >
-        <PageEmpty>Nothing to give a Bot here.</PageEmpty>
+        <PageEmpty icon={IconPlugOff} title="This app is off">
+          Nothing to give a Bot here.
+        </PageEmpty>
       </PageShell>
     );
   }
@@ -252,7 +261,7 @@ function RouteComponent() {
         description="There is no Bot with that name."
         title="Not a Bot"
       >
-        <PageEmpty>
+        <PageEmpty icon={IconRobot} title="Bot not found">
           It may have been deleted after you opened this page.
         </PageEmpty>
       </PageShell>
@@ -421,9 +430,8 @@ function RouteComponent() {
       <SkippedToolsNotice names={server.skippedTools ?? []} />
 
       {server.tools.length === 0 ? (
-        <PageEmpty>
-          {server.lastError ??
-            `${appTitle} lists no actions. Refresh its tools to check again.`}
+        <PageEmpty icon={IconTool} title="No actions listed">
+          {server.lastError ?? "Refresh its tools to check again."}
         </PageEmpty>
       ) : (
         <>
@@ -473,7 +481,10 @@ function RouteComponent() {
             title="Reads"
           >
             {reads.length === 0 ? (
-              <PageEmpty>
+              <PageEmpty
+                icon={needle ? IconSearch : IconListDetails}
+                title={needle ? "No matches" : "No read-only actions"}
+              >
                 {needle
                   ? `Nothing that only reads matches "${search.trim()}".`
                   : `${appTitle} has no read-only actions.`}
@@ -491,7 +502,10 @@ function RouteComponent() {
             title="Changes things"
           >
             {writes.length === 0 ? (
-              <PageEmpty>
+              <PageEmpty
+                icon={needle ? IconSearch : IconListDetails}
+                title={needle ? "No matches" : "No actions that change things"}
+              >
                 {needle
                   ? `Nothing that changes things matches "${search.trim()}".`
                   : `${appTitle} has no actions that change things.`}

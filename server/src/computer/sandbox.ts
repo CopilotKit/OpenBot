@@ -15,6 +15,7 @@
  * in-cluster service account gives a token and a CA, which is what `inClusterConfig` reads.
  */
 import { readFile } from "node:fs/promises";
+import { ComputerStillStartingError } from "./client";
 import type {
   ComputerLocation,
   ComputerProvider,
@@ -89,6 +90,41 @@ export function imagesOf(podTemplate: unknown): string {
     .join(",");
 }
 
+/**
+ * The pod template, cut for one computer: each container told which id it is for (`COMPUTER_BOT_ID`), as the supervisor
+ * tells each container it starts.
+ *
+ * THE COMPUTER DECIDES WHETHER A PERSON'S BROWSER MAY RUN ON IT FROM THIS. A Sandbox is one computer for one id, but
+ * the computer cannot see that from inside: without the id it reads as the one computer every Bot shares, and refuses
+ * a person's browser there (agent-computer's `person-access.ts`). Given it, a person's computer runs their browser and
+ * refuses everything else. For a Bot's it changes only which profile a request that names nobody falls back to, which
+ * is the Bot's own. The template itself is left as it was, since every computer is cut from it.
+ */
+export function podTemplateFor(podTemplate: unknown, botId: string): unknown {
+  const template = podTemplate as
+    | { spec?: { containers?: Record<string, unknown>[] } }
+    | undefined;
+  const containers = template?.spec?.containers;
+  if (!template?.spec || !Array.isArray(containers)) return podTemplate;
+  return {
+    ...template,
+    spec: {
+      ...template.spec,
+      containers: containers.map((container) => {
+        const env = Array.isArray(container.env)
+          ? (container.env as { name?: unknown }[]).filter(
+              (variable) => variable.name !== "COMPUTER_BOT_ID",
+            )
+          : [];
+        return {
+          ...container,
+          env: [...env, { name: "COMPUTER_BOT_ID", value: botId }],
+        };
+      }),
+    },
+  };
+}
+
 export type SandboxProviderOptions = {
   /** Where the Bots' computers live. The provider is scoped to exactly this namespace. */
   namespace: string;
@@ -116,9 +152,23 @@ export type SandboxProviderOptions = {
   token?: string | (() => Promise<string>);
   ca?: string;
   fetchImpl?: typeof fetch;
-  /** How long `locate` waits for a suspended computer to come back before giving up. */
+  /** How long a computer is waited on to come back, by `update`'s restart and at most by `locate`. */
   resumeTimeoutMs?: number;
+  /**
+   * How long one `locate` waits before answering that the computer is still starting.
+   *
+   * Shorter than a resume can take ON PURPOSE. `locate` runs inside a person's request, and a load
+   * balancer with the usual 60s idle timeout cuts a request that says nothing for longer: the browser
+   * got a bare gateway error, the action could still land once the pod came up, and the model was
+   * told it had failed. Answering before that line keeps the "not performed" true. Giving up costs
+   * nothing, because the resume has already been written and the pod keeps coming up; the next call
+   * waits again.
+   */
+  locateWaitMs?: number;
 };
+
+/** See `locateWaitMs`. Under a 60s load balancer idle timeout, with room for the call itself. */
+const LOCATE_WAIT_MS = 45_000;
 
 /**
  * The service account this pod was given, which is how it reaches the API server.
@@ -250,6 +300,10 @@ export function createSandboxComputerProvider(
 } {
   const doFetch = options.fetchImpl ?? fetch;
   const resumeTimeoutMs = options.resumeTimeoutMs ?? 120_000;
+  const locateWaitMs = Math.min(
+    resumeTimeoutMs,
+    options.locateWaitMs ?? LOCATE_WAIT_MS,
+  );
   /** Restarts started by `update` and not yet finished, one per Bot. */
   const lastRestart = new Map<string, Promise<void>>();
   const base = () =>
@@ -316,21 +370,36 @@ export function createSandboxComputerProvider(
         // `podTemplate` is required and `volumeClaimTemplates` is what makes a suspend worth doing,
         // and both arrive together from the mounted template.
         ...options.template,
+        podTemplate: podTemplateFor(options.template.podTemplate, botId),
       },
     };
   }
 
-  async function waitForReady(botId: string): Promise<Sandbox> {
-    const deadline = Date.now() + resumeTimeoutMs;
+  async function waitForReady(
+    botId: string,
+    budgetMs: number = resumeTimeoutMs,
+  ): Promise<Sandbox> {
+    const deadline = Date.now() + budgetMs;
     for (;;) {
       const sandbox = await read(botId);
       if (sandbox && isReady(sandbox) && sandbox.status?.serviceFQDN) {
         return sandbox;
       }
       if (Date.now() >= deadline) {
-        throw new SandboxError(
-          `The computer for ${botId} did not become ready within ${Math.round(resumeTimeoutMs / 1000)}s. A resume costs a pod schedule and a browser launch, so this is a real wait rather than a failure, but it has to end somewhere.`,
+        /*
+         * A resume costs a pod schedule and a browser launch, so this is a real wait rather than a
+         * failure, but it has to end somewhere. When it does, the caller is told the computer is
+         * still starting and nothing was done, which is the truth: the pod is very likely seconds
+         * away. The operator's version, with the Bot and the budget, goes to the log.
+         */
+        console.warn(
+          JSON.stringify({
+            type: "computer-sandbox-still-starting",
+            botId,
+            waitedMs: budgetMs,
+          }),
         );
+        throw new ComputerStillStartingError();
       }
       await new Promise((resolve) => setTimeout(resolve, 1_000));
     }
@@ -369,7 +438,7 @@ export function createSandboxComputerProvider(
         {
           op: "replace",
           path: "/spec/podTemplate",
-          value: options.template.podTemplate,
+          value: podTemplateFor(options.template.podTemplate, botId),
         },
         { op: "add", path: "/spec/operatingMode", value: operatingMode },
       ]),
@@ -458,7 +527,7 @@ export function createSandboxComputerProvider(
       // A computer that is running on an older image is left alone here. It may be in the middle of
       // a task, and restarting it under the Bot is the person's decision, which is `update`.
 
-      const ready = await waitForReady(botId);
+      const ready = await waitForReady(botId, locateWaitMs);
       const fqdn = ready.status?.serviceFQDN;
       if (!fqdn) {
         throw new SandboxError(
