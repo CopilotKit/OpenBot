@@ -66,6 +66,19 @@ export type TaskRecord = {
   updatedAt: string;
 };
 
+/** What a task is opened with. Everything else about it is read from the ledgers. */
+export type NewTask = {
+  ownerUserId: string;
+  botId: string;
+  channelId: string;
+  title: string;
+  why: string | null;
+  origin: TaskOrigin;
+  suggestionId: string | null;
+  sourceApp: string | null;
+  sourceLink: string | null;
+};
+
 export class TaskNotFoundError extends Error {
   constructor() {
     super("Couldn't find that task.");
