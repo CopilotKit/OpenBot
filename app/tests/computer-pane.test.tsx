@@ -441,21 +441,17 @@ describe("the screen in the pane", () => {
     );
   }
 
-  test("asks for a secret for the page it is on, and says it goes only there", async () => {
+  test("asks for a secret for the page, and says it goes only there, never naming a site it can't vouch for", async () => {
     screenServer({ secretWanted: "the code sent to your phone" });
     const view = renderScreen();
     expect(
-      await view.findByText(
-        "accounts.example.com needs the code sent to your phone",
-      ),
+      await view.findByText("The page needs the code sent to your phone"),
     ).toBeTruthy();
     expect(
-      view.getByText(
-        "It goes straight to accounts.example.com. Ana never sees it.",
-      ),
+      view.getByText("It goes straight to the page. Ana never sees it."),
     ).toBeTruthy();
     const field = view.getByLabelText(
-      /accounts\.example\.com needs the code sent to your phone/,
+      /The page needs the code sent to your phone/,
     );
     expect(field.getAttribute("type")).toBe("password");
     expect(view.getByRole("button", { name: "Send to the page" })).toBeTruthy();
