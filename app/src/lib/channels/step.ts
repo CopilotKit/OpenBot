@@ -122,6 +122,36 @@ export function stepFor(
   return running ?? THINKING;
 }
 
+/**
+ * Whether the turn the Bot is on stopped to wait for the person: a call in it has no result, or only
+ * the note that it went to its approval card. Read once the turn is over, that turn ended on
+ * something the person has to answer (an approval, a sign-in), not on an answer of its own.
+ */
+export function turnWaitsOnPerson(messages: readonly Message[]): boolean {
+  const items = toVisibleChatItems(messages);
+  return items
+    .slice(turnStart(items))
+    .some(
+      (item) =>
+        item.kind === "tool" &&
+        (item.result === undefined || wentToItsCard(item.result)),
+    );
+}
+
+/** The browser's note for a computer call it sent to its approval card instead of running it. */
+function wentToItsCard(result: string): boolean {
+  try {
+    const parsed: unknown = JSON.parse(result);
+    return (
+      !!parsed &&
+      typeof parsed === "object" &&
+      (parsed as { waiting?: unknown }).waiting === true
+    );
+  } catch {
+    return false;
+  }
+}
+
 /** Where the turn the Bot is on began: after the person's last message, their words or files. */
 function turnStart(items: readonly VisibleChatItem[]): number {
   return (
