@@ -16,6 +16,7 @@ import { motion, useReducedMotion } from "motion/react";
 import {
   createContext,
   memo,
+  useCallback,
   useContext,
   useEffect,
   useLayoutEffect,
@@ -77,6 +78,7 @@ import {
   type TranscriptItem,
 } from "./tool-activity";
 import { isBrowserStep } from "./browser-activity";
+import { shouldDrawEarlier, useTranscriptPages } from "./transcript-pages";
 import {
   attachmentModality,
   type SentAttachment,
@@ -465,6 +467,12 @@ export function openingStagger(ids: readonly string[]): Map<string, string> {
 const ArrivalsLiveContext = createContext<React.RefObject<boolean> | null>(
   null,
 );
+
+/*
+ * For rows drawn later but older than everything on screen: an earlier page added above as the
+ * reader scrolls up (`useTranscriptPages`). They are history, so they draw at rest.
+ */
+const AT_REST: React.RefObject<boolean> = { current: false };
 
 function ArrivalsLive({ children }: { children: React.ReactNode }) {
   const live = useRef(false);
@@ -1743,6 +1751,34 @@ export function ChatTranscript({
         };
   };
 
+  /* Which rows are drawn; see `useTranscriptPages`. */
+  const pages = useTranscriptPages(items.length, restoring);
+  const { drawEarlier, from: pagesFrom } = pages;
+  const drawEarlierNearTop = useCallback(
+    (from: number) => {
+      const element = viewportRef.current;
+      if (
+        element !== null &&
+        shouldDrawEarlier({
+          from,
+          scrollTop: element.scrollTop,
+          scrollHeight: element.scrollHeight,
+        })
+      ) {
+        drawEarlier();
+      }
+    },
+    [drawEarlier],
+  );
+  /*
+   * After every page, before paint: a page that does not reach LOAD_MARGIN_PX above the fold (short
+   * rows, a tall screen) draws the one before it straight away. Runs after the scroller's landing,
+   * which happens in the provider's own layout effect, a child of this one.
+   */
+  useLayoutEffect(() => {
+    if (!restoring) drawEarlierNearTop(pagesFrom);
+  }, [pagesFrom, restoring, drawEarlierNearTop]);
+
   /*
    * NOTHING BUT THE PLACEHOLDER UNTIL HISTORY IS COMPLETE, AND THE SCROLLER MOUNTED FRESH AFTER IT.
    *
@@ -1780,11 +1816,82 @@ export function ChatTranscript({
     );
   }
 
+  /*
+   * One row, wherever it is drawn. `index` is the row's place in `items`, not in the slice being
+   * drawn, so "the last row" and "latest" mean the same with or without older pages above.
+   */
+  const renderRow = (item: TranscriptItem, index: number) =>
+    item.kind === "tools" ? (
+      <MessageScrollerItem
+        key={item.id}
+        messageId={item.id}
+        {...openingProps(item.id)}
+      >
+        <ToolRow
+          active={busy && index === items.length - 1}
+          id={item.id}
+          latest={index >= latestIndex}
+          steps={item.steps}
+        />
+      </MessageScrollerItem>
+    ) : item.kind === "tool" ? (
+      <MessageScrollerItem
+        key={item.id}
+        messageId={item.id}
+        {...openingProps(item.id)}
+      >
+        <ToolRow
+          active={busy && index === items.length - 1}
+          id={item.id}
+          latest={index >= latestIndex}
+          steps={[item]}
+        />
+      </MessageScrollerItem>
+    ) : item.kind === "activity" ? (
+      <MessageScrollerItem
+        key={item.id}
+        messageId={item.id}
+        {...openingProps(item.id)}
+      >
+        <TranscriptActivity message={item.message} />
+      </MessageScrollerItem>
+    ) : item.kind === "text" ? (
+      <MessageScrollerItem
+        key={item.id}
+        messageId={item.id}
+        scrollAnchor={anchorRows.has(item.id)}
+        {...openingProps(item.id)}
+      >
+        <TranscriptMessage
+          commandNames={commandNames}
+          role={item.role}
+          text={item.text}
+        />
+      </MessageScrollerItem>
+    ) : item.kind === "attachments" ? (
+      <MessageScrollerItem
+        key={item.id}
+        messageId={item.id}
+        scrollAnchor={anchorRows.has(item.id)}
+        {...openingProps(item.id)}
+      >
+        <TranscriptAttachments attachments={item.attachments} />
+      </MessageScrollerItem>
+    ) : (
+      // Every member of the union is handled above. `assertNever` types `item` as
+      // `never` here, so a future addition to `VisibleChatItem` fails to typecheck at
+      // this call instead of silently falling into this branch and rendering nothing.
+      assertNever(item)
+    );
+
   return (
     <ArrivalsLive>
       <MessageScrollerProvider autoScroll scrollPreviousItemPeek={48}>
         <MessageScroller>
-          <MessageScrollerViewport ref={viewportRef}>
+          <MessageScrollerViewport
+            onScroll={() => drawEarlierNearTop(pagesFrom)}
+            ref={viewportRef}
+          >
             <MessageScrollerContent
               aria-busy={busy}
               className="mx-auto w-full max-w-2xl px-4 py-6"
@@ -1810,6 +1917,14 @@ export function ChatTranscript({
                * caller falls through to its follow-the-bottom branch — so a new turn stops aligning
                * to the top of the viewport with a peek of the previous one, silently, with no test
                * failing.
+               *
+               * OLDER PAGES GO BEFORE THIS BLOCK, AND THAT IS THE SAME MECHANISM USED ON PURPOSE.
+               * When the reader nears the top, the page before is drawn (`useTranscriptPages`). Drawn
+               * here, ahead of this block, it moves whatever was the first child, and a first child
+               * that moved is the scroller's own "rows were prepended" case: it puts the row the
+               * reader was looking at back where it was (`de()`), and never runs the scan above, which
+               * would read the shifted rows as new ones and jump to an old turn. Rows that arrive
+               * live still go after this block, at the end, where that scan looks for them.
                *
                * `display: contents` IS LOAD-BEARING FOR THE SAME REASON, and not a layout trick. It
                * promotes these children to flex items of the column so they can carry `order`, while
@@ -1838,6 +1953,11 @@ export function ChatTranscript({
                * Paying it properly means the scroller identifying new rows by identity rather than by
                * position, which is the library's to change and is worth asking for.
                */}
+              <ArrivalsLiveContext.Provider value={AT_REST}>
+                {items
+                  .slice(pages.from, pages.split)
+                  .map((item, offset) => renderRow(item, pages.from + offset))}
+              </ArrivalsLiveContext.Provider>
               <div className="contents [&>*]:order-1">
                 {stopped ? (
                   <Stopped reason={stopped} />
@@ -1858,70 +1978,9 @@ export function ChatTranscript({
                   />
                 ))}
               </div>
-              {items.map((item, index) =>
-                item.kind === "tools" ? (
-                  <MessageScrollerItem
-                    key={item.id}
-                    messageId={item.id}
-                    {...openingProps(item.id)}
-                  >
-                    <ToolRow
-                      active={busy && index === items.length - 1}
-                      id={item.id}
-                      latest={index >= latestIndex}
-                      steps={item.steps}
-                    />
-                  </MessageScrollerItem>
-                ) : item.kind === "tool" ? (
-                  <MessageScrollerItem
-                    key={item.id}
-                    messageId={item.id}
-                    {...openingProps(item.id)}
-                  >
-                    <ToolRow
-                      active={busy && index === items.length - 1}
-                      id={item.id}
-                      latest={index >= latestIndex}
-                      steps={[item]}
-                    />
-                  </MessageScrollerItem>
-                ) : item.kind === "activity" ? (
-                  <MessageScrollerItem
-                    key={item.id}
-                    messageId={item.id}
-                    {...openingProps(item.id)}
-                  >
-                    <TranscriptActivity message={item.message} />
-                  </MessageScrollerItem>
-                ) : item.kind === "text" ? (
-                  <MessageScrollerItem
-                    key={item.id}
-                    messageId={item.id}
-                    scrollAnchor={anchorRows.has(item.id)}
-                    {...openingProps(item.id)}
-                  >
-                    <TranscriptMessage
-                      commandNames={commandNames}
-                      role={item.role}
-                      text={item.text}
-                    />
-                  </MessageScrollerItem>
-                ) : item.kind === "attachments" ? (
-                  <MessageScrollerItem
-                    key={item.id}
-                    messageId={item.id}
-                    scrollAnchor={anchorRows.has(item.id)}
-                    {...openingProps(item.id)}
-                  >
-                    <TranscriptAttachments attachments={item.attachments} />
-                  </MessageScrollerItem>
-                ) : (
-                  // Every member of the union is handled above. `assertNever` types `item` as
-                  // `never` here, so a future addition to `VisibleChatItem` fails to typecheck at
-                  // this call instead of silently falling into this branch and rendering nothing.
-                  assertNever(item)
-                ),
-              )}
+              {items
+                .slice(pages.split)
+                .map((item, offset) => renderRow(item, pages.split + offset))}
             </MessageScrollerContent>
           </MessageScrollerViewport>
           <MessageScrollerButton />
