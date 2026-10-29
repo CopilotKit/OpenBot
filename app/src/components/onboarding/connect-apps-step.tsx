@@ -16,6 +16,7 @@ import { Separator } from "@/components/ui/separator";
 import { defaultAgentProfile } from "@/lib/agents/default-agent";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { type AppAccess, botAppsQueryOptions } from "@/lib/app-access/queries";
+import { currentUserQueryOptions } from "@/lib/auth/queries";
 import {
   confirmBrokeredConnectionMutationOptions,
   connectAccountMutationOptions,
@@ -75,6 +76,7 @@ export function ConnectAppsStep({
   failed,
   returned,
   leaveFor,
+  openPage,
 }: {
   /** The last consent came back failed. */
   failed: boolean;
@@ -82,7 +84,11 @@ export function ConnectAppsStep({
   returned?: ConsentApp | null;
   /** Where the browser goes to approve the connection: the vendor's own page. */
   leaveFor: (url: string, app: ConsentApp) => void;
+  /** Opens an app page once onboarding finishes, as the setup checklist's links do. */
+  openPage?: (target: { label: string; path: string }) => void;
 }) {
+  // An admin with nothing to connect is the one who adds apps, so is shown where.
+  const isAdmin = useQuery(currentUserQueryOptions()).data?.role === "admin";
   const agents = useQuery(agentListQueryOptions());
   const bot = defaultAgentProfile(agents.data);
   const apps = useQuery({
@@ -157,8 +163,26 @@ export function ConnectAppsStep({
           Connections.
         </p>
       ) : rows?.length === 0 ? (
-        <PageEmpty icon={IconPlug} title="No apps to connect yet">
-          When an admin adds apps, you can connect them in Connections.
+        <PageEmpty
+          action={
+            isAdmin && openPage ? (
+              <Button
+                onClick={() =>
+                  openPage({ label: "Plugins", path: "/admin/plugins" })
+                }
+                size="sm"
+                variant="outline"
+              >
+                Add apps
+              </Button>
+            ) : undefined
+          }
+          icon={IconPlug}
+          title="No apps to connect yet"
+        >
+          {isAdmin
+            ? "Add apps for everyone in Plugins, then connect your own here or in Connections."
+            : "When an admin adds apps, you can connect them in Connections."}
         </PageEmpty>
       ) : (
         <PageRows>

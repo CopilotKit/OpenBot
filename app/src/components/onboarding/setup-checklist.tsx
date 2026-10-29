@@ -180,10 +180,11 @@ function SetupItem({
         <Icon />
       </ItemMedia>
       <ItemContent className="min-w-0">
-        <ItemTitle className="line-clamp-none flex-wrap gap-x-2 gap-y-0 [overflow-wrap:anywhere]">
+        {/* `line-clamp-none` makes the title a block, so the tag keeps its own space. */}
+        <ItemTitle className="line-clamp-none [overflow-wrap:anywhere]">
           {row.title}
           {row.required ? (
-            <span className="type-caption whitespace-nowrap font-normal text-muted-foreground">
+            <span className="type-caption ms-2 whitespace-nowrap font-normal text-muted-foreground">
               Required
             </span>
           ) : null}
