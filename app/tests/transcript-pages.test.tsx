@@ -1,12 +1,19 @@
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import type { Message } from "@ag-ui/core";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { cleanup, fireEvent, render } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  renderHook,
+} from "@testing-library/react";
 import { ChatTranscript } from "@/components/channels/chat-transcript";
 import {
   earlierFrom,
   openingFrom,
   shouldDrawEarlier,
+  useTranscriptPages,
 } from "@/components/channels/transcript-pages";
 import { settleReactWork } from "./settle-react-work";
 
@@ -240,4 +247,19 @@ test("one trigger at the very top draws one page, not the whole history", () => 
   fireEvent.scroll(element);
 
   expect(rows(view.container).length).toBe(40);
+});
+
+/* A jump from the rail to a turn several pages up draws everything down to it, in one go. */
+test("drawing down to a row draws every page from it", () => {
+  const { result } = renderHook(
+    ({ count }) => useTranscriptPages(count, false),
+    { initialProps: { count: 100 } },
+  );
+  expect(result.current.from).toBe(80);
+
+  act(() => result.current.drawTo(33));
+  expect(result.current.from).toBe(33);
+
+  act(() => result.current.drawTo(50));
+  expect(result.current.from).toBe(33);
 });

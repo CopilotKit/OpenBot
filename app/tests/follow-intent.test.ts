@@ -130,3 +130,12 @@ test("a queued message resumes at the end", () => {
     scrollToEnd: "auto",
   });
 });
+
+/* Jumping to a turn from the rail is the person moving through the conversation, like scrolling up. */
+test("a jump from the rail stops following, and coming back to the end resumes it", () => {
+  const jumped = nextFollow(FOLLOWING, { type: "jump" });
+  expect(jumped).toEqual({ state: PAUSED, scrollToEnd: null });
+  expect(nextFollow(jumped.state, scroll(900, 800, 40)).state).toEqual(
+    FOLLOWING,
+  );
+});

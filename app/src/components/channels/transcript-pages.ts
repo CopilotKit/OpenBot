@@ -45,7 +45,12 @@ export function shouldDrawEarlier(view: {
 export function useTranscriptPages(
   count: number,
   restoring: boolean,
-): { from: number; split: number; drawEarlier: () => void } {
+): {
+  from: number;
+  split: number;
+  drawEarlier: () => void;
+  drawTo: (index: number) => void;
+} {
   /* One object per opening, so a page drawn for an earlier opening is recognisably not this one's. */
   const openingRef = useRef<{ split: number } | null>(null);
   const [earlier, setEarlier] = useState<{
@@ -72,6 +77,12 @@ export function useTranscriptPages(
     if (current === null || fromRef.current === 0) return;
     setEarlier({ opening: current, from: earlierFrom(fromRef.current) });
   }, []);
+  /* Every page down to the row at `index`, for a jump to a turn that has not been drawn yet. */
+  const drawTo = useCallback((index: number) => {
+    const current = openingRef.current;
+    if (current === null || index >= fromRef.current) return;
+    setEarlier({ opening: current, from: Math.max(0, index) });
+  }, []);
 
-  return { from, split, drawEarlier };
+  return { from, split, drawEarlier, drawTo };
 }

@@ -44,6 +44,8 @@ export type FollowEvent =
     }
   | { type: "selection"; active: boolean }
   | { type: "button" }
+  /* A mark on the rail: they went to a turn of their choosing, so stay with what they chose. */
+  | { type: "jump" }
   | { type: "send" }
   /* A message parked under the conversation: they are looking at the end, so go there. */
   | { type: "queued" };
@@ -69,6 +71,8 @@ function movesUp(event: FollowEvent): boolean {
       return UP_KEYS.has(event.key) || (event.key === " " && event.shiftKey);
     case "touch":
       return event.fingerDeltaY > 0;
+    case "jump":
+      return true;
     case "scroll":
       // Only a scroll the person is dragging: the scrollbar, with a pointer held down on it.
       return event.pointerDown && event.top < event.previousTop;
