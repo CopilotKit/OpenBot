@@ -191,7 +191,7 @@ changes for a deployment.
   the Bot's page and in the list of what needs you. Once you answer, it folds to how it went
   (Allowed, Sent, Done, Declined, Didn't work) and says who decided. A request for a step that is
   alone in its turn now shows in the conversation too, where before it waited only on the Bot's
-  page.
+  page. Under the message box, every conversation says that OpenBot is AI and can make mistakes.
 
 ### Generated interfaces use A2UI 1.0
 
