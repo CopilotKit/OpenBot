@@ -128,6 +128,13 @@ export type ComposerProps = {
    * `text-lg`) goes through here, where tailwind-merge lets it beat the built-in `text-sm`.
    */
   editorClassName?: string;
+  /** What the empty editor says. Home steps it through prompts built from the person's Bots. */
+  placeholder?: string;
+  /**
+   * The editor's minimum height in pixels, on the full composer only; the compact one keeps its
+   * single line. Unset, PromptArea's own minimum applies.
+   */
+  editorMinHeight?: number;
   compact?: boolean;
   voiceCall?: { active: boolean; supported: boolean; onStart(): void };
   /** Agents that `@` can address. Empty means the mention menu reports an empty channel. */
@@ -312,6 +319,8 @@ const UNACCEPTED_DROP_REASON = {
 export function Composer({
   className,
   editorClassName,
+  placeholder = "Ask anything",
+  editorMinHeight,
   compact = false,
   voiceCall,
   agents = [],
@@ -1561,7 +1570,7 @@ export function Composer({
                   onChange={handleChange}
                   onImagePaste={canAttach ? stagePastedImage : undefined}
                   onSubmit={submitDraft}
-                  placeholder="Ask anything"
+                  placeholder={placeholder}
                   ref={promptAreaRef}
                   triggers={triggers}
                   value={value}
@@ -1618,10 +1627,11 @@ export function Composer({
                 )}
                 disabled={disabled}
                 maxHeight={MAX_HEIGHT_PX}
+                minHeight={editorMinHeight}
                 onChange={handleChange}
                 onImagePaste={canAttach ? stagePastedImage : undefined}
                 onSubmit={submitDraft}
-                placeholder="Ask anything"
+                placeholder={placeholder}
                 ref={promptAreaRef}
                 triggers={triggers}
                 value={value}
