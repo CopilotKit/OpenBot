@@ -22,6 +22,8 @@ import type { AgentActor } from "./profile-types";
 export type AgentResolutionContext = {
   initiator?: AuditInitiator;
   depth?: number;
+  /** A task's own turn, which does the work rather than handing it to another task. */
+  task?: boolean;
 };
 
 export class CoworkerUnavailableError extends Error {}
@@ -46,6 +48,7 @@ export type ActorAgentResolverDependencies = {
   loadToolsForActor?: (
     actorId: string,
     initiator?: AuditInitiator,
+    turn?: { task?: boolean },
   ) => LoadToolsForBot;
   signRunForActor?: (
     actorId: string,
@@ -110,7 +113,11 @@ export function createActorAgentResolver(
       deps.model,
       deps.resolveModelApiKey,
       deps.stallGuard,
-      deps.loadToolsForActor?.(actor.id, context?.initiator),
+      deps.loadToolsForActor?.(
+        actor.id,
+        context?.initiator,
+        context?.task ? { task: true } : undefined,
+      ),
       deps.signRunForActor?.(actor.id, context?.initiator, context?.depth),
       deps.computerGuidance,
       deps.loadVendors,

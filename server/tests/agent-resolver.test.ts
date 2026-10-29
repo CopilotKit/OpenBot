@@ -58,6 +58,25 @@ describe("actor-scoped agent resolver", () => {
     ]);
   });
 
+  test("tells the tools when the turn is a task's own, and says nothing otherwise", async () => {
+    const turns: unknown[] = [];
+    const resolver = createActorAgentResolver({
+      loadAgents: async () => [
+        { id: "risk", name: "Risk", type: "built_in", systemPrompt: "Work." },
+      ],
+      model: { provider: "openai", defaultModel: "unused" },
+      resolveModelApiKey: async () => "synthetic-key",
+      loadToolsForActor: (_id, _cause, turn) => {
+        turns.push(turn);
+        return async () => [];
+      },
+    });
+    const actor = { id: "u1", role: "user" as const };
+    await resolver.resolveAgentForActor(actor, "risk", { task: true });
+    await resolver.resolveAgentForActor(actor, "risk");
+    expect(turns).toEqual([{ task: true }, undefined]);
+  });
+
   test("propagates construction failures instead of reporting an unavailable coworker", async () => {
     const failure = new Error("key store unavailable");
     const resolver = createActorAgentResolver({
