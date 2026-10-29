@@ -107,6 +107,19 @@ describe("a task's turn", () => {
     });
   });
 
+  test("answers whether its reply asks, read from the whole reply rather than the line it keeps", async () => {
+    const question = `Shall I send draft A to Danny, ${"with the Friday date and the studio address, ".repeat(6)}or wait for you?`;
+    const turn = turnWith(async () => ({
+      replyText: `Both drafts are ready.\n\n${question}`,
+    }));
+    expect(await turn.start()).toEqual({
+      messageId: "task-1:reply",
+      asks: true,
+    });
+    // The line kept is cut short, before its question mark.
+    expect(turn.said.at(-1)?.text).toEndWith("…");
+  });
+
   test("that stops for Allow once ends waiting on the person, not failed", async () => {
     const turn = turnWith(async () => {
       throw new HeadlessToolSuspension(

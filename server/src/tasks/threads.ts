@@ -17,9 +17,10 @@ import type {
   ProactiveEngineDeps,
   ProactiveScope,
   TaskThreads,
+  TaskTurnEnding,
 } from "../proactive/engine";
 import type { TaskReplyContextReader } from "./reply-context";
-import { replyTail } from "./reply-ending";
+import { replyEnding } from "./reply-ending";
 import { plainFailure, type TaskStore } from "./store";
 
 /*
@@ -136,7 +137,9 @@ export function createTaskTurn(deps: {
   runTurn: TurnRunner;
   /** Resolves a reply's files and skills. Absent, a reply with either fails. */
   replyContext?: Pick<TaskReplyContextReader, "resolve">;
-}): ProactiveEngineDeps["startTask"] {
+}): (
+  ...turn: Parameters<ProactiveEngineDeps["startTask"]>
+) => Promise<TaskTurnEnding | undefined> {
   return async (scope, input) => {
     const actor = await deps.actorFor(scope.ownerUserId);
     const record = (text: string, agentId: string | null, id: string) =>
@@ -197,13 +200,16 @@ export function createTaskTurn(deps: {
        * Recorded as how the reply ends, its next step, rather than how it starts: Tasks shows this
        * line after the task's status (`TaskRecord.next`), and a conversation's preview keeps only
        * its first 200 characters, which for a long reply would be its opening.
+       *
+       * Whether it asks is read here, from the whole reply, and answered for the turn's work item:
+       * the line recorded is cut short, and a long closing question loses its question mark there.
        */
-      if (result.replyText)
-        await record(
-          replyTail(result.replyText) ?? result.replyText,
-          scope.agentId,
-          `${input.runId}:reply`,
-        );
+      if (result.replyText) {
+        const ending = replyEnding(result.replyText);
+        const messageId = `${input.runId}:reply`;
+        await record(ending.tail ?? result.replyText, scope.agentId, messageId);
+        return { messageId, asks: ending.asks };
+      }
     } catch (error) {
       if (!(error instanceof HeadlessToolSuspension)) {
         if (input.final && !(error instanceof ThreadLockBusyError))

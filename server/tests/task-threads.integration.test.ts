@@ -60,6 +60,7 @@ import {
   PROACTIVE_TASK_KIND,
   type ProactiveScope,
   type TaskThreads,
+  type TaskTurnEnding,
 } from "../src/proactive/engine";
 import { createProactiveRoutes } from "../src/proactive/routes";
 import { createProactiveStore } from "../src/proactive/store";
@@ -247,7 +248,7 @@ function engineFor(
   turn: (
     started: Started,
     signal: AbortSignal,
-  ) => Promise<void> = async () => {},
+  ) => Promise<TaskTurnEnding | undefined> | Promise<void> = async () => {},
   durable?: WorkQueue,
   replyContext?: ReturnType<typeof createTaskReplyContext>,
   tasks: TaskThreads = threads,
@@ -274,7 +275,7 @@ function engineFor(
     resolveScope: scopeFor,
     notify: async () => undefined,
     tasks,
-    startTask: async (scope, input) => {
+    startTask: (scope, input) => {
       const run = {
         scope,
         runId: input.runId,
@@ -285,7 +286,7 @@ function engineFor(
         ...(input.skillIds ? { skillIds: input.skillIds } : {}),
       };
       started.push(run);
-      await turn(run, input.signal);
+      return turn(run, input.signal);
     },
     catalogue: { listServers: async () => [] },
     mintThreadId: () => `${prefix}-research-thread`,
@@ -1180,6 +1181,36 @@ describe("status", () => {
       },
     });
     expect(await statusOf(task.id)).toBe("working");
+  });
+
+  test("a closing question too long for its conversation's line still asks for input", async () => {
+    const question =
+      "Should I send Danny the reply now, with the Friday time moved to ten, the studio on Hearth Street as the place, and the note about parking in the yard behind the building, or would you like to read it through first?";
+    // Longer than the line a conversation keeps, which cuts it before its question mark.
+    expect(Array.from(question).length).toBeGreaterThan(200);
+    const turn = createTaskTurn({
+      actorFor,
+      channels: {
+        recordActivity: channelStore.recordActivity,
+        signalBusy: async () => {},
+      },
+      runTurn: async () => ({
+        replyText: `I drafted the reply to Danny.\n\n${question}`,
+      }),
+    });
+    const { engine } = engineFor(
+      ({ scope, ...input }, signal) => turn(scope, { ...input, signal }),
+      createWorkQueue(database),
+    );
+    const task = await engine.startAsked(owner.id, bot, {
+      title: "Reply to Danny",
+      instruction: "Draft a reply to Danny.",
+    });
+    await engine.idle();
+    expect(await taskStore.get(owner.id, task.id)).toMatchObject({
+      status: "needs_input",
+      next: expect.stringMatching(/^Should I send Danny/),
+    });
   });
 
   async function resolvedReply() {
