@@ -29,7 +29,7 @@ export const TASK_FRAME = [
  * second of them on the list's next-step line.
  */
 export const TASK_ENDING =
-  'End with a sentence or two in plain words on what you did. Ask the person a question only if you need their answer to go on, and never end by offering more work as a question. Don\'t label these parts, as in "What I did:" or "Still waiting on you:".';
+  'End with a sentence or two, written to the person as "you", on what you did. Ask them a question only if you need their answer to go on; if nothing waits on them, leave that unsaid, and never end by offering more work as a question. Don\'t label these parts, as in "What I did:" or "Still waiting on you:".';
 
 /** The historical frame and blank line remain the prefix of correction messages. */
 const PREFIX = [...TASK_FRAME, "", ""].join("\n");
