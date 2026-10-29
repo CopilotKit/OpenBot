@@ -284,7 +284,9 @@ import { createModelCompleter } from "./routing/model";
 import { createSelfHostBanner } from "./self-host-banner";
 import { createSetupSources, modelKeyOf } from "./setup/checklist";
 import { createComputerCheck } from "./setup/computer-check";
+import { createTaskReplyContext } from "./tasks/reply-context";
 import { createTaskStore } from "./tasks/store";
+import { createTaskThreads, createTaskTurn } from "./tasks/threads";
 import { createTeamBots } from "./team-bots/team-bots";
 import {
   createPackageStatusReader,
@@ -1421,6 +1423,13 @@ const deliveryScopeFor: DeliveryScopeResolver = async (
 };
 
 /*
+ * A person's tasks, read from the queue and the approval and question inboxes the sweeps keep. See
+ * tasks/store.ts. Made this early because research delivery below asks it which conversations are
+ * a task's own.
+ */
+const taskStore = createTaskStore(database);
+
+/*
  * Memory sources and background research, on by default for each person and Bot, and never switched
  * back on once the person turns one down. See memory/defaults.ts.
  */
@@ -1432,9 +1441,11 @@ const memoryDefaults = createMemoryDefaults({
   channelBots: async (ownerUserId, channelId) =>
     (await channelStore.get(await actorFor(ownerUserId), channelId))
       ?.agentIds ?? null,
-  // The same rule research delivery uses, read when a person speaks (long after it is defined).
+  // The same rule research delivery uses, read when a person speaks (long after it is defined). Never
+  // a task's own conversation: research writes to the person, and a task's turn works for them.
   canDeliver: async (ownerUserId, channelId, agentId) =>
-    (await deliveryScopeFor(ownerUserId, channelId, agentId)) !== null,
+    (await deliveryScopeFor(ownerUserId, channelId, agentId)) !== null &&
+    !(await taskStore.isTaskConversation(ownerUserId, channelId)),
   mintThreadId: () => threadIdentity.mint(),
   // Read when a Bot turn starts, long after `teamBots` below is defined.
   publishedByAnother: (ownerUserId, agentId) =>
@@ -2177,6 +2188,22 @@ deliveryNotifications = (scope, input) => deliveryRouter.notify(scope, input);
  * work queue as routines. Suggestions go to the web inbox and the owner's delivery routing.
  */
 const proactiveStore = createProactiveStore(database);
+// The files and skills a reply in a task's conversation names, checked as a conversation checks them.
+const taskReplyContext = createTaskReplyContext({
+  load: (scope, id) =>
+    loadAttachmentForTurn(
+      database,
+      { actorId: scope.ownerUserId, threadId: scope.threadId },
+      id,
+    ),
+  markSent: (scope, ids) =>
+    markAttachmentsSent(
+      database,
+      { actorId: scope.ownerUserId, threadId: scope.threadId },
+      ids,
+    ),
+  skillsFor: (agentId) => pluginStore.listForAgent(agentId),
+});
 const proactiveEngine = createProactiveEngine({
   store: proactiveStore,
   memory: personalMemoryStore,
@@ -2196,30 +2223,21 @@ const proactiveEngine = createProactiveEngine({
   }),
   resolveScope: deliveryScopeFor,
   notify: (scope, input) => deliveryNotifications(scope, input),
-  startTask: async (scope, input) => {
-    const actor = await actorFor(scope.ownerUserId);
-    await channelStore.recordActivity(
-      actor,
-      scope.channelId,
-      { text: input.text, agentId: null, at: new Date() },
-      { id: `${input.runId}:input` },
-    );
-    const result = await approvalContinuationRunner({
-      ...scope,
-      routineId: input.runId,
-      instruction: input.text,
-      userMessage: { id: input.runId, role: "user", content: input.text },
-      initiator: PERSON_INITIATOR,
-      signal: input.signal,
-    });
-    if (result.replyText)
-      await channelStore.recordActivity(
-        actor,
-        scope.channelId,
-        { text: result.replyText, agentId: scope.agentId, at: new Date() },
-        { id: `${input.runId}:reply` },
-      );
-  },
+  // Started work runs as a task, in a conversation of its own. See tasks/threads.ts.
+  tasks: createTaskThreads({
+    database,
+    store: taskStore,
+    channels: channelStore,
+    actorFor,
+    scopeFor: deliveryScopeFor,
+  }),
+  startTask: createTaskTurn({
+    channels: channelStore,
+    actorFor,
+    runTurn: approvalContinuationRunner,
+    replyContext: taskReplyContext,
+  }),
+  acceptReplyContext: taskReplyContext.accept,
   catalogue: pluginStore,
   deniedToolNames: async (ownerUserId, agentId) => {
     const [tools, allowed] = await Promise.all([
@@ -2245,11 +2263,6 @@ const proactiveSweep = repeatAfterEach(async () => {
     );
   }
 }, 60_000);
-/*
- * A person's tasks, read from the queue and the approval and question inboxes the sweeps above
- * already keep. See tasks/store.ts.
- */
-const taskStore = createTaskStore(database);
 /*
  * Follow-ups a Bot scheduled for itself: one headless turn each, through the same turn runner as a
  * routine, into the person's conversation with that Bot. See agents/wake-up.ts.

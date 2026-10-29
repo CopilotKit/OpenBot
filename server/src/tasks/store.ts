@@ -1,6 +1,8 @@
+import { randomUUID } from "node:crypto";
 import { and, desc, eq, inArray, isNull, or, type SQL, sql } from "drizzle-orm";
 import {
   type PersonQuestion,
+  pendingPersonQuestion,
   questionResponseMessage,
 } from "../approvals/questions";
 import type { Database } from "../db/client";
@@ -11,10 +13,16 @@ import {
   tasks,
   workItems,
 } from "../db/schema";
-import { PROACTIVE_TASK_KIND } from "../proactive/engine";
+import {
+  PROACTIVE_TASK_KIND,
+  type TaskInput,
+  taskInputSchema,
+} from "../proactive/engine";
+import { ProactiveRefusedError } from "../proactive/types";
 import { DEFAULT_MAX_ATTEMPTS } from "../work/queue";
 import { replyEnding, replyTail } from "./reply-ending";
 import {
+  type NewTask,
   TASK_RUNS,
   TaskNotFoundError,
   type TaskRecord,
@@ -82,7 +90,10 @@ export function plainFailure(error: string | null | undefined): string {
     [/before (it|retries) could/i, "it failed before it could be tried again"],
     [/\bpaused\b/i, "work is paused"],
     [/allowed model/i, "the model isn't allowed here"],
-    [/lock/i, "the conversation was busy with another reply"],
+    [
+      /lock|busy with another turn/i,
+      "the conversation was busy with another reply",
+    ],
     [/cancel|abort/i, "the run was stopped"],
     [
       /\b40[13]\b|authentication|api.?key/i,
@@ -122,6 +133,10 @@ type Row = typeof tasks.$inferSelect;
 type TaskState = {
   /** The person's completion, unless genuinely new durable work superseded it. */
   resolvedAt: Date | null;
+  /** What the turn its status is read from was asked: what Try again asks again. */
+  turnInput: Record<string, unknown> | null;
+  /** How many turns of its own it has had, which keys Try again so two at once run once. */
+  turns: number;
   queuedReplies: { messageId: string; text: string }[];
   answeredQuestionIds: Set<string>;
   needsInput: boolean;
@@ -140,6 +155,7 @@ const payload = (field: string) => sql<string>`${workItems.payload}->>${field}`;
 const approvalThread = sql<string>`${approvalRequests.action}->>'threadId'`;
 
 export type TaskStore = ReturnType<typeof createTaskStore>;
+type TaskTransaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 
 /** Every read and write is the owner's: another person's task is the same as no task. */
 export function createTaskStore(
@@ -163,6 +179,8 @@ export function createTaskStore(
         row.id,
         {
           resolvedAt: row.resolvedAt,
+          turnInput: null,
+          turns: 0,
           queuedReplies: [],
           answeredQuestionIds: new Set<string>(),
           needsInput: false,
@@ -300,6 +318,7 @@ export function createTaskStore(
       database
         .select({
           ...turnState,
+          input: workItems.payload,
           reply: payload("reply"),
           followup: payload("followup"),
           questionIds: sql<
@@ -386,21 +405,33 @@ export function createTaskStore(
       ),
     );
     const taskTurns = [
-      ...turns.map((turn) => ({ ...turn, maxAttempts: TASK_RUNS })),
-      ...responses.map(({ question, response, ...turn }) => ({
-        ...turn,
-        // The person-response worker accepts one attempt, unlike a task's own turns.
-        maxAttempts: 1,
-        suggestionId: null,
-        followup: "true",
-        reply: response,
-        messageId: questionResponseMessage(
+      ...turns.map((turn) => ({ ...turn, own: true, maxAttempts: TASK_RUNS })),
+      ...responses.map(({ question, response, ...turn }) => {
+        const message = questionResponseMessage(
           question,
           response,
           `person-response:${turn.key}`,
-        ).id,
-        questionIds: [turn.key],
-      })),
+        );
+        return {
+          ...turn,
+          own: false,
+          // The person-response worker accepts one attempt, unlike a task's own turns.
+          maxAttempts: 1,
+          suggestionId: null,
+          followup: "true",
+          reply: response,
+          messageId: message.id,
+          questionIds: [turn.key],
+          // Tried again, the answer is carried on as a reply of the person's, in its own words.
+          input: {
+            text: message.content,
+            followup: true,
+            questionIds: [turn.key],
+            inputId: message.id,
+            reply: response,
+          } as Record<string, unknown>,
+        };
+      }),
     ].sort((a, b) => b.acceptedAt - a.acceptedAt || b.key.localeCompare(a.key));
     const latestOutcome = new Map<string, (typeof taskTurns)[number]>();
     const unfinished = new Map<string, (typeof taskTurns)[number]>();
@@ -414,8 +445,10 @@ export function createTaskStore(
           state.get(taskId)?.answeredQuestionIds.add(id);
       if (taskId) {
         const entry = state.get(taskId);
-        if (entry && turn.taskId && turn.afterResolution)
-          entry.resolvedAt = null;
+        if (entry && turn.taskId) {
+          if (turn.own) entry.turns += 1;
+          if (turn.afterResolution) entry.resolvedAt = null;
+        }
         const latest = latestOutcome.get(taskId);
         // Ties retain creation/key order, but insertion order never hides a later terminal turn.
         if (!latest || turn.outcomeAt > latest.outcomeAt)
@@ -454,6 +487,7 @@ export function createTaskStore(
       if (!entry) continue;
       // Any queued/live turn takes priority, including one whose older insert committed late.
       const turn = unfinished.get(row.id) ?? latestOutcome.get(row.id);
+      entry.turnInput = turn?.input ?? null;
       if (!turn) {
         /*
          * Opened, and its turn not queued yet: the moment between the two writes that start a task.
@@ -539,14 +573,20 @@ export function createTaskStore(
     };
   }
 
-  async function one(owner: string, id: string): Promise<TaskRecord> {
+  async function oneWithState(owner: string, id: string) {
     const [row] = await database
       .select()
       .from(tasks)
       .where(owned(owner, id))
       .limit(1);
     if (!row) throw new TaskNotFoundError();
-    return recordOf(row, (await stateOf(owner, [row])).get(id));
+    const state = (await stateOf(owner, [row])).get(id);
+    if (!state) throw new TaskNotFoundError();
+    return { record: recordOf(row, state), state };
+  }
+
+  async function one(owner: string, id: string): Promise<TaskRecord> {
+    return (await oneWithState(owner, id)).record;
   }
 
   async function setResolved(owner: string, id: string, resolved: boolean) {
@@ -562,6 +602,115 @@ export function createTaskStore(
   }
 
   return {
+    /**
+     * Records a task opened in a conversation made for it. On the transaction that made the
+     * conversation, so neither is ever there without the other.
+     */
+    async create(
+      input: NewTask,
+      executor: Database | TaskTransaction = database,
+    ): Promise<TaskRecord> {
+      const at = now();
+      const [row] = await executor
+        .insert(tasks)
+        .values({ id: randomUUID(), ...input, createdAt: at, updatedAt: at })
+        .returning();
+      if (!row) throw new Error("The task was not saved.");
+      return recordOf(row, undefined);
+    },
+    /**
+     * The person's questions waiting in a task's conversation, less any a reply already answered:
+     * the ones a reply taken now answers.
+     */
+    async pendingQuestions(owner: string, id: string): Promise<string[]> {
+      const task = await one(owner, id);
+      const rows = await database
+        .select({ key: workItems.key })
+        .from(workItems)
+        .where(
+          and(
+            pendingPersonQuestion(owner),
+            sql`${workItems.payload}->>'mode' = 'completed_question'`,
+            or(
+              sql`${workItems.payload}->>'channelId' = ${task.channelId}`,
+              task.threadId
+                ? sql`${workItems.payload}->>'threadId' = ${task.threadId}`
+                : sql`false`,
+            ),
+          ),
+        );
+      return rows.map((row) => row.key);
+    },
+    /** Marks the person's questions answered, by a reply that has now run. */
+    async answerQuestions(owner: string, ids: readonly string[]) {
+      if (ids.length === 0) return;
+      await database
+        .update(workItems)
+        .set({ finishedAt: sql`now()`, updatedAt: sql`now()` })
+        .where(
+          and(
+            eq(workItems.kind, "person.question"),
+            inArray(workItems.key, [...ids]),
+            sql`${workItems.payload}->>'actorId' = ${owner}`,
+            isNull(workItems.finishedAt),
+          ),
+        );
+    },
+    /** Whether this conversation of the person's is a task's own. */
+    async isTaskConversation(owner: string, channelId: string) {
+      const [row] = await database
+        .select({ id: tasks.id })
+        .from(tasks)
+        .where(
+          and(eq(tasks.ownerUserId, owner), eq(tasks.channelId, channelId)),
+        )
+        .limit(1);
+      return row !== undefined;
+    },
+    /** Where a task lives, without working out what it is doing: for running its turn. */
+    async locate(
+      owner: string,
+      id: string,
+    ): Promise<{ channelId: string; botId: string } | null> {
+      const [row] = await database
+        .select({ channelId: tasks.channelId, botId: tasks.botId })
+        .from(tasks)
+        .where(owned(owner, id))
+        .limit(1);
+      return row ?? null;
+    },
+    /**
+     * What a failed task's turn was asked to do, to run it again, and how many turns it has had:
+     * the ask its failed turn carried, or, for one never queued, its suggestion or its title.
+     * Refused unless it failed, so Try again never starts a second run beside a live one.
+     *
+     * A task marked done after it failed is taken too. Reading what to ask leaves it done; only the
+     * rerun, once it is on the queue, makes it not done.
+     */
+    async failedTurn(
+      owner: string,
+      id: string,
+    ): Promise<{ ask: TaskInput; turns: number }> {
+      const { record: task, state } = await oneWithState(owner, id);
+      const failed =
+        task.status === "failed" ||
+        (task.status === "resolved" && task.failure !== null);
+      if (!failed)
+        throw new ProactiveRefusedError(
+          "Only a task that couldn't finish can be tried again.",
+        );
+      const input = taskInputSchema.parse(state.turnInput ?? {});
+      const suggestionId = input.suggestionId ?? task.suggestionId;
+      // An empty text is a reply of files alone, and is kept. Only a missing ask falls back.
+      const ask =
+        input.text !== undefined
+          ? input
+          : {
+              ...input,
+              ...(suggestionId ? { suggestionId } : { text: task.title }),
+            };
+      return { ask, turns: state.turns };
+    },
     /** The owner's tasks, newest first. No cap on how many there are; a page is what a list shows. */
     async list(owner: string, limit = 200): Promise<TaskRecord[]> {
       const rows = await database
