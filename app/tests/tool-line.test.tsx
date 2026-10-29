@@ -95,3 +95,46 @@ test("a call that worked is named for what it did", () => {
   expect(view.getByText("Read your email")).toBeDefined();
   expect(view.getByText("Gmail")).toBeDefined();
 });
+
+const ALREADY_WAITING =
+  "An identical request is already waiting for the person's decision on the Bot's page in OpenBot, so this was not done and no second request was made. Do not repeat it; wait for their answer.";
+const SEND = "mcp__composio-gmail__GMAIL_SEND_EMAIL";
+
+test("a send tried again after the person declined it says they declined, not that it was blocked", () => {
+  for (const result of [
+    `${REFUSAL_MARKER} ${DECLINED}`,
+    JSON.stringify(`${REFUSAL_MARKER} ${DECLINED}`),
+  ]) {
+    const view = render(<ServerToolLine name={SEND} result={result} />);
+    expect(view.getByText("You declined: Send your email")).toBeDefined();
+    expect(view.queryByText(/Blocked/)).toBeNull();
+    expect(view.container.querySelector(".text-status-problem")).toBeNull();
+    expect(view.container.textContent).not.toContain("their decision");
+    cleanup();
+  }
+});
+
+test("a send repeated while its request still waits waits with it, and is never called declined", () => {
+  const waiting = render(
+    <ServerToolLine
+      conversationWaiting
+      name={SEND}
+      result={`${REFUSAL_MARKER} ${ALREADY_WAITING}`}
+    />,
+  );
+  expect(waiting.getByText("Send your email, waiting for you")).toBeDefined();
+  expect(waiting.queryByText(/declined/)).toBeNull();
+  expect(waiting.queryByText(/Blocked/)).toBeNull();
+  expect(waiting.container.textContent).not.toContain("Do not repeat it");
+  cleanup();
+
+  // Once nothing here waits any more, the repeat was simply not done.
+  const answered = render(
+    <ServerToolLine
+      name={SEND}
+      result={`${REFUSAL_MARKER} ${ALREADY_WAITING}`}
+    />,
+  );
+  expect(answered.getByText("Send your email, not done yet")).toBeDefined();
+  expect(answered.queryByText(/declined|waiting for you/)).toBeNull();
+});

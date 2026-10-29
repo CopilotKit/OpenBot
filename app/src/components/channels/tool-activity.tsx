@@ -28,8 +28,8 @@ import {
   asText,
   forDisplay,
   REFUSAL_MARKER,
-  toolResultDeclined,
   toolResultFailed,
+  toolResultHeldBack,
 } from "@/lib/plugins/tool-result";
 import { readTeamBotConsent } from "@/lib/team-bots";
 import {
@@ -38,6 +38,7 @@ import {
   isBrowserStep,
 } from "./browser-activity";
 import type { VisibleChatItem } from "./chat-messages";
+import { useConversationWaiting } from "./conversation-presence";
 import { ToolLine } from "./tool-line";
 
 type ToolItem = Extract<VisibleChatItem, { kind: "tool" }>;
@@ -238,6 +239,11 @@ export type StepDetails = {
   refused: boolean;
   /** The person said no on its card. Their decision, not an issue. */
   declined: boolean;
+  /**
+   * Not done, because the same request was already waiting on its card and was not asked again. It
+   * waits with that one, and is not an issue.
+   */
+  alreadyWaiting: boolean;
   /** A browser step cut off before it finished, by Stop or by its computer stopping. Not an issue. */
   stopped: boolean;
   /** A browser step a computer still starting turned away, so nothing was done yet. Not an issue. */
@@ -322,6 +328,7 @@ export function stepDetails(step: ToolItem): StepDetails {
       failed: outcome === "failed",
       refused: outcome === "blocked",
       declined: outcome === "declined",
+      alreadyWaiting: outcome === "alreadyWaiting",
       stopped: outcome === "stopped",
       notYet: outcome === "notYet",
       ...(browser.reason ? { reason: browser.reason } : {}),
@@ -332,27 +339,31 @@ export function stepDetails(step: ToolItem): StepDetails {
 
   const name = step.toolCall.function.name;
   const answer = step.result === undefined ? undefined : asText(step.result);
-  // The person declining on the card is not a result either, and its words are for the model.
-  const declined = toolResultDeclined(step.result);
-  const refused = !declined && (answer?.startsWith(REFUSAL_MARKER) ?? false);
+  // The person holding a call back is not a result either, and its words are for the model.
+  const heldBack = toolResultHeldBack(step.result);
+  const declined = heldBack === "declined";
+  const alreadyWaiting = heldBack === "alreadyWaiting";
+  const refused = !heldBack && (answer?.startsWith(REFUSAL_MARKER) ?? false);
   const body = refused ? answer?.slice(REFUSAL_MARKER.length).trim() : answer;
   // This deployment's own tools answer the model, not the person; see `ServerToolLine`.
   const own = ownToolLabel(name) !== null;
-  const failed = !refused && !declined && toolResultFailed(step.result);
+  const failed = !refused && !heldBack && toolResultFailed(step.result);
   const outcome = {
     id: step.id,
     pending: step.result === undefined,
     failed,
     refused,
     declined,
+    alreadyWaiting,
     stopped: false,
     notYet: false,
     inputs,
-    ...(body && !own && !declined ? { output: body } : {}),
+    ...(body && !own && !heldBack ? { output: body } : {}),
   };
   // Running, a step says what is happening now; done, what happened. One that did not happen is
   // named plainly ("Send your email"), never as though it had.
-  const state = failed || refused || declined ? "plain" : outcome.pending;
+  const state =
+    failed || refused || heldBack !== null ? "plain" : outcome.pending;
   // Not a connector: one of this deployment's own tools, or one an external agent runs itself.
   // Named in words, never as an identifier.
   if (!name.startsWith("mcp__")) {
@@ -421,6 +432,7 @@ function isDone(step: StepDetails): boolean {
     !step.failed &&
     !step.refused &&
     !step.declined &&
+    !step.alreadyWaiting &&
     !step.stopped &&
     !step.notYet
   );
@@ -562,6 +574,13 @@ function StepStatus({
             : STEP_STATUS.stopped}
       </span>
     );
+  // Waits with the request it repeated, and once that is answered it was simply not done.
+  if (step.alreadyWaiting)
+    return (
+      <span className="shrink-0 text-muted-foreground">
+        {waiting ? STEP_STATUS.waiting : STEP_STATUS.stopped}
+      </span>
+    );
   if (step.stopped || step.notYet || step.declined)
     return (
       <span className="shrink-0 text-muted-foreground">
@@ -592,7 +611,7 @@ function StepRow({
 }: {
   step: StepDetails;
   active: boolean;
-  /** Held on its approval card until the person answers. */
+  /** Held on its approval card until the person answers, or waiting with the request it repeated. */
   waiting: boolean;
 }) {
   // Only a step that is running now says it is happening; one stopped or held says what it would do.
@@ -704,6 +723,10 @@ export function ToolActivity({
 }) {
   const steps = group.steps.map(stepDetails);
   const held = useHeldForPerson();
+  const waitingHere = useConversationWaiting();
+  // On its own card, or with the identical request it repeated while that one still waits.
+  const waitsForPerson = (step: StepDetails) =>
+    held.has(step.id) || (step.alreadyWaiting && waitingHere);
   const running = active && steps.some((step) => step.pending);
   const current = steps.find((step) => step.pending);
   const issues = steps.filter((step) => step.failed || step.refused).length;
@@ -714,7 +737,7 @@ export function ToolActivity({
    */
   const nothingDone = !running && !steps.some(isDone);
   // Nothing done yet because a step waits on its card, which is drawn beside this line.
-  const waiting = nothingDone && steps.some((step) => held.has(step.id));
+  const waiting = nothingDone && steps.some(waitsForPerson);
   // The folded line draws its own steps, so a waiting approval gets its card beside it, not inside.
   return (
     <>
@@ -744,7 +767,7 @@ export function ToolActivity({
               active={active}
               key={step.id}
               step={step}
-              waiting={held.has(step.id)}
+              waiting={waitsForPerson(step)}
             />
           ))}
         </ol>

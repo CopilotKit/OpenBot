@@ -67,8 +67,8 @@ import {
   asText,
   forDisplay,
   REFUSAL_MARKER,
-  toolResultDeclined,
   toolResultFailed,
+  toolResultHeldBack,
 } from "@/lib/plugins/tool-result";
 import { readTeamBotConsent } from "@/lib/team-bots";
 import { cn } from "@/lib/utils";
@@ -83,6 +83,7 @@ import {
 } from "./chat-messages";
 import { splitChatOrigin } from "./chat-origin";
 import type { QueuedMessage } from "./composer";
+import { useConversationWaiting } from "./conversation-presence";
 import { FollowScroll, RESUME_PX, useFollowIntent } from "./follow-intent";
 import { LateRenderersContext, LateRenderersWatch } from "./late-renderers";
 import { usePacedReveal } from "./paced-reveal";
@@ -1491,6 +1492,7 @@ const ToolCallBody = memo(function ToolCallBody({
   const renderToolCall = useRenderToolCall();
   // Held on its approval card: the same inbox the card under it reads.
   const waiting = useHeldForPerson().has(toolCallId);
+  const conversationWaiting = useConversationWaiting();
   const toolCall = useMemo(
     () => ({
       id: toolCallId,
@@ -1543,6 +1545,7 @@ const ToolCallBody = memo(function ToolCallBody({
         {drawn ?? (
           <>
             <ServerToolLine
+              conversationWaiting={conversationWaiting}
               name={name}
               place={{ toolCallId, latest }}
               result={result}
@@ -1640,6 +1643,7 @@ export function ServerToolLine({
   result,
   place,
   waiting = false,
+  conversationWaiting = false,
 }: {
   name: string;
   result?: string;
@@ -1647,11 +1651,18 @@ export function ServerToolLine({
   place?: CardPlace;
   /** Held on its approval card for the person's answer, so it is not running yet. */
   waiting?: boolean;
+  /** An approval in this conversation waits on the person, which a call repeating it waits with. */
+  conversationWaiting?: boolean;
 }) {
-  const held = waiting && result === undefined;
-  const running = result === undefined && !held;
+  const heldBack = toolResultHeldBack(result);
   // Said no on its card: nothing was done, and the line says so rather than naming it as done.
-  const declined = toolResultDeclined(result);
+  const declined = heldBack === "declined";
+  // Not asked again, because the same request already waits on its card. Not done either way.
+  const alreadyWaiting = heldBack === "alreadyWaiting";
+  const held =
+    (waiting && result === undefined) ||
+    (alreadyWaiting && conversationWaiting);
+  const running = result === undefined && !held;
   /*
    * A refusal is not a result, and must not read like one.
    *
@@ -1660,12 +1671,12 @@ export function ServerToolLine({
    * any guess made here. See REFUSAL_MARKER in server/src/plugins/tools.ts.
    */
   const answer = result === undefined ? undefined : asText(result);
-  const refused = !declined && (answer?.startsWith(REFUSAL_MARKER) ?? false);
-  const failed = !refused && !declined && toolResultFailed(result);
+  const refused = !heldBack && (answer?.startsWith(REFUSAL_MARKER) ?? false);
+  const failed = !refused && !heldBack && toolResultFailed(result);
   // A call that did not happen, or waits on its card, is named plainly ("Send your email").
   const { label, detail } = readToolName(
     name,
-    refused || failed || declined || held ? "plain" : running,
+    refused || failed || heldBack !== null || held ? "plain" : running,
   );
   /*
    * The marker is for this component, not for the reader. Left in, a refusal reads "Blocked" in the
@@ -1693,10 +1704,11 @@ export function ServerToolLine({
    * THAT TOOL'S OTHER ANSWERS ARE FOR THE MODEL. An app nobody can name comes back as plain text
    * telling the Bot to say so plainly and not to browse to it — an instruction, which read by the
    * person looks like the Bot being told off in front of them. The line still says the check
-   * happened; the Bot's own reply says what it found. A decline's answer is the same kind of thing:
-   * it tells the Bot not to try again, and the line has already said what happened.
+   * happened; the Bot's own reply says what it found. A call the person held back answers the same
+   * kind of thing: it tells the Bot not to try again, and the line has already said what happened.
    */
-  const shown = name === SHOW_APP_ACCESS_TOOL || declined ? undefined : body;
+  const shown =
+    name === SHOW_APP_ACCESS_TOOL || heldBack !== null ? undefined : body;
   return (
     <ToolLine
       {...(detail ? { detail } : {})}
@@ -1704,6 +1716,7 @@ export function ServerToolLine({
       refused={refused}
       failed={failed}
       declined={declined}
+      notYet={alreadyWaiting && !held}
       running={running}
       waiting={held}
     >

@@ -20,6 +20,7 @@ import {
   type ConversationStep,
   useConversationStatus,
   useConversationSteps,
+  useConversationWaiting,
 } from "@/components/channels/conversation-presence";
 import {
   STEP_STATUS,
@@ -79,18 +80,27 @@ export type StepLogEntry =
  * the Bot is on the turn it belongs to, and otherwise was cut off. One with a result is read by
  * `browserOutcome`, the same reading its line in the conversation uses: the person declined it,
  * somebody pressed Stop, a boundary refused it, the computer was still starting, it did not work,
- * or it worked.
+ * or it worked. One not asked again because the same request was waiting waits with it while the
+ * conversation does, and was not done once it doesn't.
  */
 function browserState(
   step: ConversationStep,
-  { working, held }: { working: boolean; held: ReadonlySet<string> },
+  { working, held, waiting = false }: StepLogContext,
 ): StepState {
   if (held.has(step.item.toolCall.id)) return "waiting";
   const outcome = browserOutcome(step.item);
   if (outcome === "pending")
     return working && step.latest ? "running" : "stopped";
+  if (outcome === "alreadyWaiting") return waiting ? "waiting" : "stopped";
   return outcome;
 }
+
+/** The turn, the calls held on their cards, and whether anything in the conversation waits. */
+type StepLogContext = {
+  working: boolean;
+  held: ReadonlySet<string>;
+  waiting?: boolean;
+};
 
 /**
  * The browser steps and the command log as one list, oldest first. Stable, so steps seen at the
@@ -99,7 +109,7 @@ function browserState(
 export function stepLogEntries(
   steps: readonly ConversationStep[],
   activity: readonly ComputerActivity[],
-  context: { working: boolean; held: ReadonlySet<string> },
+  context: StepLogContext,
 ): StepLogEntry[] {
   const browser = steps.map((step): StepLogEntry => {
     const status = browserState(step, context);
@@ -247,7 +257,8 @@ export function StepLog({ computerId }: { computerId: string }) {
   );
   const working = useConversationStatus().kind === "working";
   const held = useHeldForPerson();
-  const entries = stepLogEntries(steps, activity, { working, held });
+  const waiting = useConversationWaiting();
+  const entries = stepLogEntries(steps, activity, { working, held, waiting });
 
   if (entries.length === 0) {
     return (
