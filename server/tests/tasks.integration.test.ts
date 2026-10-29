@@ -22,6 +22,7 @@ import {
   workItems,
 } from "../src/db/schema";
 import { PROACTIVE_TASK_KIND } from "../src/proactive/engine";
+import { createTaskReportReader } from "../src/tasks/report";
 import { createTaskRoutes } from "../src/tasks/routes";
 import { createTaskStore, type TaskStore } from "../src/tasks/store";
 import type { TaskRecord } from "../src/tasks/types";
@@ -613,6 +614,29 @@ describe("a task whose turn fails", () => {
     });
   });
 
+  test("whose turns have since left the queue reads from its conversation, never as not started", async () => {
+    const task = await freshTask();
+    const at = Date.now();
+    await channelStore.recordActivity(
+      owner,
+      task.channelId,
+      { text: "Prepare the notes.", agentId: null, at: new Date(at) },
+      { id: `task-${task.id}:input` },
+    );
+    await channelStore.recordActivity(owner, task.channelId, {
+      text: "The notes are ready.",
+      agentId: bot,
+      at: new Date(at + 1_000),
+    });
+    const later = createTaskStore(database, {
+      now: () => new Date(Date.now() + 2 * 60_000),
+    });
+    expect(await later.get(owner.id, task.id)).toMatchObject({
+      status: "ready_for_review",
+      failure: null,
+    });
+  });
+
   test("stays Failed whatever is said in its conversation, until a turn of its own finishes", async () => {
     const task = await freshTask();
     await turnFor(task.id, { attempts: 2, lastError: "fetch failed" });
@@ -739,5 +763,90 @@ describe("/api/tasks", () => {
     } finally {
       logged.mockRestore();
     }
+  });
+});
+
+describe("reading one person's tasks", () => {
+  /** Every statement a read sends, as the driver is handed it, so each can be planned as it ran. */
+  async function statementsOf(read: () => Promise<unknown>) {
+    const client = database.$client;
+    const unsafe = client.unsafe.bind(client);
+    const sent: { query: string; params: unknown[] }[] = [];
+    const spy = spyOn(client, "unsafe").mockImplementation(
+      (query: string, params?: unknown[]) => {
+        sent.push({ query, params: params ?? [] });
+        return unsafe(query, params);
+      },
+    );
+    try {
+      await read();
+    } finally {
+      spy.mockRestore();
+    }
+    return sent;
+  }
+  /**
+   * How Postgres would run each over a queue holding many people's task turns and answers. Written,
+   * analysed and planned in one transaction that is rolled back, so no other test sees the rows.
+   */
+  async function plansOf(statements: { query: string; params: unknown[] }[]) {
+    const plans: string[] = [];
+    const rollback = new Error("rollback");
+    await database.$client
+      .begin(async (client) => {
+        await client.unsafe(`
+          insert into work_items (kind, key, payload, finished_at)
+          select kind, kind || ':many:' || n, jsonb_build_object(
+            'ownerUserId', 'many-' || (n % 200),
+            'taskId', 'many-task-' || (n % 2000),
+            'followup', 'true',
+            'questionIds', jsonb_build_array('many-question-' || n)
+          ), now()
+          from generate_series(1, 4000) as n,
+            unnest(array['${PROACTIVE_TASK_KIND}', 'person.response']) as kind
+        `);
+        await client.unsafe("analyze work_items");
+        for (const statement of statements) {
+          const rows: { "QUERY PLAN": string }[] = await client.unsafe(
+            `explain ${statement.query}`,
+            statement.params,
+          );
+          plans.push(rows.map((row) => row["QUERY PLAN"]).join("\n"));
+        }
+        throw rollback;
+      })
+      .catch((error: unknown) => {
+        if (error !== rollback) throw error;
+      });
+    return plans;
+  }
+
+  test("finds their task turns and answers through the index, never by scanning everyone's", async () => {
+    const task = await freshTask();
+    await turnFor(task.id, { finishedAt: new Date() });
+    const record = await taskStore.get(owner.id, task.id);
+    const report = createTaskReportReader({
+      database,
+      history: async () => [],
+    });
+    const questions = createApprovalQuestions(database, async () => {});
+    const sent = [
+      ...(await statementsOf(() => taskStore.list(owner.id))),
+      ...(await statementsOf(() => report(owner.id, record))),
+      ...(await statementsOf(() => questions.list(owner.id))),
+    ];
+    // The list's turns and answers, the report's, and the inbox's check for answers already taken.
+    const plans = await plansOf(
+      sent.filter(({ query, params }) =>
+        [PROACTIVE_TASK_KIND, "person.response"].some(
+          (kind) => query.includes(`'${kind}'`) || params.includes(kind),
+        ),
+      ),
+    );
+    expect(plans).toHaveLength(5);
+    // Looked up by the person, not filtered from every row of the kind.
+    const byPerson =
+      /work_items_owner_task_idx.*\n\s*Index Cond: .*'ownerUserId'::text\) = /;
+    expect(plans.filter((plan) => !byPerson.test(plan))).toEqual([]);
   });
 });
