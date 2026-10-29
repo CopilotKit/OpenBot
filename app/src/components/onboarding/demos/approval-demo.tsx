@@ -12,7 +12,7 @@ export const APPROVAL_CHOICES = [
 ] as const;
 
 /**
- * It asks before it acts: a Bot about to send an email waits for an answer, gets Allow once, and
+ * When a Bot asks: a Bot about to send an email waits for an answer, gets Allow once, and
  * sends it.
  *
  * A DRAWING OF AN APPROVAL CARD, FOR THIS STEP ONLY. The real card is the conversation's, and it

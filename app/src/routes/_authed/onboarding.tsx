@@ -240,14 +240,21 @@ const team: OnboardingStep = {
   demo: () => <TeamDemo />,
 };
 
+/*
+ * Said as OpenBot behaves out of the box: "Ask before making changes" starts off, so a Bot asks only
+ * where a rule says to, and paying or changing account security is always handed to the person
+ * (`server/src/approvals/policy.ts`).
+ */
 const approval: OnboardingStep = {
   id: "approval",
-  title: "It asks first",
+  title: "You decide what it asks",
   intro: () => (
-    <StepIntro title="It asks before it acts">
+    <StepIntro title="You decide what it asks about">
       <p>
-        Before a Bot sends, buys or deletes anything, it asks you. Allow it
-        once, or always allow it here.
+        Paying for things and changing account security are always left to you.
+        For everything else, turn on Ask before making changes in Settings, or
+        give a Bot its own rules. When a Bot asks, allow it once or always allow
+        it there.
       </p>
     </StepIntro>
   ),
