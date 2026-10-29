@@ -2233,6 +2233,25 @@ describe("connecting a brokered app", () => {
     ]);
   });
 
+  test("a person who started on onboarding's Connect your apps step is sent back to it", async () => {
+    /*
+     * Onboarding is the one page somebody who has not finished it may open, so a consent started
+     * there has to come back there: any other page would send them on to onboarding's start with no
+     * word about the account. The step confirms the account on arrival, as the account page does.
+     */
+    const { authorized, connect } = brokeredApp();
+
+    await connect({}, "?returnTo=onboarding");
+
+    expect(authorized).toEqual([
+      {
+        account: ADMIN_ACCOUNT,
+        toolkit: "linear",
+        returnUrl: "http://localhost:3001/onboarding?step=apps",
+      },
+    ]);
+  });
+
   test("a returnTo naming somewhere else is the default, not a destination", async () => {
     // Narrowed to one of two names on the way in, so an unrecognised value never reaches the url
     // that gets built. A full address in that parameter is the attack this shape refuses.
