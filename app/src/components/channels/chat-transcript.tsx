@@ -91,7 +91,7 @@ import {
   type Turn,
   turnsOf,
 } from "./transcript-turns";
-import { useLateRenderers } from "./late-renderers";
+import { LateRenderersContext, LateRenderersWatch } from "./late-renderers";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import {
   attachmentModality,
@@ -1333,20 +1333,19 @@ const TranscriptActivity = memo(function TranscriptActivity({
   message: ActivityMessage;
 }) {
   const { renderActivityMessage } = useRenderActivityMessage();
-  const { copilotkit } = useCopilotKit();
-  const { data: capabilities } = useQuery(deploymentCapabilitiesQueryOptions());
+  /*
+   * Drawn before generative UI was switched on (a cold load: the capabilities answer or the runtime
+   * connection still on its way), an activity found no renderer. Read so it redraws when the
+   * renderers arrive, rather than staying blank until its own message next changes; see
+   * `LateRenderersWatch`, which the transcript mounts once for all of them.
+   */
+  useContext(LateRenderersContext);
   const voice = message.activityType === VOICE_CHAT_ACTIVITY;
   const drawn = voice ? (
     <VoiceChatCard call={message.content.call as VoiceChatEntry} />
   ) : (
     renderActivityMessage(message)
   );
-  /*
-   * Drawn before generative UI was switched on (a cold load: the capabilities answer or the runtime
-   * connection still on its way), an activity found no renderer. Re-rendered when the renderers
-   * arrive, rather than staying blank until its own message next changes; see `useLateRenderers`.
-   */
-  useLateRenderers(copilotkit, !voice && !drawn, capabilities?.generativeUi);
   if (!drawn) return null;
 
   return (
@@ -1756,6 +1755,23 @@ function useSmoothSendScroll(
   }, [newestUserMessageId, onSend, reducedMotion, restoring, viewport]);
 }
 
+/** The transcript's one `LateRenderersWatch`, with what it needs from the provider and the server. */
+function TranscriptRenderersWatch({
+  onVersion,
+}: {
+  onVersion: (version: number) => void;
+}) {
+  const { copilotkit } = useCopilotKit();
+  const { data: capabilities } = useQuery(deploymentCapabilitiesQueryOptions());
+  return (
+    <LateRenderersWatch
+      core={copilotkit}
+      onVersion={onVersion}
+      settled={capabilities?.generativeUi}
+    />
+  );
+}
+
 export function ChatTranscript({
   busy = false,
   commandNames = "",
@@ -1904,6 +1920,14 @@ export function ChatTranscript({
     );
     return () => window.cancelAnimationFrame(frame);
   }, [pagesFrom, restoring, drawEarlierNearTop]);
+
+  /* Activities that may be waiting on their renderers; see `LateRenderersWatch`. */
+  const [renderersVersion, setRenderersVersion] = useState(0);
+  const hasActivities = items.some(
+    (item) =>
+      item.kind === "activity" &&
+      item.message.activityType !== VOICE_CHAT_ACTIVITY,
+  );
 
   /* The rail's marks, and which turn is being read; see `TranscriptRail`. */
   const turns = turnsOf(items);
@@ -2130,134 +2154,141 @@ export function ChatTranscript({
 
   return (
     <ArrivalsLive>
-      <MessageScrollerProvider
-        autoScroll={follow.following}
-        scrollPreviousItemPeek={48}
-      >
-        <MessageScroller className="@container">
-          <MessageScrollerViewport
-            {...follow.viewportHandlers}
-            data-following={follow.following}
-            onScroll={(event) => {
-              follow.viewportHandlers.onScroll?.(event);
-              drawEarlierNearTop(pagesFrom);
-              readActiveTurn();
-            }}
-            ref={viewportRef}
-          >
-            <MessageScrollerContent
-              aria-busy={busy}
-              className="mx-auto w-full max-w-2xl px-4 py-6"
-              spacerClassName="order-2"
+      {hasActivities ? (
+        <TranscriptRenderersWatch onVersion={setRenderersVersion} />
+      ) : null}
+      <LateRenderersContext.Provider value={renderersVersion}>
+        <MessageScrollerProvider
+          autoScroll={follow.following}
+          scrollPreviousItemPeek={48}
+        >
+          <MessageScroller className="@container">
+            <MessageScrollerViewport
+              {...follow.viewportHandlers}
+              data-following={follow.following}
+              onScroll={(event) => {
+                follow.viewportHandlers.onScroll?.(event);
+                drawEarlierNearTop(pagesFrom);
+                readActiveTurn();
+              }}
+              ref={viewportRef}
             >
-              {/*
-               * DRAWN LAST, WRITTEN FIRST, AND THE SCROLLER IS WHY. Three reviewers have now arrived
-               * at this block, worked the mechanism out from the library's bundle, and reached the
-               * same place; it had no comment for any of them to read. This is that comment.
-               *
-               * `MessageScrollerContent` is `flex flex-col`, so `order` is live: the spacer takes
-               * `order-2`, these children take `order-1`, and the transcript rows below keep the
-               * default `0`. Visual order is therefore items, then anything parked or in flight, then
-               * the spacer — while DOM order puts this block first.
-               *
-               * IT CANNOT SIMPLY BE MOVED DOWN. The scroller finds a newly appended row POSITIONALLY.
-               * On every content change it takes `Array.from(content.children)` minus the spacer,
-               * compares the length against the previous length, and when it grew scans FROM THE OLD
-               * LENGTH FORWARD for the next `data-scroll-anchor="true"` (`je(a, T)` in
-               * `@shadcn/react/dist/message-scroller`). A new row is only found when it lands at the
-               * very end of that list. Put this block after `items.map` and every appended row lands
-               * one slot short of the end, the scan finds this div instead, returns null, and the
-               * caller falls through to its follow-the-bottom branch — so a new turn stops aligning
-               * to the top of the viewport with a peek of the previous one, silently, with no test
-               * failing.
-               *
-               * OLDER PAGES GO BEFORE THIS BLOCK, AND THAT IS THE SAME MECHANISM USED ON PURPOSE.
-               * When the reader nears the top, the page before is drawn (`useTranscriptPages`). Drawn
-               * here, ahead of this block, it moves whatever was the first child, and a first child
-               * that moved is the scroller's own "rows were prepended" case: it puts the row the
-               * reader was looking at back where it was (`de()`), and never runs the scan above, which
-               * would read the shifted rows as new ones and jump to an old turn. Rows that arrive
-               * live still go after this block, at the end, where that scan looks for them.
-               *
-               * ONE CASE IT DOES NOT COVER. The scroller takes one path per batch of changes, so a page
-               * drawn above and a sent message landing in the SAME commit would be held in place and
-               * the new turn not aligned to the top. They come from different updates (a scroll near
-               * the top, a send at the bottom) and in practice never commit together; if they ever
-               * do, the turn is not aligned when it arrives, and a later change that keeps the row
-               * count can align to it then instead (the scroller's `Ge`), a beat late.
-               *
-               * `display: contents` IS LOAD-BEARING FOR THE SAME REASON, and not a layout trick. It
-               * promotes these children to flex items of the column so they can carry `order`, while
-               * the div itself stays a single, always-present entry in `content.children` — one
-               * stable slot the row count can be offset by. Wrapping `items.map` the same way would
-               * be the natural symmetry and is fatal: the rows would leave `content.children`
-               * entirely and the scroller would see a transcript of two elements, neither carrying a
-               * `data-message-id`, so nothing would register, be tracked as visible, or anchor.
-               *
-               * WHAT THIS COSTS, STATED RATHER THAN LEFT TO BE REDISCOVERED. `order` moves paint and
-               * not the DOM, so it moves neither focus order nor the reading order of the enclosing
-               * `role="log"`. A keyboard user tabbing in reaches the "Remove queued message: …"
-               * button of every parked message before any control in the conversation, though those
-               * lines are drawn at the very bottom (WCAG 2.4.3); a screen reader reading the log
-               * linearly hears the parked messages, and `Stopped`, ahead of the conversation they
-               * follow on screen (WCAG 1.3.2).
-               *
-               * THAT IS A KNOWN, UNPAID DEBT AND NOT AN OVERSIGHT. The fixes available from inside
-               * this file were each tried on paper and each breaks something worse: `aria-owns` needs
-               * a generated id per row and re-sequences only the accessibility tree, leaving tab
-               * order inverted; positive `tabIndex` hijacks the tab sequence of the whole page;
-               * hoisting the queue out of `MessageScrollerContent` into a sibling region — the
-               * cleanest END STATE, since a parked message is genuinely not a log entry — puts it
-               * outside a column that is `min-h-full`, so it lands below the fold on a short
-               * transcript, outside the `gap-6` rhythm, and outside the spacer's height arithmetic.
-               * Paying it properly means the scroller identifying new rows by identity rather than by
-               * position, which is the library's to change and is worth asking for.
-               */}
-              <ArrivalsLiveContext.Provider value={AT_REST}>
+              <MessageScrollerContent
+                aria-busy={busy}
+                className="mx-auto w-full max-w-2xl px-4 py-6"
+                spacerClassName="order-2"
+              >
+                {/*
+                 * DRAWN LAST, WRITTEN FIRST, AND THE SCROLLER IS WHY. Three reviewers have now arrived
+                 * at this block, worked the mechanism out from the library's bundle, and reached the
+                 * same place; it had no comment for any of them to read. This is that comment.
+                 *
+                 * `MessageScrollerContent` is `flex flex-col`, so `order` is live: the spacer takes
+                 * `order-2`, these children take `order-1`, and the transcript rows below keep the
+                 * default `0`. Visual order is therefore items, then anything parked or in flight, then
+                 * the spacer — while DOM order puts this block first.
+                 *
+                 * IT CANNOT SIMPLY BE MOVED DOWN. The scroller finds a newly appended row POSITIONALLY.
+                 * On every content change it takes `Array.from(content.children)` minus the spacer,
+                 * compares the length against the previous length, and when it grew scans FROM THE OLD
+                 * LENGTH FORWARD for the next `data-scroll-anchor="true"` (`je(a, T)` in
+                 * `@shadcn/react/dist/message-scroller`). A new row is only found when it lands at the
+                 * very end of that list. Put this block after `items.map` and every appended row lands
+                 * one slot short of the end, the scan finds this div instead, returns null, and the
+                 * caller falls through to its follow-the-bottom branch — so a new turn stops aligning
+                 * to the top of the viewport with a peek of the previous one, silently, with no test
+                 * failing.
+                 *
+                 * OLDER PAGES GO BEFORE THIS BLOCK, AND THAT IS THE SAME MECHANISM USED ON PURPOSE.
+                 * When the reader nears the top, the page before is drawn (`useTranscriptPages`). Drawn
+                 * here, ahead of this block, it moves whatever was the first child, and a first child
+                 * that moved is the scroller's own "rows were prepended" case: it puts the row the
+                 * reader was looking at back where it was (`de()`), and never runs the scan above, which
+                 * would read the shifted rows as new ones and jump to an old turn. Rows that arrive
+                 * live still go after this block, at the end, where that scan looks for them.
+                 *
+                 * ONE CASE IT DOES NOT COVER. The scroller takes one path per batch of changes, so a page
+                 * drawn above and a sent message landing in the SAME commit would be held in place and
+                 * the new turn not aligned to the top. They come from different updates (a scroll near
+                 * the top, a send at the bottom) and in practice never commit together; if they ever
+                 * do, the turn is not aligned when it arrives, and a later change that keeps the row
+                 * count can align to it then instead (the scroller's `Ge`), a beat late.
+                 *
+                 * `display: contents` IS LOAD-BEARING FOR THE SAME REASON, and not a layout trick. It
+                 * promotes these children to flex items of the column so they can carry `order`, while
+                 * the div itself stays a single, always-present entry in `content.children` — one
+                 * stable slot the row count can be offset by. Wrapping `items.map` the same way would
+                 * be the natural symmetry and is fatal: the rows would leave `content.children`
+                 * entirely and the scroller would see a transcript of two elements, neither carrying a
+                 * `data-message-id`, so nothing would register, be tracked as visible, or anchor.
+                 *
+                 * WHAT THIS COSTS, STATED RATHER THAN LEFT TO BE REDISCOVERED. `order` moves paint and
+                 * not the DOM, so it moves neither focus order nor the reading order of the enclosing
+                 * `role="log"`. A keyboard user tabbing in reaches the "Remove queued message: …"
+                 * button of every parked message before any control in the conversation, though those
+                 * lines are drawn at the very bottom (WCAG 2.4.3); a screen reader reading the log
+                 * linearly hears the parked messages, and `Stopped`, ahead of the conversation they
+                 * follow on screen (WCAG 1.3.2).
+                 *
+                 * THAT IS A KNOWN, UNPAID DEBT AND NOT AN OVERSIGHT. The fixes available from inside
+                 * this file were each tried on paper and each breaks something worse: `aria-owns` needs
+                 * a generated id per row and re-sequences only the accessibility tree, leaving tab
+                 * order inverted; positive `tabIndex` hijacks the tab sequence of the whole page;
+                 * hoisting the queue out of `MessageScrollerContent` into a sibling region — the
+                 * cleanest END STATE, since a parked message is genuinely not a log entry — puts it
+                 * outside a column that is `min-h-full`, so it lands below the fold on a short
+                 * transcript, outside the `gap-6` rhythm, and outside the spacer's height arithmetic.
+                 * Paying it properly means the scroller identifying new rows by identity rather than by
+                 * position, which is the library's to change and is worth asking for.
+                 */}
+                <ArrivalsLiveContext.Provider value={AT_REST}>
+                  {items
+                    .slice(pages.from, pages.split)
+                    .map((item, offset) =>
+                      renderRow(item, pages.from + offset),
+                    )}
+                </ArrivalsLiveContext.Provider>
+                <div className="contents [&>*]:order-1">
+                  {stopped ? (
+                    <Stopped reason={stopped} />
+                  ) : waitingOnFirstToken ? (
+                    <Thinking />
+                  ) : null}
+                  {working}
+                  {queued.map((message) => (
+                    <Queued
+                      attachments={message.attachments}
+                      key={message.id}
+                      onRemove={
+                        onRemoveQueued
+                          ? () => onRemoveQueued(message.id)
+                          : undefined
+                      }
+                      text={message.text}
+                    />
+                  ))}
+                </div>
                 {items
-                  .slice(pages.from, pages.split)
-                  .map((item, offset) => renderRow(item, pages.from + offset))}
-              </ArrivalsLiveContext.Provider>
-              <div className="contents [&>*]:order-1">
-                {stopped ? (
-                  <Stopped reason={stopped} />
-                ) : waitingOnFirstToken ? (
-                  <Thinking />
-                ) : null}
-                {working}
-                {queued.map((message) => (
-                  <Queued
-                    attachments={message.attachments}
-                    key={message.id}
-                    onRemove={
-                      onRemoveQueued
-                        ? () => onRemoveQueued(message.id)
-                        : undefined
-                    }
-                    text={message.text}
-                  />
-                ))}
-              </div>
-              {items
-                .slice(pages.split)
-                .map((item, offset) => renderRow(item, pages.split + offset))}
-            </MessageScrollerContent>
-          </MessageScrollerViewport>
-          <MessageScrollerButton
-            onClick={(event) => {
-              // Ours, not the scroller's: it would scroll before it had been told to follow again.
-              event.preventDefault();
-              dispatchFollow({ type: "button" });
-            }}
-          />
-          <ScrollNewestQueuedIntoView
-            newest={queued.at(-1)?.id ?? null}
-            onQueued={followOnQueued}
-          />
-          <FollowScroll request={follow.request} />
-          <TranscriptRail active={activeTurn} onJump={jump} turns={turns} />
-        </MessageScroller>
-      </MessageScrollerProvider>
+                  .slice(pages.split)
+                  .map((item, offset) => renderRow(item, pages.split + offset))}
+              </MessageScrollerContent>
+            </MessageScrollerViewport>
+            <MessageScrollerButton
+              onClick={(event) => {
+                // Ours, not the scroller's: it would scroll before it had been told to follow again.
+                event.preventDefault();
+                dispatchFollow({ type: "button" });
+              }}
+            />
+            <ScrollNewestQueuedIntoView
+              newest={queued.at(-1)?.id ?? null}
+              onQueued={followOnQueued}
+            />
+            <FollowScroll request={follow.request} />
+            <TranscriptRail active={activeTurn} onJump={jump} turns={turns} />
+          </MessageScroller>
+        </MessageScrollerProvider>
+      </LateRenderersContext.Provider>
     </ArrivalsLive>
   );
 }

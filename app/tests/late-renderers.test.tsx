@@ -1,7 +1,10 @@
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { act, cleanup, renderHook } from "@testing-library/react";
-import { useLateRenderers } from "@/components/channels/late-renderers";
+import { act, cleanup, render, renderHook } from "@testing-library/react";
+import {
+  LateRenderersWatch,
+  useLateRenderers,
+} from "@/components/channels/late-renderers";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -78,4 +81,44 @@ test("an activity that already has its renderer does not listen", () => {
   renderHook(() => useLateRenderers(core, false, undefined));
 
   expect(core.listeners.size).toBe(0);
+});
+
+/*
+ * The provider's swap can land a few frames after the connection is heard, under the load of a cold
+ * start. One look a frame later missed it, and nothing looked again.
+ */
+test("keeps looking for a few frames after the runtime connects", async () => {
+  const core = fakeCore();
+  const { result } = renderHook(() => useLateRenderers(core, true, undefined));
+  await nextFrame();
+  const before = result.current;
+
+  act(() => core.connect());
+  await nextFrame();
+  await nextFrame();
+  core.renderActivityMessages = [{ activityType: "a2ui" }];
+  await nextFrame();
+  await nextFrame();
+
+  expect(result.current).toBe(before + 1);
+});
+
+/* One subscription for the whole transcript, however many activities are waiting in it. */
+test("the transcript's watch listens once and reports a change", async () => {
+  const core = fakeCore();
+  const versions: number[] = [];
+  render(
+    <LateRenderersWatch
+      core={core}
+      onVersion={(version) => versions.push(version)}
+      settled={undefined}
+    />,
+  );
+  expect(core.listeners.size).toBe(1);
+
+  core.renderActivityMessages = [{ activityType: "a2ui" }];
+  act(() => core.connect());
+  await nextFrame();
+
+  expect(versions).toEqual([1]);
 });
