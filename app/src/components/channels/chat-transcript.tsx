@@ -1977,6 +1977,13 @@ export function ChatTranscript({
                * would read the shifted rows as new ones and jump to an old turn. Rows that arrive
                * live still go after this block, at the end, where that scan looks for them.
                *
+               * ONE CASE IT DOES NOT COVER. The scroller takes one path per batch of changes, so a page
+               * drawn above and a sent message landing in the SAME commit would be held in place and
+               * the new turn not aligned to the top. They come from different updates (a scroll near
+               * the top, a send at the bottom) and in practice never commit together; if they ever
+               * do, the turn is not aligned when it arrives, and a later change that keeps the row
+               * count can align to it then instead (the scroller's `Ge`), a beat late.
+               *
                * `display: contents` IS LOAD-BEARING FOR THE SAME REASON, and not a layout trick. It
                * promotes these children to flex items of the column so they can carry `order`, while
                * the div itself stays a single, always-present entry in `content.children` — one
